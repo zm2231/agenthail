@@ -16,7 +16,7 @@ func goalSweepFixture(t *testing.T) (noticeFixture, *goalRelaySurface, *atomic.I
 	t.Helper()
 	f := newNoticeFixture(t)
 	f.fake.caps = surface.Capabilities{Goal: true, Send: true}
-	goals := &goalRelaySurface{daemonSurface: f.fake, goal: &surface.GoalState{Objective: "ship it", Status: surface.GoalStatusBlocked, Reason: "needs a token", CreatedAt: time.Now().Add(-time.Hour), UpdatedAt: time.Now()}}
+	goals := newGoalRelaySurface(f.fake, &surface.GoalState{Objective: "ship it", Status: surface.GoalStatusBlocked, Reason: "needs a token", CreatedAt: time.Now().Add(-time.Hour), UpdatedAt: time.Now()})
 	f.d.Surfaces = []surface.Surface{goals}
 	f.d.discoverCatalog(context.Background())
 	var desktop atomic.Int32
@@ -85,9 +85,9 @@ func TestAWorkersBlockedGoalReachesItsLeadOnceAndThePerson(t *testing.T) {
 func TestAGoalReadThatFailsIsReadAgainOnTheNextSweep(t *testing.T) {
 	f, goals, _ := goalSweepFixture(t)
 	now := time.Now()
-	goals.goalErr = errors.New("app-server unreachable")
+	goals.setGoalErr(errors.New("app-server unreachable"))
 	f.d.sweepStoppedGoals(context.Background(), now)
-	goals.goalErr = nil
+	goals.setGoalErr(nil)
 	f.d.sweepStoppedGoals(context.Background(), now.Add(goalSweepEvery))
 	f.d.sweepStoppedGoals(context.Background(), now.Add(2*goalSweepEvery))
 	if notices := f.notices(t); len(notices) != 1 {
@@ -178,10 +178,12 @@ func TestAGoalStoppedAgainAfterResumingIsNoticedAgain(t *testing.T) {
 	f, goals, desktop := goalSweepFixture(t)
 	now := time.Now()
 	f.d.sweepStoppedGoals(context.Background(), now)
-	goals.goal.Status, goals.goal.UpdatedAt = surface.GoalStatusActive, now.Add(time.Second)
+	goals.changeGoal(func(g *surface.GoalState) { g.Status, g.UpdatedAt = surface.GoalStatusActive, now.Add(time.Second) })
 	f.touch(t, now.Add(time.Second))
 	f.d.sweepStoppedGoals(context.Background(), now.Add(time.Second))
-	goals.goal.Status, goals.goal.UpdatedAt = surface.GoalStatusUsageLimited, now.Add(2*time.Second)
+	goals.changeGoal(func(g *surface.GoalState) {
+		g.Status, g.UpdatedAt = surface.GoalStatusUsageLimited, now.Add(2*time.Second)
+	})
 	f.touch(t, now.Add(2*time.Second))
 	f.d.sweepStoppedGoals(context.Background(), now.Add(2*time.Second))
 	if notices := f.notices(t); len(notices) != 2 || !strings.Contains(notices[1].Message, "usage limit") {
