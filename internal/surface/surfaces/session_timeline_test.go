@@ -496,10 +496,13 @@ func TestCodexDesktopStreamCheckpointsOffsetAcrossLifetimes(t *testing.T) {
 		t.Helper()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		time.AfterFunc(100*time.Millisecond, cancel)
+		// The lifetime ends once the stream has read the transcript and
+		// checkpointed its offset, however long that read takes.
+		transcriptWaiting = cancel
+		defer func() { transcriptWaiting = nil }()
 		var events []surface.StreamEvent
 		err := codex.Stream(ctx, session, "", func(event surface.StreamEvent) {
-			if event.Text == want {
+			if event.Kind != "commands" {
 				events = append(events, event)
 			}
 		}, time.Second)
