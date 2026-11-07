@@ -51,10 +51,12 @@ func Reconcile(home, socketDir string) error {
 		if processExists(manifest.PID) {
 			continue
 		}
-		removeManifestSocket(manifest.ControlPath, manifest.ControlDevice, manifest.ControlInode)
-		removeManifestSocket(manifest.SocketPath, manifest.SocketDevice, manifest.SocketInode)
+		controlGone := removeManifestSocket(manifest.ControlPath, manifest.ControlDevice, manifest.ControlInode, manifest.PID)
+		socketGone := removeManifestSocket(manifest.SocketPath, manifest.SocketDevice, manifest.SocketInode, manifest.PID)
 		removeOwnedRecord(manifest.RecordPath, manifest)
-		cleanupManifest(path, manifest)
+		if controlGone && socketGone {
+			cleanupManifest(path, manifest)
+		}
 		_ = os.Remove(filepath.Dir(path))
 	}
 	return nil

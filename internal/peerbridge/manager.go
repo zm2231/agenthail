@@ -788,19 +788,33 @@ func (c *child) stop(timeout time.Duration) {
 }
 
 func (c *child) cleanup() {
+	// A socket kept because a process holds its owner's PID keeps the
+	// ownership manifest too, so the next startup reconciliation removes it
+	// once that PID is gone.
+	keptSocket := false
 	for path, owned := range c.paths {
 		current, err := os.Lstat(path)
-		if err != nil {
+		if err != nil || current.Mode()&os.ModeSocket == 0 || !os.SameFile(owned, current) {
+			continue
+		}
+		if c.process != nil && claudepeer.SocketIsStale(path, c.process.Pid) {
+			_ = os.Remove(path)
+		} else {
+			keptSocket = true
+		}
+	}
+	for path, owned := range c.paths {
+		current, err := os.Lstat(path)
+		if err != nil || current.Mode()&os.ModeSocket != 0 {
 			continue
 		}
 		matches := os.SameFile(owned, current)
-		if matches && current.Mode()&os.ModeSocket != 0 {
-			matches = claudepeer.SocketRefusesConnections(path)
-		}
 		if path == c.recordPath && current.Mode().IsRegular() {
 			data, _ := os.ReadFile(path)
 			var record recordOwnership
 			matches = c.record.Agenthail == "peer-worker" && json.Unmarshal(data, &record) == nil && record == c.record
+		} else if keptSocket {
+			matches = false
 		}
 		if matches {
 			_ = os.Remove(path)

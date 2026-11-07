@@ -860,11 +860,91 @@ func TestChildCleanupKeepsAListenerThatReusedItsSocketInode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	(&child{paths: map[string]os.FileInfo{live: liveInfo, stale: staleInfo}}).cleanup()
+	exited := exec.Command("true")
+	if err := exited.Run(); err != nil {
+		t.Fatal(err)
+	}
+	(&child{process: exited.Process, paths: map[string]os.FileInfo{live: liveInfo, stale: staleInfo}}).cleanup()
 	if _, err := os.Lstat(live); err != nil {
 		t.Fatalf("listening socket removed: %v", err)
 	}
 	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
 		t.Fatalf("refused socket kept: %v", err)
+	}
+}
+
+func TestChildCleanupKeepsEverySocketWhileItsOwnerIsAlive(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "ah-cleanup-full-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	path := filepath.Join(dir, "full.sock")
+	listener, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listening := true
+	defer func() {
+		if listening {
+			syscall.Close(listener)
+		}
+	}()
+	if err := syscall.Bind(listener, &syscall.SockaddrUnix{Name: path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Listen(listener, 1); err != nil {
+		t.Fatal(err)
+	}
+	for queued := 0; ; queued++ {
+		if queued == 256 {
+			t.Fatal("the listener never filled its queue")
+		}
+		conn, dialErr := net.Dial("unix", path)
+		if dialErr != nil {
+			break
+		}
+		defer conn.Close()
+	}
+	closed := filepath.Join(dir, "closed.sock")
+	closedListener, err := net.ListenUnix("unix", &net.UnixAddr{Name: closed, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedListener.SetUnlinkOnClose(false)
+	closedListener.Close()
+	manifest := filepath.Join(dir, "manifest.json")
+	if err := os.WriteFile(manifest, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	paths := map[string]os.FileInfo{}
+	for _, owned := range []string{path, closed, manifest} {
+		info, err := os.Lstat(owned)
+		if err != nil {
+			t.Fatal(err)
+		}
+		paths[owned] = info
+	}
+	owner, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	(&child{process: owner, paths: paths}).cleanup()
+	for owned := range paths {
+		if _, err := os.Lstat(owned); err != nil {
+			t.Fatalf("%s was removed while its owner is alive: %v", filepath.Base(owned), err)
+		}
+	}
+	gone := exec.Command("true")
+	if err := gone.Run(); err != nil {
+		t.Fatal(err)
+	}
+	syscall.Close(listener)
+	listening = false
+	(&child{process: gone.Process, paths: paths}).cleanup()
+	for owned := range paths {
+		if _, err := os.Lstat(owned); !os.IsNotExist(err) {
+			t.Fatalf("%s survived cleanup after its owner was gone: %v", filepath.Base(owned), err)
+		}
 	}
 }

@@ -65,10 +65,11 @@ func removeOwnedSocket(path string, device, inode uint64) {
 	}
 }
 
-func removeManifestSocket(path string, device, inode uint64) bool {
+// removeManifestSocket reports whether the manifest has nothing left at path
+// that a later reconciliation could still prove its own and remove.
+func removeManifestSocket(path string, device, inode uint64, owner int) bool {
 	if device == 0 || inode == 0 {
-		_, err := os.Lstat(path)
-		return os.IsNotExist(err)
+		return true
 	}
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
@@ -79,9 +80,9 @@ func removeManifestSocket(path string, device, inode uint64) bool {
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || info.Mode()&os.ModeSocket == 0 || !ownedByCurrentUser(info) || uint64(stat.Dev) != device || uint64(stat.Ino) != inode {
-		return false
+		return true
 	}
-	if !SocketRefusesConnections(path) {
+	if !SocketIsStale(path, owner) {
 		return false
 	}
 	removeErr := os.Remove(path)
@@ -92,11 +93,17 @@ var dialSocket = func(path string) (net.Conn, error) {
 	return net.DialTimeout("unix", path, 200*time.Millisecond)
 }
 
-// SocketRefusesConnections reports whether nothing listens at path. A
-// filesystem can hand a freed inode to the next socket made at the same path,
-// so a matching device and inode do not prove a socket is stale; only a
-// refused connection does, and any other dial result keeps the socket.
-func SocketRefusesConnections(path string) bool {
+// SocketIsStale reports whether the socket at path is left over from owner,
+// the process that made it and whose PID names it. A filesystem can hand a
+// freed inode to the next socket made at the same path, so a matching device
+// and inode do not prove a socket is stale, and macOS refuses a connection to
+// a live listener whose queue is full just as it does when nothing listens. A
+// socket is stale only when no process holds the owner's PID and a connection
+// is refused; any other dial result keeps it.
+func SocketIsStale(path string, owner int) bool {
+	if owner <= 0 || processExists(owner) {
+		return false
+	}
 	connection, err := dialSocket(path)
 	if err == nil {
 		connection.Close()

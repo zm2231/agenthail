@@ -632,14 +632,18 @@ func TestReconcilePreservesReplacementSocketAtReusedPIDPath(t *testing.T) {
 	if err := writeExclusiveJSON(manifestPath, manifest); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(peerPath); err != nil {
-		t.Fatal(err)
-	}
-	replacement, err := net.Listen("unix", peerPath)
+	// Bound beside the stale socket while it still exists, the replacement
+	// cannot take its inode.
+	replacementPath := filepath.Join(socketDir, "replacement.sock")
+	replacement, err := net.ListenUnix("unix", &net.UnixAddr{Name: replacementPath, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	replacement.SetUnlinkOnClose(false)
 	defer replacement.Close()
+	if err := os.Rename(replacementPath, peerPath); err != nil {
+		t.Fatal(err)
+	}
 	if err := Reconcile(home, socketDir); err != nil {
 		t.Fatal(err)
 	}
@@ -722,6 +726,18 @@ func TestReconcileKeepsStaleSocketWhenLivenessIsAmbiguous(t *testing.T) {
 	}
 	if _, err := os.Lstat(peerPath); err != nil {
 		t.Fatalf("socket removed on an ambiguous liveness probe: %v", err)
+	}
+	if _, err := os.Lstat(manifestPath); err != nil {
+		t.Fatalf("the manifest of a kept socket was removed, so no later reconciliation can remove the socket: %v", err)
+	}
+	dialSocket = original
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{peerPath, manifestPath} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s survived the reconciliation that found its socket stale: %v", filepath.Base(path), err)
+		}
 	}
 }
 
