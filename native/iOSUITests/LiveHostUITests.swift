@@ -8,42 +8,54 @@ final class LiveHostUITests: XCTestCase {
 
     func testPairingWithALiveHostListsItsConversations() throws {
         let control = try LiveControl()
-        let app = XCUIApplication()
-        app.launchArguments = ["--live-test-loopback"]
-        app.launch()
-
-        let field = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Or paste a pairing link")).firstMatch
-        if !field.waitForExistence(timeout: 10), app.tab("Settings").exists {
-            app.tab("Settings").tapWhenReady()
-            let add = app.buttons["Add a computer"]
-            for _ in 0..<6 where !add.isHittable { app.swipeUp() }
-            add.tapWhenReady()
-        }
-        require(field.waitForExistence(timeout: 10), "the pairing form opens", app)
-        field.tapWhenReady()
-        let link = try control.pairingLink(host: 0)
-        let hostID = try XCTUnwrap(URLComponents(string: link)?.queryItems?.first { $0.name == "host" }?.value, link)
-        field.typeText(link)
-        app.buttons["Connect with pairing link"].tapWhenReady()
-        app.buttons["Add computer"].tapWhenReady(timeout: 10)
-
-        let sessions = app.tab("Sessions")
-        require(sessions.waitForExistence(timeout: 30), "pairing finishes", app)
-        sessions.tapWhenReady()
-        app.buttons["scope-all"].tapWhenReady()
+        let app = launchForLiveHosts()
+        let hostID = try pairLiveHost(0, control: control, in: app)
         for title in ["Check the release notes", "Tidy the build script"] {
-            let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "session-\(hostID)::", title))
-            require(rows.firstMatch.waitForExistence(timeout: 30), "\(title) is listed from Live A", app)
+            let rows = liveRow(title, host: hostID, in: app)
+            requireLive(rows.firstMatch.waitForExistence(timeout: 30), "\(title) is listed from Live A", app)
             XCTAssertEqual(rows.count, 1, "Live A lists \(title) once")
         }
     }
 
-    private func require(_ condition: Bool, _ message: String, _ app: XCUIApplication) {
-        guard !condition else { return }
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = message
-        shot.lifetime = .keepAlways
-        add(shot)
-        XCTFail("\(message):\n\(app.debugDescription)")
+    func testAReplyWrittenOnTheHostShowsInTheOpenConversation() throws {
+        let control = try LiveControl()
+        let app = launchForLiveHosts()
+        let hostID = try pairLiveHost(0, control: control, in: app)
+        let row = liveRow("Check the release notes", host: hostID, in: app).firstMatch
+        requireLive(row.waitForExistence(timeout: 30), "the conversation is listed", app)
+        row.tapWhenReady()
+        let seeded = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Done: check the release notes.")).firstMatch
+        requireLive(seeded.waitForExistence(timeout: 20), "the conversation opens on its transcript", app)
+
+        let text = "Live reply " + UUID().uuidString.prefix(8)
+        try control.reply(host: 0, conversation: 0, text: text)
+        let reply = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        requireLive(reply.waitForExistence(timeout: 20), "a reply written on the host shows without a reload", app)
+    }
+
+    func testAHostThatGoesDownAndComesBackIsUsableAgainWithoutARelaunch() throws {
+        let control = try LiveControl()
+        let app = launchForLiveHosts()
+        let hostID = try pairLiveHost(0, control: control, in: app)
+        let row = liveRow("Check the release notes", host: hostID, in: app).firstMatch
+        requireLive(row.waitForExistence(timeout: 30), "the conversation is listed", app)
+
+        try control.stop(host: 0)
+        requireLive(waitFor(row, value: "Unavailable", timeout: 90), "a stopped host's conversation is marked unavailable", app)
+        try control.start(host: 0)
+        requireLive(waitFor(row, notValue: "Unavailable", timeout: 90), "the conversation is available again once the host is back", app)
+
+        row.tapWhenReady()
+        let seeded = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Done: check the release notes.")).firstMatch
+        requireLive(seeded.waitForExistence(timeout: 20), "the conversation opens after the host came back", app)
+        let text = "After restart " + UUID().uuidString.prefix(8)
+        try control.reply(host: 0, conversation: 0, text: text)
+        let reply = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        requireLive(reply.waitForExistence(timeout: 20), "a reply written after the host came back shows live", app)
+    }
+
+    private func waitFor(_ element: XCUIElement, value: String? = nil, notValue: String? = nil, timeout: TimeInterval) -> Bool {
+        let predicate = value.map { NSPredicate(format: "value == %@", $0) } ?? NSPredicate(format: "exists == true AND value != %@", notValue ?? "")
+        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
     }
 }

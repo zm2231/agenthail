@@ -15,9 +15,22 @@ struct LiveControl {
         return try XCTUnwrap(object["url"], "the link reply has a url: \(object)")
     }
 
-    private func post(_ path: String) throws -> Data {
+    func stop(host: Int) throws {
+        _ = try post("hosts/\(host)/stop")
+    }
+
+    func start(host: Int) throws {
+        _ = try post("hosts/\(host)/start")
+    }
+
+    func reply(host: Int, conversation: Int, text: String) throws {
+        _ = try post("hosts/\(host)/reply", body: try JSONSerialization.data(withJSONObject: ["conversation": conversation, "text": text]))
+    }
+
+    private func post(_ path: String, body: Data? = nil) throws -> Data {
         var request = URLRequest(url: base.appendingPathComponent(path), timeoutInterval: 30)
         request.httpMethod = "POST"
+        request.httpBody = body
         let reply = Reply()
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error {
