@@ -884,7 +884,12 @@ func TestChildCleanupKeepsEverySocketWhileItsOwnerIsAlive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer syscall.Close(listener)
+	listening := true
+	defer func() {
+		if listening {
+			syscall.Close(listener)
+		}
+	}()
 	if err := syscall.Bind(listener, &syscall.SockaddrUnix{Name: path}); err != nil {
 		t.Fatal(err)
 	}
@@ -908,22 +913,38 @@ func TestChildCleanupKeepsEverySocketWhileItsOwnerIsAlive(t *testing.T) {
 	}
 	closedListener.SetUnlinkOnClose(false)
 	closedListener.Close()
+	manifest := filepath.Join(dir, "manifest.json")
+	if err := os.WriteFile(manifest, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	paths := map[string]os.FileInfo{}
-	for _, socket := range []string{path, closed} {
-		info, err := os.Lstat(socket)
+	for _, owned := range []string{path, closed, manifest} {
+		info, err := os.Lstat(owned)
 		if err != nil {
 			t.Fatal(err)
 		}
-		paths[socket] = info
+		paths[owned] = info
 	}
 	owner, err := os.FindProcess(os.Getpid())
 	if err != nil {
 		t.Fatal(err)
 	}
 	(&child{process: owner, paths: paths}).cleanup()
-	for socket := range paths {
-		if _, err := os.Lstat(socket); err != nil {
-			t.Fatalf("%s was removed while its owner is alive: %v", filepath.Base(socket), err)
+	for owned := range paths {
+		if _, err := os.Lstat(owned); err != nil {
+			t.Fatalf("%s was removed while its owner is alive: %v", filepath.Base(owned), err)
+		}
+	}
+	gone := exec.Command("true")
+	if err := gone.Run(); err != nil {
+		t.Fatal(err)
+	}
+	syscall.Close(listener)
+	listening = false
+	(&child{process: gone.Process, paths: paths}).cleanup()
+	for owned := range paths {
+		if _, err := os.Lstat(owned); !os.IsNotExist(err) {
+			t.Fatalf("%s survived cleanup after its owner was gone: %v", filepath.Base(owned), err)
 		}
 	}
 }

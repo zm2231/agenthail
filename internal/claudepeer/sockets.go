@@ -65,10 +65,11 @@ func removeOwnedSocket(path string, device, inode uint64) {
 	}
 }
 
+// removeManifestSocket reports whether the manifest has nothing left at path
+// that a later reconciliation could still prove its own and remove.
 func removeManifestSocket(path string, device, inode uint64, owner int) bool {
 	if device == 0 || inode == 0 {
-		_, err := os.Lstat(path)
-		return os.IsNotExist(err)
+		return true
 	}
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
@@ -79,7 +80,7 @@ func removeManifestSocket(path string, device, inode uint64, owner int) bool {
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || info.Mode()&os.ModeSocket == 0 || !ownedByCurrentUser(info) || uint64(stat.Dev) != device || uint64(stat.Ino) != inode {
-		return false
+		return true
 	}
 	if !SocketIsStale(path, owner) {
 		return false
