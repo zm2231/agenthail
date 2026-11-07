@@ -17,9 +17,9 @@ type IdleCompactionState struct {
 	CompactedSince bool
 }
 
-// IdleCompactionRead is a state read up to Offset of the record in the file
-// File names, which the next read of that same file continues from instead
-// of reading the record again.
+// IdleCompactionRead is the state read from a transcript up to Offset. File
+// identifies the transcript file that was read, so the next read continues
+// from Offset only in that same file.
 type IdleCompactionRead struct {
 	State  IdleCompactionState
 	Offset int64
