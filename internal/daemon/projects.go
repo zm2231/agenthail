@@ -672,6 +672,14 @@ func (d *Daemon) forwardProjectAction(ctx context.Context, host *pairedHost, req
 	return answer.status, envelope.Error.Code, fmt.Errorf("%s answered %d: %s", host.record.Name, answer.status, strings.TrimSpace(string(answer.payload)))
 }
 
+func (d *Daemon) archiveSession(sessionID string, at time.Time) error {
+	if err := d.Registry.ArchiveSession(sessionID, at); err != nil {
+		return err
+	}
+	go d.closeBrowserTabs(sessionID)
+	return nil
+}
+
 func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error) {
 	unlock, _ := d.keepLocks.acquire(sessionID, true)
 	defer unlock()
@@ -681,7 +689,7 @@ func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error
 		if taskErr != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", taskErr.Error())
 		}
-		err = d.Registry.ArchiveSession(sessionID, time.Now().UTC())
+		err = d.archiveSession(sessionID, time.Now().UTC())
 		if err == nil && found && task.State == registry.TaskRunning {
 			d.publishTaskSettled(sessionID, registry.TaskCancelled, "")
 		}

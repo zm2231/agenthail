@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const Protocol = 1
+const Protocol = 2
 
 const maxResponseBytes = 1 << 20
 
@@ -49,29 +49,22 @@ const (
 	StateUnavailable      = "unavailable"
 )
 
-type Client struct{ Socket string }
+type Client struct {
+	Socket string
+	Secret string
+}
 
 func (c Client) Hello(ctx context.Context) (Hello, error) {
 	var hello Hello
-	return hello, c.call(ctx, "hello", &hello)
+	return hello, c.Call(ctx, "hello", nil, &hello)
 }
 
 func (c Client) Status(ctx context.Context) (Status, error) {
 	var status Status
-	return status, c.call(ctx, "status", &status)
+	return status, c.Call(ctx, "status", nil, &status)
 }
 
-func (c Client) Launch(ctx context.Context) (Status, error) {
-	var status Status
-	return status, c.call(ctx, "launch", &status)
-}
-
-func (c Client) Close(ctx context.Context) (Status, error) {
-	var status Status
-	return status, c.call(ctx, "close", &status)
-}
-
-func (c Client) call(ctx context.Context, method string, result any) error {
+func (c Client) Call(ctx context.Context, method string, params, result any) error {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", c.Socket)
 	if err != nil {
@@ -82,7 +75,10 @@ func (c Client) call(ctx context.Context, method string, result any) error {
 	}
 	defer conn.Close()
 	defer context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })()
-	request, err := json.Marshal(map[string]any{"id": 1, "method": method})
+	if params == nil {
+		params = struct{}{}
+	}
+	request, err := json.Marshal(map[string]any{"id": 1, "method": method, "params": params, "token": c.Secret})
 	if err != nil {
 		return err
 	}

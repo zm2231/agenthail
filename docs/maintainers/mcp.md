@@ -65,7 +65,7 @@ The lifetime is the start timeout plus its naming margin (50 s) for starts the d
 
 `mcpAuth` resolves the bearer to its session, then reads what that session may do from durable state on every request:
 
-- **Default capabilities:** `read.self`, `read.project`, `spawn`, `control.descendants`, `requests.answer`, `ledger.read` and `ledger.write`.
+- **Default capabilities:** `read.self`, `read.project`, `spawn`, `control.descendants`, `requests.answer`, `ledger.read`, `ledger.write` and `browser.drive`.
 - **Project lead:** a session in the registry's local lead set (`LocalLeadSessions`) also holds `control.project`.
 - **Voice operator:** the session holding the `@voice` alias that voice registered (with a `session_origins` row `via='voice'`) also holds `control.all` and `read.all`. A replaced operator loses them on its next call.
 - **Ceiling:** the session's row in `session_ceilings`, or unbounded (`{}`) when it has none, as for every session a person starts (see [Ceiling](#ceiling)).
@@ -121,6 +121,7 @@ Archived sessions and sessions owned by other hosts are outside every scope. A s
 | `agenthail_queue` | Retry or cancel one queued instruction, or clear a session's pending ones | `control.all` |
 | `agenthail_coordinator` | Set or clear a project's coordinator | `control.all` |
 | `agenthail_ledger_write` | `attach`, `clause`, `question` or `work` in the caller's project ledger, recorded as the caller; ownership cannot be set | `ledger.write` |
+| `agenthail_browser` | Drive tabs in the host's headless browser: `open`, `navigate`, `snapshot`, `act`, `wait`, `dialog`, `resize`, `list`, `close`. Each session has its own browser context and sees only its own tabs; see [the browser host](browser-host.md#tabs) | `browser.drive` |
 
 Every write runs the same shared code as the dashboard and CLI, with the session's principal, so it is validated, refused and recorded the same way: `agenthail_ledger_write` through the ledger's own write route (`ledgerWriteRoute`, the handler behind `/api/v1/ledger/<op>`), and every other write through `performAction`. Both take the same idempotency key and record the same audit entry. Every write acts as the calling session (its principal, and the source of its audit entry) and never carries a person author. The message tools (`agenthail_send`, `agenthail_steer`, `agenthail_channel_send`) also set `sourceSessionId` to the caller, so the message is attributed to that session, as the CLI's `agenthail send` from a session is, and `agenthail_create` sets it for a Claude or Codex start so the new session's spawner is the caller. Other writes leave it empty, since on those actions it means something else (a fork's source, a coordinator start's creator).
 

@@ -93,7 +93,10 @@ export class Browser {
       if (missing.length > 0) throw Object.assign(new Error(`Chromium needs system libraries: ${missing.join(', ')}`), { code: 'missing_libraries' });
       const { chromium } = await import('playwright-core');
       this.browser = await chromium.launch({ headless: true, executablePath: this.executable() });
-      this.browser.on('disconnected', () => { this.browser = null; });
+      this.browser.on('disconnected', () => {
+        this.browser = null;
+        this.disconnected?.();
+      });
     } catch (error) {
       if (error.code !== 'missing_libraries') this.error = error.message;
       throw error;

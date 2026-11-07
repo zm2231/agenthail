@@ -110,7 +110,7 @@ const version = process.argv[process.argv.indexOf('--version') + 1];
 net.createServer(connection => {
   readline.createInterface({ input: connection }).on('line', line => {
     if (JSON.parse(line).method === 'hello') {
-      connection.write(JSON.stringify({ id: 1, result: { protocol: 1, hostVersion: version, pid: process.pid } }) + '\n');
+      connection.write(JSON.stringify({ id: 1, result: { protocol: 2, hostVersion: version, pid: process.pid } }) + '\n');
     }
   });
 }).listen(socket);

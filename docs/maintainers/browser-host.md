@@ -15,8 +15,15 @@ and on SIGINT, so it never outlives the daemon. `AGENTHAIL_BROWSER_HOST`
 overrides the script path.
 
 The socket is mode 0600. Each connection carries newline-delimited JSON:
-requests `{id, method, params}`, responses `{id, result}` or
+requests `{id, method, params, token}`, responses `{id, result}` or
 `{id, error: {code, message}}`, one line at most 1 MiB.
+
+Agents run as the same user as the daemon, so the socket's mode alone would
+let any of them name another session as `owner`. The daemon writes a fresh
+random secret as the first line of the host's stdin, a pipe only it holds; the
+host listens only after reading it (and exits if it is shorter than 32
+bytes), and answers `unauthorized` to every request whose `token` is not that
+secret, `hello` included.
 
 | Method | Result |
 |---|---|
@@ -24,11 +31,41 @@ requests `{id, method, params}`, responses `{id, result}` or
 | `status` | the status below |
 | `launch` | downloads Chromium if absent, starts it, returns the status |
 | `close` | closes Chromium, returns the status |
+| `tabs.open`, `tabs.navigate`, `tabs.snapshot`, `tabs.act`, `tabs.wait`, `tabs.dialog`, `tabs.resize`, `tabs.list`, `tabs.close`, `tabs.closeOwner` | see [Tabs](#tabs) |
 
-The daemon accepts a host only when `hello` reports protocol 1, the daemon's
+The daemon accepts a host only when `hello` reports protocol 2, the daemon's
 own version and the pid it spawned, within 15 seconds. Every call is bounded by
 its caller's context: when the context ends, the connection is cut, so a
 wedged host cannot hold up the daemon.
+
+## Tabs
+
+Agents drive tabs through `agenthail_browser` ([MCP tools](mcp.md)). The daemon
+passes the calling session's id as `owner` on every `tabs.*` call, and the host
+keeps the only record of tabs:
+
+- Each owner gets its own Playwright browser context, so cookies and storage
+  are never shared between sessions. A tab id from another owner answers
+  `not_found`, the same as a closed one.
+- Tabs stay open with no client connected and between turns. Archiving a
+  session calls `tabs.closeOwner`, which closes its tabs and its context.
+- `tabs.list` reads the host; nothing is cached in the daemon. When the host
+  or Chromium restarts, every tab is gone: `list` is empty, an old id answers
+  `not_found` (tab ids are random, so one never names a newer tab), and `open`
+  starts a fresh tab.
+- `tabs.snapshot` returns the page's accessibility tree in Playwright's `ai`
+  mode, with `[ref=eN]` element refs, cut at a line to at most 20 KiB
+  (`truncated: true`). `includeImage` also writes a PNG under
+  `~/.agenthail/browser-host/shots` and returns its path.
+- `tabs.act` takes a `kind` (`click`, `type`, `select`, `hover`, `drag`,
+  `press`, `scroll`, `upload`) and a `ref` from the latest snapshot, with a
+  10-second limit. `tabs.wait` waits for text, a ref, a URL part or network
+  idle, at most 30 seconds.
+- A JavaScript dialog is held until `tabs.dialog` accepts or dismisses it.
+  Any page operation (`open` or `navigate` while the page loads, `snapshot`,
+  `act`, `wait`, `resize`) during which one opens returns at once with
+  `dialog: {type, message}`; `snapshot` then carries no tree, and `act`
+  answers `dialog_open` until the dialog is answered.
 
 ## Chromium on first use
 
@@ -75,8 +112,8 @@ dependencies, the same way as the Claude host; every install path ships
 ```bash
 npm ci --prefix browser-host
 npm test --prefix browser-host
-go test ./internal/browserhost/ ./internal/daemon/ -run 'BrowserHost' -race
+go test ./internal/browserhost/ ./internal/daemon/ -run 'BrowserHost|AgentsTab' -race
 ```
 
-The Node test downloads Chromium unless `AGENTHAIL_BROWSER_TEST_BROWSERS`
+The Node and Go tests download Chromium unless `AGENTHAIL_BROWSER_TEST_BROWSERS`
 names a directory to keep it in; CI caches that directory.

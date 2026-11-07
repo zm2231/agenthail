@@ -8,7 +8,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-var defaultSessionCapabilities = []string{"read.self", "read.project", "spawn", "control.descendants", "requests.answer", "ledger.read", "ledger.write"}
+var defaultSessionCapabilities = []string{"read.self", "read.project", "spawn", "control.descendants", "requests.answer", "ledger.read", "ledger.write", "browser.drive"}
 
 const leadCapability = "control.project"
 
