@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -100,4 +104,60 @@ func TestAStoppingDaemonStopsACatchUpAndTheNextStartFinishesIt(t *testing.T) {
 	if len(got) < 2 || got[len(got)-2].Assistant != "answer 300" || got[len(got)-1].Assistant != "answer 301" {
 		t.Fatalf("after a restart the page ends %+v, want answers 300 and 301", got[max(0, len(got)-2):])
 	}
+}
+
+// stoppingRederive stops its source as the transcript read for a rederive
+// returns, the way a daemon shutdown lands between the read and the write.
+type stoppingRederive struct {
+	*rederiveSurface
+	stop func()
+}
+
+func (s *stoppingRederive) TranscriptItems(ctx context.Context, session *surface.Session, request surface.TranscriptItemsRequest) (*surface.TranscriptItemsResult, error) {
+	read, err := s.rederiveSurface.TranscriptItems(ctx, session, request)
+	if request.Identity == "" {
+		s.stop()
+	}
+	return read, err
+}
+
+func TestARederiveTheDaemonStopsDuringLeavesTheJournalForTheNextStart(t *testing.T) {
+	_, r, fake, from, _ := daemonFixture(t)
+	from.Surface, from.RuntimeKind, from.Transport, from.Transcript = surface.KindClaude, surface.RuntimeClaudeCLI, "", "/transcript.jsonl"
+	if err := r.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	earlierDerivationJournal(t, r, from.ID)
+	inner := &rederiveSurface{daemonSurface: fake, items: transcriptItems()}
+	sourceCtx, stop := context.WithCancel(context.Background())
+	stopped := &sessionSource{manager: newTestSourceManager(t, r), session: from, adapter: &stoppingRederive{rederiveSurface: inner, stop: stop}, epoch: "stopped", ctx: sourceCtx, appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
+	if err := stopped.loadSeed(); !errors.Is(err, context.Canceled) || inner.calls != 1 {
+		t.Fatalf("a rederive stopped after its read returned err=%v after %d reads", err, inner.calls)
+	}
+	if turn := journalTurnOf(t, r, from.ID, "100-aaaaaa-0"); turn != "" {
+		t.Fatalf("a stopped rederive rewrote the journal: the first reply is in turn %q", turn)
+	}
+	next := &sessionSource{manager: newTestSourceManager(t, r), session: from, adapter: inner, epoch: "next", ctx: context.Background(), appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
+	if err := next.loadSeed(); err != nil || inner.calls != 2 {
+		t.Fatalf("the next start did not rederive: err=%v reads=%d", err, inner.calls)
+	}
+	if turn := journalTurnOf(t, r, from.ID, "100-aaaaaa-0"); turn != "u1" {
+		t.Fatalf("the next start did not rederive the journal: the first reply is in turn %q", turn)
+	}
+}
+
+func journalTurnOf(t *testing.T, r *registry.Registry, sessionID, itemID string) string {
+	t.Helper()
+	page, err := r.ReadSessionJournalPage(sessionID, 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range page.Entries {
+		var payload sessionJournalPayload
+		if json.Unmarshal(entry.Payload, &payload) == nil && payload.ItemID == itemID {
+			return payload.TurnID
+		}
+	}
+	t.Fatalf("the journal has no row %s", itemID)
+	return ""
 }

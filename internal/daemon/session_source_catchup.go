@@ -98,7 +98,9 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 		}
 	}
 	if continued {
-		s.removeDroppedItems(dropped, known)
+		if err := s.removeDroppedItems(dropped, known); err != nil {
+			return err
+		}
 	}
 	if continued && readToStart {
 		if err := s.manager.registry.LowerSessionJournalHistoryBoundary(s.session.ID, 0); err != nil {
@@ -111,8 +113,11 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	return s.recordTranscriptCheckpoint(end, transcriptIdentity)
 }
 
-func (s *sessionSource) removeDroppedItems(items []surface.TimelineItem, known map[string]struct{}) {
+func (s *sessionSource) removeDroppedItems(items []surface.TimelineItem, known map[string]struct{}) error {
 	for _, item := range items {
+		if err := s.ctx.Err(); err != nil {
+			return err
+		}
 		if item.ID == "" {
 			continue
 		}
@@ -122,6 +127,7 @@ func (s *sessionSource) removeDroppedItems(items []surface.TimelineItem, known m
 		}
 		s.append(surface.StreamEvent{ID: event.ID, ProviderKey: event.ProviderKey, Operation: "remove", Kind: item.Kind, TurnID: item.TurnID, Final: true})
 	}
+	return nil
 }
 
 func (s *sessionSource) journalHoldsTranscript() (bool, error) {
