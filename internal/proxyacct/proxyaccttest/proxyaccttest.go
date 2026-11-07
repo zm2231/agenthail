@@ -40,6 +40,7 @@ type Proxy struct {
 	Forced     atomic.Value
 	FailWrite  atomic.Value
 	SlowHealth atomic.Int64
+	SlowRead   atomic.Int64
 
 	mu     sync.Mutex
 	writes []string
@@ -74,6 +75,7 @@ func New(t *testing.T) *Proxy {
 			return
 		}
 		if route == "read" {
+			time.Sleep(time.Duration(proxy.SlowRead.Load()))
 			w.Write([]byte(proxy.Files.Load().(string)))
 			return
 		}

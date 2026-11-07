@@ -143,6 +143,7 @@ func TestASlowKeyCommandGetsItsWholeTimeToRead(t *testing.T) {
 	slow := `sleep 1.5; printf '%s\n' "$0"`
 	f := newProxyUsageFixture(t, `,"management":{"command":["/bin/sh","-c","`+strings.ReplaceAll(slow, `"`, `\"`)+`","`+proxyaccttest.Key+`"]}`)
 	f.proxy.SlowHealth.Store(int64(1500 * time.Millisecond))
+	f.proxy.SlowRead.Store(int64(1500 * time.Millisecond))
 	body, raw := f.usage(t)
 	group := body.Sets[2]
 	if group.ProxyProblem != "" || len(group.Accounts) != 2 || strings.Contains(raw, proxyaccttest.Key) {
