@@ -107,7 +107,8 @@ type Session struct {
 	Requests       []Request    `json:"requests"`
 	// Tasks are the live background tasks Claude last reported. A host that
 	// predates them leaves it nil.
-	Tasks []Task `json:"tasks"`
+	Tasks        []Task `json:"tasks"`
+	TaskTurnOwed bool   `json:"taskTurnOwed"`
 	// Commands are what a person can run in the session, as Claude last
 	// listed them; nil until Claude has.
 	Commands []Command `json:"commands"`

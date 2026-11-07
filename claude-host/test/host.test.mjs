@@ -1067,6 +1067,36 @@ test('a retiring host closes a session only after the turn that reports its fini
 
 test('a retiring host waits for that turn when the task leaves the live set before its notification', () => retiresAfterTheNotificationTurn({ FAKE_CLAUDE_LEVEL_FIRST: '1' }));
 
+// listsTheOwedTaskTurn ends a background task while Claude is idle and holds
+// the turn that tells the model, which the session listing must show as owed
+// until that turn runs.
+async function listsTheOwedTaskTurn(env) {
+  const f = fixture();
+  const release = path.join(f.root, 'notify');
+  await startHost(f, { env: { FAKE_CLAUDE_NOTIFY_RELEASE: release, ...env } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'BACKGROUND 200' });
+  await c.event(turnResult(id, uuid));
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'idle');
+  const listed = async () => (await c.call('list')).sessions.find((s) => s.sessionId === id);
+  await c.event((e) => e.sessionId === id && e.kind === 'sdk' && e.message.subtype === 'background_tasks_changed' && e.message.tasks.length === 0, 5000);
+  await c.event((e) => e.sessionId === id && e.kind === 'sdk' && e.message.subtype === 'task_notification', 5000);
+  const ended = await listed();
+  assert.deepEqual([ended.state, ended.tasks, ended.taskTurnOwed], ['idle', [], true]);
+  fs.writeFileSync(release, '');
+  await c.event((e) => e.sessionId === id && e.kind === 'sdk' && e.message.type === 'result' && e.message.result.startsWith('notified:'), 5000);
+  assert.equal((await listed()).taskTurnOwed, false, 'the turn that reports the task pays it');
+  c.close();
+}
+
+test('a session lists the turn it owes for a finished background task until that turn starts', () => listsTheOwedTaskTurn({}));
+
+test('a session lists that turn as owed when the task leaves the live set before its notification', () => listsTheOwedTaskTurn({ FAKE_CLAUDE_LEVEL_FIRST: '1' }));
+
 // retiresAfterAnAmbientTask drains the host while an ambient task runs. Its
 // end starts no turn, so the session closes once the task leaves the live set.
 async function retiresAfterAnAmbientTask(env) {

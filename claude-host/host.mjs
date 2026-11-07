@@ -303,8 +303,16 @@ class Session {
       autoCompact: this.context?.autoCompact ?? null,
       requests: [...this.pending.values()].map((p) => p.request),
       tasks: this.describeTasks(),
+      taskTurnOwed: this.taskTurnOwed(),
       commands: this.commands,
     };
+  }
+
+  // taskTurnOwed is a background task that ended while Claude was idle and
+  // whose turn telling the model has not started: its work is not done yet.
+  taskTurnOwed() {
+    for (const key of this.owed) if (key.startsWith('task:')) return true;
+    return false;
   }
 
   // describeTasks lists the live background tasks Claude last reported, with
