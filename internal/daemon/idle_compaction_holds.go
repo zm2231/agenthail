@@ -12,6 +12,7 @@ const idleCompactionHoldsKept = 50
 
 type IdleCompactionHold struct {
 	SessionID     string    `json:"sessionId"`
+	Session       string    `json:"session"`
 	Root          string    `json:"root"`
 	RequestAt     time.Time `json:"requestAt"`
 	ContextTokens int64     `json:"contextTokens"`

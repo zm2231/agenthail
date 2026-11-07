@@ -85,6 +85,7 @@ jobs:
           node scripts/test-dashboard-startup.mjs
           node scripts/test-dashboard-idempotency.mjs
           node scripts/test-dashboard-pending-send.mjs
+          node scripts/test-dashboard-compact-holds.mjs
           node scripts/test-dashboard-composer-send.mjs
           node scripts/test-dashboard-queued-attachments.mjs
           node scripts/test-dashboard-timeline.mjs

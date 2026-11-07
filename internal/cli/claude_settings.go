@@ -70,14 +70,32 @@ func (a *App) cmdClaude(args []string) error {
 		}
 		results = append(results, settings)
 	}
+	if changing {
+		if hasFlag(args, "--json") {
+			return emit(map[string]any{"roots": results})
+		}
+		for _, settings := range results {
+			fmt.Println(describeClaudeCompactSettings(settings))
+		}
+		fmt.Println("Claude's own settings apply to sessions started after the change; Agenthail's idle compaction applies from its next check.")
+		return nil
+	}
+	holds, holdsErr := a.idleCompactionHolds()
 	if hasFlag(args, "--json") {
-		return emit(map[string]any{"roots": results})
+		report := map[string]any{"roots": results, "idleCompactionHolds": holds}
+		if holdsErr != nil {
+			report["idleCompactionHoldsError"] = holdsErr.Error()
+		}
+		return emit(report)
 	}
 	for _, settings := range results {
 		fmt.Println(describeClaudeCompactSettings(settings))
+		for _, line := range describeIdleCompactionHolds(settings.Root, holds) {
+			fmt.Println(line)
+		}
 	}
-	if changing {
-		fmt.Println("Claude's own settings apply to sessions started after the change; Agenthail's idle compaction applies from its next check.")
+	if holdsErr != nil {
+		fmt.Println("Why idle sessions were not compacted is not shown: " + holdsErr.Error())
 	}
 	return nil
 }
