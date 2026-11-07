@@ -1,3 +1,4 @@
+import "../../scripts/test-home.mjs"
 import test from "node:test"
 import assert from "node:assert/strict"
 import { ensureKVNamespace } from "../scripts/ensure-kv-namespace.mjs"

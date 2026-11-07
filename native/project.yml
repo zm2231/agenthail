@@ -75,6 +75,7 @@ targets:
       - path: SessionStore.swift
       - path: EventRetryBackoff.swift
       - path: ConnectionGrace.swift
+      - path: SnapshotRefreshPolicy.swift
       - path: CatalogBatch.swift
       - path: CatalogInbox.swift
       - path: CatalogFeed.swift

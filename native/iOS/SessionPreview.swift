@@ -209,6 +209,7 @@ struct SessionPreview: View {
             }
             items.insert(contentsOf: runs, at: 4)
             items.append(["id": "after-run", "kind": "message", "role": "assistant", "title": "assistant", "text": "Every target builds after reconnecting.", "truncated": false])
+            if ProcessInfo.processInfo.arguments.contains("--preview-long-history") { items.insert(contentsOf: Self.longHistory, at: 0) }
             detail["timeline"] = timeline.merging(["items": items, "nextBefore": 0]) { $1 }
             return String(data: try! JSONSerialization.data(withJSONObject: detail), encoding: .utf8)!
         }

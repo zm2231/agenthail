@@ -83,17 +83,17 @@ func retryBusy[T any](w *writeDB, attempt func(context.Context) (T, error)) (T, 
 	}
 	wait := boundRetryFirst
 	for {
-		// Past the deadline a write still lands when the lock is free, but never waits for it.
+		// The deadline bounds only the wait for the lock; cancelling a write under way would roll its transaction back under the caller.
 		expired := ctx.Err() != nil
-		attemptCtx, busy := ctx, boundBusyTimeout
+		pragmaCtx, busy := ctx, boundBusyTimeout
 		if expired {
-			attemptCtx, busy = context.WithoutCancel(ctx), 0
+			pragmaCtx, busy = context.WithoutCancel(ctx), 0
 		}
-		if _, err := w.raw.ExecContext(attemptCtx, fmt.Sprintf("PRAGMA busy_timeout=%d", busy.Milliseconds())); err != nil {
+		if _, err := w.raw.ExecContext(pragmaCtx, fmt.Sprintf("PRAGMA busy_timeout=%d", busy.Milliseconds())); err != nil {
 			var zero T
 			return zero, fmt.Errorf("registry write: %w", err)
 		}
-		value, err := attempt(attemptCtx)
+		value, err := attempt(context.WithoutCancel(ctx))
 		if !isBusy(err) {
 			return value, err
 		}

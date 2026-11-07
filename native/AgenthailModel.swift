@@ -106,8 +106,9 @@ final class AgenthailModel: ObservableObject {
     private var connectionTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
+    private(set) var pendingRefresh = EventRefresh()
     private var statusRefreshTask: Task<Void, Never>?
-    private var lastEventID: UInt64 = 0
+    private(set) var lastEventID: UInt64 = 0
     private(set) var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
     lazy var catalogFeed = makeCatalogFeed()
     let store = SessionStore(limits: .desktop)
@@ -1319,7 +1320,7 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    private func receive(_ event: AgenthailEvent) {
+    func receive(_ event: AgenthailEvent) {
         if event.type == "ui.changed" {
             lastEventID = max(lastEventID, event.id)
             if let api { interface.load(from: api) }
@@ -1345,14 +1346,18 @@ final class AgenthailModel: ObservableObject {
         if let entityID = event.entityId {
             panes.forEach { $0.sessionChanged(entityID) }
         }
+        pendingRefresh.merge(EventRefresh(for: event.type, auditing: operationsVisible))
+        guard !pendingRefresh.isEmpty else { return }
         refreshTask?.cancel()
         refreshTask = Task {
             try? await Task.sleep(for: .milliseconds(180))
             if Task.isCancelled { return }
-            _ = await refresh()
-            if OperationsRefreshPolicy.reloadOperations(for: event.type) {
+            let due = pendingRefresh
+            pendingRefresh = EventRefresh()
+            if due.snapshot { _ = await refresh() }
+            if due.operations {
                 await loadOperations()
-            } else if operationsVisible && OperationsRefreshPolicy.reloadAudit(for: event.type) {
+            } else if due.audit && operationsVisible {
                 await loadAudit(reset: true)
             }
         }

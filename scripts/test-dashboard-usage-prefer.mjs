@@ -1,3 +1,4 @@
+import "./test-home.mjs";
 import assert from "node:assert/strict";
 import { accounts, renderPanel } from "../internal/daemon/dashboard/js/usage.js";
 import { openPrefer, planQuery, planSections, preferenceWord } from "../internal/daemon/dashboard/js/usage-prefer.js";

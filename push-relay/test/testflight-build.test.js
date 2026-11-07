@@ -1,3 +1,4 @@
+import "../../scripts/test-home.mjs"
 import assert from "node:assert/strict"
 import { generateKeyPairSync, verify } from "node:crypto"
 import test from "node:test"

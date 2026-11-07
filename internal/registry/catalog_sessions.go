@@ -216,6 +216,10 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 			return CatalogEvent{}, false, err
 		}
 	}
+	staysRetired, err := catalogRowStaysRetiredTx(tx, state.Session)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
 	if err := registerSessionTx(tx, state.Session); err != nil {
 		return CatalogEvent{}, false, err
 	}
@@ -239,9 +243,9 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	}
 	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,waiting_on,background_tasks,usage_limit,turn_stop)
 		VALUES(?,?,?,?,?,?,?,0,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
-		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0, retired=0,
+		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0, retired=CASE WHEN ? THEN catalog_sessions.retired ELSE 0 END,
 		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0, waiting_on=excluded.waiting_on, background_tasks=excluded.background_tasks, usage_limit=excluded.usage_limit, turn_stop=excluded.turn_stop`,
-		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, formatTimestamp(state.ObservedAt), state.ProjectionFingerprint, priorGeneration, waitingOn, background, usageLimit, turnStop); err != nil {
+		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, formatTimestamp(state.ObservedAt), state.ProjectionFingerprint, priorGeneration, waitingOn, background, usageLimit, turnStop, staysRetired); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	if len(event.Payload) > 0 {
@@ -316,14 +320,33 @@ func (p catalogSessionPrior) unchangedBy(q catalogQuerier, state CatalogSessionS
 	return sessionRowMatchesTx(q, state.Session)
 }
 
+// A retired row comes back through the sessions_unretire and current
+// triggers, or with new activity; any other change keeps it retired.
+func catalogRowStaysRetiredTx(tx *sql.Tx, s surface.Session) (bool, error) {
+	var lastActiveMS int64
+	err := tx.QueryRow(`SELECT last_active_ms FROM sessions WHERE id=?`, s.ID).Scan(&lastActiveMS)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return s.LastActive.IsZero() || s.LastActive.UnixMilli() <= lastActiveMS, nil
+}
+
 // sessionRowMatchesTx reports whether registering the session would leave its
 // stored session and runtime rows unchanged, so an unchanged catalog
 // observation needs no write.
 func sessionRowMatchesTx(tx catalogQuerier, s surface.Session) (bool, error) {
-	var kind, name, cwd, status, transcript, source, transport, model, bridge, forkedFrom string
+	var kind, name, cwd, status, transcript, model, bridge, forkedFrom string
 	var pid, hasLocal int
+	var routeKept bool
 	var lastActiveMS int64
-	err := tx.QueryRow(`SELECT surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,bridge,forked_from,last_active_ms FROM sessions WHERE id=?`, s.ID).Scan(&kind, &name, &cwd, &pid, &status, &transcript, &hasLocal, &source, &transport, &model, &bridge, &forkedFrom, &lastActiveMS)
+	err := tx.QueryRow(`SELECT surface,name,cwd,pid,status,transcript,has_local,
+		sessions.source=`+sessionRouteSourceSQL+` AND sessions.transport=`+sessionRouteTransportSQL+` AND sessions.runtime_kind=`+sessionRouteRuntimeSQL+`,
+		configured_model,bridge,forked_from,last_active_ms
+		FROM sessions, (SELECT ? AS source, ? AS transport, ? AS runtime_kind) AS excluded WHERE id=?`,
+		s.Source, s.Transport, string(s.RuntimeKind), s.ID).Scan(&kind, &name, &cwd, &pid, &status, &transcript, &hasLocal, &routeKept, &model, &bridge, &forkedFrom, &lastActiveMS)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -334,7 +357,7 @@ func sessionRowMatchesTx(tx catalogQuerier, s surface.Session) (bool, error) {
 	if !s.LastActive.IsZero() {
 		wantLastActive = s.LastActive.UnixMilli()
 	}
-	if kind != string(s.Surface) || name != s.Name || cwd != s.Cwd || pid != s.PID || status != string(s.Status) || transcript != s.Transcript || hasLocal != b2i(s.HasLocal) || source != s.Source || transport != s.Transport || (s.ConfiguredModel != "" && model != s.ConfiguredModel) || bridge != s.Bridge || (forkedFrom == "" && s.ForkedFrom != "") || lastActiveMS != wantLastActive {
+	if kind != string(s.Surface) || name != s.Name || cwd != s.Cwd || pid != s.PID || status != string(s.Status) || transcript != s.Transcript || hasLocal != b2i(s.HasLocal) || !routeKept || (s.ConfiguredModel != "" && model != s.ConfiguredModel) || bridge != s.Bridge || (forkedFrom == "" && s.ForkedFrom != "") || lastActiveMS != wantLastActive {
 		return false, nil
 	}
 	if s.Runtime != nil {

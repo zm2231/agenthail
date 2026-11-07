@@ -54,6 +54,7 @@ type Daemon struct {
 	pollInterval         time.Duration
 	Surfaces             []surface.Surface
 	log                  *log.Logger
+	idleHolds            idleCompactionHolds
 	errorMu              sync.Mutex
 	observeErrors        map[string]observedError
 	ui                   *uiState

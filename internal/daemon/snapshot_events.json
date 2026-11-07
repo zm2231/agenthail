@@ -1,0 +1,21 @@
+[
+  {"event": "stream.reset", "cache": false, "reread": true, "why": "written by the events stream when a cursor expires; clients missed events and reread everything"},
+  {"event": "state.changed", "cache": true, "reread": true, "why": "queue, attention, delivery problems, relays, channels, coordinators and lead replacements"},
+  {"event": "settings.updated", "cache": true, "reread": true, "why": "busy delivery, Codex recent hours and the person's name"},
+  {"event": "signin.changed", "cache": true, "reread": true, "why": "browser sign-in status in the base snapshot"},
+  {"event": "host.paired", "cache": true, "reread": true, "why": "the daemon's paired host list"},
+  {"event": "host.removed", "cache": true, "reread": true, "why": "the daemon's paired host list"},
+  {"event": "host.state", "cache": true, "reread": true, "why": "a paired host's shown connection state"},
+  {"event": "session.updated", "cache": true, "reread": false, "why": "session rows in the full cached state; clients get rows from the catalog stream and the base snapshot carries none"},
+  {"event": "turn.completed", "cache": true, "reread": false, "why": "session rows in the full cached state; clients get rows from the catalog and session streams"},
+  {"event": "device.paired", "cache": false, "reread": false, "why": "devices are not in the snapshot; the Mac reloads them with Operations"},
+  {"event": "device.revoked", "cache": false, "reread": false, "why": "devices are not in the snapshot; the Mac reloads them with Operations"},
+  {"event": "device.push.updated", "cache": false, "reread": false, "why": "devices are not in the snapshot; the Mac reloads them with Operations"},
+  {"event": "task.settled", "cache": false, "reread": false, "why": "wakes task waiters; task records are not in the snapshot"},
+  {"event": "task.request", "cache": false, "reread": false, "why": "wakes task waiters; task records are not in the snapshot"},
+  {"event": "task.goal_stopped", "cache": false, "reread": false, "why": "wakes task waiters; task records are not in the snapshot"},
+  {"event": "ledger.", "family": true, "cache": false, "reread": false, "why": "intent ledger activity; the ledger is not in the snapshot"},
+  {"event": "ui.changed", "cache": false, "reread": false, "why": "appearance, reloaded through its own handler"},
+  {"event": "ui.snapshot.requested", "cache": false, "reread": false, "why": "asks a window for a screenshot through its own handler"},
+  {"event": "ui.snapshot.closed", "cache": false, "reread": false, "why": "ends a screenshot request through its own handler"}
+]

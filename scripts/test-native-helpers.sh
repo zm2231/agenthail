@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+owned=""
+trap '[ -z "$owned" ] || rm -rf "$owned"' EXIT
+stop() {
+  local child
+  for child in $(pgrep -P $$ || true); do kill -TERM -- "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; done
+  exit "$1"
+}
+# bash skips the EXIT trap when a signal ends it, as a timeout or a closed session does.
+trap 'stop 129' HUP
+trap 'stop 130' INT
+trap 'stop 143' TERM
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -n "${1:-}" ]; then
   OUT="$1"
 else
-  # A private directory, so concurrent runs from other checkouts cannot
-  # rebuild the library under this one.
-  OUT="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/agenthail-native-helpers.XXXXXX")"
-  trap 'rm -rf "$OUT"' EXIT
+  # Private to this run; one assignment creates and records it, so a signal cannot fall between the two.
+  owned="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/agenthail-native-helpers.XXXXXX")"
+  OUT="$owned"
 fi
 JOBS="${AGENTHAIL_TEST_JOBS:-$(sysctl -n hw.ncpu)}"
 
@@ -60,6 +71,7 @@ SOURCES=(
   ClaudeSubagentList.swift
   SessionStore.swift
   StatusRefreshPolicy.swift
+  SnapshotRefreshPolicy.swift
   ToolPresentation.swift
   TextDiff.swift
   ToolDiffCache.swift
@@ -182,7 +194,7 @@ elif [ "$shown" -ne 1 ]; then
   exit 1
 fi
 
-rm -rf "$OUT"
+[ -n "$owned" ] || rm -rf "$OUT"
 mkdir -p "$OUT/logs"
 swiftc -parse-as-library -emit-library -static -enable-testing \
   -module-name AgenthailHelpers \
@@ -210,4 +222,8 @@ run_test() {
 export -f run_test
 export OUT
 
-printf '%s\0' "$ROOT"/native/tests/*_test.swift | xargs -0 -n1 -P "$JOBS" bash -c 'run_test "$1"' _
+# In the background and in its own process group, so a signal is handled at once and stops every worker.
+set -m
+xargs -0 -n1 -P "$JOBS" bash -c 'run_test "$1"' _ < <(printf '%s\0' "$ROOT"/native/tests/*_test.swift) &
+set +m
+wait $!

@@ -59,23 +59,9 @@ func registerSessionRowTx(tx *sql.Tx, s surface.Session) error {
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
 		   pid=excluded.pid,status=excluded.status,ended=excluded.ended,transcript=excluded.transcript,
 		   has_local=excluded.has_local,
-		   source=CASE
-		     WHEN sessions.surface='codex' AND sessions.transport='managed' AND NOT (excluded.source='vscode' AND excluded.transport='desktop') THEN sessions.source
-		     WHEN sessions.surface='codex' AND sessions.transport='desktop' AND excluded.source='agenthail' AND excluded.transport='managed' THEN sessions.source
-		     WHEN excluded.source<>'' THEN excluded.source
-		     ELSE sessions.source
-		   END,
-		   transport=CASE
-		     WHEN sessions.surface='codex' AND sessions.transport='managed' AND NOT (excluded.source='vscode' AND excluded.transport='desktop') THEN sessions.transport
-		     WHEN sessions.surface='codex' AND sessions.transport='desktop' AND excluded.source='agenthail' AND excluded.transport='managed' THEN sessions.transport
-		     WHEN excluded.transport<>'' THEN excluded.transport
-		     ELSE sessions.transport
-			   END,
-			   runtime_kind=CASE
-		     WHEN sessions.surface='codex' AND sessions.transport='managed' AND NOT (excluded.source='vscode' AND excluded.transport='desktop') THEN sessions.runtime_kind
-		     WHEN sessions.surface='codex' AND sessions.transport='desktop' AND excluded.source='agenthail' AND excluded.transport='managed' THEN sessions.runtime_kind
-		     ELSE excluded.runtime_kind
-			   END,
+		   source=`+sessionRouteSourceSQL+`,
+		   transport=`+sessionRouteTransportSQL+`,
+		   runtime_kind=`+sessionRouteRuntimeSQL+`,
 			   configured_model=CASE WHEN excluded.configured_model<>'' THEN excluded.configured_model ELSE sessions.configured_model END,
 			   bridge=excluded.bridge,
 			   forked_from=CASE WHEN sessions.forked_from<>'' THEN sessions.forked_from ELSE excluded.forked_from END,

@@ -397,9 +397,6 @@ func (d *Daemon) setHostState(host *pairedHost, state, detail string, contacted 
 	}
 	if changed {
 		d.publishEvent("host.state", host.record.ID, map[string]any{"host": host.ref(), "detail": detail})
-		if d.dashboard != nil {
-			d.dashboard.invalidate()
-		}
 	}
 }
 

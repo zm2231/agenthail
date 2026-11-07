@@ -163,6 +163,10 @@ func claudeRootIdentity(root string) string {
 	return root
 }
 
+func SameClaudeRoot(a, b string) bool {
+	return claudeRootIdentity(filepath.Clean(a)) == claudeRootIdentity(filepath.Clean(b))
+}
+
 func ClaudeSessionRecordPaths(roots []string, pid string) []string {
 	var paths []string
 	for _, root := range roots {

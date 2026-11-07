@@ -3,6 +3,8 @@ name: iOS
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -33,7 +35,7 @@ jobs:
         run: scripts/ci-full-gate.sh
       - id: diff
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           STACK: ${{ toJSON(github.event.pull_request.stack) }}
           STACK_BASE_REF: ${{ github.event.pull_request.stack.base.ref }}
         run: |
@@ -62,7 +64,7 @@ jobs:
   ios:
     needs: changes
     if: needs.changes.outputs.ios == 'true' && needs.changes.outputs.full == 'true' && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size)
-    runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 45
     env:
       DERIVED: ${{ github.workspace }}/../ios-derived
@@ -105,7 +107,7 @@ jobs:
 
   ios-release:
     needs: changes
-    if: needs.changes.outputs.ios == 'true' && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size)
+    if: github.event_name == 'pull_request' && needs.changes.outputs.ios == 'true' && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size)
     runs-on: macos-26
     timeout-minutes: 45
     env:

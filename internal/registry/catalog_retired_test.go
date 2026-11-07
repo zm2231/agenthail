@@ -398,3 +398,86 @@ func TestPresentationCountsRetiredRowsItDoesNotRead(t *testing.T) {
 		t.Fatalf("history=%+v", history.Rows)
 	}
 }
+
+func TestTheRetiredCountsFollowARetiredSessionsStatus(t *testing.T) {
+	r := openTestRegistry(t)
+	recordEndedRow(t, r, surface.Session{ID: "ended"}, `{"id":"ended","current":false}`)
+	endedPasses(t, r, 2)
+	if !isRetired(t, r, "ended") {
+		t.Fatal("the fixture row did not retire")
+	}
+	statuses := func() []surface.SessionStatus {
+		read, err := r.ReadCurrentCatalogPresentation(context.Background(), func(string, uint64) bool { return false })
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found []surface.SessionStatus
+		for _, count := range read.Retired {
+			found = append(found, count.Status)
+		}
+		return found
+	}
+	if got := statuses(); len(got) != 1 || got[0] != surface.StatusOffline {
+		t.Fatalf("retired counts=%v", got)
+	}
+	session, err := r.Session("ended")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.Status = surface.StatusIdle
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	if !isRetired(t, r, "ended") {
+		t.Fatal("registering the session brought its row back")
+	}
+	if got := statuses(); len(got) != 1 || got[0] != surface.StatusIdle {
+		t.Fatalf("retired counts after the status changed=%v", got)
+	}
+}
+
+func TestTheRetiredCountsFollowAMovedProject(t *testing.T) {
+	r := openTestRegistry(t)
+	session := surface.Session{ID: "ended", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: "/fixture/ended.jsonl", LastActive: time.Now().Add(-48 * time.Hour)}
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{"localId":"key-a"}`), Checkout: []byte(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: `{"id":"ended","current":false}`}, CatalogEvent{DedupeKey: "fixture:ended", Type: "session.upserted", EntityID: "ended", Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	endedPasses(t, r, 2)
+	if !isRetired(t, r, "ended") {
+		t.Fatal("the fixture row did not retire")
+	}
+	if _, err := r.ObserveRepositoryKey("/work/a", "key-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ArchiveProject(ProjectRecord{ID: "key-a", WorkspaceRoot: "/work/a"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	archived := func() []bool {
+		read, err := r.ReadCurrentCatalogPresentation(context.Background(), func(string, uint64) bool { return false })
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found []bool
+		for _, count := range read.Retired {
+			found = append(found, count.Archived)
+		}
+		return found
+	}
+	if got := archived(); len(got) != 1 || !got[0] {
+		t.Fatalf("retired counts before the move=%v", got)
+	}
+	if outcome, err := r.ObserveRepositoryKey("/work/a", "key-b"); err != nil || outcome.Refused != nil {
+		t.Fatalf("move=%+v %v", outcome, err)
+	}
+	var moved int
+	if err := r.read.QueryRow(`SELECT COUNT(*) FROM projects WHERE id='key-b'`).Scan(&moved); err != nil || moved != 1 {
+		t.Fatalf("the archived project did not move: %d %v", moved, err)
+	}
+	stored, err := r.ReadCurrentCatalogPresentation(WithoutReadCaches(context.Background()), func(string, uint64) bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := archived(); len(stored.Retired) != 1 || stored.Retired[0].Archived || len(got) != 1 || got[0] {
+		t.Fatalf("retired counts after the move=%v, stored=%+v", got, stored.Retired)
+	}
+}

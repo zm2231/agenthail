@@ -2,12 +2,17 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tidwall/gjson"
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -173,6 +178,62 @@ func TestCompactSettingsKeepASymlinkedSettingsFile(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(target); gjson.GetBytes(data, "autoCompactWindow").Int() != 300000 || gjson.GetBytes(data, "theme").String() != "dark" {
 		t.Fatalf("target=%s", data)
+	}
+}
+
+func TestCompactSettingsShowWhyIdleSessionsUnderEachRootWereNotCompacted(t *testing.T) {
+	home, primary, work := compactSettingsFixture(t)
+	if err := os.MkdirAll(work, 0700); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(home, "linked-work")
+	if err := os.Symlink(work, linked); err != nil {
+		t.Fatal(err)
+	}
+	var holds []daemon.IdleCompactionHold
+	for i := range 7 {
+		holds = append(holds, daemon.IdleCompactionHold{SessionID: fmt.Sprintf("s-%d", i), Session: fmt.Sprintf("@work-%d", i), Root: linked, ContextTokens: 250000, Reason: "the session is busy, not idle", At: time.Now().Add(time.Duration(i-10) * time.Minute)})
+	}
+	holds = append(holds, daemon.IdleCompactionHold{SessionID: "s-primary", Root: primary, ContextTokens: 300000, Reason: "a background task is running", At: time.Now()})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/claude/compact-settings" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"roots": []any{}, "idleCompactionHolds": holds})
+	}))
+	t.Cleanup(server.Close)
+	app, _ := cliFixture(t, &cliSurface{kind: "claude"})
+	app.catalogDaemonRunning = func() bool { return true }
+	app.daemonAPIOverride = func() (*daemonAPIClient, error) {
+		return &daemonAPIClient{baseURL: server.URL, token: "dashboard-synthetic", httpClient: server.Client()}, nil
+	}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"claude", "settings", "compact"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	primaryPart, workPart, found := strings.Cut(output, filepath.Join(work, "settings.json"))
+	if !found || !strings.Contains(primaryPart, "  not compacted: s-primary at 300000 tokens, just now: a background task is running") {
+		t.Fatalf("output=%s", output)
+	}
+	var shown []string
+	for _, line := range strings.Split(workPart, "\n") {
+		if name, ok := strings.CutPrefix(line, "  not compacted: "); ok {
+			shown = append(shown, strings.Fields(name)[0])
+		}
+	}
+	if strings.Join(shown, " ") != "@work-6 @work-5 @work-4 @work-3 @work-2" || !strings.Contains(workPart, "at 250000 tokens, 4m ago: the session is busy, not idle") {
+		t.Fatalf("work root holds=%v output=%s", shown, output)
+	}
+
+	app.catalogDaemonRunning = func() bool { return false }
+	output, err = captureStdout(t, func() error { return app.Run([]string{"claude", "settings", "compact"}) })
+	if err != nil || strings.Contains(output, "not compacted:") || !strings.Contains(output, "Why idle sessions were not compacted is not shown: the daemon is not running") {
+		t.Fatalf("err=%v output=%s", err, output)
+	}
+	output, err = captureStdout(t, func() error { return app.Run([]string{"claude", "settings", "compact", "--json"}) })
+	if err != nil || !gjson.Get(output, "idleCompactionHoldsError").Exists() || len(gjson.Get(output, "roots").Array()) != 2 {
+		t.Fatalf("err=%v output=%s", err, output)
 	}
 }
 

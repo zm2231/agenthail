@@ -262,6 +262,31 @@ and `sessionSourceManager.publishedTurn` relabels the compaction whose
 journaled or read from history; the transcript itself records a manual
 compact.
 
+The transcript rules are checked first. A session whose transcript shows a
+due request but that is held by any other rule has the first one recorded
+once for that request: the daemon logs `idle compaction held for <session> at
+<tokens> tokens, idle <minutes>: <reason>`, and `GET
+/api/v1/claude/compact-settings` lists the latest 50 holds as
+`idleCompactionHolds` (`sessionId`, `session`, `root`, `requestAt`,
+`contextTokens`, `reason`, `at`), with `root` given as the configured root it
+resolves to and `session` as the session's display name. The dashboard's
+compaction settings show the latest five under each root, and `agenthail claude
+settings compact` prints them under each root, saying so when the daemon can't
+be reached. The reasons, in the order they are checked: off for the root, not
+idle (a status that never left busy shows here), waiting on a prompt, a
+background task running, the root at a usage limit, no compact for the
+session, and a queued or in-flight item. The holds live in the daemon's memory
+and start empty when it restarts.
+
+Each transcript changed in the last hour is read on every pass, held or not,
+so the reads are incremental: `Claude.IdleCompactionState` continues from the
+offset the previous pass reached and folds in only the records appended since,
+so a pass reads what was written in the minute before it. The offset belongs to
+the file it was read from (device and inode), and the appended bytes are read
+from the same open file that was measured. It reads the last 4 MiB afresh on
+the first pass, when the transcript was replaced or shrank, or when more than
+that was appended.
+
 For a `claude-bg` job, Claude assigns the background ID. Agenthail parses that ID from the native launch response, then resolves the full session ID through `claude agents --json --all`. It never assumes that a supplied `--session-id` controls background identity. The registered session and optional alias become the targets for later messages. A successful launch confirms registration, not completion of the first model turn; there is no fabricated turn receipt.
 
 Claude Code lets one conversation stay open in several processes; resuming it elsewhere only warns. The conversation has one row whatever its processes: the process that opened it first is attached to the row, sends to the session reach it, and a later process is addressed by its PID. When a process moves to another conversation (`/branch`, `/clear`, `/resume`), registering it under the new conversation detaches it from the old row; nothing else moves. Commands run from either process still resolve to that session. Because a sender's process is unknown when several share its ID, replies to it are addressed to the session rather than to one process's socket.

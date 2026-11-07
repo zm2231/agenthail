@@ -153,16 +153,6 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
-    func testSessionDeltaEventsUseTheirOwnStreamsWithoutSnapshotRefresh() {
-        XCTAssertFalse(AgenthailIOSModel.shouldRefreshSnapshot(for: "session.updated"))
-        XCTAssertFalse(AgenthailIOSModel.shouldRefreshSnapshot(for: "turn.completed"))
-        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "state.changed"))
-        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "settings.updated"))
-        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "device.push.updated"))
-        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "stream.reset"))
-    }
-
-    @MainActor
     func testSessionStreamRejectsEmptyItemIdentity() async throws {
         let model = Self.computerModel()
         var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))

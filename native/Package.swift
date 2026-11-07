@@ -25,6 +25,7 @@ let package = Package(
                 "AgenthailApp.swift",
                 "DuplicateApplicationPolicy.swift",
                 "StatusRefreshPolicy.swift",
+                "SnapshotRefreshPolicy.swift",
                 "AgenthailModels.swift",
                 "TurnSettings.swift",
                 "AgenthailAPI.swift",

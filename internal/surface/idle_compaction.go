@@ -17,6 +17,15 @@ type IdleCompactionState struct {
 	CompactedSince bool
 }
 
+// IdleCompactionRead is the state read from a transcript up to Offset. File
+// identifies the transcript file that was read, so the next read continues
+// from Offset only in that same file.
+type IdleCompactionRead struct {
+	State  IdleCompactionState
+	Offset int64
+	File   string
+}
+
 type IdleCompactionReader interface {
-	IdleCompactionState(ctx context.Context, sess *Session) (IdleCompactionState, error)
+	IdleCompactionState(ctx context.Context, sess *Session, from IdleCompactionRead) (IdleCompactionRead, error)
 }

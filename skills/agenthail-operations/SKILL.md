@@ -118,7 +118,9 @@ minutes after a Claude session's last request, while its one-hour prompt cache
 is still warm, the daemon queues a `/compact` for a session with at least that
 many context tokens (200000 by default) and nothing queued or running, unless
 the root's account is at a usage limit. It applies to running sessions at once.
-The roots are those of the machine the command runs on; each host's settings
+Under each root, the read also lists the latest sessions the daemon found due
+but did not compact, and why (`not compacted: <session> at <tokens> tokens,
+<when>: <reason>`); `--json` has them as `idleCompactionHolds`. The roots are those of the machine the command runs on; each host's settings
 are changed on that host or through its daemon.
 
 One unhealthy surface does not block the others. `doctor --json` reports each

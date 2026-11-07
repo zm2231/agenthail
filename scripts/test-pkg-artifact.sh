@@ -79,8 +79,8 @@ test -L "$work/home/.codex/skills/agenthail-operations"
 test "$(readlink "$work/home/.codex/skills/agenthail-operations")" = "$root/skills/agenthail-operations"
 test "$(readlink "$work/home/.claude/skills/agenthail-operations")" = "$work/checkout/skills/agenthail-operations"
 test "$(readlink "$work/home/.hermes/skills/agenthail-operations")" = "$root/skills/agenthail-operations"
-PYTHONPATH="$root/pydeps" PYTHONDONTWRITEBYTECODE=1 "$root/runtime/python/bin/python3" -c 'from curl_cffi import requests; assert requests'
-(cd "$root" && PATH="$root/runtime/node/bin:/usr/bin:/bin" "$root/runtime/node/bin/node" -e "import('@steipete/sweet-cookie').then(module => { if (!module.getCookies) process.exit(1) })")
+env -i HOME="$work/home" PATH=/usr/bin:/bin PYTHONPATH="$root/pydeps" PYTHONDONTWRITEBYTECODE=1 "$root/runtime/python/bin/python3" -c 'from curl_cffi import requests; assert requests'
+(cd "$root" && env -i HOME="$work/home" PATH="$root/runtime/node/bin:/usr/bin:/bin" "$root/runtime/node/bin/node" -e "import('@steipete/sweet-cookie').then(module => { if (!module.getCookies) process.exit(1) })")
 "$root/runtime/node/bin/node" "$(dirname "$0")/test-staged-hosts.mjs" "$root"
 
 linkage="$work/linkage.txt"

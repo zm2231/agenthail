@@ -31,7 +31,17 @@ func (d *Daemon) claudeCompactSettingsHandler(w http.ResponseWriter, r *http.Req
 			}
 			results = append(results, settings)
 		}
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"roots": results})
+		holds := d.idleHolds.list()
+		for i := range holds {
+			for _, root := range roots {
+				if surface.SameClaudeRoot(holds[i].Root, root) {
+					holds[i].Root = root
+					break
+				}
+			}
+			holds[i].Session = d.resolveDisplay(holds[i].SessionID)
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"roots": results, "idleCompactionHolds": holds})
 	case http.MethodPost:
 		var request struct {
 			Root                   string `json:"root"`

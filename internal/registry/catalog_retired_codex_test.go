@@ -158,6 +158,69 @@ func TestARetiredSubagentMovedUnderAnotherParentComesBack(t *testing.T) {
 	}
 }
 
+func recordCodexProjection(t *testing.T, r *Registry, session surface.Session, projection string) {
+	t.Helper()
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "fixture:" + session.ID + ":" + projection, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAManagedThreadDiscoveryStillListsStaysRetiredAcrossPasses(t *testing.T) {
+	r := openTestRegistry(t)
+	created := codexThread("managed", "", "", 0, true)
+	created.Source, created.Transport, created.RuntimeKind = "agenthail", "managed", surface.RuntimeCodexAppServer
+	if err := r.RegisterSession(created); err != nil {
+		t.Fatal(err)
+	}
+	discovered := created
+	discovered.Source = "vscode"
+	recordCodexThread(t, r, discovered)
+	codexSweep(t, r, "managed")
+	if !isRetired(t, r, "managed") {
+		t.Fatal("fixture: the ended managed thread should retire")
+	}
+	observed := func() (at string) {
+		t.Helper()
+		if err := r.read.QueryRow(`SELECT observed_at FROM catalog_sessions WHERE session_id='managed'`).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	before := observed()
+	for range 3 {
+		recordCodexThread(t, r, discovered)
+		if !isRetired(t, r, "managed") {
+			t.Fatal("a pass that found the thread as it was un-retired it")
+		}
+	}
+	if after := observed(); after != before {
+		t.Fatalf("passes over an unchanged thread rewrote its row: observed %s -> %s", before, after)
+	}
+	if session, err := r.Session("managed"); err != nil || session.Source != "agenthail" || session.Transport != "managed" {
+		t.Fatalf("session=%+v err=%v, want the stored managed route kept", session, err)
+	}
+}
+
+func TestARetiredThreadComesBackWithNewActivityButNotWithAnyOtherChange(t *testing.T) {
+	r := openTestRegistry(t)
+	thread := codexThread("root", "", "", 0, true)
+	recordCodexThread(t, r, thread)
+	codexSweep(t, r, "root")
+	renamed := thread
+	renamed.Name = "renamed"
+	recordCodexProjection(t, r, renamed, `{"id":"root","name":"renamed"}`)
+	if !isRetired(t, r, "root") {
+		t.Fatal("a rename of an ended, old thread un-retired it")
+	}
+	active := renamed
+	active.LastActive = time.Now().Add(-time.Hour)
+	recordCodexProjection(t, r, active, `{"id":"root","name":"renamed","active":"recent"}`)
+	codexSweep(t, r, "root")
+	if isRetired(t, r, "root") {
+		t.Fatal("a thread with new activity stayed retired")
+	}
+}
+
 func TestASubagentWhoseParentHasNoRowRetiresAndComesBackWhenTheParentAppears(t *testing.T) {
 	r := openTestRegistry(t)
 	recordCodexThread(t, r, codexThread("orphan", "missing", "missing", 1, true))

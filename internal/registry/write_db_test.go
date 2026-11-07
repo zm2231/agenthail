@@ -83,6 +83,39 @@ func TestABoundWriteWaitsForTheLockUntilItsDeadline(t *testing.T) {
 	tx.Rollback()
 }
 
+func TestATransactionStartedBeforeItsDeadlineCommitsAfterIt(t *testing.T) {
+	r := openTestRegistry(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	release, err := r.WriteWithin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	tx, err := r.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("the transaction did not begin before its deadline, so this run proves nothing")
+	}
+	if _, err := tx.Exec(`CREATE TABLE deadline_mid_transaction (x INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	<-ctx.Done()
+	time.Sleep(20 * time.Millisecond)
+	if _, err := tx.Exec(`INSERT INTO deadline_mid_transaction VALUES (1)`); err != nil {
+		t.Fatalf("a write in a transaction that began before the deadline failed after it: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("a transaction that began before the deadline did not commit after it: %v", err)
+	}
+	var rows int
+	if err := r.db.raw.QueryRow(`SELECT count(*) FROM deadline_mid_transaction`).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("rows=%d err=%v", rows, err)
+	}
+}
+
 func TestAWriteBoundToAnEndedDeadlineLandsOnlyWhenTheLockIsFree(t *testing.T) {
 	r := openTestRegistry(t)
 	ctx, cancel := context.WithCancel(context.Background())

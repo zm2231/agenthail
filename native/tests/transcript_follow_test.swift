@@ -22,6 +22,7 @@ final class Feed: ObservableObject {
 @MainActor var shownOpen: [String: Bool] = [:]
 @MainActor var rowTops: [String: CGFloat] = [:]
 @MainActor let rowMemory = TranscriptRowMemory()
+@MainActor weak var watched: Feed?
 
 func rows(_ prefix: String, _ count: Int) -> [Row] {
     (0..<count).map { Row(id: "\(prefix)\($0)", lines: 1 + ($0 * 7) % 9) }
@@ -129,6 +130,7 @@ struct TranscriptFollowTest {
     static func main() {
         _ = NSApplication.shared
         let feed = Feed()
+        watched = feed
         let hosting = NSHostingView(rootView: Transcript(feed: feed))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.alphaValue = 0
@@ -169,8 +171,9 @@ struct TranscriptFollowTest {
 
         move(scroll, to: 500)
         feed.rows = rows("Cr", 70)
+        expectEventually(offset(scroll) == 500 && !feed.following, "a page that replaces the rows leaves an up-scrolled reader where they were, got offset \(offset(scroll))")
         spin(0.6)
-        expect(offset(scroll) == 500 && !feed.following, "a page that replaces the rows leaves an up-scrolled reader where they were, got offset \(offset(scroll))")
+        expect(offset(scroll) == 500 && !feed.following, "an up-scrolled reader stays put after a replaced page settles, got offset \(offset(scroll))")
 
         move(scroll, to: 300)
         feed.rows = rows("Cq", 10) + feed.rows
@@ -390,8 +393,9 @@ struct TranscriptFollowTest {
             let place = gap(scroll)
             for page in 0..<6 {
                 feed.rows = rows("Zt\(Int(start))p\(page)-", 20) + feed.rows
-                spin(0.8)
-                expect(abs(gap(scroll) - place) < 2, "older pages loaded in a row keep a reader near the top in place, from \(Int(start)) after page \(page) distance from bottom \(place) became \(gap(scroll))")
+                expectEventually(abs(gap(scroll) - place) < 2, "older pages loaded in a row keep a reader near the top in place, from \(Int(start)) after page \(page) distance from bottom \(place) became \(gap(scroll))")
+                spin(0.3)
+                expect(abs(gap(scroll) - place) < 2, "a reader near the top stays in place once page \(page) settles, from \(Int(start)) distance from bottom \(place) became \(gap(scroll))")
             }
         }
 
@@ -482,7 +486,15 @@ struct TranscriptFollowTest {
 
     @MainActor
     private static func expectBottom(_ scroll: NSScrollView, _ message: String) {
-        expectEventually(abs(gap(scroll)) < 2, "\(message), \(Int(gap(scroll))) points short of the bottom at offset \(Int(offset(scroll)))")
+        expectEventually(abs(gap(scroll)) < 2, "\(message), \(Int(gap(scroll))) points short of the bottom at offset \(Int(offset(scroll))); \(geometry(scroll))")
+    }
+
+    @MainActor
+    private static func geometry(_ scroll: NSScrollView) -> String {
+        let clip = scroll.contentView
+        let ids = watched?.rows.suffix(2).map(\.id) ?? []
+        let pitch = ids.count == 2 ? (rowTops[ids[1]] ?? 0) - (rowTops[ids[0]] ?? 0) : 0
+        return "document \(scroll.documentView?.frame.height ?? 0), clip \(clip.bounds), insets top \(clip.contentInsets.top) bottom \(clip.contentInsets.bottom), following \(watched?.following ?? false), last row pitch \(pitch)"
     }
 
     @MainActor

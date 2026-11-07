@@ -3,8 +3,16 @@ import XCTest
 @MainActor
 final class ActivityCollapseTests: XCTestCase {
     func testCollapsingALongRunFromItsEndKeepsTheRunOnScreen() {
+        collapseLongRunFromItsEnd([])
+    }
+
+    func testCollapsingALongRunBelowALongHistoryKeepsTheRunOnScreen() {
+        collapseLongRunFromItsEnd(["--preview-long-history"])
+    }
+
+    private func collapseLongRunFromItsEnd(_ extra: [String]) {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-long-activity"]
+        app.launchArguments = ["--preview-session", "--preview-long-activity"] + extra
         app.launch()
         let timeline = app.scrollViews["session-timeline"]
         XCTAssertTrue(timeline.waitForExistence(timeout: 10))
@@ -20,8 +28,10 @@ final class ActivityCollapseTests: XCTestCase {
         XCTAssertGreaterThan(collapse.frame.width, timeline.frame.width / 2, "the control should span the row, at \(collapse.frame)")
         collapse.tapWhenStill()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: collapse)], timeout: 5), .completed)
+        let landed = activity.frame.minY
         // Give the scroll view time to settle before reading what it shows.
         RunLoop.current.run(until: Date().addingTimeInterval(1))
+        XCTAssertLessThan(abs(activity.frame.minY - landed), 8, "the collapsed run's header moved from \(landed) to \(activity.frame.minY) after the reveal landed")
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "After collapsing the run from its end"
         attachment.lifetime = .keepAlways

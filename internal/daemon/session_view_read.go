@@ -34,6 +34,14 @@ func (d *Daemon) readCatalogPresentation(ctx context.Context, request sessionVie
 	if request.Scope == "all" || request.Scope == "archived" || request.Filters.Query != "" {
 		load = d.Registry.ReadCatalogPresentation
 	}
+	if d.presentation.uncached {
+		read, err := load(registry.WithoutReadCaches(ctx), func(string, uint64) bool { return true })
+		if err != nil {
+			return read, err
+		}
+		cache.reset(read.HostEpoch)
+		return read, cache.adopt(read)
+	}
 	read, err := load(ctx, cache.stale)
 	if err != nil {
 		return read, err
@@ -52,6 +60,9 @@ func (d *Daemon) sessionViewBuildFor(ctx context.Context, request sessionViewReq
 	if !d.presentation.uncached {
 		return d.cachedSessionView(ctx, request, now)
 	}
+	shared := d.presentation.fingerprints
+	d.presentation.fingerprints = presentationFingerprints{}
+	defer func() { d.presentation.fingerprints = shared }()
 	config, err := LoadDashboardConfig()
 	if err != nil {
 		return nil, err

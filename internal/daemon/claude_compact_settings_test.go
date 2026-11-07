@@ -72,6 +72,41 @@ func TestTheDashboardReadsAndEditsEachClaudeRootsCompactionSettings(t *testing.T
 	}
 }
 
+func TestAnIdleCompactionHoldIsListedUnderTheConfiguredRootItCameFromWithTheSessionsName(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, "claude"))
+	work := filepath.Join(home, ".claude-work")
+	linked := filepath.Join(home, "linked-work")
+	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".agenthail", "config.json"), []byte(`{"claudeConfigDirs":["`+work+`"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(work, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(work, linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("planner", from.ID); err != nil {
+		t.Fatal(err)
+	}
+	d.idleHolds.record(IdleCompactionHold{SessionID: from.ID, Root: linked, ContextTokens: 250000, Reason: "a background task is running"}, func(IdleCompactionHold) {})
+	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/claude/compact-settings", "")
+	var body struct {
+		Holds []IdleCompactionHold `json:"idleCompactionHolds"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || len(body.Holds) != 1 {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if hold := body.Holds[0]; hold.Root != work || hold.Session != "@planner" || hold.SessionID != from.ID {
+		t.Fatalf("hold=%+v, want root %s and session @planner", hold, work)
+	}
+}
+
 func TestAgenthailsIdleCompactionIsOnByDefaultAndSetPerRootInItsOwnConfig(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	home := t.TempDir()

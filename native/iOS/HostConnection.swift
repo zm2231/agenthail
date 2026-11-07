@@ -352,7 +352,7 @@ final class HostConnection {
         lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
         if let entity = event.entityId { delegate?.host(self, receivedEventFor: entity) }
         if event.type == "ui.changed" { delegate?.hostAppearanceChanged(self) }
-        guard AgenthailIOSModel.shouldRefreshSnapshot(for: event.type) else { return }
+        guard SnapshotRefreshPolicy.refreshes(for: event.type) else { return }
         eventRefreshTask?.cancel()
         eventRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))

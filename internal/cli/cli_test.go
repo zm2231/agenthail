@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -794,11 +795,19 @@ func TestSendDirectStreamPreservesAppendThenAuthoritativeFinal(t *testing.T) {
 func TestSendTimeoutBoundsDelivery(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true}, sendWait: true}
-	app, _ := cliFixture(t, fake)
+	app, r := cliFixture(t, fake)
 	started := time.Now()
 	err := app.Run([]string{"send", "codex:s", "hello", "--timeout", "50ms"})
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 500*time.Millisecond {
 		t.Fatalf("elapsed=%s err=%v", time.Since(started), err)
+	}
+	var failed delivery.FailedDeliveryError
+	if !errors.As(err, &failed) {
+		t.Fatalf("a send that ran out of time did not say its delivery failed: %v", err)
+	}
+	intent, err := r.DeliveryIntent(failed.DeliveryID)
+	if err != nil || intent.Status != registry.DeliveryIntentFailed || !strings.Contains(intent.Failure, context.DeadlineExceeded.Error()) {
+		t.Fatalf("a send that ran out of time left its delivery as %+v (err %v)", intent, err)
 	}
 }
 
