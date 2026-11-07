@@ -3,6 +3,7 @@ package surfaces
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -27,7 +28,7 @@ func claudeTurnStartBefore(path string, end int64) (time.Time, bool) {
 		}
 		if turns := foldClaudeTurn(nil, record); len(turns) == 1 && turns[0].UserID != "" {
 			started, found = turns[0].StartedAt, !turns[0].StartedAt.IsZero()
-			return false
+			return record.IsMeta && isClaudeStopHookFeedback(strings.TrimSpace(transcriptText(record.Message.Content)))
 		}
 		return true
 	})
