@@ -29,7 +29,7 @@ func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedVersion13(t, r)
-	assertEverySessionColumnSeeded(t, r.db)
+	assertEverySessionColumnSeeded(t, r.db.raw)
 	if _, err := r.db.Exec(`PRAGMA user_version=13`); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 	}
 	defer r.Close()
 
-	assertNoRetiredIDs(t, r.db)
+	assertNoRetiredIDs(t, r.db.raw)
 	var version int
 	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
 		t.Fatalf("user_version=%d err=%v", version, err)

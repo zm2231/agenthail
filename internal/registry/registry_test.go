@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -109,7 +110,7 @@ func TestOpenRestrictsDefaultStateDirectoryCreatedByAnotherWriter(t *testing.T) 
 	if err := os.Mkdir(state, 0755); err != nil {
 		t.Fatal(err)
 	}
-	r, err := OpenDefault(true)
+	r, err := OpenDefault(context.Background(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1221,7 +1222,7 @@ func TestReadsDoNotWaitForAWriterBlockedOnAnotherProcess(t *testing.T) {
 	go func() {
 		writeDone <- r.RegisterSession(surface.Session{ID: "waiting-writer", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop})
 	}()
-	for deadline := time.Now().Add(2 * time.Second); r.db.Stats().InUse == 0; {
+	for deadline := time.Now().Add(2 * time.Second); r.db.raw.Stats().InUse == 0; {
 		if time.Now().After(deadline) {
 			t.Fatal("writer never took the write connection")
 		}

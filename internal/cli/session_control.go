@@ -22,7 +22,10 @@ func (a *App) cmdStream(args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel, err := a.deadlineContext(timeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
@@ -117,7 +120,7 @@ func (a *App) cmdModel(args []string) error {
 	if len(positional) < 1 || len(positional) > 2 {
 		return fmt.Errorf("usage: agenthail model <target> [name] [--json] [--timeout 30s]")
 	}
-	ctx, cancel, err := commandContext(args)
+	ctx, cancel, err := a.timedContext(args, controlCommandTimeout)
 	if err != nil {
 		return err
 	}
@@ -198,7 +201,7 @@ func (a *App) cmdControl(args []string) error {
 	default:
 		return fmt.Errorf("unknown control %q; use model, interrupt, steer or compact for those", action)
 	}
-	ctx, cancel, err := commandContext(args)
+	ctx, cancel, err := a.timedContext(args, controlCommandTimeout)
 	if err != nil {
 		return err
 	}
@@ -250,21 +253,12 @@ func printControl(target string, result *surface.ControlResult) {
 	}
 }
 
-func commandContext(args []string) (context.Context, context.CancelFunc, error) {
-	timeout, err := commandTimeout(args, 30*time.Second)
-	if err != nil {
-		return nil, nil, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	return ctx, cancel, nil
-}
-
 func (a *App) cmdInterrupt(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) != 1 {
 		return fmt.Errorf("usage: agenthail interrupt <target> [--json] [--timeout 30s]")
 	}
-	ctx, cancel, err := commandContext(args)
+	ctx, cancel, err := a.timedContext(args, controlCommandTimeout)
 	if err != nil {
 		return err
 	}
@@ -294,7 +288,7 @@ func (a *App) cmdSteer(args []string) error {
 	if len(positional) < 2 {
 		return fmt.Errorf("usage: agenthail steer <target> \"message\" ('-' reads stdin) [--json] [--timeout 30s]")
 	}
-	ctx, cancel, err := commandContext(args)
+	ctx, cancel, err := a.timedContext(args, controlCommandTimeout)
 	if err != nil {
 		return err
 	}
