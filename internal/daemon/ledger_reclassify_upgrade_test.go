@@ -59,7 +59,7 @@ func TestRederivesWaitForASlot(t *testing.T) {
 	}
 	fake := &daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, kind: surface.KindClaude}
 	adapter := &rederiveSurface{daemonSurface: fake}
-	source := &sessionSource{manager: manager, session: s, adapter: adapter, epoch: "waiting", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{ctx: context.Background(), manager: manager, session: s, adapter: adapter, epoch: "waiting", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if err := source.rederiveJournal(ctx); !errors.Is(err, context.DeadlineExceeded) || adapter.calls != 0 {

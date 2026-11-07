@@ -34,7 +34,9 @@ func (s *sessionSource) catchUpFromCheckpoint(ctx context.Context, trustedIdenti
 		s.session.TranscriptIdentity = read.Identity
 		s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
 	}
-	s.appendSeedItems(read.Items)
+	if err := s.appendSeedItems(read.Items); err != nil {
+		return false, err
+	}
 	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.Identity); err != nil {
 		return false, err
 	}

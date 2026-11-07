@@ -93,7 +93,9 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 		before = read.NextBefore
 	}
 	for index := len(pages) - 1; index >= 0; index-- {
-		s.appendSeedItems(pages[index])
+		if err := s.appendSeedItems(pages[index]); err != nil {
+			return err
+		}
 	}
 	if continued {
 		s.removeDroppedItems(dropped, known)

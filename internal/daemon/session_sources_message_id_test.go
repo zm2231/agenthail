@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/sessionstream"
@@ -11,7 +12,7 @@ func TestSessionJournalKeepsAPromptsMessageIDForSeedAndLive(t *testing.T) {
 	for _, mode := range []string{"seed", "live", "seed-metadata"} {
 		t.Run(mode, func(t *testing.T) {
 			_, reg, fake, from, _ := daemonFixture(t)
-			source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
+			source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
 			item := surface.TimelineItem{ID: "prompt", Kind: "message", Role: "user", Text: "Run the tests", TurnID: "turn-1", MessageID: "intent-uuid"}
 			switch mode {
 			case "live":
