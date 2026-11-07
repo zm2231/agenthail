@@ -28,6 +28,7 @@ targets:
       - path: AgenthailModels.swift
       - path: TurnSettings.swift
       - path: AgenthailAPI.swift
+      - path: KeptDelivery.swift
       - path: QueueSteer.swift
       - path: InboxMessage.swift
       - path: PeerEnvelope.swift

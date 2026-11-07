@@ -867,6 +867,8 @@ final class AgenthailModel: ObservableObject {
     func retrySend(_ send: LocalSend, in sessionID: String) {
         guard let api, let index = localSends[sessionID]?.firstIndex(where: { $0.id == send.id }) else { return }
         localSends[sessionID]?[index].failure = nil
+        localSends[sessionID]?[index].deliveryID = nil
+        localSends[sessionID]?[index].deletable = false
         deliver(send, to: sessionID, api: api)
     }
 
@@ -882,7 +884,12 @@ final class AgenthailModel: ObservableObject {
                 completion?(true)
             } catch {
                 let failure = AgenthailAPIError.userMessage(error)
-                updateLocalSend(send.id, in: sessionID) { $0.failure = failure }
+                let kept = error as? KeptDelivery
+                updateLocalSend(send.id, in: sessionID) {
+                    $0.failure = failure
+                    $0.deliveryID = kept?.deliveryID
+                    $0.deletable = kept?.deletable ?? false
+                }
                 completion?(false)
             }
         }

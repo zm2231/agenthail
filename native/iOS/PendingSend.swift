@@ -47,6 +47,8 @@ enum SendOutcome: Equatable {
     // Any answer from the computer is definite. Without one, the message may have arrived.
     static func of(_ error: Error) -> SendOutcome {
         switch error {
+        case let kept as KeptDelivery:
+            return of(kept.error)
         case let error as AgenthailAPIError:
             switch error {
             case .invalidResponse, .outcomeUnknown, .unavailable: return .unconfirmed

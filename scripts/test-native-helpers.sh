@@ -25,6 +25,7 @@ JOBS="${AGENTHAIL_TEST_JOBS:-$(sysctl -n hw.ncpu)}"
 
 SOURCES=(
   AgenthailAPI.swift
+  KeptDelivery.swift
   InboxMessage.swift
   PeerEnvelope.swift
   TaggedResponses.swift

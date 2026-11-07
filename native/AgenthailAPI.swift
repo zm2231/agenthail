@@ -291,7 +291,7 @@ final class AgenthailAPI: @unchecked Sendable {
 
     func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, author: String? = nil, attachments: [String] = [], idempotencyKey: String? = nil) async throws -> ActionReceipt {
         let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery, author: author, attachments: attachments)
-        return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
+        return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey, keepsDelivery: true)
     }
 
     /// Fixes an instruction's bytes and key, pin included, so that retrying it can only replay it.
@@ -309,7 +309,7 @@ final class AgenthailAPI: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(wire.key, forHTTPHeaderField: "Idempotency-Key")
         let (data, response) = try await session.data(for: request)
-        try validate(response: response, data: data)
+        do { try validate(response: response, data: data) } catch { throw KeptDelivery.wrapping(error, body: data) }
         return try JSONDecoder().decode(ActionReceipt.self, from: data)
     }
 
@@ -804,7 +804,7 @@ final class AgenthailAPI: @unchecked Sendable {
         try await request(path, method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
-    private func requestEncoded<T: Decodable, Body: Encodable>(_ path: String, method: String, body: Body, timeout: TimeInterval = 25, idempotencyKey: String? = nil) async throws -> T {
+    private func requestEncoded<T: Decodable, Body: Encodable>(_ path: String, method: String, body: Body, timeout: TimeInterval = 25, idempotencyKey: String? = nil, keepsDelivery: Bool = false) async throws -> T {
         var request = authorizedRequest(path: path)
         request.httpMethod = method
         request.timeoutInterval = timeout
@@ -812,7 +812,7 @@ final class AgenthailAPI: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         setIdempotencyHeader(on: &request, path: path, method: method, key: idempotencyKey)
         let (data, response) = try await session.data(for: request)
-        try validate(response: response, data: data)
+        do { try validate(response: response, data: data) } catch where keepsDelivery { throw KeptDelivery.wrapping(error, body: data) }
         return try JSONDecoder().decode(T.self, from: data)
     }
 
