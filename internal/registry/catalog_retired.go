@@ -50,6 +50,19 @@ WHEN (OLD.retired=1 OR NEW.retired=1) AND (NEW.retired IS NOT OLD.retired OR NEW
 BEGIN
 	UPDATE catalog_retired_version SET version=version+1;
 END;
+DROP TRIGGER IF EXISTS catalog_retired_version_row_added;
+CREATE TRIGGER catalog_retired_version_row_added AFTER INSERT ON catalog_sessions
+WHEN NEW.retired=1
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
+DROP TRIGGER IF EXISTS catalog_retired_version_session;
+CREATE TRIGGER catalog_retired_version_session AFTER UPDATE OF status,surface,host_id ON sessions
+WHEN (NEW.status IS NOT OLD.status OR NEW.surface IS NOT OLD.surface OR NEW.host_id IS NOT OLD.host_id)
+	AND EXISTS (SELECT 1 FROM catalog_sessions WHERE session_id=NEW.id AND retired=1)
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
 DROP TRIGGER IF EXISTS catalog_retired_version_removed;
 CREATE TRIGGER catalog_retired_version_removed AFTER DELETE ON catalog_sessions
 WHEN OLD.retired=1
@@ -208,6 +221,9 @@ type catalogRetiredCache struct {
 
 // Cached: grouping parses every retired row's project on the current-view path.
 func (r *Registry) catalogRetiredCounts(ctx context.Context, tx *sql.Tx) ([]CatalogRetiredCount, error) {
+	if readCachesBypassed(ctx) {
+		return readRetiredCounts(ctx, tx)
+	}
 	var version int64
 	if err := tx.QueryRowContext(ctx, `SELECT version FROM catalog_retired_version WHERE id=1`).Scan(&version); err != nil {
 		return nil, err
@@ -218,12 +234,24 @@ func (r *Registry) catalogRetiredCounts(ctx context.Context, tx *sql.Tx) ([]Cata
 	if cache.valid && cache.version == version {
 		return cache.counts, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT s.surface,s.status,COALESCE(json_extract(cs.host_project,'$.id'),''),
-		sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,s.host_id<>'' AND cs.unavailable_reason<>'',COUNT(*)
-		FROM catalog_sessions cs INDEXED BY catalog_sessions_retired JOIN sessions s ON s.id=cs.session_id
-		LEFT JOIN session_archive sa ON sa.session_id=s.id
-		LEFT JOIN projects p ON p.id=json_extract(cs.host_project,'$.localId')
-		WHERE cs.retired=1 GROUP BY 1,2,3,4,5`)
+	counts, err := readRetiredCounts(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	cache.valid, cache.version, cache.counts = true, version, counts
+	return counts, nil
+}
+
+// Every column this reads must move catalog_retired_version when it changes.
+const catalogRetiredCountsQuery = `SELECT s.surface,s.status,COALESCE(json_extract(cs.host_project,'$.id'),''),
+	sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,s.host_id<>'' AND cs.unavailable_reason<>'',COUNT(*)
+	FROM catalog_sessions cs INDEXED BY catalog_sessions_retired JOIN sessions s ON s.id=cs.session_id
+	LEFT JOIN session_archive sa ON sa.session_id=s.id
+	LEFT JOIN projects p ON p.id=json_extract(cs.host_project,'$.localId')
+	WHERE cs.retired=1 GROUP BY 1,2,3,4,5`
+
+func readRetiredCounts(ctx context.Context, tx *sql.Tx) ([]CatalogRetiredCount, error) {
+	rows, err := tx.QueryContext(ctx, catalogRetiredCountsQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -236,11 +264,7 @@ func (r *Registry) catalogRetiredCounts(ctx context.Context, tx *sql.Tx) ([]Cata
 		}
 		counts = append(counts, count)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	cache.valid, cache.version, cache.counts = true, version, counts
-	return counts, nil
+	return counts, rows.Err()
 }
 
 // IDs let a peer tell a row it kept from one removed while it was away.

@@ -398,3 +398,40 @@ func TestPresentationCountsRetiredRowsItDoesNotRead(t *testing.T) {
 		t.Fatalf("history=%+v", history.Rows)
 	}
 }
+
+func TestTheRetiredCountsFollowARetiredSessionsStatus(t *testing.T) {
+	r := openTestRegistry(t)
+	recordEndedRow(t, r, surface.Session{ID: "ended"}, `{"id":"ended","current":false}`)
+	endedPasses(t, r, 2)
+	if !isRetired(t, r, "ended") {
+		t.Fatal("the fixture row did not retire")
+	}
+	statuses := func() []surface.SessionStatus {
+		read, err := r.ReadCurrentCatalogPresentation(context.Background(), func(string, uint64) bool { return false })
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found []surface.SessionStatus
+		for _, count := range read.Retired {
+			found = append(found, count.Status)
+		}
+		return found
+	}
+	if got := statuses(); len(got) != 1 || got[0] != surface.StatusOffline {
+		t.Fatalf("retired counts=%v", got)
+	}
+	session, err := r.Session("ended")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.Status = surface.StatusIdle
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	if !isRetired(t, r, "ended") {
+		t.Fatal("registering the session brought its row back")
+	}
+	if got := statuses(); len(got) != 1 || got[0] != surface.StatusIdle {
+		t.Fatalf("retired counts after the status changed=%v", got)
+	}
+}

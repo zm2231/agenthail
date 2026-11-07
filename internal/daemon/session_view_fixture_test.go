@@ -450,6 +450,16 @@ func newViewFixture(t *testing.T) *viewFixture {
 		if err := reg.ArchiveSession("s3", f.clock); err != nil {
 			t.Fatal(err)
 		}
+		listed := map[string]struct{}{}
+		for id := range fake.sessions {
+			listed[id] = struct{}{}
+		}
+		if _, err := reg.RecordCatalogDiscovery(surface.KindCodex, listed, f.clock, true, 3); err != nil {
+			t.Fatal(err)
+		}
+		if retired, err := reg.CatalogListingForEntities([]string{"old-ended-true"}); err != nil || !retired.Retired["old-ended-true"] {
+			t.Fatalf("the ended session did not retire: %+v %v", retired.Retired, err)
+		}
 	}
 	return f
 }

@@ -1,4 +1,4 @@
--- schemaVersion 75
+-- schemaVersion 76
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -1273,6 +1273,21 @@ END;
 -- trigger catalog_retired_version_row
 CREATE TRIGGER catalog_retired_version_row AFTER UPDATE OF retired,host_project,unavailable_reason ON catalog_sessions
 WHEN (OLD.retired=1 OR NEW.retired=1) AND (NEW.retired IS NOT OLD.retired OR NEW.host_project IS NOT OLD.host_project OR NEW.unavailable_reason IS NOT OLD.unavailable_reason)
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
+
+-- trigger catalog_retired_version_row_added
+CREATE TRIGGER catalog_retired_version_row_added AFTER INSERT ON catalog_sessions
+WHEN NEW.retired=1
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
+
+-- trigger catalog_retired_version_session
+CREATE TRIGGER catalog_retired_version_session AFTER UPDATE OF status,surface,host_id ON sessions
+WHEN (NEW.status IS NOT OLD.status OR NEW.surface IS NOT OLD.surface OR NEW.host_id IS NOT OLD.host_id)
+	AND EXISTS (SELECT 1 FROM catalog_sessions WHERE session_id=NEW.id AND retired=1)
 BEGIN
 	UPDATE catalog_retired_version SET version=version+1;
 END;
