@@ -73,6 +73,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 if following { layout.scheduleCheck(checkEnd) }
                 return geometry
             } action: { old, new in
+                layout.seen = new
                 let inserted = leadingRow != placedLeadingRow && placedLeadingRow.map(hasRow) == true
                 placedLeadingRow = leadingRow
                 let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
@@ -148,6 +149,8 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     private func checkEnd() -> Bool {
         guard following, let geometry = layout.geometry else { return true }
         guard resting else { return false }
+        // An offset move the action has not handled yet is a scroll, not content the end must catch up with.
+        if let seen = layout.seen, seen.contentSize == geometry.contentSize, seen.contentOffset != geometry.contentOffset { return true }
         if TranscriptEnd(geometry).distance > 2 {
             settle { $0.scrollTo(edge: .bottom) }
         }
@@ -169,6 +172,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
 @MainActor
 private final class Layout {
     var geometry: ScrollGeometry?
+    var seen: ScrollGeometry?
     var animationStart: ContinuousClock.Instant?
     private(set) var resized = false
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?

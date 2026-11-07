@@ -22,6 +22,7 @@ final class Feed: ObservableObject {
 @MainActor var appears: [String: Int] = [:]
 @MainActor var shownOpen: [String: Bool] = [:]
 @MainActor var rowTops: [String: CGFloat] = [:]
+@MainActor var seenGeometry: [String] = []
 @MainActor let rowMemory = TranscriptRowMemory()
 @MainActor weak var watched: Feed?
 
@@ -60,6 +61,8 @@ struct Transcript: View {
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
             layout.visible = geometry.visibleRect
+            seenGeometry.append(String(format: "%.3f offset %.0f content %.0f visible maxY %.0f insets %.0f/%.0f end %.0f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 100), geometry.contentOffset.y, geometry.contentSize.height, geometry.visibleRect.maxY, geometry.contentInsets.top, geometry.contentInsets.bottom, geometry.contentSize.height - (geometry.visibleRect.maxY - geometry.contentInsets.bottom)))
+            if seenGeometry.count > 12 { seenGeometry.removeFirst() }
             return true
         } action: { _, _ in }
         .onChange(of: "\(feed.transcript)|\(ids.count)|\(ids.last ?? "")", initial: true) {
@@ -501,6 +504,27 @@ struct TranscriptFollowTest {
         expect(!feed.following && abs(offset(scroll) - nearPlace) < 1, "a reader who stops just short of the end keeps that place as rows stream, offset \(nearPlace) became \(offset(scroll))")
         drag(scroll, to: bottomOffset(scroll))
         expect(feed.following, "a reader who scrolls back to the end follows again, \(Int(gap(scroll))) points short")
+
+        for top in [0, 44, 69, 70, 100, 120] as [CGFloat] {
+            for bottom in [0, 20] as [CGFloat] {
+                let size = "header \(Int(top)), bottom inset \(Int(bottom))"
+                feed.header = top
+                feed.inset = bottom
+                feed.transcript = "I\(Int(top))-\(Int(bottom))"
+                feed.rows = rows("I\(Int(top))-\(Int(bottom))-", 60)
+                spin(0.6)
+                expectBottom(scroll, "with \(size) a transcript opens at the live edge")
+                let end = offset(scroll)
+                move(scroll, to: end - 400)
+                expect(!feed.following, "with \(size) scrolling up stops following")
+                move(scroll, to: end)
+                expect(feed.following, "with \(size) the exact end follows again, \(Int(gap(scroll))) points short")
+                move(scroll, to: end - TranscriptFollow<String>.bottomSlack - 1)
+                expect(!feed.following, "with \(size) a place just past the slack does not follow")
+            }
+        }
+        feed.header = 44
+        feed.inset = 100
     }
 
     @MainActor
@@ -560,7 +584,7 @@ struct TranscriptFollowTest {
         let clip = scroll.contentView
         let ids = watched?.rows.suffix(2).map(\.id) ?? []
         let pitch = ids.count == 2 ? (rowTops[ids[1]] ?? 0) - (rowTops[ids[0]] ?? 0) : 0
-        return "document \(scroll.documentView?.frame.height ?? 0), clip \(clip.bounds), insets top \(clip.contentInsets.top) bottom \(clip.contentInsets.bottom), following \(watched?.following ?? false), last row pitch \(pitch)"
+        return "document \(scroll.documentView?.frame.height ?? 0), clip \(clip.bounds), insets top \(clip.contentInsets.top) bottom \(clip.contentInsets.bottom), following \(watched?.following ?? false), last row pitch \(pitch); SwiftUI geometry, newest last at \(String(format: "%.3f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 100))):\n  " + seenGeometry.joined(separator: "\n  ")
     }
 
     @MainActor
