@@ -566,9 +566,10 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 	for _, entry := range sessions {
 		live := entry.live
 		stamps := catalogFileStamps(live.files)
-		// A usage limit lifts at its reset time with no file change, so
-		// the row is reread then.
-		if entry.stamps != nil && equalStrings(entry.stamps, stamps) && !entry.session.UsageLimit.Lifted(time.Now()) {
+		// A usage limit lifting and a reply turning to finishing change no
+		// file, so the row is reread when they fall due.
+		now := time.Now()
+		if entry.stamps != nil && equalStrings(entry.stamps, stamps) && !entry.session.UsageLimit.Lifted(now) && !entry.session.Activity.FinishingDue(now) {
 			continue
 		}
 		if !current(entry, func(live *catalogLiveSession) { live.stamps = stamps }) {

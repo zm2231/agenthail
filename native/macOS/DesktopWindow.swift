@@ -565,7 +565,7 @@ struct SessionRowView: View {
                         .truncationMode(.tail)
                 } else if kind == .working, let activity = session.activity {
                     TimelineView(.everyMinute) { context in
-                        if let note = activity.quietNote(now: context.date) {
+                        if let note = activity.note(now: context.date) {
                             Text(note)
                                 .font(.system(size: DesktopType.meta))
                                 .foregroundStyle(DesktopPalette.text2)

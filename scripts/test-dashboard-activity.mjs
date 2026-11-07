@@ -28,6 +28,12 @@ assert.equal(
   "Waiting on you",
   "a wait outranks the quiet note",
 );
+assert.equal(context.presenceLabel(busy({ lastProgressAt: "2026-10-23T10:14:00Z", finishingSince: "2026-10-23T10:14:00Z" }), now), "Finishing · running hooks");
+assert.equal(
+  context.presenceLabel(busy({ lastProgressAt: "2026-10-23T10:00:00Z", finishingSince: "2026-10-23T10:00:00Z" }), now),
+  "Finishing · running hooks · 14 min",
+  "a reply whose process stays busy says it is finishing, and for how long after a minute",
+);
 assert.equal(context.presenceLabel({ name: "builder", status: "idle", currentReason: "recent", activity: { lastProgressAt: "2026-10-23T09:00:00Z" } }, now), "Recent");
 assert.equal(context.presenceLabel({ name: "lead", status: "idle", currentReason: "lead" }, now), "Lead");
 console.log("dashboard activity ok");

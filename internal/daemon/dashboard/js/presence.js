@@ -87,6 +87,11 @@ export function quietDuration(ms) {
 }
 
 export function workingLabel(session, now = Date.now()) {
+  const finishing = Date.parse(session.activity?.finishingSince || "");
+  if (finishing) {
+    const elapsed = now - finishing;
+    return elapsed >= 60000 ? `Finishing · running hooks · ${quietDuration(elapsed)}` : "Finishing · running hooks";
+  }
   const note = quietNote(session.activity, now);
   return note ? `Working · ${note}` : "Working";
 }

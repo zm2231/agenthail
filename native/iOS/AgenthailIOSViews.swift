@@ -1824,7 +1824,7 @@ struct IOSSessionRow: View {
                 Text(reason).font(.caption).foregroundStyle(PhonePalette.muted)
             } else if kind == .working, let activity = session.activity {
                 TimelineView(.everyMinute) { context in
-                    if let note = activity.quietNote(now: context.date) {
+                    if let note = activity.note(now: context.date) {
                         Text(note).font(.caption).foregroundStyle(PhonePalette.muted)
                     }
                 }

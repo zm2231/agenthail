@@ -24,6 +24,12 @@ struct SessionActivityTest {
 
         let idle = try JSONDecoder().decode(SessionState.self, from: Data(#"{"id":"s","surface":"claude","name":"builder","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"activity":{"lastProgressAt":"2026-10-23T09:00:00Z"}}"#.utf8))
         check(idle.activity?.lastProgressAt == "2026-10-23T09:00:00Z" && idle.activity?.tool == nil && idle.activity?.noProcess == nil, "an activity without a tool or process flag decodes")
+
+        let hooks = try session(#"{"busySince":"2026-10-23T09:50:00Z","lastProgressAt":"2026-10-23T10:00:00Z","finishingSince":"2026-10-23T10:00:00Z"}"#)
+        check(hooks.workingLabel(now: try date("2026-10-23T10:00:30Z")) == "Finishing · running hooks", "a reply whose process stays busy says it is finishing: \(hooks.workingLabel(now: try date("2026-10-23T10:00:30Z")))")
+        check(hooks.workingLabel(now: now) == "Finishing · running hooks · 14 min", "after a minute it says for how long: \(hooks.workingLabel(now: now))")
+        check(hooks.activity?.note(now: now) == "Finishing · running hooks · 14 min", "the row's note line says the same, not no activity: \(hooks.activity?.note(now: now) ?? "nil")")
+        check(quiet.activity?.note(now: now) == quiet.activity?.quietNote(now: now), "a turn that is not finishing keeps its quiet note")
         print("ok")
     }
 

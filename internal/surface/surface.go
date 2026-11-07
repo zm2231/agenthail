@@ -124,6 +124,22 @@ type Activity struct {
 	LastProgressAt time.Time    `json:"lastProgressAt,omitzero"`
 	Tool           *RunningTool `json:"tool,omitempty"`
 	NoProcess      bool         `json:"noProcess,omitempty"`
+	// Claude stays busy after its reply while Stop hooks run.
+	FinishingSince time.Time `json:"finishingSince,omitzero"`
+	EndedAt        time.Time `json:"-"`
+}
+
+const FinishingGrace = 2 * time.Second
+
+func (a *Activity) Finishing(now time.Time) {
+	if a != nil && !a.EndedAt.IsZero() && !now.Before(a.EndedAt.Add(FinishingGrace)) {
+		a.FinishingSince = a.EndedAt
+	}
+}
+
+// Nothing is written while Stop hooks run, so only the clock can mark finishing.
+func (a *Activity) FinishingDue(now time.Time) bool {
+	return a != nil && !a.EndedAt.IsZero() && a.FinishingSince.IsZero() && !now.Before(a.EndedAt.Add(FinishingGrace))
 }
 
 // RunningTool is a tool call a turn started and has not had a result for.
@@ -142,7 +158,7 @@ func SameActivity(left, right *Activity) bool {
 	if left == nil || right == nil {
 		return left == right
 	}
-	if !left.BusySince.Equal(right.BusySince) || left.NoProcess != right.NoProcess {
+	if !left.BusySince.Equal(right.BusySince) || left.NoProcess != right.NoProcess || !left.FinishingSince.Equal(right.FinishingSince) {
 		return false
 	}
 	if (left.Tool == nil) != (right.Tool == nil) || left.Tool != nil && (left.Tool.Name != right.Tool.Name || !left.Tool.StartedAt.Equal(right.Tool.StartedAt)) {
@@ -921,6 +937,7 @@ type TurnObservation struct {
 	UsageLimit      *UsageLimit      `json:"usageLimit,omitempty"`
 	TurnStop        *TurnStop        `json:"turnStop,omitempty"`
 	Activity        *Activity        `json:"activity,omitempty"`
+	Ended           *Activity        `json:"-"`
 	Plan            *Plan            `json:"plan,omitempty"`
 	// LimitStop is a last turn a usage limit refused, kept after the limit
 	// resets since nothing has run in the session since.
