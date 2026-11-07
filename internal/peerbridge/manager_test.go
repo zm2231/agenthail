@@ -860,11 +860,70 @@ func TestChildCleanupKeepsAListenerThatReusedItsSocketInode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	(&child{paths: map[string]os.FileInfo{live: liveInfo, stale: staleInfo}}).cleanup()
+	exited := exec.Command("true")
+	if err := exited.Run(); err != nil {
+		t.Fatal(err)
+	}
+	(&child{process: exited.Process, paths: map[string]os.FileInfo{live: liveInfo, stale: staleInfo}}).cleanup()
 	if _, err := os.Lstat(live); err != nil {
 		t.Fatalf("listening socket removed: %v", err)
 	}
 	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
 		t.Fatalf("refused socket kept: %v", err)
+	}
+}
+
+func TestChildCleanupKeepsEverySocketWhileItsOwnerIsAlive(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "ah-cleanup-full-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	path := filepath.Join(dir, "full.sock")
+	listener, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(listener)
+	if err := syscall.Bind(listener, &syscall.SockaddrUnix{Name: path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Listen(listener, 1); err != nil {
+		t.Fatal(err)
+	}
+	for queued := 0; ; queued++ {
+		if queued == 256 {
+			t.Fatal("the listener never filled its queue")
+		}
+		conn, dialErr := net.Dial("unix", path)
+		if dialErr != nil {
+			break
+		}
+		defer conn.Close()
+	}
+	closed := filepath.Join(dir, "closed.sock")
+	closedListener, err := net.ListenUnix("unix", &net.UnixAddr{Name: closed, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedListener.SetUnlinkOnClose(false)
+	closedListener.Close()
+	paths := map[string]os.FileInfo{}
+	for _, socket := range []string{path, closed} {
+		info, err := os.Lstat(socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		paths[socket] = info
+	}
+	owner, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	(&child{process: owner, paths: paths}).cleanup()
+	for socket := range paths {
+		if _, err := os.Lstat(socket); err != nil {
+			t.Fatalf("%s was removed while its owner is alive: %v", filepath.Base(socket), err)
+		}
 	}
 }

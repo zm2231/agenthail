@@ -795,7 +795,7 @@ func (c *child) cleanup() {
 		}
 		matches := os.SameFile(owned, current)
 		if matches && current.Mode()&os.ModeSocket != 0 {
-			matches = claudepeer.SocketRefusesConnections(path)
+			matches = c.process != nil && claudepeer.SocketIsStale(path, c.process.Pid)
 		}
 		if path == c.recordPath && current.Mode().IsRegular() {
 			data, _ := os.ReadFile(path)
