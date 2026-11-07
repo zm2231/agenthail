@@ -16,7 +16,7 @@ func goalSweepFixture(t *testing.T) (noticeFixture, *goalRelaySurface, *atomic.I
 	t.Helper()
 	f := newNoticeFixture(t)
 	f.fake.caps = surface.Capabilities{Goal: true, Send: true}
-	goals := &goalRelaySurface{daemonSurface: f.fake, goal: &surface.GoalState{Objective: "ship it", Status: surface.GoalStatusBlocked, Reason: "needs a token", CreatedAt: time.Now().Add(-time.Hour), UpdatedAt: time.Now()}}
+	goals := newGoalRelaySurface(f.fake, &surface.GoalState{Objective: "ship it", Status: surface.GoalStatusBlocked, Reason: "needs a token", CreatedAt: time.Now().Add(-time.Hour), UpdatedAt: time.Now()})
 	f.d.Surfaces = []surface.Surface{goals}
 	f.d.discoverCatalog(context.Background())
 	var desktop atomic.Int32
@@ -85,9 +85,9 @@ func TestAWorkersBlockedGoalReachesItsLeadOnceAndThePerson(t *testing.T) {
 func TestAGoalReadThatFailsIsReadAgainOnTheNextSweep(t *testing.T) {
 	f, goals, _ := goalSweepFixture(t)
 	now := time.Now()
-	goals.goalErr = errors.New("app-server unreachable")
+	goals.setGoalErr(errors.New("app-server unreachable"))
 	f.d.sweepStoppedGoals(context.Background(), now)
-	goals.goalErr = nil
+	goals.setGoalErr(nil)
 	f.d.sweepStoppedGoals(context.Background(), now.Add(goalSweepEvery))
 	f.d.sweepStoppedGoals(context.Background(), now.Add(2*goalSweepEvery))
 	if notices := f.notices(t); len(notices) != 1 {

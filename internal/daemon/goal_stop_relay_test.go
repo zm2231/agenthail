@@ -15,7 +15,7 @@ func goalRelayFixture(t *testing.T, once bool) (*Daemon, *registry.Registry, *go
 	t.Setenv("HOME", t.TempDir())
 	d, r, base, from, to := daemonFixture(t)
 	base.caps = surface.Capabilities{Goal: true, Send: true}
-	fake := &goalRelaySurface{daemonSurface: base, goal: &surface.GoalState{Objective: "ship it", Status: surface.GoalStatusActive, CreatedAt: time.Now().Add(-time.Minute), UpdatedAt: time.Now().Add(-time.Minute)}}
+	fake := newGoalRelaySurface(base, &surface.GoalState{Objective: "ship it", Status: surface.GoalStatusActive, CreatedAt: time.Now().Add(-time.Minute), UpdatedAt: time.Now().Add(-time.Minute)})
 	d.Surfaces = []surface.Surface{fake}
 	if err := r.PrepareRelaySource(context.Background(), fake, &from, registry.HandoffGoalCompleted); err != nil {
 		t.Fatal(err)

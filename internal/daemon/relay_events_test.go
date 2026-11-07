@@ -144,19 +144,28 @@ func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
 
 type goalRelaySurface struct {
 	*daemonSurface
-	goal    *surface.GoalState
-	goalErr error
+	fakeGoal
+}
+
+func newGoalRelaySurface(base *daemonSurface, goal *surface.GoalState) *goalRelaySurface {
+	fake := &goalRelaySurface{daemonSurface: base}
+	fake.setGoal(goal)
+	return fake
 }
 
 func (f *goalRelaySurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
-	return f.goal, f.goalErr
+	return f.read()
 }
 
 func TestGoalRelayWaitsForExplicitCompletionAndReleasesLatestOnce(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	d, r, base, from, to := daemonFixture(t)
 	base.caps = surface.Capabilities{Goal: true, Send: true}
-	fake := &goalRelaySurface{daemonSurface: base, goal: &surface.GoalState{Objective: "finish", Status: surface.GoalStatusActive, CreatedAt: time.Now().Add(-time.Minute)}}
+	created := time.Now().Add(-time.Minute)
+	goal := func(status string) *surface.GoalState {
+		return &surface.GoalState{Objective: "finish", Status: status, CreatedAt: created}
+	}
+	fake := newGoalRelaySurface(base, goal(surface.GoalStatusActive))
 	d.Surfaces = []surface.Surface{fake}
 	if err := r.PrepareRelaySource(context.Background(), fake, &from, registry.HandoffGoalCompleted); err != nil {
 		t.Fatal(err)
@@ -169,19 +178,19 @@ func TestGoalRelayWaitsForExplicitCompletionAndReleasesLatestOnce(t *testing.T) 
 		d.syncRelays(context.Background(), fake, &from)
 	}
 	for _, status := range []string{surface.GoalStatusPaused, surface.GoalStatusActive, "unknown"} {
-		fake.goal.Status = status
+		fake.setGoal(goal(status))
 		d.syncRelays(context.Background(), fake, &from)
 		if r.QueueCount(to.ID) != 0 {
 			t.Fatalf("status %s released a goal", status)
 		}
 	}
-	fake.goal.Status = surface.GoalStatusComplete
-	fake.goalErr = fmt.Errorf("goal lookup offline")
+	fake.setGoal(goal(surface.GoalStatusComplete))
+	fake.setGoalErr(fmt.Errorf("goal lookup offline"))
 	d.syncRelays(context.Background(), fake, &from)
 	if r.QueueCount(to.ID) != 0 {
 		t.Fatal("unknown goal released")
 	}
-	fake.goalErr = nil
+	fake.setGoalErr(nil)
 	base.observations[from.ID].ActiveTurnID = "still-working"
 	d.syncRelays(context.Background(), fake, &from)
 	if r.QueueCount(to.ID) != 0 {
@@ -243,7 +252,7 @@ func TestGoalRelayRequiresCompletionWithinCurrentGoal(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	d, r, base, from, to := daemonFixture(t)
 	base.caps = surface.Capabilities{Goal: true, Send: true}
-	fake := &goalRelaySurface{daemonSurface: base, goal: &surface.GoalState{Objective: "finish", Status: surface.GoalStatusComplete, CreatedAt: time.Now().Add(-time.Minute)}}
+	fake := newGoalRelaySurface(base, &surface.GoalState{Objective: "finish", Status: surface.GoalStatusComplete, CreatedAt: time.Now().Add(-time.Minute)})
 	if _, err := r.AddRelayRoute(from.ID, to.ID, ".*", false, registry.HandoffGoalCompleted); err != nil {
 		t.Fatal(err)
 	}
