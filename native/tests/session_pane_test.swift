@@ -2,6 +2,31 @@
 import Combine
 import Foundation
 import Network
+import Observation
+
+@MainActor
+final class FeedRecorder {
+    private let feed: TranscriptFeed
+    private var watching = true
+    private(set) var shown: [[String]] = []
+
+    init(_ feed: TranscriptFeed) {
+        self.feed = feed
+        watch()
+    }
+
+    func stop() { watching = false }
+
+    private func watch() {
+        withObservationTracking { _ = feed.items } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.watching else { return }
+                self.shown.append(self.feed.items.map(\.id))
+                self.watch()
+            }
+        }
+    }
+}
 
 @main
 struct SessionPaneTest {
@@ -504,8 +529,7 @@ struct SessionPaneTest {
         let streamingPort = await streamingServer.ready()
         let streamingModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(streamingPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
         let streamingPane = streamingModel.openPane()
-        var shownTimelines: [[String]] = []
-        let shown = streamingPane.$detail.sink { shownTimelines.append($0?.timeline?.items.map(\.id) ?? []) }
+        let shownTimelines = FeedRecorder(streamingPane.transcript)
         var olderPublishes = 0
         let olderShown = streamingPane.$olderItems.sink { _ in olderPublishes += 1 }
         streamingPane.select("D")
@@ -514,9 +538,9 @@ struct SessionPaneTest {
         try? await Task.sleep(for: .milliseconds(600))
         check(pageRequests == 1, "streamed rows apply without reading the page again: \(pageRequests) page reads, rows \(streamingPane.timelineItems.map(\.id))")
         check(streamingPane.streamedRows.isEmpty, "rows applied with no page read in flight are not kept: \(streamingPane.streamedRows.count)")
-        check(!shownTimelines.contains(["a", "b", "c"]), "rows that arrive together render once: \(shownTimelines)")
+        check(!shownTimelines.shown.contains(["a", "b", "c"]), "rows that arrive together render once: \(shownTimelines.shown)")
         check(olderPublishes <= 3, "rows that leave the earlier pages alone do not publish them: \(olderPublishes) publishes")
-        shown.cancel()
+        shownTimelines.stop()
         olderShown.cancel()
         streamingServer.push(frame(104, row(104, "d", kind: "done", text: "")), to: "session-stream")
         let turnDeadline = Date().addingTimeInterval(5)
@@ -551,6 +575,15 @@ struct SessionPaneTest {
         while streamingPane.pageReadsInFlight > 0, Date() < landedDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         check(streamingPane.timelineItems.map(\.id) == ["a", "c", "e"] && streamingPane.timelineItems.first?.text == "a3", "an older page that lands last keeps an update streamed while both reads were open: \(streamingPane.timelineItems.map { "\($0.id)=\($0.text)" })")
         check(streamingPane.streamedRows.isEmpty, "rows kept for overlapping reads are dropped once the last lands: \(streamingPane.streamedRows.count)")
+        var paneChanges = 0
+        let paneWatch = streamingPane.objectWillChange.sink { paneChanges += 1 }
+        streamingServer.push(frame(107, row(107, "c", text: "c2")), to: "session-stream")
+        let feedDeadline = Date().addingTimeInterval(5)
+        while streamingPane.transcript.items.first(where: { $0.id == "c" })?.text != "c2", Date() < feedDeadline { try? await Task.sleep(for: .milliseconds(10)) }
+        try? await Task.sleep(for: SessionPane.streamPublishInterval * 2)
+        paneWatch.cancel()
+        check(streamingPane.timelineItems.first(where: { $0.id == "c" })?.text == "c2", "a streamed row reaches the transcript: \(streamingPane.timelineItems.map { "\($0.id)=\($0.text)" })")
+        check(paneChanges == 0, "a streamed row updates the transcript without republishing the pane: \(paneChanges) pane changes")
 
         let streamedSession = SessionState(id: "D", surface: "claude", name: "d", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: false, readOnlyReason: nil)
         func listing(_ sessions: [SessionState]) -> DashboardSnapshot {
@@ -559,7 +592,7 @@ struct SessionPaneTest {
         streamingModel.snapshot = listing([streamedSession])
         streamingPane.reconcile()
         let shownBeforeRemoval = streamingPane.timelineItems.map(\.id)
-        streamingServer.push(frame(107, row(107, "f", text: "f1")), to: "session-stream")
+        streamingServer.push(frame(108, row(108, "f", text: "f1")), to: "session-stream")
         let pendingDeadline = Date().addingTimeInterval(5)
         while streamingPane.unpublishedDetail == nil, Date() < pendingDeadline { try? await Task.sleep(for: .milliseconds(5)) }
         streamingModel.snapshot = listing([])
