@@ -98,13 +98,13 @@ ios_label() {
 ios_label "iOS inputs changed" "run rerun 7 -R owner/repo;" success
 ios_label "no iOS input changed" "" skipped
 
-# gate <expected full> <head ref> <labels json>: runs ci-full-gate.sh.
+# gate <expected full> <head ref> <labels json> [event]: runs ci-full-gate.sh.
 gate() {
-	local want="$1" ref="$2" labels="$3"
+	local want="$1" ref="$2" labels="$3" event="${4:-pull_request}"
 	rm -rf "$WORK/answers" && mkdir -p "$WORK/answers"
 	printf '{"labels":%s}' "$labels" >"$WORK/answers/repos_owner_repo_pulls_12"
 	: >"$WORK/output"
-	env PATH="$WORK/bin:$PATH" ANSWERS="$WORK/answers" CALLS="$WORK/calls" GITHUB_REPOSITORY=owner/repo GITHUB_OUTPUT="$WORK/output" \
+	env PATH="$WORK/bin:$PATH" ANSWERS="$WORK/answers" CALLS="$WORK/calls" GITHUB_REPOSITORY=owner/repo GITHUB_OUTPUT="$WORK/output" GITHUB_EVENT_NAME="$event" \
 		HEAD_REF="$ref" PR_NUMBER=12 bash "$ROOT/scripts/ci-full-gate.sh" >"$WORK/out" 2>&1 || fail "gate $ref $labels: $(cat "$WORK/out")"
 	grep -qx "full=$want" "$WORK/output" || fail "gate $ref $labels: $(cat "$WORK/output"), want full=$want"
 }
@@ -113,6 +113,7 @@ gate true feature/x '[{"name":"type:bug"},{"name":"full-ci"}]'
 gate false feature/x '[{"name":"type:bug"}]'
 gate false feature/x '[{"name":"full-ci-later"}]'
 gate true train/42 '[]'
+gate true '' '[]' push
 
 if [ "$failures" -gt 0 ]; then
 	exit 1

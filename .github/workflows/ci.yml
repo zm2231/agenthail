@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -32,7 +34,7 @@ jobs:
 
   verify:
     if: ${{ !github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size }}
-    runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -162,7 +164,7 @@ jobs:
   native:
     needs: gate
     if: ${{ needs.gate.outputs.full == 'true' }}
-    runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -266,7 +268,7 @@ jobs:
   installer:
     needs: gate
     if: ${{ needs.gate.outputs.full == 'true' }}
-    runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -293,7 +295,7 @@ jobs:
   package:
     needs: gate
     if: ${{ needs.gate.outputs.full == 'true' }}
-    runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
