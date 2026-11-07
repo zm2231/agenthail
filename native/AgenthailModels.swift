@@ -545,7 +545,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     let surface: String
     let name: String
     let alias: String?
-    let status: String
+    var status: String
     let lastActive: String?
     var queueCount: Int
     let open: Bool

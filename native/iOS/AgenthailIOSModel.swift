@@ -192,6 +192,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private var sessionMetadata = MetadataOverlay()
     private var stateRequests: UInt64 = 0
     private var selectedSessionStateSeq: UInt64 = 0
+    private var unlistedStateRead: Task<Void, Never>?
+    private var unlistedStatePending: String?
     private var sessionStreamUnsupported = false
     private var unsupportedRefreshTask: Task<Void, Never>?
     private var sessionReload: (id: String, task: Task<Void, Never>)?
@@ -2335,6 +2337,37 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         if older != olderActivity { olderActivity = older }
         if changed { selectedDetail = detail }
         if error != sessionError { sessionError = error }
+        if changed, !replaying, snapshot?.sessions.contains(where: { $0.id == selected }) != true { readUnlistedState(selected) }
+    }
+
+    // A session missing from the snapshot gets no status from it, so its own stream prompts a read.
+    private func readUnlistedState(_ id: String) {
+        guard unlistedStateRead == nil else {
+            unlistedStatePending = id
+            return
+        }
+        unlistedStateRead = Task { [weak self] in
+            await self?.readSelectedState(id)
+            guard let self else { return }
+            self.unlistedStateRead = nil
+            if let next = self.unlistedStatePending {
+                self.unlistedStatePending = nil
+                self.readUnlistedState(next)
+            }
+        }
+    }
+
+    private func readSelectedState(_ id: String) async {
+        guard selectedSessionID == id, snapshot?.sessions.contains(where: { $0.id == id }) != true,
+              case let (connection, route)? = try? resolveServer(id) else { return }
+        let seq = nextStateRequest()
+        guard let read = try? await connection.api.sessionDetail(id: route.sessionID, includeTimeline: false, waitForCatchUp: false),
+              selectedSessionID == id, server(for: id) === connection, seq > selectedSessionStateSeq,
+              var detail = selectedDetail, detail.session.id == id else { return }
+        selectedSessionStateSeq = seq
+        guard detail.liveState != read.liveState else { return }
+        detail.liveState = read.liveState
+        selectedDetail = detail
     }
 
     private static func timelineItem(_ event: SessionStreamEvent) -> TimelineItem {
