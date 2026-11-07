@@ -154,6 +154,7 @@ jobs:
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
           scripts/test-codesign-retry.sh
           scripts/test-ci-self-hosted.sh
+          scripts/test-ci-needs-passed.sh
           scripts/test-ios-test-stall-guard.sh
           scripts/test-macos-app-resources-check.sh
           bash -n packaging/scripts/preinstall packaging/scripts/postinstall
@@ -180,7 +181,7 @@ jobs:
         if: always() && runner.environment == 'self-hosted'
         run: scripts/ci-self-hosted.sh cleanup
 
-  verify-linux:
+  verify-linux-rest:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -198,13 +199,63 @@ jobs:
           cache-dependency-path: |
             claude-host/package-lock.json
             browser-host/package-lock.json
-      - name: Vet
-        run: go vet ./...
       - uses: actions/cache@v5
         with:
           path: ~/.cache/agenthail-build/playwright
           key: agenthail-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('browser-host/package-lock.json') }}
+      - name: Node host modules
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/agenthail-build/node-v*.tar.gz
+          key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
+      - name: Stage the shipped Node
+        run: scripts/fetch-node.sh
+      - name: Shipped Node download test
+        run: scripts/test-fetch-node.sh
+
+      - name: Race tests
+        # sqlite's generated C is not instrumented here; release.yml runs the race tests with it instrumented.
+        run: AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test $(go list ./... | grep -vx 'github.com/zm2231/agenthail/internal/daemon') -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+
+  verify-linux-daemon:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            claude-host/package-lock.json
+            browser-host/package-lock.json
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/agenthail-build/playwright
+          key: agenthail-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('browser-host/package-lock.json') }}
+      - name: Vet
+        if: matrix.shard == 0
+        run: go vet ./...
+      - name: Node host modules
+        if: matrix.shard == 0
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
       - name: Node host tests
+        if: matrix.shard == 1
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
@@ -216,11 +267,33 @@ jobs:
           key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
       - name: Stage the shipped Node
         run: scripts/fetch-node.sh
-      - name: Shipped Node download test
-        run: scripts/test-fetch-node.sh
-      - name: Race tests
+      - name: Race tests, one shard of internal/daemon
         # sqlite's generated C is not instrumented here; release.yml runs the race tests with it instrumented.
-        run: AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+        run: |
+          pattern="$(go run ./scripts/go-test-shard ${{ matrix.shard }} ${{ strategy.job-total }} ./internal/daemon -race)"
+          AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test ./internal/daemon -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m -run "$pattern"
+      - name: The shards together hold every internal/daemon test go test lists
+        if: matrix.shard == 0
+        run: |
+          AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test ./internal/daemon -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -list '.*' | grep -E '^(Test|Example|Fuzz)' | sort > "$RUNNER_TEMP/listed"
+          for shard in $(seq 0 $((${{ strategy.job-total }} - 1))); do
+            go run ./scripts/go-test-shard -names "$shard" ${{ strategy.job-total }} ./internal/daemon -race
+          done | sort > "$RUNNER_TEMP/sharded"
+          diff "$RUNNER_TEMP/listed" "$RUNNER_TEMP/sharded"
+
+  verify-linux:
+    needs: [verify-linux-rest, verify-linux-daemon]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts
+      - name: Every Linux verify job passed
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: scripts/ci-needs-passed.sh "$RESULTS"
 
   linux-archives:
     runs-on: ubuntu-latest
