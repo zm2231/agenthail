@@ -19,7 +19,11 @@ struct DesktopWindow: View {
         WindowChromeLayout(model: model, pane: pane, interface: model.interface) {
             splitView.paneFrame([.horizontal, .bottom])
         }
-        .background { if let snapshot { BackdropProbe(snapshot: snapshot) } }
+        .background {
+            BackdropProbe { [weak model] backdrop in
+                if let snapshot { snapshot.backdrop = backdrop } else { model?.mainBackdrop = backdrop }
+            }
+        }
         .disabled(model.paletteVisible)
         .windowBackdrop(model.interface)
         .environment(model)

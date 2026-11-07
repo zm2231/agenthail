@@ -12,11 +12,11 @@ final class SnapshotProbe {
 }
 
 struct BackdropProbe: View {
-    let snapshot: SnapshotProbe
+    let found: (WindowBackdrop?) -> Void
     @Environment(\.windowBackdrop) private var backdrop
 
     var body: some View {
-        Color.clear.onAppear { snapshot.backdrop = backdrop }
+        Color.clear.onAppear { found(backdrop) }
     }
 }
 
@@ -68,6 +68,10 @@ enum WindowSnapshot {
     static func capture(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
         let size = request.width.flatMap { width in request.height.map { CGSize(width: width, height: $0) } }
         if request.session == nil, size == nil, let window = model.mainWindow, window.isVisible, !window.isMiniaturized {
+            if model.mainBackdrop?.shows(model.interface.config) == false {
+                await budget.wait { model.mainBackdrop?.shows(model.interface.config) != false }
+                await budget.pause(settle)
+            }
             let live = WindowImage.png(of: window)
             if live != .failure(.empty) { return live }
         }
@@ -101,7 +105,7 @@ enum WindowSnapshot {
         }
         await budget.wait {
             let detail = resolved == nil || pane.detail?.session.id == resolved || pane.detailLoadError != nil
-            return detail && probe.backdrop?.current == true
+            return detail && probe.backdrop?.shows(model.interface.config) == true
         }
         await budget.pause(settle)
         return WindowImage.png(of: window)
