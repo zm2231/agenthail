@@ -1,0 +1,77 @@
+# iPhone live harness
+
+The iPhone UI tests run against a fake daemon built into the app. `cmd/ios-live-harness` runs real Agenthail daemons for tests that go through the app's real connection path instead: pairing, the event stream, a host going down and coming back.
+
+```
+go build -o "$RUNNER_TEMP/agenthail" ./cmd/agenthail
+go run ./cmd/ios-live-harness -agenthail "$RUNNER_TEMP/agenthail" -hosts 2 -- <test command> [args...]
+```
+
+The harness starts the hosts, runs the test command, stops the hosts and deletes their directories. It exits with the test command's status. It exits with 3 if a host broke its isolation, and with 4 if the hosts could not be set up.
+
+## Hosts
+
+Each host gets a new directory under the system temp directory, or under `/tmp` when the temp directory's path is too long. It must be on the internal disk. The directory path must stay under 60 bytes, because macOS limits a Unix socket path to 104 bytes. Before the daemon starts, the harness writes into the host's registry:
+
+- browser sign-in turned off for Claude and Notion;
+- the host name `live-a`, `live-b` and so on;
+- `dashboard.json` serving on `127.0.0.1` at a free port;
+- two ended Claude conversations, with their transcripts. They show under the `recent` and `all` scopes.
+
+It writes no Claude session records with process IDs, so the daemon has no live process to attach to.
+
+The daemon runs as `agenthail daemon-run` in the foreground. No install, service or dashboard command runs. Its environment is the following list and nothing else:
+
+| Variable | Value |
+|---|---|
+| `PATH` | `<dir>/bin` |
+| `HOME`, `CFFIXED_USER_HOME` | `<dir>/home` |
+| `TMPDIR` | `<dir>/tmp/` |
+| `XDG_RUNTIME_DIR` | `<dir>/run` |
+| `CODEX_HOME` | `<dir>/home/.codex` |
+| `CLAUDE_CONFIG_DIR` | `<dir>/home/.claude` |
+| `AGENTHAIL_CLAUDE_SOCKET_DIR` | `<dir>/sockets` |
+| `AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT` | the trap port |
+| `AGENTHAIL_PUSH_RELAY_URL` | `http://127.0.0.1:<the trap port>` |
+| `LANG` | `en_US.UTF-8` |
+
+`<dir>/bin` holds links to `git`, `kill`, `ps` and `sleep`, the commands the daemon runs by name, and nothing else. No Claude or Codex CLI is on it, so a host cannot find the machine's own.
+
+The trap port is a loopback port the harness holds for the whole run and closes every connection on. No other service on the machine can take it, so a host that looks for Codex or sends a notification reaches nothing.
+
+## Isolation check
+
+From the moment the first host starts until the last one has stopped, the harness reads every open descriptor of each host's daemon and the daemon's child processes, every 250 ms. On Linux it reads `/proc` and `ss`; on macOS it reads `lsof`. The run fails when any of these appears:
+
+- a TCP listener on any port except the host's own dashboard port, or a TCP connection that is neither to or from that port nor to the trap port, on loopback too;
+- a TCP peer off this machine, or any UDP socket;
+- a Unix socket, bound or connected to, whose path is outside the host's directory;
+- an open file under the HOME of the user running the harness, or under `/tmp/cc-socks`, which real Claude sessions share;
+- a process running any program other than the agenthail binary, the commands in `<dir>/bin`, the helpers git runs from `git --exec-path`, and on macOS the developer-directory copies of those commands that `xcrun --find` names, which the `/usr/bin` shims run.
+
+Each violation is printed when it is first seen and again at exit. If the harness cannot read the processes, that counts as a failure.
+
+What the check cannot see:
+
+- A connection, file or child process that opens and closes between two reads.
+- A process that detaches from the daemon's process tree, for example by forking twice, is no longer read.
+- A connected Unix socket whose peer has no path. Its other end cannot be checked against the host's directory.
+
+## Control port
+
+The test command gets the control address in `AGENTHAIL_LIVE_CONTROL`. It also gets it in `TEST_RUNNER_AGENTHAIL_LIVE_CONTROL`, which `xcodebuild` passes to the UI test runner as `AGENTHAIL_LIVE_CONTROL`. The port is on loopback; `-control 127.0.0.1:<port>` fixes it. The commands are:
+
+| Request | Result |
+|---|---|
+| `GET /hosts` | `[{"index", "name", "endpoint", "running"}]` |
+| `POST /hosts/{i}/link` | `{"url": "agenthail://pair?..."}`: a new pairing for host `i`, valid for 10 minutes |
+| `POST /hosts/{i}/stop` | stops host `i`'s daemon by the process ID the harness recorded |
+| `POST /hosts/{i}/start` | starts it again on the same port and waits until it answers |
+
+Once the test command exits, the harness refuses new commands and closes the control port, so a later command fails. Commands already running finish before it stops the hosts.
+
+The harness mints a pairing link in the host's registry rather than through `/api/v1/pairings`, which pairs only through a Tailscale address. The link's endpoint is the host's `http://127.0.0.1:<port>`. The phone completes pairing through `POST /api/v1/pair`, as it does in production.
+
+## Tests
+
+`go test ./cmd/ios-live-harness` starts helper processes that stay inside a host's scope, and others that reach a loopback port, a Unix socket and a file outside it. It checks the watcher flags exactly the second set. It runs in both `verify` jobs, so the `lsof` reader is checked on macOS and the `/proc` reader on Linux.
