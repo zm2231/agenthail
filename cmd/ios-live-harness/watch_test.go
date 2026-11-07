@@ -53,6 +53,12 @@ func helper(mode string) {
 		file, err := os.Open(os.Getenv("FILE"))
 		must(err)
 		held = append(held, tcp, unix, file)
+	case "planted":
+		listener, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("PORT"))
+		must(err)
+		tcp, err := net.Dial("tcp", os.Getenv("TCP"))
+		must(err)
+		held = append(held, listener, tcp)
 	case "exec":
 		child := exec.Command(os.Getenv("PROGRAM"), "60")
 		must(child.Start())

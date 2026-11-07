@@ -51,6 +51,8 @@ From the moment the first host starts until the last one has stopped, the harnes
 
 Each violation is printed when it is first seen and again at exit. If the harness cannot read the processes, that counts as a failure.
 
+So that a clean run shows the check looked, the harness also prints each distinct descriptor the first time it sees a host hold it, as `ios-live-harness: saw <host>: <descriptor>`. A client's ephemeral port is left out, and files under system directories such as `/usr/lib/` are listed once per directory. At exit it prints how many samples it took. A run that would otherwise pass fails with exit 3 if the watcher took no samples, or never saw a host's own dashboard listener. When the test command or the setup already failed, that failure's status stands, and the reason is printed beside it. An isolation violation still exits 3 whatever else happened.
+
 What the check cannot see:
 
 - A connection, file or child process that opens and closes between two reads.
