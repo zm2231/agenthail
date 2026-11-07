@@ -137,7 +137,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let message: String
         let cwd: String
         let model: String
-        let turnSettings: TurnSettings
+        let launch: LaunchSettings
         let claudeFields: [String: String]
         let launcher: String?
         let host: String?
@@ -163,7 +163,6 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var creationWarning: String?
     @Published private(set) var creationCanStartAgain = false
     @Published var pendingControls: Set<String> = []
-    @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
     @Published private(set) var fetchedSubagents = SubagentPageCache()
     private var subagentServers: [String: HostConnection?] = [:]
     private var subagentFailedUnreachable: Set<String> = []
@@ -482,19 +481,6 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         case "canceled": return "Instruction canceled."
         default: return "Delivery status: \(evidence ?? "unknown")"
         }
-    }
-
-    func turnSettings(for sessionID: String) -> TurnSettings {
-        turnSettingsDrafts[sessionID] ?? TurnSettings()
-    }
-
-    func setTurnSettings(_ settings: TurnSettings, for sessionID: String) {
-        if settings.isEmpty { turnSettingsDrafts.removeValue(forKey: sessionID) }
-        else { turnSettingsDrafts[sessionID] = settings }
-    }
-
-    func clearTurnSettings(for sessionID: String) {
-        turnSettingsDrafts.removeValue(forKey: sessionID)
     }
 
     func loadSubagents(of session: SessionState) async {
@@ -860,7 +846,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         creationRequestKey = nil
         creationCanStartAgain = false
     }
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) async -> Bool {
+    func createSession(surface: String, message: String, cwd: String, model: String, launch: LaunchSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) async -> Bool {
         guard !creatingSession, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         let api: AgenthailAPI
         let target: HostTarget
@@ -871,14 +857,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         creatingSession = true; creationError = nil; creationWarning = nil; creationCanStartAgain = false
         defer { creatingSession = false }
         let identity = CreationRequestIdentity(surface: surface, message: message, cwd: cwd, model: model,
-                                               turnSettings: surface == "codex" ? turnSettings : .init(),
+                                               launch: surface == "codex" ? launch : .init(),
                                                claudeFields: claude.fields, launcher: launcher?.id, host: host)
         if creationRequestIdentity != identity || creationRequestKey == nil {
             creationRequestIdentity = identity
             creationRequestKey = UUID().uuidString
         }
         do {
-            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, host: target.remote, idempotencyKey: creationRequestKey, failureReceipts: true)
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, launch: surface == "codex" ? launch : .init(), claude: claude, launcher: launcher, host: target.remote, idempotencyKey: creationRequestKey, failureReceipts: true)
             if receipt.outcomeUnknown && receipt.id == nil {
                 creationError = SessionCreationReceipt.unknownOutcomeMessage
                 creationCanStartAgain = true
@@ -1413,15 +1399,20 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         await refreshSession(sessionID)
     }
 
-    func setPermissionMode(_ mode: String, sessionID: String) async {
+    func setTurnSetting(_ key: String, to value: String, sessionID: String) async {
+        guard !pendingControls.contains(sessionID) else { return }
+        pendingControls.insert(sessionID)
+        defer { pendingControls.remove(sessionID) }
         do {
             let (api, route) = try resolve(sessionID)
-            try await api.setPermissionMode(sessionID: route.sessionID, mode: mode)
+            try await api.setTurnSetting(sessionID: route.sessionID, key: key, value: value)
             operationError = nil
         } catch {
-            operationError = error.localizedDescription
+            operationError = AgenthailAPIError.userMessage(error)
+            return
         }
-        await fetchRequests(sessionID, key: sessionRequestsKey)
+        if selectedSessionID == sessionID { startSessionMetadata(sessionID) }
+        if key == TurnSetting.mode { await fetchRequests(sessionID, key: sessionRequestsKey) }
     }
 
     // A send to a computer reached through another is queued on the owner, or on the other computer while the owner is down.
@@ -1575,8 +1566,6 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         var refused = refusedSends
         if rekeys.carry(&refused) { refusedSends = refused }
         _ = rekeys.carry(&lostAttachments)
-        var settings = turnSettingsDrafts
-        if rekeys.carry(&settings) { turnSettingsDrafts = settings }
         if let requested = requestedSessionID, rekeys.resolve(requested) != requested {
             requestedSessionID = rekeys.resolve(requested)
         } else if let selected = selectedSessionID, rekeys.resolve(selected) != selected {
@@ -1630,7 +1619,6 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             refusedSends[session.id] = kept
             return
         }
-        let turnSettings = session.surface == "codex" ? turnSettingsDrafts[session.id] ?? TurnSettings() : TurnSettings()
         failedSends[session.id] = nil
         refusedSends[session.id] = nil
         deliveryQueueIDs.removeValue(forKey: session.id)
@@ -1649,7 +1637,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 attachmentDrafts[session.id] = held.attachments
             }
         }
-        sendQueue.add(PendingSend(sessionID: session.id, message: message, attachments: attachments, turnSettings: turnSettings))
+        sendQueue.add(PendingSend(sessionID: session.id, message: message, attachments: attachments))
     }
 
     private func deliver(_ send: PendingSend) async -> SendOutcome {
@@ -1670,7 +1658,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 sendQueue.setUploaded(stored, for: send)
                 uploaded = stored
             }
-            let wire = try send.wire ?? api.instructionWire(sessionID: route.sessionID, message: send.message, turnSettings: send.turnSettings, author: "person", attachments: uploaded ?? [], idempotencyKey: send.idempotencyKey)
+            let wire = try send.wire ?? api.instructionWire(sessionID: route.sessionID, message: send.message, author: "person", attachments: uploaded ?? [], idempotencyKey: send.idempotencyKey)
             if send.wire == nil { sendQueue.setWire(wire, for: send) }
             let response = try await api.send(wire)
             if sendQueue.holds(send) {
@@ -1681,9 +1669,6 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 }
             }
             await refreshSession(send.sessionID)
-            if turnSettingsDrafts[send.sessionID] == send.turnSettings {
-                clearTurnSettings(for: send.sessionID)
-            }
             return .answered
         } catch {
             if let kept = error as? KeptDelivery { keptDeliveries[send.idempotencyKey] = kept }

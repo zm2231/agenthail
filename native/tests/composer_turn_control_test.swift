@@ -4,19 +4,21 @@ import Foundation
 @main
 struct ComposerTurnControlTest {
     static func main() {
+        let claudeModes = #"[{"id":"manual","label":"Manual"},{"id":"acceptEdits","label":"Accept edits"},{"id":"plan","label":"Plan"},{"id":"auto","label":"Auto"},{"id":"dontAsk","label":"Don't ask","confirm":true},{"id":"bypassPermissions","label":"Bypass permissions","confirm":true}]"#
+        func mode(_ value: String, _ options: String) -> TurnSetting {
+            try! JSONDecoder().decode(TurnSetting.self, from: Data(#"{"key":"mode","value":"\#(value)","options":\#(options),"applies":"now"}"#.utf8))
+        }
         var seen: [String] = []
-        var mode = "manual"
+        var current = "manual"
         for _ in 0..<4 {
-            mode = SessionRequests.cycled(from: mode)
-            seen.append(mode)
+            current = mode(current, claudeModes).cycled?.id ?? ""
+            seen.append(current)
         }
         check(seen == ["acceptEdits", "plan", "auto", "manual"], "⇧Tab cycles manual, accept edits, plan and auto: \(seen)")
-        check(SessionRequests.cycled(from: "") == "acceptEdits" && SessionRequests.cycled(from: "default") == "acceptEdits", "a session in its settings' default moves on to accept edits")
-        check(SessionRequests.cycled(from: "bypassPermissions") == "manual" && SessionRequests.cycled(from: "dontAsk") == "manual", "leaving a menu-only mode goes back to manual")
-        check(!SessionRequests.cyclingModes.contains("bypassPermissions") && !SessionRequests.cyclingModes.contains("dontAsk"), "cycling never lands on bypass permissions or don't ask")
-        check(SessionRequests.cyclingModes.allSatisfy(SessionRequests.permissionModes.contains), "every cycled mode is one a session can be set to")
-
-        check(TurnSettings.Mode.cycled(from: nil) == .plan && TurnSettings.Mode.cycled(from: .plan) == .default && TurnSettings.Mode.cycled(from: .default) == .plan, "Codex switches between Plan and Work")
+        check(mode("", claudeModes).cycled?.id == "manual" && mode("bypassPermissions", claudeModes).cycled?.id == "manual" && mode("dontAsk", claudeModes).cycled?.id == "manual", "leaving a menu-only or unset mode starts the cycle again")
+        check(mode("auto", claudeModes).quietOptions.allSatisfy { !$0.needsConfirmation } && mode("auto", claudeModes).quietOptions.count == 4, "cycling never lands on bypass permissions or don't ask")
+        let codexModes = #"[{"id":"default","label":"Default"},{"id":"plan","label":"Plan"}]"#
+        check(mode("default", codexModes).cycled?.id == "plan" && mode("plan", codexModes).cycled?.id == "default", "Codex switches between Default and Plan")
 
         check(QueueTakeBack.text(queued: ["first", "second"], draft: "now") == "first\n\nsecond\n\nnow", "taken-back messages go ahead of the draft, oldest first")
         check(QueueTakeBack.text(queued: ["first"], draft: "  \n") == "first", "an empty draft adds nothing after them")

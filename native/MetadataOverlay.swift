@@ -5,6 +5,7 @@ struct MetadataOverlay {
     private(set) var goal: GoalState?
     private(set) var model: String?
     private(set) var models: [ModelOption]?
+    private(set) var turnSettings: [TurnSetting]?
     private(set) var claudeRuns: [ClaudeRunObservation]?
     private(set) var claudeSubagents: [ClaudeSubagentLink]?
     private(set) var claudeSubagentsTotal: Int?
@@ -19,6 +20,7 @@ struct MetadataOverlay {
         goal = detail?.goal
         model = detail?.model
         models = detail?.models
+        turnSettings = detail?.turnSettings
         claudeRuns = detail?.claudeRuns
         claudeSubagents = detail?.claudeSubagents
         claudeSubagentsTotal = detail?.claudeSubagentsTotal
@@ -26,7 +28,7 @@ struct MetadataOverlay {
     }
 
     mutating func absorb(_ metadata: SessionMetadata) {
-        absorb(context: metadata.context, goal: metadata.goal, model: metadata.model, models: metadata.models)
+        absorb(context: metadata.context, goal: metadata.goal, model: metadata.model, models: metadata.models, turnSettings: metadata.turnSettings)
         claudeRuns = metadata.claudeRuns
         claudeSubagents = metadata.claudeSubagents
         claudeSubagentsTotal = metadata.claudeSubagentsTotal
@@ -52,11 +54,12 @@ struct MetadataOverlay {
         settled = true
     }
 
-    mutating func absorb(context: ContextState?, goal: GoalState?, model: String?, models: [ModelOption]?) {
+    mutating func absorb(context: ContextState?, goal: GoalState?, model: String?, models: [ModelOption]?, turnSettings: [TurnSetting]? = nil) {
         if !streamed.contains("context"), let context { self.context = context }
         if !streamed.contains("goal"), let goal { self.goal = goal }
         if let model { self.model = model }
         if let models { self.models = models }
+        if let turnSettings { self.turnSettings = turnSettings }
     }
 
     mutating func stream(context: ContextState?) {
@@ -75,6 +78,7 @@ struct MetadataOverlay {
         merged.goal = goal
         merged.model = model
         merged.models = models
+        merged.turnSettings = turnSettings
         merged.claudeRuns = claudeRuns
         merged.claudeSubagents = claudeSubagents
         merged.claudeSubagentsTotal = claudeSubagentsTotal

@@ -872,7 +872,6 @@ struct IOSComposer: View {
     let detail: SessionDetail
     let showQueuedRow: (() -> Void)?
     @State private var showingModels = false
-    @State private var showingTurnSettings = false
     @State private var showingPrompts = false
     @State private var loadedModels: [ModelOption]?
     @State private var completionState = CompletionState(session: "", caret: 0)
@@ -880,11 +879,6 @@ struct IOSComposer: View {
 
     private var steering: Bool { detail.session.status == "busy" && detail.session.waitingOn == nil && detail.capabilities.steer && model.busyDelivery(for: detail.session.id) == "steer" }
     private var sending: Bool { model.pendingSends[session.id]?.first.map { !$0.unconfirmed } == true && draft.text.isEmpty }
-    private var permissionMode: String? {
-        guard detail.capabilities.permissionMode else { return nil }
-        return model.sessionRequests?.permissionMode
-    }
-
     private var stashActionTitle: String {
         let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
         if !empty { return model.stashes[session.id] == nil ? "Stash draft" : "Swap with stashed draft" }
@@ -910,51 +904,8 @@ struct IOSComposer: View {
             ComposerAttachmentMenu(model: model)
                 .disabled(sending)
         }
-        if detail.capabilities.model {
-            Button { showingModels = true } label: { modelLabel }
-            .buttonStyle(.plain)
-            .disabled(model.pendingControls.contains(session.id))
-            .accessibilityLabel("Change model, " + modelName)
-            .accessibilityIdentifier("composer-model-picker")
-        } else { modelLabel }
-        if let mode = permissionMode {
-            Button { Task { await model.setPermissionMode(SessionRequests.cycled(from: mode), sessionID: session.id) } } label: {
-                Text(SessionRequests.permissionModeLabel(mode)).font(.footnote.weight(.medium))
-                    .lineLimit(1)
-                    .padding(.horizontal, 10).frame(minHeight: 44)
-                    .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
-            }
-            .buttonStyle(.plain)
-            .layoutPriority(1)
-            .accessibilityLabel("Mode, " + SessionRequests.permissionModeLabel(mode))
-            .accessibilityHint("Changes to the next mode")
-            .accessibilityIdentifier("composer-mode")
-        } else if session.surface == "codex" && detail.capabilities.send {
-            let mode = model.turnSettings(for: session.id).mode
-            Button {
-                var settings = model.turnSettings(for: session.id)
-                settings.mode = TurnSettings.Mode.cycled(from: settings.mode)
-                model.setTurnSettings(settings, for: session.id)
-            } label: {
-                Text(mode == .plan ? "Plan" : mode == .default ? "Work" : "Session").font(.footnote.weight(.medium))
-                    .lineLimit(1)
-                    .padding(.horizontal, 10).frame(minHeight: 44)
-                    .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
-            }
-            .buttonStyle(.plain)
-            .layoutPriority(1)
-            .accessibilityLabel("Mode, " + (mode == .plan ? "Plan" : mode == .default ? "Work" : "session setting"))
-            .accessibilityHint("Switches between Work and Plan for the next message")
-            .accessibilityIdentifier("composer-mode")
-        }
-        if session.surface == "codex" && detail.capabilities.send {
-            Button { showingTurnSettings = true } label: {
-                Image(systemName: model.turnSettings(for: session.id).isEmpty ? "slider.horizontal.3" : "slider.horizontal.3.circle.fill")
-                    .font(.body).frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Effort and plan mode")
-            .accessibilityIdentifier("composer-turn-settings")
+        if !detail.readOnly, let settings = detail.turnSettings, !settings.isEmpty {
+            IOSTurnSettingChips(model: model, sessionID: session.id, settings: settings) { showingModels = true }
         }
     }
 
@@ -1054,25 +1005,9 @@ struct IOSComposer: View {
             }
         }
         .sheet(isPresented: $showingModels) {
-            SearchableModelSelectionSheet(initialOptions: loadedModels ?? detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in
-                if let value {
-                    var settings = model.turnSettings(for: session.id)
-                    settings.effort = nil
-                    model.setTurnSettings(settings, for: session.id)
-                    model.action("model", session: session, model: value)
-                }
+            SearchableModelSelectionSheet(initialOptions: loadedModels ?? detail.models ?? [], currentSelectedID: detail.turnSettings?.setting(TurnSetting.model)?.value ?? detail.model, allowsDefault: false, onSelect: { value in
+                if let value { Task { await model.setTurnSetting(TurnSetting.model, to: value, sessionID: session.id) } }
             }, reload: { try await loadModels() })
-        }
-        .sheet(isPresented: $showingTurnSettings) {
-            NavigationStack {
-                Form {
-                    TurnSettingsView(settings: Binding(get: { model.turnSettings(for: session.id) }, set: { model.setTurnSettings($0, for: session.id) }), modelOption: selectedModelOption, enabled: !steering && !sending)
-                }
-                .navigationTitle("Effort and mode")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingTurnSettings = false } } }
-                .task { if selectedModelOption == nil { _ = try? await loadModels() } }
-            }
         }
         .onChange(of: session.id) { _, _ in loadedModels = nil }
         .task(id: mentionRequest) { await loadMentionFiles(mentionRequest) }
@@ -1131,22 +1066,11 @@ struct IOSComposer: View {
         editor.replace(change.range, with: change.replacement, caret: change.caret)
     }
 
-    private var modelName: String { detail.model ?? SessionStyle.agentName(detail.session.surface) }
-    private var selectedModelOption: ModelOption? {
-        let options = loadedModels ?? detail.models ?? []
-        return options.first { $0.id == detail.model } ?? (detail.model == nil ? options.first { $0.default == true } : nil)
-    }
     private func loadModels() async throws -> [ModelOption] {
         let options = try await model.creationModels(surface: session.surface, host: session.remoteHostID)
         loadedModels = options
         return options
     }
-    private var modelLabel: some View {
-        Text(modelName).font(.caption.weight(.medium)).lineLimit(1).truncationMode(.middle)
-            .padding(.horizontal, 12).frame(minHeight: 44)
-            .background(Color.primary.opacity(0.05), in: Capsule())
-    }
-
 }
 
 extension EnvironmentValues {
@@ -1625,16 +1549,16 @@ struct SessionInspector: View {
                             Button("Change model") { showingModels = true }
                                 .disabled(model.pendingControls.contains(session.id))
                         }
-                        if detail.capabilities.permissionMode {
-                            let current = model.sessionRequests?.permissionMode ?? ""
+                        if detail.capabilities.permissionMode, let mode = detail.turnSettings?.setting(TurnSetting.mode) {
                             Menu {
-                                ForEach(SessionRequests.permissionModes, id: \.self) { mode in
-                                    Button(SessionRequests.permissionModeLabel(mode)) { Task { await model.setPermissionMode(mode, sessionID: session.id) } }
-                                        .disabled(mode == current)
+                                ForEach(mode.quietOptions, id: \.id) { option in
+                                    Button(option.label) { Task { await model.setTurnSetting(mode.key, to: option.id, sessionID: session.id) } }
+                                        .disabled(option.id == mode.value)
                                 }
                             } label: {
-                                LabeledContent("Permission mode", value: SessionRequests.permissionModeLabel(current))
+                                LabeledContent("Permission mode", value: mode.valueLabel)
                             }
+                            .disabled(model.pendingControls.contains(session.id))
                         }
                         if detail.capabilities.commands {
                             Group {
@@ -1683,10 +1607,7 @@ struct SessionInspector: View {
             .sheet(isPresented: $showingModels) {
                 SearchableModelSelectionSheet(initialOptions: detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in
                     if let value {
-                        var settings = model.turnSettings(for: session.id)
-                        settings.effort = nil
-                        model.setTurnSettings(settings, for: session.id)
-                        model.action("model", session: session, model: value)
+                        Task { await model.setTurnSetting(TurnSetting.model, to: value, sessionID: session.id) }
                         dismiss()
                     }
                 }, reload: { try await model.creationModels(surface: session.surface, host: session.remoteHostID) })

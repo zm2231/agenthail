@@ -15,7 +15,7 @@ struct NewSessionSheet: View {
     @State private var claude = ClaudeCreationSettings()
     @State private var selectedLauncher: LauncherOption?
     @State private var showingModels = false
-    @State private var turnSettings = TurnSettings()
+    @State private var launch = LaunchSettings()
 
     init(model: AgenthailIOSModel, place: NewSessionPlace? = nil) {
         self.model = model
@@ -86,7 +86,7 @@ struct NewSessionSheet: View {
                             Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on \(hostName).").font(.footnote).foregroundStyle(PhonePalette.muted)
                         }
                         if selectedSurface == "codex" {
-                            TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)
+                            LaunchSettingsView(settings: $launch, modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)
                         }
                         if selectedSurface == "claude", hosts.claudeConfigRoots.count > 1 {
                             let roots = hosts.claudeConfigRoots
@@ -170,7 +170,7 @@ struct NewSessionSheet: View {
             .sheet(isPresented: $showingModels) {
                 SearchableModelSelectionSheet(initialOptions: models, currentSelectedID: selectedModel.isEmpty ? nil : selectedModel, allowsDefault: true, onSelect: { value in
                     selectedModel = value ?? ""
-                    turnSettings.effort = nil
+                    launch.effort = nil
                 }, reload: {
                     let generation = hosts.generation
                     let values = try await model.creationModels(surface: selectedSurface, host: hosts.hostQuery)
@@ -188,14 +188,14 @@ struct NewSessionSheet: View {
             }
             .task(id: "\(hosts.generation)/\(selectedSurface)") {
                 selectedLauncher = nil
-                models = []; selectedModel = ""; modelError = nil; turnSettings = .init(); claude = .init()
+                models = []; selectedModel = ""; modelError = nil; launch = .init(); claude = .init()
                 guard !selectedSurface.isEmpty else { return }
                 do { let values = try await model.creationModels(surface: selectedSurface, host: hosts.hostQuery); try Task.checkCancellation(); models = values }
                 catch is CancellationError {} catch { modelError = "Models unavailable. You can still use the runtime default." }
             }
             .onChange(of: selectedLauncher) { _, launcher in
                 guard launcher?.isTerminal == true else { return }
-                turnSettings = .init()
+                launch = .init()
                 claude = ClaudeCreationSettings(configRoot: claude.configRoot)
             }
         }
@@ -205,7 +205,7 @@ struct NewSessionSheet: View {
     }
     private func start() {
         Task {
-            if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, turnSettings: turnSettings, claude: claude, launcher: selectedLauncher, host: hosts.hostQuery) { dismiss() }
+            if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, launch: launch, claude: claude, launcher: selectedLauncher, host: hosts.hostQuery) { dismiss() }
         }
     }
     private func launchers(for surface: String, options: SessionCreationOptions) -> [LauncherOption] {

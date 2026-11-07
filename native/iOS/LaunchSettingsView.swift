@@ -1,25 +1,25 @@
 import SwiftUI
 
-struct TurnSettingsView: View {
-    @Binding var settings: TurnSettings
+struct LaunchSettingsView: View {
+    @Binding var settings: LaunchSettings
     let modelOption: ModelOption?
     let enabled: Bool
 
     private var efforts: [String] { modelOption?.supportedReasoningEfforts ?? [] }
 
     var body: some View {
-        Section("Next Codex turn") {
+        Section("First Codex turn") {
             Picker("Effort", selection: effortBinding) {
                 Text("Runtime default").tag("")
                 ForEach(efforts, id: \.self) { Text($0.capitalized).tag($0) }
             }
-            Picker("Mode", selection: modeBinding) {
-                Text("Use session setting").tag(nil as TurnSettings.Mode?)
-                Text("Work").tag(TurnSettings.Mode.default as TurnSettings.Mode?)
-                Text("Plan").tag(TurnSettings.Mode.plan as TurnSettings.Mode?)
+            Picker("Mode", selection: $settings.mode) {
+                Text("Runtime default").tag(nil as LaunchSettings.Mode?)
+                Text("Work").tag(LaunchSettings.Mode.default as LaunchSettings.Mode?)
+                Text("Plan").tag(LaunchSettings.Mode.plan as LaunchSettings.Mode?)
             }
             if !enabled {
-                Text("Turn settings apply to the next normal message. Steering uses the active turn.")
+                Text("A session started in a terminal uses the runtime's own effort and mode.")
                     .font(.footnote)
                     .foregroundStyle(PhonePalette.muted)
             } else if efforts.isEmpty {
@@ -35,11 +35,5 @@ struct TurnSettingsView: View {
         Binding(
             get: { settings.effort ?? "" },
             set: { settings.effort = $0.isEmpty ? nil : $0 })
-    }
-
-    private var modeBinding: Binding<TurnSettings.Mode?> {
-        Binding(
-            get: { settings.mode },
-            set: { settings.mode = $0 })
     }
 }

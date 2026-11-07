@@ -1471,6 +1471,7 @@ struct SessionMetadata: Decodable {
     let goal: GoalState?
     let model: String?
     let models: [ModelOption]?
+    var turnSettings: [TurnSetting]? = nil
     let claudeRuns: [ClaudeRunObservation]?
     let claudeSubagents: [ClaudeSubagentLink]?
     var claudeSubagentsTotal: Int? = nil
@@ -1520,6 +1521,7 @@ struct SessionDetail: Decodable {
     var goal: GoalState?
     var model: String?
     var models: [ModelOption]?
+    var turnSettings: [TurnSetting]?
     var claudeRuns: [ClaudeRunObservation]?
     var claudeSubagents: [ClaudeSubagentLink]?
     var claudeSubagentsTotal: Int?
@@ -2345,31 +2347,6 @@ struct SessionRequests: Decodable, Hashable {
     /// expired, so its card goes at once rather than staying clickable.
     func removing(_ id: String) -> SessionRequests {
         SessionRequests(permissionMode: permissionMode, requests: requests.filter { $0.id != id })
-    }
-
-    /// The modes a person can change a running session into; an empty mode is
-    /// the settings' default, which a session can start in but not be set to.
-    static let permissionModes = ["acceptEdits", "auto", "plan", "manual", "dontAsk", "bypassPermissions"]
-
-    // Bypass permissions and Don't ask stay menu-only, so a key press never lands a session there.
-    static let cyclingModes = ["manual", "acceptEdits", "plan", "auto"]
-
-    static func cycled(from mode: String) -> String {
-        guard let index = cyclingModes.firstIndex(of: mode) else { return mode == "" || mode == "default" ? "acceptEdits" : "manual" }
-        return cyclingModes[(index + 1) % cyclingModes.count]
-    }
-
-    static func permissionModeLabel(_ mode: String) -> String {
-        switch mode {
-        case "": return "Default (Claude settings)"
-        case "acceptEdits": return "Accept edits"
-        case "auto": return "Auto"
-        case "plan": return "Plan"
-        case "manual": return "Manual"
-        case "dontAsk": return "Don't ask"
-        case "bypassPermissions": return "Bypass permissions"
-        default: return mode
-        }
     }
 }
 

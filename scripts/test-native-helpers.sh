@@ -98,7 +98,8 @@ SOURCES=(
   TimelineMetadata.swift
   TimelineEventLabel.swift
   TurnNoticePreference.swift
-  TurnSettings.swift
+  LaunchSettings.swift
+  SessionTurnSettings.swift
   QueueSteer.swift
   UIConfig.swift
   SurfaceMode.swift
@@ -160,6 +161,7 @@ SOURCES=(
   macOS/SpotlightCatalog.swift
   macOS/StatusStripFit.swift
   macOS/TranscriptBlock.swift
+  macOS/TurnSettingConfirmation.swift
   macOS/TranscriptAgentBlocks.swift
   TranscriptEnd.swift
   macOS/TranscriptEndCheck.swift

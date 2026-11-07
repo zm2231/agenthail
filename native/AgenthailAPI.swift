@@ -289,14 +289,14 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await post("/api/v1/ui/snapshot/" + encoded, body: ["error": reason])
     }
 
-    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, author: String? = nil, attachments: [String] = [], idempotencyKey: String? = nil) async throws -> ActionReceipt {
-        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery, author: author, attachments: attachments)
+    func sendInstruction(action: String, sessionID: String, message: String, busyDelivery: String? = nil, author: String? = nil, attachments: [String] = [], idempotencyKey: String? = nil) async throws -> ActionReceipt {
+        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, busyDelivery: busyDelivery, author: author, attachments: attachments)
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey, keepsDelivery: true)
     }
 
     /// Fixes an instruction's bytes and key, pin included, so that retrying it can only replay it.
-    func instructionWire(sessionID: String, message: String, turnSettings: TurnSettings, author: String?, attachments: [String], idempotencyKey: String) throws -> ActionWire {
-        let body = InstructionRequest(action: "send", sessionID: sessionID, message: message, turnSettings: turnSettings, author: author, attachments: attachments)
+    func instructionWire(sessionID: String, message: String, author: String?, attachments: [String], idempotencyKey: String) throws -> ActionWire {
+        let body = InstructionRequest(action: "send", sessionID: sessionID, message: message, author: author, attachments: attachments)
         let pinned = holderPins.pinned(body: try JSONEncoder().encode(body), key: idempotencyKey)
         return ActionWire(body: pinned.body, key: pinned.key)
     }
@@ -441,24 +441,24 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    static func creationBody(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) throws -> Data {
-        if launcher?.isTerminal == true && (!turnSettings.isEmpty || !claude.fields.filter({ $0.key != "configRoot" }).isEmpty) {
+    static func creationBody(surface: String, message: String, cwd: String, model: String, launch: LaunchSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) throws -> Data {
+        if launcher?.isTerminal == true && (!launch.isEmpty || !claude.fields.filter({ $0.key != "configRoot" }).isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
         var body: [String: Any] = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
         if let launcher { body["launcher"] = launcher.id }
         if let host { body["host"] = host }
         if surface == "codex" {
-            if let effort = turnSettings.effort { body["effort"] = effort }
-            if let mode = turnSettings.mode { body["mode"] = mode.rawValue }
+            if let effort = launch.effort { body["effort"] = effort }
+            if let mode = launch.mode { body["mode"] = mode.rawValue }
         } else if surface == "claude" {
             body.merge(claude.fields) { _, value in value }
         }
         return try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
-        try await createSession(body: Self.creationBody(surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, claude: claude, launcher: launcher, host: host), idempotencyKey: idempotencyKey, failureReceipts: failureReceipts)
+    func createSession(surface: String, message: String, cwd: String, model: String, launch: LaunchSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
+        try await createSession(body: Self.creationBody(surface: surface, message: message, cwd: cwd, model: model, launch: launch, claude: claude, launcher: launcher, host: host), idempotencyKey: idempotencyKey, failureReceipts: failureReceipts)
     }
 
     func createSession(body: Data, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
@@ -671,8 +671,8 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "lead-replacement-ack", "replacementId": id])
     }
 
-    func setPermissionMode(sessionID: String, mode: String) async throws {
-        let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "permission-mode", "sessionId": sessionID, "permissionMode": mode])
+    func setTurnSetting(sessionID: String, key: String, value: String) async throws {
+        let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "turn-setting", "sessionId": sessionID, "setting": key, "value": value])
     }
 
     func projectAction(_ action: String, projectID: String) async throws {
@@ -980,12 +980,11 @@ private struct InstructionRequest: Encodable {
     let action: String
     let sessionID: String
     let message: String
-    let turnSettings: TurnSettings
     var busyDelivery: String? = nil
     var author: String? = nil
     var attachments: [String] = []
 
-    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case busyDelivery; case author; case attachments }
+    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case busyDelivery; case author; case attachments }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -995,10 +994,6 @@ private struct InstructionRequest: Encodable {
         try container.encodeIfPresent(busyDelivery, forKey: .busyDelivery)
         try container.encodeIfPresent(author, forKey: .author)
         if !attachments.isEmpty { try container.encode(attachments, forKey: .attachments) }
-        if action != "steer" {
-            try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
-            try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
-        }
     }
 }
 

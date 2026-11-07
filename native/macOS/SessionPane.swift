@@ -450,7 +450,7 @@ final class SessionPane: ObservableObject, Identifiable {
                 olderItems = []
                 olderCursor = loaded.timeline?.nextBefore
             }
-            metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models)
+            metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models, turnSettings: loaded.turnSettings)
             var merged = metadata.apply(to: loaded)
             let pageSeq = loaded.journalSeq ?? 0
             var older = olderItems
@@ -597,22 +597,30 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     func changeModel(to modelID: String) {
-        guard let sessionID = selectedSessionID else { return }
-        var settings = model.turnSettings(for: sessionID)
-        settings.effort = nil
-        model.setTurnSettings(settings, for: sessionID)
-        runControl(action: "model", sessionID: sessionID, modelID: modelID)
+        changeTurnSetting(TurnSetting.model, to: modelID)
+    }
+
+    func changeTurnSetting(_ key: String, to value: String) {
+        guard let sessionID = selectedSessionID, !controlPending, removedSession == nil else { return }
+        controlPending = true
+        Task {
+            let succeeded = await model.setTurnSetting(key, to: value, sessionID: sessionID)
+            controlPending = false
+            guard succeeded, !closed, selectedSessionID == sessionID, removedSession == nil else { return }
+            startMetadataLoad(sessionID)
+            if key == TurnSetting.mode { await fetchRequests(sessionID, key: requestsKey) }
+        }
     }
 
     func compactContext() {
         guard let sessionID = selectedSessionID else { return }
-        runControl(action: "compact", sessionID: sessionID, modelID: nil)
+        runControl(action: "compact", sessionID: sessionID)
     }
 
     /// Resumes a session a usage limit stopped now, or keeps it stopped.
     func resumeAfterLimit(_ resume: Bool) {
         guard let sessionID = selectedSessionID else { return }
-        runControl(action: resume ? "limit-resume" : "limit-resume-cancel", sessionID: sessionID, modelID: nil)
+        runControl(action: resume ? "limit-resume" : "limit-resume-cancel", sessionID: sessionID)
     }
 
     func moveAfterLimit(to root: String) {
@@ -625,11 +633,11 @@ final class SessionPane: ObservableObject, Identifiable {
         }
     }
 
-    private func runControl(action: String, sessionID: String, modelID: String?) {
+    private func runControl(action: String, sessionID: String) {
         guard !controlPending, removedSession == nil else { return }
         controlPending = true
         Task {
-            let succeeded = await model.performNow(action: action, sessionID: sessionID, model: modelID)
+            let succeeded = await model.performNow(action: action, sessionID: sessionID)
             controlPending = false
             if succeeded, !closed, selectedSessionID == sessionID, removedSession == nil { startMetadataLoad(sessionID) }
         }
@@ -665,8 +673,7 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private func send(_ text: String, attachments: [ComposerAttachment] = [], to sessionID: String, busyDelivery: String?) {
-        let settings = selectedSession?.surface == "codex" && busyDelivery != "steer" ? model.turnSettings(for: sessionID) : TurnSettings()
-        model.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery, turnSettings: settings)
+        model.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery)
     }
 
     private func run(_ command: SlashCommand, argument: String, sessionID: String) {
@@ -872,17 +879,6 @@ final class SessionPane: ObservableObject, Identifiable {
         }
         await fetchRequests(id, key: requestsKey)
         await loadSession(id)
-    }
-
-    func setPermissionMode(_ mode: String) async {
-        guard let api = model.api, let id = selectedSessionID else { return }
-        do {
-            try await api.setPermissionMode(sessionID: id, mode: mode)
-            if requestError != nil { requestError = nil }
-        } catch {
-            requestError = error.localizedDescription
-        }
-        await fetchRequests(id, key: requestsKey)
     }
 
     func reloadDetail() {

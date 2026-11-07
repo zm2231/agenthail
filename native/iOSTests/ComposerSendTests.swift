@@ -357,7 +357,7 @@ final class ComposerSendTests: XCTestCase {
 
     func testAKilledSendWhoseAttachmentNeverUploadedComesBackAsADraft() async throws {
         let store = temporaryStore()
-        store.save(.init(sends: [.init(id: UUID(), sessionID: "computer::codex-flow", message: "With a file", turnSettings: TurnSettings(), idempotencyKey: "k", uploaded: nil, wire: nil, hadAttachments: true)]))
+        store.save(.init(sends: [.init(id: UUID(), sessionID: "computer::codex-flow", message: "With a file",idempotencyKey: "k", uploaded: nil, wire: nil, hadAttachments: true)]))
         let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
         XCTAssertTrue(model.pendingSends.isEmpty)
         XCTAssertNotNil(model.failedSends["computer::codex-flow"])
@@ -506,7 +506,7 @@ final class ComposerSendTests: XCTestCase {
         store.save(.init(
             drafts: [session.id: "Saved draft", "computer::other": "Saved elsewhere"],
             stashes: ["computer::stashed": "Saved stash"],
-            sends: [.init(id: UUID(), sessionID: session.id, message: "Saved send", turnSettings: TurnSettings(), idempotencyKey: "saved-key", uploaded: [], wire: nil, hadAttachments: false)]
+            sends: [.init(id: UUID(), sessionID: session.id, message: "Saved send",idempotencyKey: "saved-key", uploaded: [], wire: nil, hadAttachments: false)]
         ))
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: store.file.path)
         addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: store.file.path) }
@@ -547,9 +547,9 @@ final class ComposerSendTests: XCTestCase {
             delivered.append(send.message)
             return release ? .answered : .unconfirmed
         }
-        queue.add(PendingSend(sessionID: "a", message: "New", attachments: [], turnSettings: TurnSettings()))
+        queue.add(PendingSend(sessionID: "a", message: "New", attachments: []))
         try await waitUntil { delivered.count == 1 }
-        queue.restore([PendingSend(sessionID: "a", message: "Saved", attachments: [], turnSettings: TurnSettings())])
+        queue.restore([PendingSend(sessionID: "a", message: "Saved", attachments: [])])
         XCTAssertEqual(queue.pending["a"]?.map(\.message), ["Saved", "New"])
         release = true
         queue.wake()
@@ -618,7 +618,7 @@ final class ComposerSendTests: XCTestCase {
             delivered.append(send.sessionID)
             return online ? .answered : .unconfirmed
         }
-        queue.add(PendingSend(sessionID: "old", message: "Moves", attachments: [], turnSettings: TurnSettings()))
+        queue.add(PendingSend(sessionID: "old", message: "Moves", attachments: []))
         try await waitUntil { queue.pending["old"]?.first?.unconfirmed == true }
         var rekeys = SessionRekeys()
         rekeys.record(["old": "new"])
@@ -641,7 +641,7 @@ final class ComposerSendTests: XCTestCase {
             attempts += 1
             return online ? .answered : .unconfirmed
         }
-        queue.add(PendingSend(sessionID: "a", message: "m", attachments: [], turnSettings: TurnSettings(), sentAt: clock))
+        queue.add(PendingSend(sessionID: "a", message: "m", attachments: [],sentAt: clock))
         try await waitUntil { queue.pending["a"]?.first?.unconfirmed == true }
         queue.wake()
         try await waitUntil { attempts == 2 }
@@ -671,17 +671,17 @@ final class ComposerSendTests: XCTestCase {
     }
 
     func testAWaitingSendIsNamedByItsFirstLine() {
-        let send = PendingSend(sessionID: "a", message: "  Check the signing step\nthen rerun", attachments: [], turnSettings: TurnSettings())
+        let send = PendingSend(sessionID: "a", message: "  Check the signing step\nthen rerun", attachments: [])
         XCTAssertEqual(send.previewLine, "Check the signing step")
-        XCTAssertEqual(PendingSend(sessionID: "a", message: "", attachments: [], turnSettings: TurnSettings()).previewLine, "Message with attachments")
+        XCTAssertEqual(PendingSend(sessionID: "a", message: "", attachments: []).previewLine, "Message with attachments")
     }
 
     private func stoppedSend(_ session: String = "a", _ message: String = "old") -> PendingSend {
-        PendingSend(sessionID: session, message: message, attachments: [], turnSettings: TurnSettings(), unconfirmed: true, sentAt: Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow))
+        PendingSend(sessionID: session, message: message, attachments: [],unconfirmed: true, sentAt: Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow))
     }
 
     private func recentSend(_ session: String = "a", _ message: String = "new") -> PendingSend {
-        PendingSend(sessionID: session, message: message, attachments: [], turnSettings: TurnSettings())
+        PendingSend(sessionID: session, message: message, attachments: [])
     }
 
     func testATapDuringAnotherSendsBackoffGoesAtOnce() async throws {
@@ -807,7 +807,7 @@ final class ComposerSendTests: XCTestCase {
 
     func testAPendingSendPreviewsItsFirstLine() {
         func preview(_ message: String) -> String {
-            PendingSend(sessionID: "a", message: message, attachments: [], turnSettings: TurnSettings()).previewLine
+            PendingSend(sessionID: "a", message: message, attachments: []).previewLine
         }
         XCTAssertEqual(preview("\n  First line  \nSecond"), "First line")
         XCTAssertEqual(preview(""), "Message with attachments")
@@ -820,9 +820,9 @@ final class ComposerSendTests: XCTestCase {
             delivered.append(send.message)
             return .answered
         }
-        queue.restore([PendingSend(sessionID: "a", message: "old", attachments: [], turnSettings: TurnSettings(), unconfirmed: true, sentAt: Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow))])
+        queue.restore([PendingSend(sessionID: "a", message: "old", attachments: [],unconfirmed: true, sentAt: Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow))])
         try await waitUntil { queue.pending["a"]?.first?.retryStopped == true }
-        queue.add(PendingSend(sessionID: "a", message: "new", attachments: [], turnSettings: TurnSettings()))
+        queue.add(PendingSend(sessionID: "a", message: "new", attachments: []))
         try await waitUntil { delivered == ["new"] }
         XCTAssertEqual(queue.pending["a"]?.map(\.message), ["old"])
     }
@@ -830,7 +830,7 @@ final class ComposerSendTests: XCTestCase {
     func testAnOldSavedSendComesBackStoppedAndKeepsItsSentTime() async throws {
         let store = temporaryStore()
         let sent = Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow)
-        store.save(ComposerStore.Saved(sends: [.init(PendingSend(sessionID: "computer::demo", message: "Days old", attachments: [], turnSettings: TurnSettings(), sentAt: sent))]))
+        store.save(ComposerStore.Saved(sends: [.init(PendingSend(sessionID: "computer::demo", message: "Days old", attachments: [],sentAt: sent))]))
         XCTAssertEqual(store.load().saved.sends.first?.sentAt?.timeIntervalSince1970 ?? 0, sent.timeIntervalSince1970, accuracy: 0.01)
 
         let before = ComposerSendProtocol.state.attempts.count
@@ -839,7 +839,7 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertEqual(model.deliveryStatus["computer::demo"], "Not confirmed")
         XCTAssertEqual(ComposerSendProtocol.state.attempts.count, before, "opening the app does not send it")
 
-        let older = ComposerStore.Saved.Send(id: UUID(), sessionID: "s", message: "m", turnSettings: TurnSettings(), idempotencyKey: "k", uploaded: nil, wire: nil, hadAttachments: false)
+        let older = ComposerStore.Saved.Send(id: UUID(), sessionID: "s", message: "m",idempotencyKey: "k", uploaded: nil, wire: nil, hadAttachments: false)
         let decoded = try JSONDecoder().decode(ComposerStore.Saved.Send.self, from: JSONEncoder().encode(older))
         XCTAssertEqual(decoded.resumable?.sentAt, .distantPast, "a send saved with no time never arrives late by itself")
     }
@@ -851,7 +851,7 @@ final class ComposerSendTests: XCTestCase {
             attempts += 1
             return .unconfirmed
         }
-        queue?.add(PendingSend(sessionID: "a", message: "m", attachments: [], turnSettings: TurnSettings()))
+        queue?.add(PendingSend(sessionID: "a", message: "m", attachments: []))
         try await waitUntil { attempts == 1 }
         queue = nil
         try await Task.sleep(for: .milliseconds(2500))

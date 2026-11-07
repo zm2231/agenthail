@@ -1359,7 +1359,6 @@ struct ComposerView: View {
     @State private var dropTargeted = false
     @State private var completionState = CompletionState(session: "", caret: 0)
     @State private var editor = ComposerEditor()
-    @State private var modeChanged = false
     @State private var showingSent = false
     @State private var searchingSent = false
     @ObservedObject private var shortcuts = ShortcutStore.shared
@@ -1445,29 +1444,12 @@ struct ComposerView: View {
                             .help("Attach files or images")
                             .accessibilityLabel("Attach files or images")
                         }
-                        if session.surface == "codex" {
-                            TurnSettingsMenu(model: model, sessionID: session.id, detail: pane.detail)
-                                .frame(height: 28)
-                        }
                         ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", lines: ComposerNSTextView.composerLines, onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret in updateCompletion { $0.caret = caret } }, completionKey: completionKey) { submit(alternate: false) }
                             .id(session.id)
                             .frame(minHeight: 28)
                             .padding(.horizontal, DesktopSpace.xs)
                         HStack(spacing: DesktopSpace.xs) {
-                            if let mode = permissionMode {
-                                Button(action: cycleMode) {
-                                    Text(SessionRequests.permissionModeLabel(mode))
-                                        .font(.system(size: DesktopType.meta, weight: .medium))
-                                        .foregroundStyle(mode == "" || mode == "manual" ? DesktopPalette.text2 : DesktopPalette.accentText)
-                                        .padding(.horizontal, 8)
-                                        .frame(height: 22)
-                                        .background(DesktopPalette.accent.opacity(0.18).when(modeChanged), in: Capsule())
-                                        .overlay(Capsule().strokeBorder(DesktopPalette.line))
-                                }
-                                .buttonStyle(.plain)
-                                .help(shortcuts.help("Change mode", .composerCycleMode))
-                                .accessibilityLabel("Mode, \(SessionRequests.permissionModeLabel(mode))")
-                            }
+                            TurnSettingChips(pane: pane, cycleMode: cycleMode)
                             if !session.sharedHolders.isEmpty {
                                 HolderPicker(model: model, session: session)
                             }
@@ -1673,9 +1655,9 @@ struct ComposerView: View {
         focused = true
     }
 
-    private var permissionMode: String? {
-        guard session.capabilities.permissionMode, !session.isReadOnly else { return nil }
-        return pane.requests?.permissionMode
+    private var nextMode: TurnSetting.Option? {
+        guard !session.isReadOnly else { return nil }
+        return pane.detail?.turnSettings?.setting(TurnSetting.mode)?.cycled
     }
 
     private func perform(_ command: ComposerCommand) -> Bool {
@@ -1686,7 +1668,7 @@ struct ComposerView: View {
             }
             return true
         case .cycleMode:
-            if permissionMode != nil || session.surface == "codex" {
+            if nextMode != nil {
                 cycleMode()
                 return true
             }
@@ -1728,18 +1710,7 @@ struct ComposerView: View {
     }
 
     private func cycleMode() {
-        if let mode = permissionMode {
-            Task { await pane.setPermissionMode(SessionRequests.cycled(from: mode)) }
-        } else if session.surface == "codex" {
-            var settings = model.turnSettings(for: session.id)
-            settings.mode = TurnSettings.Mode.cycled(from: settings.mode)
-            model.setTurnSettings(settings, for: session.id)
-        }
-        withAnimation(.easeOut(duration: 0.15)) { modeChanged = true }
-        Task {
-            try? await Task.sleep(for: .seconds(1.2))
-            withAnimation(.easeOut(duration: 0.4)) { modeChanged = false }
-        }
+        if let next = nextMode { pane.changeTurnSetting(TurnSetting.mode, to: next.id) }
     }
 
     private func takeBackQueued() -> Bool {
@@ -2047,6 +2018,7 @@ struct DetailsTab: View {
     @ObservedObject var pane: SessionPane
     let session: SessionState
     @State private var showTokens = false
+    @State private var pendingMode: TurnSettingChoice?
     private var modelOptions: [ModelOption] {
         if let options = pane.detail?.models, !options.isEmpty { return options }
         return model.modelCatalog[session.modelCatalogKey] ?? []
@@ -2137,20 +2109,21 @@ struct DetailsTab: View {
                 } else if let model = pane.detail?.model {
                     detailRow("Model", model)
                 }
-                if canControl && session.capabilities.permissionMode, let current = pane.requests?.permissionMode {
+                if canControl && session.capabilities.permissionMode, let mode = pane.detail?.turnSettings?.setting(TurnSetting.mode) {
                     GridRow {
                         Text("Permissions").foregroundStyle(DesktopPalette.text2)
-                        Menu(SessionRequests.permissionModeLabel(current)) {
-                            ForEach(SessionRequests.permissionModes, id: \.self) { mode in
+                        Menu(mode.valueLabel) {
+                            ForEach(mode.options, id: \.id) { option in
                                 Button {
-                                    Task { await pane.setPermissionMode(mode) }
+                                    TurnSettingChoice.choose(option, for: mode, pending: &pendingMode, apply: pane.changeTurnSetting)
                                 } label: {
-                                    if mode == current { Label(SessionRequests.permissionModeLabel(mode), systemImage: "checkmark") } else { Text(SessionRequests.permissionModeLabel(mode)) }
+                                    if option.id == mode.value { Label(option.label, systemImage: "checkmark") } else { Text(option.label) }
                                 }
                             }
                         }
                         .menuStyle(.borderlessButton)
                         .fixedSize()
+                        .disabled(pane.controlPending)
                     }
                 }
                 if let project = session.project?.displayName { detailRow("Project", project) }
@@ -2187,6 +2160,7 @@ struct DetailsTab: View {
             if catalogNeeded != nil { await model.loadModelCatalog(for: session) }
         }
         .task(id: SubagentFetchKey(session, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: session) }
+        .confirmingTurnSetting($pendingMode) { pane.changeTurnSetting($0.key, to: $0.option.id) }
     }
 
     private var canControl: Bool { !session.isReadOnly && pane.removedSession == nil }

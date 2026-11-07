@@ -11,7 +11,6 @@ struct LocalSend: Identifiable, Equatable {
     let sentAt: Date
     var status: String?
     var busyDelivery: String? = nil
-    var turnSettings = TurnSettings()
     var failure: String? = nil
     var deliveryID: Int64? = nil
     var deletable = false
