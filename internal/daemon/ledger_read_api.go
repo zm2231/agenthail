@@ -190,15 +190,14 @@ func (d *Daemon) apiLedgerEventsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	flusher.Flush()
 	authorized := func() bool { return d.apiEventStreamAuthorized(r) }
-	sse.Follow(r.Context(), w, flusher, wake, func(_ struct{}, open bool) bool {
+	sse.Follow(r.Context(), w, wake, func(_ struct{}, open bool) bool {
 		if !open || !authorized() {
 			return false
 		}
 		for _, change := range hub.take(id) {
 			writeLedgerChange(w, change)
 		}
-		flusher.Flush()
-		return true
+		return sse.Flush(w) == nil
 	}, authorized)
 }
 

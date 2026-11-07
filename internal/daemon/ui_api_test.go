@@ -14,8 +14,8 @@ import (
 )
 
 func uiEvents(d *Daemon) []string {
-	backlog, _, _, cancel := d.events.subscribe(0)
-	defer cancel()
+	backlog, follower, _ := d.events.subscribe(0)
+	follower.Cancel()
 	var revs []string
 	for _, event := range backlog {
 		if event.Type == "ui.changed" {

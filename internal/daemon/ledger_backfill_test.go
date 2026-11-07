@@ -83,8 +83,7 @@ func TestBackfillNotesPromptsTheHookMissed(t *testing.T) {
 	s := p.session(t, r, "s-missed")
 	source := journalSource(d, s, nil)
 	now := time.Now()
-	_, stream, _, cancel := d.events.subscribe(d.events.cursor())
-	defer cancel()
+	stream := followEvents(t, d.events)
 	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "caught", Prompt: "seen by the hook"})
 	source.append(liveEvent(typedPrompt("u-caught", "caught", "seen by the hook", now)))
 	source.append(liveEvent(typedPrompt("u-missed", "missed", "hook was down", now)))
@@ -142,8 +141,8 @@ func TestBackfillNotesPromptsTheHookMissed(t *testing.T) {
 	if seen != 1 {
 		t.Fatalf("a live subscriber must see the missed-capture event once, saw %d in %+v", seen, live)
 	}
-	resumed, _, _, cancelResume := d.events.subscribe(missed[0].ID - 1)
-	defer cancelResume()
+	resumed, resumedFollower, _ := d.events.subscribe(missed[0].ID - 1)
+	defer resumedFollower.Cancel()
 	if len(resumed) == 0 || resumed[0].ID != missed[0].ID {
 		t.Fatalf("resuming before the missed-capture event must replay it first, got %+v", resumed)
 	}

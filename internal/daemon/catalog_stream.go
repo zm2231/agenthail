@@ -207,7 +207,7 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "stream_unavailable", "Streaming is unavailable.")
 		return
@@ -258,15 +258,14 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 				return false
 			}
 			if len(batch) < catalogStreamBatch {
-				flusher.Flush()
-				return true
+				return sse.Flush(w) == nil
 			}
 		}
 	}
 	if !write(window.Events) || !follow() {
 		return
 	}
-	sse.Follow(r.Context(), w, flusher, follower.Wake, func(struct{}, bool) bool {
+	sse.Follow(r.Context(), w, follower.Wake, func(struct{}, bool) bool {
 		return follow()
 	}, func() bool { return d.apiEventStreamAuthorized(r) })
 }

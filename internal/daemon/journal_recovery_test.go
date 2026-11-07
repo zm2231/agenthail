@@ -267,7 +267,7 @@ func TestSessionStreamSendsEachJournalRowOnceAfterItsReplayWindow(t *testing.T) 
 	close(wake)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-stream?id="+from.ID, nil)
-	d.writeSessionStream(recorder, request, recorder, from.ID, 0, window, wake)
+	d.writeSessionStream(recorder, request, from.ID, 0, window, wake)
 	body := recorder.Body.String()
 	if strings.Contains(body, `"body":"stale"`) || strings.Count(body, `"body":"fresh"`) != 1 || strings.Count(body, `"body":"next"`) != 1 {
 		t.Fatalf("stream body=%s", body)

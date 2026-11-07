@@ -241,8 +241,8 @@ func TestAPIV1SnapshotCursorClosesBootstrapGap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backlog, _, reset, cancel := d.events.subscribe(snapshot.EventCursor)
-	defer cancel()
+	backlog, follower, reset := d.events.subscribe(snapshot.EventCursor)
+	follower.Cancel()
 	if reset || len(backlog) != 1 || backlog[0].ID != second.ID {
 		t.Fatalf("reset=%v backlog=%+v", reset, backlog)
 	}

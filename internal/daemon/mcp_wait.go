@@ -255,14 +255,17 @@ func (d *Daemon) taskRequests(ctx context.Context, task registry.Task, session *
 func (d *Daemon) awaitTaskChange(ctx context.Context, after uint64, running []registry.Task, remaining time.Duration) error {
 	timer := time.NewTimer(min(remaining, taskWaitReread))
 	defer timer.Stop()
-	var stream <-chan apiEvent
+	var follower *eventFollower
+	var wake <-chan struct{}
 	if d.events != nil {
-		backlog, events, reset, cancel := d.events.subscribe(after)
-		defer cancel()
+		var backlog []apiEvent
+		var reset bool
+		backlog, follower, reset = d.events.subscribe(after)
+		defer follower.Cancel()
 		if reset || concernsTask(backlog, running) {
 			return nil
 		}
-		stream = events
+		wake = follower.Wake
 	}
 	for {
 		select {
@@ -270,8 +273,11 @@ func (d *Daemon) awaitTaskChange(ctx context.Context, after uint64, running []re
 			return ctx.Err()
 		case <-timer.C:
 			return nil
-		case event, open := <-stream:
-			if !open || concernsTask([]apiEvent{event}, running) {
+		case _, open := <-wake:
+			if !open {
+				return nil
+			}
+			if events, gap := follower.read(); gap || concernsTask(events, running) {
 				return nil
 			}
 		}

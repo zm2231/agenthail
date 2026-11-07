@@ -50,34 +50,6 @@ func (f *taskFixture) queuedFor(t *testing.T, session, key string) int {
 	return count
 }
 
-func (f *taskFixture) subscribers() int {
-	f.d.events.mu.Lock()
-	defer f.d.events.mu.Unlock()
-	return len(f.d.events.subscribers)
-}
-
-// awaitSubscribers reports whether at least n event subscribers are open
-// before stop closes.
-func (f *taskFixture) awaitSubscribers(n int, stop <-chan struct{}) bool {
-	for f.subscribers() < n {
-		select {
-		case <-stop:
-			return false
-		case <-time.After(time.Millisecond):
-		}
-	}
-	return true
-}
-
-func (f *taskFixture) dropSubscribers() {
-	f.d.events.mu.Lock()
-	defer f.d.events.mu.Unlock()
-	for id, subscriber := range f.d.events.subscribers {
-		delete(f.d.events.subscribers, id)
-		close(subscriber)
-	}
-}
-
 type waitArrival struct {
 	name string
 	make func(f *taskFixture)
@@ -130,43 +102,6 @@ func TestAnEventBetweenTheReadAndTheSubscribeWakesTheWait(t *testing.T) {
 	}
 }
 
-func TestADroppedSubscriptionDoesNotLoseTheEvent(t *testing.T) {
-	for _, arrival := range waitArrivals(t) {
-		t.Run(arrival.name, func(t *testing.T) {
-			f := newTaskFixture(t)
-			reads := 0
-			returned := make(chan struct{})
-			dropped := make(chan struct{})
-			f.d.taskWaitRead = func() {
-				reads++
-				if reads == 1 {
-					before := f.subscribers()
-					go func() {
-						defer close(dropped)
-						if !f.awaitSubscribers(before+1, returned) {
-							return
-						}
-						f.dropSubscribers()
-						arrival.make(f)
-						f.dropSubscribers()
-					}()
-				}
-			}
-			started := time.Now()
-			out := f.wait(t, map[string]any{"timeoutSec": 20})
-			close(returned)
-			<-dropped
-			readyOf(t, out, arrival.kind)
-			if reads < 2 {
-				t.Fatalf("reads=%d", reads)
-			}
-			if elapsed := time.Since(started); elapsed >= waitWokenPromptly {
-				t.Fatalf("took %s", elapsed)
-			}
-		})
-	}
-}
-
 func (f *taskFixture) noise(t *testing.T) {
 	t.Helper()
 	if _, err := f.d.events.publish("test.noise", "noise", nil); err != nil {
@@ -181,8 +116,8 @@ func (f *taskFixture) forceHubReset(t *testing.T, after uint64) {
 	f.d.events.mu.Lock()
 	f.d.events.history = f.d.events.history[len(f.d.events.history)-1:]
 	f.d.events.mu.Unlock()
-	_, _, reset, cancel := f.d.events.subscribe(after)
-	cancel()
+	_, follower, reset := f.d.events.subscribe(after)
+	follower.Cancel()
 	if !reset {
 		t.Fatalf("a subscribe from %d did not reset", after)
 	}

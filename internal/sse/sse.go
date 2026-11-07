@@ -9,7 +9,12 @@ import (
 	"time"
 )
 
-const KeepalivePeriod = 15 * time.Second
+var (
+	keepalivePeriod = 15 * time.Second
+	// writeWait bounds each write to a stream, so a client that stops
+	// reading ends its stream instead of holding the handler forever.
+	writeWait = time.Minute
+)
 
 func Cursor(r *http.Request) (uint64, error) {
 	value := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
@@ -33,17 +38,29 @@ func SetHeaders(header http.Header) {
 // replay would otherwise wait for the first keepalive.
 func Open(w http.ResponseWriter) {
 	SetHeaders(w.Header())
+	ExtendWrite(w)
 	fmt.Fprint(w, ": connected\n\n")
 }
 
-func Follow[T any](ctx context.Context, w http.ResponseWriter, flusher http.Flusher, wake <-chan T, onWake func(value T, open bool) bool, authorized func() bool) {
-	keepalive := time.NewTicker(KeepalivePeriod)
+func ExtendWrite(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(writeWait))
+}
+
+// Flush sends what the stream has written and reports a client that is gone
+// or did not take it before the write deadline.
+func Flush(w http.ResponseWriter) error {
+	return http.NewResponseController(w).Flush()
+}
+
+func Follow[T any](ctx context.Context, w http.ResponseWriter, wake <-chan T, onWake func(value T, open bool) bool, authorized func() bool) {
+	keepalive := time.NewTicker(keepalivePeriod)
 	defer keepalive.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case value, open := <-wake:
+			ExtendWrite(w)
 			if !onWake(value, open) {
 				return
 			}
@@ -51,8 +68,10 @@ func Follow[T any](ctx context.Context, w http.ResponseWriter, flusher http.Flus
 			if !authorized() {
 				return
 			}
-			fmt.Fprint(w, ": keepalive\n\n")
-			flusher.Flush()
+			ExtendWrite(w)
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil || Flush(w) != nil {
+				return
+			}
 		}
 	}
 }
