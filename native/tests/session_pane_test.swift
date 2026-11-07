@@ -5,23 +5,28 @@ import Network
 import Observation
 
 @MainActor
-final class FeedRecorder {
-    private let feed: TranscriptFeed
+final class TimelineRecorder {
+    private let pane: SessionPane
     private var watching = true
+    private var published: AnyCancellable?
     private(set) var shown: [[String]] = []
 
-    init(_ feed: TranscriptFeed) {
-        self.feed = feed
+    init(_ pane: SessionPane) {
+        self.pane = pane
+        published = pane.$detail.sink { [weak self] in self?.shown.append($0?.timeline?.items.map(\.id) ?? []) }
         watch()
     }
 
-    func stop() { watching = false }
+    func stop() {
+        watching = false
+        published = nil
+    }
 
     private func watch() {
-        withObservationTracking { _ = feed.items } onChange: { [weak self] in
+        withObservationTracking { _ = pane.timelineItems } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self, self.watching else { return }
-                self.shown.append(self.feed.items.map(\.id))
+                self.shown.append(self.pane.timelineItems.map(\.id))
                 self.watch()
             }
         }
@@ -529,7 +534,7 @@ struct SessionPaneTest {
         let streamingPort = await streamingServer.ready()
         let streamingModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(streamingPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
         let streamingPane = streamingModel.openPane()
-        let shownTimelines = FeedRecorder(streamingPane.transcript)
+        let shownTimelines = TimelineRecorder(streamingPane)
         var olderPublishes = 0
         let olderShown = streamingPane.$olderItems.sink { _ in olderPublishes += 1 }
         streamingPane.select("D")
@@ -581,12 +586,15 @@ struct SessionPaneTest {
         check(streamingPane.streamedRows.isEmpty, "rows kept for overlapping reads are dropped once the last lands: \(streamingPane.streamedRows.count)")
         var paneChanges = 0
         let paneWatch = streamingPane.objectWillChange.sink { paneChanges += 1 }
+        let timelineWatch = TimelineRecorder(streamingPane)
         streamingServer.push(frame(107, row(107, "c", text: "c2")), to: "session-stream")
         let feedDeadline = Date().addingTimeInterval(5)
-        while streamingPane.transcript.items.first(where: { $0.id == "c" })?.text != "c2", Date() < feedDeadline { try? await Task.sleep(for: .milliseconds(10)) }
+        while streamingPane.timelineItems.first(where: { $0.id == "c" })?.text != "c2", Date() < feedDeadline { try? await Task.sleep(for: .milliseconds(10)) }
         try? await Task.sleep(for: SessionPane.streamPublishInterval * 2)
         paneWatch.cancel()
+        timelineWatch.stop()
         check(streamingPane.timelineItems.first(where: { $0.id == "c" })?.text == "c2", "a streamed row reaches the transcript: \(streamingPane.timelineItems.map { "\($0.id)=\($0.text)" })")
+        check(timelineWatch.shown.count >= 2, "a streamed row notifies views that read the timeline: \(timelineWatch.shown)")
         check(paneChanges == 0, "a streamed row updates the transcript without republishing the pane: \(paneChanges) pane changes")
 
         let streamedSession = SessionState(id: "D", surface: "claude", name: "d", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: false, readOnlyReason: nil)

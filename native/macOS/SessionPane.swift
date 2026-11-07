@@ -29,10 +29,7 @@ final class SessionPane: ObservableObject, Identifiable {
     }
     @Published private(set) var archivedTabError: String?
     @Published private(set) var detail: SessionDetail? {
-        didSet {
-            live = nil
-            transcript.show(detail?.timeline?.items ?? [])
-        }
+        didSet { live = nil }
     }
     let transcript = TranscriptFeed()
     private var live: SessionDetail?
@@ -193,7 +190,10 @@ final class SessionPane: ObservableObject, Identifiable {
         clearSelection()
         shownProjectID = id
     }
-    var timelineItems: [TimelineItem] { olderItems + transcript.items }
+    var timelineItems: [TimelineItem] {
+        _ = transcript.revision
+        return olderItems + ((live ?? detail)?.timeline?.items ?? [])
+    }
 
     /// Shows a session. With tabs, it opens in the preview tab unless kept,
     /// or switches to the tab it is already in.
@@ -1004,7 +1004,7 @@ final class SessionPane: ObservableObject, Identifiable {
             guard let pending = unpublishedDetail else { return }
             unpublishedDetail = nil
             live = pending
-            transcript.show(pending.timeline?.items ?? [])
+            transcript.streamed()
             model.detailLoaded(warm(pending), for: pending.session.id)
         }
         return true

@@ -3,9 +3,7 @@ import Observation
 @MainActor
 @Observable
 final class TranscriptFeed {
-    private(set) var items: [TimelineItem] = []
+    private(set) var revision = 0
 
-    func show(_ next: [TimelineItem]) {
-        if next != items { items = next }
-    }
+    func streamed() { revision &+= 1 }
 }
