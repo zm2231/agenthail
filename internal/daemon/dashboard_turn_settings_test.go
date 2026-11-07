@@ -22,9 +22,14 @@ func (s *turnSettingsSurface) TurnSettings(context.Context, *surface.Session) ([
 	return s.settings, nil
 }
 
-func (s *turnSettingsSurface) SetTurnSetting(_ context.Context, _ *surface.Session, key, value string) error {
+func (s *turnSettingsSurface) SetTurnSetting(_ context.Context, sess *surface.Session, key, value string) error {
 	if s.fail != nil {
 		return s.fail
+	}
+	if key == surface.TurnSettingModel {
+		sess.ConfiguredModel = value
+		s.changes = append(s.changes, key+"="+value)
+		return nil
 	}
 	if err := surface.ValidTurnSetting(s.settings, key, value); err != nil {
 		return err
@@ -91,5 +96,22 @@ func TestATurnSettingActionReachesTheAdapterAndNamesWhatItCannotDo(t *testing.T)
 	}
 	if fmt.Sprint(fake.changes) != "[effort=high]" {
 		t.Fatalf("a failed change was recorded: %v", fake.changes)
+	}
+}
+
+func TestAClaudeModelTurnSettingIsKeptInTheRegistry(t *testing.T) {
+	_, registry, _, _, _ := daemonFixture(t)
+	claude := surface.Session{ID: "claude-host", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}
+	if err := registry.RegisterSession(claude); err != nil {
+		t.Fatal(err)
+	}
+	fake := &turnSettingsSurface{daemonSurface: &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{claude.ID: claude}, accepted: true}}
+	d := newTestDaemon(t, registry, []surface.Surface{fake})
+	if _, err := d.doSessionAction(context.Background(), principal{Kind: principalPerson}, dashboardActionRequest{SessionID: claude.ID, Action: "turn-setting", Setting: "model", Value: "opus"}); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := registry.Session(claude.ID)
+	if err != nil || kept.ConfiguredModel != "opus" {
+		t.Fatalf("kept=%+v err=%v", kept, err)
 	}
 }

@@ -296,7 +296,7 @@ func TestPersonSendWithOptionsIsRejectedNotDowngraded(t *testing.T) {
 
 func TestQueuedPersonMessageWithOptionsIsRejectedAtDrain(t *testing.T) {
 	f := newHumanTurnFixture(t)
-	queueID, err := f.r.QueueMessageWithOptions(f.bridged.ID, "queued with effort", "", surface.SendOptions{Author: surface.AuthorPerson, TurnOptions: surface.TurnOptions{Effort: "high"}})
+	queueID, err := f.r.QueueMessageWithOptions(f.bridged.ID, "queued with a service tier", "", surface.SendOptions{Author: surface.AuthorPerson, TurnOptions: surface.TurnOptions{ServiceTier: "fast"}})
 	if err != nil {
 		t.Fatal(err)
 	}

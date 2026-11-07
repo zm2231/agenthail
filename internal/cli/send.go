@@ -131,7 +131,7 @@ func (a *App) cmdSend(args []string) error {
 			baseline = observation.CompletedTurnID
 		}
 	}
-	turnOptions, err := parseTurnOptions(args)
+	turnOptions, err := parseSendTurnOptions(args)
 	if err != nil {
 		return err
 	}

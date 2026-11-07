@@ -79,6 +79,9 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	if err := options.TurnOptions.Validate(surface.KindCodex); err != nil {
 		return nil, nil, err
 	}
+	if err := options.LaunchSettings.ValidateCodex(); err != nil {
+		return nil, nil, err
+	}
 	if options.Agent != "" || options.PermissionMode != "" || options.Name != "" || options.ConfigRoot != "" {
 		return nil, nil, fmt.Errorf("name, agent, permission-mode and config root creation options require Claude")
 	}
@@ -130,7 +133,10 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 		"threadId": threadID,
 		"input":    []map[string]any{{"type": "text", "text": message}},
 	}
-	if err := applyCodexTurnOptions(ctx, client, session, options.Model, options.TurnOptions, turnParams); err != nil {
+	if err := applyCodexTurnOptions(options.Model, options.TurnOptions, turnParams); err != nil {
+		return session, nil, err
+	}
+	if err := applyCodexLaunchSettings(ctx, client, session, options.Model, options.LaunchSettings, turnParams); err != nil {
 		return session, nil, err
 	}
 	turnResponse, err := client.Request(ctx, "turn/start", turnParams, 10*time.Second)

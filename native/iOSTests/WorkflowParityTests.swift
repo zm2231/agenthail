@@ -107,11 +107,11 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertTrue(model.creationError?.contains("do not support advanced") == true)
     }
 
-    func testQueueDecodesIntegratedTurnSettings() throws {
-        let data = Data(#"{"id":7,"sessionId":"demo","sourceSessionId":"sender","target":"demo","message":"next","status":"pending","evidence":"queued","attempts":0,"queuedAt":"now","effort":"high","mode":"plan","serviceTier":"fast","outputSchema":{"type":"object","required":["answer"],"additionalProperties":false}}"#.utf8)
+    func testQueueDecodesPerTurnOptions() throws {
+        let data = Data(#"{"id":7,"sessionId":"demo","sourceSessionId":"sender","target":"demo","message":"next","status":"pending","evidence":"queued","attempts":0,"queuedAt":"now","serviceTier":"fast","outputSchema":{"type":"object","required":["answer"],"additionalProperties":false}}"#.utf8)
         let queue = try JSONDecoder().decode(QueueState.self, from: data)
-        XCTAssertEqual(queue.sourceSessionId, "sender"); XCTAssertEqual(queue.effort, "high")
-        XCTAssertEqual(queue.mode, "plan"); XCTAssertEqual(queue.serviceTier, "fast")
+        XCTAssertEqual(queue.sourceSessionId, "sender")
+        XCTAssertEqual(queue.serviceTier, "fast")
         let schema = try JSONSerialization.jsonObject(with: Data(queue.outputSchema!.formatted.utf8)) as! [String:Any]
         XCTAssertEqual(schema["required"] as? [String], ["answer"])
         XCTAssertEqual(schema["additionalProperties"] as? Bool, false)

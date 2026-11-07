@@ -423,7 +423,7 @@ func TestRelayOutboxPreservesOptionsWhenBusySteerIsConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.caps = surface.Capabilities{Send: true, Steer: true}
-	queueID, err := r.QueueRelayMessageWithOptions(to.ID, "relay with options", "relay:options", 1, surface.SendOptions{Model: "model-a", BusyDelivery: "steer", TurnOptions: surface.TurnOptions{Effort: "high"}})
+	queueID, err := r.QueueRelayMessageWithOptions(to.ID, "relay with options", "relay:options", 1, surface.SendOptions{Model: "model-a", BusyDelivery: "steer", TurnOptions: surface.TurnOptions{ServiceTier: "fast"}})
 	if err != nil {
 		t.Fatal(err)
 	}

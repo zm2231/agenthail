@@ -525,7 +525,7 @@ func (a *App) sendToNamedCoordinator(ctx context.Context, spec registry.Coordina
 	if err != nil {
 		return err
 	}
-	turnOptions, err := parseTurnOptions(args)
+	turnOptions, err := parseSendTurnOptions(args)
 	if err != nil {
 		return err
 	}

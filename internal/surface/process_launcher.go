@@ -205,7 +205,7 @@ func validateLaunchRequest(request LaunchRequest, agents []SurfaceKind) error {
 	if options.ConfigRoot != "" && request.Surface != KindClaude {
 		return errors.New("config root applies to Claude only")
 	}
-	if options.Agent != "" || options.PermissionMode != "" || options.ApprovalPolicy != "" || !options.TurnOptions.Empty() {
+	if options.Agent != "" || options.PermissionMode != "" || options.ApprovalPolicy != "" || !options.TurnOptions.Empty() || !options.LaunchSettings.Empty() {
 		return fmt.Errorf("%w: a terminal launch takes only the cwd, message, model, name and Claude config root", ErrLaunchOptionUnsupported)
 	}
 	return nil

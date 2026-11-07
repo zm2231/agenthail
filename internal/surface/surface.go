@@ -794,7 +794,8 @@ func PersonName(ctx context.Context) string {
 
 type SessionStartOptions struct {
 	TurnOptions
-	Name           string `json:"name,omitempty"`
+	LaunchSettings
+	Name          string `json:"name,omitempty"`
 	Agent          string `json:"agent,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
 	ConfigRoot     string `json:"configRoot,omitempty"`

@@ -33,7 +33,7 @@ func TestRouteForAsksTheAdapter(t *testing.T) {
 func TestHumanTurnRouteRejectsEveryPerMessageOption(t *testing.T) {
 	for _, options := range []SendOptions{
 		{Model: "claude-haiku-5-5"},
-		{TurnOptions: TurnOptions{Effort: "high"}},
+		{TurnOptions: TurnOptions{ServiceTier: "fast"}},
 	} {
 		err := RouteHumanTurn.Validate(routeFake{}, options)
 		if !IsDeliveryTerminal(err) {

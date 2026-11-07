@@ -349,8 +349,11 @@ start returns Claude's output.
 Codex supports `thread fork <target>` and `thread queue <target> <list|add|update|delete|reorder|start>`.
 Native queue adds require `--client-id <stable-id>`; reuse it only for retries
 of the same submission. Native queue commands do not enter the Agenthail outbox.
-`send` and `thread create codex` accept `--effort`, `--mode plan|default`,
-`--service-tier` and `--output-schema <file>`. Preserve these fields on retries.
+`send` and `thread create codex` accept `--service-tier` and
+`--output-schema <file>`; preserve them on retries. Effort and mode are session
+settings: `thread create codex` takes `--effort` and `--mode plan|default` for
+the first turn, and `send` refuses them. Change them later with the
+`turn-setting` action.
 See [session operations](../../docs/maintainers/session-operations.md) for the
 complete flags, API shapes, lifecycle limits and verification boundary.
 

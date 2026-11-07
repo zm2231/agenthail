@@ -1144,8 +1144,6 @@ struct CheckoutIdentity: Codable, Hashable {
 struct QueueState: Decodable, Identifiable, Equatable {
 	let operation: String?
     var sourceSessionId: String?
-    let effort: String?
-    let mode: String?
     let serviceTier: String?
     let outputSchema: RecordedJSON?
     let id: Int64

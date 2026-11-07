@@ -78,7 +78,7 @@ struct QueueFactsTest {
         expect(QueueSteer.refusal(attached, capabilities: steerCaps(false))?.contains("images can't join") == true, "an image waits where the steer takes none")
         expect(QueueSteer.refusal(fileOnly, capabilities: steerCaps(false)) == nil, "a file steers as its path even where images can't")
         expect(QueueSteer.refusal(fileOnly, capabilities: steerCaps(nil))?.contains("Update Agenthail") == true, "an older computer's attachments wait")
-        expect(QueueSteer.refusal(row(#","effort":"high""#), capabilities: steerCaps(true))?.contains("turn settings") == true, "steer can't carry turn settings")
+        expect(QueueSteer.refusal(row(#","serviceTier":"fast""#), capabilities: steerCaps(true))?.contains("turn settings") == true, "steer can't carry turn settings")
         expect(QueueSteer.refusal(row(#","model":"m""#), capabilities: steerCaps(true))?.contains("model") == true, "steer can't carry a model")
         expect(QueueSteer.refusal(row(#","attachments":[{"id":"b","name":"log.txt","mediaType":"text/plain","bytes":4,"missing":true}]"#), capabilities: steerCaps(true))?.contains("gone") == true, "a row whose file is gone can't steer")
         expect(queue(1, status: "pending", heldBy: "waiting").queuedReceipt == "Queued for @builder, which is waiting on you; sends after you answer.", "a refreshed receipt keeps that the target is waiting on you")

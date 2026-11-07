@@ -9,21 +9,28 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func applyCodexTurnOptions(ctx context.Context, client codexClient, session *surface.Session, model string, options surface.TurnOptions, params map[string]any) error {
+func applyCodexTurnOptions(model string, options surface.TurnOptions, params map[string]any) error {
 	if err := options.Validate(surface.KindCodex); err != nil {
 		return err
 	}
 	if model != "" {
 		params["model"] = model
 	}
-	if options.Effort != "" {
-		params["effort"] = options.Effort
-	}
 	if options.ServiceTier != "" {
 		params["serviceTierForTurn"] = options.ServiceTier
 	}
 	if len(options.OutputSchema) > 0 {
 		params["outputSchema"] = options.OutputSchema
+	}
+	return nil
+}
+
+func applyCodexLaunchSettings(ctx context.Context, client codexClient, session *surface.Session, model string, options surface.LaunchSettings, params map[string]any) error {
+	if err := options.ValidateCodex(); err != nil {
+		return err
+	}
+	if options.Effort != "" {
+		params["effort"] = options.Effort
 	}
 	if options.Mode != "" {
 		if model == "" {

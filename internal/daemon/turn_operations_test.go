@@ -41,11 +41,11 @@ func TestAdvancedOptionsWithoutModelReachDashboardAndOutbox(t *testing.T) {
 	adapter := &operationSurface{daemonSurface: fake}
 	d.Surfaces = []surface.Surface{adapter}
 	w := httptest.NewRecorder()
-	d.actionsHTTPHandler(actionFormatDashboard)(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"send","sessionId":"from","message":"hello","effort":"high","outputSchema":{"type":"object"}}`)))
-	if w.Code != 200 || adapter.options.Effort != "high" || len(adapter.options.OutputSchema) == 0 {
+	d.actionsHTTPHandler(actionFormatDashboard)(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"send","sessionId":"from","message":"hello","serviceTier":"fast","outputSchema":{"type":"object"}}`)))
+	if w.Code != 200 || adapter.options.ServiceTier != "fast" || len(adapter.options.OutputSchema) == 0 {
 		t.Fatalf("status=%d options=%+v body=%s", w.Code, adapter.options, w.Body)
 	}
-	id, err := r.QueueMessageWithOptions(from.ID, "queued", "", surface.SendOptions{TurnOptions: surface.TurnOptions{Effort: "xhigh", Mode: "plan"}})
+	id, err := r.QueueMessageWithOptions(from.ID, "queued", "", surface.SendOptions{TurnOptions: surface.TurnOptions{ServiceTier: "flex"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,13 +54,33 @@ func TestAdvancedOptionsWithoutModelReachDashboardAndOutbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := json.Marshal(state.Queue)
-	if !strings.Contains(string(data), `"effort":"xhigh"`) {
+	if !strings.Contains(string(data), `"serviceTier":"flex"`) {
 		t.Fatal(string(data))
 	}
 	d.drainMessageQueue(context.Background(), adapter, &from)
 	item, err := r.QueueItem(id, nil)
-	if err != nil || item.Status != "delivered" || adapter.options.Effort != "xhigh" || adapter.options.Mode != "plan" {
+	if err != nil || item.Status != "delivered" || adapter.options.ServiceTier != "flex" {
 		t.Fatal(item, adapter.options, err)
+	}
+}
+
+func TestASendCarryingEffortOrModeIsRefused(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	adapter := &operationSurface{daemonSurface: fake}
+	d.Surfaces = []surface.Surface{adapter}
+	for _, body := range []string{
+		`{"action":"send","sessionId":"from","message":"hello","effort":"high"}`,
+		`{"action":"send","sessionId":"from","message":"hello","mode":"plan"}`,
+		`{"action":"coordinator-send","sessionId":"from","message":"hello","effort":"high"}`,
+	} {
+		w := httptest.NewRecorder()
+		d.actionsHTTPHandler(actionFormatDashboard)(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(body)))
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "turn-setting") {
+			t.Fatalf("%s: status=%d body=%s", body, w.Code, w.Body)
+		}
+	}
+	if adapter.sends != 0 || r.QueueCount("from") != 0 {
+		t.Fatalf("a refused send reached the session: sends=%d queued=%d", adapter.sends, r.QueueCount("from"))
 	}
 }
 func TestDashboardForkPersistsAndNativeQueuePreservesCursor(t *testing.T) {

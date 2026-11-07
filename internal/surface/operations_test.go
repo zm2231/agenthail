@@ -8,13 +8,21 @@ import (
 )
 
 func TestTurnOptionValidationRejectsSilentDowngrades(t *testing.T) {
-	for _, options := range []TurnOptions{{Effort: "nonsense"}, {Mode: "random"}, {OutputSchema: json.RawMessage(`[]`)}, {OutputSchema: json.RawMessage(`null`)}, {ServiceTier: "unknown"}} {
+	for _, options := range []TurnOptions{{OutputSchema: json.RawMessage(`[]`)}, {OutputSchema: json.RawMessage(`null`)}, {ServiceTier: "unknown"}} {
 		if options.Validate(KindCodex) == nil {
 			t.Fatalf("accepted %+v", options)
 		}
 	}
-	if (TurnOptions{Effort: "high"}).Validate(KindNotion) == nil {
+	if (TurnOptions{ServiceTier: "fast"}).Validate(KindNotion) == nil {
 		t.Fatal("Notion silently accepted Codex options")
+	}
+	for _, settings := range []LaunchSettings{{Effort: "nonsense"}, {Mode: "random"}} {
+		if settings.ValidateCodex() == nil {
+			t.Fatalf("accepted %+v", settings)
+		}
+	}
+	if err := (LaunchSettings{Effort: "xhigh", Mode: "plan"}).ValidateCodex(); err != nil {
+		t.Fatal(err)
 	}
 }
 

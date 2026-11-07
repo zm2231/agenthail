@@ -4,18 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 )
 
 type TurnOptions struct {
-	Effort       string          `json:"effort,omitempty"`
-	Mode         string          `json:"mode,omitempty"`
 	ServiceTier  string          `json:"serviceTier,omitempty"`
 	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
 }
 
 func (o TurnOptions) Empty() bool {
-	return o.Effort == "" && o.Mode == "" && o.ServiceTier == "" && len(o.OutputSchema) == 0
+	return o.ServiceTier == "" && len(o.OutputSchema) == 0
 }
 func (o TurnOptions) Validate(kind SurfaceKind) error {
 	if o.Empty() {
@@ -23,12 +20,6 @@ func (o TurnOptions) Validate(kind SurfaceKind) error {
 	}
 	if kind != KindCodex {
 		return fmt.Errorf("advanced turn options require Codex")
-	}
-	if o.Effort != "" && !slices.Contains([]string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}, o.Effort) {
-		return fmt.Errorf("invalid reasoning effort")
-	}
-	if o.Mode != "" && o.Mode != "plan" && o.Mode != "default" {
-		return fmt.Errorf("mode must be plan or default")
 	}
 	if o.ServiceTier != "" && o.ServiceTier != "default" && o.ServiceTier != "fast" && o.ServiceTier != "flex" {
 		return fmt.Errorf("service tier must be default, fast, or flex")

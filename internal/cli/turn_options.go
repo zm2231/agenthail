@@ -8,7 +8,7 @@ import (
 )
 
 func parseTurnOptions(args []string) (surface.TurnOptions, error) {
-	options := surface.TurnOptions{Effort: flagVal(args, "--effort"), Mode: flagVal(args, "--mode"), ServiceTier: flagVal(args, "--service-tier")}
+	options := surface.TurnOptions{ServiceTier: flagVal(args, "--service-tier")}
 	if path := flagVal(args, "--output-schema"); path != "" {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -17,4 +17,15 @@ func parseTurnOptions(args []string) (surface.TurnOptions, error) {
 		options.OutputSchema = data
 	}
 	return options, nil
+}
+
+func parseSendTurnOptions(args []string) (surface.TurnOptions, error) {
+	if flagVal(args, "--effort") != "" || flagVal(args, "--mode") != "" {
+		return surface.TurnOptions{}, surface.ErrTurnSettingsOnSend
+	}
+	return parseTurnOptions(args)
+}
+
+func parseLaunchSettings(args []string) surface.LaunchSettings {
+	return surface.LaunchSettings{Effort: flagVal(args, "--effort"), Mode: flagVal(args, "--mode")}
 }

@@ -46,7 +46,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		"threadId": sess.ID,
 		"input":    codexUserInput(message, options.Images),
 	}
-	if err := applyCodexTurnOptions(ctx, conn, sess, options.Model, options.TurnOptions, params); err != nil {
+	if err := applyCodexTurnOptions(options.Model, options.TurnOptions, params); err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	resp, err := conn.Request(ctx, "turn/start", params, 10*time.Second)

@@ -1,6 +1,6 @@
 # Session creation, lifecycle and Codex native controls
 
-Agenthail exposes these operations through the CLI and the authenticated dashboard API. The web dashboard has creation controls, Codex turn options, and a session operations form. The native iPhone companion supports Claude background creation with name, worktree, named-agent, model, effort and permission options, plus ordinary session and Agenthail queue controls. The Mac app has Claude background lifecycle, Codex forks, native Codex queue editing, and Codex effort and plan mode; see [native apps](../native-apps.md). On iPhone, use the web dashboard, Mac app or CLI for those.
+Agenthail exposes these operations through the CLI and the authenticated dashboard API. The web dashboard has creation controls, model, effort and mode chips, Codex service tier and output schema, and a session operations form. The native iPhone companion supports Claude background creation with name, worktree, named-agent, model, effort and permission options, plus ordinary session and Agenthail queue controls. The Mac app has Claude background lifecycle, Codex forks, native Codex queue editing, and model, effort and mode chips; see [native apps](../native-apps.md). On iPhone, use the web dashboard, Mac app or CLI for those.
 
 The immediate send status in CLI JSON and dashboard/mobile API results is `sent`, `queued`, or `submitted`, followed by the target. `sent` means the selected transport accepted the request, `queued` means Agenthail durably accepted delayed work, and `submitted` means Agenthail recorded the intent without asserting provider acceptance. Human/API sends without an agent sender use the durable operator identity. Channel sends count `submitted` members separately from `sent` and `queued`. Receipt copy does not ask the sender to investigate read or confirmation state. Success is silent; proven delivery problems appear as notices. Internal audit evidence retains `transport_accepted`, `held`, `delivered`, `reply_observed`, `failed`, `unknown`, and `canceled`. Socket acceptance never proves model completion.
 
@@ -349,22 +349,23 @@ This queue belongs to Codex. Native queue actions do not also create Agenthail o
 ## Codex turn settings and structured output
 
 ```sh
-agenthail send @builder "Return the findings" --effort high --mode plan --service-tier fast --output-schema /path/to/schema.json --reply --json
-agenthail thread create codex "Return the findings" --output-schema /path/to/schema.json --effort high --json
+agenthail send @builder "Return the findings" --service-tier fast --output-schema /path/to/schema.json --reply --json
+agenthail thread create codex "Return the findings" --output-schema /path/to/schema.json --effort high --mode plan --json
 ```
 
-Effort accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; the selected model must support the requested value. Mode accepts `plan` or `default`. If mode is supplied without a model override, Agenthail reads the current session model. Codex's collaboration settings take precedence over separate model/effort fields. These native settings can affect subsequent turns; an omitted field does not promise a reset.
+A session's model, effort and mode are session state. `GET /api/v1/session-metadata` lists them as `turnSettings`, and the `turn-setting` action changes one: `{"action":"turn-setting","sessionId":…,"setting":"effort","value":"high"}`. A Codex thread keeps them and applies a change from its next turn; a Claude session the host runs applies it at once. A `send` (or `coordinator-send`) that carries `effort` or `mode` is refused with 400, and `agenthail send --effort` or `--mode` fails the same way. Creation still takes them for the first turn: effort accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`, and mode accepts `plan` or `default`; mode without a model reads the new thread's model.
 
 Service tier accepts `default`, `fast` or `flex` and uses the protocol's `serviceTierForTurn` field. Output schema is an inline JSON object in the API and a file in the CLI, limited to 64 KiB. Agenthail validates that it is an object; Codex validates supported schema semantics and constrains the final response. It does not constrain every tool event or intermediate message.
 
-Turn settings survive the durable Agenthail queue, retries and daemon replay even when no model override is given. Registry schema version 3 adds `message_queue.turn_options`; existing queued entries retain empty/default settings. Queue JSON and dashboard queue state expose the stored fields. Advanced send settings are rejected for non-Codex targets; Claude creation separately supports its native effort flag.
+Service tier and output schema survive the durable Agenthail queue, retries and daemon replay even when no model override is given; they are stored in `message_queue.turn_options`, and queue JSON and dashboard queue state expose them. They are rejected for non-Codex targets; Claude creation separately supports its native effort flag.
 
 ## API and output
 
 `POST /api/action` uses the existing dashboard authentication and request protection:
 
 - `session-create`: `surface`, `message`, `cwd`, `alias`, `model`, plus creation and turn fields.
-- `send`: `sessionId`, `message`, `effort`, `mode`, `serviceTier`, `outputSchema`.
+- `send`: `sessionId`, `message`, `serviceTier`, `outputSchema`.
+- `turn-setting`: `sessionId`, `setting` (`model`, `effort` or `mode`), `value`. An old runtime is `409 runtime_too_old` with `runtime` and `minimum`.
 - `session-fork`: `sessionId`, `fork: {model, lastTurnId, beforeTurnId}`.
 - `native-queue`: `sessionId`, `nativeQueue: {queueAction, message, queuedSubmissionId, clientUserMessageId, queuedSubmissionIds, cursor}`.
 - `session-lifecycle-status`, `session-lifecycle-logs`, `session-lifecycle-stop`, `session-lifecycle-resume`: `sessionId`.

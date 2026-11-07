@@ -234,8 +234,7 @@ struct QueueListView: View {
                 Text(envelope.body).textSelection(.enabled)
                 LabeledContent("Attempts", value: item.attempts.formatted()).font(.footnote)
                 if let value = item.model { LabeledContent("Model", value: value).font(.footnote) }
-                if let value = item.effort { LabeledContent("Effort", value: value).font(.footnote) }
-                if let value = item.mode { LabeledContent("Mode", value: value).font(.footnote) }
+                if let value = item.serviceTier { LabeledContent("Service tier", value: value).font(.footnote) }
                 if let value = item.sourceSessionId { LabeledContent("From session", value: value).font(.footnote).textSelection(.enabled) }
             }.font(.footnote)
             if let refusal = steering?.refusal {

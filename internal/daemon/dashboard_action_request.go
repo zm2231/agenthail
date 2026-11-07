@@ -9,7 +9,8 @@ import (
 
 type dashboardActionRequest struct {
 	surface.TurnOptions
-	Name            string                     `json:"name"`
+	surface.LaunchSettings
+	Name           string                     `json:"name"`
 	Worktree        string                     `json:"worktree"`
 	Isolation       string                     `json:"isolation"`
 	Base            string                     `json:"base"`

@@ -5,7 +5,7 @@ struct QueuedMessageSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private var details: [(name: String, value: String)] {
-        let optional: [(String, String?)] = [("Model", item.model), ("Effort", item.effort), ("Mode", item.mode)]
+        let optional: [(String, String?)] = [("Model", item.model), ("Service tier", item.serviceTier)]
         return [("Attempts", item.attempts.formatted())] + optional.compactMap { name, value in value.map { (name, $0) } }
     }
 

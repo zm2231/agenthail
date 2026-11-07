@@ -27,7 +27,7 @@ enum QueueSteer {
     }
 
     private static func carriesTurnOptions(_ item: QueueState) -> Bool {
-        [item.model, item.effort, item.mode, item.serviceTier].contains { !($0 ?? "").isEmpty } || item.outputSchema != nil
+        [item.model, item.serviceTier].contains { !($0 ?? "").isEmpty } || item.outputSchema != nil
     }
 
     private static func isImage(_ attachment: QueueAttachment) -> Bool {

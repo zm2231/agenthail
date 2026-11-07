@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type actionOperation func(*Daemon, context.Context, principal, dashboardActionRequest) (actionResult, error)
@@ -31,6 +33,9 @@ var typedActions = map[string]actionOperation{
 func (d *Daemon) dispatchAction(ctx context.Context, p principal, request dashboardActionRequest) (actionResult, error) {
 	if len(request.Attachments) > 0 && request.Action != "send" {
 		return actionResult{}, invalidRequest("attachments are only accepted with send")
+	}
+	if !request.LaunchSettings.Empty() && request.Action != "session-create" {
+		return actionResult{}, invalidRequest(surface.ErrTurnSettingsOnSend.Error())
 	}
 	if strings.HasPrefix(request.Action, "project-") {
 		return d.doProjectAction(ctx, p, projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title, Survivor: request.Survivor})

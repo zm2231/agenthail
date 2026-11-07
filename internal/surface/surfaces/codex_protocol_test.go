@@ -180,7 +180,7 @@ func TestCodexDesktopSendNeverResumesLoadedThreadAndLoadsUnloadedThreadOnce(t *t
 				return ""
 			})
 			session := test.session
-			sent, err := NewCodex(bridge.URL).SendWithOptions(context.Background(), &session, "deliver queued work", surface.SendOptions{TurnOptions: surface.TurnOptions{Mode: "plan"}})
+			sent, err := NewCodex(bridge.URL).SendWithOptions(context.Background(), &session, "deliver queued work", surface.SendOptions{TurnOptions: surface.TurnOptions{ServiceTier: "fast"}})
 			if err != nil || sent == nil || !sent.Accepted || sent.UUID != "turn" {
 				t.Fatalf("sent=%+v err=%v", sent, err)
 			}

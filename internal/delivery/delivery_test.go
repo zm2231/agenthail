@@ -644,7 +644,7 @@ func TestDispatcherQueuesSteerPolicyWhenOptionsNeedPreserving(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := &fakeSurface{result: &surface.SendResult{Accepted: false}, capabilities: surface.Capabilities{Steer: true}}
-	options := surface.SendOptions{BusyDelivery: "steer", Model: "model-a", TurnOptions: surface.TurnOptions{Effort: "high"}}
+	options := surface.SendOptions{BusyDelivery: "steer", Model: "model-a", TurnOptions: surface.TurnOptions{ServiceTier: "fast"}}
 	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "preserve options", "", options)
 	if err != nil || receipt.Evidence != surface.EvidenceQueued || len(adapter.steered) != 0 || r.QueueCount(session.ID) != 1 {
 		t.Fatalf("receipt=%+v err=%v steered=%v queued=%d", receipt, err, adapter.steered, r.QueueCount(session.ID))
@@ -653,7 +653,7 @@ func TestDispatcherQueuesSteerPolicyWhenOptionsNeedPreserving(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item.Model != "model-a" || item.Effort != "high" || item.BusyDelivery != "queue" {
+	if item.Model != "model-a" || item.ServiceTier != "fast" || item.BusyDelivery != "queue" {
 		t.Fatalf("queued options were not preserved safely: %+v", item)
 	}
 }

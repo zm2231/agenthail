@@ -186,6 +186,11 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 			d.recordSetting(session, key, value, p.actor())
 			result = &surface.ControlResult{SessionID: session.ID, Action: "turn-setting", Evidence: surface.EvidenceDelivered}
 		}
+		if err == nil && key == surface.TurnSettingModel && session.Surface == surface.KindClaude {
+			if persistErr := d.Registry.RegisterSession(*session); persistErr != nil {
+				err = fmt.Errorf("persist Claude model state: %w", persistErr)
+			}
+		}
 	case "permission-mode":
 		if !effective.PermissionMode {
 			return actionResult{}, invalidRequest("this session's permission mode cannot change while it runs")
