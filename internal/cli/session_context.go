@@ -39,12 +39,15 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	if hook.Event != claudehooks.Start.Event && hook.Event != claudehooks.PromptSubmit.Event {
 		return nil
 	}
+	ctx, cancel, err := a.deadlineContext(claudeSessionContextLimit)
+	if err != nil {
+		return nil
+	}
+	defer cancel()
 	store, err := a.openRegistry()
 	if err != nil || store == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	session, err := store.Session(hook.SessionID)
 	if err != nil {
 		// Codex runs the hook inside the app-server that holds the thread

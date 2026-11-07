@@ -30,6 +30,11 @@ func (a *App) turnStop(input io.Reader, now time.Time) map[string]any {
 	if hook.StopHookActive || hook.AgentID != "" {
 		return nil
 	}
+	_, cancel, err := a.deadlineContext(claudeSessionContextLimit)
+	if err != nil {
+		return nil
+	}
+	defer cancel()
 	store, err := a.openRegistry()
 	if err != nil || store == nil {
 		return nil

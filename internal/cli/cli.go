@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -19,10 +20,12 @@ type SurfaceEntry struct {
 
 type App struct {
 	Registry                  *registry.Registry
-	OpenRegistry              func() (*registry.Registry, error)
-	OpenCurrentRegistry       func() (*registry.Registry, error)
+	OpenRegistry              func(writeDeadline context.Context) (*registry.Registry, error)
+	OpenCurrentRegistry       func(writeDeadline context.Context) (*registry.Registry, error)
 	registryMu                sync.Mutex
 	registryErr               error
+	writeDeadline             context.Context
+	releaseWrites             func()
 	Surfaces                  []SurfaceEntry
 	UIDir                     string
 	uiAuthorName              string
@@ -54,11 +57,16 @@ func (a *App) openRegistry() (*registry.Registry, error) {
 	if a.Registry != nil || a.OpenRegistry == nil || a.registryErr != nil {
 		return a.Registry, a.registryErr
 	}
-	a.Registry, a.registryErr = a.OpenRegistry()
+	deadline := a.writeDeadline
+	if deadline == nil {
+		deadline = context.Background()
+	}
+	a.Registry, a.registryErr = a.OpenRegistry(deadline)
 	if a.registryErr != nil {
 		a.registryErr = fmt.Errorf("open registry: %w", a.registryErr)
 	} else {
 		a.Registry.SetBusyPolicy(deliverypolicy.Current)
+		a.registryErr = a.bindWritesLocked()
 	}
 	return a.Registry, a.registryErr
 }

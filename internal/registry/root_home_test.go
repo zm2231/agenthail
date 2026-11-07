@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -110,7 +111,7 @@ func TestEveryOpenAndARestoreRefuseBeforeCreatingAnything(t *testing.T) {
 	path := filepath.Join(home, ".agenthail", "registry.db")
 	for name, attempt := range map[string]func() error{
 		"Open":        func() error { _, err := Open(path); return err },
-		"OpenDefault": func() error { _, err := OpenDefault(true); return err },
+		"OpenDefault": func() error { _, err := OpenDefault(context.Background(), true); return err },
 		"OpenCurrent": func() error { _, err := OpenCurrent(path); return err },
 		"restore":     func() error { _, err := restoreMigrationBackup(path, 1); return err },
 		"any command": RefuseSudoHome,

@@ -22,7 +22,7 @@ const claudeHookInputLimit = 1 << 20
 
 // claudeSessionContextLimit bounds the session-context hook, registry locks
 // included, well inside the hook's timeout: a prompt never waits on it.
-const claudeSessionContextLimit = 5 * time.Second
+var claudeSessionContextLimit = 5 * time.Second
 
 // claudeSessionContextExpired starts the limit; tests run the hook without one.
 var claudeSessionContextExpired = func() <-chan time.Time { return time.After(claudeSessionContextLimit) }

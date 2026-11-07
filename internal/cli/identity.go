@@ -268,7 +268,10 @@ func (a *App) cmdRelay(args []string) error {
 		if err != nil {
 			return err
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
+		ctx, cancel, err := a.deadlineContext(a.DefaultTimeout)
+		if err != nil {
+			return err
+		}
 		defer cancel()
 		remote, remoteErr := a.pairedHostRelays(ctx)
 		if hasFlag(args, "--json") {
