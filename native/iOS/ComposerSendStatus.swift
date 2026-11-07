@@ -13,6 +13,10 @@ struct ComposerSendStatus: View {
             row(failure, color: PhonePalette.failed, identifier: "send-failure") {
                 Button("Retry") { model.send(to: session) }
                     .accessibilityIdentifier("send-retry")
+                if model.refusedSends[session.id]?.canDelete == true {
+                    Button("Delete", role: .destructive) { model.deleteRefusedSend(in: session.id) }
+                        .accessibilityIdentifier("send-delete")
+                }
             }
         } else if let waiting {
             row(waiting.retryStopped ? "Not confirmed" : "Not confirmed yet · retrying", detail: waiting.previewLine, color: PhonePalette.muted, identifier: "send-unconfirmed") {

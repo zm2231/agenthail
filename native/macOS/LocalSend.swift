@@ -13,6 +13,10 @@ struct LocalSend: Identifiable, Equatable {
     var busyDelivery: String? = nil
     var turnSettings = TurnSettings()
     var failure: String? = nil
+    var deliveryID: Int64? = nil
+    var deletable = false
+
+    var canDelete: Bool { failure != nil && (deliveryID == nil || deletable) }
 
     static let clockSkew: TimeInterval = 5
 

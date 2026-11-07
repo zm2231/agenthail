@@ -15,7 +15,10 @@ struct SessionRekeys {
     }
 
     func resolve(_ id: String) -> String {
-        map[id] ?? id
+        var current = id
+        var seen: Set<String> = [id]
+        while let next = map[current], seen.insert(next).inserted { current = next }
+        return current
     }
 
     /// Moves values held under retired ids to the ids they continue under,
@@ -23,8 +26,9 @@ struct SessionRekeys {
     /// anything moved.
     func carry<Value>(_ values: inout [String: Value]) -> Bool {
         var moved = false
-        for (old, new) in map {
-            guard let value = values.removeValue(forKey: old) else { continue }
+        for old in map.keys {
+            let new = resolve(old)
+            guard new != old, let value = values.removeValue(forKey: old) else { continue }
             if values[new] == nil { values[new] = value }
             moved = true
         }

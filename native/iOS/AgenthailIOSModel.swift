@@ -113,6 +113,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private let sendQueue = SendQueue()
     @Published private(set) var pendingSends: [String: [PendingSend]] = [:]
     @Published var failedSends: [String: String] = [:]
+    @Published private(set) var refusedSends: [String: RefusedSend] = [:]
+    private var keptDeliveries: [String: KeptDelivery] = [:]
     private var lostAttachments: [String: [String]] = [:]
     private var composerStore: ComposerStore?
     private var waitingComposerStore: ComposerStore?
@@ -1557,6 +1559,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         sendQueue.carry(rekeys)
         var failures = failedSends
         if rekeys.carry(&failures) { failedSends = failures }
+        var refused = refusedSends
+        if rekeys.carry(&refused) { refusedSends = refused }
         _ = rekeys.carry(&lostAttachments)
         var settings = turnSettingsDrafts
         if rekeys.carry(&settings) { turnSettingsDrafts = settings }
@@ -1597,20 +1601,25 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = composerAttachments
         guard !ComposerAttachments.isEmpty(text: message, attachments: attachments) else { return }
+        let kept = RefusedSend(message: message, attachments: attachments)
         guard let detail = selectedDetail, detail.session.id == session.id else {
             failedSends[session.id] = "This session is still opening. Your draft is kept."
+            refusedSends[session.id] = kept
             return
         }
         guard !detail.readOnly, detail.capabilities.send else {
             failedSends[session.id] = "This session can't take messages. Your draft is kept."
+            refusedSends[session.id] = kept
             return
         }
         do { _ = try self.resolve(session.id) } catch {
             failedSends[session.id] = AgenthailAPIError.userMessage(error)
+            refusedSends[session.id] = kept
             return
         }
         let turnSettings = session.surface == "codex" ? turnSettingsDrafts[session.id] ?? TurnSettings() : TurnSettings()
         failedSends[session.id] = nil
+        refusedSends[session.id] = nil
         deliveryQueueIDs.removeValue(forKey: session.id)
         deliveryStatus[session.id] = "Sending…"
         composer = ""
@@ -1631,6 +1640,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     private func deliver(_ send: PendingSend) async -> SendOutcome {
+        keptDeliveries[send.idempotencyKey] = nil
         var background = UIBackgroundTaskIdentifier.invalid
         background = UIApplication.shared.beginBackgroundTask(withName: "send") {
             UIApplication.shared.endBackgroundTask(background)
@@ -1663,6 +1673,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             }
             return .answered
         } catch {
+            if let kept = error as? KeptDelivery { keptDeliveries[send.idempotencyKey] = kept }
             return .of(error)
         }
     }
@@ -1682,8 +1693,43 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         deliveryIDs.removeValue(forKey: send.sessionID)
         deliveryStatus[send.sessionID] = "Couldn’t complete request. Draft kept."
         failedSends[send.sessionID] = reason
+        let kept = keptDeliveries.removeValue(forKey: send.idempotencyKey)
+        refusedSends[send.sessionID] = RefusedSend(message: send.message, attachments: send.attachments, deliveryID: kept?.deliveryID, deletable: kept?.deletable ?? false)
         if selectedSessionID != send.sessionID { operationError = reason }
         returnToComposer(send)
+        saveComposerState()
+    }
+
+    func deleteRefusedSend(in sessionID: String) {
+        guard let refused = refusedSends[sessionID], refused.canDelete else { return }
+        guard let deliveryID = refused.deliveryID else {
+            dropRefusedSend(refused, in: sessionID)
+            return
+        }
+        Task {
+            do {
+                try await resolve(sessionID).api.action("delivery-delete", deliveryID: deliveryID)
+                dropRefusedSend(refused, in: rekeys.resolve(sessionID))
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
+        }
+    }
+
+    private func dropRefusedSend(_ refused: RefusedSend, in sessionID: String) {
+        guard refusedSends[sessionID] == refused else { return }
+        refusedSends[sessionID] = nil
+        failedSends[sessionID] = nil
+        deliveryStatus[sessionID] = nil
+        if selectedSessionID == sessionID {
+            let left = refused.removed(from: composer, attachments: composerAttachments)
+            composer = left.text
+            composerAttachments = left.attachments
+        } else {
+            let left = refused.removed(from: drafts[sessionID] ?? "", attachments: attachmentDrafts[sessionID] ?? [])
+            drafts[sessionID] = left.text
+            attachmentDrafts[sessionID] = left.attachments
+        }
         saveComposerState()
     }
 
@@ -1997,6 +2043,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         attachmentDrafts = attachmentDrafts.filter { !owned($0.key) }
         sendQueue.removeAll(where: owned)
         failedSends = failedSends.filter { !owned($0.key) }
+        refusedSends = refusedSends.filter { !owned($0.key) }
         lostAttachments = lostAttachments.filter { !owned($0.key) }
         store.prune(removing: owned)
         stashes = stashes.filter { !owned($0.key) }
