@@ -151,6 +151,9 @@ func setLead(t *testing.T, node *federationNode, project, root, name, sessionID 
 	if _, err := node.reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: project, ProjectRoot: root, Name: name, Surface: "codex", Cwd: root}, change); err != nil {
 		t.Fatal(err)
 	}
+	// The daemon publishes its own coordinator changes to paired hosts this
+	// way; a registry write alone reaches them only when something else does.
+	node.daemon.flushCatalog("coordinator " + project)
 }
 
 func sendToProject(t *testing.T, operator *mcp.ClientSession, project, message, key string) (coordinatorSendReply, string, bool) {

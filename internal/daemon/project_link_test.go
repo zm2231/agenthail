@@ -117,6 +117,7 @@ func clearLead(t *testing.T, node *federationNode, project string) {
 	if _, err := node.reg.ClearCoordinator(project, "test", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
+	node.daemon.flushCatalog("coordinator " + project)
 }
 
 func leadHistory(t *testing.T, node *federationNode, project string) []string {
