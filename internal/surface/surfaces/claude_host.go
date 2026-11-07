@@ -162,7 +162,9 @@ func (h *claudeHost) readState() {
 // The intent uuid becomes the transcript record's uuid: the turn is followed
 // by it, and a resend of the same message runs once. Only a person's turn
 // carries the human origin; any other turn Claude records as the host's.
-func (c *Claude) sendHostTurn(ctx context.Context, sess *surface.Session, message, priority string, images surface.Uploads, person bool) (*surface.SendResult, error) {
+// sendHostTurn with whenIdle leaves a busy session's message unaccepted, so
+// the sender's busy delivery decides whether it waits or steers.
+func (c *Claude) sendHostTurn(ctx context.Context, sess *surface.Session, message, priority string, images surface.Uploads, person, whenIdle bool) (*surface.SendResult, error) {
 	id := surface.MessageUUID(ctx)
 	if id == "" {
 		id = uuid.NewString()
@@ -171,11 +173,14 @@ func (c *Claude) sendHostTurn(ctx context.Context, sess *surface.Session, messag
 	for _, image := range images {
 		attached = append(attached, claudehost.Image{Path: image.Path, MediaType: image.MediaType})
 	}
-	request := claudehost.SendRequest{SessionID: sess.ID, UUID: id, Text: message, Images: attached, Priority: priority}
+	request := claudehost.SendRequest{SessionID: sess.ID, UUID: id, Text: message, Images: attached, Priority: priority, IfIdle: whenIdle}
 	if person {
 		request.Origin = &claudehost.Origin{Kind: "human"}
 	}
 	if _, err := c.host.client.Send(ctx, request); err != nil {
+		if whenIdle && claudehost.IsCode(err, "busy") {
+			return &surface.SendResult{UUID: id, Accepted: false}, nil
+		}
 		return nil, claudeHostDeliveryError(err)
 	}
 	return &surface.SendResult{UUID: id, Accepted: true}, nil
@@ -191,7 +196,7 @@ func (c *Claude) SendAgenthailTurn(ctx context.Context, sess *surface.Session, m
 	if _, err := c.reach(ctx, sess); err != nil {
 		return nil, err
 	}
-	return c.sendHostTurn(ctx, sess, message, "", nil, false)
+	return c.sendHostTurn(ctx, sess, message, "", nil, false, true)
 }
 
 func (c *Claude) interruptHost(ctx context.Context, sess *surface.Session) error {

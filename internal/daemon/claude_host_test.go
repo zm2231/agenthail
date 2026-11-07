@@ -95,6 +95,7 @@ func TestAPersonsMessageToAHostSessionIsDeliveredUnderItsIntentUUID(t *testing.T
 	if receipt.Evidence != surface.EvidenceDelivered || receipt.TurnID != intent.UUID {
 		t.Fatalf("receipt = %+v, want delivered with turn %s", receipt, intent.UUID)
 	}
+	testkit.Eventually(t, "the first turn to end", 15*time.Second, func() bool { return hostState(t, client, id) == "idle" })
 
 	queued, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: surface.PersonSessionID, TargetSessionID: id, Message: "sent from the queue", Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
 	if err != nil {

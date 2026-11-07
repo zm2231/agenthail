@@ -136,7 +136,7 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 		return nil, err
 	}
 	if claudeHosted(sess) {
-		return c.sendHostTurn(ctx, sess, message, "", images, true)
+		return c.sendHostTurn(ctx, sess, message, "", images, true, true)
 	}
 	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("%w: Claude conversation %s runs without its web bridge", surface.ErrRouteChanged, sess.ID))

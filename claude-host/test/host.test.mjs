@@ -768,6 +768,27 @@ test('interrupt ends the running turn', async () => {
   c.close();
 });
 
+test('a message sent only if Claude is idle is refused while a turn runs and taken once it ends', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const running = randomUUID();
+  await c.call('send', { sessionId: id, uuid: running, text: 'SLOW 30000' });
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'busy');
+  const held = randomUUID();
+  await assert.rejects(c.call('send', { sessionId: id, uuid: held, text: 'after the turn', ifIdle: true }), { code: 'busy' });
+  await c.call('interrupt', { sessionId: id });
+  await c.event(turnResult(id, running));
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'idle');
+  assert.deepEqual(await c.call('send', { sessionId: id, uuid: held, text: 'after the turn', ifIdle: true }), { accepted: true, duplicate: false });
+  await c.event(turnResult(id, held));
+  assert.deepEqual(transcript(f, id).map((l) => [l.uuid, l.reply]), [[running, 'interrupted'], [held, 'echo:after the turn']]);
+  c.close();
+});
+
 test('a host restart keeps the running turn and resumes the session afterwards', async () => {
   const f = fixture();
   const first = await startHost(f);

@@ -173,7 +173,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 	if err := surface.SessionReady(ctx, *session); err != nil {
 		return session, nil, fmt.Errorf("record the new conversation before its first turn: %w", err)
 	}
-	sent, err := c.sendHostTurn(ctx, session, options.Message, "", nil, surface.SourceSessionID(ctx) == surface.PersonSessionID)
+	sent, err := c.sendHostTurn(ctx, session, options.Message, "", nil, surface.SourceSessionID(ctx) == surface.PersonSessionID, false)
 	return session, sent, err
 }
 

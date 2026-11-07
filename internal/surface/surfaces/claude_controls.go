@@ -236,7 +236,7 @@ func (c *Claude) hostControl(ctx context.Context, sess *surface.Session, action,
 		if err != nil {
 			return nil, err
 		}
-		sent, err := c.sendHostTurn(ctx, sess, value, "now", images, person)
+		sent, err := c.sendHostTurn(ctx, sess, value, "now", images, person, false)
 		if err != nil {
 			return nil, err
 		}
@@ -246,7 +246,7 @@ func (c *Claude) hostControl(ctx context.Context, sess *surface.Session, action,
 			return nil, err
 		}
 		return c.compactControl(ctx, sess, func(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
-			return c.sendHostTurn(ctx, sess, message, "", nil, false)
+			return c.sendHostTurn(ctx, sess, message, "", nil, false, false)
 		})
 	}
 	return nil, surface.ErrUnsupported

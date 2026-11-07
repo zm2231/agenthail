@@ -235,6 +235,7 @@ type SendRequest struct {
 	Images    []Image `json:"images,omitempty"`
 	Priority  string  `json:"priority,omitempty"`
 	Origin    *Origin `json:"origin,omitempty"`
+	IfIdle    bool    `json:"ifIdle,omitempty"`
 }
 
 // Image is a stored image file the host reads and gives Claude as an image
