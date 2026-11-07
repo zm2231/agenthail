@@ -4,6 +4,7 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 
 - [Packaging and releases](../packaging.md)
 - [Self-hosted CI runners](self-hosted-ci.md)
+- [iPhone live harness: real daemons for connection tests](ios-live-harness.md)
 - [Linux daemon: systemd service, updates and doctor](linux-daemon.md)
 - [Daemon runtime profiles: capturing heap, allocs and goroutines](debug-profiles.md)
 - [Claude session host](claude-host.md)
