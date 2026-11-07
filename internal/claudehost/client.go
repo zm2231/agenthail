@@ -520,7 +520,10 @@ func (c Client) sessionCall(ctx context.Context, method string, params, out any)
 
 // onRetiring runs call on every retiring host at once and returns the answer
 // of the one that has the session, so a host that does not answer holds up
-// only a session it may run. When none has it, the answer is notOpen.
+// only a session it may run. When none has it, the answer is notOpen, the
+// current host's; a held answer is asked again, since the Claude it named may
+// have exited and its host forgotten the session after the current host gave
+// it.
 func (c Client) onRetiring(ctx context.Context, notOpen error, call func(context.Context, Client) (json.RawMessage, error)) (json.RawMessage, error) {
 	retiring := c.Retiring()
 	ctx, cancel := context.WithCancel(ctx)
@@ -542,6 +545,9 @@ func (c Client) onRetiring(ctx context.Context, notOpen error, call func(context
 			continue
 		}
 		return answer.result, answer.err
+	}
+	if IsCode(notOpen, "held") {
+		return call(ctx, c)
 	}
 	return nil, notOpen
 }
