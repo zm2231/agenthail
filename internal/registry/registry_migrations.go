@@ -322,6 +322,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "delivery_intents", "retries", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "delivery_intents", "failed_from", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	for _, column := range []struct{ name, decl string }{
 		{"handoff", `TEXT NOT NULL DEFAULT 'turn_finished'`},
 		{"event_cursor", `INTEGER NOT NULL DEFAULT 0`},

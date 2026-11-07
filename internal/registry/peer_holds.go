@@ -92,7 +92,7 @@ func (r *Registry) DropPeerMessage(m PeerMessage, reason string) (bool, error) {
 		if !heldFrom(intent.Status) && intent.Status != DeliveryIntentHeld {
 			return false, nil
 		}
-		if _, err := tx.Exec(`UPDATE delivery_intents SET dismissed_at=NULL WHERE id=?`, intent.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,dismissed_at=NULL WHERE id=?`, DeliveryIntentHeld, intent.ID); err != nil {
 			return false, err
 		}
 		if changed, err := failDeliveryIntent(tx, intent.ID, reason); err != nil || !changed {

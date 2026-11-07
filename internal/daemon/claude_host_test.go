@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -111,6 +112,40 @@ func TestAPersonsMessageToAHostSessionIsDeliveredUnderItsIntentUUID(t *testing.T
 			t.Fatalf("turn %d = %+v, want a human turn %q under %s", i, turns[i], want.text, want.uuid)
 		}
 	}
+}
+
+func TestAPersonCompactsAHostSessionFromTheDashboard(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	session := hostedSession(t, claude, id)
+	r := hostRegistry(t)
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDaemon(t, r, []surface.Surface{claude})
+	ctx := context.Background()
+	if _, err := d.dispatcher().DeliverWithOptions(ctx, claude, &session, "hello", "", surface.SendOptions{Author: surface.AuthorPerson}); err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the turn", 15*time.Second, func() bool { return len(fixture.Turns(t, id)) == 1 })
+
+	result, err := d.doSessionAction(ctx, principal{Kind: principalPerson}, dashboardActionRequest{SessionID: id, Action: "compact"})
+	if err != nil {
+		t.Fatalf("compact action: %v", err)
+	}
+	d.drainMessageQueue(ctx, claude, &session)
+	testkit.Eventually(t, fmt.Sprintf("the queued compact of action %+v delivered", result), 15*time.Second, func() bool {
+		history, err := r.ListHistory(20, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return slices.ContainsFunc(history, func(entry registry.HistoryEntry) bool {
+			return entry.Kind == "delivered" && entry.Message == "compact" && entry.Evidence == surface.EvidenceDelivered
+		})
+	})
 }
 
 func TestAStoppedDaemonLeavesNoClaudeHostSupervisorRunning(t *testing.T) {

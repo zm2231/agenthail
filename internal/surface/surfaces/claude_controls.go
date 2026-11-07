@@ -149,7 +149,7 @@ func (c *Claude) Control(ctx context.Context, sess *surface.Session, control sur
 	case "status":
 		return &surface.ControlResult{SessionID: sess.ID, Action: "status", Evidence: surface.EvidenceReplyObserved, Source: "claude-runtime-state", Output: model, Detail: "Remote Control is connected to this session; the model comes from its runtime"}, nil
 	case "compact":
-		return c.compactControl(ctx, sess)
+		return c.compactControl(ctx, sess, c.postMessage)
 	case "context", "usage", "effort", "rename":
 		return c.commandControl(ctx, sess, control.Action, value)
 	case "model":
@@ -241,6 +241,13 @@ func (c *Claude) hostControl(ctx context.Context, sess *surface.Session, action,
 			return nil, err
 		}
 		return &surface.ControlResult{SessionID: sess.ID, RequestID: sent.UUID, TurnID: sent.UUID, Action: action, Evidence: surface.EvidenceDelivered, Source: "claude-host"}, nil
+	case "compact":
+		if _, err := c.reach(ctx, sess); err != nil {
+			return nil, err
+		}
+		return c.compactControl(ctx, sess, func(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+			return c.sendHostTurn(ctx, sess, message, "", nil, false)
+		})
 	}
 	return nil, surface.ErrUnsupported
 }
@@ -330,7 +337,7 @@ func (c *Claude) confirmInterrupt(ctx context.Context, sess *surface.Session, re
 	return result, nil
 }
 
-func (c *Claude) compactControl(ctx context.Context, sess *surface.Session) (*surface.ControlResult, error) {
+func (c *Claude) compactControl(ctx context.Context, sess *surface.Session, send func(context.Context, *surface.Session, string) (*surface.SendResult, error)) (*surface.ControlResult, error) {
 	path := sess.Transcript
 	if path == "" {
 		path = c.transcriptPath(sess)
@@ -339,7 +346,7 @@ func (c *Claude) compactControl(ctx context.Context, sess *surface.Session) (*su
 	if err != nil {
 		return nil, fmt.Errorf("compact confirmation requires a local transcript: %w", err)
 	}
-	sent, err := c.postMessage(ctx, sess, "/compact")
+	sent, err := send(ctx, sess, "/compact")
 	if err != nil {
 		return nil, err
 	}
@@ -350,15 +357,19 @@ func (c *Claude) compactControl(ctx context.Context, sess *surface.Session) (*su
 			first = false
 			return false, nil
 		}
-		completed, err := readClaudeCompactCompletion(path, info.Size(), sent.UUID)
+		completed, rejected, err := readClaudeCompactCompletion(path, info.Size(), sent.UUID)
 		if err != nil {
 			return false, fmt.Errorf("read compact completion: %w", err)
 		}
-		if completed {
-			return true, nil
+		if rejected != "" {
+			result.Evidence = surface.EvidenceFailed
+			return false, surface.DeliveryTerminal(fmt.Errorf("Claude rejected /compact: %s", rejected), surface.DeliveryInvalidRequest)
 		}
-		return false, nil
+		return completed, nil
 	})
+	if result.Evidence == surface.EvidenceFailed {
+		return result, err
+	}
 	if err != nil {
 		result.Evidence = surface.EvidenceUnknown
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
