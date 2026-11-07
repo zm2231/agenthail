@@ -265,14 +265,15 @@ final class VoiceTests: XCTestCase {
     func testLosingTheHostEndsTheSystemCallAfterTheGrace() async throws {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
-        model.heartbeatInterval = .milliseconds(20); model.heartbeatGrace = .milliseconds(200)
+        model.heartbeatInterval = .milliseconds(10); model.heartbeatGrace = .seconds(60)
         api.heartbeatReply = { _ in throw URLError(.notConnectedToInternet) }
         await model.call()
         audio.onMessage?("offer", "v=0 fixture")
         audio.onMessage?("connection", "connected")
-        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "heartbeat" }) { await Task.yield() }
-        try await Task.sleep(for: .milliseconds(100))
-        XCTAssertEqual(audio.ends, 0)
+        for _ in 0..<500 where api.actions.filter({ $0.action == "heartbeat" }).count < 3 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertGreaterThanOrEqual(api.actions.filter { $0.action == "heartbeat" }.count, 3)
+        XCTAssertEqual(audio.ends, 0, "failed heartbeats inside the grace keep the call")
+        model.heartbeatGrace = .zero
         for _ in 0..<300 where audio.ends == 0 { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(audio.ends, 1)
         XCTAssertFalse(model.hasLocalCall)
