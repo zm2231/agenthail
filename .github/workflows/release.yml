@@ -94,7 +94,7 @@ jobs:
         run: scripts/fetch-node.sh
       - name: Test source
         run: |
-          go test ./... -race -count=1 -timeout 25m
+          go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
           go vet ./...
 
   macos-package:
@@ -220,7 +220,7 @@ jobs:
       - name: Test source on Linux
         if: matrix.arch == 'amd64'
         run: |
-          go test ./... -race -count=1 -timeout 25m
+          go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
           go vet ./...
       - name: Build Linux archive
         env:

@@ -440,8 +440,13 @@ the host, and `thread resume` reopens it. The host keeps no background log.
 A Claude process started through the SDK does not register a Remote Control
 bridge, with or without `--remote-control`, while `claude --bg` under the same
 account does. Host sessions therefore have no `bridgeSessionId` and are not
-controllable from claude.ai or the Claude apps, and `/compact` is unsupported
-for them. The model and permission mode change through the host instead.
+controllable from claude.ai or the Claude apps. The model and permission mode
+change through the host instead, and compact is `/compact` sent as an ordinary
+turn, which Claude runs as the command. Claude writes the compact boundary and
+its summary before the command's own record; the summary carries the command's
+`promptId`, which joins the boundary to the request. A refusal is a
+`local_command` stderr record under the request, such as `Error: No messages to
+compact`, and fails the compact without a retry.
 
 ## Packaging
 
