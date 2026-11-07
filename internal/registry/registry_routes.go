@@ -63,6 +63,20 @@ func (r *Registry) AddRelayRoute(from, to, pattern string, once bool, handoff st
 	return id, nil
 }
 
+func (r *Registry) MoveRelayRoutes(from, to string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, query := range routeMoves {
+		if _, err := tx.Exec(query, from, to); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 type WatchedSession struct {
 	ID      string
 	Surface surface.SurfaceKind
