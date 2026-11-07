@@ -25,6 +25,8 @@ final class VoiceOperatorModel: ObservableObject {
     private var timelineAPI: AgenthailAPI?
     private var polling: Task<Void, Never>?
     private var heartbeat: Task<Void, Never>?
+    var heartbeatInterval: Duration = .seconds(10)
+    var heartbeatGrace: Duration = .seconds(30)
     private var activityRefresh: Task<Void, Never>?
     private var mediaRecovery: Task<Void, Never>?
     private var visibleScreens: Int?
@@ -142,6 +144,10 @@ final class VoiceOperatorModel: ObservableObject {
                 hangup()
                 return
             }
+            if next.phase == "stopping", hasLocalCall, let attemptID, next.attemptId == attemptID {
+                hostStopped(next, attempt: attemptID)
+                return
+            }
             let terminal = next.phase == "ended" || next.phase == "blocked"
             if terminal, (hostHangupPending || hostHangupUnconfirmed), next.attemptId != hostHangupAttemptID { return }
             if terminal, dialing || audioConnected {
@@ -245,6 +251,10 @@ final class VoiceOperatorModel: ObservableObject {
                     let next = try await api.action(VoiceAction(action: "heartbeat", attemptId: attempt))
                     guard !Task.isCancelled, current == self.generation else { return }
                     lastSuccess = .now
+                    if next.phase == "stopping", next.attemptId == attempt {
+                        self.hostStopped(next, attempt: attempt)
+                        return
+                    }
                     if ["ended", "blocked", "unknown"].contains(next.phase) {
                         self.diagnostics?.end("host_\(next.phase)", id: attempt)
                         self.error = self.error ?? next.message ?? "The host ended this call."
@@ -253,16 +263,25 @@ final class VoiceOperatorModel: ObservableObject {
                     }
                 } catch {
                     guard !Task.isCancelled, current == self.generation else { return }
-                    if lastSuccess.duration(to: .now) >= .seconds(30) {
+                    if lastSuccess.duration(to: .now) >= self.heartbeatGrace {
                         self.diagnostics?.end("host_unreachable", id: attempt)
                         self.error = self.error ?? "The connection to Agenthail was lost. Audio has stopped; call again when it reconnects."
                         self.hangup()
                         return
                     }
                 }
-                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                do { try await Task.sleep(for: self.heartbeatInterval) } catch { return }
             }
         }
+    }
+
+    // Heartbeats would keep the host's stopping call alive forever.
+    private func hostStopped(_ next: VoiceState, attempt: String) {
+        state = next
+        diagnostics?.end("host_stopping", id: attempt)
+        error = error ?? next.message.flatMap { $0.isEmpty ? nil : $0 } ?? "The host ended this voice call."
+        startSubmitted = false
+        hangup()
     }
 
     func call() async {
