@@ -282,6 +282,8 @@ struct SessionSidebar: View {
                 .keyboardShortcut(shortcuts.keyboardShortcut(.nextSession))
                 .hidden()
         }
+        // The column re-measures its minimum size on every layout; an open frame answers without measuring every row.
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
     }
 }
 
