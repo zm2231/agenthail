@@ -1,3 +1,4 @@
+import '../../scripts/test-home.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import http from 'node:http';
