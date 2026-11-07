@@ -16,6 +16,7 @@ const (
 	sessionOnly    = "per-session state read by its own command or the launcher, not by any view query"
 	voiceOperators = "voice operator roles, read by LocalSessionRoles, which the view build does not call"
 	queueMarks     = "mirrored sessions whose queue changed, read only by RefreshHostQueueCounts, which writes the count a view reads into catalog_sessions"
+	idleAttempts   = "idle compaction attempts, read by the idle compactor and when a turn record is journaled, not by any view query"
 )
 
 var notSessionViewInputs = map[string]string{
@@ -29,7 +30,7 @@ var notSessionViewInputs = map[string]string{
 	"project_moves": ledgerTables, "removed_project_ledgers": ledgerTables, "repository_keys": ledgerTables,
 	"alias_reservations": sessionOnly, "launcher_pending": sessionOnly, "pending_ceilings": sessionOnly, "session_ceilings": sessionOnly,
 	"session_context": sessionOnly, "session_moves": sessionOnly, "session_rekeys": sessionOnly, "tasks": sessionOnly,
-	"session_origins": voiceOperators, "host_queue_dirty": queueMarks,
+	"session_origins": voiceOperators, "host_queue_dirty": queueMarks, "idle_compactions": idleAttempts,
 }
 
 func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T) {

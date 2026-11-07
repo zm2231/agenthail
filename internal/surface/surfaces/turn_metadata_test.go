@@ -150,7 +150,7 @@ var (
 	claudeCompletedTurn = &surface.TurnMetadata{V: 1, State: "completed", Model: "claude-fixture", DurationMs: count(7000), Usage: &surface.TurnUsage{InputTokens: 2228, CachedInputTokens: 2100, CacheWriteTokens: 120, OutputTokens: 55, ReasoningTokens: count(12)}, ContextTokens: count(1125),
 		Compactions: []surface.TurnCompaction{{Trigger: "threshold", PreTokens: count(1103), PostTokens: count(200)}}}
 	claudeInterruptedTurn = &surface.TurnMetadata{V: 1, State: "interrupted", Model: "claude-fixture", DurationMs: count(5000), Usage: &surface.TurnUsage{InputTokens: 57, CachedInputTokens: 50, OutputTokens: 9}, ContextTokens: count(30),
-		Compactions: []surface.TurnCompaction{{Trigger: "idle", PreTokens: count(1300), PostTokens: count(250)}, {Trigger: "manual", PreTokens: count(260), PostTokens: count(240)}, {Trigger: "threshold", PreTokens: count(57), PostTokens: count(30)}}, Unavailable: []string{"usage.reasoningTokens"}}
+		Compactions: []surface.TurnCompaction{{Trigger: "idle", PreTokens: count(1300), PostTokens: count(250)}, {Trigger: "manual", PreTokens: count(260), PostTokens: count(240), RequestID: "c1"}, {Trigger: "threshold", PreTokens: count(57), PostTokens: count(30)}}, Unavailable: []string{"usage.reasoningTokens"}}
 )
 
 func TestClaudeTranscriptReportsEachTurnsModelUsageAndDuration(t *testing.T) {

@@ -72,18 +72,23 @@ type ClaudeCompactSettings struct {
 	ModelWindows       map[string]ClaudeCompactWindow `json:"modelWindows,omitempty"`
 	AutoCompactEnabled *bool                          `json:"autoCompactEnabled,omitempty"`
 	IdleCompaction     *bool                          `json:"idleCompaction,omitempty"`
+	AgenthailIdle      IdleCompaction                 `json:"agenthailIdleCompaction"`
 	Overrides          map[string]string              `json:"overrides,omitempty"`
 }
 
 var claudeCompactOverrides = []string{"CLAUDE_CODE_AUTO_COMPACT_WINDOW", "DISABLE_AUTO_COMPACT", "DISABLE_COMPACT"}
 
-func ReadClaudeCompactSettings(root string) (ClaudeCompactSettings, error) {
+func ReadClaudeCompactSettings(home, root string) (ClaudeCompactSettings, error) {
 	path := ClaudeSettingsPath(root)
 	data, _, err := ReadClaudeSettingsFile(path)
 	if err != nil {
 		return ClaudeCompactSettings{}, err
 	}
-	settings := ClaudeCompactSettings{Root: root, SettingsPath: path}
+	agenthailIdle, err := ReadIdleCompaction(home, root)
+	if err != nil {
+		return ClaudeCompactSettings{}, err
+	}
+	settings := ClaudeCompactSettings{Root: root, SettingsPath: path, AgenthailIdle: agenthailIdle}
 	if value := gjson.GetBytes(data, "autoCompactWindow"); value.Exists() {
 		window := claudeCompactWindow(value)
 		settings.AutoCompactWindow = &window
@@ -131,16 +136,27 @@ func claudeSettingsBool(data []byte, key string) *bool {
 
 // Window is a token count, "auto", or "unset" to remove the key; Model
 // scopes it to that model's modelSettings entry.
+// AgenthailIdle and AgenthailIdleMinTokens change Agenthail's own idle
+// compaction, which takes effect on its next check, running sessions included.
 type ClaudeCompactChange struct {
-	Model   string
-	Window  string
-	Enabled *bool
-	Idle    *bool
+	Model                  string
+	Window                 string
+	Enabled                *bool
+	Idle                   *bool
+	AgenthailIdle          *bool
+	AgenthailIdleMinTokens *int64
+}
+
+func (c ClaudeCompactChange) Changes() bool {
+	return c.Window != "" || c.Model != "" || c.Enabled != nil || c.Idle != nil || c.AgenthailIdle != nil || c.AgenthailIdleMinTokens != nil
 }
 
 // A running Claude does not reread the file; the change applies to sessions
 // started after it.
-func WriteClaudeCompactSettings(root string, change ClaudeCompactChange) (ClaudeCompactSettings, error) {
+func WriteClaudeCompactSettings(home, root string, change ClaudeCompactChange) (ClaudeCompactSettings, error) {
+	if err := validIdleCompactionMinTokens(change.AgenthailIdleMinTokens); err != nil {
+		return ClaudeCompactSettings{}, err
+	}
 	path := ClaudeSettingsPath(root)
 	data, mode, err := ReadClaudeSettingsFile(path)
 	if err != nil {
@@ -183,7 +199,10 @@ func WriteClaudeCompactSettings(root string, change ClaudeCompactChange) (Claude
 			return ClaudeCompactSettings{}, err
 		}
 	}
-	return ReadClaudeCompactSettings(root)
+	if err := writeIdleCompaction(home, root, change.AgenthailIdle, change.AgenthailIdleMinTokens); err != nil {
+		return ClaudeCompactSettings{}, err
+	}
+	return ReadClaudeCompactSettings(home, root)
 }
 
 func escapeSettingsPath(key string) string {

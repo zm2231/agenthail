@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const claudeSettingsUsage = "usage: agenthail claude settings compact [--root <path|name>] [--model <model>] [<tokens|auto|unset>] [--enabled on|off] [--idle on|off] [--json]"
+const claudeSettingsUsage = "usage: agenthail claude settings compact [--root <path|name>] [--model <model>] [<tokens|auto|unset>] [--enabled on|off] [--idle on|off] [--agenthail-idle on|off] [--agenthail-idle-min <tokens>] [--json]"
 
 func (a *App) cmdClaude(args []string) error {
 	positional := stripFlags(args)
@@ -24,7 +25,7 @@ func (a *App) cmdClaude(args []string) error {
 	if len(positional) == 3 {
 		change.Window = positional[2]
 	}
-	for flag, target := range map[string]**bool{"--enabled": &change.Enabled, "--idle": &change.Idle} {
+	for flag, target := range map[string]**bool{"--enabled": &change.Enabled, "--idle": &change.Idle, "--agenthail-idle": &change.AgenthailIdle} {
 		if !hasFlag(args, flag) {
 			continue
 		}
@@ -38,7 +39,14 @@ func (a *App) cmdClaude(args []string) error {
 			return fmt.Errorf("%s takes on or off\n%s", flag, claudeSettingsUsage)
 		}
 	}
-	changing := change.Window != "" || change.Model != "" || change.Enabled != nil || change.Idle != nil
+	if hasFlag(args, "--agenthail-idle-min") {
+		tokens, err := strconv.ParseInt(flagVal(args, "--agenthail-idle-min"), 10, 64)
+		if err != nil {
+			return fmt.Errorf("--agenthail-idle-min takes a token count\n%s", claudeSettingsUsage)
+		}
+		change.AgenthailIdleMinTokens = &tokens
+	}
+	changing := change.Changes()
 	var roots []string
 	if choice := flagVal(args, "--root"); choice != "" || changing {
 		root, err := surface.ResolveClaudeConfigRoot(home, choice)
@@ -53,9 +61,9 @@ func (a *App) cmdClaude(args []string) error {
 	for _, root := range roots {
 		var settings surface.ClaudeCompactSettings
 		if changing {
-			settings, err = surface.WriteClaudeCompactSettings(root, change)
+			settings, err = surface.WriteClaudeCompactSettings(home, root, change)
 		} else {
-			settings, err = surface.ReadClaudeCompactSettings(root)
+			settings, err = surface.ReadClaudeCompactSettings(home, root)
 		}
 		if err != nil {
 			return err
@@ -69,7 +77,7 @@ func (a *App) cmdClaude(args []string) error {
 		fmt.Println(describeClaudeCompactSettings(settings))
 	}
 	if changing {
-		fmt.Println("Applies to Claude sessions started after the change.")
+		fmt.Println("Claude's own settings apply to sessions started after the change; Agenthail's idle compaction applies from its next check.")
 	}
 	return nil
 }
@@ -86,6 +94,11 @@ func describeClaudeCompactSettings(settings surface.ClaudeCompactSettings) strin
 		lines = append(lines, fmt.Sprintf("  %s: %s", model, describeClaudeCompactWindow(&window)))
 	}
 	lines = append(lines, "  autoCompactEnabled: "+describeClaudeSettingBool(settings.AutoCompactEnabled), "  idleCompaction: "+describeClaudeSettingBool(settings.IdleCompaction))
+	agenthailIdle := "off"
+	if settings.AgenthailIdle.Enabled {
+		agenthailIdle = fmt.Sprintf("on, from %d tokens", settings.AgenthailIdle.MinContextTokens)
+	}
+	lines = append(lines, "  Agenthail idle compaction: "+agenthailIdle)
 	names := make([]string, 0, len(settings.Overrides))
 	for name := range settings.Overrides {
 		names = append(names, name)

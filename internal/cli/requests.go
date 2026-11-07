@@ -21,7 +21,7 @@ func (a *App) cmdRequests(args []string) error {
 	if len(positional) != 1 {
 		return fmt.Errorf("usage: agenthail requests <target> [--json]")
 	}
-	ctx, cancel, err := commandContext(args)
+	ctx, cancel, err := a.timedContext(args, controlCommandTimeout)
 	if err != nil {
 		return err
 	}
@@ -51,7 +51,7 @@ func (a *App) cmdAnswer(args []string) error {
 	if len(positional) < 1 || len(positional) > 2 || (len(positional) == 1 && flagVal(args, "--answers") == "") {
 		return usage
 	}
-	ctx, cancel, err := commandContext(args)
+	ctx, cancel, err := a.timedContext(args, controlCommandTimeout)
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func (a *App) cmdPermissionMode(args []string) error {
 	if len(positional) < 1 || len(positional) > 2 {
 		return fmt.Errorf("usage: agenthail permission-mode <target> [acceptEdits|auto|bypassPermissions|manual|dontAsk|plan] [--json] [--timeout 30s]")
 	}
-	ctx, cancel, err := commandContext(args)
+	ctx, cancel, err := a.timedContext(args, controlCommandTimeout)
 	if err != nil {
 		return err
 	}

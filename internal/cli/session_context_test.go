@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -216,8 +217,8 @@ func TestTheSessionContextHookNeverMigratesTheRegistry(t *testing.T) {
 			t.Fatal(err)
 		}
 		app := &App{
-			OpenRegistry:         func() (*registry.Registry, error) { return registry.Open(path) },
-			OpenCurrentRegistry:  func() (*registry.Registry, error) { return registry.OpenCurrent(path) },
+			OpenRegistry:         func(context.Context) (*registry.Registry, error) { return registry.Open(path) },
+			OpenCurrentRegistry:  func(context.Context) (*registry.Registry, error) { return registry.OpenCurrent(path) },
 			Surfaces:             []SurfaceEntry{{Name: string(surface.KindClaude), Surface: &cliSurface{kind: surface.KindClaude}}},
 			DefaultTimeout:       time.Second,
 			catalogDaemonRunning: func() bool { return false },

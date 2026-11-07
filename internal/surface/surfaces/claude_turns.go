@@ -39,6 +39,10 @@ type claudeTurnTracker struct {
 	// betweenKnown: the tracker saw the last turn end or read from the start.
 	between      []surface.TurnCompaction
 	betweenKnown bool
+	// A /compact over Remote Control comes before its boundary; one the SDK
+	// runs comes after it, sharing its promptId with the boundary's summary.
+	compactRequest string
+	summaryPrompt  string
 }
 
 // claudeTurnMeter accumulates the turn whose start record the tracker saw.
@@ -146,18 +150,23 @@ func (t *claudeTurnTracker) finish(ended []claudeTurnEnd, turnID, key, status st
 // next turn when none is open. Claude writes its idle notice just after the
 // boundary of an idle compaction, so the notice relabels the latest one.
 func (t *claudeTurnTracker) observeCompaction(record map[string]any) {
-	if str(record, "type") != "system" {
-		return
-	}
 	open := t.current != "" && t.current == t.meter.turnID && !t.meter.finished
 	compactions := &t.between
 	if open {
 		compactions = &t.meter.compactions
 	}
+	if str(record, "type") == "user" {
+		t.observeCompactRequest(record, *compactions)
+		return
+	}
+	if str(record, "type") != "system" {
+		return
+	}
 	switch str(record, "subtype") {
 	case "compact_boundary":
 		metadata, _ := record["compactMetadata"].(map[string]any)
-		compaction := surface.TurnCompaction{Trigger: surface.CompactionThreshold}
+		compaction := surface.TurnCompaction{Trigger: surface.CompactionThreshold, RequestID: t.compactRequest}
+		t.compactRequest, t.summaryPrompt = "", ""
 		switch str(metadata, "trigger") {
 		case "manual":
 			compaction.Trigger = surface.CompactionManual
@@ -182,6 +191,24 @@ func (t *claudeTurnTracker) observeCompaction(record map[string]any) {
 			(*compactions)[n-1].Trigger = surface.CompactionIdle
 		}
 	}
+}
+
+func (t *claudeTurnTracker) observeCompactRequest(record map[string]any, compactions []surface.TurnCompaction) {
+	prompt := str(record, "promptId")
+	if summary, _ := record["isCompactSummary"].(bool); summary {
+		t.summaryPrompt = prompt
+		return
+	}
+	message, _ := record["message"].(map[string]any)
+	if !isClaudeCompactCommand(transcriptText(message["content"])) {
+		return
+	}
+	if n := len(compactions); n > 0 && compactions[n-1].RequestID == "" && prompt != "" && prompt == t.summaryPrompt {
+		compactions[n-1].RequestID = str(record, "uuid")
+		t.summaryPrompt = ""
+		return
+	}
+	t.compactRequest = str(record, "uuid")
 }
 
 func claudeIdleCompactionNotice(content string) bool {

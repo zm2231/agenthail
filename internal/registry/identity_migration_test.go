@@ -29,7 +29,7 @@ func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedVersion13(t, r)
-	assertEverySessionColumnSeeded(t, r.db)
+	assertEverySessionColumnSeeded(t, r.db.raw)
 	if _, err := r.db.Exec(`PRAGMA user_version=13`); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 	}
 	defer r.Close()
 
-	assertNoRetiredIDs(t, r.db)
+	assertNoRetiredIDs(t, r.db.raw)
 	var version int
 	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
 		t.Fatalf("user_version=%d err=%v", version, err)
@@ -180,6 +180,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 	exec(`INSERT INTO session_runtime(session_id) VALUES(?),(?),('conversation-native')`, rekeyedBridge, collidedBridge)
 	exec(`INSERT INTO session_archive(session_id,archived_at_ms) VALUES(?,1)`, rekeyedBridge)
 	exec(`INSERT INTO session_keep_alive(session_id,attempts) VALUES(?,1)`, rekeyedBridge)
+	exec(`INSERT INTO idle_compactions(session_id,window_ms) VALUES(?,1)`, rekeyedBridge)
 	exec(`INSERT INTO turn_ends(session_id,started_at_ms) VALUES(?,1)`, rekeyedBridge)
 	exec(`INSERT INTO session_credentials(session_id,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES(?,'hash',1,2,3)`, rekeyedBridge)
 	exec(`INSERT INTO session_credentials(pending_ref,claimed_session_id,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES('ref',?,'pending-hash',1,2,3)`, rekeyedBridge)

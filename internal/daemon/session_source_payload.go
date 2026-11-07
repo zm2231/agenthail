@@ -99,7 +99,30 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJourn
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, PromptID: event.PromptID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Phase: event.Phase, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Commands: commandsOf(event.Commands), Unavailable: unavailableOf(event.Commands), Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: event.Turn, text: text}, bodyKey
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, PromptID: event.PromptID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Phase: event.Phase, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Commands: commandsOf(event.Commands), Unavailable: unavailableOf(event.Commands), Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: s.manager.publishedTurn(s.session.ID, event.Turn), text: text}, bodyKey
+}
+
+// publishedTurn is the turn as clients see it: a compaction this daemon's
+// idle compactor requested is labelled idle, which the transcript records as
+// a manual /compact.
+func (m *sessionSourceManager) publishedTurn(sessionID string, turn *surface.TurnMetadata) *surface.TurnMetadata {
+	if turn == nil || !slices.ContainsFunc(turn.Compactions, func(c surface.TurnCompaction) bool { return c.RequestID != "" }) {
+		return turn
+	}
+	idle, err := m.registry.IdleCompactionRequests(sessionID)
+	if err != nil {
+		idle = nil
+	}
+	published := *turn
+	published.Compactions = make([]surface.TurnCompaction, len(turn.Compactions))
+	for i, compaction := range turn.Compactions {
+		if idle[compaction.RequestID] {
+			compaction.Trigger = surface.CompactionIdle
+		}
+		compaction.RequestID = ""
+		published.Compactions[i] = compaction
+	}
+	return &published
 }
 
 func commandsOf(commands *surface.RuntimeCommands) []surface.RuntimeCommand {

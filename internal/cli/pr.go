@@ -26,7 +26,10 @@ func (a *App) cmdPR(args []string) error {
 	if len(positional) != 2 {
 		return fmt.Errorf("%s", prUsage)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
+	ctx, cancel, err := a.deadlineContext(a.DefaultTimeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	id, err := a.prSession(ctx, flagVal(args, "--session"))
 	if err != nil {

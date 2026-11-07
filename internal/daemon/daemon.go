@@ -350,6 +350,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.sweepUploads(ctx)
 	go d.runLimitResumes(ctx)
 	go d.runKeepAlive(ctx)
+	go d.runIdleCompaction(ctx)
 	go d.runGoalSweeps(ctx)
 	go d.runWorkCleans(ctx)
 	go d.runPRSweeps(ctx)

@@ -112,6 +112,12 @@ in that root's file (the primary root by default). Tokens run from 100000 to
 running Claude does not reread the file: a change applies to sessions started
 after it. A hosted session's `contextUsage.autoCompact` is what the running
 Claude reports (`source: "runtime"`), the value actually in effect.
+`--agenthail-idle on|off` and `--agenthail-idle-min <tokens>` set Agenthail's
+own idle compaction for the root, kept in `~/.agenthail/config.json`: about 50
+minutes after a Claude session's last request, while its one-hour prompt cache
+is still warm, the daemon queues a `/compact` for a session with at least that
+many context tokens (200000 by default) and nothing queued or running, unless
+the root's account is at a usage limit. It applies to running sessions at once.
 The roots are those of the machine the command runs on; each host's settings
 are changed on that host or through its daemon.
 
@@ -141,8 +147,8 @@ the model reads it with the result of the tool call that is running (observed
 with Claude Code 2.1.316). Compact, model, interrupt, steer and the `control`
 commands (context, usage, status, effort, rename) require a Remote Control
 attachment. A session the Claude host runs has no Remote Control: it takes
-interrupt, steer, model and permission-mode changes through the host, and has
-no compact or `control` commands.
+interrupt, steer, compact, model and permission-mode changes through the host,
+and has no `control` commands.
 
 An agent's words never become a Claude session's own turn; only the person,
 Agenthail and the CLI run outside any session (under its label) write one.
@@ -429,7 +435,8 @@ includes the reasoning output. `contextTokens` is how full the context was when
 the turn ended. `compactions` lists, oldest first, each compaction since the
 previous turn ended, so one Claude ran while the session sat idle, or a
 `/compact` between turns, shows on the turn after it. `trigger` is `threshold`
-(the context reached the autocompact window), `idle`, `manual`, or `unknown`;
+(the context reached the autocompact window), `idle` (Claude or Agenthail
+compacted an idle session), `manual`, or `unknown`;
 Codex does not record why it compacted, so its compactions are `unknown`. No
 `compactions` field, and none listed in `unavailable`, means there were none. `unavailable` lists each field the provider did
 not record for that turn, such as `["model","durationMs","usage"]`; a listed

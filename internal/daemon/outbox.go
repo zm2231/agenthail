@@ -171,7 +171,18 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 	operationCtx, cancel := context.WithTimeout(ctx, compactOperationTimeout)
 	defer cancel()
 	addressed := *session
-	err := adapter.Compact(operationCtx, session)
+	var err error
+	if controller, ok := adapter.(surface.Controller); ok {
+		var result *surface.ControlResult
+		result, err = controller.Control(operationCtx, session, surface.ControlRequest{Action: "compact"})
+		if result != nil && result.RequestID != "" {
+			if recordErr := d.Registry.RecordIdleCompactionRequest(item.ID, result.RequestID); recordErr != nil {
+				d.log.Printf("record compact request of queue item %d: %s", item.ID, recordErr)
+			}
+		}
+	} else {
+		err = adapter.Compact(operationCtx, session)
+	}
 	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {
 		d.finishReachedHostOwned(item, &addressed, "compact", ownedErr, registry.SendTrace{})
 		return

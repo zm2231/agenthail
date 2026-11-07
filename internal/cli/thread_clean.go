@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 )
 
@@ -23,7 +22,10 @@ func (a *App) cmdThreadClean(args []string) error {
 	if len(positional) != 2 {
 		return fmt.Errorf("%s", threadCleanUsage)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
+	ctx, cancel, err := a.deadlineContext(a.DefaultTimeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	session, _, remote, err := a.resolveAnyTarget(ctx, positional[1])
 	if err != nil {

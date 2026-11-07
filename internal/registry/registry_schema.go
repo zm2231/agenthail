@@ -408,6 +408,7 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	status TEXT NOT NULL,
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',
+	failed_from TEXT NOT NULL DEFAULT '',
 	dismissed_at TEXT,
 	notification_queue_id INTEGER REFERENCES message_queue(id) ON DELETE SET NULL,
 	retries INTEGER NOT NULL DEFAULT 0,
@@ -612,6 +613,14 @@ CREATE TABLE IF NOT EXISTS session_keep_alive (
 	announced INTEGER NOT NULL DEFAULT 0,
 	error TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS idle_compactions (
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	window_ms INTEGER NOT NULL,
+	queue_id INTEGER NOT NULL DEFAULT 0,
+	request_uuid TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (session_id, window_ms)
+);
+CREATE INDEX IF NOT EXISTS idle_compactions_queue ON idle_compactions(queue_id) WHERE queue_id!=0;
 CREATE TABLE IF NOT EXISTS turn_ends (
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	started_at_ms INTEGER NOT NULL,

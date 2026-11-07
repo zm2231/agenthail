@@ -1,4 +1,4 @@
--- schemaVersion 73
+-- schemaVersion 75
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -41,6 +41,9 @@ CREATE INDEX device_connection_drops_recent ON device_connection_drops(device_id
 
 -- index device_pairings_expires
 CREATE INDEX device_pairings_expires ON device_pairings(expires_at);
+
+-- index idle_compactions_queue
+CREATE INDEX idle_compactions_queue ON idle_compactions(queue_id) WHERE queue_id!=0;
 
 -- index ledger_events_origin
 CREATE UNIQUE INDEX ledger_events_origin ON ledger_events(project_key, actor_host_id, origin_seq) WHERE origin_seq > 0;
@@ -314,6 +317,7 @@ CREATE TABLE delivery_intents (
 	status TEXT NOT NULL,
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',
+	failed_from TEXT NOT NULL DEFAULT '',
 	dismissed_at TEXT,
 	notification_queue_id INTEGER REFERENCES message_queue(id) ON DELETE SET NULL,
 	retries INTEGER NOT NULL DEFAULT 0,
@@ -392,6 +396,15 @@ CREATE TABLE hosts (
 	catalog_epoch TEXT NOT NULL DEFAULT '',
 	catalog_seq INTEGER NOT NULL DEFAULT 0,
 	catalog_retired_clock INTEGER NOT NULL DEFAULT -1
+);
+
+-- table idle_compactions
+CREATE TABLE idle_compactions (
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	window_ms INTEGER NOT NULL,
+	queue_id INTEGER NOT NULL DEFAULT 0,
+	request_uuid TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (session_id, window_ms)
 );
 
 -- table launcher_pending
@@ -1037,9 +1050,9 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_delivery_intents_update
-CREATE TRIGGER catalog_presentation_version_delivery_intents_update AFTER UPDATE OF created_at,dismissed_at,evidence,failure,id,message,notification_queue_id,provider_key,queue_id,relayed,retries,sender_session_id,status,target_session_id,updated_at,uuid ON delivery_intents WHEN ((NEW.status IN ('failed','held') OR (NEW.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
+CREATE TRIGGER catalog_presentation_version_delivery_intents_update AFTER UPDATE OF created_at,dismissed_at,evidence,failed_from,failure,id,message,notification_queue_id,provider_key,queue_id,relayed,retries,sender_session_id,status,target_session_id,updated_at,uuid ON delivery_intents WHEN ((NEW.status IN ('failed','held') OR (NEW.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
 	WHERE f.sender_session_id=NEW.sender_session_id AND f.target_session_id=NEW.target_session_id AND f.status='failed' AND f.id<NEW.id))) OR (OLD.status IN ('failed','held') OR (OLD.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
-	WHERE f.sender_session_id=OLD.sender_session_id AND f.target_session_id=OLD.target_session_id AND f.status='failed' AND f.id<OLD.id)))) AND (NEW.created_at IS NOT OLD.created_at OR NEW.dismissed_at IS NOT OLD.dismissed_at OR NEW.evidence IS NOT OLD.evidence OR NEW.failure IS NOT OLD.failure OR NEW.id IS NOT OLD.id OR NEW.message IS NOT OLD.message OR NEW.notification_queue_id IS NOT OLD.notification_queue_id OR NEW.provider_key IS NOT OLD.provider_key OR NEW.queue_id IS NOT OLD.queue_id OR NEW.relayed IS NOT OLD.relayed OR NEW.retries IS NOT OLD.retries OR NEW.sender_session_id IS NOT OLD.sender_session_id OR NEW.status IS NOT OLD.status OR NEW.target_session_id IS NOT OLD.target_session_id OR NEW.updated_at IS NOT OLD.updated_at OR NEW.uuid IS NOT OLD.uuid)
+	WHERE f.sender_session_id=OLD.sender_session_id AND f.target_session_id=OLD.target_session_id AND f.status='failed' AND f.id<OLD.id)))) AND (NEW.created_at IS NOT OLD.created_at OR NEW.dismissed_at IS NOT OLD.dismissed_at OR NEW.evidence IS NOT OLD.evidence OR NEW.failed_from IS NOT OLD.failed_from OR NEW.failure IS NOT OLD.failure OR NEW.id IS NOT OLD.id OR NEW.message IS NOT OLD.message OR NEW.notification_queue_id IS NOT OLD.notification_queue_id OR NEW.provider_key IS NOT OLD.provider_key OR NEW.queue_id IS NOT OLD.queue_id OR NEW.relayed IS NOT OLD.relayed OR NEW.retries IS NOT OLD.retries OR NEW.sender_session_id IS NOT OLD.sender_session_id OR NEW.status IS NOT OLD.status OR NEW.target_session_id IS NOT OLD.target_session_id OR NEW.updated_at IS NOT OLD.updated_at OR NEW.uuid IS NOT OLD.uuid)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

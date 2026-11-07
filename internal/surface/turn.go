@@ -38,10 +38,13 @@ const (
 
 // TurnCompaction is one compaction of the conversation: what triggered it and
 // the context it left. A size the provider did not record is absent.
+// RequestID is the /compact request that ran it, when one did; the daemon
+// reads it to tell its own compactions apart, so it is not published.
 type TurnCompaction struct {
 	Trigger    string `json:"trigger"`
 	PreTokens  *int64 `json:"preTokens,omitempty"`
 	PostTokens *int64 `json:"postTokens,omitempty"`
+	RequestID  string `json:"-"`
 }
 
 // TurnMeasure is what a provider measured about a turn. A nil field was not

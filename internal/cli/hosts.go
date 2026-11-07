@@ -402,7 +402,10 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel, err := a.deadlineContext(timeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	client, err := a.daemonAPI()
 	if err != nil {

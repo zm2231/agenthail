@@ -116,7 +116,7 @@ func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation str
 		merged.Files = item.Files
 	}
 	if item.Turn != nil {
-		merged.Turn = item.Turn
+		merged.Turn = s.manager.publishedTurn(s.session.ID, item.Turn)
 	}
 	if merged.Role == payload.Role && merged.Origin == payload.Origin && merged.Sender == payload.Sender && merged.Title == payload.Title && merged.Status == payload.Status && merged.TurnID == payload.TurnID && merged.MessageID == payload.MessageID && merged.PromptID == payload.PromptID && merged.CallID == payload.CallID && merged.Truncated == payload.Truncated && merged.TruncationReason == payload.TruncationReason && reflect.DeepEqual(merged.Attachment, payload.Attachment) && reflect.DeepEqual(merged.Files, payload.Files) && reflect.DeepEqual(merged.Turn, payload.Turn) {
 		return true

@@ -46,8 +46,10 @@ func main() {
 	}
 	home, _ := os.UserHomeDir()
 	app := &cli.App{
-		OpenRegistry:        func() (*registry.Registry, error) { return registry.OpenDefault(mayUpgradeRegistry(version)) },
-		OpenCurrentRegistry: func() (*registry.Registry, error) { return registry.OpenCurrent("") },
+		OpenRegistry: func(ctx context.Context) (*registry.Registry, error) {
+			return registry.OpenDefault(ctx, mayUpgradeRegistry(version))
+		},
+		OpenCurrentRegistry: func(context.Context) (*registry.Registry, error) { return registry.OpenCurrent("") },
 		DefaultTimeout:      cli.DefaultCommandTimeout,
 		Version:             version,
 		Revision:            revision,

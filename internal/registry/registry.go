@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -15,7 +16,7 @@ import (
 )
 
 type Registry struct {
-	db            *sql.DB
+	db            *writeDB
 	read          *sql.DB
 	openLock      *os.File
 	path          string
@@ -54,7 +55,7 @@ func (r *Registry) Steers(busyDelivery string) bool {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion    = 73
+	schemaVersion    = 75
 	readConnections  = 4
 	deadReviewWindow = time.Hour
 )
@@ -83,14 +84,14 @@ func defaultPath() string {
 }
 
 func Open(path string) (*Registry, error) {
-	return open(path, false, true)
+	return open(context.Background(), path, false, true)
 }
 
-func OpenDefault(allowUpgrade bool) (*Registry, error) {
-	return open(defaultPath(), true, allowUpgrade)
+func OpenDefault(ctx context.Context, allowUpgrade bool) (*Registry, error) {
+	return open(ctx, defaultPath(), true, allowUpgrade)
 }
 
-func open(path string, private, allowUpgrade bool) (*Registry, error) {
+func open(ctx context.Context, path string, private, allowUpgrade bool) (*Registry, error) {
 	if err := refuseSudoHomeFor(path); err != nil {
 		return nil, err
 	}
@@ -105,6 +106,14 @@ func open(path string, private, allowUpgrade bool) (*Registry, error) {
 	r, err := connect(path)
 	if err != nil {
 		return nil, err
+	}
+	if ctx.Done() != nil {
+		release, err := r.WriteWithin(ctx)
+		if err != nil {
+			r.Close()
+			return nil, err
+		}
+		defer release()
 	}
 	current, err := r.current()
 	if err != nil {
@@ -129,7 +138,7 @@ func open(path string, private, allowUpgrade bool) (*Registry, error) {
 
 func (r *Registry) prepare() error {
 	var err error
-	if r.journal, err = prepareJournalStatements(r.db, journalStatementSQL); err == nil {
+	if r.journal, err = prepareJournalStatements(r.db.raw, journalStatementSQL); err == nil {
 		r.journalRead, err = prepareJournalStatements(r.read, journalReadStatementSQL)
 	}
 	if err != nil {
@@ -204,7 +213,7 @@ func connect(path string) (*Registry, error) {
 	}
 	read.SetMaxOpenConns(readConnections)
 	read.SetMaxIdleConns(readConnections)
-	return &Registry{db: db, read: read, openLock: openLock, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
+	return &Registry{db: &writeDB{raw: db}, read: read, openLock: openLock, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
 }
 
 func closeOpenLock(file *os.File) {
@@ -214,7 +223,7 @@ func closeOpenLock(file *os.File) {
 }
 
 func (r *Registry) Path() string     { return r.path }
-func (r *Registry) WriteDB() *sql.DB { return r.db }
+func (r *Registry) WriteDB() *sql.DB { return r.db.raw }
 func (r *Registry) ReadDB() *sql.DB  { return r.read }
 
 func (r *Registry) Close() error {

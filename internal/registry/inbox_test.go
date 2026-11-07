@@ -113,7 +113,7 @@ func TestAFailureNoticeIsInTheSendersInbox(t *testing.T) {
 
 var messageQueueInsert = regexp.MustCompile(`(?is)\binsert\s+(or\s+\w+\s+)?into\s+message_queue\b`)
 
-var messageQueueWritersAllowed = map[string]bool{"enqueueMessageTx": true, "QueueGoal": true, "QueueCompact": true, "queueHostDeliveryTx": true}
+var messageQueueWritersAllowed = map[string]bool{"enqueueMessageTx": true, "QueueGoal": true, "queueCompactTx": true, "queueHostDeliveryTx": true}
 
 func messageQueueWriters(t *testing.T, root string) []string {
 	t.Helper()

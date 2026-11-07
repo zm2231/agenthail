@@ -53,27 +53,34 @@ func (r *Registry) QueueCompact(sessionID string) (int64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	var existing int64
-	err = tx.QueryRow(`SELECT id FROM message_queue WHERE session_id=? AND operation=? AND status IN ('pending','inflight') ORDER BY id LIMIT 1`, sessionID, QueueOperationCompact).Scan(&existing)
-	if err == nil {
-		return existing, tx.Commit()
-	}
-	if err != sql.ErrNoRows {
-		return 0, err
-	}
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,status,updated_at) VALUES (?,?,?,'pending',datetime('now'))`, sessionID, "/compact", QueueOperationCompact)
-	if err != nil {
-		return 0, err
-	}
-	id, err := res.LastInsertId()
+	id, created, err := queueCompactTx(tx, sessionID)
 	if err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
-	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: "compact"})
+	if created {
+		_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: "compact"})
+	}
 	return id, nil
+}
+
+func queueCompactTx(tx *sql.Tx, sessionID string) (int64, bool, error) {
+	var existing int64
+	err := tx.QueryRow(`SELECT id FROM message_queue WHERE session_id=? AND operation=? AND status IN ('pending','inflight') ORDER BY id LIMIT 1`, sessionID, QueueOperationCompact).Scan(&existing)
+	if err == nil {
+		return existing, false, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, false, err
+	}
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,status,updated_at) VALUES (?,?,?,'pending',datetime('now'))`, sessionID, "/compact", QueueOperationCompact)
+	if err != nil {
+		return 0, false, err
+	}
+	id, err := res.LastInsertId()
+	return id, true, err
 }
 
 func (r *Registry) QueueRelayMessage(sessionID, message, deliveryKey string, relayHops int) (int64, error) {
