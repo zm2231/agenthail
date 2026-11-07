@@ -408,13 +408,16 @@ private struct PhoneBackdropBody<Content: View>: View {
         let rendered = appearance.active ? appearance.rendered[key(surface)] : nil
         let layered = appearance.active && surface == .transcript ? appearance.layered[key(surface)] : nil
         let cards = appearance.active && surface == .list ? CardBackdrop(image: appearance.rendered[key(.cards)], frame: frame) : nil
+        let shown = key(surface)
+        let ground = surface == .transcript && shown.solid ? appearance.solidPaneColor(dark: shown.dark, target: shown.target)
+            : Color(uiColor: surface == .list && !appearance.active ? .systemGroupedBackground : .systemBackground)
         content
             .environment(\.cardBackdrop, cards)
             .environment(\.backdropKey, key(surface))
             .environment(\.transcriptScrim, surface == .transcript ? scrim : nil)
             .scrollContentBackground(appearance.active ? .hidden : .automatic)
             .background {
-                BackdropLayer(image: rendered?.image, grouped: surface == .list && !appearance.active, frame: $frame) {
+                BackdropLayer(image: rendered?.image, ground: ground, frame: $frame) {
                     if let layered { TranscriptBackdropLayer(layers: layered, scrim: scrim).transition(.opacity) }
                 }
             }
@@ -427,7 +430,7 @@ private struct PhoneBackdropBody<Content: View>: View {
 
 private struct BackdropLayer<Layered: View>: View {
     let image: CGImage?
-    let grouped: Bool
+    let ground: Color
     @Binding var frame: CGRect
     @ViewBuilder let layered: Layered
 
@@ -435,7 +438,7 @@ private struct BackdropLayer<Layered: View>: View {
         GeometryReader { proxy in
             let size = proxy.size
             ZStack {
-                Color(uiColor: grouped ? .systemGroupedBackground : .systemBackground)
+                ground
                 if let image {
                     Image(decorative: image, scale: CGFloat(image.width) / max(size.width, 1))
                         .resizable()
