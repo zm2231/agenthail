@@ -5,6 +5,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 list="${UI_TEST_TIERS:-$root/native/ui-test-tiers.txt}"
 sources="${UI_TEST_SOURCES:-$root/native/iOSUITests}"
 all_tiers="smoke main nightly"
+known_tiers="$all_tiers live"
 wide='^(native/iOSUITests/|native/ui-test-tiers\.txt$|scripts/ios-ui-tests\.sh$|scripts/ios-simulator\.sh$|\.github/workflows/ios\.yml$|native/iOS/AgenthailIOSViews\.swift$|native/iOS/(SessionPreview|Preview|Transcript|QueueTail|OlderPlace|OpeningRebuild|StreamBatch|ScrollJump|CompactActivity|IOSAgentMessageRows|Timeline)[^/]*\.swift$)'
 
 usage() {
@@ -34,7 +35,7 @@ declared() {
 check() {
 	local bad=0 tier test
 	while read -r tier test extra; do
-		if [ -n "${extra:-}" ] || [[ ! " $all_tiers " == *" $tier "* ]] || [[ ! "$test" =~ ^[A-Za-z0-9_]+/test[A-Za-z0-9_]*$ ]]; then
+		if [ -n "${extra:-}" ] || [[ ! " $known_tiers " == *" $tier "* ]] || [[ ! "$test" =~ ^[A-Za-z0-9_]+/test[A-Za-z0-9_]*$ ]]; then
 			echo "malformed line: $tier $test ${extra:-}" >&2
 			bad=1
 		fi
