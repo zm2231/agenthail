@@ -55,7 +55,7 @@ So that a clean run shows the check looked, the harness also prints each distinc
 
 A host's own daemon may never run `git` or `sleep` while the watcher looks, because each run lasts milliseconds. So once the hosts are up, the harness runs each of them from every host's `<dir>/bin`, with the host's environment, in a form that waits: `git hash-object --stdin` and `sleep 30`. It treats each one as part of that host until the watcher has seen its program, then stops it. On macOS this checks the `/usr/bin` shims and the developer-directory copies they run. If the watcher never sees one of them, the run fails as if the watcher saw nothing.
 
-The probes run whichever `git` the machine's `PATH` resolves, which on the self-hosted runner is Homebrew's. On a Mac without Homebrew git, a `git` program the allow list misses shows as a violation naming its path, and adding that path fixes it.
+The probes run whichever `git` the harness's own `PATH` resolves, and the harness builds the allowed programs from that same lookup, plus the developer-directory copy `xcrun --find` names on macOS. A `git` that runs a program neither of those names shows as a violation naming that program.
 
 What the check cannot see:
 
