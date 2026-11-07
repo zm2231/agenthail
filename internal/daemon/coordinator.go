@@ -374,13 +374,19 @@ func (d *Daemon) assignCoordinator(ctx context.Context, p principal, request coo
 		cleared++
 	}
 	for _, current := range existing {
-		if current.HostID != "" || current.SessionID == "" || sessionID == "" || current.SessionID == sessionID {
+		previous, known := d.leadSession(current)
+		if !known || sessionID == "" || previous == sessionID {
 			continue
 		}
-		if err := d.Registry.MoveRelayRoutes(current.SessionID, sessionID); err != nil {
-			return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", fmt.Sprintf("@%s now coordinates the project, but the relays of %s stay on it: %s", stored.Name, d.resolveDisplay(current.SessionID), err))
+		if err := d.Registry.MoveRelayRoutes(previous, sessionID); err != nil {
+			return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", fmt.Sprintf("@%s now coordinates the project, but the relays of %s stay on it: %s", stored.Name, d.resolveDisplay(previous), err))
 		}
 		d.publishEvent("state.changed", sessionID, map[string]string{"source": "relay"})
+	}
+	for _, current := range existing {
+		if current.HostID != "" {
+			d.handOverPeerRelays(ctx, current, sessionID)
+		}
 	}
 	d.flushCatalog("coordinator " + spec.ProjectID)
 	return actionOK(map[string]any{"ok": true, "coordinator": stored, "replaced": existing}), nil
@@ -501,6 +507,21 @@ func (d *Daemon) clearPeerCoordinator(ctx context.Context, current registry.Coor
 		return fmt.Errorf("host %s refused: %w", host.record.Name, err)
 	}
 	return d.Registry.RemoveHostCoordinator(current.HostID, current.ProjectID)
+}
+
+// leadSession is the session a coordinator's relays are stored against on
+// this host: its own conversation, or the mirrored conversation of a paired
+// host's coordinator. known is false when this host has no such session.
+func (d *Daemon) leadSession(spec registry.CoordinatorSpec) (string, bool) {
+	if spec.SessionID == "" {
+		return "", false
+	}
+	if spec.HostID == "" {
+		return spec.SessionID, true
+	}
+	_, id, _ := hosts.Split(spec.SessionID)
+	owner, err := d.Registry.SessionHost(id)
+	return id, err == nil && owner == spec.HostID
 }
 
 func (d *Daemon) flushCatalog(what string) {
