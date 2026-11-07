@@ -133,6 +133,21 @@ func leadHistory(t *testing.T, node *federationNode, project string) []string {
 	return entries
 }
 
+// caughtUp reports whether follower has applied every catalog event leader,
+// paired with follower as name, has written.
+func caughtUp(t *testing.T, follower, leader *federationNode, name string) bool {
+	t.Helper()
+	written, err := leader.reg.CatalogEventsAfter(0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := follower.reg.Host(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return host.CatalogSeq >= written.LatestSeq
+}
+
 func linkHonoured(t *testing.T, node *federationNode) bool {
 	t.Helper()
 	node.daemon.discoverCatalog(context.Background())
@@ -144,6 +159,9 @@ func TestAForkWithPastLeadsJoinsUpstreamAndItsLeadHistoryFollowsOnEveryHost(t *t
 	laptop, server := linkedFederation(t)
 	namedLead(t, laptop, forkProject, "laptop-fork-lead")
 	clearLead(t, laptop, forkProject)
+	// Until the server has the laptop's clear, it still holds the laptop's lead
+	// and refuses one of its own.
+	testkit.Eventually(t, "the server has every change the laptop made", 10*time.Second, func() bool { return caughtUp(t, server, laptop, "laptop") })
 	namedLead(t, server, forkProject, "server-fork-lead")
 	clearLead(t, server, forkProject)
 	namedLead(t, laptop, upstreamProject, "upstream-lead")
