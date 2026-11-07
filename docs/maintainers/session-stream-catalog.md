@@ -242,7 +242,12 @@ sync read retired rows. The session view still counts them for the All tab,
 recounting only when a retired row or the archive changes. Presence reads a
 retired row that has a queued message, a lead's name, attention, a usage-limit
 stop or a failed send, and reads them all when the archive changes. A row leaves
-history when its session is held again, its parent changes, or the row becomes current.
+history when its session is held again, its parent changes, the row becomes
+current, or the session shows newer activity; any other change keeps it retired.
+A pass writes a row only when its projection or stored session would change,
+compared through the same route rule the session upsert applies, so a managed
+Codex thread whose discovered source differs from the one it keeps is not
+rewritten on every pass.
 
 ## Behavioral checks
 
