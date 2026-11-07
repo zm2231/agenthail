@@ -121,7 +121,7 @@ func (c *Claude) adoptHolder(ctx context.Context, conversation, root string) (*c
 			holder.session = process.session
 		} else {
 			pid, _ := record.fields["pid"].(float64)
-			holder.session = surface.Session{ID: conversation, PID: int(pid), Cwd: str(record.fields, "cwd"), Status: claudePeerStatus(record.fields), Transcript: c.resolveTranscript(conversation)}
+			holder.session = surface.Session{ID: conversation, PID: int(pid), Cwd: str(record.fields, "cwd"), Status: claudePeerStatus(record.fields), Transcript: onlyTranscript(transcripts(conversation))}
 			holder.session.BackgroundTasks = c.recordBackground(ctx, &holder.session)
 		}
 		holder.hosted = claudeHosted(&holder.session)

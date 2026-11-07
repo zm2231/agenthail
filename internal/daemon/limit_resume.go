@@ -112,6 +112,7 @@ func (d *Daemon) sweepLimitStops(ctx context.Context, now time.Time) {
 			recorded[resume.SessionID] = resume
 		}
 	}
+	transcripts := map[surface.UsageLimitReader]func(*surface.Session) string{}
 	for i := range sessions {
 		session := &sessions[i]
 		if session.Surface != surface.KindClaude {
@@ -125,7 +126,10 @@ func (d *Daemon) sweepLimitStops(ctx context.Context, now time.Time) {
 		if !ok {
 			continue
 		}
-		transcript := reader.UsageLimitTranscript(session)
+		if transcripts[reader] == nil {
+			transcripts[reader] = reader.UsageLimitTranscripts()
+		}
+		transcript := transcripts[reader](session)
 		changed, recent := d.limitResumes.transcriptChanged(session.ID, transcript, now)
 		if _, stopped := recorded[session.ID]; !recent && !stopped {
 			continue

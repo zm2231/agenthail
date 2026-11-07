@@ -43,6 +43,7 @@ type daemonSurface struct {
 	observeCalls   atomic.Int32
 	transcripts    map[string]string
 	limitReads     atomic.Int32
+	listings       atomic.Int32
 	startOptions   []surface.SessionStartOptions
 	startCeilings  []json.RawMessage
 	startErr       error

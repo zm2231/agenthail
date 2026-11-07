@@ -40,9 +40,10 @@ func onlyTranscript(paths []string) string {
 // changed, which is when Claude Code adds or removes a transcript, by
 // surface.UnchangedSince.
 type claudeTranscriptIndex struct {
-	mu   sync.Mutex
-	dirs map[string]claudeProjectListing
-	byID map[string]map[string]struct{}
+	mu      sync.Mutex
+	dirs    map[string]claudeProjectListing
+	byID    map[string]map[string]struct{}
+	readDir func(string) ([]os.DirEntry, error)
 }
 
 type claudeProjectListing struct {
@@ -52,7 +53,7 @@ type claudeProjectListing struct {
 }
 
 func newClaudeTranscriptIndex() *claudeTranscriptIndex {
-	return &claudeTranscriptIndex{dirs: map[string]claudeProjectListing{}, byID: map[string]map[string]struct{}{}}
+	return &claudeTranscriptIndex{dirs: map[string]claudeProjectListing{}, byID: map[string]map[string]struct{}{}, readDir: os.ReadDir}
 }
 
 // pass brings the index up to date across roots once and returns a lookup
@@ -82,7 +83,7 @@ func (x *claudeTranscriptIndex) refresh(roots []string) {
 	present := map[string]bool{}
 	for _, root := range roots {
 		projects := filepath.Join(root, "projects")
-		entries, err := os.ReadDir(projects)
+		entries, err := x.readDir(projects)
 		if err != nil {
 			continue
 		}
@@ -112,7 +113,7 @@ func (x *claudeTranscriptIndex) refresh(roots []string) {
 
 func (x *claudeTranscriptIndex) list(dir string, modified time.Time) {
 	listed := time.Now()
-	files, err := os.ReadDir(dir)
+	files, err := x.readDir(dir)
 	if err != nil {
 		return
 	}
