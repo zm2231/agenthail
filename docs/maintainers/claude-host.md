@@ -107,7 +107,8 @@ past it. A failed request returns `{code, message}`:
 | `refused` | `open`: Claude exited with an error before it started, such as a workspace it does not trust | refused, held until a person fixes the cause |
 | `open_failed` | `open`: Claude could not be spawned, was killed, or did not start in time | unavailable, retried |
 | `stale` | `respond`: the request was already answered or withdrawn | a conflict; nothing is retried |
-| `busy` | `send` with `ifIdle`: a turn is running; `close` with `ifIdle`: the session is still working | the message is handled as for a busy target: queued or steered |
+| `busy` | `send` with `ifIdle`: a turn is running | the message is handled as for a busy target: queued or steered |
+| `busy` | `close` with `ifIdle`: the session is still working | the session keeps running; adoption checks again until its wait runs out, then refuses as busy |
 
 A `send` is answered only after the SDK has taken the message for Claude's
 input, so a success means the message has left the host's queue.
