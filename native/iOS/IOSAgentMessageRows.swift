@@ -13,7 +13,7 @@ enum AgentFoldGroups {
         for run in AgentFold.runs(agents) {
             folded += shown[next..<run.lowerBound]
             let messages = agents[run].compactMap { $0 }
-            var group = TimelineGroup(id: "agents:" + shown[run.lowerBound].id, items: shown[run].flatMap(\.items))
+            var group = TimelineGroup(id: TranscriptRowID.fold(shown[run.lowerBound].id), items: shown[run].flatMap(\.items))
             group.foldLabel = AgentFold.label(messages)
             group.foldSenders = AgentFold.senders(messages)
             folded.append(group)
@@ -39,7 +39,7 @@ struct IOSAgentMessageRow: View {
 
     private var files: [AttachedFile] { item.files ?? [] }
     private var expandable: Bool { truncated || !files.isEmpty }
-    private var expanded: Bool { expandAll || (rows.current(opened) ?? rows.isOpen(item.id) ?? false) }
+    private var expanded: Bool { expandAll || (rows.current(opened) ?? rows.isOpen(TranscriptRowID.item(item.id)) ?? false) }
     private var chip: String { agentChip(item, agent) }
 
     var body: some View {
@@ -98,7 +98,7 @@ struct IOSAgentMessageRow: View {
         guard !expandAll, expandable || expanded else { return }
         let next = !expanded
         opened = rows.choice(next)
-        rows.set(item.id, open: next)
+        rows.set(TranscriptRowID.item(item.id), open: next)
     }
 }
 
@@ -126,7 +126,7 @@ struct IOSAgentSendRow: View {
 
     private var message: String { agent.body ?? "" }
     private var failed: Bool { result.map(ToolRunSummary.isFailure) ?? false }
-    private var expanded: Bool { !message.isEmpty && (expandAll || (rows.current(opened) ?? rows.isOpen(call.id) ?? false)) }
+    private var expanded: Bool { !message.isEmpty && (expandAll || (rows.current(opened) ?? rows.isOpen(TranscriptRowID.item(call.id)) ?? false)) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -134,7 +134,7 @@ struct IOSAgentSendRow: View {
                 guard !expandAll, !message.isEmpty else { return }
                 let next = !expanded
                 opened = rows.choice(next)
-                rows.set(call.id, open: next)
+                rows.set(TranscriptRowID.item(call.id), open: next)
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "arrow.turn.down.right").font(.caption).foregroundStyle(PhonePalette.muted)
@@ -207,7 +207,7 @@ struct IOSAgentFoldRow: View {
             .accessibilityLabel(group.foldLabel ?? "")
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             .accessibilityHint("From \(group.foldSenders)")
-            .accessibilityIdentifier("agent-fold-" + group.id)
+            .accessibilityIdentifier("agent-fold-" + group.firstItemID)
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(group.items) { item in

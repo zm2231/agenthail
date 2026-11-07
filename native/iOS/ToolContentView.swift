@@ -36,7 +36,7 @@ struct ToolContentView: View {
     private func changes(_ diffs: [FileDiff]) -> some View {
         ForEach(diffs, id: \.path) { file in
             Label(file.path, systemImage: "doc.text").font(.callout).textSelection(.enabled)
-            DiffView(id: item.id + ":" + file.path, hunks: file.hunks)
+            DiffView(id: TranscriptRowID.file(TranscriptRowID.item(item.id), path: file.path), hunks: file.hunks)
         }
         rawInput
     }

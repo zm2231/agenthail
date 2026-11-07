@@ -88,6 +88,7 @@ SOURCES=(
   TranscriptScrimRowLayers.swift
   TranscriptScrimRows.swift
   TranscriptTail.swift
+  TranscriptRowID.swift
   AgentMessage.swift
   ClampedText.swift
   TurnClock.swift

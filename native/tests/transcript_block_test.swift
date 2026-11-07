@@ -27,7 +27,7 @@ struct TranscriptBlockTest {
             return
         }
         check(fold.label == "3 updates · 2 agent messages, 1 task notice" && fold.senders == "builder, another agent, Task notification", "the fold names its kinds: \(fold)")
-        check(fold.members.map(\.id) == [peer.id, other.id, notice.id] && blocks[0].id == "agents:" + peer.id, "the fold keeps its members in order")
+        check(fold.members.map(\.id) == [peer.id, other.id, notice.id].map(TranscriptRowID.item) && blocks[0].id == TranscriptRowID.fold(TranscriptRowID.item(peer.id)), "the fold keeps its members in order")
         if case .agent(let entry) = fold.members[2].kind {
             check(entry.chip == "Task notification · completed", "a task notice names its status: \(entry.chip)")
         }

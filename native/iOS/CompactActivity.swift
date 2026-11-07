@@ -10,6 +10,7 @@ struct TimelineGroup: Identifiable {
     var items: [TimelineItem]
     var foldLabel: String? = nil
     var foldSenders = ""
+    var firstItemID: String { items.first?.id ?? "" }
     var callCount: Int { items.filter { $0.kind == "toolCall" }.count }
     var errorCount: Int { items.filter(ToolRunSummary.isFailure).count }
     var isSend: Bool { items.first?.agent?.isSend == true }
@@ -39,7 +40,7 @@ struct TimelineGroup: Identifiable {
         var sends: [String: Int] = [:]
         for item in items {
             if item.agent?.isSend == true {
-                if groups.last?.isSend != true { groups.append(TimelineGroup(id: item.id, items: [])) }
+                if groups.last?.isSend != true { groups.append(TimelineGroup(id: TranscriptRowID.group(item.id), items: [])) }
                 groups[groups.count - 1].items.append(item)
                 if let call = item.callId { sends[call] = groups.count - 1 }
                 continue
@@ -51,7 +52,7 @@ struct TimelineGroup: Identifiable {
             let activity = ["toolCall", "toolResult", "reasoning"].contains(item.kind)
             if activity, groups.last?.isActivity == true { groups[groups.count - 1].items.append(item) }
             else if isTurnDuration(item), let last = groups.last, last.isReply, last.items.count == 1 { groups[groups.count - 1].items.append(item) }
-            else { groups.append(TimelineGroup(id: item.id, items: [item])) }
+            else { groups.append(TimelineGroup(id: TranscriptRowID.group(item.id), items: [item])) }
         }
         return foldAgents ? AgentFoldGroups.folded(groups) : groups
     }
@@ -65,7 +66,7 @@ struct TimelineGroup: Identifiable {
                 groups[index].items.append(item)
             } else {
                 if item.kind == "toolCall", let callID = item.callId { calls[callID] = groups.count }
-                groups.append(TimelineGroup(id: item.id, items: [item]))
+                groups.append(TimelineGroup(id: TranscriptRowID.group(item.id), items: [item]))
             }
         }
         return groups
@@ -97,7 +98,7 @@ struct CompactActivityGroup: View {
                         ToolLineLabel(verb: ToolRunSummary.label(group.items), object: "", isCode: false, failed: false, failures: group.errorCount, trailing: open ? "chevron.down" : "chevron.right")
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("activity-" + group.id)
+                    .accessibilityIdentifier("activity-" + group.firstItemID)
                     .accessibilityValue(open ? "Expanded" : "Collapsed")
                     .accessibilityHint("Show each tool in this run")
                     .contentTop($top)
@@ -119,7 +120,7 @@ struct CompactActivityGroup: View {
                             CollapseLabel(title: "Collapse activity")
                         }
                         .buttonStyle(.plain)
-                        .accessibilityIdentifier("collapse-activity-" + group.id)
+                        .accessibilityIdentifier("collapse-activity-" + group.firstItemID)
                     }
                 }
                 if !diffs.isEmpty {
@@ -222,7 +223,7 @@ struct ToolActivityRow: View {
     var body: some View {
         let object = presentation.object
         // A failure is the one line that opens itself, so its output is on screen without a tap.
-        let open = rows.current(opened) ?? rows.isOpen(call.id) ?? failed
+        let open = rows.current(opened) ?? rows.isOpen(TranscriptRowID.item(call.id)) ?? failed
         VStack(alignment: .leading, spacing: 0) {
             Button { onInspect(); set(!open) } label: {
                 ToolLineLabel(verb: presentation.verb, object: object.text, isCode: object.isCode, failed: failed, trailing: open ? "chevron.down" : "chevron.right")
@@ -271,7 +272,7 @@ struct ToolActivityRow: View {
 
     private func set(_ open: Bool) {
         opened = rows.choice(open)
-        rows.set(call.id, open: open)
+        rows.set(TranscriptRowID.item(call.id), open: open)
     }
 }
 
@@ -288,7 +289,7 @@ struct ToolOutput: View {
         let failed = ToolRunSummary.isFailure(result)
         let preview = ToolRunSummary.outputPreview(result.text)
         let lines = result.text.split(separator: "\n", omittingEmptySubsequences: false)
-        let shown = rows.current(shownLines) ?? rows.count("output-" + result.id) ?? 0
+        let shown = rows.current(shownLines) ?? rows.count(TranscriptRowID.output(result.id)) ?? 0
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(failed ? "Error output" : "Output").font(.caption.weight(.semibold))
@@ -333,7 +334,7 @@ struct ToolOutput: View {
 
     private func show(_ count: Int) {
         shownLines = rows.choice(count)
-        rows.set("output-" + result.id, count: count)
+        rows.set(TranscriptRowID.output(result.id), count: count)
     }
 }
 
@@ -392,7 +393,7 @@ struct FileChips: View {
         }
     }
 
-    private func key(_ path: String) -> String { "chip-" + run + ":" + path }
+    private func key(_ path: String) -> String { TranscriptRowID.file(run, path: path) }
 
     private func isOpen(_ path: String) -> Bool { rows.current(opened[path]) ?? rows.isOpen(key(path)) ?? false }
 }

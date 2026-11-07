@@ -179,7 +179,7 @@ final class QueueTailTests: XCTestCase {
         try tail.update(active: (1...5).map { try row(Int64($0)) }, timeline: [], now: start)
         XCTAssertEqual(tail.shown.map(\.item.id), [3, 4, 5])
         XCTAssertEqual(tail.hiddenCount, 2)
-        XCTAssertEqual(tail.lastShownID, "queue-computer/5")
+        XCTAssertEqual(tail.lastShownID, TranscriptRowID.queue("computer/5"))
         tail.expanded = true
         XCTAssertEqual(tail.shown.count, 5)
         XCTAssertEqual(tail.hiddenCount, 0)

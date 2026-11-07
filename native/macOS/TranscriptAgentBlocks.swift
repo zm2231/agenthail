@@ -34,7 +34,7 @@ extension TranscriptBlock {
             let members = Array(blocks[run])
             let messages = agents[run].compactMap { $0 }
             let entry = AgentFoldEntry(label: AgentFold.label(messages), senders: AgentFold.senders(messages), members: members)
-            folded.append(TranscriptBlock(id: "agents:" + members[0].id, kind: .agentFold(entry), timestamp: members.last?.timestamp))
+            folded.append(TranscriptBlock(id: TranscriptRowID.fold(members[0].id), kind: .agentFold(entry), timestamp: members.last?.timestamp))
             next = run.upperBound
         }
         folded += blocks[next...]

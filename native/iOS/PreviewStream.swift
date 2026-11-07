@@ -5,7 +5,11 @@ import UIKit
 enum PreviewStream {
     static let enabled = ProcessInfo.processInfo.arguments.contains("--preview-stream")
     static let follows = enabled || ProcessInfo.processInfo.arguments.contains("--preview-follow")
-    static let interval: TimeInterval = 0.6
+    static let interval: TimeInterval = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--preview-stream-rate"), index + 1 < arguments.count, let rate = Double(arguments[index + 1]), rate > 0 else { return 0.6 }
+        return 1 / rate
+    }()
     static let started = Date()
     nonisolated(unsafe) static var base: UInt64 = 0
     nonisolated(unsafe) static var history = 160

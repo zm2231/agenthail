@@ -8,8 +8,10 @@ final class StreamBatch<Event: Sendable>: Sendable {
 
     private let state = OSAllocatedUnfairLock(initialState: State())
     private let drain: @MainActor @Sendable ([Event]) -> Void
+    private let interval: Duration
 
-    init(drain: @escaping @MainActor @Sendable ([Event]) -> Void) {
+    init(interval: Duration = .zero, drain: @escaping @MainActor @Sendable ([Event]) -> Void) {
+        self.interval = interval
         self.drain = drain
     }
 
@@ -20,7 +22,10 @@ final class StreamBatch<Event: Sendable>: Sendable {
             return !state.scheduled
         }
         guard schedule else { return }
-        Task { @MainActor in self.flush() }
+        Task { @MainActor in
+            if self.interval > .zero { try? await Task.sleep(for: self.interval) }
+            self.flush()
+        }
     }
 
     @MainActor func flush() {

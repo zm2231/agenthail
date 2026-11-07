@@ -26,14 +26,14 @@ struct TranscriptBlock: Identifiable, Equatable {
         var sends: [String: Int] = [:]
         func flushTools() {
             guard let first = tools.first else { return }
-            blocks.append(TranscriptBlock(id: "tools-\(first.id)", kind: .tools(tools)))
+            blocks.append(TranscriptBlock(id: TranscriptRowID.tools(first.id), kind: .tools(tools)))
             tools = []
         }
         for item in items {
             if let agent = item.agent, agent.isIncoming || agent.isSend {
                 flushTools()
                 if agent.isSend, let call = item.callId { sends[call] = blocks.count }
-                blocks.append(TranscriptBlock(id: item.id, kind: .agent(AgentEntry(item: item, agent: agent)), truncated: item.truncated, timestamp: item.timestamp))
+                blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .agent(AgentEntry(item: item, agent: agent)), truncated: item.truncated, timestamp: item.timestamp))
                 continue
             }
             if item.kind == "toolResult", let call = item.callId, let index = sends[call], case .agent(var entry) = blocks[index].kind {
@@ -44,7 +44,7 @@ struct TranscriptBlock: Identifiable, Equatable {
             if item.isInstructions {
                 flushTools()
                 if !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .instructions(item.text), truncated: item.truncated))
+                    blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .instructions(item.text), truncated: item.truncated))
                 }
                 continue
             }
@@ -55,34 +55,34 @@ struct TranscriptBlock: Identifiable, Equatable {
                 guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty else { continue }
                 if item.role == "user" {
                     let (text, images) = stripImageMarkers(item.text)
-                    if !text.isEmpty || !files.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .user(text, files: files), truncated: item.truncated, timestamp: item.timestamp)) }
-                    if images > 0 { blocks.append(TranscriptBlock(id: item.id + "#images", kind: .annotation(images == 1 ? "Image attached" : "\(images) images attached"))) }
+                    if !text.isEmpty || !files.isEmpty { blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .user(text, files: files), truncated: item.truncated, timestamp: item.timestamp)) }
+                    if images > 0 { blocks.append(TranscriptBlock(id: TranscriptRowID.images(item.id), kind: .annotation(images == 1 ? "Image attached" : "\(images) images attached"))) }
                 } else {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .assistant(item.text), truncated: item.truncated, timestamp: item.timestamp))
+                    blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .assistant(item.text), truncated: item.truncated, timestamp: item.timestamp))
                 }
             case "attachment":
                 flushTools()
                 if let attachment = item.attachment, attachment.isImage {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .image(attachment), truncated: item.truncated))
+                    blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .image(attachment), truncated: item.truncated))
                 } else {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Image attached"), truncated: item.truncated))
+                    blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .annotation("Image attached"), truncated: item.truncated))
                 }
             case "notice":
                 flushTools()
                 let text = item.noticeText
-                if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .notice(text), truncated: item.truncated)) }
+                if !text.isEmpty { blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .notice(text), truncated: item.truncated)) }
             case "event" where item.title == "Turn duration":
                 flushTools()
                 if let last = blocks.indices.last, case .assistant = blocks[last].kind, blocks[last].finished == nil {
                     blocks[last].finished = item.text
                     blocks[last].timestamp = item.timestamp ?? blocks[last].timestamp
                 } else {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .annotation(TurnClock.footer(duration: item.text, at: item.timestamp)), truncated: item.truncated))
+                    blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .annotation(TurnClock.footer(duration: item.text, at: item.timestamp)), truncated: item.truncated))
                 }
             case "event":
                 flushTools()
                 let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                blocks.append(TranscriptBlock(id: item.id, kind: text.isEmpty ? .annotation(item.eventTitle) : .notice(item.eventLine), truncated: item.truncated))
+                blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: text.isEmpty ? .annotation(item.eventTitle) : .notice(item.eventLine), truncated: item.truncated))
             case "context", "goal", "done", "phase":
                 continue
             default:

@@ -37,6 +37,36 @@ final class StreamBatchTests: XCTestCase {
         XCTAssertEqual(drains.batches, [[1, 2]])
     }
 
+    func testRowsInsideTheIntervalApplyOnceAfterIt() async throws {
+        let drains = Drains()
+        let batch = StreamBatch<Int>(interval: .milliseconds(100)) { drains.batches.append($0) }
+        batch.add(1)
+        try await Task.sleep(for: .milliseconds(40))
+        batch.add(2)
+        XCTAssertTrue(drains.batches.isEmpty, "a row applied before the interval passed")
+        try await waitUntil { !drains.batches.isEmpty }
+        XCTAssertEqual(drains.batches, [[1, 2]])
+    }
+
+    func testFlushInsideTheIntervalAppliesAtOnceAndOnlyOnce() async throws {
+        let drains = Drains()
+        let batch = StreamBatch<Int>(interval: .milliseconds(100)) { drains.batches.append($0) }
+        batch.add(1)
+        batch.flush()
+        XCTAssertEqual(drains.batches, [[1]])
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(drains.batches, [[1]], "the waiting drain applied again after a flush")
+    }
+
+    func testTheFirstNonEmptyLineIsTakenWithoutSplittingTheText() {
+        XCTAssertEqual(TimelineItem.firstLine("swift build\nsecond line"), "swift build")
+        XCTAssertEqual(TimelineItem.firstLine("\n\n  indented\nnext"), "  indented")
+        XCTAssertEqual(TimelineItem.firstLine("single"), "single")
+        XCTAssertEqual(TimelineItem.firstLine(""), "")
+        XCTAssertEqual(TimelineItem.firstLine("\n\n"), "")
+        XCTAssertEqual(TimelineItem.firstLine("crlf\r\nnext"), "crlf\r\nnext".split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init))
+    }
+
     func testOnlyShortSingleLineEventsAreDividers() {
         XCTAssertTrue(TranscriptDivider.fits("gpt-5.6-terra"))
         XCTAssertFalse(TranscriptDivider.fits("first\nsecond"))

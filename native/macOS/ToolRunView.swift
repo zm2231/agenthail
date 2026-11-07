@@ -138,17 +138,18 @@ struct ToolLine: View {
     @Environment(\.revealRow) private var revealRow
 
     private var failed: Bool { results.contains(where: ToolRunSummary.isFailure) || ToolRunSummary.isFailure(call) }
+    private var row: String { TranscriptRowID.item(call.id) }
 
     var body: some View {
         let presentation = ToolPresentation(name: call.title, text: call.text)
         let object = presentation.object
         // A failure is the one line that opens itself, so its output is on screen without a click.
-        let open = rows.current(opened) ?? rows.isOpen(call.id) ?? failed
+        let open = rows.current(opened) ?? rows.isOpen(row) ?? failed
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
                 holdPlace()
                 opened = rows.choice(!open)
-                rows.set(call.id, open: !open)
+                rows.set(row, open: !open)
             } label: {
                 ToolLineLabel(verb: presentation.verb, object: object.text, isCode: object.isCode, failed: failed)
             }
@@ -168,7 +169,7 @@ struct ToolLine: View {
                                         .font(.system(size: DesktopType.meta, design: .monospaced))
                                         .foregroundStyle(DesktopPalette.muted)
                                 }
-                                DiffView(id: call.id + ":" + file.path, hunks: file.hunks)
+                                DiffView(id: TranscriptRowID.file(row, path: file.path), hunks: file.hunks)
                             }
                         }
                         ShortenedNote(item: call)
@@ -183,7 +184,7 @@ struct ToolLine: View {
                     }
                     CollapseLine(title: "Collapse tool") {
                         opened = rows.choice(false)
-                        rows.set(call.id, open: false)
+                        rows.set(row, open: false)
                         revealRow($top)
                     }
                 }
@@ -210,12 +211,13 @@ struct ReasoningLine: View {
     @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
-        let open = rows.current(opened) ?? rows.isOpen(item.id) ?? false
+        let row = TranscriptRowID.item(item.id)
+        let open = rows.current(opened) ?? rows.isOpen(row) ?? false
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
                 holdPlace()
                 opened = rows.choice(!open)
-                rows.set(item.id, open: !open)
+                rows.set(row, open: !open)
             } label: {
                 ToolLineLabel(verb: "Thought", object: item.text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? "", isCode: false, failed: false)
             }
@@ -246,12 +248,13 @@ struct OutputLine: View {
 
     var body: some View {
         let failed = ToolRunSummary.isFailure(result)
-        let open = rows.current(opened) ?? rows.isOpen(result.id) ?? failed
+        let row = TranscriptRowID.item(result.id)
+        let open = rows.current(opened) ?? rows.isOpen(row) ?? failed
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
                 holdPlace()
                 opened = rows.choice(!open)
-                rows.set(result.id, open: !open)
+                rows.set(row, open: !open)
             } label: {
                 ToolLineLabel(verb: "Output", object: result.text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? "", isCode: true, failed: failed)
             }
@@ -287,7 +290,7 @@ struct ToolOutputBlock: View {
         let failed = ToolRunSummary.isFailure(result)
         let preview = ToolRunSummary.outputPreview(result.text)
         let lines = result.text.split(separator: "\n", omittingEmptySubsequences: false)
-        let shown = rows.current(shownLines) ?? rows.count("output-" + result.id) ?? 0
+        let shown = rows.current(shownLines) ?? rows.count(TranscriptRowID.output(result.id)) ?? 0
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             HStack(spacing: 10) {
                 Text(failed ? "Error output" : "Output")
@@ -347,7 +350,7 @@ struct ToolOutputBlock: View {
 
     private func set(_ count: Int) {
         shownLines = rows.choice(count)
-        rows.set("output-" + result.id, count: count)
+        rows.set(TranscriptRowID.output(result.id), count: count)
     }
 }
 
@@ -410,7 +413,7 @@ struct FileChips: View {
         }
     }
 
-    private func key(_ path: String) -> String { "chip-" + run + ":" + path }
+    private func key(_ path: String) -> String { TranscriptRowID.file(run, path: path) }
 
     private func isOpen(_ path: String) -> Bool { rows.current(opened[path]) ?? rows.isOpen(key(path)) ?? false }
 }

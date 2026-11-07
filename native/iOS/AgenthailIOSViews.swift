@@ -515,6 +515,7 @@ struct SessionScreen: View {
     @State private var userScrolling = false
     @State private var position = ScrollPosition()
     @State private var olderPlace = OlderPlaceHold()
+    @State private var memo = TimelineMemo()
     private static let rowSpacing: CGFloat = 12
 
     private var displayTitle: String {
@@ -525,20 +526,25 @@ struct SessionScreen: View {
         model.selectedDetail?.session.id == session.id ? model.selectedDetail : nil
     }
     private var items: [TimelineItem] {
-        let latest = detail?.timeline?.items ?? []
-        let ids = Set(latest.map(\.id))
-        return model.olderActivity.filter { !ids.contains($0.id) } + latest
+        memo.items(latest: detail?.timeline?.items ?? [], older: model.olderActivity)
+    }
+    private var groups: [TimelineGroup] {
+        memo.groups(latest: detail?.timeline?.items ?? [], older: model.olderActivity, foldAgents: !expandAgents)
     }
 
     static func showsActivity(timeline: SessionTimeline, itemCount: Int, activityCursor: Int64?, exchangeCount: Int) -> Bool {
         timeline.unavailableReason == nil && (itemCount > 0 || (activityCursor ?? 0) > 0 || exchangeCount == 0)
     }
 
+    private var firstRowID: String? {
+        activityOnly ? items.first.map { TranscriptRowID.item($0.id) } : groups.first?.id
+    }
+
     private var latestRowID: String? {
         guard let detail, let timeline = detail.timeline else { return nil }
         let items = items
         guard Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchangeCount ?? 0) else { return nil }
-        return activityOnly ? items.last?.id : TimelineGroup.make(items, foldAgents: !expandAgents).last?.id
+        return activityOnly ? items.last.map { TranscriptRowID.item($0.id) } : groups.last?.id
     }
 
     private func scrollToLatest() {
@@ -611,7 +617,7 @@ struct SessionScreen: View {
                 if (model.activityCursor ?? 0) > 0 {
                     Button {
                         followingLatest = false
-                        let hold = olderPlace.hold(activityOnly ? items.first?.id : TimelineGroup.make(items, foldAgents: !expandAgents).first?.id)
+                        let hold = olderPlace.hold(firstRowID)
                         Task {
                             await model.loadOlderActivity()
                             olderPlace.pageApplied(hold)
@@ -629,9 +635,12 @@ struct SessionScreen: View {
                 }
                 if activityOnly {
                     let leading = items.first?.id
-                    ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).rebuilt($0.id, generation: rowsGeneration).tracksOlderPlace($0.id, leading: $0.id == leading, in: olderPlace).probesScrollJump($0.id).onAppear { [id = $0.id] in if id == items.last?.id { openingRowAppeared(id) } }.id($0.id) }
+                    ForEach(items) { item in
+                        let row = TranscriptRowID.item(item.id)
+                        IOSTimelineRow(item: item, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).rebuilt(row, generation: rowsGeneration).tracksOlderPlace(row, leading: item.id == leading, in: olderPlace).probesScrollJump(row).onAppear { if item.id == items.last?.id { openingRowAppeared(row) } }.id(row)
+                    }
                 } else {
-                    let groups = TimelineGroup.make(items, foldAgents: !expandAgents)
+                    let groups = self.groups
                     ForEach(groups) { group in
                         CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
                             .rebuilt(group.id, generation: rowsGeneration)
@@ -834,8 +843,8 @@ struct SessionScreen: View {
             edge.atLatest = !startsAtOldest
             landed = false
             await model.loadSession(session.id)
-            if startsAtOldest, let first = items.first {
-                position.scrollTo(id: first.id, anchor: .top)
+            if startsAtOldest, let first = firstRowID {
+                position.scrollTo(id: first, anchor: .top)
             } else if followingLatest {
                 scrollToLatest()
             }
@@ -1295,12 +1304,12 @@ struct IOSTimelineRow: View {
             TranscriptDivider(text: [eventLabel, TurnClock.time(item.timestamp)].compactMap { $0 }.joined(separator: " · "))
             if item.truncated { ShortenedNote() }
         } else {
-            let open = rows.current(opened) ?? rows.isOpen(item.id) ?? (item.kind == "toolResult" && ToolRunSummary.isFailure(item))
+            let open = rows.current(opened) ?? rows.isOpen(TranscriptRowID.item(item.id)) ?? (item.kind == "toolResult" && ToolRunSummary.isFailure(item))
             VStack(alignment: .leading, spacing: 8) {
                 Button {
                     onInspect()
                     opened = rows.choice(!open)
-                    rows.set(item.id, open: !open)
+                    rows.set(TranscriptRowID.item(item.id), open: !open)
                 } label: {
                     ToolLineLabel(verb: lineVerb, object: firstLine, isCode: item.kind == "toolResult", failed: item.kind == "toolResult" && ToolRunSummary.isFailure(item), trailing: open ? "chevron.down" : "chevron.right")
                 }
@@ -1317,13 +1326,13 @@ struct IOSTimelineRow: View {
                     }
                     .padding(.leading, ToolLineLabel.indent)
                 } else if item.truncated { ShortenedNote().padding(.leading, ToolLineLabel.indent) }
-				let retainedBody = rows.current(loadedBody) ?? rows.body(item.id)
+				let retainedBody = rows.current(loadedBody) ?? rows.body(TranscriptRowID.item(item.id))
 				if item.bodyRef != nil, retainedBody == nil, let bodyLoader {
 					Button("Load retained body") {
 						Task {
 							guard let body = await bodyLoader(item) else { return }
 							loadedBody = rows.choice(body)
-							rows.set(item.id, body: body)
+							rows.set(TranscriptRowID.item(item.id), body: body)
 						}
 					}.font(.caption)
 				} else if let retainedBody {
@@ -1344,9 +1353,7 @@ struct IOSTimelineRow: View {
         default: item.title
         }
     }
-    private var firstLine: String {
-        item.text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
-    }
+    private var firstLine: String { TimelineItem.firstLine(item.text) }
 
     private var messageLabel: String {
         if item.role == "user" { return "You" }
@@ -1378,7 +1385,7 @@ struct AttachmentRow: View {
     @Environment(\.transcriptRows) private var rows
     @Environment(\.cachedAttachment) private var cached
 
-    private var failedKey: String { "attachment-failed-" + item.id }
+    private var failedKey: String { TranscriptRowID.failedAttachment(item.id) }
     private var data: Data? { loaded ?? cached(item) }
 
     var body: some View {

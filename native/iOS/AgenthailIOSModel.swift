@@ -171,6 +171,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private var hostOrder: [String] = []
     private var catalog = HostCatalog()
     private var sessionStreamTask: Task<Void, Never>?
+    static let streamPublishInterval: Duration = .milliseconds(100)
     private var sessionMetadataTask: Task<Void, Never>?
     private var sessionServer: HostConnection?
     private(set) var sessionStreamCursor: UInt64 = 0
@@ -2199,7 +2200,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard selectedSessionID == id, case let (connection, route)? = try? resolveServer(id) else { return }
         sessionStreamTask = Task {
             let backoff = EventRetryBackoff()
-            let batch = StreamBatch<SessionStreamEvent> { [weak self] events in
+            let batch = StreamBatch<SessionStreamEvent>(interval: Self.streamPublishInterval) { [weak self] events in
                 self?.applySessionStreamEvents(events, route: route, server: connection)
             }
             while !Task.isCancelled, selectedSessionID == id, server(for: id) === connection {
