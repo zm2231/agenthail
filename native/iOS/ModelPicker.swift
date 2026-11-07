@@ -41,6 +41,11 @@ struct SearchableModelSelectionSheet: View {
 
     private var supportsCustomID: Bool { options.contains { $0.allowsCustom == true } }
 
+    private var customChosen: Bool {
+        guard let pendingSelection, !options.contains(where: { $0.id == pendingSelection }) else { return false }
+        return customID.trimmingCharacters(in: .whitespacesAndNewlines) == pendingSelection
+    }
+
     private var canApply: Bool {
         allowsDefault || !(pendingSelection?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
@@ -78,20 +83,24 @@ struct SearchableModelSelectionSheet: View {
                 }
                 if supportsCustomID {
                     Section("Custom model ID") {
-                        TextField("Enter an explicit model ID", text: $customID)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .focused($customFocused)
+                        HStack {
+                            TextField("Enter an explicit model ID", text: $customID)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .focused($customFocused)
+                            if customChosen {
+                                Image(systemName: "checkmark")
+                                    .accessibilityLabel("Selected")
+                                    .accessibilityIdentifier("custom-model-selected")
+                            }
+                        }
                         Button("Use custom model ID") {
                             let value = customID.trimmingCharacters(in: .whitespacesAndNewlines)
                             guard !value.isEmpty else { return }
                             pendingSelection = value
                             customFocused = false
                         }
-                        .disabled(customID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        if let pendingSelection, !options.contains(where: { $0.id == pendingSelection }) {
-                            Label(pendingSelection, systemImage: "checkmark").font(.footnote)
-                        }
+                        .disabled(customID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || customChosen)
                     }
                 }
                 Section {
