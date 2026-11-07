@@ -158,6 +158,7 @@ SOURCES=(
   macOS/StatusStripFit.swift
   macOS/TranscriptBlock.swift
   macOS/TranscriptAgentBlocks.swift
+  TranscriptEnd.swift
   macOS/TranscriptFollow.swift
   macOS/TranscriptFeed.swift
   macOS/RevealedRow.swift

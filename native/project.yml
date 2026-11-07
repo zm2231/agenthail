@@ -86,6 +86,7 @@ targets:
       - path: DiffPresentation.swift
       - path: ToolRunSummary.swift
       - path: TranscriptRows.swift
+      - path: TranscriptEnd.swift
       - path: TranscriptScrim.swift
       - path: TranscriptScrimMask.swift
       - path: TranscriptScrimRowLayers.swift

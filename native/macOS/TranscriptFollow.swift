@@ -36,7 +36,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     }
 
     static func atBottom(_ geometry: ScrollGeometry) -> Bool {
-        geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - bottomSlack
+        TranscriptEnd(geometry).distance < bottomSlack
     }
 
     func body(content: Content) -> some View {
@@ -61,6 +61,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .onScrollGeometryChange(for: ScrollGeometry.self) { geometry in
                 // The action is not called for every change, so the latest geometry is kept as it is read.
                 layout.geometry = geometry
+                if following { layout.scheduleCheck(checkEnd) }
                 return geometry
             } action: { old, new in
                 let inserted = leadingRow != placedLeadingRow && placedLeadingRow.map(hasRow) == true
@@ -82,6 +83,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                         settle { $0.scrollTo(edge: .bottom) }
                     } else if !animating {
                         // A jump's animation passes through offsets short of the bottom; they are not the reader leaving it.
+                        if !following || old.contentOffset != new.contentOffset { layout.readerContent = new.contentSize.height }
                         following = Self.atBottom(new)
                     }
                 } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
@@ -94,6 +96,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 } else if !following, resting, Self.atBottom(new) {
                     // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
                     following = true
+                    layout.readerContent = new.contentSize.height
                 }
             }
             .environment(\.holdTranscriptPlace, HoldTranscriptPlace(hold: holdPlace))
@@ -106,6 +109,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .onChange(of: transcript) {
                 generation &+= 1
                 layout.releaseHold()
+                layout.readerContent = nil
                 placedLeadingRow = leadingRow
                 following = true
                 position.scrollTo(edge: .bottom)
@@ -132,6 +136,16 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
         settle { $0.scrollTo(edge: .bottom) }
     }
 
+    // The geometry action can skip a stream's last change; false asks again once the scroll rests.
+    private func checkEnd() -> Bool {
+        guard following, let geometry = layout.geometry else { return true }
+        guard resting else { return false }
+        if geometry.contentSize.height > layout.readerContent ?? 0, TranscriptEnd(geometry).distance > 2 {
+            settle { $0.scrollTo(edge: .bottom) }
+        }
+        return true
+    }
+
     // Geometry callbacks run mid-layout, so scrolling waits for the next turn and is dropped if the transcript changed meanwhile.
     private func settle(_ move: @escaping (inout ScrollPosition) -> Void) {
         let scheduled = generation
@@ -151,6 +165,18 @@ private final class Layout {
     private(set) var resized = false
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
     var revealed: RevealedRow?
+    var readerContent: CGFloat?
+    private var checkDue = false
+
+    // Not pushed back by later changes, so a steady stream is still checked.
+    func scheduleCheck(_ check: @escaping @MainActor () -> Bool) {
+        guard !checkDue else { return }
+        checkDue = true
+        Task { @MainActor in
+            repeat { try? await Task.sleep(for: .milliseconds(150)) } while !check()
+            checkDue = false
+        }
+    }
 
     var heldFromEnd: CGFloat? {
         guard let fromEnd, ContinuousClock.now < fromEnd.until else { return nil }

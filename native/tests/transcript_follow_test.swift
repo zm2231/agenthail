@@ -12,6 +12,7 @@ final class Feed: ObservableObject {
     @Published var transcript = "A"
     @Published var rows: [Row] = []
     @Published var inset: CGFloat = 100
+    @Published var header: CGFloat = 44
     @Published var usesTail = false
     var following = true
     var eager = 0
@@ -66,7 +67,7 @@ struct Transcript: View {
             layout.tail.update(ids, in: feed.transcript, rows: layout.rows, visible: layout.visible, following: following)
         }
         .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.rows.contains { $0.id == id } }, position: $position, following: $following)
-        .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: 44) }
+        .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: feed.header) }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
         .onChange(of: following) { feed.following = following }
         .onReceive(NotificationCenter.default.publisher(for: .jumpToLatest)) { _ in
@@ -453,6 +454,40 @@ struct TranscriptFollowTest {
         spin(0.6)
         expectBottom(scroll, "a tall newest row that grows stays followed")
         expect(feed.following, "a tall newest row keeps following")
+
+        feed.usesTail = false
+        feed.header = 80
+        feed.transcript = "H"
+        feed.rows = rows("H", 60)
+        spin(0.6)
+        expectBottom(scroll, "a transcript under a tall header opens at the live edge")
+        let bottom = offset(scroll)
+        move(scroll, to: bottom - 400)
+        expect(!feed.following, "scrolling up under a tall header stops following")
+        move(scroll, to: bottom)
+        expect(feed.following, "scrolling back to the end under a tall header follows again, \(Int(gap(scroll))) points short of the bottom")
+        for index in 0..<10 {
+            feed.rows += rows("Hs\(index)-", 1)
+            spin(0.1)
+        }
+        expectBottom(scroll, "rows streamed under a tall header stay followed")
+
+        feed.header = 44
+        feed.transcript = "S"
+        feed.rows = rows("S", 60)
+        spin(0.6)
+        for index in 0..<10 {
+            feed.rows += rows("Sa\(index)-", 1)
+            spin(0.05)
+        }
+        move(scroll, to: offset(scroll) - 400)
+        let readerPlace = offset(scroll)
+        for index in 0..<20 {
+            feed.rows += rows("Sb\(index)-", 1)
+            spin(0.05)
+        }
+        spin(0.6)
+        expect(!feed.following && abs(offset(scroll) - readerPlace) < 1, "a reader who scrolls up while rows stream stays put, offset \(readerPlace) became \(offset(scroll))")
     }
 
     @MainActor
