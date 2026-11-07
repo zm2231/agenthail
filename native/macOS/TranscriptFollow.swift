@@ -27,6 +27,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     @State private var layout = Layout()
 
     static var bottomSlack: CGFloat { 70 }
+    static var readerReach: CGFloat { 4 }
     /// Longer than a jump's animation. A scroll moved mid-animation can leave the phase animating for good.
     static var animationLimit: Duration { .milliseconds(500) }
 
@@ -36,7 +37,12 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     }
 
     static func atBottom(_ geometry: ScrollGeometry) -> Bool {
-        geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - bottomSlack
+        TranscriptEnd(geometry).distance < bottomSlack
+    }
+
+    // The slack absorbs layout settling; following is regained, or kept after a reader's scroll, only at the end itself.
+    static func atEnd(_ geometry: ScrollGeometry) -> Bool {
+        TranscriptEnd(geometry).distance < readerReach
     }
 
     func body(content: Content) -> some View {
@@ -44,8 +50,11 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .scrollPosition($position)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(following ? .bottom : nil, for: .sizeChanges)
-            .onScrollPhaseChange { _, new in
+            .onScrollPhaseChange { old, new in
                 phase = new
+                if new == .idle, old == .interacting || old == .decelerating, let geometry = layout.geometry {
+                    following = Self.atEnd(geometry)
+                }
                 if new == .interacting || new == .decelerating { layout.releaseHold() }
                 layout.animationStart = new == .animating ? .now : nil
                 if new == .animating {
@@ -61,8 +70,10 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .onScrollGeometryChange(for: ScrollGeometry.self) { geometry in
                 // The action is not called for every change, so the latest geometry is kept as it is read.
                 layout.geometry = geometry
+                if following { layout.scheduleCheck(checkEnd) }
                 return geometry
             } action: { old, new in
+                layout.seen = new
                 let inserted = leadingRow != placedLeadingRow && placedLeadingRow.map(hasRow) == true
                 placedLeadingRow = leadingRow
                 let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
@@ -82,7 +93,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                         settle { $0.scrollTo(edge: .bottom) }
                     } else if !animating {
                         // A jump's animation passes through offsets short of the bottom; they are not the reader leaving it.
-                        following = Self.atBottom(new)
+                        following = following ? Self.atBottom(new) : Self.atEnd(new)
                     }
                 } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
                     settle { $0.scrollTo(edge: .bottom) }
@@ -91,7 +102,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     layout.holdFromEnd(distance, content: new.contentSize.height)
                     let target = max(new.contentSize.height - distance, 0)
                     settle { $0.scrollTo(y: Self.scrollY(target, in: new)) }
-                } else if !following, resting, Self.atBottom(new) {
+                } else if !following, resting, Self.atEnd(new) {
                     // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
                     following = true
                 }
@@ -103,9 +114,11 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 layout.revealed = RevealedRow(top: top)
                 position.scrollTo(y: top.wrappedValue)
             }
+            .onDisappear { layout.cancelCheck() }
             .onChange(of: transcript) {
                 generation &+= 1
                 layout.releaseHold()
+                layout.cancelCheck()
                 placedLeadingRow = leadingRow
                 following = true
                 position.scrollTo(edge: .bottom)
@@ -132,6 +145,21 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
         settle { $0.scrollTo(edge: .bottom) }
     }
 
+    // The geometry action can skip a stream's last change; false asks again once the scroll rests.
+    private func checkEnd() -> Bool {
+        guard let geometry = layout.geometry else { return true }
+        switch TranscriptEndCheck.decide(following: following, resting: resting, geometry: geometry, seen: layout.seen, deferred: layout.checkDeferred) {
+        case .retry:
+            if resting { layout.checkDeferred = true }
+            return false
+        case .scroll:
+            settle { $0.scrollTo(edge: .bottom) }
+            return true
+        case .done:
+            return true
+        }
+    }
+
     // Geometry callbacks run mid-layout, so scrolling waits for the next turn and is dropped if the transcript changed meanwhile.
     private func settle(_ move: @escaping (inout ScrollPosition) -> Void) {
         let scheduled = generation
@@ -147,10 +175,31 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
 @MainActor
 private final class Layout {
     var geometry: ScrollGeometry?
+    var seen: ScrollGeometry?
+    var checkDeferred = false
     var animationStart: ContinuousClock.Instant?
     private(set) var resized = false
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
     var revealed: RevealedRow?
+    private var check: Task<Void, Never>?
+
+    // Not pushed back by later changes, so a steady stream is still checked.
+    func scheduleCheck(_ run: @escaping @MainActor () -> Bool) {
+        guard check == nil else { return }
+        checkDeferred = false
+        check = Task { @MainActor in
+            repeat {
+                do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            } while !run()
+            check = nil
+        }
+    }
+
+    func cancelCheck() {
+        check?.cancel()
+        check = nil
+        checkDeferred = false
+    }
 
     var heldFromEnd: CGFloat? {
         guard let fromEnd, ContinuousClock.now < fromEnd.until else { return nil }

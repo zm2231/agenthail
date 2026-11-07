@@ -89,6 +89,7 @@ let package = Package(
                 "DiffPresentation.swift",
                 "ToolRunSummary.swift",
                 "TranscriptRows.swift",
+                "TranscriptEnd.swift",
                 "TranscriptScrim.swift",
                 "TranscriptScrimMask.swift",
                 "TranscriptScrimRowLayers.swift",

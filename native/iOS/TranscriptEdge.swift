@@ -1,19 +1,5 @@
 import SwiftUI
 
-struct TranscriptEnd: Equatable {
-    let contentHeight: CGFloat
-    let visibleBottom: CGFloat
-    let bottomInset: CGFloat
-
-    init(_ geometry: ScrollGeometry) {
-        contentHeight = geometry.contentSize.height
-        visibleBottom = geometry.visibleRect.maxY
-        bottomInset = geometry.contentInsets.bottom
-    }
-
-    var distance: CGFloat { contentHeight - (visibleBottom - bottomInset) }
-}
-
 @MainActor @Observable
 final class TranscriptEdge {
     static let reach: CGFloat = 24

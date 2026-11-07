@@ -12,6 +12,7 @@ final class Feed: ObservableObject {
     @Published var transcript = "A"
     @Published var rows: [Row] = []
     @Published var inset: CGFloat = 100
+    @Published var header: CGFloat = 44
     @Published var usesTail = false
     var following = true
     var eager = 0
@@ -21,6 +22,7 @@ final class Feed: ObservableObject {
 @MainActor var appears: [String: Int] = [:]
 @MainActor var shownOpen: [String: Bool] = [:]
 @MainActor var rowTops: [String: CGFloat] = [:]
+@MainActor var seenGeometry: [String] = []
 @MainActor let rowMemory = TranscriptRowMemory()
 @MainActor weak var watched: Feed?
 
@@ -59,6 +61,8 @@ struct Transcript: View {
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
             layout.visible = geometry.visibleRect
+            seenGeometry.append(String(format: "%.3f offset %.0f content %.0f visible maxY %.0f insets %.0f/%.0f end %.0f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 100), geometry.contentOffset.y, geometry.contentSize.height, geometry.visibleRect.maxY, geometry.contentInsets.top, geometry.contentInsets.bottom, geometry.contentSize.height - (geometry.visibleRect.maxY - geometry.contentInsets.bottom)))
+            if seenGeometry.count > 12 { seenGeometry.removeFirst() }
             return true
         } action: { _, _ in }
         .onChange(of: "\(feed.transcript)|\(ids.count)|\(ids.last ?? "")", initial: true) {
@@ -66,9 +70,13 @@ struct Transcript: View {
             layout.tail.update(ids, in: feed.transcript, rows: layout.rows, visible: layout.visible, following: following)
         }
         .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.rows.contains { $0.id == id } }, position: $position, following: $following)
-        .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: 44) }
+        .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: feed.header) }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
-        .onChange(of: following) { feed.following = following }
+        .onChange(of: following) {
+            feed.following = following
+            seenGeometry.append(String(format: "%.3f following %@", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 100), following ? "on" : "off"))
+            if seenGeometry.count > 12 { seenGeometry.removeFirst() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .jumpToLatest)) { _ in
             scrollToLatest($position, following: $following)
         }
@@ -453,6 +461,79 @@ struct TranscriptFollowTest {
         spin(0.6)
         expectBottom(scroll, "a tall newest row that grows stays followed")
         expect(feed.following, "a tall newest row keeps following")
+
+        feed.usesTail = false
+        feed.header = 80
+        feed.transcript = "H"
+        feed.rows = rows("H", 60)
+        spin(0.6)
+        expectBottom(scroll, "a transcript under a tall header opens at the live edge")
+        let bottom = offset(scroll)
+        move(scroll, to: bottom - 400)
+        expect(!feed.following, "scrolling up under a tall header stops following")
+        move(scroll, to: bottom)
+        expect(feed.following, "scrolling back to the end under a tall header follows again, \(Int(gap(scroll))) points short of the bottom")
+        for index in 0..<10 {
+            feed.rows += rows("Hs\(index)-", 1)
+            spin(0.1)
+        }
+        expectBottom(scroll, "rows streamed under a tall header stay followed")
+
+        feed.header = 44
+        feed.transcript = "S"
+        feed.rows = rows("S", 60)
+        spin(0.6)
+        for index in 0..<10 {
+            feed.rows += rows("Sa\(index)-", 1)
+            spin(0.05)
+        }
+        move(scroll, to: offset(scroll) - 400)
+        let readerPlace = offset(scroll)
+        for index in 0..<20 {
+            feed.rows += rows("Sb\(index)-", 1)
+            spin(0.05)
+        }
+        spin(0.6)
+        expect(!feed.following && abs(offset(scroll) - readerPlace) < 1, "a reader who scrolls up while rows stream stays put, offset \(readerPlace) became \(offset(scroll))")
+
+        feed.transcript = "N"
+        feed.rows = rows("N", 60)
+        spin(0.6)
+        expectBottom(scroll, "a fresh transcript before a short scroll up opens at the live edge")
+        drag(scroll, to: offset(scroll) - 40)
+        let nearPlace = offset(scroll)
+        expect(!feed.following, "a reader who scrolls to just short of the end stops following")
+        for index in 0..<10 { feed.rows += rows("Ns\(index)-", 1); spin(0.05) }
+        spin(0.6)
+        expect(!feed.following && abs(offset(scroll) - nearPlace) < 1, "a reader who stops just short of the end keeps that place as rows stream, offset \(nearPlace) became \(offset(scroll))")
+        drag(scroll, to: bottomOffset(scroll))
+        expect(feed.following, "a reader who scrolls back to the end follows again, \(Int(gap(scroll))) points short")
+
+        for top in [0, 44, 69, 70, 100, 120] as [CGFloat] {
+            for bottom in [0, 20] as [CGFloat] {
+                let size = "header \(Int(top)), bottom inset \(Int(bottom))"
+                feed.header = top
+                feed.inset = bottom
+                feed.transcript = "I\(Int(top))-\(Int(bottom))"
+                feed.rows = rows("I\(Int(top))-\(Int(bottom))-", 60)
+                spin(0.6)
+                expectBottom(scroll, "with \(size) a transcript opens at the live edge")
+                let end = offset(scroll)
+                move(scroll, to: end - 400)
+                expect(!feed.following, "with \(size) scrolling up stops following")
+                move(scroll, to: end)
+                expect(feed.following, "with \(size) the exact end follows again, \(Int(gap(scroll))) points short")
+                move(scroll, to: end - TranscriptFollow<String>.bottomSlack + 1)
+                expect(feed.following, "with \(size) a layout move inside the slack keeps following")
+                expectBottom(scroll, "with \(size) a followed transcript moved inside the slack returns to the end")
+                // SwiftUI undoes a clip move made before it finishes its own scroll.
+                spin(0.3)
+                move(scroll, to: end - TranscriptFollow<String>.bottomSlack - 1)
+                expect(!feed.following, "with \(size) a place just past the slack does not follow, \(Int(gap(scroll))) points short; \(geometry(scroll))")
+            }
+        }
+        feed.header = 44
+        feed.inset = 100
     }
 
     @MainActor
@@ -471,6 +552,24 @@ struct TranscriptFollowTest {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
         spin(0.3)
+    }
+
+    // A live scroll, as a trackpad or wheel gesture reports it, so the transcript sees a reader's scroll phases.
+    @MainActor
+    private static func drag(_ scroll: NSScrollView, to y: CGFloat) {
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        spin(0.05)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
+        spin(0.05)
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        spin(0.3)
+    }
+
+    @MainActor
+    private static func bottomOffset(_ scroll: NSScrollView) -> CGFloat {
+        offset(scroll) + gap(scroll)
     }
 
     @MainActor
@@ -494,7 +593,7 @@ struct TranscriptFollowTest {
         let clip = scroll.contentView
         let ids = watched?.rows.suffix(2).map(\.id) ?? []
         let pitch = ids.count == 2 ? (rowTops[ids[1]] ?? 0) - (rowTops[ids[0]] ?? 0) : 0
-        return "document \(scroll.documentView?.frame.height ?? 0), clip \(clip.bounds), insets top \(clip.contentInsets.top) bottom \(clip.contentInsets.bottom), following \(watched?.following ?? false), last row pitch \(pitch)"
+        return "document \(scroll.documentView?.frame.height ?? 0), clip \(clip.bounds), insets top \(clip.contentInsets.top) bottom \(clip.contentInsets.bottom), following \(watched?.following ?? false), last row pitch \(pitch); SwiftUI geometry, newest last at \(String(format: "%.3f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 100))):\n  " + seenGeometry.joined(separator: "\n  ")
     }
 
     @MainActor
