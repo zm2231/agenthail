@@ -196,7 +196,7 @@ func normalizeConfig(c Config) (Config, error) {
 		return c, errors.New("home, session id, and session surface are required")
 	}
 	if c.SocketDir == "" {
-		c.SocketDir = defaultSocketDir
+		c.SocketDir = SocketDir()
 	}
 	if c.Generation == "" {
 		c.Generation = "direct"

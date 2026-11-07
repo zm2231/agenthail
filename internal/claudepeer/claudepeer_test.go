@@ -796,12 +796,12 @@ func TestThePersonAndTheCLISayWhoWroteTheMessageAndWhereTheReplyGoes(t *testing.
 
 func sendNative(t *testing.T, sender surface.Session, message string) (string, string) {
 	t.Helper()
-	if err := os.MkdirAll(DefaultSocketDir, 0700); err != nil {
+	if err := os.MkdirAll(SocketDir(), 0700); err != nil {
 		t.Fatal(err)
 	}
 	name := uuid.NewString()
-	senderSocket := filepath.Join(DefaultSocketDir, "native-sender-"+name+".sock")
-	targetSocket := filepath.Join(DefaultSocketDir, strconv.Itoa(os.Getpid())+".sock")
+	senderSocket := filepath.Join(SocketDir(), "native-sender-"+name+".sock")
+	targetSocket := filepath.Join(SocketDir(), strconv.Itoa(os.Getpid())+".sock")
 	if _, err := os.Lstat(targetSocket); !os.IsNotExist(err) {
 		t.Fatalf("test target socket already exists: %v", err)
 	}

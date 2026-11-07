@@ -9,9 +9,7 @@ import (
 )
 
 const (
-	DefaultSocketDir    = "/tmp/cc-socks"
 	PeerProtocolVersion = 1
-	defaultSocketDir    = DefaultSocketDir
 	peerProtocol        = PeerProtocolVersion
 	maxLineBytes        = 64 << 10
 	maxFrames           = 16

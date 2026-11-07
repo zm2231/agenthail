@@ -39,7 +39,7 @@ func SendNative(ctx context.Context, home string, sender surface.Session, sender
 	if err := ValidateSend(sender.ID, targetSocket, message); err != nil {
 		return nil, err
 	}
-	if err := validateTargetSocket(defaultSocketDir, targetSocket); err != nil {
+	if err := validateTargetSocket(SocketDir(), targetSocket); err != nil {
 		return nil, err
 	}
 	id := messageID(surface.MessageUUID(ctx))

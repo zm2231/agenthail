@@ -59,7 +59,8 @@ non-failing `notes` with the exact install step
 (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`). Never run that
 installer on the user's behalf. Relevant overrides are
 `AGENTHAIL_PYTHON`, `AGENTHAIL_CLAUDE_BIN`,
-`AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT`, `AGENTHAIL_NOTION_SPACE`, and
+`AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT`, `AGENTHAIL_CLAUDE_SOCKET_DIR`,
+`AGENTHAIL_NOTION_SPACE`, and
 `AGENTHAIL_NOTION_USER`. Never print browser cookies, dashboard tokens, or
 credentials.
 
