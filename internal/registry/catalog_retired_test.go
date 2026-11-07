@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -484,5 +485,32 @@ func TestTheRetiredCountsFollowAMovedProject(t *testing.T) {
 	}
 	if got := archived(); len(stored.Retired) != 1 || stored.Retired[0].Archived || len(got) != 1 || got[0] {
 		t.Fatalf("retired counts after the move=%v, stored=%+v", got, stored.Retired)
+	}
+}
+
+// A retire pass runs on every discovery pass; with thousands of mirrored rows
+// a session subquery per row took seconds and held status changes behind it.
+func TestARetirePassLooksEachRowsSessionUpByID(t *testing.T) {
+	r := openTestRegistry(t)
+	rows, err := r.db.Query(`EXPLAIN QUERY PLAN `+catalogRetireQuery, 0, "claude", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(plan, "\n")
+	if strings.Contains(joined, "SCAN s") || strings.Contains(joined, "SEARCH s USING INDEX sessions_recent") || !strings.Contains(joined, "SEARCH s USING INDEX sqlite_autoindex_sessions_1 (id=?)") {
+		t.Fatalf("plan:\n%s", joined)
 	}
 }
