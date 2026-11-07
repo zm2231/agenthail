@@ -40,6 +40,11 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
         TranscriptEnd(geometry).distance < bottomSlack
     }
 
+    // The slack absorbs layout settling; following is regained, or kept after a reader's scroll, only at the end itself.
+    static func atEnd(_ geometry: ScrollGeometry) -> Bool {
+        TranscriptEnd(geometry).distance < readerReach
+    }
+
     func body(content: Content) -> some View {
         content
             .scrollPosition($position)
@@ -48,9 +53,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .onScrollPhaseChange { old, new in
                 phase = new
                 if new == .idle, old == .interacting || old == .decelerating, let geometry = layout.geometry {
-                    // The slack is for layout settling; a reader who stops short of the end stops following.
-                    following = TranscriptEnd(geometry).distance < Self.readerReach
-                    layout.readerGap = 0
+                    following = Self.atEnd(geometry)
                 }
                 if new == .interacting || new == .decelerating { layout.releaseHold() }
                 layout.animationStart = new == .animating ? .now : nil
@@ -89,9 +92,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                         settle { $0.scrollTo(edge: .bottom) }
                     } else if !animating {
                         // A jump's animation passes through offsets short of the bottom; they are not the reader leaving it.
-                        let atEnd = Self.atBottom(new)
-                        if atEnd, !following || old.contentOffset != new.contentOffset { layout.readerGap = TranscriptEnd(new).distance }
-                        following = atEnd
+                        following = following ? Self.atBottom(new) : Self.atEnd(new)
                     }
                 } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
                     settle { $0.scrollTo(edge: .bottom) }
@@ -100,10 +101,9 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     layout.holdFromEnd(distance, content: new.contentSize.height)
                     let target = max(new.contentSize.height - distance, 0)
                     settle { $0.scrollTo(y: Self.scrollY(target, in: new)) }
-                } else if !following, resting, Self.atBottom(new) {
+                } else if !following, resting, Self.atEnd(new) {
                     // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
                     following = true
-                    layout.readerGap = TranscriptEnd(new).distance
                 }
             }
             .environment(\.holdTranscriptPlace, HoldTranscriptPlace(hold: holdPlace))
@@ -114,14 +114,10 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 position.scrollTo(y: top.wrappedValue)
             }
             .onDisappear { layout.cancelCheck() }
-            .onChange(of: following) { _, now in
-                if !now { layout.readerGap = 0 }
-            }
             .onChange(of: transcript) {
                 generation &+= 1
                 layout.releaseHold()
                 layout.cancelCheck()
-                layout.readerGap = 0
                 placedLeadingRow = leadingRow
                 following = true
                 position.scrollTo(edge: .bottom)
@@ -152,7 +148,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     private func checkEnd() -> Bool {
         guard following, let geometry = layout.geometry else { return true }
         guard resting else { return false }
-        if TranscriptEnd(geometry).distance > layout.readerGap + 2 {
+        if TranscriptEnd(geometry).distance > 2 {
             settle { $0.scrollTo(edge: .bottom) }
         }
         return true
@@ -177,7 +173,6 @@ private final class Layout {
     private(set) var resized = false
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
     var revealed: RevealedRow?
-    var readerGap: CGFloat = 0
     private var check: Task<Void, Never>?
 
     // Not pushed back by later changes, so a steady stream is still checked.
