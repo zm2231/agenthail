@@ -2,15 +2,24 @@ import XCTest
 
 @MainActor
 final class ActivityCollapseTests: XCTestCase {
-    func testCollapsingALongRunFromItsEndKeepsTheRunOnScreen() {
-        collapseLongRunFromItsEnd([])
+    func testCollapsingAToolAndThenItsRunFromTheirEndsKeepsEachOnScreen() {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // A portrait iPad shows the whole expanded tool, so its line never scrolls away.
+            XCUIDevice.shared.orientation = .landscapeLeft
+            addTeardownBlock { @MainActor in XCUIDevice.shared.orientation = .portrait }
+        }
+        let (app, timeline, activity) = openLongRun([])
+        collapseToolFromItsEnd(app, timeline)
+        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .portrait }
+        collapseRunFromItsEnd(app, timeline, activity)
     }
 
     func testCollapsingALongRunBelowALongHistoryKeepsTheRunOnScreen() {
-        collapseLongRunFromItsEnd(["--preview-long-history"])
+        let (app, timeline, activity) = openLongRun(["--preview-long-history"])
+        collapseRunFromItsEnd(app, timeline, activity)
     }
 
-    private func collapseLongRunFromItsEnd(_ extra: [String]) {
+    private func openLongRun(_ extra: [String]) -> (XCUIApplication, XCUIElement, XCUIElement) {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-long-activity"] + extra
         app.launch()
@@ -20,6 +29,10 @@ final class ActivityCollapseTests: XCTestCase {
         XCTAssertTrue(activity.waitForExistence(timeout: 10))
         for _ in 0..<6 where !activity.isHittable { timeline.swipeDown() }
         activity.tapWhenReady()
+        return (app, timeline, activity)
+    }
+
+    private func collapseRunFromItsEnd(_ app: XCUIApplication, _ timeline: XCUIElement, _ activity: XCUIElement) {
         let collapse = app.buttons["collapse-activity-3"]
         for _ in 0..<12 where !collapse.isHittable { timeline.swipeUp() }
         if collapse.frame.maxY > timeline.frame.maxY - 140 { timeline.swipeUp() }
@@ -41,21 +54,7 @@ final class ActivityCollapseTests: XCTestCase {
         XCTAssertTrue(reply.isHittable, "the reply after the run should be on screen, at \(reply.frame) in \(timeline.frame)")
     }
 
-    func testCollapsingAToolFromItsEndKeepsTheToolOnScreen() {
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            // A portrait iPad shows the whole expanded tool, so its line never scrolls away.
-            XCUIDevice.shared.orientation = .landscapeLeft
-            addTeardownBlock { @MainActor in XCUIDevice.shared.orientation = .portrait }
-        }
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-long-activity"]
-        app.launch()
-        let timeline = app.scrollViews["session-timeline"]
-        XCTAssertTrue(timeline.waitForExistence(timeout: 10))
-        let activity = app.buttons["activity-3"]
-        XCTAssertTrue(activity.waitForExistence(timeout: 10))
-        for _ in 0..<6 where !activity.isHittable { timeline.swipeDown() }
-        activity.tapWhenReady()
+    private func collapseToolFromItsEnd(_ app: XCUIApplication, _ timeline: XCUIElement) {
         let tool = app.buttons["tool-run-2"]
         XCTAssertTrue(tool.waitForExistence(timeout: 5))
         tool.scrollIntoMiddle(of: timeline)

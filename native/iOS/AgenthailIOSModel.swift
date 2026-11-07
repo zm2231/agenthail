@@ -1758,7 +1758,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             saveComposerState()
         }
         sendQueue.refused = { [weak self] send, reason in self?.sendWasRefused(send, reason: reason) }
-        sendQueue.unconfirmed = { [weak self] send in self?.deliveryStatus[send.sessionID] = send.retryStopped ? "Not confirmed" : "Not confirmed yet · retrying" }
+        sendQueue.unconfirmed = { [weak self] send in self?.deliveryStatus[send.sessionID] = send.unconfirmedTitle }
     }
 
     private func restoreComposerState() {

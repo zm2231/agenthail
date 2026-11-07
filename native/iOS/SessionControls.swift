@@ -12,24 +12,20 @@ struct SessionEditingControls: View {
     var body: some View {
         Section("Organize conversation") {
             Button("Name conversation", systemImage: "pencil") { text = detail.alias ?? ""; editingName = true }
-            if !detail.readOnly && detail.capabilities.goalSet {
-                Button(detail.goal?.objective.isEmpty == false ? "Edit goal" : "Set goal", systemImage: "target") { text = detail.goal?.objective ?? ""; editingGoal = true }
-                if detail.goal?.objective.isEmpty == false { Button("Clear goal", role: .destructive) { Task { await save("goal-clear") } } }
-                if detail.capabilities.goal, let goal = detail.goal {
-                    if goal.status == "active" {
-                        Button("Pause goal", systemImage: "pause.fill") { Task { await save("goal-pause") } }
-                    } else if goal.status == "paused" {
-                        Button("Resume goal", systemImage: "play.fill") { Task { await save("goal-resume") } }
-                    }
-                    Button(goal.tokenBudget == nil ? "Set token budget" : "Edit token budget", systemImage: "gauge.with.dots.needle.67percent") {
-                        budgetText = goal.tokenBudget.map(String.init) ?? ""
-                        editingBudget = true
-                    }
-                    if goal.tokenBudget != nil {
-                        Button("Clear token budget", role: .destructive) { Task { await save("goal-budget", text: "") } }
-                    }
+            let goal = GoalControls(detail)
+            if goal.offers(.setGoal) || goal.offers(.editGoal) {
+                Button(goal.offers(.editGoal) ? "Edit goal" : "Set goal", systemImage: "target") { text = detail.goal?.objective ?? ""; editingGoal = true }
+            }
+            if goal.offers(.clearGoal) { Button("Clear goal", role: .destructive) { Task { await save("goal-clear") } } }
+            if goal.offers(.pause) { Button("Pause goal", systemImage: "pause.fill") { Task { await save("goal-pause") } } }
+            if goal.offers(.resume) { Button("Resume goal", systemImage: "play.fill") { Task { await save("goal-resume") } } }
+            if goal.offers(.setBudget) || goal.offers(.editBudget) {
+                Button(goal.offers(.editBudget) ? "Edit token budget" : "Set token budget", systemImage: "gauge.with.dots.needle.67percent") {
+                    budgetText = detail.goal?.tokenBudget.map(String.init) ?? ""
+                    editingBudget = true
                 }
             }
+            if goal.offers(.clearBudget) { Button("Clear token budget", role: .destructive) { Task { await save("goal-budget", text: "") } } }
             if let error { Text(error).font(.footnote).foregroundStyle(PhonePalette.failed) }
         }
         .disabled(model.pendingControls.contains(detail.session.id))

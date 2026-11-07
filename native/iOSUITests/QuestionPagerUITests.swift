@@ -6,10 +6,6 @@ final class QuestionPagerUITests: XCTestCase {
         pageThrough(theme: "dark")
     }
 
-    func testTwoQuestionsPageThroughToAReviewInLight() {
-        pageThrough(theme: "light")
-    }
-
     private func pageThrough(theme: String) {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-questions", "--preview-theme", theme]

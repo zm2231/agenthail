@@ -45,18 +45,11 @@ struct QueueTailRows: View {
         }
     }
 
-    private func label(_ row: QueueTail.Row) -> String {
-        if row.leavingSince != nil { return "Delivering" }
-        if row.isDead { return "Delivery needs review" }
-        if let sender = PeerEnvelope(row.item.message).senderName { return "Queued · From \(sender)" }
-        return row.item.status == "inflight" ? "Delivering" : "Queued"
-    }
-
     private func bubble(_ row: QueueTail.Row) -> some View {
         let item = row.item
         let names = (item.attachments ?? []).map(\.name).joined(separator: ", ")
         return VStack(alignment: .leading, spacing: 4) {
-            Text(label(row))
+            Text(row.heading)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(row.isDead ? AnyShapeStyle(PhonePalette.attention) : AnyShapeStyle(PhonePalette.muted))
             HStack(spacing: 6) {
@@ -74,10 +67,10 @@ struct QueueTailRows: View {
                 .buttonStyle(.plain)
                 .accessibilityHint("Shows the whole message")
                 .accessibilityIdentifier("queue-tail-read-\(item.id)")
-                if row.leavingSince == nil { actions(row) }
+                actions(row)
             }
-            if row.isDead {
-                Text(item.lastError.flatMap { $0.isEmpty ? nil : $0 } ?? "It may already have reached the agent. Check the session before sending again.")
+            if let reason = row.reason {
+                Text(reason)
                     .font(.footnote).foregroundStyle(PhonePalette.muted)
                     .accessibilityIdentifier("queue-tail-reason-\(item.id)")
             }
@@ -91,12 +84,13 @@ struct QueueTailRows: View {
     @ViewBuilder private func actions(_ row: QueueTail.Row) -> some View {
         let item = row.item
         let idle = !model.pendingControls.contains("queue:\(item.listID)")
-        if row.isDead {
+        switch row.controls {
+        case .review:
             control("Send again", id: "queue-tail-retry-\(item.id)", enabled: idle) { retrying = row }
             control("Dismiss", id: "queue-tail-dismiss-\(item.id)", enabled: idle) {
                 run(row, leaves: true) { try await model.updateQueue(item, retry: false) }
             }
-        } else if item.status == "pending" {
+        case .waiting:
             let steering = model.queueSteer(item)
             if let steering, steering.refusal == nil {
                 control("Steer", id: "queue-tail-steer-\(item.id)", enabled: idle) {
@@ -127,6 +121,8 @@ struct QueueTailRows: View {
             .disabled(!idle)
             .accessibilityLabel("More actions for this queued message")
             .accessibilityIdentifier("queue-tail-menu-\(item.id)")
+        case .none:
+            EmptyView()
         }
     }
 

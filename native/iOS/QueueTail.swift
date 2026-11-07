@@ -9,6 +9,30 @@ struct QueueTail: Equatable {
         var id: String { TranscriptRowID.queue("\(item.listID)") }
         var isDead: Bool { item.status == "dead" }
         var isOwn: Bool { (item.author ?? "person") == "person" && PeerEnvelope(item.message).sender == nil }
+
+        enum Controls: Equatable {
+            case review
+            case waiting
+            case none
+        }
+
+        var heading: String {
+            if leavingSince != nil { return "Delivering" }
+            if isDead { return "Delivery needs review" }
+            if let sender = PeerEnvelope(item.message).senderName { return "Queued · From \(sender)" }
+            return item.status == "inflight" ? "Delivering" : "Queued"
+        }
+
+        var reason: String? {
+            guard isDead else { return nil }
+            return item.lastError.flatMap { $0.isEmpty ? nil : $0 } ?? "It may already have reached the agent. Check the session before sending again."
+        }
+
+        var controls: Controls {
+            if leavingSince != nil { return .none }
+            if isDead { return .review }
+            return item.status == "pending" ? .waiting : .none
+        }
     }
 
     static let shownCount = 3

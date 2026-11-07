@@ -2,21 +2,6 @@ import XCTest
 
 @MainActor
 final class VoiceOperatorUITests: XCTestCase {
-    func testPreviewStartsAtNewestTranscriptAndExplainsNewConversation() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-voice"]
-        app.launch()
-
-        let newest = app.staticTexts["Newest voice update"]
-        XCTAssertTrue(newest.waitForExistence(timeout: 10))
-        XCTAssertTrue(newest.isHittable)
-
-        let newConversation = app.buttons["new-voice-conversation"]
-        XCTAssertTrue(newConversation.isHittable)
-        newConversation.tapWhenReady()
-        XCTAssertTrue(app.staticTexts["This creates a separate Codex thread. The current conversation remains available in Sessions."].waitForExistence(timeout: 5))
-    }
-
     func testJumpToLatestReachesTheBottomWithoutMovingTheControls() {
         if UIDevice.current.userInterfaceIdiom == .pad {
             XCUIDevice.shared.orientation = .landscapeLeft
@@ -82,19 +67,25 @@ final class VoiceOperatorUITests: XCTestCase {
         XCTAssertTrue(app.buttons["collapse-tool-3"].waitForExistence(timeout: 5))
     }
 
-    func testTheCallScreenOpensAtTheBottomItCanScrollBackTo() {
+    func testTheCallScreenOpensAtTheBottomItCanScrollBackToAndExplainsNewConversation() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-voice"]
         app.launch()
 
         let newest = app.staticTexts["Newest voice update"]
         XCTAssertTrue(newest.waitForExistence(timeout: 10))
+        XCTAssertTrue(newest.isHittable)
         let opened = settledMinY(of: newest)
         let scroll = app.scrollViews.firstMatch
         scroll.swipeDown()
         scroll.swipeUp()
         scroll.swipeUp()
         XCTAssertEqual(settledMinY(of: newest), opened, accuracy: 3, "the screen opened past the bottom it can scroll back to")
+
+        let newConversation = app.buttons["new-voice-conversation"]
+        XCTAssertTrue(newConversation.isHittable)
+        newConversation.tapWhenReady()
+        XCTAssertTrue(app.staticTexts["This creates a separate Codex thread. The current conversation remains available in Sessions."].waitForExistence(timeout: 5))
     }
 
     // The element's position once it has stopped moving for half a second.

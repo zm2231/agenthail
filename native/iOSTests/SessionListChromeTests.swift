@@ -43,6 +43,7 @@ final class SessionListChromeTests: XCTestCase {
             XCTAssertFalse((ring.spoken ?? "").isEmpty, "\(ring) must be spoken, not only drawn")
         }
         XCTAssertNil(SessionRing.idle.spoken)
+        XCTAssertEqual(SessionRing.unavailable.spoken, "Unavailable", "a session out of reach says so in words")
     }
 
     func testEachAgentHasItsOwnGlyph() {

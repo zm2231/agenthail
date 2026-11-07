@@ -1534,16 +1534,12 @@ struct SessionInspector: View {
                     } else { Text("This agent has not reported context usage.").foregroundStyle(PhonePalette.muted) }
                 }
                 SessionEditingControls(model: model, detail: detail)
-                if let goal = detail.goal {
+                if let goal = detail.goal.map(GoalFacts.init) {
                     Section("Goal") {
-                        if !goal.objective.isEmpty { Text(goal.objective).textSelection(.enabled) }
-                        LabeledContent("Status", value: goal.displayStatus)
+                        if let objective = goal.objective { Text(objective).textSelection(.enabled) }
+                        LabeledContent("Status", value: goal.status)
                             .foregroundStyle(goal.needsAttention ? AnyShapeStyle(PhonePalette.attention) : AnyShapeStyle(.primary))
-                        if let value = goal.timeUsedSeconds { LabeledContent("Elapsed", value: formatGoalDuration(value)) }
-                        if let value = goal.tokensUsed { LabeledContent("Tokens used", value: value.formatted()) }
-                        if let value = goal.tokenBudget { LabeledContent("Token budget", value: value.formatted()) }
-                        if let value = goal.createdAt { LabeledContent("Created", value: value) }
-                        if let value = goal.updatedAt { LabeledContent("Updated", value: value) }
+                        ForEach(goal.rows, id: \.label) { LabeledContent($0.label, value: $0.value) }
                         if let reason = goal.reason { LabeledContent("Reason") { Text(reason).textSelection(.enabled) } }
                     }
                 }

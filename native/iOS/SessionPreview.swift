@@ -7,12 +7,6 @@ struct SessionPreview: View {
     private let session: SessionState
     private let detail: SessionDetail
 
-    private static var storeWithASendPastItsHour: ComposerStore {
-        let store = ComposerStore(file: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("composer.json"))
-        store.save(ComposerStore.Saved(sends: [.init(id: UUID(), sessionID: "computer::demo", message: "Check the signing step before the next release, then tell me what changed.", turnSettings: TurnSettings(), idempotencyKey: UUID().uuidString, uploaded: nil, wire: nil, hadAttachments: false, sentAt: Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow))]))
-        return store
-    }
-
     init() {
         let decoder = JSONDecoder()
         let capture = SessionCapture.current
@@ -31,8 +25,7 @@ struct SessionPreview: View {
         let model = AgenthailIOSModel(
             api: AgenthailAPI(baseURL: URL(string: "https://preview.invalid")!, token: "public-demo", session: URLSession(configuration: config)),
             paired: ProcessInfo.processInfo.arguments.contains("--preview-voice-entry"),
-            hostName: "studio-mac",
-            composerStore: ProcessInfo.processInfo.arguments.contains("--preview-send-past-its-hour") ? Self.storeWithASendPastItsHour : nil
+            hostName: "studio-mac"
         )
         model.setHostSnapshot(snapshot, view: view)
         detail.session.id = HostCatalog.qualify("computer", detail.session.id)
@@ -134,13 +127,9 @@ struct SessionPreview: View {
     }
     nonisolated static let previewUsageLimit: [String: String] = ["resetsAt": "2026-09-12T18:20:00Z"]
 
-    /// With --preview-waiting the detail reports the question too; with
-    /// --preview-waiting-catalog-only only the catalog does. With
-    /// --preview-claude-goal the session reports a blocked goal it sets and
-    /// clears but cannot pause or budget.
     nonisolated static var previewDetailJSON: String {
         let arguments = ProcessInfo.processInfo.arguments
-        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") || arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") || arguments.contains("--preview-limit-move") || arguments.contains("--preview-terminal-question") else { return basePreviewDetailJSON }
+        guard arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") || arguments.contains("--preview-limit-move") || arguments.contains("--preview-terminal-question") else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
         if arguments.contains("--preview-terminal-question") {
             var session = detail["session"] as! [String: Any]
@@ -165,11 +154,6 @@ struct SessionPreview: View {
             capabilities["respond"] = true
             detail["capabilities"] = capabilities
         }
-        if arguments.contains("--preview-waiting") {
-            var session = detail["session"] as! [String: Any]
-            session["waitingOn"] = previewWaiting
-            detail["session"] = session
-        }
         if arguments.contains("--preview-unreachable") {
             var session = detail["session"] as! [String: Any]
             session["waitingOn"] = previewUnreachable
@@ -179,14 +163,6 @@ struct SessionPreview: View {
             capabilities["respond"] = true
             capabilities["lifecycle"] = previewHostedLifecycle
             detail["capabilities"] = capabilities
-        }
-        if arguments.contains("--preview-claude-goal") {
-            var capabilities = detail["capabilities"] as! [String: Any]
-            capabilities["goal"] = false
-            capabilities["goalSet"] = true
-            capabilities["goalStatus"] = true
-            detail["capabilities"] = capabilities
-            detail["goal"] = ["objective": "Make the release build pass on a clean checkout", "status": "blocked", "timeUsedSeconds": 540, "tokensUsed": 1078, "tokenBudget": NSNull(), "reason": "The signing certificate is not installed on this machine, so the release build cannot pass here.", "createdAt": "2026-09-07T12:00:00Z", "updatedAt": "2026-09-07T12:09:00Z"]
         }
         return String(data: try! JSONSerialization.data(withJSONObject: detail), encoding: .utf8)!
     }
@@ -245,13 +221,6 @@ struct SessionPreview: View {
         ]
         let projects: [[String: Any]] = [["id": "project-fieldnotes", "displayName": "fieldnotes", "checkouts": [["host": ["id": "computer", "name": "computer", "state": "local"], "projectId": "project-fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "added": true]], "coordinators": [["name": "release-lead", "surface": "codex", "sessionId": "codex-demo"]]]]
         var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": previewSnapshotQueue,"channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24, "projects": projects]
-        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--preview-waiting") }) {
-            snapshot["busyDelivery"] = "steer"
-            var waitingSessions = sessions
-            waitingSessions[0]["waitingOn"] = previewWaiting
-            waitingSessions[0]["runtime"] = ["launcher": "cmux", "focusable": true]
-            snapshot["sessions"] = waitingSessions
-        }
         if ProcessInfo.processInfo.arguments.contains("--preview-questions") {
             var asking = snapshot["sessions"] as! [[String: Any]]
             asking[0]["waitingOn"] = previewQuestions
@@ -312,16 +281,6 @@ struct SessionPreview: View {
             }
             snapshot["sessions"] = crowded
         }
-        if ProcessInfo.processInfo.arguments.contains("--preview-host-offline") {
-            var offline = snapshot["sessions"] as! [[String: Any]]
-            offline[4]["host"] = ["id": "h0123456789ab", "name": "vps.example.ts.net", "state": "unreachable"]
-            offline[4]["unavailableReason"] = "vps.example.ts.net is offline"
-            snapshot["sessions"] = offline
-        }
-        if ProcessInfo.processInfo.arguments.contains("--preview-attention") {
-            snapshot["attention"] = [["id": 1, "sessionId": "codex-demo", "target": "Review the release pipeline", "queueId": 2, "reason": "Delivery outcome could not be confirmed", "requestedAction": "review", "createdAt": "2026-09-11T18:20:00Z"]]
-            snapshot["deliveryProblems"] = [["deliveryId": 7, "sessionId": "h0123456789ab::remote-demo-2", "sourceSessionId": "saved-demo", "attentionSessionId": "saved-demo", "message": "Check the release notes", "reason": "expired", "status": "expired", "at": "2026-09-11T13:05:00Z"]]
-        }
         if ProcessInfo.processInfo.arguments.contains("--preview-holders") {
             var sharedSessions = snapshot["sessions"] as! [[String: Any]]
             sharedSessions[0]["holders"] = [
@@ -343,17 +302,11 @@ struct SessionPreview: View {
     nonisolated static var tailRowsJSON: String {
         let common = #""sessionId":"demo","target":"Make the build reliable","evidence":"queued","attempts":0,"queuedAt":"2026-09-12T04:00:00.000000000Z""#
         func own(_ id: Int, _ message: String) -> String { #"{"id":\#(id),\#(common),"status":"pending","heldBy":"busy","author":"person","message":"\#(message)"}"# }
-        func peer(_ id: Int, _ message: String) -> String {
-            let envelope = #"<cross-session-message from=\"uds:/tmp/helper.sock\" from-name=\"agenthail/claude: @helper\">\#(message)</cross-session-message>"#
-            return #"{"id":\#(id),\#(common),"status":"pending","heldBy":"busy","author":"agent","message":"\#(envelope)"}"#
-        }
         let picture = #"{"id":21,\#(common),"status":"pending","heldBy":"busy","author":"person","message":"This is the failing screen, match the spacing.","attachments":[{"id":"upload:1","name":"failing-screen.png","mediaType":"image/png","bytes":2048,"width":800,"height":600}]}"#
         let rows: [String]
         switch UserDefaults.standard.string(forKey: "preview-tail") {
         case "none": rows = []
         case "many": rows = [picture, own(22, "Then rerun the suite."), own(23, "Add a note to the changelog."), own(24, "Close the old issue once it's green."), own(25, "And tag the release.")]
-        case "peer": rows = [own(21, "Keep the regression check with the fix."), peer(22, "Check the release notes."), peer(23, "The build finished."), peer(24, "Ready for review."), peer(25, "One more thing.")]
-        case "dead": rows = [#"{"id":21,"sessionId":"demo","target":"Make the build reliable","evidence":"unknown","attempts":2,"queuedAt":"2026-09-12T04:00:00.000000000Z","status":"dead","author":"person","lastError":"delivery outcome is unknown: the connection dropped","message":"Rerun the suite with the fix."}"#]
         default: rows = [picture]
         }
         return #"{"items":[\#(rows.joined(separator: ","))],"nextBefore":null}"#
@@ -438,10 +391,6 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         if request.url?.path == "/api/v1/actions" {
-            if ProcessInfo.processInfo.arguments.contains("--preview-send-lost") {
-                client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
-                return
-            }
             if ProcessInfo.processInfo.arguments.contains("--preview-send-refused") {
                 client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 409, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
                 client?.urlProtocol(self, didLoad: Data(#"{"error":{"message":"This session has ended."}}"#.utf8))
