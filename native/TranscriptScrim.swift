@@ -14,7 +14,7 @@ final class TranscriptScrim {
     private weak var sink: TranscriptScrimSink?
     private(set) var mask: TranscriptScrimMask
     private(set) var origin: CGPoint?
-    private var keyed: [ObjectIdentifier: CGRect] = [:]
+    private var keyed: [ObjectIdentifier: TranscriptScrimMask.Row] = [:]
     private var end: CGFloat?
     private var pending = false
 
@@ -23,24 +23,31 @@ final class TranscriptScrim {
         mask = TranscriptScrimMask(rows: [], shape: shape)
     }
 
-    var rowLayers: [CGRect] { keyed.values.compactMap { TranscriptScrimMask.layer(row: $0) } }
+    var rowLayers: [CGRect] { keyed.values.compactMap { TranscriptScrimMask.layer(row: $0.rect) } }
 
     func attach(_ sink: TranscriptScrimSink) {
         guard self.sink !== sink else { return }
         self.sink = sink
         sink.place(mask, origin: origin)
-        for (row, rect) in keyed { sink.placeRow(row, TranscriptScrimMask.layer(row: rect)) }
+        for (row, entry) in keyed { sink.placeRow(row, TranscriptScrimMask.layer(row: entry.rect)) }
     }
 
     func report(_ rows: [CGRect]) {
-        rebuild(rows)
+        rebuild(rows.map { TranscriptScrimMask.Row(rect: $0) })
     }
 
-    func update(_ row: ObjectIdentifier, _ rect: CGRect?) {
-        guard keyed[row] != rect else { return }
-        keyed[row] = rect
-        sink?.placeRow(row, rect.flatMap { TranscriptScrimMask.layer(row: $0) })
+    func update(_ row: ObjectIdentifier, _ rect: CGRect?, turn: String? = nil) {
+        let next = rect.map { TranscriptScrimMask.Row(rect: $0, turn: turn) }
+        guard keyed[row] != next else { return }
+        let moved = keyed[row]?.rect != rect
+        keyed[row] = next
+        if moved { sink?.placeRow(row, rect.flatMap { TranscriptScrimMask.layer(row: $0) }) }
         schedule()
+    }
+
+    func retag(_ row: ObjectIdentifier, turn: String?) {
+        guard let entry = keyed[row], entry.turn != turn else { return }
+        update(row, entry.rect, turn: turn)
     }
 
     func reportEnd(_ end: CGFloat) {
@@ -68,8 +75,8 @@ final class TranscriptScrim {
         if let sink { sink.flushSoon(self) } else { flush() }
     }
 
-    private func rebuild(_ rows: [CGRect]) {
-        let next = TranscriptScrimMask(rows: rows, shape: shape, end: end)
+    private func rebuild(_ rows: [TranscriptScrimMask.Row]) {
+        let next = TranscriptScrimMask(turns: rows, shape: shape, end: end)
         guard next != mask else { return }
         mask = next
         sink?.place(mask, origin: origin)

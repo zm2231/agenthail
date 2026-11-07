@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TranscriptBlockView: View, @MainActor Equatable {
     let block: TranscriptBlock
+    var turn: String?
     var onEdit = TranscriptRowAction<String>(nil)
     @State private var opened: RowChoice<Bool>?
     @Environment(\.transcriptRows) private var rows
@@ -11,13 +12,14 @@ struct TranscriptBlockView: View, @MainActor Equatable {
     private var note: String? { block.truncated ? TimelineMetadata.shortened : nil }
     private var expanded: Bool { rows.current(opened) ?? rows.isOpen(block.id) ?? false }
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.block == rhs.block && lhs.onEdit == rhs.onEdit }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.block == rhs.block && lhs.turn == rhs.turn && lhs.onEdit == rhs.onEdit }
 
     var body: some View {
         if case .user(let text, let files) = block.kind {
             UserBubble(text: text, receipt: note, time: TurnClock.time(block.timestamp), files: files, onEdit: onEdit.closure, row: block.id)
+                .transcriptScrimRow(turn: turn)
         } else {
-            row.transcriptScrimRow()
+            row.transcriptScrimRow(turn: turn)
         }
     }
 

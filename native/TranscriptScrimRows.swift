@@ -10,8 +10,8 @@ private struct TranscriptScrimRowsKey: PreferenceKey {
 }
 
 extension View {
-    func transcriptScrimRow() -> some View {
-        modifier(TranscriptScrimRow())
+    func transcriptScrimRow(turn: String? = nil) -> some View {
+        modifier(TranscriptScrimRow(turn: turn))
     }
 
     func transcriptScrimContent() -> some View {
@@ -22,6 +22,7 @@ extension View {
 private final class TranscriptScrimRowKey {}
 
 private struct TranscriptScrimRow: ViewModifier {
+    let turn: String?
     @Environment(\.transcriptScrim) private var scrim
     @State private var key = TranscriptScrimRowKey()
 
@@ -30,7 +31,8 @@ private struct TranscriptScrimRow: ViewModifier {
             if let scrim, scrim.shape != .band {
                 let id = ObjectIdentifier(key)
                 Color.clear
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { scrim.update(id, $0) }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { scrim.update(id, $0, turn: turn) }
+                    .onChange(of: turn) { _, next in scrim.retag(id, turn: next) }
                     .onDisappear { scrim.update(id, nil) }
             } else if scrim != nil {
                 GeometryReader { proxy in
