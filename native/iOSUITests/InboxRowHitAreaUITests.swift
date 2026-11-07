@@ -6,13 +6,10 @@ final class InboxRowHitAreaUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func testTheEmptyPartOfACurrentRowOpensItsSession() {
+    func testTheEmptyPartOfACurrentAndAHistoryRowOpensItsSession() {
         let app = launchInbox()
         assertOpensFromTheGap(app.buttons["inbox-session-2"], in: app)
-    }
-
-    func testTheEmptyPartOfAHistoryRowOpensItsSession() {
-        let app = launchInbox()
+        app.tab("Inbox").tapWhenReady()
         app.buttons["History"].tapWhenReady()
         assertOpensFromTheGap(app.buttons["inbox-message-13"], in: app)
     }

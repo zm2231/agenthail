@@ -17,7 +17,7 @@ final class InboxSteerUITests: XCTestCase {
         add(shot)
     }
 
-    func testAWaitingRowOffersSteerAndARowThatCantSteerSaysWhy() {
+    func testAWaitingRowOffersSteerSendsItAndARowThatCantSteerSaysWhy() {
         let app = openInbox(theme: "dark")
         let steer = app.buttons["queue-steer-11"]
         XCTAssertTrue(steer.waitForExistence(timeout: 10), "a person's image row on a running session offers Steer")
@@ -29,13 +29,8 @@ final class InboxSteerUITests: XCTestCase {
         XCTAssertTrue(refused.exists, "a row with a model says why it can't steer")
         XCTAssertFalse(app.buttons["queue-steer-12"].exists)
         record(app, "inbox-steer-refused-dark")
-    }
-
-    func testTappingSteerSendsTheRowAsASteerAndItLeaves() {
-        let app = openInbox(theme: "dark")
-        let steer = app.buttons["queue-steer-11"]
-        XCTAssertTrue(steer.waitForExistence(timeout: 10))
-        steer.tap()
+        for _ in 0..<4 where !steer.isHittable { app.swipeDown() }
+        steer.tapWhenStill()
         XCTAssertTrue(steer.waitForNonExistence(timeout: 5), "the row stays until a send with steer delivery arrives")
         XCTAssertTrue(app.staticTexts["queue-steer-refusal-12"].exists, "the other row stays")
     }

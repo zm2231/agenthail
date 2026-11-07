@@ -14,10 +14,13 @@ final class ProjectNowUITests: XCTestCase {
         app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Now'")).firstMatch
     }
 
-    func testNowComesBeforeTheLeadWhenItHasRows() {
+    func testOneCheckoutsNowComesFirstWithNoGroupHeader() {
         let app = launch("single")
         XCTAssertTrue(app.staticTexts["Lead"].waitForExistence(timeout: 5))
         XCTAssertLessThan(top(now(app)), top(app.staticTexts["Lead"]), "what needs you is the first thing on the screen")
+        XCTAssertTrue(app.staticTexts["Now · 2"].exists)
+        XCTAssertFalse(app.staticTexts["main"].exists)
+        XCTAssertLessThan(top(app.buttons["project-session-computer::waiting"]), top(app.buttons["project-session-computer::idle"]))
     }
 
     func testTheLeadStaysFirstWithNothingInNow() {
@@ -27,14 +30,6 @@ final class ProjectNowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Nothing in the last day"].exists)
     }
 
-    func testAGroupLineSitsCloseToTheRowsUnderIt() {
-        let app = launch("multi")
-        let line = app.staticTexts["feat/export"]
-        let title = app.buttons["project-session-computer::csv"].staticTexts["Add CSV export"]
-        XCTAssertTrue(line.waitForExistence(timeout: 5))
-        XCTAssertTrue(title.waitForExistence(timeout: 5))
-        XCTAssertLessThan(title.frame.minY - line.frame.maxY, 22, "the line reads as the header of the rows under it")
-    }
 
     private func record(_ app: XCUIApplication, _ name: String) {
         let shot = XCTAttachment(screenshot: app.screenshot())
@@ -45,8 +40,13 @@ final class ProjectNowUITests: XCTestCase {
 
     private func top(_ element: XCUIElement) -> CGFloat { element.frame.minY }
 
-    func testSeveralCheckoutsGroupAndSortByWhatNeedsThePerson() {
+    func testSeveralCheckoutsGroupUnderCloseLinesAndSortByWhatNeedsThePerson() {
         let app = launch("multi")
+        let line = app.staticTexts["feat/export"]
+        let title = app.buttons["project-session-computer::csv"].staticTexts["Add CSV export"]
+        XCTAssertTrue(line.waitForExistence(timeout: 5))
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertLessThan(title.frame.minY - line.frame.maxY, 22, "the line reads as the header of the rows under it")
         XCTAssertTrue(app.staticTexts["Now · 5"].exists)
         XCTAssertFalse(app.staticTexts["Recent"].exists)
         XCTAssertFalse(app.staticTexts["Running now · 3"].exists)
@@ -62,13 +62,6 @@ final class ProjectNowUITests: XCTestCase {
         XCTAssertLessThan(top(waiting), top(build), "waiting on you sorts above running")
         waiting.tapWhenReady()
         XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10), "a row opens its session")
-    }
-
-    func testASingleCheckoutShowsNoGroupHeader() {
-        let app = launch("single")
-        XCTAssertTrue(app.staticTexts["Now · 2"].exists)
-        XCTAssertFalse(app.staticTexts["main"].exists)
-        XCTAssertLessThan(top(app.buttons["project-session-computer::waiting"]), top(app.buttons["project-session-computer::idle"]))
     }
 
     func testShots() throws {

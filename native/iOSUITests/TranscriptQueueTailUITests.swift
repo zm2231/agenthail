@@ -199,13 +199,18 @@ final class TranscriptQueueTailUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Attempts'")).firstMatch.exists)
     }
 
-    func testTheReceiptGoesToTheQueuedRow() {
+    func testTheReceiptSitsOnTheComposerAndGoesToTheQueuedRow() {
         let app = launch("many", extra: ["--preview-delivery"])
+        let receipt = app.buttons["latest-instruction"]
+        XCTAssertTrue(receipt.waitForExistence(timeout: 10))
+        assertOnComposer(receipt, app)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "receipt"
+        shot.lifetime = .keepAlways
+        add(shot)
         let timeline = app.scrollViews["session-timeline"]
         timeline.swipeDown(velocity: .slow)
         XCTAssertTrue(app.buttons["Jump to latest"].waitForExistence(timeout: 2))
-        let receipt = app.buttons["latest-instruction"]
-        XCTAssertTrue(receipt.exists)
         receipt.tapWhenReady()
         XCTAssertTrue(row(25, app).waitForExistence(timeout: 5))
         XCTAssertTrue(row(25, app).waitUntilStill(), "the receipt's row kept moving")
@@ -215,8 +220,16 @@ final class TranscriptQueueTailUITests: XCTestCase {
 
     func testTheReceiptIsPlainWithNoQueuedRow() {
         let app = launch("none", extra: ["--preview-delivery"])
-        XCTAssertTrue(app.staticTexts["latest-instruction"].waitForExistence(timeout: 10))
+        let receipt = app.staticTexts["latest-instruction"]
+        XCTAssertTrue(receipt.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["latest-instruction"].exists)
+        assertOnComposer(receipt, app)
+    }
+
+    private func assertOnComposer(_ receipt: XCUIElement, _ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let composer = app.otherElements["composer"]
+        XCTAssertTrue(composer.exists, file: file, line: line)
+        XCTAssertTrue(composer.frame.contains(receipt.frame), "the receipt \(receipt.frame) is outside the composer \(composer.frame)", file: file, line: line)
     }
 
     func testCancellingTheLastRowLeavesTheTranscriptAtItsLatestRow() {
