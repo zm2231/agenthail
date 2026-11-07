@@ -27,6 +27,14 @@ struct LiveControl {
         _ = try post("hosts/\(host)/reply", body: try JSONSerialization.data(withJSONObject: ["conversation": conversation, "text": text]))
     }
 
+    func startTurn(host: Int, prompt: String) throws {
+        _ = try post("hosts/\(host)/turn/start", body: try JSONSerialization.data(withJSONObject: ["text": prompt]))
+    }
+
+    func finishTurn(host: Int, reply: String) throws {
+        _ = try post("hosts/\(host)/turn/finish", body: try JSONSerialization.data(withJSONObject: ["text": reply]))
+    }
+
     private func post(_ path: String, body: Data? = nil) throws -> Data {
         var request = URLRequest(url: base.appendingPathComponent(path), timeoutInterval: 30)
         request.httpMethod = "POST"

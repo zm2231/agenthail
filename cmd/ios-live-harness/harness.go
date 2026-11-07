@@ -137,6 +137,7 @@ func (h *harness) shutdown() {
 	h.ops.Wait()
 	for _, host := range h.hosts {
 		host.stop()
+		host.endTurn()
 	}
 	if h.watch != nil {
 		h.watch.halt()
@@ -148,6 +149,7 @@ func (h *harness) shutdown() {
 func (h *harness) cleanup() {
 	for _, host := range h.hosts {
 		host.stop()
+		host.endTurn()
 	}
 	if h.trap != nil {
 		h.trap.Close()
@@ -172,6 +174,8 @@ type hostStatus struct {
 //	GET  /hosts             every host and whether it is running
 //	POST /hosts/{i}/link    a new pairing link for host i
 //	POST /hosts/{i}/reply   append an assistant reply to one of host i's seeded conversations
+//	POST /hosts/{i}/turn/start   open a turn in a running Claude conversation on host i
+//	POST /hosts/{i}/turn/finish  end that turn as Claude does
 //	POST /hosts/{i}/stop    stop host i's daemon
 //	POST /hosts/{i}/start   start host i's daemon again on the same port
 func (h *harness) controlHandler(ctx context.Context) http.Handler {
@@ -231,6 +235,27 @@ func (h *harness) controlHandler(ctx context.Context) http.Handler {
 			writeJSON(w, http.StatusOK, map[string]string{"session": id})
 		})(w, r)
 	})
+	turn := func(run func(*host, string) (string, error)) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				Text string `json:"text"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil || body.Text == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"text\": \"...\"}"})
+				return
+			}
+			withHost(func(w http.ResponseWriter, host *host) {
+				id, err := run(host, body.Text)
+				if err != nil {
+					writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+					return
+				}
+				writeJSON(w, http.StatusOK, map[string]string{"session": id})
+			})(w, r)
+		}
+	}
+	mux.HandleFunc("POST /hosts/{i}/turn/start", turn((*host).startTurn))
+	mux.HandleFunc("POST /hosts/{i}/turn/finish", turn((*host).finishTurn))
 	mux.HandleFunc("POST /hosts/{i}/stop", withHost(func(w http.ResponseWriter, host *host) {
 		host.stop()
 		writeJSON(w, http.StatusOK, status(host))

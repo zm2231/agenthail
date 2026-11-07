@@ -18,7 +18,7 @@ Each host gets a new directory under the system temp directory, or under `/tmp` 
 - `dashboard.json` serving on `127.0.0.1` at a free port;
 - two ended Claude conversations, with their transcripts. They show under the `recent` and `all` scopes. The second one's folder is a git repository with an ignored `build.log`, so a file list that came from git leaves that file out.
 
-It writes no Claude session records with process IDs, so the daemon has no live process to attach to.
+It writes no Claude session records with process IDs, so the daemon has no live process to attach to, until a test opens a turn through the control port.
 
 The daemon runs as `agenthail daemon-run` in the foreground. No install, service or dashboard command runs. Its environment is the following list and nothing else:
 
@@ -55,6 +55,8 @@ So that a clean run shows the check looked, the harness also prints each distinc
 
 A host's own daemon may never run `git` or `sleep` while the watcher looks, because each run lasts milliseconds. So once the hosts are up, the harness runs each of them from every host's `<dir>/bin`, with the host's environment, in a form that waits: `git hash-object --stdin` and `sleep 30`. It treats each one as part of that host until the watcher has seen its program, then stops it. On macOS this checks the `/usr/bin` shims and the developer-directory copies they run. If the watcher never sees one of them, the run fails as if the watcher saw nothing.
 
+The probes run whichever `git` the harness's own `PATH` resolves, and the harness builds the allowed programs from that same lookup, plus the developer-directory copy `xcrun --find` names on macOS. A `git` that runs a program neither of those names shows as a violation naming that program.
+
 What the check cannot see:
 
 - A connection, file or child process that opens and closes between two reads.
@@ -70,16 +72,18 @@ The test command gets the control address in `AGENTHAIL_LIVE_CONTROL`. It also g
 | `GET /hosts` | `[{"index", "name", "endpoint", "running"}]` |
 | `POST /hosts/{i}/link` | `{"url": "agenthail://pair?..."}`: a new pairing for host `i`, valid for 10 minutes |
 | `POST /hosts/{i}/reply` with `{"conversation": n, "text": "..."}` | appends an assistant reply to host `i`'s seeded conversation `n`, as Claude would, and answers `{"session": id}` |
+| `POST /hosts/{i}/turn/start` with `{"text": "..."}` | opens a turn in a running Claude conversation on host `i` and answers `{"session": id}`. A `sleep` the harness starts from `<dir>/bin` stands in for the Claude process, with a socket in `<dir>/sockets` and a session record saying `busy`; the transcript ends on the prompt. One turn at a time per host; a second answers 409 |
+| `POST /hosts/{i}/turn/finish` with `{"text": "..."}` | ends that turn as Claude does: the reply with `end_turn`, a `turn_duration` record, then the session record going `idle` |
 | `POST /hosts/{i}/stop` | stops host `i`'s daemon by the process ID the harness recorded |
 | `POST /hosts/{i}/start` | starts it again on the same port and waits until it answers |
 
-Once the test command exits, the harness refuses new commands and closes the control port, so a later command fails. Commands already running finish before it stops the hosts.
+Once the test command exits, the harness refuses new commands and closes the control port, so a later command fails. Commands already running finish before it stops the hosts. It then stops each open turn's process by the process ID it recorded and removes its socket and session record.
 
 The harness mints a pairing link in the host's registry rather than through `/api/v1/pairings`, which pairs only through a Tailscale address. The link's endpoint is the host's `http://127.0.0.1:<port>`. The phone completes pairing through `POST /api/v1/pair`, as it does in production.
 
 ## Tests
 
-`go test ./cmd/ios-live-harness` starts helper processes that stay inside a host's scope, and others that reach a loopback port, a Unix socket and a file outside it. It checks the watcher flags exactly the second set. It runs in both `verify` jobs, so the `lsof` reader is checked on macOS and the `/proc` reader on Linux.
+`go test ./cmd/ios-live-harness` starts helper processes that stay inside a host's scope, and others that reach a loopback port, a Unix socket and a file outside it. It checks the watcher flags exactly the second set. It also opens and finishes a turn through the control port and reads it with the daemon's own Claude adapter: busy with an active turn while open, idle with the reply once finished. It runs in both `verify` jobs, so the `lsof` reader is checked on macOS and the `/proc` reader on Linux.
 
 ## The app's side
 
@@ -96,6 +100,7 @@ Live tests are in the `live` tier of `native/ui-test-tiers.txt`, which no pull r
 | `LiveHostUITests` pairing | `Live A`'s two ended conversations are listed under All, each once |
 | `LiveHostUITests` reply | a reply written on the host shows in the open conversation without a reload |
 | `LiveHostUITests` down and back | a stopped host's conversation is marked unavailable; once it starts again the conversation is available and a new reply shows live, without relaunching the app |
+| `LiveHostUITests` finished turn | a conversation with an open turn is listed as Working and its header says Working; once the turn finishes the reply shows and the header stops saying Working within 10 seconds. It prints how long that took |
 | `LiveHostsUITests` two hosts | each host lists its own conversation; stopping one marks only its conversation unavailable |
 | `LiveHostsUITests` file suggestions | typing `@` in the git checkout's conversation lists its files from git on the host, not the ignored one |
 

@@ -1449,6 +1449,7 @@ struct SessionSummary: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("Open session details, context, model and controls")
+        .accessibilityIdentifier("session-summary")
     }
     private var status: some View {
         TimelineView(.everyMinute) { context in

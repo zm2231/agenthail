@@ -44,6 +44,7 @@ type host struct {
 	logPath string
 
 	conversations []conversation
+	turn          *liveTurn
 
 	mu   sync.Mutex
 	cmd  *exec.Cmd
