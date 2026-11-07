@@ -281,4 +281,25 @@ final class TranscriptQueueTailUITests: XCTestCase {
             app.terminate()
         }
     }
+
+    func testOpeningTheQueueWhileFollowingKeepsRowsOnScreen() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-tail", "-preview-tail", "many", "--preview-theme", "dark", "--preview-stream"]
+        app.launch()
+        let timeline = app.scrollViews["session-timeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 10))
+        let more = app.buttons["queue-tail-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 15))
+        app.waitForSteadyJump()
+        let viewport = timeline.frame
+        let rows = CGRect(x: viewport.minX + 16, y: viewport.minY + 120, width: viewport.width - 32, height: viewport.height * 0.5)
+        XCTAssertTrue(ScreenshotInk.shows(app.screenshot().image, in: rows), "the transcript was blank before opening the queue")
+        more.tap()
+        let end = Date().addingTimeInterval(4)
+        var frame = 0
+        while Date() < end {
+            XCTAssertTrue(ScreenshotInk.shows(app.screenshot().image, in: rows), "the transcript was blank \(frame) frames after opening the queue")
+            frame += 1
+        }
+    }
 }

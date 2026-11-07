@@ -552,10 +552,9 @@ struct SessionScreen: View {
         ScrollCount.value += 1
         if PreviewFollowStuck.enabled, landed { return }
 #endif
-        if overflows, let id = queueTail.lastShownID ?? latestRowID {
-            position.scrollTo(id: id, anchor: .bottom)
-        } else {
-            position.scrollTo(edge: .bottom)
+        switch LatestScroll.target(overflows: overflows, latest: queueTail.lastShownID ?? latestRowID, pinned: position.viewID(type: String.self)) {
+        case .row(let id): position.scrollTo(id: id, anchor: .bottom)
+        case .edge: position.scrollTo(edge: .bottom)
         }
     }
 
