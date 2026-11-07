@@ -18,10 +18,16 @@ func (a *App) resolveDisplay(sessionID string) string {
 		if alias, err := a.registry().ReverseAlias(sessionID); err == nil && alias != "" {
 			return "@" + alias
 		}
-		if sfc, name, _, err := a.registry().GetSession(sessionID); err == nil {
-			if name != "" {
-				return fmt.Sprintf("%s/%s", sfc, truncate(name, 20))
-			}
+	}
+	return a.sessionLabel(sessionID)
+}
+
+// sessionLabel names a session by its surface and name, or its id, never by
+// an alias.
+func (a *App) sessionLabel(sessionID string) string {
+	if a.registry() != nil {
+		if sfc, name, _, err := a.registry().GetSession(sessionID); err == nil && name != "" {
+			return fmt.Sprintf("%s/%s", sfc, truncate(name, 20))
 		}
 	}
 	return truncate(sessionID, 24)
@@ -81,8 +87,7 @@ func (a *App) identifyList() error {
 		return nil
 	}
 	for _, r := range rows {
-		label := a.resolveDisplay(r.SessionID)
-		fmt.Printf("@%-20s %s\n", r.Name, label)
+		fmt.Printf("@%-20s %s\n", r.Name, a.sessionLabel(r.SessionID))
 	}
 	return nil
 }
