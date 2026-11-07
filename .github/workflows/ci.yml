@@ -133,6 +133,9 @@ jobs:
         run: |
           scripts/test-ci-runner-job-started.sh
           scripts/test-ci-full-label.sh
+          scripts/test-ci-failure-issue.sh
+          scripts/test-ios-ui-tests.sh
+          scripts/ios-ui-tests.sh check
       - name: Push relay tests
         working-directory: push-relay
         run: |
