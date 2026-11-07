@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -38,10 +39,12 @@ func (d *Daemon) runIdleCompaction(ctx context.Context) {
 	}
 }
 
-// compactIdle queues a compact for each Claude session of this host that has
-// sat idle since a large request whose cache is about to expire. A usage
-// limit anywhere under a config root holds the root's sessions, since the
-// compact would be refused too; being near the limit does not.
+// compactIdle queues a compact for each Claude session of this host whose
+// transcript shows a large request, idle in the hour its cache lasts. A
+// session that shows one but is held, such as one still marked busy or under
+// a root at its usage limit, has the first hold recorded once per request.
+// A usage limit anywhere under a config root holds the root's sessions, since
+// the compact would be refused too; being near the limit does not.
 func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string]idleTranscript) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -69,7 +72,7 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 			continue
 		}
 		seen[session.Transcript] = true
-		if session.Ended || session.Status != surface.StatusIdle || session.WaitingOn != nil || (session.BackgroundTasks != nil && session.BackgroundTasks.Running) {
+		if session.Ended {
 			continue
 		}
 		info, err := os.Stat(session.Transcript)
@@ -77,9 +80,6 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 			continue
 		}
 		root := claudeTranscriptRoot(session.Transcript)
-		if refused[root] {
-			continue
-		}
 		rootSettings, ok := settings[root]
 		if !ok {
 			if rootSettings, err = surface.ReadIdleCompaction(home, root); err != nil {
@@ -88,15 +88,12 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 			}
 			settings[root] = rootSettings
 		}
-		if !rootSettings.Enabled {
-			continue
-		}
 		adapter, err := d.adapters().For(session)
 		if err != nil {
 			continue
 		}
 		reader, ok := adapter.(surface.IdleCompactionReader)
-		if !ok || !surface.EffectiveCapabilities(adapter, session).Compact {
+		if !ok {
 			continue
 		}
 		known, ok := read[session.Transcript]
@@ -113,14 +110,25 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 		if state.LastRequestAt.IsZero() || idle < idleCompactionAfter || idle >= idleCompactionBefore || !state.OneHourCache || state.CompactedSince || state.ContextTokens < rootSettings.MinContextTokens {
 			continue
 		}
-		queued, err := d.Registry.QueueIdleCompaction(session.ID, state.LastRequestAt)
-		if err != nil {
-			d.log.Printf("queue idle compaction for %s: %s", d.resolveDisplay(session.ID), err)
-			continue
+		hold := idleCompactionHold(session, rootSettings, refused[root], surface.EffectiveCapabilities(adapter, session).Compact)
+		if hold == "" {
+			outcome, err := d.Registry.QueueIdleCompaction(session.ID, state.LastRequestAt)
+			if err != nil {
+				d.log.Printf("queue idle compaction for %s: %s", d.resolveDisplay(session.ID), err)
+				continue
+			}
+			switch outcome {
+			case registry.IdleCompactionQueued:
+				d.log.Printf("queued idle compaction for %s at %d tokens, idle %s", d.resolveDisplay(session.ID), state.ContextTokens, idle.Round(time.Minute))
+				continue
+			case registry.IdleCompactionAttempted:
+				continue
+			}
+			hold = "a message or command is queued or in flight"
 		}
-		if queued {
-			d.log.Printf("queued idle compaction for %s at %d tokens, idle %s", d.resolveDisplay(session.ID), state.ContextTokens, idle.Round(time.Minute))
-		}
+		d.idleHolds.record(IdleCompactionHold{SessionID: session.ID, Root: root, RequestAt: state.LastRequestAt, ContextTokens: state.ContextTokens, Reason: hold, At: now}, func(held IdleCompactionHold) {
+			d.log.Printf("idle compaction held for %s at %d tokens, idle %s: %s", d.resolveDisplay(held.SessionID), held.ContextTokens, idle.Round(time.Minute), held.Reason)
+		})
 	}
 	for path := range read {
 		if !seen[path] {

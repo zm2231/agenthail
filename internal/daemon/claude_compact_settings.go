@@ -31,7 +31,7 @@ func (d *Daemon) claudeCompactSettingsHandler(w http.ResponseWriter, r *http.Req
 			}
 			results = append(results, settings)
 		}
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"roots": results})
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"roots": results, "idleCompactionHolds": d.idleHolds.list()})
 	case http.MethodPost:
 		var request struct {
 			Root                   string `json:"root"`

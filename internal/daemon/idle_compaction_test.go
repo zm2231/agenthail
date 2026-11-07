@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -113,5 +115,30 @@ func TestAnIdleLargeSessionIsCompactedOnceBeforeItsCacheExpires(t *testing.T) {
 		if queued != want {
 			t.Errorf("%s: %d idle compactions queued, want %d", id, queued, want)
 		}
+	}
+
+	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/v1/claude/compact-settings", "")
+	var body struct {
+		Holds []IdleCompactionHold `json:"idleCompactionHolds"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+		t.Fatalf("compact settings = %d %s", response.Code, response.Body)
+	}
+	held := map[string]string{}
+	for _, hold := range body.Holds {
+		if _, twice := held[hold.SessionID]; twice {
+			t.Errorf("%s held twice for one request", hold.SessionID)
+		}
+		held[hold.SessionID] = hold.Reason
+	}
+	wantHeld := map[string]string{
+		"busy":          "the session is busy, not idle",
+		"background":    "a background task is running",
+		"queued":        "a message or command is queued or in flight",
+		"under-a-limit": "the account under this root is at a usage limit",
+		"turned-off":    "idle compaction is off for this root",
+	}
+	if !maps.Equal(held, wantHeld) {
+		t.Errorf("held = %v, want %v", held, wantHeld)
 	}
 }

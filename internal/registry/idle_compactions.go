@@ -5,42 +5,53 @@ import (
 	"time"
 )
 
+type IdleCompactionOutcome string
+
+const (
+	IdleCompactionQueued    IdleCompactionOutcome = "queued"
+	IdleCompactionAttempted IdleCompactionOutcome = "attempted"
+	IdleCompactionWaiting   IdleCompactionOutcome = "waiting"
+)
+
 // QueueIdleCompaction queues one compact for the idle window that began with
 // the session's request at window. It queues nothing when the window already
 // had its attempt or anything waits in the session's queue, so a compact
 // never runs ahead of a message.
-func (r *Registry) QueueIdleCompaction(sessionID string, window time.Time) (bool, error) {
+func (r *Registry) QueueIdleCompaction(sessionID string, window time.Time) (IdleCompactionOutcome, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	defer tx.Rollback()
+	var attempted int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM idle_compactions WHERE session_id=? AND window_ms=?`, sessionID, window.UnixMilli()).Scan(&attempted); err != nil {
+		return "", err
+	}
+	if attempted > 0 {
+		return IdleCompactionAttempted, nil
+	}
 	var waiting int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&waiting); err != nil {
-		return false, err
+		return "", err
 	}
 	if waiting > 0 {
-		return false, nil
+		return IdleCompactionWaiting, nil
 	}
-	res, err := tx.Exec(`INSERT OR IGNORE INTO idle_compactions(session_id,window_ms) VALUES(?,?)`, sessionID, window.UnixMilli())
-	if err != nil {
-		return false, err
-	}
-	if inserted, err := res.RowsAffected(); err != nil || inserted == 0 {
-		return false, err
+	if _, err := tx.Exec(`INSERT INTO idle_compactions(session_id,window_ms) VALUES(?,?)`, sessionID, window.UnixMilli()); err != nil {
+		return "", err
 	}
 	id, _, err := queueCompactTx(tx, sessionID)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	if _, err := tx.Exec(`UPDATE idle_compactions SET queue_id=? WHERE session_id=? AND window_ms=?`, id, sessionID, window.UnixMilli()); err != nil {
-		return false, err
+		return "", err
 	}
 	if err := tx.Commit(); err != nil {
-		return false, err
+		return "", err
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: "idle compact"})
-	return true, nil
+	return IdleCompactionQueued, nil
 }
 
 func (r *Registry) IsIdleCompaction(queueID int64) (bool, error) {
