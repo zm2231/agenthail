@@ -12,6 +12,8 @@ struct TranscriptScrimMask: Equatable {
     static let far: CGFloat = 100_000
     // Wider than any laid-out gap between rows: a wider space holds rows not reported yet.
     static let unreported: CGFloat = 32
+    // A gap between turns keeps most of the scrim, so art behind it shows as a faint step rather than a bright line.
+    static let gapCover: Float = 0.75
 
     struct Row: Equatable {
         let rect: CGRect
@@ -19,6 +21,7 @@ struct TranscriptScrimMask: Equatable {
     }
 
     var layers: [CGRect]
+    var floor: CGRect? = nil
 
     init(rows: [CGRect], shape: Shape = .band, end: CGFloat? = nil, column: ClosedRange<CGFloat>? = nil) {
         self.init(turns: rows.map { Row(rect: $0) }, shape: shape, end: end, column: column)
@@ -63,6 +66,7 @@ struct TranscriptScrimMask: Equatable {
         cores.append(CGRect(x: left - Self.reach, y: -Self.far, width: Self.reach, height: height))
         cores.append(CGRect(x: right, y: -Self.far, width: Self.reach, height: height))
         layers = cores.map { $0.insetBy(dx: -Self.reach, dy: -Self.reach) }
+        floor = span(-Self.far, panel.maxY).insetBy(dx: -Self.reach, dy: -Self.reach)
     }
 
     private init(band rows: [CGRect]) {

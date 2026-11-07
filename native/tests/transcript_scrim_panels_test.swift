@@ -56,6 +56,10 @@ struct TranscriptScrimPanelsTest {
         let split = TranscriptScrimMask(turns: [first, second], shape: .panels)
         let covered = { (x: CGFloat) in split.layers.contains { $0.contains(CGPoint(x: x, y: 155)) } }
         check(!covered(340), "the gap between turns stays open across the transcript")
+        let floor = split.floor ?? .null
+        check(floor.contains(CGPoint(x: 340, y: 155)) && floor.minX >= -reach && floor.maxX <= 680 + reach, "a floor under the panels spans the column, so an open gap still dims the art behind it, got \(floor)")
+        check(floor.maxY == 190 + reach && TranscriptScrimMask.gapCover > 0 && TranscriptScrimMask.gapCover < 1, "the floor ends with the panels and covers less than they do, so the gap still shows as a step")
+        check(TranscriptScrimMask(rows: [ask.rect], shape: .band).floor == nil, "the band shape has no floor")
         check(covered(-reach) && covered(680 + reach), "the gap ends at the transcript's edges instead of running into the margins")
         let stale = Row(rect: CGRect(x: 0, y: 300, width: 1058, height: 40), turn: "u3")
         let narrowed = TranscriptScrimMask(turns: [first, second, stale], shape: .panels, column: 0...680)

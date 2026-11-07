@@ -5,6 +5,12 @@ final class TranscriptScrimRowLayers {
     static let still: [String: CAAction] = Dictionary(uniqueKeysWithValues: ["contents", "bounds", "position", "frame", "opacity", "hidden", "backgroundColor", "mask", "sublayers"].map { ($0, NSNull()) })
 
     let content = CALayer()
+    private lazy var floor: CALayer = {
+        let layer = make()
+        layer.opacity = TranscriptScrimMask.gapCover
+        layer.isHidden = true
+        return layer
+    }()
     private var covers: [CALayer] = []
     private var keyed: [ObjectIdentifier: CALayer] = [:]
     private var spare: [CALayer] = []
@@ -18,6 +24,12 @@ final class TranscriptScrimRowLayers {
 
     func place(_ mask: TranscriptScrimMask, scale: CGFloat) {
         rescale(scale)
+        if let frame = mask.floor {
+            if floor.isHidden { floor.isHidden = false }
+            if floor.frame != frame { floor.frame = frame }
+        } else if !floor.isHidden {
+            floor.isHidden = true
+        }
         while covers.count < mask.layers.count { covers.append(make()) }
         for (i, layer) in covers.enumerated() {
             let hidden = i >= mask.layers.count
@@ -55,7 +67,7 @@ final class TranscriptScrimRowLayers {
         guard scale != self.scale else { return }
         self.scale = scale
         let image = TranscriptScrim.image(scale: scale)
-        for layer in covers + Array(keyed.values) + spare {
+        for layer in [floor] + covers + Array(keyed.values) + spare {
             layer.contents = image
             layer.contentsScale = scale
         }
