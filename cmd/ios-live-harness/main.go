@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -85,13 +86,26 @@ func (h *harness) runCommand(ctx context.Context, command []string) int {
 }
 
 func (h *harness) exitCode(status int) int {
-	violations := h.watch.violations()
-	if len(violations) == 0 {
-		return status
+	fmt.Fprintf(os.Stderr, "ios-live-harness: %s\n", h.watch.summary())
+	return verdict(os.Stderr, status, h.watch.violations(), h.watch.blind())
+}
+
+func verdict(out io.Writer, status int, violations, blind []string) int {
+	if len(blind) > 0 {
+		fmt.Fprintf(out, "ios-live-harness: the isolation check proves nothing:\n")
+		for _, b := range blind {
+			fmt.Fprintf(out, "  %s\n", b)
+		}
 	}
-	fmt.Fprintf(os.Stderr, "ios-live-harness: %d isolation violations:\n", len(violations))
-	for _, v := range violations {
-		fmt.Fprintf(os.Stderr, "  %s\n", v)
+	if len(violations) > 0 {
+		fmt.Fprintf(out, "ios-live-harness: %d isolation violations:\n", len(violations))
+		for _, v := range violations {
+			fmt.Fprintf(out, "  %s\n", v)
+		}
+		return exitIsolation
 	}
-	return exitIsolation
+	if status == 0 && len(blind) > 0 {
+		return exitIsolation
+	}
+	return status
 }

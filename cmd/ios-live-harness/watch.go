@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -120,16 +121,22 @@ type watcher struct {
 	interval time.Duration
 	roots    func() map[int]scope
 
-	mu    sync.Mutex
-	found []string
-	seen  map[string]bool
-	err   error
-	stop  chan struct{}
-	done  chan struct{}
+	mu        sync.Mutex
+	out       io.Writer
+	inventory *inventory
+	found     []string
+	seen      map[string]bool
+	err       error
+	stop      chan struct{}
+	done      chan struct{}
 }
 
 func newWatcher(b backend, interval time.Duration, roots func() map[int]scope) *watcher {
-	return &watcher{backend: b, interval: interval, roots: roots, seen: map[string]bool{}}
+	return newWatcherTo(os.Stderr, b, interval, roots)
+}
+
+func newWatcherTo(out io.Writer, b backend, interval time.Duration, roots func() map[int]scope) *watcher {
+	return &watcher{backend: b, interval: interval, roots: roots, out: out, inventory: newInventory(out), seen: map[string]bool{}}
 }
 
 func (w *watcher) start() {
@@ -173,11 +180,21 @@ func (w *watcher) poll() {
 		}
 		var found []endpoint
 		if found, err = w.backend.endpoints(pids); err == nil {
+			scopes := make([]scope, 0, len(roots))
+			for _, s := range roots {
+				scopes = append(scopes, s)
+			}
+			w.mu.Lock()
+			w.inventory.sample(scopes)
+			w.mu.Unlock()
 			for _, e := range found {
 				s, ok := owner[e.pid]
 				if !ok {
 					continue
 				}
+				w.mu.Lock()
+				w.inventory.note(s, e)
+				w.mu.Unlock()
 				if why := s.check(e); why != "" {
 					w.record(fmt.Sprintf("%s %s: %s", s.name, why, e))
 				}
@@ -201,7 +218,7 @@ func (w *watcher) record(violation string) {
 	}
 	w.seen[violation] = true
 	w.found = append(w.found, violation)
-	fmt.Fprintf(os.Stderr, "ios-live-harness: isolation: %s\n", violation)
+	fmt.Fprintf(w.out, "ios-live-harness: isolation: %s\n", violation)
 }
 
 // violations lists everything the watcher saw, and counts a failure to read
@@ -214,6 +231,18 @@ func (w *watcher) violations() []string {
 		out = append(out, "the watcher could not read the host processes: "+w.err.Error())
 	}
 	return out
+}
+
+func (w *watcher) blind() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.inventory.problems()
+}
+
+func (w *watcher) summary() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.inventory.summary()
 }
 
 // descendants maps each host daemon and every process below it to the
