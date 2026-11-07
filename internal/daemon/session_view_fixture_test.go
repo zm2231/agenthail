@@ -438,6 +438,18 @@ func newViewFixture(t *testing.T) *viewFixture {
 				t.Fatal(err)
 			}
 		}
+		gone := registry.ProjectRecord{ID: "project-gone", WorkspaceRoot: t.TempDir(), Title: "gone", Added: true, CreatedAt: f.clock}
+		if err := reg.AddProject(gone); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.ArchiveProject(gone, f.clock); err != nil {
+			t.Fatal(err)
+		}
+		inGone := surface.Session{ID: "old-ended-gone", Name: "old", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusNotLoaded, Ended: true, Cwd: gone.WorkspaceRoot, LastActive: f.clock.Add(-96 * time.Hour)}
+		fake.sessions[inGone.ID] = inGone
+		if err := reg.RegisterSession(inGone); err != nil {
+			t.Fatal(err)
+		}
 		d.discoverCatalog(f.ctx)
 		lead := registry.CoordinatorSpec{ProjectID: here.ID, ProjectRoot: cwd, Cwd: cwd, Name: "lead-fill", Surface: string(surface.KindCodex), SessionID: "lead-was", ChangedAt: f.clock}
 		stored, err := reg.SetCoordinator(lead, registry.CoordinatorChange{SessionID: "lead-was", Replace: true, OverPeers: true})
@@ -457,8 +469,8 @@ func newViewFixture(t *testing.T) *viewFixture {
 		if _, err := reg.RecordCatalogDiscovery(surface.KindCodex, listed, f.clock, true, 3); err != nil {
 			t.Fatal(err)
 		}
-		if retired, err := reg.CatalogListingForEntities([]string{"old-ended-true"}); err != nil || !retired.Retired["old-ended-true"] {
-			t.Fatalf("the ended session did not retire: %+v %v", retired.Retired, err)
+		if retired, err := reg.CatalogListingForEntities([]string{"old-ended-true", "old-ended-gone"}); err != nil || !retired.Retired["old-ended-true"] || !retired.Retired["old-ended-gone"] {
+			t.Fatalf("the ended sessions did not retire: %+v %v", retired.Retired, err)
 		}
 	}
 	return f

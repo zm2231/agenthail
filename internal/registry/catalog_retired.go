@@ -45,8 +45,8 @@ BEGIN
 END;
 INSERT OR IGNORE INTO catalog_retired_version(id,version) VALUES(1,0);
 DROP TRIGGER IF EXISTS catalog_retired_version_row;
-CREATE TRIGGER catalog_retired_version_row AFTER UPDATE OF retired,host_project,unavailable_reason ON catalog_sessions
-WHEN (OLD.retired=1 OR NEW.retired=1) AND (NEW.retired IS NOT OLD.retired OR NEW.host_project IS NOT OLD.host_project OR NEW.unavailable_reason IS NOT OLD.unavailable_reason)
+CREATE TRIGGER catalog_retired_version_row AFTER UPDATE OF session_id,retired,host_project,unavailable_reason ON catalog_sessions
+WHEN (OLD.retired=1 OR NEW.retired=1) AND (NEW.session_id IS NOT OLD.session_id OR NEW.retired IS NOT OLD.retired OR NEW.host_project IS NOT OLD.host_project OR NEW.unavailable_reason IS NOT OLD.unavailable_reason)
 BEGIN
 	UPDATE catalog_retired_version SET version=version+1;
 END;
@@ -57,9 +57,9 @@ BEGIN
 	UPDATE catalog_retired_version SET version=version+1;
 END;
 DROP TRIGGER IF EXISTS catalog_retired_version_session;
-CREATE TRIGGER catalog_retired_version_session AFTER UPDATE OF status,surface,host_id ON sessions
-WHEN (NEW.status IS NOT OLD.status OR NEW.surface IS NOT OLD.surface OR NEW.host_id IS NOT OLD.host_id)
-	AND EXISTS (SELECT 1 FROM catalog_sessions WHERE session_id=NEW.id AND retired=1)
+CREATE TRIGGER catalog_retired_version_session AFTER UPDATE OF id,status,surface,host_id ON sessions
+WHEN (NEW.id IS NOT OLD.id OR NEW.status IS NOT OLD.status OR NEW.surface IS NOT OLD.surface OR NEW.host_id IS NOT OLD.host_id)
+	AND EXISTS (SELECT 1 FROM catalog_sessions WHERE session_id IN (OLD.id,NEW.id) AND retired=1)
 BEGIN
 	UPDATE catalog_retired_version SET version=version+1;
 END;
@@ -71,6 +71,12 @@ BEGIN
 END;
 DROP TRIGGER IF EXISTS catalog_retired_version_archived;
 CREATE TRIGGER catalog_retired_version_archived AFTER INSERT ON session_archive
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
+DROP TRIGGER IF EXISTS catalog_retired_version_rearchived;
+CREATE TRIGGER catalog_retired_version_rearchived AFTER UPDATE OF session_id ON session_archive
+WHEN NEW.session_id IS NOT OLD.session_id
 BEGIN
 	UPDATE catalog_retired_version SET version=version+1;
 END;
@@ -86,8 +92,8 @@ BEGIN
 	UPDATE catalog_retired_version SET version=version+1;
 END;
 DROP TRIGGER IF EXISTS catalog_retired_version_project;
-CREATE TRIGGER catalog_retired_version_project AFTER UPDATE OF archived_at_ms ON projects
-WHEN NEW.archived_at_ms IS NOT OLD.archived_at_ms
+CREATE TRIGGER catalog_retired_version_project AFTER UPDATE OF id,archived_at_ms ON projects
+WHEN NEW.id IS NOT OLD.id OR NEW.archived_at_ms IS NOT OLD.archived_at_ms
 BEGIN
 	UPDATE catalog_retired_version SET version=version+1;
 END;

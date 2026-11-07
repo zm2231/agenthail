@@ -74,8 +74,9 @@ func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T)
 	// A restore appends to catalog_events like any write, so the log position
 	// and the revision that hashes it move on; the rest must come back.
 	logPosition := regexp.MustCompile(`"revision":"[0-9a-f]+"|"catalogSeq":[0-9]+`)
-	baseline, restored := "", ""
+	baseline, restored := "", "filling the fixture"
 	unchanged := func(before string) {
+		served(restored, before)
 		before = logPosition.ReplaceAllString(before, "")
 		if baseline == "" {
 			baseline = before
@@ -94,7 +95,12 @@ func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T)
 			}
 			continue
 		}
-		columns := queryStrings(t, db, fmt.Sprintf(`SELECT name FROM pragma_table_xinfo(%s) WHERE pk=0 AND hidden=0`, sqlQuote(table)))
+		// A key is swept where a write can rewrite it: not the rowid that
+		// names the row here, and not one other rows reference, which the
+		// registry's foreign keys hold in place.
+		columns := queryStrings(t, db, fmt.Sprintf(`SELECT name FROM pragma_table_xinfo(%[1]s) WHERE hidden=0 AND (pk=0 OR (%[2]s
+			AND NOT (upper(type)='INTEGER' AND (SELECT COUNT(*) FROM pragma_table_xinfo(%[1]s) WHERE pk>0)=1)
+			AND NOT EXISTS (SELECT 1 FROM sqlite_schema m, pragma_foreign_key_list(m.name) f WHERE m.type='table' AND f."table"=%[1]s)))`, sqlQuote(table), fmt.Sprint(rowKey == "rowid")))
 		stored := queryStrings(t, db, fmt.Sprintf(`SELECT '"'||replace(name,'"','""')||'"' FROM pragma_table_xinfo(%s) WHERE hidden=0`, sqlQuote(table)))
 		identical := make([]string, 0, len(columns))
 		values := make([]string, 0, len(columns))

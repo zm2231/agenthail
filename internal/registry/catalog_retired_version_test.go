@@ -4,49 +4,61 @@ import (
 	"database/sql"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 // queryColumns names every table column a query reads, from SQLite's own
-// program for it, so the list cannot fall behind the query.
+// program for it, so the list cannot fall behind the query. A column counts
+// as read when the program loads it, seeks an index or rowid by it, or opens
+// a partial index whose predicate names it.
 func queryColumns(t *testing.T, db *sql.DB, query string) map[string][]string {
 	t.Helper()
-	type object struct{ name, table, kind string }
+	type object struct{ name, table, kind, sql string }
 	objects := map[int64]object{}
-	schema, err := db.Query(`SELECT name,tbl_name,type,rootpage FROM sqlite_schema WHERE type IN ('table','index') AND rootpage>0`)
+	schema, err := db.Query(`SELECT name,tbl_name,type,rootpage,COALESCE(sql,'') FROM sqlite_schema WHERE type IN ('table','index') AND rootpage>0`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for schema.Next() {
 		var o object
 		var root int64
-		if err := schema.Scan(&o.name, &o.table, &o.kind, &root); err != nil {
+		if err := schema.Scan(&o.name, &o.table, &o.kind, &root, &o.sql); err != nil {
 			t.Fatal(err)
 		}
 		objects[root] = o
 	}
 	schema.Close()
-	names := func(pragma, name string) map[int64]string {
-		rows, err := db.Query(`SELECT `+map[string]string{"table_info": "cid,name", "index_xinfo": "seqno,COALESCE(name,'')"}[pragma]+` FROM pragma_`+pragma+`(?)`, name)
+	type column struct {
+		at         int64
+		name, kind string
+		pk, key    bool
+	}
+	columns := func(o object) []column {
+		pragma := `SELECT cid,name,type,pk>0,1 FROM pragma_table_info(?)`
+		if o.kind == "index" {
+			pragma = `SELECT seqno,COALESCE(name,''),'',0,key FROM pragma_index_xinfo(?)`
+		}
+		rows, err := db.Query(pragma, o.name)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer rows.Close()
-		out := map[int64]string{}
+		var out []column
 		for rows.Next() {
-			var at int64
-			var column string
-			if err := rows.Scan(&at, &column); err != nil {
+			var c column
+			if err := rows.Scan(&c.at, &c.name, &c.kind, &c.pk, &c.key); err != nil {
 				t.Fatal(err)
 			}
-			out[at] = column
+			out = append(out, c)
 		}
 		return out
 	}
 	type step struct {
 		opcode string
 		p1, p2 int64
+		p4     string
 	}
 	var steps []step
 	program, err := db.Query(`EXPLAIN ` + query)
@@ -60,28 +72,62 @@ func queryColumns(t *testing.T, db *sql.DB, query string) map[string][]string {
 		if err := program.Scan(&addr, &opcode, &p1, &p2, &p3, &p4, &p5, &comment); err != nil {
 			t.Fatal(err)
 		}
-		steps = append(steps, step{opcode, p1, p2})
+		steps = append(steps, step{opcode, p1, p2, p4.String})
 	}
 	program.Close()
-	cursors := map[int64]object{}
 	read := map[string][]string{}
+	mark := func(table, name string) {
+		if name != "" && !slices.Contains(read[table], name) {
+			read[table] = append(read[table], name)
+		}
+	}
+	identifier := regexp.MustCompile(`\w+`)
+	cursors := map[int64]object{}
 	for _, s := range steps {
+		o, open := cursors[s.p1]
 		switch s.opcode {
 		case "OpenRead":
 			if o, ok := objects[s.p2]; ok {
 				cursors[s.p1] = o
+				if where := strings.Index(strings.ToUpper(o.sql), " WHERE "); o.kind == "index" && where >= 0 {
+					words := identifier.FindAllString(o.sql[where:], -1)
+					for _, c := range columns(object{name: o.table, kind: "table"}) {
+						if slices.Contains(words, c.name) {
+							mark(o.table, c.name)
+						}
+					}
+				}
 			}
 		case "Column":
-			o, ok := cursors[s.p1]
-			if !ok {
+			if !open {
 				continue
 			}
-			pragma := "table_info"
-			if o.kind == "index" {
-				pragma = "index_xinfo"
+			for _, c := range columns(o) {
+				if c.at == s.p2 {
+					mark(o.table, c.name)
+				}
 			}
-			if column := names(pragma, o.name)[s.p2]; column != "" && !slices.Contains(read[o.table], column) {
-				read[o.table] = append(read[o.table], column)
+		case "SeekGE", "SeekGT", "SeekLE", "SeekLT", "IdxGE", "IdxGT", "IdxLE", "IdxLT", "Found", "NotFound", "NoConflict":
+			if !open || o.kind != "index" {
+				continue
+			}
+			fields, err := strconv.Atoi(s.p4)
+			if err != nil {
+				t.Fatalf("%s on %s has no key count: %q", s.opcode, o.name, s.p4)
+			}
+			for _, c := range columns(o) {
+				if c.key && c.at < int64(fields) {
+					mark(o.table, c.name)
+				}
+			}
+		case "SeekRowid", "NotExists":
+			if !open {
+				continue
+			}
+			for _, c := range columns(o) {
+				if c.pk && strings.EqualFold(c.kind, "INTEGER") {
+					mark(o.table, c.name)
+				}
 			}
 		}
 	}
@@ -125,14 +171,12 @@ func versionTriggers(t *testing.T, db *sql.DB, version string) map[string][]vers
 func TestEveryValueTheRetiredCountsReadMovesTheirVersion(t *testing.T) {
 	r := openTestRegistry(t)
 	read := queryColumns(t, r.db.raw, catalogRetiredCountsQuery)
-	if !slices.Contains(read["sessions"], "status") || !slices.Contains(read["catalog_sessions"], "host_project") {
+	if !slices.Contains(read["sessions"], "status") || !slices.Contains(read["catalog_sessions"], "retired") || !slices.Contains(read["projects"], "id") || !slices.Contains(read["session_archive"], "session_id") {
 		t.Fatalf("the query's columns were not read from its program: %v", read)
 	}
 	watched := versionTriggers(t, r.db.raw, "catalog_retired_version")
-	// A row's key is never rewritten in place, and a sessions row reaches the
-	// counts only through its catalog_sessions row, whose own insert and
-	// delete are watched.
-	keys := map[string]string{"catalog_sessions": "session_id", "sessions": "id", "session_archive": "session_id", "projects": "id"}
+	// A sessions row reaches the counts only through the catalog_sessions row
+	// that references it, whose own insert and delete are watched.
 	joinedOnly := map[string]bool{"sessions": true}
 	for table, columns := range read {
 		has := func(event, column string) bool {
@@ -144,7 +188,7 @@ func TestEveryValueTheRetiredCountsReadMovesTheirVersion(t *testing.T) {
 			return false
 		}
 		for _, column := range columns {
-			if column != keys[table] && !has("UPDATE", column) {
+			if !has("UPDATE", column) {
 				t.Errorf("the retired counts read %s.%s, but changing it leaves catalog_retired_version as it was", table, column)
 			}
 		}
