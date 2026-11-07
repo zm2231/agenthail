@@ -7,6 +7,9 @@ struct PendingSend: Identifiable, Equatable {
         return !attachments.isEmpty && ids.count == attachments.count ? ids : nil
     }
 
+    var unconfirmedTitle: String { retryStopped ? "Not confirmed" : "Not confirmed yet · retrying" }
+    var offersRetry: Bool { retryStopped }
+
     var previewLine: String {
         let line = message.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
         return line.isEmpty ? "Message with attachments" : line

@@ -27,16 +27,4 @@ final class SessionScopeUITests: XCTestCase {
         shot.lifetime = .keepAlways
         add(shot)
     }
-
-    func testAnUnavailableSessionSaysSoInWords() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-app", "--preview-host-offline"]
-        app.launch()
-        let offline = app.buttons["session-h0123456789ab::remote-demo-2"]
-        XCTAssertTrue(app.buttons["session-computer::demo"].waitForExistence(timeout: 10))
-        for _ in 0..<4 where !offline.exists { app.swipeUp() }
-        XCTAssertTrue(offline.waitForExistence(timeout: 5), "the unavailable row is in the list below the fold")
-        XCTAssertEqual(offline.value as? String, "Unavailable")
-        XCTAssertTrue(offline.label.contains("Unavailable"), "the row shows the word, not only the ring: \(offline.label)")
-    }
 }

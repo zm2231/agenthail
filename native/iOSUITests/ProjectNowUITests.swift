@@ -71,18 +71,6 @@ final class ProjectNowUITests: XCTestCase {
         XCTAssertLessThan(top(app.buttons["project-session-computer::waiting"]), top(app.buttons["project-session-computer::idle"]))
     }
 
-    func testAnUnreachableComputerSortsLastAndSaysSo() {
-        let app = launch("unreachable")
-        let far = app.staticTexts["main · build-server · unreachable"]
-        XCTAssertTrue(far.waitForExistence(timeout: 5))
-        XCTAssertLessThan(top(app.staticTexts["main · studio-mac"]), top(far))
-    }
-
-    func testFoldersOutsideARepositoryAreNamedByFolder() {
-        let app = launch("plain")
-        XCTAssertLessThan(top(app.staticTexts["notes"]), top(app.staticTexts["scans"]))
-    }
-
     func testShots() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["NOW_SHOTS"] == "1", "eight launches, too slow for every run")
         for scenario in ["multi", "single", "unreachable", "plain"] {

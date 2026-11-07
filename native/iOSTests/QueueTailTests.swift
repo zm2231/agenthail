@@ -4,9 +4,10 @@ import XCTest
 final class QueueTailTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
 
-    private func row(_ id: Int64, status: String = "pending", message: String = "m", author: String? = "person", operation: String? = nil) throws -> QueueState {
+    private func row(_ id: Int64, status: String = "pending", message: String = "m", author: String? = "person", operation: String? = nil, lastError: String? = nil) throws -> QueueState {
         var object: [String: Any] = ["id": id, "sessionId": "s", "target": "t", "message": message, "status": status, "attempts": 0, "queuedAt": "2026-11-04 10:00:00", "evidence": "queued"]
         if let author { object["author"] = author }
+        if let lastError { object["lastError"] = lastError }
         if let operation { object["operation"] = operation }
         var item = try JSONDecoder().decode(QueueState.self, from: JSONSerialization.data(withJSONObject: object))
         item.hostID = "computer"
@@ -190,6 +191,33 @@ final class QueueTailTests: XCTestCase {
         try tail.update(active: [row(1, message: "mine"), row(2, message: envelope("a"), author: "agent"), row(3, message: envelope("b"), author: "agent"), row(4, message: envelope("c"), author: "agent"), row(5, message: envelope("d"), author: "agent")], timeline: [], now: start)
         XCTAssertEqual(tail.shown.map(\.item.id), [1, 4, 5])
         XCTAssertEqual(tail.hiddenCount, 2)
+    }
+
+    func testAFailedRowOffersReviewAndSaysItNeedsIt() throws {
+        let dead = QueueTail.Row(item: try row(1, status: "dead"))
+        XCTAssertEqual(dead.controls, .review, "a failed row offers Send again and Dismiss")
+        XCTAssertEqual(dead.heading, "Delivery needs review")
+        XCTAssertEqual(dead.reason, "It may already have reached the agent. Check the session before sending again.")
+        let failed = try row(2, status: "dead", lastError: "delivery outcome is unknown: the connection dropped")
+        XCTAssertEqual(QueueTail.Row(item: failed).reason, "delivery outcome is unknown: the connection dropped")
+        XCTAssertNil(QueueTail.Row(item: try row(3)).reason, "a waiting row gives no reason")
+    }
+
+    func testOnlyAWaitingRowOffersSteerAndItsMenu() throws {
+        XCTAssertEqual(QueueTail.Row(item: try row(1)).controls, .waiting)
+        XCTAssertEqual(QueueTail.Row(item: try row(1)).heading, "Queued")
+        let delivering = QueueTail.Row(item: try row(2, status: "inflight"))
+        XCTAssertEqual(delivering.controls, QueueTail.Row.Controls.none)
+        XCTAssertEqual(delivering.heading, "Delivering")
+        let leaving = QueueTail.Row(item: try row(3, status: "dead"), leavingSince: start)
+        XCTAssertEqual(leaving.controls, QueueTail.Row.Controls.none, "a row on its way out offers nothing")
+        XCTAssertEqual(leaving.heading, "Delivering")
+    }
+
+    func testAPeerRowIsHeadedByItsSender() throws {
+        let peer = QueueTail.Row(item: try row(1, message: envelope("Check the release notes."), author: "agent"))
+        XCTAssertEqual(peer.heading, "Queued · From @helper")
+        XCTAssertFalse(peer.isOwn)
     }
 
     func testAFailedRowOutranksWaitingRows() throws {

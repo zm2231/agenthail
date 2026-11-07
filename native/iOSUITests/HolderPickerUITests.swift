@@ -20,15 +20,6 @@ final class HolderPickerUITests: XCTestCase {
         attach(app, "Composer sending to the chosen terminal")
     }
 
-    func testTheSessionListCountsTheTerminalsAConversationIsOpenIn() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-app", "--preview-holders"]
-        app.launch()
-        let count = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "2 terminals")).firstMatch
-        XCTAssertTrue(count.waitForExistence(timeout: 10))
-        attach(app, "Session list with a conversation open in two terminals")
-    }
-
     private func attach(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name

@@ -645,6 +645,9 @@ final class ComposerSendTests: XCTestCase {
         try await waitUntil { queue.pending["a"]?.first?.unconfirmed == true }
         queue.wake()
         try await waitUntil { attempts == 2 }
+        let retrying = try XCTUnwrap(queue.pending["a"]?.first)
+        XCTAssertEqual(retrying.unconfirmedTitle, "Not confirmed yet · retrying")
+        XCTAssertFalse(retrying.offersRetry, "within the hour it retries by itself")
 
         clock = clock.addingTimeInterval(SendQueue.retryWindow)
         queue.wake()
@@ -655,6 +658,8 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertEqual(attempts, stopped, "past the hour only a tap sends it")
 
         let send = try XCTUnwrap(queue.pending["a"]?.first)
+        XCTAssertEqual(send.unconfirmedTitle, "Not confirmed")
+        XCTAssertTrue(send.offersRetry, "past the hour the row offers Retry")
         queue.retry(send)
         try await waitUntil { attempts == stopped + 1 && queue.pending["a"]?.first?.retryStopped == true }
         try await Task.sleep(for: .milliseconds(1200))
@@ -663,6 +668,12 @@ final class ComposerSendTests: XCTestCase {
         online = true
         queue.retry(try XCTUnwrap(queue.pending["a"]?.first))
         try await waitUntil { queue.pending.isEmpty }
+    }
+
+    func testAWaitingSendIsNamedByItsFirstLine() {
+        let send = PendingSend(sessionID: "a", message: "  Check the signing step\nthen rerun", attachments: [], turnSettings: TurnSettings())
+        XCTAssertEqual(send.previewLine, "Check the signing step")
+        XCTAssertEqual(PendingSend(sessionID: "a", message: "", attachments: [], turnSettings: TurnSettings()).previewLine, "Message with attachments")
     }
 
     private func stoppedSend(_ session: String = "a", _ message: String = "old") -> PendingSend {

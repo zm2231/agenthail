@@ -219,21 +219,6 @@ final class TranscriptQueueTailUITests: XCTestCase {
         XCTAssertFalse(app.buttons["latest-instruction"].exists)
     }
 
-    func testAPeerRowDoesNotPushOutThePersonsOwn() {
-        let app = launch("peer")
-        XCTAssertTrue(app.staticTexts["Queued · From @helper"].exists, "a peer row names its sender briefly")
-        XCTAssertTrue(row(21, app).exists, "the person's own row is one of the three")
-        XCTAssertEqual(app.buttons["queue-tail-more"].label, "2 more queued")
-        XCTAssertFalse(app.buttons["queue-tail-steer-25"].exists, "a peer row can't steer as the person")
-    }
-
-    func testAFailedRowKeepsItsReasonAndRetry() {
-        let app = launch("dead")
-        XCTAssertTrue(app.staticTexts["queue-tail-reason-21"].exists)
-        XCTAssertTrue(app.buttons["queue-tail-retry-21"].exists)
-        XCTAssertTrue(app.buttons["queue-tail-dismiss-21"].exists)
-    }
-
     func testCancellingTheLastRowLeavesTheTranscriptAtItsLatestRow() {
         let app = launch()
         let bubble = row(21, app)

@@ -19,8 +19,8 @@ struct ComposerSendStatus: View {
                 }
             }
         } else if let waiting {
-            row(waiting.retryStopped ? "Not confirmed" : "Not confirmed yet · retrying", detail: waiting.previewLine, color: PhonePalette.muted, identifier: "send-unconfirmed") {
-                if waiting.retryStopped {
+            row(waiting.unconfirmedTitle, detail: waiting.previewLine, color: PhonePalette.muted, identifier: "send-unconfirmed") {
+                if waiting.offersRetry {
                     Button("Retry") { model.retrySend(waiting) }
                         .accessibilityIdentifier("send-unconfirmed-retry")
                 }
