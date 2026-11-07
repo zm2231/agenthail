@@ -253,7 +253,6 @@ type Session struct {
 	Transport             string            `json:"transport,omitempty"`
 	RuntimeKind           RuntimeKind       `json:"runtimeKind,omitempty"`
 	ConfiguredModel       string            `json:"configuredModel,omitempty"`
-	PendingModel          string            `json:"pendingModel,omitempty"`
 	Bridge                string            `json:"bridge,omitempty"`
 	ForkedFrom            string            `json:"forkedFrom,omitempty"`
 	LastActive            time.Time         `json:"lastActive"`

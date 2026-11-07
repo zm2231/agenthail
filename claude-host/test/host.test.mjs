@@ -678,20 +678,23 @@ test('a request does not outlive its host', async () => {
   d.close();
 });
 
-test('model and permission mode change live and a resume keeps them', async () => {
+test('model, effort and permission mode change live and a resume keeps them', async () => {
   const f = fixture();
   const first = await startHost(f);
   const c = new Client(f.socket);
   const id = randomUUID();
-  const opened = await c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'acceptEdits' });
+  const opened = await c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'acceptEdits', effort: 'low' });
   assert.equal(opened.permissionMode, 'acceptEdits');
+  assert.equal(opened.effort, 'low');
   assert.equal((await c.call('setPermissionMode', { sessionId: id, permissionMode: 'bypassPermissions' })).permissionMode, 'bypassPermissions');
   assert.equal((await c.call('setModel', { sessionId: id, model: 'opus' })).model, 'opus');
+  assert.equal((await c.call('setEffort', { sessionId: id, effort: 'xhigh' })).effort, 'xhigh');
   await assert.rejects(c.call('setPermissionMode', { sessionId: id, permissionMode: 'yolo' }), { code: 'invalid' });
   await assert.rejects(c.call('setModel', { sessionId: id, model: '' }), { code: 'invalid' });
+  await assert.rejects(c.call('setEffort', { sessionId: id, effort: 'turbo' }), { code: 'invalid' });
   await assert.rejects(c.call('setModel', { sessionId: randomUUID(), model: 'opus' }), { code: 'not_open' });
   const controls = fs.readFileSync(path.join(f.claudeDir, 'controls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  assert.deepEqual(controls.map((r) => [r.subtype, r.mode ?? r.model]), [['set_permission_mode', 'bypassPermissions'], ['set_model', 'opus']]);
+  assert.deepEqual(controls.map((r) => [r.subtype, r.mode ?? r.model ?? r.settings?.effortLevel]), [['set_permission_mode', 'bypassPermissions'], ['set_model', 'opus'], ['apply_flag_settings', 'xhigh']]);
   await c.call('close', { sessionId: id });
   c.close();
   first.kill('SIGKILL');
@@ -702,8 +705,9 @@ test('model and permission mode change live and a resume keeps them', async () =
   const resumed = await d.call('open', { resume: id, cwd: f.cwd });
   assert.equal(resumed.permissionMode, 'bypassPermissions');
   assert.equal(resumed.model, 'opus');
+  assert.equal(resumed.effort, 'xhigh');
   const argv = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1).argv;
-  assert.ok(argv.includes('--permission-mode=bypassPermissions') && argv.includes('--model=opus'), argv.join(' '));
+  assert.ok(argv.includes('--permission-mode=bypassPermissions') && argv.includes('--model=opus') && argv.includes('--effort=xhigh'), argv.join(' '));
   d.close();
 });
 

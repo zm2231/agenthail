@@ -30,7 +30,7 @@ struct ClaudeObservationsSection: View {
     }
 
     static let fieldNames = [
-        "context": "Context usage", "goal": "Goal", "model": "Current model", "pendingModel": "Next model",
+        "context": "Context usage", "goal": "Goal", "model": "Current model",
         "models": "Model list", "claudeRuns": "Claude runs", "claudeSubagents": "Subagents",
     ]
 

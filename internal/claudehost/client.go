@@ -99,7 +99,8 @@ type Session struct {
 	OpenedAt       string       `json:"openedAt"`
 	PermissionMode string       `json:"permissionMode"`
 	Model          string       `json:"model"`
-	Checker        string       `json:"checker,omitempty"`
+	Effort         string       `json:"effort"`
+	Checker       string       `json:"checker,omitempty"`
 	MCPError       string       `json:"mcpError,omitempty"`
 	ContextWindow  int64        `json:"contextWindow"`
 	ContextModel   string       `json:"contextModel"`
@@ -388,6 +389,11 @@ func (c Client) SetModel(ctx context.Context, sessionID, model string) (Session,
 func (c Client) ReplaceMCP(ctx context.Context, sessionID string, server MCPServer) (Session, error) {
 	var out Session
 	return out, c.sessionCall(ctx, "replaceMcp", map[string]any{"sessionId": sessionID, "mcp": server}, &out)
+}
+
+func (c Client) SetEffort(ctx context.Context, sessionID, effort string) (Session, error) {
+	var out Session
+	return out, c.sessionCall(ctx, "setEffort", map[string]string{"sessionId": sessionID, "effort": effort}, &out)
 }
 
 func (c Client) SetPermissionMode(ctx context.Context, sessionID, mode string) (Session, error) {

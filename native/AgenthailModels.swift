@@ -1470,7 +1470,6 @@ struct SessionMetadata: Decodable {
     let context: ContextState?
     let goal: GoalState?
     let model: String?
-    var pendingModel: String? = nil
     let models: [ModelOption]?
     let claudeRuns: [ClaudeRunObservation]?
     let claudeSubagents: [ClaudeSubagentLink]?
@@ -1520,7 +1519,6 @@ struct SessionDetail: Decodable {
     var context: ContextState?
     var goal: GoalState?
     var model: String?
-    var pendingModel: String?
     var models: [ModelOption]?
     var claudeRuns: [ClaudeRunObservation]?
     var claudeSubagents: [ClaudeSubagentLink]?
@@ -1599,7 +1597,6 @@ struct RawSession: Decodable {
     let source: String?
     var transport: String?
     var cwd: String?
-    var pendingModel: String? = nil
     var runtime: SessionRuntime?
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
@@ -2404,28 +2401,6 @@ private indirect enum RequestInput: Codable {
     }
 }
 
-extension SessionDetail {
-    /// The model the conversation takes with its next turn sent through
-    /// Agenthail, when that differs from the model it runs now.
-    var nextTurnModel: String? {
-        guard let pending = pendingModel ?? session.pendingModel, !pending.isEmpty, pending != model else { return nil }
-        return pending
-    }
-
-    var modelLabel: String? {
-        guard let pending = nextTurnModel else { return model }
-        guard let model else { return "\(pending) from next turn" }
-        return "\(model) · \(pending) from next turn"
-    }
-}
-
-enum MetadataLabels {
-    static func modelMenuTitle(current: String?, next: String?) -> String {
-        guard let next, next != current else { return current ?? "Choose" }
-        guard let current else { return "\(next) from next turn" }
-        return "\(current) · \(next) from next turn"
-    }
-}
 
 enum QueueTakeBack {
     /// Queued messages go back ahead of the draft, oldest first, as they would have been sent.

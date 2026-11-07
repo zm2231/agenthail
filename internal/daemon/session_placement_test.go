@@ -76,7 +76,6 @@ var placementExempt = map[string]bool{"RegisteredAt": true, "Attention": true, "
 var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"RuntimeKind":     func(r *dashboardSession, _ time.Time) { r.RuntimeKind = surface.RuntimeClaudeCLI },
 	"ConfiguredModel": func(r *dashboardSession, _ time.Time) { r.ConfiguredModel = "other" },
-	"PendingModel":    func(r *dashboardSession, _ time.Time) { r.PendingModel = "next" },
 	"ClaudeConfigRoot": func(r *dashboardSession, _ time.Time) {
 		r.ClaudeConfigRoot = &surface.SessionConfigRoot{Name: "work", Root: "/w/.claude"}
 	},

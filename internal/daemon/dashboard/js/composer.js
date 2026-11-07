@@ -184,7 +184,7 @@ export function renderSlashMenu() {
   const choosingModel = value.toLowerCase().startsWith("/model ");
   const visible = value.startsWith("/") && !value.includes(" ");
   const commands = choosingModel
-    ? (app.history?.models || []).map((model) => [model.id, model.displayName || model.id, model.id === (app.history?.pendingModel || app.selected?.pendingModel) ? "From next turn" : model.description || "", model.default])
+    ? (app.history?.models || []).map((model) => [model.id, model.displayName || model.id, model.description || "", model.default])
     : visible
     ? app.slashCommands.filter(([command]) => command.startsWith(query))
     : [];

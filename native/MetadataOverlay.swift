@@ -4,7 +4,6 @@ struct MetadataOverlay {
     private(set) var context: ContextState?
     private(set) var goal: GoalState?
     private(set) var model: String?
-    private(set) var pendingModel: String?
     private(set) var models: [ModelOption]?
     private(set) var claudeRuns: [ClaudeRunObservation]?
     private(set) var claudeSubagents: [ClaudeSubagentLink]?
@@ -19,7 +18,6 @@ struct MetadataOverlay {
         context = detail?.context
         goal = detail?.goal
         model = detail?.model
-        pendingModel = detail?.pendingModel
         models = detail?.models
         claudeRuns = detail?.claudeRuns
         claudeSubagents = detail?.claudeSubagents
@@ -29,7 +27,6 @@ struct MetadataOverlay {
 
     mutating func absorb(_ metadata: SessionMetadata) {
         absorb(context: metadata.context, goal: metadata.goal, model: metadata.model, models: metadata.models)
-        pendingModel = metadata.pendingModel
         claudeRuns = metadata.claudeRuns
         claudeSubagents = metadata.claudeSubagents
         claudeSubagentsTotal = metadata.claudeSubagentsTotal
@@ -77,7 +74,6 @@ struct MetadataOverlay {
         merged.context = context
         merged.goal = goal
         merged.model = model
-        merged.pendingModel = pendingModel
         merged.models = models
         merged.claudeRuns = claudeRuns
         merged.claudeSubagents = claudeSubagents

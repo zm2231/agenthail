@@ -1588,7 +1588,7 @@ struct ComposerView: View {
         if options.contains(where: { $0.id == query }) { return [] }
         return options
             .filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) || $0.displayName.localizedCaseInsensitiveContains(query) }
-            .map { CompletionItem(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.model ? "Current" : $0.id == pane.detail?.nextTurnModel ? "From next turn" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
+            .map { CompletionItem(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.model ? "Current" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
     }
 
     private var completionToken: CompletionToken? {
@@ -2121,12 +2121,12 @@ struct DetailsTab: View {
                 if canControl && session.capabilities.model, case let options = modelOptions, !options.isEmpty {
                     GridRow {
                         Text("Model").foregroundStyle(DesktopPalette.text2)
-                        Menu(MetadataLabels.modelMenuTitle(current: options.first { $0.id == modelName }?.displayName ?? modelName, next: options.first { $0.id == pane.detail?.nextTurnModel }?.displayName ?? pane.detail?.nextTurnModel)) {
+                        Menu(options.first { $0.id == modelName }?.displayName ?? modelName ?? "Choose") {
                             ForEach(options) { option in
                                 Button {
                                     pane.changeModel(to: option.id)
                                 } label: {
-                                    if option.id == modelName { Label(option.displayName, systemImage: "checkmark") } else if option.id == pane.detail?.nextTurnModel { Label(option.displayName + " (from next turn)", systemImage: "clock") } else { Text(option.displayName) }
+                                    if option.id == modelName { Label(option.displayName, systemImage: "checkmark") } else { Text(option.displayName) }
                                 }
                             }
                         }
@@ -2134,8 +2134,8 @@ struct DetailsTab: View {
                         .fixedSize()
                         .disabled(pane.controlPending)
                     }
-                } else if let modelLabel = pane.detail?.modelLabel {
-                    detailRow("Model", modelLabel)
+                } else if let model = pane.detail?.model {
+                    detailRow("Model", model)
                 }
                 if canControl && session.capabilities.permissionMode, let current = pane.requests?.permissionMode {
                     GridRow {

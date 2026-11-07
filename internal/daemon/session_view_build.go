@@ -165,7 +165,7 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 	for id, row := range plan.rows {
 		hydrated := d.presentation.fingerprints.rows[internal[id]].row
 		row.Holders, row.Plan, row.Runtime, row.ClaudeConfigRoot = hydrated.Holders, hydrated.Plan, hydrated.Runtime, hydrated.ClaudeConfigRoot
-		row.ConfiguredModel, row.PendingModel = hydrated.ConfiguredModel, hydrated.PendingModel
+		row.ConfiguredModel = hydrated.ConfiguredModel
 	}
 	if plan.view.RefreshAt != nil {
 		build.expire(*plan.view.RefreshAt)

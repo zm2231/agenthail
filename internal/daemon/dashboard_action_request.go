@@ -30,7 +30,9 @@ type dashboardActionRequest struct {
 	Message         string                     `json:"message"`
 	Alias           string                     `json:"alias"`
 	Model           string                     `json:"model"`
-	BusyDelivery    string                     `json:"busyDelivery"`
+	Setting         string                     `json:"setting"`
+	Value           string                     `json:"value"`
+	BusyDelivery   string                     `json:"busyDelivery"`
 	QueueID         int64                      `json:"queueId"`
 	Channel         string                     `json:"channel"`
 	NewChannel      string                     `json:"newChannel"`

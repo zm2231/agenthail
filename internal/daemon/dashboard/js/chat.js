@@ -69,7 +69,7 @@ export function renderChat() {
   renderSlashMenu();
   syncRequests();
   renderBackgroundTasks(session);
-  $("#chat-subtitle").textContent = conversationMeta(session, model, app.history?.pendingModel ?? session.pendingModel ?? "");
+  $("#chat-subtitle").textContent = conversationMeta(session, model);
   $("#thread-count").textContent =
     `${exchanges.length} recent exchange${exchanges.length === 1 ? "" : "s"}`;
   renderContextUsage(context);

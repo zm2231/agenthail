@@ -25,36 +25,10 @@ func (c *Codex) Model(ctx context.Context, sess *surface.Session, name string) (
 }
 
 func (c *Codex) SetModel(ctx context.Context, sess *surface.Session, name string) (surface.ModelChange, error) {
-	lock, err := acquireCodexWriteLock(ctx)
-	if err != nil {
-		return surface.ModelChange{}, surface.DeliveryUnavailable(err)
-	}
-	defer releaseCodexWriteLock(lock)
-	client, err := c.openRoute(ctx, sess)
-	if err != nil {
-		return surface.ModelChange{}, surface.DeliveryUnavailable(err)
-	}
-	defer client.Close()
-	if err := c.loadForDirectInput(ctx, client, sess, name); err != nil {
-		if surface.IsDeliveryTerminal(err) {
-			return surface.ModelChange{}, err
-		}
-		return surface.ModelChange{}, surface.DeliveryUnavailable(err)
-	}
-	current, err := codexThreadModel(ctx, client, sess.ID)
-	if err != nil {
+	if err := c.SetTurnSetting(ctx, sess, surface.TurnSettingModel, name); err != nil {
 		return surface.ModelChange{}, err
 	}
-	if current == name {
-		if err := clearCodexPendingModel(sess.ID); err != nil {
-			return surface.ModelChange{}, fmt.Errorf("clear the pending model: %w", err)
-		}
-		return surface.ModelChange{Model: current}, nil
-	}
-	if err := saveCodexPendingModel(sess.ID, codexPendingModel{Model: name, From: current, SetAt: time.Now().UTC()}); err != nil {
-		return surface.ModelChange{}, fmt.Errorf("record the pending model: %w", err)
-	}
-	return surface.ModelChange{Model: current, PendingModel: name, Limit: "A turn started from Codex Desktop's composer or its own queue runs on the model Desktop shows."}, nil
+	return surface.ModelChange{Model: name}, nil
 }
 
 func codexThreadModel(ctx context.Context, client codexClient, threadID string) (string, error) {

@@ -166,6 +166,26 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 				err = fmt.Errorf("persist Claude model state: %w", persistErr)
 			}
 		}
+	case "turn-setting":
+		provider, ok := adapter.(surface.TurnSettingsProvider)
+		if !ok {
+			return actionResult{}, invalidRequest("this session has no turn settings")
+		}
+		key, value := strings.TrimSpace(request.Setting), strings.TrimSpace(request.Value)
+		if key == "" || value == "" {
+			return actionResult{}, invalidRequest("setting and value are required")
+		}
+		err = provider.SetTurnSetting(ctx, session, key, value)
+		if version, ok := surface.IsRuntimeVersionError(err); ok {
+			return actionResult{}, &actionError{Status: http.StatusConflict, Code: "runtime_too_old", Message: err.Error(), Extra: map[string]any{"runtime": version.Runtime, "minimum": version.Minimum}}
+		}
+		if errors.Is(err, surface.ErrInvalidTurnSetting) || errors.Is(err, surface.ErrUnsupported) {
+			return actionResult{}, invalidRequest(err.Error())
+		}
+		if err == nil {
+			d.recordSetting(session, key, value, p.actor())
+			result = &surface.ControlResult{SessionID: session.ID, Action: "turn-setting", Evidence: surface.EvidenceDelivered}
+		}
 	case "permission-mode":
 		if !effective.PermissionMode {
 			return actionResult{}, invalidRequest("this session's permission mode cannot change while it runs")

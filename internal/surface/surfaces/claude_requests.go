@@ -70,14 +70,16 @@ func (c *Claude) Respond(ctx context.Context, sess *surface.Session, requestID s
 	return outcome, nil
 }
 
-// hostSetting changes a hosted session's model or permission mode while it
-// runs. The host keeps both, so a later resume reopens with them.
+// hostSetting changes a hosted session's model, effort or permission mode
+// while it runs. The host keeps them, so a later resume reopens with them.
 func (c *Claude) hostSetting(ctx context.Context, sess *surface.Session, action, value string) (*surface.ControlResult, error) {
 	var listed claudehost.Session
 	var err error
 	switch action {
 	case "model":
 		listed, err = c.host.client.SetModel(ctx, sess.ID, value)
+	case "effort":
+		listed, err = c.host.client.SetEffort(ctx, sess.ID, value)
 	case "permission-mode":
 		listed, err = c.host.client.SetPermissionMode(ctx, sess.ID, value)
 	}
@@ -85,11 +87,15 @@ func (c *Claude) hostSetting(ctx context.Context, sess *surface.Session, action,
 	if err != nil {
 		return nil, claudeHostDeliveryError(err)
 	}
-	if action == "model" {
+	output := listed.PermissionMode
+	switch action {
+	case "model":
 		sess.ConfiguredModel = listed.Model
-		return &surface.ControlResult{SessionID: sess.ID, Action: action, Evidence: surface.EvidenceDelivered, Source: "claude-host", Output: listed.Model}, nil
+		output = listed.Model
+	case "effort":
+		output = listed.Effort
 	}
-	return &surface.ControlResult{SessionID: sess.ID, Action: action, Evidence: surface.EvidenceDelivered, Source: "claude-host", Output: listed.PermissionMode}, nil
+	return &surface.ControlResult{SessionID: sess.ID, Action: action, Evidence: surface.EvidenceDelivered, Source: "claude-host", Output: output}, nil
 }
 
 func validClaudePermissionMode(mode string) bool {
