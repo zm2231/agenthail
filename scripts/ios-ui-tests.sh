@@ -21,8 +21,9 @@ entries() { grep -vE '^[[:space:]]*(#|$)' "$list" || true; }
 declared() {
 	awk '
 		FNR == 1 { class = "" }
-		/^[[:space:]]*(final[[:space:]]+)?class[[:space:]]+[A-Za-z0-9_]+[[:space:]]*:[[:space:]]*XCTestCase/ {
-			sub(/^[[:space:]]*(final[[:space:]]+)?class[[:space:]]+/, ""); sub(/[[:space:]]*:.*/, ""); class = $0; next
+		/^((@[A-Za-z]+|public|private|fileprivate|internal|final|open)[[:space:]]+)*(class|struct|enum|actor|extension|protocol)[[:space:]]/ { class = "" }
+		/^((@[A-Za-z]+|public|private|fileprivate|internal|open)[[:space:]]+)*(final[[:space:]]+)?class[[:space:]]+[A-Za-z0-9_]+[[:space:]]*:[[:space:]]*XCTestCase/ {
+			sub(/^.*class[[:space:]]+/, ""); sub(/[[:space:]]*:.*/, ""); class = $0; next
 		}
 		class != "" && /^[[:space:]]*func[[:space:]]+test[A-Za-z0-9_]*[[:space:]]*\(/ {
 			sub(/^[[:space:]]*func[[:space:]]+/, ""); sub(/[[:space:]]*\(.*/, ""); print class "/" $0

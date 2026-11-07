@@ -20,6 +20,14 @@ final class AUITests: XCTestCase {
     func testOne() {}
     func testTwo() throws {}
 }
+
+extension XCUIApplication {
+    func testHelperInTheSameFile() {}
+}
+
+private struct Probe {
+    func testShapedHelper() {}
+}
 SWIFT
 cat >"$work/src/Helpers.swift" <<'SWIFT'
 extension XCUIElement {
