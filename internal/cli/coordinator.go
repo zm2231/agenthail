@@ -195,8 +195,8 @@ func (a *App) callerLead() (registry.CoordinatorSpec, error) {
 }
 
 func (a *App) callerSession() *surface.Session {
-	for _, variable := range callerEnv {
-		id := os.Getenv(variable.name)
+	for _, variable := range surface.CallerIdentity {
+		id := os.Getenv(variable.Variable)
 		if id == "" {
 			continue
 		}

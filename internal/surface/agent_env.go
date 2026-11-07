@@ -15,6 +15,13 @@ var callerIdentityVariables = []string{
 	"CODEX_THREAD_ID",
 }
 
+// CallerIdentity is in resolution order; an empty Surface means an Agenthail session id.
+var CallerIdentity = []struct{ Variable, Surface string }{
+	{"AGENTHAIL_SESSION_ID", ""},
+	{"CLAUDE_CODE_SESSION_ID", "claude"},
+	{"CODEX_THREAD_ID", "codex"},
+}
+
 // AgentEnv returns env without the caller identity variables.
 func AgentEnv(env []string) []string {
 	out := make([]string, 0, len(env))

@@ -67,6 +67,28 @@ keeps the only record of tabs:
   `dialog: {type, message}`; `snapshot` then carries no tree, and `act`
   answers `dialog_open` until the dialog is answered.
 
+## Servers
+
+The `servers` action finds what a tab can open on this host. It runs in the
+daemon (`internal/listeners`), not the browser host, and works with no host
+running. It never connects to a port:
+
+- Linux reads the LISTEN rows of `/proc/net/tcp` and `/proc/net/tcp6`, maps
+  each socket inode to the lowest pid holding it through `/proc/*/fd`, and
+  reads that process's command and starting environment from `/proc`.
+- macOS runs `lsof -nP -iTCP -sTCP:LISTEN` and reads each owner's environment
+  with the `kern.procargs2` sysctl.
+
+A listener belongs to the session named by the first set identity variable
+in its owner's environment, in the order the CLI resolves its caller:
+`AGENTHAIL_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` (a Claude session), then
+`CODEX_THREAD_ID` (a Codex session). Agent tool commands carry these, and so
+does everything they start, including a server whose shell has exited.
+`session` and `mine` appear only for sessions the caller can read. A
+listener whose owner this user cannot inspect has no `pid`, `command` or
+`session`. The environment is the process's own claim, so `session` labels a
+server and grants nothing.
+
 ## Chromium on first use
 
 Chromium is not shipped. The first `launch` runs `playwright-core`'s installer
@@ -112,7 +134,7 @@ dependencies, the same way as the Claude host; every install path ships
 ```bash
 npm ci --prefix browser-host
 npm test --prefix browser-host
-go test ./internal/browserhost/ ./internal/daemon/ -run 'BrowserHost|AgentsTab' -race
+go test ./internal/browserhost/ ./internal/daemon/ -run 'BrowserHost|AgentsTab|LedgerChecker|Servers' -race
 ```
 
 The Node and Go tests download Chromium unless `AGENTHAIL_BROWSER_TEST_BROWSERS`

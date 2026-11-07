@@ -5,13 +5,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-)
 
-var callerEnv = []struct{ name, prefix string }{
-	{"AGENTHAIL_SESSION_ID", ""},
-	{"CLAUDE_CODE_SESSION_ID", "claude:"},
-	{"CODEX_THREAD_ID", "codex:"},
-}
+	"github.com/zm2231/agenthail/internal/surface"
+)
 
 // sourceSessionID names the calling session: --from, else the conversation id
 // the agent's own process puts in every tool command's environment, read at
@@ -20,12 +16,15 @@ var callerEnv = []struct{ name, prefix string }{
 func (a *App) sourceSessionID(ctx context.Context, selector string) (string, error) {
 	var envSet []string
 	if selector == "" {
-		for _, source := range callerEnv {
-			if id := os.Getenv(source.name); id != "" {
+		for _, source := range surface.CallerIdentity {
+			if id := os.Getenv(source.Variable); id != "" {
 				if len(envSet) == 0 {
-					selector = source.prefix + id
+					selector = id
+					if source.Surface != "" {
+						selector = source.Surface + ":" + id
+					}
 				}
-				envSet = append(envSet, source.name)
+				envSet = append(envSet, source.Variable)
 			}
 		}
 	}
