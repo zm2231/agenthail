@@ -39,7 +39,7 @@ struct ProxyPreferSheet: View {
             if request.set == .only {
                 Toggle("Also move the running sessions on the accounts it turns off", isOn: $moveNow)
             }
-            if let problem {
+            if let problem, problem.isEmpty {
                 Text(problem).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("proxy-prefer-problem")
             }
