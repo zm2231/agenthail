@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -131,4 +132,45 @@ func TestAStreamThatFallsBehindTheHistoryIsToldToRereadAndKeepsFollowing(t *test
 	awaitReceived(t, client, ended, "event: stream.reset\n")
 	after := publishBurst(t, d, 1)
 	awaitReceived(t, client, ended, "id: "+strconv.FormatUint(after.ID, 10)+"\n")
+}
+
+// goneClient is an event stream whose connection broke after it opened: like
+// net/http's response, every write and flush after the first write fails.
+type goneClient struct {
+	header  http.Header
+	started chan struct{}
+	once    sync.Once
+}
+
+func (c *goneClient) Header() http.Header { return c.header }
+func (c *goneClient) WriteHeader(int)     {}
+func (c *goneClient) Flush()              {}
+func (c *goneClient) FlushError() error   { return net.ErrClosed }
+
+func (c *goneClient) Write(p []byte) (int, error) {
+	opened := false
+	c.once.Do(func() { opened = true; close(c.started) })
+	if opened {
+		return len(p), nil
+	}
+	return 0, net.ErrClosed
+}
+
+func TestAnEventsStreamEndsWhenItsClientIsGone(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(t.Context())
+	request.Header.Set("Authorization", "Bearer secret")
+	client := &goneClient{header: http.Header{}, started: make(chan struct{})}
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		dashboardRouter(d).ServeHTTP(client, request)
+	}()
+	<-client.started
+	publishBurst(t, d, 1)
+	select {
+	case <-ended:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the events stream stayed open after its client was gone")
+	}
 }

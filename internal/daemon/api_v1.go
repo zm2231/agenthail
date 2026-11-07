@@ -216,7 +216,7 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 	authorized := func() bool { return d.apiEventStreamAuthorized(r) }
-	sse.Follow(r.Context(), w, flusher, follower.Wake, func(_ struct{}, open bool) bool {
+	sse.Follow(r.Context(), w, follower.Wake, func(_ struct{}, open bool) bool {
 		if !open || !authorized() {
 			return false
 		}
@@ -227,8 +227,7 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 		for _, event := range events {
 			writeSSEEvent(w, event)
 		}
-		flusher.Flush()
-		return true
+		return http.NewResponseController(w).Flush() == nil
 	}, authorized)
 }
 

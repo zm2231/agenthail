@@ -266,7 +266,7 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 	if !write(window.Events) || !follow() {
 		return
 	}
-	sse.Follow(r.Context(), w, flusher, follower.Wake, func(struct{}, bool) bool {
+	sse.Follow(r.Context(), w, follower.Wake, func(struct{}, bool) bool {
 		return follow()
 	}, func() bool { return d.apiEventStreamAuthorized(r) })
 }

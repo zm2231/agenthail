@@ -103,7 +103,7 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flus
 	if !follow() {
 		return
 	}
-	sse.Follow(r.Context(), w, flusher, wake, func(_ struct{}, open bool) bool {
+	sse.Follow(r.Context(), w, wake, func(_ struct{}, open bool) bool {
 		return follow() && open
 	}, func() bool { return d.apiEventStreamAuthorized(r) })
 }
