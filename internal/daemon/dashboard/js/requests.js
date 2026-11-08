@@ -82,8 +82,16 @@ export function renderRequestCard(request) {
   const title = request.title || `Claude wants to use ${request.tool}`;
   const input = request.input && Object.keys(request.input).length ? `<pre>${escape(JSON.stringify(request.input, null, 2))}</pre>` : "";
   const detail = [request.description, request.reason, request.blockedPath && `Path: ${request.blockedPath}`].filter(Boolean).map((line) => `<p>${escape(line)}</p>`).join("");
-  return `<div class="request-card"><h3>${escape(title)}${created}</h3>${detail}${input}<div class="request-actions"><button class="primary-button" type="button" data-request-respond="allow" data-request-id="${escape(request.id)}">Allow</button>${request.alwaysAllow ? `<button class="soft-button" type="button" data-request-respond="always" data-request-id="${escape(request.id)}">Always allow</button>` : ""}<button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(request.id)}">Deny</button></div></div>`;
+  return `<div class="request-card"><h3>${escape(title)}${created}</h3>${detail}${input}<div class="request-actions"><button class="primary-button" type="button" data-request-respond="allow" data-request-id="${escape(request.id)}">Allow</button>${request.alwaysAllow ? `<button class="soft-button" type="button" data-request-respond="always" data-request-id="${escape(request.id)}">Always allow</button>` : ""}<button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(request.id)}">Deny</button>${request.alwaysDeny ? `<button class="soft-button" type="button" data-request-respond="never" data-request-id="${escape(request.id)}">Always deny</button>` : ""}${request.stoppable ? `<button class="soft-button" type="button" data-request-respond="stop" data-request-id="${escape(request.id)}">Deny and stop</button>` : ""}</div></div>`;
 }
+
+const respondDecisions = {
+  allow: { behavior: "allow" },
+  always: { behavior: "allow", always: true },
+  deny: { behavior: "deny" },
+  never: { behavior: "deny", always: true },
+  stop: { behavior: "deny", stop: true },
+};
 
 export function renderInputRequest(request, created) {
   const e = request.elicitation;
@@ -180,7 +188,7 @@ export function bindRequestEvents() {
     if (!button) return;
     button.disabled = true;
     const choice = button.dataset.requestRespond;
-    await respondToRequest(button.dataset.requestId, choice === "deny" ? { behavior: "deny" } : { behavior: "allow", always: choice === "always" });
+    await respondToRequest(button.dataset.requestId, respondDecisions[choice]);
   });
   bindQuestionPager(respondToRequest);
   document.addEventListener("submit", async (event) => {

@@ -39,6 +39,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 		observation = codexObservation(thread)
 	}
 	observation = dropUnconfirmedTurn(ctx, conn, thread, observation)
+	observation.WaitingOn = c.preciseWait(ctx, conn, sess, observation.WaitingOn)
 	if path := codexTranscriptPath(sess); path != "" {
 		if info, err := os.Stat(path); err == nil {
 			observation.Plan = c.plan(ctx, path, info)

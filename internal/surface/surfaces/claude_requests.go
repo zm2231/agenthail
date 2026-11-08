@@ -56,6 +56,9 @@ func (c *Claude) Respond(ctx context.Context, sess *surface.Session, requestID s
 	if requestID == "" {
 		return "", fmt.Errorf("a request id is required")
 	}
+	if decision.Stop || (decision.Behavior == "deny" && decision.Always) {
+		return "", fmt.Errorf("claude requests offer neither a denial that stops the turn nor one that always denies")
+	}
 	if !claudeHosted(sess) {
 		return c.prompts.answer(sess.ID, requestID, decision)
 	}

@@ -368,6 +368,12 @@ assert(elements["#request-panel"].hidden, "an approval with no request yet shows
 context.app.requests = { requests: [{ id: "live", kind: "approval", title: "Run ls" }] };
 context.renderRequests();
 assert(elements["#request-panel"].innerHTML.includes("data-request-respond=\"allow\"") && elements["#request-panel"].innerHTML.includes("Run ls"), "an approval shows its request card");
+const codexCard = context.renderRequestCard({ id: "t:call_1", kind: "approval", tool: "Bash", title: "rm -rf build", alwaysAllow: true, alwaysDeny: true, stoppable: true, noReason: true });
+for (const choice of ["allow", "always", "deny", "never", "stop"]) {
+  assert(codexCard.includes(`data-request-respond="${choice}"`), `a Codex approval offers ${choice}`);
+}
+const plainCard = context.renderRequestCard({ id: "r1", kind: "approval", tool: "Bash", title: "ls" });
+assert(!plainCard.includes('data-request-respond="never"') && !plainCard.includes('data-request-respond="stop"'), "an approval that offers neither shows no always-deny or stop");
 const formCard = context.renderRequestCard({
   id: "e1",
   kind: "input",

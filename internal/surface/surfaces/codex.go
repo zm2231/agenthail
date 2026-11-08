@@ -35,6 +35,7 @@ type Codex struct {
 	mcpAttachment
 	codexConfigAttachment
 	subscriptions codexSubscriptions
+	waits         codexWaits
 }
 
 // codexDesktopRunsHere is whether Codex Desktop can run on this machine;

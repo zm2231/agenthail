@@ -54,6 +54,7 @@ func (c *Codex) list(ctx context.Context, sweep bool) ([]surface.Session, bool, 
 	out := make([]surface.Session, 0, len(byID))
 	for _, session := range byID {
 		c.reconcileLocalStatus(ctx, &session)
+		c.applyKnownWait(&session)
 		out = append(out, session)
 	}
 	if complete {

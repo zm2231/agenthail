@@ -29,7 +29,13 @@ type Request struct {
 	Questions   []Question      `json:"questions,omitempty"`
 	Elicitation *Elicitation    `json:"elicitation,omitempty"`
 	AlwaysAllow bool            `json:"alwaysAllow"`
-	CreatedAt   time.Time       `json:"createdAt"`
+	// AlwaysDeny offers a rule that denies the request from now on, Stoppable
+	// a denial that also ends the turn, and NoReason says a denial carries no
+	// message to the agent.
+	AlwaysDeny bool      `json:"alwaysDeny,omitempty"`
+	Stoppable  bool      `json:"stoppable,omitempty"`
+	NoReason   bool      `json:"noReason,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 type Question struct {
@@ -81,7 +87,8 @@ type ElicitationOption struct {
 }
 
 // Decision is a person's answer to a Request. Behavior is "allow" or "deny".
-// Always allows the tool from now on with the rule the request offers. A
+// Always allows the tool from now on with the rule the request offers, or
+// with deny denies it from now on. Stop with deny also ends the turn. A
 // question is allowed with Answers, one per question keyed by its text; a
 // multi-select answer joins its labels with ", ". An input request is allowed
 // with Content, an object of its form's field values, or none for a link.
@@ -91,6 +98,7 @@ type Decision struct {
 	Choice   string            `json:"choice,omitempty"`
 	Behavior string            `json:"behavior"`
 	Always   bool              `json:"always,omitempty"`
+	Stop     bool              `json:"stop,omitempty"`
 	Message  string            `json:"message,omitempty"`
 	Answers  map[string]string `json:"answers,omitempty"`
 	Content  json.RawMessage   `json:"content,omitempty"`

@@ -60,6 +60,11 @@ const realReloadCodexVersion = "0.151.0"
 // 9000 input tokens.
 func realManagedCodex(t *testing.T) {
 	t.Helper()
+	realManagedCodexWith(t, &mockResponses{})
+}
+
+func realManagedCodexWith(t *testing.T, model http.Handler) {
+	t.Helper()
 	if _, err := exec.LookPath("codex"); err != nil {
 		t.Skip("codex is not installed")
 	}
@@ -67,7 +72,7 @@ func realManagedCodex(t *testing.T) {
 	if err != nil || !codexAtLeast(strings.TrimPrefix(strings.TrimSpace(string(out)), "codex-cli "), realReloadCodexVersion) {
 		t.Skipf("codex %q is older than %s, the oldest whose reload this test was checked against", out, realReloadCodexVersion)
 	}
-	server := httptest.NewServer(&mockResponses{})
+	server := httptest.NewServer(model)
 	t.Cleanup(server.Close)
 	home, err := os.MkdirTemp("/tmp", "ah-cx-")
 	if err != nil {

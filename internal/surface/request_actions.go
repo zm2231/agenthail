@@ -14,8 +14,9 @@ const maxQuestionOptions = 4
 const maxRequestActionTitle = 40
 
 // RequestAction is one button a notification offers for a request. ID is a
-// choice its Choose accepts: "allow", "always", "deny", "o<n>" for a
-// question's nth option, or "reply", which takes the person's typed text.
+// choice its Choose accepts: "allow", "always", "deny", "never" (always
+// deny), "stop" (deny and end the turn), "o<n>" for a question's nth option,
+// or "reply", which takes the person's typed text.
 // Titles are only for display; a choice is resolved against the request as it
 // is when the button is pressed.
 type RequestAction struct {
@@ -24,8 +25,9 @@ type RequestAction struct {
 }
 
 // Actions are the buttons that answer the request from a notification. A tool
-// approval gets allow, always allow when the request offers it, deny, and a
-// reply that denies it with the person's message. A question that is the
+// approval gets allow, always allow, always deny and deny-and-stop when the
+// request offers them, deny, and a reply that denies it with the person's
+// message unless the provider takes no reason with a denial. A question that is the
 // request's only question and takes one answer gets a reply that answers it
 // in the person's own words, after one button per option. A
 // notification answer carries one choice or one line of text, so several
@@ -46,7 +48,17 @@ func (r Request) Actions() []RequestAction {
 		if r.AlwaysAllow {
 			actions = append(actions, RequestAction{ID: "always", Title: "Always allow"})
 		}
-		return append(actions, RequestAction{ID: "deny", Title: "Deny"}, RequestAction{ID: "reply", Title: "Deny with message…"})
+		actions = append(actions, RequestAction{ID: "deny", Title: "Deny"})
+		if r.AlwaysDeny {
+			actions = append(actions, RequestAction{ID: "never", Title: "Always deny"})
+		}
+		if r.Stoppable {
+			actions = append(actions, RequestAction{ID: "stop", Title: "Deny and stop"})
+		}
+		if r.NoReason {
+			return actions
+		}
+		return append(actions, RequestAction{ID: "reply", Title: "Deny with message…"})
 	}
 	question, ok := r.singleChoice()
 	if !ok {
@@ -73,8 +85,10 @@ func (r Request) Choose(choice, text string) (Decision, error) {
 		switch choice {
 		case "allow", "always":
 			return Decision{Behavior: "allow", Always: choice == "always"}, nil
-		case "deny":
-			return Decision{Behavior: "deny"}, nil
+		case "deny", "never":
+			return Decision{Behavior: "deny", Always: choice == "never"}, nil
+		case "stop":
+			return Decision{Behavior: "deny", Stop: true}, nil
 		}
 		question, _ := r.singleChoice()
 		if choice == "reply" {
