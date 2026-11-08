@@ -33,7 +33,12 @@ class MemoryDurableStorage {
   async put(key, value) { this.values.set(key, value) }
   async setAlarm(value) { this.alarm = value }
   async deleteAll() { this.values.clear() }
-  async transaction(callback) { return callback(this) }
+  queue = Promise.resolve()
+  transaction(callback) {
+    const run = this.queue.then(() => callback(this))
+    this.queue = run.catch(() => {})
+    return run
+  }
 }
 
 class MemoryNamespace {
@@ -46,7 +51,12 @@ class MemoryNamespace {
       this.instances.set(id, { storage, object })
     }
     const { object } = this.instances.get(id)
-    return { fetch: (url, init) => object.fetch(new Request(url, init)) }
+    return {
+      fetch: async (url, init) => {
+        if (this.failing?.has(new URL(url).pathname)) throw new Error("durable object unavailable")
+        return object.fetch(new Request(url, init))
+      }
+    }
   }
 }
 
@@ -593,8 +603,11 @@ async function withAPNs(statuses, run) {
   const delivered = []
   const realFetch = globalThis.fetch
   globalThis.fetch = async (url, init) => {
+    const status = statuses.shift() ?? 200
+    if (status === "throw") throw new TypeError("network connection lost")
+    if (typeof status === "object") await status.until
     delivered.push({ url, payload: JSON.parse(init.body) })
-    return new Response(null, { status: statuses.shift() ?? 200 })
+    return new Response(null, { status: typeof status === "object" ? status.status : status })
   }
   try {
     await run()
@@ -627,7 +640,8 @@ test("one phone paired to two computers gets a deduplicated notification once", 
   assert.equal(stored.length, 3)
   for (const [name, { storage }] of stored) {
     assert.equal(name.includes(phone) || name.includes(turnKey), false, "the claim's name is a hash, not the token or key")
-    assert.deepEqual([...storage.values.keys()], ["expiresAt"])
+    assert.deepEqual([...storage.values.keys()], ["claim"])
+    assert.deepEqual(Object.keys(storage.values.get("claim")).sort(), ["delivered", "until"])
   }
 })
 
@@ -688,5 +702,67 @@ test("send refuses a malformed dedupe key before APNs", async () => {
       assert.equal(response.status, dedupeKey === "" ? 200 : 400)
     }
   })
+  assert.equal(delivered.length, 1)
+})
+
+test("a send whose APNs request throws leaves no claim behind", async () => {
+  const env = await apnsEnvironment()
+  const phone = "ab".repeat(32)
+  const viaHost = await registerFixture(env, "host", phone)
+  const viaViewer = await registerFixture(env, "viewer", phone)
+  const delivered = await withAPNs(["throw", 200], async () => {
+    await assert.rejects(send(request("POST", { ...viaHost, ...finished, dedupeKey: turnKey }), env))
+    const retried = await send(request("POST", { ...viaViewer, ...finished, dedupeKey: turnKey }), env)
+    assert.deepEqual(await retried.json(), { ok: true })
+  })
+  assert.equal(delivered.length, 1)
+})
+
+test("a claim whose release or confirm is lost is retried once its lease ends, never answered as delivered", async () => {
+  for (const [first, lost] of [[500, "/release"], ["throw", "/release"], [200, "/confirm"]]) {
+    const env = await apnsEnvironment()
+    const phone = "ab".repeat(32)
+    const viaHost = await registerFixture(env, "host", phone)
+    const viaViewer = await registerFixture(env, "viewer", phone)
+    env.PUSH_DEDUPE.failing = new Set([lost])
+    const realNow = Date.now
+    let now = realNow()
+    Date.now = () => now
+    try {
+      const answers = []
+      const delivered = await withAPNs([first, 200], async () => {
+        await send(request("POST", { ...viaHost, ...finished, dedupeKey: turnKey }), env).catch(() => {})
+        const pending = await send(request("POST", { ...viaViewer, ...finished, dedupeKey: turnKey }), env)
+        answers.push(pending.status, await pending.json())
+        now += 31 * 1000
+        const after = await send(request("POST", { ...viaViewer, ...finished, dedupeKey: turnKey }), env)
+        answers.push(after.status)
+      })
+      assert.deepEqual(answers, [503, { error: "dedupe_pending" }, 200], `${first} with ${lost} lost`)
+      assert.equal(delivered.length, first === "throw" ? 1 : 2, `${first} with ${lost} lost`)
+    } finally {
+      Date.now = realNow
+    }
+  }
+})
+
+test("concurrent senders of one notification deliver it once, and the loser is told to retry", async () => {
+  const env = await apnsEnvironment()
+  const phone = "ab".repeat(32)
+  const viaHost = await registerFixture(env, "host", phone)
+  const viaViewer = await registerFixture(env, "viewer", phone)
+  let answer
+  const slow = { status: 200, until: new Promise(resolve => { answer = resolve }) }
+  const statuses = []
+  const delivered = await withAPNs([slow], async () => {
+    const winner = send(request("POST", { ...viaHost, ...finished, dedupeKey: turnKey }), env)
+    const loser = await send(request("POST", { ...viaViewer, ...finished, dedupeKey: turnKey }), env)
+    statuses.push(loser.status)
+    answer()
+    statuses.push((await winner).status)
+    const retried = await send(request("POST", { ...viaViewer, ...finished, dedupeKey: turnKey }), env)
+    statuses.push(await retried.json())
+  })
+  assert.deepEqual(statuses, [503, 200, { ok: true, deduped: true }])
   assert.equal(delivered.length, 1)
 })
