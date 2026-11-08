@@ -115,4 +115,21 @@ await first;
 assert.ok(!elements.list.innerHTML.includes("old prompt"));
 assert.equal(app.decisionsKey.endsWith("epoch:4"), true);
 assert.equal(app.decisions.decisions.length, 0, "the newest load is the one kept");
+
+const busy = (n) => ({ decisions: [{ group: "waiting", sessionId: `busy-${n}`, kind: "request", reason: "r", answerable: false }], leadHandling: [], unreachable: [], outdated: [] });
+const streamStart = loads;
+app.state.catalogSeq = 10;
+const streaming = vm.runInContext("refreshDecisions(slowLoader)", context);
+for (let n = 1; n <= 3; n++) {
+  app.state.catalogSeq = 10 + n;
+  await vm.runInContext("refreshDecisions(slowLoader)", context);
+  pending.shift()(busy(n));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(loads - streamStart, n + 1, "each change during a load costs one more load, not more");
+}
+assert.equal(app.decisions.decisions[0].sessionId, "busy-2", "a steady stream of changes still shows a recent load");
+pending.shift()(busy(4));
+await streaming;
+assert.equal(app.decisions.decisions[0].sessionId, "busy-4");
+assert.equal(app.decisionsKey.endsWith("epoch:13"), true, "the quiet catalog's load is kept as current");
 console.log("dashboard decisions ok");

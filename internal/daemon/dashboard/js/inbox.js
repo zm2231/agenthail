@@ -15,10 +15,14 @@ export async function refreshDecisions(loader = loadDecisions) {
   app.decisionsAgain = false;
   try {
     const loaded = await loader();
-    if (!app.decisionsAgain && decisionsKey() === key) {
+    const current = !app.decisionsAgain && decisionsKey() === key;
+    if (current || app.decisionsDropped) {
       app.decisions = loaded;
-      app.decisionsKey = key;
+      app.decisionsKey = current ? key : undefined;
+      app.decisionsDropped = false;
       renderInbox();
+    } else {
+      app.decisionsDropped = true;
     }
   } finally {
     app.decisionsLoading = false;
