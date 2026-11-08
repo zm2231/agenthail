@@ -9,6 +9,7 @@ const decoder = new TextDecoder()
 let cachedProviderToken = null
 const registrationTTLSeconds = 90 * 24 * 60 * 60
 const challengeTTLMilliseconds = 5 * 60 * 1000
+const dedupeTTLMilliseconds = 10 * 60 * 1000
 const defaultRequestBodyLimit = 8192
 const registrationRequestBodyLimit = 24576
 const appAttestationLimitBytes = 16384
@@ -24,7 +25,7 @@ export default {
         const apnsConfigured = Boolean(env.APNS_KEY_P8 && env.APNS_KEY_ID && env.APPLE_TEAM_ID && env.APNS_TOPIC)
         const rateLimitsConfigured = Boolean(env.REGISTER_RATE_LIMITER && env.SEND_RATE_LIMITER)
         const configured = appAttestConfigured && apnsConfigured && rateLimitsConfigured
-        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit", "request-id", "withdraw", "host-tag", "push-id"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
+        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit", "request-id", "withdraw", "host-tag", "push-id", "dedupe-key"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
       }
       if (request.method === "POST" && url.pathname === "/v1/attest/challenge") {
         return await issueChallenge(request, env)
@@ -215,10 +216,56 @@ export async function send(request, env) {
     payload.aps["mutable-content"] = 1
     payload.pushId = pushId
   }
+  const dedupeKey = body?.dedupeKey === undefined ? "" : body.dedupeKey
+  if (dedupeKey !== "" && (typeof dedupeKey !== "string" || !/^[a-f0-9]{64}$/.test(dedupeKey))) {
+    return json({ error: "invalid_dedupe_key" }, 400)
+  }
   const headers = { "apns-push-type": "alert", "apns-priority": "10" }
   if (collapseID) headers["apns-collapse-id"] = collapseID
+  let claim = null
+  if (dedupeKey) {
+    if (!env.PUSH_DEDUPE) return json({ error: "dedupe_store_unavailable" }, 503)
+    claim = env.PUSH_DEDUPE.getByName(await sha256(`${device.stored.token}:${dedupeKey}`))
+    const claimed = await claim.fetch("https://dedupe.internal/claim", { method: "POST" })
+    if (!claimed.ok) return json({ error: "dedupe_store_unavailable" }, 503)
+    if (!(await claimed.json()).claimed) return json({ ok: true, deduped: true })
+  }
   const response = await deliver(env, device, headers, payload)
+  if (claim && !response.ok) await claim.fetch("https://dedupe.internal/release", { method: "POST" })
   return pushId && response.ok ? json({ ok: true, receipt: true }) : response
+}
+
+// One phone's claim on one notification across every computer paired to it.
+// Named by a hash of device token and dedupe key; it stores only the expiry.
+export class PushDedupe {
+  constructor(ctx) {
+    this.ctx = ctx
+  }
+
+  async fetch(request) {
+    const pathname = new URL(request.url).pathname
+    if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405)
+    if (pathname === "/claim") {
+      const claimed = await this.ctx.storage.transaction(async transaction => {
+        const expiresAt = await transaction.get("expiresAt")
+        if (expiresAt && expiresAt > Date.now()) return false
+        const until = Date.now() + dedupeTTLMilliseconds
+        await transaction.put("expiresAt", until)
+        await this.ctx.storage.setAlarm(until)
+        return true
+      })
+      return json({ claimed })
+    }
+    if (pathname === "/release") {
+      await this.ctx.storage.deleteAll()
+      return json({ ok: true })
+    }
+    return json({ error: "not_found" }, 404)
+  }
+
+  async alarm() {
+    await this.ctx.storage.deleteAll()
+  }
 }
 
 // withdraw asks the app, in the background, to remove the notification it
