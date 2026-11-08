@@ -154,7 +154,7 @@ struct ScrollJumpLabel: View {
                 .font(.system(size: 1)).opacity(0.01)
                 .frame(width: 1, height: 1).clipped()
                 .accessibilityIdentifier("scroll-jumps")
-            Text(ScrollJumpProbe.shared.log.suffix(10).joined(separator: " ; "))
+            Text(ScrollJumpProbe.shared.log.suffix(30).joined(separator: " ; "))
                 .font(.system(size: 1)).opacity(0.01)
                 .frame(width: 1, height: 1).clipped()
                 .accessibilityIdentifier("scroll-jump-log")

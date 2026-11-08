@@ -5,11 +5,35 @@ final class TranscriptScrollDeltaUITests: XCTestCase {
     private struct Drag { let direction: String; let label: String; let moved: CGFloat? }
 
     func testUniformRepliesMoveOnlyWithTheFinger() throws {
-        try measure(["--preview-stream-paused"], name: "uniform")
+        fling(["--preview-stream-paused"], name: "uniform")
     }
 
     func testVariedRepliesMoveOnlyWithTheFinger() throws {
-        try measure(["--preview-stream-paused", "--preview-stream-varied"], name: "varied")
+        fling(["--preview-stream-paused", "--preview-stream-varied"], name: "varied")
+    }
+
+    private func fling(_ extra: [String], name: String) {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-stream", "--preview-theme", "dark", "--scroll-probe"] + extra
+        app.launch()
+        let timeline = app.scrollViews["session-timeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 15))
+        XCTAssertTrue(timeline.staticTexts.matching(NSPredicate(format: "label CONTAINS 'of reply '")).firstMatch.waitForExistence(timeout: 15), "the transcript showed no reply")
+        XCTAssertTrue(timeline.waitUntilRowsStill(), "the transcript kept moving after it opened")
+        for _ in 0..<20 { timeline.swipeDown(velocity: .fast) }
+        _ = timeline.waitUntilRowsStill()
+        let older = app.staticTexts["scroll-jumps"].label
+        for _ in 0..<20 { timeline.swipeUp(velocity: .fast) }
+        _ = timeline.waitUntilRowsStill()
+        let probe = app.staticTexts["scroll-jumps"].label
+        let log = app.staticTexts["scroll-jump-log"].exists ? app.staticTexts["scroll-jump-log"].label : ""
+        let text = "\(name) flings: after 20 toward older \(older); after 20 back \(probe)\nlog: \(log)"
+        print("SCROLL-FLING\n\(text)")
+        let attachment = XCTAttachment(string: text)
+        attachment.name = "\(name) flings"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertEqual(TranscriptScrollJumpUITests.parse(probe).jumps, 0, text)
     }
 
     private func midScreenText(_ timeline: XCUIElement) throws -> String? {
