@@ -439,7 +439,8 @@ final class AgenthailModel {
     }
 
     func markSeen(_ id: String) {
-        finishedUnseen.remove(id)
+        // Removing in place notifies every reader even when the id is absent.
+        if finishedUnseen.contains(id) { finishedUnseen.remove(id) }
     }
 
     private func pruneStore() {

@@ -247,8 +247,10 @@ struct SessionPaneTest {
         check(watched.draftIsEmpty, "removing the last attachment empties the draft")
         let columns = PaneChanges(watched) { _ = ($0.sidebarDocks, $0.sidebarOverlay, $0.inspectorVisible, $0.inspectorDocks, $0.inspectorOverlay) }
         let selection = PaneChanges(watched) { _ = $0.selectedSessionID }
+        let unseen = PaneChanges(watched) { _ = $0.model.finishedUnseen }
         watched.select("E")
         check(selection.count >= 1 && columns.count == 0, "a selection change reaches selection readers only: selection \(selection.count), columns \(columns.count)")
+        check(unseen.count == 0, "selecting a session that was not finished-unseen leaves its readers alone: \(unseen.count)")
 
         func conflict(_ json: String) -> AgenthailAPIError { AgenthailAPI.streamConflict(Data(json.utf8)) }
         if case .streamGap = conflict(#"{"error":{"code":"stream_gap","message":"gone"}}"#) {} else { check(false, "a retained-cursor conflict is a gap") }
