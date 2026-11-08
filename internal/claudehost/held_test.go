@@ -3,8 +3,12 @@ package claudehost_test
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -80,7 +84,7 @@ func heldHosts(t *testing.T, opened func(method string) (any, *claudehost.Error)
 		}
 		return opened(method)
 	})
-	stubHost(t, filepath.Join(filepath.Dir(client.Socket), "claude-host.4241.sock"), func(method string) (any, *claudehost.Error) {
+	stubHost(t, filepath.Join(filepath.Dir(client.Socket), fmt.Sprintf("claude-host.%d.sock", os.Getpid())), func(method string) (any, *claudehost.Error) {
 		if method == "hello" {
 			return hello, nil
 		}
@@ -140,5 +144,42 @@ func TestAResumeRefusedAsHeldWhileItsClaudeExitsOpensOnTheCurrentHost(t *testing
 	opened, err := client.Open(testContext(t), claudehost.OpenRequest{Resume: sessionID, Cwd: "/"})
 	if err != nil || opened.SessionID != sessionID || opened.PID != 4343 {
 		t.Fatalf("resume = %+v, %v; want it opened on the current host", opened, err)
+	}
+}
+
+func TestARetiringHostsSocketIsRemovedOnlyOnceItsProcessHasGone(t *testing.T) {
+	home, err := os.MkdirTemp("", "ch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	client := claudehost.NewClient(home)
+	if err := os.MkdirAll(filepath.Dir(client.Socket), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	refusing := filepath.Join(filepath.Dir(client.Socket), fmt.Sprintf("claude-host.%d.sock", os.Getpid()))
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: refusing, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	listener.Close()
+	exited := exec.Command("true")
+	if err := exited.Run(); err != nil {
+		t.Fatal(err)
+	}
+	dead := filepath.Join(filepath.Dir(client.Socket), fmt.Sprintf("claude-host.%d.sock", exited.Process.Pid))
+	if err := os.WriteFile(dead, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	retiring := client.Retiring()
+	if len(retiring) != 1 || retiring[0].Socket != refusing {
+		t.Fatalf("retiring = %v, want only the host whose process still runs", retiring)
+	}
+	if _, err := os.Stat(refusing); err != nil {
+		t.Fatalf("the socket of a running host that refused a dial was removed: %v", err)
+	}
+	if _, err := os.Stat(dead); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the socket of a host whose process is gone was kept: %v", err)
 	}
 }

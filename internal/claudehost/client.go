@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -295,26 +297,37 @@ func SocketPath(home string) string {
 func NewClient(home string) Client { return Client{Socket: SocketPath(home)} }
 
 // Retiring are the hosts that gave up Socket to a newer one and still serve
-// the sessions they ran, each on a socket named by its pid. A socket nothing
-// listens on is left by a retiring host that died; it is removed.
+// the sessions they ran, each on a socket named by its pid. The socket of a
+// retiring host that died is removed.
 func (c Client) Retiring() []Client {
 	paths, _ := filepath.Glob(strings.TrimSuffix(c.Socket, ".sock") + ".*.sock")
 	var out []Client
 	for _, path := range paths {
-		var dialer net.Dialer
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		conn, err := dialer.DialContext(ctx, "unix", path)
-		cancel()
-		if errors.Is(err, syscall.ECONNREFUSED) {
+		host := Client{Socket: path}
+		if host.Gone() {
 			_ = os.Remove(path)
 			continue
 		}
-		if err == nil {
-			conn.Close()
-		}
-		out = append(out, Client{Socket: path})
+		out = append(out, host)
 	}
 	return out
+}
+
+// Gone reports that the retiring host on Socket has exited: its socket is
+// removed or the process its name carries no longer runs. A refused dial is
+// not proof, since macOS refuses a connection to a live listener whose
+// backlog is full.
+func (c Client) Gone() bool {
+	if _, err := os.Lstat(c.Socket); errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	name := strings.TrimSuffix(filepath.Base(c.Socket), ".sock")
+	pid, err := strconv.Atoi(name[strings.LastIndexByte(name, '.')+1:])
+	if err != nil || pid <= 0 {
+		return false
+	}
+	err = syscall.Kill(pid, 0)
+	return err != nil && !errors.Is(err, syscall.EPERM)
 }
 
 func (c Client) Hello(ctx context.Context) (Hello, error) {
