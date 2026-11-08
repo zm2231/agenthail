@@ -248,7 +248,12 @@ func (c *managedCodexClient) Notified() <-chan struct{} { return c.notified }
 
 func (c *managedCodexClient) Done() <-chan struct{} { return c.closed }
 
-func (c *managedCodexClient) Close() error { return c.ws.Close() }
+// Close fails the client at once, so the thread subscriptions it joined drop
+// it before its read loop sees the socket close.
+func (c *managedCodexClient) Close() error {
+	c.fail(net.ErrClosed)
+	return c.ws.Close()
+}
 
 func (c *Codex) openDesktop(ctx context.Context) (codexClient, error) {
 	conn, err := c.dial(ctx)
