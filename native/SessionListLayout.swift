@@ -9,6 +9,13 @@ enum SessionListLayout {
         return ScopeRequest(scope: SessionFilter.archived.viewScope, surface: refinement.surface, status: refinement.status?.rawValue)
     }
 
+    static func archivedProjectID(_ id: String) -> String { "archived:" + id }
+
+    static func shownFamilies(_ tree: SessionTree, grouped: Bool, projectExpanded: (String) -> Bool, keeping selectedID: String?) -> [SessionFamily] {
+        guard grouped else { return tree.flat }
+        return tree.projects.flatMap { $0.shown(expanded: projectExpanded($0.id), keeping: selectedID).checkouts.flatMap(\.families) }
+    }
+
     static func order(_ families: [SessionFamily], expanded: (SessionFamily) -> Bool) -> [String] {
         var ids: [String] = []
         for family in families {

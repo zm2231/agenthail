@@ -27,6 +27,10 @@ struct SessionListLayoutTest {
         check(SessionListLayout.order(tree.flat, expanded: { $0.id == "b" }) == ["a", "b", "b1", "c"], "an expanded family adds its subagents after it")
         check(SessionListLayout.order(tree.flat + tree.flat, expanded: { _ in false }) == ["a", "b", "c"], "a session listed twice is stepped through once")
 
+        check(SessionListLayout.shownFamilies(tree, grouped: false, projectExpanded: { _ in false }, keeping: nil).map(\.id) == ["a", "b", "c"], "without grouping the archived section is the flat list")
+        check(SessionListLayout.shownFamilies(tree, grouped: true, projectExpanded: { _ in true }, keeping: nil).map(\.id) == ["a", "c", "b"], "with grouping the archived section follows its projects")
+        check(SessionListLayout.archivedProjectID("p1") != "p1", "an archived project folds apart from the same project in the active list")
+
         let refined = SessionRefinement(status: .working, surface: "claude")
         check(SessionListLayout.archivedRequest(filter: .all, refinement: SessionRefinement(), shows: false) == nil, "archived sessions stay out unless asked for")
         for filter in [SessionFilter.running, .recent, .archived] {

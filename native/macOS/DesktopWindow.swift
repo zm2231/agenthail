@@ -248,7 +248,7 @@ struct SessionSidebar: View {
                             .padding(.horizontal, DesktopSpace.s)
                     }
                     if scoped == nil && !hasMore {
-                        SidebarArchivedSection(model: model, pane: pane, expandedFamilies: $expandedFamilies)
+                        SidebarArchivedSection(model: model, pane: pane, grouped: groupsByProject, expandedProjects: $expandedProjects, expandedFamilies: $expandedFamilies)
                     }
                     }
                 }
@@ -359,7 +359,7 @@ extension SessionSidebar {
         let families = showsFlat ? tree.flat : scopedProjects(tree).flatMap { project in
             project.shown(expanded: expandedProjects.contains(project.id), keeping: pane.selectedSessionID).checkouts.flatMap(\.families)
         }
-        let archived = pane.scope.projectID == nil && !model.listHasMore ? model.archivedTree().flat : []
+        let archived = pane.scope.projectID == nil && !model.listHasMore ? SessionListLayout.shownFamilies(model.archivedTree(), grouped: groupsByProject, projectExpanded: { expandedProjects.contains(SessionListLayout.archivedProjectID($0)) }, keeping: pane.selectedSessionID) : []
         return SessionListLayout.order(families + archived, expanded: familyExpanded)
     }
 

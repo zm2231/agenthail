@@ -4,6 +4,7 @@ import socketserver
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 NOW = "2026-01-01T12:00:00Z"
 CAPABILITIES = {"send": True, "stream": True, "reply": True, "goal": False, "compact": True, "model": True, "interrupt": True, "steer": True}
@@ -43,6 +44,7 @@ ANSWER_REPLIES = {
     "failed": (502, {"ok": False, "error": {"code": "bad_gateway", "message": "the session is not running"}}),
 }
 HELD_STREAMS = set()
+SCOPED = {}
 ACTIONS_LOG = os.environ.get("AGENTHAIL_FIXTURE_ACTIONS_LOG", "")
 REQUESTS_LOG = os.environ.get("AGENTHAIL_FIXTURE_REQUESTS_LOG", "")
 
@@ -68,7 +70,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b":" + b" " * 1024 + b"\n\n")
             self.wfile.flush()
             threading.Event().wait()
-        body = RESPONSES.get(self.path.split("?", 1)[0])
+        path, _, query = self.path.partition("?")
+        body = SCOPED.get(parse_qs(query).get("scope", [""])[0]) if path == "/api/v1/snapshot" else None
+        body = body or RESPONSES.get(path)
         if body is None:
             if REQUESTS_LOG:
                 with open(REQUESTS_LOG, "a") as log:
@@ -216,6 +220,34 @@ if __name__ == "__main__":
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.add("/api/v1/events")
+    if sys.argv[1:2] == ["list"]:
+        def listed(id, name, project, surface, status, minutes):
+            return {**SESSION, "id": id, "name": name, "alias": None, "surface": surface, "status": status, "cwd": "/srv/" + project,
+                    "lastActive": f"2026-01-01T{11 - minutes // 60:02d}:{59 - minutes % 60:02d}:00Z",
+                    "project": {"id": project, "displayName": project, "rootPath": "/srv/" + project, "kind": "git"},
+                    "checkout": {"id": project + "-main", "path": "/srv/" + project, "branch": "main", "dirty": False, "isMain": True}}
+
+        def page(sessions):
+            count = {"families": len(sessions), "sessions": len(sessions)}
+            projects = list(dict.fromkeys(s["project"]["id"] for s in sessions))
+            return {"sessions": sessions, "view": {
+                "counts": {scope: count for scope in ("running", "current", "recent", "all", "archived")}, "surfaces": [],
+                "projects": [{"id": p, "name": p, "counts": count, "collapsedFamilyIds": []} for p in projects],
+                "families": [{"id": s["id"], "rootId": s["id"], "projectId": s["project"]["id"], "checkoutId": s["checkout"]["id"],
+                              "members": [{"id": s["id"], "depth": 0, "contextOnly": False, "pinned": False}], "pinned": False, "workingSubagents": 0}
+                             for s in sessions]}}
+
+        active = [listed("web-1", "Fix the login redirect", "web-app", "claude", "busy", 2), listed("docs-1", "Write the install guide", "docs-site", "codex", "idle", 9),
+                  listed("web-2", "Add dark mode tokens", "web-app", "codex", "idle", 25), listed("docs-2", "Check broken links", "docs-site", "claude", "idle", 70)]
+        archived = [listed("web-0", "Spike the old migration", "web-app", "codex", "idle", 300), listed("docs-0", "Draft the changelog", "docs-site", "claude", "idle", 400)]
+        RESPONSES["/api/v1/snapshot"]["sessions"] = active
+        RESPONSES["/api/v1/snapshot"]["totalSessions"] = len(active)
+        SCOPED.update({scope: page(active) for scope in ("current", "recent", "all", "running")})
+        SCOPED["archived"] = page(archived)
+        RESPONSES["/api/v1/projects/activity"] = {"projects": []}
+        theme = sys.argv[2] if len(sys.argv) > 2 else "system"
+        RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
+        HELD_STREAMS.update({"/api/v1/events", "/api/v1/catalog-events"})
     server = Server(("127.0.0.1", 0), Handler)
     print(server.server_address[1], flush=True)
     sys.stdout.close()

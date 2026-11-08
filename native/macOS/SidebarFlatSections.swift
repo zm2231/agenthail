@@ -23,6 +23,8 @@ struct SidebarFlatFamilies: View {
 struct SidebarArchivedSection: View {
     let model: AgenthailModel
     let pane: SessionPane
+    let grouped: Bool
+    @Binding var expandedProjects: Set<String>
     @Binding var expandedFamilies: Set<String>
 
     var body: some View {
@@ -30,7 +32,21 @@ struct SidebarArchivedSection: View {
             let tree = model.archivedTree()
             VStack(alignment: .leading, spacing: 2) {
                 SidebarCaption("Archived")
-                SidebarFlatFamilies(families: tree.flat, attention: tree.attention, model: model, pane: pane, expandedFamilies: $expandedFamilies)
+                if grouped {
+                    ForEach(tree.projects) { project in
+                        let id = SessionListLayout.archivedProjectID(project.id)
+                        SidebarProjectSection(
+                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(id), selectedID: pane.selectedSessionID, attention: tree.attention, expandedFamilies: expandedFamilies, shownProjectID: pane.shownProjectID),
+                            model: model,
+                            pane: pane,
+                            toggleProject: { flip(id, in: $expandedProjects) },
+                            toggleFamily: { flip($0, in: $expandedFamilies) }
+                        )
+                        .equatable()
+                    }
+                } else {
+                    SidebarFlatFamilies(families: tree.flat, attention: tree.attention, model: model, pane: pane, expandedFamilies: $expandedFamilies)
+                }
                 if model.archivedHasMore {
                     ProgressView()
                         .controlSize(.small)
@@ -53,5 +69,9 @@ struct SidebarArchivedSection: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("sidebar-archived")
         }
+    }
+
+    private func flip(_ id: String, in set: Binding<Set<String>>) {
+        if set.wrappedValue.contains(id) { set.wrappedValue.remove(id) } else { set.wrappedValue.insert(id) }
     }
 }
