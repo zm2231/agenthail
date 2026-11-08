@@ -16,15 +16,17 @@ struct BackgroundTaskLinesTest {
         check(BackgroundTasks(running: true, tasks: [], source: "runtime").sourceNote == nil, "a list from the runtime needs no note, like the host's")
 
         check(shell.sinceText() == nil && shell.timedLine() == "Shell: npm run build", "a task without a start time has no since")
-        let now = Date(timeIntervalSince1970: 1_767_268_800)
+        let now = Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date())!
+        let tenMinutesAgo = now.addingTimeInterval(-600)
         var started = shell
-        started.since = ISO8601DateFormatter().string(from: now.addingTimeInterval(-600))
+        started.since = ISO8601DateFormatter().string(from: tenMinutesAgo)
         let today = started.sinceText(now: now) ?? ""
-        check(today.hasPrefix("since ") && !today.contains(","), "a task started today shows its time: \(today)")
+        check(today == "since " + tenMinutesAgo.formatted(date: .omitted, time: .shortened), "a task started today shows its time: \(today)")
         check(started.timedLine(now: now) == "Shell: npm run build · \(today)", "the line ends with the since time")
-        started.since = ISO8601DateFormatter().string(from: now.addingTimeInterval(-3 * 86_400))
+        let threeDaysAgo = now.addingTimeInterval(-3 * 86_400)
+        started.since = ISO8601DateFormatter().string(from: threeDaysAgo)
         let earlier = started.sinceText(now: now) ?? ""
-        check(earlier.hasPrefix("since ") && earlier != today, "a task from an earlier day names the day: \(earlier)")
+        check(earlier == "since " + threeDaysAgo.formatted(.dateTime.weekday(.abbreviated).hour().minute()), "a task from an earlier day names the day: \(earlier)")
         var ambient = server
         ambient.since = "not a time"
         check(ambient.timedLine() == "Shell: npm run dev (ambient)", "an unreadable start time is left out")
