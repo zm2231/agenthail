@@ -223,7 +223,7 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     func showAll() {
-        guard scope != .all else { return }
+        guard scope != .all || shownProjectID != nil else { return }
         scope = .all
         shownProjectID = nil
         if tabsEnabled { showActiveTab() }

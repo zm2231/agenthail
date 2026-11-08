@@ -1,0 +1,25 @@
+{
+  "projects": [
+    {"id": "repo:example/app", "displayName": "app", "checkouts": [
+      {"host": {"id": "", "name": "laptop", "state": "local"}, "projectId": "repo:example/app", "rootPath": "/work/app"},
+      {"host": {"id": "h", "name": "server", "state": "connected"}, "projectId": "repo:example/app", "rootPath": "/srv/app"}]},
+    {"id": "notes-local", "displayName": "notes", "checkouts": [
+      {"host": {"id": "", "name": "laptop", "state": "local"}, "projectId": "notes-local", "rootPath": "/work/notes"},
+      {"host": {"id": "h", "name": "server", "state": "connected"}, "projectId": "notes-server", "rootPath": "/srv/notes"}]},
+    {"id": "web", "displayName": "web", "linked": [{"id": "web-before", "displayName": "web (old)"}], "checkouts": [
+      {"host": {"id": "", "name": "laptop", "state": "local"}, "projectId": "web", "rootPath": "/work/web"},
+      {"host": {"id": "h", "name": "server", "state": "connected"}, "projectId": "web-server", "rootPath": "/srv/web", "linkedFrom": {"id": "web-before", "displayName": "web (old)"}}]}
+  ],
+  "cases": [
+    {"name": "a local decision maps by its project id", "session": "l", "host": "", "projectId": "repo:example/app", "tile": "repo:example/app"},
+    {"name": "a project with a key is one tile on every computer", "session": "k", "host": "h", "projectId": "repo:example/app", "tile": "repo:example/app"},
+    {"name": "a paired computer's keyless project reaches the tile holding its checkout", "session": "f", "host": "h", "projectId": "notes-server", "tile": "notes-local"},
+    {"name": "a local decision in a linked project", "session": "wl", "host": "", "projectId": "web", "tile": "web"},
+    {"name": "a project linked across two computers: the remote's own id lands on the same tile as the local one", "session": "wr", "host": "h", "projectId": "web-before", "tile": "web"},
+    {"name": "a project no tile holds maps to no tile", "session": "u", "host": "h", "projectId": "elsewhere", "tile": null},
+    {"name": "another computer's checkout id maps to no tile", "session": "o", "host": "k", "projectId": "notes-server", "tile": null},
+    {"name": "a decision with no project maps to no tile", "session": "n", "host": "", "projectId": null, "tile": null}
+  ],
+  "counts": {"repo:example/app": 2, "notes-local": 1, "web": 2},
+  "inboxTotal": 8
+}
