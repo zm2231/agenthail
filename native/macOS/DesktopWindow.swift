@@ -602,7 +602,7 @@ struct SessionRowView: View {
     private func noteText(_ note: String, kind: SessionDisplayKind) -> some View {
         Text(note)
             .font(.system(size: DesktopType.meta))
-            .foregroundStyle(kind == .waiting || kind == .stopped ? DesktopPalette.attention : DesktopPalette.text2)
+            .foregroundStyle(kind == .waiting ? DesktopPalette.attention : DesktopPalette.text2)
             .lineLimit(1)
             .truncationMode(.tail)
     }
