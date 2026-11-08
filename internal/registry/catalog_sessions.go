@@ -241,11 +241,15 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,waiting_on,background_tasks,usage_limit,turn_stop)
-		VALUES(?,?,?,?,?,?,?,0,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
+	settings, err := encodeCatalogSettings(state.Session.Settings)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,waiting_on,background_tasks,usage_limit,turn_stop,settings)
+		VALUES(?,?,?,?,?,?,?,0,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
 		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0, retired=CASE WHEN ? THEN catalog_sessions.retired ELSE 0 END,
-		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0, waiting_on=excluded.waiting_on, background_tasks=excluded.background_tasks, usage_limit=excluded.usage_limit, turn_stop=excluded.turn_stop`,
-		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, formatTimestamp(state.ObservedAt), state.ProjectionFingerprint, priorGeneration, waitingOn, background, usageLimit, turnStop, staysRetired); err != nil {
+		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0, waiting_on=excluded.waiting_on, background_tasks=excluded.background_tasks, usage_limit=excluded.usage_limit, turn_stop=excluded.turn_stop, settings=excluded.settings`,
+		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, formatTimestamp(state.ObservedAt), state.ProjectionFingerprint, priorGeneration, waitingOn, background, usageLimit, turnStop, settings, staysRetired); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	if len(event.Payload) > 0 {
@@ -680,6 +684,7 @@ func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now t
 	delete(session, "backgroundTasks")
 	delete(session, "usageLimit")
 	delete(session, "turnStop")
+	delete(session, "settings")
 	delete(session, "activity")
 	delete(session, "plan")
 	delete(session, "holders")
@@ -700,7 +705,7 @@ func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now t
 	if generation, err = nextProjectionGenerationTx(tx); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=?,waiting_on=?,background_tasks=?,usage_limit=?,turn_stop=? WHERE session_id=?`, string(next), generation, []byte{}, []byte{}, []byte{}, []byte{}, sessionID); err != nil {
+	if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=?,waiting_on=?,background_tasks=?,usage_limit=?,turn_stop=?,settings=? WHERE session_id=?`, string(next), generation, []byte{}, []byte{}, []byte{}, []byte{}, []byte{}, sessionID); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	session["observedAt"] = lastObserved
@@ -760,7 +765,7 @@ func (r *Registry) CatalogProjectionFingerprint(sessionID string) (string, bool,
 }
 
 const catalogSessionSelect = `SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
-		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,cs.background_tasks,cs.usage_limit,cs.turn_stop,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `,s.registered_at
+		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,cs.background_tasks,cs.usage_limit,cs.turn_stop,cs.settings,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `,s.registered_at
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id`
 
 const catalogSnapshotOrder = `

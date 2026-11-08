@@ -347,10 +347,11 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 	// The host's projection is the only record of what its session waits on,
 	// runs in the background, is limited by and was stopped by.
 	var asked struct {
-		WaitingOn       *surface.Waiting         `json:"waitingOn"`
-		BackgroundTasks *surface.BackgroundTasks `json:"backgroundTasks"`
-		UsageLimit      *surface.UsageLimit      `json:"usageLimit"`
-		TurnStop        *surface.TurnStop        `json:"turnStop"`
+		WaitingOn       *surface.Waiting          `json:"waitingOn"`
+		BackgroundTasks *surface.BackgroundTasks  `json:"backgroundTasks"`
+		UsageLimit      *surface.UsageLimit       `json:"usageLimit"`
+		TurnStop        *surface.TurnStop         `json:"turnStop"`
+		Settings        *surface.ObservedSettings `json:"settings"`
 	}
 	if err := json.Unmarshal(row.Projection, &asked); err != nil {
 		return CatalogEvent{}, false, fmt.Errorf("host catalog waiting state: %w", err)
@@ -372,6 +373,10 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		return CatalogEvent{}, false, err
 	}
 	turnStop, err := encodeCatalogTurnStop(asked.TurnStop)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	settings, err := encodeCatalogSettings(asked.Settings)
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}
@@ -456,11 +461,11 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		return CatalogEvent{}, false, err
 	}
 	observedAt := row.ObservedAt.UTC()
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count,waiting_on,background_tasks,usage_limit,turn_stop)
-		VALUES(?,?,?,?,?,?,?,0,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count,waiting_on,background_tasks,usage_limit,turn_stop,settings)
+		VALUES(?,?,?,?,?,?,?,0,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
 		unavailable_reason=excluded.unavailable_reason,observed_at=excluded.observed_at,misses=0,retired=0,projection_fingerprint=excluded.projection_fingerprint,
-		projection_generation=excluded.projection_generation,discovery_failures=0,host_queue_count=excluded.host_queue_count,waiting_on=excluded.waiting_on,background_tasks=excluded.background_tasks,usage_limit=excluded.usage_limit,turn_stop=excluded.turn_stop`,
-		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, formatTimestamp(observedAt), fingerprint, generation, row.QueueCount, waitingOn, background, usageLimit, turnStop); err != nil {
+		projection_generation=excluded.projection_generation,discovery_failures=0,host_queue_count=excluded.host_queue_count,waiting_on=excluded.waiting_on,background_tasks=excluded.background_tasks,usage_limit=excluded.usage_limit,turn_stop=excluded.turn_stop,settings=excluded.settings`,
+		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, formatTimestamp(observedAt), fingerprint, generation, row.QueueCount, waitingOn, background, usageLimit, turnStop, settings); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	event, created, err := appendHostUpsertTx(tx, row.EntityID, projection, generation, observedAt, row.UnavailableReason)

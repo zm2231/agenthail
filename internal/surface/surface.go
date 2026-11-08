@@ -245,6 +245,7 @@ type Session struct {
 	BackgroundTasks       *BackgroundTasks  `json:"backgroundTasks,omitempty"`
 	UsageLimit            *UsageLimit       `json:"usageLimit,omitempty"`
 	TurnStop              *TurnStop         `json:"turnStop,omitempty"`
+	Settings              *ObservedSettings `json:"settings,omitempty"`
 	Activity              *Activity         `json:"activity,omitempty"`
 	Plan                  *Plan             `json:"plan,omitempty"`
 	Transcript            string            `json:"transcript"`
@@ -278,6 +279,18 @@ type Session struct {
 	// transcript, so a stream with no offset reads it from the start rather
 	// than from its end.
 	TranscriptFromStart bool `json:"-"`
+}
+
+// ObservedSettings are the effort and permission mode a running session's
+// runtime reports now. A session nothing observes has none, rather than a
+// value set earlier that a change in its own terminal would leave stale.
+type ObservedSettings struct {
+	Effort     string `json:"effort,omitempty"`
+	Permission string `json:"permission,omitempty"`
+}
+
+func SameObservedSettings(a, b *ObservedSettings) bool {
+	return (a == nil) == (b == nil) && (a == nil || *a == *b)
 }
 
 // Holder is one of several live processes that hold a conversation open, as
@@ -795,7 +808,7 @@ func PersonName(ctx context.Context) string {
 type SessionStartOptions struct {
 	TurnOptions
 	LaunchSettings
-	Name          string `json:"name,omitempty"`
+	Name           string `json:"name,omitempty"`
 	Agent          string `json:"agent,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
 	ConfigRoot     string `json:"configRoot,omitempty"`

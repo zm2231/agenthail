@@ -37,6 +37,7 @@ type dashboardSession struct {
 	BackgroundTasks   *surface.BackgroundTasks   `json:"backgroundTasks,omitempty"`
 	UsageLimit        *surface.UsageLimit        `json:"usageLimit,omitempty"`
 	TurnStop          *surface.TurnStop          `json:"turnStop,omitempty"`
+	Settings          *surface.ObservedSettings  `json:"settings,omitempty"`
 	LimitResume       *dashboardLimitResume      `json:"limitResume,omitempty"`
 	Activity          *surface.Activity          `json:"activity,omitempty"`
 	Plan              *surface.Plan              `json:"plan,omitempty"`
@@ -62,7 +63,7 @@ type dashboardSession struct {
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
 	Worktree          *workView                  `json:"worktree,omitempty"`
 	PRs               []prView                   `json:"prs,omitempty"`
-	ObservedAt       time.Time                  `json:"observedAt,omitempty"`
+	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
 	Runtime           *surface.Runtime           `json:"runtime,omitempty"`
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`

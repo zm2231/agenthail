@@ -17,6 +17,7 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 	sess.UsageLimit, sess.TurnStop = nil, nil
 	sess.Activity = nil
 	sess.Plan = nil
+	sess.Settings = c.observedSettings(ctx, sess)
 	if sess.HasLocal {
 		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
 			sess.Status = observation.Status
@@ -30,4 +31,15 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 	if sess.Activity != nil && sess.Activity.LastProgressAt.After(sess.LastActive) {
 		sess.LastActive = sess.Activity.LastProgressAt
 	}
+}
+
+func (c *Claude) observedSettings(ctx context.Context, sess *surface.Session) *surface.ObservedSettings {
+	if !claudeHosted(sess) {
+		return nil
+	}
+	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
+	if !ok || (listed.Effort == "" && listed.PermissionMode == "") {
+		return nil
+	}
+	return &surface.ObservedSettings{Effort: listed.Effort, Permission: listed.PermissionMode}
 }
