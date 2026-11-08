@@ -170,6 +170,10 @@ leaves them out of a hosted session's command list, so the dashboard does not
 offer them there.
 
 Sessions the host does not run get their list from the host's per-folder listing,
-which starts Claude without a turn. Claude sends no `system/init` without a turn,
-so that listing does not know which commands are terminal-only and offers all of
-them.
+which starts Claude without a turn, so Claude sends it no `system/init`. The host
+instead keeps the terminal-only names its hosted sessions report, with the Claude
+version that reported them, in `terminal-commands.json` in its state directory,
+and leaves those names out of every folder listing. Names reported by the same
+Claude version are added to the set; a session on a different version replaces it.
+Until a hosted session on this machine has run a turn nothing is recorded, and the
+listing offers every command.
