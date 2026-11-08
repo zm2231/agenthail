@@ -168,7 +168,9 @@ struct SessionSidebar: View {
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     var body: some View {
-        let tree = model.sessionTree
+        let scoped = pane.scope.projectID
+        let tree = scoped.map(model.scopeTree) ?? model.sessionTree
+        let hasMore = scoped.map(model.scopeHasMore) ?? model.listHasMore
         VStack(spacing: 0) {
             if holdsWindowButtons && chromeTop == 0 {
                 Color.clear
@@ -218,20 +220,22 @@ struct SessionSidebar: View {
                                 ProjectMenuButtons(model: model, pane: pane, project: project)
                             }
                     }
-                    if scopedProjects(tree).isEmpty && projectsWithoutSessions(tree).isEmpty && !model.listHasMore {
+                    if scopedProjects(tree).isEmpty && projectsWithoutSessions(tree).isEmpty && !hasMore {
                         Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
                             .font(.system(size: DesktopType.body))
                             .foregroundStyle(DesktopPalette.text2)
                             .padding(.horizontal, DesktopSpace.s)
                     }
-                    if model.listHasMore {
+                    if hasMore, let request = scoped.map(model.scopeRequest) ?? model.listRequest {
                         ProgressView()
                             .controlSize(.small)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, DesktopSpace.s)
-                            .task(id: model.pages.listings[model.listRequest!]?.rows.count ?? -1) { await model.listMore() }
+                            .task(id: ListPageKey(request: request, rows: model.pages.listings[request]?.rows.count ?? -1)) {
+                                if let scoped { await model.readScope(scoped) } else { await model.listMore() }
+                            }
                     }
-                    if let error = model.reader.pageError, model.listRequest != nil {
+                    if let error = model.reader.pageError, scoped != nil || model.listRequest != nil {
                         Text(error)
                             .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(DesktopPalette.text2)

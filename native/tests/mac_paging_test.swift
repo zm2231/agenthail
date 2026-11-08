@@ -27,6 +27,14 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
         return #"{"sessions":[\#(ids.map { row($0, current: current) }.joined(separator: ","))],"hostEpoch":"\#(epoch)","catalogSeq":5,"view":\#(view)\#(next.map { #","nextCursor":"\#($0)""# } ?? "")}"#
     }
 
+    static func projectPage(_ ids: [String], project: String) -> String {
+        let identity = #""project":{"id":"\#(project)","displayName":"\#(project)","rootPath":"/\#(project)","kind":"git"}"#
+        let rows = ids.map { row($0).replacingOccurrences(of: #""open":true"#, with: #""open":true,\#(identity)"#) }
+        let families = ids.map { #"{"id":"\#($0)","rootId":"\#($0)","projectId":"\#(project)","checkoutId":"","members":[{"id":"\#($0)","depth":0,"contextOnly":false,"pinned":false}],"pinned":false,"workingSubagents":0}"# }
+        let view = #"{"counts":{"all":{"families":\#(ids.count),"sessions":\#(ids.count)}},"surfaces":[],"projects":[{"id":"\#(project)","name":"\#(project)","counts":{"families":\#(ids.count),"sessions":\#(ids.count)},"collapsedFamilyIds":[]}],"families":[\#(families.joined(separator: ","))]}"#
+        return #"{"sessions":[\#(rows.joined(separator: ","))],"hostEpoch":"\#(epoch)","catalogSeq":5,"view":\#(view)}"#
+    }
+
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "paging.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
@@ -37,6 +45,7 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
         Self.lock.withLock { Self.requests.append(url.path + "?" + (url.query ?? "")) }
         let body: String
         switch (url.path, query["scope"], query["cursor"], query["q"]) {
+        case ("/api/v1/snapshot", _, _, _) where query["projectId"] == "far": body = Self.projectPage(query["status"] == nil ? ["far-a", "far-b"] : ["far-a"], project: "far")
         case ("/api/v1/projects/activity", _, _, _): body = #"{"projects":[]}"#
         case ("/api/v1/history", _, _, _): body = #"{"items":[],"hasMore":false,"nextBefore":0,"kinds":[]}"#
         case ("/api/v1/snapshot", nil, _, _):
@@ -113,6 +122,21 @@ struct MacPagingTest {
         check(model.refinementSurfaces.contains("codex"), "surface choices come from the daemon's view")
         check(model.filterCounts[.recent] == 2 && model.filterCounts[.running] == 1, "a refined list counts every tab by the daemon: \(model.filterCounts)")
         check(model.pages.listings.keys.filter { $0.projectID == nil }.count == 1, "only the shown list is kept")
+        model.sessionRefinement = SessionRefinement()
+
+        let scopedIDs = { model.scopeTree("far").projects.flatMap { $0.checkouts.flatMap(\.families) }.map(\.id) }
+        check(!ids().contains("far-a") && scopedIDs().isEmpty && model.scopeHasMore("far"), "a project whose sessions aren't in the loaded pages starts with its own listing unread")
+        await model.readScope("far")
+        check(PagingDaemon.requests.contains { $0.contains("scope=all") && $0.contains("projectId=far") }, "a project scope reads that project's listing: \(PagingDaemon.requests.suffix(3))")
+        check(scopedIDs() == ["far-a", "far-b"] && !model.scopeHasMore("far"), "the scoped rail lists the project's own listing: \(scopedIDs())")
+        let builds = model.scopeTrees.builds
+        model.applyCatalogEvents([try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":6,"type":"session.upserted","data":{"session":\#(PagingDaemon.row("live", status: "busy", current: true))}}"#.utf8))])
+        _ = scopedIDs()
+        check(model.scopeTrees.builds == builds, "an unrelated session's upsert does not rebuild the scoped tree")
+        model.sessionRefinement = SessionRefinement(status: .working, surface: "claude")
+        await model.readScope("far")
+        check(PagingDaemon.requests.contains { $0.contains("projectId=far") && $0.contains("status=working") && $0.contains("surface=claude") }, "a refinement narrows the project's listing at the daemon")
+        check(scopedIDs() == ["far-a"] && model.pages.listings.keys.filter { $0.projectID == "far" && $0 != model.earlierRequest("far") }.count == 1, "only the shown refinement's project listing is kept beside the project page's own: \(scopedIDs()) \(model.pages.listings.keys.filter { $0.projectID == "far" })")
         model.sessionRefinement = SessionRefinement()
         model.sessionFilter = .recent
 

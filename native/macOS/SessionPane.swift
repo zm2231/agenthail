@@ -187,6 +187,7 @@ final class SessionPane: ObservableObject, Identifiable {
     var displayedSession: SessionState? { shownProjectID == nil ? selectedSession ?? removedSession : nil }
 
     @Published private(set) var scope = PaneScope.all
+    private var scopeArchived = false
     @Published var selectedDecisionID: String?
 
     var showsInbox: Bool { scope == .inbox }
@@ -202,11 +203,16 @@ final class SessionPane: ObservableObject, Identifiable {
     func showScope(project id: String) {
         showProject(id)
         guard !closed else { return }
+        scopeArchived = model.projects.contains { $0.id == id && $0.archived == true }
         scope = .project(id)
     }
 
     private func dropMissingScope() {
-        guard let id = scope.projectID, !PaneScope.holds(id, in: model.projects) else { return }
+        guard let id = scope.projectID else { return }
+        if PaneScope.holds(id, in: model.projects, wasArchived: scopeArchived) {
+            scopeArchived = model.projects.contains { $0.id == id && $0.archived == true }
+            return
+        }
         scope = .all
         if shownProjectID == id { shownProjectID = nil }
     }

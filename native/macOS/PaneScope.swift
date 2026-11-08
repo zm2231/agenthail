@@ -1,5 +1,10 @@
 import Foundation
 
+struct ListPageKey: Hashable {
+    let request: ScopeRequest
+    let rows: Int
+}
+
 enum PaneScope: Equatable {
     case all
     case inbox
@@ -20,7 +25,7 @@ enum PaneScope: Equatable {
         return open.first { $0.host.state == "local" } ?? open.first
     }
 
-    static func holds(_ id: String, in projects: [ProjectState]) -> Bool {
-        projects.contains { $0.id == id && $0.archived != true }
+    static func holds(_ id: String, in projects: [ProjectState], wasArchived: Bool) -> Bool {
+        projects.contains { $0.id == id && ($0.archived != true || wasArchived) }
     }
 }

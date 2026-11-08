@@ -118,6 +118,7 @@ let package = Package(
                 "RequestCard.swift",
                 "AgenthailModel.swift",
                 "AgenthailModelPaging.swift",
+                "ScopeTreeCache.swift",
                 "VoiceAPI.swift",
                 "VoiceAudioBridge.swift",
                 "VoiceCallDiagnostics.swift",

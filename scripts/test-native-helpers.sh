@@ -32,6 +32,7 @@ SOURCES=(
   TaggedResponses.swift
   AgenthailModel.swift
   AgenthailModelPaging.swift
+  ScopeTreeCache.swift
   AgenthailModels.swift
   ComposerAttachment.swift
   ComposerTextSync.swift
