@@ -33,6 +33,13 @@ extension AgenthailModel {
         InboxStops.build(attention: attention, deliveries: deliveryProblems, replacements: leadReplacements, inbox: decisionFeed.inbox, localHosts: [""])
     }
 
+    var needsYouCount: Int { inboxStops.count }
+
+    func queuedText(_ stop: InboxStop) -> String? {
+        guard case .queued(let item) = stop else { return nil }
+        return queue.first { $0.id == item.queueId }?.message
+    }
+
     func needsYou(_ stops: InboxStops) -> [String: Int] {
         stops.needsYou(in: projects) { [self] in session($0)?.project?.id }
     }

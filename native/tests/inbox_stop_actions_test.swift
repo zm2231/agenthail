@@ -43,7 +43,8 @@ enum StopStream {
 @main
 struct InboxStopActionsTest {
     static let snapshot = #"""
-    {"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":24,
+    {"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,
+     "queue":[{"id":7,"sessionId":"s-web","target":"fix the build","message":"Run the migration after the backup","status":"dead","evidence":"unknown","attempts":1,"queuedAt":"2026-11-08T09:59:00Z"}],"channels":[],"relays":[],"history":[],"codexRecentHours":24,
      "attention":[{"id":1,"sessionId":"s-web","target":"fix the build","queueId":7,"reason":"Delivery failed","requestedAction":"Retry or cancel this message","createdAt":"2026-11-08T10:00:00Z"},
                   {"id":2,"sessionId":"s-web","target":"fix the build","queueId":8,"reason":"Delivery failed","requestedAction":"Retry or cancel this message","createdAt":"2026-11-08T10:01:00Z"}],
      "deliveryProblems":[{"deliveryId":3,"sessionId":"s-api","message":"check the schema","reason":"target_gone","status":"failed","at":"2026-11-08T10:05:00Z"}],
@@ -61,6 +62,8 @@ struct InboxStopActionsTest {
         let stops = model.inboxStops
         check(stops.stopped.map(\.id) == ["queue:/7", "queue:/8", "delivery:/3", "replacement:/5"], "the Mac Inbox lists every stop: \(stops.stopped.map(\.id))")
         check(stops.count == 4, "the Inbox tile counts every stop")
+        check(model.needsYouCount == 4, "the window chrome and status bar give the Inbox's answer, not the sessions': \(model.needsYouCount)")
+        check(model.queuedText(stops.stopped[0]) == "Run the migration after the backup", "a stuck message's card shows the message")
         check(stops.entries.map(\.paneID) == stops.stopped.map(\.id), "the pane walks the same rows")
         check(stops.following(stops.entries[1]) == "delivery:/3", "after a row, the next one is picked")
 

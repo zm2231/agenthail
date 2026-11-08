@@ -12,6 +12,7 @@ const app = {
     attention: [{ id: 1, sessionId: "lead", target: "release-lead", queueId: 31, reason: "Held for a decision", requestedAction: "retry or cancel", createdAt: "2026-03-01T09:00:00Z" }],
     deliveryProblems: [],
     leadReplacements: [],
+    queue: [{ id: 31, sessionId: "lead", message: "Ship <it> after the backup", status: "dead" }],
   },
   selected: null,
 };
@@ -65,6 +66,7 @@ const html = elements.list.innerHTML;
 assert.equal(elements.panel.hidden, false);
 assert.ok(html.indexOf("Stopped on you") < html.indexOf("Holding up work") && html.indexOf("Holding up work") < html.indexOf("Waiting on you"));
 assert.match(html, /data-retry="31"/, "a held delivery keeps its buttons in Stopped on you");
+assert.match(html, /data-queued-text>Ship &lt;it&gt; after the backup</, "a stuck message shows what it says");
 assert.ok(!html.includes("1 message needs a decision"), "a local held delivery is listed once, with its buttons, not again as a decision");
 assert.match(html, /data-decision="server::far"/, "a remote delivery problem opens its session");
 assert.match(html, /Holds up 1/);

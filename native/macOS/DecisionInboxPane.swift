@@ -32,6 +32,7 @@ struct DecisionInboxPane: View {
                 card(item, following: following)
             } else if let entry {
                 InboxStopCard(model: model, pane: pane, stop: entry, following: following)
+                    .id(entry.paneID)
             } else {
                 ContentUnavailableView(model.decisionFeed.loaded ? "Nothing needs you" : "Looking for decisions", systemImage: "tray")
             }

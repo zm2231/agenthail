@@ -47,7 +47,9 @@ function projectOf(id) {
 }
 
 function attentionItem(item) {
-  return `<article class="attention-item"><div><div class="attention-target"><i></i>${escape(item.target)}</div><strong>${escape(item.reason)}</strong><p>${escape(item.requestedAction)} · ${timeAgo(item.createdAt)}</p></div><div class="operation-actions"><button class="soft-button" data-retry="${item.queueId}" type="button">Retry</button><button class="soft-button" data-cancel="${item.queueId}" type="button">Cancel</button></div></article>`;
+  const message = (app.state.queue || []).find((queued) => queued.id === item.queueId)?.message;
+  const text = message ? `<p class="queue-message" data-queued-text>${escape(message)}</p>` : "";
+  return `<article class="attention-item"><div><div class="attention-target"><i></i>${escape(item.target)}</div><strong>${escape(item.reason)}</strong>${text}<p>${escape(item.requestedAction)} · ${timeAgo(item.createdAt)}</p></div><div class="operation-actions"><button class="soft-button" data-retry="${item.queueId}" type="button">Retry</button><button class="soft-button" data-cancel="${item.queueId}" type="button">Cancel</button></div></article>`;
 }
 
 function leadReplacementItem(item) {

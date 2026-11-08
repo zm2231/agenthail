@@ -2,9 +2,10 @@ import SwiftUI
 
 struct InboxStopCard: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let stop: InboxStop
     let following: String?
+    @State private var expanded = false
 
     var body: some View {
         ScrollView {
@@ -24,6 +25,24 @@ struct InboxStopCard: View {
                 }
                 ForEach(stop.lines, id: \.self) { line in
                     Text(line).font(.system(size: DesktopType.body)).foregroundStyle(DesktopPalette.text).textSelection(.enabled)
+                }
+                if let message = model.queuedText(stop) {
+                    VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+                        Text(message)
+                            .font(.system(size: DesktopType.body))
+                            .foregroundStyle(DesktopPalette.text)
+                            .lineLimit(expanded ? nil : 4)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(DesktopSpace.s)
+                            .background(DesktopPalette.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                            .accessibilityIdentifier("inbox-stop-message")
+                        if message.count > 280 || message.filter(\.isNewline).count > 3 {
+                            Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
+                                .buttonStyle(.link)
+                                .accessibilityIdentifier("inbox-stop-message-toggle")
+                        }
+                    }
                 }
                 HStack(spacing: DesktopSpace.s) { actions }
             }
