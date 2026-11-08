@@ -68,6 +68,7 @@ struct Transcript: View {
             .padding(24)
             .coordinateSpace(.named(TranscriptRows.contentSpace))
             .background { TranscriptSelectionAnchor(hold: feed.hold) }
+            .background { TranscriptClipAnchor().frame(width: 0, height: 0) }
             .environment(\.transcriptRows, TranscriptRows(memory: rowMemory, session: feed.transcript))
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in

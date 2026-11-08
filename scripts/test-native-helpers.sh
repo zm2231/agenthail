@@ -164,6 +164,7 @@ SOURCES=(
   macOS/TurnSettingConfirmation.swift
   macOS/TranscriptAgentBlocks.swift
   TranscriptEnd.swift
+  macOS/TranscriptClip.swift
   macOS/TranscriptEndCheck.swift
   macOS/TranscriptFollow.swift
   macOS/TranscriptSelectionHold.swift

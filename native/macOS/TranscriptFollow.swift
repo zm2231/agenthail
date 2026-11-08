@@ -19,6 +19,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     let transcript: ID
     let leadingRow: String?
     let hasRow: (String) -> Bool
+    let held: () -> Bool
     @Binding var position: ScrollPosition
     @Binding var following: Bool
     @State private var phase: ScrollPhase = .idle
@@ -69,6 +70,9 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             }
             .onScrollGeometryChange(for: ScrollGeometry.self) { geometry in
                 // The action is not called for every change, so the latest geometry is kept as it is read.
+                if let previous = layout.geometry, previous.contentSize.height != geometry.contentSize.height {
+                    layout.lastGrowth = geometry.contentSize.height - previous.contentSize.height
+                }
                 layout.geometry = geometry
                 if following { layout.scheduleCheck(checkEnd) }
                 return geometry
@@ -108,6 +112,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 }
             }
             .environment(\.holdTranscriptPlace, HoldTranscriptPlace(hold: holdPlace))
+            .environment(\.transcriptClip, layout.clip)
             .environment(\.revealRow) { top in
                 following = false
                 layout.releaseHold()
@@ -119,6 +124,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 generation &+= 1
                 layout.releaseHold()
                 layout.cancelCheck()
+                layout.lastGrowth = nil
                 placedLeadingRow = leadingRow
                 following = true
                 position.scrollTo(edge: .bottom)
@@ -148,12 +154,16 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     // The geometry action can skip a stream's last change; false asks again once the scroll rests.
     private func checkEnd() -> Bool {
         guard let geometry = layout.geometry else { return true }
-        switch TranscriptEndCheck.decide(following: following, resting: resting, geometry: geometry, seen: layout.seen, deferred: layout.checkDeferred) {
+        switch TranscriptEndCheck.decide(following: following, resting: resting, geometry: geometry, seen: layout.seen, deferred: layout.checkDeferred,
+                                         lastGrowth: layout.lastGrowth, clipDistance: layout.clip.distanceToEnd, held: held()) {
         case .retry:
             if resting { layout.checkDeferred = true }
             return false
         case .scroll:
             settle { $0.scrollTo(edge: .bottom) }
+            return true
+        case .clip:
+            layout.clip.scrollToEnd()
             return true
         case .done:
             return true
@@ -177,6 +187,8 @@ private final class Layout {
     var geometry: ScrollGeometry?
     var seen: ScrollGeometry?
     var checkDeferred = false
+    let clip = TranscriptClip()
+    var lastGrowth: CGFloat?
     var animationStart: ContinuousClock.Instant?
     private(set) var resized = false
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
@@ -241,8 +253,8 @@ private final class Layout {
 }
 
 extension View {
-    func transcriptFollow<ID: Equatable>(_ transcript: ID, leadingRow: String?, hasRow: @escaping (String) -> Bool, position: Binding<ScrollPosition>, following: Binding<Bool>) -> some View {
-        modifier(TranscriptFollow(transcript: transcript, leadingRow: leadingRow, hasRow: hasRow, position: position, following: following))
+    func transcriptFollow<ID: Equatable>(_ transcript: ID, leadingRow: String?, hasRow: @escaping (String) -> Bool, held: @escaping () -> Bool = { false }, position: Binding<ScrollPosition>, following: Binding<Bool>) -> some View {
+        modifier(TranscriptFollow(transcript: transcript, leadingRow: leadingRow, hasRow: hasRow, held: held, position: position, following: following))
     }
 }
 
