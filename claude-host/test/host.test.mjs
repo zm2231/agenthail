@@ -770,6 +770,24 @@ test('a compact window for an idle session closes it now, and the next host open
   d.close();
 });
 
+test('a closed session with no kept settings takes a pending compact window and can clear it', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('close', { sessionId: id });
+  const chosen = await c.call('setAutoCompactWindow', { sessionId: id, window: '150000' });
+  assert.equal(chosen.autoCompactWindow, 'default');
+  assert.equal(chosen.pendingAutoCompactWindow, '150000');
+  assert.equal((await c.call('setAutoCompactWindow', { sessionId: id, window: 'default' })).pendingAutoCompactWindow, null, 'choosing the window in effect clears the pending one');
+  await c.call('setAutoCompactWindow', { sessionId: id, window: '150000' });
+  const reopened = await c.call('open', { resume: id, cwd: f.cwd });
+  assert.deepEqual(lastSettings(f), { autoCompactWindow: 150000 });
+  assert.equal(reopened.autoCompactWindow, '150000');
+  c.close();
+});
+
 test('a compact window for a working session waits for its turn to end', async () => {
   const f = fixture();
   await startHost(f);

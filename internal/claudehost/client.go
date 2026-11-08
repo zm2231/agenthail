@@ -94,23 +94,23 @@ type CheckerOpen struct {
 }
 
 type Session struct {
-	SessionID          string       `json:"sessionId"`
-	PID                int          `json:"pid"`
-	Cwd                string       `json:"cwd"`
-	State              string       `json:"state"`
-	OpenedAt           string       `json:"openedAt"`
-	PermissionMode     string       `json:"permissionMode"`
-	Model              string       `json:"model"`
-	Effort             string       `json:"effort"`
-	Checker            string       `json:"checker,omitempty"`
-	MCPError           string       `json:"mcpError,omitempty"`
-	ContextWindow      int64        `json:"contextWindow"`
-	ContextModel       string       `json:"contextModel"`
-	AutoCompact        *AutoCompact `json:"autoCompact"`
-	AutoCompactEnabled *bool        `json:"autoCompactEnabled"`
-	AutoCompactWindow        string  `json:"autoCompactWindow"`
-	PendingAutoCompactWindow *string `json:"pendingAutoCompactWindow"`
-	Requests           []Request    `json:"requests"`
+	SessionID                string       `json:"sessionId"`
+	PID                      int          `json:"pid"`
+	Cwd                      string       `json:"cwd"`
+	State                    string       `json:"state"`
+	OpenedAt                 string       `json:"openedAt"`
+	PermissionMode           string       `json:"permissionMode"`
+	Model                    string       `json:"model"`
+	Effort                   string       `json:"effort"`
+	Checker                  string       `json:"checker,omitempty"`
+	MCPError                 string       `json:"mcpError,omitempty"`
+	ContextWindow            int64        `json:"contextWindow"`
+	ContextModel             string       `json:"contextModel"`
+	AutoCompact              *AutoCompact `json:"autoCompact"`
+	AutoCompactEnabled       *bool        `json:"autoCompactEnabled"`
+	AutoCompactWindow        string       `json:"autoCompactWindow"`
+	PendingAutoCompactWindow *string      `json:"pendingAutoCompactWindow"`
+	Requests                 []Request    `json:"requests"`
 	// Tasks are the live background tasks Claude last reported. A host that
 	// predates them leaves it nil.
 	Tasks        []Task `json:"tasks"`

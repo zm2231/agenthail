@@ -420,7 +420,8 @@ const methods = {
   },
   setAutoCompactWindow: async ({ sessionId, window }) => {
     if (typeof window !== 'string' || !validCompactWindow(window)) throw new HostError('invalid', 'window is default, auto or a token count from 100000 to 1000000');
-    const kept = sessions.has(sessionId) ? undefined : settings.get(sessionId);
+    if (typeof sessionId !== 'string' || !UUID.test(sessionId)) throw new HostError('invalid', `session id must be a uuid: ${sessionId}`);
+    const kept = sessions.has(sessionId) ? undefined : (settings.get(sessionId) ?? {});
     if (kept && !kept.checker) {
       const { pendingAutoCompactWindow, ...rest } = kept;
       const current = kept.autoCompactWindow ?? 'default';
