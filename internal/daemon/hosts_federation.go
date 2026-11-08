@@ -407,30 +407,22 @@ func (d *Daemon) setHostState(host *pairedHost, state, detail string, contacted 
 	}
 }
 
-// runHostMirror reconnects to a host with a doubling delay. An event the
-// follower could not apply reconciles from a snapshot at once, but a repeat
-// within hostRetryMax backs off like an outage: a payload shape this build
-// cannot read fails on every event that carries it, and each failure would
-// otherwise fetch a full snapshot.
 func (d *Daemon) runHostMirror(ctx context.Context, host *pairedHost) {
 	delay := d.federation.retryMin
 	var outage hostOutage
-	var applyFailed time.Time
+	var repair repairBackoff
 	for ctx.Err() == nil {
 		connected, err := d.mirrorHostOnce(ctx, host, &outage)
 		if ctx.Err() != nil {
 			return
 		}
-		var unapplied catalogApplyError
+		if connected {
+			delay = d.federation.retryMin
+		}
 		wait := delay
-		switch {
-		case errors.As(err, &unapplied):
-			if applyFailed.IsZero() || time.Since(applyFailed) > hostRetryMax {
-				wait, delay = 0, d.federation.retryMin
-			}
-			applyFailed = time.Now()
-		case connected:
-			wait, delay = d.federation.retryMin, d.federation.retryMin
+		var unapplied catalogApplyError
+		if errors.As(err, &unapplied) {
+			wait = repair.next(time.Now(), d.federation.retryMin, hostRetryMax)
 		}
 		if err != nil {
 			d.hostFailed(host, &outage, err)
@@ -440,10 +432,30 @@ func (d *Daemon) runHostMirror(ctx context.Context, host *pairedHost) {
 			return
 		case <-time.After(wait):
 		}
-		if wait > 0 {
-			delay = min(delay*2, hostRetryMax)
-		}
+		delay = min(delay*2, hostRetryMax)
 	}
+}
+
+// repairBackoff spaces the snapshots that repair catalog events the follower
+// could not apply. The first is taken at once; one that fails again within
+// ceiling of the follower resuming waits a doubling delay, since a payload
+// shape this build cannot read fails on every event that carries it.
+type repairBackoff struct {
+	resumed time.Time
+	delay   time.Duration
+}
+
+func (b *repairBackoff) next(now time.Time, floor, ceiling time.Duration) time.Duration {
+	switch {
+	case b.resumed.IsZero() || now.Sub(b.resumed) > ceiling:
+		b.delay = 0
+	case b.delay == 0:
+		b.delay = floor
+	default:
+		b.delay = min(b.delay*2, ceiling)
+	}
+	b.resumed = now.Add(b.delay)
+	return b.delay
 }
 
 func hostFailureState(err error) string {
