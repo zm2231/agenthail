@@ -1212,12 +1212,27 @@ type Capabilities struct {
 	// Commands is a session that takes Claude Remote Control's context, usage,
 	// status, effort and rename commands.
 	Commands bool `json:"commands"`
-	// TurnNotice, when set, tells the person that what they write reaches the
-	// session only as a note from Agenthail, not as their own turn, and what
-	// would change that.
-	TurnNotice string `json:"turnNotice,omitempty"`
+	// PersonMessage is how a person's message reaches the session.
+	PersonMessage PersonMessage `json:"personMessage"`
+	// RemoteControl is an install where /remote-control in the session's terminal makes a person's message their turn.
+	RemoteControl bool `json:"remoteControl"`
 	// Lifecycle is what the session's runtime does to the session itself.
 	Lifecycle Lifecycle `json:"lifecycle"`
+}
+
+// The zero PersonMessage serializes as "turn": only an adapter that knows a person's message arrives as a note says so.
+type PersonMessage string
+
+const (
+	PersonTurn PersonMessage = "turn"
+	PersonNote PersonMessage = "note"
+)
+
+func (p PersonMessage) MarshalText() ([]byte, error) {
+	if p == PersonNote {
+		return []byte(PersonNote), nil
+	}
+	return []byte(PersonTurn), nil
 }
 
 // Lifecycle names the operations on a session's process that its runtime

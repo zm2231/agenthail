@@ -68,5 +68,5 @@ func (d *Daemon) createNotionThread(ctx context.Context, message string, name re
 		return nil, fmt.Errorf("Notion thread %s was created but alias %q could not be registered: %w", session.ID, alias, err)
 	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
-	return &delivery.Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID, TurnID: result.UUID}, nil
+	return &delivery.Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID, TurnID: result.UUID, DeliveredAs: surface.PersonTurn}, nil
 }

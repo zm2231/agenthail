@@ -9,7 +9,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func storedTurnNotice(t *testing.T, f *humanTurnFixture, sessionID string) string {
+func storedPersonMessage(t *testing.T, f *humanTurnFixture, sessionID string) surface.PersonMessage {
 	t.Helper()
 	fingerprint, found, err := f.r.CatalogProjectionFingerprint(sessionID)
 	if err != nil || !found {
@@ -19,25 +19,25 @@ func storedTurnNotice(t *testing.T, f *humanTurnFixture, sessionID string) strin
 	if err := json.Unmarshal([]byte(fingerprint), &row); err != nil {
 		t.Fatal(err)
 	}
-	return row.Capabilities.TurnNotice
+	return row.Capabilities.PersonMessage
 }
 
 func TestTheNoticeAPersonSeesMatchesTheRouteTheirSendTakes(t *testing.T) {
 	f := newHumanTurnFixture(t)
 	f.d.discoverCatalog(context.Background())
-	if notice := storedTurnNotice(t, f, f.bridged.ID); notice != "" {
-		t.Fatalf("notice=%q, want none while the session has Remote Control", notice)
+	if got := storedPersonMessage(t, f, f.bridged.ID); got != surface.PersonTurn {
+		t.Fatalf("personMessage=%q, want a turn while the session has Remote Control", got)
 	}
 
 	f.process.Record(f.bridged.ID, f.process.Home, "")
-	noticeAtSend := ""
-	f.claude.beforeSend = func() { noticeAtSend = storedTurnNotice(t, f, f.bridged.ID) }
+	var atSend surface.PersonMessage
+	f.claude.beforeSend = func() { atSend = storedPersonMessage(t, f, f.bridged.ID) }
 	f.send(t, `{"action":"send","author":"person","sessionId":"conversation-bridge","message":"after Remote Control ended"}`)
 
 	if len(f.posts) != 0 || len(f.claude.native) != 1 {
 		t.Fatalf("posts=%v native=%v, want the send on the socket the process still offers", f.posts, f.claude.native)
 	}
-	if noticeAtSend == "" {
+	if atSend != surface.PersonNote {
 		t.Fatal("the row still promised the person's own turn when the message went out as a note")
 	}
 }
@@ -46,14 +46,14 @@ func TestASendThatFindsRemoteControlGonePublishesTheNoteRouteBeforeDeliveringOnI
 	f := newHumanTurnFixture(t)
 	f.d.discoverCatalog(context.Background())
 	f.postStatus = http.StatusNotFound
-	noticeAtSend := ""
-	f.claude.beforeSend = func() { noticeAtSend = storedTurnNotice(t, f, f.bridged.ID) }
+	var atSend surface.PersonMessage
+	f.claude.beforeSend = func() { atSend = storedPersonMessage(t, f, f.bridged.ID) }
 	receipt := f.send(t, `{"action":"send","author":"person","sessionId":"conversation-bridge","message":"still there?"}`)
 
-	if receipt["evidence"] != string(surface.EvidenceTransportAccepted) || len(f.posts) != 1 || len(f.claude.native) != 1 || f.claude.native[0] != "still there?" {
+	if receipt["evidence"] != string(surface.EvidenceTransportAccepted) || receipt["deliveredAs"] != "note" || len(f.posts) != 1 || len(f.claude.native) != 1 || f.claude.native[0] != "still there?" {
 		t.Fatalf("receipt=%v posts=%d native=%v, want one refused post and the message accepted once on the socket", receipt, len(f.posts), f.claude.native)
 	}
-	if noticeAtSend == "" {
+	if atSend != surface.PersonNote {
 		t.Fatal("the row still promised the person's own turn when the message went out on the socket as a note")
 	}
 	history, err := f.r.ListHistory(10, f.bridged.ID)

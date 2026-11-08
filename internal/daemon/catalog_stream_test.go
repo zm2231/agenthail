@@ -589,6 +589,10 @@ func TestDiscoveryStreamsFullDashboardSessionRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var want surface.Capabilities
+	if raw, err := json.Marshal(d.Surfaces[0].Capabilities()); err != nil || json.Unmarshal(raw, &want) != nil {
+		t.Fatalf("capabilities round trip: %v", err)
+	}
 	for _, event := range window.Events {
 		if event.Type != "session.upserted" {
 			continue
@@ -599,7 +603,7 @@ func TestDiscoveryStreamsFullDashboardSessionRow(t *testing.T) {
 		if err := json.Unmarshal(event.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Session.ID == "" || payload.Session.Capabilities != d.Surfaces[0].Capabilities() || payload.Session.ObservedAt.IsZero() || payload.Session.Checkout == nil {
+		if payload.Session.ID == "" || payload.Session.Capabilities != want || payload.Session.ObservedAt.IsZero() || payload.Session.Checkout == nil {
 			t.Fatalf("payload=%+v", payload.Session)
 		}
 		return

@@ -260,4 +260,74 @@ for (const [typed, mode, expected] of [["redirect", "steer", "redirect"], ["/ste
   assert.equal(tab.$("#message").value, "no room, signed out");
 }
 
+
+{
+  const tab = await loaded();
+  const note = { personMessage: "note", remoteControl: true, lifecycle: { adopt: true } };
+  tab.context.app.history = { capabilities: note };
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#composer-note").textContent, "What you write reaches this terminal session as a note from Agenthail, not as your own turn. Run /remote-control in its terminal, or open it in Agenthail, to write as yourself.");
+  assert.equal(tab.$("#composer-adopt").hidden, false, "a session that can be opened in Agenthail offers it");
+  tab.context.app.history = { capabilities: { personMessage: "note", remoteControl: false, lifecycle: { adopt: false } } };
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#composer-note").textContent, "What you write reaches this terminal session as a note from Agenthail, not as your own turn.");
+  assert.equal(tab.$("#composer-adopt").hidden, true, "no remedy is offered that this session cannot take");
+  tab.context.app.history = { capabilities: { personMessage: "turn", remoteControl: true, lifecycle: { adopt: true } } };
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#composer-note").textContent, "Ready to send.");
+  assert.equal(tab.$("#composer-adopt").hidden, true, "a session that takes the person's turn offers no adopt");
+}
+
+{
+  const tab = await loaded();
+  tab.answers.push(() => ({ ok: false, status: 409, text: async () => JSON.stringify({ error: { code: "session_adopt_needs_consent", message: "Claude is still running in its terminal." } }) }));
+  tab.answers.push(() => ({ ok: true, json: async () => ({ ok: true, result: { session: { id: "a-hosted" } } }) }));
+  const selected = [];
+  tab.context.selectSession = async (id) => selected.push(id);
+  await tab.context.adoptSelected();
+  assert.deepEqual(tab.requests.map((request) => [request.body.action, request.body.sessionId, request.body.stopTerminal ?? false]), [["session-adopt", "a", false], ["session-adopt", "a", true]], "consent to stop the terminal is asked before it is given");
+  assert.ok(tab.toasts.includes("Opened in Agenthail. What you write now is your own turn."));
+}
+
+{
+  const tab = await loaded();
+  tab.context.window.confirm = () => false;
+  tab.answers.push(() => ({ ok: false, status: 409, text: async () => JSON.stringify({ error: { code: "session_adopt_needs_consent", message: "Claude is still running in its terminal." } }) }));
+  await tab.context.adoptSelected();
+  assert.equal(tab.requests.length, 1, "declining leaves the terminal running");
+  assert.ok(tab.toasts.includes("Claude is still running in its terminal."));
+}
+
+{
+  const tab = await loaded();
+  tab.$("#message").value = "to the terminal";
+  tab.$("#send").dataset.mode = "send";
+  tab.answers.push(() => ({ ok: true, json: async () => ({ ok: true, result: { evidence: "transport_accepted", deliveredAs: "note", detail: "Sent to a's Claude socket." } }) }));
+  await tab.context.send();
+  await settled();
+  assert.ok(tab.toasts.some((text) => text.endsWith("as a note from Agenthail, not as your own turn.")), `the send says it went as a note: ${tab.toasts}`);
+}
+
+{
+  const tab = page();
+  await dashboardModules(["composer", "send-status", "pending-send", "catalog-live"], tab.context);
+  const { app } = tab.context;
+  const turn = { personMessage: "turn", remoteControl: true, lifecycle: { adopt: true } };
+  app.selected = { id: "a", alias: "a", status: "idle", capabilities: turn };
+  app.state.sessions = [app.selected];
+  app.history = { capabilities: turn };
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#composer-adopt").hidden, true);
+  tab.context.catalogRead(1);
+  let synced = 0;
+  const hooks = { render() {}, reread() {}, controls: () => { synced++; tab.context.syncComposerAction(); } };
+  const upsert = (seq, capabilities) => tab.context.catalogEvent({ data: JSON.stringify({ stream: "catalog", seq, type: "session.upserted", data: { session: { id: "a", alias: "a", status: "idle", capabilities } } }) }, hooks);
+  upsert(2, { ...turn, personMessage: "note" });
+  assert.equal(synced, 1, "a streamed change to the open session's capabilities refreshes its controls");
+  assert.match(tab.$("#composer-note").textContent, /as a note from Agenthail/);
+  assert.equal(tab.$("#composer-adopt").hidden, false, "the open session offers Open in Agenthail once its messages become notes");
+  upsert(3, { ...turn, personMessage: "note" });
+  assert.equal(synced, 1, "a row update that leaves capabilities alone does not re-render controls");
+}
+
 console.log("dashboard composer send tests passed");

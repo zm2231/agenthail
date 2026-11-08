@@ -431,7 +431,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason, ChangedBy: sender, HistoryID: historyID}
 	if startErr != nil {
 		_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, Message: message, Error: startErr.Error()})
-		outcome.Receipt = &delivery.Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, Started: true, Detail: startedDetail(spec, previous, reason)}
+		outcome.Receipt = &delivery.Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, Started: true, Detail: startedDetail(spec, previous, reason), DeliveredAs: surface.PersonTurn}
 		if intent != nil {
 			outcome.Receipt.DeliveryID, outcome.Receipt.MessageID = intent.ID, intent.UUID
 		}
@@ -442,7 +442,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 		turn = sent.UUID
 	}
 	_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: turn})
-	outcome.Receipt = &delivery.Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: turn, Started: true, Detail: startedDetail(spec, previous, reason)}
+	outcome.Receipt = &delivery.Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: turn, Started: true, Detail: startedDetail(spec, previous, reason), DeliveredAs: surface.PersonTurn}
 	return outcome, nil
 }
 

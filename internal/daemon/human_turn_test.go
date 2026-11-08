@@ -157,7 +157,7 @@ func TestPersonSendToBridgedClaudeIsHumanTurn(t *testing.T) {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
 	assertHumanTurnPost(t, f.posts[0], "Please inspect the failure.")
-	if receipt["evidence"] != string(surface.EvidenceDelivered) {
+	if receipt["evidence"] != string(surface.EvidenceDelivered) || receipt["deliveredAs"] != "turn" {
 		t.Fatalf("receipt=%v", receipt)
 	}
 }
@@ -179,7 +179,7 @@ func TestPersonSendWithoutBridgeUsesNativeTransport(t *testing.T) {
 	if len(f.posts) != 0 || len(f.claude.native) != 1 || f.claude.native[0] != "hello" {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
-	if receipt["evidence"] != string(surface.EvidenceTransportAccepted) {
+	if receipt["evidence"] != string(surface.EvidenceTransportAccepted) || receipt["deliveredAs"] != "note" {
 		t.Fatalf("receipt=%v", receipt)
 	}
 }
@@ -188,7 +188,7 @@ func TestPersonSendToBusyBridgedClaudeQueuesHumanTurn(t *testing.T) {
 	f := newHumanTurnFixture(t)
 	f.transcript(t, f.bridged, idleClaudeTranscript+busyClaudeTranscript)
 	receipt := f.send(t, `{"action":"send","author":"person","sessionId":"conversation-bridge","busyDelivery":"queue","message":"after this turn"}`)
-	if receipt["evidence"] != string(surface.EvidenceQueued) || len(f.posts) != 0 || len(f.claude.native) != 0 {
+	if _, said := receipt["deliveredAs"]; said || receipt["evidence"] != string(surface.EvidenceQueued) || len(f.posts) != 0 || len(f.claude.native) != 0 {
 		t.Fatalf("receipt=%v native=%q posts=%q", receipt, f.claude.native, f.posts)
 	}
 	queueID := int64(receipt["queueId"].(float64))
@@ -228,7 +228,7 @@ func TestUncertainHumanTurnPostIsNeverRetried(t *testing.T) {
 	f := newHumanTurnFixture(t)
 	f.postErr = errors.New("connection reset after write")
 	receipt := f.send(t, `{"action":"send","author":"person","sessionId":"conversation-bridge","message":"maybe delivered"}`)
-	if receipt["evidence"] != string(surface.EvidenceSubmitted) || len(f.posts) != 1 || len(f.claude.native) != 0 {
+	if receipt["evidence"] != string(surface.EvidenceSubmitted) || receipt["deliveredAs"] != "turn" || len(f.posts) != 1 || len(f.claude.native) != 0 {
 		t.Fatalf("receipt=%v native=%q posts=%q", receipt, f.claude.native, f.posts)
 	}
 	f.d.drainMessageQueue(t.Context(), f.claude, &f.bridged)

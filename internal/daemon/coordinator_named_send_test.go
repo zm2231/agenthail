@@ -75,7 +75,7 @@ func TestALeadWithNoConversationStartsWithItsModelAndFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, body := f.sendToLead(t, "lead-first", map[string]any{"message": "first task"})
-	if code != http.StatusOK || body["started"] != true || !strings.Contains(receiptField(body, "detail"), "Started coordinator @fixture-lead") {
+	if code != http.StatusOK || body["started"] != true || !strings.Contains(receiptField(body, "detail"), "Started coordinator @fixture-lead") || receiptField(body, "deliveredAs") != "turn" {
 		t.Fatalf("status=%d body=%v", code, body)
 	}
 	current := f.current(t)

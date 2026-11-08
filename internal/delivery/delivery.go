@@ -25,6 +25,8 @@ type Receipt struct {
 	MessageID  string                   `json:"messageId,omitempty"`
 	Detail     string                   `json:"detail,omitempty"`
 	Notice     string                   `json:"notice,omitempty"`
+	// DeliveredAs is unset on a queued receipt: its route is chosen at delivery.
+	DeliveredAs surface.PersonMessage `json:"deliveredAs,omitempty"`
 	// Started marks a conversation started to take the message.
 	Started bool `json:"started,omitempty"`
 	// MovedTo names the session that took a message the addressed session
@@ -345,14 +347,14 @@ func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session 
 	if err != nil {
 		if intent != nil {
 			if surface.IsDeliveryOutcomeUnknown(err) {
-				return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
+				return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target), DeliveredAs: surface.PersonTurn}, nil
 			}
 			err = d.failIntent(intent, session.ID, err)
 		}
 		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, SourceSessionID: sourceID, Message: label, Error: err.Error()})
 		return nil, err
 	}
-	receipt := &Receipt{Evidence: result.Evidence, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, RequestID: result.RequestID, Source: result.Source, TurnID: result.TurnID, Detail: fmt.Sprintf("Sent to %s.", target)}
+	receipt := &Receipt{Evidence: result.Evidence, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, RequestID: result.RequestID, Source: result.Source, TurnID: result.TurnID, Detail: fmt.Sprintf("Sent to %s.", target), DeliveredAs: surface.PersonTurn}
 	kind := "control-accepted"
 	if result.Evidence == surface.EvidenceTransportAccepted {
 		kind = "transport-accepted"
@@ -488,6 +490,9 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 		record(registry.HistoryEntry{Kind: "unknown", SessionID: addressed.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
 		return nil, ownedErr
 	}
+	// The send itself can move the session, as resuming an exited one does, so its route is read after it.
+	taken := surface.RouteFor(adapter, session, options.RouteAuthor())
+	deliveredAs := taken.PersonMessage()
 	if surface.IsDeliveryHeld(err) {
 		options.BusyDelivery = string(deliverypolicy.Queue)
 		return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, deliverypolicy.Queue, "", intent, nil)
@@ -498,7 +503,7 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 				record(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceUnknown})
 				return nil, err
 			}
-			receipt := &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target)}
+			receipt := &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target), DeliveredAs: deliveredAs}
 			record(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceSubmitted})
 			return receipt, nil
 		}
@@ -511,14 +516,14 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 	if result == nil {
 		err := fmt.Errorf("%s returned an empty delivery result", adapter.Name())
 		if intent != nil {
-			return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
+			return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target), DeliveredAs: deliveredAs}, nil
 		}
 		record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err
 	}
 	if result.Accepted {
-		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: result.UUID, Notice: result.Notice}
-		peerTransport := surface.RouteFor(adapter, session, options.RouteAuthor()).TransportOnly()
+		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: result.UUID, Notice: result.Notice, DeliveredAs: deliveredAs}
+		peerTransport := taken.TransportOnly()
 		if peerTransport {
 			receipt.Evidence = surface.EvidenceTransportAccepted
 		}
