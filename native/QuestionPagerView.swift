@@ -6,14 +6,16 @@ struct QuestionPagerView: View {
     let accent: AnyShapeStyle
     let actionTint: AnyShapeStyle?
     let respond: (RequestDecision) -> Void
+    let focusOnAppear: Bool
     @State private var pager: QuestionPager
     @FocusState private var focused: Bool
 
-    init(request: SessionRequest, answering: Bool, accent: AnyShapeStyle, actionTint: AnyShapeStyle? = nil, respond: @escaping (RequestDecision) -> Void) {
+    init(request: SessionRequest, answering: Bool, accent: AnyShapeStyle, actionTint: AnyShapeStyle? = nil, focusOnAppear: Bool = false, respond: @escaping (RequestDecision) -> Void) {
         self.request = request
         self.answering = answering
         self.accent = accent
         self.actionTint = actionTint
+        self.focusOnAppear = focusOnAppear
         self.respond = respond
         _pager = State(initialValue: QuestionPagerDrafts.shared.pager(for: request))
     }
@@ -34,6 +36,7 @@ struct QuestionPagerView: View {
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
+        .onAppear { if focusOnAppear { focused = true } }
         #endif
         .onKeyPress(keys: [.leftArrow, .rightArrow, .tab, .return]) { press in
             handle(press)
@@ -232,7 +235,7 @@ struct QuestionPagerView: View {
             pager.move(by: 1)
         case .tab where !pager.isSingle:
             pager.move(by: press.modifiers.contains(.shift) ? -1 : 1)
-        case .return:
+        case .return where !press.modifiers.contains(.shift):
             advance()
         default:
             return .ignored

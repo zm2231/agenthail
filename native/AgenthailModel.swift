@@ -113,6 +113,7 @@ final class AgenthailModel {
     @ObservationIgnored private(set) var lastEventID: UInt64 = 0
     private(set) var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
     @ObservationIgnored lazy var catalogFeed = makeCatalogFeed()
+    @ObservationIgnored lazy var decisionFeed = DecisionFeed(key: { [unowned self] in decisionsKey }, load: { [unowned self] in await loadDecisions() })
     let store = SessionStore(limits: .desktop)
     private var drafts: [String: ComposerDraft] = [:]
     private var rekeys = SessionRekeys()

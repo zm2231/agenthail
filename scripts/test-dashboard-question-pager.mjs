@@ -97,7 +97,7 @@ assert.equal(pagers.choose(asking, 1), null, "picking an ask's option waits for 
 assert.doesNotMatch(pagers.renderActions(asking, askRequest.id), /data-request-respond="deny"/, "an ask has nothing to decline");
 assert.match(pagers.renderActions(asking, askRequest.id), />Submit</);
 const askPage = pagers.renderPage(asking);
-assert.match(askPage, /Deploy <small class="pager-suggested">Suggested<\/small>/, "the suggested option is marked");
+assert.match(askPage, /Deploy <small class="pager-suggested">Recommended<\/small>/, "the suggested option is marked Recommended");
 assert.match(askPage, /href="https:\/\/example.com\/run\?a=1&#38;b=2" target="_blank" rel="noopener noreferrer">Runbook</, "links open apart from the dashboard");
 assert.match(askPage, /data-pager-note/, "an ask takes a note");
 same(pagers.decision(asking, pagers.next(asking)), { behavior: "allow", answers: { "Deploy it now?": "Wait" } }, "an empty note is left out");

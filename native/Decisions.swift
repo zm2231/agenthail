@@ -49,3 +49,72 @@ struct DecisionsPage: Decodable {
     var decisions: [DecisionItem]
     var leadHandling: [LeadHandledItem]
 }
+
+enum DecisionAnswer: Equatable {
+    case answered
+    case failed(RequestAnswerFailure)
+    case busy
+}
+
+struct DecisionInbox: Equatable {
+    var decisions: [DecisionItem] = []
+    var leadHandling: [LeadHandledItem] = []
+    var unreachable: [String] = []
+    var outdated: [String] = []
+
+    var isEmpty: Bool { decisions.isEmpty && leadHandling.isEmpty }
+
+    func items(in group: DecisionGroup) -> [DecisionItem] {
+        decisions.filter { $0.group == group }
+    }
+
+    mutating func add(_ page: DecisionsPage, host hostID: String, qualify: (String) -> String) {
+        decisions = Self.ordered(decisions + page.decisions.map { Self.qualified($0, host: hostID, qualify) })
+        leadHandling += page.leadHandling.map { Self.qualified($0, qualify) }
+    }
+
+    func removing(_ sessionID: String) -> DecisionInbox {
+        var inbox = self
+        inbox.decisions.removeAll { $0.sessionId == sessionID }
+        return inbox
+    }
+
+    static func qualified(_ item: DecisionItem, host hostID: String, _ qualify: (String) -> String) -> DecisionItem {
+        var item = item
+        item.hostID = hostID
+        item.sessionId = qualify(item.sessionId)
+        item.projectId = item.projectId.map(qualify)
+        item.holdsUp = item.holdsUp?.map(qualify)
+        return item
+    }
+
+    static func qualified(_ item: LeadHandledItem, _ qualify: (String) -> String) -> LeadHandledItem {
+        var item = item
+        item.sessionId = qualify(item.sessionId)
+        item.projectId = item.projectId.map(qualify)
+        item.heldBy = qualify(item.heldBy)
+        return item
+    }
+
+    static func ordered(_ items: [DecisionItem]) -> [DecisionItem] {
+        let rank = Dictionary(uniqueKeysWithValues: DecisionGroup.allCases.enumerated().map { ($1, $0) })
+        return items.sorted { lhs, rhs in
+            if lhs.group != rhs.group { return rank[lhs.group]! < rank[rhs.group]! }
+            switch (lhs.sinceDate, rhs.sinceDate) {
+            case let (left?, right?) where left != right: return left < right
+            default: return lhs.sessionId < rhs.sessionId
+            }
+        }
+    }
+
+    // Offered only when every question names a suggestion, so accepting never guesses.
+    static func recommended(_ request: SessionRequest) -> RequestDecision? {
+        guard request.usesPager, let questions = request.questions, !questions.isEmpty else { return nil }
+        var answers: [String: String] = [:]
+        for question in questions {
+            guard let suggested = question.suggested, question.options.indices.contains(suggested) else { return nil }
+            answers[question.question] = question.options[suggested].label
+        }
+        return .answers(answers)
+    }
+}
