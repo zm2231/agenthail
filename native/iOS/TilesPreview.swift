@@ -11,6 +11,7 @@ enum TilesPreview {
             [
                 "id": "p-" + name,
                 "displayName": name,
+                "checkouts": [],
                 "coordinators": [["name": name + "-lead", "surface": "claude"]],
                 "activity": ["id": "p-" + name, "lastActive": String(format: "2026-09-12T0%d:00:00Z", 9 - index), "sessionCount": 1, "checkouts": []],
             ]

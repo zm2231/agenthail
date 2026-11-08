@@ -7,8 +7,8 @@ final class ProjectTilesTests: XCTestCase {
     func testTilesCountDecisionsUnderTheProjectIdsTheScreensOpen() throws {
         var snapshot = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as? [String: Any])
         snapshot["projects"] = [
-            ["id": "p-api", "displayName": "api", "coordinators": [["name": "lead", "surface": "claude"]]],
-            ["id": "hpeer::p-tool", "displayName": "tool", "coordinators": [["name": "lead", "surface": "claude"]]],
+            ["id": "p-api", "displayName": "api", "checkouts": [], "coordinators": [["name": "lead", "surface": "claude"]]],
+            ["id": "hpeer::p-tool", "displayName": "tool", "checkouts": [], "coordinators": [["name": "lead", "surface": "claude"]]],
         ]
         let model = AgenthailIOSTests.computerModel()
         model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: JSONSerialization.data(withJSONObject: snapshot)))
