@@ -107,7 +107,8 @@ type Session struct {
 	ContextWindow  int64        `json:"contextWindow"`
 	ContextModel   string       `json:"contextModel"`
 	AutoCompact    *AutoCompact `json:"autoCompact"`
-	Requests       []Request    `json:"requests"`
+	AutoCompactEnabled *bool `json:"autoCompactEnabled"`
+	Requests      []Request    `json:"requests"`
 	// Tasks are the live background tasks Claude last reported. A host that
 	// predates them leaves it nil.
 	Tasks        []Task `json:"tasks"`
@@ -408,6 +409,11 @@ func (c Client) ReplaceMCP(ctx context.Context, sessionID string, server MCPServ
 func (c Client) SetEffort(ctx context.Context, sessionID, effort string) (Session, error) {
 	var out Session
 	return out, c.sessionCall(ctx, "setEffort", map[string]string{"sessionId": sessionID, "effort": effort}, &out)
+}
+
+func (c Client) SetAutoCompact(ctx context.Context, sessionID string, enabled bool) (Session, error) {
+	var out Session
+	return out, c.sessionCall(ctx, "setAutoCompact", map[string]any{"sessionId": sessionID, "enabled": enabled}, &out)
 }
 
 func (c Client) SetPermissionMode(ctx context.Context, sessionID, mode string) (Session, error) {

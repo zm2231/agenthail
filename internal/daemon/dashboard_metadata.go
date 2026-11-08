@@ -67,6 +67,9 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 	if provider, ok := adapter.(surface.TurnSettingsProvider); ok {
 		requests["turnSettings"] = func() (any, error) { return provider.TurnSettings(ctx, session) }
 	}
+	if provider, ok := adapter.(surface.CompactSettingsProvider); ok {
+		requests["compactSettings"] = func() (any, error) { return provider.CompactSettings(ctx, session) }
+	}
 	if observer, ok := adapter.(surface.ClaudeRunObserver); ok {
 		requests["claudeRuns"] = func() (any, error) {
 			runs, err := observer.ObserveClaudeRuns(ctx)

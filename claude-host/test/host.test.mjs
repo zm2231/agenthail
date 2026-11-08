@@ -711,6 +711,28 @@ test('model, effort and permission mode change live and a resume keeps them', as
   d.close();
 });
 
+test('autocompact turns off live and a resume keeps it off', async () => {
+  const f = fixture();
+  const first = await startHost(f);
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const off = await c.call('setAutoCompact', { sessionId: id, enabled: false });
+  assert.deepEqual(off.autoCompact, { enabled: false });
+  await assert.rejects(c.call('setAutoCompact', { sessionId: id, enabled: 'no' }), { code: 'invalid' });
+  first.kill('SIGKILL');
+  await first.exited;
+  c.close();
+
+  await startHost(f);
+  const d = new Client(f.socket);
+  await d.call('open', { resume: id, cwd: f.cwd });
+  const argv = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1).argv;
+  const settings = argv.find((a) => a.startsWith('--settings='))?.slice('--settings='.length) ?? argv[argv.indexOf('--settings') + 1];
+  assert.deepEqual(JSON.parse(settings), { autoCompactEnabled: false }, argv.join(' '));
+  d.close();
+});
+
 test('the listing gives the permission mode Claude reports, also one it changed by itself', async () => {
   const f = fixture();
   await startHost(f);

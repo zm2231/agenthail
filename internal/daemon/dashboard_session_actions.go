@@ -167,15 +167,26 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 			}
 		}
 	case "turn-setting":
-		provider, ok := adapter.(surface.TurnSettingsProvider)
-		if !ok {
-			return actionResult{}, invalidRequest("this session has no turn settings")
-		}
 		key, value := strings.TrimSpace(request.Setting), strings.TrimSpace(request.Value)
 		if key == "" || value == "" {
 			return actionResult{}, invalidRequest("setting and value are required")
 		}
-		err = provider.SetTurnSetting(ctx, session, key, value)
+		if key == surface.CompactSettingAuto || key == surface.CompactSettingWindow {
+			compact, ok := adapter.(surface.CompactSettingsProvider)
+			if !ok {
+				return actionResult{}, invalidRequest("this session has no compact settings")
+			}
+			err = compact.SetCompactSetting(ctx, session, key, value)
+			if err == nil && key == surface.CompactSettingWindow {
+				d.publishEvent("settings.updated", "", map[string]string{"source": "claude-compact-settings"})
+			}
+		} else {
+			provider, ok := adapter.(surface.TurnSettingsProvider)
+			if !ok {
+				return actionResult{}, invalidRequest("this session has no turn settings")
+			}
+			err = provider.SetTurnSetting(ctx, session, key, value)
+		}
 		if version, ok := surface.IsRuntimeVersionError(err); ok {
 			return actionResult{}, &actionError{Status: http.StatusConflict, Code: "runtime_too_old", Message: err.Error(), Extra: map[string]any{"runtime": version.Runtime, "minimum": version.Minimum}}
 		}

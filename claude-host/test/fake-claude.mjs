@@ -37,6 +37,9 @@ const settings = (() => {
     return {};
   }
 })();
+try {
+  Object.assign(settings, JSON.parse(flag('settings') || '{}'));
+} catch {}
 const contextReport = () => {
   const modelWindow = windows[model] ?? 1000000;
   if (settings.autoCompactEnabled === false) return { model, maxTokens: modelWindow, rawMaxTokens: modelWindow, isAutoCompactEnabled: false, autocompactSource: 'auto' };
@@ -455,6 +458,10 @@ lines.on('line', (line) => {
     if (subtype === 'set_permission_mode') {
       permissionMode = message.request.mode;
       write({ type: 'system', subtype: 'status', status: null, permissionMode, uuid: crypto.randomUUID(), session_id: sessionId });
+    }
+    // Measured on Claude: autoCompactEnabled applies mid-session, autoCompactWindow does not.
+    if (subtype === 'apply_flag_settings' && typeof message.request.settings?.autoCompactEnabled === 'boolean') {
+      settings.autoCompactEnabled = message.request.settings.autoCompactEnabled;
     }
     if (subtype === 'set_model' || subtype === 'set_permission_mode' || subtype === 'mcp_set_servers' || subtype === 'apply_flag_settings') {
       fs.appendFileSync(path.join(dir, 'controls.jsonl'), JSON.stringify({ sessionId, pid: process.pid, ...message.request }) + '\n');
