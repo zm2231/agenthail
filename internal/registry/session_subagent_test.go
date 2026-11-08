@@ -106,3 +106,16 @@ func TestResolveTargetWalksSubagentPaths(t *testing.T) {
 		t.Fatalf("a nickname shared by two siblings is ambiguous: %v", err)
 	}
 }
+
+// An empty target, as a request that omits its session ID sends, names no one
+// session, so nothing acts on whichever single root session it would match.
+func TestAnEmptyTargetResolvesNoSessionAmongSeveral(t *testing.T) {
+	r := openTestRegistry(t)
+	registerFamily(t, r)
+	if got, err := r.ResolveTarget(""); err == nil {
+		t.Fatalf("an empty target resolved to %q", got)
+	}
+	if got, err := r.ResolveSurfaceTarget(surface.KindCodex, ""); err == nil {
+		t.Fatalf("an empty codex target resolved to %q", got)
+	}
+}

@@ -126,6 +126,40 @@ func TestFragmentDoesNotResolveAnExitedHistoricalSession(t *testing.T) {
 	}
 }
 
+func TestSendToAnExitedSessionByAUniqueIDPrefixResumesIt(t *testing.T) {
+	e := exitedClaudeApp(t)
+	output, err := captureStdout(t, func() error { return e.app.Run([]string{"send", terminalConversation[:8], "hello"}) })
+	if err != nil || !strings.HasPrefix(output, "accepted by Claude socket") || e.peers.Count("hello") != 1 {
+		t.Fatalf("output=%q err=%v peer=%d", output, err, e.peers.Count("hello"))
+	}
+	if spawns := e.host.Spawns(t, terminalConversation); len(spawns) != 1 {
+		t.Fatalf("spawns=%+v, want the exited session resumed once", spawns)
+	}
+}
+
+func TestAnEmptySurfaceTargetResolvesNoExitedSession(t *testing.T) {
+	e := exitedClaudeApp(t)
+	if session, _, err := e.app.resolveTarget(context.Background(), "claude:"); err == nil {
+		t.Fatalf("claude: with no session resolved to %s", session.ID)
+	}
+}
+
+func TestAnIDPrefixTwoExitedSessionsShareResumesNeither(t *testing.T) {
+	e := exitedClaudeApp(t)
+	other := e.session
+	other.ID, other.Bridge, other.Name, other.Transcript = terminalConversation[:8]+"-0000-4000-8000-000000000000", "", "other terminal", ""
+	if err := e.r.RegisterSession(other); err != nil {
+		t.Fatal(err)
+	}
+	err := e.app.Run([]string{"send", terminalConversation[:8], "hello"})
+	if err == nil || !strings.Contains(err.Error(), terminalConversation) || !strings.Contains(err.Error(), other.ID) {
+		t.Fatalf("err=%v, want a refusal naming both sessions", err)
+	}
+	if len(e.host.Spawns(t, terminalConversation)) != 0 || len(e.host.Spawns(t, other.ID)) != 0 || e.peers.Count("hello") != 0 {
+		t.Fatal("an ambiguous prefix resumed or delivered to a session")
+	}
+}
+
 func TestResolvingARegisteredSessionTheSurfaceCannotGiveDoesNotRefreshIt(t *testing.T) {
 	for name, resolveErr := range map[string]error{"not listed": surface.ErrSessionNotFound, "surface unavailable": surface.DeliveryUnavailable(errors.New("fixture surface is down"))} {
 		t.Run(name, func(t *testing.T) {
