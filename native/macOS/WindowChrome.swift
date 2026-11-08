@@ -58,7 +58,7 @@ struct TitleBarStrip: View {
     private static let maximumTab: CGFloat = 240
 
     var body: some View {
-        let tree = model.sessionTree
+        let needsYou = model.needsYou
         HStack(spacing: DesktopSpace.s) {
             if !pane.sidebarDocks { SidebarToggle(pane: pane) }
             GeometryReader { geometry in
@@ -101,8 +101,8 @@ struct TitleBarStrip: View {
                 }
                 .frame(maxHeight: .infinity)
             }
-            if !tree.needsYou.isEmpty {
-                NeedsYouPill(sessions: tree.needsYou) { pane.select($0) }
+            if !needsYou.isEmpty {
+                NeedsYouPill(sessions: needsYou) { pane.select($0) }
             }
             Button { model.paletteVisible.toggle() } label: { Image(systemName: "magnifyingglass") }
                 .buttonStyle(.plain)
