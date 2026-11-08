@@ -1888,6 +1888,16 @@ struct PairingResponse: Decodable {
     let scopes: [String]
 }
 
+struct PairingStatusResponse: Decodable {
+    struct Device: Decodable {
+        let name: String
+    }
+
+    let id: String
+    let state: String
+    let device: Device?
+}
+
 struct PairedDeviceResponse: Decodable {
     struct Host: Decodable {
         let id: String

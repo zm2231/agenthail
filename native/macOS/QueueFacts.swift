@@ -37,6 +37,11 @@ enum QueueFacts {
         return item.status == "dead"
     }
 
+    static func canTakeBack(_ item: QueueState, target: SessionState?) -> Bool {
+        guard let target, !target.isReadOnly else { return false }
+        return item.status == "pending" && ["", "message"].contains(item.operation ?? "")
+    }
+
     static func canCancel(_ item: QueueState) -> Bool { item.status == "pending" || item.status == "dead" }
 
     static func lastError(_ item: QueueState) -> String? {

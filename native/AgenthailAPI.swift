@@ -564,6 +564,14 @@ final class AgenthailAPI: @unchecked Sendable {
         try await post("/api/v1/claude/compact-settings", body: body)
     }
 
+    func pairingStatus(id: String) async throws -> PairingStatusResponse {
+        var components = URLComponents()
+        components.path = "/api/v1/pairings"
+        components.queryItems = [URLQueryItem(name: "id", value: id)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
     func createLoginLink(remote: Bool) async throws -> LoginLinkResponse {
         try await post("/api/v1/dashboard/login-links", body: ["remote": remote])
     }

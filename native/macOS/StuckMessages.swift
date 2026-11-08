@@ -17,6 +17,7 @@ struct QueueItemActions: View {
 struct QueueItemRow: View {
     var model: AgenthailModel
     let item: QueueState
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let target = model.knownSessions.first { $0.id == item.sessionId }
@@ -43,8 +44,18 @@ struct QueueItemRow: View {
             Text(QueueFacts.statusLabel(item.status))
                 .font(.system(size: DesktopType.caption))
                 .foregroundStyle(item.status == "dead" ? DesktopPalette.failed : DesktopPalette.text2)
+            if QueueFacts.canTakeBack(item, target: target) {
+                Button("Take back", action: takeBack)
+                    .help("Cancel this queued message and put its text back in the conversation's composer")
+            }
             QueueItemActions(model: model, item: item)
         }
+    }
+
+    private func takeBack() {
+        model.takeBackQueued([item], sessionID: item.sessionId)
+        model.mainPane.select(item.sessionId)
+        MainWindowShow.show(model.mainWindow) { openWindow(id: "main") }
     }
 }
 

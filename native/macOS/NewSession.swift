@@ -89,12 +89,15 @@ struct NewSessionView: View {
         }
         placeChip
         if !draft.launchers.isEmpty, let launcher = draft.form.launcher {
-            chip(launcher.label, symbol: "terminal", help: "Where the agent runs") { launcherPicker }
+            chip(launcher.label, symbol: "terminal", help: NewSessionLabels.launcherHelp(launcher)) { launcherPicker }
         }
         NewSessionOptionsChip(form: $draft.form)
     }
 
-    private var launcherPicker: some View {
+    @ViewBuilder private var launcherPicker: some View {
+        if let detail = draft.form.launcher.flatMap(NewSessionLabels.launcherDetail) {
+            Text(detail)
+        }
         Picker("Runs in", selection: Binding(get: { draft.form.launcher?.id }, set: { id in draft.form.selectLauncher(draft.launchers.first { $0.id == id }) })) {
             Text("Default").tag(nil as String?)
             ForEach(draft.launchers) { option in

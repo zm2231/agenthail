@@ -42,6 +42,8 @@ final class AgenthailModel {
     var permissionsError: String?
     var signinError: String?
     var pairing: PairingResponse?
+    var pairingNotice: String?
+    @ObservationIgnored var pairingWatch: Task<Void, Never>?
     var settings: DashboardSettingsState?
     var claudeRemoteControl: ClaudeRemoteControlState?
     var audit: [HistoryState] = []
@@ -707,14 +709,17 @@ final class AgenthailModel {
 
     func loadAudit(reset: Bool) async {
         guard let api else { return }
+        let (kind, query) = (auditKind, auditQuery)
         do {
             let before = reset ? 0 : (audit.last?.id ?? 0)
-            let page = try await api.history(before: before, kind: auditKind, query: auditQuery)
+            let page = try await api.history(before: before, kind: kind, query: query)
+            guard kind == auditKind, query == auditQuery else { return }
             audit = reset ? page.items : audit + page.items
             auditKinds = page.kinds
             auditHasMore = page.hasMore
             operationError = nil
         } catch {
+            guard kind == auditKind, query == auditQuery else { return }
             operationError = AgenthailAPIError.userMessage(error)
         }
     }
@@ -754,18 +759,6 @@ final class AgenthailModel {
                 try await api.updateSettings(action: enabled ? "remote-enable" : "remote-disable")
                 settings = try await api.settings()
                 pairing = nil
-                operationError = nil
-            } catch {
-                operationError = AgenthailAPIError.userMessage(error)
-            }
-        }
-    }
-
-    func createPairing() {
-        guard let api else { return }
-        Task {
-            do {
-                pairing = try await api.createPairing(name: "iPhone")
                 operationError = nil
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)

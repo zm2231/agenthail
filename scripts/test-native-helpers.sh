@@ -33,6 +33,7 @@ SOURCES=(
   TaggedResponses.swift
   AgenthailModel.swift
   AgenthailModelPaging.swift
+  AgenthailModelPairing.swift
   ScopeTreeCache.swift
   AgenthailModels.swift
   ComposerAttachment.swift
@@ -163,6 +164,7 @@ SOURCES=(
   macOS/ClaudeCompact.swift
   macOS/ClaudeCompactDraft.swift
   macOS/ClaudeCompactStore.swift
+  macOS/PairingProgress.swift
   macOS/SessionPane.swift
   macOS/MacDecisions.swift
   macOS/PaneScope.swift
