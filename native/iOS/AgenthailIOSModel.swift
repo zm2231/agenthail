@@ -510,7 +510,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents.children(of: sessionID))
     }
 
-    func inboxPage(before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
+    private func inboxHosts() throws -> [InboxPage.Host] {
         let direct = hostOrder.compactMap { connections[$0] }.filter(\.shownReachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
         let remote = catalog.hosts.compactMap { host -> InboxPage.Host? in
             guard let target = catalog.target(forHost: host.id), let peer = target.remote, let connection = connections[target.hostID] else { return nil }
@@ -518,7 +518,33 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
         let hosts = direct + remote
         guard !hosts.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        return try await InboxPage.load(from: hosts, before: cursors, partial: partial)
+        return hosts
+    }
+
+    func inboxPage(before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
+        try await InboxPage.load(from: inboxHosts(), before: cursors, partial: partial)
+    }
+
+    func decisionInbox() async throws -> DecisionInbox {
+        await DecisionInbox.load(from: try inboxHosts())
+    }
+
+    func answerDecision(_ request: SessionRequest, sessionID: String, decision: RequestDecision) async -> DecisionAnswer {
+        guard answeringRequest == nil else { return .busy }
+        answeringRequest = request.id
+        defer { answeringRequest = nil }
+        var failure: RequestAnswerFailure?
+        do {
+            let (api, route) = try resolve(sessionID)
+            _ = try await api.respond(sessionID: route.sessionID, requestID: request.id, decision: decision)
+        } catch {
+            failure = RequestAnswerFailure(error)
+        }
+        if RequestAnswerFailure.retires(request, failure: failure) {
+            retiredAsks.retire(request.id, in: sessionID, receipt: failure == nil ? AnswerReceipt(request, decision) : nil)
+        }
+        await refreshSession(sessionID)
+        return failure.map(DecisionAnswer.failed) ?? .answered
     }
 
     func editSession(id: String, action: String, text: String = "") async throws {

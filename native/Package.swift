@@ -33,6 +33,7 @@ let package = Package(
                 "KeptDelivery.swift",
                 "QueueSteer.swift",
                 "InboxMessage.swift",
+                "Decisions.swift",
                 "PeerEnvelope.swift",
                 "TaggedResponses.swift",
                 "UIConfig.swift",

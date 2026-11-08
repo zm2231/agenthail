@@ -43,6 +43,7 @@ targets:
       - path: KeptDelivery.swift
       - path: QueueSteer.swift
       - path: InboxMessage.swift
+      - path: Decisions.swift
       - path: PeerEnvelope.swift
       - path: TaggedResponses.swift
       - path: UIConfig.swift
