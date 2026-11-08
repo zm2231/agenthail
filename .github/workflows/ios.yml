@@ -46,7 +46,7 @@ jobs:
           test -s "$RUNNER_TEMP/sources"
           git diff --name-only --no-renames "$BASE" HEAD > "$RUNNER_TEMP/changed"
           inputs=(native/project.yml native/Agenthail.xcodeproj native/ui-test-tiers.txt scripts/ios-simulator.sh scripts/ios-test-stall-guard.sh scripts/ios-ui-tests.sh scripts/test-xcodegen-project.sh .github/workflows/ios.yml)
-          while read -r source; do inputs+=("native/$source"); done < "$RUNNER_TEMP/sources"
+          while read -r source; do path="native/$source"; inputs+=("${path#native/../}"); done < "$RUNNER_TEMP/sources"
           ios=false
           while read -r file; do
             for input in "${inputs[@]}"; do

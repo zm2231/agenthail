@@ -109,4 +109,8 @@ vm.runInContext("renderTiles()", row);
 assert.match(painted.innerHTML, /data-scope="github\.com\/example\/web"[^>]*><span class="tile-mark" data-colour="3">W</, "a project tile's mark carries the project's colour");
 assert.equal(painted.innerHTML.match(/data-colour/g).length, 1, "Inbox, the overflow tile and All stay neutral");
 assert.match(painted.innerHTML, /title="1 more project"[^]*<span class="tile-name">\+1<\/span>/, "the overflow tile reads +N and names the count in full");
+row.app.state = { daemon: { host: { id: "server-1" } }, projects: [{ id: "notes", displayName: "notes", sessionCount: 1 }, { id: "laptop::scratch", displayName: "scratch", sessionCount: 1 }] };
+vm.runInContext("renderTiles()", row);
+assert.match(painted.innerHTML, /data-scope="notes"[^>]*><span class="tile-mark" data-colour="1">N</, "a keyless project on its own computer takes the colour every other computer gives it");
+assert.match(painted.innerHTML, /data-scope="laptop::scratch"[^>]*><span class="tile-mark" data-colour="5">S</, "a relayed project keeps its owner's colour");
 console.log("dashboard session scope ok");

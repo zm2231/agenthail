@@ -56,7 +56,7 @@ struct PhoneProjectTiles: View {
     }
 
     private func letter(_ project: ProjectState) -> some View {
-        let colour = PhonePalette.project(model.projects[project.id]?.state.id ?? project.id)
+        let colour = PhonePalette.project(model.colourID(of: project.id))
         return Text(ProjectTiles.letter(project.displayName))
             .font(.body.weight(.semibold))
             .foregroundStyle(colour.ink)

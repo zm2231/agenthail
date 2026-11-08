@@ -211,6 +211,8 @@ targets:
     platform: iOS
     sources:
       - path: iOSTests
+      - path: ../scripts/fixtures/project-colour-vectors.json
+        buildPhase: resources
     dependencies:
       - target: AgenthailIOS
     settings:

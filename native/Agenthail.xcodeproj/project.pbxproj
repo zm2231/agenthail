@@ -22,6 +22,7 @@
 		0E2E9D9395C4F13F0A4D4BC1 /* PreviewOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 826A12E2CF9BAA03B52A3BE2 /* PreviewOrder.swift */; };
 		0F92392EFC8E61394813A4A2 /* PeerEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = F77B8DA845015C0FCA7BF4DC /* PeerEnvelope.swift */; };
 		0FAECDD6138BD5C0909D10AC /* ActivityCollapseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F09A07A373E592786676A4E6 /* ActivityCollapseTests.swift */; };
+		0FD65105E3BB3A00644313C5 /* project-colour-vectors.json in Resources */ = {isa = PBXBuildFile; fileRef = 81738883B2A44D4FCEACC17E /* project-colour-vectors.json */; };
 		100B4CB409614B5814F31A16 /* PhoneProjectTiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9935CC4F24C80AD8F13FBE84 /* PhoneProjectTiles.swift */; };
 		1173F957401A01ED3BC23E60 /* CompactActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6FA2A30098E1DF73419A954 /* CompactActivity.swift */; };
 		11918A9914F039C35680AB1B /* ComposerSendTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D28CE0B823700F4409C5132 /* ComposerSendTests.swift */; };
@@ -489,6 +490,7 @@
 		7EDE788460A077CFD53DEB5B /* VoiceSystemCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSystemCall.swift; sourceTree = "<group>"; };
 		80556ACED6CC69B509058277 /* NativeVoicePeer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVoicePeer.swift; sourceTree = "<group>"; };
 		810A89887D83EC59792B1195 /* ReturnAndTypingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReturnAndTypingUITests.swift; sourceTree = "<group>"; };
+		81738883B2A44D4FCEACC17E /* project-colour-vectors.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "project-colour-vectors.json"; sourceTree = "<group>"; };
 		826A12E2CF9BAA03B52A3BE2 /* PreviewOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewOrder.swift; sourceTree = "<group>"; };
 		82CF227CB7E6B02B97811F14 /* HolderPickerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HolderPickerUITests.swift; sourceTree = "<group>"; };
 		836598CAF0AF568C68FD23C5 /* SessionCreation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCreation.swift; sourceTree = "<group>"; };
@@ -932,6 +934,7 @@
 				1BE85140BFF4D3D8B996F2AD /* VoiceAudioBridge.swift */,
 				C8E82B270A0825F319A10EBD /* VoiceCallDiagnostics.swift */,
 				AFAA5C70E0A307C25243752B /* VoiceOperatorModel.swift */,
+				B9244E7733E316729D90562B /* fixtures */,
 				2F4CFBEFFBB629F2446D48E0 /* iOS */,
 				6FA4E53ED9FB111FBCBD675E /* iOSNotificationService */,
 				FE69312B1A3C67311E6940BB /* iOSTests */,
@@ -950,6 +953,15 @@
 				76A055FF778B7F609D27D5DD /* AgenthailIOSUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B9244E7733E316729D90562B /* fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				81738883B2A44D4FCEACC17E /* project-colour-vectors.json */,
+			);
+			name = fixtures;
+			path = ../scripts/fixtures;
 			sourceTree = "<group>";
 		};
 		FE69312B1A3C67311E6940BB /* iOSTests */ = {
@@ -1028,6 +1040,7 @@
 			buildConfigurationList = 36987F37A88317F93BD7D7F4 /* Build configuration list for PBXNativeTarget "AgenthailIOSTests" */;
 			buildPhases = (
 				623A41C5D12865C782118B9C /* Sources */,
+				6A9A228DED78DD9637DA6A10 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -1129,6 +1142,14 @@
 			files = (
 				E8B2191C22212C7C32973327 /* Assets.xcassets in Resources */,
 				99E03BA72DDB73EE6761B2FF /* WebRTC-LICENSE.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6A9A228DED78DD9637DA6A10 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0FD65105E3BB3A00644313C5 /* project-colour-vectors.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

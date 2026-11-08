@@ -43,6 +43,12 @@ export function orderTiles(projects, limit) {
 
 export const projectColourCount = 6;
 
+export function projectColourID(projectID, ownerHostID) {
+  const id = String(projectID ?? "");
+  if (!ownerHostID || !id || id.includes(separator) || id.startsWith("repo:")) return id;
+  return `${ownerHostID}${separator}${id}`;
+}
+
 export function projectColour(projectID) {
   let hash = 2166136261;
   for (const part of encodeURIComponent(String(projectID ?? "")).match(/%[0-9A-F]{2}|./g) || []) {

@@ -10,10 +10,11 @@ struct SidebarTiles: View {
         let inbox = model.decisionFeed.inbox
         let counts = inbox.needsYou(in: model.projects)
         let tiles = ProjectTiles.order(model.projects, limit: Self.projectLimit)
+        let owner = model.snapshot?.daemon.host?.id ?? ""
         HStack(alignment: .top, spacing: 2) {
             tile("Inbox", mark: .symbol("tray"), count: inbox.decisions.count, selected: pane.scope == .inbox, id: "sidebar-tile-inbox", action: pane.showInbox)
             ForEach(tiles.shown) { project in
-                tile(project.displayName, mark: .letter(ProjectTiles.letter(project.displayName), project: project.id), count: counts[project.id] ?? 0,
+                tile(project.displayName, mark: .letter(ProjectTiles.letter(project.displayName), project: ProjectTiles.colourID(project.id, owner: owner)), count: counts[project.id] ?? 0,
                      selected: pane.scope == .project(project.id), id: "sidebar-tile-project-" + project.id) { pane.showScope(project: project.id) }
             }
             if !tiles.more.isEmpty {

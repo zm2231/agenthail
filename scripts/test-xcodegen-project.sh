@@ -6,6 +6,8 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/agenthail-xcodegen.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
 cp -R "$repo/native" "$tmp/native"
+mkdir -p "$tmp/scripts"
+cp -R "$repo/scripts/fixtures" "$tmp/scripts/fixtures"
 rm -rf "$tmp/native/Agenthail.xcodeproj"
 xcodegen generate --quiet --spec "$tmp/native/project.yml" --project "$tmp/native" --project-root "$tmp/native"
 

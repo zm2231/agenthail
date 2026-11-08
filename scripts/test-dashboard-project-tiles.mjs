@@ -42,6 +42,12 @@ const colours = JSON.parse(readFileSync(new URL("./fixtures/project-colour-vecto
 const projectColour = vm.runInContext("projectColour", context);
 assert.equal(vm.runInContext("projectColourCount", context), colours.count, "the dashboard has as many project colours as the vectors");
 for (const vector of colours.cases) assert.equal(projectColour(vector.id), vector.colour, `${vector.id} takes the same colour as on the Mac`);
+const projectColourID = vm.runInContext("projectColourID", context);
+for (const vector of colours.colourIds) {
+  const id = projectColourID(vector.id, vector.owner);
+  assert.equal(id, vector.colourId, vector.name);
+  assert.equal(projectColour(id), vector.colour, vector.name);
+}
 const css = readFileSync(new URL("../internal/daemon/dashboard/tokens.css", import.meta.url), "utf8");
 for (let colour = 0; colour < colours.count; colour++) {
   assert.ok(css.includes(`.tile-mark[data-colour="${colour}"]`), `tokens.css paints project colour ${colour}`);

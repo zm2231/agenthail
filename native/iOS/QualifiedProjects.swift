@@ -10,4 +10,8 @@ extension AgenthailIOSModel {
             }
         }
     }
+
+    func colourID(of projectID: String) -> String {
+        projects[projectID].map { ProjectTiles.colourID($0.state.id, owner: $0.hostID) } ?? projectID
+    }
 }
