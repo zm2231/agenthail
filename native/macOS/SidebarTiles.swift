@@ -13,7 +13,7 @@ struct SidebarTiles: View {
         HStack(alignment: .top, spacing: 2) {
             tile("Inbox", mark: .symbol("tray"), count: inbox.decisions.count, selected: pane.scope == .inbox, id: "sidebar-tile-inbox", action: pane.showInbox)
             ForEach(tiles.shown) { project in
-                tile(project.displayName, mark: .letter(ProjectTiles.letter(project.displayName)), count: counts[project.id] ?? 0,
+                tile(project.displayName, mark: .letter(ProjectTiles.letter(project.displayName), project: project.id), count: counts[project.id] ?? 0,
                      selected: pane.scope == .project(project.id), id: "sidebar-tile-project-" + project.id) { pane.showScope(project: project.id) }
             }
             if !tiles.more.isEmpty {
@@ -22,13 +22,15 @@ struct SidebarTiles: View {
                         Button(project.archived == true ? "\(project.displayName) (archived)" : project.displayName) { pane.showScope(project: project.id) }
                     }
                 } label: {
-                    face("\(tiles.more.count) more", mark: .symbol("ellipsis"), count: tiles.more.reduce(0) { $0 + (counts[$1.id] ?? 0) },
+                    face("+\(tiles.more.count)", mark: .symbol("ellipsis"), count: tiles.more.reduce(0) { $0 + (counts[$1.id] ?? 0) },
                          selected: tiles.more.contains { pane.scope == .project($0.id) })
                 }
                 .menuStyle(.button)
                 .menuIndicator(.hidden)
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("sidebar-tile-more")
+                .accessibilityLabel(moreTitle(tiles.more.count))
+                .help(moreTitle(tiles.more.count))
             }
             tile("All", mark: .symbol("square.stack"), count: 0, selected: pane.scope == .all, id: "sidebar-tile-all", action: pane.showAll)
         }
@@ -36,9 +38,22 @@ struct SidebarTiles: View {
         .padding(.bottom, DesktopSpace.xs)
     }
 
+    private func moreTitle(_ count: Int) -> String {
+        count == 1 ? "1 more project" : "\(count) more projects"
+    }
+
     enum Mark {
         case symbol(String)
-        case letter(String)
+        case letter(String, project: String)
+
+        var colours: (fill: Color, ink: AnyShapeStyle) {
+            switch self {
+            case .symbol: return (DesktopPalette.fill, AnyShapeStyle(DesktopPalette.text))
+            case .letter(_, let project):
+                let colour = DesktopPalette.project(project)
+                return (colour.fill, AnyShapeStyle(colour.ink))
+            }
+        }
     }
 
     private func tile(_ title: String, mark: Mark, count: Int, selected: Bool, id: String, action: @escaping () -> Void) -> some View {
@@ -56,12 +71,12 @@ struct SidebarTiles: View {
             Group {
                 switch mark {
                 case .symbol(let name): Image(systemName: name).font(.system(size: DesktopType.body, weight: .medium))
-                case .letter(let letter): Text(letter).font(.system(size: DesktopType.body, weight: .semibold))
+                case .letter(let letter, _): Text(letter).font(.system(size: DesktopType.body, weight: .semibold))
                 }
             }
-            .foregroundStyle(DesktopPalette.text)
+            .foregroundStyle(mark.colours.ink)
             .frame(width: 28, height: 28)
-            .background(DesktopPalette.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+            .background(mark.colours.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
             .overlay(alignment: .topTrailing) {
                 if count > 0 {
                     Text("\(count)")

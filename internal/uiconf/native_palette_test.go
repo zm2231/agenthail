@@ -41,6 +41,18 @@ func TestNativePaletteTokensMatchPaletteJSON(t *testing.T) {
 		}
 		return pairs
 	}
+	var projects []ProjectColour
+	for i, m := range regexp.MustCompile(`\(fill: \(0x(\w{6}), 0x(\w{6})\), ink: \(0x(\w{6}), 0x(\w{6})\)\)`).FindAllStringSubmatch(string(source), -1) {
+		name := ""
+		if i < len(BuiltIn.Projects) {
+			name = BuiltIn.Projects[i].Name
+		}
+		projects = append(projects, ProjectColour{Name: name, Fill: pair(m[1], m[2]), Ink: pair(m[3], m[4])})
+	}
+	if fmt.Sprint(projects) != fmt.Sprint(BuiltIn.Projects) {
+		t.Errorf("PaletteTokens projects %v, palette.json %v", projects, BuiltIn.Projects)
+	}
+
 	rolesSource, increasedSource, found := strings.Cut(string(source), "static let increasedRoles")
 	if !found {
 		t.Fatal("PaletteTokens has no increasedRoles table")

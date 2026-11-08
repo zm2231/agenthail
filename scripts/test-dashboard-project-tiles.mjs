@@ -38,4 +38,12 @@ const roomy = orderTiles(projects, 6);
 assert.deepEqual(ids(roomy.shown), ["newest", "middle", "old", "lead-only"], "a project with no sessions gets a tile when it has a lead");
 assert.deepEqual(ids(roomy.more), ["empty", "shelved"], "an archived project only appears under more");
 assert.equal(tileLetter("agenthail") + tileLetter("_tools") + tileLetter(""), "AT·", "a tile's letter is the name's first letter or digit");
+const colours = JSON.parse(readFileSync(new URL("./fixtures/project-colour-vectors.json", import.meta.url), "utf8"));
+const projectColour = vm.runInContext("projectColour", context);
+assert.equal(vm.runInContext("projectColourCount", context), colours.count, "the dashboard has as many project colours as the vectors");
+for (const vector of colours.cases) assert.equal(projectColour(vector.id), vector.colour, `${vector.id} takes the same colour as on the Mac`);
+const css = readFileSync(new URL("../internal/daemon/dashboard/tokens.css", import.meta.url), "utf8");
+for (let colour = 0; colour < colours.count; colour++) {
+  assert.ok(css.includes(`.tile-mark[data-colour="${colour}"]`), `tokens.css paints project colour ${colour}`);
+}
 console.log("dashboard project tiles tests passed");

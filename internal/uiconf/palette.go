@@ -15,9 +15,16 @@ type Pair struct {
 	Light string `json:"light"`
 }
 
+type ProjectColour struct {
+	Name string `json:"name"`
+	Fill Pair   `json:"fill"`
+	Ink  Pair   `json:"ink"`
+}
+
 type Palette struct {
 	Roles    map[string]Pair            `json:"roles"`
 	Surfaces map[string]map[string]Pair `json:"surfaces"`
+	Projects []ProjectColour            `json:"projects"`
 }
 
 var BuiltIn = func() Palette {

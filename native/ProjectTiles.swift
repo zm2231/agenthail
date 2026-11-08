@@ -18,6 +18,12 @@ struct ProjectTiles: Equatable {
         return ProjectTiles(shown: shown, more: rest)
     }
 
+    static func colour(_ projectID: String) -> Int {
+        var hash: UInt32 = 2_166_136_261
+        for byte in projectID.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
+        return Int(hash % UInt32(PaletteTokens.projects.count))
+    }
+
     static func letter(_ name: String) -> String {
         name.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "·"
     }

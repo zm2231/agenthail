@@ -23,8 +23,23 @@ struct ProjectTilesTest {
         check(roomy.shown.map(\.id) == ["newest", "middle", "old", "lead-only"], "a project with no sessions gets a tile when it has a lead: \(roomy.shown.map(\.id))")
         check(roomy.more.map(\.id) == ["empty", "shelved"], "an archived project only appears under more")
         check(ProjectTiles.letter("agenthail") == "A" && ProjectTiles.letter("_tools") == "T" && ProjectTiles.letter("") == "·", "a tile's letter is the name's first letter or digit")
+        let vectors = try! JSONDecoder().decode(ColourVectors.self, from: Data(contentsOf: colourFixture))
+        check(PaletteTokens.projects.count == vectors.count, "\(PaletteTokens.projects.count) project colours, the vectors expect \(vectors.count)")
+        for vector in vectors.cases {
+            check(ProjectTiles.colour(vector.id) == vector.colour, "\(vector.id) takes colour \(ProjectTiles.colour(vector.id)), the dashboard gives it \(vector.colour)")
+        }
         print("project tiles ok")
     }
+
+    struct ColourVectors: Decodable {
+        struct Case: Decodable { let id: String; let colour: Int }
+        let count: Int
+        let cases: [Case]
+    }
+
+    static let colourFixture = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("scripts/fixtures/project-colour-vectors.json")
 
     static func check(_ condition: Bool, _ message: String) {
         if !condition {

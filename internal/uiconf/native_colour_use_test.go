@@ -88,6 +88,13 @@ var statusColours = map[string]statusColour{
 			"macOS/ToolRunView.swift":        {1, "added lines"},
 		},
 	},
+	"project": {
+		job:  "which project something belongs to, on the project's tile mark; never a state",
+		uses: regexp.MustCompile(`DesktopPalette\.project\(|PhonePalette\.project\(|PaletteTokens\.projects\[`),
+		files: map[string]colourUse{
+			"macOS/SidebarTiles.swift": {1, "a project tile's letter mark"},
+		},
+	},
 }
 
 var paletteDefinitions = map[string]bool{

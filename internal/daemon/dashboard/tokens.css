@@ -27,6 +27,18 @@
   --radius: 16px;
   --max: 1540px;
   --conversation-width: 1120px;
+  --project-0-fill: #38421c;
+  --project-0-ink: #d5e7af;
+  --project-1-fill: #074742;
+  --project-1-ink: #a4efe5;
+  --project-2-fill: #124356;
+  --project-2-ink: #a9e9ff;
+  --project-3-fill: #403659;
+  --project-3-ink: #e2d5ff;
+  --project-4-fill: #4d324f;
+  --project-4-ink: #f8cefb;
+  --project-5-fill: #562f3e;
+  --project-5-ink: #ffcae0;
 }
 :root[data-theme="light"] {
   --paper: oklch(97.5% 0.006 70);
@@ -50,6 +62,18 @@
   --shadow-soft: oklch(30% 0.02 45/0.1);
   --shadow: oklch(30% 0.02 45/0.16);
   --shadow-strong: oklch(30% 0.02 45/0.2);
+  --project-0-fill: #d8e4bc;
+  --project-0-ink: #354400;
+  --project-1-fill: #b6eae3;
+  --project-1-ink: #004b44;
+  --project-2-fill: #b9e6fb;
+  --project-2-ink: #004562;
+  --project-3-fill: #e1d7ff;
+  --project-3-ink: #423166;
+  --project-4-fill: #f1d2f3;
+  --project-4-ink: #542a57;
+  --project-5-fill: #fec0d6;
+  --project-5-ink: #60263f;
 }
 * {
   box-sizing: border-box;
@@ -666,6 +690,12 @@ textarea:focus-visible {
   color: var(--ink);
   font-weight: 600;
 }
+.tile-mark[data-colour="0"] { background: var(--project-0-fill); color: var(--project-0-ink); }
+.tile-mark[data-colour="1"] { background: var(--project-1-fill); color: var(--project-1-ink); }
+.tile-mark[data-colour="2"] { background: var(--project-2-fill); color: var(--project-2-ink); }
+.tile-mark[data-colour="3"] { background: var(--project-3-fill); color: var(--project-3-ink); }
+.tile-mark[data-colour="4"] { background: var(--project-4-fill); color: var(--project-4-ink); }
+.tile-mark[data-colour="5"] { background: var(--project-5-fill); color: var(--project-5-ink); }
 .tile-badge {
   position: absolute;
   top: -6px;

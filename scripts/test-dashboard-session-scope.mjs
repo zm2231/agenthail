@@ -97,4 +97,16 @@ vm.runInContext('setScope("P")', tiles);
 tiles.app.state.projects = [{ id: "Q" }];
 vm.runInContext("dropMissingScope()", tiles);
 assert.equal(tiles.app.scope, "all", "a project that is gone drops back to All");
+const painted = { innerHTML: "" };
+const row = vm.createContext({
+  app: { scope: "all", state: { projects: [{ id: "github.com/example/web", displayName: "web", sessionCount: 1, lastActive: "2026-11-08T10:00:00Z" }, { id: "shelved", archived: true }] } },
+  showView: () => {}, openProject: () => {}, leaveProject: () => {}, syncDecisionPane: () => {}, renderSessions: () => {},
+  shownDecisions: () => [],
+  $: () => painted,
+});
+await dashboardModules(["project-tiles-view"], row);
+vm.runInContext("renderTiles()", row);
+assert.match(painted.innerHTML, /data-scope="github\.com\/example\/web"[^>]*><span class="tile-mark" data-colour="3">W</, "a project tile's mark carries the project's colour");
+assert.equal(painted.innerHTML.match(/data-colour/g).length, 1, "Inbox, the overflow tile and All stay neutral");
+assert.match(painted.innerHTML, /title="1 more project"[^]*<span class="tile-name">\+1<\/span>/, "the overflow tile reads +N and names the count in full");
 console.log("dashboard session scope ok");

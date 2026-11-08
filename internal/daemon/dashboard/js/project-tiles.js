@@ -41,6 +41,17 @@ export function orderTiles(projects, limit) {
   return { shown, more };
 }
 
+export const projectColourCount = 6;
+
+export function projectColour(projectID) {
+  let hash = 2166136261;
+  for (const part of encodeURIComponent(String(projectID ?? "")).match(/%[0-9A-F]{2}|./g) || []) {
+    const byte = part.length === 3 ? parseInt(part.slice(1), 16) : part.charCodeAt(0);
+    hash = Math.imul(hash ^ byte, 16777619) >>> 0;
+  }
+  return hash % projectColourCount;
+}
+
 export function tileLetter(name) {
   const found = Array.from(String(name || "")).find((character) => /[\p{L}\p{N}]/u.test(character));
   return found ? found.toUpperCase() : "·";

@@ -1,7 +1,7 @@
 import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape } from "./format.js";
-import { orderTiles, tileLetter, needsYouByProject } from "./project-tiles.js";
+import { orderTiles, tileLetter, needsYouByProject, projectColour } from "./project-tiles.js";
 import { shownDecisions } from "./decision-card.js";
 import { openProject, leaveProject } from "./project-pane.js";
 import { syncDecisionPane } from "./pane-scope.js";
@@ -10,9 +10,10 @@ import { showView } from "./navigation.js";
 
 export const tileLimit = 6;
 
-function tile(scope, mark, title, count, selected) {
+function tile(scope, mark, title, count, selected, colour) {
   const badge = count ? `<span class="tile-badge">${count}</span>` : "";
-  return `<button class="project-tile${selected ? " active" : ""}" type="button" data-scope="${escape(scope)}" title="${escape(title)}" aria-pressed="${selected}"><span class="tile-mark">${mark}${badge}</span><span class="tile-name">${escape(title)}</span></button>`;
+  const tint = colour === undefined ? "" : ` data-colour="${colour}"`;
+  return `<button class="project-tile${selected ? " active" : ""}" type="button" data-scope="${escape(scope)}" title="${escape(title)}" aria-pressed="${selected}"><span class="tile-mark"${tint}>${mark}${badge}</span><span class="tile-name">${escape(title)}</span></button>`;
 }
 
 export function renderTiles() {
@@ -27,10 +28,10 @@ export function renderTiles() {
   const moreSelected = more.some((project) => project.id === scope);
   const options = more.map((project) => `<option value="${escape(project.id)}"${project.id === scope ? " selected" : ""}>${escape(project.displayName || project.id)}${project.archived ? " (archived)" : ""}</option>`).join("");
   const menu = more.length
-    ? `<label class="project-tile${moreSelected ? " active" : ""}" title="More projects"><span class="tile-mark">…${moreCount ? `<span class="tile-badge">${moreCount}</span>` : ""}</span><span class="tile-name">${more.length} more</span><select data-scope-more aria-label="More projects"><option value="">More projects</option>${options}</select></label>`
+    ? `<label class="project-tile${moreSelected ? " active" : ""}" title="${more.length} more ${more.length === 1 ? "project" : "projects"}"><span class="tile-mark">…${moreCount ? `<span class="tile-badge">${moreCount}</span>` : ""}</span><span class="tile-name">+${more.length}</span><select data-scope-more aria-label="More projects"><option value="">More projects</option>${options}</select></label>`
     : "";
   row.innerHTML = tile("inbox", "▤", "Inbox", decisions.length, scope === "inbox")
-    + shown.map((project) => tile(project.id, escape(tileLetter(project.displayName || project.id)), project.displayName || project.id, counts[project.id] || 0, scope === project.id)).join("")
+    + shown.map((project) => tile(project.id, escape(tileLetter(project.displayName || project.id)), project.displayName || project.id, counts[project.id] || 0, scope === project.id, projectColour(project.id))).join("")
     + menu
     + tile("all", "≡", "All", 0, scope === "all");
 }
