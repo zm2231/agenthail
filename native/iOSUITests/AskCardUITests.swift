@@ -14,7 +14,7 @@ final class AskCardUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-ask", "--preview-theme", theme]
         app.launch()
-        let heading = app.staticTexts["@builder asks: Ready to ship"]
+        let heading = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "@builder asks: Ready to ship")).firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 10), "the ask shows with the session's name though it answers nothing through its provider")
         XCTAssertTrue(app.staticTexts["· Recommended"].exists || app.buttons.matching(NSPredicate(format: "label CONTAINS 'Recommended'")).firstMatch.exists, "the suggested option is marked Recommended")
         XCTAssertTrue(app.buttons["Runbook"].exists || app.links["Runbook"].exists, "the ask's link shows")
