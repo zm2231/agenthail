@@ -40,7 +40,7 @@ const context = {
   labels: { codex: "Codex", claude: "Claude Code" },
   Date: class extends Date { static now() { return now; } },
 };
-await dashboardModules(["session-order", "project-view", "project-now", "session-row", "holders", "presence", "hosts", "session-labels", "format"], context);
+await dashboardModules(["session-order", "project-view", "project-tiles", "project-now", "session-row", "holders", "presence", "hosts", "session-labels", "format"], context);
 const run = (code) => vm.runInContext(code, context);
 let html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /Loading this project/, "a project page waits for its own listing rather than showing an empty or stale one");

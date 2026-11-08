@@ -35,6 +35,10 @@ enum SessionDisplayKind: String, CaseIterable, Identifiable {
         }
     }
 
+    static func idleLead(_ session: SessionState, now: Date = Date()) -> Bool {
+        session.currentReason == "lead" && of(session, now: now) == .idle
+    }
+
     static func label(_ session: SessionState, now: Date = Date(), waitingPlace: WaitingPlace? = nil, limit: String? = nil) -> String {
         switch of(session, now: now) {
         case .unavailable: "Unavailable"

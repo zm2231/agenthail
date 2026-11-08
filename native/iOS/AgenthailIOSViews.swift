@@ -1727,6 +1727,16 @@ struct IOSSessionRow: View {
             .lineLimit(1)
             .fixedSize()
             .accessibilityLabel("Waiting on background work")
+        } else if SessionDisplayKind.idleLead(session) {
+            HStack(spacing: 4) {
+                Image(systemName: "flag")
+                Text("Lead")
+            }
+            .font(.caption)
+            .foregroundStyle(PhonePalette.muted)
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityIdentifier("session-lead-" + session.id)
         }
         if let plan = session.livePlan {
             HStack(spacing: 4) {

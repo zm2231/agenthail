@@ -9,7 +9,10 @@ struct SidebarTiles: View {
     var body: some View {
         let inbox = model.decisionFeed.inbox
         let counts = inbox.needsYou(in: model.projects)
-        let tiles = ProjectTiles.order(model.projects, limit: Self.projectLimit)
+        let leads = model.projects.reduce(into: [String: ProjectTiles.Lead]()) { leads, project in
+            if let session = project.leads.first.flatMap(ProjectContents.leadSessionID).flatMap(model.session) { leads[project.id] = ProjectTiles.Lead(session) }
+        }
+        let tiles = ProjectTiles.order(model.projects, limit: Self.projectLimit, waiting: counts, leads: leads)
         let owner = model.snapshot?.daemon.host?.id ?? ""
         HStack(alignment: .top, spacing: 2) {
             tile("Inbox", mark: .symbol("tray"), count: inbox.decisions.count, selected: pane.scope == .inbox, id: "sidebar-tile-inbox", action: pane.showInbox)

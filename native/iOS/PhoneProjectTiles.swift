@@ -13,8 +13,8 @@ struct PhoneProjectTiles: View {
 
     var body: some View {
         let projects = model.qualifiedProjects
-        let tiles = ProjectTiles.order(projects, limit: Self.limit(sizeClass))
         let counts = model.decisionFeed.inbox.needsYou(in: projects)
+        let tiles = ProjectTiles.order(projects, limit: Self.limit(sizeClass), waiting: counts, leads: model.tileLeads)
         if !tiles.shown.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 8) {

@@ -14,6 +14,8 @@ struct SessionFactsTest {
 
         expect(SessionFacts.presenceLabel(session(reason: "queued")) == "Queued", "current reason wins")
         expect(SessionFacts.presenceLabel(session(reason: "lead")) == "Lead", "a project lead idle past the window reads as the lead")
+        expect(SessionDisplayKind.idleLead(session(reason: "lead")), "the iPhone labels an idle lead too")
+        expect(!SessionDisplayKind.idleLead(session(status: "busy", reason: "lead")) && !SessionDisplayKind.idleLead(session(reason: "recent")), "a working lead or a recent session is not labelled Lead")
         expect(SessionFacts.presenceLabel(session(status: "busy")) == "Working", "status label without a reason")
         expect(SessionFacts.presenceLabel(session(status: "notLoaded")) == "Unavailable", "not loaded reads as unavailable")
         var waiting = session(status: "busy", reason: "working")

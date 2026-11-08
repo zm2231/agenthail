@@ -1,0 +1,110 @@
+{
+  "now": "2026-11-08T12:00:00Z",
+  "cases": [
+    {
+      "name": "an idle lead from yesterday outranks newer work without a lead",
+      "limit": 2,
+      "projects": [
+        {"id": "alpha", "sessionCount": 1, "lastActive": "2026-11-08T11:00:00Z"},
+        {"id": "beta", "sessionCount": 1, "lastActive": "2026-11-08T10:00:00Z"},
+        {"id": "led", "sessionCount": 0, "lead": {"session": {"currentReason": "lead", "waitingOn": false, "lastActive": "2026-11-07T09:00:00Z"}}}
+      ],
+      "shown": ["led", "alpha"],
+      "more": ["beta"]
+    },
+    {
+      "name": "a project with a decision waiting is never pushed under more by lead projects",
+      "limit": 3,
+      "projects": [
+        {"id": "lead-1", "sessionCount": 0, "lead": {"session": {"currentReason": "lead", "waitingOn": false, "lastActive": "2026-11-07T12:00:00Z"}}},
+        {"id": "lead-2", "sessionCount": 0, "lead": {"session": {"currentReason": "lead", "waitingOn": false, "lastActive": "2026-11-06T12:00:00Z"}}},
+        {"id": "lead-3", "sessionCount": 1, "lastActive": "2026-11-05T12:00:00Z", "lead": {"session": {"currentReason": "working", "waitingOn": false, "lastActive": "2026-11-05T12:00:00Z"}}},
+        {"id": "lead-4", "sessionCount": 0, "lead": {"session": {"currentReason": "lead", "waitingOn": false, "lastActive": "2026-11-08T09:00:00Z"}}},
+        {"id": "decision", "sessionCount": 1, "lastActive": "2026-10-19T12:00:00Z", "waiting": 1}
+      ],
+      "shown": ["decision", "lead-4", "lead-1"],
+      "more": ["lead-2", "lead-3"]
+    },
+    {
+      "name": "a lead idle for more than seven days ranks by time like any project",
+      "limit": 2,
+      "projects": [
+        {"id": "stale", "sessionCount": 0, "lead": {"session": {"currentReason": "lead", "waitingOn": false, "lastActive": "2026-10-29T12:00:00Z"}}},
+        {"id": "alpha", "sessionCount": 1, "lastActive": "2026-11-06T12:00:00Z"},
+        {"id": "beta", "sessionCount": 1, "lastActive": "2026-11-03T12:00:00Z"}
+      ],
+      "shown": ["alpha", "beta"],
+      "more": ["stale"]
+    },
+    {
+      "name": "a working lead counts however long ago it last moved",
+      "limit": 1,
+      "projects": [
+        {"id": "alpha", "sessionCount": 1, "lastActive": "2026-11-08T11:00:00Z"},
+        {"id": "working", "sessionCount": 0, "lead": {"session": {"currentReason": "working", "waitingOn": false, "lastActive": "2026-10-09T12:00:00Z"}}}
+      ],
+      "shown": ["working"],
+      "more": ["alpha"]
+    },
+    {
+      "name": "a lead waiting on the person counts as active",
+      "limit": 1,
+      "projects": [
+        {"id": "alpha", "sessionCount": 1, "lastActive": "2026-11-08T11:00:00Z"},
+        {"id": "asking", "sessionCount": 0, "lead": {"session": {"currentReason": "lead", "waitingOn": true, "lastActive": "2026-10-19T12:00:00Z"}}}
+      ],
+      "shown": ["asking"],
+      "more": ["alpha"]
+    },
+    {
+      "name": "a queued lead counts as active",
+      "limit": 1,
+      "projects": [
+        {"id": "alpha", "sessionCount": 1, "lastActive": "2026-11-08T11:00:00Z"},
+        {"id": "queued", "sessionCount": 0, "lead": {"session": {"currentReason": "queued", "waitingOn": false, "lastActive": "2026-10-19T12:00:00Z"}}}
+      ],
+      "shown": ["queued"],
+      "more": ["alpha"]
+    },
+    {
+      "name": "a tile's time is the newer of its project's activity and its lead's",
+      "limit": 2,
+      "projects": [
+        {"id": "river", "sessionCount": 1, "lastActive": "2026-11-08T10:00:00Z", "lead": {"session": {"currentReason": "lead", "waitingOn": false, "lastActive": "2026-11-06T12:00:00Z"}}},
+        {"id": "pine", "sessionCount": 1, "lastActive": "2026-11-05T12:00:00Z", "lead": {"session": {"currentReason": "lead", "waitingOn": false, "lastActive": "2026-11-08T11:00:00Z"}}}
+      ],
+      "shown": ["pine", "river"],
+      "more": []
+    },
+    {
+      "name": "an archived project with a working lead stays under more",
+      "limit": 2,
+      "projects": [
+        {"id": "shelved", "sessionCount": 1, "lastActive": "2026-11-08T11:30:00Z", "archived": true, "lead": {"session": {"currentReason": "working", "waitingOn": false, "lastActive": "2026-11-08T11:30:00Z"}}},
+        {"id": "alpha", "sessionCount": 1, "lastActive": "2026-11-08T11:00:00Z"}
+      ],
+      "shown": ["alpha"],
+      "more": ["shelved"]
+    },
+    {
+      "name": "a lead that has not started ranks by its project's own activity",
+      "limit": 1,
+      "projects": [
+        {"id": "unstarted", "sessionCount": 0, "lead": {"session": null}},
+        {"id": "alpha", "sessionCount": 1, "lastActive": "2026-11-08T11:00:00Z"}
+      ],
+      "shown": ["alpha"],
+      "more": ["unstarted"]
+    },
+    {
+      "name": "a decision in a project with no sessions and no lead still gets a tile",
+      "limit": 1,
+      "projects": [
+        {"id": "led", "sessionCount": 0, "lead": {"session": {"currentReason": "lead", "waitingOn": false, "lastActive": "2026-11-08T11:00:00Z"}}},
+        {"id": "quiet", "sessionCount": 0, "waiting": 2}
+      ],
+      "shown": ["quiet"],
+      "more": ["led"]
+    }
+  ]
+}

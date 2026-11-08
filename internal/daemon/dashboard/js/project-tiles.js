@@ -33,9 +33,40 @@ export function withActivity(projects, activity) {
   return projects.map((project) => ({ ...project, lastActive: byID.get(project.id)?.lastActive, sessionCount: byID.get(project.id)?.sessionCount ?? 0 }));
 }
 
-export function orderTiles(projects, limit) {
-  const open = projects.filter((project) => !project.archived && ((project.sessionCount || 0) > 0 || (project.coordinators || []).length > 0));
-  const recent = open.sort((a, b) => (Date.parse(b.lastActive || "") || 0) - (Date.parse(a.lastActive || "") || 0) || byName(a, b));
+export const leadRecentWindow = 7 * 24 * 60 * 60 * 1000;
+
+export function leadSessionID(lead) {
+  if (!lead?.sessionId) return "";
+  if (!lead.host || lead.host.state === "local" || lead.sessionId.includes(separator)) return lead.sessionId;
+  return `${lead.host.id}${separator}${lead.sessionId}`;
+}
+
+export function leadState(session) {
+  return {
+    lastActive: Date.parse(session.lastActive || "") || 0,
+    active: Boolean(session.waitingOn) || session.currentReason === "working" || session.currentReason === "queued",
+  };
+}
+
+export function tileLeads(projects, sessions) {
+  const byID = new Map(sessions.map((session) => [session.id, session]));
+  const leads = {};
+  for (const project of projects) {
+    const session = byID.get(leadSessionID((project.coordinators || [])[0]));
+    if (session) leads[project.id] = leadState(session);
+  }
+  return leads;
+}
+
+export function orderTiles(projects, limit, { waiting = {}, leads = {}, now = Date.now() } = {}) {
+  const group = (project) => {
+    if ((waiting[project.id] || 0) > 0) return 0;
+    const lead = leads[project.id];
+    return lead && (lead.active || (lead.lastActive && now - lead.lastActive <= leadRecentWindow)) ? 1 : 2;
+  };
+  const time = (project) => Math.max(Date.parse(project.lastActive || "") || 0, leads[project.id]?.lastActive || 0);
+  const open = projects.filter((project) => !project.archived && ((project.sessionCount || 0) > 0 || (project.coordinators || []).length > 0 || (waiting[project.id] || 0) > 0));
+  const recent = open.sort((a, b) => group(a) - group(b) || time(b) - time(a) || byName(a, b));
   const shown = recent.slice(0, limit);
   const more = projects.filter((project) => !shown.some((tile) => tile.id === project.id)).sort(byName);
   return { shown, more };

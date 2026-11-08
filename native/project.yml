@@ -213,6 +213,8 @@ targets:
       - path: iOSTests
       - path: ../scripts/fixtures/project-colour-vectors.json
         buildPhase: resources
+      - path: ../scripts/fixtures/tile-order-vectors.json
+        buildPhase: resources
     dependencies:
       - target: AgenthailIOS
     settings:

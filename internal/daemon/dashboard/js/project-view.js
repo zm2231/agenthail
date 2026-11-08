@@ -5,6 +5,7 @@ import { sessionButton } from "./session-row.js";
 import { orderReady, projectKey, projectSessions } from "./session-order.js";
 import { projectNow } from "./project-now.js";
 import { hostDown, presenceLabel, unavailable } from "./presence.js";
+import { leadSessionID } from "./project-tiles.js";
 
 const knownSince = Date.UTC(2000, 0, 1);
 const activity = (session) => {
@@ -20,12 +21,6 @@ const sessionWorking = (session) => session.status === "busy";
 
 export function leadNote(lead) {
   return lead?.sessionId ? "not running · the next message picks it up" : "starts with the first message sent to it";
-}
-
-export function leadSessionID(lead) {
-  if (!lead?.sessionId) return "";
-  if (!lead.host || lead.host.state === "local" || lead.sessionId.includes("::")) return lead.sessionId;
-  return `${lead.host.id}::${lead.sessionId}`;
 }
 
 export function projectContents(project) {
