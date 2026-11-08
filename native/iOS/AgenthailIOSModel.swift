@@ -472,9 +472,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     private func deliveryLabel(_ receipt: DeliveryReceipt?) -> String {
-        let label = deliveryLabel(receipt?.evidence, detail: receipt?.detail)
-        guard let note = PersonMessageNote.receiptNote(receipt?.deliveredAs) else { return label }
-        return "\(label) · \(note)"
+        PersonMessageNote.receiptLine(deliveryLabel(receipt?.evidence, detail: receipt?.detail), receipt: receipt)
     }
 
     private func deliveryLabel(_ evidence: String?, detail: String?) -> String {

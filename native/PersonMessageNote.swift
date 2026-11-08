@@ -14,4 +14,9 @@ enum PersonMessageNote {
     static func receiptNote(_ deliveredAs: String?) -> String? {
         deliveredAs == "note" ? deliveredAsNote : nil
     }
+
+    static func receiptLine(_ base: String, receipt: DeliveryReceipt?) -> String {
+        let notice = receipt?.notice.flatMap { $0.isEmpty ? nil : $0 }
+        return [base, receiptNote(receipt?.deliveredAs), notice].compactMap { $0 }.joined(separator: " · ")
+    }
 }
