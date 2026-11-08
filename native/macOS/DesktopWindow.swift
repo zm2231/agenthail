@@ -1416,6 +1416,13 @@ struct ComposerView: View {
                 }
                 .scrimText()
             }
+            if let background = session.backgroundTasks, background.isShown {
+                BackgroundTasksDock(background: background)
+                    .id(session.id)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, DesktopSpace.s)
+                    .scrimText()
+            }
             if session.isReadOnly || !session.capabilities.send {
                 Text(session.readOnlyReason ?? "This session is closed. You can read it, but not message it.")
                     .font(.system(size: DesktopType.body))
@@ -2112,7 +2119,7 @@ struct DetailsTab: View {
                     detailRow("Exchanges", SessionFacts.exchangeLabel(detail.exchangeCount ?? 0))
                 }
                 if let background = session.backgroundTasks {
-                    detailRow("Background", ([background.summary] + (background.tasks ?? []).map(\.line) + [background.sourceNote].compactMap { $0 }).joined(separator: "\n"))
+                    detailRow("Background", ([background.summary] + (background.tasks ?? []).map { $0.timedLine() } + [background.sourceNote].compactMap { $0 }).joined(separator: "\n"))
                 }
                 let modelName = pane.detail?.selectedModelID
                 if canControl && session.capabilities.model, case let options = modelOptions.map({ TurnSetting.Option(id: $0.id, label: $0.displayName) }), !options.isEmpty {

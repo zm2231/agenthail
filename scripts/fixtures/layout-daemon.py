@@ -3,6 +3,7 @@ import os
 import socketserver
 import sys
 import threading
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
@@ -297,6 +298,42 @@ if __name__ == "__main__":
                            "/api/v1/prompts": {"prompts": [], "nextBefore": None}, "/api/v1/requests": {"permissionMode": "", "requests": []}}.items():
             RESPONSES[path] = body
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
+        RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
+        HELD_STREAMS.update({"/api/v1/events", "/api/v1/catalog-events", "/api/v1/session-stream"})
+    if sys.argv[1:2] == ["background"]:
+        def ago(minutes):
+            return (datetime.now(timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        def tasked(id, name, status, background):
+            return {**SESSION, "id": id, "name": name, "alias": None, "status": status, "lastActive": ago(1), "backgroundTasks": background}
+
+        sessions = [
+            tasked("build", "Ship the release build", "idle", {"running": True, "source": "host", "tasks": [
+                {"id": "b1", "kind": "shell", "description": "npm run build -- --production", "since": ago(12)},
+                {"id": "a1", "kind": "agent", "description": "Review the migration diff", "since": ago(4)},
+                {"id": "m1", "kind": "monitor", "description": "file watcher", "ambient": True, "since": ago(90)}]}),
+            tasked("server", "Work on the landing page", "idle", {"running": False, "source": "host", "tasks": [
+                {"id": "d1", "kind": "shell", "description": "npm run dev", "ambient": True, "since": ago(26 * 60)}]}),
+        ]
+        shown = next((s for s in sessions if s["id"] == (sys.argv[2] if len(sys.argv) > 2 else "build")), sessions[0])
+        count = {"families": len(sessions), "sessions": len(sessions)}
+        RESPONSES["/api/v1/snapshot"].update({"sessions": sessions, "totalSessions": len(sessions), "view": {
+            "counts": {"running": {"families": 0, "sessions": 0}, "current": count, "recent": count, "all": count, "archived": {"families": 0, "sessions": 0}},
+            "surfaces": [], "projects": [{"id": SESSION["project"]["id"], "name": SESSION["project"]["displayName"], "counts": count, "collapsedFamilyIds": [s["id"] for s in sessions]}],
+            "families": [{"id": s["id"], "rootId": s["id"], "projectId": SESSION["project"]["id"], "checkoutId": SESSION["checkout"]["id"],
+                          "members": [{"id": s["id"], "depth": 0, "contextOnly": False, "pinned": False}], "pinned": False, "workingSubagents": 0} for s in sessions]}})
+        RESPONSES["/api/v1/session"] = {
+            "session": {k: shown[k] for k in ("id", "surface", "name", "status", "lastActive", "cwd")},
+            "exchanges": [], "capabilities": CAPABILITIES, "readOnly": False, "readOnlyReason": "",
+            "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": []},
+        }
+        for path, body in {"/api/v1/projects/activity": {"projects": []}, "/api/v1/history": {"items": [], "hasMore": False, "nextBefore": 0, "kinds": []},
+                           "/api/v1/decisions": {"decisions": [], "leadHandling": []}, "/api/v1/usage": {"sets": []}, "/api/v1/models": {"models": []},
+                           "/api/v1/session-options": {"surfaces": [{"id": "claude", "workspace": True}], "projects": [], "claudeConfigRoots": []},
+                           "/api/v1/session-commands": {"commands": [], "unavailable": ""}, "/api/v1/session-metadata": {},
+                           "/api/v1/prompts": {"prompts": [], "nextBefore": None}, "/api/v1/requests": {"permissionMode": "", "requests": []}}.items():
+            RESPONSES[path] = body
+        theme = sys.argv[3] if len(sys.argv) > 3 else "system"
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.update({"/api/v1/events", "/api/v1/catalog-events", "/api/v1/session-stream"})
     server = Server(("127.0.0.1", 0), Handler)

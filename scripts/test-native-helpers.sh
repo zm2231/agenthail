@@ -155,6 +155,7 @@ SOURCES=(
   macOS/DesktopGlass.swift
   macOS/SessionFacts.swift
   macOS/SessionRowNote.swift
+  macOS/BackgroundTaskLines.swift
   macOS/SessionHandle.swift
   macOS/SessionLaunch.swift
   macOS/OutputSchemaInput.swift
