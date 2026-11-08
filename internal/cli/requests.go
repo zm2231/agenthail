@@ -143,51 +143,37 @@ func (a *App) cmdPermissionMode(args []string) error {
 	return a.printControlResult(sess, result, controlErr, args)
 }
 
-// requestState reads a session's open requests, from its adapter here or
-// from the host that runs it.
+// A running daemon holds open requests, terminal Claude prompts included.
 func (a *App) requestState(ctx context.Context, target string) (surface.RequestState, string, error) {
 	sess, surf, remote, err := a.resolveAnyTarget(ctx, target)
 	if err != nil {
 		return surface.RequestState{}, "", err
 	}
 	if remote != nil {
-		client, err := a.daemonAPI()
-		if err != nil {
-			return surface.RequestState{}, "", err
-		}
-		var state surface.RequestState
-		if err := client.getJSON(ctx, "/api/v1/requests", url.Values{"sessionId": []string{remote.ID}}, &state); err != nil {
-			return surface.RequestState{}, "", fmt.Errorf("read requests of %s: %w", remote.label(), err)
-		}
-		return state, remote.label(), nil
+		return a.daemonRequests(ctx, remote.ID, remote.label())
+	}
+	label := a.resolveDisplay(sess.ID)
+	if a.daemonIsRunning() {
+		return a.daemonRequests(ctx, sess.ID, label)
 	}
 	responder, ok := surf.(surface.Responder)
-	if ok && surface.EffectiveCapabilities(surf, sess).Respond {
-		state, err := responder.Requests(ctx, sess)
-		return state, a.resolveDisplay(sess.ID), err
+	if !ok || !surface.EffectiveCapabilities(surf, sess).Respond {
+		return surface.RequestState{}, "", fmt.Errorf("%s does not take answers through Agenthail", label)
 	}
-	if state, held := a.daemonHeldRequests(ctx, sess.ID); held {
-		return state, a.resolveDisplay(sess.ID), nil
-	}
-	return surface.RequestState{}, "", fmt.Errorf("%s does not take answers through Agenthail", a.resolveDisplay(sess.ID))
+	state, err := responder.Requests(ctx, sess)
+	return state, label, err
 }
 
-// daemonHeldRequests reads the requests the daemon holds for a session this
-// process cannot answer itself, such as a terminal Claude prompt passed to
-// the daemon by its hook.
-func (a *App) daemonHeldRequests(ctx context.Context, sessionID string) (surface.RequestState, bool) {
-	if !a.daemonIsRunning() {
-		return surface.RequestState{}, false
-	}
+func (a *App) daemonRequests(ctx context.Context, sessionID, label string) (surface.RequestState, string, error) {
 	client, err := a.daemonAPI()
 	if err != nil {
-		return surface.RequestState{}, false
+		return surface.RequestState{}, "", err
 	}
 	var state surface.RequestState
 	if err := client.getJSON(ctx, "/api/v1/requests", url.Values{"sessionId": []string{sessionID}}, &state); err != nil {
-		return surface.RequestState{}, false
+		return surface.RequestState{}, "", fmt.Errorf("read requests of %s: %w", label, err)
 	}
-	return state, true
+	return state, label, nil
 }
 
 func (a *App) respond(ctx context.Context, target, requestID string, decision surface.Decision) (string, error) {
@@ -214,9 +200,12 @@ func (a *App) respond(ctx context.Context, target, requestID string, decision su
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return "", err
 	}
+	if a.daemonIsRunning() {
+		return a.respondThroughDaemon(ctx, sess.ID, requestID, decision)
+	}
 	responder, ok := surf.(surface.Responder)
 	if !ok || !surface.EffectiveCapabilities(surf, sess).Respond {
-		return a.respondThroughDaemon(ctx, sess.ID, requestID, decision)
+		return "", fmt.Errorf("%s does not take answers through Agenthail", a.resolveDisplay(sess.ID))
 	}
 	outcome, err := responder.Respond(ctx, sess, requestID, decision)
 	if err != nil {
