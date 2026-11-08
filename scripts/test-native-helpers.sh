@@ -160,7 +160,7 @@ SOURCES=(
   macOS/SessionPane.swift
   macOS/MacDecisions.swift
   macOS/PaneScope.swift
-  macOS/DecisionFeed.swift
+  DecisionFeed.swift
   macOS/DecisionInboxPane.swift
   macOS/SidebarRow.swift
   macOS/SidebarSectionInputs.swift

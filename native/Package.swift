@@ -34,6 +34,7 @@ let package = Package(
                 "QueueSteer.swift",
                 "InboxMessage.swift",
                 "Decisions.swift",
+                "DecisionFeed.swift",
                 "PeerEnvelope.swift",
                 "TaggedResponses.swift",
                 "UIConfig.swift",

@@ -36,6 +36,10 @@ struct DecisionProjectVectorsTest {
         let inbox = DecisionInbox(decisions: decisions)
         check(inbox.needsYou(in: vectors.projects) == vectors.counts, "tile badges: \(inbox.needsYou(in: vectors.projects))")
         check(inbox.decisions.count == vectors.inboxTotal, "the Inbox still counts decisions no tile holds")
+        for project in vectors.projects {
+            let held = inbox.decisions(in: project.id, of: vectors.projects)
+            check(held.count == vectors.counts[project.id] ?? 0, "\(project.id)'s screen lists the decisions its tile counts")
+        }
         print("decision project vectors ok")
     }
 

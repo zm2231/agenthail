@@ -109,6 +109,7 @@ struct PairingForm: View {
 
 struct MainTabs: View {
     @ObservedObject var model: AgenthailIOSModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selection = 0
 
     var body: some View {
@@ -120,6 +121,7 @@ struct MainTabs: View {
             NavigationStack { QueueListView(model: model) }
                 .solidTabBar()
                 .tabItem { Label("Inbox", systemImage: "tray") }
+                .badge(model.decisionFeed.count)
                 .tag(1)
             NavigationStack { SettingsView(model: model) }
                 .solidTabBar()
@@ -128,6 +130,13 @@ struct MainTabs: View {
         }
         .onChange(of: model.requestedSessionID) { _, sessionID in
             if sessionID != nil { selection = 0 }
+        }
+        .task(id: model.decisionsKey) {
+            try? await Task.sleep(for: .milliseconds(300))
+            if !Task.isCancelled { model.decisionFeed.refresh() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { model.decisionFeed.reload() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .agenthailNotificationOpened)) { notification in
             guard let sessionID = notification.object as? String else { return }
@@ -239,6 +248,12 @@ struct ConversationListView: View {
         let tree = tree
         let families = tree.projects.flatMap { $0.checkouts.flatMap(\.families) }
         List {
+            if search.isEmpty {
+                PhoneProjectTiles(model: model, open: openSession)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 0, trailing: 0))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
             SessionScopeChips(scope: $scope, runningCount: tree.counts[.running] ?? 0)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 .listRowSeparator(.hidden)

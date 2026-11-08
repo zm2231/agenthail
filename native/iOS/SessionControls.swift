@@ -63,7 +63,6 @@ struct QueueListView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var error: String?
     @State private var page = InboxPage()
-    @State private var decisions = DecisionInbox()
     @State private var loading = true
     @State private var settled = false
     @State private var loadingOlder = false
@@ -117,7 +116,7 @@ struct QueueListView: View {
                 }
                 if loading && page.isEmpty { ProgressView("Loading deliveries") }
                 if !showHistory {
-                    DecisionSections(model: model, inbox: decisions, open: open) { Task { await reload() } }
+                    DecisionSections(model: model, inbox: model.decisionFeed.inbox, open: open) { Task { await reload() } }
                     let review = current.filter { $0.status == "dead" }
                     let pending = current.filter { $0.status != "dead" }
                     if !review.isEmpty {
@@ -129,7 +128,7 @@ struct QueueListView: View {
                     if !pending.isEmpty {
                         Section("Waiting to deliver") { ForEach(pending, id: \.listID) { item in queueRow(item) } }
                     }
-                    if !loading && error == nil && model.connectionError == nil && current.isEmpty && decisions.isEmpty {
+                    if !loading && error == nil && model.connectionError == nil && current.isEmpty && model.decisionFeed.loaded && model.decisionFeed.inbox.isEmpty {
                         ContentUnavailableView("Nothing needs you", systemImage: "tray", description: Text("Questions and approvals waiting on you, and instructions waiting to send, appear here. Everything else is in History."))
                             .listRowSeparator(.hidden)
                     }
@@ -341,7 +340,7 @@ struct QueueListView: View {
     }
     private func reload() async {
         let requestID = UUID(); reloadID = requestID
-        async let loadedDecisions = try? model.decisionInbox()
+        model.decisionFeed.reload()
         do {
             let first = try await model.inboxPage { partial in
                 guard reloadID == requestID, !settled else { return }
@@ -353,7 +352,6 @@ struct QueueListView: View {
             guard reloadID == requestID, !Task.isCancelled else { return }
             self.error = error.localizedDescription
         }
-        if let loaded = await loadedDecisions, reloadID == requestID, !Task.isCancelled { decisions = loaded }
         loading = false
         settled = true
     }

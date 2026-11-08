@@ -48,7 +48,11 @@ struct ProjectScreen: View {
 
     private func content(_ project: ListedProject, _ contents: ProjectContents) -> some View {
         let computers = Set(project.state.checkouts.map(\.host.id)).count
+        let waiting = DecisionInbox(decisions: model.decisionFeed.inbox.decisions(in: projectID, of: model.qualifiedProjects))
         return List {
+            if !waiting.isEmpty {
+                DecisionSections(model: model, inbox: waiting, open: openSession) { model.decisionFeed.refresh() }
+            }
             if contents.now.count > 0 { nowSection(contents.now) }
             Section("Lead") { leadCard(project, contents) }
             if contents.now.count == 0 { nowSection(contents.now) }

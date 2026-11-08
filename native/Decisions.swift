@@ -128,6 +128,10 @@ struct DecisionInbox: Equatable {
         }
     }
 
+    func decisions(in projectID: String, of projects: [ProjectState]) -> [DecisionItem] {
+        decisions.filter { Self.projectID(of: $0, in: projects) == projectID }
+    }
+
     // Offered only when every question names a suggestion, so accepting never guesses.
     static func recommended(_ request: SessionRequest) -> RequestDecision? {
         guard request.usesPager, let questions = request.questions, !questions.isEmpty else { return nil }

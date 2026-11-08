@@ -34,6 +34,11 @@ final class DecisionFeed {
         Task { await run(wanted) }
     }
 
+    func reload() {
+        shownKey = nil
+        if loadingKey != nil { again = true } else { refresh() }
+    }
+
     private func run(_ wanted: String) async {
         let next = await load()
         loadingKey = nil

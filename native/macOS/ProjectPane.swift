@@ -174,7 +174,7 @@ struct ProjectPane: View {
 
     @ViewBuilder
     private var decisions: some View {
-        let items = model.decisionFeed.inbox.decisions.filter { DecisionInbox.projectID(of: $0, in: model.projects) == project.id }
+        let items = model.decisionFeed.inbox.decisions(in: project.id, of: model.projects)
         if !items.isEmpty {
             card("Needs you · \(items.count)") {
                 ForEach(items) { item in

@@ -11,11 +11,20 @@ enum PhonePalette {
     static let diffRemoved = RoleStyle(.diffRemoved)
     static let accent = PhoneAccentStyle(use: .fill)
     static let accentText = PhoneAccentStyle(use: .text)
-    static let ground = Color(uiColor: UIColor { traits in
-        let hex = traits.userInterfaceStyle == .dark ? PaletteTokens.window.dark : PaletteTokens.window.light
-        return UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
-    })
+    static let ground = dynamic(PaletteTokens.window)
     static let hairline = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.10) : UIColor(white: 0, alpha: 0.08) })
+
+    static func project(_ projectID: String) -> (fill: Color, ink: Color) {
+        let colour = PaletteTokens.projects[ProjectTiles.colour(projectID)]
+        return (dynamic(colour.fill), dynamic(colour.ink))
+    }
+
+    private static func dynamic(_ pair: PaletteTokens.Pair) -> Color {
+        Color(uiColor: UIColor { traits in
+            let hex = traits.userInterfaceStyle == .dark ? pair.dark : pair.light
+            return UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+        })
+    }
 
     static func ground(dark: Bool) -> BackdropRGB { rgb(dark ? PaletteTokens.window.dark : PaletteTokens.window.light) }
 
