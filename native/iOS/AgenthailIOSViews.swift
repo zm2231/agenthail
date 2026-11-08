@@ -278,7 +278,9 @@ struct ConversationListView: View {
                         Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(PhonePalette.attention)
                     }
                     .font(.subheadline.weight(.semibold)).foregroundStyle(.primary).textCase(nil).glassLabel()
+                    .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Needs you")
+                    .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("needs-you-header")
                 }
             }
