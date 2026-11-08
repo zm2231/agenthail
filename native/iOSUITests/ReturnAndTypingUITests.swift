@@ -19,19 +19,23 @@ final class ReturnAndTypingUITests: XCTestCase {
         let keepsDraft = { (step: String) in
             XCTAssertEqual((composer.value as? String)?.count, draft, "the draft keeps every character \(step)")
         }
+        let drawn = { (step: String) in
+            let keyboard = app.keyboards.firstMatch
+            XCTAssertTrue(reply.waitForHittable(timeout: 2), "the transcript is drawn within 2 s \(step): reply exists=\(reply.exists) at \(reply.frame), composer at \(app.otherElements["composer"].frame), keyboard \(keyboard.exists ? "\(keyboard.frame)" : "hidden"), window \(app.windows.firstMatch.frame)")
+        }
         let started = Date()
         composer.typeText(typed)
         composer.typeText(typed)
         let typing = Date().timeIntervalSince(started)
         XCTAssertLessThan(typing, 90, "typing 2,000 characters took \(Int(typing)) s; the harness alone takes about 35 s")
         keepsDraft("after typing")
-        XCTAssertTrue(reply.waitForHittable(timeout: 2), "the transcript is drawn within 2 s of typing 2,000 characters")
+        drawn("of typing 2,000 characters")
 
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10))
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
-        XCTAssertTrue(reply.waitForHittable(timeout: 2), "the transcript is drawn within 2 s of returning to the app")
+        drawn("of returning to the app")
         keepsDraft("after returning to the app")
 
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -41,7 +45,7 @@ final class ReturnAndTypingUITests: XCTestCase {
             let bottom = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98))
             bottom.press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)))
             XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
-            XCTAssertTrue(reply.waitForHittable(timeout: 2), "the transcript is drawn within 2 s of closing Notification Center (pull \(pull))")
+            drawn("of closing Notification Center (pull \(pull))")
             keepsDraft("after Notification Center (pull \(pull))")
         }
     }
