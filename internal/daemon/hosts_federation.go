@@ -437,9 +437,9 @@ func (d *Daemon) runHostMirror(ctx context.Context, host *pairedHost) {
 }
 
 // repairBackoff spaces the snapshots that repair catalog events the follower
-// could not apply. The first is taken at once; one that fails again within
-// ceiling of the follower resuming waits a doubling delay, since a payload
-// shape this build cannot read fails on every event that carries it.
+// could not apply. The first is taken at once. A failure within ceiling of
+// the follower resuming waits a doubling delay instead, since a payload shape
+// this build cannot read fails on every event that carries it.
 type repairBackoff struct {
 	resumed time.Time
 	delay   time.Duration
