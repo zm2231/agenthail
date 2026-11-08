@@ -45,7 +45,7 @@ var codexDesktopRunsHere = runtime.GOOS == "darwin"
 func NewCodex(remoteURL string) *Codex {
 	managed := remoteURL == "" || !strings.Contains(remoteURL, "://")
 	if remoteURL == "" {
-		if !codexDesktopRunsHere {
+		if !codexDesktopRunsHere || !codexHomeIsAccountDefault() {
 			return &Codex{managed: managed}
 		}
 		remoteURL = "9231"

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -23,8 +22,8 @@ type cdpConn struct {
 }
 
 func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
-	if c.desktopURL == "" {
-		return nil, fmt.Errorf("Codex Desktop does not run on %s; set AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT to reach one", runtime.GOOS)
+	if err := c.DesktopScope(); err != nil {
+		return nil, err
 	}
 	targets, err := surface.ProbeOnce(ctx, codexDesktopProbe{c.desktopURL}, func() ([]codexCDPTarget, error) {
 		return resolveCodexRendererEndpoint(ctx, c.desktopURL)

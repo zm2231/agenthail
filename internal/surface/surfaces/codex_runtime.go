@@ -151,6 +151,9 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 // Desktop on this Mac's loopback port is one `agenthail launch codex` can
 // start; any other endpoint must be made reachable where it runs.
 func (c *Codex) desktopProblem() (surface.RuntimeProblem, string) {
+	if codexDesktopRunsHere && c.desktopURL == "" {
+		return surface.RuntimeDesktopUnreachable, codexDesktopOptIn
+	}
 	if codexDesktopRunsHere && c.managed {
 		return surface.RuntimeBridgeUnavailable, codexLaunchRemediation
 	}

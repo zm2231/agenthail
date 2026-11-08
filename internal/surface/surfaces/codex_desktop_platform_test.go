@@ -11,8 +11,12 @@ import (
 )
 
 func TestCodexProbesTheDefaultDesktopPortOnlyWhereDesktopRuns(t *testing.T) {
-	restore := codexDesktopRunsHere
-	t.Cleanup(func() { codexDesktopRunsHere = restore })
+	restore, restoreAccount := codexDesktopRunsHere, codexAccountHome
+	t.Cleanup(func() { codexDesktopRunsHere, codexAccountHome = restore, restoreAccount })
+	account := t.TempDir()
+	codexAccountHome = func() string { return account }
+	t.Setenv("HOME", account)
+	t.Setenv("CODEX_HOME", "")
 
 	codexDesktopRunsHere = true
 	if got := NewCodex("").desktopURL; got != "ws://127.0.0.1:9231" {
@@ -39,24 +43,34 @@ func TestCodexProbesTheDefaultDesktopPortOnlyWhereDesktopRuns(t *testing.T) {
 }
 
 func TestOnlyALocalDesktopOnAMacIsRepairedByLaunchingCodex(t *testing.T) {
-	restore := codexDesktopRunsHere
-	t.Cleanup(func() { codexDesktopRunsHere = restore })
+	restore, restoreAccount := codexDesktopRunsHere, codexAccountHome
+	t.Cleanup(func() { codexDesktopRunsHere, codexAccountHome = restore, restoreAccount })
+	account := t.TempDir()
+	codexAccountHome = func() string { return account }
+	t.Setenv("CODEX_HOME", "")
 	for _, test := range []struct {
 		runsHere bool
 		endpoint string
+		home     string
 		want     surface.RuntimeProblem
 	}{
-		{runsHere: true, endpoint: "", want: surface.RuntimeBridgeUnavailable},
-		{runsHere: true, endpoint: "9300", want: surface.RuntimeBridgeUnavailable},
-		{runsHere: true, endpoint: "ws://laptop.example:9231", want: surface.RuntimeDesktopUnreachable},
-		{runsHere: false, endpoint: "9300", want: surface.RuntimeDesktopUnreachable},
-		{runsHere: false, endpoint: "ws://laptop.example:9231", want: surface.RuntimeDesktopUnreachable},
+		{runsHere: true, endpoint: "", home: account, want: surface.RuntimeBridgeUnavailable},
+		{runsHere: true, endpoint: "9300", home: account, want: surface.RuntimeBridgeUnavailable},
+		{runsHere: true, endpoint: "ws://laptop.example:9231", home: account, want: surface.RuntimeDesktopUnreachable},
+		{runsHere: false, endpoint: "9300", home: account, want: surface.RuntimeDesktopUnreachable},
+		{runsHere: false, endpoint: "ws://laptop.example:9231", home: account, want: surface.RuntimeDesktopUnreachable},
 	} {
+		t.Setenv("HOME", test.home)
 		codexDesktopRunsHere = test.runsHere
 		codex := NewCodex(test.endpoint)
 		problem, remediation := codex.desktopProblem()
 		if problem != test.want || (problem == surface.RuntimeDesktopUnreachable) != strings.Contains(remediation, codex.desktopURL+" reachable") {
 			t.Errorf("runsHere=%v endpoint=%q: problem=%s remediation=%q", test.runsHere, test.endpoint, problem, remediation)
 		}
+	}
+	t.Setenv("HOME", t.TempDir())
+	codexDesktopRunsHere = true
+	if problem, remediation := NewCodex("").desktopProblem(); problem != surface.RuntimeDesktopUnreachable || remediation != codexDesktopOptIn {
+		t.Errorf("a Codex home of its own on a Mac: problem=%s remediation=%q", problem, remediation)
 	}
 }
