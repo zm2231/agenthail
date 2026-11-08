@@ -111,6 +111,7 @@ SOURCES=(
   TurnNoticePreference.swift
   LaunchSettings.swift
   SessionTurnSettings.swift
+  PersonMessageNote.swift
   QueueSteer.swift
   UIConfig.swift
   SurfaceMode.swift

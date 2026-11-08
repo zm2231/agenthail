@@ -471,6 +471,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         connection.updateSnapshot { $0.leadReplacements = $0.leadReplacements?.filter { $0.id != replacement.id } }
     }
 
+    private func deliveryLabel(_ receipt: DeliveryReceipt?) -> String {
+        let label = deliveryLabel(receipt?.evidence, detail: receipt?.detail)
+        guard let note = PersonMessageNote.receiptNote(receipt?.deliveredAs) else { return label }
+        return "\(label) · \(note)"
+    }
+
     private func deliveryLabel(_ evidence: String?, detail: String?) -> String {
         switch evidence {
         case "submitted": return detail ?? "Submitted"
@@ -635,7 +641,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let attachments = cancelled.attachments ?? []
         do {
             let receipt = try await api.steerQueued(message: message, attachments: attachments, sessionID: route.sessionID)
-            deliveryStatus[id] = deliveryLabel(receipt.result?.evidence, detail: receipt.result?.detail)
+            deliveryStatus[id] = deliveryLabel(receipt.result)
         } catch {
             returnToDraft(message, attachments: attachments, id: id)
             await connections[route.hostID]?.refresh(fresh: true)
@@ -1696,7 +1702,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             let response = try await api.send(wire)
             if sendQueue.holds(send) {
                 if let deliveryID = response.result?.deliveryId { deliveryIDs[send.sessionID] = deliveryID }
-                deliveryStatus[send.sessionID] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
+                deliveryStatus[send.sessionID] = deliveryLabel(response.result)
                 if response.result?.evidence == "queued", let queueID = response.result?.queueId {
                     deliveryQueueIDs[send.sessionID] = queueID
                 }

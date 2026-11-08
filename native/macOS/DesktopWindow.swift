@@ -1398,7 +1398,7 @@ struct ComposerView: View {
     private var canSteer: Bool { session.capabilities.steer && !session.isWaitingOnYou && steerRefusal == nil }
     private var statusLine: String {
         if takesTurnOptions, let problem = draft.turnOptionsProblem { return problem }
-        return ComposerStatusLine.text(.init(waitingOnYou: session.isWaitingOnYou, turnNotice: session.capabilities.turnNotice, working: session.isWorking, hasMessage: hasText, isCommand: draftIsCommand, steerRefusal: session.capabilities.steer ? steerRefusal : nil, followUpHint: hint, stopShortcut: shortcuts.label(.stop)))
+        return ComposerStatusLine.text(.init(waitingOnYou: session.isWaitingOnYou, turnNotice: session.composerTurnNotice, working: session.isWorking, hasMessage: hasText, isCommand: draftIsCommand, steerRefusal: session.capabilities.steer ? steerRefusal : nil, followUpHint: hint, stopShortcut: shortcuts.label(.stop)))
     }
     private var pasteAttachments: ((PastedAttachments) -> Void)? {
         guard session.capabilities.attach else { return nil }

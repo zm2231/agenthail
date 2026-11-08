@@ -1088,4 +1088,5 @@ struct DeliveryReceipt: Decodable {
     var waitingOn: WaitingState? = nil
     var movedTo: String? = nil
     var notice: String? = nil
+    var deliveredAs: String? = nil
 }

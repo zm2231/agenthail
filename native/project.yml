@@ -39,6 +39,7 @@ targets:
       - path: AgenthailModels.swift
       - path: LaunchSettings.swift
       - path: SessionTurnSettings.swift
+      - path: PersonMessageNote.swift
       - path: AgenthailAPI.swift
       - path: ClaudeCompactModels.swift
       - path: KeptDelivery.swift

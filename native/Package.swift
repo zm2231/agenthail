@@ -29,6 +29,7 @@ let package = Package(
                 "AgenthailModels.swift",
                 "LaunchSettings.swift",
                 "SessionTurnSettings.swift",
+                "PersonMessageNote.swift",
                 "AgenthailAPI.swift",
                 "ClaudeCompactModels.swift",
                 "KeptDelivery.swift",

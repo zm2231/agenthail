@@ -49,8 +49,8 @@ struct LocalSend: Identifiable, Equatable {
     static func label(for receipt: DeliveryReceipt?, steer: Bool = false) -> String {
         if receipt?.evidence == "transport_accepted", let detail = receipt?.detail, !detail.isEmpty { return detail }
         let base = label(for: receipt?.status, waitingOnYou: receipt?.waitingOn != nil, steer: steer, movedTo: receipt?.movedTo)
-        guard let notice = receipt?.notice, !notice.isEmpty else { return base }
-        return "\(base) · \(notice)"
+        let notice = receipt?.notice.flatMap { $0.isEmpty ? nil : $0 }
+        return ([base, PersonMessageNote.receiptNote(receipt?.deliveredAs), notice].compactMap { $0 }).joined(separator: " · ")
     }
 
     // The timeline shows a send's typed text with its files split out. Images

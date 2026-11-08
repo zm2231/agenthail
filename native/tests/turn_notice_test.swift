@@ -8,17 +8,34 @@ struct TurnNoticeTest {
         func session(_ capabilities: Capabilities, readOnly: Bool = false) -> SessionState {
             SessionState(id: "T", surface: "claude", name: "t", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: capabilities, readOnly: readOnly, readOnlyReason: nil)
         }
-        let adoptable = session(Capabilities(send: true, turnNotice: notice, lifecycle: SessionLifecycle(adopt: true)))
-        check(adoptable.composerTurnNotice.hasPrefix(notice) && adoptable.composerTurnNotice.contains("Open in Agenthail"), "an adoptable session offers Open in Agenthail")
-        let fixed = session(Capabilities(send: true, turnNotice: notice))
-        check(fixed.composerTurnNotice == notice, "a session the app cannot adopt names no app remedy")
-        check(session(Capabilities(send: true, lifecycle: SessionLifecycle(adopt: true))).composerTurnNotice.isEmpty, "a session that takes the person's turn has no notice")
+        let remoteControl = " Run /remote-control in its terminal to write as yourself."
+        let adopt = " Open in Agenthail also makes it your own turn."
+        let vectors: [(String, Bool, Bool, String)] = [
+            ("note", false, false, notice),
+            ("note", true, false, notice + remoteControl),
+            ("note", false, true, notice + adopt),
+            ("note", true, true, notice + remoteControl + adopt),
+            ("turn", true, true, ""),
+            ("turn", false, false, ""),
+        ]
+        for (personMessage, remote, canAdopt, want) in vectors {
+            let shown = session(Capabilities(send: true, personMessage: personMessage, remoteControl: remote, lifecycle: SessionLifecycle(adopt: canAdopt))).composerTurnNotice
+            check(shown == want, "personMessage \(personMessage), remoteControl \(remote), adopt \(canAdopt): \(shown)")
+        }
+        let readOnly = session(Capabilities(send: true, personMessage: "note", lifecycle: SessionLifecycle(adopt: true)), readOnly: true).composerTurnNotice
+        check(readOnly == notice, "a read-only session cannot be adopted, so it names no app remedy: \(readOnly)")
 
         let older = #"{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}"#
         let decoded = try? JSONDecoder().decode(Capabilities.self, from: Data(older.utf8))
-        check(decoded?.turnNotice == "", "a host that sends no notice decodes as none")
-        let current = #"{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false,"turnNotice":"note"}"#
-        check((try? JSONDecoder().decode(Capabilities.self, from: Data(current.utf8)))?.turnNotice == "note", "a host's notice decodes")
+        check(decoded?.personMessage == "turn" && decoded?.remoteControl == false, "a host that sends neither field takes the person's turn")
+        let current = #"{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false,"personMessage":"note","remoteControl":true}"#
+        let host = try? JSONDecoder().decode(Capabilities.self, from: Data(current.utf8))
+        check(host?.reachesAsNote == true && host?.remoteControl == true, "a host's personMessage and remoteControl decode")
+
+        check(PersonMessageNote.receiptNote("note") == "Delivered as a note", "a send that went as a note says so")
+        check(PersonMessageNote.receiptNote("turn") == nil && PersonMessageNote.receiptNote(nil) == nil, "a send that went as the person's turn, or is still queued, adds nothing")
+        let receipt = #"{"evidence":"delivered","status":"sent","sessionId":"T","deliveredAs":"note"}"#
+        check((try? JSONDecoder().decode(DeliveryReceipt.self, from: Data(receipt.utf8)))?.deliveredAs == "note", "a send receipt's deliveredAs decodes")
 
         var dismissed = ""
         check(TurnNoticePreference.shows(for: "a", hidden: false, dismissed: dismissed), "a session shows the notice until it is dismissed")
