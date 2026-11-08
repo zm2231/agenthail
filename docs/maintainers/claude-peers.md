@@ -113,9 +113,12 @@ evidence, with the request id as the result.
 ## Claude host evidence
 
 A session the Claude host runs takes its controls from the host, not from
-Remote Control (`Claude.hostControl`). The host calls the Agent SDK, which sends
-Claude a `control_request` and resolves when the `control_response` carrying its
-request id arrives. A host call that times out or loses the host is `unknown`.
+Remote Control (`Claude.hostControl`). For model, permission mode, effort and
+interrupt the host calls the Agent SDK, which sends Claude a `control_request`
+and resolves when the `control_response` carrying its request id arrives. Steer
+and compact are user messages the host passes to Claude's input. A request the
+host took but whose answer was lost is `unknown`; a host that is not running, or
+not reachable, makes the control unavailable and nothing is sent.
 
 | Control | Request | Evidence |
 | --- | --- | --- |
