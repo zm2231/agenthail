@@ -415,21 +415,21 @@ id; check the session before retrying. Arbitrary slash commands are not exposed.
 
 Messages a person types in the dashboard or the Mac/iPhone app carry `"author": "person"` and reach a Claude session with a Remote Control attachment as that person's own user turn, as do composer steers. A `send` action without `author`, and every CLI, relay, channel, voice or agent send to Claude, stays a native peer message whenever the session has a native socket. A bridge-only session takes the person's and Agenthail's messages through Remote Control; any other message waits in the queue until the session has a socket. Do not set `author: person` on a message an agent wrote.
 
-`send` queues a busy target by default. `--no-queue` requires immediate
-delivery and never queues: a busy target refuses it, nothing is sent, and the
-error names the next step, `agenthail queue <target> "msg"` to deliver when the
-turn ends or `agenthail steer <target> "msg"` to reach the turn now, unless it
-can go now: a Claude session with a socket takes it over the socket at its next
-tool call whatever the busy-delivery setting, and otherwise the setting `steer`
-steers it into the turn. A busy target's send otherwise waits for the turn,
-except that a Claude session with a socket takes it at its next tool call, and
-the `steer` setting steers it when the target takes steers and the sender may
-steer it.
-`steer` on an idle target has no turn to reach and says to run
-`agenthail send <target> "msg"`; a steer from an agent that may not steer the
-target goes as a send would, and its receipt says so. A target waiting on you
-holds a queue or steer, and a send except to a Claude session with a socket,
-until you answer (`agenthail requests <target>`). When the daemon is not
+`send` queues a busy target by default: it waits for the turn, or under the
+busy-delivery setting `steer` it steers the turn when the target takes steers
+and the sender may steer it. `--no-queue` requires immediate delivery and never
+queues: under the `steer` setting it steers as above, and otherwise a busy target
+refuses it, nothing is sent, and the error names the next step,
+`agenthail queue <target> "msg"` to deliver when the turn ends or
+`agenthail steer <target> "msg"` to reach the turn now. `steer` on an idle
+target has no turn to reach and says to run `agenthail send <target> "msg"`; a
+steer from an agent that may not steer the target goes as a send would, and its
+receipt says so. A target waiting on you holds a send, queue or steer until you
+answer (`agenthail requests <target>`). A Claude session with a socket is the
+one exception to all of this: a send (with or without `--no-queue`) and a steer
+go over its socket now, busy or not, taken at its next tool call or as a new
+turn, and the receipt says it was not steered; a send also goes while it waits
+on you, a steer is held then, and `queue` still waits for the turn. When the daemon is not
 running, queued messages wait and `send`, `queue` and `steer` all warn; run
 `agenthail daemon start`. Another host's sessions are reached through this
 computer's daemon, which must be running, and refuse `--no-queue`. A read-only

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,24 @@ func TestANoQueueSendToABusyClaudeSessionGoesOverItsSocket(t *testing.T) {
 	}
 	if len(peers.Sends()) != 1 || posts.count("right now") != 0 || r.QueueCount(originalConversation) != 0 {
 		t.Fatalf("sends=%d steered=%d queued=%d, want one socket send and neither of the others", len(peers.Sends()), posts.count("right now"), r.QueueCount(originalConversation))
+	}
+}
+
+func TestASteerToABusyClaudeSessionGoesOverItsSocketAndSaysSo(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	app, r, fixture, posts := liveClaudeApp(t)
+	fixture.Listen()
+	fixture.Transcript(originalConversation, fixture.Home)
+	fixture.RecordStatus(originalConversation, fixture.Home, liveBridge, "busy", "", time.Now())
+	peers := claudetest.ListenPeerManager(t, fixture.Home)
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"steer", "claude:" + originalConversation, "change course"})
+	})
+	if err != nil || !strings.Contains(output, "not steered") {
+		t.Fatalf("a steer to a busy socket Claude must say it was not steered: output=%q err=%v", output, err)
+	}
+	if len(peers.Sends()) != 1 || posts.count("change course") != 0 || r.QueueCount(originalConversation) != 0 {
+		t.Fatalf("sends=%d steered=%d queued=%d, want one socket send and neither of the others", len(peers.Sends()), posts.count("change course"), r.QueueCount(originalConversation))
 	}
 }
 

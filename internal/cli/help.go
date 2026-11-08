@@ -69,18 +69,19 @@ Session commands:
 
 Delivery (send, queue, steer):
   idle target                   send delivers now; queue holds it for the daemon; steer has no turn to reach and says
-                                to run 'agenthail send <target> "msg"' (a socket-only Claude takes it as a message)
-  busy target                   queue delivers when the turn ends and steer reaches the running turn; send waits for
-                                the turn too, except that a Claude session with a socket takes it at its next tool
-                                call, and a busy-delivery setting of "steer" (dashboard settings) steers it when the
-                                target takes steers and you may steer it
+                                to run 'agenthail send <target> "msg"'
+  busy target                   queue delivers when the turn ends; steer reaches the running turn; send waits for the
+                                turn, or steers it under a busy-delivery setting of "steer" (dashboard settings) when
+                                the target takes steers and you may steer it
+  busy target, --no-queue       never queued: steered under the "steer" setting as above, otherwise refused with
+                                nothing sent, naming 'agenthail queue <target> "msg"' and 'agenthail steer <target> "msg"'
+  target waiting on you         send, queue and steer hold the message until you answer ('agenthail requests <target>')
+  Claude with a socket          the rows above apply except: send (with or without --no-queue) and steer go over its
+                                socket now, busy or not, taken at its next tool call or as a new turn, and the receipt
+                                says it was not steered; a send also goes while it waits on you, a steer is held then,
+                                and queue still waits for the turn
   steer you may not send        only the person, the target's lead or the session that started it steer; anyone
                                 else's steer goes as a send would (now if idle, queued if busy), and the receipt says so
-  busy target, --no-queue       never queued: refused with nothing sent, naming 'agenthail queue <target> "msg"' and
-                                'agenthail steer <target> "msg"', unless it can go now: a Claude session with a socket
-                                takes it at its next tool call (whatever the setting), or the "steer" setting steers it
-  target waiting on you         queue and steer hold the message until you answer ('agenthail requests <target>'), and
-                                so does send, except to a Claude session with a socket
   daemon not running            queued messages wait, and send, queue and steer warn; run 'agenthail daemon start'
   another host's session        reached through this computer's daemon, so start it first; --no-queue is refused
                                 because the daemon holds the send until that host answers
