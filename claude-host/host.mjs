@@ -35,6 +35,7 @@ const HUMAN_KEPT = 64;
 // together stay well inside the daemon's 20 s deadline for a stop.
 const CLOSE_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS) || 5_000;
 const KILL_WAIT_MS = 2_000;
+const SUBSCRIBER_FLUSH_MS = 5_000;
 // How long a retiring host waits for a session's background tasks to end
 // before it closes the session at its next idle point anyway. A task a worker
 // keeps restarting never ends, and the session would hold this host and its
@@ -1256,12 +1257,20 @@ function exitWhenDrained() {
   if (draining && sessions.size === 0 && replying === 0) shutdown(0);
 }
 
+// shutdown writes out what subscribers have yet to read, such as the notice
+// for a session a retiring host closed, before the process exits, and waits
+// at most SUBSCRIBER_FLUSH_MS for a subscriber that does not read.
 function shutdown(code) {
   server.close();
   try {
     fs.unlinkSync(listening);
   } catch {}
-  process.exit(code);
+  const flushed = [...subscribers].map((socket) => new Promise((resolve) => {
+    socket.once('finish', resolve);
+    socket.once('close', resolve);
+    socket.end();
+  }));
+  by(Date.now() + SUBSCRIBER_FLUSH_MS, Promise.all(flushed)).then(() => process.exit(code));
 }
 
 function retiredNotice(tasks) {

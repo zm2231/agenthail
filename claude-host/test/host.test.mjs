@@ -1170,6 +1170,40 @@ test('past its drain grace a retiring host closes an idle session whose backgrou
   r.close();
 });
 
+test('a retiring host stays up until a subscriber that has fallen behind has read the notice of the session it closed', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS: '1500' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const burst = randomUUID();
+  await c.call('send', { sessionId: id, uuid: burst, text: 'BURST 4200' });
+  await c.event(turnResult(id, burst));
+  const background = randomUUID();
+  await c.call('send', { sessionId: id, uuid: background, text: 'BACKGROUND 60000' });
+  await c.event(turnResult(id, background));
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'idle');
+  await c.call('drain');
+  const behind = net.createConnection(retiringSocket(f, host));
+  await new Promise((resolve) => behind.once('connect', resolve));
+  behind.write(JSON.stringify({ id: 1, method: 'subscribe', params: { after: 0 } }) + '\n');
+  behind.pause();
+  await sleep(3000);
+  assert.ok(alive(host.pid), 'the host waits for the subscriber to read what it was sent');
+  const lines = readline.createInterface({ input: behind });
+  const retired = await new Promise((resolve, reject) => {
+    lines.on('line', (line) => {
+      const { event } = JSON.parse(line);
+      if (event?.sessionId === id && event.kind === 'retired') resolve(event);
+    });
+    lines.on('close', () => reject(new Error('the host hung up before the notice')));
+  });
+  assert.match(retired.notice, new RegExp(`background shell \\(task-${background}\\)`));
+  assert.equal(await host.exited, 0);
+  c.close();
+});
+
 test('past its drain grace a retiring host still lets a running turn end before it closes the session', async () => {
   const f = fixture();
   const host = await startHost(f, { env: { AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS: '300' } });
