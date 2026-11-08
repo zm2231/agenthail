@@ -12,6 +12,8 @@ await dashboardModules(["session-labels"], context);
 
 assert.match(context.conversationMeta({ status: "idle", queueCount: 0 }, "gpt-luna"), / · gpt-luna$/);
 assert.doesNotMatch(context.conversationMeta({ status: "idle", queueCount: 0 }), /gpt/);
+assert.match(context.conversationMeta({ status: "idle", queueCount: 0, settings: { effort: "xhigh", permission: "plan" } }, "opus"), / · opus · effort xhigh · mode plan$/);
+assert.doesNotMatch(context.conversationMeta({ status: "idle", queueCount: 0 }), /effort|mode/);
 
 const composer = fs.readFileSync(new URL("../internal/daemon/dashboard/js/composer.js", import.meta.url), "utf8");
 assert.doesNotMatch(composer, /pendingModel|From next turn/);

@@ -345,6 +345,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"background_tasks", `BLOB NOT NULL DEFAULT ''`},
 		{"usage_limit", `BLOB NOT NULL DEFAULT ''`},
 		{"turn_stop", `BLOB NOT NULL DEFAULT ''`},
+		{"settings", `BLOB NOT NULL DEFAULT ''`},
 		{"current", `INTEGER NOT NULL DEFAULT 0`},
 		{"current_reason", `TEXT NOT NULL DEFAULT ''`},
 	} {

@@ -1,4 +1,4 @@
--- schemaVersion 77
+-- schemaVersion 78
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -202,6 +202,7 @@ CREATE TABLE catalog_sessions (
 	background_tasks BLOB NOT NULL DEFAULT '',
 	usage_limit BLOB NOT NULL DEFAULT '',
 	turn_stop BLOB NOT NULL DEFAULT '',
+	settings BLOB NOT NULL DEFAULT '',
 	current INTEGER NOT NULL DEFAULT 0,
 	current_reason TEXT NOT NULL DEFAULT '',
 	retired INTEGER NOT NULL DEFAULT 0

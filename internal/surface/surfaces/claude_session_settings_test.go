@@ -72,3 +72,22 @@ func TestAStoppedClaudeSessionReportsItsSettingsFromItsTranscriptWithoutStarting
 		t.Fatalf("listed=%v with no model list read yet, want it unknown", *settings.Model.Listed)
 	}
 }
+
+func TestAHostedClaudeSessionListsTheEffortAndModeItsHostReports(t *testing.T) {
+	c, fixture := hostedClaude(t)
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	sess := listedSession(t, c, id)
+	ctx := context.Background()
+	for _, change := range [][2]string{{surface.TurnSettingEffort, "xhigh"}, {surface.TurnSettingMode, "plan"}} {
+		if err := c.SetTurnSetting(ctx, sess, change[0], change[1]); err != nil {
+			t.Fatalf("set %s: %v", change[0], err)
+		}
+	}
+
+	listed := listedSession(t, c, id)
+	if want := (surface.ObservedSettings{Effort: "xhigh", Permission: "plan"}); listed.Settings == nil || *listed.Settings != want {
+		t.Fatalf("settings = %+v, want %+v", listed.Settings, want)
+	}
+}

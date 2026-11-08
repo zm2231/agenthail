@@ -477,6 +477,45 @@ func TestAHostCatalogRowKeepsItsUsageLimit(t *testing.T) {
 	}
 }
 
+func TestACatalogRowKeepsOnlyTheSettingsLastObserved(t *testing.T) {
+	r := openTestRegistry(t)
+	record := func(settings *surface.ObservedSettings) {
+		t.Helper()
+		projection := fmt.Sprintf(`{"id":"hosted","surface":"claude","settings":%s}`, mustJSON(t, settings))
+		if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "hosted", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Settings: settings}, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "session.upserted:hosted:" + projection, Type: "session.upserted", EntityID: "hosted", Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record(&surface.ObservedSettings{Effort: "xhigh", Permission: "plan"})
+	if stored, err := r.Session("hosted"); err != nil || stored.Settings == nil || *stored.Settings != (surface.ObservedSettings{Effort: "xhigh", Permission: "plan"}) {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	record(nil)
+	if stored, err := r.Session("hosted"); err != nil || stored.Settings != nil {
+		t.Fatalf("settings kept after an observation without them: %+v err=%v", stored.Settings, err)
+	}
+
+	if _, err := r.AddHost(PairedHost{ID: "h00000000000b", Name: "server", Endpoint: "https://server.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	projection := `{"id":"remote-hosted","surface":"claude","settings":{"effort":"high","permission":"acceptEdits"}}`
+	if _, _, err := r.ApplyHostCatalogRow("h00000000000b", HostCatalogRow{Session: surface.Session{ID: "remote-hosted", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}, EntityID: "remote-hosted", Projection: json.RawMessage(projection)}); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := r.Session("remote-hosted"); err != nil || stored.Settings == nil || *stored.Settings != (surface.ObservedSettings{Effort: "high", Permission: "acceptEdits"}) {
+		t.Fatalf("mirrored=%+v err=%v", stored, err)
+	}
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
 func recordCatalogProjection(t *testing.T, r *Registry, id, name string) (CatalogEvent, bool) {
 	t.Helper()
 	projection := fmt.Sprintf(`{"id":%q,"surface":"codex","name":%q,"cwd":"/work","status":"idle"}`, id, name)
