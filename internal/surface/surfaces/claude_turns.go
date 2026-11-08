@@ -43,6 +43,7 @@ type claudeTurnTracker struct {
 	// runs comes after it, sharing its promptId with the boundary's summary.
 	compactRequest string
 	summaryPrompt  string
+	interleaved    bool
 }
 
 // claudeTurnMeter accumulates the turn whose start record the tracker saw.
@@ -64,6 +65,11 @@ type claudeTurnMeter struct {
 	// reply ended it; a turn answered without an end block is still open.
 	answered bool
 	endBlock bool
+	// seenBefore holds, on a tracker resumed past a checkpoint region's
+	// verified offset, the messages that region had counted.
+	lastUsage   string
+	interleaved bool
+	seenBefore  map[string]bool
 }
 
 func newClaudeTurnTracker(current string, closing surface.ClaudeClosingTurn) *claudeTurnTracker {
@@ -87,6 +93,7 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 			ended = t.finish(ended, t.current, stableTimelineItemID(offset, line, itemCount()), "")
 		}
 		t.current = str(record, "uuid")
+		t.interleaved = t.sawInterleaving()
 		t.meter = claudeTurnMeter{turnID: t.current, usage: map[string]surface.TurnUsage{}, compactions: t.between, compactionsKnown: t.betweenKnown}
 		t.between, t.betweenKnown = nil, false
 	}
@@ -270,6 +277,12 @@ func (m *claudeTurnMeter) observe(record map[string]any) {
 		reasoning := int64Value(thinking)
 		counted.ReasoningTokens = &reasoning
 	}
+	if id != m.lastUsage {
+		if _, again := m.usage[id]; again || m.seenBefore[id] {
+			m.interleaved = true
+		}
+	}
+	m.lastUsage = id
 	m.usage[id] = counted
 	context := counted.InputTokens
 	m.context = &context
@@ -321,35 +334,57 @@ func claudeTurnStateAt(ctx context.Context, file *os.File, offset int64) (*claud
 }
 
 func newClaudeTurnStartSearch() *turnStartSearch {
-	return newTurnStartSearch(claudeLineMayStartTurn, func(record map[string]any) bool {
-		return claudeRecordStartsTurn(record) && !claudeRecordIsStopHookFeedback(record)
-	})
+	return newTurnStartSearch(claudeLineMayStartTurn, claudeSearchStartsTurn)
+}
+
+func claudeSearchStartsTurn(record map[string]any) bool {
+	return claudeRecordStartsTurn(record) && !claudeRecordIsStopHookFeedback(record)
 }
 
 func claudeTurnStateFrom(ctx context.Context, file *os.File, offset int64, starts *turnStartSearch) (*claudeTurnTracker, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	identity := transcriptFileIdentity(info)
+	if identity != "" {
+		if tracker, ok, err := claudeReplayCheckpoints.resume(ctx, file, identity, offset); err != nil || ok {
+			return tracker, err
+		}
+	}
 	tracker := newClaudeTurnTracker("", surface.ClaudeClosingTurn{})
 	from, found, err := turnReplayStart(ctx, file, offset, starts)
 	if err != nil || !found {
 		return tracker, err
 	}
 	tracker.betweenKnown = from == 0
-	err = scanReplayLines(ctx, file, from, offset, func(line []byte, recordOffset int64) {
+	recorder := newReplayRecorder()
+	err = scanReplayLines(ctx, file, from, offset, func(line []byte, recordOffset int64) bool {
 		record, exact := decodeReplayRecord(line)
 		if record == nil {
-			return
+			return true
 		}
-		tracker.observe(record, recordOffset, line, func() int {
-			if exact {
-				return len(claudeTimelineItems(record))
-			}
-			var full map[string]any
-			if decodeShrunkRecord(line, &full) != nil {
-				return 0
-			}
-			return len(claudeTimelineItems(full))
-		})
+		recorder.visit(tracker, record, line, recordOffset)
+		tracker.observe(record, recordOffset, line, replayItemCount(record, exact, line))
+		return true
 	})
+	if err == nil {
+		claudeReplayCheckpoints.record(file, identity, offset, tracker, recorder)
+	}
 	return tracker, err
+}
+
+func replayItemCount(record map[string]any, exact bool, line []byte) func() int {
+	return func() int {
+		if exact {
+			return len(claudeTimelineItems(record))
+		}
+		var full map[string]any
+		if decodeShrunkRecord(line, &full) != nil {
+			return 0
+		}
+		return len(claudeTimelineItems(full))
+	}
 }
 
 const replayStringBytes = 256
@@ -392,8 +427,9 @@ func claudeReplayReadsText(record map[string]any) bool {
 	return false
 }
 
-// scanReplayLines passes visit the reader's own buffer, valid only until visit returns.
-func scanReplayLines(ctx context.Context, file *os.File, from, to int64, visit func(line []byte, offset int64)) error {
+// scanReplayLines passes visit the reader's own buffer, valid only until visit
+// returns; visit returns false to stop.
+func scanReplayLines(ctx context.Context, file *os.File, from, to int64, visit func(line []byte, offset int64) bool) error {
 	reader := bufio.NewReaderSize(io.NewSectionReader(file, from, to-from), 1<<20)
 	offset := from
 	var long []byte
@@ -412,8 +448,8 @@ func scanReplayLines(ctx context.Context, file *os.File, from, to int64, visit f
 			long = append(long, chunk...)
 			line, pending = long, false
 		}
-		if len(line) > 0 && line[len(line)-1] == '\n' {
-			visit(line, offset)
+		if len(line) > 0 && line[len(line)-1] == '\n' && !visit(line, offset) {
+			return nil
 		}
 		offset += int64(len(line))
 		long = long[:0]
