@@ -318,8 +318,8 @@ func (a *App) cmdSteer(args []string) error {
 		return fmt.Errorf("message is empty")
 	}
 	receipt, err := a.dispatcher().Steer(ctx, surf, sess, message, "")
-	if errors.Is(err, surface.ErrNothingToSteer) {
-		return fmt.Errorf("%w; run 'agenthail send %s \"message\"' to start a turn", err, positional[0])
+	if err != nil && isNothingToSteer(err) {
+		return idleSteerRefusal(positional[0])
 	}
 	if err != nil {
 		return err
@@ -343,6 +343,9 @@ func printSteerReceipt(receipt delivery.Receipt, target string) {
 		detail += fmt.Sprintf(" Queue item #%d.", receipt.QueueID)
 	}
 	fmt.Println(detail)
+	if uncertainOutcome(receipt) {
+		fmt.Println(uncertainNote(target))
+	}
 	if receipt.Notice != "" {
 		fmt.Println(receipt.Notice)
 	}

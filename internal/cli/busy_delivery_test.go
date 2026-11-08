@@ -77,6 +77,57 @@ func TestSteeringAnIdleSessionSaysToSend(t *testing.T) {
 	}
 }
 
+func TestARemoteIdleSteerSaysToSend(t *testing.T) {
+	app, _, _, api := federatedCLIFixture(t, true)
+	api.responses = map[string]string{"steer": `{"error":{"code":"invalid","message":"` + surface.ErrNothingToSteer.Error() + `"}}`}
+	api.statuses = map[string]int{"steer": 409}
+	_, err := captureStdout(t, func() error { return app.Run([]string{"steer", "vps::@builder", "use the cache"}) })
+	if !errors.Is(err, surface.ErrNothingToSteer) || !strings.Contains(err.Error(), `agenthail send vps::@builder "message"`) {
+		t.Fatalf("a remote idle steer does not name send: %v", err)
+	}
+}
+
+func TestUncertainOutcomesSayToReadTheSessionFirst(t *testing.T) {
+	remote, _, _, api := federatedCLIFixture(t, true)
+	api.response = `{"ok":true,"status":"submitted"}`
+	output, err := captureStdout(t, func() error { return remote.Run([]string{"send", "vps::@builder", "hello vps"}) })
+	if err != nil || !strings.Contains(output, "agenthail last vps::@builder") {
+		t.Fatalf("an unknown remote send does not name last: %q err=%v", output, err)
+	}
+	output, err = captureStdout(t, func() error { return remote.Run([]string{"steer", "vps::@builder", "use the cache"}) })
+	if err != nil || !strings.Contains(output, "agenthail last vps::@builder") {
+		t.Fatalf("an unknown remote steer does not name last: %q err=%v", output, err)
+	}
+
+	lost := surface.DeliveryOutcomeUnknown(errors.New("the acknowledgement was lost"))
+	busy := surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusBusy}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": busy}, caps: surface.Capabilities{Send: true, Steer: true}, sendErr: lost, steerErr: lost}
+	local, _ := cliFixture(t, fake)
+	for _, command := range [][]string{{"send", "codex:target", "hello"}, {"steer", "codex:target", "use the cache"}} {
+		output, err := captureStdout(t, func() error { return local.Run(command) })
+		if err != nil || !strings.Contains(output, "agenthail last") {
+			t.Fatalf("%s with an unknown outcome does not name last: %q err=%v", command[0], output, err)
+		}
+	}
+}
+
+func TestASteerFromAnAgentThatMayNotSteerGoesAsASend(t *testing.T) {
+	idle := surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusIdle}
+	worker := surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusBusy}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": idle, "worker": worker}, caps: surface.Capabilities{Send: true, Steer: true}}
+	app, r := cliFixture(t, fake)
+	for _, session := range []surface.Session{idle, worker} {
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "worker")
+	output, err := captureStdout(t, func() error { return app.Run([]string{"steer", "codex:target", "change course"}) })
+	if err != nil || len(fake.steered) != 0 || len(fake.sent) != 1 || !strings.Contains(output, "not a steer") {
+		t.Fatalf("an unauthorised steer to an idle target: output=%q sent=%q steered=%q err=%v", output, fake.sent, fake.steered, err)
+	}
+}
+
 func TestHelpAndTheSkillNameTheSameDeliveryNextSteps(t *testing.T) {
 	help, err := captureStdout(t, func() error { return (&App{}).Run([]string{"help"}) })
 	if err != nil {

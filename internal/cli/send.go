@@ -216,9 +216,9 @@ func (a *App) cmdSend(args []string) error {
 			return emit(receipt)
 		}
 		if receipt.DeliveryID != 0 {
-			fmt.Printf("delivery submitted (id %d); %s\n", receipt.DeliveryID, receipt.Detail)
+			fmt.Printf("delivery submitted (id %d); %s %s\n", receipt.DeliveryID, receipt.Detail, uncertainNote(target))
 		} else {
-			fmt.Printf("delivery submitted; %s\n", receipt.Detail)
+			fmt.Printf("delivery submitted; %s %s\n", receipt.Detail, uncertainNote(target))
 		}
 		return nil
 	}

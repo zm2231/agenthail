@@ -70,14 +70,20 @@ Session commands:
 Delivery (send, queue, steer):
   idle target                   send delivers now; queue holds it for the daemon; steer has no turn to reach and says
                                 to run 'agenthail send <target> "msg"' (a socket-only Claude takes it as a message)
-  busy target                   send and queue deliver when the turn ends; steer reaches the running turn
+  busy target                   queue delivers when the turn ends and steer reaches the running turn; send waits for
+                                the turn too, except that a Claude session with a socket takes it at its next tool
+                                call and a busy-delivery setting of "steer" (dashboard settings) steers it instead
   steer you may not send        only the person, the target's lead or the session that started it steer; anyone
-                                else's steer is sent as a queued message, and the receipt says so
+                                else's steer goes as a send would (now if idle, queued if busy), and the receipt says so
   busy target, --no-queue       refused, nothing sent; run 'agenthail queue <target> "msg"' or 'agenthail steer <target> "msg"'
-  target waiting on you         send, queue and steer hold the message until you answer ('agenthail requests <target>')
-  daemon not running            queued messages wait and a warning says so; run 'agenthail daemon start'
+  target waiting on you         queue and steer hold the message until you answer ('agenthail requests <target>'), and
+                                so does send, except to a Claude session with a socket
+  daemon not running            queued messages wait, and send, queue and steer warn; run 'agenthail daemon start'
+  another host's session        reached through this computer's daemon, so start it first; --no-queue is refused
+                                because the daemon holds the send until that host answers
   read-only target              refused with its reason before anything is queued; nothing to retry
-  submitted or unknown outcome  the message may have arrived; read 'agenthail last <target>' before sending again
+  submitted or unknown outcome  the message may have arrived, and the output says so; read 'agenthail last <target>'
+                                before sending again
 
 Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)

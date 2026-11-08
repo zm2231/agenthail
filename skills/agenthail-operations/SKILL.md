@@ -418,13 +418,19 @@ Messages a person types in the dashboard or the Mac/iPhone app carry `"author": 
 `send` queues a busy target by default. `--no-queue` requires immediate
 delivery: a busy target refuses it, nothing is sent, and the error names the
 next step, `agenthail queue <target> "msg"` to deliver when the turn ends or
-`agenthail steer <target> "msg"` to reach the turn now. `steer` on an idle
-target has no turn to reach and says to run `agenthail send <target> "msg"`.
-A target waiting on you holds a send, queue or steer until you answer
-(`agenthail requests <target>`). When the daemon is not running, queued
-messages wait and `send`, `queue` and `steer` all warn; run
-`agenthail daemon start`. A read-only target is refused with its reason before
-anything is queued. A `submitted` or `unknown` outcome may have arrived: read
+`agenthail steer <target> "msg"` to reach the turn now. A busy target's send
+otherwise waits for the turn, except that a Claude session with a socket takes
+it at its next tool call and a busy-delivery setting of `steer` steers it.
+`steer` on an idle target has no turn to reach and says to run
+`agenthail send <target> "msg"`; a steer from an agent that may not steer the
+target goes as a send would, and its receipt says so. A target waiting on you
+holds a queue or steer, and a send except to a Claude session with a socket,
+until you answer (`agenthail requests <target>`). When the daemon is not
+running, queued messages wait and `send`, `queue` and `steer` all warn; run
+`agenthail daemon start`. Another host's sessions are reached through this
+computer's daemon, which must be running, and refuse `--no-queue`. A read-only
+target is refused with its reason before anything is queued. A `submitted` or
+`unknown` outcome may have arrived, and the output says so: read
 `agenthail last <target>` before sending again. `--reply` waits for one new completed reply only when delivery is
 immediate. A queued `--reply` returns the durable queue receipt. `--stream`
 watches live deltas and cannot be combined with `--reply` or `--json`.
