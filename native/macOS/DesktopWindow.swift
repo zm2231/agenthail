@@ -235,7 +235,7 @@ struct SessionSidebar: View {
                                 if let scoped { await model.readScope(scoped) } else { await model.listMore() }
                             }
                     }
-                    if let error = model.reader.pageError, scoped != nil || model.listRequest != nil {
+                    if let request = scoped.map(model.scopeRequest) ?? model.listRequest, let error = model.reader.pageErrors[request] {
                         Text(error)
                             .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(DesktopPalette.text2)

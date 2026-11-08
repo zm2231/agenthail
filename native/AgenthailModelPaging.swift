@@ -69,9 +69,8 @@ extension AgenthailModel {
     func scopeHasMore(_ projectID: String) -> Bool { pages.hasMore(scopeRequest(projectID)) }
 
     func readScope(_ projectID: String) async {
-        let request = scopeRequest(projectID)
-        reader.requests.filter { $0.projectID == projectID && $0 != request && $0 != earlierRequest(projectID) }.forEach(reader.drop)
-        await reader.readMore(request)
+        dropUnusedScopes()
+        await reader.readMore(scopeRequest(projectID))
     }
 
     func listMore() async {

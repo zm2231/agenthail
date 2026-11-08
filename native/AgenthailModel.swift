@@ -227,6 +227,12 @@ final class AgenthailModel {
         guard pane !== mainPane else { return }
         pane.close()
         panes.removeAll { $0 === pane }
+        dropUnusedScopes()
+    }
+
+    func dropUnusedScopes() {
+        let kept = Set(panes.compactMap { $0.scope.projectID.map(scopeRequest) } + panes.compactMap { $0.shownProjectID.map(earlierRequest) })
+        reader.requests.filter { $0.projectID != nil && !kept.contains($0) }.forEach(reader.drop)
     }
 
     deinit {

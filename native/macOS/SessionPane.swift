@@ -23,7 +23,9 @@ final class SessionPane: ObservableObject, Identifiable {
         }
     }
     @Published private(set) var newSession: NewSessionDraft?
-    @Published private(set) var shownProjectID: String?
+    @Published private(set) var shownProjectID: String? {
+        didSet { if shownProjectID != oldValue { model.dropUnusedScopes() } }
+    }
     @Published var archivedTab: SessionState? {
         didSet { if archivedTab?.id != oldValue?.id { archivedTabError = nil } }
     }
@@ -186,7 +188,9 @@ final class SessionPane: ObservableObject, Identifiable {
     var selectedSession: SessionState? { model.session(selectedSessionID) }
     var displayedSession: SessionState? { shownProjectID == nil ? selectedSession ?? removedSession : nil }
 
-    @Published private(set) var scope = PaneScope.all
+    @Published private(set) var scope = PaneScope.all {
+        didSet { if scope != oldValue { model.dropUnusedScopes() } }
+    }
     private var scopeArchived = false
     @Published var selectedDecisionID: String?
 
