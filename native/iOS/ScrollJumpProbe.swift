@@ -21,8 +21,10 @@ final class ScrollJumpProbe {
     private let started = CACurrentMediaTime()
     private(set) var jumps = 0
     private(set) var worst: CGFloat = 0
+    private(set) var end = ""
 
     func geometry(_ geometry: ScrollGeometry) {
+        end = String(format: "h=%.1f vb=%.1f inset=%.1f", geometry.contentSize.height, geometry.visibleRect.maxY, geometry.contentInsets.bottom)
         offset = geometry.contentOffset.y
         height = geometry.contentSize.height
         visible = geometry.visibleRect.height
@@ -122,6 +124,10 @@ struct ScrollJumpLabel: View {
                 .font(.system(size: 1)).opacity(0.01)
                 .frame(width: 1, height: 1).clipped()
                 .accessibilityIdentifier("scroll-jumps")
+            Text(ScrollJumpProbe.shared.end)
+                .font(.system(size: 1)).opacity(0.01)
+                .frame(width: 1, height: 1).clipped()
+                .accessibilityIdentifier("scroll-end")
         }
     }
 }
