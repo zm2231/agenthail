@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -361,7 +362,7 @@ func (d *Daemon) fitWaitItems(items []mcpWaitItem) []mcpWaitItem {
 		if len(item.Prompt) > share {
 			item.Prompt, item.Clipped = clipUTF8(item.Prompt, share), true
 		}
-		encoded, _ := json.Marshal(item)
+		encoded, _ := apitime.Marshal(item)
 		if used+len(encoded) > mcpOutputLimit*3/4 && len(ready) > 0 {
 			break
 		}

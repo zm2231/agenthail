@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -165,7 +166,7 @@ func clippedTaskResult(task registry.Task, budget int) mcpTaskResult {
 		if out.Truncated {
 			out.Next = "The text is clipped; agenthail_read on the child has all of it."
 		}
-		encoded, err := json.Marshal(out)
+		encoded, err := apitime.Marshal(out)
 		if err != nil || len(encoded) <= budget || limit == 0 {
 			return out
 		}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -101,7 +102,7 @@ func (d *Daemon) mcpReadSince(sessionID string, since uint64) (any, error) {
 		}
 		if journalRowIsItem(row) {
 			view := mcpItem(toItem(row))
-			encoded, _ := json.Marshal(view)
+			encoded, _ := apitime.Marshal(view)
 			if used+len(encoded) > mcpPageBudget && len(items) > 0 {
 				break
 			}
@@ -146,7 +147,7 @@ func (d *Daemon) mcpReadBack(ctx context.Context, session *surface.Session, curs
 	}
 	start, used := len(pending), 0
 	for start > 0 {
-		encoded, _ := json.Marshal(mcpItem(pending[start-1]))
+		encoded, _ := apitime.Marshal(mcpItem(pending[start-1]))
 		if used+len(encoded) > mcpPageBudget && start < len(pending) {
 			break
 		}

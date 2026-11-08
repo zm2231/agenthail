@@ -3,11 +3,12 @@ package daemon
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/apitime"
 )
 
 const mcpPromptFloor = 256
@@ -54,7 +55,7 @@ func (d *Daemon) mcpRequests(ctx context.Context, caller *mcpCaller, input mcpRe
 		if !state.Since.IsZero() {
 			row["since"] = state.Since.UTC().Format(time.RFC3339)
 		}
-		encoded, _ := json.Marshal(row)
+		encoded, _ := apitime.Marshal(row)
 		if used+len(encoded) > mcpPageBudget {
 			continue
 		}
@@ -92,7 +93,7 @@ func (d *Daemon) mcpSessionRequests(ctx context.Context, caller *mcpCaller, ref,
 	used := 0
 	for _, request := range requests {
 		view := requestView(request, promptLimit)
-		encoded, _ := json.Marshal(view)
+		encoded, _ := apitime.Marshal(view)
 		if used+len(encoded) > mcpPageBudget {
 			break
 		}
