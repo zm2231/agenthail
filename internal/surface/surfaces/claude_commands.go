@@ -1,25 +1,20 @@
 package surfaces
 
 import (
-	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-var (
-	claudeCommandNameTag = regexp.MustCompile(`(?s)<command-name>(.*?)</command-name>`)
-	claudeCommandArgsTag = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
-	claudeCommandElement = regexp.MustCompile(`(?s)<command-(?:name|message|args)>.*?</command-(?:name|message|args)>`)
-	claudeCommandOutput  = regexp.MustCompile(`(?s)^<local-command-(stdout|stderr)>(.*)</local-command-(?:stdout|stderr)>$`)
-	claudeCommandCaveat  = regexp.MustCompile(`(?s)^<local-command-caveat>.*</local-command-caveat>$`)
-)
+var claudeCommandElements = []string{"name", "message", "args"}
 
 // claudeCommandMarkup reports text that is wholly the markup Claude Code writes
 // for a slash command: the invocation, its output, or the caveat before them.
 func claudeCommandMarkup(text string) bool {
 	text = strings.TrimSpace(text)
-	return claudeCommandInvocation(text) || claudeCommandOutput.MatchString(text) || claudeCommandCaveat.MatchString(text)
+	_, _, output := claudeCommandOutputParts(text)
+	return claudeCommandInvocation(text) || output || claudeTagWraps(text, "<local-command-caveat>", "</local-command-caveat>")
 }
 
 func IsTypedHumanPrompt(text string) bool {
@@ -40,22 +35,90 @@ func IsTypedHumanPrompt(text string) bool {
 	return true
 }
 
+// Each element closes at the first closing tag of any of the three. String
+// searches, each resumed where the last stopped, keep this linear: a pasted
+// argument can run to megabytes.
 func claudeCommandInvocation(text string) bool {
 	text = strings.TrimSpace(text)
-	return claudeCommandNameTag.MatchString(text) && strings.TrimSpace(claudeCommandElement.ReplaceAllString(text, "")) == ""
+	if _, named := claudeTagContent(text, "<command-name>", "</command-name>"); !named {
+		return false
+	}
+	next := [3]int{-2, -2, -2}
+	for at := 0; ; {
+		at = len(text) - len(strings.TrimLeftFunc(text[at:], unicode.IsSpace))
+		if at == len(text) {
+			return true
+		}
+		opened := false
+		for _, element := range claudeCommandElements {
+			if open := "<command-" + element + ">"; strings.HasPrefix(text[at:], open) {
+				at, opened = at+len(open), true
+				break
+			}
+		}
+		if !opened {
+			return false
+		}
+		end := -1
+		for i, element := range claudeCommandElements {
+			closing := "</command-" + element + ">"
+			if next[i] != -1 && next[i] < at {
+				if index := strings.Index(text[at:], closing); index >= 0 {
+					next[i] = at + index + len(closing)
+				} else {
+					next[i] = -1
+				}
+			}
+			if next[i] >= 0 && (end < 0 || next[i] < end) {
+				end = next[i]
+			}
+		}
+		if end < 0 {
+			return false
+		}
+		at = end
+	}
 }
 
 // claudeCommandLine returns an invocation as it is typed: "/goal tests pass".
 func claudeCommandLine(text string) string {
-	name := claudeCommandNameTag.FindStringSubmatch(text)
-	if name == nil {
+	name, named := claudeTagContent(text, "<command-name>", "</command-name>")
+	if !named {
 		return ""
 	}
-	command := strings.TrimSpace(name[1])
-	if args := claudeCommandArgsTag.FindStringSubmatch(text); args != nil && strings.TrimSpace(args[1]) != "" {
-		command += " " + strings.TrimSpace(args[1])
+	command := strings.TrimSpace(name)
+	if args, ok := claudeTagContent(text, "<command-args>", "</command-args>"); ok && strings.TrimSpace(args) != "" {
+		command += " " + strings.TrimSpace(args)
 	}
 	return command
+}
+
+func claudeTagContent(text, open, closing string) (string, bool) {
+	start := strings.Index(text, open)
+	if start < 0 {
+		return "", false
+	}
+	start += len(open)
+	end := strings.Index(text[start:], closing)
+	if end < 0 {
+		return "", false
+	}
+	return text[start : start+end], true
+}
+
+func claudeTagWraps(text, open, closing string) bool {
+	return len(text) >= len(open)+len(closing) && strings.HasPrefix(text, open) && strings.HasSuffix(text, closing)
+}
+
+func claudeCommandOutputParts(text string) (stream, content string, ok bool) {
+	for _, open := range []string{"stdout", "stderr"} {
+		for _, closing := range []string{"stdout", "stderr"} {
+			if openTag, closeTag := "<local-command-"+open+">", "</local-command-"+closing+">"; claudeTagWraps(text, openTag, closeTag) {
+				return open, text[len(openTag) : len(text)-len(closeTag)], true
+			}
+		}
+	}
+	return "", "", false
 }
 
 // claudeLocalCommandOutput returns what a slash command printed, from the
@@ -63,9 +126,9 @@ func claudeCommandLine(text string) string {
 // stderr.
 func claudeLocalCommandOutput(content string) (string, bool) {
 	content = strings.TrimSpace(content)
-	stream := ""
-	if match := claudeCommandOutput.FindStringSubmatch(content); match != nil {
-		stream, content = match[1], match[2]
+	stream, output, ok := claudeCommandOutputParts(content)
+	if ok {
+		content = output
 	}
 	return strings.TrimSpace(ansiEscapeRe.ReplaceAllString(content, "")), stream == "stderr"
 }
@@ -78,7 +141,7 @@ func claudeCommandItems(text string) []surface.TimelineItem {
 	if claudeCommandInvocation(text) {
 		return []surface.TimelineItem{{Kind: "event", Title: surface.TimelineCommand, Text: claudeCommandLine(text)}}
 	}
-	if claudeCommandOutput.MatchString(text) {
+	if _, _, output := claudeCommandOutputParts(text); output {
 		return []surface.TimelineItem{claudeLocalCommandItem(text)}
 	}
 	return nil
