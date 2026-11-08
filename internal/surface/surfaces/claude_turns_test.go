@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -292,5 +293,43 @@ func TestClaudeTranscriptItemsRefuseAReplacedTranscriptAndABacklogPastTheLimit(t
 	}
 	if _, err := claude.TranscriptItems(context.Background(), session, surface.TranscriptItemsRequest{Identity: whole.Identity}); !errors.Is(err, surface.ErrTranscriptChanged) {
 		t.Fatalf("a replaced transcript: err=%v", err)
+	}
+}
+
+func TestAReadFromAfterALongSlashCommandEndsTheTurnThatWasOpen(t *testing.T) {
+	command := `<command-name>/review</command-name><command-args>` + strings.Repeat("check every caller ", 30) + `</command-args>`
+	records := []string{
+		`{"type":"user","uuid":"first","timestamp":"2026-10-19T10:00:00Z","message":{"content":"inspect"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-10-19T10:00:01Z","message":{"id":"m1","content":[{"type":"text","text":"looking"}]}}`,
+		`{"type":"user","uuid":"command","timestamp":"2026-10-19T10:00:02Z","message":{"content":` + strconv.Quote(command) + `}}`,
+		`{"type":"assistant","uuid":"a2","timestamp":"2026-10-19T10:00:03Z","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}`,
+		`{"type":"system","subtype":"turn_duration","timestamp":"2026-10-19T10:00:04Z","durationMs":4000}`,
+	}
+	path := writeTranscript(t, strings.Join(records, "\n"))
+	from := int64(len(records[0]) + len(records[1]) + len(records[2]) + 3)
+	claude := NewClaude(nil, t.TempDir())
+	session := &surface.Session{Transcript: path, Status: surface.StatusIdle}
+	done := func(request surface.TranscriptItemsRequest) map[string]string {
+		t.Helper()
+		read, err := claude.TranscriptItems(context.Background(), session, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		turns := map[string]string{}
+		for _, item := range read.Items {
+			if item.Kind == "done" {
+				turns[item.ID] = item.TurnID
+			}
+		}
+		return turns
+	}
+	whole, after := done(surface.TranscriptItemsRequest{}), done(surface.TranscriptItemsRequest{From: from})
+	if len(after) != 1 || !reflect.DeepEqual(after, whole) {
+		t.Fatalf("read from after the command ends %v; read from the start ends %v", after, whole)
+	}
+	for _, turn := range after {
+		if turn != "first" {
+			t.Fatalf("the slash command started turn %q", turn)
+		}
 	}
 }

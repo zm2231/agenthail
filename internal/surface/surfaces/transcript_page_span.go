@@ -105,7 +105,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 			if decodeShrunkRecord(line, &record) != nil {
 				continue
 			}
-			turnID, ended, interrupted := turns.observe(record, recordOffset, line, len(claudeTimelineItems(record)))
+			turnID, ended, interrupted := turns.observe(record, recordOffset, line, func() int { return len(claudeTimelineItems(record)) })
 			recordTurnIDs[index] = turnID
 			claudeEnds[index] = ended
 			claudeInterrupts[index] = interrupted
