@@ -41,7 +41,8 @@ export function renderSessions() {
     renderInboxScope();
     return;
   }
-  if (app.inboxMode === "projects") {
+  const scopedProject = app.scope && app.scope !== "all" && app.scope !== "inbox";
+  if (app.inboxMode === "projects" && !scopedProject) {
     const projects = renderProjects(query);
     $("#conversation-count").textContent = `${projects.count}`;
     $("#session-tools").classList.remove("hidden");
@@ -61,7 +62,7 @@ export function renderSessions() {
     .filter((session) => scopeKeeps(app.scope, session.project?.id));
   const visible = sessions.slice(0, app.sessionLimit);
   const listScopes = listOrderScopes();
-  const total = paged ? listScopes.reduce((sum, key) => sum + (listedTotal(key) ?? 0), 0) : sessions.length;
+  const total = paged && !scopedProject ? listScopes.reduce((sum, key) => sum + (listedTotal(key) ?? 0), 0) : sessions.length;
   const hasMore = paged && (visible.length < sessions.length || listScopes.some(listingHasMore));
   const historyResults = (app.codexSearch.query === query ? app.codexSearch.results : []).filter((result) => scopeKeeps(app.scope, result.project?.id));
   $("#conversation-count").textContent = `${total}`;
@@ -72,9 +73,11 @@ export function renderSessions() {
       ? sessions.length
         ? `Open Claude sessions, working or queued work, and recent sessions (Codex ${app.state.codexRecentHours || 5}-hour window)`
         : "Nothing current right now"
-      : hasMore
-        ? `Showing ${visible.length} of ${total}`
-        : `${total} conversations`;
+      : scopedProject
+        ? `${total} ${total === 1 ? "conversation" : "conversations"} in this project${hasMore ? " so far" : ""}`
+        : hasMore
+          ? `Showing ${visible.length} of ${total}`
+          : `${total} conversations`;
   const sessionItems = visible.map(sessionButton).join("");
   const historyItems = historyResults
     .map(
@@ -95,7 +98,7 @@ export function renderSessions() {
       : `<div class="empty-state compact"><p>${app.inboxMode === "current" ? "No current work. Search to find an older Codex conversation." : "No conversations in this view."}</p></div>`;
   const more = $("#session-more");
   more.hidden = !hasMore;
-  more.textContent = `Show more (${Math.max(0, total - visible.length)})`;
+  more.textContent = scopedProject ? "Show more" : `Show more (${Math.max(0, total - visible.length)})`;
 }
 
 export function syncInboxModeButtons() {
