@@ -6,6 +6,7 @@ struct MetadataOverlay {
     private(set) var model: String?
     private(set) var models: [ModelOption]?
     private(set) var turnSettings: [TurnSetting]?
+    private(set) var compactSettings: [TurnSetting]?
     private(set) var claudeRuns: [ClaudeRunObservation]?
     private(set) var claudeSubagents: [ClaudeSubagentLink]?
     private(set) var claudeSubagentsTotal: Int?
@@ -21,6 +22,7 @@ struct MetadataOverlay {
         model = detail?.model
         models = detail?.models
         turnSettings = detail?.turnSettings
+        compactSettings = detail?.compactSettings
         claudeRuns = detail?.claudeRuns
         claudeSubagents = detail?.claudeSubagents
         claudeSubagentsTotal = detail?.claudeSubagentsTotal
@@ -28,7 +30,7 @@ struct MetadataOverlay {
     }
 
     mutating func absorb(_ metadata: SessionMetadata) {
-        absorb(context: metadata.context, goal: metadata.goal, model: metadata.model, models: metadata.models, turnSettings: metadata.turnSettings)
+        absorb(context: metadata.context, goal: metadata.goal, model: metadata.model, models: metadata.models, turnSettings: metadata.turnSettings, compactSettings: metadata.compactSettings)
         claudeRuns = metadata.claudeRuns
         claudeSubagents = metadata.claudeSubagents
         claudeSubagentsTotal = metadata.claudeSubagentsTotal
@@ -54,12 +56,13 @@ struct MetadataOverlay {
         settled = true
     }
 
-    mutating func absorb(context: ContextState?, goal: GoalState?, model: String?, models: [ModelOption]?, turnSettings: [TurnSetting]? = nil) {
+    mutating func absorb(context: ContextState?, goal: GoalState?, model: String?, models: [ModelOption]?, turnSettings: [TurnSetting]? = nil, compactSettings: [TurnSetting]? = nil) {
         if !streamed.contains("context"), let context { self.context = context }
         if !streamed.contains("goal"), let goal { self.goal = goal }
         if let model { self.model = model }
         if let models { self.models = models }
         if let turnSettings { self.turnSettings = turnSettings }
+        if let compactSettings { self.compactSettings = compactSettings }
     }
 
     mutating func stream(context: ContextState?) {
@@ -79,6 +82,7 @@ struct MetadataOverlay {
         merged.model = model
         merged.models = models
         merged.turnSettings = turnSettings
+        merged.compactSettings = compactSettings
         merged.claudeRuns = claudeRuns
         merged.claudeSubagents = claudeSubagents
         merged.claudeSubagentsTotal = claudeSubagentsTotal

@@ -30,6 +30,7 @@
 		149EB3D4624823F45B729F35 /* ConnectionGrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43AE1BA12D189875A5286611 /* ConnectionGrace.swift */; };
 		16BEC587028859F8D4264925 /* PreviewVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = F837954350613F6F72854AAC /* PreviewVoice.swift */; };
 		1848D31E51AC4C2EC9A08CE5 /* DiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 863060175315DE04E5E368FE /* DiffView.swift */; };
+		1897987D61BD5EB7108CF674 /* IOSCompactSettingRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDEFC9E7DDF653EB627520D5 /* IOSCompactSettingRows.swift */; };
 		197A07BF95C9510A26CD3BA2 /* RenderStamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F711EBA034CF79FA2A9FACB2 /* RenderStamp.swift */; };
 		19F74440B0063F058ECAC3B1 /* OpeningRebuild.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB41442C64DD54FC6DA200D /* OpeningRebuild.swift */; };
 		19F76CDE88F8DD94EFB0B254 /* InboxPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 594DCB083C5E8FF9E54F29F3 /* InboxPage.swift */; };
@@ -152,6 +153,7 @@
 		84AFE005DFA7159DC412701B /* TapWhenReady.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B076C97F3E9777192BE7445 /* TapWhenReady.swift */; };
 		8523C9FE13A49C19BAB84F32 /* StreamBatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C933DAD93E085284E4848C02 /* StreamBatchTests.swift */; };
 		85F3CA57BBD61C2736722F97 /* LaunchSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3363D4FAA68ECBF82BF02D87 /* LaunchSettings.swift */; };
+		86F099C5EF95C2E17F173758 /* CompactSettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3008805202D0F277905C7AD0 /* CompactSettingsUITests.swift */; };
 		892BF804B3CCDACA9204314E /* LoadOlderUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11020CFD9564E496189456D7 /* LoadOlderUITests.swift */; };
 		89D474B8B62640AE3C083434 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95E0C3350224ACA1936067A2 /* NotificationService.swift */; };
 		8A9EB86DE2BE6A64EC6BAC5E /* InboxSessionLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 733B75BC332AD6D99809519F /* InboxSessionLink.swift */; };
@@ -373,6 +375,7 @@
 		2D4E8441D391EC82454A513B /* TimelineMemoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineMemoTests.swift; sourceTree = "<group>"; };
 		2F2502112214D5FFC5F444F8 /* SnapshotPartsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotPartsTests.swift; sourceTree = "<group>"; };
 		2F45AEA3B7FFE59B1D25B7B3 /* PairingLinkLoopbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingLinkLoopbackTests.swift; sourceTree = "<group>"; };
+		3008805202D0F277905C7AD0 /* CompactSettingsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactSettingsUITests.swift; sourceTree = "<group>"; };
 		30176EBA21660093B69CE89F /* CachedAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedAttachment.swift; sourceTree = "<group>"; };
 		3085052480F0B14328A21215 /* PairingLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingLink.swift; sourceTree = "<group>"; };
 		31E7F9955F530D265404381A /* ComposerCompletionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerCompletionUITests.swift; sourceTree = "<group>"; };
@@ -559,6 +562,7 @@
 		DC0780EE05E65FF35002726B /* InboxMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxMessage.swift; sourceTree = "<group>"; };
 		DD4723140E73A7A29B4FAE91 /* AskCardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskCardTests.swift; sourceTree = "<group>"; };
 		DD6DB02C48C8DEC1677170BC /* SessionCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCapture.swift; sourceTree = "<group>"; };
+		DDEFC9E7DDF653EB627520D5 /* IOSCompactSettingRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSCompactSettingRows.swift; sourceTree = "<group>"; };
 		DE0C4EA53BE662D64BEE9AEE /* ComposerPasteUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerPasteUITests.swift; sourceTree = "<group>"; };
 		DE75ABB49AC40D0AF64253E2 /* ToolRunSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRunSummary.swift; sourceTree = "<group>"; };
 		DF655CC887DB4FBB11D2254F /* ComposerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerStore.swift; sourceTree = "<group>"; };
@@ -656,6 +660,7 @@
 				733B75BC332AD6D99809519F /* InboxSessionLink.swift */,
 				72CFB9B3A032677BE34153EF /* Info.plist */,
 				FCE274E1BB269CCB9EE79986 /* IOSAgentMessageRows.swift */,
+				DDEFC9E7DDF653EB627520D5 /* IOSCompactSettingRows.swift */,
 				65D0BA0C7D9C9B408A8B9B2E /* IOSTurnSettingChips.swift */,
 				EDE64B86C2BC64932A6DAD35 /* KeychainStore.swift */,
 				37CA9654A2A028F24A14765B /* LatestScroll.swift */,
@@ -741,6 +746,7 @@
 				3244752A0EB724F241568485 /* ActivityReadingTests.swift */,
 				F7102ADAAC596D409D86A255 /* AppNavigation.swift */,
 				EE88FC29735E666A53BDA5D5 /* AskCardUITests.swift */,
+				3008805202D0F277905C7AD0 /* CompactSettingsUITests.swift */,
 				31E7F9955F530D265404381A /* ComposerCompletionUITests.swift */,
 				D7AB57E979311608CDD29FB0 /* ComposerLargeTextUITests.swift */,
 				DE0C4EA53BE662D64BEE9AEE /* ComposerPasteUITests.swift */,
@@ -1163,6 +1169,7 @@
 				F128EFC3BBA08D20A5551869 /* HostNames.swift in Sources */,
 				D93181D4360081173A3C4C0D /* HostRefresh.swift in Sources */,
 				3AB0063F47197B7896AA470C /* IOSAgentMessageRows.swift in Sources */,
+				1897987D61BD5EB7108CF674 /* IOSCompactSettingRows.swift in Sources */,
 				77AC407C76F334A0B017DAB8 /* IOSTurnSettingChips.swift in Sources */,
 				D92EC6BF317D15BED4C92287 /* InboxHistoryRow.swift in Sources */,
 				8DB87421428094CA918F04F4 /* InboxMessage.swift in Sources */,
@@ -1315,6 +1322,7 @@
 				CBCA932E315251D8765B458D /* ActivityReadingTests.swift in Sources */,
 				3ACF64A332C4FEA250A80EAA /* AppNavigation.swift in Sources */,
 				9B077FDF698BF81210CF533A /* AskCardUITests.swift in Sources */,
+				86F099C5EF95C2E17F173758 /* CompactSettingsUITests.swift in Sources */,
 				C5FE4F8892E9F4ACA5B44216 /* ComposerCompletionUITests.swift in Sources */,
 				D2238C1C327A791D2C182179 /* ComposerLargeTextUITests.swift in Sources */,
 				B9CD23CD91B154E5235B3813 /* ComposerPasteUITests.swift in Sources */,

@@ -12,13 +12,23 @@ struct TurnSetting: Decodable, Equatable, Sendable {
     static let model = "model"
     static let effort = "effort"
     static let mode = "mode"
+    static let autoCompact = "autoCompact"
+    static let compactWindow = "compactWindow"
 
     let key: String
     let value: String
     let options: [Option]
     let applies: String
+    var scope: String? = nil
 
     var appliesNextTurn: Bool { applies == "nextTurn" }
+    var appliesNote: String? {
+        switch applies {
+        case "newSessions": scope.map { "For new sessions on \($0)" } ?? "For new sessions"
+        case "nextTurn": "From the next turn"
+        default: nil
+        }
+    }
     var current: Option? { options.first { $0.id == value } }
     var quietOptions: [Option] { options.filter { !$0.needsConfirmation } }
 
@@ -32,7 +42,13 @@ struct TurnSetting: Decodable, Equatable, Sendable {
         }
     }
 
-    var chipName: String { key.prefix(1).uppercased() + key.dropFirst() }
+    var chipName: String {
+        switch key {
+        case Self.autoCompact: "Auto-compact"
+        case Self.compactWindow: "Compact at"
+        default: key.prefix(1).uppercased() + key.dropFirst()
+        }
+    }
     var chipAccessibilityLabel: String { "\(chipName), \(valueLabel)" }
 
     enum Pick: Equatable { case unchanged, apply, confirm }

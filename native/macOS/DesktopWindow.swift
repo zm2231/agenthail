@@ -2132,6 +2132,13 @@ struct DetailsTab: View {
                         .disabled(pane.controlPending)
                     }
                 }
+                if canControl, let compact = pane.detail?.compactSettings {
+                    ForEach(compact, id: \.key) { setting in
+                        TurnSettingMenuRow(setting: setting, disabled: pane.controlPending) { option in
+                            TurnSettingChoice.choose(option, for: setting, pending: &pendingMode, apply: pane.changeTurnSetting)
+                        }
+                    }
+                }
                 if let project = session.project?.displayName { detailRow("Project", project) }
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
                 if let path = session.checkout?.path ?? session.cwd { InspectorPathRow(label: "Checkout", path: path) }

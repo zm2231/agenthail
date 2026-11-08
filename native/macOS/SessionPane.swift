@@ -450,7 +450,7 @@ final class SessionPane: ObservableObject, Identifiable {
                 olderItems = []
                 olderCursor = loaded.timeline?.nextBefore
             }
-            metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models, turnSettings: loaded.turnSettings)
+            metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models, turnSettings: loaded.turnSettings, compactSettings: loaded.compactSettings)
             var merged = metadata.apply(to: loaded)
             let pageSeq = loaded.journalSeq ?? 0
             var older = olderItems

@@ -1455,6 +1455,9 @@ struct SessionInspector: View {
                         if let value = context.reclaimedTokens { LabeledContent("Tokens reclaimed", value: value.formatted()) }
                         if context.compacting { Label("Compacting context", systemImage: "arrow.down.right.and.arrow.up.left") }
                     } else { Text("This agent has not reported context usage.").foregroundStyle(PhonePalette.muted) }
+                    if !detail.readOnly, let compact = detail.compactSettings, !compact.isEmpty {
+                        IOSCompactSettingRows(model: model, sessionID: session.id, settings: compact)
+                    }
                 }
                 SessionEditingControls(model: model, detail: detail)
                 if let goal = detail.goal.map(GoalFacts.init) {
