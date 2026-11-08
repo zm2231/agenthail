@@ -18,7 +18,11 @@ struct RequestCard: View {
     @State private var replying = false
     @State private var reply = ""
 
-    var heading: String { Self.heading(request, asker: asker, surface: agentSurface) }
+    var heading: String { Self.timed(Self.heading(request, asker: asker, surface: agentSurface), request) }
+
+    static func timed(_ heading: String, _ request: SessionRequest) -> String {
+        TurnClock.time(request.createdAt).map { "\(heading) · \($0)" } ?? heading
+    }
 
     static func heading(_ request: SessionRequest, asker: String, surface: String = "") -> String {
         if request.isAsk { return "\(asker) asks: \(request.title ?? "")" }
@@ -55,6 +59,11 @@ struct RequestCard: View {
                     Text(request.summary).font(.body.weight(.medium))
                     if let description = request.description, !description.isEmpty {
                         Text(description).font(.footnote).foregroundStyle(RoleStyle(.muted))
+                    }
+                    if let reason = request.reason, !reason.isEmpty {
+                        Text(reason).font(.footnote).foregroundStyle(RoleStyle(.muted))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("request-reason")
                     }
                     if let input = request.input, !input.isEmpty, input != "{}" {
                         Text(input).font(.caption.monospaced()).lineLimit(6).textSelection(.enabled)
@@ -124,7 +133,7 @@ struct RequestCard: View {
 
     @ViewBuilder
     private func inputView(_ elicitation: Elicitation) -> some View {
-        Label("\(elicitation.server.isEmpty ? "An MCP server" : elicitation.server) asks for input", systemImage: "square.and.pencil")
+        Label(Self.timed("\(elicitation.server.isEmpty ? "An MCP server" : elicitation.server) asks for input", request), systemImage: "square.and.pencil")
             .font(.caption.weight(.semibold))
             .foregroundStyle(accent)
         Text(elicitation.message).font(.body.weight(.medium))

@@ -36,6 +36,15 @@ struct AskCardTest {
         let legacyButtons = RequestCard.approvalButtons(legacy.actions)
         check(legacy.actions.isEmpty && legacyButtons.allowing.isEmpty && legacyButtons.denying.isEmpty && legacyButtons.reply == nil, "an approval from a computer that sends no choices offers no buttons it could refuse")
         check(RequestCard.noChoicesNote.contains("answer it where the session runs"), "and the card says where to answer it instead")
+
+        check(legacy.createdAt == "2026-10-20T00:00:00Z", "a request's time decodes")
+        let stamped = RequestCard.timed("Claude wants your approval", legacy)
+        check(stamped.hasPrefix("Claude wants your approval · ") && stamped.count > "Claude wants your approval · ".count, "the card's heading carries the request's time: \(stamped)")
+        check(RequestCard.timed("Claude asks", SessionRequest(id: "n", kind: "question", tool: "AskUserQuestion")) == "Claude asks", "a request without a time keeps its plain heading")
+        let reasons = try! JSONDecoder().decode(SessionRequests.self, from: Data(#"{"permissionMode":"","requests":[{"id":"p1","kind":"approval","tool":"Bash","reason":"Writes outside the workspace","alwaysAllow":false,"createdAt":"2026-11-08T10:00:00.123456Z"},{"id":"p2","kind":"approval","tool":"Edit","alwaysAllow":false},{"id":"q1","kind":"question","tool":"AskUserQuestion","alwaysAllow":false}]}"#.utf8))
+        check(reasons.requests[0].reason == "Writes outside the workspace", "an approval's reason decodes")
+        check(reasons.requests[0].createdAt.flatMap(TurnClock.time) != nil, "a time with fractional seconds reads")
+        check(reasons.offered(pendingAsk: nil).map(\.id) == ["p1", "p2", "q1"], "every open request is offered, not only the first")
         let replyBody = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(RequestDecision(choice: "reply", message: "Use the staging host"))) as! [String: Any]
         check(replyBody["choice"] as? String == "reply" && replyBody["message"] as? String == "Use the staging host" && replyBody.count == 2, "a message denial is sent as the reply choice with its text: \(replyBody)")
 
