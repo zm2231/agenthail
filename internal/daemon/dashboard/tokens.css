@@ -618,6 +618,23 @@ textarea:focus-visible {
   display: grid;
   gap: 0;
 }
+.decision-group h3 {
+  margin: 14px 0 2px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.decision-holds {
+  margin-right: 8px;
+  color: var(--bad);
+  font-weight: 600;
+}
+.decision-lead,
+.decision-note {
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
 .attention-item {
   display: flex;
   align-items: center;
