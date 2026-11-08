@@ -154,6 +154,8 @@ SOURCES=(
   macOS/SessionLaunch.swift
   macOS/OutputSchemaInput.swift
   macOS/TurnOptionsChip.swift
+  macOS/GoalFacts.swift
+  macOS/ClaudeRunFacts.swift
   macOS/SessionOperationControllers.swift
   macOS/SessionOperations.swift
   macOS/NewSessionDraft.swift

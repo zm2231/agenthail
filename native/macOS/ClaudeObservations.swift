@@ -4,16 +4,23 @@ struct ClaudeObservationsSection: View {
     let detail: SessionDetail?
 
     var body: some View {
-        if let runs = detail?.claudeRuns, !runs.isEmpty {
+        if let runs = detail?.claudeRuns {
             group("Claude runs") {
+                if runs.isEmpty {
+                    Text("No observed Claude runs.")
+                        .font(.system(size: DesktopType.meta))
+                        .foregroundStyle(DesktopPalette.text2)
+                }
                 ForEach(runs) { run in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(run.jobId)
-                        let facts = [run.providerState, run.runType, run.updatedAt.map { "Updated \($0)" }].compactMap { $0 }.filter { !$0.isEmpty }
+                        Text("Job: \(run.jobId)")
+                            .textSelection(.enabled)
+                        let facts = ClaudeRunFacts.lines(run)
                         if !facts.isEmpty {
                             Text(facts.joined(separator: " · "))
                                 .font(.system(size: DesktopType.meta))
                                 .foregroundStyle(DesktopPalette.text2)
+                                .textSelection(.enabled)
                         }
                     }
                 }

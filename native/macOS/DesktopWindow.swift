@@ -928,6 +928,18 @@ struct TranscriptView: View {
                     .transcriptScrimRow(turn: send.id.description)
                     .padding(.top, TranscriptBlock.gap(above: .user(send.text, files: []), after: index > 0 ? .user(sends[index - 1].text, files: []) : blocks.last?.kind))
                 }
+                if let attention = GoalFacts.attention(pane.detail?.goal) {
+                    Button { if !pane.inspectorShown { pane.toggleInspector() } } label: {
+                        Label(attention, systemImage: "exclamationmark.triangle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: DesktopType.body))
+                    .foregroundStyle(DesktopPalette.attention)
+                    .help("Show the goal in the inspector")
+                    .accessibilityIdentifier("goal-attention")
+                    .transcriptScrimRow()
+                    .padding(.top, DesktopSpace.m)
+                }
                 if session.isWaitingOnBackground, let background = session.backgroundTasks {
                     HStack(spacing: DesktopSpace.s) {
                         StatusIndicator(session: session, needsYou: false)
