@@ -2,7 +2,7 @@ import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { renderProjects } from "./projects.js";
 import { scopedSessions } from "./session-scope.js";
-import { listedTotal, listingHasMore, listOrderScopes, orderReady } from "./session-order.js";
+import { listedTotal, listingHasMore, listOrderScopes, orderReady, scopeOrderKeys } from "./session-order.js";
 import { displayName, rawDisplayName } from "./session-labels.js";
 import { remoteHostName } from "./hosts.js";
 import { sessionButton } from "./session-row.js";
@@ -26,7 +26,9 @@ export function renderSessions() {
     const value = badge.dataset.inboxCount === "projects" ? (app.state.projects || []).filter((project) => !project.archived).length : counts[badge.dataset.inboxCount];
     badge.textContent = value === undefined ? "" : ` ${value}`;
   });
-  if (!orderReady(listOrderScopes())) {
+  const scopeKeys = scopeOrderKeys();
+  const scopedProject = scopeKeys.length > 0;
+  if (!orderReady(scopedProject ? scopeKeys : listOrderScopes())) {
     syncInboxModeButtons();
     $("#conversation-count").textContent = "";
     $("#filter-summary").textContent = "Loading";
@@ -41,7 +43,6 @@ export function renderSessions() {
     renderInboxScope();
     return;
   }
-  const scopedProject = app.scope && app.scope !== "all" && app.scope !== "inbox";
   if (app.inboxMode === "projects" && !scopedProject) {
     const projects = renderProjects(query);
     $("#conversation-count").textContent = `${projects.count}`;
@@ -56,17 +57,16 @@ export function renderSessions() {
   }
   $("#session-filters").hidden = false;
   $("#show-archived-row").hidden = false;
-  const paged = app.inboxMode === "all";
-  const sessions = (paged ? scopedSessions() : scopedSessions().filter((session) =>
-    !query || `${displayName(session)} ${session.surface} ${session.name} ${remoteHostName(session)}`.toLowerCase().includes(query)))
-    .filter((session) => scopeKeeps(app.scope, session.project?.id));
+  const paged = app.inboxMode === "all" || scopedProject;
+  const sessions = paged ? scopedSessions() : scopedSessions().filter((session) =>
+    !query || `${displayName(session)} ${session.surface} ${session.name} ${remoteHostName(session)}`.toLowerCase().includes(query));
   const visible = sessions.slice(0, app.sessionLimit);
   const listScopes = listOrderScopes();
-  const total = paged && !scopedProject ? listScopes.reduce((sum, key) => sum + (listedTotal(key) ?? 0), 0) : sessions.length;
-  const hasMore = paged && (visible.length < sessions.length || listScopes.some(listingHasMore));
+  const total = scopedProject ? sessions.length : paged ? listScopes.reduce((sum, key) => sum + (listedTotal(key) ?? 0), 0) : sessions.length;
+  const hasMore = visible.length < sessions.length || (paged && !scopedProject && listScopes.some(listingHasMore));
   const historyResults = (app.codexSearch.query === query ? app.codexSearch.results : []).filter((result) => scopeKeeps(app.scope, result.project?.id));
   $("#conversation-count").textContent = `${total}`;
-  $("#session-tools").classList.toggle("hidden", app.inboxMode !== "all");
+  $("#session-tools").classList.toggle("hidden", !paged);
   syncInboxModeButtons();
   $("#filter-summary").textContent =
     app.inboxMode === "current"

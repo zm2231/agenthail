@@ -36,10 +36,11 @@ export function renderTiles() {
 }
 
 export function setScope(scope) {
-  showView("conversations");
   app.scope = scope;
-  if (scope === "inbox" || scope === "all") leaveProject();
-  else openProject(scope);
+  if (scope === "inbox" || scope === "all") {
+    leaveProject();
+    showView("conversations");
+  } else openProject(scope);
   syncDecisionPane();
   renderSessions();
   renderTiles();
@@ -54,7 +55,7 @@ export function openDecision(sessionId) {
 export function dropMissingScope() {
   const scope = app.scope;
   if (!scope || scope === "all" || scope === "inbox") return;
-  if ((app.state.projects || []).some((project) => project.id === scope && !project.archived)) return;
+  if ((app.state.projects || []).some((project) => project.id === scope)) return;
   app.scope = "all";
   if (app.selectedProject === scope) leaveProject();
   syncDecisionPane();

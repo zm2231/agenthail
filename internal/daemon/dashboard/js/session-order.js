@@ -3,6 +3,14 @@ import { readBase, readListing } from "./session-pages.js";
 
 export const projectKey = (id, scope = "all") => `project:${scope}:${id}`;
 
+export function scopeOrderKeys() {
+  const id = app.scope;
+  if (!id || id === "all" || id === "inbox") return [];
+  const archived = (app.state?.projects || []).some((project) => project.id === id && project.archived);
+  const scopes = archived ? ["archived"] : app.showArchived ? ["all", "archived"] : ["all"];
+  return scopes.map((scope) => `scope:${scope}:${id}`);
+}
+
 export function listOrderScopes() {
   if (app.inboxMode === "current") return ["current"];
   if (app.inboxMode === "projects") return ["all", "archived"];
@@ -17,6 +25,7 @@ export function neededOrderScopes() {
       for (const project of app.state?.projects || []) if (app.expandedProjects?.has(project.id)) keys.add(projectKey(project.id, project.archived ? "archived" : "all"));
     }
     if (app.selectedProject) keys.add(projectKey(app.selectedProject));
+    scopeOrderKeys().forEach((key) => keys.add(key));
   }
   return [...keys];
 }
@@ -33,6 +42,10 @@ export function listingSpec(key) {
   if (key.startsWith("project:")) {
     const scope = key.split(":")[1];
     return { scope, params: { projectId: key.slice(`project:${scope}:`.length) } };
+  }
+  if (key.startsWith("scope:")) {
+    const scope = key.split(":")[1];
+    return { scope, params: { projectId: key.slice(`scope:${scope}:`.length), ...listParams() } };
   }
   if (key === "current") return { scope: key, params: {} };
   if (app.inboxMode === "projects") return { scope: key, params: { collapsed: "1", ...(app.listQuery ? { q: app.listQuery } : {}) } };

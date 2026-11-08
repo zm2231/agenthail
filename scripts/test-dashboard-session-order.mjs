@@ -35,7 +35,7 @@ const context = {
   },
   responseError: async (response) => new Error(`refused ${response.status}`),
 };
-await dashboardModules(["session-order"], context);
+await dashboardModules(["session-order", "session-scope"], context);
 const { app } = context;
 const ids = (key) => context.orderedSessions(key).map((session) => session.id).join(",");
 
@@ -102,6 +102,32 @@ await context.loadSessionOrder();
 assert.equal(context.projectSessions("project:all:p", "p").map((session) => session.id).join(","), "a");
 app.view = "overview";
 assert.deepEqual([...context.neededOrderScopes()], ["current"], "a project left open behind Overview is not read");
+app.view = "conversations";
+app.selectedProject = null;
+app.state = { projects: [{ id: "p" }, { id: "q" }, { id: "old", archived: true }] };
+app.scope = "q";
+assert.deepEqual([...context.neededOrderScopes()], ["current", "all", "archived", "scope:all:q"], "a project tile reads that project's own listing, not just the rows already loaded");
+Object.assign(app.filters, { surface: "codex", status: "working" });
+app.listQuery = "fix";
+pages[path({ scope: "all", members: "1", projectId: "q", surface: "codex", status: "working", q: "fix", limit: "200" })] = page("all", [family("q1", "q"), family("q2", "q")], { page: { nextCursor: "more" } });
+pages[path({ scope: "all", members: "1", projectId: "q", surface: "codex", status: "working", q: "fix", limit: "200", cursor: "more" })] = page("all", [family("q3", "q")]);
+requested = [];
+await context.loadSessionOrder();
+assert(requested.includes(path({ scope: "all", members: "1", projectId: "q", surface: "codex", status: "working", q: "fix", limit: "200", cursor: "more" })), "the project's listing is read to the end, refined like the global list");
+assert.equal(context.scopedSessions().map((session) => session.id).join(","), "q1,q2,q3", "the scoped rail lists every session the project's listing holds");
+app.showArchived = true;
+pages[path({ scope: "archived", members: "1", projectId: "q", surface: "codex", status: "working", q: "fix", limit: "200" })] = page("archived", [family("q9", "q")]);
+assert.deepEqual([...context.neededOrderScopes()].slice(-2), ["scope:all:q", "scope:archived:q"], "Show archived adds the project's archived sessions");
+await context.loadSessionOrder();
+assert.equal(context.scopedSessions().map((session) => session.id).join(","), "q1,q2,q3,q9");
+app.scope = "old";
+assert.deepEqual([...context.neededOrderScopes()].slice(-1), ["scope:archived:old"], "an archived project's sessions are read from the archive");
+Object.assign(app.filters, { surface: "all", status: "all" });
+app.listQuery = "";
+app.showArchived = false;
+app.scope = "all";
+assert.equal([...context.neededOrderScopes()].some((key) => key.startsWith("scope:")), false, "All reads no project listing");
+app.view = "overview";
 
 await context.loadSessionOrder();
 assert.deepEqual(Object.keys(app.sessionOrder), ["current"], "listings no longer shown are dropped");
