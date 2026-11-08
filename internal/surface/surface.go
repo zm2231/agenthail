@@ -1301,6 +1301,14 @@ type CatalogWatcher interface {
 	CatalogWatchDirs() []string
 }
 
+// CatalogNotifier reports that one of the surface's sessions may have changed
+// in a way its files do not show, so the daemon lists the surface at once
+// rather than at its next discovery pass. NotifyCatalog runs until ctx ends
+// and calls changed for each report.
+type CatalogNotifier interface {
+	NotifyCatalog(ctx context.Context, changed func())
+}
+
 func DeriveName(explicit, preview string, maxLen int) string {
 	if explicit != "" {
 		return truncate(explicit, maxLen)

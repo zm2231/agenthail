@@ -246,6 +246,8 @@ func (c *managedCodexClient) failed() bool {
 // Notified fires after a notification arrives; DrainNotifications returns it.
 func (c *managedCodexClient) Notified() <-chan struct{} { return c.notified }
 
+func (c *managedCodexClient) Done() <-chan struct{} { return c.closed }
+
 func (c *managedCodexClient) Close() error { return c.ws.Close() }
 
 func (c *Codex) openDesktop(ctx context.Context) (codexClient, error) {

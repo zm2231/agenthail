@@ -399,6 +399,7 @@ func (d *Daemon) runCatalog(ctx context.Context) {
 	defer d.catalogIdentities.wait()
 	wakes := newCatalogWakes(d.Surfaces, filewake.FollowDir)
 	defer wakes.close()
+	wakes.notify(ctx)
 	discoveryTicker := time.NewTicker(catalogDiscoveryInterval)
 	defer discoveryTicker.Stop()
 	wakes.sync()
