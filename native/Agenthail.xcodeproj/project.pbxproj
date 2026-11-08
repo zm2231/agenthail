@@ -14,6 +14,7 @@
 		0265FA869065773F39600986 /* TestRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34BE7F9A701699F72A33B490 /* TestRoutes.swift */; };
 		05F4FFACC1654CC28C97D034 /* LiveHostsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E41EE59EAF583C15761AE1B5 /* LiveHostsUITests.swift */; };
 		070A9882E55DDEE16B0D1592 /* SessionNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2615CE29223F7FB746D9F8B2 /* SessionNavigationTests.swift */; };
+		0715C585683831BC3087A7AB /* ClaudeCompactModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68D47388531D27A7AD47C846 /* ClaudeCompactModels.swift */; };
 		0735E5BFD23705F4C87E60D6 /* InboxPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F0E5F2D719CC6DDC08591BC /* InboxPreview.swift */; };
 		0740E2CF3E344953963E5796 /* TranscriptTail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14EA08B4C3AAC865894FE6A1 /* TranscriptTail.swift */; };
 		07F8982FFE8731CB9677BBA1 /* SessionControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F97182BB6B3E031BAE4D18C /* SessionControls.swift */; };
@@ -456,6 +457,7 @@
 		66AFA0C1285AF89FECDA0777 /* UsageMetersUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageMetersUITests.swift; sourceTree = "<group>"; };
 		66C823A3E6D08A4782876813 /* UsageAccounts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageAccounts.swift; sourceTree = "<group>"; };
 		683BD6EDC7DF2D9B5259747B /* GoalFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalFacts.swift; sourceTree = "<group>"; };
+		68D47388531D27A7AD47C846 /* ClaudeCompactModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeCompactModels.swift; sourceTree = "<group>"; };
 		695D132A63FCAF806DBC97FE /* QueueTailRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueTailRows.swift; sourceTree = "<group>"; };
 		6BB39D1F5A77FDB75976F7AF /* ProjectNow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectNow.swift; sourceTree = "<group>"; };
 		6F0E5F2D719CC6DDC08591BC /* InboxPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxPreview.swift; sourceTree = "<group>"; };
@@ -827,6 +829,7 @@
 				C30F19978B305863CC6EEB32 /* CatalogNews.swift */,
 				771642DB9E0CADCD34FB5911 /* ChipFlow.swift */,
 				375690EDA07B0E3F4C2E13DB /* ClampedText.swift */,
+				68D47388531D27A7AD47C846 /* ClaudeCompactModels.swift */,
 				3FB569A293EA25F2E0C39509 /* ClaudeRootLabels.swift */,
 				E12EFFAC919D5A9794A56E13 /* ClaudeSubagentList.swift */,
 				33AFDDC2552D1DC17F94ABC1 /* ComposerAttachment.swift */,
@@ -1160,6 +1163,7 @@
 				D9147155C40454C2B7422A96 /* CatalogNews.swift in Sources */,
 				7D811A47383D269BF3A14E45 /* ChipFlow.swift in Sources */,
 				C847E5B4D44BC31BEB51D57F /* ClampedText.swift in Sources */,
+				0715C585683831BC3087A7AB /* ClaudeCompactModels.swift in Sources */,
 				625738A022690297F180759E /* ClaudeRootLabels.swift in Sources */,
 				3088041E658DFAE92C94F2EB /* ClaudeSubagentList.swift in Sources */,
 				1173F957401A01ED3BC23E60 /* CompactActivity.swift in Sources */,

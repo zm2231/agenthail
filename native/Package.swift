@@ -30,6 +30,7 @@ let package = Package(
                 "LaunchSettings.swift",
                 "SessionTurnSettings.swift",
                 "AgenthailAPI.swift",
+                "ClaudeCompactModels.swift",
                 "KeptDelivery.swift",
                 "QueueSteer.swift",
                 "InboxMessage.swift",

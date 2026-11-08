@@ -25,6 +25,7 @@ JOBS="${AGENTHAIL_TEST_JOBS:-$(sysctl -n hw.ncpu)}"
 
 SOURCES=(
   AgenthailAPI.swift
+  ClaudeCompactModels.swift
   KeptDelivery.swift
   InboxMessage.swift
   Decisions.swift
@@ -157,6 +158,9 @@ SOURCES=(
   macOS/SessionOperations.swift
   macOS/NewSessionDraft.swift
   macOS/NewSessionLabels.swift
+  macOS/ClaudeCompact.swift
+  macOS/ClaudeCompactDraft.swift
+  macOS/ClaudeCompactStore.swift
   macOS/SessionPane.swift
   macOS/MacDecisions.swift
   macOS/PaneScope.swift
