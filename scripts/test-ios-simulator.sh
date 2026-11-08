@@ -13,6 +13,9 @@ cat >"$WORK/bin/xcrun" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2 ${3:-}" in
   "simctl list devices") echo '{"devices":{"ios":[{"name":"Agenthail iPhone","udid":"UDID-IPHONE"}]}}' ;;
+  "simctl list runtimes") echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","isAvailable":true}]}' ;;
+  "simctl list devicetypes") echo "${DEVICE_TYPES:?}" ;;
+  "simctl create"*) printf '%s\n' "$@" >"$CREATED"; echo UDID-NEW ;;
   "simctl boot"*|"simctl bootstatus"*) ;;
   *) echo "unexpected xcrun $*" >&2; exit 1 ;;
 esac
@@ -28,7 +31,7 @@ cat >"$WORK/bin/defaults" <<'EOF'
 echo "$XCODE_DERIVED_DATA"
 EOF
 chmod +x "$WORK/bin/"*
-export PATH="$WORK/bin:$PATH" LOCKED="$WORK/locked"
+export PATH="$WORK/bin:$PATH" LOCKED="$WORK/locked" CREATED="$WORK/created"
 
 failures=0
 fail() {
@@ -95,6 +98,19 @@ run 2 sh -c "xcodebuild test -scheme AgenthailIOS"
 
 run 0 xcrun simctl install booted App.app
 [ "$(tr '\n' ' ' <<<"$locked")" = "xcrun simctl install booted App.app " ] || fail "a non-xcodebuild command was changed: $locked"
+
+pro13='{"name":"iPad Pro 13-inch (M5)","identifier":"iPad-Pro-13-inch-M5"}'
+pro11='{"name":"iPad Pro 11-inch (M5)","identifier":"iPad-Pro-11-inch-M5"}'
+air='{"name":"iPad Air 13-inch (M3)","identifier":"iPad-Air-13-inch-M3"}'
+phone='{"name":"iPhone 17 Pro","identifier":"iPhone-17-Pro"}'
+created() {
+  rm -f "$CREATED"
+  DEVICE_TYPES="{\"devicetypes\":[$1]}" "$ROOT/scripts/ios-simulator.sh" "$2" >/dev/null 2>&1 || true
+  sed -n 4p "$CREATED" 2>/dev/null || true
+}
+[ "$(created "$pro13,$pro11,$phone" ipad)" = iPad-Pro-11-inch-M5 ] || fail "a new iPad simulator is not the 11-inch iPad Pro the iPad UI tests are written for"
+[ "$(created "$air,$phone" ipad)" = iPad-Air-13-inch-M3 ] || fail "without an 11-inch iPad Pro no iPad simulator was created"
+[ "$(AGENTHAIL_SIMULATOR_NAME="Agenthail CI phone" created "$phone,$pro11" iphone)" = iPhone-17-Pro ] || fail "the iPhone simulator type changed"
 
 if [ "$failures" -gt 0 ]; then
   exit 1

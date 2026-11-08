@@ -28,13 +28,13 @@ Any other label changes nothing. Adding `full-ci` to a pull request from a fork 
 | Pull request that changes the transcript, the preview daemon or the UI test harness | `smoke`, `main` |
 | Pull request labelled `ui-all` | `smoke`, `main`, `nightly` |
 | Push to `main` | `smoke`, `main` |
-| `iOS nightly`, every night and on `workflow_dispatch` | `smoke`, `main`, `nightly` |
+| `iOS nightly`, every night and on `workflow_dispatch`, on iPhone and on iPad | `smoke`, `main`, `nightly` |
 
 Tests in the `live` tier pair the app with real daemons, so they run only under `cmd/ios-live-harness` in `iOS live nightly`, never in the runs above. See [iPhone live harness](ios-live-harness.md).
 
 `scripts/ios-ui-tests.sh tiers` decides the tiers from the event, the changed files and the labels; the paths that widen a pull request to `main` are in its `wide` pattern. `scripts/ios-ui-tests.sh check` fails when a UI test is in no tier, in two, or a listed test no longer exists, so a new test cannot silently never run. `ios`, `iOS nightly` and `verify` run the check, and `scripts/test-ios-ui-tests.sh` checks the script.
 
-A failed `ios` run on a push to `main` opens the issue `iOS tests on main are failing`, assigned to the repository owner, or comments on it if it is open; the next passing push closes it. A cancelled run, such as one a later push replaced, reports nothing. `iOS nightly` does the same with `Nightly iOS tests are failing`, and also reports a run that stopped or was cancelled. Both use `scripts/ci-failure-issue.sh`, which `scripts/test-ci-failure-issue.sh` checks.
+A failed `ios` run on a push to `main` opens the issue `iOS tests on main are failing`, assigned to the repository owner, or comments on it if it is open; the next passing push closes it. A cancelled run, such as one a later push replaced, reports nothing. `iOS nightly` runs the suite once on an iPhone simulator and once on an 11-inch iPad Pro simulator, through `.github/workflows/ios-device-tests.yml`. Each device reports on its own issue, `Nightly iOS tests are failing` and `Nightly iPad tests are failing`, and a run that stopped or was cancelled is reported too. Pull requests and pushes run the iOS tests on iPhone only. Both use `scripts/ci-failure-issue.sh`, which `scripts/test-ci-failure-issue.sh` checks.
 
 ## Fork protection
 
