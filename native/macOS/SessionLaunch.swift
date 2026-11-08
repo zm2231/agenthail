@@ -77,7 +77,7 @@ struct SessionLaunchForm: Equatable {
     var worktree = ""
     var permissionMode = ""
 
-    static let outputSchemaLimit = 64 << 10
+    static let outputSchemaLimit = OutputSchemaInput.limit
 
     var usesFolder: Bool { agent != "notion" }
     var listsModels: Bool { agent != "notion" }
@@ -93,21 +93,10 @@ struct SessionLaunchForm: Equatable {
 
     var outputSchemaProblem: String? {
         guard agent == "codex", setsLaunchOptions else { return nil }
-        if case .failure(let problem) = parsedOutputSchema { return problem.message }
-        return nil
+        return OutputSchemaInput.problem(outputSchema)
     }
 
-    private var parsedOutputSchema: Result<Any?, OutputSchemaProblem> {
-        let text = outputSchema.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return .success(nil) }
-        guard let schema = try? JSONSerialization.jsonObject(with: Data(text.utf8)), schema is [String: Any] else {
-            return .failure(OutputSchemaProblem(message: "The output schema must be a JSON object."))
-        }
-        guard let sent = try? JSONSerialization.data(withJSONObject: schema), sent.count <= Self.outputSchemaLimit else {
-            return .failure(OutputSchemaProblem(message: "The output schema must be at most 64 KiB."))
-        }
-        return .success(schema)
-    }
+    private var parsedOutputSchema: Result<Any?, OutputSchemaProblem> { OutputSchemaInput.parse(outputSchema) }
 
     mutating func switchAgent(to next: String) {
         guard next != agent else { return }
@@ -148,9 +137,4 @@ struct SessionLaunchForm: Equatable {
         let selected = models.first { $0.id == model } ?? (model.isEmpty ? models.first { $0.default == true } : nil)
         return selected?.supportedReasoningEfforts ?? []
     }
-}
-
-struct OutputSchemaProblem: LocalizedError {
-    let message: String
-    var errorDescription: String? { message }
 }

@@ -909,14 +909,14 @@ final class AgenthailModel {
         return connected && api != nil
     }
 
-    func send(_ message: String, attachments: [ComposerAttachment] = [], to sessionID: String, busyDelivery: String? = nil, completion: ((Bool) -> Void)? = nil) {
+    func send(_ message: String, attachments: [ComposerAttachment] = [], to sessionID: String, busyDelivery: String? = nil, turnOptions: MessageTurnOptions? = nil, completion: ((Bool) -> Void)? = nil) {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !ComposerAttachments.isEmpty(text: text, attachments: attachments), api != nil else {
             restoreToComposer(text, attachments: attachments, sessionID: sessionID)
             completion?(false)
             return
         }
-        outbox.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery, completion: completion)
+        outbox.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery, turnOptions: turnOptions, completion: completion)
     }
 
     func retrySend(_ send: LocalSend, in sessionID: String) {
@@ -1519,6 +1519,15 @@ final class ComposerDraft: ObservableObject {
     @Published private(set) var stash: ComposerStash?
     @Published private(set) var sent: [PromptItem] = []
     @Published private(set) var focusRequests = 0
+    @Published var serviceTier = ""
+    @Published var outputSchema = ""
+
+    var turnOptionsProblem: String? { OutputSchemaInput.problem(outputSchema) }
+    var turnOptions: MessageTurnOptions? {
+        guard case .success(let schema) = OutputSchemaInput.recorded(outputSchema) else { return nil }
+        let options = MessageTurnOptions(serviceTier: serviceTier.isEmpty ? nil : serviceTier, outputSchema: schema)
+        return options.isEmpty ? nil : options
+    }
     private(set) var cleared: [String] = []
     private var lastEscape: Date?
     var history = PromptHistory()

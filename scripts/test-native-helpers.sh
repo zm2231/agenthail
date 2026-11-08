@@ -151,6 +151,8 @@ SOURCES=(
   macOS/SessionFacts.swift
   macOS/SessionHandle.swift
   macOS/SessionLaunch.swift
+  macOS/OutputSchemaInput.swift
+  macOS/TurnOptionsChip.swift
   macOS/SessionOperationControllers.swift
   macOS/SessionOperations.swift
   macOS/NewSessionDraft.swift
