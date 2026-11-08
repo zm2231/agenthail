@@ -342,7 +342,7 @@ func TestFederationStopsReplayingHeldSendsOnceTheHostIsIncompatible(t *testing.T
 
 func TestFederationMirrorKeepsEachSessionsRuntime(t *testing.T) {
 	local, remote, record := pairedFederation(t)
-	appServer := surface.Session{ID: "remote-c", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, ConfiguredModel: "gpt-remote", Name: "work remote-c", Status: surface.StatusIdle, Source: "agenthail", Transport: "managed", LastActive: time.Now()}
+	appServer := surface.Session{ID: "remote-c", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Settings: &surface.ObservedSettings{Model: "gpt-remote"}, Name: "work remote-c", Status: surface.StatusIdle, Source: "agenthail", Transport: "managed", LastActive: time.Now()}
 	if err := remote.reg.RegisterSession(appServer); err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestFederationMirrorKeepsEachSessionsRuntime(t *testing.T) {
 			if _, err := local.daemon.adapters().For(session); err != nil {
 				t.Fatalf("%s: mirrored %s does not resolve its runtime: %v", stage, id, err)
 			}
-			if id == "remote-c" && (session.ConfiguredModel != "gpt-remote" || session.Transport != "managed" || session.LastActive.IsZero()) {
+			if id == "remote-c" && (session.Settings == nil || session.Settings.Model != "gpt-remote" || session.Transport != "managed" || session.LastActive.IsZero()) {
 				t.Fatalf("%s: mirrored row lost session fields: %+v", stage, session)
 			}
 		}

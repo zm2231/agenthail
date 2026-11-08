@@ -281,10 +281,11 @@ type Session struct {
 	TranscriptFromStart bool `json:"-"`
 }
 
-// ObservedSettings are the effort and permission mode a running session's
-// runtime reports now. A session nothing observes has none, rather than a
+// ObservedSettings are the model, effort and permission mode a running
+// session's runtime reports now. A session nothing observes has none, rather than a
 // value set earlier that a change in its own terminal would leave stale.
 type ObservedSettings struct {
+	Model      string `json:"model,omitempty"`
 	Effort     string `json:"effort,omitempty"`
 	Permission string `json:"permission,omitempty"`
 }

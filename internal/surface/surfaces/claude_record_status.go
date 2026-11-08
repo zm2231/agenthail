@@ -38,8 +38,8 @@ func (c *Claude) observedSettings(ctx context.Context, sess *surface.Session) *s
 		return nil
 	}
 	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
-	if !ok || (listed.Effort == "" && listed.PermissionMode == "") {
+	if !ok || (listed.Model == "" && listed.Effort == "" && listed.PermissionMode == "") {
 		return nil
 	}
-	return &surface.ObservedSettings{Effort: listed.Effort, Permission: listed.PermissionMode}
+	return &surface.ObservedSettings{Model: listed.Model, Effort: listed.Effort, Permission: listed.PermissionMode}
 }

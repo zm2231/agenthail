@@ -16,7 +16,7 @@ func TestAPresencePassBuildsOnTheProjectionAnotherWriterStored(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := storedProjection(t, r, "from")
-	row.ConfiguredModel = "model-b"
+	row.Settings = &surface.ObservedSettings{Model: "model-b"}
 	next, err := json.Marshal(row)
 	if err != nil {
 		t.Fatal(err)
@@ -28,8 +28,8 @@ func TestAPresencePassBuildsOnTheProjectionAnotherWriterStored(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.publishCatalogPresence()
-	if row := storedProjection(t, r, "from"); row.QueueCount != 1 || row.ConfiguredModel != "model-b" {
-		t.Fatalf("queueCount=%d configuredModel=%q", row.QueueCount, row.ConfiguredModel)
+	if row := storedProjection(t, r, "from"); row.QueueCount != 1 || row.Settings == nil || row.Settings.Model != "model-b" {
+		t.Fatalf("queueCount=%d settings=%+v", row.QueueCount, row.Settings)
 	}
 }
 
