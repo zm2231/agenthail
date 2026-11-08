@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,6 +161,21 @@ func (c *catalogWakes) request(kind surface.SurfaceKind) {
 	select {
 	case c.signal <- struct{}{}:
 	default:
+	}
+}
+
+func (c *catalogWakes) notify(ctx context.Context) {
+	for _, adapter := range c.adapters {
+		notifier, ok := adapter.(surface.CatalogNotifier)
+		if !ok {
+			continue
+		}
+		kind := adapter.Name()
+		c.forwards.Add(1)
+		go func() {
+			defer c.forwards.Done()
+			notifier.NotifyCatalog(ctx, func() { c.request(kind) })
+		}()
 	}
 }
 
