@@ -331,7 +331,7 @@ struct SessionPreview: View {
     {
       "session":{"id":"demo","surface":"claude","name":"Make the build reliable","status":"busy","lastActive":"2026-09-07T12:05:00Z","cwd":"/Users/demo/projects/fieldnotes","source":"cli","transport":"local"},
       "journalSeq":2048,
-      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true,"attach":true},
+      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true,"attach":true,"permissionMode":true},
       "readOnly":false,"readOnlyReason":"","model":"Claude Sonnet",
       "models":[{"id":"sonnet","displayName":"Claude Sonnet"},{"id":"opus","displayName":"Claude Opus"}],
       "context":{"usedTokens":86400,"contextWindow":200000,"cumulativeTokens":312000,"compacting":false,"compactionCount":1,"reclaimedTokens":42000,"inputTokens":83000,"cachedInputTokens":60000,"outputTokens":3400},
