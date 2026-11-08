@@ -46,26 +46,12 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		"threadId": sess.ID,
 		"input":    codexUserInput(message, options.Images),
 	}
-	model, notice := options.Model, ""
-	_, pending := loadCodexPendingModel(sess.ID)
-	if pending && model == "" {
-		current, err := codexThreadModel(ctx, conn, sess.ID)
-		if err != nil {
-			return nil, surface.DeliveryUnavailable(fmt.Errorf("read the model the pending choice replaces: %w", err))
-		}
-		model, notice = codexPendingModelForTurn(sess.ID, current)
-	}
-	if err := applyCodexTurnOptions(ctx, conn, sess, model, options.TurnOptions, params); err != nil {
+	if err := applyCodexTurnOptions(options.Model, options.TurnOptions, params); err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	resp, err := conn.Request(ctx, "turn/start", params, 10*time.Second)
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/start: %w", err))
-	}
-	if pending {
-		if err := clearCodexPendingModel(sess.ID); err != nil {
-			notice = strings.TrimSpace(notice + " The pending model choice could not be cleared: " + err.Error())
-		}
 	}
 	turnID := sess.ID
 	if result, _ := resp["result"].(map[string]any); result != nil {
@@ -75,7 +61,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 			turnID = value
 		}
 	}
-	return &surface.SendResult{UUID: turnID, Accepted: true, Notice: notice}, nil
+	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
 }
 
 // NativeImages is true on every route: each Codex transport speaks the

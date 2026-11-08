@@ -253,7 +253,6 @@ type Session struct {
 	Transport             string            `json:"transport,omitempty"`
 	RuntimeKind           RuntimeKind       `json:"runtimeKind,omitempty"`
 	ConfiguredModel       string            `json:"configuredModel,omitempty"`
-	PendingModel          string            `json:"pendingModel,omitempty"`
 	Bridge                string            `json:"bridge,omitempty"`
 	ForkedFrom            string            `json:"forkedFrom,omitempty"`
 	LastActive            time.Time         `json:"lastActive"`
@@ -795,7 +794,8 @@ func PersonName(ctx context.Context) string {
 
 type SessionStartOptions struct {
 	TurnOptions
-	Name           string `json:"name,omitempty"`
+	LaunchSettings
+	Name          string `json:"name,omitempty"`
 	Agent          string `json:"agent,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
 	ConfigRoot     string `json:"configRoot,omitempty"`

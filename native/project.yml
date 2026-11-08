@@ -37,7 +37,8 @@ targets:
           touch "$DERIVED_FILE_DIR/debug-local-networking.stamp"
     sources:
       - path: AgenthailModels.swift
-      - path: TurnSettings.swift
+      - path: LaunchSettings.swift
+      - path: SessionTurnSettings.swift
       - path: AgenthailAPI.swift
       - path: KeptDelivery.swift
       - path: QueueSteer.swift

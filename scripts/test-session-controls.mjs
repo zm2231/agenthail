@@ -16,7 +16,7 @@ const button = {};
 let submit;
 const form = {elements, closest: () => details, querySelector: () => button, querySelectorAll: () => Object.values(elements).filter(x => x.name), addEventListener: (_, handler) => {submit = handler;}};
 const fields = {'#session-operation-form': form, '#session-operation-result': {textContent: ''}};
-for (const name of ['effort', 'mode', 'tier', 'schema']) fields[`#turn-${name}`] = {value: '', closest: () => ({})};
+for (const name of ['tier', 'schema']) fields[`#turn-${name}`] = {value: '', closest: () => ({})};
 const app = {selected: {id: 'source', surface: 'codex'}};
 let fail = false;
 let calls = [];

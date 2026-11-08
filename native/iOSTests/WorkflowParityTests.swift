@@ -6,8 +6,8 @@ final class WorkflowParityTests: XCTestCase {
     func testCodexCreationEncodesEffortAndPlanWithoutLeakingToClaude() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
-        let settings = TurnSettings(effort: "high", mode: .plan)
-        let created = await model.createSession(surface: "codex", message: "Plan the fix", cwd: "/project", model: "chosen", turnSettings: settings)
+        let settings = LaunchSettings(effort: "high", mode: .plan)
+        let created = await model.createSession(surface: "codex", message: "Plan the fix", cwd: "/project", model: "chosen", launch: settings)
         XCTAssertTrue(created)
         let action = ParityProtocol.state.actions[0]
         XCTAssertEqual(action["action"] as? String, "session-create")
@@ -17,7 +17,7 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertNil(action["turnSettings"])
         XCTAssertNil(action["outputSchema"])
         XCTAssertNil(action["serviceTier"])
-        _ = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "", turnSettings: settings)
+        _ = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "", launch: settings)
         XCTAssertNil(ParityProtocol.state.actions[1]["effort"])
         XCTAssertNil(ParityProtocol.state.actions[1]["mode"])
     }
@@ -83,8 +83,8 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertNil(ParityProtocol.state.actions[0]["effort"])
         XCTAssertNil(ParityProtocol.state.actions[0]["mode"])
 
-        let settings = TurnSettings(effort: "high", mode: .plan)
-        let rejected = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", turnSettings: settings, launcher: LauncherOption(id: "tmux"))
+        let settings = LaunchSettings(effort: "high", mode: .plan)
+        let rejected = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launch: settings, launcher: LauncherOption(id: "tmux"))
         XCTAssertFalse(rejected)
         XCTAssertEqual(ParityProtocol.state.actions.count, 1)
         XCTAssertTrue(model.creationError?.contains("do not support advanced") == true)
@@ -100,18 +100,18 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertNil(ParityProtocol.state.actions[0]["effort"])
         XCTAssertNil(ParityProtocol.state.actions[0]["mode"])
 
-        let settings = TurnSettings(effort: "high", mode: .plan)
-        let rejected = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", turnSettings: settings, launcher: LauncherOption(id: "cmux"))
+        let settings = LaunchSettings(effort: "high", mode: .plan)
+        let rejected = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launch: settings, launcher: LauncherOption(id: "cmux"))
         XCTAssertFalse(rejected)
         XCTAssertEqual(ParityProtocol.state.actions.count, 1)
         XCTAssertTrue(model.creationError?.contains("do not support advanced") == true)
     }
 
-    func testQueueDecodesIntegratedTurnSettings() throws {
-        let data = Data(#"{"id":7,"sessionId":"demo","sourceSessionId":"sender","target":"demo","message":"next","status":"pending","evidence":"queued","attempts":0,"queuedAt":"now","effort":"high","mode":"plan","serviceTier":"fast","outputSchema":{"type":"object","required":["answer"],"additionalProperties":false}}"#.utf8)
+    func testQueueDecodesPerTurnOptions() throws {
+        let data = Data(#"{"id":7,"sessionId":"demo","sourceSessionId":"sender","target":"demo","message":"next","status":"pending","evidence":"queued","attempts":0,"queuedAt":"now","serviceTier":"fast","outputSchema":{"type":"object","required":["answer"],"additionalProperties":false}}"#.utf8)
         let queue = try JSONDecoder().decode(QueueState.self, from: data)
-        XCTAssertEqual(queue.sourceSessionId, "sender"); XCTAssertEqual(queue.effort, "high")
-        XCTAssertEqual(queue.mode, "plan"); XCTAssertEqual(queue.serviceTier, "fast")
+        XCTAssertEqual(queue.sourceSessionId, "sender")
+        XCTAssertEqual(queue.serviceTier, "fast")
         let schema = try JSONSerialization.jsonObject(with: Data(queue.outputSchema!.formatted.utf8)) as! [String:Any]
         XCTAssertEqual(schema["required"] as? [String], ["answer"])
         XCTAssertEqual(schema["additionalProperties"] as? Bool, false)

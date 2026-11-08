@@ -555,7 +555,7 @@ func TestCodexManagedInterruptTargetsOnlyTheConfirmedTurn(t *testing.T) {
 	}
 }
 
-func TestCodexManagedSendEncodesTurnOptionsWithActiveModel(t *testing.T) {
+func TestCodexManagedSendEncodesTurnOptionsWithoutSessionSettings(t *testing.T) {
 	fake := startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
 		switch method {
 		case "thread/resume":
@@ -568,7 +568,7 @@ func TestCodexManagedSendEncodesTurnOptionsWithActiveModel(t *testing.T) {
 		return nil
 	})
 	fake.AddThread(codextest.Thread{ID: "thread", Originator: "agenthail"})
-	options := surface.TurnOptions{Effort: "high", Mode: "plan", ServiceTier: "fast", OutputSchema: json.RawMessage(`{"type":"object"}`)}
+	options := surface.TurnOptions{ServiceTier: "fast", OutputSchema: json.RawMessage(`{"type":"object"}`)}
 	sent, err := isolatedManagedRuntime(t).SendWithOptions(context.Background(), managedSession(), "hello", surface.SendOptions{TurnOptions: options})
 	if err != nil || sent == nil || !sent.Accepted || sent.UUID != "turn" {
 		t.Fatalf("sent=%+v err=%v", sent, err)
@@ -578,9 +578,7 @@ func TestCodexManagedSendEncodesTurnOptionsWithActiveModel(t *testing.T) {
 		t.Fatalf("methods=%v", fake.Methods())
 	}
 	params := starts[0]
-	mode, _ := params["collaborationMode"].(map[string]any)
-	settings, _ := mode["settings"].(map[string]any)
-	if params["threadId"] != "thread" || settings["model"] != "active-model" || settings["reasoning_effort"] != "high" || mode["mode"] != "plan" || params["serviceTierForTurn"] != "fast" {
+	if params["threadId"] != "thread" || params["serviceTierForTurn"] != "fast" || params["effort"] != nil || params["collaborationMode"] != nil {
 		t.Fatal(params)
 	}
 	if schema, _ := params["outputSchema"].(map[string]any); schema["type"] != "object" {

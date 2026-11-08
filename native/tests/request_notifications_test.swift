@@ -133,9 +133,9 @@ struct RequestNotificationsTest {
         _ = try? await api.respond(sessionID: "s1", requestID: "req-2", decision: RequestDecision(choice: "reply", message: "use staging"))
         check((RespondStub.bodies.last?["decision"] as? [String: String]) == ["choice": "reply", "message": "use staging"], "reply body \(RespondStub.bodies.last ?? [:])")
         RespondStub.replies = [(200, "{}")]
-        try? await api.setPermissionMode(sessionID: "s1", mode: "plan")
+        try? await api.setTurnSetting(sessionID: "s1", key: "mode", value: "plan")
         let mode = RespondStub.bodies.last ?? [:]
-        check(mode["action"] as? String == "permission-mode" && mode["permissionMode"] as? String == "plan", "permission mode body \(mode)")
+        check(mode["action"] as? String == "turn-setting" && mode["setting"] as? String == "mode" && mode["value"] as? String == "plan", "mode body \(mode)")
     }
 
     static func checkDecoding() {
@@ -144,7 +144,6 @@ struct RequestNotificationsTest {
         check(state.requests.count == 2 && state.requests[0].summary == "Claude wants to run true" && state.requests[0].alwaysAllow, "approval \(state.requests[0])")
         check(state.requests[0].input?.contains(#""command":"true""#) == true, "input \(String(describing: state.requests[0].input))")
         check(state.requests[1].isQuestion && state.requests[1].questions?.first?.options.first?.label == "Red", "question \(state.requests[1])")
-        check(SessionRequests.permissionModeLabel(state.permissionMode) == "Default (Claude settings)", "default label")
         let capabilities = try? JSONDecoder().decode(Capabilities.self, from: Data(#"{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":true,"interrupt":true,"steer":true,"respond":true,"permissionMode":true}"#.utf8))
         check(capabilities?.respond == true && capabilities?.permissionMode == true && capabilities?.commands == false, "capabilities \(String(describing: capabilities))")
     }

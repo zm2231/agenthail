@@ -271,7 +271,7 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 	if err != nil {
 		return err
 	}
-	turnOptions, err := parseTurnOptions(args)
+	turnOptions, err := parseSendTurnOptions(args)
 	if err != nil {
 		return err
 	}
@@ -353,7 +353,7 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 	return nil
 }
 
-func actionPayload(options surface.TurnOptions) (map[string]any, error) {
+func actionPayload(options any) (map[string]any, error) {
 	encoded, err := json.Marshal(options)
 	if err != nil {
 		return nil, err
@@ -411,7 +411,10 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 	if err != nil {
 		return err
 	}
-	payload, err := actionPayload(request.options.TurnOptions)
+	payload, err := actionPayload(struct {
+		surface.TurnOptions
+		surface.LaunchSettings
+	}{request.options.TurnOptions, request.options.LaunchSettings})
 	if err != nil {
 		return err
 	}

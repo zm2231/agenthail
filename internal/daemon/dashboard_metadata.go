@@ -60,12 +60,12 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 	}
 	if effective.Model {
 		requests["model"] = func() (any, error) { return adapter.Model(ctx, session, "") }
-		if reader, ok := adapter.(surface.PendingModelReader); ok {
-			requests["pendingModel"] = func() (any, error) { return reader.PendingModel(session.ID), nil }
-		}
 		if lister, ok := adapter.(surface.ModelLister); ok {
 			requests["models"] = func() (any, error) { return lister.Models(ctx) }
 		}
+	}
+	if provider, ok := adapter.(surface.TurnSettingsProvider); ok {
+		requests["turnSettings"] = func() (any, error) { return provider.TurnSettings(ctx, session) }
 	}
 	if observer, ok := adapter.(surface.ClaudeRunObserver); ok {
 		requests["claudeRuns"] = func() (any, error) {

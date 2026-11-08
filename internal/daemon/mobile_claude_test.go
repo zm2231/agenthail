@@ -131,7 +131,7 @@ func TestAClaudeCreationWhoseFirstTurnIsUnconfirmedRecordsThatTurnsUUID(t *testi
 
 func TestMobileQueuePreservesIntegratedTurnSettings(t *testing.T) {
 	d, registry, _, from, _ := daemonFixture(t)
-	_, err := registry.QueueMessageWithOptions(from.ID, "queued", "", surface.SendOptions{TurnOptions: surface.TurnOptions{Effort: "high", Mode: "plan", ServiceTier: "fast", OutputSchema: json.RawMessage(`{"type":"object"}`)}})
+	_, err := registry.QueueMessageWithOptions(from.ID, "queued", "", surface.SendOptions{TurnOptions: surface.TurnOptions{ServiceTier: "fast", OutputSchema: json.RawMessage(`{"type":"object"}`)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestMobileQueuePreservesIntegratedTurnSettings(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	dashboardRouter(d).ServeHTTP(response, request)
-	for _, want := range []string{`"effort":"high"`, `"mode":"plan"`, `"serviceTier":"fast"`, `"outputSchema":{"type":"object"}`} {
+	for _, want := range []string{`"serviceTier":"fast"`, `"outputSchema":{"type":"object"}`} {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Fatal(response.Body.String())
 		}

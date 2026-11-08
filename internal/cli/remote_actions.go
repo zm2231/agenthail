@@ -72,9 +72,6 @@ func (a *App) modelRemote(ctx context.Context, remote *remoteTarget, name string
 	}
 	var change surface.ModelChange
 	_ = json.Unmarshal(raw, &change.Model)
-	if pending, ok := metadata["pendingModel"]; ok {
-		_ = json.Unmarshal(pending, &change.PendingModel)
-	}
 	return printModelChange(remote.ID, change, args)
 }
 

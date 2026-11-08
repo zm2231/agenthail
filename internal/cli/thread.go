@@ -383,7 +383,7 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 	if err != nil {
 		return request, err
 	}
-	request.options = surface.SessionStartOptions{Message: request.message, Cwd: request.cwd, Model: request.model, ApprovalPolicy: request.approval, TurnOptions: turnOptions, Name: flagVal(args, "--name"), Agent: flagVal(args, "--agent"), PermissionMode: flagVal(args, "--permission-mode"), ConfigRoot: flagVal(args, "--root")}
+	request.options = surface.SessionStartOptions{Message: request.message, Cwd: request.cwd, Model: request.model, ApprovalPolicy: request.approval, TurnOptions: turnOptions, LaunchSettings: parseLaunchSettings(args), Name: flagVal(args, "--name"), Agent: flagVal(args, "--agent"), PermissionMode: flagVal(args, "--permission-mode"), ConfigRoot: flagVal(args, "--root")}
 	return request, nil
 }
 

@@ -26,7 +26,7 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 		}
 	}
 	startOptions := func(cwd string) surface.SessionStartOptions {
-		return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Agent: request.Agent, PermissionMode: request.PermissionMode, ConfigRoot: strings.TrimSpace(request.ConfigRoot)}
+		return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, LaunchSettings: request.LaunchSettings, Name: request.Name, Agent: request.Agent, PermissionMode: request.PermissionMode, ConfigRoot: strings.TrimSpace(request.ConfigRoot)}
 	}
 	if request.Task && creator == "" {
 		return actionResult{}, invalidRequest("a task needs the session that started it")

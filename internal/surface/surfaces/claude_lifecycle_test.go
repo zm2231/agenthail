@@ -66,7 +66,7 @@ func TestClaudeStartsASessionInTheHostWithItsFirstTurn(t *testing.T) {
 	c := NewClaude(nil, host.Home)
 	turn := uuid.NewString()
 	ctx := surface.WithSourceSessionID(surface.WithMessageUUID(context.Background(), turn), surface.PersonSessionID)
-	session, sent, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, Name: "builder", PermissionMode: "acceptEdits", TurnOptions: surface.TurnOptions{Effort: "high"}})
+	session, sent, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, Name: "builder", PermissionMode: "acceptEdits", LaunchSettings: surface.LaunchSettings{Effort: "high"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -93,7 +93,6 @@ final class AgenthailModel {
     var findTask: Task<Void, Never>?
     var spotlightCatalog: SpotlightCatalog?
     private(set) var localSends: [String: [LocalSend]] = [:]
-    private var turnSettingsDrafts: [String: TurnSettings] = [:]
     private(set) var fetchedSubagents = SubagentPageCache()
 
     private(set) var api: AgenthailAPI?
@@ -607,6 +606,18 @@ final class AgenthailModel {
         }
     }
 
+    func setTurnSetting(_ key: String, to value: String, sessionID: String) async -> Bool {
+        guard let api else { return false }
+        do {
+            try await api.setTurnSetting(sessionID: sessionID, key: key, value: value)
+            operationError = nil
+            return true
+        } catch {
+            operationError = AgenthailAPIError.userMessage(error)
+            return false
+        }
+    }
+
     func moveToAccount(sessionID: String, root: String) async -> Bool {
         guard let api else { return false }
         do {
@@ -872,22 +883,14 @@ final class AgenthailModel {
         return connected && api != nil
     }
 
-    func turnSettings(for sessionID: String) -> TurnSettings {
-        turnSettingsDrafts[sessionID] ?? TurnSettings()
-    }
-
-    func setTurnSettings(_ settings: TurnSettings, for sessionID: String) {
-        if settings.isEmpty { turnSettingsDrafts.removeValue(forKey: sessionID) } else { turnSettingsDrafts[sessionID] = settings }
-    }
-
-    func send(_ message: String, attachments: [ComposerAttachment] = [], to sessionID: String, busyDelivery: String? = nil, turnSettings: TurnSettings = .init(), completion: ((Bool) -> Void)? = nil) {
+    func send(_ message: String, attachments: [ComposerAttachment] = [], to sessionID: String, busyDelivery: String? = nil, completion: ((Bool) -> Void)? = nil) {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !ComposerAttachments.isEmpty(text: text, attachments: attachments), let api else {
             restoreToComposer(text, attachments: attachments, sessionID: sessionID)
             completion?(false)
             return
         }
-        let pending = LocalSend(text: text, attachments: attachments, sentAt: Date(), status: nil, busyDelivery: busyDelivery, turnSettings: turnSettings)
+        let pending = LocalSend(text: text, attachments: attachments, sentAt: Date(), status: nil, busyDelivery: busyDelivery)
         localSends[sessionID, default: []].append(pending)
         deliver(pending, to: sessionID, api: api, completion: completion)
     }
@@ -905,8 +908,7 @@ final class AgenthailModel {
             do {
                 let uploaded = try await api.upload(send.attachments, sessionID: sessionID)
                 updateLocalSend(send.id, in: sessionID) { $0.uploaded = uploaded }
-                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: send.text, turnSettings: send.turnSettings, busyDelivery: send.busyDelivery, author: "person", attachments: uploaded.map(\.id), idempotencyKey: send.idempotencyKey)
-                if !send.turnSettings.isEmpty, turnSettingsDrafts[sessionID] == send.turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
+                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: send.text, busyDelivery: send.busyDelivery, author: "person", attachments: uploaded.map(\.id), idempotencyKey: send.idempotencyKey)
                 updateLocalSend(send.id, in: sessionID) { $0.status = LocalSend.label(for: receipt.result?.status, waitingOnYou: receipt.result?.waitingOn != nil, movedTo: receipt.result?.movedTo) }
                 operationError = nil
                 completion?(true)
@@ -1438,8 +1440,6 @@ final class AgenthailModel {
             _ = rekeys.carry(&drafts)
             var sends = localSends
             if rekeys.carry(&sends) { localSends = sends }
-            var settings = turnSettingsDrafts
-            if rekeys.carry(&settings) { turnSettingsDrafts = settings }
         }
         panes.forEach { $0.reconcile() }
     }

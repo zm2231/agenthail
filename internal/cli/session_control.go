@@ -170,11 +170,7 @@ func (a *App) cmdModel(args []string) error {
 	if err != nil {
 		return err
 	}
-	change := surface.ModelChange{Model: current}
-	if reader, ok := surf.(surface.PendingModelReader); ok && name == "" {
-		change.PendingModel = reader.PendingModel(sess.ID)
-	}
-	return printModelChange(sess.ID, change, args)
+	return printModelChange(sess.ID, surface.ModelChange{Model: current}, args)
 }
 
 func printModelChange(sessionID string, change surface.ModelChange, args []string) error {

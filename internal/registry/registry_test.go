@@ -1036,7 +1036,7 @@ func TestSteerQueueNormalizesOptionsAndExcludesThemFromSteerClaims(t *testing.T)
 	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusBusy}); err != nil {
 		t.Fatal(err)
 	}
-	id, err := r.QueueRelayMessageWithOptions("target", "optioned steer", "relay:options", 1, surface.SendOptions{Model: "model-a", BusyDelivery: "steer", TurnOptions: surface.TurnOptions{Effort: "high"}})
+	id, err := r.QueueRelayMessageWithOptions("target", "optioned steer", "relay:options", 1, surface.SendOptions{Model: "model-a", BusyDelivery: "steer", TurnOptions: surface.TurnOptions{ServiceTier: "fast"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1044,7 +1044,7 @@ func TestSteerQueueNormalizesOptionsAndExcludesThemFromSteerClaims(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item.BusyDelivery != "queue" || item.Model != "model-a" || item.Effort != "high" {
+	if item.BusyDelivery != "queue" || item.Model != "model-a" || item.ServiceTier != "fast" {
 		t.Fatalf("normalized queue item=%+v", item)
 	}
 	steer, err := r.ClaimNextSteerMessage("target", time.Now())

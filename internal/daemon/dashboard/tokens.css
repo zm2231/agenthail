@@ -3038,23 +3038,29 @@ select {
   flex-wrap: wrap;
   gap: 8px;
 }
-.composer .request-mode {
+.composer .turn-settings {
   display: flex;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  box-shadow: none;
-  backdrop-filter: none;
-  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  overflow-x: auto;
   color: var(--muted);
   font-size: 0.85rem;
 }
-.composer .request-mode select {
+.composer .turn-settings[hidden] {
+  display: none;
+}
+.composer .turn-setting {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  white-space: nowrap;
+}
+.composer .turn-setting select {
   width: auto;
-  flex: 0 1 240px;
+}
+.composer .turn-setting-hint {
+  font-size: 0.75rem;
 }
 .timeline-notice {
   margin: 8px 0;

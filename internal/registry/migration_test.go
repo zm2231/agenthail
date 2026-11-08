@@ -238,7 +238,7 @@ func assertMigratedQueue(t *testing.T, r *Registry, source string) {
 	if err != nil || item == nil {
 		t.Fatalf("pending claim=%+v err=%v", item, err)
 	}
-	if item.Message != "pending hello" || item.Operation != QueueOperationMessage || item.SourceSessionID != source || item.RelayHops != 0 || item.TurnOptions.Effort != "" || len(item.TurnOptions.OutputSchema) != 0 {
+	if item.Message != "pending hello" || item.Operation != QueueOperationMessage || item.SourceSessionID != source || item.RelayHops != 0 || item.TurnOptions.ServiceTier != "" || len(item.TurnOptions.OutputSchema) != 0 {
 		t.Fatalf("pending item=%+v", item)
 	}
 	if err := r.AckMessage(item.ID); err != nil {
@@ -248,7 +248,7 @@ func assertMigratedQueue(t *testing.T, r *Registry, source string) {
 
 func assertMigratedRegistryAcceptsCurrentWrites(t *testing.T, r *Registry) {
 	t.Helper()
-	options := surface.TurnOptions{Effort: "xhigh", Mode: "plan", ServiceTier: "fast", OutputSchema: json.RawMessage(`{"type":"object"}`)}
+	options := surface.TurnOptions{ServiceTier: "fast", OutputSchema: json.RawMessage(`{"type":"object"}`)}
 	id, err := r.QueueMessageWithOptions("target", "after upgrade", "", surface.SendOptions{SourceSessionID: "sender", TurnOptions: options})
 	if err != nil {
 		t.Fatal(err)

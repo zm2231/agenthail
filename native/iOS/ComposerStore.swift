@@ -7,7 +7,6 @@ struct ComposerStore {
             let id: UUID
             let sessionID: String
             let message: String
-            let turnSettings: TurnSettings
             let idempotencyKey: String
             let uploaded: [String]?
             let wire: ActionWire?
@@ -64,12 +63,12 @@ struct ComposerStore {
 
 extension ComposerStore.Saved.Send {
     init(_ send: PendingSend) {
-        self.init(id: send.id, sessionID: send.sessionID, message: send.message, turnSettings: send.turnSettings, idempotencyKey: send.idempotencyKey, uploaded: send.uploaded ?? send.alreadyUploaded, wire: send.wire, hadAttachments: !send.attachments.isEmpty, sentAt: send.sentAt)
+        self.init(id: send.id, sessionID: send.sessionID, message: send.message, idempotencyKey: send.idempotencyKey, uploaded: send.uploaded ?? send.alreadyUploaded, wire: send.wire, hadAttachments: !send.attachments.isEmpty, sentAt: send.sentAt)
     }
 
     /// Nil when attachments were not uploaded before the app ended: their bytes are gone, so this cannot be resent as it was.
     var resumable: PendingSend? {
         guard !hadAttachments || uploaded != nil else { return nil }
-        return PendingSend(id: id, sessionID: sessionID, message: message, attachments: [], turnSettings: turnSettings, idempotencyKey: idempotencyKey, uploaded: uploaded ?? [], wire: wire, unconfirmed: true, sentAt: sentAt ?? .distantPast)
+        return PendingSend(id: id, sessionID: sessionID, message: message, attachments: [], idempotencyKey: idempotencyKey, uploaded: uploaded ?? [], wire: wire, unconfirmed: true, sentAt: sentAt ?? .distantPast)
     }
 }

@@ -9,7 +9,8 @@ import (
 
 type dashboardActionRequest struct {
 	surface.TurnOptions
-	Name            string                     `json:"name"`
+	surface.LaunchSettings
+	Name           string                     `json:"name"`
 	Worktree        string                     `json:"worktree"`
 	Isolation       string                     `json:"isolation"`
 	Base            string                     `json:"base"`
@@ -30,7 +31,9 @@ type dashboardActionRequest struct {
 	Message         string                     `json:"message"`
 	Alias           string                     `json:"alias"`
 	Model           string                     `json:"model"`
-	BusyDelivery    string                     `json:"busyDelivery"`
+	Setting         string                     `json:"setting"`
+	Value           string                     `json:"value"`
+	BusyDelivery   string                     `json:"busyDelivery"`
 	QueueID         int64                      `json:"queueId"`
 	Channel         string                     `json:"channel"`
 	NewChannel      string                     `json:"newChannel"`

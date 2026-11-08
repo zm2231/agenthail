@@ -57,19 +57,14 @@ func (c *Codex) applyCodexTranscriptStatus(ctx context.Context, session *surface
 	}
 }
 
-// LocalStatusFiles watches the pending model record even before the
-// thread has a rollout, since a model can be chosen for a thread with no
-// turns yet.
 func (c *Codex) LocalStatusFiles(session surface.Session) []string {
-	files := []string{codexPendingModelPath(session.ID)}
-	if session.Transcript != "" {
-		files = append(files, session.Transcript)
+	if session.Transcript == "" {
+		return nil
 	}
-	return files
+	return []string{session.Transcript}
 }
 
 func (c *Codex) LocalStatus(ctx context.Context, session surface.Session) (surface.Session, error) {
-	applyCodexPendingModel(&session)
 	if session.Transcript == "" {
 		return session, nil
 	}

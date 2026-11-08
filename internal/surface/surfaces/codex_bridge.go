@@ -223,9 +223,8 @@ func (c *Codex) rpc(ctx context.Context, conn *cdpConn, method string, params ma
 		return nil, fmt.Errorf("parse %s response: %w", method, err)
 	}
 	if envelope, ok := response["error"].(map[string]any); ok {
-		message, _ := envelope["message"].(string)
-		code := envelope["code"]
-		return nil, fmt.Errorf("%s RPC error (%v): %s", method, code, message)
+		code, _ := envelope["code"].(float64)
+		return nil, &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message")}
 	}
 	return response, nil
 }

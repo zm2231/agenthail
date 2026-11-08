@@ -15,7 +15,7 @@ import (
 // The single-statement merge patch the presentation read used before it cached projections.
 const presentationOracleSQL = `SELECT s.id,
  json_patch(json_remove(COALESCE(NULLIF(cs.projection_fingerprint,''),'{}'),
- '$.holders','$.plan','$.runtime','$.claudeConfigRoot','$.configuredModel','$.pendingModel'),
+ '$.holders','$.plan','$.runtime','$.claudeConfigRoot','$.configuredModel'),
  json_object('name',s.name,'surface',s.surface,'status',s.status,'cwd',s.cwd,
  'lastActive',CASE WHEN s.last_active_ms>0 THEN strftime('%Y-%m-%dT%H:%M:%fZ',s.last_active_ms/1000.0,'unixepoch') ELSE NULL END,
  'registeredAt',strftime('%Y-%m-%dT%H:%M:%SZ',s.registered_at),

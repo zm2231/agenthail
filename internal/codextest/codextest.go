@@ -42,6 +42,8 @@ type Turn struct {
 	User      string
 	Assistant string
 	Model     string
+	Effort    string
+	Mode      string
 }
 
 type Thread struct {
@@ -57,6 +59,10 @@ type Thread struct {
 	// Model is the thread's model. thread/resume changes it only for a thread
 	// that is not loaded; turn/start with a model changes it for good.
 	Model string
+	// Effort and Mode are what thread/settings/update last set; they reach
+	// every later turn, as Codex keeps them on the thread.
+	Effort string
+	Mode   string
 	// Name is what thread/name/set last gave the thread.
 	Name string
 }
@@ -338,23 +344,61 @@ func (d *Daemon) AddThread(thread Thread) {
 	d.writeRollout(&stored)
 }
 
-// writeRollout records the thread's session_meta where Codex keeps rollouts,
-// dated by the thread id's UUIDv7 timestamp.
-func (d *Daemon) writeRollout(thread *Thread) {
+func (d *Daemon) RolloutPath(threadID string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if thread := d.threads[threadID]; thread != nil {
+		return d.rolloutPath(thread)
+	}
+	return ""
+}
+
+// rolloutPath is where Codex keeps the thread's rollout, dated by the thread
+// id's UUIDv7 timestamp.
+func (d *Daemon) rolloutPath(thread *Thread) string {
 	digits := strings.ReplaceAll(thread.ID, "-", "")
 	if len(digits) < 12 || thread.Originator == "" {
-		return
+		return ""
 	}
 	millis, err := strconv.ParseInt(digits[:12], 16, 64)
 	if err != nil {
-		return
+		return ""
 	}
 	created := time.UnixMilli(millis)
-	path := filepath.Join(d.Home, "sessions", created.Format("2006"), created.Format("01"), created.Format("02"), "rollout-"+created.Format("2006-01-02T15-04-05")+"-"+thread.ID+".jsonl")
+	return filepath.Join(d.Home, "sessions", created.Format("2006"), created.Format("01"), created.Format("02"), "rollout-"+created.Format("2006-01-02T15-04-05")+"-"+thread.ID+".jsonl")
+}
+
+func (d *Daemon) writeRollout(thread *Thread) {
+	path := d.rolloutPath(thread)
+	if path == "" {
+		return
+	}
 	meta, _ := json.Marshal(map[string]any{"type": "session_meta", "payload": map[string]any{"id": thread.ID, "originator": thread.Originator, "source": "vscode", "cwd": thread.Cwd}})
 	if os.MkdirAll(filepath.Dir(path), 0700) == nil {
 		_ = os.WriteFile(path, append(meta, '\n'), 0600)
 	}
+}
+
+func (d *Daemon) appendRollout(thread *Thread, record map[string]any) {
+	path := d.rolloutPath(thread)
+	if path == "" {
+		return
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	line, _ := json.Marshal(record)
+	_, _ = file.Write(append(line, '\n'))
+}
+
+func collaborationMode(thread *Thread) map[string]any {
+	mode := thread.Mode
+	if mode == "" {
+		mode = "default"
+	}
+	return map[string]any{"mode": mode, "settings": map[string]any{"model": thread.Model, "reasoning_effort": thread.Effort}}
 }
 
 func (d *Daemon) Unload(threadID string) {
@@ -519,9 +563,32 @@ func (d *Daemon) lifecycle(method string, params map[string]any, result map[stri
 		if model, _ := params["model"].(string); model != "" {
 			thread.Model = model
 		}
-		turn := Turn{ID: fmt.Sprintf("turn-%d", len(thread.Turns)+1), Status: "inProgress", User: inputText(params), Model: thread.Model}
+		if effort, _ := params["effort"].(string); effort != "" {
+			thread.Effort = effort
+		}
+		turn := Turn{ID: fmt.Sprintf("turn-%d", len(thread.Turns)+1), Status: "inProgress", User: inputText(params), Model: thread.Model, Effort: thread.Effort, Mode: thread.Mode}
+		if mode, _ := params["collaborationMode"].(map[string]any); mode != nil {
+			turn.Mode, _ = mode["mode"].(string)
+		}
 		thread.Turns = append(thread.Turns, turn)
+		d.appendRollout(thread, map[string]any{"type": "turn_context", "payload": map[string]any{"turn_id": turn.ID, "model": turn.Model, "effort": turn.Effort, "collaboration_mode": collaborationMode(&Thread{Model: turn.Model, Effort: turn.Effort, Mode: turn.Mode})}})
 		return map[string]any{"turn": turnJSON(turn)}
+	case "thread/settings/update":
+		thread := d.threads[threadID]
+		if thread == nil || !d.loaded[threadID] {
+			return rpcError("thread not found: " + threadID)
+		}
+		if model, _ := params["model"].(string); model != "" {
+			thread.Model = model
+		}
+		if effort, _ := params["effort"].(string); effort != "" {
+			thread.Effort = effort
+		}
+		if mode, _ := params["collaborationMode"].(map[string]any); mode != nil {
+			thread.Mode, _ = mode["mode"].(string)
+		}
+		d.appendRollout(thread, map[string]any{"type": "event_msg", "payload": map[string]any{"type": "thread_settings_applied", "thread_settings": map[string]any{"model": thread.Model, "reasoning_effort": thread.Effort, "collaboration_mode": collaborationMode(thread)}}})
+		return map[string]any{}
 	case "turn/steer":
 		turn := d.activeTurn(threadID)
 		expected, _ := params["expectedTurnId"].(string)

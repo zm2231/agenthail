@@ -268,8 +268,6 @@
             </div>
             <footer class="composer">
               <details><summary>Codex turn options</summary>
-                <label>Effort <input id="turn-effort" placeholder="Use session default" /></label>
-                <label>Mode <select id="turn-mode"><option value="">Use session default</option><option>plan</option><option>default</option></select></label>
                 <label>Service tier <select id="turn-tier"><option value="">Use session default</option><option>default</option><option>fast</option><option>flex</option></select></label>
                 <label>Output JSON schema <textarea id="turn-schema" rows="3" placeholder='{"type":"object","properties":{}}'></textarea></label>
               </details>
@@ -297,6 +295,7 @@
                 <button id="send-status-put-back" type="button">Put back</button>
               </div>
               <div id="composer-attachments" data-pane="float" hidden></div>
+              <div class="turn-settings" id="turn-settings" role="group" aria-label="Session settings" hidden></div>
               <form id="composer" data-pane="float">
                 <textarea
                   id="message"

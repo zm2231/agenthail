@@ -416,7 +416,7 @@ func TestTMUXFocusWithoutClientNamesAttachCommandOffMac(t *testing.T) {
 }
 
 func TestATerminalLaunchRefusesOptionsItCannotPassToTheAgent(t *testing.T) {
-	for _, options := range []SessionStartOptions{{Agent: "reviewer"}, {PermissionMode: "plan"}, {ApprovalPolicy: "never"}, {TurnOptions: TurnOptions{Effort: "high"}}} {
+	for _, options := range []SessionStartOptions{{Agent: "reviewer"}, {PermissionMode: "plan"}, {ApprovalPolicy: "never"}, {LaunchSettings: LaunchSettings{Effort: "high"}}, {TurnOptions: TurnOptions{ServiceTier: "fast"}}} {
 		options.Cwd, options.Message = "/work", "hello"
 		for _, launcher := range []Launcher{newCMUX(), newTMUX()} {
 			if _, err := launcher.Launch(context.Background(), LaunchRequest{Surface: KindClaude, Options: options}); !errors.Is(err, ErrLaunchOptionUnsupported) {

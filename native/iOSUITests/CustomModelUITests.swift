@@ -11,8 +11,10 @@ final class CustomModelUITests: XCTestCase {
         chip.tap()
         XCTAssertTrue(app.navigationBars["Model"].waitForExistence(timeout: 10))
         let field = app.textFields["Enter an explicit model ID"]
-        for _ in 0..<6 where !field.isHittable { app.collectionViews.firstMatch.swipeUp() }
-        XCTAssertTrue(field.isHittable, "the custom model field is reachable")
+        let search = app.searchFields["Search model options"]
+        let clearOfSearch = { field.isHittable && (!search.exists || field.frame.maxY < search.frame.minY - 8) }
+        for _ in 0..<8 where !clearOfSearch() { app.collectionViews.firstMatch.swipeUp() }
+        XCTAssertTrue(clearOfSearch(), "the custom model field is reachable above the search field")
 
         let id = "provider/my-model"
         field.tap()

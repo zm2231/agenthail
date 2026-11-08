@@ -61,11 +61,6 @@ struct SessionPaneTest {
         check(second.selectedSessionID == "A", "a closed pane ignores selection")
         check(first.selectedSessionID == "A", "closing one pane leaves the others")
 
-        model.setTurnSettings(TurnSettings(effort: "high", mode: .plan), for: "A")
-        check(model.turnSettings(for: "A") == TurnSettings(effort: "high", mode: .plan) && model.turnSettings(for: "B").isEmpty, "next-turn settings belong to one session")
-        model.setTurnSettings(TurnSettings(), for: "A")
-        check(model.turnSettings(for: "A").isEmpty, "resetting removes a session's next-turn settings")
-
         let working = SessionState(id: "W", surface: "codex", name: "w", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
         check(SessionPane.stopAvailable(working, removed: false, draftEmpty: true), "an empty draft lets Stop interrupt a working session")
         check(!SessionPane.stopAvailable(working, removed: false, draftEmpty: false), "a draft turns Stop into queue or steer")
@@ -529,6 +524,7 @@ struct SessionPaneTest {
                 requestReads += 1
                 return requestReads == 1 || requestReads == 3 ? StubServer.hold : StubServer.reply("200 OK", #"{"permissionMode":"default","requests":[]}"#)
             }
+            if line.contains("/api/v1/actions") { return StubServer.reply("200 OK", "{}") }
             return StubServer.reply("404 Not Found", "{}")
         }
         let streamingPort = await streamingServer.ready()
@@ -635,7 +631,7 @@ struct SessionPaneTest {
         let resyncDeadline = Date().addingTimeInterval(5)
         while streamingPane.requests == nil, Date() < resyncDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         check(requestReads == 2 && streamingPane.requests?.permissionMode == "default", "a session that comes back reads its requests again: reads \(requestReads)")
-        Task { await streamingPane.setPermissionMode("plan") }
+        streamingPane.changeTurnSetting(TurnSetting.mode, to: "plan")
         let heldReadDeadline = Date().addingTimeInterval(5)
         while requestReads < 3, Date() < heldReadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         streamingModel.snapshot = listing([])

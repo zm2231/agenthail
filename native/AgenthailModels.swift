@@ -1144,8 +1144,6 @@ struct CheckoutIdentity: Codable, Hashable {
 struct QueueState: Decodable, Identifiable, Equatable {
 	let operation: String?
     var sourceSessionId: String?
-    let effort: String?
-    let mode: String?
     let serviceTier: String?
     let outputSchema: RecordedJSON?
     let id: Int64
@@ -1470,8 +1468,8 @@ struct SessionMetadata: Decodable {
     let context: ContextState?
     let goal: GoalState?
     let model: String?
-    var pendingModel: String? = nil
     let models: [ModelOption]?
+    var turnSettings: [TurnSetting]? = nil
     let claudeRuns: [ClaudeRunObservation]?
     let claudeSubagents: [ClaudeSubagentLink]?
     var claudeSubagentsTotal: Int? = nil
@@ -1520,8 +1518,8 @@ struct SessionDetail: Decodable {
     var context: ContextState?
     var goal: GoalState?
     var model: String?
-    var pendingModel: String?
     var models: [ModelOption]?
+    var turnSettings: [TurnSetting]?
     var claudeRuns: [ClaudeRunObservation]?
     var claudeSubagents: [ClaudeSubagentLink]?
     var claudeSubagentsTotal: Int?
@@ -1599,7 +1597,6 @@ struct RawSession: Decodable {
     let source: String?
     var transport: String?
     var cwd: String?
-    var pendingModel: String? = nil
     var runtime: SessionRuntime?
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
@@ -2349,31 +2346,6 @@ struct SessionRequests: Decodable, Hashable {
     func removing(_ id: String) -> SessionRequests {
         SessionRequests(permissionMode: permissionMode, requests: requests.filter { $0.id != id })
     }
-
-    /// The modes a person can change a running session into; an empty mode is
-    /// the settings' default, which a session can start in but not be set to.
-    static let permissionModes = ["acceptEdits", "auto", "plan", "manual", "dontAsk", "bypassPermissions"]
-
-    // Bypass permissions and Don't ask stay menu-only, so a key press never lands a session there.
-    static let cyclingModes = ["manual", "acceptEdits", "plan", "auto"]
-
-    static func cycled(from mode: String) -> String {
-        guard let index = cyclingModes.firstIndex(of: mode) else { return mode == "" || mode == "default" ? "acceptEdits" : "manual" }
-        return cyclingModes[(index + 1) % cyclingModes.count]
-    }
-
-    static func permissionModeLabel(_ mode: String) -> String {
-        switch mode {
-        case "": return "Default (Claude settings)"
-        case "acceptEdits": return "Accept edits"
-        case "auto": return "Auto"
-        case "plan": return "Plan"
-        case "manual": return "Manual"
-        case "dontAsk": return "Don't ask"
-        case "bypassPermissions": return "Bypass permissions"
-        default: return mode
-        }
-    }
 }
 
 /// A request's tool input, kept only to show it as JSON.
@@ -2404,28 +2376,6 @@ private indirect enum RequestInput: Codable {
     }
 }
 
-extension SessionDetail {
-    /// The model the conversation takes with its next turn sent through
-    /// Agenthail, when that differs from the model it runs now.
-    var nextTurnModel: String? {
-        guard let pending = pendingModel ?? session.pendingModel, !pending.isEmpty, pending != model else { return nil }
-        return pending
-    }
-
-    var modelLabel: String? {
-        guard let pending = nextTurnModel else { return model }
-        guard let model else { return "\(pending) from next turn" }
-        return "\(model) · \(pending) from next turn"
-    }
-}
-
-enum MetadataLabels {
-    static func modelMenuTitle(current: String?, next: String?) -> String {
-        guard let next, next != current else { return current ?? "Choose" }
-        guard let current else { return "\(next) from next turn" }
-        return "\(current) · \(next) from next turn"
-    }
-}
 
 enum QueueTakeBack {
     /// Queued messages go back ahead of the draft, oldest first, as they would have been sent.

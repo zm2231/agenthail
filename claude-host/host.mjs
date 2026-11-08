@@ -308,7 +308,7 @@ class Session {
   }
 
   remember() {
-    settings.set(this.id, { permissionMode: this.permissionMode, model: this.model, ...(this.checker ? { checker: this.checker } : {}), updatedAt: new Date().toISOString() });
+    settings.set(this.id, { permissionMode: this.permissionMode, model: this.model, ...(this.effort ? { effort: this.effort } : {}), ...(this.checker ? { checker: this.checker } : {}), updatedAt: new Date().toISOString() });
     writeSettings();
   }
 
@@ -321,6 +321,7 @@ class Session {
       openedAt: this.openedAt,
       permissionMode: this.permissionMode,
       model: this.model,
+      effort: this.effort ?? '',
       ...(this.checker ? { checker: this.checker } : {}),
       contextWindow: this.context?.window ?? 0,
       contextModel: this.context?.model ?? '',
@@ -383,6 +384,14 @@ const methods = {
     validMcp(mcp);
     const s = unsandboxed(sessionId);
     await s.attachAgenthail(mcp);
+    return s.describe();
+  },
+  setEffort: async ({ sessionId, effort }) => {
+    if (!EFFORTS.has(effort)) throw new HostError('invalid', `unknown effort: ${effort}`);
+    const s = unsandboxed(sessionId);
+    await s.query.applyFlagSettings({ effortLevel: effort });
+    s.effort = effort;
+    s.remember();
     return s.describe();
   },
   setPermissionMode: async ({ sessionId, permissionMode }) => {
@@ -495,7 +504,9 @@ async function open(params) {
   const checker = params.checker ? checkerOptions({ run: params.checker.run, token: params.checker.token, configDir: params.configDir, agenthail: args.agenthail }) : null;
   const permissionMode = checker?.permissionMode || params.permissionMode || kept?.permissionMode || '';
   const model = params.model || checker?.model || kept?.model || '';
+  const effort = params.effort || kept?.effort || '';
   const s = new Session(id, cwd, permissionMode, model);
+  s.effort = effort;
   s.checker = params.checker?.run ?? '';
   s.mcpToken = params.mcp?.token ?? '';
   sessions.set(id, s);
@@ -515,7 +526,7 @@ async function open(params) {
           ...(params.resume ? { resume: id } : { sessionId: id }),
           ...(permissionMode ? { permissionMode } : {}),
           ...(model ? { model } : {}),
-          ...(params.effort ? { effort: params.effort } : {}),
+          ...(effort ? { effort } : {}),
           ...(params.agent ? { agent: params.agent } : {}),
           extraArgs,
           // Every session may be switched into bypassPermissions later, which

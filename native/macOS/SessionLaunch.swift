@@ -102,9 +102,9 @@ struct SessionLaunchForm: Equatable {
 
     func creationBody() throws -> Data {
         let effort = setsEffort ? effort : ""
-        let turnSettings = agent == "codex" && !effort.isEmpty ? TurnSettings(effort: effort) : TurnSettings()
+        let launch = agent == "codex" && !effort.isEmpty ? LaunchSettings(effort: effort) : LaunchSettings()
         let claude = agent == "claude" ? ClaudeCreationSettings(effort: effort, configRoot: configRoot) : ClaudeCreationSettings()
-        return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, turnSettings: turnSettings, claude: claude, launcher: launcher, host: host)
+        return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, launch: launch, claude: claude, launcher: launcher, host: host)
     }
 
     func efforts(models: [ModelOption]) -> [String] {

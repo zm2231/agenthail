@@ -17,6 +17,7 @@ import { exchangePrompt, renderMessage } from "./messages.js";
 import { alignTranscriptTop } from "./transcript-scroll.js";
 import { expandAgentsPreference, markClampedAgentRows } from "./agent-messages.js";
 import { limitMoveButton } from "./limit-move.js";
+import { renderTurnSettings } from "./turn-settings.js";
 
 export function renderChat() {
   const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning, claudeRuns, claudeSubagents, claudeSubagentsTotal } = app.history || {};
@@ -67,9 +68,10 @@ export function renderChat() {
   }
   syncComposerAction();
   renderSlashMenu();
+  renderTurnSettings();
   syncRequests();
   renderBackgroundTasks(session);
-  $("#chat-subtitle").textContent = conversationMeta(session, model, app.history?.pendingModel ?? session.pendingModel ?? "");
+  $("#chat-subtitle").textContent = conversationMeta(session, model);
   $("#thread-count").textContent =
     `${exchanges.length} recent exchange${exchanges.length === 1 ? "" : "s"}`;
   renderContextUsage(context);

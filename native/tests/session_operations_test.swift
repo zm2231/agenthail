@@ -191,14 +191,10 @@ struct SessionOperationsTest {
         }
         check(StubProtocol.bodies.last?["action"] as? String == "session-lifecycle-stop", "lifecycle actions use the session-lifecycle prefix")
 
-        let settings = TurnSettings(effort: "high", mode: .plan)
         reset([(200, #"{"result":{"status":"delivered"}}"#), (200, #"{"result":{"status":"delivered"}}"#)])
-        _ = try? await api.sendInstruction(action: "send", sessionID: "S", message: "hi", turnSettings: settings)
-        _ = try? await api.sendInstruction(action: "steer", sessionID: "S", message: "hi", turnSettings: settings)
-        let send = StubProtocol.bodies.first ?? [:]
-        check(send["effort"] as? String == "high" && send["mode"] as? String == "plan" && send["serviceTier"] == nil && send["outputSchema"] == nil, "a send carries effort and mode only: \(send)")
-        let steer = StubProtocol.bodies.last ?? [:]
-        check(steer["effort"] == nil && steer["mode"] == nil, "a steer keeps the running turn's settings")
+        _ = try? await api.sendInstruction(action: "send", sessionID: "S", message: "hi")
+        _ = try? await api.sendInstruction(action: "steer", sessionID: "S", message: "hi")
+        check(StubProtocol.bodies.allSatisfy { Set($0.keys).isDisjoint(with: ["effort", "mode", "serviceTier", "outputSchema"]) }, "sends and steers carry no turn settings: \(StubProtocol.bodies)")
     }
 
     @MainActor

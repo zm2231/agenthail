@@ -100,6 +100,7 @@ func parityCases() []parityCase {
 		session("model", "model", `,"model":"gpt"`),
 		session("model empty", "model", ``),
 		session("permission-mode", "permission-mode", `,"permissionMode":"plan"`),
+		session("turn-setting", "turn-setting", `,"setting":"effort","value":"high"`),
 		session("respond", "respond", `,"requestId":"r1","decision":{"behavior":"allow"}`),
 		session("context", "context", ``),
 		session("usage", "usage", ``),

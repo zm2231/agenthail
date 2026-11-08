@@ -10,14 +10,6 @@ import (
 )
 
 func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, error) {
-	session, err := c.resolve(ctx, target)
-	if session != nil {
-		applyCodexPendingModel(session)
-	}
-	return session, err
-}
-
-func (c *Codex) resolve(ctx context.Context, target string) (*surface.Session, error) {
 	if looksLikeUUID(target) {
 		return c.resolveID(ctx, target)
 	}

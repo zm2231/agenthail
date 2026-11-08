@@ -19,7 +19,6 @@ struct PendingSend: Identifiable, Equatable {
     var sessionID: String
     let message: String
     let attachments: [ComposerAttachment]
-    let turnSettings: TurnSettings
     let idempotencyKey: String
     var uploaded: [String]?
     var wire: ActionWire?
@@ -28,13 +27,12 @@ struct PendingSend: Identifiable, Equatable {
     var retryStopped = false
     var retryingOnTap = false
 
-    init(id: UUID = UUID(), sessionID: String, message: String, attachments: [ComposerAttachment], turnSettings: TurnSettings, idempotencyKey: String = UUID().uuidString, uploaded: [String]? = nil, wire: ActionWire? = nil, unconfirmed: Bool = false, sentAt: Date = Date()) {
+    init(id: UUID = UUID(), sessionID: String, message: String, attachments: [ComposerAttachment], idempotencyKey: String = UUID().uuidString, uploaded: [String]? = nil, wire: ActionWire? = nil, unconfirmed: Bool = false, sentAt: Date = Date()) {
         self.sentAt = sentAt
         self.id = id
         self.sessionID = sessionID
         self.message = message
         self.attachments = attachments
-        self.turnSettings = turnSettings
         self.idempotencyKey = idempotencyKey
         self.uploaded = uploaded
         self.wire = wire
