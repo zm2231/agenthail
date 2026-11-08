@@ -4,9 +4,12 @@ import { escape, labels, surfaceIcon, timeAgo } from "./format.js";
 import { orderedSessions } from "./session-order.js";
 import { backgroundWaiting, presenceLabel, presenceTone } from "./presence.js";
 import { displayName } from "./session-labels.js";
+import { refreshDecisions, renderInbox } from "./inbox.js";
+
+export { renderDeliveryProblems, renderLeadReplacements } from "./inbox.js";
 
 export function renderOverview() {
-  const { surfaces, sessions, attention } = app.state;
+  const { surfaces, sessions } = app.state;
   const connected = surfaces.filter((surface) => surface.connected).length;
   const working = sessions.filter(
     (session) => session.currentReason === "working",
@@ -80,35 +83,6 @@ export function renderOverview() {
       )
       .join("") ||
     '<p class="empty-inline">No conversations are active right now.</p>';
-  const attentionPanel = $("#attention-panel");
-  attentionPanel.hidden = attention.length === 0;
-  $("#attention-list").innerHTML = attention
-    .map(
-      (item) =>
-        `<article class="attention-item"><div><div class="attention-target"><i></i>${escape(item.target)}</div><strong>${escape(item.reason)}</strong><p>${escape(item.requestedAction)} · ${timeAgo(item.createdAt)}</p></div><div class="operation-actions"><button class="soft-button" data-retry="${item.queueId}" type="button">Retry</button><button class="soft-button" data-cancel="${item.queueId}" type="button">Cancel</button></div></article>`,
-    )
-    .join("");
-  renderDeliveryProblems();
-  renderLeadReplacements();
-}
-
-export function renderLeadReplacements() {
-  const replacements = app.state.leadReplacements || [];
-  $("#lead-replacements-panel").hidden = replacements.length === 0;
-  $("#lead-replacements-list").innerHTML = replacements.map(item => {
-    const by = item.changedBy ? ` by ${item.changedBy}` : "";
-    return `<article class="attention-item"><div><div class="attention-target">@${escape(item.name)}</div><strong>Now runs in a new conversation</strong><p>${escape(item.reason)}</p><p>Replaced${escape(by)} · ${timeAgo(item.at)}</p></div><div class="operation-actions"><button class="soft-button" data-session="${escape(item.sessionId)}" type="button">Open</button><button class="soft-button" data-lead-replacement-ack="${escape(item.id)}" type="button">Acknowledge</button></div></article>`;
-  }).join("");
-}
-
-export function renderDeliveryProblems() {
-  const problems = app.state.deliveryProblems || [];
-  $("#delivery-problems-panel").hidden = problems.length === 0;
-  $("#delivery-problems-list").innerHTML = problems.map(item => {
-    const session = app.state.sessions.find(session => session.id === item.sessionId);
-    const target = session ? displayName(session) : item.sessionId;
-    return `<article class="attention-item"><div><div class="attention-target">${escape(target)}</div><strong>${escape(item.reason)}</strong><p>${escape(item.message)}</p><p>${escape(item.status)} · ${timeAgo(item.at)}</p></div><div class="operation-actions">${item.deletable
-      ? `<button class="soft-button" data-delivery-delete="${escape(item.deliveryId)}" type="button">Delete</button>`
-      : `<button class="soft-button" data-delivery-dismiss="${escape(item.deliveryId)}" type="button">Dismiss</button>`}</div></article>`;
-  }).join("");
+  renderInbox();
+  refreshDecisions();
 }
