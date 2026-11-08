@@ -260,6 +260,43 @@ if __name__ == "__main__":
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.update({"/api/v1/events", "/api/v1/catalog-events"})
+    if sys.argv[1:2] == ["labels"]:
+        def labelled(id, name, **fields):
+            return {**SESSION, "id": id, "name": name, "alias": None, "status": "idle", "cwd": "/srv/web-app",
+                    "project": {"id": "web-app", "displayName": "web-app", "rootPath": "/srv/web-app", "kind": "git"},
+                    "checkout": {"id": "web-app-main", "path": "/srv/web-app", "branch": "main", "dirty": False, "isMain": True}, **fields}
+
+        sessions = [
+            labelled("link", "https://github.com/acme/widgets/pull/12 review the change",
+                     claudeConfigRoot={"name": "team", "root": "/srv/home/.team/.claude", "signedInAs": "dev@example.com"}),
+            labelled("terminal", "Ship the release notes", status="busy", runtimeKind="claude-cli", waitingOn={"kind": "question", "id": "q1", "since": NOW}),
+            labelled("limit", "Migrate the database", limitResume={"state": "waiting"}),
+            labelled("stopped", "Fix the flaky test", turnStop={"turnId": "t1", "reason": "the model returned an error"}),
+            labelled("background", "Watch the build", backgroundTasks={"running": True, "tasks": [{"id": "b1", "kind": "shell", "description": "npm run build"}], "source": "host"}),
+            labelled("offline-host", "Sync the mirror", host={"id": "h0123456789ab", "name": "server", "state": "unreachable"}, unavailableReason="server is unreachable"),
+            labelled("archived", "Spike the old migration", archived=True),
+            labelled("plain", "Write the install guide"),
+        ]
+        count = {"families": len(sessions), "sessions": len(sessions)}
+        RESPONSES["/api/v1/snapshot"].update({"sessions": sessions, "totalSessions": len(sessions), "view": {
+            "counts": {scope: count for scope in ("running", "current", "recent", "all", "archived")}, "surfaces": [],
+            "projects": [{"id": "web-app", "name": "web-app", "counts": count, "collapsedFamilyIds": [s["id"] for s in sessions]}],
+            "families": [{"id": s["id"], "rootId": s["id"], "projectId": "web-app", "checkoutId": "web-app-main",
+                          "members": [{"id": s["id"], "depth": 0, "contextOnly": False, "pinned": False}], "pinned": False, "workingSubagents": 0} for s in sessions]}})
+        RESPONSES["/api/v1/session"] = {
+            "session": {k: sessions[0][k] for k in ("id", "surface", "name", "status", "lastActive", "cwd", "claudeConfigRoot")},
+            "exchanges": [], "capabilities": CAPABILITIES, "readOnly": False, "readOnlyReason": "",
+            "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": []},
+        }
+        for path, body in {"/api/v1/projects/activity": {"projects": []}, "/api/v1/history": {"items": [], "hasMore": False, "nextBefore": 0, "kinds": []},
+                           "/api/v1/decisions": {"decisions": [], "leadHandling": []}, "/api/v1/usage": {"sets": []}, "/api/v1/models": {"models": []},
+                           "/api/v1/session-options": {"surfaces": [{"id": "claude", "workspace": True}], "projects": [], "claudeConfigRoots": []},
+                           "/api/v1/session-commands": {"commands": [], "unavailable": ""}, "/api/v1/session-metadata": {},
+                           "/api/v1/prompts": {"prompts": [], "nextBefore": None}, "/api/v1/requests": {"permissionMode": "", "requests": []}}.items():
+            RESPONSES[path] = body
+        theme = sys.argv[2] if len(sys.argv) > 2 else "system"
+        RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
+        HELD_STREAMS.update({"/api/v1/events", "/api/v1/catalog-events", "/api/v1/session-stream"})
     server = Server(("127.0.0.1", 0), Handler)
     print(server.server_address[1], flush=True)
     sys.stdout.close()
