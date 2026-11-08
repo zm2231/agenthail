@@ -348,7 +348,7 @@ func claudeTurnStateFrom(ctx context.Context, file *os.File, offset int64, start
 	}
 	identity := transcriptFileIdentity(info)
 	if identity != "" {
-		if tracker, ok, err := claudeReplayCheckpoints.resume(ctx, file, identity, offset); err != nil || ok {
+		if tracker, ok, err := claudeReplayCheckpoints.resume(ctx, file, identity, info.Size(), offset); err != nil || ok {
 			return tracker, err
 		}
 	}

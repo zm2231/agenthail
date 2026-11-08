@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -80,18 +81,31 @@ func TestAMessageReturningAfterACheckpointIsCountedOnce(t *testing.T) {
 
 func TestATranscriptRewrittenInPlaceIsNotReadFromItsOldCheckpoints(t *testing.T) {
 	withReplayCheckpointsEveryRecord(t)
-	before, rewritten := checkpointTurnLines("u1", 10, false), checkpointTurnLines("v1", 20, false)
-	path := writeTranscript(t, strings.Join(before, "\n")+"\n")
-	from := checkpointLineOffset(before, 9)
-	if from != checkpointLineOffset(rewritten, 9) {
-		t.Fatal("the rewritten transcript must keep its records at the same offsets")
-	}
-	checkpointTurnRead(t, path, from)
-	if err := os.WriteFile(path, []byte(strings.Join(rewritten, "\n")+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	whole, after := checkpointTurnRead(t, path, 0), checkpointTurnRead(t, path, from)
-	if after["v1"] == nil || !reflect.DeepEqual(after["v1"], whole["v1"]) {
-		t.Fatalf("the rewritten transcript read from offset %d ends %v; read from the start it ends turn v1 with %+v", from, after, whole["v1"])
+	before := checkpointTurnLines("u1", 10, false)
+	shortened := slices.Clone(before)
+	shortened[6] = strings.Replace(before[6], `"input_tokens":13,`, `"input_tokens":93,`, 1)
+	shortened[9] = strings.Replace(before[9], `"text":"step"`, `"text":"s"`, 1)
+	for _, rewrite := range []struct {
+		name, turn string
+		lines      []string
+	}{
+		{"with a new turn at the same offsets", "v1", checkpointTurnLines("v1", 20, false)},
+		{"with an earlier record changed and the file shortened", "u1", shortened},
+	} {
+		t.Run(rewrite.name, func(t *testing.T) {
+			path := writeTranscript(t, strings.Join(before, "\n")+"\n")
+			from := checkpointLineOffset(before, 8)
+			if from != checkpointLineOffset(rewrite.lines, 8) {
+				t.Fatal("the rewrite must keep its records at the same offsets")
+			}
+			checkpointTurnRead(t, path, checkpointLineOffset(before, len(before)))
+			if err := os.WriteFile(path, []byte(strings.Join(rewrite.lines, "\n")+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			whole, after := checkpointTurnRead(t, path, 0), checkpointTurnRead(t, path, from)
+			if after[rewrite.turn] == nil || !reflect.DeepEqual(after[rewrite.turn], whole[rewrite.turn]) {
+				t.Fatalf("read from offset %d it ends %v; read from the start it ends turn %s with %+v", from, after, rewrite.turn, whole[rewrite.turn])
+			}
+		})
 	}
 }

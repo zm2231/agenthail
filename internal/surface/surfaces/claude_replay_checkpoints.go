@@ -23,6 +23,7 @@ const (
 	replayRegionLimit       = 8
 	replayRegionCheckpoints = 16
 	replayPrintBytes        = 256
+	replayReportedLimit     = 1024
 )
 
 // A replayRegion holds trackers saved while replaying one turn. Any offset
@@ -99,14 +100,17 @@ func (c *replayCheckpointCache) lookup(identity string, offset int64) (replayRes
 }
 
 // resume returns false when no checkpoint applies: none lies in reach before
-// offset, a turn starts after it, the file no longer holds the records it was
-// taken at, or a message's usage returns after another's.
-func (c *replayCheckpointCache) resume(ctx context.Context, file *os.File, identity string, offset int64) (*claudeTurnTracker, bool, error) {
+// offset, a turn starts after it, the file is shorter than the region was
+// verified to or no longer holds the records it was taken at, or a message's
+// usage returns after another's. Like the other transcript cursors, it takes
+// a file of the same identity that still reaches its offsets as the same
+// file grown by appends.
+func (c *replayCheckpointCache) resume(ctx context.Context, file *os.File, identity string, size, offset int64) (*claudeTurnTracker, bool, error) {
 	point, ok := c.lookup(identity, offset)
 	if !ok {
 		return nil, false, nil
 	}
-	if !replayPrintMatches(file, point.start, point.startPrint) || !replayPrintMatches(file, point.at.offset, point.at.print) {
+	if size < point.verified || !replayPrintMatches(file, point.start, point.startPrint) || !replayPrintMatches(file, point.at.offset, point.at.print) {
 		c.drop(identity, point.start)
 		return nil, false, nil
 	}
@@ -219,6 +223,9 @@ func (c *replayCheckpointCache) drop(identity string, start int64) {
 func (c *replayCheckpointCache) report(identity, path string, start int64) {
 	c.mu.Lock()
 	reported := c.reported[identity]
+	if !reported && len(c.reported) >= replayReportedLimit {
+		clear(c.reported)
+	}
 	c.reported[identity] = true
 	c.mu.Unlock()
 	if !reported {
