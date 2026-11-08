@@ -150,6 +150,7 @@ SOURCES=(
   macOS/SessionPane.swift
   macOS/MacDecisions.swift
   macOS/DecisionFeed.swift
+  macOS/DecisionInboxPane.swift
   macOS/SidebarRow.swift
   macOS/StatusItemsState.swift
   macOS/StatusItems.swift
