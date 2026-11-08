@@ -1169,8 +1169,7 @@ struct QueueState: Decodable, Identifiable, Equatable {
         historical == true || status == "delivered" || status == "canceled"
     }
 
-    // The daemon stamps queue rows in SQLite's UTC "yyyy-MM-dd HH:mm:ss".
-    var queuedDate: Date? { TimestampParser.date(queuedAt) ?? TimestampParser.date(queuedAt.replacingOccurrences(of: " ", with: "T") + "Z") }
+    var queuedDate: Date? { TimestampParser.date(queuedAt) }
 
     /// The send receipt for a queued message, worded as the daemon words it.
     var queuedReceipt: String {
