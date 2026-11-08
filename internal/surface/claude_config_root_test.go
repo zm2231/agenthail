@@ -2,6 +2,7 @@ package surface
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -245,5 +246,65 @@ func TestAnAccountSwitchWrittenInTheTickOfTheLastReadIsRead(t *testing.T) {
 	}
 	if second := cache.read(path); second == first {
 		t.Fatalf("a same-size rewrite in the tick of the last read was not read: %+v", second)
+	}
+}
+
+func TestDescribedRootsSayWhereEachCameFromAndWhichAreMissing(t *testing.T) {
+	home := claudeRootsHome(t, "work")
+	gone := filepath.Join(home, "gone")
+	writeClaudeGlobalConfigFixture(t, AgenthailConfigPath(home), map[string]any{"claudeConfigDirs": []string{filepath.Join(home, "work"), gone}})
+	daemon := filepath.Join(home, "daemon-root")
+	if err := os.MkdirAll(daemon, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", daemon)
+	if err := RecordDaemonClaudeRoot(home); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	roots, err := DescribeClaudeConfigRoots(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	missing := map[string]bool{}
+	for _, root := range roots {
+		got[root.Root] = root.Source
+		missing[root.Root] = root.Missing
+	}
+	want := map[string]string{filepath.Join(home, ".claude"): ClaudeRootFromDefault, daemon: ClaudeRootFromDaemon, filepath.Join(home, "work"): ClaudeRootFromConfig, gone: ClaudeRootFromConfig}
+	if len(got) != len(want) {
+		t.Fatalf("roots=%+v", roots)
+	}
+	for path, source := range want {
+		if got[path] != source {
+			t.Fatalf("%s came from %q, want %q", path, got[path], source)
+		}
+	}
+	if !missing[gone] || missing[filepath.Join(home, "work")] || missing[daemon] {
+		t.Fatalf("missing=%v, want only %s", missing, gone)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", daemon)
+	if roots, err := DescribeClaudeConfigRoots(home); err != nil || roots[0].Root != daemon || roots[0].Source != ClaudeRootFromEnv {
+		t.Fatalf("a primary named by CLAUDE_CONFIG_DIR: %+v err=%v", roots, err)
+	}
+}
+
+func TestAConfiguredRootThatDoesNotExistIsNotResolvedForAStart(t *testing.T) {
+	home := claudeRootsHome(t)
+	gone := filepath.Join(home, ".gone", ".claude")
+	writeClaudeGlobalConfigFixture(t, AgenthailConfigPath(home), map[string]any{"claudeConfigDirs": []string{gone}})
+	for _, choice := range []string{"gone", gone} {
+		_, err := ResolveClaudeStartRoot(home, choice)
+		var missing ClaudeRootMissingError
+		if !errors.As(err, &missing) || missing.Root != gone {
+			t.Fatalf("choice %q: err=%v, want the root refused as missing", choice, err)
+		}
+	}
+	if _, err := os.Stat(gone); !os.IsNotExist(err) {
+		t.Fatalf("resolving created the root: %v", err)
+	}
+	if root, err := ResolveClaudeStartRoot(home, ""); err != nil || root != filepath.Join(home, ".claude") {
+		t.Fatalf("the primary root, which Claude creates on first run: %q err=%v", root, err)
 	}
 }

@@ -31,7 +31,7 @@ func (a *App) cmdRoots(args []string) error {
 		if root.Primary {
 			name += " (primary)"
 		}
-		fmt.Printf("%s  %s\n  %s\n", name, root.Root, describeClaudeConfigRoot(root, now))
+		fmt.Printf("%s  %s  (%s)\n  %s\n", name, root.Root, claudeRootSourceLabel(root.Source), describeClaudeConfigRoot(root, now))
 	}
 	return nil
 }
@@ -66,7 +66,23 @@ func (a *App) claudeConfigRoots(ctx context.Context) ([]surface.ClaudeConfigRoot
 	return roots, err
 }
 
+func claudeRootSourceLabel(source string) string {
+	switch source {
+	case surface.ClaudeRootFromEnv:
+		return "from CLAUDE_CONFIG_DIR"
+	case surface.ClaudeRootFromDaemon:
+		return "the daemon's root"
+	case surface.ClaudeRootFromConfig:
+		return "from claudeConfigDirs"
+	default:
+		return "the default"
+	}
+}
+
 func describeClaudeConfigRoot(root surface.ClaudeConfigRoot, now time.Time) string {
+	if root.Missing {
+		return "does not exist; nothing runs in it until you sign in to Claude there"
+	}
 	if root.Error != "" {
 		return "unreadable: " + root.Error
 	}

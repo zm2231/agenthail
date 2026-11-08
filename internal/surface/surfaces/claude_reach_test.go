@@ -256,3 +256,43 @@ func TestClaudeCompactOfExitedSessionDoesNotResumeIt(t *testing.T) {
 		t.Fatalf("compact resumed the conversation: %+v", spawns)
 	}
 }
+
+func TestClaudeSendToAStoppedSessionWhoseRootIsGoneIsRefusedWithoutAStart(t *testing.T) {
+	fixture, host, c := hostResume(t)
+	work := fixture.AddRoot("work")
+	session := exitedSession(fixture)
+	if err := os.RemoveAll(work); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.SendHumanTurn(context.Background(), &session, "hello", nil)
+	var missing surface.ClaudeRootMissingError
+	if !errors.As(err, &missing) || missing.Root != work || !surface.IsDeliveryTerminal(err) {
+		t.Fatalf("err=%v, want a refusal naming %s", err, work)
+	}
+	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 0 {
+		t.Fatalf("spawns=%+v, want no start in any root", spawns)
+	}
+	if _, err := os.Stat(work); !os.IsNotExist(err) {
+		t.Fatalf("the missing root was created: %v", err)
+	}
+}
+
+func TestClaudeResumeOfASessionWhoseRootIsGoneIsRefusedWithoutAStart(t *testing.T) {
+	fixture, host, c := hostResume(t)
+	work := fixture.AddRoot("work")
+	session := exitedSession(fixture)
+	if err := os.RemoveAll(work); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.SessionAction(context.Background(), &session, "resume")
+	var missing surface.ClaudeRootMissingError
+	if !errors.As(err, &missing) || missing.Root != work {
+		t.Fatalf("err=%v, want a refusal naming %s", err, work)
+	}
+	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 0 {
+		t.Fatalf("spawns=%+v, want no start in any root", spawns)
+	}
+	if _, err := os.Stat(work); !os.IsNotExist(err) {
+		t.Fatalf("the missing root was created: %v", err)
+	}
+}

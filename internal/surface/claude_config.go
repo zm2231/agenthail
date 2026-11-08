@@ -39,12 +39,36 @@ func AgenthailConfigPath(home string) string {
 
 const maxAgenthailConfigBytes = 64 * 1024
 
+const (
+	ClaudeRootFromEnv     = "env"
+	ClaudeRootFromDefault = "default"
+	ClaudeRootFromDaemon  = "daemon"
+	ClaudeRootFromConfig  = "config"
+)
+
+type claudeRootSource struct {
+	path   string
+	source string
+}
+
 // ClaudeConfigRoots returns every Claude config root Agenthail reads: the
 // caller's primary root first, then the daemon's recorded primary root, so
 // a caller in another root still sees the daemon's set, then each
 // claudeConfigDirs entry from the Agenthail config. A root named twice, including through a symlink, appears once. A
 // config that cannot be read as that list is an error, never an empty list.
 func ClaudeConfigRoots(home string) ([]string, error) {
+	sources, err := claudeConfigRootSources(home)
+	if err != nil {
+		return nil, err
+	}
+	roots := make([]string, len(sources))
+	for i, source := range sources {
+		roots[i] = source.path
+	}
+	return roots, nil
+}
+
+func claudeConfigRootSources(home string) ([]claudeRootSource, error) {
 	configured, err := configuredClaudeRoots(home)
 	if err != nil {
 		return nil, err
@@ -53,11 +77,15 @@ func ClaudeConfigRoots(home string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	roots := []string{filepath.Clean(ClaudeConfigDir(home))}
-	seen := map[string]bool{claudeRootIdentity(roots[0]): true}
+	primary := claudeRootSource{path: filepath.Clean(ClaudeConfigDir(home)), source: ClaudeRootFromDefault}
+	if strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")) != "" {
+		primary.source = ClaudeRootFromEnv
+	}
+	roots := []claudeRootSource{primary}
+	seen := map[string]bool{claudeRootIdentity(primary.path): true}
 	if daemonRoot != "" && !seen[claudeRootIdentity(daemonRoot)] {
 		seen[claudeRootIdentity(daemonRoot)] = true
-		roots = append(roots, daemonRoot)
+		roots = append(roots, claudeRootSource{path: daemonRoot, source: ClaudeRootFromDaemon})
 	}
 	for _, root := range configured {
 		if strings.TrimSpace(root) == "" || !filepath.IsAbs(root) {
@@ -74,7 +102,7 @@ func ClaudeConfigRoots(home string) ([]string, error) {
 			continue
 		}
 		seen[identity] = true
-		roots = append(roots, root)
+		roots = append(roots, claudeRootSource{path: root, source: ClaudeRootFromConfig})
 	}
 	return roots, nil
 }

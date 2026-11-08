@@ -86,7 +86,12 @@ func (c *Claude) backgroundJobs(ctx context.Context, root string) ([]rootedBackg
 		}
 	}
 	var jobs []rootedBackground
-	for _, each := range roots {
+	for i, each := range roots {
+		// Claude creates the config directory it is pointed at, so listing a
+		// configured root that is gone would recreate it signed out.
+		if _, err := os.Stat(each); i > 0 && os.IsNotExist(err) {
+			continue
+		}
 		listed, err := c.backgroundSessions(ctx, each)
 		if err != nil {
 			return nil, err
@@ -137,7 +142,7 @@ func (c *Claude) startRoot(options surface.SessionStartOptions) (string, error) 
 	if options.ConfigRoot == "" {
 		return filepath.Clean(surface.ClaudeConfigDir(c.home)), nil
 	}
-	root, err := surface.ResolveClaudeConfigRoot(c.home, options.ConfigRoot)
+	root, err := surface.ResolveClaudeStartRoot(c.home, options.ConfigRoot)
 	if err != nil {
 		return "", surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
 	}
@@ -240,6 +245,11 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	}
 	if action == "stop" || action == "resume" {
 		if err := c.ensureOneHolder(session); err != nil {
+			return nil, err
+		}
+	}
+	if action == "resume" && root == "" {
+		if err := c.recordedRootGone(session); err != nil {
 			return nil, err
 		}
 	}

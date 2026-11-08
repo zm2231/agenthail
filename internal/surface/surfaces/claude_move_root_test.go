@@ -127,6 +127,30 @@ func TestARootMoveTheTargetCannotTakeLeavesEverythingWhereItWas(t *testing.T) {
 	}
 }
 
+func TestARootMoveToAConfiguredRootThatDoesNotExistIsRefused(t *testing.T) {
+	f := newRootMoveFixture(t)
+	primary := filepath.Join(f.host.Home, ".claude")
+	if err := os.RemoveAll(f.second); err != nil {
+		t.Fatal(err)
+	}
+	out := f.prepare(t)
+
+	_, err := f.c.MoveToRoot(context.Background(), out, uuid.NewString(), "work")
+	var missing surface.ClaudeRootMissingError
+	if !errors.As(err, &missing) || missing.Root != f.second {
+		t.Fatalf("err=%v, want a refusal naming %s", err, f.second)
+	}
+	if !f.transcriptIn(t, primary) {
+		t.Fatal("a refused move did not leave the transcript in its root")
+	}
+	if _, err := os.Stat(f.second); !os.IsNotExist(err) {
+		t.Fatalf("the missing root was created: %v", err)
+	}
+	if err := f.c.CheckMoveIn(surface.MoveIn{Conversation: uuid.NewString(), Cwd: f.cwd, Size: 1, Root: "work"}); !errors.As(err, &missing) {
+		t.Fatalf("a move in to the missing root: err=%v, want it refused as missing", err)
+	}
+}
+
 func TestRecoveringARootMoveFinishesAPlacedOneAndReturnsAnUnplacedOne(t *testing.T) {
 	f := newRootMoveFixture(t)
 	primary := filepath.Join(f.host.Home, ".claude")

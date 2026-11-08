@@ -293,13 +293,14 @@ func (a *App) cmdDoctor(args []string) error {
 		if claudeRootsErr != nil {
 			fmt.Printf("claude config: %s\n", claudeRootsErr)
 		}
-		for i, root := range claudeRoots {
+		for _, root := range claudeRoots {
 			label := "claude config"
-			if i > 0 {
-				label = "claude config (claudeConfigDirs)"
+			described, ok := surface.ClaudeConfigRootFor(claudeConfigRoots, root)
+			if ok {
+				label += " (" + claudeRootSourceLabel(described.Source) + ")"
 			}
 			fmt.Printf("%s: %s\n", label, root)
-			if described, ok := surface.ClaudeConfigRootFor(claudeConfigRoots, root); ok {
+			if ok {
 				fmt.Printf("  %s\n", describeClaudeConfigRoot(described, time.Now()))
 			}
 			switch claudeHookStates[root] {
