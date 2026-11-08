@@ -1,12 +1,6 @@
 import SwiftUI
 
 extension ProjectContents {
-    static func leadSessionID(_ lead: ProjectState.Lead) -> String? {
-        guard let sessionID = lead.sessionId, !sessionID.isEmpty else { return nil }
-        guard let host = lead.host, host.state != "local", !sessionID.contains("::") else { return sessionID }
-        return host.id + "::" + sessionID
-    }
-
     static func build(_ project: ProjectState, sessions: [SessionState], localName: String?) -> ProjectContents {
         let lead = project.leads.first
         return build(lead: lead, leadID: lead.flatMap(leadSessionID), projectID: project.id, sessions: sessions, computers: Set(project.checkouts.map(\.host.id)).count, localName: localName ?? "this computer")
@@ -96,7 +90,16 @@ struct ProjectPane: View {
             Text(project.displayName).font(.system(size: DesktopType.display, weight: .semibold)).foregroundStyle(DesktopPalette.text)
             Text("\(SessionTree.sessionCountLabel(count))\(computers > 1 ? " on \(computers) computers" : "")")
                 .font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
+            if let chip = ProjectHeaderFacts.leadChip(project.leads) {
+                ProjectLeadChipView(chip: chip) { pane.select($0) }
+            }
             Spacer()
+            if project.archived != true {
+                ProjectBroadcastButton(project: project) { message, key in
+                    try await model.broadcast(to: project, message: message, idempotencyKey: key)
+                }
+                .id(project.id)
+            }
             Menu("Project settings") { ProjectMenuButtons(model: model, pane: pane, project: project) }
                 .fixedSize()
             Button(contents.lead == nil ? "New lead…" : "Change lead…") { pane.projectSheet = .lead(project) }

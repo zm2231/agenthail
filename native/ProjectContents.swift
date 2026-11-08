@@ -12,6 +12,12 @@ struct ProjectContents: Equatable {
         case message
     }
 
+    static func leadSessionID(_ lead: ProjectState.Lead) -> String? {
+        guard let sessionID = lead.sessionId, !sessionID.isEmpty else { return nil }
+        guard let host = lead.host, host.state != "local", !sessionID.contains("::") else { return sessionID }
+        return host.id + "::" + sessionID
+    }
+
     static func leadNote(_ lead: ProjectState.Lead) -> String {
         (lead.sessionId ?? "").isEmpty ? "starts with the first message sent to it" : "not running · the next message picks it up"
     }

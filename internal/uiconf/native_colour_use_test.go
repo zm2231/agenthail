@@ -47,6 +47,7 @@ var statusColours = map[string]statusColour{
 			"macOS/DesktopWindow.swift":         {10, "the needs-you waiting label, the delivery problem banner, undelivered messages, an end-of-turn ask, a goal that needs the person"},
 			"macOS/GoalSection.swift":           {1, "a goal that needs the person"},
 			"macOS/LeadReplacementBanner.swift": {3, "a lead replacement to decide"},
+			"macOS/ProjectHeaderParts.swift":    {1, "several leads in one project, to decide"},
 			"macOS/SidebarSessionRow.swift":     {1, "a needs-you row"},
 			"macOS/StatusItems.swift":           {1, "the needs-you count"},
 			"macOS/StuckMessages.swift":         {3, "messages that were not delivered"},

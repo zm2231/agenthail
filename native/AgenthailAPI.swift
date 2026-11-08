@@ -658,6 +658,21 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await post("/api/v1/actions", body: body, idempotencyKey: idempotencyKey)
     }
 
+    func channelSend(_ channel: String, message: String, idempotencyKey: String) async throws -> ChannelSendResult {
+        let path = "/api/v1/actions"
+        var request = authorizedRequest(path: path)
+        request.httpMethod = "POST"
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["action": "channel-send", "channel": channel, "message": message, "author": "person"])
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        setIdempotencyHeader(on: &request, path: path, method: "POST", key: idempotencyKey)
+        let (data, response) = try await session.data(for: request)
+        if (response as? HTTPURLResponse)?.statusCode == 409, let partial = try? JSONDecoder().decode(ChannelSendResult.self, from: data), !partial.recipients.isEmpty {
+            return partial
+        }
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ChannelSendResult.self, from: data)
+    }
+
     func control(_ action: String, sessionID: String, message: String? = nil, model: String? = nil) async throws -> DeliveryReceipt? {
         var body: [String: Any] = ["action": action, "sessionId": sessionID]
         if let message { body["message"] = message }
@@ -1050,6 +1065,17 @@ private struct LeadResponse: Decodable {
 
 struct ActionReceipt: Decodable {
     let result: DeliveryReceipt?
+}
+
+struct ChannelSendResult: Decodable {
+    struct Recipient: Decodable, Equatable {
+        var sessionId: String?
+        var coordinator: String?
+        let outcome: String
+        var detail: String?
+    }
+
+    let recipients: [Recipient]
 }
 struct DeliveryReceipt: Decodable {
     let deliveryId: Int64?

@@ -124,6 +124,7 @@ let package = Package(
                 "AgenthailModel.swift",
                 "AgenthailModelPaging.swift",
                 "AgenthailModelPairing.swift",
+                "AgenthailModelBroadcast.swift",
                 "ScopeTreeCache.swift",
                 "VoiceAPI.swift",
                 "VoiceAudioBridge.swift",
