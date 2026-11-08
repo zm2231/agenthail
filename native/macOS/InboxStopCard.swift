@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct InboxStopCard: View {
@@ -6,6 +7,16 @@ struct InboxStopCard: View {
     let stop: InboxStop
     let following: String?
     @State private var expanded = false
+    @State private var textWidth: CGFloat = 0
+
+    static let shownLines = 4
+
+    static func overflows(_ text: String, width: CGFloat) -> Bool {
+        guard width > 0 else { return false }
+        let font = NSFont.systemFont(ofSize: DesktopType.body)
+        let height = (text as NSString).boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin], attributes: [.font: font]).height
+        return height > NSLayoutManager().defaultLineHeight(for: font) * CGFloat(shownLines) + 0.5
+    }
 
     var body: some View {
         ScrollView {
@@ -31,13 +42,14 @@ struct InboxStopCard: View {
                         Text(message)
                             .font(.system(size: DesktopType.body))
                             .foregroundStyle(DesktopPalette.text)
-                            .lineLimit(expanded ? nil : 4)
+                            .lineLimit(expanded ? nil : Self.shownLines)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
                             .padding(DesktopSpace.s)
                             .background(DesktopPalette.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
                             .accessibilityIdentifier("inbox-stop-message")
-                        if message.count > 280 || message.filter(\.isNewline).count > 3 {
+                        if expanded || Self.overflows(message, width: textWidth) {
                             Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
                                 .buttonStyle(.link)
                                 .accessibilityIdentifier("inbox-stop-message-toggle")

@@ -10,6 +10,9 @@ final class NeedsYouUITests: XCTestCase {
         let limited = app.buttons["needs-you-h0123456789ab::remote-demo-2"]
         XCTAssertTrue(stranded.waitForExistence(timeout: 10))
         XCTAssertTrue(limited.exists)
+        let header = app.descendants(matching: .any)["needs-you-header"]
+        XCTAssertTrue(header.exists)
+        XCTAssertEqual(header.label, "Needs you", "the Inbox badge is the one Needs you count")
         XCTAssertTrue(stranded.label.contains("Waiting on a prompt Agenthail can't reach. Stop and resume to clear it"), stranded.label)
         XCTAssertTrue(limited.label.contains("Usage limit, resets"), limited.label)
         XCTAssertLessThan(stranded.frame.minY, limited.frame.minY)
