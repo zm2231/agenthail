@@ -196,10 +196,13 @@ func TestSessionViewIgnoresFieldsPlacementLeavesOut(t *testing.T) {
 	for _, target := range []string{"s02", "s00", "child"} {
 		for field, mutate := range placementIgnoredMutations {
 			f := newOrderFixture()
-			before := viewSignature(t, f)
+			before, placed := viewSignature(t, f), sessionPlacement(*f.rows[target])
 			mutate(f.rows[target], f.now)
 			if viewSignature(t, f) != before {
 				t.Errorf("%s on %s changed the view, so it must be a placement input", field, target)
+			}
+			if sessionPlacement(*f.rows[target]) != placed {
+				t.Errorf("%s on %s changed the placement of a field the view ignores", field, target)
 			}
 		}
 	}
