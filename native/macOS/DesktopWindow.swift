@@ -976,11 +976,12 @@ struct TranscriptView: View {
                         .onDisappear { tailLayout.rows[slot.id] = nil }
                 }
                 ForEach(Array(sends.enumerated()), id: \.element.id) { index, send in
-                    UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
+                    UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, unconfirmed: send.unconfirmedTitle, onEdit: canResend ? { text in
                         if send.failure != nil { pane.model.discardSend(send, in: session.id) }
                         resend(text, attachments: send.failure != nil ? send.attachments : [])
-                    } : nil, onRetry: send.failure == nil || !canResend ? nil : { pane.model.retrySend(send, in: session.id) },
-                    onDelete: send.canDelete ? { pane.model.deleteSend(send, in: session.id) } : nil)
+                    } : nil, onRetry: (send.failure == nil && !send.retryStopped) || !canResend ? nil : { pane.model.retrySend(send, in: session.id) },
+                    onDelete: send.canDelete ? { pane.model.deleteSend(send, in: session.id) } : nil,
+                    onPutBack: send.unconfirmedTitle != nil && send.retryStopped ? { pane.model.putBackSend(send, in: session.id) } : nil)
                     .transcriptScrimRow(turn: send.id.description)
                     .padding(.top, TranscriptBlock.gap(above: .user(send.text, files: []), after: index > 0 ? .user(sends[index - 1].text, files: []) : blocks.last?.kind))
                 }
@@ -1198,9 +1199,11 @@ struct UserBubble: View {
     var time: String? = nil
     var files: [AttachedFile] = []
     var failure: String? = nil
+    var unconfirmed: String? = nil
     var onEdit: ((String) -> Void)? = nil
     var onRetry: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
+    var onPutBack: (() -> Void)? = nil
     /// The transcript row this message is, so "Show more" is remembered with the session's other rows.
     var row: String? = nil
     @State private var opened: RowChoice<Bool>?
@@ -1266,11 +1269,28 @@ struct UserBubble: View {
                     Button("Retry", action: onRetry)
                         .buttonStyle(.plain)
                         .foregroundStyle(DesktopPalette.accentText)
+                        .help("Sends it again as a new message. The refused one was not delivered.")
                 }
                 if let onDelete {
                     Button("Delete", action: onDelete)
                         .buttonStyle(.plain)
                         .foregroundStyle(DesktopPalette.accentText)
+                }
+            } else if let unconfirmed {
+                Image(systemName: "questionmark.circle")
+                Text(unconfirmed)
+                    .lineLimit(2)
+                if let onRetry {
+                    Button("Retry", action: onRetry)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DesktopPalette.accentText)
+                        .help("Sends the same message again. If the first try arrived, it is not delivered twice.")
+                }
+                if let onPutBack {
+                    Button("Put back", action: onPutBack)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DesktopPalette.accentText)
+                        .help("Returns the text to the composer. It may already have arrived, so check the conversation before sending it again.")
                 }
             } else {
                 let status = [receipt, time].compactMap { $0 }.joined(separator: " · ")

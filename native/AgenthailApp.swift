@@ -565,7 +565,7 @@ private struct AgenthailMenuBarApp: App {
     @StateObject private var voice: VoiceController
 
     init() {
-        let model = AgenthailModel()
+        let model = AgenthailModel(composerStore: .standard(folder: "Agenthail"))
         let voice = VoiceController()
         model.onSnapshotRequest = { [weak model, weak voice] request, api in
             guard let model, let voice else { return }

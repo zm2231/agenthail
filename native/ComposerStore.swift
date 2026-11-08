@@ -1,4 +1,4 @@
-import UIKit
+import Foundation
 
 /// What typed or sent text must outlive the app. Attachment bytes stay in memory.
 struct ComposerStore {
@@ -12,6 +12,8 @@ struct ComposerStore {
             let wire: ActionWire?
             let hadAttachments: Bool
             var sentAt: Date? = nil
+            var busyDelivery: String? = nil
+            var files: [UploadedAttachment]? = nil
         }
 
         var drafts: [String: String] = [:]
@@ -25,9 +27,10 @@ struct ComposerStore {
     let file: URL
     var protectedDataIsAvailable: @MainActor () -> Bool = { true }
 
-    static var standard: ComposerStore? {
+    static func standard(folder: String? = nil, protectedDataIsAvailable: @escaping @MainActor () -> Bool = { true }) -> ComposerStore? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            .map { ComposerStore(file: $0.appendingPathComponent("composer.json"), protectedDataIsAvailable: { UIApplication.shared.isProtectedDataAvailable }) }
+            .map { base in folder.map { base.appendingPathComponent($0, isDirectory: true) } ?? base }
+            .map { ComposerStore(file: $0.appendingPathComponent("composer.json"), protectedDataIsAvailable: protectedDataIsAvailable) }
     }
 
     struct Loaded {
@@ -63,12 +66,12 @@ struct ComposerStore {
 
 extension ComposerStore.Saved.Send {
     init(_ send: PendingSend) {
-        self.init(id: send.id, sessionID: send.sessionID, message: send.message, idempotencyKey: send.idempotencyKey, uploaded: send.uploaded ?? send.alreadyUploaded, wire: send.wire, hadAttachments: !send.attachments.isEmpty, sentAt: send.sentAt)
+        self.init(id: send.id, sessionID: send.sessionID, message: send.message, idempotencyKey: send.idempotencyKey, uploaded: send.uploaded ?? send.alreadyUploaded, wire: send.wire, hadAttachments: !send.attachments.isEmpty, sentAt: send.sentAt, busyDelivery: send.busyDelivery, files: send.files)
     }
 
     /// Nil when attachments were not uploaded before the app ended: their bytes are gone, so this cannot be resent as it was.
     var resumable: PendingSend? {
         guard !hadAttachments || uploaded != nil else { return nil }
-        return PendingSend(id: id, sessionID: sessionID, message: message, attachments: [], idempotencyKey: idempotencyKey, uploaded: uploaded ?? [], wire: wire, unconfirmed: true, sentAt: sentAt ?? .distantPast)
+        return PendingSend(id: id, sessionID: sessionID, message: message, attachments: files?.map(ComposerAttachment.init(uploaded:)) ?? [], idempotencyKey: idempotencyKey, uploaded: uploaded ?? [], wire: wire, unconfirmed: true, sentAt: sentAt ?? .distantPast, busyDelivery: busyDelivery)
     }
 }

@@ -55,7 +55,7 @@ struct SettingsRequestsTest {
         RecordingProtocol.reset()
         if let failedA { model.retrySend(failedA, in: "claude-target") }
         let retried = await waitFor { $0.path == "/api/v1/actions" && $0.body["message"] as? String == "synthetic send A" }
-        check(retried?.idempotencyKey != nil && retried?.idempotencyKey == rejectedA?.idempotencyKey && retried?.body["busyDelivery"] as? String == "queue", "a retry after another send repeats the original request under its own key: \(String(describing: retried?.body))")
+        check(retried?.idempotencyKey != nil && retried?.idempotencyKey != rejectedA?.idempotencyKey && retried?.body["busyDelivery"] as? String == "queue", "a retry after a refusal repeats the request under a new key, since the daemon keeps the refusal under the old one: \(String(describing: retried?.body))")
         let delivered = await waitForSend(model) { $0.text == "synthetic send A" && $0.status != nil }
         check(delivered?.failure == nil && model.localSends["claude-target"]?.filter({ $0.text == "synthetic send A" }).count == 1, "a successful retry clears the failure on the same message: \(String(describing: model.localSends["claude-target"]))")
         check(model.localSends["claude-target"]?.first(where: { $0.text == "synthetic send B" })?.failure != nil, "retrying one message leaves another failed message alone")

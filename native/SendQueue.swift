@@ -14,6 +14,7 @@ final class SendQueue {
     private var workers: [String: Task<Void, Never>] = [:]
     private var waits: [String: Task<Void, Never>] = [:]
     private var moves: [String: String] = [:]
+    private var delivering: Set<UUID> = []
 
     deinit {
         workers.values.forEach { $0.cancel() }
@@ -50,8 +51,11 @@ final class SendQueue {
         if let session = pending.first(where: { $0.value.contains { $0.id == send.id } })?.key { start(session) }
     }
 
-    func setUploaded(_ uploaded: [String], for send: PendingSend) {
-        update(send) { $0.uploaded = uploaded }
+    func setUploaded(_ uploaded: [UploadedAttachment], for send: PendingSend) {
+        update(send) {
+            $0.uploaded = uploaded.map(\.id)
+            $0.files = uploaded
+        }
         changed?()
     }
 
@@ -89,11 +93,14 @@ final class SendQueue {
             }
             pending[target, default: []].append(contentsOf: sends)
             moved = true
-            if let worker = workers.removeValue(forKey: session), workers[target] == nil {
+            let worker = workers.removeValue(forKey: session)
+            if let worker, workers[target] == nil {
                 workers[target] = worker
                 moves[session] = target
                 waits[target] = waits.removeValue(forKey: session)
             } else {
+                worker?.cancel()
+                waits.removeValue(forKey: session)?.cancel()
                 start(target)
             }
         }
@@ -145,7 +152,13 @@ final class SendQueue {
             stopRetrying(send)
         }
         guard let send = pending[current(session)]?.first(where: { !$0.retryStopped }), let deliver else { return false }
+        guard !delivering.contains(send.id) else {
+            try? await Task.sleep(for: .milliseconds(50))
+            return !Task.isCancelled
+        }
+        delivering.insert(send.id)
         let outcome = await deliver(send)
+        delivering.remove(send.id)
         guard !Task.isCancelled else { return false }
         await settle(send, outcome, backoff: backoff, session: session)
         return true

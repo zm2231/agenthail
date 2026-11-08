@@ -1680,9 +1680,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             let (api, route) = try resolve(send.sessionID)
             var uploaded = send.uploaded
             if uploaded == nil {
-                let stored = try await api.upload(send.attachments, sessionID: route.sessionID).map(\.id)
+                let stored = try await api.upload(send.attachments, sessionID: route.sessionID)
                 sendQueue.setUploaded(stored, for: send)
-                uploaded = stored
+                uploaded = stored.map(\.id)
             }
             let wire = try send.wire ?? api.instructionWire(sessionID: route.sessionID, message: send.message, author: "person", attachments: uploaded ?? [], idempotencyKey: send.idempotencyKey)
             if send.wire == nil { sendQueue.setWire(wire, for: send) }
