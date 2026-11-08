@@ -10,7 +10,6 @@ let cachedProviderToken = null
 const registrationTTLSeconds = 90 * 24 * 60 * 60
 const challengeTTLMilliseconds = 5 * 60 * 1000
 const dedupeTTLMilliseconds = 10 * 60 * 1000
-const dedupeLeaseMilliseconds = 30 * 1000
 const defaultRequestBodyLimit = 8192
 const registrationRequestBodyLimit = 24576
 const appAttestationLimitBytes = 16384
@@ -228,57 +227,46 @@ export async function send(request, env) {
     return pushId && response.ok ? json({ ok: true, receipt: true }) : response
   }
   if (!env.PUSH_DEDUPE) return json({ error: "dedupe_store_unavailable" }, 503)
-  const claim = env.PUSH_DEDUPE.getByName(await sha256(`${device.stored.token}:${dedupeKey}`))
-  const claimed = await claim.fetch("https://dedupe.internal/claim", { method: "POST" })
-  if (!claimed.ok) return json({ error: "dedupe_store_unavailable" }, 503)
-  const { state } = await claimed.json()
-  if (state === "delivered") return json({ ok: true, deduped: true })
-  // 5xx: daemons treat 4xx as terminal and the holder may still fail.
-  if (state !== "claimed") return json({ error: "dedupe_pending" }, 503)
-  let response
-  try {
-    response = await deliver(env, device, headers, payload)
-  } finally {
-    const outcome = response?.ok ? "/confirm" : "/release"
-    await claim.fetch(`https://dedupe.internal${outcome}`, { method: "POST" }).catch(() => {})
-  }
-  return pushId && response.ok ? json({ ok: true, receipt: true }) : response
+  const once = env.PUSH_DEDUPE.getByName(await sha256(`${device.stored.token}:${dedupeKey}`))
+  const response = await once.fetch("https://dedupe.internal/deliver", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ device, headers, payload })
+  })
+  if (!response.ok) return response
+  if ((await response.clone().json()).deduped) return json({ ok: true, deduped: true })
+  return pushId ? json({ ok: true, receipt: true }) : response
 }
 
-// Named by a hash of device token and dedupe key. Only a confirmed delivery
-// answers later senders as deduplicated; a lost confirm or release ends with
-// the short pending lease.
+// Named by a hash of device token and dedupe key. It calls Apple itself and
+// records the delivery in its own storage, so no acknowledgement can be lost
+// in between, and takes one send at a time, so a send that arrives during
+// another delivers only if that one failed.
 export class PushDedupe {
-  constructor(ctx) {
+  constructor(ctx, env) {
     this.ctx = ctx
+    this.env = env
+    this.queue = Promise.resolve()
   }
 
   async fetch(request) {
-    const pathname = new URL(request.url).pathname
-    if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405)
-    if (pathname === "/claim") {
-      const state = await this.ctx.storage.transaction(async transaction => {
-        const claim = await transaction.get("claim")
-        if (claim && claim.until > Date.now()) return claim.delivered ? "delivered" : "pending"
-        await this.hold(transaction, { delivered: false, until: Date.now() + dedupeLeaseMilliseconds })
-        return "claimed"
-      })
-      return json({ state })
-    }
-    if (pathname === "/confirm") {
-      await this.ctx.storage.transaction(transaction => this.hold(transaction, { delivered: true, until: Date.now() + dedupeTTLMilliseconds }))
-      return json({ ok: true })
-    }
-    if (pathname === "/release") {
-      await this.ctx.storage.deleteAll()
-      return json({ ok: true })
-    }
-    return json({ error: "not_found" }, 404)
+    if (request.method !== "POST" || new URL(request.url).pathname !== "/deliver") return json({ error: "not_found" }, 404)
+    const { device, headers, payload } = await request.json()
+    const turn = this.queue.then(() => this.deliverOnce(device, headers, payload))
+    this.queue = turn.catch(() => {})
+    return turn
   }
 
-  async hold(transaction, claim) {
-    await transaction.put("claim", claim)
-    await this.ctx.storage.setAlarm(claim.until)
+  async deliverOnce(device, headers, payload) {
+    const deliveredUntil = await this.ctx.storage.get("deliveredUntil")
+    if (deliveredUntil > Date.now()) return json({ ok: true, deduped: true })
+    const response = await deliver(this.env, device, headers, payload)
+    if (response.ok) {
+      const until = Date.now() + dedupeTTLMilliseconds
+      await this.ctx.storage.put("deliveredUntil", until)
+      await this.ctx.storage.setAlarm(until)
+    }
+    return response
   }
 
   async alarm() {
