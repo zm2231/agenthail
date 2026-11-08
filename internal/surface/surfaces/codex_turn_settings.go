@@ -15,9 +15,11 @@ import (
 const CodexThreadSettingsVersion = "0.133.0"
 
 type codexThreadSettings struct {
-	Model  string
-	Effort string
-	Mode   string
+	Model    string
+	Effort   string
+	Mode     string
+	Approval string
+	Sandbox  string
 }
 
 var codexModeOptions = []surface.TurnSettingOption{{ID: "default", Label: "Default"}, {ID: "plan", Label: "Plan"}}
@@ -138,6 +140,25 @@ func codexThreadSettingsError(err error) error {
 // readCodexThreadSettings reads the settings the newest turn ran with, or a
 // later change Codex recorded as thread_settings_applied.
 func readCodexThreadSettings(ctx context.Context, rollout string) (codexThreadSettings, bool) {
+	return readNewestCodexSettings(ctx, rollout, func(line []byte) bool {
+		return bytes.Contains(line, []byte(`"turn_context"`)) || bytes.Contains(line, []byte(`"thread_settings_applied"`))
+	}, codexSettingsRecord)
+}
+
+// readCodexTurnContext reads the newest turn's own record, which alone
+// carries the sandbox a turn ran in.
+func readCodexTurnContext(ctx context.Context, rollout string) (codexThreadSettings, bool) {
+	return readNewestCodexSettings(ctx, rollout, func(line []byte) bool {
+		return bytes.Contains(line, []byte(`"turn_context"`))
+	}, func(record map[string]any) (codexThreadSettings, bool) {
+		if str(record, "type") != "turn_context" {
+			return codexThreadSettings{}, false
+		}
+		return codexSettingsRecord(record)
+	})
+}
+
+func readNewestCodexSettings(ctx context.Context, rollout string, candidate func([]byte) bool, read func(map[string]any) (codexThreadSettings, bool)) (codexThreadSettings, bool) {
 	if rollout == "" {
 		return codexThreadSettings{}, false
 	}
@@ -154,10 +175,7 @@ func readCodexThreadSettings(ctx context.Context, rollout string) (codexThreadSe
 	if err != nil {
 		return codexThreadSettings{}, false
 	}
-	candidate := func(line []byte) bool {
-		return bytes.Contains(line, []byte(`"turn_context"`)) || bytes.Contains(line, []byte(`"thread_settings_applied"`))
-	}
-	match := func(record map[string]any) bool { _, ok := codexSettingsRecord(record); return ok }
+	match := func(record map[string]any) bool { _, ok := read(record); return ok }
 	start, found, err := transcriptRecordBefore(ctx, file, info.Size(), candidate, match)
 	if err != nil || !found {
 		return codexThreadSettings{}, false
@@ -166,7 +184,7 @@ func readCodexThreadSettings(ctx context.Context, rollout string) (codexThreadSe
 	var ok bool
 	_ = scanTranscriptRecords(ctx, file, start, info.Size(), true, func(record map[string]any, _ int64, _ []byte) {
 		if !ok {
-			settings, ok = codexSettingsRecord(record)
+			settings, ok = read(record)
 		}
 	})
 	return settings, ok
@@ -177,11 +195,12 @@ func codexSettingsRecord(record map[string]any) (codexThreadSettings, bool) {
 	switch {
 	case str(record, "type") == "turn_context":
 		mode, _ := payload["collaboration_mode"].(map[string]any)
-		return codexThreadSettings{Model: str(payload, "model"), Effort: str(payload, "effort"), Mode: str(mode, "mode")}, true
+		sandbox, _ := payload["sandbox_policy"].(map[string]any)
+		return codexThreadSettings{Model: str(payload, "model"), Effort: str(payload, "effort"), Mode: str(mode, "mode"), Approval: str(payload, "approval_policy"), Sandbox: str(sandbox, "type")}, true
 	case str(record, "type") == "event_msg" && str(payload, "type") == "thread_settings_applied":
 		applied, _ := payload["thread_settings"].(map[string]any)
 		mode, _ := applied["collaboration_mode"].(map[string]any)
-		return codexThreadSettings{Model: str(applied, "model"), Effort: str(applied, "reasoning_effort"), Mode: str(mode, "mode")}, true
+		return codexThreadSettings{Model: str(applied, "model"), Effort: str(applied, "reasoning_effort"), Mode: str(mode, "mode"), Approval: str(applied, "approval_policy")}, true
 	}
 	return codexThreadSettings{}, false
 }

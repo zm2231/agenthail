@@ -134,6 +134,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/claude/permission-request", d.apiV1Guard(dashboard, "control", d.claudePermissionRequestHandler))
 	mux.HandleFunc("/api/v1/requests", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.requestsHandler))))
 	mux.HandleFunc("/api/v1/session-options", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.sessionOptionsHandler))))
+	mux.HandleFunc("/api/v1/session-settings", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.sessionSettingsHandler))))
 	mux.HandleFunc("/api/v1/session-options/claude-usage", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.claudeRootUsageHandler))))
 	mux.HandleFunc("/api/v1/session-options/claude-pick", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.claudeRootPickHandler))))
 	mux.HandleFunc("/api/v1/session-options/codex-usage", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.codexUsageHandler))))

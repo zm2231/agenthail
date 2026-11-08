@@ -346,6 +346,10 @@ again. `thread resume` remains for waking a session without a message; it
 returns once the session can take messages, and a session Claude refuses to
 start returns Claude's output.
 
+`thread settings <target>` (or `agenthail_session_settings` with no setting)
+shows the model, effort, permission and Claude config root a session runs
+with, and where each was read from, without waking it.
+
 Codex supports `thread fork <target>` and `thread queue <target> <list|add|update|delete|reorder|start>`.
 Native queue adds require `--client-id <stable-id>`; reuse it only for retries
 of the same submission. Native queue commands do not enter the Agenthail outbox.
