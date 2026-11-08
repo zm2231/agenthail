@@ -868,7 +868,7 @@ struct TranscriptView: View {
     }
 
     private func blockRow(_ slot: TranscriptSlot, canResend: Bool) -> some View {
-        TranscriptBlockView(block: slot.block, turn: slot.turn, onEdit: TranscriptRowAction(canResend ? { resend($0) } : nil))
+        TranscriptBlockView(block: slot.block, turn: slot.turn, onEdit: TranscriptRowAction(canResend ? { pane.composerDraft.edit($0) } : nil))
             .equatable()
             .padding(.top, slot.gap)
     }
@@ -919,7 +919,7 @@ struct TranscriptView: View {
                 ForEach(Array(sends.enumerated()), id: \.element.id) { index, send in
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, unconfirmed: send.unconfirmedTitle, onEdit: canResend ? { text in
                         if send.failure != nil { pane.model.discardSend(send, in: session.id) }
-                        resend(text, attachments: send.failure != nil ? send.attachments : [])
+                        pane.composerDraft.edit(text, attachments: send.failure != nil ? send.attachments : [])
                     } : nil, onRetry: (send.failure == nil && !send.retryStopped) || !canResend ? nil : { pane.model.retrySend(send, in: session.id) },
                     onDelete: send.canDelete ? { pane.model.deleteSend(send, in: session.id) } : nil,
                     onPutBack: send.unconfirmedTitle != nil && send.retryStopped ? { pane.model.putBackSend(send, in: session.id) } : nil)
@@ -1058,11 +1058,6 @@ struct TranscriptView: View {
         Task { await pane.loadOlder() }
     }
 
-    private func resend(_ text: String, attachments: [ComposerAttachment] = []) {
-        pane.resend(text, attachments: attachments)
-        jumpToLatest()
-    }
-
     private func jumpToLatest() {
         scrollToLatest($position, following: $following, latest: tailLayout.newest)
     }
@@ -1150,21 +1145,13 @@ struct UserBubble: View {
     @State private var opened: RowChoice<Bool>?
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
-    @State private var editing = false
     @State private var hovering = false
 
     private var expanded: Bool { rows.current(opened) ?? row.flatMap { rows.isOpen("more-" + $0) } ?? false }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 5) {
-            if editing, let onEdit {
-                MessageEditor(text: text, onCancel: { editing = false }, onSend: { edited in
-                    editing = false
-                    onEdit(edited)
-                })
-            } else {
-                bubble
-            }
+            bubble
         }
         .transcriptScrimRow()
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1199,7 +1186,7 @@ struct UserBubble: View {
                 .foregroundStyle(DesktopPalette.text2)
         }
         HStack(spacing: DesktopSpace.s) {
-            MessageActions(text: text, revealed: hovering, onEdit: onEdit == nil ? nil : { editing = true })
+            MessageActions(text: text, revealed: hovering, onEdit: onEdit.map { edit in { edit(text) } })
             if let failure {
                 Image(systemName: "exclamationmark.circle")
                     .foregroundStyle(DesktopPalette.failed)
@@ -1354,7 +1341,11 @@ struct ComposerView: View {
     }
 
     private var hasText: Bool { !draft.isEmpty }
-    private var canSteer: Bool { session.capabilities.steer && !session.isWaitingOnYou }
+    private var steerRefusal: String? { QueueSteer.composerRefusal(draft.attachments, capabilities: session.capabilities) }
+    private var canSteer: Bool { session.capabilities.steer && !session.isWaitingOnYou && steerRefusal == nil }
+    private var statusLine: String {
+        ComposerStatusLine.text(.init(waitingOnYou: session.isWaitingOnYou, turnNotice: session.capabilities.turnNotice, working: session.isWorking, hasMessage: hasText, isCommand: draftIsCommand, steerRefusal: session.capabilities.steer ? steerRefusal : nil, followUpHint: hint, stopShortcut: shortcuts.label(.stop)))
+    }
     private var pasteAttachments: ((PastedAttachments) -> Void)? {
         guard session.capabilities.attach else { return nil }
         return { add($0) }
@@ -1470,13 +1461,13 @@ struct ComposerView: View {
                             .frame(width: 0, height: 0)
                     }
                     .padding(DesktopSpace.xs)
-                    if session.isWorking && hasText && !draftIsCommand {
-                        Text(hint)
-                            .font(.system(size: DesktopType.caption))
-                            .foregroundStyle(DesktopPalette.text2)
-                            .padding(.horizontal, DesktopSpace.m)
-                            .padding(.bottom, DesktopSpace.xs)
-                    }
+                    Text(statusLine)
+                        .font(.system(size: DesktopType.caption))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .lineLimit(2)
+                        .padding(.horizontal, DesktopSpace.m)
+                        .padding(.bottom, DesktopSpace.xs)
+                        .accessibilityIdentifier("composer-status")
                 }
                 .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
                 .scrimSurface(radius: DesktopRadius.sheet)
@@ -1532,6 +1523,7 @@ struct ComposerView: View {
             }
         }
         .onAppear { focused = true }
+        .onChange(of: draft.focusRequests) { focused = true }
         .task(id: session.id) { await model.loadPrompts(for: session.id) }
         .task(id: mentionRequest) { await loadMentionFiles(mentionRequest) }
         .onChange(of: completion.items.map(\.id)) { updateCompletion { $0.highlighted = 0 } }
@@ -1761,7 +1753,8 @@ struct ComposerView: View {
     private func submit(alternate: Bool) {
         guard hasText else { return }
         if completionKey(.accept) { return }
-        let explicit = session.isWorking && alternate && canSteer ? resolvedAction(alternate: true).rawValue : nil
+        let refusedSteer = session.isWorking && session.capabilities.steer && steerRefusal != nil
+        let explicit = refusedSteer ? FollowUpAction.queue.rawValue : session.isWorking && alternate && canSteer ? resolvedAction(alternate: true).rawValue : nil
         pane.submit(busyDelivery: explicit)
     }
 }

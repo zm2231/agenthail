@@ -5,6 +5,17 @@ enum QueueSteer {
         items.filter { $0.status == "pending" && ["", "message"].contains($0.operation ?? "") }.sorted { $0.id < $1.id }
     }
 
+    static func composerRefusal(_ attachments: [ComposerAttachment], capabilities: Capabilities) -> String? {
+        guard !attachments.isEmpty else { return nil }
+        guard let steerImages = capabilities.steerImages else {
+            return "Update Agenthail on this computer to steer attachments. Send queues them for next."
+        }
+        if !steerImages && attachments.contains(where: \.isImage) {
+            return "Attached images can't join a running turn on this session. Send queues them for next."
+        }
+        return nil
+    }
+
     static func refusal(_ item: QueueState, capabilities: Capabilities) -> String? {
         if let author = item.author, author != "person" {
             return "This message came from another session, and Steer would send it as yours. It sends when the turn ends."

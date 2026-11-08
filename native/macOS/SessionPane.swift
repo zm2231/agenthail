@@ -728,11 +728,6 @@ final class SessionPane: ObservableObject, Identifiable {
         composerDraft.restoreStashAfterSend()
     }
 
-    func resend(_ text: String, attachments: [ComposerAttachment] = []) {
-        guard let sessionID = selectedSessionID, removedSession == nil else { return }
-        send(text, attachments: attachments, to: sessionID, busyDelivery: nil)
-    }
-
     private func send(_ text: String, attachments: [ComposerAttachment] = [], to sessionID: String, busyDelivery: String?) {
         model.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery)
     }

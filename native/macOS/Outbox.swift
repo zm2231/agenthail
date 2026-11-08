@@ -132,7 +132,7 @@ final class Outbox {
             if send.wire == nil { queue.setWire(wire, for: send) }
             let receipt = try await api.send(wire)
             update(send.id, in: send.sessionID) {
-                $0.status = LocalSend.label(for: receipt.result?.status, waitingOnYou: receipt.result?.waitingOn != nil, movedTo: receipt.result?.movedTo)
+                $0.status = LocalSend.label(for: receipt.result)
                 $0.unconfirmed = false
                 $0.retryStopped = false
             }
