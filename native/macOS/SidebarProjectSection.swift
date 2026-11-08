@@ -16,7 +16,7 @@ struct SidebarProjectSection: View, @MainActor Equatable {
         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
         VStack(alignment: .leading, spacing: 1) {
             ProjectHeaderView(name: project.name, hosts: project.hosts, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.counts.sessions)
-                .opensProject(project.identity?.id, model: model, pane: pane)
+                .opensProject(project.identity?.id, model: model, pane: pane, shown: key.isShownProject)
                 .contextMenu {
                     if let identity = project.identity {
                         Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }

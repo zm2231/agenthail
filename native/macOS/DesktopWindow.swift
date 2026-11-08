@@ -208,7 +208,7 @@ struct SessionSidebar: View {
                     }
                     ForEach(tree.projects) { project in
                         SidebarProjectSection(
-                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(project.id), selectedID: pane.selectedSessionID, attention: tree.attention, expandedFamilies: expandedFamilies),
+                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(project.id), selectedID: pane.selectedSessionID, attention: tree.attention, expandedFamilies: expandedFamilies, shownProjectID: pane.shownProjectID),
                             model: model,
                             pane: pane,
                             toggleProject: { toggle(project.id, in: $expandedProjects) },
