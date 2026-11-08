@@ -35,6 +35,7 @@ type TurnSetting struct {
 	Options []TurnSettingOption `json:"options"`
 	Applies string              `json:"applies"`
 	Scope   string              `json:"scope,omitempty"`
+	Pending *string             `json:"pending,omitempty"`
 }
 
 type TurnSettingsProvider interface {

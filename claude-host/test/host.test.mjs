@@ -738,6 +738,101 @@ test('a resume passes the same arguments with or without an autocompact choice, 
   d.close();
 });
 
+const lastSettings = (f) => {
+  const argv = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1).argv;
+  const value = argv.find((a) => a.startsWith('--settings='))?.slice('--settings='.length) ?? (argv.includes('--settings') ? argv[argv.indexOf('--settings') + 1] : '');
+  return value ? JSON.parse(value) : {};
+};
+
+test('a compact window for an idle session closes it now, and the next host opens it with the window', async () => {
+  const f = fixture();
+  const first = await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await assert.rejects(c.call('setAutoCompactWindow', { sessionId: id, window: '5000' }), { code: 'invalid' });
+  const pending = await c.call('setAutoCompactWindow', { sessionId: id, window: '150000' });
+  assert.equal(pending.autoCompactWindow, 'default');
+  assert.equal(pending.pendingAutoCompactWindow, '150000', 'the window is pending until the session reopens');
+  await c.event((e) => e.sessionId === id && e.kind === 'exited');
+  assert.equal((await c.call('list')).sessions.some((s) => s.sessionId === id), false, 'the idle session is closed at once');
+  first.kill('SIGKILL');
+  await first.exited;
+  c.close();
+
+  await startHost(f);
+  const d = new Client(f.socket);
+  const reopened = await d.call('open', { resume: id, cwd: f.cwd });
+  assert.deepEqual(lastSettings(f), { autoCompactWindow: 150000 }, 'a fresh host opens the session with its window');
+  assert.equal(reopened.autoCompactWindow, '150000');
+  assert.equal(reopened.pendingAutoCompactWindow, null);
+  d.close();
+});
+
+test('a closed session with no kept settings takes a pending compact window and can clear it', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('close', { sessionId: id });
+  const chosen = await c.call('setAutoCompactWindow', { sessionId: id, window: '150000' });
+  assert.equal(chosen.autoCompactWindow, 'default');
+  assert.equal(chosen.pendingAutoCompactWindow, '150000');
+  assert.equal((await c.call('setAutoCompactWindow', { sessionId: id, window: 'default' })).pendingAutoCompactWindow, null, 'choosing the window in effect clears the pending one');
+  await c.call('setAutoCompactWindow', { sessionId: id, window: '150000' });
+  const reopened = await c.call('open', { resume: id, cwd: f.cwd });
+  assert.deepEqual(lastSettings(f), { autoCompactWindow: 150000 });
+  assert.equal(reopened.autoCompactWindow, '150000');
+  c.close();
+});
+
+test('a compact window for a working session waits for its turn to end', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'SLOW 600', origin: { kind: 'human' } });
+  await c.event(running(id));
+  await c.call('setAutoCompactWindow', { sessionId: id, window: 'auto' });
+  assert.equal((await c.call('list')).sessions.find((s) => s.sessionId === id)?.pendingAutoCompactWindow, 'auto', 'a working session stays open with the window pending');
+  await c.event((e) => e.sessionId === id && e.kind === 'exited', 15000);
+  c.close();
+});
+
+test('a reopen that fails keeps the old compact window and says so', async () => {
+  const f = fixture();
+  const first = await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('setAutoCompactWindow', { sessionId: id, window: '150000' });
+  await c.event((e) => e.sessionId === id && e.kind === 'exited');
+  first.kill('SIGKILL');
+  await first.exited;
+  c.close();
+
+  const broken = path.join(f.root, 'claude-bin');
+  fs.writeFileSync(broken, '', { mode: 0o644 });
+  const second = await startHost(f, { claude: broken });
+  const d = new Client(f.socket);
+  await assert.rejects(d.call('open', { resume: id, cwd: f.cwd }), (error) => error.code === 'open_failed' && /keeps compact window default instead of 150000/.test(error.message));
+  second.kill('SIGKILL');
+  await second.exited;
+  d.close();
+
+  await startHost(f);
+  const e = new Client(f.socket);
+  const reopened = await e.call('open', { resume: id, cwd: f.cwd });
+  assert.deepEqual(lastSettings(f), {}, 'the next open uses the old window');
+  assert.equal(reopened.pendingAutoCompactWindow, null);
+  e.close();
+});
+
 test('autocompact turns off live and a resume keeps it off', async () => {
   const f = fixture();
   const first = await startHost(f);

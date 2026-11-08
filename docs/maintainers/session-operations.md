@@ -357,6 +357,8 @@ A session's model, effort and mode are session state. `GET /api/v1/session-metad
 
 When a session compacts its context is listed as `compactSettings` in the same shape, and the same `turn-setting` action changes it. `autoCompact` is `on` or `off` and applies at once to a Claude session the host runs; the host keeps it when it reopens the session. `compactWindow` is `auto` or a token count from 100000 to 1000000. For Claude it applies to new sessions: it is written to the settings of the config root named in `scope`, at the session's model entry when the root already has one and at the root's own `autoCompactWindow` otherwise. A running Claude does not take a new window.
 
+`sessionCompactWindow` gives one Claude session the host runs its own window: `default` (the root's), `auto` or a token count. The host keeps the choice with the session's other settings, which survive a host update and a daemon restart. Once the session is idle, with no open request, background task or owed turn, the host closes it, and the next message reopens it with the window. Until then the setting's `value` is the window in effect and `pending` the one chosen. A reopen that fails leaves the session with its old window and the error names both. A Claude that reports no session states is closed only as one of its turns ends, since its idle is a guess, so there the window applies from the message after the next.
+
 Service tier accepts `default`, `fast` or `flex` and uses the protocol's `serviceTierForTurn` field. Output schema is an inline JSON object in the API and a file in the CLI, limited to 64 KiB. Agenthail validates that it is an object; Codex validates supported schema semantics and constrains the final response. It does not constrain every tool event or intermediate message.
 
 Service tier and output schema survive the durable Agenthail queue, retries and daemon replay even when no model override is given; they are stored in `message_queue.turn_options`, and queue JSON and dashboard queue state expose them. They are rejected for non-Codex targets; Claude creation separately supports its native effort flag.
@@ -367,7 +369,7 @@ Service tier and output schema survive the durable Agenthail queue, retries and 
 
 - `session-create`: `surface`, `message`, `cwd`, `alias`, `model`, plus creation and turn fields.
 - `send`: `sessionId`, `message`, `serviceTier`, `outputSchema`.
-- `turn-setting`: `sessionId`, `setting` (`model`, `effort`, `mode`, `autoCompact` or `compactWindow`), `value`. An old runtime is `409 runtime_too_old` with `runtime` and `minimum`.
+- `turn-setting`: `sessionId`, `setting` (`model`, `effort`, `mode`, `autoCompact`, `compactWindow` or `sessionCompactWindow`), `value`. An old runtime is `409 runtime_too_old` with `runtime` and `minimum`.
 - `session-fork`: `sessionId`, `fork: {model, lastTurnId, beforeTurnId}`.
 - `native-queue`: `sessionId`, `nativeQueue: {queueAction, message, queuedSubmissionId, clientUserMessageId, queuedSubmissionIds, cursor}`.
 - `session-lifecycle-status`, `session-lifecycle-logs`, `session-lifecycle-stop`, `session-lifecycle-resume`: `sessionId`.

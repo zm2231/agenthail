@@ -79,6 +79,10 @@ assert.match(panel, /For new sessions on work/, "a root window says it is for ne
 assert.match(panel, /<option value="" selected disabled>Default<\/option>/, "an unset window reads as the default");
 assert.equal(compactModules["compact-settings"].renderCompactSettings({ ...compactDetail, readOnly: true }), "", "a read-only session shows no compact settings");
 assert.equal(compactModules["compact-settings"].renderCompactSettings(detail), "", "a session without compact settings shows none");
+const own = { key: "sessionCompactWindow", value: "default", applies: "nextMessage", options: [{ id: "default", label: "Root default" }, { id: "150000", label: "150k" }] };
+assert.match(compactModules["compact-settings"].renderCompactSettings({ compactSettings: [own] }), /This session.*Restarts the session when idle/s, "a session's own window says it restarts the session");
+assert.match(compactModules["compact-settings"].renderCompactSettings({ compactSettings: [{ ...own, pending: "150000" }] }), /150k from the next message/, "a pending window shows as pending");
+assert.match(compactModules["compact-settings"].renderCompactSettings({ compactSettings: [{ ...own, pending: "150000" }] }), /<option value="default" selected>Root default/, "the window in effect stays selected while another is pending");
 assert.equal(compactModules["compact-settings"].compactSettingsOf(detail).length, 0, "a session without compact settings has none to change");
 const timelineModules = await dashboardModules(["timeline"], {});
 const signature = timelineModules.timeline.timelineSignature;
