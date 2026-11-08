@@ -44,3 +44,22 @@ func TestThreadCreateFromAnEmptySurfaceTargetStartsNothing(t *testing.T) {
 		t.Fatalf("--from claude: started a thread attributed to the only session: err=%v output=%q", err, output)
 	}
 }
+
+func TestThisHostsNameWithAnEmptyTargetNamesNoSession(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}
+	app, r := cliFixture(t, fake)
+	only := surface.Session{ID: "only-codex", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
+	fake.sessions[only.ID] = only
+	if err := r.RegisterSession(only); err != nil {
+		t.Fatal(err)
+	}
+	self, err := r.HostIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{self.Name + "::", self.ID + "::", self.Name + "::codex:"} {
+		if output, err := captureStdout(t, func() error { return app.Run([]string{"last", target}) }); err == nil {
+			t.Fatalf("last %s read the only session: %q", target, output)
+		}
+	}
+}
