@@ -1686,6 +1686,37 @@ test('a folder is listed by a Claude that starts without hooks, MCP servers or a
   c.close();
 });
 
+test('a folder listing leaves out the terminal-only commands sessions of its Claude version reported', async () => {
+  const f = fixture();
+  const names = async (c) => (await c.call('commands', { cwd: f.cwd })).commands.map((x) => x.name);
+  const first = await startHost(f, { env: { FAKE_CLAUDE_TERMINAL_COMMANDS: 'statusline' } });
+  let c = new Client(f.socket);
+  assert.ok((await names(c)).includes('statusline'), 'nothing is left out before any session has reported');
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const turn = randomUUID();
+  await c.call('send', { sessionId: id, uuid: turn, text: 'hello' });
+  await c.event(turnResult(id, turn));
+  assert.deepEqual(await names(c), ['review', 'compact', 'l5-probe'], 'a cached listing drops what a session reported');
+  c.close();
+  first.kill('SIGKILL');
+  await first.exited;
+
+  const second = await startHost(f, { env: { FAKE_CLAUDE_VERSION: '2.2.0' } });
+  c = new Client(f.socket);
+  assert.deepEqual(await names(c), ['review', 'compact', 'l5-probe'], 'a restarted host remembers them');
+  await c.call('subscribe');
+  const other = randomUUID();
+  await c.call('open', { sessionId: other, cwd: f.cwd });
+  const next = randomUUID();
+  await c.call('send', { sessionId: other, uuid: next, text: 'hello' });
+  await c.event(turnResult(other, next));
+  assert.ok((await names(c)).includes('statusline'), 'a session on another Claude version replaces what an older one reported');
+  c.close();
+  second.kill('SIGKILL');
+});
+
 test('a listing that does not start in time is killed and refused, and folders are listed one at a time', async () => {
   const f = fixture();
   await startHost(f, { env: { FAKE_CLAUDE_INITIALIZE_MS: '2000', AGENTHAIL_CLAUDE_HOST_LISTING_TIMEOUT_MS: '600' } });

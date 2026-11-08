@@ -64,7 +64,8 @@ const seen = new Set(
 // The commands Claude reports while it starts: two rows can share a name, and
 // Claude's own row is the one /name runs. A SKILLS turn reports a new list, as
 // Claude does when it finds a skill mid-session. FAKE_CLAUDE_TERMINAL_COMMANDS
-// names commands the first turn's init message marks terminal-only.
+// names commands the first turn's init message marks terminal-only, and
+// FAKE_CLAUDE_VERSION the version it reports.
 const commands = [
   { name: 'review', description: 'A project command that shares a name', argumentHint: '' },
   { name: 'review', description: 'Review a pull request', argumentHint: '[pr]', builtin: true },
@@ -161,7 +162,7 @@ async function turn(message) {
   if (!initSent) {
     initSent = true;
     const terminal = process.env.FAKE_CLAUDE_TERMINAL_COMMANDS;
-    write({ type: 'system', subtype: 'init', session_id: sessionId, uuid: crypto.randomUUID(), slash_commands: commands.map((c) => c.name), ...(terminal ? { terminal_slash_commands: terminal.split(',') } : {}) });
+    write({ type: 'system', subtype: 'init', session_id: sessionId, uuid: crypto.randomUUID(), claude_code_version: process.env.FAKE_CLAUDE_VERSION || '2.1.0', slash_commands: commands.map((c) => c.name), ...(terminal ? { terminal_slash_commands: terminal.split(',') } : {}) });
   }
   state('running');
   let reply = `echo:${text}`;
