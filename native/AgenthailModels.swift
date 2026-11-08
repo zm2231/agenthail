@@ -2231,6 +2231,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     /// The project's current lead when this request is from a lead a restart replaced.
     var replacedBy: String? = nil
     var actions: [Action] = []
+    var createdAt: String? = nil
 
     var isQuestion: Bool { kind == "question" }
     var isAsk: Bool { kind == "ask" }
@@ -2238,7 +2239,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var summary: String { [title, displayName].compactMap { $0 }.first { !$0.isEmpty } ?? tool }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation, replacedBy, actions
+        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation, replacedBy, actions, createdAt
     }
 
     init(id: String, kind: String, tool: String, title: String? = nil, questions: [Question]? = nil, alwaysAllow: Bool = false, input: String? = nil, actions: [Action] = []) {
@@ -2260,6 +2261,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
         alwaysAllow = try container.decodeIfPresent(Bool.self, forKey: .alwaysAllow) ?? false
         replacedBy = try container.decodeIfPresent(String.self, forKey: .replacedBy)
         actions = try container.decodeIfPresent([Action].self, forKey: .actions) ?? []
+        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
         if let raw = try container.decodeIfPresent(RequestInput.self, forKey: .input), let data = try? JSONEncoder().encode(raw) {
             input = String(data: data, encoding: .utf8)
         }

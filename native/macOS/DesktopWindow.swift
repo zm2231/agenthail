@@ -662,20 +662,22 @@ struct ConversationPane: View {
                                     .frame(maxWidth: DesktopColumns.reading)
                                     .padding(.horizontal, DesktopColumns.gutter)
                                     .padding(.top, DesktopSpace.s)
-                            } else if let request = pane.requests?.offered(pendingAsk: session.pendingAskID, retired: pane.retiredAsks.retired(in: session.id)).first, !session.isReadOnly {
-                                RequestCard(request: request, answering: pane.answeringRequest != nil, accent: AnyShapeStyle(DesktopPalette.accentText),
-                                            respond: { decision in Task { await pane.respond(to: request, decision: decision) } },
-                                            leadNow: request.replacedBy.map { model.sessionName($0) },
-                                            withdraw: request.replacedBy == nil ? nil : { Task { await pane.withdraw(request) } },
-                                            asker: session.displayName, attention: AnyShapeStyle(DesktopPalette.attention), surface: nil, actionTint: AnyShapeStyle(DesktopPalette.accent),
-                                            agentSurface: session.surface)
-                                .id(request.id)
-                                .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 12))
-                                .scrimSurface(radius: 12)
-                                .floatingEdge(RoundedRectangle(cornerRadius: 12))
-                                .frame(maxWidth: DesktopColumns.reading)
-                                .padding(.horizontal, DesktopColumns.gutter)
-                                .padding(.top, DesktopSpace.s)
+                            } else if let requests = pane.requests?.offered(pendingAsk: session.pendingAskID, retired: pane.retiredAsks.retired(in: session.id)), !requests.isEmpty, !session.isReadOnly {
+                                ForEach(requests) { request in
+                                    RequestCard(request: request, answering: pane.answeringRequest != nil, accent: AnyShapeStyle(DesktopPalette.accentText),
+                                                respond: { decision in Task { await pane.respond(to: request, decision: decision) } },
+                                                leadNow: request.replacedBy.map { model.sessionName($0) },
+                                                withdraw: request.replacedBy == nil ? nil : { Task { await pane.withdraw(request) } },
+                                                asker: session.displayName, attention: AnyShapeStyle(DesktopPalette.attention), surface: nil, actionTint: AnyShapeStyle(DesktopPalette.accent),
+                                                agentSurface: session.surface)
+                                    .id(request.id)
+                                    .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 12))
+                                    .scrimSurface(radius: 12)
+                                    .floatingEdge(RoundedRectangle(cornerRadius: 12))
+                                    .frame(maxWidth: DesktopColumns.reading)
+                                    .padding(.horizontal, DesktopColumns.gutter)
+                                    .padding(.top, DesktopSpace.s)
+                                }
                             } else if let receipt = pane.retiredAsks.receipt(for: session) {
                                 AnswerReceiptRow(receipt: receipt)
                                     .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 12))
