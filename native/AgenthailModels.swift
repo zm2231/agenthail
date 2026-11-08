@@ -607,7 +607,7 @@ struct SessionState: Codable, Identifiable, Hashable {
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
-        return name.isEmpty ? id : name
+        return name.isEmpty ? id : SessionNames.display(name)
     }
 
     var isWorking: Bool { status == "busy" }

@@ -14,6 +14,8 @@ struct SessionRowLabelsTest {
         expect(SessionNames.display("fix https://github.com/acme/widgets") == "fix https://github.com/acme/widgets", "only a name that starts with the link changes")
         expect(SessionNames.display("Write the install guide") == "Write the install guide", "a plain name stays")
         expect(session(name: "https://github.com/acme/widgets/issues/4").title == "acme / widgets", "the session title uses the short name")
+        expect(session(name: "https://github.com/acme/widgets/issues/4").displayName == "acme / widgets", "the iPhone's name for a session uses the short name too")
+        expect(session(name: "").displayName == "s1", "a session without a name still falls back to its id")
 
         expect(SessionRowNote.text(session()) == nil, "an idle row has one line")
         expect(SessionRowNote.text(session(queued: 2)) == nil, "the queued count already shows on the row")
