@@ -167,6 +167,7 @@ struct SessionSidebar: View {
     @State private var expandedProjects: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
     @ObservedObject private var shortcuts = ShortcutStore.shared
+    @AppStorage(SessionListLayout.groupsKey) private var groupsByProject = true
 
     var body: some View {
         let scoped = pane.scope.projectID
@@ -202,6 +203,9 @@ struct SessionSidebar: View {
                     } else if !model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         searchResults
                     } else {
+                    if showsFlat {
+                        SidebarFlatFamilies(families: tree.flat, attention: tree.attention, model: model, pane: pane, expandedFamilies: $expandedFamilies)
+                    } else {
                     ForEach(scopedProjects(tree)) { project in
                         SidebarProjectSection(
                             key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(project.id), selectedID: pane.selectedSessionID, attention: tree.attention, expandedFamilies: expandedFamilies, shownProjectID: pane.shownProjectID),
@@ -221,7 +225,8 @@ struct SessionSidebar: View {
                                 ProjectMenuButtons(model: model, pane: pane, project: project)
                             }
                     }
-                    if scopedProjects(tree).isEmpty && projectsWithoutSessions(tree).isEmpty && !hasMore {
+                    }
+                    if (showsFlat ? tree.flat.isEmpty : scopedProjects(tree).isEmpty && projectsWithoutSessions(tree).isEmpty) && !hasMore {
                         Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
                             .font(.system(size: DesktopType.body))
                             .foregroundStyle(DesktopPalette.text2)
@@ -241,6 +246,9 @@ struct SessionSidebar: View {
                             .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(DesktopPalette.text2)
                             .padding(.horizontal, DesktopSpace.s)
+                    }
+                    if scoped == nil && !hasMore {
+                        SidebarArchivedSection(model: model, pane: pane, grouped: groupsByProject, expandedProjects: $expandedProjects, expandedFamilies: $expandedFamilies)
                     }
                     }
                 }
@@ -348,15 +356,15 @@ extension SessionSidebar {
             let matches = searchMatches
             return matches.local.map(\.id) + matches.remote.map(\.session.id)
         }
-        var ids: [String] = []
-        for project in scopedProjects(tree) {
-            let shown = project.shown(expanded: expandedProjects.contains(project.id), keeping: pane.selectedSessionID)
-            for family in shown.checkouts.flatMap(\.families) {
-                let rows = [family.root.id] + (familyExpanded(family) ? family.members.map(\.id) : [])
-                ids += rows.filter { !ids.contains($0) }
-            }
+        let families = showsFlat ? tree.flat : scopedProjects(tree).flatMap { project in
+            project.shown(expanded: expandedProjects.contains(project.id), keeping: pane.selectedSessionID).checkouts.flatMap(\.families)
         }
-        return ids
+        let archived = pane.scope.projectID == nil && !model.listHasMore ? SessionListLayout.shownFamilies(model.archivedTree(), grouped: groupsByProject, projectExpanded: { expandedProjects.contains(SessionListLayout.archivedProjectID($0)) }, keeping: pane.selectedSessionID) : []
+        return SessionListLayout.order(families + archived, expanded: familyExpanded)
+    }
+
+    private var showsFlat: Bool {
+        !groupsByProject && pane.scope.projectID == nil
     }
 
     private func familyExpanded(_ family: SessionFamily) -> Bool {
