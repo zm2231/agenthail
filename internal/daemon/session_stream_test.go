@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -290,7 +291,7 @@ func TestASessionStreamCarriesEachRowAsTheSessionPageReadsIt(t *testing.T) {
 		}
 		want, onPage := paged[envelope.Data.ItemID]
 		if onPage {
-			encoded, err := marshalAPIJSON(want)
+			encoded, err := apitime.Marshal(want)
 			if err != nil {
 				t.Fatal(err)
 			}

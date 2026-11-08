@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/project"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
@@ -108,7 +109,7 @@ func newProjectActivity(state dashboardState) projectActivityPage {
 }
 
 func contentTag(hostEpoch string, content any) (string, error) {
-	encoded, err := marshalAPIJSON(content)
+	encoded, err := apitime.Marshal(content)
 	if err != nil {
 		return "", err
 	}

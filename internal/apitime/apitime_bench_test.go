@@ -1,4 +1,4 @@
-package daemon
+package apitime
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func BenchmarkAPIJSONSessionPage(b *testing.B) {
+func BenchmarkMarshalSessionPage(b *testing.B) {
 	items := make([]surface.TimelineItem, 0, 200)
 	for index := range 200 {
 		items = append(items, surface.TimelineItem{ID: fmt.Sprint(index), Kind: "text", Role: "assistant", Title: "text", Text: strings.Repeat("a reply line with \"quotes\" and é ", 16), Timestamp: "2026-11-06T01:02:03.000000000Z", TurnID: fmt.Sprint(index / 4)})
@@ -30,7 +30,7 @@ func BenchmarkAPIJSONSessionPage(b *testing.B) {
 	b.Run("api", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			if _, err := marshalAPIJSON(page); err != nil {
+			if _, err := Marshal(page); err != nil {
 				b.Fatal(err)
 			}
 		}

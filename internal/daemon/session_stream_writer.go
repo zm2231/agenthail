@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"unicode/utf8"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -154,7 +155,7 @@ func replyShape(row sessionJournalPayload) sessionJournalPayload {
 }
 
 func (s *sessionStreamWriter) writeAppend(seq uint64, row sessionJournalPayload, from int, gained []byte) error {
-	encoded, err := marshalAPIJSON(sessionStreamAppend{Stream: "session", SessionID: s.sessionID, Seq: seq, Type: "append", ItemID: row.ItemID, From: from, Text: string(gained), Version: row.Version, TS: row.TS, Final: row.Final})
+	encoded, err := apitime.Marshal(sessionStreamAppend{Stream: "session", SessionID: s.sessionID, Seq: seq, Type: "append", ItemID: row.ItemID, From: from, Text: string(gained), Version: row.Version, TS: row.TS, Final: row.Final})
 	if err != nil {
 		return err
 	}

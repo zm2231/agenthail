@@ -5,7 +5,7 @@ final class QueueTailTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func row(_ id: Int64, status: String = "pending", message: String = "m", author: String? = "person", operation: String? = nil, lastError: String? = nil) throws -> QueueState {
-        var object: [String: Any] = ["id": id, "sessionId": "s", "target": "t", "message": message, "status": status, "attempts": 0, "queuedAt": "2026-11-04 10:00:00", "evidence": "queued"]
+        var object: [String: Any] = ["id": id, "sessionId": "s", "target": "t", "message": message, "status": status, "attempts": 0, "queuedAt": "2026-11-04T10:00:00.000000000Z", "evidence": "queued"]
         if let author { object["author"] = author }
         if let lastError { object["lastError"] = lastError }
         if let operation { object["operation"] = operation }

@@ -150,7 +150,7 @@ final class ComposerSendTests: XCTestCase {
     }
 
     private func queuedItem(_ session: SessionState, attachments: String = "") throws -> QueueState {
-        var item = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":9,"sessionId":"\#(session.id)","target":"t","message":"from the row","status":"pending","attempts":0,"queuedAt":"2026-11-04 10:00:00","evidence":"queued"\#(attachments)}"#.utf8))
+        var item = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":9,"sessionId":"\#(session.id)","target":"t","message":"from the row","status":"pending","attempts":0,"queuedAt":"2026-11-04T10:00:00.000000000Z","evidence":"queued"\#(attachments)}"#.utf8))
         item.hostID = "computer"
         return item
     }

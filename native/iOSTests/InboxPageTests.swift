@@ -35,9 +35,9 @@ private final class InboxHostProtocol: URLProtocol, @unchecked Sendable {
     }
 
     private static func lookup(id: String, on host: String, via remote: String?) -> String? {
-        if id == "9" && remote == "hserver" { return #"{"items":[\#(queued(9, at: "2026-11-02 10:00:00"))]}"# }
-        if id == "10" && remote == nil { return #"{"items":[\#(queued(10, at: "2026-11-02 10:00:00").replacingOccurrences(of: #""sessionId":"s1""#, with: #""sessionId":"hserver::s1""#))]}"# }
-        if id == "11" && remote == nil { return #"{"items":[\#(queued(11, at: "2026-11-02 10:00:00").replacingOccurrences(of: #""sessionId":"s1""#, with: #""sessionId":"laptop-own""#))]}"# }
+        if id == "9" && remote == "hserver" { return #"{"items":[\#(queued(9, at: "2026-11-02T10:00:00.000000000Z"))]}"# }
+        if id == "10" && remote == nil { return #"{"items":[\#(queued(10, at: "2026-11-02T10:00:00.000000000Z").replacingOccurrences(of: #""sessionId":"s1""#, with: #""sessionId":"hserver::s1""#))]}"# }
+        if id == "11" && remote == nil { return #"{"items":[\#(queued(11, at: "2026-11-02T10:00:00.000000000Z").replacingOccurrences(of: #""sessionId":"s1""#, with: #""sessionId":"laptop-own""#))]}"# }
         return #"{"items":[]}"#
     }
 
@@ -61,7 +61,7 @@ private final class InboxHostProtocol: URLProtocol, @unchecked Sendable {
     private static func answer(host: String, path: String, before: String?) -> (Int, String) {
         if path == "/api/v1/queue" {
             let rows = host == "older.invalid" || host == "dated.invalid"
-                ? [queued(9, at: "2026-11-02 10:00:00"), #"{"id":2,"sessionId":"s1","target":"@s1","message":"done","status":"delivered","attempts":1,"queuedAt":"2026-11-01 10:00:00","historical":true,"evidence":"delivered"}"#]
+                ? [queued(9, at: "2026-11-02T10:00:00.000000000Z"), #"{"id":2,"sessionId":"s1","target":"@s1","message":"done","status":"delivered","attempts":1,"queuedAt":"2026-11-01T10:00:00.000000000Z","historical":true,"evidence":"delivered"}"#]
                 : []
             return (200, #"{"items":[\#(rows.joined(separator: ","))]}"#)
         }
@@ -126,7 +126,7 @@ final class InboxPageTests: XCTestCase {
     }
 
     private func queueRow(id: Int) -> QueueState {
-        try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":\#(id),"sessionId":"s","target":"@s","message":"m","status":"pending","attempts":0,"queuedAt":"2026-11-02 10:00:00","evidence":"queued"}"#.utf8))
+        try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":\#(id),"sessionId":"s","target":"@s","message":"m","status":"pending","attempts":0,"queuedAt":"2026-11-02T10:00:00.000000000Z","evidence":"queued"}"#.utf8))
     }
 
     func testAComputerTooOldForTheInboxIsNamedAndOthersStillList() async throws {

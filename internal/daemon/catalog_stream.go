@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sse"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -316,7 +317,7 @@ func writeCatalogStreamEntry(w http.ResponseWriter, event registry.CatalogEvent)
 	if !json.Valid(event.Payload) {
 		return fmt.Errorf("invalid catalog event payload")
 	}
-	payload, err := marshalAPIJSON(catalogStreamEnvelope{Stream: "catalog", Seq: event.Seq, Type: event.Type, Data: event.Payload})
+	payload, err := apitime.Marshal(catalogStreamEnvelope{Stream: "catalog", Seq: event.Seq, Type: event.Type, Data: event.Payload})
 	if err != nil {
 		return err
 	}

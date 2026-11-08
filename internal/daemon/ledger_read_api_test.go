@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/sse"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -109,7 +110,7 @@ func TestTheLedgerReadRouteServesEachViewWithAnETagOfItsContent(t *testing.T) {
 	item, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=item&id="+index.ID)
 	current, _ := store.Board(p.key)
 	context, _ := current.WorkContext(index.ID)
-	want, _ := json.Marshal(context)
+	want, _ := apitime.Marshal(context)
 	if got, _ := json.Marshal(item["item"]); item["kind"] != "work" || string(got) != string(normalizedJSON(t, want)) {
 		t.Fatalf("item view %s, want what show --json prints %s", got, want)
 	}
