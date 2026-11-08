@@ -57,7 +57,10 @@ export function dropMissingScope() {
   const scope = app.scope;
   if (!scope || scope === "all" || scope === "inbox") return;
   const project = (app.state.projects || []).find((entry) => entry.id === scope);
-  if (project && (!project.archived || app.scopeArchived)) return;
+  if (project && (!project.archived || app.scopeArchived)) {
+    app.scopeArchived = Boolean(project.archived);
+    return;
+  }
   app.scope = "all";
   if (app.selectedProject === scope) leaveProject();
   syncDecisionPane();
