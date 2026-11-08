@@ -121,9 +121,6 @@ func (r *Registry) idPrefixMatches(target, kind string, limit int) ([]string, er
 }
 
 func (r *Registry) IDPrefixTarget(kind surface.SurfaceKind, prefix string) (string, error) {
-	if prefix == "" {
-		return "", sql.ErrNoRows
-	}
 	ids, err := r.idPrefixMatches(prefix, string(kind), 2)
 	switch {
 	case err != nil:

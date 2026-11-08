@@ -137,6 +137,13 @@ func TestSendToAnExitedSessionByAUniqueIDPrefixResumesIt(t *testing.T) {
 	}
 }
 
+func TestAnEmptySurfaceTargetResolvesNoExitedSession(t *testing.T) {
+	e := exitedClaudeApp(t)
+	if session, _, err := e.app.resolveTarget(context.Background(), "claude:"); err == nil {
+		t.Fatalf("claude: with no session resolved to %s", session.ID)
+	}
+}
+
 func TestAnIDPrefixTwoExitedSessionsShareResumesNeither(t *testing.T) {
 	e := exitedClaudeApp(t)
 	other := e.session
