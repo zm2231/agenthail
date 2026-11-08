@@ -41,6 +41,9 @@ func (r *Registry) CanonicalSession(ref string) (id, hostID string, found bool, 
 }
 
 func (r *Registry) ResolveTarget(target string) (string, error) {
+	if surface.NoTarget(target) {
+		return "", surface.ErrNoTarget
+	}
 	if path, ok := strings.CutPrefix(target, "@"); ok {
 		if strings.Contains(path, "/") {
 			return r.resolveSubagentPath(path)
@@ -51,6 +54,9 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 }
 
 func (r *Registry) ResolveSurfaceTarget(kind surface.SurfaceKind, target string) (string, error) {
+	if surface.NoTarget(target) {
+		return "", surface.ErrNoTarget
+	}
 	if name, ok := strings.CutPrefix(target, "@"); ok {
 		return r.ExactTarget(kind, name)
 	}
