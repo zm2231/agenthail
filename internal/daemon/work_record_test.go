@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -306,5 +308,104 @@ func TestACreateThatCrashedIsReconciledFromItsRecord(t *testing.T) {
 	}
 	if branches := gitIn(t, checkout, "branch", "--list", "ah/orphan"); branches != "" {
 		t.Fatalf("orphan branch left: %q", branches)
+	}
+}
+
+func TestACreateAtAWorktreeAlreadyRecordedIsRefused(t *testing.T) {
+	checkout := pushedCheckout(t)
+	d, reg, fake, _, _ := daemonFixture(t)
+	plan, err := worktree.NewPlan(context.Background(), worktree.Spec{Cwd: checkout, Branch: "ah/taken"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.BeginWork(registry.WorkRecord{WorktreePath: plan.WorktreePath, RepoRoot: plan.RepoRoot, Branch: plan.Branch, BaseRef: plan.BaseRef, BaseCommit: plan.BaseCommit}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	code, answer := workAction(t, d, map[string]any{"action": "session-create", "surface": "codex", "message": "Build", "cwd": checkout, "worktree": "ah/taken"})
+	if failure, _ := answer["error"].(map[string]any); code != http.StatusBadRequest || failure["code"] != "invalid_request" {
+		t.Fatalf("a create racing another at the same worktree: %d %v", code, answer)
+	}
+	if len(fake.startOptions) != 0 {
+		t.Fatalf("a refused create started a session: %+v", fake.startOptions)
+	}
+	if work, found, err := reg.WorkAt(plan.WorktreePath); err != nil || !found || work.State != registry.WorkCreating {
+		t.Fatalf("the other create's record: %+v found=%t err=%v", work, found, err)
+	}
+}
+
+func TestAWorktreeAnotherSessionIsWorkingInIsKeptUntilItStops(t *testing.T) {
+	checkout := pushedCheckout(t)
+	d, reg, _, _, _ := daemonFixture(t)
+	if code, answer := workAction(t, d, map[string]any{"action": "session-create", "surface": "codex", "message": "Build", "cwd": checkout, "worktree": "ah/shared"}); code != http.StatusCreated {
+		t.Fatal(code, answer)
+	}
+	settleIdle(t, reg, "started")
+	path := filepath.Join(checkout, worktree.Dir, "ah-shared")
+	if err := reg.RegisterSession(surface.Session{ID: "visitor", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: path, Status: surface.StatusBusy}); err != nil {
+		t.Fatal(err)
+	}
+	if code, answer := workAction(t, d, map[string]any{"action": "session-archive", "sessionId": "started"}); code != http.StatusOK {
+		t.Fatal(code, answer)
+	}
+	d.sweepWork(context.Background(), time.Now())
+	if work := workOf(t, reg, "started"); work.Cleanup != registry.WorkCleanupKept || work.CleanupReason != registry.WorkKeptRunning {
+		t.Fatalf("a worktree another session is mid-turn in was cleaned: %+v", work)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the worktree went while a session worked in it: %v", err)
+	}
+	settleIdle(t, reg, "visitor")
+	d.sweepWork(context.Background(), time.Now())
+	if work := workOf(t, reg, "started"); work.Cleanup != registry.WorkCleanupRemoved {
+		t.Fatalf("the worktree was not cleaned once nothing worked in it: %+v", work)
+	}
+}
+
+func TestARecordedWorktreeOutsideTheWorktreesFolderIsNeverRemoved(t *testing.T) {
+	checkout := pushedCheckout(t)
+	d, reg, _, _, _ := daemonFixture(t)
+	resolved, err := filepath.EvalSymlinks(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := filepath.Join(filepath.Dir(resolved), "elsewhere")
+	gitIn(t, checkout, "worktree", "add", "--quiet", "-b", "ah/elsewhere", elsewhere, "main")
+	base := gitIn(t, checkout, "rev-parse", "main")
+	if err := reg.BeginWork(registry.WorkRecord{WorktreePath: elsewhere, RepoRoot: resolved, Branch: "ah/elsewhere", BaseRef: "main", BaseCommit: base}, time.Now().Add(-2*workCreatingStale)); err != nil {
+		t.Fatal(err)
+	}
+	d.sweepWork(context.Background(), time.Now())
+	work, found, err := reg.WorkAt(elsewhere)
+	if err != nil || !found || work.Cleanup != registry.WorkCleanupKept {
+		t.Fatalf("a worktree Agenthail did not make was cleaned: %+v found=%t err=%v", work, found, err)
+	}
+	if _, err := os.Stat(elsewhere); err != nil {
+		t.Fatalf("a worktree outside .worktrees was removed: %v", err)
+	}
+}
+
+func TestTwoSpawnsOfOneWorkerMakeOneWorktree(t *testing.T) {
+	checkout := pushedCheckout(t)
+	d, _, fake, _, _ := daemonFixture(t)
+	router := dashboardRouter(d)
+	codes := make([]int, 2)
+	var wg sync.WaitGroup
+	for i := range codes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes[i] = postAction(t, router, map[string]any{"action": "session-create", "surface": "codex", "message": "Build", "cwd": checkout, "isolation": "worktree", "alias": "builder"}).Code
+		}()
+	}
+	wg.Wait()
+	slices.Sort(codes)
+	if codes[0] != http.StatusCreated || codes[1] != http.StatusBadRequest {
+		t.Fatalf("two spawns of one worker answered %v, want one created and one refused", codes)
+	}
+	if len(fake.startOptions) != 1 {
+		t.Fatalf("%d sessions started, want 1", len(fake.startOptions))
+	}
+	if _, err := os.Stat(filepath.Join(checkout, worktree.Dir, "ah-builder")); err != nil {
+		t.Fatalf("the created worker's worktree is gone: %v", err)
 	}
 }

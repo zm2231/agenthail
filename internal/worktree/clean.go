@@ -2,7 +2,9 @@ package worktree
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -39,6 +41,14 @@ const keptPathLimit = 5
 // The worktree is removed without force, so git refuses anything this check
 // missed.
 func Clean(ctx context.Context, record Record, options Options) (Outcome, error) {
+	if filepath.Dir(record.WorktreePath) != filepath.Join(record.RepoRoot, Dir) {
+		return Outcome{}, fmt.Errorf("%s is not in %s, where Agenthail makes worktrees", record.WorktreePath, filepath.Join(record.RepoRoot, Dir))
+	}
+	release, err := lockRepository(ctx, record.RepoRoot)
+	if err != nil {
+		return Outcome{}, err
+	}
+	defer release()
 	var tips []string
 	if _, err := os.Stat(record.WorktreePath); err == nil {
 		status, err := git(ctx, record.WorktreePath, "status", "--porcelain", "-z", "--untracked-files=all", "--ignored")

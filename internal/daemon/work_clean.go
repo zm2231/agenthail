@@ -118,7 +118,7 @@ func (d *Daemon) cleanWork(ctx context.Context, worktreePath string, options wor
 	if err != nil || !found || record.State != registry.WorkSettled || record.Cleanup == registry.WorkCleanupRemoved {
 		return record, err
 	}
-	if d.sessionWorking(record.SessionID) {
+	if d.worktreeInUse(record) {
 		return d.setWorkCleanup(record, registry.WorkCleanupKept, registry.WorkKeptRunning, nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, workCleanTimeout)
@@ -148,15 +148,25 @@ func (d *Daemon) setWorkCleanup(record registry.WorkRecord, cleanup, reason stri
 	return record, err
 }
 
-func (d *Daemon) sessionWorking(sessionID string) bool {
-	if sessionID == "" {
-		return false
-	}
-	session, err := d.Registry.Session(sessionID)
+// worktreeInUse is whether its owner, or any other session working in it,
+// is mid-turn or running background work.
+func (d *Daemon) worktreeInUse(record registry.WorkRecord) bool {
+	sessions, err := d.Registry.ListSessions(0)
 	if err != nil {
-		return false
+		return true
 	}
-	return session.Status == surface.StatusBusy || surface.BackgroundRunning(session.BackgroundTasks)
+	for _, listed := range sessions {
+		if listed.ID != record.SessionID && !underRoot(listed.Cwd, []string{record.WorktreePath}) {
+			continue
+		}
+		// The listing shows a session missing from the catalog as offline;
+		// its recorded status is the safer read before removing files.
+		session, err := d.Registry.Session(listed.ID)
+		if err != nil || session.Status == surface.StatusBusy || surface.BackgroundRunning(session.BackgroundTasks) {
+			return true
+		}
+	}
+	return false
 }
 
 // doWorkClean is the person settling a session's worktree, or asking again
