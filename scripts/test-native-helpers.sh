@@ -149,6 +149,7 @@ SOURCES=(
   macOS/NewSessionLabels.swift
   macOS/SessionPane.swift
   macOS/SidebarRow.swift
+  macOS/SidebarSectionInputs.swift
   macOS/StatusItemsState.swift
   macOS/StatusItems.swift
   macOS/ReadableButtonStyle.swift
