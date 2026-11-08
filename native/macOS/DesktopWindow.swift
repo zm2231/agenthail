@@ -207,40 +207,14 @@ struct SessionSidebar: View {
                         }
                     }
                     ForEach(tree.projects) { project in
-                        let expanded = expandedProjects.contains(project.id)
-                        let shown = project.shown(expanded: expanded, keeping: pane.selectedSessionID)
-                        let single = project.checkouts.count == 1 ? project.checkouts.first : nil
-                        VStack(alignment: .leading, spacing: 1) {
-                            ProjectHeaderView(name: project.name, hosts: project.hosts, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.counts.sessions)
-                                .opensProject(project.identity?.id, model: model, pane: pane)
-                                .contextMenu {
-                                    if let identity = project.identity {
-                                        Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
-                                        if let state = model.projects.first(where: { $0.id == identity.id }) {
-                                            Divider()
-                                            ProjectMenuButtons(model: model, pane: pane, project: state)
-                                        }
-                                    }
-                                }
-                            ForEach(shown.checkouts) { checkout in
-                                if single == nil {
-                                    CheckoutRowView(checkout: checkout, host: project.spansHosts ? project.hostLabel(of: checkout) : nil)
-                                }
-                                ForEach(checkout.families) { family in
-                                    familyRows(family, attention: tree.attention)
-                                }
-                            }
-                            if let more = project.moreLabel(expanded: expanded, keeping: pane.selectedSessionID) {
-                                Button(more) {
-                                    if expanded { expandedProjects.remove(project.id) } else { expandedProjects.insert(project.id) }
-                                }
-                                .buttonStyle(.plain)
-                                .font(.system(size: DesktopType.secondary))
-                                .foregroundStyle(DesktopPalette.text2)
-                                .padding(.leading, 35)
-                                .padding(.vertical, DesktopSpace.xs)
-                            }
-                        }
+                        SidebarProjectSection(
+                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(project.id), selectedID: pane.selectedSessionID, attention: tree.attention, expandedFamilies: expandedFamilies),
+                            model: model,
+                            pane: pane,
+                            toggleProject: { toggle(project.id, in: $expandedProjects) },
+                            toggleFamily: { toggle($0, in: $expandedFamilies) }
+                        )
+                        .equatable()
                     }
                     ForEach(projectsWithoutSessions(tree)) { project in
                         ProjectHeaderView(name: project.displayName, hosts: ProjectMenu.hosts(of: project), branch: nil, dirty: false, archived: false)
@@ -387,31 +361,8 @@ extension SessionSidebar {
         !family.members.isEmpty && (expandedFamilies.contains(family.id) || family.members.contains { $0.id == pane.selectedSessionID })
     }
 
-    @ViewBuilder
-    private func familyRows(_ family: SessionFamily, attention: [String: SessionAttention]) -> some View {
-        let expanded = familyExpanded(family)
-        HStack(spacing: 0) {
-            sessionButton(family.root, title: family.root.title, family: family, attention: attention[family.root.id])
-            if !family.members.isEmpty {
-                Button {
-                    if expandedFamilies.contains(family.id) { expandedFamilies.remove(family.id) } else { expandedFamilies.insert(family.id) }
-                } label: {
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: DesktopType.caption, weight: .semibold))
-                        .frame(width: 18, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(DesktopPalette.text2)
-                .accessibilityLabel(expanded ? "Hide subagents" : "Show subagents")
-            }
-        }
-        if expanded {
-            ForEach(family.members) { member in
-                sessionButton(member.session, title: SessionFamilies.label(member.session), attention: attention[member.id])
-                    .padding(.leading, CGFloat(member.depth) * 16)
-            }
-        }
+    private func toggle(_ id: String, in set: Binding<Set<String>>) {
+        if set.wrappedValue.contains(id) { set.wrappedValue.remove(id) } else { set.wrappedValue.insert(id) }
     }
 
     private func projectsWithoutSessions(_ tree: SessionTree) -> [ProjectState] {
@@ -431,12 +382,8 @@ extension SessionSidebar {
         }
     }
 
-    private func sessionButton(_ session: SessionState, title: String, family: SessionFamily? = nil, attention: SessionAttention?, showsReason: Bool = false) -> some View {
-        SidebarSessionRow(
-            state: SidebarRowState(session: session, title: title, family: family, attention: attention, showsReason: showsReason, finishedUnseen: model.finishedUnseen.contains(session.id), selected: pane.selectedSessionID == session.id, canMakeLead: ProjectMenu.canMakeLead(session, projects: model.projects)),
-            actions: SidebarRowActions(shown: session, model: model, pane: pane)
-        )
-        .equatable()
+    private func sessionButton(_ session: SessionState, title: String, attention: SessionAttention?, showsReason: Bool = false) -> some View {
+        SidebarRowButton(session: session, title: title, attention: attention, showsReason: showsReason, selectedID: pane.selectedSessionID, model: model, pane: pane)
     }
 }
 
