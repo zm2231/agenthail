@@ -78,7 +78,22 @@ struct TurnSettingsTest {
         check(sent && TurnSettingStub.actions.count == 2 && send["action"] as? String == "send", "the next message is sent: \(TurnSettingStub.actions)")
         check(send["effort"] == nil && send["mode"] == nil, "the send carries no effort or mode: \(send)")
         modelOptions()
+        try compactSettings()
         print("turn settings: ok")
+    }
+
+    private static func compactSettings() throws {
+        let metadata = try JSONDecoder().decode(SessionMetadata.self, from: Data(#"{"sessionId":"S","compactSettings":[{"key":"autoCompact","value":"on","options":[{"id":"on","label":"On"},{"id":"off","label":"Off"}],"applies":"now"},{"key":"compactWindow","value":"","options":[{"id":"auto","label":"Auto"},{"id":"400000","label":"400k"}],"applies":"newSessions","scope":"work"}]}"#.utf8))
+        var overlay = MetadataOverlay()
+        overlay.absorb(metadata)
+        let detail = overlay.apply(to: try JSONDecoder().decode(SessionDetail.self, from: Data(#"{"session":{"id":"S","surface":"claude","name":"Demo","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"exchanges":[],"capabilities":{"send":true,"stream":false,"reply":false,"goal":false,"compact":true,"model":true,"interrupt":false,"steer":false},"readOnly":false,"readOnlyReason":""}"#.utf8)))
+        let compact = detail.compactSettings ?? []
+        check(compact.map(\.chipName) == ["Auto-compact", "Compact at"], "session metadata carries compact settings to the detail: \(compact.map(\.chipName))")
+        check(compact.map(\.appliesNote) == [nil, "For new sessions on work"], "a root window says where it applies: \(compact.map(\.appliesNote))")
+        check(compact.last?.valueLabel == "Default" && compact.first?.chipAccessibilityLabel == "Auto-compact, On", "an unset window reads as the default")
+        let later = try JSONDecoder().decode(SessionMetadata.self, from: Data(#"{"sessionId":"S"}"#.utf8))
+        overlay.absorb(later)
+        check(overlay.apply(to: detail).compactSettings?.count == 2, "metadata without compact settings keeps the last ones")
     }
 
     private static func modelOptions() {

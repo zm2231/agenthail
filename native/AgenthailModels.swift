@@ -1470,6 +1470,7 @@ struct SessionMetadata: Decodable {
     let model: String?
     let models: [ModelOption]?
     var turnSettings: [TurnSetting]? = nil
+    var compactSettings: [TurnSetting]? = nil
     let claudeRuns: [ClaudeRunObservation]?
     let claudeSubagents: [ClaudeSubagentLink]?
     var claudeSubagentsTotal: Int? = nil
@@ -1520,6 +1521,7 @@ struct SessionDetail: Decodable {
     var model: String?
     var models: [ModelOption]?
     var turnSettings: [TurnSetting]?
+    var compactSettings: [TurnSetting]?
     var claudeRuns: [ClaudeRunObservation]?
     var claudeSubagents: [ClaudeSubagentLink]?
     var claudeSubagentsTotal: Int?

@@ -8,6 +8,7 @@ import { syncRequests } from "./requests.js";
 import { renderBackgroundTasks } from "./background-tasks.js";
 import { conversationMeta } from "./session-labels.js";
 import { renderContextUsage } from "./context-usage.js";
+import { renderCompactSettings, compactSettingsOf } from "./compact-settings.js";
 import { renderLiveTurn, startLiveStream } from "./session-stream.js";
 import { goalMetrics, renderGoalAttention } from "./goals.js";
 import { remoteHostName } from "./hosts.js";
@@ -89,13 +90,15 @@ export function renderChat() {
   } else if (capabilities.goalStatus && goal?.objective) {
     settings.push(`<div class="session-tools session-goal-status" data-tool="goal-status"><label><span>Goal</span><input value="${escape(goal.objective)}" readonly></label>${goalMetrics(goal)}</div>`);
   }
+  const compact = renderCompactSettings(app.history);
+  if (compact) settings.push(compact);
   const toolRows = [
     `<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`,
     remoteHostName(session) ? "" : `<details class="session-details"><summary>Voice</summary><p>Call this exact conversation through Codex Voice, or transfer an active call here.</p><button class="soft-button" type="button" data-voice-session="${escape(session.id)}">Call this session</button></details>`,
   ];
   if (session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents, claudeSubagentsTotal, app.allSubagents));
   const timeline = app.history?.timeline?.items || [];
-  const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, claudeSubagentsTotal, app.allSubagents, expandAgents);
+  const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, claudeSubagentsTotal, app.allSubagents, expandAgents, app.history?.readOnly ? [] : compactSettingsOf(app.history));
   if (app.transcriptSignature === signature) return;
   const chatBody = $("#chat-body");
   const previousScrollTop = chatBody.scrollTop;

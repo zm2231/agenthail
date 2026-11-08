@@ -308,7 +308,7 @@ class Session {
   }
 
   remember() {
-    settings.set(this.id, { permissionMode: this.permissionMode, model: this.model, ...(this.effort ? { effort: this.effort } : {}), ...(this.checker ? { checker: this.checker } : {}), updatedAt: new Date().toISOString() });
+    settings.set(this.id, { permissionMode: this.permissionMode, model: this.model, ...(this.effort ? { effort: this.effort } : {}), ...(typeof this.autoCompactEnabled === 'boolean' ? { autoCompactEnabled: this.autoCompactEnabled } : {}), ...(this.checker ? { checker: this.checker } : {}), updatedAt: new Date().toISOString() });
     writeSettings();
   }
 
@@ -326,6 +326,7 @@ class Session {
       contextWindow: this.context?.window ?? 0,
       contextModel: this.context?.model ?? '',
       autoCompact: this.context?.autoCompact ?? null,
+      autoCompactEnabled: this.autoCompactEnabled ?? null,
       requests: [...this.pending.values()].map((p) => p.request),
       tasks: this.describeTasks(),
       taskTurnOwed: this.taskTurnOwed(),
@@ -392,6 +393,15 @@ const methods = {
     await s.query.applyFlagSettings({ effortLevel: effort });
     s.effort = effort;
     s.remember();
+    return s.describe();
+  },
+  setAutoCompact: async ({ sessionId, enabled }) => {
+    if (typeof enabled !== 'boolean') throw new HostError('invalid', 'enabled must be true or false');
+    const s = unsandboxed(sessionId);
+    await s.query.applyFlagSettings({ autoCompactEnabled: enabled });
+    s.autoCompactEnabled = enabled;
+    s.remember();
+    await s.measure({ modelUsage: s.context?.model ? { [s.context.model]: { contextWindow: s.context.window } } : {} }).catch(() => {});
     return s.describe();
   },
   setPermissionMode: async ({ sessionId, permissionMode }) => {
@@ -507,6 +517,7 @@ async function open(params) {
   const effort = params.effort || kept?.effort || '';
   const s = new Session(id, cwd, permissionMode, model);
   s.effort = effort;
+  if (typeof kept?.autoCompactEnabled === 'boolean') s.autoCompactEnabled = kept.autoCompactEnabled;
   s.checker = params.checker?.run ?? '';
   s.mcpToken = params.mcp?.token ?? '';
   sessions.set(id, s);
@@ -527,6 +538,7 @@ async function open(params) {
           ...(permissionMode ? { permissionMode } : {}),
           ...(model ? { model } : {}),
           ...(effort ? { effort } : {}),
+          ...(typeof s.autoCompactEnabled === 'boolean' ? { settings: { autoCompactEnabled: s.autoCompactEnabled } } : {}),
           ...(params.agent ? { agent: params.agent } : {}),
           extraArgs,
           // Every session may be switched into bypassPermissions later, which
