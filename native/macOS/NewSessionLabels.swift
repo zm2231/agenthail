@@ -13,6 +13,15 @@ enum NewSessionLabels {
         return label.isEmpty ? "Options" : label
     }
 
+    static func launcherDetail(_ launcher: LauncherOption) -> String? {
+        let detail = launcher.detail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return detail.isEmpty ? nil : detail
+    }
+
+    static func launcherHelp(_ launcher: LauncherOption) -> String {
+        launcherDetail(launcher).map { "Runs in \(launcher.label): \($0)" } ?? "Where the agent runs"
+    }
+
     static func place(_ folder: String, host: String?) -> String {
         [host, folder].compactMap { $0 }.joined(separator: " · ")
     }

@@ -204,6 +204,7 @@ struct GeneralSettings: View {
 
 struct DevicesSettings: View {
     var model: AgenthailModel
+    @State private var revoking: DeviceState?
 
     var body: some View {
         Form {
@@ -227,10 +228,16 @@ struct DevicesSettings: View {
                 BrowserAccessSection(remote: remote, createLink: model.createLoginLink)
             }
             Section("Pair an iPhone") {
-                Button("Show Pairing Code") { model.createPairing() }
-                    .disabled(model.settings?.remoteAccess.enabled != true)
                 if let pairing = model.pairing {
-                    PairingCode(pairing: pairing)
+                    PairingCode(pairing: pairing, cancel: model.cancelPairing)
+                } else {
+                    Button("Show Pairing Code") { model.createPairing() }
+                        .disabled(model.settings?.remoteAccess.enabled != true)
+                }
+                if let notice = model.pairingNotice {
+                    Text(notice)
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(DesktopPalette.text2)
                 }
             }
             Section("Paired devices") {
@@ -246,9 +253,14 @@ struct DevicesSettings: View {
                                 .foregroundStyle(DesktopPalette.text2)
                         }
                         Spacer()
-                        Button("Revoke", role: .destructive) { model.revokeDevice(device.id) }
+                        Button("Revoke", role: .destructive) { revoking = device }
                     }
                 }
+            }
+            .confirmationDialog(revoking.map { "Disconnect \($0.name) from this computer?" } ?? "", isPresented: Binding(get: { revoking != nil }, set: { if !$0 { revoking = nil } }), presenting: revoking) { device in
+                Button("Disconnect", role: .destructive) { model.revokeDevice(device.id) }
+            } message: { _ in
+                Text("It stops reaching this computer until you pair it again.")
             }
             if let daemon = model.daemon {
                 HostsSection(daemon: daemon)
@@ -308,6 +320,7 @@ private struct HostsSection: View {
 
 private struct PairingCode: View {
     let pairing: PairingResponse
+    let cancel: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -315,14 +328,15 @@ private struct PairingCode: View {
                 Image(nsImage: image).interpolation(.none).resizable().frame(width: 128, height: 128)
             }
             VStack(alignment: .leading, spacing: 6) {
-                Text("Scan with Agenthail on iPhone")
-                Text("The code expires in five minutes and works once.")
+                Text("Waiting for the iPhone")
+                Text("Scan with the iPhone's camera, or with Scan pairing code in Agenthail. \(PairingProgress.deadline(pairing))")
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
                 Text(pairing.endpoint)
                     .font(.system(size: DesktopType.caption, design: .monospaced))
                     .textSelection(.enabled)
                     .lineLimit(2)
+                Button("Cancel", action: cancel)
             }
         }
     }
@@ -512,20 +526,31 @@ struct DeliverySettings: View {
 
 struct ActivitySettings: View {
     @Bindable var model: AgenthailModel
+    @State private var searching: Task<Void, Never>?
+
+    private func search(after delay: Duration) {
+        searching?.cancel()
+        searching = Task {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await model.loadAudit(reset: true)
+        }
+    }
 
     var body: some View {
         Form {
             Section {
                 HStack {
                     TextField("Search activity", text: $model.auditQuery)
-                        .onSubmit { Task { await model.loadAudit(reset: true) } }
+                        .onSubmit { search(after: .zero) }
+                        .onChange(of: model.auditQuery) { search(after: .milliseconds(250)) }
                     Picker("", selection: $model.auditKind) {
                         Text("All events").tag("")
                         ForEach(model.auditKinds, id: \.self) { Text(AuditFacts.kindLabel($0)).tag($0) }
                     }
                     .labelsHidden()
                     .frame(maxWidth: 170)
-                    .onChange(of: model.auditKind) { Task { await model.loadAudit(reset: true) } }
+                    .onChange(of: model.auditKind) { search(after: .zero) }
                 }
             }
             Section("Recent activity · \(SettingsCounts.history(model.history.count))") {

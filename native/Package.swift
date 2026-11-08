@@ -123,6 +123,7 @@ let package = Package(
                 "RequestCard.swift",
                 "AgenthailModel.swift",
                 "AgenthailModelPaging.swift",
+                "AgenthailModelPairing.swift",
                 "ScopeTreeCache.swift",
                 "VoiceAPI.swift",
                 "VoiceAudioBridge.swift",
