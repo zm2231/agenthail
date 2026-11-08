@@ -206,6 +206,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	}
 	desktopNotificationMessage := ""
 	mobileNotificationMessage := ""
+	notificationOutcome := ""
 	completionPredatesActiveDelivery := previous.ActiveTurnID != "" && observation.ActiveTurnID == previous.ActiveTurnID
 	completionChanged := found && !completionPredatesActiveDelivery && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID
 	if completionChanged {
@@ -230,12 +231,12 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	held, released := heldCompletion(previous, observation, completionChanged)
 	terminalCompletion := completionChanged && observation.ActiveTurnID == "" && !surface.BackgroundRunning(observation.BackgroundTasks) || released
 	if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && !session.Delegated() && observation.Reply != nil && observation.Reply.Done {
-		desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
-		mobileNotificationMessage = fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface))
+		notificationOutcome = turnOutcomeFinished
 		if observation.Reply.Error != "" {
-			desktopNotificationMessage = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
-			mobileNotificationMessage = fmt.Sprintf("%s failed", notificationSurfaceName(session.Surface))
+			notificationOutcome = turnOutcomeFailed
 		}
+		desktopNotificationMessage = fmt.Sprintf("%s %s", d.resolveDisplay(session.ID), notificationOutcome)
+		mobileNotificationMessage = fmt.Sprintf("%s %s%s", notificationSurfaceName(session.Surface), notificationOutcome, d.onHost())
 	}
 	if terminalCompletion {
 		if err := d.Registry.ClearCompletionNotification(session.ID); err != nil {
@@ -255,7 +256,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 			d.log.Printf("bind turn completion %s: %s", d.resolveDisplay(session.ID), err)
 		}
 	}
-	notice := turnCompletedNotice{desktop: desktopNotificationMessage, mobile: mobileNotificationMessage}
+	notice := turnCompletedNotice{desktop: desktopNotificationMessage, mobile: mobileNotificationMessage, outcome: notificationOutcome}
 	if notice.desktop != "" && observation.Reply.Error == "" {
 		notice = d.endTurnNotifications(session, observation.CompletedTurnID, notice.desktop, notice.mobile)
 	}

@@ -505,3 +505,9 @@ func deviceHasScope(scopes []string, required string) bool {
 	}
 	return false
 }
+
+func (r *Registry) HasHostViewers() (bool, error) {
+	var viewed bool
+	err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM paired_devices WHERE revoked_at='' AND (','||scopes||',') LIKE ?)`, "%,"+HostScope+",%").Scan(&viewed)
+	return viewed, err
+}

@@ -358,6 +358,38 @@ clients send one; the daemon generates one otherwise):
 `net/http` itself replays a request that carries an `Idempotency-Key` header
 once when a reused connection fails, which is safe for the same reason.
 
+## Completion notifications
+
+A paired host's session notifies here when its turn finishes, fails or ends
+asking you something, the same as a local one. The host decides: when its own
+observer raises a completion notification, it records the turn, the outcome
+(`finished`, `failed` or `needs_you`) and, for an ask, the request id in
+`session_runtime` (`notice_*`), and publishes them on the session's catalog
+row as `turnCompletion`. A viewing daemon never judges a mirrored session's
+turn finished from its status.
+
+A viewing daemon notifies from a `session.upserted` event on the host's catalog
+stream whose `turnCompletion` names a turn other than the one its stored row
+had. Rows it reads from a snapshot only record where the host stands. The
+mirror takes a snapshot on every connect, after a stream gap and when the
+daemon starts, and follows the stream from the snapshot's position, so a turn
+that finished while the host was unreachable, or while this daemon was down,
+never notifies here, and a first-seen row never notifies.
+
+The notification names the app, the host and the status: "Codex agent
+finished on server" on this computer's desktop and paired phones. An ask
+carries the host's request id: the desktop notification gets the ask's
+buttons from the mirrored `endTurn`, the phone fetches the request from this
+daemon, and an answer here is routed to the host like any other action.
+
+Every computer paired to the same phone may send the notification: the host
+for its own session, and each daemon viewing it. Each send carries the same
+`dedupeKey`, the SHA-256 of the host id, the host's session id and the turn
+id, and the push relay delivers a key to a phone once (see
+[push relay](push-relay.md)). Whichever arrives first is shown, so a host
+mirrored by another daemon also names itself in its own completion pushes.
+Each viewing Mac shows its own desktop notification.
+
 ## Targets
 
 `host::target` resolves `target` on that host. A target without a host is

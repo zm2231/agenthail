@@ -10,11 +10,11 @@ import (
 )
 
 type RuntimeState struct {
-	LastStatus        surface.SessionStatus
-	ActiveTurnID      string
-	CompletedTurnID   string
-	RelayHops         int
-	NotificationArmed bool
+	LastStatus           surface.SessionStatus
+	ActiveTurnID         string
+	CompletedTurnID      string
+	RelayHops            int
+	NotificationArmed    bool
 	HeldCompletionTurnID string
 	UpdatedAt            time.Time
 }
@@ -146,4 +146,38 @@ func (r *Registry) RecordRelayDelivery(routeID int64, completionID string) (bool
 func (r *Registry) ForgetRelayDelivery(routeID int64, completionID string) error {
 	_, err := r.db.Exec(`DELETE FROM relay_deliveries WHERE route_id=? AND completion_id=?`, routeID, completionID)
 	return err
+}
+
+// TurnNotice is the completion this host last notified; viewing hosts
+// notify from it rather than judging completion themselves.
+type TurnNotice struct {
+	TurnID    string
+	Outcome   string
+	RequestID string
+	At        time.Time
+}
+
+func (r *Registry) RecordTurnNotice(sessionID string, notice TurnNotice) error {
+	_, err := r.db.Exec(`UPDATE session_runtime SET notice_turn_id=?,notice_outcome=?,notice_request_id=?,notice_at_ms=? WHERE session_id=?`, notice.TurnID, notice.Outcome, notice.RequestID, notice.At.UnixMilli(), sessionID)
+	return err
+}
+
+func (r *Registry) TurnNotices() (map[string]TurnNotice, error) {
+	rows, err := r.read.Query(`SELECT session_id,notice_turn_id,notice_outcome,notice_request_id,notice_at_ms FROM session_runtime WHERE notice_turn_id<>''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	notices := map[string]TurnNotice{}
+	for rows.Next() {
+		var sessionID string
+		var notice TurnNotice
+		var atMS int64
+		if err := rows.Scan(&sessionID, &notice.TurnID, &notice.Outcome, &notice.RequestID, &atMS); err != nil {
+			return nil, err
+		}
+		notice.At = time.UnixMilli(atMS).UTC()
+		notices[sessionID] = notice
+	}
+	return notices, rows.Err()
 }

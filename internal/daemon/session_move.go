@@ -317,7 +317,7 @@ func (d *Daemon) completeMoveOut(ctx context.Context, host *pairedHost, moveID s
 		// The target may have reported the session while it was still local
 		// here, which hid its row; it is the session's row now.
 		if row, found := host.hiddenRow(move.Conversation); found {
-			if err := d.mirrorOrHide(host, row); err != nil {
+			if err := d.mirrorOrHide(host, row, false); err != nil {
 				d.logRuntimeError("move "+moveID+" mirror", err)
 			}
 		}

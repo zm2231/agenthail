@@ -559,7 +559,7 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 		if !servedByHost(row, host.record.ID) {
 			continue
 		}
-		if err := d.mirrorOrHide(host, row); err != nil {
+		if err := d.mirrorOrHide(host, row, false); err != nil {
 			d.logRuntimeError("host "+host.record.Name+" mirror "+row.ID, err)
 			complete = false
 			continue
@@ -690,7 +690,7 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 		if !servedByHost(payload.Session, host.record.ID) {
 			return nil
 		}
-		return d.mirrorOrHide(host, payload.Session)
+		return d.mirrorOrHide(host, payload.Session, true)
 	case "session.removed":
 		var payload struct {
 			SessionID string `json:"sessionId"`
@@ -784,9 +784,11 @@ func (d *Daemon) updateMirroredQueueCount(host *pairedHost, sessionID string, co
 
 // mirrorOrHide mirrors a host row, or records it as hidden when its id is
 // already a local session. A local session row is never deleted, so a hidden
-// row stays hidden until the host stops serving it.
-func (d *Daemon) mirrorOrHide(host *pairedHost, row dashboardSession) error {
-	err := d.mirrorRemoteRow(host, row)
+// row stays hidden until the host stops serving it. A live row, one the
+// host's catalog stream carried rather than a snapshot, notifies a turn the
+// host has just notified.
+func (d *Daemon) mirrorOrHide(host *pairedHost, row dashboardSession, live bool) error {
+	err := d.mirrorRemoteRow(host, row, live)
 	var owned registry.SessionOwnedError
 	if errors.As(err, &owned) && owned.HostID == "" {
 		host.setHidden(row.ID, &row)
@@ -798,7 +800,8 @@ func (d *Daemon) mirrorOrHide(host *pairedHost, row dashboardSession) error {
 	return err
 }
 
-func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
+func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession, live bool) error {
+	rawID := row.ID
 	session := surface.Session{ID: row.ID, Surface: row.Surface, RuntimeKind: row.RuntimeKind, Settings: row.Settings, Name: row.Name, Cwd: row.Cwd, Status: row.Status, Ended: row.Ended, LastActive: row.LastActive, Source: row.Source, Transport: row.Transport}
 	if row.Subagent != nil {
 		subagent := *row.Subagent
@@ -834,7 +837,22 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
 	}
 	ref := host.ref()
 	row.Host = &ref
-	return d.applyMirroredProjection(host.record.ID, session, row, project, checkout)
+	var prior *dashboardTurnCompletion
+	priorFound := false
+	if live && row.TurnCompletion != nil {
+		stored, found, err := d.Registry.CatalogProjection(rawID)
+		if err != nil {
+			return err
+		}
+		prior, priorFound = mirroredTurnCompletion(stored), found
+	}
+	if err := d.applyMirroredProjection(host.record.ID, session, row, project, checkout); err != nil {
+		return err
+	}
+	if priorFound {
+		d.notifyMirroredCompletion(host, rawID, row, prior)
+	}
+	return nil
 }
 
 func (d *Daemon) applyMirroredProjection(hostID string, session surface.Session, projection dashboardSession, project, checkout json.RawMessage) error {

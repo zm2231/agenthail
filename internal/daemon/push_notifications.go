@@ -46,6 +46,9 @@ func PushRelayURL() string {
 // any buttons; what the request asks never goes through the relay.
 type mobileNotification struct {
 	Title, Message, SessionID, TurnID, EventType, CollapseID, RequestID string
+	// DedupeKey names a notification every computer paired to the phone may
+	// send, so the relay delivers it once.
+	DedupeKey string
 	// PushID names one send to one device, which its receipt quotes back.
 	PushID string
 }
@@ -157,6 +160,9 @@ func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, notif
 	}
 	if notification.PushID != "" {
 		body["pushId"] = notification.PushID
+	}
+	if notification.DedupeKey != "" {
+		body["dedupeKey"] = notification.DedupeKey
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {

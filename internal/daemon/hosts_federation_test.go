@@ -207,6 +207,10 @@ type actionGate struct {
 	// streamsEnded counts the catalog streams that have ended, as when the
 	// follower drops one after an event it could not apply.
 	streamsEnded atomic.Int32
+	// beforeGap, when set, runs once before the next catalog stream request,
+	// which is then answered as a cursor the host no longer retains.
+	beforeGap atomic.Pointer[func()]
+	gaps      atomic.Int32
 }
 
 // unreadableUpserts rewrites the catalog stream's upsert of a session named
@@ -300,6 +304,12 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			n.gate.beyondVersion.Add(1)
 		}
 		if r.URL.Path == "/api/v1/catalog-events" {
+			if before := n.gate.beforeGap.Swap(nil); before != nil {
+				(*before)()
+				n.gate.gaps.Add(1)
+				writeDashboardJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"code": "stream_gap"}})
+				return
+			}
 			n.gate.streams.Add(1)
 			w = unreadableUpserts{ResponseWriter: w}
 			defer n.gate.streamsEnded.Add(1)
