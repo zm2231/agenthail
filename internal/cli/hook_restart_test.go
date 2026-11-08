@@ -71,25 +71,7 @@ func newPromptRestart(t *testing.T) (*promptRestart, func()) {
 
 func (h *promptRestart) serve() func() {
 	h.t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		if err := daemon.New(h.store, []surface.Surface{surfaces.NewClaude(nil, h.claude.Home)}).Serve(ctx); err != nil {
-			h.t.Errorf("serve: %v", err)
-		}
-	}()
-	for deadline := time.Now().Add(10 * time.Second); ; {
-		if conn, err := net.Dial("tcp", h.listen); err == nil {
-			conn.Close()
-			break
-		}
-		if time.Now().After(deadline) {
-			h.t.Fatal("the daemon's dashboard never started")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return func() { cancel(); <-done }
+	return serveTestDaemon(h.t, h.store, h.claude.Home, h.listen)
 }
 
 func (h *promptRestart) heldRequest() string {

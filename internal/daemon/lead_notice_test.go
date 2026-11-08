@@ -165,3 +165,22 @@ func TestAPromptAgenthailCannotReadStillTellsTheLeadWhatIsWaiting(t *testing.T) 
 		t.Fatalf("notices=%+v", notices)
 	}
 }
+
+func TestTheLeadIsToldHowToClearAPromptOnlyARestartReaches(t *testing.T) {
+	for _, test := range []struct {
+		lifecycle surface.Lifecycle
+		want      string
+	}{
+		{surface.Lifecycle{Stop: true, Resume: true}, "Stop and resume it to clear it"},
+		{surface.Lifecycle{}, "answer it where it runs"},
+	} {
+		f := newNoticeFixture(t)
+		f.setLead(t, "lead")
+		f.fake.caps.Lifecycle = test.lifecycle
+		f.d.noticeWaiting(f.worker, surface.Waiting{Kind: surface.WaitingQuestion, ID: "unread-1"}, surface.Request{}, false)
+		notices := f.notices(t)
+		if len(notices) != 1 || !strings.Contains(notices[0].Message, test.want) {
+			t.Fatalf("lifecycle %+v: notices=%+v, want %q", test.lifecycle, notices, test.want)
+		}
+	}
+}

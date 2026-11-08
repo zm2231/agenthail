@@ -199,11 +199,7 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 	d.announcing[session.ID] = waiting.ID
 	d.announceMu.Unlock()
 	conversationID := session.ConversationID()
-	restartable := false
-	if adapter, err := d.adapters().For(&session); err == nil {
-		lifecycle := surface.EffectiveCapabilities(adapter, &session).Lifecycle
-		restartable = lifecycle.Stop && lifecycle.Resume
-	}
+	restartable := d.restartable(session)
 	desktopMessage := elsewhereWaitingMessage(d.resolveDisplay(conversationID), waiting, session.RuntimeKind, restartable)
 	mobileMessage := elsewhereWaitingMessage(notificationSurfaceName(session.Surface), waiting, session.RuntimeKind, restartable)
 	key := waitingNotificationKey(session.ID, waiting.ID)
@@ -261,6 +257,15 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 	if !started {
 		finished()
 	}
+}
+
+func (d *Daemon) restartable(session surface.Session) bool {
+	adapter, err := d.adapters().For(&session)
+	if err != nil {
+		return false
+	}
+	lifecycle := surface.EffectiveCapabilities(adapter, &session).Lifecycle
+	return lifecycle.Stop && lifecycle.Resume
 }
 
 // withdrawWaiting removes the notifications that told the user about a
@@ -324,6 +329,8 @@ func elsewhereWaitingMessage(name string, waiting surface.Waiting, runtime surfa
 			return fmt.Sprintf("%s is waiting on a prompt Agenthail can't reach. Stop and resume it to clear it", name)
 		case runtime == surface.RuntimeClaudeCLI:
 			return fmt.Sprintf("%s %s in its terminal", name, asks)
+		default:
+			return fmt.Sprintf("%s %s. Agenthail can't answer it; answer it where it runs", name, asks)
 		}
 	}
 	return fmt.Sprintf("%s %s", name, asks)
