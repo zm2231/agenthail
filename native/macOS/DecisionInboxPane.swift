@@ -7,10 +7,6 @@ struct DecisionInboxPane: View {
     @State private var failure: String?
     @FocusState private var focused: Bool
 
-    static func selected(in inbox: DecisionInbox, id: String?) -> DecisionItem? {
-        inbox.decisions.first { $0.id == id } ?? inbox.decisions.first
-    }
-
     static func summary(_ item: DecisionItem) -> String {
         let requests = item.openRequests
         guard requests.count > 1 else { return item.reason }
@@ -27,11 +23,16 @@ struct DecisionInboxPane: View {
     }
 
     var body: some View {
-        let inbox = model.decisionFeed.inbox
-        let item = Self.selected(in: inbox, id: pane.selectedDecisionID)
+        let stops = model.inboxStops
+        let entry = stops.selected(pane.selectedDecisionID)
+        let following = entry.flatMap(stops.following)
+        let item: DecisionItem? = if case .decision(let decision) = entry { decision } else { nil }
         Group {
             if let item {
-                card(item, in: inbox.decisions)
+                card(item, following: following)
+            } else if let entry {
+                InboxStopCard(model: model, pane: pane, stop: entry, following: following)
+                    .id(entry.paneID)
             } else {
                 ContentUnavailableView(model.decisionFeed.loaded ? "Nothing needs you" : "Looking for decisions", systemImage: "tray")
             }
@@ -41,23 +42,23 @@ struct DecisionInboxPane: View {
         .focused($focused)
         .focusEffectDisabled()
         .onKeyPress(characters: CharacterSet(charactersIn: "jk")) { press in
-            move(press.characters == "j" ? 1 : -1, in: inbox.decisions, from: item)
+            move(press.characters == "j" ? 1 : -1, in: stops.entries, from: entry)
             return .handled
         }
         .onKeyPress(keys: [.return]) { press in
             guard DecisionInbox.acceptsRecommended(press.modifiers), !answering, let item, item.answerable,
                   let request = item.openRequests.first, let recommended = DecisionInbox.recommended(request) else { return .ignored }
-            Task { await answer(request, recommended, item, in: inbox.decisions) }
+            Task { await answer(request, recommended, item, following: following) }
             return .handled
         }
-        .onChange(of: item?.id, initial: true) {
+        .onChange(of: entry?.paneID, initial: true) {
             if !(item.map(Self.pagesQuestions) ?? false) { focused = true }
         }
         .scrimText()
         .backdropSurface(DesktopPalette.window)
     }
 
-    private func card(_ item: DecisionItem, in items: [DecisionItem]) -> some View {
+    private func card(_ item: DecisionItem, following: String?) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesktopSpace.m) {
                 header(item)
@@ -73,13 +74,13 @@ struct DecisionInboxPane: View {
                             .foregroundStyle(DesktopPalette.text2)
                     }
                     RequestCard(request: request, answering: answering, accent: AnyShapeStyle(DesktopPalette.accentText),
-                                respond: { decision in Task { await answer(request, decision, item, in: items) } },
+                                respond: { decision in Task { await answer(request, decision, item, following: following) } },
                                 asker: model.sessionName(item.sessionId), attention: AnyShapeStyle(DesktopPalette.attention),
                                 surface: nil, actionTint: AnyShapeStyle(DesktopPalette.accent), focusesPager: true,
                                 agentSurface: model.cells.session(item.sessionId)?.surface ?? "")
                         .id(item.sessionId + "/" + request.id)
                     if let recommended = DecisionInbox.recommended(request) {
-                        Button("Accept recommended") { Task { await answer(request, recommended, item, in: items) } }
+                        Button("Accept recommended") { Task { await answer(request, recommended, item, following: following) } }
                             .help("Shift-Return")
                             .disabled(answering)
                             .accessibilityIdentifier("decision-accept-recommended")
@@ -122,12 +123,11 @@ struct DecisionInboxPane: View {
         }
     }
 
-    private func answer(_ request: SessionRequest, _ decision: RequestDecision, _ item: DecisionItem, in items: [DecisionItem]) async {
+    private func answer(_ request: SessionRequest, _ decision: RequestDecision, _ item: DecisionItem, following: String?) async {
         guard !answering else { return }
         answering = true
         defer { answering = false }
         failure = nil
-        let following = items.firstIndex(where: { $0.id == item.id }).flatMap { items.indices.contains($0 + 1) ? items[$0 + 1].id : nil }
         let answer = await pane.answerDecision(request, in: item.sessionId, decision: decision)
         if case .failed(let result) = answer { failure = result.message }
         if !model.decisionFeed.inbox.decisions.contains(where: { $0.id == item.id }) {
@@ -135,8 +135,8 @@ struct DecisionInboxPane: View {
         }
     }
 
-    private func move(_ step: Int, in items: [DecisionItem], from item: DecisionItem?) {
-        guard let item, let index = items.firstIndex(where: { $0.id == item.id }), items.indices.contains(index + step) else { return }
-        pane.selectedDecisionID = items[index + step].id
+    private func move(_ step: Int, in entries: [InboxStop], from entry: InboxStop?) {
+        guard let entry, let index = entries.firstIndex(where: { $0.paneID == entry.paneID }), entries.indices.contains(index + step) else { return }
+        pane.selectedDecisionID = entries[index + step].paneID
     }
 }

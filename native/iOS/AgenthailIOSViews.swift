@@ -121,7 +121,7 @@ struct MainTabs: View {
             NavigationStack { QueueListView(model: model) }
                 .solidTabBar()
                 .tabItem { Label("Inbox", systemImage: "tray") }
-                .badge(model.decisionFeed.count)
+                .badge(model.inboxStops.count)
                 .tag(1)
             NavigationStack { SettingsView(model: model) }
                 .solidTabBar()
@@ -273,12 +273,15 @@ struct ConversationListView: View {
                     }
                 } header: {
                     Label {
-                        Text("Needs you · \(tree.needsYou.count)")
+                        Text("Needs you")
                     } icon: {
                         Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(PhonePalette.attention)
                     }
                     .font(.subheadline.weight(.semibold)).foregroundStyle(.primary).textCase(nil).glassLabel()
-                    .accessibilityLabel(tree.needsYou.count == 1 ? "Needs you, 1 session" : "Needs you, \(tree.needsYou.count) sessions")
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Needs you")
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("needs-you-header")
                 }
             }
             ForEach(tree.projects) { project in

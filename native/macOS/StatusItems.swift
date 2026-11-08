@@ -24,7 +24,7 @@ struct StatusItems: View, @MainActor Equatable {
             }
         case "needs-you":
             let spoken = "\(state.needsYou) need\(state.needsYou == 1 ? "s" : "") you"
-            Button { if let first = model.sessionTree.needsYou.first { pane.select(first.id) } } label: {
+            Button { pane.showInbox() } label: {
                 StatusLabel(title: state.short ? "\(state.needsYou)" : spoken, spoken: spoken) {
                     Circle().fill(DesktopPalette.attention).frame(width: 7, height: 7)
                 }

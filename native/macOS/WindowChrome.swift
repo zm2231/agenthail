@@ -58,7 +58,7 @@ struct TitleBarStrip: View {
     private static let maximumTab: CGFloat = 240
 
     var body: some View {
-        let needsYou = model.needsYou
+        let needsYou = model.needsYouCount
         HStack(spacing: DesktopSpace.s) {
             if !pane.sidebarDocks { SidebarToggle(pane: pane) }
             GeometryReader { geometry in
@@ -101,8 +101,8 @@ struct TitleBarStrip: View {
                 }
                 .frame(maxHeight: .infinity)
             }
-            if !needsYou.isEmpty {
-                NeedsYouPill(sessions: needsYou) { pane.select($0) }
+            if needsYou > 0 {
+                NeedsYouPill(count: needsYou, open: pane.showInbox)
             }
             Button { model.paletteVisible.toggle() } label: { Image(systemName: "magnifyingglass") }
                 .buttonStyle(.plain)
@@ -258,28 +258,24 @@ struct SessionTabView: View {
 }
 
 private struct NeedsYouPill: View {
-    let sessions: [SessionState]
-    let open: (String) -> Void
+    let count: Int
+    let open: () -> Void
 
     var body: some View {
-        Menu {
-            ForEach(sessions) { session in
-                Button(SessionTabView.title(session, id: session.id, label: "alias-title")) { open(session.id) }
-            }
-        } label: {
+        Button(action: open) {
             HStack(spacing: 6) {
                 Circle().fill(DesktopPalette.attention).frame(width: 7, height: 7)
-                Text("\(sessions.count) need\(sessions.count == 1 ? "s" : "") you")
+                Text("\(count) need\(count == 1 ? "s" : "") you")
                     .foregroundStyle(DesktopPalette.attention)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .overlay(Capsule().strokeBorder(DesktopPalette.attentionLine))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
         .fixedSize()
-        .accessibilityLabel("\(sessions.count) sessions need you")
+        .help("Open the Inbox")
+        .accessibilityLabel("\(count) need\(count == 1 ? "s" : "") you, open the Inbox")
     }
 }
 

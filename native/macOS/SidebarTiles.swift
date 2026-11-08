@@ -7,8 +7,8 @@ struct SidebarTiles: View {
     var pane: SessionPane
 
     var body: some View {
-        let inbox = model.decisionFeed.inbox
-        let counts = inbox.needsYou(in: model.projects)
+        let stops = model.inboxStops
+        let counts = model.needsYou(stops)
         let leads = model.projects.reduce(into: [String: ProjectTiles.Lead]()) { leads, project in
             if let session = project.leads.first.flatMap(ProjectContents.leadSessionID).flatMap(model.session) { leads[project.id] = ProjectTiles.Lead(session) }
         }
@@ -17,7 +17,7 @@ struct SidebarTiles: View {
         let owner = model.snapshot?.daemon.host?.id ?? ""
         let columns = Array(repeating: GridItem(.flexible(), spacing: TileGrid.spacing, alignment: .top), count: count)
         LazyVGrid(columns: columns, alignment: .leading, spacing: TileGrid.spacing) {
-            tile("Inbox", mark: .symbol("tray"), count: inbox.decisions.count, selected: pane.scope == .inbox, id: "sidebar-tile-inbox", action: pane.showInbox)
+            tile("Inbox", mark: .symbol("tray"), count: model.needsYouCount, selected: pane.scope == .inbox, id: "sidebar-tile-inbox", action: pane.showInbox)
             ForEach(tiles.shown) { project in
                 tile(project.displayName, mark: .letter(ProjectTiles.letter(project.displayName), project: ProjectTiles.colourID(project.id, owner: owner)), count: counts[project.id] ?? 0,
                      selected: pane.scope == .project(project.id), id: "sidebar-tile-project-" + project.id) { pane.showScope(project: project.id) }

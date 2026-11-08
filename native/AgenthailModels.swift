@@ -1271,6 +1271,7 @@ struct AttentionState: Decodable, Identifiable, Equatable {
     let reason: String
     let requestedAction: String
     let createdAt: String
+    var hostID: String? = nil
 }
 
 struct DeliveryProblem: Decodable, Identifiable, Equatable {
@@ -1370,7 +1371,7 @@ struct DashboardSnapshot: Decodable {
     let channels: [ChannelState]
     let relays: [RelayState]
     let history: [HistoryState]
-    let attention: [AttentionState]
+    var attention: [AttentionState]
     var deliveryProblems: [DeliveryProblem]?
     let codexRecentHours: Int
     let busyDelivery: String?

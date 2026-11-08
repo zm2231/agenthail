@@ -6,7 +6,7 @@ import vm from "node:vm";
 
 const vectors = JSON.parse(readFileSync(new URL("./fixtures/decision-project-vectors.json", import.meta.url), "utf8"));
 const context = { app: { state: {} } };
-await dashboardModules(["decisions", "project-tiles"], context);
+await dashboardModules(["decisions", "project-tiles", "inbox-stops"], context);
 const qualify = vm.runInContext("qualify", context);
 const projectOfDecision = vm.runInContext("projectOfDecision", context);
 const needsYouByProject = vm.runInContext("needsYouByProject", context);
@@ -92,6 +92,16 @@ for (const columns of [3, 4, 5, 6]) {
 const few = fillTiles(6, (limit) => orderTiles(many.slice(0, 10), limit));
 assert.equal(few.shown.length, 10, "every project shows when they all fit, with no more tile");
 assert.equal(few.more.length, 0, "no more tile when every project shows");
+const stopVectors = JSON.parse(readFileSync(new URL("./fixtures/inbox-stop-vectors.json", import.meta.url), "utf8"));
+const inboxStops = vm.runInContext("inboxStops", context);
+const stopsByProject = vm.runInContext("stopsByProject", context);
+for (const vector of stopVectors.cases) {
+  const stops = inboxStops({ attention: vector.attention, deliveries: vector.deliveries, replacements: vector.replacements, decisions: vector.decisions, localHosts: vector.localHosts });
+  assert.equal(JSON.stringify(stops.stopped.map((stop) => stop.id)), JSON.stringify(vector.stopped), `${vector.name}: stopped`);
+  assert.equal(JSON.stringify(stops.decisions.map((item) => item.sessionId)), JSON.stringify(vector.decisionsShown), `${vector.name}: decisions`);
+  assert.equal(JSON.stringify(stopsByProject(stops, vector.projects, (id) => vector.sessions[id])), JSON.stringify(vector.counts), `${vector.name}: counts`);
+  assert.equal(stops.count, vector.total, `${vector.name}: total`);
+}
 const css = readFileSync(new URL("../internal/daemon/dashboard/tokens.css", import.meta.url), "utf8");
 for (let colour = 0; colour < colours.count; colour++) {
   assert.ok(css.includes(`.tile-mark[data-colour="${colour}"]`), `tokens.css paints project colour ${colour}`);

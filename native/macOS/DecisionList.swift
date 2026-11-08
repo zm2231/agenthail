@@ -7,14 +7,27 @@ struct DecisionList: View {
     var body: some View {
         let feed = model.decisionFeed
         let inbox = feed.inbox
-        let selected = DecisionInboxPane.selected(in: inbox, id: pane.selectedDecisionID)
-        ForEach(DecisionGroup.allCases, id: \.self) { group in
-            let items = inbox.items(in: group)
+        let stops = model.inboxStops
+        let selected = stops.selected(pane.selectedDecisionID)?.paneID
+        if !stops.stopped.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                SidebarCaption("\(DecisionGroup.stopped.title) · \(stops.stopped.count)")
+                ForEach(stops.stopped) { stop in
+                    if case .decision(let item) = stop {
+                        row(item, selected: item.id == selected)
+                    } else {
+                        stopRow(stop, selected: stop.paneID == selected)
+                    }
+                }
+            }
+        }
+        ForEach([DecisionGroup.holding, .waiting], id: \.self) { group in
+            let items = stops.decisions.filter { $0.group == group }
             if !items.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     SidebarCaption("\(group.title) · \(items.count)")
                     ForEach(items) { item in
-                        row(item, selected: item.id == selected?.id)
+                        row(item, selected: item.id == selected)
                     }
                 }
             }
@@ -37,7 +50,7 @@ struct DecisionList: View {
                 .foregroundStyle(DesktopPalette.text2)
                 .padding(.horizontal, DesktopSpace.s)
         }
-        if inbox.isEmpty {
+        if inbox.isEmpty && stops.stopped.isEmpty {
             if feed.loaded {
                 Text("Nothing needs you.")
                     .font(.system(size: DesktopType.body))
@@ -64,6 +77,15 @@ struct DecisionList: View {
         .buttonStyle(.plain)
         .selectionMark(selected)
         .accessibilityIdentifier("decision-" + item.sessionId)
+    }
+
+    private func stopRow(_ stop: InboxStop, selected: Bool) -> some View {
+        Button { pane.selectedDecisionID = stop.paneID } label: {
+            line(stop.title(name: model.sessionName), detail: stop.summary)
+        }
+        .buttonStyle(.plain)
+        .selectionMark(selected)
+        .accessibilityIdentifier("inbox-stop-" + stop.id)
     }
 
     private func line(_ title: String, detail: String) -> some View {
