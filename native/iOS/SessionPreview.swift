@@ -99,7 +99,8 @@ struct SessionPreview: View {
         var snapshot = try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
         var sessions = snapshot["sessions"] as! [[String: Any]]
         var capabilities = sessions[0]["capabilities"] as? [String: Any] ?? [:]
-        capabilities["turnNotice"] = "What you write reaches this terminal session as a note from Agenthail, not as your own turn."
+        capabilities["personMessage"] = "note"
+        capabilities["remoteControl"] = false
         sessions[0]["capabilities"] = capabilities
         snapshot["sessions"] = sessions
         return String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!

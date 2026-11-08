@@ -269,7 +269,8 @@ if __name__ == "__main__":
 
         sessions = [
             labelled("link", "https://github.com/acme/widgets/pull/12 review the change",
-                     claudeConfigRoot={"name": "team", "root": "/srv/home/.team/.claude", "signedInAs": "dev@example.com"}),
+                     claudeConfigRoot={"name": "team", "root": "/srv/home/.team/.claude", "signedInAs": "dev@example.com"},
+                     capabilities={**CAPABILITIES, "personMessage": "note", "remoteControl": True}),
             labelled("terminal", "Ship the release notes", status="busy", runtimeKind="claude-cli", waitingOn={"kind": "question", "id": "q1", "since": NOW}),
             labelled("limit", "Migrate the database", limitResume={"state": "waiting"}),
             labelled("stopped", "Fix the flaky test", turnStop={"turnId": "t1", "reason": "the model returned an error"}),

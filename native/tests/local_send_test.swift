@@ -57,6 +57,12 @@ struct LocalSendTest {
         expect(LocalSend.label(for: "queued") == "Queued" && LocalSend.label(for: "submitted") == "Submitted" && LocalSend.label(for: "sent") == "Sent", "receipt labels use the public vocabulary")
         expect(LocalSend.label(for: "queued", waitingOnYou: true) == "Queued · Waiting on you" && LocalSend.label(for: "sent", waitingOnYou: true) == "Sent", "a queued receipt to a session waiting on you says so")
         expect(LocalSend.label(for: "sent", steer: true) == "Steer sent" && LocalSend.label(for: "sent") == "Sent", "a steer reads as a steer and an ordinary send as sent")
+        func receipt(_ json: String) -> DeliveryReceipt? { try? JSONDecoder().decode(DeliveryReceipt.self, from: Data(json.utf8)) }
+        let note = LocalSend.label(for: receipt(#"{"evidence":"delivered","status":"sent","deliveredAs":"note"}"#))
+        expect(note == "Sent · Delivered as a note", "a send that went as a note says so: \(note)")
+        expect(LocalSend.label(for: receipt(#"{"evidence":"delivered","status":"sent","deliveredAs":"turn"}"#)) == "Sent", "a send that went as the person's turn adds nothing")
+        let held = LocalSend.label(for: receipt(#"{"evidence":"delivered","status":"sent","deliveredAs":"note","notice":"Claude holds it"}"#))
+        expect(held == "Sent · Delivered as a note · Claude holds it", "the receiver's notice still follows: \(held)")
         expect(LocalSend.label(for: "sent", movedTo: "@sai-core-coordinator") == "Sent to @sai-core-coordinator" && LocalSend.label(for: "queued", waitingOnYou: true, movedTo: "@sai-core-coordinator") == "Queued for @sai-core-coordinator", "a send another session took names that session")
         expect(LocalSend.label(for: "sent", movedTo: "") == "Sent", "an empty taker reads as an ordinary send")
         print("local send tests passed")
