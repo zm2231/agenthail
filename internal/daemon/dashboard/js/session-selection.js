@@ -12,6 +12,7 @@ import { renderChat } from "./chat.js";
 import { loadSessionMetadata } from "./session-metadata.js";
 import { renderTurnSettings } from "./turn-settings.js";
 import { leaveProject } from "./project-pane.js";
+import { scopeAfterSelecting, syncDecisionPane } from "./pane-scope.js";
 import { findSession } from "./session-pages.js";
 import { pageHistory } from "./stream-items.js";
 
@@ -21,6 +22,8 @@ export async function selectSession(id, focus = false) {
   if (!session) return;
   if (!app.state.sessions.includes(session) && !app.codexSearch.results.includes(session)) app.state.sessions = [...app.state.sessions, session];
   leaveProject();
+  app.scope = scopeAfterSelecting(app.scope, session);
+  syncDecisionPane();
   if (app.selected?.id !== id) stopLiveStream(true);
   if (app.selected) app.drafts.set(app.selected.id, $("#message").value);
   app.selected = session;

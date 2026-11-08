@@ -14,13 +14,15 @@ import { selectSession } from "./session-selection.js";
 import { loadAudit } from "./audit.js";
 import { renderChat } from "./chat.js";
 import { mobileConversationView } from "./navigation.js";
-import { scopedSessions } from "./session-scope.js";
+import { defaultSession } from "./session-scope.js";
 import { listedRows, loadSessionOrder, orderIsMissing } from "./session-order.js";
 import { findSessions, readHistory } from "./session-pages.js";
+import { withActivity } from "./project-tiles.js";
 import { catalogRead } from "./catalog-live.js";
 import { rereadSoon } from "./order-refresh.js";
 import { friendlyError, toast } from "./feedback.js";
 import { refreshShownProject } from "./project-pane.js";
+import { dropMissingScope, renderTiles } from "./project-tiles-view.js";
 
 export function renderAll() {
   try {
@@ -32,7 +34,9 @@ export function renderAll() {
   }
   renderSurfaceFilter();
   renderStartSurfaceOptions();
+  dropMissingScope();
   renderSessions();
+  renderTiles();
   refreshShownProject();
   renderOperations();
   if (app.settings && app.operationsTab === "settings") renderSettings();
@@ -61,7 +65,7 @@ export async function load(fresh = false, selectDefault = true) {
     }
   }, 2000);
   try {
-    const [, { base: state, refreshAt, catalogSeq }, history] = await Promise.all([
+    const [, { base: state, refreshAt, catalogSeq, activity }, history] = await Promise.all([
       loadTools(),
       loadSessionOrder(fresh),
       readHistory(),
@@ -74,6 +78,7 @@ export async function load(fresh = false, selectDefault = true) {
     if (missing.length) for (const [id, row] of await findSessions(missing).catch(() => new Map())) rows.set(id, row);
     app.state = {
       ...state,
+      projects: withActivity(state.projects || [], activity || []),
       counts: app.sessionOrder.current.counts,
       history,
       surfaces: state.surfaces || [],
@@ -112,7 +117,7 @@ export async function load(fresh = false, selectDefault = true) {
     if (app.audit.loaded) await loadAudit(true, true);
     if (app.selected && app.history) renderChat();
     if (selectDefault && !app.selected && location.hash === "#conversations" && !mobileConversationView()) {
-      const first = scopedSessions()[0] || app.state.sessions[0];
+      const first = defaultSession();
       if (first) selectSession(first.id);
     }
   } catch (error) {

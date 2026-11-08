@@ -31,20 +31,39 @@ const context = {
   fetch: async (url) => {
     requested.push(url);
     if (!pages[url]) return { ok: false, status: 404 };
-    return { ok: true, status: 200, json: async () => structuredClone(pages[url]) };
+    return { ok: true, status: 200, headers: { get: (name) => (name === "ETag" ? pages[url].etag ?? null : null) }, json: async () => structuredClone(pages[url]) };
   },
   responseError: async (response) => new Error(`refused ${response.status}`),
 };
-await dashboardModules(["session-order"], context);
+await dashboardModules(["session-order", "session-scope"], context);
 const { app } = context;
 const ids = (key) => context.orderedSessions(key).map((session) => session.id).join(",");
 
 let { base, refreshAt } = await context.loadSessionOrder();
-assert.deepEqual(requested.sort(), ["/api/state?sessions=none", path({ scope: "current", members: "1", limit: "200" })].sort(), "the Current list reads the base and Current, nothing else");
+assert.deepEqual(requested.sort(), ["/api/state?sessions=none", "/api/v1/projects/activity", path({ scope: "current", members: "1", limit: "200" })].sort(), "the Current list reads the base, project activity and Current, nothing else");
 assert.equal(base.daemon.running, true);
 assert.equal(refreshAt, Date.parse("2026-11-05T12:10:00Z"));
 assert.deepEqual([...context.listedRows().keys()], ["b"], "rows come from the pages read");
 assert.equal(context.orderIsMissing(), false);
+const activityTag = (epoch) => `"${epoch}-${"a".repeat(24)}"`;
+pages["/api/v1/projects/activity"] = { etag: activityTag("e1"), projects: [{ id: "p", sessionCount: 2 }] };
+assert.deepEqual((await context.loadSessionOrder()).activity, [{ id: "p", sessionCount: 2 }], "project activity from the same daemon run comes with the order");
+let activityReads = 0;
+const steady = context.fetch;
+context.fetch = async (url) => {
+  if (url === "/api/v1/projects/activity") pages[url] = activityReads++ === 0 ? { etag: activityTag("e0"), projects: [] } : { etag: activityTag("e1"), projects: [{ id: "p", sessionCount: 4 }] };
+  return steady(url);
+};
+assert.deepEqual((await context.loadSessionOrder()).activity, [{ id: "p", sessionCount: 4 }], "activity from another daemon run is read again, never joined onto this run's projects");
+context.fetch = steady;
+delete pages["/api/v1/projects/activity"];
+assert.deepEqual((await context.loadSessionOrder()).activity, [{ id: "p", sessionCount: 4 }], "a failed activity read keeps the last one from the same run");
+pages["/api/state?sessions=none"].hostEpoch = "e9";
+context.fetch = async (url) => (url.startsWith("/api/state?scope") ? { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ ...structuredClone(pages[url] || pages[path({ scope: "current", members: "1", limit: "200" })]), hostEpoch: "e9" }) } : steady(url));
+assert.equal((await context.loadSessionOrder()).activity.length, 0, "activity kept from an earlier run is not joined onto a restarted daemon's projects");
+context.fetch = steady;
+pages["/api/state?sessions=none"].hostEpoch = "e1";
+await context.loadSessionOrder();
 
 app.inboxMode = "all";
 assert.equal(context.orderIsMissing(), true, "a list that shows All needs All read");
@@ -102,6 +121,38 @@ await context.loadSessionOrder();
 assert.equal(context.projectSessions("project:all:p", "p").map((session) => session.id).join(","), "a");
 app.view = "overview";
 assert.deepEqual([...context.neededOrderScopes()], ["current"], "a project left open behind Overview is not read");
+app.view = "conversations";
+app.selectedProject = null;
+app.state = { projects: [{ id: "p" }, { id: "q" }, { id: "old", archived: true }], sessions: [{ id: "b" }] };
+app.scope = "q";
+assert.equal(context.defaultSession(), null, "before its listing arrives, a project scope picks no session from outside the project");
+assert.deepEqual([...context.neededOrderScopes()], ["current", "all", "archived", "scope:all:q"], "a project tile reads that project's own listing, not just the rows already loaded");
+Object.assign(app.filters, { surface: "codex", status: "working" });
+app.listQuery = "fix";
+pages[path({ scope: "all", members: "1", projectId: "q", surface: "codex", status: "working", q: "fix", limit: "200" })] = page("all", [family("q1", "q"), family("q2", "q")], { page: { nextCursor: "more" } });
+pages[path({ scope: "all", members: "1", projectId: "q", surface: "codex", status: "working", q: "fix", limit: "200", cursor: "more" })] = page("all", [family("q3", "q")]);
+requested = [];
+await context.loadSessionOrder();
+assert(requested.includes(path({ scope: "all", members: "1", projectId: "q", surface: "codex", status: "working", q: "fix", limit: "200", cursor: "more" })), "the project's listing is read to the end, refined like the global list");
+assert.equal(context.scopedSessions().map((session) => session.id).join(","), "q1,q2,q3", "the scoped rail lists every session the project's listing holds");
+assert.equal(context.defaultSession()?.id, "q1", "once read, the default session is the project's first");
+app.showArchived = true;
+pages[path({ scope: "archived", members: "1", projectId: "q", surface: "codex", status: "working", q: "fix", limit: "200" })] = page("archived", [family("q9", "q")]);
+assert.deepEqual([...context.neededOrderScopes()].slice(-2), ["scope:all:q", "scope:archived:q"], "Show archived adds the project's archived sessions");
+await context.loadSessionOrder();
+assert.equal(context.scopedSessions().map((session) => session.id).join(","), "q1,q2,q3,q9");
+app.scope = "old";
+assert.deepEqual([...context.neededOrderScopes()].slice(-1), ["scope:archived:old"], "an archived project's sessions are read from the archive");
+app.scope = "q";
+app.inboxMode = "current";
+assert.deepEqual([...context.neededOrderScopes()].slice(-1), ["scope:current:q"], "in Current, a project scope reads the project's current sessions");
+app.inboxMode = "projects";
+Object.assign(app.filters, { surface: "all", status: "all" });
+app.listQuery = "";
+app.showArchived = false;
+app.scope = "all";
+assert.equal([...context.neededOrderScopes()].some((key) => key.startsWith("scope:")), false, "All reads no project listing");
+app.view = "overview";
 
 await context.loadSessionOrder();
 assert.deepEqual(Object.keys(app.sessionOrder), ["current"], "listings no longer shown are dropped");

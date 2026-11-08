@@ -1,5 +1,5 @@
 import { app } from "./state.js";
-import { scopedSessions } from "./session-scope.js";
+import { defaultSession } from "./session-scope.js";
 import { selectSession } from "./session-selection.js";
 import { startLiveStream, stopLiveStream } from "./session-stream.js";
 import { loadSettings } from "./settings.js";
@@ -24,7 +24,7 @@ export function showView(name) {
   document.documentElement.toggleAttribute("data-session-open", view === "conversations");
   if (location.hash !== `#${view}`) history.replaceState(null, "", `#${view}`);
   if (view === "conversations" && app.hasState && !app.selected && !mobileConversationView() && orderReady(listOrderScopes())) {
-    const first = scopedSessions()[0] || app.state.sessions[0];
+    const first = defaultSession();
     if (first) selectSession(first.id);
   }
   ensureSessionOrder();
