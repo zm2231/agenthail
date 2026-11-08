@@ -71,10 +71,16 @@ struct GoalSection: View {
                     .foregroundStyle(DesktopPalette.text2)
                     .textSelection(.enabled)
             }
-            let usage = GoalSection.usage(goal)
+            let usage = GoalFacts.usage(goal)
             if !usage.isEmpty {
                 Text(usage)
                     .font(.system(size: DesktopType.caption).monospacedDigit())
+                    .foregroundStyle(DesktopPalette.text2)
+            }
+            let times = GoalFacts.times(goal)
+            if !times.isEmpty {
+                Text(times)
+                    .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
             }
             if editable {
@@ -151,27 +157,5 @@ struct GoalSection: View {
     private func reset() {
         editor.reset()
         text = ""
-    }
-
-    static func usage(_ goal: GoalState) -> String {
-        var parts: [String] = []
-        if let seconds = goal.timeUsedSeconds { parts.append("\(duration(seconds)) elapsed") }
-        if let tokens = goal.tokensUsed {
-            if let budget = goal.tokenBudget {
-                parts.append("\(tokens.formatted(.number.notation(.compactName))) of \(budget.formatted(.number.notation(.compactName))) tokens")
-            } else {
-                parts.append("\(tokens.formatted(.number.notation(.compactName))) tokens")
-            }
-        } else if let budget = goal.tokenBudget {
-            parts.append("\(budget.formatted(.number.notation(.compactName))) token budget")
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    private static func duration(_ seconds: Int) -> String {
-        if seconds < 60 { return "\(seconds)s" }
-        let minutes = seconds / 60
-        if minutes < 60 { return "\(minutes)m" }
-        return "\(minutes / 60)h \(minutes % 60)m"
     }
 }
