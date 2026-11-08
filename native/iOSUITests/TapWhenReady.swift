@@ -1,5 +1,8 @@
 import XCTest
 
+// A frame read at a fractional scroll offset can come back a hair under its laid-out 44 pt.
+let minimumTapTarget: CGFloat = 44 - 0.01
+
 @MainActor
 extension XCUIElement {
     func tapWhenReady(timeout: TimeInterval = 5, file: StaticString = #filePath, line: UInt = #line) {

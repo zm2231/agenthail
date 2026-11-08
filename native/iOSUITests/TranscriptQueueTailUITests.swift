@@ -178,7 +178,7 @@ final class TranscriptQueueTailUITests: XCTestCase {
         let more = app.buttons["queue-tail-more"]
         XCTAssertTrue(more.exists)
         XCTAssertEqual(more.label, "2 more queued")
-        XCTAssertGreaterThanOrEqual(more.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(more.frame.height, minimumTapTarget)
         XCTAssertFalse(row(21, app).exists)
         assertNotCovered(row(25, app), app, "with the rest collapsed")
         assertAtLatest(app, "with the rest collapsed")

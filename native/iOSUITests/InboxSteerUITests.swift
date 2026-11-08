@@ -22,7 +22,7 @@ final class InboxSteerUITests: XCTestCase {
         let steer = app.buttons["queue-steer-11"]
         XCTAssertTrue(steer.waitForExistence(timeout: 10), "a person's image row on a running session offers Steer")
         XCTAssertTrue(steer.isHittable)
-        XCTAssertGreaterThanOrEqual(steer.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(steer.frame.height, minimumTapTarget)
         record(app, "inbox-steer-dark")
         let refused = app.staticTexts["queue-steer-refusal-12"]
         for _ in 0..<4 where !refused.exists { app.swipeUp() }
