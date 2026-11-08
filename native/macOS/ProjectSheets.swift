@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ProjectMenuButtons: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let project: ProjectState
 
     var body: some View {
@@ -32,7 +32,7 @@ struct ProjectMenuButtons: View {
 
 struct ProjectSheetView: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let sheet: ProjectSheet
 
     var body: some View {

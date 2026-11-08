@@ -3,7 +3,7 @@ import SwiftUI
 struct UsageChips: View {
     @ObservedObject var usage: UsageMonitor
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let bars: Bool
     @State private var showing = false
     @State private var preferring: ProxyPreferRequest?

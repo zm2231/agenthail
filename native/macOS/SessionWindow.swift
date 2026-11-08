@@ -2,16 +2,17 @@ import SwiftUI
 
 struct SessionWindow: View {
     var model: AgenthailModel
-    @StateObject private var pane: SessionPane
+    @State private var pane: SessionPane
     let sessionID: String
 
     init(model: AgenthailModel, sessionID: String) {
         self.model = model
         self.sessionID = sessionID
-        _pane = StateObject(wrappedValue: model.openPane())
+        _pane = State(initialValue: SessionPane(model: model, restoresSelection: false))
     }
 
     var body: some View {
+        @Bindable var pane = pane
         ConversationPane(model: model, pane: pane, gaps: pane.inspectorVisible ? .trailing : [], holdsWindowButtons: true)
             .paneFrame(pane.inspectorVisible ? [.leading, .vertical] : .all)
             .ignoresSafeArea(.container, edges: .top)
@@ -25,8 +26,9 @@ struct SessionWindow: View {
             .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
             .environment(model)
             .navigationTitle(pane.displayedSession?.title ?? "Session")
-            .focusedSceneObject(pane)
+            .focusedSceneValue(pane)
             .onAppear {
+                model.attach(pane)
                 pane.inspectorVisible = false
                 pane.select(sessionID)
                 model.windowAppeared()

@@ -1,20 +1,22 @@
 import Combine
 import Foundation
+import Observation
 import os
 
 @MainActor
-final class SessionPane: ObservableObject, Identifiable {
+@Observable
+final class SessionPane: Identifiable {
     let id = UUID()
     let restoresSelection: Bool
     let rowMemory = TranscriptRowMemory()
     unowned let model: AgenthailModel
 
-    @Published private(set) var selectedSessionID: String? {
+    private(set) var selectedSessionID: String? {
         didSet {
             if selectedSessionID != oldValue { endOpenInterval("left") }
         }
     }
-    @Published private(set) var tabs = SessionTabs() {
+    private(set) var tabs = SessionTabs() {
         didSet {
             if restoresSelection, tabs != oldValue, let data = try? JSONEncoder().encode(tabs) {
                 UserDefaults.standard.set(data, forKey: Self.tabsKey)
@@ -22,87 +24,87 @@ final class SessionPane: ObservableObject, Identifiable {
             if tabsEnabled { syncNewSessionDraft() }
         }
     }
-    @Published private(set) var newSession: NewSessionDraft?
-    @Published private(set) var shownProjectID: String? {
+    private(set) var newSession: NewSessionDraft?
+    private(set) var shownProjectID: String? {
         didSet { if shownProjectID != oldValue { model.dropUnusedScopes() } }
     }
-    @Published var archivedTab: SessionState? {
+    var archivedTab: SessionState? {
         didSet { if archivedTab?.id != oldValue?.id { archivedTabError = nil } }
     }
-    @Published private(set) var archivedTabError: String?
-    @Published private(set) var detail: SessionDetail? {
+    private(set) var archivedTabError: String?
+    private(set) var detail: SessionDetail? {
         didSet { live = nil }
     }
     let transcript = TranscriptFeed()
-    private var live: SessionDetail?
-    @Published private(set) var detailStale = false
-    @Published private(set) var detailRefreshFailed = false
-    @Published private(set) var removedSession: SessionState?
-    @Published private(set) var olderItems: [TimelineItem] = []
-    @Published private(set) var olderCursor: Int64?
-    @Published private(set) var loadingOlder = false
-    @Published private(set) var olderError: String?
-    @Published var inspectorVisible = true
-    @Published private(set) var inspectorDocks = true
-    @Published private(set) var inspectorOverlay = false
-    @Published private(set) var sidebarDocks = true
-    @Published private(set) var sidebarOverlay = false
-    private var fitted = false
-    @Published var renamingSession: SessionState?
-    @Published var adoptingSession: SessionState?
-    @Published var projectSheet: ProjectSheet?
-    @Published var projectConfirmation: ProjectConfirmation?
-    @Published private(set) var forking = false
-    @Published private(set) var controlPending = false
-    @Published private(set) var requests: SessionRequests?
-    @Published private(set) var answeringRequest: String?
-    @Published private(set) var retiredAsks = RetiredAsks()
-    @Published var requestError: String?
-    private var requestsKey: String?
-    @Published private(set) var composerDraft = ComposerDraft() {
+    @ObservationIgnored private var live: SessionDetail?
+    private(set) var detailStale = false
+    private(set) var detailRefreshFailed = false
+    private(set) var removedSession: SessionState?
+    private(set) var olderItems: [TimelineItem] = []
+    private(set) var olderCursor: Int64?
+    private(set) var loadingOlder = false
+    private(set) var olderError: String?
+    var inspectorVisible = true
+    private(set) var inspectorDocks = true
+    private(set) var inspectorOverlay = false
+    private(set) var sidebarDocks = true
+    private(set) var sidebarOverlay = false
+    @ObservationIgnored private var fitted = false
+    var renamingSession: SessionState?
+    var adoptingSession: SessionState?
+    var projectSheet: ProjectSheet?
+    var projectConfirmation: ProjectConfirmation?
+    private(set) var forking = false
+    private(set) var controlPending = false
+    private(set) var requests: SessionRequests?
+    private(set) var answeringRequest: String?
+    private(set) var retiredAsks = RetiredAsks()
+    var requestError: String?
+    @ObservationIgnored private var requestsKey: String?
+    private(set) var composerDraft = ComposerDraft() {
         didSet { observeDraft() }
     }
-    @Published private(set) var draftIsEmpty = true
-    private var draftObservation: AnyCancellable?
+    private(set) var draftIsEmpty = true
+    @ObservationIgnored private var draftObservation: AnyCancellable?
     var composer: String {
         get { composerDraft.text }
         set { composerDraft.text = newValue }
     }
 
-    private var selectedSnapshot: SessionState?
-    private var frozenOlderCursor: Int64?
-    private var sessionStreamTask: Task<Void, Never>?
-    private var sessionCursor: UInt64 = 0
+    @ObservationIgnored private var selectedSnapshot: SessionState?
+    @ObservationIgnored private var frozenOlderCursor: Int64?
+    @ObservationIgnored private var sessionStreamTask: Task<Void, Never>?
+    @ObservationIgnored private var sessionCursor: UInt64 = 0
     /// Rows streamed while a page read is in flight, latest mutation last, so
     /// a page read before some of them arrived can be brought up to date.
-    private(set) var streamedRows: [SessionStreamEvent] = []
-    private(set) var pageReadsInFlight = 0
-    private var requestGeneration = 0
+    @ObservationIgnored private(set) var streamedRows: [SessionStreamEvent] = []
+    @ObservationIgnored private(set) var pageReadsInFlight = 0
+    @ObservationIgnored private var requestGeneration = 0
     /// Streamed rows apply here as they arrive and reach `detail` at most once
     /// per `streamPublishInterval`, so a burst of rows renders once.
-    private(set) var unpublishedDetail: SessionDetail?
-    private var publishTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var unpublishedDetail: SessionDetail?
+    @ObservationIgnored private var publishTask: Task<Void, Never>?
     static let streamPublishInterval: Duration = .milliseconds(100)
-    private var streamAwaitsCursor = false
-    private var streamUnsupported = false
-    private var detailReloadTask: Task<Void, Never>?
-    private var detailLoadTask: Task<Void, Never>?
+    @ObservationIgnored private var streamAwaitsCursor = false
+    @ObservationIgnored private var streamUnsupported = false
+    @ObservationIgnored private var detailReloadTask: Task<Void, Never>?
+    @ObservationIgnored private var detailLoadTask: Task<Void, Never>?
     private static let signposter = OSSignposter(subsystem: "com.agenthail.app", category: "SessionOpen")
-    private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState)?
-    @Published private(set) var detailLoadError: String?
-    private var olderTask: Task<Void, Never>?
-    private var metadataTask: Task<Void, Never>?
-    private var metadata = MetadataOverlay()
-    @Published private(set) var modelCatalogNeeded = false
-    private var closed = false
-    private var detailReloadPending = false
-    private var detailReloadOwner: UUID?
-    private var selectionGeneration: UInt64 = 0
-    private var detailRequestGeneration: UInt64 = 0
-    private var detailAppliedGeneration: UInt64 = 0
+    @ObservationIgnored private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState)?
+    private(set) var detailLoadError: String?
+    @ObservationIgnored private var olderTask: Task<Void, Never>?
+    @ObservationIgnored private var metadataTask: Task<Void, Never>?
+    @ObservationIgnored private var metadata = MetadataOverlay()
+    private(set) var modelCatalogNeeded = false
+    @ObservationIgnored private var closed = false
+    @ObservationIgnored private var detailReloadPending = false
+    @ObservationIgnored private var detailReloadOwner: UUID?
+    @ObservationIgnored private var selectionGeneration: UInt64 = 0
+    @ObservationIgnored private var detailRequestGeneration: UInt64 = 0
+    @ObservationIgnored private var detailAppliedGeneration: UInt64 = 0
     /// The last journal row the shown detail reflects, kept with it in the
     /// store; nil once a row could not be applied, until a page read.
-    private var appliedCursor: UInt64?
+    @ObservationIgnored private var appliedCursor: UInt64?
 
     /// Whether the inspector is on screen, docked or over the conversation.
     var inspectorShown: Bool { inspectorDocks ? inspectorVisible : inspectorOverlay }
@@ -188,11 +190,11 @@ final class SessionPane: ObservableObject, Identifiable {
     var selectedSession: SessionState? { model.session(selectedSessionID) }
     var displayedSession: SessionState? { shownProjectID == nil ? selectedSession ?? removedSession : nil }
 
-    @Published private(set) var scope = PaneScope.all {
+    private(set) var scope = PaneScope.all {
         didSet { if scope != oldValue { model.dropUnusedScopes() } }
     }
-    private var scopeArchived = false
-    @Published var selectedDecisionID: String?
+    @ObservationIgnored private var scopeArchived = false
+    var selectedDecisionID: String?
 
     var showsInbox: Bool { scope == .inbox }
     private var holdsPage: Bool { shownProjectID != nil || showsInbox }

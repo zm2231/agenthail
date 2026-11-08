@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 struct DesktopWindow: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     private let snapshot: SnapshotProbe?
 
     /// A snapshot draws an offscreen copy that leaves the person's window, focus and saved layout alone.
@@ -16,6 +16,7 @@ struct DesktopWindow: View {
     }
 
     var body: some View {
+        @Bindable var pane = pane
         WindowChromeLayout(model: model, pane: pane, interface: model.interface) {
             splitView.paneFrame([.horizontal, .bottom])
         }
@@ -51,7 +52,7 @@ struct DesktopWindow: View {
                 }
             }
         }
-        .focusedSceneObject(pane)
+        .focusedSceneValue(pane)
         .background { if snapshot == nil { MainWindowReader(model: model) } }
         .onAppear { if snapshot == nil { model.windowAppeared() } }
         .onDisappear { if snapshot == nil { model.windowDisappeared() } }
@@ -130,7 +131,7 @@ struct DesktopWindow: View {
 
 private struct WindowChromeLayout<Content: View>: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     @ObservedObject var interface: InterfaceStore
     @ViewBuilder let content: Content
 
@@ -159,7 +160,7 @@ private struct WindowChromeLayout<Content: View>: View {
 
 struct SessionSidebar: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     var holdsWindowButtons = false
     @Environment(\.openWindow) private var openWindow
     @Environment(\.windowChromeTop) private var chromeTop
@@ -615,7 +616,7 @@ struct StatusIndicator: View {
 
 struct ConversationPane: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     var headerInset: CGFloat = 22
     var gaps: Edge.Set = []
     var holdsWindowButtons = false
@@ -699,7 +700,7 @@ struct ConversationPane: View {
                 }
             .contentTitleBand(band, toggle: showsSidebarToggle ? pane : nil)
             .glassPane(.content, fallback: DesktopPalette.window, gaps: gaps)
-            .environmentObject(pane)
+            .environment(pane)
         } else if let draft = pane.newSession {
             NewSessionView(model: model, draft: draft)
                 .contentTitleBand(band, toggle: showsSidebarToggle ? pane : nil)
@@ -849,7 +850,7 @@ struct ConversationHeader: View {
 }
 
 struct TranscriptView: View {
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let session: SessionState
     let sends: [LocalSend]
     @State private var position = ScrollPosition(edge: .bottom)
@@ -1079,7 +1080,7 @@ struct TranscriptView: View {
 
 struct AttachmentImageView: View {
     @Environment(AgenthailModel.self) private var model
-    @EnvironmentObject private var pane: SessionPane
+    @Environment(SessionPane.self) private var pane
     let attachment: SessionAttachment
     @State private var image: NSImage?
     @State private var failed = false
@@ -1925,7 +1926,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 
 struct SessionInspector: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     @State private var tab: InspectorTab = .details
 
     var body: some View {
@@ -1969,7 +1970,7 @@ struct SessionInspector: View {
 /// How full the session's context is, beside Send. Its menu says how much is
 /// used and offers to compact.
 struct ComposerContextRing: View {
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let session: SessionState
 
     var body: some View {
@@ -2006,7 +2007,7 @@ extension ContextState {
 
 struct DetailsTab: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let session: SessionState
     @State private var showTokens = false
     @State private var pendingMode: TurnSettingChoice?

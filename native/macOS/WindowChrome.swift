@@ -34,7 +34,7 @@ private struct BelowWindowChrome: ViewModifier {
 /// Shows the sidebar over the conversation when the window is too narrow
 /// to dock it.
 struct SidebarToggle: View {
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
 
     var body: some View {
         Button { pane.toggleSidebar() } label: { Image(systemName: "sidebar.left") }
@@ -48,7 +48,7 @@ struct SidebarToggle: View {
 
 struct TitleBarStrip: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     @ObservedObject var interface: InterfaceStore
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
@@ -126,7 +126,7 @@ struct TitleBarStrip: View {
 /// Says a tab closed because its session was archived elsewhere, and offers
 /// to bring it back.
 struct ArchivedTabNotice: View {
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let session: SessionState
     let label: String
 
@@ -166,7 +166,7 @@ struct ArchivedTabNotice: View {
 
 struct SessionTabView: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let tab: SessionTabs.Tab
     let label: String
     @Environment(\.openWindow) private var openWindow
@@ -285,7 +285,7 @@ private struct NeedsYouPill: View {
 
 struct StatusStrip: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     @ObservedObject var interface: InterfaceStore
     @StateObject private var usage = UsageMonitor()
 

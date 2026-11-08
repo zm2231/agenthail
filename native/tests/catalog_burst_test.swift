@@ -1,5 +1,4 @@
 @testable import AgenthailHelpers
-import Combine
 import Foundation
 import Observation
 
@@ -79,15 +78,13 @@ struct CatalogBurstTest {
             _ = model.mainPane.displayedSession
         }
         let shownCell = ChangeCounter { _ = model.session("shown") }
-        var panePublishes = 0
-        let pane = model.mainPane.objectWillChange.sink { panePublishes += 1 }
-        defer { pane.cancel() }
+        let pane = PaneChanges(model.mainPane)
 
         model.applyCatalogEvents([upserted(2, "background", "busy")])
         check(model.session("background")?.status == "busy", "the background session's row took its upsert")
         check(root.count == 0, "a background session's upsert reached the window root \(root.count) times")
         check(shownCell.count == 0, "a background session's upsert reached the shown session's views \(shownCell.count) times")
-        check(panePublishes == 0, "a background session's upsert made the pane publish \(panePublishes) times")
+        check(pane.count == 0, "a background session's upsert changed the pane \(pane.count) times")
 
         model.applyCatalogEvents([upserted(3, "shown", "busy")])
         check(root.count >= 1 && shownCell.count >= 1, "an upsert of the shown session reaches the views that show it: root \(root.count), cell \(shownCell.count)")

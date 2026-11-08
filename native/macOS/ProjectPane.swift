@@ -31,7 +31,7 @@ private extension View {
 
 struct ProjectPane: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let project: ProjectState
     @State private var showingEarlier = false
 

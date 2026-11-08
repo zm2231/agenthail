@@ -218,8 +218,13 @@ final class AgenthailModel {
 
     func openPane() -> SessionPane {
         let pane = SessionPane(model: self, restoresSelection: false)
-        panes.append(pane)
+        attach(pane)
         return pane
+    }
+
+    func attach(_ pane: SessionPane) {
+        guard !panes.contains(where: { $0 === pane }) else { return }
+        panes.append(pane)
     }
 
     func windowAppeared() {

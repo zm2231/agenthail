@@ -2,7 +2,7 @@ import SwiftUI
 
 struct StatusTail: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     @ObservedObject var usage: UsageMonitor
     let items: [String]
     let density: StatusDensity

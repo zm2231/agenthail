@@ -3,7 +3,7 @@ import SwiftUI
 
 struct CommandPalette: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     @Environment(\.openWindow) private var openWindow
     @State private var query = ""
     @State private var highlightedID: String?
