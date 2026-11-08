@@ -1339,6 +1339,12 @@ var ErrStreamWindow = errors.New("stream window elapsed")
 
 var ErrSessionNotFound = errors.New("no session matched")
 
+var ErrNoTarget = errors.New("a session target is required")
+
+func NoTarget(target string) bool {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "@")) == ""
+}
+
 type errUnsupported struct{}
 
 func (errUnsupported) Error() string { return "operation not supported by this surface" }

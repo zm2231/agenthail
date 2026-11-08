@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 func (d *Daemon) doDeliveryDismiss(_ context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
@@ -53,6 +54,9 @@ func (d *Daemon) doQueueRetry(ctx context.Context, _ principal, request dashboar
 }
 
 func (d *Daemon) doQueueClear(_ context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
+	if strings.TrimSpace(request.SessionID) == "" {
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "sessionId is required")
+	}
 	sessionID, err := d.Registry.ResolveTarget(request.SessionID)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve session: %s", err))

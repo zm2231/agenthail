@@ -15,6 +15,9 @@ import (
 )
 
 func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adapter surface.Surface, selector, target string) (session *surface.Session, live bool, err error) {
+	if surface.NoTarget(selector) {
+		return nil, false, surface.ErrNoTarget
+	}
 	session, err = adapter.Resolve(ctx, selector)
 	if err == nil || a.registry() == nil {
 		return session, err == nil, err
