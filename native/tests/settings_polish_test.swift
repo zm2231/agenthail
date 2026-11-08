@@ -10,9 +10,9 @@ struct SettingsPolishTest {
         let before = TurnClock.date("2026-11-08T12:04:00Z")!
         let after = TurnClock.date("2026-11-08T12:05:01Z")!
 
-        let paired = try decode(PairingStatusResponse.self, #"{"id":"p1","state":"paired","expiresAt":"2026-11-08T12:05:00Z","device":{"id":"d1","name":"Ana's iPhone","scopes":["read"],"hostId":"h","createdAt":"x","lastSeenAt":"","revokedAt":""}}"#)
-        check(PairingProgress.of(paired, pairing: pairing, now: before) == .paired("Ana's iPhone"), "a paired code names the device")
-        check(PairingProgress.paired("Ana's iPhone").notice == "Paired Ana's iPhone.", "pairing reads as a notice")
+        let paired = try decode(PairingStatusResponse.self, #"{"id":"p1","state":"paired","expiresAt":"2026-11-08T12:05:00Z","device":{"id":"d1","name":"Test iPhone","scopes":["read"],"hostId":"h","createdAt":"x","lastSeenAt":"","revokedAt":""}}"#)
+        check(PairingProgress.of(paired, pairing: pairing, now: before) == .paired("Test iPhone"), "a paired code names the device")
+        check(PairingProgress.paired("Test iPhone").notice == "Paired Test iPhone.", "pairing reads as a notice")
         let anonymous = try decode(PairingStatusResponse.self, #"{"id":"p1","state":"paired","expiresAt":"2026-11-08T12:05:00Z"}"#)
         check(PairingProgress.of(anonymous, pairing: pairing, now: before) == .paired("the iPhone"), "a paired code without a device still pairs")
         let expired = try decode(PairingStatusResponse.self, #"{"id":"p1","state":"expired","expiresAt":"2026-11-08T12:05:00Z"}"#)
@@ -50,10 +50,10 @@ struct SettingsPolishTest {
         let server = try StubServer { line in
             if line.contains("/api/v1/pairings?id=p1") {
                 checks += 1
-                return checks < 2 ? reply(#"{"id":"p1","state":"pending","expiresAt":"2026-11-08T12:05:00Z"}"#) : reply(#"{"id":"p1","state":"paired","expiresAt":"2026-11-08T12:05:00Z","device":{"name":"Ana's iPhone"}}"#)
+                return checks < 2 ? reply(#"{"id":"p1","state":"pending","expiresAt":"2026-11-08T12:05:00Z"}"#) : reply(#"{"id":"p1","state":"paired","expiresAt":"2026-11-08T12:05:00Z","device":{"name":"Test iPhone"}}"#)
             }
             if line.contains("/api/v1/devices") {
-                return reply(#"{"devices":[{"id":"d1","name":"Ana's iPhone","scopes":["read"],"createdAt":"2026-11-08T12:04:30Z","pushEnabled":false}]}"#)
+                return reply(#"{"devices":[{"id":"d1","name":"Test iPhone","scopes":["read"],"createdAt":"2026-11-08T12:04:30Z","pushEnabled":false}]}"#)
             }
             return "HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
         }
@@ -63,7 +63,7 @@ struct SettingsPolishTest {
 
         model.pairing = pairing
         await model.watchPairing(pairing, api: api, interval: .milliseconds(10))
-        check(checks == 2 && model.pairing == nil && model.pairingNotice == "Paired Ana's iPhone." && model.devices.map(\.name) == ["Ana's iPhone"], "pairing clears the code, says so and reloads devices")
+        check(checks == 2 && model.pairing == nil && model.pairingNotice == "Paired Test iPhone." && model.devices.map(\.name) == ["Test iPhone"], "pairing clears the code, says so and reloads devices")
 
         model.pairingNotice = nil
         model.pairing = pairing
