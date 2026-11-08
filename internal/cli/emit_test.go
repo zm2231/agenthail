@@ -1,12 +1,25 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+func TestJSONOutputMatchesTheEncoderApartFromTimestamps(t *testing.T) {
+	value := map[string]any{"message": "a <b> & \"c\"\nline end", "queuedAt": "2026-11-08T09:00:00.000000000Z", "count": 3}
+	var want bytes.Buffer
+	if err := json.NewEncoder(&want).Encode(value); err != nil {
+		t.Fatal(err)
+	}
+	got, err := captureStdout(t, func() error { return emit(value) })
+	if err != nil || got != want.String() {
+		t.Fatalf("emit printed %q, the encoder %q (err %v)", got, want.String(), err)
+	}
+}
 
 func TestJSONOutputUsesTheAPITimestampFormat(t *testing.T) {
 	target := surface.Session{ID: "target", Name: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusBusy, LastActive: time.Now()}

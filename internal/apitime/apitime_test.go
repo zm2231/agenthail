@@ -90,7 +90,7 @@ func FuzzMarshalNormalizesOnlyTimestampFields(f *testing.F) {
 			}
 			return value
 		}
-		if want := expect(decode([]byte(input)), "");!reflect.DeepEqual(decode(got), want) {
+		if want := expect(decode([]byte(input)), ""); !reflect.DeepEqual(decode(got), want) {
 			t.Fatalf("Marshal(%s) = %s", input, got)
 		}
 	})
