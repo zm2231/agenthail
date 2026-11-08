@@ -23,7 +23,17 @@ list() {
 		scripts/test-xcodegen-project.sh \
 		scripts/release-ios-proof.sh \
 		.github/workflows/ios.yml
-	while IFS= read -r source; do printf 'native/%s\n' "$source"; done <<<"$sources" | sort -u
+	while IFS= read -r source; do normalize "native/$source"; done <<<"$sources" | sort -u
+}
+
+normalize() {
+	local path="$1" collapsed
+	while :; do
+		collapsed="$(sed -E 's#(^|/)[^/]*[^/.][^/]*/\.\./#\1#' <<<"$path")"
+		[ "$collapsed" = "$path" ] && break
+		path="$collapsed"
+	done
+	printf '%s\n' "${path#./}"
 }
 
 touched() {

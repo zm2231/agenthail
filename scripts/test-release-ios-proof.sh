@@ -13,7 +13,7 @@ fail() {
 repo="$work/repo"
 mkdir -p "$repo/scripts" "$repo/native/iOS" "$work/bin"
 cp "$ROOT/scripts/ios-inputs.sh" "$ROOT/scripts/release-ios-proof.sh" "$repo/scripts/"
-printf 'targets:\n  AgenthailIOS:\n    sources:\n      - path: iOS\n      - path: Shared.swift\n' >"$repo/native/project.yml"
+printf 'targets:\n  AgenthailIOS:\n    sources:\n      - path: iOS\n      - path: Shared.swift\n  AgenthailIOSTests:\n    sources:\n      - path: ../scripts/fixtures/colours.json\n' >"$repo/native/project.yml"
 echo a >"$repo/native/iOS/App.swift"
 git -C "$repo" init -q -b main
 git -C "$repo" -c user.name=t -c user.email=t@example.test add -A
@@ -89,7 +89,8 @@ WANT_SHA="$ios_commit" RUNS="$(runs 11 success 12 success)" JOB_11=success JOB_1
 [ "$(value proven)" = false ] || fail "a green run before the input list changed proved the tag: $(cat "$work/output")"
 
 changed="$work/changed"
-for path in native/iOS/App.swift native/Shared.swift native/project.yml scripts/ios-inputs.sh scripts/release-ios-proof.sh .github/workflows/ios.yml; do
+(cd "$repo" && scripts/ios-inputs.sh list) | grep -qx scripts/fixtures/colours.json || fail "a source outside native/ is not listed by its repository path"
+for path in native/iOS/App.swift native/Shared.swift native/project.yml scripts/ios-inputs.sh scripts/release-ios-proof.sh .github/workflows/ios.yml scripts/fixtures/colours.json; do
 	echo "$path" >"$changed"
 	[ "$(cd "$repo" && scripts/ios-inputs.sh touched "$changed")" = true ] || fail "$path is an iOS input"
 done
