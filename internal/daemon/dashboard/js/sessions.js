@@ -69,12 +69,12 @@ export function renderSessions() {
   $("#session-tools").classList.toggle("hidden", !paged);
   syncInboxModeButtons();
   $("#filter-summary").textContent =
-    app.inboxMode === "current"
-      ? sessions.length
-        ? `Open Claude sessions, working or queued work, and recent sessions (Codex ${app.state.codexRecentHours || 5}-hour window)`
-        : "Nothing current right now"
-      : scopedProject
-        ? `${total} ${total === 1 ? "conversation" : "conversations"} in this project${hasMore ? " so far" : ""}`
+    scopedProject
+      ? `${total} ${app.inboxMode === "current" ? "current " : ""}${total === 1 ? "conversation" : "conversations"} in this project`
+      : app.inboxMode === "current"
+        ? sessions.length
+          ? `Open Claude sessions, working or queued work, and recent sessions (Codex ${app.state.codexRecentHours || 5}-hour window)`
+          : "Nothing current right now"
         : hasMore
           ? `Showing ${visible.length} of ${total}`
           : `${total} conversations`;

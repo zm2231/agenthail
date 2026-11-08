@@ -7,7 +7,7 @@ export function scopeOrderKeys() {
   const id = app.scope;
   if (!id || id === "all" || id === "inbox") return [];
   const archived = (app.state?.projects || []).some((project) => project.id === id && project.archived);
-  const scopes = archived ? ["archived"] : app.showArchived ? ["all", "archived"] : ["all"];
+  const scopes = archived ? ["archived"] : app.inboxMode === "current" ? ["current"] : app.showArchived ? ["all", "archived"] : ["all"];
   return scopes.map((scope) => `scope:${scope}:${id}`);
 }
 
