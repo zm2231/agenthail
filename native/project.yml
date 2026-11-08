@@ -58,6 +58,9 @@ targets:
       - path: GlassSolve.swift
       - path: HolderPins.swift
       - path: ComposerAttachment.swift
+      - path: ComposerStore.swift
+      - path: PendingSend.swift
+      - path: SendQueue.swift
       - path: ComposerTextSync.swift
       - path: ComposerCompletion.swift
       - path: SessionSelection.swift

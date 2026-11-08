@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import Observation
 import os
@@ -92,7 +93,12 @@ final class AgenthailModel {
     var listRereadTask: Task<Void, Never>?
     var findTask: Task<Void, Never>?
     var spotlightCatalog: SpotlightCatalog?
-    private(set) var localSends: [String: [LocalSend]] = [:]
+    let outbox = Outbox()
+    var localSends: [String: [LocalSend]] { outbox.rows }
+    @ObservationIgnored private var composerStore: ComposerStore?
+    @ObservationIgnored private var composerSave: Task<Void, Never>?
+    @ObservationIgnored private var draftWatches: [ObjectIdentifier: AnyCancellable] = [:]
+    @ObservationIgnored nonisolated(unsafe) private var terminationWatch: NSObjectProtocol?
     private(set) var fetchedSubagents = SubagentPageCache()
 
     private(set) var api: AgenthailAPI?
@@ -193,14 +199,17 @@ final class AgenthailModel {
         }
     }
 
-    init(connecting: Bool = true, api: AgenthailAPI? = nil) {
+    init(connecting: Bool = true, api: AgenthailAPI? = nil, composerStore: ComposerStore? = nil) {
         self.api = api
+        self.composerStore = composerStore
         mainPane = SessionPane(model: self, restoresSelection: true)
         panes = [mainPane]
         store.pinned = { [unowned self] id in
             panes.contains { $0.selectedSessionID == id } || drafts[id]?.isEmpty == false
         }
         store.working = { [unowned self] id in knownSessions.first { $0.id == id }?.isWorking == true }
+        connectOutbox()
+        restoreComposer()
         if connecting { connect() }
     }
 
@@ -233,6 +242,7 @@ final class AgenthailModel {
         eventTask?.cancel()
         refreshTask?.cancel()
         statusRefreshTask?.cancel()
+        if let terminationWatch { NotificationCenter.default.removeObserver(terminationWatch) }
     }
 
     func pickHolder(_ holder: SessionHolder?, for sessionID: String) {
@@ -252,6 +262,7 @@ final class AgenthailModel {
                     let api = try AgenthailAPI()
                     daemonBuild = try await api.version().build
                     self.api = api
+                    outbox.wake()
                     clearConnectionError()
                     lastEventID = 0
                     if await refresh(fresh: true) {
@@ -384,9 +395,7 @@ final class AgenthailModel {
 
     func detailLoaded(_ loaded: WarmSession, for id: String) {
         store.keep(loaded, for: id)
-        if let items = loaded.detail.timeline?.items, let sends = localSends[id] {
-            localSends[id] = LocalSend.reconcile(sends, with: items)
-        }
+        if let items = loaded.detail.timeline?.items { outbox.reconcile(items, for: id) }
     }
 
     func openNewSession(message: String? = nil) {
@@ -406,6 +415,9 @@ final class AgenthailModel {
         if let draft = drafts[sessionID] { return draft }
         let draft = ComposerDraft()
         drafts[sessionID] = draft
+        if composerStore != nil {
+            draftWatches[ObjectIdentifier(draft)] = draft.objectWillChange.sink { [weak self] _ in self?.saveComposerSoon() }
+        }
         return draft
     }
 
@@ -889,66 +901,72 @@ final class AgenthailModel {
 
     func send(_ message: String, attachments: [ComposerAttachment] = [], to sessionID: String, busyDelivery: String? = nil, completion: ((Bool) -> Void)? = nil) {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !ComposerAttachments.isEmpty(text: text, attachments: attachments), let api else {
+        guard !ComposerAttachments.isEmpty(text: text, attachments: attachments), api != nil else {
             restoreToComposer(text, attachments: attachments, sessionID: sessionID)
             completion?(false)
             return
         }
-        let pending = LocalSend(text: text, attachments: attachments, sentAt: Date(), status: nil, busyDelivery: busyDelivery)
-        localSends[sessionID, default: []].append(pending)
-        deliver(pending, to: sessionID, api: api, completion: completion)
+        outbox.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery, completion: completion)
     }
 
     func retrySend(_ send: LocalSend, in sessionID: String) {
-        guard let api, let index = localSends[sessionID]?.firstIndex(where: { $0.id == send.id }) else { return }
-        localSends[sessionID]?[index].failure = nil
-        localSends[sessionID]?[index].deliveryID = nil
-        localSends[sessionID]?[index].deletable = false
-        deliver(send, to: sessionID, api: api)
+        outbox.retry(send, in: sessionID)
     }
 
-    private func deliver(_ send: LocalSend, to sessionID: String, api: AgenthailAPI, completion: ((Bool) -> Void)? = nil) {
-        Task {
-            do {
-                let uploaded = try await api.upload(send.attachments, sessionID: sessionID)
-                updateLocalSend(send.id, in: sessionID) { $0.uploaded = uploaded }
-                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: send.text, busyDelivery: send.busyDelivery, author: "person", attachments: uploaded.map(\.id), idempotencyKey: send.idempotencyKey)
-                updateLocalSend(send.id, in: sessionID) { $0.status = LocalSend.label(for: receipt.result?.status, waitingOnYou: receipt.result?.waitingOn != nil, movedTo: receipt.result?.movedTo) }
-                operationError = nil
-                completion?(true)
-            } catch {
-                let failure = AgenthailAPIError.userMessage(error)
-                let kept = error as? KeptDelivery
-                updateLocalSend(send.id, in: sessionID) {
-                    $0.failure = failure
-                    $0.deliveryID = kept?.deliveryID
-                    $0.deletable = kept?.deletable ?? false
-                }
-                completion?(false)
-            }
-        }
+    func putBackSend(_ send: LocalSend, in sessionID: String) {
+        outbox.putBack(send, in: sessionID)
     }
 
     func discardSend(_ send: LocalSend, in sessionID: String) {
-        localSends[sessionID]?.removeAll { $0.id == send.id }
+        outbox.discard(send, in: sessionID)
     }
 
     func deleteSend(_ send: LocalSend, in sessionID: String) {
-        guard send.canDelete else { return }
-        let position = localSends[sessionID]?.firstIndex { $0.id == send.id }
-        discardSend(send, in: sessionID)
-        guard let deliveryID = send.deliveryID, let api else { return }
-        Task {
-            do {
-                try await api.action("delivery-delete", deliveryID: deliveryID)
-                operationError = nil
-            } catch {
-                operationError = AgenthailAPIError.userMessage(error)
-                if let position, localSends[sessionID]?.contains(where: { $0.id == send.id }) != true {
-                    localSends[sessionID, default: []].insert(send, at: min(position, localSends[sessionID]?.count ?? 0))
-                }
-            }
+        outbox.delete(send, in: sessionID)
+    }
+
+    private func connectOutbox() {
+        outbox.api = { [unowned self] in api }
+        outbox.resolve = { [unowned self] in rekeys.resolve($0) }
+        outbox.returnToComposer = { [unowned self] send, sessionID in restoreToComposer(send.text, attachments: send.attachments, sessionID: sessionID) }
+        outbox.notice = { [unowned self] in operationError = $0 }
+        outbox.changed = { [unowned self] in saveComposer() }
+    }
+
+    private func restoreComposer() {
+        guard let composerStore else { return }
+        let loaded = composerStore.load()
+        if loaded.unreadable, loaded.setAside == nil {
+            self.composerStore = nil
+            operationError = "Your saved drafts couldn't be read, so they are left as they were and not saved over."
+            return
         }
+        var notices: [String] = []
+        if loaded.unreadable { notices.append("Your saved drafts couldn't be read. The file was set aside.") }
+        if let lost = DraftArchive.restore(loaded.saved, into: draft(for:)) { notices.append(lost) }
+        for send in outbox.restore(loaded.saved.sends) {
+            draft(for: send.sessionID).restore(send.message)
+            notices.append("Not sent: Agenthail closed before its attachment uploaded. The text is back in the composer; add the attachment again.")
+        }
+        if !notices.isEmpty { operationError = notices.joined(separator: " ") }
+        terminationWatch = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.saveComposer() }
+        }
+    }
+
+    private func saveComposerSoon() {
+        guard composerStore != nil, composerSave == nil else { return }
+        composerSave = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            self?.saveComposer()
+        }
+    }
+
+    func saveComposer() {
+        composerSave?.cancel()
+        composerSave = nil
+        composerStore?.save(DraftArchive.saved(drafts, sends: outbox.saved))
     }
 
     private(set) var modelCatalog: [String: [ModelOption]] = [:]
@@ -1130,7 +1148,7 @@ final class AgenthailModel {
             let attachments = cancelled.attachments ?? []
             do {
                 let receipt = try await api.steerQueued(message: message, attachments: attachments, sessionID: item.sessionId)
-                localSends[item.sessionId, default: []].append(LocalSend(text: message, attachments: attachments.map { ComposerAttachment(uploaded: $0.upload) }, sentAt: Date(), status: LocalSend.label(for: receipt.result?.status, steer: true)))
+                outbox.record(LocalSend(text: message, attachments: attachments.map { ComposerAttachment(uploaded: $0.upload) }, sentAt: Date(), status: LocalSend.label(for: receipt.result?.status, steer: true)), in: item.sessionId)
                 operationError = nil
             } catch {
                 let lost = draft(for: item.sessionId).takeBack([message], attachments: attachments)
@@ -1291,12 +1309,6 @@ final class AgenthailModel {
         draft(for: sessionID).restore(text, attachments: attachments)
     }
 
-    private func updateLocalSend(_ id: UUID, in sessionID: String, _ change: (inout LocalSend) -> Void) {
-        let sessionID = rekeys.resolve(sessionID)
-        guard let index = localSends[sessionID]?.firstIndex(where: { $0.id == id }) else { return }
-        change(&localSends[sessionID]![index])
-    }
-
     private func makeCatalogFeed() -> CatalogFeed {
         CatalogFeed(CatalogFeed.Host(
             api: { [weak self] in self?.api },
@@ -1441,9 +1453,8 @@ final class AgenthailModel {
 
     private func reconcilePanes() {
         if !rekeys.isEmpty {
-            _ = rekeys.carry(&drafts)
-            var sends = localSends
-            if rekeys.carry(&sends) { localSends = sends }
+            if rekeys.carry(&drafts) { saveComposerSoon() }
+            outbox.carry(rekeys)
         }
         panes.forEach { $0.reconcile() }
     }
@@ -1519,6 +1530,14 @@ final class ComposerDraft: ObservableObject {
         attachments = held.attachments
         stash = nil
         return true
+    }
+
+    func keep(_ kept: ComposerStash) {
+        guard stash != nil else {
+            stash = kept
+            return
+        }
+        restore(kept.text, attachments: kept.attachments)
     }
 
     func restoreStashAfterSend() {

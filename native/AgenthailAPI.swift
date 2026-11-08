@@ -295,8 +295,8 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 
     /// Fixes an instruction's bytes and key, pin included, so that retrying it can only replay it.
-    func instructionWire(sessionID: String, message: String, author: String?, attachments: [String], idempotencyKey: String) throws -> ActionWire {
-        let body = InstructionRequest(action: "send", sessionID: sessionID, message: message, author: author, attachments: attachments)
+    func instructionWire(sessionID: String, message: String, busyDelivery: String? = nil, author: String?, attachments: [String], idempotencyKey: String) throws -> ActionWire {
+        let body = InstructionRequest(action: "send", sessionID: sessionID, message: message, busyDelivery: busyDelivery, author: author, attachments: attachments)
         let pinned = holderPins.pinned(body: try JSONEncoder().encode(body), key: idempotencyKey)
         return ActionWire(body: pinned.body, key: pinned.key)
     }

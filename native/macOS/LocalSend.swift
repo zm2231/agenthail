@@ -1,8 +1,7 @@
 import Foundation
 
 struct LocalSend: Identifiable, Equatable {
-    let id = UUID()
-    let idempotencyKey = UUID().uuidString
+    var id = UUID()
     let text: String
     var attachments: [ComposerAttachment] = []
     // The names the daemon stored the attachments under, known once they are
@@ -14,8 +13,14 @@ struct LocalSend: Identifiable, Equatable {
     var failure: String? = nil
     var deliveryID: Int64? = nil
     var deletable = false
+    var unconfirmed = false
+    var retryStopped = false
 
     var canDelete: Bool { failure != nil && (deliveryID == nil || deletable) }
+    var unconfirmedTitle: String? {
+        guard unconfirmed, failure == nil else { return nil }
+        return retryStopped ? "Not confirmed. It may already have arrived." : "Not confirmed yet · retrying"
+    }
 
     static let clockSkew: TimeInterval = 5
 

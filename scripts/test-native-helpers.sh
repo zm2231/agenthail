@@ -34,6 +34,9 @@ SOURCES=(
   AgenthailModelPaging.swift
   AgenthailModels.swift
   ComposerAttachment.swift
+  ComposerStore.swift
+  PendingSend.swift
+  SendQueue.swift
   ComposerTextSync.swift
   ComposerCompletion.swift
   DuplicateApplicationPolicy.swift
@@ -134,6 +137,8 @@ SOURCES=(
   macOS/ComposerPaste.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
+  macOS/Outbox.swift
+  macOS/DraftArchive.swift
   macOS/MainWindowShow.swift
   macOS/Overview.swift
   macOS/QueueFacts.swift
