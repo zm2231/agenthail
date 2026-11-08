@@ -57,9 +57,9 @@ func waitingNoticeKey(sessionID, questionID string) string {
 	return "notice-" + waitingNotificationKey(sessionID, questionID)
 }
 
-func waitingNotice(name, target string, waiting surface.Waiting, runtime surface.RuntimeKind, request surface.Request, open bool) string {
+func waitingNotice(name, target string, waiting surface.Waiting, runtime surface.RuntimeKind, restartable bool, request surface.Request, open bool) string {
 	if !open {
-		return fmt.Sprintf("[agenthail] %s. The person was notified too.", elsewhereWaitingMessage(name, waiting, runtime, false))
+		return fmt.Sprintf("[agenthail] %s. The person was notified too.", elsewhereWaitingMessage(name, waiting, runtime, restartable))
 	}
 	asks := request.Prompt()
 	if detail := strings.TrimSpace(request.Description); detail != "" && detail != asks {
@@ -73,7 +73,7 @@ func (d *Daemon) noticeWaiting(session surface.Session, waiting surface.Waiting,
 	if !ok {
 		return
 	}
-	message := waitingNotice(d.resolveDisplay(session.ID), d.answerTarget(session.ID), waiting, session.RuntimeKind, request, open)
+	message := waitingNotice(d.resolveDisplay(session.ID), d.answerTarget(session.ID), waiting, session.RuntimeKind, d.restartable(session), request, open)
 	d.taskNoticeMu.Lock()
 	defer d.taskNoticeMu.Unlock()
 	if d.taskRequestsRead[session.ID] == (taskRequestRead{waitingID: waiting.ID, reader: to.sessionID}) {

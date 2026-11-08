@@ -96,10 +96,26 @@ func TestTheCLIReadsAndAnswersATerminalQuestionTheDaemonHolds(t *testing.T) {
 	}
 }
 
+type daemonOnlyAnswers struct {
+	*surfaces.Claude
+	t *testing.T
+}
+
+func (s daemonOnlyAnswers) Requests(context.Context, *surface.Session) (surface.RequestState, error) {
+	s.t.Error("the CLI read requests in-process while a daemon ran")
+	return surface.RequestState{}, nil
+}
+
+func (s daemonOnlyAnswers) Respond(context.Context, *surface.Session, string, surface.Decision) (string, error) {
+	s.t.Error("the CLI answered in-process while a daemon ran")
+	return "", nil
+}
+
 func TestTheCLIAnswersAHostSessionsQuestionThroughTheDaemon(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app, r, host, client, id := hostedClaudeApp(t)
 	startTestDaemon(t, app, r, host.Home)
+	app.Surfaces[0].Surface = daemonOnlyAnswers{Claude: app.Surfaces[0].Surface.(*surfaces.Claude), t: t}
 	if _, err := client.Send(context.Background(), claudehost.SendRequest{SessionID: id, UUID: uuid.NewString(), Text: "QUESTION", Origin: &claudehost.Origin{Kind: "human"}}); err != nil {
 		t.Fatal(err)
 	}
