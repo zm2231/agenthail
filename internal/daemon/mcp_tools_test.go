@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -98,6 +99,33 @@ func TestMCPCapabilitiesNameTheReadReachAndLimits(t *testing.T) {
 	reads, _ := result["reads"].([]any)
 	if refused || limits["outputBytes"] != float64(mcpOutputLimit) || len(reads) != 3 {
 		t.Fatalf("capabilities=%v", result)
+	}
+}
+
+func TestMCPCapabilitiesSayWhichSurfacesTheCallerMayStart(t *testing.T) {
+	d, _, fake, from, to := daemonFixture(t)
+	d.Surfaces = []surface.Surface{&daemonSurface{kind: surface.KindClaude}, fake, &daemonSurface{kind: surface.KindNotion}}
+	server := mcpServer(t, d)
+	spawnable := func(session *mcp.ClientSession) map[string]any {
+		result, refused := callMCP(t, session, "agenthail_capabilities", nil)
+		if refused {
+			t.Fatalf("capabilities refused: %v", result)
+		}
+		found := map[string]any{}
+		for _, entry := range result["surfaces"].([]any) {
+			entry := entry.(map[string]any)
+			found[entry["surface"].(string)] = entry["spawn"]
+			if entry["spawn"] == false && entry["reason"] == "" {
+				t.Fatalf("a surface the caller may not start gives no reason: %v", entry)
+			}
+		}
+		return found
+	}
+	if got := spawnable(mcpSession(t, server, issueMCPToken(t, d, from))); got["claude"] != true || got["codex"] != true || got["notion"] != false {
+		t.Fatalf("a session may start Claude and Codex but not Notion: %v", got)
+	}
+	if got := spawnable(asOperator(t, d, server, to.ID)); got["claude"] != true || got["codex"] != true || got["notion"] != true {
+		t.Fatalf("the voice operator may start every surface: %v", got)
 	}
 }
 

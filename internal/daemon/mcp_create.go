@@ -28,25 +28,35 @@ type mcpCreateInput struct {
 	Base           string `json:"base,omitempty" jsonschema:"Worktree base ref; default cwd's HEAD."`
 }
 
-func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCreateInput) (any, error) {
-	if !caller.has("spawn") {
-		return nil, refuse("capability_missing", "This session may not start sessions.")
+// agenthail_capabilities reports this same refusal, so the two cannot disagree.
+func spawnRefusal(caller *mcpCaller, kind surface.SurfaceKind) *mcpRefusal {
+	switch {
+	case !caller.has("spawn"):
+		return refuse("capability_missing", "This session may not start sessions.")
+	case kind == surface.KindNotion && !caller.has("control.all"):
+		return &mcpRefusal{Code: "exceeds_ceiling", Message: "A Notion thread works in the person's Notion workspace, outside any ceiling; starting one is for the person's voice operator.", Detail: map[string]any{"axis": "surface"}}
+	case kind != surface.KindClaude && kind != surface.KindCodex && kind != surface.KindNotion:
+		return refuse("invalid", "surface is claude, codex or notion.")
 	}
+	return nil
+}
+
+func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCreateInput) (any, error) {
 	kind := surface.SurfaceKind(strings.TrimSpace(input.Surface))
+	if !caller.has("spawn") {
+		return nil, spawnRefusal(caller, kind)
+	}
 	if strings.TrimSpace(input.Message) == "" {
 		return nil, refuse("invalid", "message is required.")
 	}
-	if kind == surface.KindNotion {
-		if input.Task {
-			return nil, refuse("invalid", "A Notion thread cannot be a task.")
-		}
-		if !caller.has("control.all") {
-			return nil, &mcpRefusal{Code: "exceeds_ceiling", Message: "A Notion thread works in the person's Notion workspace, outside any ceiling; starting one is for the person's voice operator.", Detail: map[string]any{"axis": "surface"}}
-		}
-		return d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{Action: "notion-create", Message: input.Message, Model: strings.TrimSpace(input.Model), Alias: strings.TrimSpace(input.Alias)})
+	if kind == surface.KindNotion && input.Task {
+		return nil, refuse("invalid", "A Notion thread cannot be a task.")
 	}
-	if kind != surface.KindClaude && kind != surface.KindCodex {
-		return nil, refuse("invalid", "surface is claude, codex or notion.")
+	if refusal := spawnRefusal(caller, kind); refusal != nil {
+		return nil, refusal
+	}
+	if kind == surface.KindNotion {
+		return d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{Action: "notion-create", Message: input.Message, Model: strings.TrimSpace(input.Model), Alias: strings.TrimSpace(input.Alias)})
 	}
 	isolation := strings.TrimSpace(input.Isolation)
 	if isolation != "" && isolation != isolationWorktree {

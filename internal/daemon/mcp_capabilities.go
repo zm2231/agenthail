@@ -7,7 +7,11 @@ var mcpLimits = map[string]int{"depth": 3, "children": 8, "outputBytes": mcpOutp
 func (d *Daemon) mcpCapabilities(_ context.Context, caller *mcpCaller, _ struct{}) (any, error) {
 	surfaces := []map[string]any{}
 	for _, adapter := range d.Surfaces {
-		surfaces = append(surfaces, map[string]any{"surface": string(adapter.Name()), "spawn": false, "reason": "This server offers read tools only."})
+		entry := map[string]any{"surface": string(adapter.Name()), "spawn": true}
+		if refusal := spawnRefusal(caller, adapter.Name()); refusal != nil {
+			entry["spawn"], entry["reason"] = false, refusal.Message
+		}
+		surfaces = append(surfaces, entry)
 	}
 	reach := []string{}
 	for _, grant := range []struct{ capability, scope string }{{"read.self", "your own session"}, {"read.project", "your project's sessions"}, {"control.descendants", "sessions you spawned"}} {
