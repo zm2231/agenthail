@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -165,7 +167,31 @@ func awaitMirroredCompletion(t *testing.T, viewer *federationNode, sessionID, tu
 	})
 }
 
-func settleNotices() { time.Sleep(300 * time.Millisecond) }
+var settleMarks atomic.Int32
+
+// settleNotices returns once every notice the host's earlier catalog events could raise has been sent. The host's stream is ordered, so a marker row mirrored on each viewer means every earlier event was handled and its notice started; draining background work then finishes the sends.
+func settleNotices(t *testing.T, host *federationNode, hostID string, viewers ...*federationNode) {
+	t.Helper()
+	name := fmt.Sprintf("settled %d", settleMarks.Add(1))
+	host.fake.mu.Lock()
+	session := host.fake.sessions["remote-a"]
+	session.Name, session.LastActive = name, time.Now()
+	host.fake.sessions["remote-a"] = session
+	host.fake.mu.Unlock()
+	host.daemon.discoverCatalog(context.Background())
+	for _, viewer := range viewers {
+		testkit.Eventually(t, "the viewer to mirror the marker", 10*time.Second, func() bool {
+			for _, row := range sessionsOf(viewer.snapshot(t), hostID) {
+				if row.Name == name {
+					return true
+				}
+			}
+			return false
+		})
+		viewer.daemon.background.wait()
+	}
+	host.daemon.background.wait()
+}
 
 func TestATurnOnAPairedLinuxHostNotifiesTheViewerAndThePhoneOnce(t *testing.T) {
 	relay := newPhoneRelay(t)
@@ -178,7 +204,7 @@ func TestATurnOnAPairedLinuxHostNotifiesTheViewerAndThePhoneOnce(t *testing.T) {
 
 	hostTurn(t, host, "remote-a", "turn-1", "", nil)
 	testkit.Eventually(t, "both computers to send the push", 10*time.Second, func() bool { return len(relay.sent()) == 2 })
-	settleNotices()
+	settleNotices(t, host, record.ID, viewer)
 	sends := relay.sent()
 	if sends[0]["dedupeKey"] == "" || sends[0]["dedupeKey"] != sends[1]["dedupeKey"] {
 		t.Fatalf("the two computers named the notification differently: %+v", sends)
@@ -200,15 +226,14 @@ func TestATurnOnAPairedLinuxHostNotifiesTheViewerAndThePhoneOnce(t *testing.T) {
 			t.Fatalf("the viewer's push names session %q, not %q", send["sessionId"], qualified)
 		}
 	}
-	awaitMirroredName(t, viewer, host, record.ID, "renamed after its turn")
-	settleNotices()
+	settleNotices(t, host, record.ID, viewer)
 	if notices := mac.list(); len(notices) != 1 {
 		t.Fatalf("a later change to the row notified its turn again: %+v", notices)
 	}
 
 	hostTurn(t, host, "remote-a", "turn-2", "the model refused", nil)
 	testkit.Eventually(t, "the failure notified", 10*time.Second, func() bool { return len(mac.list()) == 2 })
-	settleNotices()
+	settleNotices(t, host, record.ID, viewer)
 	if notices := mac.list(); notices[1].message != "Codex agent failed on vps" {
 		t.Fatalf("failure notice %+v", notices[1])
 	}
@@ -233,7 +258,7 @@ func TestEachViewingMacNotifiesItsOwnScreenWhileThePhoneGetsOne(t *testing.T) {
 
 	hostTurn(t, host, "remote-b", "turn-1", "", nil)
 	testkit.Eventually(t, "both viewers to send the push", 10*time.Second, func() bool { return len(relay.sent()) == 2 })
-	settleNotices()
+	settleNotices(t, host, record.ID, first, second)
 	for index, mac := range macs {
 		if notices := mac.list(); len(notices) != 1 {
 			t.Fatalf("viewer %d desktop notices %+v", index, notices)
@@ -246,7 +271,7 @@ func TestEachViewingMacNotifiesItsOwnScreenWhileThePhoneGetsOne(t *testing.T) {
 
 func TestAPairedHostsTurnsWhileItWasUnreachableNeverNotify(t *testing.T) {
 	relay := newPhoneRelay(t)
-	viewer, host, _ := pairedFederationWith(t, func(f *federation) {
+	viewer, host, record := pairedFederationWith(t, func(f *federation) {
 		f.downGrace, f.retryMin = time.Hour, 50*time.Millisecond
 	})
 	withoutDesktop(host.daemon)
@@ -268,7 +293,7 @@ func TestAPairedHostsTurnsWhileItWasUnreachableNeverNotify(t *testing.T) {
 	host.gate.proxyDown.Store(false)
 	awaitNewStream(t, host, streams)
 	awaitMirroredCompletion(t, viewer, "remote-a", "turn-2")
-	settleNotices()
+	settleNotices(t, host, record.ID, viewer)
 	if notices := mac.list(); len(notices) != 1 {
 		t.Fatalf("a turn finished while the host was unreachable notified on reconnect: %+v", notices)
 	}
@@ -282,7 +307,7 @@ func TestAPairedHostsTurnsWhileItWasUnreachableNeverNotify(t *testing.T) {
 
 func TestARestartedViewerDoesNotNotifyTurnsItMissed(t *testing.T) {
 	relay := newPhoneRelay(t)
-	viewer, host, _ := pairedFederation(t)
+	viewer, host, record := pairedFederation(t)
 	withoutDesktop(host.daemon)
 	mac := recordDesktop(viewer.daemon)
 	relay.pairPhone(t, viewer.reg, "phone", "via-viewer")
@@ -295,7 +320,7 @@ func TestARestartedViewerDoesNotNotifyTurnsItMissed(t *testing.T) {
 	awaitHostNotice(t, host, "remote-a", "turn-2")
 	viewer.start(t, testRoots(host.server))
 	awaitMirroredCompletion(t, viewer, "remote-a", "turn-2")
-	settleNotices()
+	settleNotices(t, host, record.ID, viewer)
 	if notices := mac.list(); len(notices) != 1 {
 		t.Fatalf("a restarted viewer notified a turn it missed: %+v", notices)
 	}
@@ -306,7 +331,7 @@ func TestARestartedViewerDoesNotNotifyTurnsItMissed(t *testing.T) {
 
 func TestATurnFirstSeenAfterAStreamGapDoesNotNotify(t *testing.T) {
 	relay := newPhoneRelay(t)
-	viewer, host, _ := pairedFederationWith(t, func(f *federation) { f.retryMin = 50 * time.Millisecond })
+	viewer, host, record := pairedFederationWith(t, func(f *federation) { f.retryMin = 50 * time.Millisecond })
 	withoutDesktop(host.daemon)
 	mac := recordDesktop(viewer.daemon)
 	relay.pairPhone(t, viewer.reg, "phone", "via-viewer")
@@ -322,7 +347,7 @@ func TestATurnFirstSeenAfterAStreamGapDoesNotNotify(t *testing.T) {
 	if host.gate.snapshotsServed.Load()-snapshots < 2 {
 		t.Fatal("the viewer did not take a snapshot after the gap")
 	}
-	settleNotices()
+	settleNotices(t, host, record.ID, viewer)
 	if notices := mac.list(); len(notices) != 1 {
 		t.Fatalf("a turn read from the snapshot after a gap notified: %+v", notices)
 	}
@@ -348,7 +373,7 @@ func TestAnAskOnAPairedHostNotifiesWithItsButtonsAndIsAnsweredThroughTheViewer(t
 		}
 	})
 	testkit.Eventually(t, "both computers to send the ask", 10*time.Second, func() bool { return len(relay.sent()) == 2 })
-	settleNotices()
+	settleNotices(t, host, record.ID, viewer)
 	sends := relay.sent()
 	if sends[0]["requestId"] == "" || sends[0]["requestId"] != sends[1]["requestId"] || sends[0]["dedupeKey"] != sends[1]["dedupeKey"] {
 		t.Fatalf("the two pushes are not the same ask: %+v", sends)
@@ -391,7 +416,7 @@ func TestASessionFirstSeenWithAFinishedTurnDoesNotNotify(t *testing.T) {
 
 	hostTurn(t, host, "remote-new", "turn-1", "", nil)
 	awaitMirroredCompletion(t, viewer, "remote-new", "turn-1")
-	settleNotices()
+	settleNotices(t, host, record.ID, viewer)
 	if notices := mac.list(); len(notices) != 0 {
 		t.Fatalf("a row first seen with its turn already finished notified: %+v", notices)
 	}
@@ -401,4 +426,3 @@ func TestASessionFirstSeenWithAFinishedTurnDoesNotNotify(t *testing.T) {
 		t.Fatalf("the phone showed %+v", shown)
 	}
 }
-
