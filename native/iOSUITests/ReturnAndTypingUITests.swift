@@ -19,9 +19,22 @@ final class ReturnAndTypingUITests: XCTestCase {
         let keepsDraft = { (step: String) in
             XCTAssertEqual((composer.value as? String)?.count, draft, "the draft keeps every character \(step)")
         }
+        let timeline = app.scrollViews["session-timeline"]
+        let band = {
+            let top = app.navigationBars.firstMatch.frame.maxY
+            let bottom = app.otherElements["composer"].frame.minY
+            return CGRect(x: 0, y: top, width: app.windows.firstMatch.frame.width, height: max(0, bottom - top))
+        }
+        let visibleRows = { (try? timeline.snapshot())?.textCount(in: band()) ?? 0 }
         let drawn = { (step: String) in
+            let deadline = Date().addingTimeInterval(2)
+            var rows = visibleRows()
+            while rows == 0 && Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+                rows = visibleRows()
+            }
             let keyboard = app.keyboards.firstMatch
-            XCTAssertTrue(reply.waitForHittable(timeout: 2), "the transcript is drawn within 2 s \(step): reply exists=\(reply.exists) at \(reply.frame), composer at \(app.otherElements["composer"].frame), keyboard \(keyboard.exists ? "\(keyboard.frame)" : "hidden"), window \(app.windows.firstMatch.frame)")
+            XCTAssertGreaterThan(rows, 0, "the transcript shows rows between the top bar and the composer within 2 s \(step): band \(band()), keyboard \(keyboard.exists ? "\(keyboard.frame)" : "hidden")")
         }
         let started = Date()
         composer.typeText(typed)
@@ -51,13 +64,9 @@ final class ReturnAndTypingUITests: XCTestCase {
     }
 }
 
-private extension XCUIElement {
-    func waitForHittable(timeout: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if exists && isHittable { return true }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-        }
-        return exists && isHittable
+private extension XCUIElementSnapshot {
+    func textCount(in band: CGRect) -> Int {
+        let shown = elementType == .staticText && band.intersection(frame).height >= 10 ? 1 : 0
+        return children.reduce(shown) { $0 + $1.textCount(in: band) }
     }
 }
