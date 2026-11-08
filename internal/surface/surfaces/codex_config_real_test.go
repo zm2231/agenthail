@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -98,7 +99,9 @@ func realManagedCodexWith(t *testing.T, model http.Handler) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	// codex is a launcher whose app-server runs as its child, so only killing
+	// the whole group stops the server.
+	t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); _ = cmd.Wait() })
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if client, err := dialManagedCodex(context.Background()); err == nil {
