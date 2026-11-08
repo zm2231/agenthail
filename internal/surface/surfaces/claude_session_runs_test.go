@@ -77,3 +77,28 @@ func TestALiveSessionShowsOnlyTheRunsOfItsRunningProcess(t *testing.T) {
 		t.Fatalf("a session with no runs: %+v err=%v, want an empty list", none, err)
 	}
 }
+
+func TestALiveRecordThatNamesNoStartIsDatedByItsProcess(t *testing.T) {
+	process := exec.Command("sleep", "30")
+	if err := process.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = process.Process.Kill(); _ = process.Wait() })
+	started, err := processStartedAt(process.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	writePeerRecord(t, home, process.Process.Pid, map[string]any{"pid": float64(process.Process.Pid), "sessionId": "keystone"})
+	writeClaudeJob(t, home, "july", "keystone", "", time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC))
+	writeClaudeJob(t, home, "before", "keystone", "", started.Add(-time.Hour))
+	runs, err := NewClaude(nil, home).ObserveSessionClaudeRuns(context.Background(), &surface.Session{ID: "keystone", Surface: surface.KindClaude, PID: process.Process.Pid})
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("a live session whose record names no start shows %v (err %v), want no run from before its process", jobIDs(runs), err)
+	}
+	writeClaudeJob(t, home, "now", "keystone", "", started.Add(time.Minute))
+	runs, err = NewClaude(nil, home).ObserveSessionClaudeRuns(context.Background(), &surface.Session{ID: "keystone", Surface: surface.KindClaude, PID: process.Process.Pid})
+	if err != nil || !slices.Equal(jobIDs(runs), []string{"now"}) {
+		t.Fatalf("runs=%v err=%v, want the run of the running process", jobIDs(runs), err)
+	}
+}

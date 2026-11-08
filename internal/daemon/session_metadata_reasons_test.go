@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +62,29 @@ func TestAMetadataReadThatFailsSaysWhy(t *testing.T) {
 	reason := got["claudeRuns"]
 	if !strings.HasPrefix(reason, "Could not read: xxx") || !strings.HasSuffix(reason, "…") || utf8.RuneCountInString(strings.TrimPrefix(reason, "Could not read: ")) != metadataReasonLimit {
 		t.Errorf("a long error is not bounded to %d characters: %q", metadataReasonLimit, reason)
+	}
+}
+
+func TestACancelledMetadataRequestIsNotCalledATimeout(t *testing.T) {
+	_, registry, _, from, _ := daemonFixture(t)
+	from.Surface, from.RuntimeKind, from.ID = surface.KindClaude, surface.RuntimeClaudeCLI, "claude-session"
+	if err := registry.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	fake := &dashboardClaudeRunSurface{daemonSurface: &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{from.ID: from}, accepted: true}, blockRuns: true}
+	d := newTestDaemon(t, registry, []surface.Surface{fake})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	response := httptest.NewRecorder()
+	d.dashboardSessionMetadataHandler(response, httptest.NewRequest(http.MethodGet, "/api/session-metadata?id="+from.ID, nil).WithContext(ctx))
+	var body struct {
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body=%s err=%v", response.Body.String(), err)
+	}
+	if got := body.Errors["claudeRuns"]; got != "Could not read: context canceled" {
+		t.Fatalf("a cancelled request reports %q, want the cancellation and not a timeout", got)
 	}
 }
 

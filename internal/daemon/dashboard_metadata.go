@@ -107,8 +107,12 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 				response[result.field] = result.value
 			}
 		case <-ctx.Done():
+			reason := metadataFailure(ctx.Err())
+			if r.Context().Err() != nil {
+				reason = metadataFailure(r.Context().Err())
+			}
 			for field := range requests {
-				errorsByField[field] = metadataTimedOut()
+				errorsByField[field] = reason
 			}
 			requests = nil
 		}

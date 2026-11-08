@@ -76,6 +76,7 @@ type dashboardClaudeRunSurface struct {
 	*daemonSurface
 	runs         []surface.ClaudeRunObservation
 	runsErr      error
+	blockRuns    bool
 	processStart time.Time
 	links        []surface.ClaudeSubagentLink
 	linkParents  []string
@@ -85,7 +86,11 @@ func (s *dashboardClaudeRunSurface) ObserveClaudeRuns(context.Context) ([]surfac
 	return s.runs, nil
 }
 
-func (s *dashboardClaudeRunSurface) ObserveSessionClaudeRuns(_ context.Context, session *surface.Session) ([]surface.ClaudeRunObservation, error) {
+func (s *dashboardClaudeRunSurface) ObserveSessionClaudeRuns(ctx context.Context, session *surface.Session) ([]surface.ClaudeRunObservation, error) {
+	if s.blockRuns {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if s.runsErr != nil {
 		return nil, s.runsErr
 	}
