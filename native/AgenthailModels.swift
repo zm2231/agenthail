@@ -1228,6 +1228,13 @@ struct QueueState: Decodable, Identifiable, Equatable {
     }
 }
 
+struct MessageTurnOptions: Codable, Equatable {
+    var serviceTier: String? = nil
+    var outputSchema: RecordedJSON? = nil
+
+    var isEmpty: Bool { (serviceTier ?? "").isEmpty && outputSchema == nil }
+}
+
 indirect enum RecordedJSON: Codable, Equatable {
     case object([String: RecordedJSON]), array([RecordedJSON]), string(String), number(Double), bool(Bool), null
     init(from decoder: Decoder) throws {

@@ -15,6 +15,7 @@ struct LocalSend: Identifiable, Equatable {
     var deletable = false
     var unconfirmed = false
     var retryStopped = false
+    var turnOptions: MessageTurnOptions? = nil
 
     var canDelete: Bool { failure != nil && (deliveryID == nil || deletable) }
     var unconfirmedTitle: String? {

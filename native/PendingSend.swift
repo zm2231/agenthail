@@ -26,12 +26,14 @@ struct PendingSend: Identifiable, Equatable {
     var unconfirmed = false
     let sentAt: Date
     let busyDelivery: String?
+    let turnOptions: MessageTurnOptions?
     var retryStopped = false
     var retryingOnTap = false
 
-    init(id: UUID = UUID(), sessionID: String, message: String, attachments: [ComposerAttachment], idempotencyKey: String = UUID().uuidString, uploaded: [String]? = nil, wire: ActionWire? = nil, unconfirmed: Bool = false, sentAt: Date = Date(), busyDelivery: String? = nil) {
+    init(id: UUID = UUID(), sessionID: String, message: String, attachments: [ComposerAttachment], idempotencyKey: String = UUID().uuidString, uploaded: [String]? = nil, wire: ActionWire? = nil, unconfirmed: Bool = false, sentAt: Date = Date(), busyDelivery: String? = nil, turnOptions: MessageTurnOptions? = nil) {
         self.sentAt = sentAt
         self.busyDelivery = busyDelivery
+        self.turnOptions = turnOptions?.isEmpty == false ? turnOptions : nil
         let stored = attachments.compactMap(\.uploaded)
         files = !attachments.isEmpty && stored.count == attachments.count ? stored : nil
         self.id = id

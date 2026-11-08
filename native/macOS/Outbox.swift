@@ -25,9 +25,9 @@ final class Outbox {
         queue.unconfirmed = { [weak self] send in self?.finish(send.id, delivered: false) }
     }
 
-    func send(_ text: String, attachments: [ComposerAttachment], to sessionID: String, busyDelivery: String?, completion: ((Bool) -> Void)?) {
-        let pending = PendingSend(sessionID: sessionID, message: text, attachments: attachments, busyDelivery: busyDelivery)
-        rows[sessionID, default: []].append(LocalSend(id: pending.id, text: text, attachments: attachments, sentAt: pending.sentAt, status: nil, busyDelivery: busyDelivery))
+    func send(_ text: String, attachments: [ComposerAttachment], to sessionID: String, busyDelivery: String?, turnOptions: MessageTurnOptions? = nil, completion: ((Bool) -> Void)?) {
+        let pending = PendingSend(sessionID: sessionID, message: text, attachments: attachments, busyDelivery: busyDelivery, turnOptions: turnOptions)
+        rows[sessionID, default: []].append(LocalSend(id: pending.id, text: text, attachments: attachments, sentAt: pending.sentAt, status: nil, busyDelivery: busyDelivery, turnOptions: pending.turnOptions))
         if let completion { completions[pending.id] = completion }
         queue.add(pending)
     }
@@ -44,7 +44,7 @@ final class Outbox {
         }
         guard row.failure != nil else { return }
         // The daemon keeps a refusal under its key, so the retry is a new request.
-        var pending = PendingSend(id: row.id, sessionID: session, message: row.text, attachments: row.attachments, uploaded: row.uploaded?.map(\.id), busyDelivery: row.busyDelivery)
+        var pending = PendingSend(id: row.id, sessionID: session, message: row.text, attachments: row.attachments, uploaded: row.uploaded?.map(\.id), busyDelivery: row.busyDelivery, turnOptions: row.turnOptions)
         pending.files = row.uploaded
         update(row.id, in: session) {
             $0.failure = nil
@@ -110,7 +110,7 @@ final class Outbox {
     func restore(_ saved: [ComposerStore.Saved.Send]) -> [ComposerStore.Saved.Send] {
         let resumable = saved.compactMap(\.resumable)
         for (session, sends) in Dictionary(grouping: resumable, by: \.sessionID) {
-            let restored = sends.map { LocalSend(id: $0.id, text: $0.message, attachments: $0.attachments, uploaded: $0.files, sentAt: $0.sentAt, status: nil, busyDelivery: $0.busyDelivery, unconfirmed: true) }
+            let restored = sends.map { LocalSend(id: $0.id, text: $0.message, attachments: $0.attachments, uploaded: $0.files, sentAt: $0.sentAt, status: nil, busyDelivery: $0.busyDelivery, unconfirmed: true, turnOptions: $0.turnOptions) }
             rows[session] = restored + (rows[session] ?? [])
         }
         queue.restore(resumable)
@@ -128,7 +128,7 @@ final class Outbox {
                 update(send.id, in: send.sessionID) { $0.uploaded = stored }
                 uploaded = stored.map(\.id)
             }
-            let wire = try send.wire ?? api.instructionWire(sessionID: resolve(send.sessionID), message: send.message, busyDelivery: send.busyDelivery, author: "person", attachments: uploaded ?? [], idempotencyKey: send.idempotencyKey)
+            let wire = try send.wire ?? api.instructionWire(sessionID: resolve(send.sessionID), message: send.message, busyDelivery: send.busyDelivery, author: "person", attachments: uploaded ?? [], turnOptions: send.turnOptions, idempotencyKey: send.idempotencyKey)
             if send.wire == nil { queue.setWire(wire, for: send) }
             let receipt = try await api.send(wire)
             update(send.id, in: send.sessionID) {

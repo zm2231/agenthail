@@ -1341,10 +1341,15 @@ struct ComposerView: View {
     }
 
     private var hasText: Bool { !draft.isEmpty }
-    private var steerRefusal: String? { QueueSteer.composerRefusal(draft.attachments, capabilities: session.capabilities) }
+    private var takesTurnOptions: Bool { session.surface == "codex" }
+    private var steerRefusal: String? {
+        if takesTurnOptions && draft.turnOptions != nil { return "Steer can't carry turn options. Send queues this for next." }
+        return QueueSteer.composerRefusal(draft.attachments, capabilities: session.capabilities)
+    }
     private var canSteer: Bool { session.capabilities.steer && !session.isWaitingOnYou && steerRefusal == nil }
     private var statusLine: String {
-        ComposerStatusLine.text(.init(waitingOnYou: session.isWaitingOnYou, turnNotice: session.capabilities.turnNotice, working: session.isWorking, hasMessage: hasText, isCommand: draftIsCommand, steerRefusal: session.capabilities.steer ? steerRefusal : nil, followUpHint: hint, stopShortcut: shortcuts.label(.stop)))
+        if takesTurnOptions, let problem = draft.turnOptionsProblem { return problem }
+        return ComposerStatusLine.text(.init(waitingOnYou: session.isWaitingOnYou, turnNotice: session.capabilities.turnNotice, working: session.isWorking, hasMessage: hasText, isCommand: draftIsCommand, steerRefusal: session.capabilities.steer ? steerRefusal : nil, followUpHint: hint, stopShortcut: shortcuts.label(.stop)))
     }
     private var pasteAttachments: ((PastedAttachments) -> Void)? {
         guard session.capabilities.attach else { return nil }
@@ -1419,6 +1424,7 @@ struct ComposerView: View {
                             .padding(.horizontal, DesktopSpace.xs)
                         HStack(spacing: DesktopSpace.xs) {
                             TurnSettingChips(pane: pane)
+                            if takesTurnOptions { TurnOptionsChip(draft: draft) }
                             if !session.sharedHolders.isEmpty {
                                 HolderPicker(model: model, session: session)
                             }

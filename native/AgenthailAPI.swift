@@ -295,8 +295,8 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 
     /// Fixes an instruction's bytes and key, pin included, so that retrying it can only replay it.
-    func instructionWire(sessionID: String, message: String, busyDelivery: String? = nil, author: String?, attachments: [String], idempotencyKey: String) throws -> ActionWire {
-        let body = InstructionRequest(action: "send", sessionID: sessionID, message: message, busyDelivery: busyDelivery, author: author, attachments: attachments)
+    func instructionWire(sessionID: String, message: String, busyDelivery: String? = nil, author: String?, attachments: [String], turnOptions: MessageTurnOptions? = nil, idempotencyKey: String) throws -> ActionWire {
+        let body = InstructionRequest(action: "send", sessionID: sessionID, message: message, busyDelivery: busyDelivery, author: author, attachments: attachments, turnOptions: turnOptions)
         let pinned = holderPins.pinned(body: try JSONEncoder().encode(body), key: idempotencyKey)
         return ActionWire(body: pinned.body, key: pinned.key)
     }
@@ -989,8 +989,9 @@ private struct InstructionRequest: Encodable {
     var busyDelivery: String? = nil
     var author: String? = nil
     var attachments: [String] = []
+    var turnOptions: MessageTurnOptions? = nil
 
-    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case busyDelivery; case author; case attachments }
+    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case busyDelivery; case author; case attachments; case serviceTier; case outputSchema }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -1000,6 +1001,8 @@ private struct InstructionRequest: Encodable {
         try container.encodeIfPresent(busyDelivery, forKey: .busyDelivery)
         try container.encodeIfPresent(author, forKey: .author)
         if !attachments.isEmpty { try container.encode(attachments, forKey: .attachments) }
+        if let tier = turnOptions?.serviceTier, !tier.isEmpty { try container.encode(tier, forKey: .serviceTier) }
+        try container.encodeIfPresent(turnOptions?.outputSchema, forKey: .outputSchema)
     }
 }
 

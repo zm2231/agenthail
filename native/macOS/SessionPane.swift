@@ -718,18 +718,19 @@ final class SessionPane: ObservableObject, Identifiable {
                 return
             }
         }
+        let codex = selectedSession?.surface == "codex"
+        if codex, let problem = composerDraft.turnOptionsProblem {
+            model.operationError = problem
+            return
+        }
         let text = composer
         let attachments = composerDraft.attachments
         composer = ""
         composerDraft.attachments = []
         tabs.keep(sessionID)
-        send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery)
+        model.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery, turnOptions: codex ? composerDraft.turnOptions : nil)
         composerDraft.recordSending(text)
         composerDraft.restoreStashAfterSend()
-    }
-
-    private func send(_ text: String, attachments: [ComposerAttachment] = [], to sessionID: String, busyDelivery: String?) {
-        model.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery)
     }
 
     private func run(_ command: SlashCommand, argument: String, sessionID: String) {

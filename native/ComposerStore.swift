@@ -14,6 +14,7 @@ struct ComposerStore {
             var sentAt: Date? = nil
             var busyDelivery: String? = nil
             var files: [UploadedAttachment]? = nil
+            var turnOptions: MessageTurnOptions? = nil
         }
 
         var drafts: [String: String] = [:]
@@ -66,12 +67,12 @@ struct ComposerStore {
 
 extension ComposerStore.Saved.Send {
     init(_ send: PendingSend) {
-        self.init(id: send.id, sessionID: send.sessionID, message: send.message, idempotencyKey: send.idempotencyKey, uploaded: send.uploaded ?? send.alreadyUploaded, wire: send.wire, hadAttachments: !send.attachments.isEmpty, sentAt: send.sentAt, busyDelivery: send.busyDelivery, files: send.files)
+        self.init(id: send.id, sessionID: send.sessionID, message: send.message, idempotencyKey: send.idempotencyKey, uploaded: send.uploaded ?? send.alreadyUploaded, wire: send.wire, hadAttachments: !send.attachments.isEmpty, sentAt: send.sentAt, busyDelivery: send.busyDelivery, files: send.files, turnOptions: send.turnOptions)
     }
 
     /// Nil when attachments were not uploaded before the app ended: their bytes are gone, so this cannot be resent as it was.
     var resumable: PendingSend? {
         guard !hadAttachments || uploaded != nil else { return nil }
-        return PendingSend(id: id, sessionID: sessionID, message: message, attachments: files?.map(ComposerAttachment.init(uploaded:)) ?? [], idempotencyKey: idempotencyKey, uploaded: uploaded ?? [], wire: wire, unconfirmed: true, sentAt: sentAt ?? .distantPast, busyDelivery: busyDelivery)
+        return PendingSend(id: id, sessionID: sessionID, message: message, attachments: files?.map(ComposerAttachment.init(uploaded:)) ?? [], idempotencyKey: idempotencyKey, uploaded: uploaded ?? [], wire: wire, unconfirmed: true, sentAt: sentAt ?? .distantPast, busyDelivery: busyDelivery, turnOptions: turnOptions)
     }
 }
