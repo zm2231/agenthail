@@ -83,7 +83,8 @@ holdLock(path.join(args.state, 'lock'));
 const sessions = new Map();
 const orphans = loadOrphans(path.join(args.state, 'state.json'));
 const settings = loadSettings(path.join(args.state, 'settings.json'));
-const terminalCommands = loadTerminalCommands(path.join(args.state, 'terminal-commands.json'));
+const terminalCommandsFile = path.join(args.state, 'terminal-commands.json');
+const terminalCommands = { version: '', names: new Set(), stamp: '' };
 const events = [];
 const subscribers = new Set();
 let seq = 0;
@@ -703,6 +704,7 @@ async function listCommands({ cwd, configDir } = {}) {
   }
   if (!entry.offered) await entry.running;
   if (!entry.offered) throw new HostError('listing_failed', `Claude did not list its commands for ${cwd}`);
+  readTerminalCommands();
   return { commands: runnableCommands(entry.offered, terminalCommands.names), listedAt: new Date(entry.listedAt).toISOString() };
 }
 
@@ -1233,17 +1235,31 @@ function loadSettings(settingsPath) {
 // a folder listing never gets, so the host keeps the names its sessions report
 // and a listing leaves them out. A session on another Claude version replaces
 // them; sessions of one version add theirs, since project and plugin commands
-// differ by folder.
-function loadTerminalCommands(file) {
+// differ by folder. A retiring host still runs sessions while its replacement
+// starts new ones, so each write merges what the file holds, and a listing
+// reads the file again when it has changed.
+function readTerminalCommands() {
+  let stat;
   try {
-    const state = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return { version: typeof state.version === 'string' ? state.version : '', names: new Set((Array.isArray(state.names) ? state.names : []).filter((n) => typeof n === 'string')) };
+    stat = fs.statSync(terminalCommandsFile);
   } catch {
-    return { version: '', names: new Set() };
+    return;
   }
+  const stamp = `${stat.mtimeMs}:${stat.size}:${stat.ino}`;
+  if (stamp === terminalCommands.stamp) return;
+  try {
+    const state = JSON.parse(fs.readFileSync(terminalCommandsFile, 'utf8'));
+    terminalCommands.version = typeof state.version === 'string' ? state.version : '';
+    terminalCommands.names = new Set((Array.isArray(state.names) ? state.names : []).filter((n) => typeof n === 'string'));
+  } catch {
+    terminalCommands.version = '';
+    terminalCommands.names = new Set();
+  }
+  terminalCommands.stamp = stamp;
 }
 
 function learnTerminalCommands(init) {
+  readTerminalCommands();
   const version = typeof init.claude_code_version === 'string' ? init.claude_code_version : '';
   const reported = (Array.isArray(init.terminal_slash_commands) ? init.terminal_slash_commands : []).filter((n) => typeof n === 'string');
   const same = version === terminalCommands.version;
@@ -1251,11 +1267,10 @@ function learnTerminalCommands(init) {
   if (same && names.size === terminalCommands.names.size) return;
   terminalCommands.version = version;
   terminalCommands.names = names;
-  const target = path.join(args.state, 'terminal-commands.json');
-  const temp = `${target}.${process.pid}.tmp`;
+  const temp = `${terminalCommandsFile}.${process.pid}.tmp`;
   try {
     fs.writeFileSync(temp, JSON.stringify({ version, names: [...names] }) + '\n', { mode: 0o600 });
-    fs.renameSync(temp, target);
+    fs.renameSync(temp, terminalCommandsFile);
   } catch (error) {
     log(`recording Claude's terminal-only commands failed: ${error.message}`);
   }

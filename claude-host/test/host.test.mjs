@@ -1717,6 +1717,36 @@ test('a folder listing leaves out the terminal-only commands sessions of its Cla
   second.kill('SIGKILL');
 });
 
+test('a retiring host and its replacement both keep the terminal-only commands their sessions report', async () => {
+  const f = fixture();
+  const gate = path.join(f.root, 'init-gate');
+  const old = await startHost(f, { env: { FAKE_CLAUDE_TERMINAL_COMMANDS: 'statusline', FAKE_CLAUDE_INIT_GATE: gate } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const early = randomUUID();
+  await c.call('open', { sessionId: early, cwd: f.cwd });
+  const first = randomUUID();
+  await c.call('send', { sessionId: early, uuid: first, text: 'hello' });
+  await c.call('drain');
+  assert.ok(await lockReleased(f));
+
+  await startHost(f, { env: { FAKE_CLAUDE_TERMINAL_COMMANDS: 'l5-probe' } });
+  const d = new Client(f.socket);
+  await d.call('subscribe');
+  const late = randomUUID();
+  await d.call('open', { sessionId: late, cwd: f.cwd });
+  const second = randomUUID();
+  await d.call('send', { sessionId: late, uuid: second, text: 'hello' });
+  await d.event(turnResult(late, second));
+  fs.writeFileSync(gate, '');
+  assert.equal(await old.exited, 0, 'the retiring host ends once its session has finished the turn');
+  const recorded = JSON.parse(fs.readFileSync(path.join(f.state, 'terminal-commands.json'), 'utf8'));
+  assert.deepEqual(recorded.names.sort(), ['l5-probe', 'statusline']);
+  assert.deepEqual((await d.call('commands', { cwd: f.cwd })).commands.map((x) => x.name), ['review', 'compact']);
+  c.close();
+  d.close();
+});
+
 test('a listing that does not start in time is killed and refused, and folders are listed one at a time', async () => {
   const f = fixture();
   await startHost(f, { env: { FAKE_CLAUDE_INITIALIZE_MS: '2000', AGENTHAIL_CLAUDE_HOST_LISTING_TIMEOUT_MS: '600' } });
