@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
@@ -40,7 +39,6 @@ func TestAHostSessionTurnsAutocompactOffNowAndItsWindowGoesToTheRoot(t *testing.
 	if err := c.SetCompactSetting(ctx, sess, surface.CompactSettingWindow, "50000"); !errors.Is(err, surface.ErrInvalidTurnSetting) {
 		t.Fatalf("a window Claude ignores was accepted: %v", err)
 	}
-	c.host.listed = time.Time{}
 	settings, err = c.CompactSettings(ctx, sess)
 	if err != nil {
 		t.Fatal(err)
@@ -67,6 +65,33 @@ func TestAWindowChangeGoesToTheModelsOwnWindowWhenTheRootHasOne(t *testing.T) {
 	}
 	if key, value := claudeWindowFor(file, "claude-sonnet-5-5"); key != "" || value != "300000" {
 		t.Fatalf("root window: %q %q", key, value)
+	}
+}
+
+func TestAWindowChangeBeforeClaudeNamesItsModelGoesToTheChosenModelsWindow(t *testing.T) {
+	home := t.TempDir()
+	settings := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, []byte(`{"autoCompactWindow":300000,"modelSettings":{"claude-opus-5-5":{"autoCompactWindow":"auto"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := NewClaude(nil, home)
+	sess := &surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, ConfiguredModel: "claude-opus-5-5"}
+	listed, err := c.CompactSettings(context.Background(), sess)
+	if err != nil || settingValue(t, listed, surface.CompactSettingWindow).Value != surface.CompactAuto {
+		t.Fatalf("settings=%+v err=%v", listed, err)
+	}
+	if err := c.SetCompactSetting(context.Background(), sess, surface.CompactSettingWindow, "600000"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gjson.GetBytes(data, "modelSettings.claude-opus-5-5.autoCompactWindow").Int() != 600000 || gjson.GetBytes(data, "autoCompactWindow").Int() != 300000 {
+		t.Fatalf("settings = %s", data)
 	}
 }
 

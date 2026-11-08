@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -14,24 +15,21 @@ func (c *Claude) CompactSettings(ctx context.Context, sess *surface.Session) ([]
 		return nil, err
 	}
 	var settings []surface.TurnSetting
-	model := ""
-	if claudeHosted(sess) {
-		if listed, ok := c.host.session(ctx, sess.ID, sess.PID); ok {
-			model = listed.ContextModel
-			enabled := true
-			if listed.AutoCompact != nil {
-				enabled = listed.AutoCompact.Enabled
-			} else if listed.AutoCompactEnabled != nil {
-				enabled = *listed.AutoCompactEnabled
-			}
-			settings = append(settings, surface.AutoCompactSetting(enabled))
+	listed, hosted := c.hostedListing(ctx, sess)
+	if hosted {
+		enabled := true
+		if listed.AutoCompact != nil {
+			enabled = listed.AutoCompact.Enabled
+		} else if listed.AutoCompactEnabled != nil {
+			enabled = *listed.AutoCompactEnabled
 		}
+		settings = append(settings, surface.AutoCompactSetting(enabled))
 	}
 	file, err := surface.ReadClaudeCompactSettings(c.home, root.Root)
 	if err != nil {
 		return nil, err
 	}
-	_, window := claudeWindowFor(file, model)
+	_, window := claudeWindowFor(file, claudeSessionModels(sess, listed)...)
 	return append(settings, surface.CompactWindowSetting(window, surface.TurnSettingAppliesNewSessions, root.Name)), nil
 }
 
@@ -48,7 +46,11 @@ func (c *Claude) SetCompactSetting(ctx context.Context, sess *surface.Session, k
 			return err
 		}
 		_, err := c.host.client.SetAutoCompact(ctx, sess.ID, value == surface.CompactAutoOn)
-		return err
+		c.host.forget()
+		if err != nil {
+			return claudeHostDeliveryError(err)
+		}
+		return nil
 	case surface.CompactSettingWindow:
 		if err := surface.ValidCompactWindow(value); err != nil {
 			return err
@@ -61,17 +63,24 @@ func (c *Claude) SetCompactSetting(ctx context.Context, sess *surface.Session, k
 		if err != nil {
 			return err
 		}
-		model := ""
-		if claudeHosted(sess) {
-			if listed, ok := c.host.session(ctx, sess.ID, sess.PID); ok {
-				model = listed.ContextModel
-			}
-		}
-		key, _ := claudeWindowFor(file, model)
+		listed, _ := c.hostedListing(ctx, sess)
+		key, _ := claudeWindowFor(file, claudeSessionModels(sess, listed)...)
 		_, err = surface.WriteClaudeCompactSettings(c.home, root.Root, surface.ClaudeCompactChange{Model: key, Window: value})
 		return err
 	}
 	return fmt.Errorf("%w: unknown compact setting %q", surface.ErrInvalidTurnSetting, key)
+}
+
+func (c *Claude) hostedListing(ctx context.Context, sess *surface.Session) (claudehost.Session, bool) {
+	if !claudeHosted(sess) {
+		return claudehost.Session{}, false
+	}
+	return c.host.session(ctx, sess.ID, sess.PID)
+}
+
+// Claude names the model it ran only after a turn; before that the chosen model stands in.
+func claudeSessionModels(sess *surface.Session, listed claudehost.Session) []string {
+	return []string{listed.ContextModel, listed.Model, sess.ConfiguredModel}
 }
 
 func (c *Claude) compactRoot(sess *surface.Session) (surface.ClaudeConfigRoot, error) {
@@ -92,10 +101,11 @@ func (c *Claude) compactRoot(sess *surface.Session) (surface.ClaudeConfigRoot, e
 	return roots[0], nil
 }
 
-// A model's own window shadows the root's, so a change goes where Claude reads it for this model.
-func claudeWindowFor(file surface.ClaudeCompactSettings, model string) (string, string) {
-	if window, ok := file.ModelWindows[model]; ok && model != "" {
-		return model, claudeWindowValue(window)
+func claudeWindowFor(file surface.ClaudeCompactSettings, models ...string) (string, string) {
+	for _, model := range models {
+		if window, ok := file.ModelWindows[model]; ok && model != "" {
+			return model, claudeWindowValue(window)
+		}
 	}
 	if file.AutoCompactWindow != nil {
 		return "", claudeWindowValue(*file.AutoCompactWindow)
