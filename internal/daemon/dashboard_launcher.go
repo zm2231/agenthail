@@ -111,7 +111,7 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 			startErr = errors.New("session starter returned no session")
 		}
 		if work != nil {
-			d.abandonWork(*work)
+			d.unstartedWork(*work, startErr)
 		}
 		return actionResult{}, d.unstartedSession(request.Message, startErr)
 	}

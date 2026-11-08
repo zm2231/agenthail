@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type RefusedError struct{ Err error }
@@ -32,6 +33,17 @@ func Begin(ctx context.Context, reg *registry.Registry, spec Spec) (Plan, error)
 		return plan, errors.Join(fmt.Errorf("make worktree: %w", err), Abandon(context.WithoutCancel(ctx), reg, plan))
 	}
 	return made, nil
+}
+
+// Unstarted takes back the worktree of a session whose start returned none.
+// When the start's outcome is unknown a session may be running in it anyway,
+// so the record stays creating for the reconcile, which hands the worktree to
+// a session found inside it or settles it and keeps any work in it.
+func Unstarted(ctx context.Context, reg *registry.Registry, plan Plan, startErr error) error {
+	if surface.IsDeliveryOutcomeUnknown(startErr) {
+		return nil
+	}
+	return Abandon(ctx, reg, plan)
 }
 
 // Abandon keeps the record when the worktree could not be discarded, so the
