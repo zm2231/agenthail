@@ -1,14 +1,14 @@
 import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape } from "./format.js";
-import { orderTiles, tileLetter, tileLeads, needsYouByProject, projectColour, projectColourID } from "./project-tiles.js";
+import { fillTiles, orderTiles, tileColumns, tileLetter, tileLeads, needsYouByProject, projectColour, projectColourID } from "./project-tiles.js";
 import { shownDecisions } from "./decision-card.js";
 import { openProject, leaveProject } from "./project-pane.js";
 import { syncDecisionPane } from "./pane-scope.js";
 import { renderSessions } from "./sessions.js";
 import { showView } from "./navigation.js";
 
-export const tileLimit = 6;
+let shownColumns = 0;
 
 function tile(scope, mark, title, count, selected, colour) {
   const badge = count ? `<span class="tile-badge">${count}</span>` : "";
@@ -22,7 +22,9 @@ export function renderTiles() {
   const projects = app.state.projects || [];
   const decisions = shownDecisions();
   const counts = needsYouByProject(decisions, projects);
-  const { shown, more } = orderTiles(projects, tileLimit, { waiting: counts, leads: tileLeads(projects, app.state.sessions || []) });
+  const leads = tileLeads(projects, app.state.sessions || []);
+  shownColumns = tileColumns(row.clientWidth);
+  const { shown, more } = fillTiles(shownColumns, (limit) => orderTiles(projects, limit, { waiting: counts, leads }));
   const scope = app.scope || "all";
   const owner = app.state.daemon?.host?.id || "";
   const moreCount = more.reduce((sum, project) => sum + (counts[project.id] || 0), 0);
@@ -78,4 +80,6 @@ export function bindTiles() {
   document.addEventListener("change", (event) => {
     if (event.target.matches("[data-scope-more]") && event.target.value) setScope(event.target.value);
   });
+  const row = $("#project-tiles");
+  if (row && typeof ResizeObserver !== "undefined") new ResizeObserver(() => { if (tileColumns(row.clientWidth) !== shownColumns) renderTiles(); }).observe(row);
 }

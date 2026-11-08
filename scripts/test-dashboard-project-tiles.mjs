@@ -35,8 +35,8 @@ const tight = orderTiles(projects, 3);
 assert.deepEqual(ids(tight.shown), ["newest", "middle", "old"], "tiles are the most recently active open projects");
 assert.deepEqual(ids(tight.more), ["empty", "lead-only", "shelved"], "the rest, archived ones included, go under more");
 const roomy = orderTiles(projects, 6);
-assert.deepEqual(ids(roomy.shown), ["newest", "middle", "old", "lead-only"], "a project with no sessions gets a tile when it has a lead");
-assert.deepEqual(ids(roomy.more), ["empty", "shelved"], "an archived project only appears under more");
+assert.deepEqual(ids(roomy.shown), ["newest", "middle", "old", "lead-only", "empty"], "a lead ranks with active projects, and an idle project fills a tile left over");
+assert.deepEqual(ids(roomy.more), ["shelved"], "an archived project only appears under more");
 assert.equal(tileLetter("agenthail") + tileLetter("_tools") + tileLetter(""), "AT·", "a tile's letter is the name's first letter or digit");
 const colours = JSON.parse(readFileSync(new URL("./fixtures/project-colour-vectors.json", import.meta.url), "utf8"));
 const projectColour = vm.runInContext("projectColour", context);
@@ -74,6 +74,24 @@ const found = tileLeads([
 assert.deepEqual(Object.keys(found).sort(), ["far", "near"], "a lead's session is found on its own computer and a paired one");
 assert.equal(found.far.active, true, "a working lead is active");
 assert.equal(found.near.active, false, "an idle lead is not");
+const tileColumns = vm.runInContext("tileColumns", context);
+const fillTiles = vm.runInContext("fillTiles", context);
+assert.deepEqual([0, 120, 260, 312, 340].map(tileColumns), [3, 3, 5, 6, 6], "a column is at least 50 px, and there are always at least three");
+assert.deepEqual([undefined, NaN, -40].map(tileColumns), [3, 3, 3], "an unmeasured row still gets three columns");
+const many = Array.from({ length: 15 }, (_, n) => ({ id: `p${n}`, displayName: `p${n}`, sessionCount: 15 - n, lastActive: "2026-11-08T10:00:00Z" }));
+for (const columns of [3, 5, 6]) {
+  const filled = fillTiles(columns, (limit) => orderTiles(many, limit));
+  assert.equal(2 + filled.shown.length + (filled.more.length ? 1 : 0), 2 * columns, `${columns} columns: Inbox, projects, more and All fill both rows`);
+}
+const mostlyIdle = many.map((project, n) => ({ ...project, sessionCount: n < 2 ? 1 : 0, lastActive: undefined }));
+for (const columns of [3, 4, 5, 6]) {
+  const filled = fillTiles(columns, (limit) => orderTiles(mostlyIdle, limit));
+  assert.equal(3 + filled.shown.length, 2 * columns, `${columns} columns: idle projects fill the rows after the active ones`);
+  assert.deepEqual(ids(filled.shown).slice(0, 2), ["p0", "p1"], "active projects come first");
+}
+const few = fillTiles(6, (limit) => orderTiles(many.slice(0, 10), limit));
+assert.equal(few.shown.length, 10, "every project shows when they all fit, with no more tile");
+assert.equal(few.more.length, 0, "no more tile when every project shows");
 const css = readFileSync(new URL("../internal/daemon/dashboard/tokens.css", import.meta.url), "utf8");
 for (let colour = 0; colour < colours.count; colour++) {
   assert.ok(css.includes(`.tile-mark[data-colour="${colour}"]`), `tokens.css paints project colour ${colour}`);

@@ -135,11 +135,11 @@ if __name__ == "__main__":
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.add("/api/v1/events")
-    if sys.argv[1:2] in (["ask"], ["ask-several"], ["inbox"]):
+    if sys.argv[1:2] in (["ask"], ["ask-several"], ["inbox"], ["tiles"]):
         # An idle session whose ended turn asks the person, from a provider that answers nothing through Agenthail.
         SESSION["status"] = "idle"
         SESSION["capabilities"] = {**CAPABILITIES, "respond": False}
-        with open(os.path.join(os.path.dirname(__file__), ("ask" if sys.argv[1] == "inbox" else sys.argv[1]) + "-requests.json")) as requests:
+        with open(os.path.join(os.path.dirname(__file__), ("ask" if sys.argv[1] in ("inbox", "tiles") else sys.argv[1]) + "-requests.json")) as requests:
             RESPONSES["/api/v1/requests"] = json.load(requests)
         ask = RESPONSES["/api/v1/requests"]["requests"][0]
         SESSION["endTurn"] = {"headline": ask["title"], "needs": "you", "endedAt": NOW, "requestId": ask["id"]}
@@ -170,6 +170,7 @@ if __name__ == "__main__":
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.add("/api/v1/events")
     if sys.argv[1:2] == ["inbox"]:
+        ask = RESPONSES["/api/v1/requests"]["requests"][0]
         RESPONSES["/api/v1/decisions"] = {
             "decisions": [
                 {"group": "stopped", "sessionId": "fixture-stopped", "kind": "delivery", "reason": "A message to it was not delivered", "since": NOW, "answerable": False},
@@ -188,6 +189,20 @@ if __name__ == "__main__":
             {"id": SESSION["project"]["id"], "lastActive": NOW, "sessionCount": 1, "checkouts": [{"projectId": SESSION["project"]["id"], "sessionCount": 1}]},
             {"id": "release-notes", "sessionCount": 0, "checkouts": []},
         ]}
+    if sys.argv[1:2] == ["tiles"]:
+        names = ["backend", "website", "monitor", "billing", "mobile1", "docs", "api", "search", "ledger", "android", "desktop", "payroll", "metrics", "support", "release"]
+        count = int(sys.argv[2]) if len(sys.argv) > 2 else 3
+        local = {"id": "", "name": "this Mac", "state": "local"}
+        RESPONSES["/api/v1/snapshot"]["projects"] = [
+            {"id": name, "displayName": name, "kind": "folder", "checkouts": [{"host": local, "projectId": name, "rootPath": "/tmp/" + name}]}
+            for name in names[:count]
+        ]
+        RESPONSES["/api/v1/projects/activity"] = {"projects": [
+            {"id": name, "lastActive": NOW, "sessionCount": count - index, "checkouts": [{"projectId": name, "sessionCount": count - index}]}
+            for index, name in enumerate(names[:count])
+        ]}
+        theme = sys.argv[3] if len(sys.argv) > 3 else "system"
+        RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
     if sys.argv[1:2] == ["agents"]:
         # An idle session whose transcript holds agent messages, sends and a fold, in the given theme.
         SESSION["status"] = "idle"

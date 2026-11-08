@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SidebarTiles: View {
-    static let projectLimit = 5
+    @State private var width = DesktopColumns.sidebar.ideal - 2 * DesktopSpace.s
 
     var model: AgenthailModel
     var pane: SessionPane
@@ -12,9 +12,11 @@ struct SidebarTiles: View {
         let leads = model.projects.reduce(into: [String: ProjectTiles.Lead]()) { leads, project in
             if let session = project.leads.first.flatMap(ProjectContents.leadSessionID).flatMap(model.session) { leads[project.id] = ProjectTiles.Lead(session) }
         }
-        let tiles = ProjectTiles.order(model.projects, limit: Self.projectLimit, waiting: counts, leads: leads)
+        let count = TileGrid.columns(width: width)
+        let tiles = TileGrid.fill(columns: count) { ProjectTiles.order(model.projects, limit: $0, waiting: counts, leads: leads) }
         let owner = model.snapshot?.daemon.host?.id ?? ""
-        HStack(alignment: .top, spacing: 2) {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: TileGrid.spacing, alignment: .top), count: count)
+        LazyVGrid(columns: columns, alignment: .leading, spacing: TileGrid.spacing) {
             tile("Inbox", mark: .symbol("tray"), count: inbox.decisions.count, selected: pane.scope == .inbox, id: "sidebar-tile-inbox", action: pane.showInbox)
             ForEach(tiles.shown) { project in
                 tile(project.displayName, mark: .letter(ProjectTiles.letter(project.displayName), project: ProjectTiles.colourID(project.id, owner: owner)), count: counts[project.id] ?? 0,
@@ -38,6 +40,7 @@ struct SidebarTiles: View {
             }
             tile("All", mark: .symbol("square.stack"), count: 0, selected: pane.scope == .all, id: "sidebar-tile-all", action: pane.showAll)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .padding(.horizontal, DesktopSpace.s)
         .padding(.bottom, DesktopSpace.xs)
     }

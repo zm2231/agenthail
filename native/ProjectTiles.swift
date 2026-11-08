@@ -16,7 +16,7 @@ struct ProjectTiles: Equatable {
         }
 
         init(currentReason: String?, waiting: Bool, lastActive: String?) {
-            self.init(lastActive: lastActive.flatMap(TimestampParser.date), active: waiting || currentReason == "working" || currentReason == "queued")
+            self.init(lastActive: lastActive.flatMap(ProjectTiles.millisecondDate), active: waiting || currentReason == "working" || currentReason == "queued")
         }
 
         init(_ session: SessionState) {
@@ -28,15 +28,24 @@ struct ProjectTiles: Equatable {
         }
     }
 
+    static func millisecondDate(_ value: String) -> Date? {
+        let trimmed = value.replacingOccurrences(of: #"(\.\d{3})\d+"#, with: "$1", options: .regularExpression)
+        return TimestampParser.date(trimmed).map { Date(timeIntervalSince1970: ($0.timeIntervalSince1970 * 1000).rounded() / 1000) }
+    }
+
     static func order(_ projects: [ProjectState], limit: Int, waiting: [String: Int] = [:], leads: [String: Lead] = [:], now: Date = Date()) -> ProjectTiles {
+        func active(_ project: ProjectState) -> Bool {
+            project.activity?.sessionCount ?? 0 > 0 || !project.leads.isEmpty || waiting[project.id] ?? 0 > 0
+        }
         func group(_ project: ProjectState) -> Int {
             if waiting[project.id] ?? 0 > 0 { return 0 }
-            return leads[project.id]?.recent(at: now) == true ? 1 : 2
+            if leads[project.id]?.recent(at: now) == true { return 1 }
+            return active(project) ? 2 : 3
         }
         func time(_ project: ProjectState) -> Date {
-            max(project.activity?.lastActive.flatMap(TimestampParser.date) ?? .distantPast, leads[project.id]?.lastActive ?? .distantPast)
+            max(project.activity?.lastActive.flatMap(millisecondDate) ?? .distantPast, leads[project.id]?.lastActive ?? .distantPast)
         }
-        let open = projects.filter { $0.archived != true && ($0.activity?.sessionCount ?? 0 > 0 || !$0.leads.isEmpty || waiting[$0.id] ?? 0 > 0) }
+        let open = projects.filter { $0.archived != true }
         let recent = open.sorted { lhs, rhs in
             let (left, right) = (group(lhs), group(rhs))
             if left != right { return left < right }

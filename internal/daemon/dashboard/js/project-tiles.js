@@ -58,14 +58,27 @@ export function tileLeads(projects, sessions) {
   return leads;
 }
 
+export function tileColumns(width) {
+  const usable = Number.isFinite(width) ? Math.max(width, 0) : 0;
+  return Math.max(3, Math.floor((usable + 2) / 52));
+}
+
+export function fillTiles(columns, order) {
+  const slots = 2 * columns - 2;
+  const all = order(slots);
+  return all.more.length ? order(slots - 1) : all;
+}
+
 export function orderTiles(projects, limit, { waiting = {}, leads = {}, now = Date.now() } = {}) {
+  const active = (project) => (project.sessionCount || 0) > 0 || (project.coordinators || []).length > 0 || (waiting[project.id] || 0) > 0;
   const group = (project) => {
     if ((waiting[project.id] || 0) > 0) return 0;
     const lead = leads[project.id];
-    return lead && (lead.active || (lead.lastActive && now - lead.lastActive <= leadRecentWindow)) ? 1 : 2;
+    if (lead && (lead.active || (lead.lastActive && now - lead.lastActive <= leadRecentWindow))) return 1;
+    return active(project) ? 2 : 3;
   };
   const time = (project) => Math.max(Date.parse(project.lastActive || "") || 0, leads[project.id]?.lastActive || 0);
-  const open = projects.filter((project) => !project.archived && ((project.sessionCount || 0) > 0 || (project.coordinators || []).length > 0 || (waiting[project.id] || 0) > 0));
+  const open = projects.filter((project) => !project.archived);
   const recent = open.sort((a, b) => group(a) - group(b) || time(b) - time(a) || byName(a, b));
   const shown = recent.slice(0, limit);
   const more = projects.filter((project) => !shown.some((tile) => tile.id === project.id)).sort(byName);
