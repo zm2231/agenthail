@@ -31,6 +31,8 @@ struct MetadataOverlayTest {
         overlay.metadataFailed()
         let failed = overlay.apply(to: bare)
         check(failed.claudeRuns == nil && failed.claudeSubagents == nil && failed.metadataErrors == nil && failed.model == "gpt-5", "a failed metadata load clears observations only")
+        let warnings = MetadataWarnings.lines(["goal": "Timed out after 3s.", "claudeRuns": "Could not read: parse Claude job record", "custom": " ", "turnSettings": "Not supported for this session.\n"])
+        check(warnings == ["Claude runs: Could not read: parse Claude job record", "custom", "Goal: Timed out after 3s.", "Turn settings: Not supported for this session."], "each warning names its field and says why: \(warnings)")
 
         var pending = MetadataOverlay(seed: bare)
         check(!pending.needsModelCatalog, "the model catalog fallback waits while metadata is in flight")

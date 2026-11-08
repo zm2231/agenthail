@@ -90,3 +90,19 @@ struct MetadataOverlay {
         return merged
     }
 }
+
+enum MetadataWarnings {
+    static let fieldNames = [
+        "context": "Context usage", "goal": "Goal", "model": "Current model", "models": "Model list",
+        "turnSettings": "Turn settings", "compactSettings": "Compact settings",
+        "claudeRuns": "Claude runs", "claudeSubagents": "Subagents",
+    ]
+
+    static func lines(_ errors: [String: String]) -> [String] {
+        errors.keys.sorted().map { key in
+            let name = fieldNames[key] ?? key
+            let reason = errors[key].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+            return reason.isEmpty ? name : "\(name): \(reason)"
+        }
+    }
+}

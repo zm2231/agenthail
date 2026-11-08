@@ -21,21 +21,14 @@ struct ClaudeObservationsSection: View {
         }
         if let errors = detail?.metadataErrors, !errors.isEmpty {
             group("Not available right now") {
-                Text(Self.unavailable(errors.keys))
-                    .font(.system(size: DesktopType.meta))
-                    .foregroundStyle(DesktopPalette.text2)
-                    .textSelection(.enabled)
+                ForEach(MetadataWarnings.lines(errors), id: \.self) { line in
+                    Text(line)
+                        .font(.system(size: DesktopType.meta))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .textSelection(.enabled)
+                }
             }
         }
-    }
-
-    static let fieldNames = [
-        "context": "Context usage", "goal": "Goal", "model": "Current model",
-        "models": "Model list", "claudeRuns": "Claude runs", "claudeSubagents": "Subagents",
-    ]
-
-    static func unavailable(_ keys: some Collection<String>) -> String {
-        keys.sorted().map { fieldNames[$0] ?? $0 }.joined(separator: ", ")
     }
 
     private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

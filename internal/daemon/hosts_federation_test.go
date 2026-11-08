@@ -55,6 +55,10 @@ func (f *federatedSurface) ObserveClaudeRuns(context.Context) ([]surface.ClaudeR
 	return nil, nil
 }
 
+func (f *federatedSurface) ObserveSessionClaudeRuns(context.Context, *surface.Session) ([]surface.ClaudeRunObservation, error) {
+	return []surface.ClaudeRunObservation{}, nil
+}
+
 func (f *federatedSurface) ObserveClaudeSubagents(_ context.Context, session *surface.Session) ([]surface.ClaudeSubagentLink, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

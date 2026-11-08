@@ -1538,10 +1538,8 @@ struct SessionInspector: View {
                 }
                 if let errors = detail.metadataErrors, !errors.isEmpty {
                     Section("Metadata warnings") {
-                        ForEach(errors.keys.sorted(), id: \.self) { key in
-                            if let message = errors[key] {
-                                LabeledContent(key, value: message)
-                            }
+                        ForEach(MetadataWarnings.lines(errors), id: \.self) { line in
+                            Text(line).textSelection(.enabled)
                         }
                     }
                 }

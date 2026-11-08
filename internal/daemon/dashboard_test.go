@@ -74,13 +74,22 @@ func readDashboardState(t *testing.T, handler http.Handler) dashboardState {
 
 type dashboardClaudeRunSurface struct {
 	*daemonSurface
-	runs        []surface.ClaudeRunObservation
-	links       []surface.ClaudeSubagentLink
-	linkParents []string
+	runs         []surface.ClaudeRunObservation
+	runsErr      error
+	processStart time.Time
+	links        []surface.ClaudeSubagentLink
+	linkParents  []string
 }
 
 func (s *dashboardClaudeRunSurface) ObserveClaudeRuns(context.Context) ([]surface.ClaudeRunObservation, error) {
 	return s.runs, nil
+}
+
+func (s *dashboardClaudeRunSurface) ObserveSessionClaudeRuns(_ context.Context, session *surface.Session) ([]surface.ClaudeRunObservation, error) {
+	if s.runsErr != nil {
+		return nil, s.runsErr
+	}
+	return surface.CurrentClaudeRuns(s.runs, session.ID, s.processStart), nil
 }
 
 func (s *dashboardClaudeRunSurface) ObserveClaudeSubagents(_ context.Context, session *surface.Session) ([]surface.ClaudeSubagentLink, error) {
