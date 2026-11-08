@@ -3,6 +3,7 @@ import os
 import socketserver
 import sys
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
@@ -45,6 +46,7 @@ ANSWER_REPLIES = {
     "failed": (502, {"ok": False, "error": {"code": "bad_gateway", "message": "the session is not running"}}),
 }
 HELD_STREAMS = set()
+STREAMS = {}
 SCOPED = {}
 ACTIONS_LOG = os.environ.get("AGENTHAIL_FIXTURE_ACTIONS_LOG", "")
 REQUESTS_LOG = os.environ.get("AGENTHAIL_FIXTURE_REQUESTS_LOG", "")
@@ -71,6 +73,17 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b":" + b" " * 1024 + b"\n\n")
             self.wfile.flush()
             threading.Event().wait()
+        if self.path.split("?", 1)[0] in STREAMS:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(b":" + b" " * 1024 + b"\n\n")
+            self.wfile.flush()
+            try:
+                STREAMS[self.path.split("?", 1)[0]](self.wfile)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         path, _, query = self.path.partition("?")
         body = SCOPED.get(parse_qs(query).get("scope", [""])[0]) if path == "/api/v1/snapshot" else None
         body = body or RESPONSES.get(path)
@@ -349,6 +362,73 @@ if __name__ == "__main__":
         theme = sys.argv[3] if len(sys.argv) > 3 else "system"
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.update({"/api/v1/events", "/api/v1/catalog-events", "/api/v1/session-stream"})
+    if sys.argv[1:2] == ["upserts"]:
+        count = int(sys.argv[2]) if len(sys.argv) > 2 else 40
+        variant = sys.argv[3] if len(sys.argv) > 3 else "stable"
+        interval = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0
+        transcript = int(sys.argv[5]) if len(sys.argv) > 5 else 0
+
+        def row(id, status="idle"):
+            return {**SESSION, "id": id, "name": f"Session {id}", "alias": None, "status": status, "lastActive": NOW, "placement": "p-" + id}
+
+        rows = [row("shown"), row("hidden", "busy")] + [row(f"s{n:03d}") for n in range(count - 2)]
+        listed = {"families": len(rows), "sessions": len(rows)}
+        page = {**RESPONSES["/api/v1/snapshot"], "sessions": rows, "totalSessions": len(rows), "view": {
+            "counts": {scope: listed for scope in ("running", "current", "recent", "all")} | {"archived": {"families": 0, "sessions": 0}}, "surfaces": [],
+            "projects": [{"id": SESSION["project"]["id"], "name": SESSION["project"]["displayName"], "counts": listed, "collapsedFamilyIds": [r["id"] for r in rows]}],
+            "families": [{"id": r["id"], "rootId": r["id"], "projectId": SESSION["project"]["id"], "checkoutId": SESSION["checkout"]["id"],
+                          "members": [{"id": r["id"], "depth": 0, "contextOnly": False, "pinned": False}], "pinned": False, "workingSubagents": 0} for r in rows]}}
+        RESPONSES["/api/v1/snapshot"] = page
+        SCOPED.update({scope: page for scope in ("current", "recent", "all", "running")})
+        RESPONSES["/api/v1/session"] = {
+            "session": {k: rows[0][k] for k in ("id", "surface", "name", "status", "lastActive", "cwd")},
+            "exchanges": [], "capabilities": CAPABILITIES, "readOnly": False, "readOnlyReason": "",
+            "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": [
+                {"id": f"t{n}", "kind": kind, "role": role, "title": title, "text": text, "timestamp": NOW, "callId": f"c{n // 4}", "truncated": False}
+                for n in range(transcript)
+                for kind, role, title, text in [[
+                    ("message", "user", "", f"Step {n}: check the parser handles nested lists and report what changed."),
+                    ("toolCall", "assistant", f"Run go test ./internal/parse/... -run TestNested{n}", ""),
+                    ("toolResult", "tool", "", "ok  \tgithub.com/example/parse\t0.42s\n" * 3),
+                    ("message", "assistant", "", f"Done with step {n}. The **nested list** case now keeps its indentation, and `ParseBlock` returns early for empty input.\n\n- kept the old behaviour for flat lists\n- added a case for three levels"),
+                ][n % 4]]]},
+        }
+        for path, body in {"/api/v1/projects/activity": {"projects": []}, "/api/v1/history": {"items": [], "hasMore": False, "nextBefore": 0, "kinds": []},
+                           "/api/v1/decisions": {"decisions": [], "leadHandling": []}, "/api/v1/usage": {"sets": []}, "/api/v1/models": {"models": []},
+                           "/api/v1/session-options": {"surfaces": [{"id": "claude", "workspace": True}], "projects": [], "claudeConfigRoots": []},
+                           "/api/v1/session-commands": {"commands": [], "unavailable": ""}, "/api/v1/session-metadata": {},
+                           "/api/v1/prompts": {"prompts": [], "nextBefore": None}, "/api/v1/requests": {"permissionMode": "", "requests": []}}.items():
+            RESPONSES[path] = body
+        RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": "dark"}}
+        HELD_STREAMS.add("/api/v1/session-stream")
+        upsert_log = os.environ.get("AGENTHAIL_FIXTURE_UPSERT_LOG", "")
+
+        def catalog(out):
+            seq = 1
+            while True:
+                time.sleep(interval)
+                seq += 1
+                hidden = {**rows[1], "lastActive": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")}
+                if variant == "moved":
+                    hidden["placement"] = f"p-hidden-{seq % 2}"
+                event = {"stream": "catalog", "seq": seq, "type": "session.upserted", "data": {"session": hidden}}
+                out.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+                out.flush()
+                if upsert_log:
+                    with open(upsert_log, "a") as log:
+                        log.write(f"{time.time():.3f} {seq}\n")
+
+        def events(out):
+            seq = 1
+            while True:
+                time.sleep(interval)
+                seq += 1
+                event = {"id": seq, "type": "session.updated", "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "entityId": "hidden",
+                         "data": {"status": "busy", "activeTurnId": "turn-1"}}
+                out.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+                out.flush()
+
+        STREAMS.update({"/api/v1/catalog-events": catalog, "/api/v1/events": events})
     server = Server(("127.0.0.1", 0), Handler)
     print(server.server_address[1], flush=True)
     sys.stdout.close()
