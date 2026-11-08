@@ -100,6 +100,9 @@ func validateCommandFlags(command string, args []string) error {
 		switch args[0] {
 		case "send", "broadcast":
 			spec.values = map[string]bool{"--from": true}
+			spec.bools = map[string]bool{"--json": true}
+		case "list":
+			spec.bools = map[string]bool{"--json": true}
 		case "rm", "remove":
 			spec.bools = map[string]bool{"--all": true}
 		}

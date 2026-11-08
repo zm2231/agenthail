@@ -47,14 +47,6 @@ func (d *Daemon) abandonWork(plan worktree.Plan) {
 	}
 }
 
-func (d *Daemon) unstartedWork(plan worktree.Plan, startErr error) {
-	ctx, cancel := context.WithTimeout(context.Background(), surfaceOperationTimeout)
-	defer cancel()
-	if err := worktree.Unstarted(ctx, d.Registry, plan, startErr); err != nil {
-		d.log.Printf("take back worktree %s: %s", plan.WorktreePath, err)
-	}
-}
-
 // worktreeCeiling moves a ceiling's roots inside the checkout to their places
 // in the worktree, so the child works in its worktree and nowhere wider.
 func worktreeCeiling(raw json.RawMessage, plan worktree.Plan) (json.RawMessage, error) {

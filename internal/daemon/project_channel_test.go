@@ -191,6 +191,26 @@ func TestAChannelSendThatFailsForAMemberNamesEveryRecipient(t *testing.T) {
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "0 sent, 0 queued, 0 submitted, 1 failed ("+d.resolveDisplay(to.ID)+" failed: ") || !strings.Contains(response.Body.String(), "model rejected") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+		Target     broadcast.Target      `json:"target"`
+		Recipients []broadcast.Recipient `json:"recipients"`
+		Sent       *int                  `json:"sent"`
+		Queued     *int                  `json:"queued"`
+		Submitted  *int                  `json:"submitted"`
+		Failed     *int                  `json:"failed"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Code != "conflict" || body.Target.Channel != "reviewers" || body.Sent == nil || *body.Sent != 0 || body.Queued == nil || body.Submitted == nil || body.Failed == nil || *body.Failed != 1 {
+		t.Fatalf("the partial failure does not carry the per-member fields: %s", response.Body)
+	}
+	if len(body.Recipients) != 1 || body.Recipients[0].SessionID != to.ID || body.Recipients[0].Outcome != broadcast.OutcomeFailed || !strings.Contains(body.Recipients[0].Detail, "model rejected") {
+		t.Fatalf("recipients=%+v", body.Recipients)
+	}
 }
 
 func TestThePersonsChannelPostReachesAnotherHostAsThePersonWithTheirName(t *testing.T) {

@@ -165,7 +165,7 @@ func (a *App) cmdThread(args []string) error {
 	if work != nil {
 		if session == nil {
 			a.cleanUp("take back worktree "+work.WorktreePath, func() error {
-				return worktree.Unstarted(context.WithoutCancel(ctx), a.registry(), *work, startErr)
+				return worktree.Abandon(context.WithoutCancel(ctx), a.registry(), *work)
 			})
 		} else if activated, err := a.registry().ActivateWork(work.WorktreePath, session.ID); err != nil || !activated {
 			fmt.Fprintf(os.Stderr, "record worktree %s: activated=%t %v\n", work.WorktreePath, activated, err)
