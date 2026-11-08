@@ -82,7 +82,12 @@ assert.deepEqual(committed, ["P", "inbox"], "the scope is set before the view as
 vm.runInContext('setScope("Q")', tiles);
 vm.runInContext("dropMissingScope()", tiles);
 assert.equal(tiles.app.scope, "Q", "an archived project chosen from More stays the scope");
-tiles.app.state.projects = [{ id: "P" }];
+vm.runInContext('setScope("P")', tiles);
+tiles.app.state.projects = [{ id: "P", archived: true }];
+vm.runInContext("dropMissingScope()", tiles);
+assert.ok(tiles.app.scope === "all" && tiles.app.selectedProject === null, "archiving the scoped project drops back to All and closes its page");
+vm.runInContext('setScope("P")', tiles);
+tiles.app.state.projects = [{ id: "Q" }];
 vm.runInContext("dropMissingScope()", tiles);
 assert.equal(tiles.app.scope, "all", "a project that is gone drops back to All");
 console.log("dashboard session scope ok");

@@ -14,7 +14,7 @@ import { selectSession } from "./session-selection.js";
 import { loadAudit } from "./audit.js";
 import { renderChat } from "./chat.js";
 import { mobileConversationView } from "./navigation.js";
-import { scopedSessions } from "./session-scope.js";
+import { defaultSession } from "./session-scope.js";
 import { listedRows, loadSessionOrder, orderIsMissing } from "./session-order.js";
 import { findSessions, readHistory } from "./session-pages.js";
 import { catalogRead } from "./catalog-live.js";
@@ -115,7 +115,7 @@ export async function load(fresh = false, selectDefault = true) {
     if (app.audit.loaded) await loadAudit(true, true);
     if (app.selected && app.history) renderChat();
     if (selectDefault && !app.selected && location.hash === "#conversations" && !mobileConversationView()) {
-      const first = scopedSessions()[0] || app.state.sessions[0];
+      const first = defaultSession();
       if (first) selectSession(first.id);
     }
   } catch (error) {
