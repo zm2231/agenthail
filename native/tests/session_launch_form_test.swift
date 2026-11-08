@@ -93,6 +93,55 @@ struct SessionLaunchFormTest {
         let notion = try await send(SessionLaunchForm(agent: "notion", folder: "/work/sample", model: "ignored", effort: "high", message: "Outline"), api)
         check(notion["action"] as? String == "notion-create", "Notion uses notion-create")
         check(notion["cwd"] as? String == "" && notion["model"] as? String == "" && notion["effort"] == nil, "Notion sends no folder, model or effort")
+
+        try await checkLaunchOptions(api)
+    }
+
+    private static func checkLaunchOptions(_ api: AgenthailAPI) async throws {
+        var codex = SessionLaunchForm(agent: "codex", folder: "/work/sample", message: "Plan it", alias: " @research ")
+        codex.approvalPolicy = "on-request"
+        codex.mode = "plan"
+        codex.serviceTier = "fast"
+        codex.outputSchema = #"{"type":"object"}"#
+        let codexBody = try await send(codex, api)
+        check(codexBody["alias"] as? String == "research", "the name is sent without its @ or spaces: \(String(describing: codexBody["alias"]))")
+        check(codexBody["approvalPolicy"] as? String == "on-request" && codexBody["mode"] as? String == "plan" && codexBody["serviceTier"] as? String == "fast", "Codex approvals, mode and tier are sent: \(codexBody)")
+        check((codexBody["outputSchema"] as? [String: Any])?["type"] as? String == "object", "the output schema is sent as JSON, not text: \(String(describing: codexBody["outputSchema"]))")
+        check(NewSessionLabels.options(codex) == "@research · 4 options", "the chip names the session and counts its options: \(NewSessionLabels.options(codex))")
+
+        codex.outputSchema = "not json"
+        check(!codex.isComplete && codex.outputSchemaProblem != nil, "a schema that isn't a JSON object can't start")
+        check((try? codex.creationBody()) == nil, "a bad schema is never sent")
+        codex.outputSchema = "[1]"
+        check(codex.outputSchemaProblem != nil, "a schema must be an object")
+        let filler = String(repeating: "x", count: SessionLaunchForm.outputSchemaLimit)
+        codex.outputSchema = #"{"description":"\#(filler)"}"#
+        check(!codex.isComplete && (try? codex.creationBody()) == nil, "a schema over the daemon's 64 KiB limit can't start or be sent")
+        codex.outputSchema = #"{"description":"\#(String(repeating: "x", count: SessionLaunchForm.outputSchemaLimit - 40))"}"#
+        check(codex.outputSchemaProblem == nil && codex.isComplete, "a schema just under the limit can start")
+
+        var claude = SessionLaunchForm(agent: "claude", folder: "/work/sample", message: "Review", alias: "reviewer")
+        claude.claudeAgent = " code-reviewer "
+        claude.worktree = "review-pass"
+        claude.permissionMode = "acceptEdits"
+        let claudeBody = try await send(claude, api)
+        check(claudeBody["alias"] as? String == "reviewer" && claudeBody["agent"] as? String == "code-reviewer" && claudeBody["worktree"] as? String == "review-pass" && claudeBody["permissionMode"] as? String == "acceptEdits", "Claude name, agent, worktree and permission mode are sent: \(claudeBody)")
+        check(claudeBody["approvalPolicy"] == nil && claudeBody["serviceTier"] == nil, "Claude sends no Codex options")
+
+        claude.selectLauncher(LauncherOption(id: "tmux"))
+        check(claude.claudeAgent.isEmpty && claude.worktree.isEmpty && claude.permissionMode.isEmpty && claude.alias == "reviewer", "a terminal launcher clears launch options but keeps the name")
+        let terminalBody = try await send(claude, api)
+        check(terminalBody["alias"] as? String == "reviewer" && Set(terminalBody.keys) == ["action", "surface", "message", "cwd", "model", "launcher", "alias"], "a terminal launch sends the name and no launch options: \(terminalBody.keys.sorted())")
+        check(NewSessionLabels.options(claude) == "@reviewer", "a terminal launch counts no options")
+
+        var switching = SessionLaunchForm(agent: "codex", folder: "/work/sample", message: "Go", alias: "kept")
+        switching.serviceTier = "flex"
+        switching.switchAgent(to: "claude")
+        check(switching.alias == "kept" && switching.serviceTier.isEmpty, "switching agents keeps the name and clears the other agent's options")
+
+        let notion = try await send(SessionLaunchForm(agent: "notion", message: "Outline", alias: "notes"), api)
+        check(notion["alias"] as? String == "notes", "Notion takes a name too")
+        check(NewSessionLabels.options(SessionLaunchForm(agent: "codex")) == "Options", "an untouched form reads Options")
     }
 
     private static func send(_ form: SessionLaunchForm, _ api: AgenthailAPI) async throws -> [String: Any] {

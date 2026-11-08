@@ -5,6 +5,14 @@ enum NewSessionLabels {
         [agent.capitalized, account, model, effort.isEmpty ? nil : effort.capitalized].compactMap { $0 }.joined(separator: " · ")
     }
 
+    static func options(_ form: SessionLaunchForm) -> String {
+        let set = form.setsLaunchOptions ? [form.approvalPolicy, form.mode, form.serviceTier, form.outputSchema.trimmingCharacters(in: .whitespacesAndNewlines), form.claudeAgent.trimmingCharacters(in: .whitespaces), form.worktree.trimmingCharacters(in: .whitespaces), form.permissionMode].filter { !$0.isEmpty }.count : 0
+        let name = form.trimmedAlias.isEmpty ? nil : "@\(form.trimmedAlias)"
+        let count = set == 0 ? nil : set == 1 ? "1 option" : "\(set) options"
+        let label = [name, count].compactMap { $0 }.joined(separator: " · ")
+        return label.isEmpty ? "Options" : label
+    }
+
     static func place(_ folder: String, host: String?) -> String {
         [host, folder].compactMap { $0 }.joined(separator: " · ")
     }

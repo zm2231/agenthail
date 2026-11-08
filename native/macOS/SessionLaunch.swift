@@ -68,22 +68,55 @@ struct SessionLaunchForm: Equatable {
     var effort = ""
     var configRoot = ""
     var message = ""
+    var alias = ""
+    var approvalPolicy = ""
+    var mode = ""
+    var serviceTier = ""
+    var outputSchema = ""
+    var claudeAgent = ""
+    var worktree = ""
+    var permissionMode = ""
+
+    static let outputSchemaLimit = 64 << 10
 
     var usesFolder: Bool { agent != "notion" }
     var listsModels: Bool { agent != "notion" }
     var setsEffort: Bool { listsModels && launcher?.isTerminal != true }
+    var setsLaunchOptions: Bool { setsEffort }
 
     var trimmedMessage: String { message.trimmingCharacters(in: .whitespacesAndNewlines) }
-    var isComplete: Bool { !trimmedMessage.isEmpty && (!usesFolder || !folder.isEmpty) }
+    var trimmedAlias: String {
+        let name = alias.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.hasPrefix("@") ? String(name.dropFirst()) : name
+    }
+    var isComplete: Bool { !trimmedMessage.isEmpty && (!usesFolder || !folder.isEmpty) && outputSchemaProblem == nil }
+
+    var outputSchemaProblem: String? {
+        guard agent == "codex", setsLaunchOptions else { return nil }
+        if case .failure(let problem) = parsedOutputSchema { return problem.message }
+        return nil
+    }
+
+    private var parsedOutputSchema: Result<Any?, OutputSchemaProblem> {
+        let text = outputSchema.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return .success(nil) }
+        guard let schema = try? JSONSerialization.jsonObject(with: Data(text.utf8)), schema is [String: Any] else {
+            return .failure(OutputSchemaProblem(message: "The output schema must be a JSON object."))
+        }
+        guard let sent = try? JSONSerialization.data(withJSONObject: schema), sent.count <= Self.outputSchemaLimit else {
+            return .failure(OutputSchemaProblem(message: "The output schema must be at most 64 KiB."))
+        }
+        return .success(schema)
+    }
 
     mutating func switchAgent(to next: String) {
         guard next != agent else { return }
-        self = SessionLaunchForm(agent: next, host: host, folder: folder, message: message)
+        self = SessionLaunchForm(agent: next, host: host, folder: folder, message: message, alias: alias)
     }
 
     mutating func switchHost(to next: String?, folder nextFolder: String) {
         guard next != host else { return }
-        self = SessionLaunchForm(agent: agent, host: next, folder: nextFolder, message: message)
+        self = SessionLaunchForm(agent: agent, host: next, folder: nextFolder, message: message, alias: alias)
     }
 
     mutating func selectModel(_ next: String) {
@@ -94,7 +127,8 @@ struct SessionLaunchForm: Equatable {
 
     mutating func selectLauncher(_ next: LauncherOption?) {
         launcher = next
-        if next?.isTerminal == true { effort = "" }
+        guard next?.isTerminal == true else { return }
+        self = SessionLaunchForm(agent: agent, host: host, launcher: next, folder: folder, model: model, configRoot: configRoot, message: message, alias: alias)
     }
 
     var cwd: String { usesFolder ? folder : "" }
@@ -102,13 +136,21 @@ struct SessionLaunchForm: Equatable {
 
     func creationBody() throws -> Data {
         let effort = setsEffort ? effort : ""
-        let launch = agent == "codex" && !effort.isEmpty ? LaunchSettings(effort: effort) : LaunchSettings()
-        let claude = agent == "claude" ? ClaudeCreationSettings(effort: effort, configRoot: configRoot) : ClaudeCreationSettings()
-        return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, launch: launch, claude: claude, launcher: launcher, host: host)
+        let options = setsLaunchOptions
+        let schema = agent == "codex" && options ? try parsedOutputSchema.get() : nil
+        let launch = agent == "codex" ? LaunchSettings(effort: effort.isEmpty ? nil : effort, mode: options ? LaunchSettings.Mode(rawValue: mode) : nil) : LaunchSettings()
+        let codex = agent == "codex" && options ? CodexCreationSettings(approvalPolicy: approvalPolicy, serviceTier: serviceTier, outputSchema: schema) : CodexCreationSettings()
+        let claude = agent == "claude" ? ClaudeCreationSettings(worktree: options ? worktree.trimmingCharacters(in: .whitespaces) : "", agent: options ? claudeAgent.trimmingCharacters(in: .whitespaces) : "", effort: effort, permissionMode: options ? permissionMode : "", configRoot: configRoot) : ClaudeCreationSettings()
+        return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, alias: trimmedAlias, launch: launch, codex: codex, claude: claude, launcher: launcher, host: host)
     }
 
     func efforts(models: [ModelOption]) -> [String] {
         let selected = models.first { $0.id == model } ?? (model.isEmpty ? models.first { $0.default == true } : nil)
         return selected?.supportedReasoningEfforts ?? []
     }
+}
+
+struct OutputSchemaProblem: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }

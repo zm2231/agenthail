@@ -445,16 +445,18 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    static func creationBody(surface: String, message: String, cwd: String, model: String, launch: LaunchSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) throws -> Data {
-        if launcher?.isTerminal == true && (!launch.isEmpty || !claude.fields.filter({ $0.key != "configRoot" }).isEmpty) {
+    static func creationBody(surface: String, message: String, cwd: String, model: String, alias: String = "", launch: LaunchSettings = .init(), codex: CodexCreationSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) throws -> Data {
+        if launcher?.isTerminal == true && (!launch.isEmpty || !codex.isEmpty || !claude.fields.filter({ $0.key != "configRoot" }).isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
         var body: [String: Any] = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
+        if !alias.isEmpty { body["alias"] = alias }
         if let launcher { body["launcher"] = launcher.id }
         if let host { body["host"] = host }
         if surface == "codex" {
             if let effort = launch.effort { body["effort"] = effort }
             if let mode = launch.mode { body["mode"] = mode.rawValue }
+            body.merge(codex.fields) { _, value in value }
         } else if surface == "claude" {
             body.merge(claude.fields) { _, value in value }
         }

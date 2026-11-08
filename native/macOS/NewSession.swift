@@ -91,6 +91,7 @@ struct NewSessionView: View {
         if !draft.launchers.isEmpty, let launcher = draft.form.launcher {
             chip(launcher.label, symbol: "terminal", help: "Where the agent runs") { launcherPicker }
         }
+        NewSessionOptionsChip(form: $draft.form)
     }
 
     private var launcherPicker: some View {
