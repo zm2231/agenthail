@@ -100,6 +100,29 @@ func TestASteerToABusyClaudeSessionGoesOverItsSocketAndSaysSo(t *testing.T) {
 	}
 }
 
+func TestASteerABusyClaudeSessionsAgentMayNotSendIsQueued(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	app, r, fixture, posts := liveClaudeApp(t)
+	fixture.Listen()
+	fixture.Transcript(originalConversation, fixture.Home)
+	fixture.RecordStatus(originalConversation, fixture.Home, liveBridge, "busy", "", time.Now())
+	peers := claudetest.ListenPeerManager(t, fixture.Home)
+	worker := surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, Source: "vscode", Transport: "desktop"}
+	if err := r.RegisterSession(worker); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", worker.ID)
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"steer", "claude:" + originalConversation, "change course"})
+	})
+	if err != nil || !strings.Contains(output, "not a steer") {
+		t.Fatalf("a steer from an agent that may not steer is sent as a message and says so: output=%q err=%v", output, err)
+	}
+	if len(peers.Sends()) != 0 || posts.count("change course") != 0 || r.QueueCount(originalConversation) != 1 {
+		t.Fatalf("sends=%d steered=%d queued=%d, want it queued for the busy socket Claude", len(peers.Sends()), posts.count("change course"), r.QueueCount(originalConversation))
+	}
+}
+
 func TestQueueToABusyClaudeSessionRecordsAnExplicitQueue(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app, r, fixture, posts := liveClaudeApp(t)

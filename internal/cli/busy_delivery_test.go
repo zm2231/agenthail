@@ -95,6 +95,28 @@ func TestASteerHeldForAnAnswerWarnsWhenTheDaemonIsDown(t *testing.T) {
 	}
 }
 
+func TestOnlyAQueuedSendWarnsThatTheDaemonIsDown(t *testing.T) {
+	for _, busy := range []bool{false, true} {
+		target := surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusIdle}
+		fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": target}, caps: surface.Capabilities{Send: true}}
+		if busy {
+			fake.sendResult = &surface.SendResult{UUID: "turn", Accepted: false}
+		}
+		app, _ := cliFixture(t, fake)
+		stubDaemonRunning(t, false)
+		stderr, err := captureStderr(t, func() error {
+			_, runErr := captureStdout(t, func() error { return app.Run([]string{"send", "codex:target", "hello"}) })
+			return runErr
+		})
+		if err != nil {
+			t.Fatalf("busy=%v: %v", busy, err)
+		}
+		if warned := strings.Contains(stderr, queuedWithoutDaemon); warned != busy {
+			t.Fatalf("busy=%v: warned=%v, want a warning only for the queued send; stderr=%q", busy, warned, stderr)
+		}
+	}
+}
+
 func TestSteeringAnIdleSessionSaysToSend(t *testing.T) {
 	idle := surface.Session{ID: "idle", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusIdle}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"idle": idle}, caps: surface.Capabilities{Send: true, Steer: true}, steerErr: surface.ErrNothingToSteer}

@@ -76,13 +76,14 @@ Delivery (send, queue, steer):
   busy target, --no-queue       never queued: steered under the "steer" setting as above, otherwise refused with
                                 nothing sent, naming 'agenthail queue <target> "msg"' and 'agenthail steer <target> "msg"'
   target waiting on you         send, queue and steer hold the message until you answer ('agenthail requests <target>')
-  Claude with a socket          the rows above apply except: send (with or without --no-queue) and steer go over its
-                                socket now, busy or not, taken at its next tool call or as a new turn, and the receipt
-                                says it was not steered; a send also goes while it waits on you, a steer is held then,
-                                and queue still waits for the turn
+  Claude with a socket          on this computer, the rows above apply except: send (with or without --no-queue) and a
+                                steer you may send go over its socket now, busy or not, taken at its next tool call or
+                                as a new turn, and the receipt says it was not steered; a send also goes while it waits
+                                on you, a steer is held then, and queue still waits for the turn
   steer you may not send        only the person, the target's lead or the session that started it steer; anyone
                                 else's steer goes as a send would (now if idle, queued if busy), and the receipt says so
-  daemon not running            queued messages wait, and send, queue and steer warn; run 'agenthail daemon start'
+  daemon not running            a message send, queue or steer queued waits, and that command warns; run
+                                'agenthail daemon start' (a message delivered now needs no daemon and gets no warning)
   another host's session        reached through this computer's daemon, so start it first; --no-queue is refused
                                 because the daemon holds the send until that host answers
   read-only target              refused with its reason before anything is queued; nothing to retry

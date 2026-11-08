@@ -425,13 +425,14 @@ refuses it, nothing is sent, and the error names the next step,
 target has no turn to reach and says to run `agenthail send <target> "msg"`; a
 steer from an agent that may not steer the target goes as a send would, and its
 receipt says so. A target waiting on you holds a send, queue or steer until you
-answer (`agenthail requests <target>`). A Claude session with a socket is the
-one exception to all of this: a send (with or without `--no-queue`) and a steer
-go over its socket now, busy or not, taken at its next tool call or as a new
-turn, and the receipt says it was not steered; a send also goes while it waits
-on you, a steer is held then, and `queue` still waits for the turn. When the daemon is not
-running, queued messages wait and `send`, `queue` and `steer` all warn; run
-`agenthail daemon start`. Another host's sessions are reached through this
+answer (`agenthail requests <target>`). A Claude session with a socket on this
+computer is the exception: a send (with or without `--no-queue`) and a steer the
+sender may send go over its socket now, busy or not, taken at its next tool call
+or as a new turn, and the receipt says it was not steered; a send also goes
+while it waits on you, a steer is held then, and `queue` still waits for the
+turn. When the daemon is not running, a `send`, `queue` or `steer` that queued
+its message warns, and the message waits; run `agenthail daemon start`. A
+message delivered now needs no daemon and gets no warning. Another host's sessions are reached through this
 computer's daemon, which must be running, and refuse `--no-queue`. A read-only
 target is refused with its reason before anything is queued. A `submitted` or
 `unknown` outcome may have arrived, and the output says so: read
