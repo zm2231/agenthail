@@ -109,7 +109,10 @@ registry; metadata reads remain best-effort and non-blocking.
 `Claude.StartSession` captures the launch model in
 `surface.Session.ConfiguredModel`. The registry persists it in
 `sessions.configured_model`, preserving an existing value when a later
-registration omits the model. Claude context projection resolves the window
+registration omits the model. The session row does not carry it: the row's
+`settings` show a model only while the Claude host reports one, so a model
+changed in the session's own terminal never leaves a stale value on the row.
+Claude context projection resolves the window
 from the evidence above and emits `ContextUsage.ContextWindowSource`; the existing
 session-detail API carries the field without a separate provider endpoint.
 

@@ -26,7 +26,6 @@ type dashboardSession struct {
 	ID                string                     `json:"id"`
 	Surface           surface.SurfaceKind        `json:"surface"`
 	RuntimeKind       surface.RuntimeKind        `json:"runtimeKind,omitempty"`
-	ConfiguredModel   string                     `json:"configuredModel,omitempty"`
 	ClaudeConfigRoot  *surface.SessionConfigRoot `json:"claudeConfigRoot,omitempty"`
 	Name              string                     `json:"name"`
 	Cwd               string                     `json:"cwd,omitempty"`

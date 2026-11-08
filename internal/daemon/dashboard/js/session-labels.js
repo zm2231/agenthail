@@ -15,7 +15,8 @@ export function displayName(session) {
 export function conversationMeta(session, model = "") {
   const parts = [session.waitingOn ? waitingLabels[waitingPlace(session)] : session.limitResume || session.usageLimit ? limitLabel(session) : stopLabel(session) ? stopLabel(session) : backgroundWaiting(session) ? "Waiting on background work" : session.status === "busy" ? workingLabel(session) : statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
-  if (model) parts.push(model);
+  const shown = model || session.settings?.model;
+  if (shown) parts.push(shown);
   if (session.settings?.effort) parts.push(`effort ${session.settings.effort}`);
   if (session.settings?.permission) parts.push(`mode ${session.settings.permission}`);
   const configRoot = session.claudeConfigRoot;
