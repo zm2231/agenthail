@@ -137,6 +137,36 @@ func TestARemoteIdleSteerSaysToSend(t *testing.T) {
 	}
 }
 
+func TestARemoteSteerCarriesTheAgentThatSentIt(t *testing.T) {
+	for _, identity := range surface.CallerIdentity {
+		t.Setenv(identity.Variable, "")
+	}
+	app, r, _, api := federatedCLIFixture(t, true)
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"steer", "vps::@builder", "from the CLI"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "worker")
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"steer", "vps::@builder", "from the worker"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"steer", "vps::@builder", "  "}) }); err == nil {
+		t.Fatal("an empty remote steer was posted")
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 2 || actions[0]["action"] != "steer" || actions[1]["action"] != "steer" {
+		t.Fatalf("actions=%v, want two steers", actions)
+	}
+	if _, hasSource := actions[0]["sourceSessionId"]; hasSource {
+		t.Fatalf("a steer run outside any agent session carried a source: %v", actions[0])
+	}
+	if actions[1]["sourceSessionId"] != "worker" || actions[1]["message"] != "from the worker" {
+		t.Fatalf("the daemon cannot gate a remote steer it does not know the sender of: %v", actions[1])
+	}
+}
+
 func TestUncertainOutcomesSayToReadTheSessionFirst(t *testing.T) {
 	remote, _, _, api := federatedCLIFixture(t, true)
 	api.response = `{"ok":true,"status":"submitted"}`

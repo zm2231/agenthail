@@ -365,12 +365,16 @@ func actionPayload(options any) (map[string]any, error) {
 	return payload, nil
 }
 
-func (a *App) steerRemote(ctx context.Context, remote *remoteTarget, message string, jsonOut bool) error {
+func (a *App) steerRemote(ctx context.Context, remote *remoteTarget, sourceID, message string, jsonOut bool) error {
 	client, err := a.daemonAPI()
 	if err != nil {
 		return err
 	}
-	data, _, err := client.action(ctx, map[string]any{"action": "steer", "sessionId": remote.ID, "message": message})
+	payload := map[string]any{"action": "steer", "sessionId": remote.ID, "message": message}
+	if sourceID != "" {
+		payload["sourceSessionId"] = sourceID
+	}
+	data, _, err := client.action(ctx, payload)
 	if err != nil {
 		if isNothingToSteer(err) {
 			return idleSteerRefusal(remote.label())

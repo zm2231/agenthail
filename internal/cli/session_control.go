@@ -294,21 +294,9 @@ func (a *App) cmdSteer(args []string) error {
 	if err != nil {
 		return err
 	}
-	if remote != nil {
-		return a.steerRemote(ctx, remote, strings.Join(positional[1:], " "), hasFlag(args, "--json"))
-	}
-	if !surface.EffectiveCapabilities(surf, sess).Steer {
-		return fmt.Errorf("%s does not support steer", surf.Name())
-	}
-	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
-		return err
-	}
 	sourceID, err := a.sourceSessionID(ctx, "")
 	if err != nil {
 		return err
-	}
-	if sourceID != "" {
-		ctx = surface.WithSourceSessionID(ctx, sourceID)
 	}
 	message, err := messageText(strings.Join(positional[1:], " "))
 	if err != nil {
@@ -316,6 +304,18 @@ func (a *App) cmdSteer(args []string) error {
 	}
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("message is empty")
+	}
+	if remote != nil {
+		return a.steerRemote(ctx, remote, sourceID, message, hasFlag(args, "--json"))
+	}
+	if !surface.EffectiveCapabilities(surf, sess).Steer {
+		return fmt.Errorf("%s does not support steer", surf.Name())
+	}
+	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
+		return err
+	}
+	if sourceID != "" {
+		ctx = surface.WithSourceSessionID(ctx, sourceID)
 	}
 	receipt, err := a.dispatcher().Steer(ctx, surf, sess, message, "")
 	if err != nil && isNothingToSteer(err) {
