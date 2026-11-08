@@ -148,6 +148,8 @@ SOURCES=(
   macOS/NewSessionDraft.swift
   macOS/NewSessionLabels.swift
   macOS/SessionPane.swift
+  macOS/MacDecisions.swift
+  macOS/DecisionFeed.swift
   macOS/SidebarRow.swift
   macOS/StatusItemsState.swift
   macOS/StatusItems.swift

@@ -184,12 +184,17 @@ struct SessionSidebar: View {
                 newSessionHelp: shortcuts.help("New session", .newSession),
                 findShortcut: shortcuts.keyboardShortcut(.findSession)
             )
-            SessionRefinementBar(model: model)
-                .scrimText()
+            SidebarTiles(model: model, pane: pane)
+            if !pane.showsInbox {
+                SessionRefinementBar(model: model)
+                    .scrimText()
+            }
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: DesktopSpace.s) {
-                    if !model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if pane.showsInbox {
+                        DecisionList(model: model, pane: pane)
+                    } else if !model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         searchResults
                     } else {
                     if !tree.needsYou.isEmpty {
@@ -683,6 +688,10 @@ struct ConversationPane: View {
     var body: some View {
         if let projectID = pane.shownProjectID, let project = model.projects.first(where: { $0.id == projectID }) {
             ProjectPane(model: model, pane: pane, project: project)
+                .contentTitleBand(band, toggle: showsSidebarToggle ? pane : nil)
+                .solidContentPane(gaps: gaps)
+        } else if pane.showsInbox {
+            DecisionInboxPane(model: model, pane: pane)
                 .contentTitleBand(band, toggle: showsSidebarToggle ? pane : nil)
                 .solidContentPane(gaps: gaps)
         } else if let session = pane.displayedSession {

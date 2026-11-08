@@ -93,6 +93,8 @@ class Handler(BaseHTTPRequestHandler):
             if status != 502 or "may have reached" in reply["error"]["message"]:
                 SESSION["endTurn"]["answeredAt"] = NOW
                 RESPONSES["/api/v1/requests"] = {"permissionMode": "", "requests": []}
+                if "/api/v1/decisions" in RESPONSES:
+                    RESPONSES["/api/v1/decisions"]["decisions"] = [item for item in RESPONSES["/api/v1/decisions"]["decisions"] if item["sessionId"] != SESSION["id"]]
         data = json.dumps(reply).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -133,11 +135,11 @@ if __name__ == "__main__":
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.add("/api/v1/events")
-    if sys.argv[1:2] in (["ask"], ["ask-several"]):
+    if sys.argv[1:2] in (["ask"], ["ask-several"], ["inbox"]):
         # An idle session whose ended turn asks the person, from a provider that answers nothing through Agenthail.
         SESSION["status"] = "idle"
         SESSION["capabilities"] = {**CAPABILITIES, "respond": False}
-        with open(os.path.join(os.path.dirname(__file__), sys.argv[1] + "-requests.json")) as requests:
+        with open(os.path.join(os.path.dirname(__file__), ("ask" if sys.argv[1] == "inbox" else sys.argv[1]) + "-requests.json")) as requests:
             RESPONSES["/api/v1/requests"] = json.load(requests)
         ask = RESPONSES["/api/v1/requests"]["requests"][0]
         SESSION["endTurn"] = {"headline": ask["title"], "needs": "you", "endedAt": NOW, "requestId": ask["id"]}
@@ -167,6 +169,15 @@ if __name__ == "__main__":
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.add("/api/v1/events")
+    if sys.argv[1:2] == ["inbox"]:
+        RESPONSES["/api/v1/decisions"] = {
+            "decisions": [
+                {"group": "stopped", "sessionId": "fixture-stopped", "kind": "delivery", "reason": "A message to it was not delivered", "since": NOW, "answerable": False},
+                {"group": "holding", "sessionId": SESSION["id"], "projectId": SESSION["project"]["id"], "kind": "ask", "reason": ask["title"], "since": NOW,
+                 "answerable": True, "requests": RESPONSES["/api/v1/requests"]["requests"], "holdsUp": ["fixture-waiting"]},
+            ],
+            "leadHandling": [{"sessionId": "fixture-worker", "heldBy": SESSION["id"], "role": "worker", "reason": "Asks to run the migration", "since": NOW}],
+        }
     if sys.argv[1:2] == ["agents"]:
         # An idle session whose transcript holds agent messages, sends and a fold, in the given theme.
         SESSION["status"] = "idle"
