@@ -725,3 +725,20 @@ test("a computer sending while another's send is in flight waits for it", async 
     assert.equal(delivered.length, calls, `winner ${winnerStatus}`)
   }
 })
+
+test("a delivery is recorded before the registration is refreshed, so a failed refresh never sends it twice", async () => {
+  const env = await apnsEnvironment()
+  const phone = "ab".repeat(32)
+  const viaHost = await registerFixture(env, "host", phone)
+  const viaViewer = await registerFixture(env, "viewer", phone)
+  const put = env.PUSH_DEVICES.put.bind(env.PUSH_DEVICES)
+  env.PUSH_DEVICES.put = async () => { throw new Error("KV unavailable") }
+  const delivered = await withAPNs([], async () => {
+    await assert.rejects(send(request("POST", { ...viaHost, ...finished, dedupeKey: turnKey }), env))
+    env.PUSH_DEVICES.put = put
+    const again = await send(request("POST", { ...viaViewer, ...finished, dedupeKey: turnKey }), env)
+    assert.deepEqual(await again.json(), { ok: true, deduped: true })
+  })
+  assert.equal(delivered.length, 1)
+})
+

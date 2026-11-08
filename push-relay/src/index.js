@@ -260,13 +260,11 @@ export class PushDedupe {
   async deliverOnce(device, headers, payload) {
     const deliveredUntil = await this.ctx.storage.get("deliveredUntil")
     if (deliveredUntil > Date.now()) return json({ ok: true, deduped: true })
-    const response = await deliver(this.env, device, headers, payload)
-    if (response.ok) {
+    return deliver(this.env, device, headers, payload, async () => {
       const until = Date.now() + dedupeTTLMilliseconds
       await this.ctx.storage.put("deliveredUntil", until)
       await this.ctx.storage.setAlarm(until)
-    }
-    return response
+    })
   }
 
   async alarm() {
@@ -304,7 +302,7 @@ async function sendingDevice(body, env) {
   return { key, stored }
 }
 
-async function deliver(env, { key, stored }, pushHeaders, payload) {
+async function deliver(env, { key, stored }, pushHeaders, payload, accepted = async () => {}) {
   const host = stored.environment === "sandbox" ? "api.sandbox.push.apple.com" : "api.push.apple.com"
   const providerToken = await apnsProviderToken(env)
   const headers = {
@@ -319,6 +317,7 @@ async function deliver(env, { key, stored }, pushHeaders, payload) {
     body: JSON.stringify(payload)
   })
   if (response.ok) {
+    await accepted()
     await env.PUSH_DEVICES.put(key, JSON.stringify(stored), { expirationTtl: registrationTTLSeconds })
     return json({ ok: true })
   }
