@@ -2,7 +2,6 @@ import SwiftUI
 
 struct TurnSettingChips: View {
     @ObservedObject var pane: SessionPane
-    let cycleMode: () -> Void
     @State private var pending: TurnSettingChoice?
 
     private var settings: [TurnSetting] { pane.detail?.turnSettings ?? [] }
@@ -17,22 +16,14 @@ struct TurnSettingChips: View {
         .confirmingTurnSetting($pending) { pane.changeTurnSetting($0.key, to: $0.option.id) }
     }
 
-    @ViewBuilder private func chip(_ setting: TurnSetting) -> some View {
-        if setting.key == TurnSetting.mode {
-            Menu { options(setting) } label: { label(setting) } primaryAction: { cycleMode() }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Click to switch mode, hold for every mode")
-                .accessibilityLabel("Mode, \(setting.valueLabel)")
-        } else {
-            Menu { options(setting) } label: { label(setting) }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help(setting.appliesNextTurn ? "Applies from the next turn" : "Applies now")
-                .accessibilityLabel("\(setting.key.capitalized), \(setting.valueLabel)")
-        }
+    private func chip(_ setting: TurnSetting) -> some View {
+        Menu { options(setting) } label: { label(setting) }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(setting.appliesNextTurn ? "Applies from the next turn" : "Applies now")
+            .accessibilityLabel("\(setting.key.capitalized), \(setting.valueLabel)")
     }
 
     @ViewBuilder private func options(_ setting: TurnSetting) -> some View {
@@ -50,11 +41,16 @@ struct TurnSettingChips: View {
     }
 
     private func label(_ setting: TurnSetting) -> some View {
-        Text(setting.valueLabel)
-            .font(.system(size: DesktopType.meta, weight: .medium))
-            .foregroundStyle(DesktopPalette.text2)
-            .lineLimit(1)
-            .fixedSize()
+        HStack(spacing: 3) {
+            Text(setting.valueLabel)
+                .lineLimit(1)
+            Image(systemName: "chevron.up.chevron.down")
+                .imageScale(.small)
+        }
+        .font(.system(size: DesktopType.meta, weight: .medium))
+        .foregroundStyle(DesktopPalette.text2)
+        .fixedSize()
+        .contentShape(Rectangle())
     }
 
     private func choose(_ option: TurnSetting.Option, for setting: TurnSetting) {

@@ -1449,7 +1449,7 @@ struct ComposerView: View {
                             .frame(minHeight: 28)
                             .padding(.horizontal, DesktopSpace.xs)
                         HStack(spacing: DesktopSpace.xs) {
-                            TurnSettingChips(pane: pane, cycleMode: cycleMode)
+                            TurnSettingChips(pane: pane)
                             if !session.sharedHolders.isEmpty {
                                 HolderPicker(model: model, session: session)
                             }
@@ -1570,7 +1570,7 @@ struct ComposerView: View {
         if options.contains(where: { $0.id == query }) { return [] }
         return options
             .filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) || $0.displayName.localizedCaseInsensitiveContains(query) }
-            .map { CompletionItem(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.model ? "Current" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
+            .map { CompletionItem(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.selectedModelID ? "Current" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
     }
 
     private var completionToken: CompletionToken? {

@@ -71,7 +71,24 @@ struct TurnSettingsTest {
         let send = TurnSettingStub.actions.last ?? [:]
         check(sent && TurnSettingStub.actions.count == 2 && send["action"] as? String == "send", "the next message is sent: \(TurnSettingStub.actions)")
         check(send["effort"] == nil && send["mode"] == nil, "the send carries no effort or mode: \(send)")
+        modelOptions()
         print("turn settings: ok")
+    }
+
+    private static func modelOptions() {
+        guard let settings = try? JSONDecoder().decode([TurnSetting].self, from: Data(#"[{"key":"model","value":"sonnet","options":[{"id":"sonnet","label":"Claude Sonnet"},{"id":"opus","label":"Claude Opus"}],"applies":"now"}]"#.utf8)) else { return check(false, "a model setting decodes") }
+        let catalog = [
+            ModelOption(id: "opus", displayName: "Opus 5.5", description: "Deepest", default: nil, allowsCustom: true, supportedReasoningEfforts: ["high"], defaultReasoningEffort: "high"),
+            ModelOption(id: "haiku", displayName: "Haiku 5.5", description: nil, default: nil, allowsCustom: true, supportedReasoningEfforts: nil, defaultReasoningEffort: nil),
+        ]
+        guard let options = settings.modelOptions(catalog: catalog) else { return check(false, "a model setting gives model options") }
+        check(options.map(\.id) == ["sonnet", "opus", "haiku"], "descriptor models lead and catalog-only models follow: \(options.map(\.id))")
+        check(options[0].displayName == "Claude Sonnet" && options[0].allowsCustom == true, "a model the catalog lacks keeps its label and the catalog's custom IDs")
+        check(options[1].displayName == "Opus 5.5" && options[1].description == "Deepest", "a model the catalog knows keeps the catalog's detail")
+        check([TurnSetting]().modelOptions(catalog: catalog) == nil, "without a model setting the catalog stands")
+        let plain = [ModelOption(id: "gpt-sol", displayName: "Sol", description: nil, default: nil, allowsCustom: nil, supportedReasoningEfforts: nil, defaultReasoningEffort: nil)]
+        check(settings.modelOptions(catalog: plain)?.first?.allowsCustom == nil, "a catalog without custom IDs grants none")
+        check(settings.modelOptions(catalog: [])?.map(\.id) == ["sonnet", "opus"], "an empty catalog still lists the descriptor's models")
     }
 
     private static func check(_ condition: Bool, _ message: String) {
