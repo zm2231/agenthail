@@ -62,6 +62,7 @@ func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboa
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
 	sent, queued, submitted, failed := result.Count(broadcast.OutcomeSent), result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeSubmitted), result.Count(broadcast.OutcomeFailed)
+	fields := result.Fields()
 	if failed > 0 {
 		outcomes := make([]string, 0, len(result.Recipients))
 		for _, recipient := range result.Recipients {
@@ -75,9 +76,10 @@ func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboa
 			}
 			outcomes = append(outcomes, outcome)
 		}
-		return actionResult{}, actionFailed(http.StatusConflict, "conflict", fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed (%s)", sent, queued, submitted, failed, strings.Join(outcomes, "; ")))
+		return actionResult{}, &actionError{Status: http.StatusConflict, Code: "conflict", Message: fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed (%s)", sent, queued, submitted, failed, strings.Join(outcomes, "; ")), Extra: fields}
 	}
-	return actionOK(map[string]any{"ok": true, "target": result.Target, "recipients": result.Recipients, "sent": sent, "queued": queued, "submitted": submitted, "failed": failed}), nil
+	fields["ok"] = true
+	return actionOK(fields), nil
 }
 
 func (d *Daemon) doChannelRename(_ context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {

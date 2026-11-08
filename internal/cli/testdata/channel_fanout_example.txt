@@ -1,0 +1,19 @@
+$ agenthail channel add crew @scout
+added @scout to #crew
+$ agenthail channel add crew @coder
+added @coder to #crew
+$ agenthail channel add crew @analyst
+added @analyst to #crew
+$ agenthail channel add crew @reviewer
+added @reviewer to #crew
+$ agenthail channel add crew vps::@builder
+added vps::@builder to #crew
+$ agenthail channel send crew "standup at 10"
+  [QUEUE] vps::@builder: held for its host
+  [SUBMIT] @analyst: Submitted to s-analyst.
+  [QUEUE] @coder: Queued for s-coder; sends when current turn ends.
+  [FAIL] @reviewer: Codex session is read only: Codex Desktop created it, or Codex recorded no creator, and the Desktop bridge is unavailable; run 'agenthail launch codex'
+  [ OK ] @scout: Sent to s-scout.
+#crew: 1 sent, 2 queued, 1 submitted, 1 failed
+warning: daemon is not running; queued channel deliveries will wait until 'agenthail daemon start'
+error: #crew had 1 failed delivery(s)

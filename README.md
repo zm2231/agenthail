@@ -263,14 +263,41 @@ A message to the coordinator always lands. When it is working, your message stee
 
 When a session stops on a permission prompt or question, or its goal stops short, Agenthail tells its project's coordinator, with the prompt and the `agenthail answer` or `agenthail goal ... resume` command to settle it. With no coordinator, one that has not started a conversation yet, or when the stuck session is the coordinator, the session that started it hears instead. You are notified either way. The session that hears is told in its Agenthail card that you made it the one who decides: it reads the request, allows what fits the stuck session's task, denies what is unsafe with the safe form in the reason, and comes to you only when the effect is hard to undo or reaches outside the task (publishing, deleting others' data, credentials, spending, raising privileges) or it can't judge it. Each prompt or stop is told once, and a notice still waiting in the queue is withdrawn when the prompt is answered.
 
-For a group that needs the same update:
+For a group that needs the same update, make a channel and send to it. After `agenthail channel create crew`, with five members in five different states, a send reports each member:
 
-```bash
-agenthail channel create launch
-agenthail channel add launch @writer
-agenthail channel add launch @builder
-agenthail channel send launch "The release date moved to Friday"
+```text
+$ agenthail channel add crew @scout
+added @scout to #crew
+$ agenthail channel add crew @coder
+added @coder to #crew
+$ agenthail channel add crew @analyst
+added @analyst to #crew
+$ agenthail channel add crew @reviewer
+added @reviewer to #crew
+$ agenthail channel add crew vps::@builder
+added vps::@builder to #crew
+$ agenthail channel send crew "standup at 10"
+  [QUEUE] vps::@builder: held for its host
+  [SUBMIT] @analyst: Submitted to s-analyst.
+  [QUEUE] @coder: Queued for s-coder; sends when current turn ends.
+  [FAIL] @reviewer: Codex session is read only: Codex Desktop created it, or Codex recorded no creator, and the Desktop bridge is unavailable; run 'agenthail launch codex'
+  [ OK ] @scout: Sent to s-scout.
+#crew: 1 sent, 2 queued, 1 submitted, 1 failed
+warning: daemon is not running; queued channel deliveries will wait until 'agenthail daemon start'
+error: #crew had 1 failed delivery(s)
 ```
+
+Each member gets the message as its own send, marked `[from <sender> via #<channel>]`. The sender is never sent its own message.
+
+- **Idle members** (`[ OK ]`) get it now.
+- **Busy members** (`[QUEUE]`) get it when their turn ends.
+- **Members on a paired host** (`[QUEUE] … held for its host`) are always queued here; this host's daemon passes the message to their host, which delivers it as a send of its own.
+- **Submitted members** (`[SUBMIT]`) may already have the message; read `agenthail last <member>` before sending again.
+- **Failed members** (`[FAIL]`) did not get it, and the line gives the reason. A member that became read-only after it joined (`channel add` refuses read-only sessions) fails this way. Other members still get the message.
+
+Messages queued for any member wait until the daemon runs, and the send warns when it is not running. Any failed member makes the command exit 1.
+
+With `--json`, `channel send` prints one object instead. It has `target`; `recipients`, one per member, with `sessionId`, `coordinator`, `hostId`, `outcome` (`sent`, `queued`, `submitted` or `failed`) and `detail`; and the `sent`, `queued`, `submitted` and `failed` counts. It still exits 1 when a member failed. The daemon API's `channel-send` action returns the same fields: in its success body, and alongside the error in its 409 partial-failure response. `agenthail channel list --json` prints each channel's `name` and `members`, each member with `sessionId`, `display` and, on a paired host, `hostId`.
 
 To reach every conversation in a project, address the project by name or id instead of a channel; you need no channel for it:
 

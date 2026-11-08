@@ -40,7 +40,7 @@ func (c cliBroadcastDelivery) Coordinator(ctx context.Context, spec registry.Coo
 	return &answer.Result, answer.Result.SessionID, nil
 }
 
-func (a *App) channelSend(ctx context.Context, name, message, fromLabel string) error {
+func (a *App) channelSend(ctx context.Context, name, message, fromLabel string, jsonOut bool) error {
 	target, err := broadcast.Resolve(a.registry(), name)
 	if err != nil {
 		return err
@@ -64,6 +64,26 @@ func (a *App) channelSend(ctx context.Context, name, message, fromLabel string) 
 	if err != nil {
 		return err
 	}
+	queued, failed := result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeFailed)
+	if jsonOut {
+		if err := emit(result.Fields()); err != nil {
+			return err
+		}
+	} else {
+		a.printChannelResult(result)
+	}
+	if queued > 0 {
+		if _, running := daemon.IsRunning(); !running {
+			fmt.Fprintln(os.Stderr, "warning: daemon is not running; queued channel deliveries will wait until 'agenthail daemon start'")
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("#%s had %d failed delivery(s)", target.Label(), failed)
+	}
+	return nil
+}
+
+func (a *App) printChannelResult(result broadcast.Result) {
 	for _, recipient := range result.Recipients {
 		label := recipient.Coordinator
 		if label == "" {
@@ -76,15 +96,5 @@ func (a *App) channelSend(ctx context.Context, name, message, fromLabel string) 
 			fmt.Printf("  %s %s\n", tag, label)
 		}
 	}
-	queued, failed := result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeFailed)
-	fmt.Printf("#%s: %d sent, %d queued, %d submitted, %d failed\n", target.Label(), result.Count(broadcast.OutcomeSent), queued, result.Count(broadcast.OutcomeSubmitted), failed)
-	if queued > 0 {
-		if _, running := daemon.IsRunning(); !running {
-			fmt.Fprintln(os.Stderr, "warning: daemon is not running; queued channel deliveries will wait until 'agenthail daemon start'")
-		}
-	}
-	if failed > 0 {
-		return fmt.Errorf("#%s had %d failed delivery(s)", target.Label(), failed)
-	}
-	return nil
+	fmt.Printf("#%s: %d sent, %d queued, %d submitted, %d failed\n", result.Target.Label(), result.Count(broadcast.OutcomeSent), result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeSubmitted), result.Count(broadcast.OutcomeFailed))
 }

@@ -112,9 +112,12 @@ Channels:
   channel create <name>         Create a channel
   channel add <name> <target>   Add a session to a channel
   channel rm <name> <target>   Remove a session from a channel (--all deletes)
-  channel list                  List channels + members (shows @alias names)
+  channel list [--json]         List channels + members (shows @alias names)
   channel rename <name> <new>   Rename a channel
-  channel send <name> "msg"     Broadcast to all members (--from <name>)
+  channel send <name> "msg" [--from <name>] [--json]
+                                Send to every member but the sender; each line says sent, queued (busy, or
+                                held for a paired host), submitted (may have arrived) or failed with its reason
+                                (e.g. read-only); exits 1 if any member failed
   channel send '#<project>' "msg"  Message a project's active conversations
                                 on every host and its coordinator
 

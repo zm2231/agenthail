@@ -699,14 +699,54 @@ folder, including sessions in its worktrees.
 agenthail channel create launch
 agenthail channel add launch @researcher
 agenthail channel add launch @builder
-agenthail channel list
-agenthail channel send launch "The release is ready for review." --from @builder
+agenthail channel list [--json]
+agenthail channel send launch "The release is ready for review." --from @builder [--json]
 agenthail channel rm launch @researcher
 agenthail channel rm launch --all
 ```
 
-Channels broadcast to every member. Busy members queue. Partial failure exits
-nonzero so the caller can report which deliveries failed.
+A channel send reaches every member except the sender, each as its own send. This is real output after `agenthail channel create crew`:
+
+```text
+$ agenthail channel add crew @scout
+added @scout to #crew
+$ agenthail channel add crew @coder
+added @coder to #crew
+$ agenthail channel add crew @analyst
+added @analyst to #crew
+$ agenthail channel add crew @reviewer
+added @reviewer to #crew
+$ agenthail channel add crew vps::@builder
+added vps::@builder to #crew
+$ agenthail channel send crew "standup at 10"
+  [QUEUE] vps::@builder: held for its host
+  [SUBMIT] @analyst: Submitted to s-analyst.
+  [QUEUE] @coder: Queued for s-coder; sends when current turn ends.
+  [FAIL] @reviewer: Codex session is read only: Codex Desktop created it, or Codex recorded no creator, and the Desktop bridge is unavailable; run 'agenthail launch codex'
+  [ OK ] @scout: Sent to s-scout.
+#crew: 1 sent, 2 queued, 1 submitted, 1 failed
+warning: daemon is not running; queued channel deliveries will wait until 'agenthail daemon start'
+error: #crew had 1 failed delivery(s)
+```
+
+Each outcome means:
+
+- **`[ OK ]`:** an idle member got the message now.
+- **`[QUEUE]`:** a busy member gets the message when its turn ends.
+- **`[QUEUE] … held for its host`:** a member on a paired host is always queued here, and the daemon passes the message on.
+- **`[SUBMIT]`:** the message may already be there; read `agenthail last <member>` before resending.
+- **`[FAIL]`:** the member was refused with its reason, for example one that became read-only after it joined. The other members still get the message.
+
+Queued messages wait for the daemon, and the send warns when it is not running. Any failure exits 1, so report the failed members and retry only those with `agenthail send`.
+
+`--json` prints one object:
+- `target`
+- `recipients`: one per member, each with `sessionId`, `coordinator`, `hostId`, `outcome` (`sent`, `queued`, `submitted` or `failed`) and `detail`
+- `sent`, `queued`, `submitted`, `failed`: the counts
+
+The command still exits 1 when any member failed. The daemon's `channel-send` action (API and MCP) returns these fields too, alongside the error in its 409 partial-failure response.
+
+`channel list --json` gives each channel's `name` and `members`. Each member has `sessionId`, `display` and, for a member on a paired host, `hostId`.
 
 ## Paired Hosts
 

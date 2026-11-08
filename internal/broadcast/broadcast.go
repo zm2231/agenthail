@@ -220,6 +220,14 @@ func (r Result) Count(outcome string) int {
 	return count
 }
 
+func (r Result) Fields() map[string]any {
+	recipients := r.Recipients
+	if recipients == nil {
+		recipients = []Recipient{}
+	}
+	return map[string]any{"target": r.Target, "recipients": recipients, "sent": r.Count(OutcomeSent), "queued": r.Count(OutcomeQueued), "submitted": r.Count(OutcomeSubmitted), "failed": r.Count(OutcomeFailed)}
+}
+
 type Delivery interface {
 	Session(ctx context.Context, sessionID, message, sourceSessionID string) (*delivery.Receipt, error)
 	// Coordinator delivers to a coordinator on this host or a paired one and

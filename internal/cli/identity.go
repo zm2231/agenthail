@@ -164,34 +164,24 @@ func (a *App) cmdChannel(args []string) error {
 		fmt.Printf("removed %s from #%s\n", label, channelName)
 		return nil
 	case "list":
-		if len(args) != 1 {
-			return fmt.Errorf("usage: agenthail channel list")
+		if len(args) > 2 || len(args) == 2 && args[1] != "--json" {
+			return fmt.Errorf("usage: agenthail channel list [--json]")
 		}
-		channels, err := a.registry().ListChannels()
-		if err != nil {
-			return err
-		}
-		if len(channels) == 0 {
-			fmt.Println("(no channels; use: agenthail channel create <name>)")
-			return nil
-		}
-		for _, ch := range channels {
-			fmt.Printf("#%s  (%d members)\n", ch.Name, ch.MemberCount)
-			for _, m := range ch.Members {
-				fmt.Printf("    %s\n", a.resolveDisplay(m))
-			}
-		}
-		return nil
+		return a.channelList(len(args) == 2)
 	case "send", "broadcast":
 		if len(args) < 3 {
-			return fmt.Errorf("usage: agenthail channel send <channel> \"message\" [--from <name>]")
+			return fmt.Errorf("usage: agenthail channel send <channel> \"message\" [--from <name>] [--json]")
 		}
 		var fromLabel string
 		var msgParts []string
-		positionalOnly := false
+		positionalOnly, jsonOut := false, false
 		for i := 2; i < len(args); i++ {
 			if args[i] == "--" {
 				positionalOnly = true
+				continue
+			}
+			if !positionalOnly && args[i] == "--json" {
+				jsonOut = true
 				continue
 			}
 			if !positionalOnly && args[i] == "--from" && i+1 < len(args) {
@@ -205,7 +195,7 @@ func (a *App) cmdChannel(args []string) error {
 		if message == "" {
 			return fmt.Errorf("message is empty")
 		}
-		return a.channelSend(ctx, args[1], message, fromLabel)
+		return a.channelSend(ctx, args[1], message, fromLabel, jsonOut)
 	default:
 		return fmt.Errorf("unknown channel subcommand '%s'", args[0])
 	}
