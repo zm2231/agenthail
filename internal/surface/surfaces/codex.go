@@ -32,6 +32,7 @@ type Codex struct {
 	backgroundMu    sync.Mutex
 	backgroundState map[string]*codexBackgroundState
 	loadedThreads   map[string]map[string]bool
+	terminals       codexTerminals
 	mcpAttachment
 	codexConfigAttachment
 	subscriptions codexSubscriptions
