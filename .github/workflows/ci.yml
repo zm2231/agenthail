@@ -223,6 +223,8 @@ jobs:
         run: scripts/fetch-node.sh
       - name: Shipped Node download test
         run: scripts/test-fetch-node.sh
+      - name: Release iOS proof tests
+        run: scripts/test-release-ios-proof.sh
 
       - name: Race tests
         # sqlite's generated C is not instrumented here; release.yml runs the race tests with it instrumented.

@@ -363,8 +363,43 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  ios-proof:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      proven: ${{ steps.find.outputs.proven }}
+      commit: ${{ steps.find.outputs.commit }}
+      run: ${{ steps.find.outputs.run }}
+      reason: ${{ steps.find.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: find
+        name: Find the iOS run that covers this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release-ios-proof.sh find "$GITHUB_SHA"
+
+  ios-suite:
+    needs: ios-proof
+    if: needs.ios-proof.outputs.proven == 'false'
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    uses: ./.github/workflows/ios.yml
+    with:
+      force: true
+
   publish:
-    needs: [push-relay-check, macos-test, macos-package, linux-archive, ios-archive]
+    needs: [push-relay-check, macos-test, macos-package, linux-archive, ios-archive, ios-proof, ios-suite]
+    if: always() && needs.push-relay-check.result == 'success' && needs.macos-test.result == 'success' && needs.macos-package.result == 'success' && needs.linux-archive.result == 'success' && needs.ios-archive.result == 'success' && needs.ios-proof.result == 'success'
     runs-on: macos-15
     timeout-minutes: 55
     env:
@@ -406,6 +441,14 @@ jobs:
             dist/agenthail-*.tar.gz
             dist/agenthail-*.tar.gz.sha256
             dsyms/Agenthail-iOS-*-dSYMs.zip
+      - name: Require a passing iOS suite
+        env:
+          PROVEN: ${{ needs.ios-proof.outputs.proven }}
+          SUITE: ${{ needs.ios-suite.result }}
+          PROOF_COMMIT: ${{ needs.ios-proof.outputs.commit }}
+          PROOF_RUN: ${{ needs.ios-proof.outputs.run }}
+          PROOF_REASON: ${{ needs.ios-proof.outputs.reason }}
+        run: scripts/release-ios-proof.sh require "$PROVEN" "$SUITE"
       - name: Configure App Store Connect authentication
         env:
           ASC_KEY: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}

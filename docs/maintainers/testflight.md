@@ -14,6 +14,15 @@ gh workflow run release.yml --repo zm2231/agenthail --ref main -f version=v0.2.2
 
 Release is a combined product release: it builds and validates the Mac package and iOS archive, validates the IPA, creates a draft GitHub release, uploads to TestFlight, verifies internal availability, deploys the relay, and publishes the GitHub release. Use the management workflow for TestFlight-only operations. See [push notification service](push-relay.md) for relay credentials and deployment behavior.
 
+Nothing goes to TestFlight, the relay or the published release until the iOS suite (the `ios` job of the [iOS workflow](../../.github/workflows/ios.yml): unit tests and the smoke and main UI tiers) has passed on code with the release commit's iOS inputs. [`scripts/ios-inputs.sh list`](../../scripts/ios-inputs.sh) defines those inputs; the list includes the scripts and workflow that define and check them.
+
+The release's `ios-proof` job finds the last first-parent commit at or before the release commit that changed an iOS input. It checks that the inputs are identical from there to the release commit. Then it looks for an iOS run for a push of that commit whose `ios` job passed.
+
+- **A run is found:** that run proves the release, and the job summary names the commit and the run.
+- **No run is found:** a later push to main can cancel an earlier iOS run, and the iOS workflow skips pushes that change no iOS input, so a passing run may not exist. In that case the release runs the iOS suite itself at the release commit, and the summary links to that run.
+
+If neither passes, the release stays a draft with every asset. The job summary explains why under "Release left as a draft". Fix iOS on main and release again, or rerun the workflow's failed jobs.
+
 The marketing version comes from the release tag or dispatch input. The iOS build number comes from the Release workflow's `github.run_number`. Read both from the release run or App Store Connect; a management workflow's run number is unrelated to the app build number.
 
 Successful upload or `processingState: VALID` alone does not establish tester access. The release gate requires:

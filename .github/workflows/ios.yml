@@ -5,6 +5,12 @@ on:
     types: [opened, synchronize, reopened]
   push:
     branches: [main]
+  workflow_call:
+    inputs:
+      force:
+        description: Run the ios job with the main UI tiers whatever changed
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,7 +38,12 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           STACK: ${{ toJSON(github.event.pull_request.stack) }}
           STACK_BASE_REF: ${{ github.event.pull_request.stack.base.ref }}
+          FORCE: ${{ inputs.force == true }}
         run: |
+          if [ "$FORCE" = true ]; then
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "stack: $STACK"
           if [ "$STACK" != null ]; then
             if [ -z "$STACK_BASE_REF" ]; then
@@ -42,18 +53,8 @@ jobs:
             git fetch --no-tags origin "+refs/heads/$STACK_BASE_REF:refs/remotes/origin/$STACK_BASE_REF"
             BASE="$(git merge-base "origin/$STACK_BASE_REF" HEAD)"
           fi
-          yq '.targets[].sources[].path' native/project.yml > "$RUNNER_TEMP/sources"
-          test -s "$RUNNER_TEMP/sources"
           git diff --name-only --no-renames "$BASE" HEAD > "$RUNNER_TEMP/changed"
-          inputs=(native/project.yml native/Agenthail.xcodeproj native/ui-test-tiers.txt scripts/ios-simulator.sh scripts/ios-test-stall-guard.sh scripts/ios-ui-tests.sh scripts/test-xcodegen-project.sh .github/workflows/ios.yml)
-          while read -r source; do path="native/$source"; inputs+=("${path#native/../}"); done < "$RUNNER_TEMP/sources"
-          ios=false
-          while read -r file; do
-            for input in "${inputs[@]}"; do
-              if [ "$file" = "$input" ] || [[ "$file" == "$input"/* ]]; then ios=true; fi
-            done
-          done < "$RUNNER_TEMP/changed"
-          echo "ios=$ios" >> "$GITHUB_OUTPUT"
+          echo "ios=$(scripts/ios-inputs.sh touched "$RUNNER_TEMP/changed")" >> "$GITHUB_OUTPUT"
       - id: tiers
         env:
           GH_TOKEN: ${{ github.token }}
@@ -136,7 +137,7 @@ jobs:
 
   report:
     needs: ios
-    if: always() && github.event_name == 'push' && needs.ios.result != 'skipped' && needs.ios.result != 'cancelled'
+    if: always() && github.event_name == 'push' && inputs.force != true && needs.ios.result != 'skipped' && needs.ios.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
