@@ -15,11 +15,11 @@ extension ProjectContents {
 
 extension View {
     @ViewBuilder
-    func opensProject(_ projectID: String?, model: AgenthailModel, pane: SessionPane) -> some View {
+    func opensProject(_ projectID: String?, model: AgenthailModel, pane: SessionPane, shown: Bool? = nil) -> some View {
         if let projectID, model.projects.contains(where: { $0.id == projectID }) {
             Button { pane.showProject(projectID) } label: { self.contentShape(Rectangle()) }
                 .buttonStyle(.plain)
-                .selectionMark(pane.shownProjectID == projectID, bar: true)
+                .selectionMark(shown ?? (pane.shownProjectID == projectID), bar: true)
                 .accessibilityHint("Opens the project")
                 .accessibilityIdentifier("open-project-" + projectID)
         } else {

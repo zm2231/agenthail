@@ -7,10 +7,12 @@ struct SidebarSectionKey: Equatable {
     let selectedID: String?
     let attention: [String: SessionAttention]
     let expandedFamilies: Set<String>
+    let isShownProject: Bool
 
-    init(project: SessionTree.Project, expanded: Bool, selectedID: String?, attention: [String: SessionAttention], expandedFamilies: Set<String>) {
+    init(project: SessionTree.Project, expanded: Bool, selectedID: String?, attention: [String: SessionAttention], expandedFamilies: Set<String>, shownProjectID: String?) {
         self.project = project
         self.expanded = expanded
+        isShownProject = shownProjectID != nil && project.identity?.id == shownProjectID
         self.selectedID = project.checkouts.contains { $0.families.contains { $0.contains(selectedID) } } ? selectedID : nil
         self.attention = attention
         self.expandedFamilies = expandedFamilies
