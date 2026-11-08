@@ -76,6 +76,8 @@ type Daemon struct {
 	threads   map[string]*Thread
 	order     []string
 	loaded    map[string]bool
+	heldBy    map[string]bool
+	loadedCfg map[string]map[string]any
 	conns     map[*connection]bool
 	called    chan struct{}
 	next      int
@@ -413,6 +415,22 @@ func (d *Daemon) Load(threadID string) {
 	d.loaded[threadID] = true
 }
 
+// HoldElsewhere keeps a thread loaded through an unsubscribe, as another client does.
+func (d *Daemon) HoldElsewhere(threadID string, held bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.heldBy == nil {
+		d.heldBy = map[string]bool{}
+	}
+	d.heldBy[threadID] = held
+}
+
+func (d *Daemon) LoadedConfig(threadID string) map[string]any {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.loadedCfg[threadID]
+}
+
 func (d *Daemon) SetThreadModel(threadID, model string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -515,8 +533,20 @@ func (d *Daemon) lifecycle(method string, params map[string]any, result map[stri
 		if model, _ := params["model"].(string); model != "" && !d.loaded[threadID] {
 			thread.Model = model
 		}
+		if !d.loaded[threadID] {
+			config, _ := params["config"].(map[string]any)
+			if d.loadedCfg == nil {
+				d.loadedCfg = map[string]map[string]any{}
+			}
+			d.loadedCfg[threadID] = config
+		}
 		d.loaded[threadID] = true
 		return map[string]any{"thread": d.threadJSON(thread, false), "model": thread.Model}
+	case "thread/unsubscribe":
+		if !d.heldBy[threadID] {
+			d.loaded[threadID] = false
+		}
+		return map[string]any{"status": "unsubscribed"}
 	case "thread/name/set":
 		thread := d.threads[threadID]
 		if thread == nil {

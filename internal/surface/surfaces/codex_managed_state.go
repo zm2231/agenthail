@@ -34,6 +34,7 @@ func (c *Codex) watchManagedClient(ctx context.Context, client codexClient, sess
 		}
 	}
 	poll()
+	defer c.subscriptions.remove(sess.ID, client)
 	notifier, _ := client.(codexNotifier)
 	subscribed := notifier != nil && c.subscribeManagedThread(ctx, client, sess.ID)
 	var notified <-chan struct{}

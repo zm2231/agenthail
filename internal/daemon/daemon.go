@@ -208,6 +208,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	}
 	if reg != nil {
 		reg.SetBusyPolicy(d.busyPolicy)
+		attachCodexConfigStore(reg, surfaces)
 	}
 	d.sources.prompts = d.backfillPrompt
 	d.sources.hookCaptured = d.holdsUncheckedHookCapture

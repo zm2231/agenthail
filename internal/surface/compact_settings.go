@@ -16,6 +16,7 @@ const (
 const (
 	TurnSettingAppliesNewSessions = "newSessions"
 	TurnSettingAppliesNextMessage = "nextMessage"
+	TurnSettingAppliesNextLoad    = "nextLoad"
 )
 
 const CompactWindowRootDefault = "default"

@@ -3,7 +3,6 @@ package surfaces
 import (
 	"context"
 	"fmt"
-	"maps"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -23,13 +22,20 @@ func mcpServerConfig(url, token string) map[string]any {
 }
 
 func withMCPConfig(params map[string]any, url, token string) map[string]any {
-	merged := maps.Clone(params)
-	merged["config"] = mcpServerConfig(url, token)
-	return merged
+	return withConfig(params, mcpServerConfig(url, token))
 }
 
 // The only sender of thread/start|resume|fork; a new thread's token is minted unbound and claimed once Codex returns its id.
 func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, method string, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
+	if method == codexThreadResume {
+		threadID, _ := params["threadId"].(string)
+		defer c.subscriptions.shared(threadID)()
+		response, err := c.resumeThread(ctx, client, session, params, wait)
+		if err == nil {
+			c.subscriptions.add(threadID, client)
+		}
+		return response, err
+	}
 	credentials := c.mcpCredentials()
 	if credentials == nil {
 		return client.Request(ctx, method, params, wait)
@@ -52,10 +58,22 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 			}
 		}
 		return response, nil
-	case codexThreadResume:
-		return c.resumeWithCredential(ctx, client, credentials, session, params, wait)
 	}
 	return nil, fmt.Errorf("codexThreadRequest does not send %s", method)
+}
+
+func (c *Codex) resumeThread(ctx context.Context, client codexClient, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
+	if store := c.codexConfigStore(); store != nil && session != nil && session.ID != "" {
+		overrides, err := store.CodexConfigOverrides(session.ID)
+		if err != nil {
+			return nil, fmt.Errorf("read the thread's config overrides: %w", err)
+		}
+		params = withConfig(params, overrides)
+	}
+	if credentials := c.mcpCredentials(); credentials != nil {
+		return c.resumeWithCredential(ctx, client, credentials, session, params, wait)
+	}
+	return client.Request(ctx, codexThreadResume, params, wait)
 }
 
 // A loaded thread ignores a resume's config, so only a reload replaces a token it holds.

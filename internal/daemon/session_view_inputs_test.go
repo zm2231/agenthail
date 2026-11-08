@@ -24,6 +24,7 @@ const (
 	voiceOperators = "voice operator roles, read by LocalSessionRoles, which the view build does not call"
 	queueMarks     = "mirrored sessions whose queue changed, read only by RefreshHostQueueCounts, which writes the count a view reads into catalog_sessions"
 	idleAttempts   = "idle compaction attempts, read by the idle compactor and when a turn record is journaled, not by any view query"
+	codexConfig    = "a Codex thread's config overrides, read when Agenthail resumes the thread and by session metadata, not by any view query"
 )
 
 var notSessionViewInputs = map[string]string{
@@ -38,6 +39,7 @@ var notSessionViewInputs = map[string]string{
 	"alias_reservations": sessionOnly, "launcher_pending": sessionOnly, "pending_ceilings": sessionOnly, "session_ceilings": sessionOnly,
 	"session_context": sessionOnly, "session_moves": sessionOnly, "session_rekeys": sessionOnly, "tasks": sessionOnly,
 	"session_origins": voiceOperators, "host_queue_dirty": queueMarks, "idle_compactions": idleAttempts,
+	"session_codex_config": codexConfig,
 }
 
 func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T) {
