@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -48,5 +49,37 @@ func TestConcurrentWorktreesForOneBranchMakeOneAndRefuseTheRest(t *testing.T) {
 	}
 	if work, found, err := reg.WorkAt(winner.WorktreePath); err != nil || !found || work.Branch != "ah/shared" {
 		t.Fatalf("the made worktree's record: %+v found=%v err=%v", work, found, err)
+	}
+}
+
+func TestParallelWorkersEachGetTheirOwnWorktree(t *testing.T) {
+	checkout := repository(t)
+	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reg.Close() })
+	const workers = 6
+	var wg sync.WaitGroup
+	plans := make([]Plan, workers)
+	errs := make([]error, workers)
+	for i := range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			plans[i], errs[i] = Begin(context.Background(), reg, Spec{Cwd: checkout, Name: fmt.Sprintf("@worker%d", i)})
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("worker %d: %v", i, err)
+		}
+		if _, err := os.Stat(plans[i].WorktreePath); err != nil {
+			t.Fatalf("worker %d has no worktree: %v", i, err)
+		}
+		if !branchExists(t, checkout, plans[i].Branch) {
+			t.Fatalf("worker %d has no branch %s", i, plans[i].Branch)
+		}
 	}
 }

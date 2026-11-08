@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -423,5 +425,31 @@ func TestARecordedWorktreeOutsideTheWorktreesFolderIsNeverRemoved(t *testing.T) 
 	}
 	if _, err := os.Stat(elsewhere); err != nil {
 		t.Fatalf("a worktree outside .worktrees was removed: %v", err)
+	}
+}
+
+func TestTwoSpawnsOfOneWorkerMakeOneWorktree(t *testing.T) {
+	checkout := pushedCheckout(t)
+	d, _, fake, _, _ := daemonFixture(t)
+	router := dashboardRouter(d)
+	codes := make([]int, 2)
+	var wg sync.WaitGroup
+	for i := range codes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes[i] = postAction(t, router, map[string]any{"action": "session-create", "surface": "codex", "message": "Build", "cwd": checkout, "isolation": "worktree", "alias": "builder"}).Code
+		}()
+	}
+	wg.Wait()
+	slices.Sort(codes)
+	if codes[0] != http.StatusCreated || codes[1] != http.StatusBadRequest {
+		t.Fatalf("two spawns of one worker answered %v, want one created and one refused", codes)
+	}
+	if len(fake.startOptions) != 1 {
+		t.Fatalf("%d sessions started, want 1", len(fake.startOptions))
+	}
+	if _, err := os.Stat(filepath.Join(checkout, worktree.Dir, "ah-builder")); err != nil {
+		t.Fatalf("the created worker's worktree is gone: %v", err)
 	}
 }
