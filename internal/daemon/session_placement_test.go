@@ -116,6 +116,9 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"EndTurn": func(r *dashboardSession, now time.Time) {
 		r.EndTurn = &dashboardEndTurn{Headline: "Deployed", Needs: endTurnNeedsNothing, EndedAt: now}
 	},
+	"TurnCompletion": func(r *dashboardSession, now time.Time) {
+		r.TurnCompletion = &dashboardTurnCompletion{TurnID: "t9", Outcome: turnOutcomeFailed, At: now}
+	},
 }
 
 func TestSessionPlacementClassifiesEveryRowField(t *testing.T) {
