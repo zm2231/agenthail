@@ -120,6 +120,10 @@ func sendDevicePushWithRetry(ctx context.Context, target registry.DevicePushTarg
 			}
 		}
 		receipt, err := sendDevicePush(ctx, target, notification)
+		if notification.DedupeKey != "" && dedupeStoreUnavailable(err) {
+			notification.DedupeKey = ""
+			receipt, err = sendDevicePush(ctx, target, notification)
+		}
 		if err != nil {
 			lastErr = err
 			var relayErr *pushRelayError
@@ -131,6 +135,18 @@ func sendDevicePushWithRetry(ctx context.Context, target registry.DevicePushTarg
 		return receipt, nil
 	}
 	return false, lastErr
+}
+
+// A relay without its dedupe store refuses keyed sends; the phone may then see a push twice, but never none.
+func dedupeStoreUnavailable(err error) bool {
+	var relayErr *pushRelayError
+	if !errors.As(err, &relayErr) || relayErr.status != http.StatusServiceUnavailable {
+		return false
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	return json.Unmarshal([]byte(relayErr.detail), &body) == nil && body.Error == "dedupe_store_unavailable"
 }
 
 func isTerminalPushRelayError(err error) bool {

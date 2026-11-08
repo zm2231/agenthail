@@ -153,3 +153,45 @@ func shortenDevicePushRetries(t *testing.T) {
 	devicePushRetryDelay = time.Millisecond
 	t.Cleanup(func() { devicePushRetryDelay = previous })
 }
+
+func TestAKeyedPushReachesARelayWithoutDedupe(t *testing.T) {
+	shortenDevicePushRetries(t)
+	for _, relay := range []struct {
+		name       string
+		refuseKeys bool
+	}{{"relay from before dedupe", false}, {"relay missing its dedupe store", true}} {
+		t.Run(relay.name, func(t *testing.T) {
+			var delivered []map[string]any
+			var refused atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				if _, keyed := body["dedupeKey"]; keyed && relay.refuseKeys {
+					refused.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusServiceUnavailable)
+					w.Write([]byte(`{"error":"dedupe_store_unavailable"}`))
+					return
+				}
+				delivered = append(delivered, body)
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"ok":true}`))
+			}))
+			defer server.Close()
+			t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
+			key := completionDedupeKey("host", "session", "turn")
+			target := registry.DevicePushTarget{InstallationID: "install", Credential: "secret"}
+			if _, err := sendDevicePushWithRetry(context.Background(), target, mobileNotification{Title: "Agenthail", Message: "Agenthail finished on mini", SessionID: "session", TurnID: "turn", EventType: "turn.completed", DedupeKey: key}); err != nil {
+				t.Fatal(err)
+			}
+			if len(delivered) != 1 {
+				t.Fatalf("delivered %d pushes, want 1", len(delivered))
+			}
+			if relay.refuseKeys && refused.Load() != 1 {
+				t.Fatalf("keyed sends refused %d times, want 1", refused.Load())
+			}
+		})
+	}
+}
