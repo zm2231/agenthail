@@ -12,7 +12,8 @@ enum PreviewStream {
     }()
     static let started = Date()
     nonisolated(unsafe) static var base: UInt64 = 0
-    nonisolated(unsafe) static var history = 160
+    static let varied = ProcessInfo.processInfo.arguments.contains("--preview-stream-varied")
+    nonisolated(unsafe) static var history = varied ? 360 : 160
 
     static let paused = ProcessInfo.processInfo.arguments.contains("--preview-stream-paused")
 
@@ -41,12 +42,22 @@ enum PreviewStream {
             data.merge(["itemId": "result-\(turn)", "kind": "toolResult", "title": "Bash result", "callId": "call-\(turn)", "body": (1...80).map { "ok \(turn).\($0) Reconnect\($0).swift" }.joined(separator: "\n")]) { $1 }
         case 2:
             data.merge(["itemId": "thought-\(turn)", "kind": "reasoning", "title": "Thinking", "body": "Checking whether turn \(turn) keeps the queued instruction attached across the reconnect."]) { $1 }
+        case _ where varied:
+            data.merge(["itemId": "reply-\(turn)", "kind": "message", "role": "assistant", "title": "assistant", "body": variedReply(turn: turn, step: step)]) { $1 }
         default:
             let paragraphs = (0...(step - 3)).map { "Paragraph \($0 + 1) of reply \(turn). " + String(repeating: "The pending build survives reconnecting and the queued instruction keeps its identity. ", count: 3 + turn % 4) }
             let structure = step >= 4 && turn % 2 == 0 ? ["## Checks for turn \(turn)\n\n- Reconnect\n  - Queue identity\n    1. Saved\n    2. Replayed\n\n```swift\nawait session.resume(turn: \(turn))\n```\n\n| Check | Result |\n| --- | --- |\n| Reconnect | Passed |\n| Identity | Passed |"] : []
             data.merge(["itemId": "reply-\(turn)", "kind": "message", "role": "assistant", "title": "assistant", "body": (paragraphs.dropLast() + structure + paragraphs.suffix(1)).joined(separator: "\n\n")]) { $1 }
         }
         return ["stream": "session", "sessionId": session, "seq": base + UInt64(k), "type": "item", "data": data]
+    }
+
+    static func variedReply(turn: Int, step: Int) -> String {
+        let count = 1 + (turn * 7 + step) % 12
+        let paragraphs = (0..<count).map { "Paragraph \($0 + 1) of reply \(turn). " + String(repeating: "The pending build survives reconnecting and the queued instruction keeps its identity. ", count: 1 + (turn * 5 + $0) % 9) }
+        let code = turn % 3 == 0 ? ["```swift\n" + (1...(20 + turn % 5 * 10)).map { "let check\($0) = await session.resume(turn: \(turn), step: \($0))" }.joined(separator: "\n") + "\n```"] : []
+        let table = turn % 4 == 1 ? ["| Check | Result |\n| --- | --- |\n" + (1...(3 + turn % 6)).map { "| Reconnect \($0) | Passed |" }.joined(separator: "\n")] : []
+        return (paragraphs.prefix(1) + code + table + paragraphs.dropFirst()).joined(separator: "\n\n")
     }
 
     static func items(through k: Int) -> [[String: Any]] {

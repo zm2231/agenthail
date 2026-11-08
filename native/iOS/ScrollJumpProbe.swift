@@ -84,10 +84,24 @@ final class ScrollJumpProbe {
         if touched, abs(seen) > 2 {
             jumps += 1
             worst = max(worst, abs(seen))
+            log.append(summary(seen: seen, step: step, last: last.rows))
             lines.append("#before \(last.rows.sorted { $0.value < $1.value }.map { "\($0.key)@\(Int($0.value))h\(Int(lastHeights[$0.key] ?? 0))" }.joined(separator: " "))")
             lines.append("#after \(layout(last.rows))")
         }
         lines.append(String(format: "%.3f\t%@\t%.1f\t%.1f\t%.1f\t%.1f\t%@", CACurrentMediaTime() - started, phase, offset, height, shift, step, moved?.key ?? "-"))
+    }
+
+    private(set) var log: [String] = []
+
+    private func summary(seen: CGFloat, step: CGFloat, last: [String: CGFloat]) -> String {
+        let above = rows.filter { $0.value < offset }
+        let grown = above.compactMap { id, _ -> String? in
+            guard last[id] != nil, let now = heights[id], let before = lastHeights[id], abs(now - before) > 1 else { return nil }
+            return "\(id)\(now > before ? "+" : "")\(Int(now - before))"
+        }
+        let added = above.keys.filter { last[$0] == nil }
+        return String(format: "t=%.2f seen=%.0f step=%.0f h=%.0f", CACurrentMediaTime() - started, seen, step, height)
+            + " grew[\(grown.joined(separator: ","))] new[\(added.count)]"
     }
 
     private func flush() {
@@ -122,6 +136,10 @@ struct ScrollJumpLabel: View {
                 .font(.system(size: 1)).opacity(0.01)
                 .frame(width: 1, height: 1).clipped()
                 .accessibilityIdentifier("scroll-jumps")
+            Text(ScrollJumpProbe.shared.log.suffix(10).joined(separator: " ; "))
+                .font(.system(size: 1)).opacity(0.01)
+                .frame(width: 1, height: 1).clipped()
+                .accessibilityIdentifier("scroll-jump-log")
         }
     }
 }
