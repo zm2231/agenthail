@@ -51,6 +51,7 @@ func TestALiveSessionShowsOnlyTheRunsOfItsRunningProcess(t *testing.T) {
 	recordAt := started.Add(time.Second)
 	writePeerRecord(t, home, process.Process.Pid, map[string]any{"pid": float64(process.Process.Pid), "sessionId": "keystone", "startedAt": float64(recordAt.UnixMilli())})
 	writeClaudeJob(t, home, "july", "keystone", "", time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC))
+	writeClaudeJob(t, home, "gap", "keystone", "", recordAt.Add(-500*time.Millisecond))
 	writeClaudeJob(t, home, "now-a", "keystone", "", recordAt.Add(time.Minute))
 	writeClaudeJob(t, home, "now-b", "", "keystone", recordAt.Add(2*time.Minute))
 	writeClaudeJob(t, home, "elsewhere", "other", "", recordAt.Add(time.Minute))
@@ -61,7 +62,7 @@ func TestALiveSessionShowsOnlyTheRunsOfItsRunningProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := jobIDs(live); !slices.Equal(got, []string{"now-a", "now-b"}) {
-		t.Fatalf("a running session shows %v, want every run of its current process and not the July one", got)
+		t.Fatalf("a running session shows %v, want every run since its record's startedAt, not the July one or one between the process start and the record", got)
 	}
 
 	ended, err := claude.ObserveSessionClaudeRuns(context.Background(), &surface.Session{ID: "keystone", Surface: surface.KindClaude})

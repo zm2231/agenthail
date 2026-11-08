@@ -80,13 +80,13 @@ func (c *Claude) ObserveSessionClaudeRuns(ctx context.Context, session *surface.
 }
 
 func claudeProcessStart(record map[string]any) (time.Time, bool) {
+	if at, ok := record["startedAt"].(float64); ok && at > 0 {
+		return time.UnixMilli(int64(at)), true
+	}
 	if pid, _ := record["pid"].(float64); pid > 0 {
 		if started, err := processStartedAt(int(pid)); err == nil {
 			return started, true
 		}
-	}
-	if at, ok := record["startedAt"].(float64); ok && at > 0 {
-		return time.UnixMilli(int64(at)), true
 	}
 	return time.Time{}, false
 }
