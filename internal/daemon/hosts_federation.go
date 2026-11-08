@@ -407,16 +407,30 @@ func (d *Daemon) setHostState(host *pairedHost, state, detail string, contacted 
 	}
 }
 
+// runHostMirror reconnects to a host with a doubling delay. An event the
+// follower could not apply reconciles from a snapshot at once, but a repeat
+// within hostRetryMax backs off like an outage: a payload shape this build
+// cannot read fails on every event that carries it, and each failure would
+// otherwise fetch a full snapshot.
 func (d *Daemon) runHostMirror(ctx context.Context, host *pairedHost) {
 	delay := d.federation.retryMin
 	var outage hostOutage
+	var applyFailed time.Time
 	for ctx.Err() == nil {
 		connected, err := d.mirrorHostOnce(ctx, host, &outage)
 		if ctx.Err() != nil {
 			return
 		}
-		if connected {
-			delay = d.federation.retryMin
+		var unapplied catalogApplyError
+		wait := delay
+		switch {
+		case errors.As(err, &unapplied):
+			if applyFailed.IsZero() || time.Since(applyFailed) > hostRetryMax {
+				wait, delay = 0, d.federation.retryMin
+			}
+			applyFailed = time.Now()
+		case connected:
+			wait, delay = d.federation.retryMin, d.federation.retryMin
 		}
 		if err != nil {
 			d.hostFailed(host, &outage, err)
@@ -424,9 +438,11 @@ func (d *Daemon) runHostMirror(ctx context.Context, host *pairedHost) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(delay):
+		case <-time.After(wait):
 		}
-		delay = min(delay*2, hostRetryMax)
+		if wait > 0 {
+			delay = min(delay*2, hostRetryMax)
+		}
 	}
 }
 
@@ -617,6 +633,7 @@ func (d *Daemon) followHostCatalog(ctx context.Context, host *pairedHost, after 
 	}
 	defer response.Body.Close()
 	reader := sse.NewReader(response.Body)
+	refused := map[string]bool{}
 	for {
 		event, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -633,7 +650,14 @@ func (d *Daemon) followHostCatalog(ctx context.Context, host *pairedHost, after 
 			return false, fmt.Errorf("host %s sent an invalid catalog event: %w", host.record.Name, err)
 		}
 		if err := d.applyHostCatalogEvent(host, envelope); err != nil {
-			d.logRuntimeError("host "+host.record.Name+" catalog event", err)
+			var owned registry.SessionOwnedError
+			if !errors.As(err, &owned) {
+				return false, catalogApplyError{host: host.record.Name, seq: envelope.Seq, err: err}
+			}
+			if !refused[owned.SessionID] {
+				refused[owned.SessionID] = true
+				d.logRuntimeError("host "+host.record.Name+" catalog event", err)
+			}
 		}
 		if err := d.Registry.RecordHostCatalogCursor(host.record.ID, host.epoch, envelope.Seq); err != nil {
 			return false, localMirror(err)
