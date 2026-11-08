@@ -200,6 +200,26 @@ func TestAWorktreeWhoseStartHasAnUnknownOutcomeIsKeptForTheSessionThatTurnsUp(t 
 	}
 }
 
+func TestAWorktreeWhoseStartHasAnUnknownOutcomeKeepsItsWorkWhenNoSessionTurnsUp(t *testing.T) {
+	checkout := pushedCheckout(t)
+	d, reg, fake, _, _ := daemonFixture(t)
+	fake.startRefused = surface.DeliveryOutcomeUnknown(errors.New("the app server stopped answering"))
+	if code, answer := workAction(t, d, map[string]any{"action": "session-create", "surface": "codex", "message": "Build", "cwd": checkout, "isolation": "worktree", "alias": "builder"}); code < 400 {
+		t.Fatal(code, answer)
+	}
+	path := filepath.Join(checkout, worktree.Dir, "ah-builder")
+	if err := os.WriteFile(filepath.Join(path, "progress.txt"), []byte("half done"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d.sweepWork(context.Background(), time.Now().Add(2*workCreatingStale))
+	if _, err := os.Stat(filepath.Join(path, "progress.txt")); err != nil {
+		t.Fatalf("uncommitted work in the worktree was lost: %v", err)
+	}
+	if work, found, err := reg.WorkAt(path); err != nil || !found || work.State != registry.WorkSettled || work.Cleanup == registry.WorkCleanupRemoved {
+		t.Fatalf("the kept worktree is not recorded as kept: %+v found=%t err=%v", work, found, err)
+	}
+}
+
 func TestCleaningAnotherHostsSessionsWorktreeRunsOnThatHost(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	checkout := pushedCheckout(t)
