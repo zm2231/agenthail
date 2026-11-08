@@ -2,9 +2,10 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"strconv"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/apitime"
 )
 
 const mcpPageBudget = mcpOutputLimit - 1<<10
@@ -51,7 +52,7 @@ func (d *Daemon) mcpSessions(_ context.Context, caller *mcpCaller, input mcpSess
 		if !session.LastActive.IsZero() {
 			view.LastActive = session.LastActive.UTC().Format(time.RFC3339)
 		}
-		encoded, _ := json.Marshal(view)
+		encoded, _ := apitime.Marshal(view)
 		if used+len(encoded) > mcpPageBudget && len(views) > 0 {
 			break
 		}

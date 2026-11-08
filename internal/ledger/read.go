@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/apitime"
 )
 
 const (
@@ -189,7 +191,7 @@ func readLimit(requested, most int) (int, error) {
 }
 
 func readJSON(value any) json.RawMessage {
-	encoded, _ := json.Marshal(value)
+	encoded, _ := apitime.Marshal(value)
 	return encoded
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/agenttools"
+	"github.com/zm2231/agenthail/internal/apitime"
 )
 
 const mcpOutputLimit = 16 << 10
@@ -113,7 +114,7 @@ func addMCPTool[In any](d *Daemon, server *mcp.Server, tool *mcp.Tool, run func(
 		if err != nil {
 			return mcpRefused(mcpRefusalFor(err)), nil, nil
 		}
-		encoded, err := json.Marshal(value)
+		encoded, err := apitime.Marshal(value)
 		if err != nil {
 			return nil, nil, err
 		}
