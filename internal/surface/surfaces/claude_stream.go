@@ -133,7 +133,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				return nil
 			}
 			items := claudeTimelineItems(record)
-			turnID, ended, interrupted := turns.observe(record, recordOffset, line, len(items))
+			turnID, ended, interrupted := turns.observe(record, recordOffset, line, func() int { return len(items) })
 			if interrupted && uuid != "" && turnID == uuid {
 				return fmt.Errorf("Claude turn %s was interrupted", uuid)
 			}

@@ -73,7 +73,7 @@ func newClaudeTurnTracker(current string, closing surface.ClaudeClosingTurn) *cl
 // observe returns the record's turn, the turns that ended at it, and whether
 // it interrupted its turn. A done key names the record that ended the turn
 // and the item index after its items, as the live stream has always keyed it.
-func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []byte, itemCount int) (string, []claudeTurnEnd, bool) {
+func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []byte, itemCount func() int) (string, []claudeTurnEnd, bool) {
 	var ended []claudeTurnEnd
 	messageID := strNested(record, "message", "id")
 	if t.closing.TurnID != "" && !claudeRecordContinuesMessage(str(record, "type"), messageID, t.closing.MessageID) {
@@ -84,7 +84,7 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 	}
 	if claudeRecordStartsTurn(record) && !(claudeRecordIsStopHookFeedback(record) && t.answeredWithoutEnd(t.current)) {
 		if t.answeredWithoutEnd(t.current) {
-			ended = t.finish(ended, t.current, stableTimelineItemID(offset, line, itemCount), "")
+			ended = t.finish(ended, t.current, stableTimelineItemID(offset, line, itemCount()), "")
 		}
 		t.current = str(record, "uuid")
 		t.meter = claudeTurnMeter{turnID: t.current, usage: map[string]surface.TurnUsage{}, compactions: t.between, compactionsKnown: t.betweenKnown}
@@ -96,7 +96,7 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 		t.meter.observe(record)
 	}
 	if t.answeredWithoutEnd(turnID) && claudeRecordStopsAfterHooks(record) {
-		return turnID, t.finish(ended, turnID, stableTimelineItemID(offset, line, itemCount), ""), false
+		return turnID, t.finish(ended, turnID, stableTimelineItemID(offset, line, itemCount()), ""), false
 	}
 	done, ending, interrupted := claudeStreamTerminal(record)
 	if interrupted {
@@ -114,7 +114,7 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 	if !ending && !done {
 		return turnID, ended, false
 	}
-	key := stableTimelineItemID(offset, line, itemCount)
+	key := stableTimelineItemID(offset, line, itemCount())
 	if ending {
 		at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
 		t.closing = surface.ClaudeClosingTurn{TurnID: turnID, MessageID: messageID, Key: key, At: at}
@@ -333,10 +333,97 @@ func claudeTurnStateFrom(ctx context.Context, file *os.File, offset int64, start
 		return tracker, err
 	}
 	tracker.betweenKnown = from == 0
-	err = scanTranscriptRecords(ctx, file, from, offset, true, func(record map[string]any, recordOffset int64, line []byte) {
-		tracker.observe(record, recordOffset, line, len(claudeTimelineItems(record)))
+	err = scanReplayLines(ctx, file, from, offset, func(line []byte, recordOffset int64) {
+		record, exact := decodeReplayRecord(line)
+		if record == nil {
+			return
+		}
+		tracker.observe(record, recordOffset, line, func() int {
+			if exact {
+				return len(claudeTimelineItems(record))
+			}
+			var full map[string]any
+			if decodeShrunkRecord(line, &full) != nil {
+				return 0
+			}
+			return len(claudeTimelineItems(full))
+		})
 	})
 	return tracker, err
+}
+
+const replayStringBytes = 256
+
+// decodeReplayRecord cuts long strings only from records whose text the
+// replay never reads; a user message with text and an API error are decoded
+// as every other reader decodes them, so commands, interrupts and stop-hook
+// feedback are recognised from their whole text. exact reports which.
+func decodeReplayRecord(line []byte) (record map[string]any, exact bool) {
+	cut, shortened := cutJSONStrings(line, replayStringBytes)
+	if shortened && json.Unmarshal(cut, &record) == nil && !claudeReplayReadsText(record) {
+		return record, false
+	}
+	record = nil
+	if decodeShrunkRecord(line, &record) != nil {
+		return nil, false
+	}
+	return record, true
+}
+
+func claudeReplayReadsText(record map[string]any) bool {
+	switch str(record, "type") {
+	case "user":
+		message, _ := record["message"].(map[string]any)
+		switch content := message["content"].(type) {
+		case string:
+			return true
+		case []any:
+			for _, raw := range content {
+				if block, _ := raw.(map[string]any); str(block, "type") == "text" {
+					return true
+				}
+			}
+		}
+		return false
+	case "assistant":
+		apiError, _ := record["isApiErrorMessage"].(bool)
+		return apiError
+	}
+	return false
+}
+
+// scanReplayLines passes visit the reader's own buffer, valid only until visit returns.
+func scanReplayLines(ctx context.Context, file *os.File, from, to int64, visit func(line []byte, offset int64)) error {
+	reader := bufio.NewReaderSize(io.NewSectionReader(file, from, to-from), 1<<20)
+	offset := from
+	var long []byte
+	pending := false
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		chunk, err := reader.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			long, pending = append(long, chunk...), true
+			continue
+		}
+		line := chunk
+		if pending {
+			long = append(long, chunk...)
+			line, pending = long, false
+		}
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			visit(line, offset)
+		}
+		offset += int64(len(line))
+		long = long[:0]
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 }
 
 // turnReplayStart returns where to replay from to stand at offset with what
@@ -444,7 +531,7 @@ func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, 
 		if itemErr != nil {
 			return
 		}
-		turnID, ended, interrupted := turns.observe(record, offset, line, len(claudeTimelineItems(record)))
+		turnID, ended, interrupted := turns.observe(record, offset, line, func() int { return len(claudeTimelineItems(record)) })
 		recordItems, err := claudeRecordTimelineItems(ctx, record, offset, line, turnID, ended, interrupted)
 		if err != nil {
 			itemErr = err
