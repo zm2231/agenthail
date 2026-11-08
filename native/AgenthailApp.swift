@@ -318,8 +318,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
         center.delegate = self
         Task { await registerNotificationCategories() }
         KeyboardShortcuts.onKeyUp(for: .openPalette) { NotificationRoute.shared.showPalette() }
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationLaunched(_:)), name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         terminateDuplicateApplications()
+        // An LSUIElement app posts no didLaunchApplicationNotification, so a later copy is only found by polling.
         duplicateTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.terminateDuplicateApplications()
         }
@@ -327,13 +327,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
 
     func applicationWillTerminate(_ notification: Notification) {
         duplicateTimer?.invalidate()
-        NSWorkspace.shared.notificationCenter.removeObserver(self)
-    }
-
-    @objc private func applicationLaunched(_ notification: Notification) {
-        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-        guard isDuplicateApplication(application) else { return }
-        terminateDuplicateApplication(application)
     }
 
     private func terminateDuplicateApplications() {
