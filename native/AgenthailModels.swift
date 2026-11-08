@@ -607,7 +607,7 @@ struct SessionState: Codable, Identifiable, Hashable {
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
-        return name.isEmpty ? id : name
+        return name.isEmpty ? id : SessionNames.display(name)
     }
 
     var isWorking: Bool { status == "busy" }
@@ -1051,7 +1051,7 @@ extension SessionState {
         if let alias, !alias.isEmpty { return "@\(alias)" }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty || trimmed == id || UUID(uuidString: trimmed) != nil { return "Untitled conversation" }
-        return trimmed
+        return SessionNames.display(trimmed)
     }
 }
 

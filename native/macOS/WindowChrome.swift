@@ -177,7 +177,7 @@ struct SessionTabView: View {
         guard let session else { return id }
         let alias = session.alias.flatMap { $0.isEmpty ? nil : "@\($0)" }
         let trimmed = session.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = trimmed.isEmpty || trimmed == session.id || UUID(uuidString: trimmed) != nil ? nil : trimmed
+        let name = trimmed.isEmpty || trimmed == session.id || UUID(uuidString: trimmed) != nil ? nil : SessionNames.display(trimmed)
         let parts: [String?]
         switch label {
         case "alias": parts = [alias ?? name]

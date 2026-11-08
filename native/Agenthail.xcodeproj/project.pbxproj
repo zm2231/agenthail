@@ -18,6 +18,7 @@
 		0735E5BFD23705F4C87E60D6 /* InboxPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F0E5F2D719CC6DDC08591BC /* InboxPreview.swift */; };
 		0740E2CF3E344953963E5796 /* TranscriptTail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14EA08B4C3AAC865894FE6A1 /* TranscriptTail.swift */; };
 		07F8982FFE8731CB9677BBA1 /* SessionControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F97182BB6B3E031BAE4D18C /* SessionControls.swift */; };
+		08E5F0CAB166A694C27B6448 /* SessionNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55F7B3BFFC4892371633C31A /* SessionNames.swift */; };
 		09008EACA9626B0CA9628068 /* SessionListChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74D671F0DB0275E3CDC13160 /* SessionListChromeTests.swift */; };
 		099165D1DD05E11819B5E106 /* HostCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDA795678500D6988089B512 /* HostCatalog.swift */; };
 		0E2E9D9395C4F13F0A4D4BC1 /* PreviewOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 826A12E2CF9BAA03B52A3BE2 /* PreviewOrder.swift */; };
@@ -445,6 +446,7 @@
 		5472B28EED94DE6B5B0C5DEF /* StreamBatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamBatch.swift; sourceTree = "<group>"; };
 		54B02472C3BEDD55ADCCFD11 /* HostDropTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostDropTests.swift; sourceTree = "<group>"; };
 		54FE2EA618A8A050E1E68FB3 /* ConnectionDropLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionDropLog.swift; sourceTree = "<group>"; };
+		55F7B3BFFC4892371633C31A /* SessionNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionNames.swift; sourceTree = "<group>"; };
 		5604EB54518AE2296BC2A09C /* RequestCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestCard.swift; sourceTree = "<group>"; };
 		56B1E565D324737E5EAEA2D6 /* ObservedScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservedScope.swift; sourceTree = "<group>"; };
 		572FE64C9C40502C461F71D3 /* ProjectContents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectContents.swift; sourceTree = "<group>"; };
@@ -913,6 +915,7 @@
 				1844979BB8DD4D3D070B71EA /* SessionDetailState.swift */,
 				D65997FC6F2FDC05350DC086 /* SessionDisplayKind.swift */,
 				34684739278D1CFFBC4D807F /* SessionEndTurn.swift */,
+				55F7B3BFFC4892371633C31A /* SessionNames.swift */,
 				F1B6B0035445CBC2ABCA5BB2 /* SessionRowTime.swift */,
 				5754FCCBE0D9C3A064B3D17E /* SessionSelection.swift */,
 				B2B8853E9BE39E1DE3C99531 /* SessionStore.swift */,
@@ -1345,6 +1348,7 @@
 				301ACB310F833ACD38519EBD /* SessionDisplayKind.swift in Sources */,
 				1B3B458D8C65A1F4B5F3CA6C /* SessionEndTurn.swift in Sources */,
 				D4B4B613E7DC1D43939370FC /* SessionListChrome.swift in Sources */,
+				08E5F0CAB166A694C27B6448 /* SessionNames.swift in Sources */,
 				2F869372B2CD32797E8B80B3 /* SessionPreview.swift in Sources */,
 				A0B266E76934221148661ED6 /* SessionRowTime.swift in Sources */,
 				D6C6711FC75F2AA441299C3F /* SessionScopes.swift in Sources */,

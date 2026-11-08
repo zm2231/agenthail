@@ -51,6 +51,11 @@ enum SessionFacts {
         session.queueCount > 0 ? [queuedLabel(session.queueCount)] : []
     }
 
+    static func configFolderLabel(_ root: SessionConfigRoot?) -> String? {
+        guard let root, !root.name.isEmpty, root.name != "default" || root.signedInAs?.isEmpty == false else { return nil }
+        return "config folder \(root.summary)"
+    }
+
     static func exchangeLabel(_ count: Int) -> String {
         "\(count) recent exchange\(count == 1 ? "" : "s")"
     }
