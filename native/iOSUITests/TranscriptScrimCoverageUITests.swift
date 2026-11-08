@@ -25,6 +25,12 @@ final class TranscriptScrimCoverageUITests: XCTestCase {
         var report = [name]
         var lines: [Line] = []
         var arts: [Float] = []
+        let working = app.staticTexts["Working"]
+        XCTAssertTrue(working.waitForExistence(timeout: 10))
+        let bar = app.navigationBars.firstMatch.frame
+        let menu = app.buttons["Session menu"].frame.insetBy(dx: -4, dy: -4)
+        let headerBand = CGRect(x: 0, y: bar.minY, width: menu.minX, height: working.frame.maxY + 8 - bar.minY)
+        var headerLuma: [[Float]] = []
         for pass in 0..<4 {
             if pass > 0 {
                 timeline.swipeDown(velocity: .slow)
@@ -32,6 +38,7 @@ final class TranscriptScrimCoverageUITests: XCTestCase {
             }
             let shot = XCUIScreen.main.screenshot()
             let image = shot.image
+            headerLuma.append(try pixels(image, in: headerBand).map(luma))
             let view = timeline.frame
             let top = app.navigationBars.firstMatch.frame.maxY + 8
             let composer = app.textViews["composer-input"]
@@ -69,6 +76,28 @@ final class TranscriptScrimCoverageUITests: XCTestCase {
             }
         }
         report.append("lines that moved, over art: \(counted), bare: \(bad)")
+
+        let showThrough = zip(headerLuma.dropFirst(), headerLuma).map { pair in zip(pair.0, pair.1).map { abs($0 - $1) }.max() ?? 0 }.max() ?? 0
+        report.append(String(format: "header band %@: worst change across scrolls %.3f", "\(headerBand.integral)", showThrough))
+        if showThrough >= 0.15 { bad += 1 }
+
+        for _ in 0..<15 { timeline.swipeDown(velocity: .fast) }
+        _ = timeline.waitUntilRowsStill()
+        let headerBottom = working.frame.maxY
+        var first: (y: CGFloat, label: String)?
+        var pending = [try timeline.snapshot()]
+        while let next = pending.popLast() {
+            pending += next.children
+            guard [.staticText, .button].contains(next.elementType), next.frame.height > 8, next.frame.maxY > bar.maxY, next.frame.minY < timeline.frame.maxY else { continue }
+            if first == nil || next.frame.minY < first!.y { first = (next.frame.minY, next.label) }
+        }
+        let gap = (first?.y ?? .infinity) - headerBottom
+        report.append(String(format: "at the top: first row '%@' starts %.1f pt below the header's last line", String((first?.label ?? "-").prefix(40)), gap))
+        if gap < 0 { bad += 1 }
+        let top = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        top.name = "\(name) at the top"
+        top.lifetime = .keepAlways
+        add(top)
         let text = report.joined(separator: "\n")
         print("SCRIM-COVERAGE\n\(text)")
         let attachment = XCTAttachment(string: text)
