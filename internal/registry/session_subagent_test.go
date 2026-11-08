@@ -107,7 +107,7 @@ func TestResolveTargetWalksSubagentPaths(t *testing.T) {
 	}
 }
 
-// An empty target, as a request that omits its session sends, names no one
+// An empty target, as a request that omits its session ID sends, names no one
 // session, so nothing acts on whichever single root session it would match.
 func TestAnEmptyTargetResolvesNoSessionAmongSeveral(t *testing.T) {
 	r := openTestRegistry(t)
