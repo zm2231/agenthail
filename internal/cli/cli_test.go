@@ -31,6 +31,8 @@ type cliSurface struct {
 	listCalls     int
 	caps          surface.Capabilities
 	observeErr    error
+	observation   *surface.TurnObservation
+	steerErr      error
 	sendResult    *surface.SendResult
 	sendErr       error
 	sendWait      bool
@@ -116,7 +118,7 @@ func (f *cliSurface) SearchSessions(context.Context, string, int) ([]surface.Ses
 	return f.searchResults, nil
 }
 func (f *cliSurface) Observe(context.Context, *surface.Session) (*surface.TurnObservation, error) {
-	return nil, f.observeErr
+	return f.observation, f.observeErr
 }
 func (f *cliSurface) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
 	f.sent = append(f.sent, message)
@@ -163,6 +165,9 @@ func (*cliSurface) Model(context.Context, *surface.Session, string) (string, err
 func (*cliSurface) Interrupt(context.Context, *surface.Session) error { return nil }
 func (f *cliSurface) Steer(ctx context.Context, _ *surface.Session, message string) error {
 	f.steerSource = surface.SourceSessionID(ctx)
+	if f.steerErr != nil {
+		return f.steerErr
+	}
 	f.steered = append(f.steered, message)
 	return nil
 }

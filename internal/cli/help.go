@@ -67,6 +67,30 @@ Session commands:
   limit-resume cancel <target>  Do not resume a stopped session for its current stop
   limit-resume on|off           Resume stopped sessions once their limit resets (default on)
 
+Delivery (send, queue, steer):
+  idle target                   send delivers now; queue holds it for the daemon; steer has no turn to reach and says
+                                to run 'agenthail send <target> "msg"'
+  busy target                   queue delivers when the turn ends; steer reaches the running turn; send waits for the
+                                turn, or steers it under a busy-delivery setting of "steer" (dashboard settings) when
+                                the target takes steers and you may steer it
+  busy target, --no-queue       never queued: steered under the "steer" setting as above, otherwise refused with
+                                nothing sent, naming 'agenthail queue <target> "msg"' and 'agenthail steer <target> "msg"'
+  target waiting on you         send, queue and steer hold the message until you answer ('agenthail requests <target>')
+  Claude with a socket          on this computer, the rows above apply except: send (with or without --no-queue) and a
+                                steer you may send go over its socket now, busy or not, taken at its next tool call or
+                                as a new turn, and the receipt says it was not steered; a send also goes while it waits
+                                on you, a steer is held then, and queue still waits for the turn
+  steer you may not send        the person, a command run outside any agent session, Agenthail itself, the target's
+                                lead and the session that started it may steer; another agent's steer goes as a send
+                                would (now if idle, queued if busy), and the receipt says so
+  daemon not running            a message send, queue or steer queued waits, and that command warns; run
+                                'agenthail daemon start' (a message delivered now needs no daemon and gets no warning)
+  another host's session        reached through this computer's daemon, so start it first; --no-queue is refused
+                                because the daemon holds the send until that host answers
+  read-only target              refused with its reason before anything is queued; nothing to retry
+  submitted or unknown outcome  the message may have arrived, and the output says so; read 'agenthail last <target>'
+                                before sending again
+
 Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
   identify rm <name>             Remove an alias

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/coordinator"
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
@@ -189,13 +188,14 @@ func (a *App) cmdSend(args []string) error {
 		if syntheticNotion && errors.Is(err, delivery.ErrTargetBusy) {
 			return fmt.Errorf("a new Notion thread must be created immediately and cannot be queued; retry 'agenthail send %s ...'", target)
 		}
+		if hasFlag(args, "--no-queue") && isTargetBusy(err) {
+			return busyRefusal(target)
+		}
 		return err
 	}
 
 	if receipt.Evidence == surface.EvidenceQueued {
-		if _, ok := daemon.IsRunning(); !ok {
-			fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
-		}
+		warnQueuedWithoutDaemon(os.Stderr)
 		if jsonOut {
 			return emit(receipt)
 		} else {
@@ -216,9 +216,9 @@ func (a *App) cmdSend(args []string) error {
 			return emit(receipt)
 		}
 		if receipt.DeliveryID != 0 {
-			fmt.Printf("delivery submitted (id %d); %s\n", receipt.DeliveryID, receipt.Detail)
+			fmt.Printf("delivery submitted (id %d); %s %s\n", receipt.DeliveryID, receipt.Detail, uncertainNote(target))
 		} else {
-			fmt.Printf("delivery submitted; %s\n", receipt.Detail)
+			fmt.Printf("delivery submitted; %s %s\n", receipt.Detail, uncertainNote(target))
 		}
 		return nil
 	}

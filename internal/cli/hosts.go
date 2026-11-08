@@ -325,7 +325,7 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 		if receipt.Evidence == surface.EvidenceQueued {
 			fmt.Printf("queued for %s: %s\n", remote.label(), receipt.Detail)
 		} else {
-			fmt.Printf("delivery submitted to %s; %s\n", remote.label(), receipt.Detail)
+			fmt.Printf("delivery submitted to %s; %s %s\n", remote.label(), receipt.Detail, uncertainNote(remote.label()))
 		}
 		return nil
 	}
@@ -365,13 +365,20 @@ func actionPayload(options any) (map[string]any, error) {
 	return payload, nil
 }
 
-func (a *App) steerRemote(ctx context.Context, remote *remoteTarget, message string, jsonOut bool) error {
+func (a *App) steerRemote(ctx context.Context, remote *remoteTarget, sourceID, message string, jsonOut bool) error {
 	client, err := a.daemonAPI()
 	if err != nil {
 		return err
 	}
-	data, _, err := client.action(ctx, map[string]any{"action": "steer", "sessionId": remote.ID, "message": message})
+	payload := map[string]any{"action": "steer", "sessionId": remote.ID, "message": message}
+	if sourceID != "" {
+		payload["sourceSessionId"] = sourceID
+	}
+	data, _, err := client.action(ctx, payload)
 	if err != nil {
+		if isNothingToSteer(err) {
+			return idleSteerRefusal(remote.label())
+		}
 		return fmt.Errorf("steer %s: %w", remote.label(), err)
 	}
 	receipt, err := remoteReceipt(data)

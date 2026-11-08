@@ -415,8 +415,29 @@ id; check the session before retrying. Arbitrary slash commands are not exposed.
 
 Messages a person types in the dashboard or the Mac/iPhone app carry `"author": "person"` and reach a Claude session with a Remote Control attachment as that person's own user turn, as do composer steers. A `send` action without `author`, and every CLI, relay, channel, voice or agent send to Claude, stays a native peer message whenever the session has a native socket. A bridge-only session takes the person's and Agenthail's messages through Remote Control; any other message waits in the queue until the session has a socket. Do not set `author: person` on a message an agent wrote.
 
-`send` queues a busy target by default. `--no-queue` requires immediate
-delivery. `--reply` waits for one new completed reply only when delivery is
+`send` queues a busy target by default: it waits for the turn, or under the
+busy-delivery setting `steer` it steers the turn when the target takes steers
+and the sender may steer it. `--no-queue` requires immediate delivery and never
+queues: under the `steer` setting it steers as above, and otherwise a busy target
+refuses it, nothing is sent, and the error names the next step,
+`agenthail queue <target> "msg"` to deliver when the turn ends or
+`agenthail steer <target> "msg"` to reach the turn now. `steer` on an idle
+target has no turn to reach and says to run `agenthail send <target> "msg"`. The
+person, a command run outside any agent session, Agenthail itself, the target's
+lead and the session that started it may steer; another agent's steer goes as a
+send would, and its receipt says so. A target waiting on you holds a send, queue or steer until you
+answer (`agenthail requests <target>`). A Claude session with a socket on this
+computer is the exception: a send (with or without `--no-queue`) and a steer the
+sender may send go over its socket now, busy or not, taken at its next tool call
+or as a new turn, and the receipt says it was not steered; a send also goes
+while it waits on you, a steer is held then, and `queue` still waits for the
+turn. When the daemon is not running, a `send`, `queue` or `steer` that queued
+its message warns, and the message waits; run `agenthail daemon start`. A
+message delivered now needs no daemon and gets no warning. Another host's sessions are reached through this
+computer's daemon, which must be running, and refuse `--no-queue`. A read-only
+target is refused with its reason before anything is queued. A `submitted` or
+`unknown` outcome may have arrived, and the output says so: read
+`agenthail last <target>` before sending again. `--reply` waits for one new completed reply only when delivery is
 immediate. A queued `--reply` returns the durable queue receipt. `--stream`
 watches live deltas and cannot be combined with `--reply` or `--json`.
 

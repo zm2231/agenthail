@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +51,75 @@ func TestSendToABusyClaudeSessionRidesItsPeerSocketWithTheSender(t *testing.T) {
 	history, err := r.ListHistory(10, originalConversation)
 	if err != nil || len(history) == 0 || history[0].Kind != "transport-accepted" || history[0].Message != "handoff" || history[0].SourceSessionID != sender.ID {
 		t.Fatalf("history=%+v err=%v, want the message recorded from the sender", history, err)
+	}
+}
+
+func TestANoQueueSendToABusyClaudeSessionGoesOverItsSocket(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".agenthail", "dashboard.json"), []byte(`{"busyDelivery":"steer"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	app, r, fixture, posts := liveClaudeApp(t)
+	fixture.Listen()
+	fixture.Transcript(originalConversation, fixture.Home)
+	fixture.RecordStatus(originalConversation, fixture.Home, liveBridge, "busy", "", time.Now())
+	peers := claudetest.ListenPeerManager(t, fixture.Home)
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"send", "--json", "--no-queue", "claude:" + originalConversation, "right now"})
+	})
+	var receipt struct {
+		Evidence string `json:"evidence"`
+	}
+	if err != nil || json.Unmarshal([]byte(output), &receipt) != nil || receipt.Evidence != string(surface.EvidenceTransportAccepted) {
+		t.Fatalf("a busy socket Claude takes a --no-queue send over its socket: output=%q err=%v", output, err)
+	}
+	if len(peers.Sends()) != 1 || posts.count("right now") != 0 || r.QueueCount(originalConversation) != 0 {
+		t.Fatalf("sends=%d steered=%d queued=%d, want one socket send and neither of the others", len(peers.Sends()), posts.count("right now"), r.QueueCount(originalConversation))
+	}
+}
+
+func TestASteerToABusyClaudeSessionGoesOverItsSocketAndSaysSo(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	app, r, fixture, posts := liveClaudeApp(t)
+	fixture.Listen()
+	fixture.Transcript(originalConversation, fixture.Home)
+	fixture.RecordStatus(originalConversation, fixture.Home, liveBridge, "busy", "", time.Now())
+	peers := claudetest.ListenPeerManager(t, fixture.Home)
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"steer", "claude:" + originalConversation, "change course"})
+	})
+	if err != nil || !strings.Contains(output, "not steered") {
+		t.Fatalf("a steer to a busy socket Claude must say it was not steered: output=%q err=%v", output, err)
+	}
+	if len(peers.Sends()) != 1 || posts.count("change course") != 0 || r.QueueCount(originalConversation) != 0 {
+		t.Fatalf("sends=%d steered=%d queued=%d, want one socket send and neither of the others", len(peers.Sends()), posts.count("change course"), r.QueueCount(originalConversation))
+	}
+}
+
+func TestASteerABusyClaudeSessionsAgentMayNotSendIsQueued(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	app, r, fixture, posts := liveClaudeApp(t)
+	fixture.Listen()
+	fixture.Transcript(originalConversation, fixture.Home)
+	fixture.RecordStatus(originalConversation, fixture.Home, liveBridge, "busy", "", time.Now())
+	peers := claudetest.ListenPeerManager(t, fixture.Home)
+	worker := surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, Source: "vscode", Transport: "desktop"}
+	if err := r.RegisterSession(worker); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", worker.ID)
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"steer", "claude:" + originalConversation, "change course"})
+	})
+	if err != nil || !strings.Contains(output, "not a steer") {
+		t.Fatalf("a steer from an agent that may not steer is sent as a message and says so: output=%q err=%v", output, err)
+	}
+	if len(peers.Sends()) != 0 || posts.count("change course") != 0 || r.QueueCount(originalConversation) != 1 {
+		t.Fatalf("sends=%d steered=%d queued=%d, want it queued for the busy socket Claude", len(peers.Sends()), posts.count("change course"), r.QueueCount(originalConversation))
 	}
 }
 
