@@ -1,4 +1,4 @@
--- schemaVersion 76
+-- schemaVersion 77
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -642,6 +642,13 @@ CREATE TABLE session_archive (
 CREATE TABLE session_ceilings (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	ceiling TEXT NOT NULL
+);
+
+-- table session_codex_config
+CREATE TABLE session_codex_config (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	overrides TEXT NOT NULL DEFAULT '{}',
+	updated_at_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- table session_context

@@ -156,6 +156,11 @@ CREATE TABLE IF NOT EXISTS session_ceilings (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	ceiling TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS session_codex_config (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	overrides TEXT NOT NULL DEFAULT '{}',
+	updated_at_ms INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS pending_ceilings (
 	credential_id INTEGER PRIMARY KEY REFERENCES session_credentials(id) ON DELETE CASCADE,
 	ceiling TEXT NOT NULL
