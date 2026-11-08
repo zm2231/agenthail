@@ -99,6 +99,9 @@ func codexActionCall(window *surface.CodexToolWindow, action codexAction, turnID
 }
 
 func codexCompletedItems(window *surface.CodexToolWindow, item map[string]any, turnID string) []surface.TimelineItem {
+	if str(item, "type") == "SubAgentActivity" {
+		return codexSubAgentActivity(window, item)
+	}
 	action, ok, mirrored := codexCompletedAction(item)
 	if mirrored {
 		return nil
@@ -122,6 +125,15 @@ func codexCompletedItems(window *surface.CodexToolWindow, item map[string]any, t
 		return []surface.TimelineItem{codexBackgroundFinished(window, action)}
 	}
 	return codexActionRow(action, str(item, "id"))
+}
+
+// Codex records a sub-agent activity beside the collaboration call that shares its id; without that call it is the only record.
+func codexSubAgentActivity(window *surface.CodexToolWindow, item map[string]any) []surface.TimelineItem {
+	id := str(item, "id")
+	if id != "" && slices.ContainsFunc(window.Open, func(call surface.CodexOpenCall) bool { return call.CallID == id }) {
+		return nil
+	}
+	return []surface.TimelineItem{{Kind: "notice", Title: strings.TrimSpace("Sub-agent " + str(item, "kind")), Text: str(item, "agent_path"), CallID: id}}
 }
 
 func codexActionRow(action codexAction, id string) []surface.TimelineItem {
