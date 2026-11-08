@@ -892,3 +892,12 @@ func deleteUnheldClaudeSessionTx(tx *sql.Tx, sessionID string) error {
 		AND NOT EXISTS (SELECT 1 FROM message_queue WHERE session_id=?1 AND status IN ('pending','inflight'))`, sessionID, string(surface.KindClaude))
 	return err
 }
+
+func (r *Registry) CatalogProjection(sessionID string) (string, bool, error) {
+	var fingerprint string
+	err := r.read.QueryRow(`SELECT projection_fingerprint FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&fingerprint)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return fingerprint, err == nil, err
+}

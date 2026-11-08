@@ -37,14 +37,14 @@ func (end *dashboardEndTurn) asksPerson() bool {
 }
 
 type turnCompletedNotice struct {
-	desktop, mobile, requestID string
-	actions                    []surface.RequestAction
+	desktop, mobile, requestID, outcome string
+	actions                             []surface.RequestAction
 }
 
 // A needs-you an agent was told of keeps the plain finished text for the
 // person; one for the person carries its ask, so the push can answer it.
 func (d *Daemon) endTurnNotifications(session *surface.Session, completedTurnID, desktop, mobile string) turnCompletedNotice {
-	notice := turnCompletedNotice{desktop: desktop, mobile: mobile}
+	notice := turnCompletedNotice{desktop: desktop, mobile: mobile, outcome: turnOutcomeFinished}
 	end, found, err := d.Registry.CompletedTurnEnd(session.ID, completedTurnID)
 	if err != nil {
 		d.log.Printf("read turn end %s: %s", d.resolveDisplay(session.ID), err)
@@ -57,10 +57,10 @@ func (d *Daemon) endTurnNotifications(session *surface.Session, completedTurnID,
 		state = "needs you"
 	}
 	notice.desktop = fmt.Sprintf("%s %s: %s", d.resolveDisplay(session.ID), state, end.Headline)
-	notice.mobile = fmt.Sprintf("%s %s: %s", notificationSurfaceName(session.Surface), state, end.Headline)
+	notice.mobile = fmt.Sprintf("%s %s%s: %s", notificationSurfaceName(session.Surface), state, d.onHost(), end.Headline)
 	if endAsksPerson(end) {
 		request := turnEndRequest(end)
-		notice.requestID, notice.actions = request.ID, request.Actions()
+		notice.requestID, notice.actions, notice.outcome = request.ID, request.Actions(), turnOutcomeNeedsYou
 	}
 	return notice
 }
