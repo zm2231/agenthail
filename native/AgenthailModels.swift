@@ -2195,6 +2195,11 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
         var links: [Link]? = nil
     }
 
+    struct Action: Decodable, Hashable {
+        let id: String
+        let title: String
+    }
+
     let id: String
     let kind: String
     let tool: String
@@ -2209,6 +2214,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var elicitation: Elicitation? = nil
     /// The project's current lead when this request is from a lead a restart replaced.
     var replacedBy: String? = nil
+    var actions: [Action] = []
 
     var isQuestion: Bool { kind == "question" }
     var isAsk: Bool { kind == "ask" }
@@ -2216,11 +2222,11 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var summary: String { [title, displayName].compactMap { $0 }.first { !$0.isEmpty } ?? tool }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation, replacedBy
+        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation, replacedBy, actions
     }
 
-    init(id: String, kind: String, tool: String, title: String? = nil, questions: [Question]? = nil, alwaysAllow: Bool = false, input: String? = nil) {
-        (self.id, self.kind, self.tool, self.title, self.questions, self.alwaysAllow, self.input) = (id, kind, tool, title, questions, alwaysAllow, input)
+    init(id: String, kind: String, tool: String, title: String? = nil, questions: [Question]? = nil, alwaysAllow: Bool = false, input: String? = nil, actions: [Action] = []) {
+        (self.id, self.kind, self.tool, self.title, self.questions, self.alwaysAllow, self.input, self.actions) = (id, kind, tool, title, questions, alwaysAllow, input, actions)
     }
 
     init(from decoder: Decoder) throws {
@@ -2237,6 +2243,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
         elicitation = try container.decodeIfPresent(Elicitation.self, forKey: .elicitation)
         alwaysAllow = try container.decodeIfPresent(Bool.self, forKey: .alwaysAllow) ?? false
         replacedBy = try container.decodeIfPresent(String.self, forKey: .replacedBy)
+        actions = try container.decodeIfPresent([Action].self, forKey: .actions) ?? []
         if let raw = try container.decodeIfPresent(RequestInput.self, forKey: .input), let data = try? JSONEncoder().encode(raw) {
             input = String(data: data, encoding: .utf8)
         }

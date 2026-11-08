@@ -16,12 +16,28 @@ struct AskCardTest {
         check(plain.suggested == nil && plain.links == nil, "a question without them decodes")
 
         check(RequestCard.heading(request, asker: "@builder") == "@builder asks: Ready to ship", "the heading names the session, then asks:, then the title")
-        check(RequestCard.heading(SessionRequest(id: "q", kind: "question", tool: "AskUserQuestion"), asker: "@builder") == "Claude asks", "a question keeps its heading")
+        check(RequestCard.heading(SessionRequest(id: "q", kind: "question", tool: "AskUserQuestion"), asker: "@builder", surface: "claude") == "Claude asks", "a question names its agent")
+        check(RequestCard.heading(SessionRequest(id: "a", kind: "approval", tool: "shell"), asker: "@builder", surface: "codex") == "Codex wants your approval", "a Codex approval names Codex, not Claude")
+        check(RequestCard.heading(SessionRequest(id: "a", kind: "approval", tool: "Bash"), asker: "@builder") == "The agent wants your approval", "an approval whose agent is unknown says the agent")
 
         let body = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(RequestDecision(behavior: "allow", message: "After lunch.", answers: ["Deploy it now?": "Wait"]))) as! [String: Any]
         check(body["behavior"] as? String == "allow" && body["message"] as? String == "After lunch." && (body["answers"] as? [String: String]) == ["Deploy it now?": "Wait"] && body.count == 3, "the decision is the contract's payload: \(body)")
         let noNote = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(QuestionPager(questions: [question], ask: true).decision(["Deploy it now?": "Deploy"]))) as! [String: Any]
         check(noNote["message"] == nil, "an empty note is omitted from the payload: \(noNote)")
+
+        let codex = try! JSONDecoder().decode(SessionRequests.self, from: Data(#"{"permissionMode":"","requests":[{"id":"c1","kind":"approval","tool":"shell","alwaysAllow":true,"alwaysDeny":true,"stoppable":true,"noReason":true,"actions":[{"id":"allow","title":"Allow"},{"id":"always","title":"Always allow"},{"id":"deny","title":"Deny"},{"id":"never","title":"Always deny"},{"id":"stop","title":"Deny and stop"}]}]}"#.utf8)).requests[0]
+        let codexButtons = RequestCard.approvalButtons(codex.actions)
+        check(codexButtons.allowing.map(\.id) == ["allow", "always"] && codexButtons.denying.map(\.id) == ["deny", "never", "stop"] && codexButtons.reply == nil, "a Codex approval shows the daemon's buttons and, taking no reason, no message: \(codexButtons)")
+        check(codexButtons.denying.map(\.title) == ["Deny", "Always deny", "Deny and stop"], "button titles are the daemon's")
+        let claude = SessionRequest(id: "a1", kind: "approval", tool: "Bash", actions: [.init(id: "allow", title: "Allow"), .init(id: "deny", title: "Deny"), .init(id: "reply", title: "Deny with message…")])
+        let claudeButtons = RequestCard.approvalButtons(claude.actions)
+        check(claudeButtons.allowing.map(\.id) == ["allow"] && claudeButtons.denying.map(\.id) == ["deny"] && claudeButtons.reply?.title == "Deny with message…", "a Claude approval offers a message with its denial: \(claudeButtons)")
+        let legacy = try! JSONDecoder().decode(SessionRequests.self, from: Data(#"{"permissionMode":"","requests":[{"id":"r1","kind":"approval","tool":"Bash","title":"Claude wants to run true","alwaysAllow":true,"createdAt":"2026-10-20T00:00:00Z"}]}"#.utf8)).requests[0]
+        let legacyButtons = RequestCard.approvalButtons(legacy.actions)
+        check(legacy.actions.isEmpty && legacyButtons.allowing.isEmpty && legacyButtons.denying.isEmpty && legacyButtons.reply == nil, "an approval from a computer that sends no choices offers no buttons it could refuse")
+        check(RequestCard.noChoicesNote.contains("answer it where the session runs"), "and the card says where to answer it instead")
+        let replyBody = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(RequestDecision(choice: "reply", message: "Use the staging host"))) as! [String: Any]
+        check(replyBody["choice"] as? String == "reply" && replyBody["message"] as? String == "Use the staging host" && replyBody.count == 2, "a message denial is sent as the reply choice with its text: \(replyBody)")
 
         let stale = RequestAnswerFailure(AgenthailAPIError.requestStale("already answered"))
         check(stale.dropsCard && stale.message == RequestAnswerFailure.staleMessage, "409 stale drops the card")

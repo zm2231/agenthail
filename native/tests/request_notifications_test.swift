@@ -65,6 +65,11 @@ struct RequestNotificationsTest {
             check(RequestNotifications.notice(from: Data(bad.utf8), requestID: "r") == nil, "no notice from \(bad)")
         }
         check(RequestNotifications.choice(forAction: "always") == "always", "always is a choice")
+        let codexBody = #"{"requests":[{"id":"c","prompt":"Run make","actions":[{"id":"allow","title":"Allow"},{"id":"always","title":"Always allow"},{"id":"deny","title":"Deny"},{"id":"never","title":"Always deny"},{"id":"stop","title":"Deny and stop"}]}]}"#
+        check(RequestNotifications.notice(from: Data(codexBody.utf8), requestID: "c")?.actions.map(\.id) == ["allow", "always", "deny", "never", "stop"], "a Codex approval's always deny and deny and stop reach the notification")
+        check(RequestNotifications.choice(forAction: "never") == "never" && RequestNotifications.choice(forAction: "stop") == "stop", "never and stop are choices")
+        let denials = RequestNotifications.category(requestID: "c", actions: [RequestNotificationAction(id: "allow", title: "Allow"), RequestNotificationAction(id: "never", title: "Always deny"), RequestNotificationAction(id: "stop", title: "Deny and stop")])
+        check(denials.actions.map { $0.options.contains(.destructive) } == [false, true, true] && denials.actions.allSatisfy { $0.options.contains(.authenticationRequired) }, "every denial is destructive and every answer needs the device unlocked")
         check(RequestNotifications.choice(forAction: UNNotificationDefaultActionIdentifier) == nil, "opening is not a choice")
         let category = RequestNotifications.category(requestID: "req-1", actions: [RequestNotificationAction(id: "allow", title: "Allow"), RequestNotificationAction(id: "deny", title: "Deny")])
         check(category.identifier == "AGENTHAIL_REQ_req-1" && category.actions.map(\.identifier) == ["allow", "deny"], "category \(category.identifier)")
