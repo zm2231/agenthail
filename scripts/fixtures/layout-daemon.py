@@ -278,8 +278,10 @@ if __name__ == "__main__":
             labelled("plain", "Write the install guide"),
         ]
         count = {"families": len(sessions), "sessions": len(sessions)}
+        scopes = {"running": sum(s["status"] == "busy" for s in sessions), "current": len(sessions), "recent": len(sessions), "all": len(sessions),
+                  "archived": sum(bool(s.get("archived")) for s in sessions)}
         RESPONSES["/api/v1/snapshot"].update({"sessions": sessions, "totalSessions": len(sessions), "view": {
-            "counts": {scope: count for scope in ("running", "current", "recent", "all", "archived")}, "surfaces": [],
+            "counts": {scope: {"families": n, "sessions": n} for scope, n in scopes.items()}, "surfaces": [],
             "projects": [{"id": "web-app", "name": "web-app", "counts": count, "collapsedFamilyIds": [s["id"] for s in sessions]}],
             "families": [{"id": s["id"], "rootId": s["id"], "projectId": "web-app", "checkoutId": "web-app-main",
                           "members": [{"id": s["id"], "depth": 0, "contextOnly": False, "pinned": False}], "pinned": False, "workingSubagents": 0} for s in sessions]}})
