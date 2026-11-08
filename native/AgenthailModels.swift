@@ -1051,7 +1051,7 @@ extension SessionState {
         if let alias, !alias.isEmpty { return "@\(alias)" }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty || trimmed == id || UUID(uuidString: trimmed) != nil { return "Untitled conversation" }
-        return trimmed
+        return SessionNames.display(trimmed)
     }
 }
 

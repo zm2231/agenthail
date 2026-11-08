@@ -64,6 +64,7 @@ let package = Package(
                 "ScopePages.swift",
                 "ScopeReader.swift",
                 "SessionDisplayKind.swift",
+                "SessionNames.swift",
                 "SessionDetailState.swift",
                 "SnapshotParts.swift",
                 "ViewOrder.swift",

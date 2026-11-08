@@ -74,6 +74,7 @@ targets:
       - path: ScopePages.swift
       - path: ScopeReader.swift
       - path: SessionDisplayKind.swift
+      - path: SessionNames.swift
       - path: SessionDetailState.swift
       - path: SnapshotParts.swift
       - path: ViewOrder.swift

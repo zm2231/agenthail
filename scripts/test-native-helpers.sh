@@ -72,6 +72,7 @@ SOURCES=(
   ScopePages.swift
   ScopeReader.swift
   SessionDisplayKind.swift
+  SessionNames.swift
   SessionDetailState.swift
   SnapshotParts.swift
   ViewOrder.swift
@@ -153,6 +154,7 @@ SOURCES=(
   GlassSolve.swift
   macOS/DesktopGlass.swift
   macOS/SessionFacts.swift
+  macOS/SessionRowNote.swift
   macOS/SessionHandle.swift
   macOS/SessionLaunch.swift
   macOS/OutputSchemaInput.swift

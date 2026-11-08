@@ -521,16 +521,12 @@ struct SessionRowView: View {
                 Text(title ?? session.title)
                     .lineLimit(1)
                     .foregroundStyle(kind != .unavailable && (session.open || kind == .working) ? DesktopPalette.text : DesktopPalette.text2)
-                if kind == .working, let activity = session.activity {
+                if kind == .working {
                     TimelineView(.everyMinute) { context in
-                        if let note = activity.note(now: context.date) {
-                            Text(note)
-                                .font(.system(size: DesktopType.meta))
-                                .foregroundStyle(DesktopPalette.text2)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
+                        if let note = SessionRowNote.text(session, now: context.date) { noteText(note, kind: kind) }
                     }
+                } else if !(saysWaiting && kind == .waiting), let note = SessionRowNote.text(session) {
+                    noteText(note, kind: kind)
                 }
             }
             if saysWaiting && kind == .waiting {
@@ -571,6 +567,14 @@ struct SessionRowView: View {
                     .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
             }
+            if session.archived == true {
+                Text("Archived")
+                    .font(.system(size: DesktopType.caption))
+                    .foregroundStyle(DesktopPalette.text2)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(DesktopPalette.fill, in: Capsule())
+            }
             if !session.sharedHolders.isEmpty {
                 HStack(spacing: 3) {
                     Image(systemName: "terminal")
@@ -593,6 +597,14 @@ struct SessionRowView: View {
         .accessibilityElement(children: .combine)
         .accessibilityValue(needsYou ? "Needs you · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
         .help(SessionFacts.rowDetail(session))
+    }
+
+    private func noteText(_ note: String, kind: SessionDisplayKind) -> some View {
+        Text(note)
+            .font(.system(size: DesktopType.meta))
+            .foregroundStyle(kind == .waiting || kind == .stopped ? DesktopPalette.attention : DesktopPalette.text2)
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 }
 
@@ -793,7 +805,7 @@ struct ConversationHeader: View {
         HStack(spacing: DesktopSpace.m) {
             if showsTitle {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(session.subagent != nil ? title : session.alias.map { _ in session.name.isEmpty ? session.title : session.name } ?? title)
+                    Text(session.subagent != nil ? title : session.alias.map { _ in session.name.isEmpty ? session.title : SessionNames.display(session.name) } ?? title)
                         .font(.system(size: DesktopType.body, weight: .semibold))
                     if let alias = session.alias, !alias.isEmpty {
                         Text("@\(alias)")
@@ -819,6 +831,14 @@ struct ConversationHeader: View {
                     .foregroundStyle(DesktopPalette.text2)
                     .lineLimit(1)
                     .fixedSize()
+            }
+            if let root = session.claudeConfigRoot, let folder = SessionFacts.configFolderLabel(root) {
+                Text(folder)
+                    .font(.system(size: DesktopType.secondary))
+                    .foregroundStyle(DesktopPalette.text2)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(root.summary + "\n" + root.root)
             }
             if session.runtime?.focusable == true, let host = session.runtime?.hostName {
                 Button("Open in \(host)") { onFocusTerminal() }
