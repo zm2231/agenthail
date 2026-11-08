@@ -19,8 +19,8 @@ func stubDaemonRunning(t *testing.T, running bool) {
 
 func TestABusyNoQueueSendIsRefusedWithItsNextStepAndNothingSent(t *testing.T) {
 	busy := surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}
-	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": busy}, caps: surface.Capabilities{Send: true}}
-	app, _ := cliFixture(t, fake)
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": busy}, caps: surface.Capabilities{Send: true}, sendResult: &surface.SendResult{UUID: "turn", Accepted: false}}
+	app, r := cliFixture(t, fake)
 	_, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:target", "now please", "--no-queue"}) })
 	if !errors.Is(err, delivery.ErrTargetBusy) {
 		t.Fatalf("a busy --no-queue send must stay a busy refusal: %v", err)
@@ -30,8 +30,9 @@ func TestABusyNoQueueSendIsRefusedWithItsNextStepAndNothingSent(t *testing.T) {
 			t.Fatalf("the refusal does not name %q: %v", next, err)
 		}
 	}
-	if len(fake.sent) != 0 {
-		t.Fatalf("a refused send reached the target: %q", fake.sent)
+	queued, err := r.ListQueue(true, nil)
+	if err != nil || len(queued) != 0 {
+		t.Fatalf("a refused --no-queue send was queued: %+v err=%v", queued, err)
 	}
 }
 
