@@ -34,6 +34,12 @@ func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adap
 		return nil, false, err
 	}
 	sid, exactErr := a.registry().ExactTarget(kind, target)
+	if errors.Is(exactErr, sql.ErrNoRows) {
+		sid, exactErr = a.registry().IDPrefixTarget(kind, target)
+		if exactErr != nil && !errors.Is(exactErr, sql.ErrNoRows) {
+			return nil, false, exactErr
+		}
+	}
 	if exactErr != nil || (selector != target && sid != selector) {
 		return nil, false, a.exitedNameError(kind, target, err)
 	}

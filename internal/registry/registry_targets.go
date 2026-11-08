@@ -63,12 +63,8 @@ func (r *Registry) resolveTarget(target, kind string) (string, error) {
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
-	if ids, err := r.idPrefixMatches(target, kind, 2); err != nil {
-		return "", err
-	} else if len(ids) == 1 {
-		return ids[0], nil
-	} else if len(ids) > 1 {
-		return "", fmt.Errorf("ambiguous session id prefix %q matches %s", target, strings.Join(ids, ", "))
+	if sid, err := r.IDPrefixTarget(surface.SurfaceKind(kind), target); !errors.Is(err, sql.ErrNoRows) {
+		return sid, err
 	}
 	ids, err := r.nameOrCwdMatches(target, kind, 2)
 	if err != nil {
@@ -122,6 +118,22 @@ func (r *Registry) FragmentMatches(kind surface.SurfaceKind, target string, limi
 
 func (r *Registry) idPrefixMatches(target, kind string, limit int) ([]string, error) {
 	return r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND id LIKE ? ESCAPE '\' AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT ?`, escapeLike(target)+"%", kind, kind, limit)
+}
+
+func (r *Registry) IDPrefixTarget(kind surface.SurfaceKind, prefix string) (string, error) {
+	if prefix == "" {
+		return "", sql.ErrNoRows
+	}
+	ids, err := r.idPrefixMatches(prefix, string(kind), 2)
+	switch {
+	case err != nil:
+		return "", err
+	case len(ids) == 0:
+		return "", sql.ErrNoRows
+	case len(ids) > 1:
+		return "", fmt.Errorf("ambiguous session id prefix %q matches %s", prefix, strings.Join(ids, ", "))
+	}
+	return ids[0], nil
 }
 
 func (r *Registry) nameOrCwdMatches(target, kind string, limit int) ([]string, error) {
