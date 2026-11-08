@@ -60,7 +60,9 @@ final class TranscriptScrollDeltaUITests: XCTestCase {
         var report = ["\(name): probe \(probe)", "log: \(log)"]
         var offCount = 0
         for direction in ["up", "down"] {
-            let moved = drags.filter { $0.direction == direction }.compactMap(\.moved).sorted()
+            let these = drags.filter { $0.direction == direction }
+            report.append("\(direction): untracked, no unique label \(these.filter { $0.label == "-" }.count), row gone after the drag \(these.filter { $0.label != "-" && $0.moved == nil }.count)")
+            let moved = these.compactMap(\.moved).sorted()
             guard !moved.isEmpty else { report.append("\(direction): no tracked rows"); continue }
             let median = moved[moved.count / 2]
             let off = drags.filter { $0.direction == direction }.compactMap { drag in drag.moved.map { (drag.label, $0 - median) } }.filter { abs($0.1) > 8 }

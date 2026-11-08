@@ -73,6 +73,13 @@ final class ScrollJumpProbe {
         let shift = shifts.isEmpty ? 0 : shifts[shifts.count / 2]
         let moved = rows.filter { id, minY in last.rows[id].map { abs($0 - minY) > 1 } ?? false }.min { $0.value < $1.value }
         let step = offset - last.offset
+        if abs(step) > 1000 {
+            let changed = heights.compactMap { id, now in lastHeights[id].map { now - $0 } }.filter { abs($0) > 1 }
+            let added = rows.keys.filter { last.rows[$0] == nil }.count
+            let gone = last.rows.keys.filter { rows[$0] == nil }.count
+            log.append(String(format: "t=%.2f BIG step=%.0f h=%.0f->%.0f rowsDelta=%.0f changed=%d new=%d gone=%d phase=%@ notes[%@]",
+                              CACurrentMediaTime() - started, step, last.height, height, changed.reduce(0, +), changed.count, added, gone, phase, recentNotes()))
+        }
         guard abs(shift) > 0.1 || abs(step) > 0.1 || moved != nil || abs(height - last.height) > 0.1 else { return }
         let recent = fingerSteps.suffix(3).sorted()
         let finger = recent.isEmpty ? 0 : recent[recent.count / 2]
@@ -92,6 +99,17 @@ final class ScrollJumpProbe {
     }
 
     private(set) var log: [String] = []
+    private var notes: [(at: CFTimeInterval, what: String)] = []
+
+    func note(_ what: String) {
+        notes.append((CACurrentMediaTime(), what))
+        if notes.count > 12 { notes.removeFirst() }
+    }
+
+    private func recentNotes() -> String {
+        let now = CACurrentMediaTime()
+        return notes.filter { now - $0.at < 0.5 }.map { String(format: "%@@%.0fms", $0.what, (now - $0.at) * 1000) }.joined(separator: ",")
+    }
 
     private func summary(seen: CGFloat, step: CGFloat, last: [String: CGFloat]) -> String {
         let above = rows.filter { $0.value < offset }
@@ -101,7 +119,7 @@ final class ScrollJumpProbe {
         }
         let added = above.keys.filter { last[$0] == nil }
         return String(format: "t=%.2f seen=%.0f step=%.0f h=%.0f", CACurrentMediaTime() - started, seen, step, height)
-            + " grew[\(grown.joined(separator: ","))] new[\(added.count)]"
+            + " grew[\(grown.joined(separator: ","))] new[\(added.count)] notes[\(recentNotes())]"
     }
 
     private func flush() {
@@ -144,6 +162,12 @@ struct ScrollJumpLabel: View {
     }
 }
 #endif
+
+@MainActor func probeNote(_ what: @autoclosure () -> String) {
+#if DEBUG
+    if ScrollJumpProbe.enabled { ScrollJumpProbe.shared.note(what()) }
+#endif
+}
 
 extension View {
     @ViewBuilder func probesScrollJump(_ id: String) -> some View {

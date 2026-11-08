@@ -564,12 +564,14 @@ struct SessionScreen: View {
         return activityOnly ? items.last.map { TranscriptRowID.item($0.id) } : groups.last?.id
     }
 
-    private func scrollToLatest() {
+    private func scrollToLatest(_ why: String) {
 #if DEBUG
         ScrollCount.value += 1
         if PreviewFollowStuck.enabled, landed { return }
 #endif
-        switch LatestScroll.target(overflows: overflows, latest: queueTail.lastShownID ?? latestRowID, pinned: position.viewID(type: String.self)) {
+        let target = LatestScroll.target(overflows: overflows, latest: queueTail.lastShownID ?? latestRowID, pinned: position.viewID(type: String.self))
+        probeNote("\(why):\(target == .edge ? "edge" : "row") f=\(followingLatest) u=\(userScrolling)")
+        switch target {
         case .row(let id): position.scrollTo(id: id, anchor: .bottom)
         case .edge: position.scrollTo(edge: .bottom)
         }
@@ -589,7 +591,7 @@ struct SessionScreen: View {
         for _ in 0..<5 {
             try? await Task.sleep(for: .milliseconds(50))
             guard followingLatest else { return }
-            scrollToLatest()
+            scrollToLatest("settle")
         }
     }
 
@@ -600,6 +602,7 @@ struct SessionScreen: View {
         olderPlace.release()
         followingLatest = true
         jumps += 1
+        probeNote("jump")
         position.scrollTo(edge: .bottom)
         Task { await settleAtLatest() }
     }
@@ -700,6 +703,7 @@ struct SessionScreen: View {
             .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
             .environment(\.revealRow) {
                 olderPlace.release()
+                probeNote("reveal")
                 position.scrollTo(y: $0.wrappedValue)
             }
             .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
@@ -727,15 +731,16 @@ struct SessionScreen: View {
             guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }
 #endif
             if phase == .interacting {
-                if !userScrolling { edge.beginDrag(following: followingLatest) }
+                if !userScrolling { probeNote("drag f=\(followingLatest) at=\(edge.atLatest)"); edge.beginDrag(following: followingLatest) }
                 olderPlace.release()
                 userScrolling = true
                 followingLatest = false
             } else if phase == .idle && userScrolling {
                 let after = edge.endDrag()
+                probeNote("idle follow=\(after.follow) catch=\(after.catchUp) at=\(edge.atLatest)")
                 followingLatest = after.follow
                 userScrolling = false
-                if after.catchUp { scrollToLatest() }
+                if after.catchUp { scrollToLatest("catchUp") }
             }
         }
         // Raw edges: a derived value that repeats across a landing can skip its last action.
@@ -755,9 +760,9 @@ struct SessionScreen: View {
             return geometry.contentSize.height
         } action: { old, new in
             olderPlace.contentChanged()
-            if landed, followingLatest, !userScrolling, new > old { scrollToLatest() }
+            if landed, followingLatest, !userScrolling, new > old { scrollToLatest("grow") }
         }
-        .onAppear { olderPlace.scroll = { [position = $position] in position.wrappedValue = $0 } }
+        .onAppear { olderPlace.scroll = { [position = $position] in probeNote("older"); position.wrappedValue = $0 } }
         .refreshable { await model.refreshSession(session.id) }
         .task(id: RequestSync.viewKey(liveSession)) { await model.syncRequests(for: liveSession) }
         // Not in the bottom bar: growing the bar would move the transcript and flip atLatest, which hides it again.
@@ -863,22 +868,23 @@ struct SessionScreen: View {
             if startsAtOldest, let first = firstRowID {
                 position.scrollTo(id: first, anchor: .top)
             } else if followingLatest {
-                scrollToLatest()
+                scrollToLatest("land")
             }
             landed = true
             opening.land(open)
             opening.fire(latest: latestRowID, rebuildOpeningRows)
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
-            if followingLatest { scrollToLatest() }
+            probeNote("items f=\(followingLatest)")
+            if followingLatest { scrollToLatest("items") }
         }
         .onDisappear { olderPlace.release() }
         .modifier(QueueTailTracking(model: model, tail: $queueTail, session: session, timeline: items))
         .onChange(of: queueTail.shownIDs) { _, _ in
-            if landed, followingLatest { scrollToLatest() }
+            if landed, followingLatest { scrollToLatest("tail") }
         }
         .onChange(of: detail?.exchanges?.last?.assistant) { _, _ in
-            if followingLatest { scrollToLatest() }
+            if followingLatest { scrollToLatest("exchanges") }
         }
     }
 }
