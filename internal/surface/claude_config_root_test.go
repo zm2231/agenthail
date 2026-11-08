@@ -1,6 +1,7 @@
 package surface
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func writeClaudeGlobalConfigFixture(t *testing.T, path string, config map[string]any) {
@@ -180,6 +183,32 @@ func TestTerminalClaudeLaunchRunsUnderTheChosenRoot(t *testing.T) {
 	request.Surface = KindCodex
 	if err := validateLaunchRequest(request, []SurfaceKind{KindClaude, KindCodex}); err == nil {
 		t.Fatal("a Codex launch accepted a Claude config root")
+	}
+}
+
+func TestTerminalClaudeLaunchInAConfiguredRootThatDoesNotExistIsRefused(t *testing.T) {
+	home := claudeRootsHome(t, "spare")
+	spare := filepath.Join(home, "spare")
+	if err := os.RemoveAll(spare); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	testkit.WriteExecutable(t, filepath.Join(bin, "claude"), "#!/bin/sh\n")
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", filepath.Join(bin, "claude"))
+	ran := filepath.Join(bin, "ran")
+	testkit.WriteExecutable(t, filepath.Join(bin, "cmux"), "#!/bin/sh\ntouch \""+ran+"\"\nprintf '%s' '{\"workspace_ref\":\"workspace:1\"}'\n")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := newCMUX().Launch(context.Background(), LaunchRequest{Surface: KindClaude, Options: SessionStartOptions{Cwd: home, Message: "hello", ConfigRoot: "spare"}})
+	var missing ClaudeRootMissingError
+	if !errors.As(err, &missing) || missing.Root != spare {
+		t.Fatalf("err=%v, want the launch refused for missing %s", err, spare)
+	}
+	if _, err := os.Stat(ran); !os.IsNotExist(err) {
+		t.Fatalf("the terminal launcher ran: %v", err)
+	}
+	if _, err := os.Stat(spare); !os.IsNotExist(err) {
+		t.Fatalf("the missing root was created: %v", err)
 	}
 }
 

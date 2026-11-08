@@ -3,14 +3,14 @@ import { escape } from "./format.js";
 import { syncStartForm } from "./start-form.js";
 import { startHostQuery } from "./start-host.js";
 import { app } from "./state.js";
-import { pickedTitle, rootTitles, rootUsage, shortReason } from "./start-root-labels.js";
+import { pickedTitle, rootOrigin, rootTitles, rootUsage, shortReason } from "./start-root-labels.js";
 
 export function renderStartConfigRoots(roots, pick = null) {
   const select = $("#new-conversation-config-root");
   const current = select.value;
   const titles = rootTitles(roots, app.startOptions?.host?.name);
   select.innerHTML = [`<option value="">${escape(defaultOption(pick, roots, titles))}</option>`, ...roots.map((root, index) =>
-    `<option value="${escape(root.root)}"${root.signedInAs || root.login === "api_key" || root.login === "proxy" ? "" : " disabled"}>${escape(claudeConfigRootOption(root, titles[index]))}</option>`,
+    `<option title="${escape(rootOrigin(root))}" value="${escape(root.root)}"${root.signedInAs || root.login === "api_key" || root.login === "proxy" ? "" : " disabled"}>${escape(claudeConfigRootOption(root, titles[index]))}</option>`,
   )].join("");
   if (roots.some(root => root.root === current)) select.value = current;
   select.closest("[data-claude-root]").dataset.single = roots.length < 2 ? "true" : "";
