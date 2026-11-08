@@ -22,6 +22,8 @@ type resolveMatch struct {
 	Alias   string              `json:"alias,omitempty"`
 	Host    dashboardHost       `json:"host"`
 	Exact   bool                `json:"exact"`
+	Project string              `json:"project,omitempty"`
+	Lead    bool                `json:"lead,omitempty"`
 }
 
 type resolveResponse struct {
@@ -84,7 +86,8 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 			return nil, lookupErr
 		}
 		alias, _ := d.Registry.ReverseAlias(sid)
-		return []resolveMatch{{ID: sid, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: named || d.Registry.NamesSession(*session, target)}}, nil
+		project, lead := d.resolveScope(*session)
+		return []resolveMatch{{ID: sid, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: named || d.Registry.NamesSession(*session, target), Project: project, Lead: lead}}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
@@ -99,9 +102,23 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 			continue
 		}
 		alias, _ := d.Registry.ReverseAlias(session.ID)
-		matches = append(matches, resolveMatch{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: d.Registry.NamesSession(*session, lookup)})
+		project, lead := d.resolveScope(*session)
+		matches = append(matches, resolveMatch{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: d.Registry.NamesSession(*session, lookup), Project: project, Lead: lead})
 	}
 	return matches, nil
+}
+
+func (d *Daemon) resolveScope(session surface.Session) (string, bool) {
+	project, err := d.sessionProject(session)
+	if err != nil || project == nil {
+		return "", false
+	}
+	spec, err := d.Registry.Coordinator(project.ID)
+	if err != nil {
+		return project.ID, false
+	}
+	lead, err := d.Registry.CoordinatorSessionID(spec)
+	return project.ID, err == nil && lead == session.ID
 }
 
 func (d *Daemon) resolveRemote(ctx context.Context, candidates []*pairedHost, target string) resolveResponse {

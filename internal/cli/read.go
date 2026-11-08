@@ -35,7 +35,7 @@ func (a *App) cmdReply(args []string) error {
 		return err
 	}
 	if remote != nil {
-		sess = remote.session()
+		sess = remote.Session()
 	} else if !surface.CapabilitiesFor(surf, sess).Reply {
 		return fmt.Errorf("%s does not support reply", surf.Name())
 	}
@@ -110,7 +110,7 @@ func (a *App) cmdLast(args []string) error {
 		return err
 	}
 	if remote != nil {
-		sess = remote.session()
+		sess = remote.Session()
 	}
 	n := 1
 	if len(positional) > 1 {
@@ -160,7 +160,7 @@ func (a *App) cmdLast(args []string) error {
 	}
 	label := a.resolveDisplay(sess.ID)
 	if remote != nil {
-		label = remote.label()
+		label = remote.Label()
 	}
 	source := read.Source
 	if source != "" {

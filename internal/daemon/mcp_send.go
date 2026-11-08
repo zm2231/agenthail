@@ -31,7 +31,7 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 	if strings.TrimSpace(input.Project) != "" {
 		return d.mcpSendToLead(ctx, caller, input)
 	}
-	target, err := d.mcpControlTarget(caller, input.Target, mode == "queue")
+	target, err := d.mcpControlTarget(ctx, caller, input.Target, mode == "queue")
 	if err != nil {
 		return nil, err
 	}

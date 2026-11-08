@@ -15,7 +15,7 @@ func (d *Daemon) mcpAlias(ctx context.Context, caller *mcpCaller, input mcpAlias
 	if strings.TrimSpace(input.Name) == "" {
 		return nil, refuse("invalid", "name is required.")
 	}
-	target, err := d.mcpControlTarget(caller, input.Target, false)
+	target, err := d.mcpControlTarget(ctx, caller, input.Target, false)
 	if err != nil {
 		return nil, err
 	}

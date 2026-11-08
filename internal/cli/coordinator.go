@@ -101,80 +101,17 @@ func (a *App) projectOf(cwd string) (*daemon.CatalogProject, error) {
 // name. It returns the target to use, and the coordinator when a paired host
 // owns it.
 func (a *App) leadTarget(target string) (string, *registry.CoordinatorSpec, error) {
-	name, ok := strings.CutPrefix(target, "@")
-	if !ok || strings.Contains(name, "/") || a.registry() == nil {
+	if a.registry() == nil {
 		return target, nil, nil
 	}
-	if strings.EqualFold(name, registry.LeadAlias) {
-		spec, err := a.callerLead()
-		if err != nil {
-			return "", nil, fmt.Errorf("@%s: %w", registry.LeadAlias, err)
-		}
-		if spec.HostID == "" {
-			return "@" + spec.Name, nil, nil
-		}
-		return target, &spec, nil
-	}
-	if _, err := a.registry().ExactTarget("", name); err == nil {
-		return target, nil, nil
-	}
-	if _, err := a.registry().CoordinatorNamed(name); err == nil {
-		return target, nil, nil
-	}
-	named, err := a.registry().CoordinatorsNamed(name)
-	if err != nil {
-		return "", nil, err
-	}
-	switch len(named) {
-	case 0:
-		return target, nil, nil
-	case 1:
-		return target, &named[0], nil
-	}
-	return "", nil, fmt.Errorf("@%s names coordinators on several hosts: %s; send to one as <host>::@%s", name, a.coordinator().Refs(named), name)
+	return a.targetResolver().LeadTarget(target)
 }
 
-// expandLead resolves @lead and a paired host's @name to a target the
-// session resolvers take: a paired host's coordinator by its conversation.
-// @lead/<nickname>[/<nickname>...] walks the coordinator's subagents from its
-// conversation ID, so the path's parent is exact.
 func (a *App) expandLead(target string) (string, error) {
-	if path, ok := strings.CutPrefix(target, "@"); ok && a.registry() != nil {
-		if head, rest, isPath := strings.Cut(path, "/"); isPath && strings.EqualFold(head, registry.LeadAlias) {
-			return a.expandLeadPath(rest)
-		}
+	if a.registry() == nil {
+		return target, nil
 	}
-	resolved, remote, err := a.leadTarget(target)
-	if err != nil || remote == nil {
-		return resolved, err
-	}
-	if remote.SessionID == "" {
-		return "", fmt.Errorf("%s has no conversation yet; send to it first, which starts one", a.coordinator().Ref(*remote))
-	}
-	_, raw, _ := hosts.Split(remote.SessionID)
-	return a.coordinator().HostName(remote.HostID) + hosts.Separator + raw, nil
-}
-
-func (a *App) expandLeadPath(nicknames string) (string, error) {
-	spec, err := a.callerLead()
-	if err != nil {
-		return "", fmt.Errorf("@%s: %w", registry.LeadAlias, err)
-	}
-	if spec.HostID != "" {
-		if spec.SessionID == "" {
-			return "", fmt.Errorf("%s has no conversation yet; send to it first, which starts one", a.coordinator().Ref(spec))
-		}
-		_, raw, _ := hosts.Split(spec.SessionID)
-		return a.coordinator().HostName(spec.HostID) + hosts.Separator + "@" + raw + "/" + nicknames, nil
-	}
-	id, err := a.registry().CoordinatorSessionID(spec)
-	if err != nil {
-		return "", err
-	}
-	if id == "" {
-		return "", fmt.Errorf("%s has no conversation yet; send to it first, which starts one", a.coordinator().Ref(spec))
-	}
-	return "@" + id + "/" + nicknames, nil
+	return a.targetResolver().ExpandLead(target)
 }
 
 // callerLead is the coordinator of the caller's project: the calling

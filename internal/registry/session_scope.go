@@ -1,5 +1,7 @@
 package registry
 
+import "encoding/json"
+
 const liveLocalSession = `s.host_id='' AND NOT EXISTS (SELECT 1 FROM session_archive a WHERE a.session_id=s.id)`
 
 // SessionRef orders sessions by registration, which never changes for a session and puts new ones last.
@@ -14,6 +16,26 @@ func (r *Registry) LiveLocalSessions() ([]SessionRef, error) {
 		err := row.Scan(&ref.ID, &ref.Order)
 		return ref, err
 	}, `SELECT s.id,s.rowid FROM sessions s WHERE `+liveLocalSession+` ORDER BY s.rowid`)
+}
+
+// HostSessionRef is a paired host's session as this host mirrors it, with the
+// alias and project that host gives it.
+type HostSessionRef struct {
+	SessionRef
+	HostID  string
+	Alias   string
+	Project json.RawMessage
+}
+
+func (r *Registry) LiveHostSessions() ([]HostSessionRef, error) {
+	return queryRows(r.read, nil, func(row rowScanner) (HostSessionRef, error) {
+		var ref HostSessionRef
+		var project []byte
+		err := row.Scan(&ref.ID, &ref.Order, &ref.HostID, &ref.Alias, &project)
+		ref.Project = project
+		return ref, err
+	}, `SELECT s.id,s.rowid,s.host_id,coalesce(json_extract(cs.projection_fingerprint,'$.alias'),''),cs.host_project FROM sessions s JOIN catalog_sessions cs ON cs.session_id=s.id
+		WHERE s.host_id<>'' AND cs.retired=0 AND cs.unavailable_reason='' AND NOT EXISTS (SELECT 1 FROM session_archive a WHERE a.session_id=s.id) ORDER BY s.rowid`)
 }
 
 func (r *Registry) SessionDescendants(sessionID string) ([]string, error) {
