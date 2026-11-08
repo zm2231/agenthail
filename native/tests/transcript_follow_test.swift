@@ -2,6 +2,10 @@
 import AppKit
 import SwiftUI
 
+final class SelectedText: NSView {
+    @objc var hasSelectedText = true
+}
+
 struct Row: Identifiable {
     let id: String
     let lines: Int
@@ -15,7 +19,9 @@ final class Feed: ObservableObject {
     @Published var header: CGFloat = 44
     @Published var usesTail = false
     var following = true
+    let hold = TranscriptSelectionHold()
     var eager = 0
+    var crossed = 0
 }
 
 @MainActor var renders: [String: Int] = [:]
@@ -23,6 +29,7 @@ final class Feed: ObservableObject {
 @MainActor var shownOpen: [String: Bool] = [:]
 @MainActor var rowTops: [String: CGFloat] = [:]
 @MainActor var seenGeometry: [String] = []
+@MainActor var live: Set<String> = []
 @MainActor let rowMemory = TranscriptRowMemory()
 @MainActor weak var watched: Feed?
 
@@ -40,16 +47,19 @@ struct Transcript: View {
         let ids = feed.rows.map(\.id)
         let split = feed.usesTail ? layout.tail.split(ids, in: feed.transcript) : ids.count
         let _ = feed.eager = ids.count - split
+        let _ = feed.crossed = max(feed.crossed, layout.tail.crossed)
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                LazyVStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(feed.rows.prefix(split)) { row in
                         RowView(row: row)
+                            .padding(.top, 20)
                     }
                 }
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(feed.rows.dropFirst(split)) { row in
                         RowView(row: row)
+                            .padding(.top, 20)
                             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { layout.rows[row.id] = $0 }
                             .onDisappear { layout.rows[row.id] = nil }
                     }
@@ -57,6 +67,7 @@ struct Transcript: View {
             }
             .padding(24)
             .coordinateSpace(.named(TranscriptRows.contentSpace))
+            .background { TranscriptSelectionAnchor(hold: feed.hold) }
             .environment(\.transcriptRows, TranscriptRows(memory: rowMemory, session: feed.transcript))
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -67,7 +78,7 @@ struct Transcript: View {
         } action: { _, _ in }
         .onChange(of: "\(feed.transcript)|\(ids.count)|\(ids.last ?? "")", initial: true) {
             guard feed.usesTail else { return }
-            layout.tail.update(ids, in: feed.transcript, rows: layout.rows, visible: layout.visible, following: following)
+            layout.tail.update(ids, in: feed.transcript, rows: layout.rows, visible: layout.visible, following: following) { feed.hold.held(over: $0, buttons: 0) }
         }
         .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.rows.contains { $0.id == id } }, position: $position, following: $following)
         .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: feed.header) }
@@ -78,7 +89,7 @@ struct Transcript: View {
             if seenGeometry.count > 12 { seenGeometry.removeFirst() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .jumpToLatest)) { _ in
-            scrollToLatest($position, following: $following)
+            scrollToLatest($position, following: $following, latest: feed.rows.last?.id)
         }
     }
 }
@@ -96,7 +107,11 @@ struct RowView: View {
         Text(String(repeating: "transcript line\n", count: row.lines + (expanded ? 30 : 0)) + row.id)
             .frame(maxWidth: .infinity, alignment: .leading)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TranscriptRows.contentSpace)).minY } action: { rowTops[row.id] = $0 }
-            .onAppear { appears[row.id, default: 0] += 1 }
+            .onAppear {
+                appears[row.id, default: 0] += 1
+                live.insert(row.id)
+            }
+            .onDisappear { live.remove(row.id) }
             .onReceive(NotificationCenter.default.publisher(for: .toggleRow)) { note in
                 guard note.object as? String == row.id else { return }
                 holdPlace()
@@ -328,15 +343,18 @@ struct TranscriptFollowTest {
 
         move(scroll, to: 0)
         spin(0.3)
-        let eagerBefore = feed.eager
-        feed.rows += rows("Tr", 30)
+        for index in 0..<30 {
+            feed.rows += rows("Tr\(index)-", 1)
+            spin(0.05)
+        }
         spin(0.5)
         expect(offset(scroll) == 0 && !feed.following, "a reader who scrolled up stays put when rows join the tail, got offset \(offset(scroll))")
-        expect(feed.eager == eagerBefore + 30, "the boundary does not move for a reader who left the bottom, \(eagerBefore) became \(feed.eager)")
+        expect(feed.eager <= TranscriptTail.rows + TranscriptTail.slack, "rows streamed while away join the lazy stack, at most the newest rows, a batch short of the slack and the row whose move renders next, eager \(feed.eager)")
 
-        NotificationCenter.default.post(name: .jumpToLatest, object: nil)
-        spin(1.0)
-        expectBottom(scroll, "jump to latest reaches the bottom of an eager tail")
+        jumpLandsOnNewest(scroll, feed, "jump to latest after streaming while away")
+        nearTheEnd(scroll, feed)
+        returnMidStream(scroll, feed)
+        heldSelection(scroll, feed)
 
         feed.transcript = "U"
         feed.rows = rows("U", 200)
@@ -540,6 +558,135 @@ struct TranscriptFollowTest {
     private static func scrollView(in view: NSView) -> NSScrollView? {
         if let scroll = view as? NSScrollView { return scroll }
         return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
+    }
+
+    @MainActor
+    private static func jumpLandsOnNewest(_ scroll: NSScrollView, _ feed: Feed, _ message: String) {
+        NotificationCenter.default.post(name: .jumpToLatest, object: nil)
+        spin(1.0)
+        expectBottom(scroll, message)
+        guard let newest = feed.rows.last?.id, let top = rowTops[newest] else { return expect(false, "\(message): the newest row was laid out") }
+        let clip = scroll.contentView.bounds
+        expect(top >= clip.minY && top < clip.maxY, "\(message): the newest row is in view, top \(Int(top)) in \(Int(clip.minY))..<\(Int(clip.maxY))")
+    }
+
+    @MainActor
+    private static func nearTheEnd(_ scroll: NSScrollView, _ feed: Feed) {
+        let height = scroll.contentView.bounds.height
+        spin(0.6)
+        for _ in 0..<5 where feed.following {
+            let end = (scroll.documentView?.frame.height ?? 0) + scroll.contentView.contentInsets.bottom - height
+            move(scroll, to: max(end - height, 0))
+            spin(0.4)
+        }
+        expect(!feed.following, "a reader one screen above the end is not following, \(geometry(scroll))")
+        func shown() -> [String] {
+            feed.rows.filter { live.contains($0.id) && (rowTops[$0.id] ?? -1) >= offset(scroll) && (rowTops[$0.id] ?? .infinity) < offset(scroll) + height - 60 }.map(\.id)
+        }
+        for _ in 0..<10 where shown().count < 2 { spin(0.2) }
+        let inView = shown()
+        guard let anchor = inView.first, let opened = inView.dropFirst().first else {
+            let near = feed.rows.compactMap { row in rowTops[row.id].map { (row.id, Int($0), live.contains(row.id)) } }.filter { abs(CGFloat($0.1) - offset(scroll)) < 1500 }
+            let place = offset(scroll)
+            move(scroll, to: place + 1)
+            move(scroll, to: place)
+            spin(0.5)
+            let nudged = shown()
+            return expect(false, "rows are in view one screen above the end, \(geometry(scroll)), live \(live.count), tops near \(near), after a 1 pt nudge \(nudged)")
+        }
+        NotificationCenter.default.post(name: .toggleRow, object: opened)
+        spin(0.4)
+        expect(shownOpen[opened] == true, "a row in view expands before the stream")
+        let placed = (rowTops[anchor] ?? 0) - offset(scroll)
+        feed.crossed = 0
+        for index in 0..<60 {
+            feed.rows += rows("Tn\(index)-", 1)
+            spin(0.05)
+        }
+        spin(0.5)
+        expect(feed.crossed > 0, "rows out of view moved into the lazy stack while away")
+        expect(abs((rowTops[anchor] ?? 0) - offset(scroll) - placed) < 1, "a row in view keeps its place when it moves to the lazy stack, moved \(Int((rowTops[anchor] ?? 0) - offset(scroll) - placed))")
+        expect(shownOpen[opened] == true, "an expanded row stays expanded after it moves to the lazy stack")
+        expect(feed.eager <= TranscriptTail.rows + TranscriptTail.slack, "near the end, 60 rows keep the eager tail bounded, got \(feed.eager)")
+
+        let step: CGFloat = 40
+        var jumps: [String] = []
+        while gap(scroll) > step {
+            let before = offset(scroll)
+            let document = scroll.documentView?.frame.height ?? 0
+            let tracked = feed.rows.first { (rowTops[$0.id] ?? -1) > before + step && (rowTops[$0.id] ?? .infinity) < before + height }?.id
+            let seen = tracked.flatMap { rowTops[$0] }.map { $0 - before }
+            move(scroll, to: before + step)
+            if let tracked, let seen, let now = rowTops[tracked] {
+                let shift = now - offset(scroll) - (seen - step)
+                if abs(shift) > 1 { jumps.append("\(tracked) shifted \(Int(shift)) at offset \(Int(before))->\(Int(offset(scroll))), document \(Int(document))->\(Int(scroll.documentView?.frame.height ?? 0))") }
+            }
+        }
+        expect(jumps.isEmpty, "scrolling down by hand through rows that streamed in while away never jumps: \(jumps)")
+        let clip = scroll.contentView
+        move(scroll, to: (scroll.documentView?.frame.height ?? 0) + clip.contentInsets.bottom - clip.bounds.height)
+        expectBottom(scroll, "the newest row is reachable by hand")
+        NotificationCenter.default.post(name: .collapseRow, object: opened)
+        spin(0.3)
+    }
+
+    @MainActor
+    private static func returnMidStream(_ scroll: NSScrollView, _ feed: Feed) {
+        move(scroll, to: max(offset(scroll) - 3 * scroll.contentView.bounds.height, 0))
+        for index in 0..<20 {
+            feed.rows += rows("Tm\(index)-", 1)
+            spin(0.05)
+        }
+        jumpLandsOnNewest(scroll, feed, "jump to latest mid-stream")
+        for index in 0..<30 {
+            feed.rows += rows("Tq\(index)-", 1)
+            spin(0.05)
+        }
+        spin(0.5)
+        expectBottom(scroll, "streaming on after returning stays followed")
+        expect(feed.following, "following resumes after jump to latest")
+        expect(feed.eager < 30, "after returning, the tail is the end's rows, eager \(feed.eager)")
+    }
+
+    @MainActor
+    private static func heldSelection(_ scroll: NSScrollView, _ feed: Feed) {
+        move(scroll, to: offset(scroll) - 150)
+        spin(0.4)
+        expect(!feed.following, "a reader just above the end is not following")
+        let height = scroll.contentView.bounds.height
+        guard let anchor = feed.rows.dropFirst(feed.rows.count - feed.eager).first(where: { live.contains($0.id) && (rowTops[$0.id] ?? -1) >= offset(scroll) && (rowTops[$0.id] ?? .infinity) < offset(scroll) + height - 60 })?.id
+        else { return expect(false, "an eager row is in view just above the end, eager \(feed.eager) \(geometry(scroll))") }
+        NotificationCenter.default.post(name: .toggleRow, object: anchor)
+        spin(0.4)
+        expect(shownOpen[anchor] == true, "an eager row in view expands")
+        let placed = (rowTops[anchor] ?? 0) - offset(scroll)
+        feed.crossed = 0
+        let top = rowTops[anchor] ?? 0
+        let selection = SelectedText(frame: NSRect(x: 0, y: top + 1, width: 10, height: 10))
+        feed.hold.anchor?.addSubview(selection)
+        expect(feed.hold.held(over: [CGRect(x: 0, y: top, width: 600, height: 20)], buttons: 0), "a selection in a row that would move holds the tail")
+        expect(!feed.hold.held(over: [CGRect(x: 0, y: top - 400, width: 600, height: 300)], buttons: 0), "a selection outside the rows that would move does not hold the tail")
+        for index in 0..<40 {
+            feed.rows += rows("Th\(index)-", 1)
+            spin(0.05)
+        }
+        spin(0.3)
+        let index = feed.rows.firstIndex { $0.id == anchor } ?? 0
+        expect(index >= feed.rows.count - feed.eager, "no row in view crosses stacks while the reader holds a selection or a drag, crossed \(feed.crossed), eager \(feed.eager)")
+        expect(abs((rowTops[anchor] ?? 0) - offset(scroll) - placed) < 1, "a held row keeps its place while the stream grows below it")
+        expect(feed.eager >= 40, "a held tail keeps streamed rows eager, got \(feed.eager)")
+        selection.removeFromSuperview()
+        for index in 0..<2 {
+            feed.rows += rows("Ti\(index)-", 1)
+            spin(0.3)
+        }
+        expect(feed.crossed >= TranscriptTail.stranded, "once released, the stranded rows in view move into the lazy stack, crossed \(feed.crossed)")
+        expect(feed.eager < TranscriptTail.rows + TranscriptTail.slack, "the released tail is bounded, got \(feed.eager)")
+        expect(abs((rowTops[anchor] ?? 0) - offset(scroll) - placed) < 1, "a row in view keeps its place when it crosses into the lazy stack, moved \(Int((rowTops[anchor] ?? 0) - offset(scroll) - placed))")
+        expect(shownOpen[anchor] == true, "an expanded row stays expanded when it crosses into the lazy stack")
+        NotificationCenter.default.post(name: .collapseRow, object: anchor)
+        spin(0.3)
+        jumpLandsOnNewest(scroll, feed, "jump to latest after a held stream")
     }
 
     @MainActor

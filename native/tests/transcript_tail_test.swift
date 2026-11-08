@@ -34,11 +34,40 @@ struct TranscriptTailTest {
         moved.update(ids, in: "a", rows: rows(open..<100), visible: visible, following: true)
         long += ["r140"]
         let below = CGRect(x: 0, y: 13_100, width: 600, height: 900)
-        moved.update(long, in: "a", rows: rows(open..<141), visible: below, following: false)
-        expect(moved.split(long, in: "a") == open, "a reader who left the bottom keeps the boundary")
+        var held = moved
+        held.update(long, in: "a", rows: rows(open..<141), visible: below, following: false) { _ in true }
+        expect(held.split(long, in: "a") == 130, "a held selection or drag still lets rows above the viewport move, got \(held.split(long, in: "a"))")
+
+        var reading = moved
+        reading.update(long, in: "a", rows: rows(open..<141), visible: below, following: false)
+        expect(reading.split(long, in: "a") == 130, "a reader who left the bottom has rows above the viewport moved, got \(reading.split(long, in: "a"))")
+        expect(reading.crossed == 130 - open, "the update counts the rows that crossed, got \(reading.crossed)")
+        reading.update(long, in: "a", rows: rows(open..<141), visible: below, following: false)
+        expect(reading.crossed == 0, "a settled boundary moves no rows")
 
         moved.update(long, in: "a", rows: rows(open..<141), visible: below, following: true)
         expect(moved.split(long, in: "a") == 130, "the boundary passes rows wholly above the viewport and no others, got \(moved.split(long, in: "a"))")
+
+        let few = CGRect(x: 0, y: CGFloat(open) * 100 + 200, width: 600, height: 900)
+        var near = TranscriptTail()
+        near.update(ids, in: "a", rows: rows(open..<100), visible: visible, following: true)
+        let six = ids + (100..<106).map { "r\($0)" }
+        near.update(six, in: "a", rows: rows(open..<106), visible: few, following: false)
+        expect(near.split(six, in: "a") == open, "fewer out-of-view rows than the slack stay put")
+
+        let tall = CGRect(x: 0, y: CGFloat(open) * 100, width: 600, height: 100_000)
+        var stranded = TranscriptTail()
+        stranded.update(ids, in: "a", rows: rows(open..<100), visible: visible, following: true)
+        let short29 = ids + (100..<(100 + TranscriptTail.stranded - 1)).map { "r\($0)" }
+        stranded.update(short29, in: "a", rows: rows(open..<short29.count), visible: tall, following: false)
+        expect(stranded.split(short29, in: "a") == open, "visible rows stay eager below the stranded threshold")
+        let past = ids + (100..<(100 + TranscriptTail.stranded)).map { "r\($0)" }
+        var asked: [CGRect] = []
+        stranded.update(past, in: "a", rows: rows(open..<past.count), visible: tall, following: false) { asked = $0; return true }
+        expect(stranded.split(past, in: "a") == open, "a held selection keeps visible rows eager past the threshold")
+        expect(asked == (open..<TranscriptTail.opening(count: past.count)).map { CGRect(x: 0, y: CGFloat($0) * 100, width: 600, height: 100) }, "the hold is asked about exactly the rows that would move, got \(asked.count)")
+        stranded.update(past, in: "a", rows: rows(open..<past.count), visible: tall, following: false)
+        expect(stranded.split(past, in: "a") == TranscriptTail.opening(count: past.count), "visible rows move once the stranded tail reaches the threshold")
 
         var unmeasured = TranscriptTail()
         unmeasured.update(ids, in: "a", rows: [:], visible: below, following: true)

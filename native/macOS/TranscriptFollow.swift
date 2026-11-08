@@ -247,7 +247,16 @@ extension View {
 }
 
 @MainActor
-func scrollToLatest(_ position: Binding<ScrollPosition>, following: Binding<Bool>) {
+func scrollToLatest(_ position: Binding<ScrollPosition>, following: Binding<Bool>, latest: String?) {
     following.wrappedValue = true
-    withAnimation(.easeOut(duration: 0.25)) { position.wrappedValue.scrollTo(edge: .bottom) }
+    guard let latest else {
+        withAnimation(.easeOut(duration: 0.25)) { position.wrappedValue.scrollTo(edge: .bottom) }
+        return
+    }
+    // A lazy stack can leave rows it never laid out unbuilt after an edge scroll; scrolling to the row first builds them.
+    position.wrappedValue.scrollTo(id: latest, anchor: .bottom)
+    DispatchQueue.main.async {
+        guard position.wrappedValue.viewID(type: String.self) == latest else { return }
+        position.wrappedValue.scrollTo(edge: .bottom)
+    }
 }
