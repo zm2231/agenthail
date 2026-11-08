@@ -47,6 +47,14 @@ func RouteFor(adapter Surface, session *Session, author Author) Route {
 
 func (r Route) TransportOnly() bool { return r == RoutePeer }
 
+// PersonMessage is how a message on this route reaches the session: a peer socket hands the model a note.
+func (r Route) PersonMessage() PersonMessage {
+	if r == RoutePeer {
+		return PersonNote
+	}
+	return PersonTurn
+}
+
 func (r Route) Validate(adapter Surface, options SendOptions) error {
 	if len(options.Uploads) > 0 && !adapter.Capabilities().Attach {
 		return DeliveryTerminal(fmt.Errorf("%s sessions cannot take attached files", adapter.Name()), DeliveryInvalidRequest)

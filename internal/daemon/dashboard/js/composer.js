@@ -33,7 +33,8 @@ export function syncComposerAction() {
   const steerRefusal = attachmentSteerRefusal(held, capabilities);
   const hasMessage = Boolean(input.value.trim()) || Boolean(app.selected && sendableAttachments(app.selected.id).length);
   const readOnly = Boolean(app.history?.readOnly || app.selected?.readOnly);
-  const turnNotice = capabilities.turnNotice || "";
+  const turnNotice = personNote(capabilities);
+  $("#composer-adopt").hidden = readOnly || !turnNotice || !capabilities.lifecycle?.adopt;
   const stopping = busy && capabilities.interrupt && !hasMessage && !attached && !readOnly;
   sendButton.dataset.mode = stopping ? "interrupt" : "send";
   sendButton.querySelector("span:first-child").textContent = stopping ? "Stop" : "Send";
@@ -58,6 +59,42 @@ export function syncComposerAction() {
       ? "Send queues this for next. Steer now changes the turn in progress."
       : "This agent is working. Stop ends the current turn."
     : "Ready to send.";
+}
+
+export function personNote(capabilities) {
+  if (capabilities?.personMessage !== "note") return "";
+  const remote = capabilities.remoteControl;
+  const adopt = capabilities.lifecycle?.adopt;
+  const remedy = remote && adopt
+    ? " Run /remote-control in its terminal, or open it in Agenthail, to write as yourself."
+    : remote
+    ? " Run /remote-control in its terminal to write as yourself."
+    : adopt
+    ? " Open it in Agenthail to write as yourself."
+    : "";
+  return `What you write reaches this terminal session as a note from Agenthail, not as your own turn.${remedy}`;
+}
+
+export async function adoptSelected() {
+  const sessionId = app.selected?.id;
+  if (!sessionId) return;
+  $("#composer-adopt").disabled = true;
+  try {
+    let result;
+    try {
+      result = await action("session-adopt", {}, crypto.randomUUID(), sessionId);
+    } catch (error) {
+      if (error.code !== "session_adopt_needs_consent" || !window.confirm(`${error.message}\n\nStop it in its terminal and open the conversation in Agenthail?`)) throw error;
+      result = await action("session-adopt", { stopTerminal: true }, crypto.randomUUID(), sessionId);
+    }
+    toast("Opened in Agenthail. What you write now is your own turn.");
+    await load(true);
+    await selectSession(result?.result?.session?.id || sessionId);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    $("#composer-adopt").disabled = false;
+  }
 }
 
 export async function send(requestedAction = "send") {
@@ -159,7 +196,11 @@ async function sendAnswered(item, result) {
   const target = result?.result?.movedTo || sessionTarget(session);
   const status = deliveryStatusLabel(result);
   toast(
-    result?.result?.waitingOn || result?.result?.evidence === "transport_accepted"
+    result?.result?.waitingOn
+      ? result.result.detail
+      : result?.result?.deliveredAs === "note"
+      ? `${status} to ${target} as a note from Agenthail, not as your own turn.`
+      : result?.result?.evidence === "transport_accepted"
       ? result.result.detail
       : item.wire.action === "steer" || (item.wire.busyDelivery === "steer" && result?.result?.evidence !== "queued")
       ? "Current turn redirected."
@@ -223,6 +264,7 @@ export function bindComposerEvents() {
     syncComposerAction();
   });
   $("#steer-message").addEventListener("click", () => send("steer"));
+  $("#composer-adopt").addEventListener("click", adoptSelected);
   $("#chat-body").addEventListener("toggle", rememberToolRow, true);
   $("#composer").addEventListener("submit", (event) => {
     event.preventDefault();

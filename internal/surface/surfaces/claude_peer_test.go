@@ -578,7 +578,7 @@ func TestClaudeAdvertisesRemoteControlCommandsOnlyWhereControlReachesThem(t *tes
 	}
 }
 
-func TestClaudeTellsThePersonWhenTheyReachALiveTerminalOnlyAsANote(t *testing.T) {
+func TestClaudeSaysWhenAPersonsMessageReachesALiveTerminalOnlyAsANote(t *testing.T) {
 	adapter := NewClaude(nil, t.TempDir())
 	live := os.Getpid()
 	terminal := &surface.Session{ID: "terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: live}
@@ -587,15 +587,19 @@ func TestClaudeTellsThePersonWhenTheyReachALiveTerminalOnlyAsANote(t *testing.T)
 		"hosted":         {ID: "hosted", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: live},
 		"exited":         {ID: "exited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"},
 	} {
-		if notice := adapter.SessionCapabilities(session).TurnNotice; notice != "" {
-			t.Fatalf("%s: a session that takes the person's turn has a notice: %q", name, notice)
+		if got := adapter.SessionCapabilities(session); got.PersonMessage != surface.PersonTurn || !got.RemoteControl {
+			t.Fatalf("%s: personMessage=%q remoteControl=%v, want a turn on an install with Remote Control", name, got.PersonMessage, got.RemoteControl)
 		}
 	}
-	if notice := adapter.SessionCapabilities(terminal).TurnNotice; !strings.Contains(notice, "/remote-control") {
-		t.Fatalf("live terminal notice = %q", notice)
+	if got := adapter.SessionCapabilities(terminal); got.PersonMessage != surface.PersonNote || !got.RemoteControl {
+		t.Fatalf("live terminal personMessage=%q remoteControl=%v", got.PersonMessage, got.RemoteControl)
 	}
 	adapter.DisableRemoteControl()
-	if notice := adapter.SessionCapabilities(terminal).TurnNotice; notice == "" || strings.Contains(notice, "/remote-control") {
-		t.Fatalf("an install without Remote Control offers it: %q", notice)
+	if got := adapter.SessionCapabilities(terminal); got.PersonMessage != surface.PersonNote || got.RemoteControl {
+		t.Fatalf("an install without Remote Control: personMessage=%q remoteControl=%v", got.PersonMessage, got.RemoteControl)
+	}
+	encoded, err := json.Marshal(surface.Capabilities{})
+	if err != nil || !strings.Contains(string(encoded), `"personMessage":"turn"`) || !strings.Contains(string(encoded), `"remoteControl":false`) {
+		t.Fatalf("a session that does not say serializes as %s err=%v", encoded, err)
 	}
 }

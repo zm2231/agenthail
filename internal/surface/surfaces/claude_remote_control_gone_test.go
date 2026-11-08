@@ -68,8 +68,8 @@ func TestAPersonsTurnThatMeetsAGoneRemoteControlIsRoutedAgainToTheTerminalsSocke
 	if relisted.Bridge != "" || c.Route(&relisted, surface.AuthorPerson) != surface.RoutePeer {
 		t.Fatalf("relisted=%+v, want the gone Remote Control dropped though the record still names it", relisted)
 	}
-	if notice := surface.EffectiveCapabilities(c, &relisted).TurnNotice; notice == "" {
-		t.Fatal("the relisted session shows no notice that a message reaches it as a note")
+	if got := surface.EffectiveCapabilities(c, &relisted).PersonMessage; got != surface.PersonNote {
+		t.Fatalf("the relisted session's personMessage=%q, want a note", got)
 	}
 }
 

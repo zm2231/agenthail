@@ -846,7 +846,7 @@ func TestDashboardCreatesAndRegistersNotionThread(t *testing.T) {
 	request.AddCookie(browserCookie(t, registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), threadID) || len(fake.sent) != 1 || fake.sent[0] != "Research the launch" || len(fake.models) != 1 || fake.models[0] != "fast" {
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), threadID) || !strings.Contains(response.Body.String(), `"deliveredAs":"turn"`) || len(fake.sent) != 1 || fake.sent[0] != "Research the launch" || len(fake.models) != 1 || fake.models[0] != "fast" {
 		t.Fatalf("status=%d sent=%v models=%v body=%s", response.Code, fake.sent, fake.models, response.Body.String())
 	}
 	session, err := registry.Session(threadID)

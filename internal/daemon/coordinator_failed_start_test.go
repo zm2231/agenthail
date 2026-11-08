@@ -236,8 +236,8 @@ func TestACoordinatorStartThatFailsKeepsThePreviousLead(t *testing.T) {
 	}
 
 	fake.startErr = surface.DeliveryOutcomeUnknown(errors.New("turn/start timed out"))
-	if response := runDashboardAction(t, d, `{"action":"coordinator-send","name":"captain","message":"hello again"}`); response.Code >= http.StatusMultipleChoices {
-		t.Fatalf("an outcome-unknown start was refused: %d %s", response.Code, response.Body)
+	if response := runDashboardAction(t, d, `{"action":"coordinator-send","name":"captain","message":"hello again"}`); response.Code >= http.StatusMultipleChoices || !strings.Contains(response.Body.String(), `"evidence":"submitted"`) || !strings.Contains(response.Body.String(), `"deliveredAs":"turn"`) {
+		t.Fatalf("an outcome-unknown start was refused or lost its delivery form: %d %s", response.Code, response.Body)
 	}
 	if got := lead(); got != "started" {
 		t.Fatalf("lead=%q after an outcome-unknown start, want the new conversation", got)

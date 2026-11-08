@@ -42,7 +42,11 @@ func TestEveryIntentBackedReceiptCarriesItsIntentsUUID(t *testing.T) {
 				t.Fatal(err)
 			}
 			receipt, err := tc.deliver(Dispatcher{Registry: r}, tc.adapter, session)
-			if err != nil || receipt == nil || receipt.DeliveryID == 0 || receipt.Evidence != tc.want {
+			deliveredAs := surface.PersonTurn
+			if tc.want == surface.EvidenceQueued {
+				deliveredAs = ""
+			}
+			if err != nil || receipt == nil || receipt.DeliveryID == 0 || receipt.Evidence != tc.want || receipt.DeliveredAs != deliveredAs {
 				t.Fatalf("receipt=%+v err=%v", receipt, err)
 			}
 			intent, err := r.DeliveryIntent(receipt.DeliveryID)

@@ -6,6 +6,7 @@ import { bindOrderHold } from "./order-hold.js";
 import { configureStream, startSharedStreams, streamsSupported, subscribe } from "./shared-stream.js";
 import { toast } from "./feedback.js";
 import { app } from "./state.js";
+import { renderChat } from "./chat.js";
 
 let painting = null;
 
@@ -25,7 +26,7 @@ export function startLiveOrder() {
   }
   configureStream("catalog", catalogStream());
   subscribe("catalog", (message) => {
-    if (message.kind === "event") catalogEvent(message.event, { render, reread: rereadSoon });
+    if (message.kind === "event") catalogEvent(message.event, { render, reread: rereadSoon, controls: renderChat });
     else if (app.hasState) rereadSoon(0);
   });
   subscribe("events", (message) => {
