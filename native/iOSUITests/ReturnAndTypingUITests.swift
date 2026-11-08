@@ -25,16 +25,31 @@ final class ReturnAndTypingUITests: XCTestCase {
             let bottom = app.otherElements["composer"].frame.minY
             return CGRect(x: 0, y: top, width: app.windows.firstMatch.frame.width, height: max(0, bottom - top))
         }
-        let visibleRows = { (try? timeline.snapshot())?.textCount(in: band()) ?? 0 }
+        let rowsIn = { (shown: CGRect) -> Bool in
+            guard let root = try? timeline.snapshot() else { return false }
+            var pending = [root]
+            while let next = pending.popLast() {
+                if next.elementType == .staticText, shown.intersection(next.frame).height >= 10 { return true }
+                pending += next.children
+            }
+            return false
+        }
+        let painted = {
+            let shown = band().insetBy(dx: 16, dy: 0)
+            return rowsIn(shown) && ScreenshotInk.shows(app.screenshot().image, in: shown)
+        }
         let drawn = { (step: String) in
             let deadline = Date().addingTimeInterval(2)
-            var rows = visibleRows()
-            while rows == 0 && Date() < deadline {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-                rows = visibleRows()
+            var shownInTime = false
+            while !shownInTime {
+                let shown = painted()
+                let checked = Date()
+                shownInTime = shown && checked <= deadline
+                if checked > deadline { break }
+                if !shown { RunLoop.current.run(until: checked.addingTimeInterval(0.05)) }
             }
             let keyboard = app.keyboards.firstMatch
-            XCTAssertGreaterThan(rows, 0, "the transcript shows rows between the top bar and the composer within 2 s \(step): band \(band()), keyboard \(keyboard.exists ? "\(keyboard.frame)" : "hidden")")
+            XCTAssertTrue(shownInTime, "the transcript is painted between the top bar and the composer within 2 s \(step): band \(band()), keyboard \(keyboard.exists ? "\(keyboard.frame)" : "hidden")")
         }
         let started = Date()
         composer.typeText(typed)
@@ -61,12 +76,5 @@ final class ReturnAndTypingUITests: XCTestCase {
             drawn("of closing Notification Center (pull \(pull))")
             keepsDraft("after Notification Center (pull \(pull))")
         }
-    }
-}
-
-private extension XCUIElementSnapshot {
-    func textCount(in band: CGRect) -> Int {
-        let shown = elementType == .staticText && band.intersection(frame).height >= 10 ? 1 : 0
-        return children.reduce(shown) { $0 + $1.textCount(in: band) }
     }
 }
