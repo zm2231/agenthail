@@ -178,6 +178,20 @@ func TestASteerFromAnAgentThatMayNotSteerGoesAsASend(t *testing.T) {
 	}
 }
 
+func TestASteerRunOutsideAnyAgentSessionReachesTheBusyTurn(t *testing.T) {
+	for _, identity := range surface.CallerIdentity {
+		t.Setenv(identity.Variable, "")
+	}
+	busy := surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusBusy}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": busy}, caps: surface.Capabilities{Send: true, Steer: true}}
+	app, r := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.Run([]string{"steer", "codex:target", "change course"}) })
+	queued, listErr := r.ListQueue(true, nil)
+	if err != nil || len(fake.steered) != 1 || len(fake.sent) != 0 || listErr != nil || len(queued) != 0 || strings.Contains(output, "not a steer") {
+		t.Fatalf("a plain CLI steer is steered: output=%q steered=%q sent=%q queued=%+v err=%v", output, fake.steered, fake.sent, queued, err)
+	}
+}
+
 func TestHelpAndTheSkillNameTheSameDeliveryNextSteps(t *testing.T) {
 	help, err := captureStdout(t, func() error { return (&App{}).Run([]string{"help"}) })
 	if err != nil {

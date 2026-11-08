@@ -80,8 +80,9 @@ Delivery (send, queue, steer):
                                 steer you may send go over its socket now, busy or not, taken at its next tool call or
                                 as a new turn, and the receipt says it was not steered; a send also goes while it waits
                                 on you, a steer is held then, and queue still waits for the turn
-  steer you may not send        only the person, the target's lead or the session that started it steer; anyone
-                                else's steer goes as a send would (now if idle, queued if busy), and the receipt says so
+  steer you may not send        the person, a command run outside any agent session, Agenthail itself, the target's
+                                lead and the session that started it may steer; another agent's steer goes as a send
+                                would (now if idle, queued if busy), and the receipt says so
   daemon not running            a message send, queue or steer queued waits, and that command warns; run
                                 'agenthail daemon start' (a message delivered now needs no daemon and gets no warning)
   another host's session        reached through this computer's daemon, so start it first; --no-queue is refused

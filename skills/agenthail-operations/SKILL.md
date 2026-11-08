@@ -422,9 +422,10 @@ queues: under the `steer` setting it steers as above, and otherwise a busy targe
 refuses it, nothing is sent, and the error names the next step,
 `agenthail queue <target> "msg"` to deliver when the turn ends or
 `agenthail steer <target> "msg"` to reach the turn now. `steer` on an idle
-target has no turn to reach and says to run `agenthail send <target> "msg"`; a
-steer from an agent that may not steer the target goes as a send would, and its
-receipt says so. A target waiting on you holds a send, queue or steer until you
+target has no turn to reach and says to run `agenthail send <target> "msg"`. The
+person, a command run outside any agent session, Agenthail itself, the target's
+lead and the session that started it may steer; another agent's steer goes as a
+send would, and its receipt says so. A target waiting on you holds a send, queue or steer until you
 answer (`agenthail requests <target>`). A Claude session with a socket on this
 computer is the exception: a send (with or without `--no-queue`) and a steer the
 sender may send go over its socket now, busy or not, taken at its next tool call
