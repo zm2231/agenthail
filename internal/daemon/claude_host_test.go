@@ -1314,3 +1314,56 @@ func TestARetiringHostThatStopsAnsweringIsLoggedOnceAndFollowedUntilItExits(t *t
 		t.Fatalf("log = %q, want one silence, one recovery and the exit", got)
 	}
 }
+
+// A retiring host past its drain grace closes a session whose background task
+// still runs; the daemon queues the host's notice of what stopped for that
+// session, which resumes it on the current host.
+func TestASessionMovedOffARetiringHostIsToldWhichBackgroundTasksStopped(t *testing.T) {
+	t.Setenv("AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS", "2000")
+	fixture := claudehosttest.New(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client, err := fixture.Manager(t, "1.0.0").Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	task := uuid.NewString()
+	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: id, UUID: task, Text: "BACKGROUND 60000"}); err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the turn that starts the task", 15*time.Second, func() bool { return len(fixture.Turns(t, id)) == 1 })
+	r := hostRegistry(t)
+	if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDaemon(t, r, nil)
+	if client, err = fixture.Manager(t, "1.1.0").Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retiring := client.Retiring()
+	if len(retiring) != 1 {
+		t.Fatalf("retiring hosts = %v, want the old one", retiring)
+	}
+	followed := make(chan struct{})
+	go func() {
+		defer close(followed)
+		d.watchRetiringClaudeHost(ctx, retiring[0])
+	}()
+	select {
+	case <-followed:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the retiring host still serves the session past its drain grace")
+	}
+	if count := r.QueueCount(id); count != 1 {
+		t.Fatalf("queued for the session = %d, want the notice", count)
+	}
+	item, err := r.QueueItem(1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.SourceSessionID != surface.SystemSessionID || !strings.Contains(item.Message, "stopped these background tasks") || !strings.Contains(item.Message, "task-"+task) {
+		t.Fatalf("queued = %+v, want Agenthail's notice naming the stopped task", item)
+	}
+}

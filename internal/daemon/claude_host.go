@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -140,6 +142,9 @@ func (d *Daemon) watchRetiringClaudeHost(ctx context.Context, host claudehost.Cl
 			start, _ := host.Subscribe(ctx, after, func(event claudehost.Event) {
 				after = event.Seq
 				d.recordPeerHold(event)
+				if event.Kind == "retired" {
+					d.relayRetiredNotice(host, event)
+				}
 				if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" || event.Kind == "exited" {
 					d.claudeHostChanged()
 				}
@@ -158,6 +163,19 @@ func (d *Daemon) watchRetiringClaudeHost(ctx context.Context, host claudehost.Cl
 	if ctx.Err() == nil {
 		d.log.Printf("Claude host: the retiring host on %s has exited", host.Socket)
 		d.claudeHostChanged()
+	}
+}
+
+// relayRetiredNotice queues for a session the notice its retiring host wrote
+// when it closed the session with background tasks still running. Delivering
+// it resumes the session on the current host.
+func (d *Daemon) relayRetiredNotice(host claudehost.Client, event claudehost.Event) {
+	if event.SessionID == "" || event.Notice == "" {
+		return
+	}
+	key := fmt.Sprintf("host-retired:%s:%s:%d", filepath.Base(host.Socket), event.SessionID, event.Seq)
+	if _, err := d.Registry.QueueMessageWithOptions(event.SessionID, event.Notice, key, surface.SendOptions{SourceSessionID: surface.SystemSessionID}); err != nil {
+		d.log.Printf("Claude host: tell %s which background tasks its move stopped: %s", d.resolveDisplay(event.SessionID), err)
 	}
 }
 

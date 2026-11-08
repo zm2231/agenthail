@@ -35,6 +35,11 @@ const HUMAN_KEPT = 64;
 // together stay well inside the daemon's 20 s deadline for a stop.
 const CLOSE_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS) || 5_000;
 const KILL_WAIT_MS = 2_000;
+// How long a retiring host waits for a session's background tasks to end
+// before it closes the session at its next idle point anyway. A task a worker
+// keeps restarting never ends, and the session would hold this host and its
+// runtime for good.
+const DRAIN_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS) || 60 * 60_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERMISSION_MODES = new Set(['default', 'manual', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -72,6 +77,7 @@ const events = [];
 const subscribers = new Set();
 let seq = 0;
 let draining = false;
+let graceOver = false;
 // Replies not yet written; a retiring host writes them before it exits.
 let replying = 0;
 let exiting = false;
@@ -247,14 +253,23 @@ class Session {
     return this.state === 'idle' && this.pending.size === 0 && this.tasks.length === 0 && this.owed.size === 0;
   }
 
+  // Once the drain grace is over, live background tasks no longer keep the
+  // session; it still retires only idle with no open request and no turn owed.
+  retirable() {
+    if (this.settled()) return true;
+    return graceOver && this.state === 'idle' && this.pending.size === 0 && this.owed.size === 0;
+  }
+
   retireIfDone({ turnEnded = false } = {}) {
     if (this.guessesIdle && !turnEnded) return;
-    if (!draining || this.ended || !this.query || !this.settled()) return;
+    if (!draining || this.ended || !this.query || !this.retirable()) return;
     if (this.measuring) {
       this.measuring.then(() => this.retireIfDone({ turnEnded }));
       return;
     }
-    log(`retiring session ${this.id} (pid ${this.pid}), now idle`);
+    const stopped = this.describeTasks();
+    log(`retiring session ${this.id} (pid ${this.pid}), now idle${stopped.length ? `, stopping ${stopped.length} background tasks` : ''}`);
+    if (stopped.length) emit(this.id, 'retired', { notice: retiredNotice(stopped) });
     this.end();
     this.query.close();
   }
@@ -1249,6 +1264,11 @@ function shutdown(code) {
   process.exit(code);
 }
 
+function retiredNotice(tasks) {
+  const lines = tasks.map((task) => `- ${task.description || task.type || 'background task'} (${task.id})`);
+  return `[agenthail] Agenthail moved this session to its updated Claude host, which stopped these background tasks:\n${lines.join('\n')}\nStart again any you still need.`;
+}
+
 // retire hands the daemon's socket and the host lock to the next host while
 // this one keeps serving its own sessions on a socket of its own, named by its
 // pid beside the daemon's, until the last one closes. It refuses new sessions.
@@ -1265,6 +1285,10 @@ async function retire() {
   });
   fs.chmodSync(socket, 0o600);
   draining = true;
+  setTimeout(() => {
+    graceOver = true;
+    for (const s of [...sessions.values()]) s.retireIfDone();
+  }, DRAIN_GRACE_MS).unref();
   server.close();
   try {
     fs.unlinkSync(args.socket);

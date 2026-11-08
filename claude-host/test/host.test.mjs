@@ -1145,6 +1145,58 @@ test('a retiring host closes a session once an ambient task ends, since no turn 
 
 test('a retiring host closes a session once an ambient task ends with the live set changing first', () => retiresAfterAnAmbientTask({ FAKE_CLAUDE_LEVEL_FIRST: '1' }));
 
+test('past its drain grace a retiring host closes an idle session whose background task still runs and says which it stopped', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS: '1500' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'BACKGROUND 60000' });
+  await c.event(turnResult(id, uuid));
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'idle');
+  await c.call('drain');
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  await sleep(500);
+  assert.ok(alive(pid), 'the session stays while its task runs inside the grace');
+  const retired = await r.event((e) => e.sessionId === id && e.kind === 'retired', 5000);
+  assert.match(retired.notice, /stopped these background tasks/);
+  assert.match(retired.notice, new RegExp(`background shell \\(task-${uuid}\\)`));
+  assert.equal(await host.exited, 0);
+  assert.ok(!alive(pid));
+  c.close();
+  r.close();
+});
+
+test('past its drain grace a retiring host still lets a running turn end before it closes the session', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS: '300' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
+  const background = randomUUID();
+  await c.call('send', { sessionId: id, uuid: background, text: 'BACKGROUND 60000' });
+  await c.event(turnResult(id, background));
+  const slow = randomUUID();
+  await c.call('send', { sessionId: id, uuid: slow, text: 'SLOW 2000' });
+  await c.event(running(id));
+  await c.call('drain');
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  await sleep(1000);
+  assert.ok(alive(pid), 'a busy session is not closed past the grace');
+  const ended = await r.event(turnResult(id, slow), 5000);
+  const retired = await r.event((e) => e.sessionId === id && e.kind === 'retired', 5000);
+  assert.ok(ended.seq < retired.seq);
+  assert.equal(await host.exited, 0);
+  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['background:60000', 'slow:2000']);
+  c.close();
+  r.close();
+});
+
 test('a retiring host does not close a session on the idle of a turn that ended before a message it passed on', async () => {
   const f = fixture();
   const host = await startHost(f, { env: { FAKE_CLAUDE_IDLE_AFTER_MS: '400' } });

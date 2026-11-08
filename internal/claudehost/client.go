@@ -282,6 +282,7 @@ type Event struct {
 	Outcome   string          `json:"outcome,omitempty"`
 	Error     string          `json:"error,omitempty"`
 	Tasks     []Task          `json:"tasks,omitempty"`
+	Notice    string          `json:"notice,omitempty"`
 }
 
 // Client reaches the host on Socket and, for a session that host does not
