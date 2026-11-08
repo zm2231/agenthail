@@ -67,6 +67,18 @@ Session commands:
   limit-resume cancel <target>  Do not resume a stopped session for its current stop
   limit-resume on|off           Resume stopped sessions once their limit resets (default on)
 
+Delivery (send, queue, steer):
+  idle target                   send delivers now; queue holds it for the daemon; steer has no turn to reach and says
+                                to run 'agenthail send <target> "msg"' (a socket-only Claude takes it as a message)
+  busy target                   send and queue deliver when the turn ends; steer reaches the running turn
+  steer you may not send        only the person, the target's lead or the session that started it steer; anyone
+                                else's steer is sent as a queued message, and the receipt says so
+  busy target, --no-queue       refused, nothing sent; run 'agenthail queue <target> "msg"' or 'agenthail steer <target> "msg"'
+  target waiting on you         send, queue and steer hold the message until you answer ('agenthail requests <target>')
+  daemon not running            queued messages wait and a warning says so; run 'agenthail daemon start'
+  read-only target              refused with its reason before anything is queued; nothing to retry
+  submitted or unknown outcome  the message may have arrived; read 'agenthail last <target>' before sending again
+
 Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
   identify rm <name>             Remove an alias

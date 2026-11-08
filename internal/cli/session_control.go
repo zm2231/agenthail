@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -317,8 +318,14 @@ func (a *App) cmdSteer(args []string) error {
 		return fmt.Errorf("message is empty")
 	}
 	receipt, err := a.dispatcher().Steer(ctx, surf, sess, message, "")
+	if errors.Is(err, surface.ErrNothingToSteer) {
+		return fmt.Errorf("%w; run 'agenthail send %s \"message\"' to start a turn", err, positional[0])
+	}
 	if err != nil {
 		return err
+	}
+	if receipt.Evidence == surface.EvidenceQueued {
+		warnQueuedWithoutDaemon(os.Stderr)
 	}
 	if hasFlag(args, "--json") {
 		return emit(receipt)

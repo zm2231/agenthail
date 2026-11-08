@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -156,9 +155,7 @@ func (a *App) cmdQueue(args []string) error {
 	if message == "" {
 		return fmt.Errorf("message is empty")
 	}
-	if _, ok := daemon.IsRunning(); !ok {
-		fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
-	}
+	warnQueuedWithoutDaemon(os.Stderr)
 	if _, err := a.registry().QueueMessageWithOptions(sess.ID, message, "", surface.SendOptions{BusyDelivery: string(deliverypolicy.Queue)}); err != nil {
 		return err
 	}
