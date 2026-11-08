@@ -6,11 +6,12 @@ export function projectOfDecision(item, projects) {
   const host = item.hostId || "";
   const prefix = host + separator;
   const id = host && named.startsWith(prefix) ? named.slice(prefix.length) : named;
-  if (projects.some((project) => project.id === id)) return id;
+  if (projects.some((project) => project.id === named)) return named;
   if (!host) return null;
+  const names = new Set([named, id]);
   const found = projects.find((project) =>
-    (project.checkouts || []).some((checkout) => checkout.host?.id === host && (checkout.projectId === id || checkout.linkedFrom?.id === id))
-    || (project.linked || []).some((ref) => ref.id === id));
+    (project.checkouts || []).some((checkout) => checkout.host?.id === host && (names.has(checkout.projectId) || names.has(checkout.linkedFrom?.id)))
+    || (project.linked || []).some((ref) => names.has(ref.id)));
   return found ? found.id : null;
 }
 
