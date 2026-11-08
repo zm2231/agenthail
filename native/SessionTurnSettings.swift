@@ -32,6 +32,9 @@ struct TurnSetting: Decodable, Equatable, Sendable {
         }
     }
 
+    var chipName: String { key.prefix(1).uppercased() + key.dropFirst() }
+    var chipAccessibilityLabel: String { "\(chipName), \(valueLabel)" }
+
     enum Pick: Equatable { case unchanged, apply, confirm }
 
     func pick(_ option: Option) -> Pick {

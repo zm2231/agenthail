@@ -12,15 +12,15 @@ struct IOSTurnSettingChips: View {
                 if let setting = settings.setting(TurnSetting.model) {
                     Button(action: showModels) { chip(setting.valueLabel) }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Change model, " + setting.valueLabel)
+                        .accessibilityLabel(setting.chipAccessibilityLabel)
                         .accessibilityIdentifier("composer-model-picker")
                 }
                 if let setting = settings.setting(TurnSetting.effort) {
-                    menu(setting, options: setting.options, name: "Effort")
+                    menu(setting, options: setting.options)
                         .accessibilityIdentifier("composer-effort")
                 }
                 if let setting = settings.setting(TurnSetting.mode) {
-                    menu(setting, options: setting.quietOptions, name: "Mode")
+                    menu(setting, options: setting.quietOptions)
                         .accessibilityIdentifier("composer-mode")
                 }
             }
@@ -29,22 +29,28 @@ struct IOSTurnSettingChips: View {
         .disabled(model.pendingControls.contains(sessionID))
     }
 
-    private func menu(_ setting: TurnSetting, options: [TurnSetting.Option], name: String) -> some View {
+    private func menu(_ setting: TurnSetting, options: [TurnSetting.Option]) -> some View {
         Menu {
             Section(setting.appliesNextTurn ? "From the next turn" : "") {
-                ForEach(options, id: \.id) { option in
-                    Button {
-                        guard setting.pick(option) == .apply else { return }
-                        Task { await model.setTurnSetting(setting.key, to: option.id, sessionID: sessionID) }
-                    } label: {
-                        if option.id == setting.value { Label(option.label, systemImage: "checkmark") } else { Text(option.label) }
+                Picker(setting.chipName, selection: selection(setting, options: options)) {
+                    ForEach(options, id: \.id) { option in
+                        Text(option.label).tag(option.id)
                     }
                 }
+                .pickerStyle(.inline)
+                .labelsHidden()
             }
         } label: {
             chip(setting.valueLabel)
         }
-        .accessibilityLabel(name + ", " + setting.valueLabel)
+        .accessibilityLabel(setting.chipAccessibilityLabel)
+    }
+
+    private func selection(_ setting: TurnSetting, options: [TurnSetting.Option]) -> Binding<String> {
+        Binding(get: { setting.value }) { id in
+            guard let option = options.first(where: { $0.id == id }), setting.pick(option) == .apply else { return }
+            Task { await model.setTurnSetting(setting.key, to: option.id, sessionID: sessionID) }
+        }
     }
 
     private func chip(_ text: String) -> some View {

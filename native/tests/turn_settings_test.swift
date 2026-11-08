@@ -43,6 +43,7 @@ struct TurnSettingsTest {
         check(settings.map(\.key) == ["model", "effort", "mode"], "session metadata carries the turn settings to the detail: \(settings.map(\.key))")
         guard let effort = settings.setting(TurnSetting.effort), let mode = settings.setting(TurnSetting.mode) else { return check(false, "effort and mode decode") }
         check(effort.appliesNextTurn && !mode.appliesNextTurn && effort.valueLabel == "Medium", "applies and labels decode")
+        check(settings.map(\.chipAccessibilityLabel) == ["Model, GPT Sol", "Effort, Medium", "Mode, Manual"], "each chip names its setting and value: \(settings.map(\.chipAccessibilityLabel))")
         check(mode.options[1].needsConfirmation && mode.quietOptions.map(\.id) == ["manual"], "a confirm option is kept out of the quiet options")
 
         let configuration = URLSessionConfiguration.ephemeral

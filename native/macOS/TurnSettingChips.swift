@@ -23,17 +23,17 @@ struct TurnSettingChips: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .help(setting.appliesNextTurn ? "Applies from the next turn" : "Applies now")
-            .accessibilityLabel("\(setting.key.capitalized), \(setting.valueLabel)")
+            .accessibilityLabel(setting.chipAccessibilityLabel)
     }
 
     @ViewBuilder private func options(_ setting: TurnSetting) -> some View {
-        ForEach(setting.options, id: \.id) { option in
-            Button {
-                choose(option, for: setting)
-            } label: {
-                if option.id == setting.value { Label(option.label, systemImage: "checkmark") } else { Text(option.label) }
+        Picker(setting.chipName, selection: selection(setting)) {
+            ForEach(setting.options, id: \.id) { option in
+                Text(option.label).tag(option.id)
             }
         }
+        .pickerStyle(.inline)
+        .labelsHidden()
         if setting.appliesNextTurn {
             Divider()
             Text("Applies from the next turn")
@@ -53,7 +53,10 @@ struct TurnSettingChips: View {
         .contentShape(Rectangle())
     }
 
-    private func choose(_ option: TurnSetting.Option, for setting: TurnSetting) {
-        TurnSettingChoice.choose(option, for: setting, pending: &pending, apply: pane.changeTurnSetting)
+    private func selection(_ setting: TurnSetting) -> Binding<String> {
+        Binding(get: { setting.value }) { id in
+            guard let option = setting.options.first(where: { $0.id == id }) else { return }
+            TurnSettingChoice.choose(option, for: setting, pending: &pending, apply: pane.changeTurnSetting)
+        }
     }
 }
