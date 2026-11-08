@@ -2,9 +2,14 @@ import SwiftUI
 
 struct SessionRefinementMenu: View {
     @Bindable var model: AgenthailModel
+    @AppStorage(SessionListLayout.groupsKey) private var groupsByProject = true
 
     var body: some View {
         Menu {
+            Toggle("Group by Project", isOn: $groupsByProject)
+            Toggle("Show Archived", isOn: $model.showsArchived)
+                .disabled(model.sessionFilter != .all)
+            Divider()
             Picker("Status", selection: $model.sessionRefinement.status) {
                 Text("All statuses").tag(SessionStatusFilter?.none)
                 ForEach(SessionStatusFilter.allCases) { Text($0.label).tag(Optional($0)) }

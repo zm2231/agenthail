@@ -78,9 +78,31 @@ extension AgenthailModel {
         await reader.readMore(request)
     }
 
+    var archivedRequest: ScopeRequest? {
+        SessionListLayout.archivedRequest(filter: sessionFilter, refinement: sessionRefinement, shows: showsArchived)
+    }
+
+    func archivedTree() -> SessionTree {
+        guard let request = archivedRequest else { return .empty }
+        let view = reader.views[request]
+        let ids = Set((view?.families ?? []).flatMap { $0.members.map(\.id) })
+        let rows = Dictionary(uniqueKeysWithValues: ids.compactMap { id in cells.session(id).map { (id, $0) } })
+        return scopeTrees.tree(for: request, view: view, rows: rows, attention: sessionAttention.filter { ids.contains($0.key) }, keeping: reader.requests)
+    }
+
+    var archivedHasMore: Bool { archivedRequest.map { pages.hasMore($0) || pages.listings[$0] == nil } ?? false }
+
+    func readArchived() async {
+        guard let request = archivedRequest else { return }
+        await reader.readMore(request)
+    }
+
     func listChanged() {
+        if archivedRequest == nil {
+            reader.requests.filter { $0.scope == SessionFilter.archived.viewScope && $0.projectID == nil && $0 != listRequest }.forEach(reader.drop)
+        }
         guard let request = listRequest else { return }
-        reader.requests.filter { $0 != request && $0.projectID == nil }.forEach(reader.drop)
+        reader.requests.filter { $0 != request && $0 != archivedRequest && $0.projectID == nil }.forEach(reader.drop)
         if pages.listings[request] == nil { Task { await reader.readMore(request) } }
         scheduleListReread()
     }

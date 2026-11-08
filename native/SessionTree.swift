@@ -99,6 +99,7 @@ struct SessionTree: Equatable {
     let needsYou: [SessionState]
     let attention: [String: SessionAttention]
     let counts: [SessionFilter: Int]
+    var flat: [SessionFamily] = []
 
     static let noProjectID = ""
     static let empty = SessionTree(projects: [], needsYou: [], attention: [:], counts: [:])

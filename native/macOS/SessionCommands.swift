@@ -7,6 +7,7 @@ struct SessionCommands: Commands {
     @FocusedValue(SessionPane.self) private var pane
     @Environment(\.openWindow) private var openWindow
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
+    @AppStorage(SessionListLayout.groupsKey) private var groupsByProject = true
 
     private var session: SessionState? { pane?.displayedSession }
     private var tabs: Bool { pane?.tabsEnabled == true }
@@ -89,6 +90,9 @@ struct SessionCommands: Commands {
                 }
                 .keyboardShortcut(shortcuts.keyboardShortcut(filter.command))
             }
+            Toggle("Group by Project", isOn: $groupsByProject)
+            Toggle("Show Archived", isOn: Binding(get: { model.showsArchived }, set: { model.showsArchived = $0 }))
+                .disabled(model.sessionFilter != .all)
             Divider()
             Button(pane?.inspectorShown == true ? "Hide Inspector" : "Show Inspector") { pane?.toggleInspector() }
                 .keyboardShortcut(shortcuts.keyboardShortcut(.toggleInspector))

@@ -80,6 +80,12 @@ final class AgenthailModel {
             rederive()
         }
     }
+    var showsArchived = UserDefaults.standard.bool(forKey: SessionListLayout.archivedKey) {
+        didSet {
+            UserDefaults.standard.set(showsArchived, forKey: SessionListLayout.archivedKey)
+            listChanged()
+        }
+    }
     @ObservationIgnored private(set) lazy var reader = makeReader()
     @ObservationIgnored let scopeTrees = ScopeTreeCache()
     var pages: ScopePages { reader.pages }

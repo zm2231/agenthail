@@ -24,7 +24,8 @@ extension SessionTree {
         for filter in SessionFilter.allCases {
             counts[filter] = (current ?? listed)?.counts[filter.viewScope]?.families
         }
-        return SessionTree(projects: projects, needsYou: needsYou(in: current ?? listed, rows: rows, attention: attention), attention: attention, counts: counts)
+        let flat = (listed?.families ?? []).compactMap { family(from: $0, rows: rows) }
+        return SessionTree(projects: projects, needsYou: needsYou(in: current ?? listed, rows: rows, attention: attention), attention: attention, counts: counts, flat: flat)
     }
 
     static func family(from view: ViewFamily, rows: [String: SessionState]) -> SessionFamily? {
