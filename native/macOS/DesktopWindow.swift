@@ -2097,40 +2097,17 @@ struct DetailsTab: View {
                     detailRow("Background", ([background.summary] + (background.tasks ?? []).map(\.line) + [background.sourceNote].compactMap { $0 }).joined(separator: "\n"))
                 }
                 let modelName = pane.detail?.selectedModelID
-                if canControl && session.capabilities.model, case let options = modelOptions, !options.isEmpty {
-                    GridRow {
-                        Text("Model").foregroundStyle(DesktopPalette.text2)
-                        Menu(options.first { $0.id == modelName }?.displayName ?? modelName ?? "Choose") {
-                            ForEach(options) { option in
-                                Button {
-                                    pane.changeModel(to: option.id)
-                                } label: {
-                                    if option.id == modelName { Label(option.displayName, systemImage: "checkmark") } else { Text(option.displayName) }
-                                }
-                            }
-                        }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-                        .disabled(pane.controlPending)
+                if canControl && session.capabilities.model, case let options = modelOptions.map({ TurnSetting.Option(id: $0.id, label: $0.displayName) }), !options.isEmpty {
+                    let setting = pane.detail?.turnSettings?.setting(TurnSetting.model) ?? TurnSetting(key: TurnSetting.model, value: modelName ?? "", options: options, applies: "now")
+                    TurnSettingMenuRow(setting: setting, options: options, disabled: pane.controlPending) { option in
+                        if setting.pick(option) == .apply { pane.changeModel(to: option.id) }
                     }
                 } else if let model = pane.detail?.model {
                     detailRow("Model", model)
                 }
                 if canControl && session.capabilities.permissionMode, let mode = pane.detail?.turnSettings?.setting(TurnSetting.mode) {
-                    GridRow {
-                        Text("Permissions").foregroundStyle(DesktopPalette.text2)
-                        Menu(mode.valueLabel) {
-                            ForEach(mode.options, id: \.id) { option in
-                                Button {
-                                    TurnSettingChoice.choose(option, for: mode, pending: &pendingMode, apply: pane.changeTurnSetting)
-                                } label: {
-                                    if option.id == mode.value { Label(option.label, systemImage: "checkmark") } else { Text(option.label) }
-                                }
-                            }
-                        }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-                        .disabled(pane.controlPending)
+                    TurnSettingMenuRow(setting: mode, title: "Permissions", disabled: pane.controlPending) { option in
+                        TurnSettingChoice.choose(option, for: mode, pending: &pendingMode, apply: pane.changeTurnSetting)
                     }
                 }
                 if canControl, let compact = pane.detail?.compactSettings {

@@ -1554,13 +1554,21 @@ struct SessionInspector: View {
                         }
                         if detail.capabilities.permissionMode, let mode = detail.turnSettings?.setting(TurnSetting.mode) {
                             Menu {
-                                ForEach(mode.quietOptions, id: \.id) { option in
-                                    Button(option.label) { Task { await model.setTurnSetting(mode.key, to: option.id, sessionID: session.id) } }
-                                        .disabled(option.id == mode.value)
+                                Picker(mode.chipName, selection: Binding(get: { mode.value }) { id in
+                                    guard let option = mode.quietOptions.first(where: { $0.id == id }), mode.pick(option) == .apply else { return }
+                                    Task { await model.setTurnSetting(mode.key, to: option.id, sessionID: session.id) }
+                                }) {
+                                    ForEach(mode.quietOptions, id: \.id) { option in
+                                        Text(option.label).tag(option.id)
+                                    }
                                 }
+                                .pickerStyle(.inline)
+                                .labelsHidden()
                             } label: {
                                 LabeledContent("Permission mode", value: mode.valueLabel)
                             }
+                            .accessibilityLabel(mode.chipAccessibilityLabel)
+                            .accessibilityIdentifier("session-permission-mode")
                             .disabled(model.pendingControls.contains(session.id))
                         }
                         if detail.capabilities.commands {
