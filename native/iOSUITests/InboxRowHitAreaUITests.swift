@@ -29,6 +29,6 @@ final class InboxRowHitAreaUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10), "a tap between the title and the chevron opens the session", file: file, line: line)
         app.backToSessions(file: file, line: line)
         XCTAssertTrue(app.tab("Sessions").waitForExistence(timeout: 5) && app.tab("Sessions").isSelected, "the session opened in the Sessions tab", file: file, line: line)
-        XCTAssertGreaterThanOrEqual(frame.height, 44, "the row answers taps across its whole 44 pt height", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(frame.height, minimumTapTarget, "the row answers taps across its whole 44 pt height", file: file, line: line)
     }
 }

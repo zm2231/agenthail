@@ -37,7 +37,7 @@ final class ActivityCollapseTests: XCTestCase {
         for _ in 0..<12 where !collapse.isHittable { timeline.swipeUp() }
         if collapse.frame.maxY > timeline.frame.maxY - 140 { timeline.swipeUp() }
         XCTAssertTrue(collapse.isHittable)
-        XCTAssertGreaterThanOrEqual(collapse.frame.height, 44, "the control should be a full-size tap target, at \(collapse.frame)")
+        XCTAssertGreaterThanOrEqual(collapse.frame.height, minimumTapTarget, "the control should be a full-size tap target, at \(collapse.frame)")
         XCTAssertGreaterThan(collapse.frame.width, timeline.frame.width / 2, "the control should span the row, at \(collapse.frame)")
         collapse.tapWhenStill()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: collapse)], timeout: 5), .completed)
@@ -65,7 +65,7 @@ final class ActivityCollapseTests: XCTestCase {
         XCTAssertTrue(collapse.isHittable)
         let top = app.navigationBars.firstMatch.frame.maxY
         XCTAssertLessThanOrEqual(tool.frame.maxY, top, "the tool's line should have scrolled under the top bar before collapsing, at \(tool.frame)")
-        XCTAssertGreaterThanOrEqual(collapse.frame.height, 44, "the control should be a full-size tap target, at \(collapse.frame)")
+        XCTAssertGreaterThanOrEqual(collapse.frame.height, minimumTapTarget, "the control should be a full-size tap target, at \(collapse.frame)")
         collapse.tapWhenStill()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: collapse)], timeout: 5), .completed)
         RunLoop.current.run(until: Date().addingTimeInterval(1))
