@@ -44,6 +44,11 @@ struct TurnSettingsTest {
         guard let effort = settings.setting(TurnSetting.effort), let mode = settings.setting(TurnSetting.mode) else { return check(false, "effort and mode decode") }
         check(effort.appliesNextTurn && !mode.appliesNextTurn && effort.valueLabel == "Medium", "applies and labels decode")
         check(settings.map(\.chipAccessibilityLabel) == ["Model, GPT Sol", "Effort, Medium", "Mode, Manual"], "each chip names its setting and value: \(settings.map(\.chipAccessibilityLabel))")
+        overlay.absorb(context: nil, goal: nil, model: nil, models: [ModelOption(id: "gpt-luna", displayName: "GPT Luna", description: nil, default: nil, allowsCustom: nil, supportedReasoningEfforts: nil, defaultReasoningEffort: nil)])
+        let catalogued = overlay.apply(to: detail)
+        guard let modelSetting = settings.setting(TurnSetting.model) else { return check(false, "model decodes") }
+        check(catalogued.menuOptions(modelSetting).map(\.id) == ["gpt-sol", "gpt-luna"], "the model chip menu offers catalog models too: \(catalogued.menuOptions(modelSetting).map(\.id))")
+        check(catalogued.menuOptions(effort) == effort.options, "other chips offer their own options")
         check(mode.options[1].needsConfirmation && mode.quietOptions.map(\.id) == ["manual"], "a confirm option is kept out of the quiet options")
 
         let configuration = URLSessionConfiguration.ephemeral

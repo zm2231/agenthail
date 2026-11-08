@@ -28,7 +28,7 @@ struct TurnSettingChips: View {
 
     @ViewBuilder private func options(_ setting: TurnSetting) -> some View {
         Picker(setting.chipName, selection: selection(setting)) {
-            ForEach(setting.options, id: \.id) { option in
+            ForEach(menuOptions(setting), id: \.id) { option in
                 Text(option.label).tag(option.id)
             }
         }
@@ -53,9 +53,13 @@ struct TurnSettingChips: View {
         .contentShape(Rectangle())
     }
 
+    private func menuOptions(_ setting: TurnSetting) -> [TurnSetting.Option] {
+        pane.detail?.menuOptions(setting) ?? setting.options
+    }
+
     private func selection(_ setting: TurnSetting) -> Binding<String> {
         Binding(get: { setting.value }) { id in
-            guard let option = setting.options.first(where: { $0.id == id }) else { return }
+            guard let option = menuOptions(setting).first(where: { $0.id == id }) else { return }
             TurnSettingChoice.choose(option, for: setting, pending: &pending, apply: pane.changeTurnSetting)
         }
     }

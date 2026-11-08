@@ -72,5 +72,10 @@ extension SessionDetail {
         return turnSettings?.modelOptions(catalog: known) ?? known
     }
 
+    func menuOptions(_ setting: TurnSetting) -> [TurnSetting.Option] {
+        guard setting.key == TurnSetting.model else { return setting.options }
+        return modelOptions().map { TurnSetting.Option(id: $0.id, label: $0.displayName) }
+    }
+
     var selectedModelID: String? { turnSettings?.setting(TurnSetting.model)?.value ?? model }
 }
