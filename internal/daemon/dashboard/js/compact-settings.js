@@ -14,6 +14,7 @@ export function compactSettingNote(setting) {
   if (setting.applies === "newSessions") return setting.scope ? `For new sessions on ${setting.scope}` : "For new sessions";
   if (setting.applies === "nextTurn") return "From the next turn";
   if (setting.applies === "nextMessage") return "Restarts the session when idle";
+  if (setting.applies === "nextLoad") return "Codex applies it the next time it loads this thread with no other app attached";
   return "";
 }
 

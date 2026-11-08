@@ -93,6 +93,8 @@ struct TurnSettingsTest {
         check(compact.last?.valueLabel == "Default" && compact.first?.chipAccessibilityLabel == "Auto-compact, On", "an unset window reads as the default")
         let own = try JSONDecoder().decode(TurnSetting.self, from: Data(#"{"key":"sessionCompactWindow","value":"default","options":[{"id":"default","label":"Root default"},{"id":"150000","label":"150k"}],"applies":"nextMessage","pending":"150000"}"#.utf8))
         check(own.chipName == "This session" && own.valueLabel == "Root default" && own.appliesNote == "150k from the next message", "a pending window shows as pending: \(String(describing: own.appliesNote))")
+        let codexWindow = try JSONDecoder().decode(TurnSetting.self, from: Data(#"{"key":"compactWindow","value":"200000","options":[{"id":"auto","label":"Auto"},{"id":"200000","label":"200k"}],"applies":"nextLoad"}"#.utf8))
+        check(codexWindow.valueLabel == "200k" && codexWindow.appliesNote?.contains("no other app attached") == true, "a Codex window says when Codex takes it: \(String(describing: codexWindow.appliesNote))")
         let later = try JSONDecoder().decode(SessionMetadata.self, from: Data(#"{"sessionId":"S"}"#.utf8))
         overlay.absorb(later)
         check(overlay.apply(to: detail).compactSettings?.count == 2, "metadata without compact settings keeps the last ones")
