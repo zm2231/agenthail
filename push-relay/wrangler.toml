@@ -26,6 +26,14 @@ binding = "PUSH_DEVICES"
 name = "APP_ATTEST_CHALLENGES"
 class_name = "AppAttestChallenge"
 
+[[durable_objects.bindings]]
+name = "PUSH_DEDUPE"
+class_name = "PushDedupe"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["AppAttestChallenge"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["PushDedupe"]

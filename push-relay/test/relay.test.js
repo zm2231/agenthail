@@ -2,7 +2,7 @@ import "../../scripts/test-home.mjs"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import worker, { AppAttestChallenge, checkRegistration, issueChallenge, register, revoke, send, verifyAppAttestation, withdraw } from "../src/index.js"
+import worker, { AppAttestChallenge, PushDedupe, checkRegistration, issueChallenge, register, revoke, send, verifyAppAttestation, withdraw } from "../src/index.js"
 
 const productionAttestation = JSON.parse(readFileSync(new URL("fixtures/app-attest-production.json", import.meta.url), "utf8"))
 
@@ -29,19 +29,24 @@ class MemoryLimiter {
 class MemoryDurableStorage {
   values = new Map()
   alarm = null
-  async get(key) { return this.values.get(key) }
+  async get(key) {
+    await new Promise(resolve => setImmediate(resolve))
+    return this.values.get(key)
+  }
   async put(key, value) { this.values.set(key, value) }
   async setAlarm(value) { this.alarm = value }
   async deleteAll() { this.values.clear() }
   async transaction(callback) { return callback(this) }
 }
 
-class MemoryChallengeNamespace {
+class MemoryNamespace {
+  constructor(DurableObject) { this.DurableObject = DurableObject }
+  env = {}
   instances = new Map()
   getByName(id) {
     if (!this.instances.has(id)) {
       const storage = new MemoryDurableStorage()
-      const object = new AppAttestChallenge({ storage })
+      const object = new this.DurableObject({ storage }, this.env)
       this.instances.set(id, { storage, object })
     }
     const { object } = this.instances.get(id)
@@ -50,15 +55,18 @@ class MemoryChallengeNamespace {
 }
 
 function environment(overrides = {}) {
-  return {
+  const env = {
     PUSH_DEVICES: new MemoryKV(),
     REGISTER_RATE_LIMITER: new MemoryLimiter(),
     SEND_RATE_LIMITER: new MemoryLimiter(),
-    APP_ATTEST_CHALLENGES: new MemoryChallengeNamespace(),
+    APP_ATTEST_CHALLENGES: new MemoryNamespace(AppAttestChallenge),
+    PUSH_DEDUPE: new MemoryNamespace(PushDedupe),
     APPLE_TEAM_ID: "V8H6LQ9448",
     APP_ATTEST_BUNDLE_ID: "io.uebelacker.AppAttestExample",
     ...overrides
   }
+  env.PUSH_DEDUPE.env = env
+  return env
 }
 
 function request(method, body) {
@@ -386,7 +394,7 @@ test("production limiter rejects registration before storage", async () => {
   const env = {
     PUSH_DEVICES: new MemoryKV(),
     REGISTER_RATE_LIMITER: new MemoryLimiter(0),
-    APP_ATTEST_CHALLENGES: new MemoryChallengeNamespace(),
+    APP_ATTEST_CHALLENGES: new MemoryNamespace(AppAttestChallenge),
     APPLE_TEAM_ID: "V8H6LQ9448",
     APP_ATTEST_BUNDLE_ID: "io.uebelacker.AppAttestExample"
   }
@@ -567,3 +575,170 @@ test("a registration's tag reaches every notification and withdrawal sent throug
   const health = await (await worker.fetch(new Request("https://push.test/health"), {})).json()
   assert.ok(health.capabilities.includes("host-tag"))
 })
+
+async function apnsEnvironment() {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])
+  const pkcs8 = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64")
+  return environment({ APNS_KEY_P8: `-----BEGIN PRIVATE KEY-----\n${pkcs8}\n-----END PRIVATE KEY-----`, APNS_KEY_ID: "KEY1234567", APNS_TOPIC: "com.agenthail.ios" })
+}
+
+async function registerFixture(env, installationId, token) {
+  const credential = `${installationId}-credential`
+  env.PUSH_DEVICES.values.set(`device:${installationId}`, JSON.stringify({
+    token,
+    environment: "sandbox",
+    attestedAt: Date.now(),
+    appAttestKeyHash: "fixture-key-hash",
+    tag: installationId,
+    credentialHash: await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential)).then(value => Buffer.from(value).toString("base64url"))
+  }))
+  return { installationId, credential }
+}
+
+async function withAPNs(statuses, run) {
+  const delivered = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    const status = statuses.shift() ?? 200
+    if (status === "throw") throw new TypeError("network connection lost")
+    if (typeof status === "object") await status.until
+    delivered.push({ url, payload: JSON.parse(init.body) })
+    return new Response(null, { status: typeof status === "object" ? status.status : status })
+  }
+  try {
+    await run()
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  return delivered
+}
+
+const finished = { title: "Agenthail", message: "Codex finished on forge", eventType: "turn.completed" }
+const turnKey = "c0ffee".repeat(10) + "c0ff"
+
+test("one phone paired to two computers gets a deduplicated notification once", async () => {
+  const env = await apnsEnvironment()
+  const phone = "ab".repeat(32)
+  const viaHost = await registerFixture(env, "host", phone)
+  const viaViewer = await registerFixture(env, "viewer", phone)
+  const otherPhone = await registerFixture(env, "tablet", "cd".repeat(32))
+  const answers = []
+  const delivered = await withAPNs([], async () => {
+    for (const [installation, dedupeKey] of [[viaHost, turnKey], [viaViewer, turnKey], [otherPhone, turnKey], [viaViewer, "ab".repeat(32)]]) {
+      const response = await send(request("POST", { ...installation, ...finished, dedupeKey, pushId: "abcdefgh2345" }), env)
+      assert.equal(response.status, 200)
+      answers.push(await response.json())
+    }
+  })
+  assert.deepEqual(answers, [{ ok: true, receipt: true }, { ok: true, deduped: true }, { ok: true, receipt: true }, { ok: true, receipt: true }])
+  assert.deepEqual(delivered.map(entry => entry.url.split("/").pop()), [phone, "cd".repeat(32), phone])
+  const stored = [...env.PUSH_DEDUPE.instances.entries()]
+  assert.equal(stored.length, 3)
+  for (const [name, { storage }] of stored) {
+    assert.equal(name.includes(phone) || name.includes(turnKey), false, "the claim's name is a hash, not the token or key")
+    assert.deepEqual([...storage.values.keys()], ["deliveredUntil"])
+  }
+})
+
+test("a notification without a dedupe key is sent as before, every time", async () => {
+  const env = await apnsEnvironment()
+  const phone = await registerFixture(env, "phone", "ab".repeat(32))
+  const delivered = await withAPNs([], async () => {
+    for (let index = 0; index < 2; index += 1) {
+      const response = await send(request("POST", { ...phone, ...finished }), env)
+      assert.deepEqual(await response.json(), { ok: true })
+    }
+  })
+  assert.equal(delivered.length, 2)
+  assert.equal(env.PUSH_DEDUPE.instances.size, 0)
+})
+
+
+test("a claim expires after ten minutes", async () => {
+  const env = await apnsEnvironment()
+  const phone = await registerFixture(env, "phone", "ab".repeat(32))
+  const realNow = Date.now
+  let now = realNow()
+  Date.now = () => now
+  try {
+    const delivered = await withAPNs([], async () => {
+      for (const advance of [0, 9 * 60 * 1000, 61 * 1000]) {
+        now += advance
+        await send(request("POST", { ...phone, ...finished, dedupeKey: turnKey }), env)
+      }
+    })
+    assert.equal(delivered.length, 2)
+    const [{ storage }] = env.PUSH_DEDUPE.instances.values()
+    assert.equal(storage.alarm, now + 10 * 60 * 1000)
+  } finally {
+    Date.now = realNow
+  }
+})
+
+test("send refuses a malformed dedupe key before APNs", async () => {
+  const env = await apnsEnvironment()
+  const phone = await registerFixture(env, "phone", "ab".repeat(32))
+  const delivered = await withAPNs([], async () => {
+    for (const dedupeKey of ["short", "C0FFEE".repeat(10) + "C0FF", 42, ""]) {
+      const response = await send(request("POST", { ...phone, ...finished, dedupeKey }), env)
+      assert.equal(response.status, dedupeKey === "" ? 200 : 400)
+    }
+  })
+  assert.equal(delivered.length, 1)
+})
+
+test("a notification APNs refused is delivered by the next computer that sends it", async () => {
+  for (const first of [500, "throw"]) {
+    const env = await apnsEnvironment()
+    const phone = "ab".repeat(32)
+    const viaHost = await registerFixture(env, "host", phone)
+    const viaViewer = await registerFixture(env, "viewer", phone)
+    const delivered = await withAPNs([first, 200], async () => {
+      const refused = await send(request("POST", { ...viaHost, ...finished, dedupeKey: turnKey }), env).catch(() => null)
+      assert.notEqual(refused?.status, 200)
+      const retried = await send(request("POST", { ...viaViewer, ...finished, dedupeKey: turnKey }), env)
+      assert.deepEqual(await retried.json(), { ok: true })
+      const again = await send(request("POST", { ...viaHost, ...finished, dedupeKey: turnKey }), env)
+      assert.deepEqual(await again.json(), { ok: true, deduped: true })
+    })
+    assert.equal(delivered.length, first === "throw" ? 1 : 2, String(first))
+  }
+})
+
+test("a computer sending while another's send is in flight waits for it", async () => {
+  for (const [winnerStatus, loserAnswer, calls] of [[200, { ok: true, deduped: true }, 1], [500, { ok: true }, 2]]) {
+    const env = await apnsEnvironment()
+    const phone = "ab".repeat(32)
+    const viaHost = await registerFixture(env, "host", phone)
+    const viaViewer = await registerFixture(env, "viewer", phone)
+    let answer
+    const slow = { status: winnerStatus, until: new Promise(resolve => { answer = resolve }) }
+    const answers = []
+    const delivered = await withAPNs([slow, 200], async () => {
+      const winner = send(request("POST", { ...viaHost, ...finished, dedupeKey: turnKey }), env)
+      const loser = send(request("POST", { ...viaViewer, ...finished, dedupeKey: turnKey }), env)
+      await new Promise(resolve => setTimeout(resolve, 10))
+      answer()
+      answers.push((await winner).status, await (await loser).json())
+    })
+    assert.deepEqual(answers, [winnerStatus === 200 ? 200 : 502, loserAnswer], `winner ${winnerStatus}`)
+    assert.equal(delivered.length, calls, `winner ${winnerStatus}`)
+  }
+})
+
+test("a delivery is recorded before the registration is refreshed, so a failed refresh never sends it twice", async () => {
+  const env = await apnsEnvironment()
+  const phone = "ab".repeat(32)
+  const viaHost = await registerFixture(env, "host", phone)
+  const viaViewer = await registerFixture(env, "viewer", phone)
+  const put = env.PUSH_DEVICES.put.bind(env.PUSH_DEVICES)
+  env.PUSH_DEVICES.put = async () => { throw new Error("KV unavailable") }
+  const delivered = await withAPNs([], async () => {
+    await assert.rejects(send(request("POST", { ...viaHost, ...finished, dedupeKey: turnKey }), env))
+    env.PUSH_DEVICES.put = put
+    const again = await send(request("POST", { ...viaViewer, ...finished, dedupeKey: turnKey }), env)
+    assert.deepEqual(await again.json(), { ok: true, deduped: true })
+  })
+  assert.equal(delivered.length, 1)
+})
+

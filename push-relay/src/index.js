@@ -9,6 +9,7 @@ const decoder = new TextDecoder()
 let cachedProviderToken = null
 const registrationTTLSeconds = 90 * 24 * 60 * 60
 const challengeTTLMilliseconds = 5 * 60 * 1000
+const dedupeTTLMilliseconds = 10 * 60 * 1000
 const defaultRequestBodyLimit = 8192
 const registrationRequestBodyLimit = 24576
 const appAttestationLimitBytes = 16384
@@ -24,7 +25,7 @@ export default {
         const apnsConfigured = Boolean(env.APNS_KEY_P8 && env.APNS_KEY_ID && env.APPLE_TEAM_ID && env.APNS_TOPIC)
         const rateLimitsConfigured = Boolean(env.REGISTER_RATE_LIMITER && env.SEND_RATE_LIMITER)
         const configured = appAttestConfigured && apnsConfigured && rateLimitsConfigured
-        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit", "request-id", "withdraw", "host-tag", "push-id"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
+        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit", "request-id", "withdraw", "host-tag", "push-id", "dedupe-key"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
       }
       if (request.method === "POST" && url.pathname === "/v1/attest/challenge") {
         return await issueChallenge(request, env)
@@ -215,10 +216,60 @@ export async function send(request, env) {
     payload.aps["mutable-content"] = 1
     payload.pushId = pushId
   }
+  const dedupeKey = body?.dedupeKey === undefined ? "" : body.dedupeKey
+  if (dedupeKey !== "" && (typeof dedupeKey !== "string" || !/^[a-f0-9]{64}$/.test(dedupeKey))) {
+    return json({ error: "invalid_dedupe_key" }, 400)
+  }
   const headers = { "apns-push-type": "alert", "apns-priority": "10" }
   if (collapseID) headers["apns-collapse-id"] = collapseID
-  const response = await deliver(env, device, headers, payload)
-  return pushId && response.ok ? json({ ok: true, receipt: true }) : response
+  if (!dedupeKey) {
+    const response = await deliver(env, device, headers, payload)
+    return pushId && response.ok ? json({ ok: true, receipt: true }) : response
+  }
+  if (!env.PUSH_DEDUPE) return json({ error: "dedupe_store_unavailable" }, 503)
+  const once = env.PUSH_DEDUPE.getByName(await sha256(`${device.stored.token}:${dedupeKey}`))
+  const response = await once.fetch("https://dedupe.internal/deliver", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ device, headers, payload })
+  })
+  if (!response.ok) return response
+  if ((await response.clone().json()).deduped) return json({ ok: true, deduped: true })
+  return pushId ? json({ ok: true, receipt: true }) : response
+}
+
+// Named by a hash of device token and dedupe key. It calls Apple itself and
+// records the delivery in its own storage, so no acknowledgement can be lost
+// in between, and takes one send at a time, so a send that arrives during
+// another delivers only if that one failed.
+export class PushDedupe {
+  constructor(ctx, env) {
+    this.ctx = ctx
+    this.env = env
+    this.queue = Promise.resolve()
+  }
+
+  async fetch(request) {
+    if (request.method !== "POST" || new URL(request.url).pathname !== "/deliver") return json({ error: "not_found" }, 404)
+    const { device, headers, payload } = await request.json()
+    const turn = this.queue.then(() => this.deliverOnce(device, headers, payload))
+    this.queue = turn.catch(() => {})
+    return turn
+  }
+
+  async deliverOnce(device, headers, payload) {
+    const deliveredUntil = await this.ctx.storage.get("deliveredUntil")
+    if (deliveredUntil > Date.now()) return json({ ok: true, deduped: true })
+    return deliver(this.env, device, headers, payload, async () => {
+      const until = Date.now() + dedupeTTLMilliseconds
+      await this.ctx.storage.put("deliveredUntil", until)
+      await this.ctx.storage.setAlarm(until)
+    })
+  }
+
+  async alarm() {
+    await this.ctx.storage.deleteAll()
+  }
 }
 
 // withdraw asks the app, in the background, to remove the notification it
@@ -251,7 +302,7 @@ async function sendingDevice(body, env) {
   return { key, stored }
 }
 
-async function deliver(env, { key, stored }, pushHeaders, payload) {
+async function deliver(env, { key, stored }, pushHeaders, payload, accepted = async () => {}) {
   const host = stored.environment === "sandbox" ? "api.sandbox.push.apple.com" : "api.push.apple.com"
   const providerToken = await apnsProviderToken(env)
   const headers = {
@@ -266,6 +317,7 @@ async function deliver(env, { key, stored }, pushHeaders, payload) {
     body: JSON.stringify(payload)
   })
   if (response.ok) {
+    await accepted()
     await env.PUSH_DEVICES.put(key, JSON.stringify(stored), { expirationTtl: registrationTTLSeconds })
     return json({ ok: true })
   }
