@@ -52,6 +52,7 @@ let package = Package(
                 "ComposerCompletion.swift",
                 "SessionSelection.swift",
                 "ProjectActions.swift",
+                "ProjectTiles.swift",
                 "ProjectContents.swift",
                 "ProjectNow.swift",
                 "ScopePages.swift",

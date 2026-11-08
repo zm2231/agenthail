@@ -46,6 +46,7 @@ struct ProjectPane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesktopSpace.l) {
                 header(contents)
+                decisions
                 HStack(alignment: .top, spacing: DesktopSpace.l) {
                     VStack(alignment: .leading, spacing: DesktopSpace.l) {
                         card(contents.now.count == 0 ? "Now" : "Now · \(contents.now.count)", trailing: showingEarlier ? nil : ("Show earlier", { showingEarlier = true })) {
@@ -166,6 +167,30 @@ struct ProjectPane: View {
                         .font(.system(size: DesktopType.caption, design: .monospaced)).foregroundStyle(DesktopPalette.text)
                         .lineLimit(1).truncationMode(.middle)
                         .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var decisions: some View {
+        let items = model.decisionFeed.inbox.decisions.filter { DecisionInbox.projectID(of: $0, in: model.projects) == project.id }
+        if !items.isEmpty {
+            card("Needs you · \(items.count)") {
+                ForEach(items) { item in
+                    Button {
+                        pane.showInbox()
+                        pane.selectedDecisionID = item.id
+                    } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(model.sessionName(item.sessionId)).font(.system(size: DesktopType.body)).foregroundStyle(DesktopPalette.text).lineLimit(1)
+                            Text(DecisionInboxPane.summary(item)).font(.system(size: DesktopType.meta)).foregroundStyle(DesktopPalette.text2).lineLimit(2)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("project-decision-" + item.sessionId)
                 }
             }
         }

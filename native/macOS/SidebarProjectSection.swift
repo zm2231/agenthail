@@ -87,14 +87,13 @@ struct SidebarRowButton: View {
     let title: String
     var family: SessionFamily? = nil
     let attention: SessionAttention?
-    var showsReason = false
     let selectedID: String?
     let model: AgenthailModel
     let pane: SessionPane
 
     var body: some View {
         SidebarSessionRow(
-            state: SidebarRowState(session: session, title: title, family: family, attention: attention, showsReason: showsReason, finishedUnseen: model.finishedUnseen.contains(session.id), selected: selectedID == session.id, canMakeLead: ProjectMenu.canMakeLead(session, projects: model.projects)),
+            state: SidebarRowState(session: session, title: title, family: family, attention: attention, finishedUnseen: model.finishedUnseen.contains(session.id), selected: selectedID == session.id, canMakeLead: ProjectMenu.canMakeLead(session, projects: model.projects)),
             actions: SidebarRowActions(shown: session, model: model, pane: pane)
         )
         .equatable()

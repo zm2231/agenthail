@@ -124,6 +124,7 @@ struct DesktopWindow: View {
         .onChange(of: pane.selectedSessionID) { pane.closeSidebarOverlay() }
         .onChange(of: pane.newSession != nil) { pane.closeSidebarOverlay() }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pane.fitWindow(width: $0) }
+        .task(id: model.decisionsKey) { await model.refreshDecisionsSoon() }
     }
 }
 
@@ -198,15 +199,7 @@ struct SessionSidebar: View {
                     } else if !model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         searchResults
                     } else {
-                    if !tree.needsYou.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
-                            SidebarCaption("Needs you")
-                            ForEach(tree.needsYou) { session in
-                                sessionButton(session, title: model.title(of: session), attention: tree.attention[session.id], showsReason: true)
-                            }
-                        }
-                    }
-                    ForEach(tree.projects) { project in
+                    ForEach(scopedProjects(tree)) { project in
                         SidebarProjectSection(
                             key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(project.id), selectedID: pane.selectedSessionID, attention: tree.attention, expandedFamilies: expandedFamilies, shownProjectID: pane.shownProjectID),
                             model: model,
@@ -225,7 +218,7 @@ struct SessionSidebar: View {
                                 ProjectMenuButtons(model: model, pane: pane, project: project)
                             }
                     }
-                    if tree.projects.isEmpty && projectsWithoutSessions(tree).isEmpty && !model.listHasMore {
+                    if scopedProjects(tree).isEmpty && projectsWithoutSessions(tree).isEmpty && !model.listHasMore {
                         Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
                             .font(.system(size: DesktopType.body))
                             .foregroundStyle(DesktopPalette.text2)
@@ -335,10 +328,14 @@ extension SessionSidebar {
 
     private var searchMatches: (local: [SessionState], remote: [SessionSearchItem]) {
         let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        let local = model.pages.found
+        let local = model.pages.found.filter { pane.scope.keeps(projectID: $0.project?.id) }
         let localIDs = Set(local.map(\.id))
-        let remote = query.count >= 3 ? model.searchResults.filter { !localIDs.contains($0.session.id) } : []
+        let remote = query.count >= 3 ? model.searchResults.filter { !localIDs.contains($0.session.id) && pane.scope.keeps(projectID: $0.session.project?.id) } : []
         return (local, remote)
+    }
+
+    private func scopedProjects(_ tree: SessionTree) -> [SessionTree.Project] {
+        tree.projects.filter { pane.scope.keeps(projectID: $0.identity?.id) }
     }
 
     private func visibleOrder(_ tree: SessionTree) -> [String] {
@@ -346,8 +343,8 @@ extension SessionSidebar {
             let matches = searchMatches
             return matches.local.map(\.id) + matches.remote.map(\.session.id)
         }
-        var ids = tree.needsYou.map(\.id)
-        for project in tree.projects {
+        var ids: [String] = []
+        for project in scopedProjects(tree) {
             let shown = project.shown(expanded: expandedProjects.contains(project.id), keeping: pane.selectedSessionID)
             for family in shown.checkouts.flatMap(\.families) {
                 let rows = [family.root.id] + (familyExpanded(family) ? family.members.map(\.id) : [])
@@ -368,7 +365,7 @@ extension SessionSidebar {
     private func projectsWithoutSessions(_ tree: SessionTree) -> [ProjectState] {
         guard model.sessionFilter == .recent || model.sessionFilter == .all, !model.sessionRefinement.isActive else { return [] }
         let listed = Set(tree.projects.compactMap(\.identity?.id))
-        return model.projects.filter { $0.archived != true && !listed.contains($0.id) }
+        return model.projects.filter { $0.archived != true && !listed.contains($0.id) && pane.scope.keeps(projectID: $0.id) }
     }
 
     private func step(_ order: [String], by offset: Int) {
@@ -382,8 +379,8 @@ extension SessionSidebar {
         }
     }
 
-    private func sessionButton(_ session: SessionState, title: String, attention: SessionAttention?, showsReason: Bool = false) -> some View {
-        SidebarRowButton(session: session, title: title, attention: attention, showsReason: showsReason, selectedID: pane.selectedSessionID, model: model, pane: pane)
+    private func sessionButton(_ session: SessionState, title: String, attention: SessionAttention?) -> some View {
+        SidebarRowButton(session: session, title: title, attention: attention, selectedID: pane.selectedSessionID, model: model, pane: pane)
     }
 }
 
@@ -500,26 +497,18 @@ struct SessionRowView: View {
     var title: String? = nil
     var family: SessionFamily? = nil
     let needsYou: Bool
-    /// Why the session needs the person, shown under its title.
-    var reason: String? = nil
     var finishedUnseen = false
     var saysWaiting = false
 
     var body: some View {
         let kind = SessionDisplayKind.of(session)
-        HStack(alignment: reason == nil ? .center : .firstTextBaseline, spacing: 9) {
+        HStack(alignment: .center, spacing: 9) {
             StatusIndicator(session: session, needsYou: needsYou, finishedUnseen: finishedUnseen)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title ?? session.title)
                     .lineLimit(1)
                     .foregroundStyle(kind != .unavailable && (session.open || kind == .working) ? DesktopPalette.text : DesktopPalette.text2)
-                if let reason {
-                    Text(reason)
-                        .font(.system(size: DesktopType.meta))
-                        .foregroundStyle(DesktopPalette.text2)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                } else if kind == .working, let activity = session.activity {
+                if kind == .working, let activity = session.activity {
                     TimelineView(.everyMinute) { context in
                         if let note = activity.note(now: context.date) {
                             Text(note)
@@ -589,7 +578,7 @@ struct SessionRowView: View {
         .font(.system(size: DesktopType.body))
         .padding(.leading, 6)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(needsYou ? "Needs you\(reason.map { ": \($0)" } ?? "") · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
+        .accessibilityValue(needsYou ? "Needs you · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
         .help(SessionFacts.rowDetail(session))
     }
 }

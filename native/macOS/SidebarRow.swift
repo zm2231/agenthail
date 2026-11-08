@@ -5,13 +5,11 @@ struct SidebarRowState: Equatable {
     let title: String
     var family: SessionFamily? = nil
     var attention: SessionAttention? = nil
-    var showsReason = false
     var finishedUnseen = false
     var selected = false
     var canMakeLead = false
 
     var needsYou: Bool { attention != nil }
-    var reason: String? { showsReason ? attention?.reason : nil }
 }
 
 @MainActor

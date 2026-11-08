@@ -59,6 +59,7 @@ SOURCES=(
   RequestNotifications.swift
   SessionSelection.swift
   ProjectActions.swift
+  ProjectTiles.swift
   ProjectContents.swift
   ProjectNow.swift
   ScopePages.swift
@@ -149,6 +150,7 @@ SOURCES=(
   macOS/NewSessionLabels.swift
   macOS/SessionPane.swift
   macOS/MacDecisions.swift
+  macOS/PaneScope.swift
   macOS/DecisionFeed.swift
   macOS/DecisionInboxPane.swift
   macOS/SidebarRow.swift

@@ -107,6 +107,26 @@ struct DecisionInbox: Equatable {
         }
     }
 
+    // A paired computer names a project as it knows it, so its decision reaches the tile that holds that checkout or link.
+    static func projectID(of item: DecisionItem, in projects: [ProjectState]) -> String? {
+        guard let named = item.projectId, !named.isEmpty else { return nil }
+        let host = item.hostID ?? ""
+        let prefix = host + "::"
+        let id = !host.isEmpty && named.hasPrefix(prefix) ? String(named.dropFirst(prefix.count)) : named
+        if projects.contains(where: { $0.id == id }) { return id }
+        guard !host.isEmpty else { return nil }
+        return projects.first { project in
+            project.checkouts.contains { $0.host.id == host && ($0.projectId == id || $0.linkedFrom?.id == id) }
+                || project.linked?.contains { $0.id == id } == true
+        }?.id
+    }
+
+    func needsYou(in projects: [ProjectState]) -> [String: Int] {
+        decisions.reduce(into: [:]) { counts, item in
+            if let project = Self.projectID(of: item, in: projects) { counts[project, default: 0] += 1 }
+        }
+    }
+
     // Offered only when every question names a suggestion, so accepting never guesses.
     static func recommended(_ request: SessionRequest) -> RequestDecision? {
         guard request.usesPager, let questions = request.questions, !questions.isEmpty else { return nil }

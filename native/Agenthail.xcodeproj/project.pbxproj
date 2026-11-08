@@ -204,6 +204,7 @@
 		B07446A550EC20C10B4D81C3 /* ToolDiffCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04B51912943C3AB5349211FF /* ToolDiffCache.swift */; };
 		B100C4F4AE622463D602F2D7 /* ScreenshotInk.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19AE4DCCC41C8D6914C5B04 /* ScreenshotInk.swift */; };
 		B12D492363D7E4F7303F208E /* GoalControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90BFC09972C560C1C9AA777 /* GoalControls.swift */; };
+		B147229E8905810BC3358C1E /* ProjectTiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 508E34C35C83775314D08D60 /* ProjectTiles.swift */; };
 		B2AFCA70BEC767703A948C78 /* EventStreamReopenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B76B455BCDD0569784FF79E1 /* EventStreamReopenTests.swift */; };
 		B44C624C75C0ECD2F23A9F6B /* PushRelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6106D394E6CAEE8B12827D6 /* PushRelayClient.swift */; };
 		B5939FFE0799BC0D656C132D /* TurnNoticeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFBB43A50691914AFA2683A6 /* TurnNoticeUITests.swift */; };
@@ -421,6 +422,7 @@
 		4ED59D26CF86A6F2EF869B2B /* ShortTranscriptUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortTranscriptUITests.swift; sourceTree = "<group>"; };
 		4F2FC22575C3B3708B76AC49 /* NewSessionAccountUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionAccountUITests.swift; sourceTree = "<group>"; };
 		4F7A9AA7E564B9BE9256DC60 /* TimelineEventLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineEventLabel.swift; sourceTree = "<group>"; };
+		508E34C35C83775314D08D60 /* ProjectTiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTiles.swift; sourceTree = "<group>"; };
 		51091AC251684C8A511D1B66 /* SurfaceMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceMode.swift; sourceTree = "<group>"; };
 		518B0A4AD3561D274206BDB8 /* ProxyPrefer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyPrefer.swift; sourceTree = "<group>"; };
 		54633D94A2BE074F38B9C618 /* TranscriptQueueTailUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptQueueTailUITests.swift; sourceTree = "<group>"; };
@@ -851,6 +853,7 @@
 				8E0D1455D8C879BD82B89137 /* ProjectActions.swift */,
 				572FE64C9C40502C461F71D3 /* ProjectContents.swift */,
 				6BB39D1F5A77FDB75976F7AF /* ProjectNow.swift */,
+				508E34C35C83775314D08D60 /* ProjectTiles.swift */,
 				518B0A4AD3561D274206BDB8 /* ProxyPrefer.swift */,
 				18E781B530EDAA7A0C57BBB6 /* ProxyPreferSheet.swift */,
 				8859AC5C7A953646383D1D8A /* PushReceipts.swift */,
@@ -1237,6 +1240,7 @@
 				E5B06D75FB0032364693C118 /* ProjectNowPreview.swift in Sources */,
 				20559ACEB6086289D106542B /* ProjectScreen.swift in Sources */,
 				74EE3850D1C6BD945E00BF40 /* ProjectSheets.swift in Sources */,
+				B147229E8905810BC3358C1E /* ProjectTiles.swift in Sources */,
 				2FD5634CC821FF495F750726 /* ProxyPrefer.swift in Sources */,
 				773581DA6EFEBB061620F848 /* ProxyPreferSheet.swift in Sources */,
 				5110B07D58FC4200FE430A49 /* PushReceipts.swift in Sources */,
