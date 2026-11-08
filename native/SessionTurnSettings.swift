@@ -32,6 +32,7 @@ struct TurnSetting: Decodable, Equatable, Sendable {
         case "newSessions": return scope.map { "For new sessions on \($0)" } ?? "For new sessions"
         case "nextTurn": return "From the next turn"
         case "nextMessage": return "Restarts the session when idle"
+        case "nextLoad": return "Codex applies it the next time it loads this thread with no other app attached"
         default: return nil
         }
     }

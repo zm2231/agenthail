@@ -33,6 +33,8 @@ type Codex struct {
 	backgroundState map[string]*codexBackgroundState
 	loadedThreads   map[string]map[string]bool
 	mcpAttachment
+	codexConfigAttachment
+	subscriptions codexSubscriptions
 }
 
 // codexDesktopRunsHere is whether Codex Desktop can run on this machine;

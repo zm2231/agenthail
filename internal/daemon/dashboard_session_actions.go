@@ -177,7 +177,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 				return actionResult{}, invalidRequest("this session has no compact settings")
 			}
 			err = compact.SetCompactSetting(ctx, session, key, value)
-			if err == nil && key == surface.CompactSettingWindow {
+			if err == nil && key == surface.CompactSettingWindow && session.Surface == surface.KindClaude {
 				d.publishEvent("settings.updated", "", map[string]string{"source": "claude-compact-settings"})
 			}
 		} else {

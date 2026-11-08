@@ -189,6 +189,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 	exec(`INSERT INTO work_records(worktree_path,session_id,repo_root,branch,base_ref,base_commit,state,created_at_ms) VALUES('/repo/.worktrees/ah-x',?,'/repo','ah/x','main','abc','active',1)`, rekeyedBridge)
 	exec(`INSERT INTO session_prs(session_id,repo,number,url,source,linked_at_ms) VALUES(?,'github.com/acme/app',1,'https://github.com/acme/app/pull/1','agent',1)`, rekeyedBridge)
 	exec(`INSERT INTO session_ceilings(session_id,ceiling) VALUES(?,'{"permission":"edits"}')`, rekeyedBridge)
+	exec(`INSERT INTO session_codex_config(session_id,overrides) VALUES(?,'{"model_auto_compact_token_limit":150000}')`, rekeyedBridge)
 	exec(`INSERT INTO session_context(session_id,fingerprint,delivered_at_ms) VALUES(?,'f',1)`, rekeyedBridge)
 	exec(`INSERT INTO limit_resumes(session_id,turn_id,refused_at_ms) VALUES(?,'refused',1)`, rekeyedBridge)
 	now := time.Now().UTC().Format(time.RFC3339Nano)

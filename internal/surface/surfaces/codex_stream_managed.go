@@ -56,6 +56,7 @@ func (c *Codex) followManagedTurn(ctx context.Context, sess *surface.Session, tu
 }
 
 func (c *Codex) followManagedTurnClient(ctx context.Context, client codexClient, sess *surface.Session, turnID string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	defer c.subscriptions.remove(sess.ID, client)
 	emitted := ""
 	finalEmitted := false
 	notifier, _ := client.(codexNotifier)

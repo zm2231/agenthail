@@ -82,6 +82,7 @@ assert.equal(compactModules["compact-settings"].renderCompactSettings(detail), "
 const own = { key: "sessionCompactWindow", value: "default", applies: "nextMessage", options: [{ id: "default", label: "Root default" }, { id: "150000", label: "150k" }] };
 assert.match(compactModules["compact-settings"].renderCompactSettings({ compactSettings: [own] }), /This session.*Restarts the session when idle/s, "a session's own window says it restarts the session");
 assert.match(compactModules["compact-settings"].renderCompactSettings({ compactSettings: [{ ...own, pending: "150000" }] }), /150k from the next message/, "a pending window shows as pending");
+assert.match(compactModules["compact-settings"].renderCompactSettings({ compactSettings: [{ key: "compactWindow", value: "200000", applies: "nextLoad", options: [{ id: "auto", label: "Auto" }, { id: "200000", label: "200k" }] }] }), /next time it loads this thread with no other app attached/, "a Codex window says when Codex takes it");
 assert.match(compactModules["compact-settings"].renderCompactSettings({ compactSettings: [{ ...own, pending: "150000" }] }), /<option value="default" selected>Root default/, "the window in effect stays selected while another is pending");
 assert.equal(compactModules["compact-settings"].compactSettingsOf(detail).length, 0, "a session without compact settings has none to change");
 const timelineModules = await dashboardModules(["timeline"], {});
