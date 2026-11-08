@@ -1,4 +1,5 @@
 @testable import AgenthailHelpers
+import SwiftUI
 import Foundation
 
 @MainActor
@@ -84,6 +85,9 @@ struct DecisionFeedTest {
         await settle()
         await loads.finish(inbox("y", requests: [first, second]))
         check(feed.count == 1, "a session the daemon stops listing is gone")
+        check(!DecisionInbox.acceptsRecommended([]), "a bare Return never accepts the recommended answers")
+        check(DecisionInbox.acceptsRecommended(.shift) && DecisionInbox.acceptsRecommended([.shift, .capsLock]), "Shift-Return accepts them")
+        check(!DecisionInbox.acceptsRecommended([.shift, .command]) && !DecisionInbox.acceptsRecommended(.option), "other modified Returns do not")
         print("decision feed ok")
     }
 

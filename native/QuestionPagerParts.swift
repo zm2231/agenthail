@@ -98,7 +98,7 @@ struct AnswerReceiptRow: View {
 
 struct SuggestedMark: View {
     var body: some View {
-        Text("· Suggested")
+        Text("· Recommended")
             .font(.caption)
             .foregroundStyle(RoleStyle(.muted))
     }

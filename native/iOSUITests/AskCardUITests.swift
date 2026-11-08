@@ -16,7 +16,7 @@ final class AskCardUITests: XCTestCase {
         app.launch()
         let heading = app.staticTexts["@builder asks: Ready to ship"]
         XCTAssertTrue(heading.waitForExistence(timeout: 10), "the ask shows with the session's name though it answers nothing through its provider")
-        XCTAssertTrue(app.staticTexts["· Suggested"].exists || app.buttons.matching(NSPredicate(format: "label CONTAINS 'Suggested'")).firstMatch.exists, "the suggested option is marked")
+        XCTAssertTrue(app.staticTexts["· Recommended"].exists || app.buttons.matching(NSPredicate(format: "label CONTAINS 'Recommended'")).firstMatch.exists, "the suggested option is marked Recommended")
         XCTAssertTrue(app.buttons["Runbook"].exists || app.links["Runbook"].exists, "the ask's link shows")
         XCTAssertFalse(app.buttons["Decline"].exists, "an ask has nothing to decline")
         let submit = app.buttons["Submit"]

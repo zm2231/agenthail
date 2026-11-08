@@ -1,4 +1,11 @@
 import Foundation
+import SwiftUI
+
+extension DecisionInbox {
+    static func acceptsRecommended(_ modifiers: EventModifiers) -> Bool {
+        modifiers.subtracting(.capsLock) == .shift
+    }
+}
 
 extension AgenthailModel {
     static let decisionTimeout: TimeInterval = 6

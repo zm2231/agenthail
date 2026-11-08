@@ -174,6 +174,8 @@ struct SessionSidebar: View {
                     .frame(height: WindowButtons.bandHeight)
                     .windowButtonBand(leading: WindowButtons.paneInset)
             }
+            SidebarTiles(model: model, pane: pane)
+                .padding(.top, DesktopSpace.s)
             SessionSidebarHeader(
                 model: model,
                 pane: pane,
@@ -184,7 +186,6 @@ struct SessionSidebar: View {
                 newSessionHelp: shortcuts.help("New session", .newSession),
                 findShortcut: shortcuts.keyboardShortcut(.findSession)
             )
-            SidebarTiles(model: model, pane: pane)
             if !pane.showsInbox {
                 SessionRefinementBar(model: model)
                     .scrimText()

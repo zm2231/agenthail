@@ -44,6 +44,12 @@ struct DecisionInboxPane: View {
             move(press.characters == "j" ? 1 : -1, in: inbox.decisions, from: item)
             return .handled
         }
+        .onKeyPress(keys: [.return]) { press in
+            guard DecisionInbox.acceptsRecommended(press.modifiers), !answering, let item, item.answerable,
+                  let request = item.openRequests.first, let recommended = DecisionInbox.recommended(request) else { return .ignored }
+            Task { await answer(request, recommended, item, in: inbox.decisions) }
+            return .handled
+        }
         .onChange(of: item?.id, initial: true) {
             if !(item.map(Self.pagesQuestions) ?? false) { focused = true }
         }
@@ -74,7 +80,7 @@ struct DecisionInboxPane: View {
                         .id(item.sessionId + "/" + request.id)
                     if let recommended = DecisionInbox.recommended(request) {
                         Button("Accept recommended") { Task { await answer(request, recommended, item, in: items) } }
-                            .keyboardShortcut(.return, modifiers: .shift)
+                            .help("Shift-Return")
                             .disabled(answering)
                             .accessibilityIdentifier("decision-accept-recommended")
                     }
