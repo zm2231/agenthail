@@ -137,6 +137,7 @@ SOURCES=(
   macOS/ComposerPaste.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
+  macOS/ComposerStatusLine.swift
   macOS/Outbox.swift
   macOS/DraftArchive.swift
   macOS/MainWindowShow.swift

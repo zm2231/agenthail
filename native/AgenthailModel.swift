@@ -1148,7 +1148,7 @@ final class AgenthailModel {
             let attachments = cancelled.attachments ?? []
             do {
                 let receipt = try await api.steerQueued(message: message, attachments: attachments, sessionID: item.sessionId)
-                outbox.record(LocalSend(text: message, attachments: attachments.map { ComposerAttachment(uploaded: $0.upload) }, sentAt: Date(), status: LocalSend.label(for: receipt.result?.status, steer: true)), in: item.sessionId)
+                outbox.record(LocalSend(text: message, attachments: attachments.map { ComposerAttachment(uploaded: $0.upload) }, sentAt: Date(), status: LocalSend.label(for: receipt.result, steer: true)), in: item.sessionId)
                 operationError = nil
             } catch {
                 let lost = draft(for: item.sessionId).takeBack([message], attachments: attachments)
@@ -1508,6 +1508,7 @@ final class ComposerDraft: ObservableObject {
     @Published var attachments: [ComposerAttachment] = []
     @Published private(set) var stash: ComposerStash?
     @Published private(set) var sent: [PromptItem] = []
+    @Published private(set) var focusRequests = 0
     private(set) var cleared: [String] = []
     private var lastEscape: Date?
     var history = PromptHistory()
@@ -1587,6 +1588,12 @@ final class ComposerDraft: ObservableObject {
 
     private func rebuildHistory() {
         history.replace(cleared + sent.map(\.text))
+    }
+
+    func edit(_ message: String, attachments edited: [ComposerAttachment] = []) {
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? message : "\(message)\n\n\(text)"
+        attachments = ComposerAttachments.adding(edited, to: attachments).attachments
+        focusRequests += 1
     }
 
     func restore(_ restored: String, attachments restoredAttachments: [ComposerAttachment] = []) {

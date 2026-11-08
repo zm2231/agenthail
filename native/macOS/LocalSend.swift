@@ -45,6 +45,13 @@ struct LocalSend: Identifiable, Equatable {
         }
     }
 
+    static func label(for receipt: DeliveryReceipt?, steer: Bool = false) -> String {
+        if receipt?.evidence == "transport_accepted", let detail = receipt?.detail, !detail.isEmpty { return detail }
+        let base = label(for: receipt?.status, waitingOnYou: receipt?.waitingOn != nil, steer: steer, movedTo: receipt?.movedTo)
+        guard let notice = receipt?.notice, !notice.isEmpty else { return base }
+        return "\(base) · \(notice)"
+    }
+
     // The timeline shows a send's typed text with its files split out. Images
     // go to the runtime natively and appear as separate attachment rows, so an
     // image-only send records no user text at all; a runtime without native
