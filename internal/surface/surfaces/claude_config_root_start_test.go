@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,5 +94,25 @@ func TestCodexCreationRefusesAClaudeConfigRoot(t *testing.T) {
 	c := &Codex{}
 	if _, _, err := c.startSessionOnTransport(context.Background(), nil, surface.SessionStartOptions{Message: "hi", ConfigRoot: "work"}, codexTransportManaged); err == nil || !strings.Contains(err.Error(), "require Claude") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestClaudeCreationInAConfiguredRootThatDoesNotExistIsRefused(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	host := claudehosttest.New(t, "")
+	host.Start(t)
+	gone := filepath.Join(host.Home, ".gone", ".claude")
+	configureClaudeRoots(t, host.Home, gone)
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+	c := NewClaude(nil, host.Home)
+	session, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, ConfigRoot: "gone"})
+	var missing surface.ClaudeRootMissingError
+	if !errors.As(err, &missing) || !surface.IsDeliveryTerminal(err) {
+		t.Fatalf("session=%+v err=%v, want a refusal naming the missing root", session, err)
+	}
+	if _, err := os.Stat(gone); !os.IsNotExist(err) {
+		t.Fatalf("the missing root was created: %v", err)
 	}
 }

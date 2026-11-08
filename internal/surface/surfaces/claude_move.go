@@ -383,7 +383,7 @@ func (c *Claude) moveInRoot(name string) (string, []string, error) {
 	if name == "" {
 		return roots[0], roots, nil
 	}
-	root, err := surface.ResolveClaudeConfigRoot(c.home, name)
+	root, err := surface.ResolveClaudeStartRoot(c.home, name)
 	return root, roots, err
 }
 

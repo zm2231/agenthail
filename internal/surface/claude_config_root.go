@@ -22,6 +22,8 @@ type ClaudeConfigRoot struct {
 	Name          string       `json:"name"`
 	Root          string       `json:"root"`
 	Primary       bool         `json:"primary"`
+	Source        string       `json:"source"`
+	Missing       bool         `json:"missing,omitempty"`
 	SignedInAs    *ClaudeLogin `json:"signedInAs,omitempty"`
 	Login         string       `json:"login,omitempty"`
 	Proxy         string       `json:"proxy,omitempty"`
@@ -86,15 +88,20 @@ func ClaudeGlobalConfigPath(home, root string) string {
 // DescribeClaudeConfigRoots lists the configured roots, primary first, each
 // with a name unique among them and the login it currently holds.
 func DescribeClaudeConfigRoots(home string) ([]ClaudeConfigRoot, error) {
-	paths, err := ClaudeConfigRoots(home)
+	sources, err := claudeConfigRootSources(home)
 	if err != nil {
 		return nil, err
 	}
-	roots := make([]ClaudeConfigRoot, 0, len(paths))
-	for i, path := range paths {
+	roots := make([]ClaudeConfigRoot, 0, len(sources))
+	for i, source := range sources {
+		path := source.path
 		root := claudeGlobalConfigs.read(ClaudeGlobalConfigPath(home, path))
 		root.Root = path
 		root.Primary = i == 0
+		root.Source = source.source
+		if _, err := os.Stat(path); i > 0 && os.IsNotExist(err) {
+			root.Missing = true
+		}
 		root.Name = claudeRootName(path, i == 0)
 		roots = append(roots, root)
 	}
@@ -119,13 +126,33 @@ func ClaudeConfigRootFor(roots []ClaudeConfigRoot, path string) (ClaudeConfigRoo
 // ResolveClaudeConfigRoot accepts a configured root's path or name; "" is
 // the primary root.
 func ResolveClaudeConfigRoot(home, choice string) (string, error) {
-	roots, err := DescribeClaudeConfigRoots(home)
+	root, err := resolveClaudeConfigRoot(home, choice)
+	return root.Root, err
+}
+
+// ResolveClaudeStartRoot resolves a root to start Claude in. A configured root
+// that does not exist is refused rather than created: Claude would make it a
+// new, signed-out root. The primary root is the caller's own and Claude creates
+// it on first run.
+func ResolveClaudeStartRoot(home, choice string) (string, error) {
+	root, err := resolveClaudeConfigRoot(home, choice)
 	if err != nil {
 		return "", err
 	}
+	if root.Missing {
+		return "", ClaudeRootMissingError{Root: root.Root, Config: AgenthailConfigPath(home)}
+	}
+	return root.Root, nil
+}
+
+func resolveClaudeConfigRoot(home, choice string) (ClaudeConfigRoot, error) {
+	roots, err := DescribeClaudeConfigRoots(home)
+	if err != nil {
+		return ClaudeConfigRoot{}, err
+	}
 	choice = strings.TrimSpace(choice)
 	if choice == "" {
-		return roots[0].Root, nil
+		return roots[0], nil
 	}
 	if filepath.IsAbs(choice) || strings.HasPrefix(choice, "~") {
 		path := choice
@@ -133,16 +160,22 @@ func ResolveClaudeConfigRoot(home, choice string) (string, error) {
 			path = filepath.Join(home, strings.TrimPrefix(path, "~"))
 		}
 		if root, ok := ClaudeConfigRootFor(roots, path); ok {
-			return root.Root, nil
+			return root, nil
 		}
-		return "", fmt.Errorf("Claude config directory %s is not configured; add it to claudeConfigDirs in %s", path, AgenthailConfigPath(home))
+		return ClaudeConfigRoot{}, fmt.Errorf("Claude config directory %s is not configured; add it to claudeConfigDirs in %s", path, AgenthailConfigPath(home))
 	}
 	for _, root := range roots {
 		if root.Name == choice {
-			return root.Root, nil
+			return root, nil
 		}
 	}
-	return "", fmt.Errorf("no configured Claude config directory is named %q; choose one of %s", choice, claudeConfigRootChoices(roots))
+	return ClaudeConfigRoot{}, fmt.Errorf("no configured Claude config directory is named %q; choose one of %s", choice, claudeConfigRootChoices(roots))
+}
+
+type ClaudeRootMissingError struct{ Root, Config string }
+
+func (e ClaudeRootMissingError) Error() string {
+	return fmt.Sprintf("Claude config directory %s does not exist, and Claude would start it signed out; sign in to Claude there to create it, or remove it from claudeConfigDirs in %s", e.Root, e.Config)
 }
 
 // claudeRootName is "default" for the primary root and otherwise the root's

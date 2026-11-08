@@ -17,7 +17,7 @@ func (c *Claude) MoveToRoot(ctx context.Context, out *surface.MoveOut, moveID, r
 	if !claudeConversationID(conversation) || !claudeConversationID(moveID) {
 		return nil, fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
-	target, err := surface.ResolveClaudeConfigRoot(c.home, root)
+	target, err := surface.ResolveClaudeStartRoot(c.home, root)
 	if err != nil {
 		return nil, err
 	}

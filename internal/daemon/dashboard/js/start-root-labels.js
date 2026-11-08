@@ -10,6 +10,12 @@ export function rootTitles(roots, host) {
   return names.map((name, index) => (names.filter((other) => other === name).length > 1 ? `${name} · ${roots[index].name}` : name));
 }
 
+const sources = { env: "from CLAUDE_CONFIG_DIR", default: "the default", daemon: "the daemon's root", config: "from claudeConfigDirs" };
+
+export function rootOrigin(root) {
+  return [root.root, sources[root.source]].filter(Boolean).join(", ");
+}
+
 export function rootUsage(root) {
   const parts = [];
   for (const [label, test] of [["session", (kind) => kind === "session" || kind === "5h"], ["week", (kind) => kind === "weekly" || kind === "weekly_all"]]) {

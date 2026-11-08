@@ -65,12 +65,29 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 	if cwd == "" {
 		return false, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no known working directory to resume in", conversation), surface.DeliveryTargetMissing)
 	}
+	if err := c.recordedRootGone(sess); err != nil {
+		return false, err
+	}
 	resumed, err := c.resume(ctx, conversation, cwd)
 	if err != nil {
 		return false, err
 	}
 	adoptClaudeProcess(sess, resumed)
 	return true, nil
+}
+
+// recordedRootGone refuses to start a stopped conversation whose transcript
+// lay in a config root that no longer exists, so a resume never starts it in
+// another root, or in a new signed-out one at the same path.
+func (c *Claude) recordedRootGone(sess *surface.Session) error {
+	if sess.Transcript == "" {
+		return nil
+	}
+	root := claudeTranscriptRoot(sess.Transcript)
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		return nil
+	}
+	return surface.DeliveryTerminal(surface.ClaudeRootMissingError{Root: root, Config: surface.AgenthailConfigPath(c.home)}, surface.DeliveryTargetMissing)
 }
 
 // reachRunning points sess at a running process of its conversation that has

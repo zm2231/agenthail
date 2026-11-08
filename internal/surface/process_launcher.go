@@ -223,7 +223,7 @@ func agentArgv(request LaunchRequest) ([]string, error) {
 		}
 		argv := []string{binary}
 		if request.Options.ConfigRoot != "" {
-			root, err := ResolveClaudeConfigRoot(home, request.Options.ConfigRoot)
+			root, err := ResolveClaudeStartRoot(home, request.Options.ConfigRoot)
 			if err != nil {
 				return nil, err
 			}

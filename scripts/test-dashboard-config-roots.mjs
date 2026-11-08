@@ -84,3 +84,10 @@ pending[asked + 1].resolve({ ok: true, json: async () => ({ best: "team@example.
 await settle();
 assert(select.innerHTML.includes(">shared via proxy · next: team · session 18%, week 41%</option>"), select.innerHTML);
 console.log("ok dashboard config roots");
+
+context.renderStartConfigRoots([
+  { name: "default", root: "/home/me/.claude", primary: true, source: "env", signedInAs: { email: "me@example.com" } },
+  { name: "gone", root: "/home/me/.gone/.claude", primary: false, source: "config", missing: true, login: "signed_out" },
+]);
+assert(select.innerHTML.includes('title="/home/me/.claude, from CLAUDE_CONFIG_DIR" value="/home/me/.claude"'), "each root says where it came from");
+assert(/title="\/home\/me\/\.gone\/\.claude, from claudeConfigDirs" value="\/home\/me\/\.gone\/\.claude" disabled>[^<]* · does not exist</.test(select.innerHTML), select.innerHTML);
