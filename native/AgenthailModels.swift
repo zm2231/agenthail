@@ -23,6 +23,22 @@ struct ClaudeCreationSettings {
     }
 }
 
+struct CodexCreationSettings {
+    var approvalPolicy = ""
+    var serviceTier = ""
+    var outputSchema: Any?
+
+    var isEmpty: Bool { approvalPolicy.isEmpty && serviceTier.isEmpty && outputSchema == nil }
+
+    var fields: [String: Any] {
+        var fields: [String: Any] = [:]
+        if !approvalPolicy.isEmpty { fields["approvalPolicy"] = approvalPolicy }
+        if !serviceTier.isEmpty { fields["serviceTier"] = serviceTier }
+        if let outputSchema { fields["outputSchema"] = outputSchema }
+        return fields
+    }
+}
+
 /// A Claude config directory and the login it holds now. Sending no config
 /// root lets the host's policy choose one.
 struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
