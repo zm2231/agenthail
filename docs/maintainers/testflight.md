@@ -16,7 +16,7 @@ Release is a combined product release: it builds and validates the Mac package a
 
 Nothing goes to TestFlight, the relay or the published release until the iOS suite (the `ios` job of the [iOS workflow](../../.github/workflows/ios.yml): unit tests and the smoke and main UI tiers) has passed on code with the release commit's iOS inputs. [`scripts/ios-inputs.sh list`](../../scripts/ios-inputs.sh) defines those inputs; the list includes the scripts and workflow that define and check them.
 
-The release's `ios-proof` job finds the last first-parent commit at or before the release commit that changed an iOS input. It checks that the inputs are identical from there to the release commit. Then it looks for an iOS run for a push of that commit whose `ios` job passed.
+The release's `ios-proof` job finds the last first-parent commit at or before the release commit that changed an iOS input. It checks that the inputs are identical from there to the release commit. Then it looks for an iOS run for a push of that commit that passed, with its `ios` job passing too. A run that a later push cancelled proves nothing, even if its `ios` job had already passed.
 
 - **A run is found:** that run proves the release, and the job summary names the commit and the run.
 - **No run is found:** a later push to main can cancel an earlier iOS run, and the iOS workflow skips pushes that change no iOS input, so a passing run may not exist. In that case the release runs the iOS suite itself at the release commit, and the summary links to that run.

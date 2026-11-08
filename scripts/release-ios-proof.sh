@@ -46,12 +46,12 @@ find_proof() {
 		conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[] | select(.name == "ios") | .conclusion] | first // ""')"
 		if [ "$conclusion" = success ]; then
 			outcome true "$proof" "$url" ""
-			say "iOS proof: $sha has the same iOS inputs as $proof, the last commit to change one, and iOS run $url passed its ios job there."
+			say "iOS proof: $sha has the same iOS inputs as $proof, the last commit to change one, and iOS run $url passed there, its ios job included."
 			return
 		fi
-	done < <(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ios.yml/runs?head_sha=$proof&event=push&per_page=100" --jq '.workflow_runs[] | "\(.id) \(.html_url)"')
-	outcome false "$proof" "" "no iOS run for a push of $proof passed its ios job"
-	say "iOS proof: no iOS run for a push of $proof, the last commit to change an iOS input, passed its ios job; the release runs the iOS suite."
+	done < <(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ios.yml/runs?head_sha=$proof&event=push&per_page=100" --jq '.workflow_runs[] | select(.conclusion == "success") | "\(.id) \(.html_url)"')
+	outcome false "$proof" "" "no iOS run for a push of $proof passed with its ios job"
+	say "iOS proof: no iOS run for a push of $proof, the last commit to change an iOS input, passed with its ios job; the release runs the iOS suite."
 }
 
 require_proof() {
