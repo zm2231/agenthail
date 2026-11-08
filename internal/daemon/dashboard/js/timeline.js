@@ -58,7 +58,7 @@ export function renderTimeline(items, session, expandAgents = false) {
   return (expandAgents ? entries.map((entry) => entry.html) : foldAgentEntries(entries, session)).join("");
 }
 
-export function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, claudeSubagentsTotal, allSubagents, expandAgents) {
+export function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, claudeSubagentsTotal, allSubagents, expandAgents, compactSettings = []) {
   return JSON.stringify([
     session.id,
     session.status === "busy" || Boolean(session.waitingOn),
@@ -74,5 +74,6 @@ export function timelineSignature(session, exchanges, goal, capabilities, transc
     claudeSubagentsTotal,
     allSubagents,
     Boolean(expandAgents),
+    compactSettings,
   ]);
 }

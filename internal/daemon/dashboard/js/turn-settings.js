@@ -4,11 +4,16 @@ import { escape } from "./format.js";
 import { action } from "./actions.js";
 import { friendlyError, toast } from "./feedback.js";
 import { loadSessionMetadata } from "./session-metadata.js";
+import { compactSettingsOf } from "./compact-settings.js";
 
 const shown = [["model", "Model"], ["effort", "Effort"], ["mode", "Mode"]];
 
 function settingsOf(history) {
   return Array.isArray(history?.turnSettings) ? history.turnSettings : [];
+}
+
+function changeableOf(history) {
+  return [...settingsOf(history), ...compactSettingsOf(history)];
 }
 
 function renderSetting(setting, name) {
@@ -36,18 +41,22 @@ export function renderTurnSettings() {
 export async function changeTurnSetting(key, value) {
   const detail = app.history;
   const sessionId = app.selected?.id;
-  const setting = settingsOf(detail).find((candidate) => candidate.key === key);
+  const setting = changeableOf(detail).find((candidate) => candidate.key === key);
   const option = setting?.options.find((candidate) => candidate.id === value);
   if (!sessionId || !option || setting.value === value) return false;
-  if (option.confirm && !window.confirm(`Switch to ${option.label}? The agent will run tools without asking you first.`)) {
+  const restore = () => {
     renderTurnSettings();
+    for (const select of $("#chat-body")?.querySelectorAll(`[data-turn-setting="${key}"]`) ?? []) select.value = setting.value;
+  };
+  if (option.confirm && !window.confirm(`Switch to ${option.label}? The agent will run tools without asking you first.`)) {
+    restore();
     return false;
   }
   try {
     await action("turn-setting", { setting: key, value });
   } catch (error) {
     toast(friendlyError(error));
-    renderTurnSettings();
+    restore();
     return false;
   }
   if (app.selected?.id === sessionId && app.history === detail) loadSessionMetadata(sessionId, detail);
@@ -55,8 +64,10 @@ export async function changeTurnSetting(key, value) {
 }
 
 export function bindTurnSettingEvents() {
-  $("#turn-settings").addEventListener("change", (event) => {
-    const select = event.target.closest("[data-turn-setting]");
-    if (select) changeTurnSetting(select.dataset.turnSetting, select.value);
-  });
+  for (const box of [$("#turn-settings"), $("#chat-body")].filter(Boolean)) {
+    box.addEventListener("change", (event) => {
+      const select = event.target.closest("[data-turn-setting]");
+      if (select) changeTurnSetting(select.dataset.turnSetting, select.value);
+    });
+  }
 }
