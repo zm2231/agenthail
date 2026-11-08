@@ -11,8 +11,8 @@ const separator = "::";
 
 export function decisionHosts() {
   const local = app.state?.daemon?.host;
-  const paired = (app.state?.daemon?.hosts || []).filter((host) => host.state === "connected");
-  return [{ id: "", name: local?.name || "this computer" }, ...paired.map((host) => ({ id: host.id, name: host.name }))];
+  const paired = app.state?.daemon?.hosts || [];
+  return [{ id: "", name: local?.name || "this computer", state: "connected" }, ...paired.map((host) => ({ id: host.id, name: host.name, state: host.state }))];
 }
 
 export function qualify(hostId, id) {
@@ -46,6 +46,8 @@ export function mergeDecisions(answers) {
 }
 
 async function ask(host, fetchImpl) {
+  if (host.state === "incompatible") return { host, outdated: true };
+  if (host.state !== "connected") return { host, error: host.state || "not connected" };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), decisionTimeout);
   try {
@@ -68,10 +70,7 @@ export async function loadDecisions(fetchImpl = fetch) {
 }
 
 export function decisionsKey() {
-  const waiting = (app.state?.sessions || [])
-    .filter((session) => session.waitingOn || session.attention)
-    .map((session) => `${session.id}:${session.waitingOn?.id || ""}:${session.attention?.kind || ""}`)
-    .sort();
-  const hosts = decisionHosts().map((host) => host.id).join(",");
-  return `${hosts}|${waiting.join(",")}`;
+  const hosts = decisionHosts().map((host) => `${host.id}:${host.state}`).join(",");
+  const catalog = app.state?.catalogSeq === undefined ? `updated:${app.state?.updatedAt || ""}` : `${app.state?.hostEpoch || ""}:${app.state.catalogSeq}`;
+  return `${hosts}|${catalog}`;
 }

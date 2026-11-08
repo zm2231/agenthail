@@ -48,6 +48,7 @@ const inbox = plain(await vm.runInContext("loadDecisions(fetch)", context));
 assert.deepEqual(asked.sort(), ["/api/v1/decisions", "/api/v1/decisions?host=server"], "only connected computers are asked, the local one without a host");
 assert.deepEqual(inbox.decisions.map((item) => `${item.group}:${item.sessionId}`), ["stopped:server::far", "stopped:lead", "holding:lead", "waiting:worker"]);
 assert.equal(inbox.decisions[0].hostId, "server");
+assert.deepEqual(inbox.unreachable, ["gone"], "a paired computer that isn't connected is named without being asked");
 assert.deepEqual(inbox.decisions[2].holdsUp, ["worker"], "local ids stay as the dashboard knows them");
 
 context.fetch = async (url) => {
@@ -56,7 +57,7 @@ context.fetch = async (url) => {
 };
 const failing = plain(await vm.runInContext("loadDecisions(fetch)", context));
 assert.deepEqual(failing.outdated, ["server"]);
-assert.deepEqual(failing.unreachable, ["laptop"]);
+assert.deepEqual(failing.unreachable, ["gone", "laptop"]);
 
 app.decisions = inbox;
 vm.runInContext("renderInbox()", context);
@@ -85,11 +86,27 @@ assert.equal(elements.panel.hidden, true, "an empty inbox hides");
 
 let loads = 0;
 app.decisionsKey = undefined;
+app.state.hostEpoch = "epoch";
+app.state.catalogSeq = 1;
 context.countingLoader = async () => { loads++; return inbox; };
 await vm.runInContext("refreshDecisions(countingLoader)", context);
 await vm.runInContext("refreshDecisions(countingLoader)", context);
-assert.equal(loads, 1, "an unchanged set of waiting sessions does not ask again");
-app.state.sessions = [...app.state.sessions, { id: "new", name: "new", waitingOn: { id: "q" } }];
+assert.equal(loads, 1, "an unchanged catalog does not ask again");
+app.state.catalogSeq = 2;
 await vm.runInContext("refreshDecisions(countingLoader)", context);
-assert.equal(loads, 2, "a new wait asks again");
+assert.equal(loads, 2, "any catalog change asks again, including a remote wait ending outside the loaded rows");
+
+let release;
+context.slowLoader = () => { loads++; return new Promise((resolve) => { release = () => resolve(inbox); }); };
+app.state.catalogSeq = 3;
+const first = vm.runInContext("refreshDecisions(slowLoader)", context);
+app.state.catalogSeq = 4;
+await vm.runInContext("refreshDecisions(slowLoader)", context);
+assert.equal(loads, 3, "a change during a load does not start a second load at once");
+release();
+await new Promise((resolve) => setTimeout(resolve, 0));
+release();
+await first;
+assert.equal(loads, 4, "the change that arrived during the load is read once the load ends");
+assert.equal(app.decisionsKey.endsWith("epoch:4"), true);
 console.log("dashboard decisions ok");

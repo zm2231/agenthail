@@ -7,11 +7,22 @@ import { decisionGroups, decisionsKey, loadDecisions } from "./decisions.js";
 export async function refreshDecisions(loader = loadDecisions) {
   const key = decisionsKey();
   if (app.decisionsKey === key) return;
-  app.decisionsKey = key;
-  const loaded = await loader();
-  if (app.decisionsKey !== key) return;
-  app.decisions = loaded;
-  renderInbox();
+  if (app.decisionsLoading) {
+    app.decisionsAgain = true;
+    return;
+  }
+  app.decisionsLoading = true;
+  try {
+    app.decisions = await loader();
+    app.decisionsKey = key;
+    renderInbox();
+  } finally {
+    app.decisionsLoading = false;
+  }
+  if (app.decisionsAgain) {
+    app.decisionsAgain = false;
+    await refreshDecisions(loader);
+  }
 }
 
 function nameOf(id) {
