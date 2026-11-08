@@ -292,11 +292,23 @@ if __name__ == "__main__":
             "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": []},
         }
         for path, body in {"/api/v1/projects/activity": {"projects": []}, "/api/v1/history": {"items": [], "hasMore": False, "nextBefore": 0, "kinds": []},
-                           "/api/v1/decisions": {"decisions": [], "leadHandling": []}, "/api/v1/usage": {"sets": []}, "/api/v1/models": {"models": []},
+                           "/api/v1/decisions": {"decisions": [
+                               {"group": "stopped", "sessionId": "terminal", "projectId": "web-app", "kind": "request", "reason": "Answer in its terminal", "since": NOW,
+                                "answerable": False, "requestError": "this session's requests are not answered through Agenthail"},
+                               {"group": "stopped", "sessionId": "limit", "projectId": "web-app", "kind": "usageLimit", "reason": "Resumes when the limit lifts", "since": NOW, "answerable": False},
+                               {"group": "stopped", "sessionId": "stopped", "projectId": "web-app", "kind": "stopped", "reason": "the model returned an error", "since": NOW, "answerable": False}],
+                               "leadHandling": []}, "/api/v1/usage": {"sets": []}, "/api/v1/models": {"models": []},
                            "/api/v1/session-options": {"surfaces": [{"id": "claude", "workspace": True}], "projects": [], "claudeConfigRoots": []},
                            "/api/v1/session-commands": {"commands": [], "unavailable": ""}, "/api/v1/session-metadata": {},
                            "/api/v1/prompts": {"prompts": [], "nextBefore": None}, "/api/v1/requests": {"permissionMode": "", "requests": []}}.items():
             RESPONSES[path] = body
+        RESPONSES["/api/v1/session"]["timeline"]["items"] = [
+            {"id": "t1", "kind": "message", "role": "user", "title": "", "text": "Summarise the review", "timestamp": NOW, "truncated": False},
+            {"id": "t2", "kind": "toolCall", "role": "assistant", "title": "Run git diff --stat", "text": "", "timestamp": NOW, "callId": "c1", "truncated": False},
+            {"id": "t3", "kind": "review", "role": "assistant", "title": "Review summary", "text": "**2 findings**, both in `api/auth.ts`.", "timestamp": NOW, "truncated": False},
+            {"id": "t4", "kind": "mystery", "role": "assistant", "title": "", "text": "", "timestamp": NOW, "truncated": False},
+            {"id": "t5", "kind": "message", "role": "assistant", "title": "", "text": "The review found two issues in the auth handler.", "timestamp": NOW, "truncated": False},
+        ]
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.update({"/api/v1/events", "/api/v1/catalog-events", "/api/v1/session-stream"})
