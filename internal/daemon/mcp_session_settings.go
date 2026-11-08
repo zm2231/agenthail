@@ -10,14 +10,24 @@ import (
 
 type mcpSessionSettingsInput struct {
 	mcpWrite
-	Target  string `json:"target" jsonschema:"A session id or @alias you spawned or, as coordinator, lead."`
-	Setting string `json:"setting" jsonschema:"model, permissionMode (Claude), effort (Claude) or compact."`
+	Target  string `json:"target" jsonschema:"A session id or @alias you spawned or, as coordinator, lead; any you can read, to read."`
+	Setting string `json:"setting,omitempty" jsonschema:"model, permissionMode (Claude), effort (Claude) or compact. Leave it out to read the settings."`
 	Value   string `json:"value,omitempty" jsonschema:"The new model, permission mode or effort; compact takes none."`
 }
 
 var mcpSettingActions = map[string]string{"model": "model", "permissionMode": "permission-mode", "effort": "effort", "compact": "compact"}
 
 func (d *Daemon) mcpSessionSettings(ctx context.Context, caller *mcpCaller, input mcpSessionSettingsInput) (any, error) {
+	if strings.TrimSpace(input.Setting) == "" {
+		if strings.TrimSpace(input.Value) != "" {
+			return nil, refuse("invalid", "value needs a setting.")
+		}
+		session, err := d.mcpReadableSession(caller, input.Target)
+		if err != nil {
+			return nil, err
+		}
+		return d.sessionSettings(ctx, session)
+	}
 	action, ok := mcpSettingActions[strings.TrimSpace(input.Setting)]
 	if !ok {
 		return nil, refuse("invalid", "setting is model, permissionMode, effort or compact.")

@@ -59,6 +59,7 @@ const threadNameMargin = 30 * time.Second
 const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree [--branch <name>] [--base <ref>]] [--agent <name>] [--permission-mode <mode>] [--root <name|dir>] [--host <host>] [--from <session>] [--timeout <duration>] [--json]
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--from <session>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
+       agenthail thread settings <target> [--json]
        agenthail thread <archive|unarchive|pin|unpin> <target> [--json]
        agenthail thread snooze <target> (--until <time|duration> | --until-finished) [--json]
        agenthail thread wake <target> [--json]
@@ -69,6 +70,7 @@ const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--
 Codex threads start on Codex Desktop when its bridge is reachable and on Codex's app-server daemon otherwise.
 --host starts the thread on a paired host; --cwd is then a path on that host.
 --worktree starts the thread in a new git worktree beside the checkout, under .worktrees/, on a new branch (--branch, or ah/<alias>) from --base or the checkout's HEAD.
+settings shows the model, effort, permission and Claude config root a thread runs with, and where each was read from, without waking it.
 clean removes a thread's worktree and branch when nothing in them would be lost, and otherwise keeps them and says why. Reporting a task and archiving do the same. Ignored files in build and package folders (node_modules, build, dist, target and the like) never keep a worktree; --force-ignored removes it past any other ignored files.`
 
 func (a *App) cmdThread(args []string) error {
@@ -87,6 +89,9 @@ func (a *App) cmdThread(args []string) error {
 	}
 	if len(args) > 0 && args[0] == "clean" {
 		return a.cmdThreadClean(args)
+	}
+	if len(args) > 0 && args[0] == "settings" {
+		return a.cmdThreadSettings(args)
 	}
 	if len(args) > 0 && args[0] != "create" {
 		return a.cmdThreadOperation(args)

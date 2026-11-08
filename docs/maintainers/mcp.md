@@ -107,7 +107,7 @@ Archived sessions and sessions owned by other hosts are outside every scope. A s
 | `agenthail_steer`, `agenthail_interrupt` | Steer or interrupt a running turn | control scope, down only |
 | `agenthail_goal` | Set, edit, clear, pause or resume a Codex session's goal, or change its token budget | control scope, down only |
 | `agenthail_answer` | Allow or deny an open request; `always` keeps allowing with the rule the request offers | `requests.answer`, control scope, down only; `always` needs `control.all` |
-| `agenthail_session_settings` | Change a session's model, permission mode or effort, or compact it | control scope, down only; a permission mode stays within the target's ceiling unless the caller has `control.all` |
+| `agenthail_session_settings` | Read a session's effective model, effort, permission and config root with where each came from; or change its model, permission mode or effort, or compact it | read: any session the caller can read; change: control scope, down only, and a permission mode stays within the target's ceiling unless the caller has `control.all` |
 | `agenthail_alias` | Name a session | control scope, down only |
 | `agenthail_archive` | Archive or restore a session | control scope, down only |
 | `agenthail_create` | Start a Claude or Codex session with a first message, within the caller's ceiling, or a Notion thread | `spawn`; Notion needs `control.all` |

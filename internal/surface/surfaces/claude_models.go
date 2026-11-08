@@ -86,6 +86,14 @@ func parseClaudeRuntimeModelLine(line []byte, requestID string) ([]surface.Model
 	return models, true
 }
 
+// loadedModels is the catalog an earlier Models call read, however old, or
+// nil; reading it never starts Claude.
+func (c *Claude) loadedModels() []surface.ModelOption {
+	c.modelsMu.Lock()
+	defer c.modelsMu.Unlock()
+	return cloneModelOptions(c.modelsCache)
+}
+
 func (c *Claude) Models(ctx context.Context) ([]surface.ModelOption, error) {
 	c.modelsMu.Lock()
 	if time.Since(c.modelsAt) < claudeModelCatalogTTL && c.modelsCache != nil {
