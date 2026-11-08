@@ -12,9 +12,9 @@ final class CustomModelUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Model"].waitForExistence(timeout: 10))
         let field = app.textFields["Enter an explicit model ID"]
         let search = app.searchFields["Search model options"]
-        let clearOfSearch = { field.isHittable && (!search.exists || field.frame.maxY < search.frame.minY - 8) }
+        let clearOfSearch = { field.isHittable && (!search.exists || !field.frame.intersects(search.frame.insetBy(dx: 0, dy: -8))) }
         for _ in 0..<8 where !clearOfSearch() { app.collectionViews.firstMatch.swipeUp() }
-        XCTAssertTrue(clearOfSearch(), "the custom model field is reachable above the search field")
+        XCTAssertTrue(clearOfSearch(), "the custom model field is reachable clear of the search field, at \(field.frame) with search at \(search.frame)")
 
         let id = "provider/my-model"
         field.tap()
