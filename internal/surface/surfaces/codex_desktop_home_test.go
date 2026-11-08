@@ -67,6 +67,20 @@ func TestCodexDialsTheDefaultDesktopPortOnlyFromTheAccountsOwnCodexHome(t *testi
 		}
 	})
 
+	t.Run("an account home that is itself a symlink", func(t *testing.T) {
+		linkedAccount := filepath.Join(root, "linked-account")
+		if err := os.Symlink(account, linkedAccount); err != nil {
+			t.Fatal(err)
+		}
+		codexAccountHome = func() string { return linkedAccount }
+		t.Cleanup(func() { codexAccountHome = func() string { return account } })
+		t.Setenv("HOME", scratch)
+		t.Setenv("CODEX_HOME", filepath.Join(account, ".codex"))
+		if got := NewCodex("").desktopURL; got != "ws://127.0.0.1:9231" {
+			t.Fatalf("desktop endpoint %q", got)
+		}
+	})
+
 	t.Run("the account's own home before its .codex exists", func(t *testing.T) {
 		fresh := filepath.Join(root, "fresh")
 		if err := os.MkdirAll(fresh, 0o755); err != nil {

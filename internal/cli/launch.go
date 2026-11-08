@@ -43,6 +43,11 @@ func launchCodex(codex surface.Surface) error {
 	if codex == nil {
 		return fmt.Errorf("Codex surface is unavailable")
 	}
+	if scoped, ok := codex.(interface{ DesktopScope() error }); ok {
+		if err := scoped.DesktopScope(); err != nil {
+			return err
+		}
+	}
 	install := surfaces.DetectCodexInstallation()
 	exe := install.Desktop
 	if exe == "" {
