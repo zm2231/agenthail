@@ -416,11 +416,13 @@ id; check the session before retrying. Arbitrary slash commands are not exposed.
 Messages a person types in the dashboard or the Mac/iPhone app carry `"author": "person"` and reach a Claude session with a Remote Control attachment as that person's own user turn, as do composer steers. A `send` action without `author`, and every CLI, relay, channel, voice or agent send to Claude, stays a native peer message whenever the session has a native socket. A bridge-only session takes the person's and Agenthail's messages through Remote Control; any other message waits in the queue until the session has a socket. Do not set `author: person` on a message an agent wrote.
 
 `send` queues a busy target by default. `--no-queue` requires immediate
-delivery: a busy target refuses it, nothing is sent, and the error names the
-next step, `agenthail queue <target> "msg"` to deliver when the turn ends or
-`agenthail steer <target> "msg"` to reach the turn now. A busy target's send
+delivery and never queues: a busy target refuses it, nothing is sent, and the
+error names the next step, `agenthail queue <target> "msg"` to deliver when the
+turn ends or `agenthail steer <target> "msg"` to reach the turn now, unless the
+busy-delivery setting `steer` steers it into the turn. A busy target's send
 otherwise waits for the turn, except that a Claude session with a socket takes
-it at its next tool call and a busy-delivery setting of `steer` steers it.
+it at its next tool call, and the `steer` setting steers it when the target
+takes steers and the sender may steer it.
 `steer` on an idle target has no turn to reach and says to run
 `agenthail send <target> "msg"`; a steer from an agent that may not steer the
 target goes as a send would, and its receipt says so. A target waiting on you

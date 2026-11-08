@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,6 +34,33 @@ func TestABusyNoQueueSendIsRefusedWithItsNextStepAndNothingSent(t *testing.T) {
 	queued, err := r.ListQueue(true, nil)
 	if err != nil || len(queued) != 0 {
 		t.Fatalf("a refused --no-queue send was queued: %+v err=%v", queued, err)
+	}
+}
+
+func TestTheSteerSettingSteersABusyNoQueueSendAndNeverQueuesIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".agenthail", "dashboard.json"), []byte(`{"busyDelivery":"steer"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	busy := surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusBusy}
+	for _, steers := range []bool{true, false} {
+		fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": busy}, caps: surface.Capabilities{Send: true, Steer: steers}, sendResult: &surface.SendResult{UUID: "turn", Accepted: false}}
+		app, r := cliFixture(t, fake)
+		_, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:target", "change course", "--no-queue"}) })
+		queued, listErr := r.ListQueue(true, nil)
+		if listErr != nil || len(queued) != 0 {
+			t.Fatalf("steers=%v: --no-queue queued %+v (err %v)", steers, queued, listErr)
+		}
+		if steers && (err != nil || len(fake.steered) != 1) {
+			t.Fatalf("with the steer setting a busy target that takes steers is steered: steered=%q err=%v", fake.steered, err)
+		}
+		if !steers && (!errors.Is(err, delivery.ErrTargetBusy) || len(fake.steered) != 0) {
+			t.Fatalf("a busy target that takes no steer is refused: steered=%q err=%v", fake.steered, err)
+		}
 	}
 }
 
