@@ -19,6 +19,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/targets"
 )
 
 const hostsUsage = `usage: agenthail hosts [list] [--json]
@@ -29,32 +30,9 @@ const hostsUsage = `usage: agenthail hosts [list] [--json]
 
 Paired hosts are other Agenthail daemons, reached over Tailscale. Target their sessions as host::target.`
 
-type hostRef struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	State string `json:"state,omitempty"`
-}
+type hostRef = targets.Host
 
-type remoteTarget struct {
-	ID      string              `json:"id"`
-	Surface surface.SurfaceKind `json:"surface"`
-	Name    string              `json:"name"`
-	Alias   string              `json:"alias,omitempty"`
-	Host    hostRef             `json:"host"`
-	Exact   bool                `json:"exact"`
-}
-
-func (t remoteTarget) label() string {
-	_, raw, _ := hosts.Split(t.ID)
-	if t.Alias != "" {
-		raw = "@" + t.Alias
-	}
-	return t.Host.Name + hosts.Separator + raw
-}
-
-func (t remoteTarget) session() *surface.Session {
-	return &surface.Session{ID: t.ID, Surface: t.Surface, Name: t.Name}
-}
+type remoteTarget = targets.Remote
 
 type targetNotFoundError struct{ target string }
 
@@ -66,7 +44,7 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 		return nil, nil, err
 	}
 	if remote != nil {
-		return nil, nil, fmt.Errorf("%s is a session on host %s; this command is not available for sessions on another host yet", remote.label(), remote.Host.Name)
+		return nil, nil, fmt.Errorf("%s is a session on host %s; this command is not available for sessions on another host yet", remote.Label(), remote.Host.Name)
 	}
 	return session, adapter, nil
 }
@@ -108,102 +86,48 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 		session, adapter, err := a.resolveLocalTarget(ctx, target)
 		return session, adapter, nil, err
 	}
-	identity, err := a.registry().HostIdentity()
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("read host identity: %w", err)
-	}
-	if target, err = a.expandTargetLead(target, identity); err != nil {
-		return nil, nil, nil, err
-	}
-	if id, hostID, found, err := a.registry().CanonicalSession(target); err != nil {
-		return nil, nil, nil, err
-	} else if found {
-		target = hosts.Qualify(hostID, id)
-	}
-	if hostText, rest, ok := hosts.Split(target); ok {
-		if strings.EqualFold(hostText, identity.ID) || strings.EqualFold(hostText, identity.Name) {
-			session, adapter, err := a.resolveLocalTarget(ctx, rest)
-			return session, adapter, nil, err
-		}
-		host, err := a.registry().Host(hostText)
-		if errors.Is(err, registry.ErrHostNotFound) {
-			return nil, nil, nil, fmt.Errorf("no paired host is named %q; see 'agenthail hosts'", hostText)
-		}
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		matches, err := a.remoteMatches(ctx, host.ID, rest)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		switch len(matches) {
-		case 0:
-			return nil, nil, nil, fmt.Errorf("no session matched '%s' on host %s", rest, host.Name)
-		case 1:
-			return a.remoteResolved(matches[0])
-		}
-		return nil, nil, nil, ambiguousTargetError(target, nil, matches)
-	}
-	paired, err := a.registry().ListHosts()
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("list paired hosts: %w", err)
-	}
-	session, adapter, localErr := a.resolveLocalTarget(ctx, target)
-	if len(paired) == 0 {
-		return session, adapter, nil, localErr
-	}
-	var notFound targetNotFoundError
-	if localErr != nil && !errors.As(localErr, &notFound) && !errors.Is(localErr, sql.ErrNoRows) && !errors.Is(localErr, surface.ErrSessionNotFound) {
-		return nil, nil, nil, localErr
-	}
-	matches, err := a.remoteMatches(ctx, "", target)
+	local, remote, err := a.targetResolver().Resolve(ctx, target)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	switch {
-	case len(matches) == 0:
-		return session, adapter, nil, localErr
-	case localErr != nil && len(matches) == 1:
-		return a.remoteResolved(matches[0])
+	if remote != nil {
+		return a.remoteResolved(*remote)
 	}
-	var local []string
-	if localErr == nil {
-		local = append(local, identity.Name+hosts.Separator+a.resolveDisplay(session.ID))
-	}
-	return nil, nil, nil, ambiguousTargetError(target, local, matches)
+	return local.session, local.adapter, nil, nil
 }
 
-// expandTargetLead expands @lead in an unqualified target or one qualified
-// with this host. Qualified with this host it stays on this host, as it
-// always resolves here.
+type localTarget struct {
+	session *surface.Session
+	adapter surface.Surface
+}
+
+func (a *App) targetResolver() targets.Resolver[localTarget] {
+	return targets.Resolver[localTarget]{
+		Registry:     a.registry(),
+		Coordinators: a.coordinator(),
+		CallerLead:   a.callerLead,
+		Local: func(ctx context.Context, target string) (localTarget, error) {
+			session, adapter, err := a.resolveLocalTarget(ctx, target)
+			return localTarget{session: session, adapter: adapter}, err
+		},
+		LocalMissing: func(err error) bool {
+			var notFound targetNotFoundError
+			return errors.As(err, &notFound) || errors.Is(err, sql.ErrNoRows) || errors.Is(err, surface.ErrSessionNotFound)
+		},
+		LocalLabel: func(local localTarget) string { return a.resolveDisplay(local.session.ID) },
+		Remote:     a.remoteMatches,
+	}
+}
+
 func (a *App) expandTargetLead(target string, identity registry.HostIdentity) (string, error) {
-	hostText, rest, qualified := hosts.Split(target)
-	if !qualified {
-		return a.expandLead(target)
-	}
-	if !strings.EqualFold(hostText, identity.ID) && !strings.EqualFold(hostText, identity.Name) {
-		return target, nil
-	}
-	expanded, err := a.expandLead(rest)
-	if err != nil {
-		return "", err
-	}
-	return hostText + hosts.Separator + expanded, nil
+	return a.targetResolver().ExpandTargetLead(target, identity)
 }
 
 func (a *App) remoteResolved(match remoteTarget) (*surface.Session, surface.Surface, *remoteTarget, error) {
 	if !a.daemonIsRunning() {
-		return nil, nil, nil, fmt.Errorf("%s is a session on host %s, reached through the local daemon, which is not running; start it with: agenthail daemon start", match.label(), match.Host.Name)
+		return nil, nil, nil, fmt.Errorf("%s is a session on host %s, reached through the local daemon, which is not running; start it with: agenthail daemon start", match.Label(), match.Host.Name)
 	}
 	return nil, nil, &match, nil
-}
-
-func ambiguousTargetError(target string, local []string, remote []remoteTarget) error {
-	labels := append([]string{}, local...)
-	for _, match := range remote {
-		labels = append(labels, match.label())
-	}
-	return fmt.Errorf("ambiguous target %q matched %s; qualify it as host::target", target, strings.Join(labels, ", "))
 }
 
 func (a *App) remoteMatches(ctx context.Context, hostID, target string) ([]remoteTarget, error) {
@@ -265,7 +189,7 @@ func remoteReceipt(data []byte) (delivery.Receipt, error) {
 func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message string, args []string, timeout time.Duration) error {
 	wantStream, wantReply, jsonOut := hasFlag(args, "--stream"), hasFlag(args, "--reply"), hasFlag(args, "--json")
 	if hasFlag(args, "--no-queue") {
-		return fmt.Errorf("--no-queue is not available for %s: the daemon holds a send to another host until that host answers", remote.label())
+		return fmt.Errorf("--no-queue is not available for %s: the daemon holds a send to another host until that host answers", remote.Label())
 	}
 	client, err := a.daemonAPI()
 	if err != nil {
@@ -292,7 +216,7 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 	}
 	var stream sessionstream.Subscription
 	if wantStream || wantReply {
-		stream, err = a.prepareDaemonSessionStream(ctx, nil, remote.session())
+		stream, err = a.prepareDaemonSessionStream(ctx, nil, remote.Session())
 		if err != nil {
 			return err
 		}
@@ -304,14 +228,14 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 	}
 	data, _, err := client.action(ctx, payload)
 	if err != nil {
-		return fmt.Errorf("send to %s: %w", remote.label(), err)
+		return fmt.Errorf("send to %s: %w", remote.Label(), err)
 	}
 	receipt, err := remoteReceipt(data)
 	if err != nil {
 		return err
 	}
 	if wantStream || wantReply {
-		if _, note := a.followReceipt(ctx, receipt, *remote.session(), &stream); note != "" {
+		if _, note := a.followReceipt(ctx, receipt, *remote.Session(), &stream); note != "" {
 			fmt.Fprintln(os.Stderr, note)
 			wantStream, wantReply = false, false
 		} else if receipt.Started && !jsonOut {
@@ -323,9 +247,9 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 			return emit(receipt)
 		}
 		if receipt.Evidence == surface.EvidenceQueued {
-			fmt.Printf("queued for %s: %s\n", remote.label(), receipt.Detail)
+			fmt.Printf("queued for %s: %s\n", remote.Label(), receipt.Detail)
 		} else {
-			fmt.Printf("delivery submitted to %s; %s %s\n", remote.label(), receipt.Detail, uncertainNote(remote.label()))
+			fmt.Printf("delivery submitted to %s; %s %s\n", remote.Label(), receipt.Detail, uncertainNote(remote.Label()))
 		}
 		return nil
 	}
@@ -349,7 +273,7 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 	if jsonOut {
 		return emit(receipt)
 	}
-	fmt.Printf("sent to %s (turn %s)\n", remote.label(), receipt.TurnID)
+	fmt.Printf("sent to %s (turn %s)\n", remote.Label(), receipt.TurnID)
 	return nil
 }
 
@@ -377,9 +301,9 @@ func (a *App) steerRemote(ctx context.Context, remote *remoteTarget, sourceID, m
 	data, _, err := client.action(ctx, payload)
 	if err != nil {
 		if isNothingToSteer(err) {
-			return idleSteerRefusal(remote.label())
+			return idleSteerRefusal(remote.Label())
 		}
-		return fmt.Errorf("steer %s: %w", remote.label(), err)
+		return fmt.Errorf("steer %s: %w", remote.Label(), err)
 	}
 	receipt, err := remoteReceipt(data)
 	if err != nil {
@@ -388,7 +312,7 @@ func (a *App) steerRemote(ctx context.Context, remote *remoteTarget, sourceID, m
 	if jsonOut {
 		return emit(receipt)
 	}
-	printSteerReceipt(receipt, remote.label())
+	printSteerReceipt(receipt, remote.Label())
 	return nil
 }
 
@@ -678,7 +602,7 @@ func (a *App) channelMember(ctx context.Context, target string, joining bool) (s
 	}
 	if remote != nil {
 		_, raw, _ := hosts.Split(remote.ID)
-		return raw, remote.label(), nil
+		return raw, remote.Label(), nil
 	}
 	if joining {
 		if err := a.ensureWritableTarget(ctx, session, adapter); err != nil {
@@ -713,10 +637,10 @@ func (a *App) addHostRelay(ctx context.Context, from *surface.Session, fromRemot
 	}
 	fromLabel, toLabel := a.resolveDisplay(relayRef(from, fromRemote)), a.resolveDisplay(relayRef(to, toRemote))
 	if fromRemote != nil {
-		fromLabel = fromRemote.label()
+		fromLabel = fromRemote.Label()
 	}
 	if toRemote != nil {
-		toLabel = toRemote.label()
+		toLabel = toRemote.Label()
 	}
 	fmt.Printf("relay on %s: %s -> %s (pattern /%s/, %s)\n", where, fromLabel, toLabel, pattern, handoff)
 	return nil

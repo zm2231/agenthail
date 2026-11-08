@@ -9,7 +9,7 @@ type mcpArchiveInput struct {
 }
 
 func (d *Daemon) mcpArchive(ctx context.Context, caller *mcpCaller, input mcpArchiveInput) (any, error) {
-	target, err := d.mcpControlTarget(caller, input.Target, false)
+	target, err := d.mcpControlTarget(ctx, caller, input.Target, false)
 	if err != nil {
 		return nil, err
 	}

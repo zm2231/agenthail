@@ -36,7 +36,7 @@ func (d *Daemon) mcpSessionSettings(ctx context.Context, caller *mcpCaller, inpu
 	if action != "compact" && value == "" {
 		return nil, refuse("invalid", "value is required for "+input.Setting+".")
 	}
-	target, err := d.mcpControlTarget(caller, input.Target, false)
+	target, err := d.mcpControlTarget(ctx, caller, input.Target, false)
 	if err != nil {
 		return nil, err
 	}

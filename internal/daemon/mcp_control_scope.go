@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"slices"
 	"strings"
 
@@ -24,10 +25,16 @@ func (d *Daemon) mcpResolveSession(ref string) (*surface.Session, error) {
 }
 
 // mcpControlTarget resolves a target the caller may act on; upward admits the caller's spawner chain and project coordinator, which only queued sends use.
-func (d *Daemon) mcpControlTarget(caller *mcpCaller, ref string, upward bool) (*surface.Session, error) {
-	session, err := d.mcpResolveSession(ref)
+func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref string, upward bool) (*surface.Session, error) {
+	if strings.TrimSpace(ref) == "" {
+		return nil, refuse("invalid", "target is required: a session id or @alias.")
+	}
+	session, remote, err := d.mcpTargets(caller).Resolve(ctx, strings.TrimSpace(ref))
 	if err != nil {
-		return nil, err
+		return nil, mcpTargetRefusal(err)
+	}
+	if remote != nil {
+		return d.mcpRemoteTarget(caller, ref, *remote, upward)
 	}
 	if session.ID == caller.session.ID {
 		return nil, refuse("invalid", "That is your own session.")

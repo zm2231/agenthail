@@ -43,7 +43,7 @@ func (d *Daemon) mcpAnswer(ctx context.Context, caller *mcpCaller, input mcpAnsw
 	default:
 		return nil, refuse("invalid", "decision is allow, always, deny, never or stop.")
 	}
-	target, err := d.mcpControlTarget(caller, input.Target, false)
+	target, err := d.mcpControlTarget(ctx, caller, input.Target, false)
 	if err != nil {
 		return nil, err
 	}

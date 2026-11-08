@@ -49,7 +49,7 @@ func (a *App) cmdLimitResume(args []string) error {
 		}
 		var id string
 		if remote != nil {
-			id, label = remote.ID, remote.label()
+			id, label = remote.ID, remote.Label()
 		} else {
 			id, label = sess.ID, a.resolveDisplay(sess.ID)
 		}

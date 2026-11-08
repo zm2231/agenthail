@@ -24,7 +24,7 @@ func (d *Daemon) mcpGoal(ctx context.Context, caller *mcpCaller, input mcpGoalIn
 	if (action == "goal-set" || action == "goal-edit") && strings.TrimSpace(input.Text) == "" {
 		return nil, refuse("invalid", "text is required to set or edit a goal.")
 	}
-	target, err := d.mcpControlTarget(caller, input.Target, false)
+	target, err := d.mcpControlTarget(ctx, caller, input.Target, false)
 	if err != nil {
 		return nil, err
 	}

@@ -33,7 +33,7 @@ func (a *App) cmdStream(args []string) error {
 		return err
 	}
 	if remote != nil {
-		sess = remote.session()
+		sess = remote.Session()
 	} else if !surface.CapabilitiesFor(surf, sess).Stream {
 		return fmt.Errorf("%s does not support stream", surf.Name())
 	}

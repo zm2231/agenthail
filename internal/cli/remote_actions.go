@@ -20,13 +20,13 @@ func (a *App) remoteAction(ctx context.Context, remote *remoteTarget, what strin
 	payload["sessionId"] = remote.ID
 	data, _, err := client.action(ctx, payload)
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: %w", what, remote.label(), err)
+		return nil, fmt.Errorf("%s %s: %w", what, remote.Label(), err)
 	}
 	var response struct {
 		Result json.RawMessage `json:"result"`
 	}
 	if err := json.Unmarshal(data, &response); err != nil {
-		return nil, fmt.Errorf("decode %s answer for %s: %w", what, remote.label(), err)
+		return nil, fmt.Errorf("decode %s answer for %s: %w", what, remote.Label(), err)
 	}
 	return response.Result, nil
 }
@@ -38,7 +38,7 @@ func (a *App) remoteMetadata(ctx context.Context, remote *remoteTarget) (map[str
 	}
 	metadata := map[string]json.RawMessage{}
 	if err := client.getJSON(ctx, "/api/v1/session-metadata", url.Values{"id": []string{remote.ID}}, &metadata); err != nil {
-		return nil, fmt.Errorf("read %s: %w", remote.label(), err)
+		return nil, fmt.Errorf("read %s: %w", remote.Label(), err)
 	}
 	return metadata, nil
 }
@@ -51,10 +51,10 @@ func (a *App) compactRemote(ctx context.Context, remote *remoteTarget) error {
 	var receipt delivery.Receipt
 	_ = json.Unmarshal(result, &receipt)
 	if receipt.Evidence == surface.EvidenceQueued {
-		fmt.Printf("compact queued for %s; it will run when the target is idle\n", remote.label())
+		fmt.Printf("compact queued for %s; it will run when the target is idle\n", remote.Label())
 		return nil
 	}
-	fmt.Printf("compacted %s\n", remote.label())
+	fmt.Printf("compacted %s\n", remote.Label())
 	return nil
 }
 
@@ -68,7 +68,7 @@ func (a *App) modelRemote(ctx context.Context, remote *remoteTarget, name string
 	}
 	raw, found := metadata["model"]
 	if !found {
-		return fmt.Errorf("%s does not report a model", remote.label())
+		return fmt.Errorf("%s does not report a model", remote.Label())
 	}
 	var change surface.ModelChange
 	_ = json.Unmarshal(raw, &change.Model)
@@ -83,7 +83,7 @@ func (a *App) goalRemote(ctx context.Context, remote *remoteTarget, positional [
 		}
 		raw, found := metadata["goal"]
 		if !found {
-			return fmt.Errorf("%s does not support goal management", remote.label())
+			return fmt.Errorf("%s does not support goal management", remote.Label())
 		}
 		var goal *surface.GoalState
 		_ = json.Unmarshal(raw, &goal)
@@ -178,11 +178,11 @@ func (a *App) queueRemote(ctx context.Context, remote *remoteTarget, message str
 	_ = json.Unmarshal(result, &receipt)
 	switch {
 	case receipt.Evidence == surface.EvidenceQueued:
-		fmt.Printf("queued for %s: %s\n", remote.label(), receipt.Detail)
+		fmt.Printf("queued for %s: %s\n", remote.Label(), receipt.Detail)
 	case receipt.Evidence == surface.EvidenceUnknown:
-		fmt.Printf("delivery submitted to %s; %s\n", remote.label(), receipt.Detail)
+		fmt.Printf("delivery submitted to %s; %s\n", remote.Label(), receipt.Detail)
 	default:
-		fmt.Printf("sent to %s\n", remote.label())
+		fmt.Printf("sent to %s\n", remote.Label())
 	}
 	return nil
 }
@@ -207,7 +207,7 @@ func (a *App) historyRemote(ctx context.Context, remote *remoteTarget, limit int
 	query := url.Values{"sessionId": []string{remote.ID}, "limit": []string{fmt.Sprint(limit)}}
 	data, _, err := client.call(ctx, "GET", "/api/v1/history", query, nil, nil)
 	if err != nil {
-		return fmt.Errorf("read history of %s: %w", remote.label(), err)
+		return fmt.Errorf("read history of %s: %w", remote.Label(), err)
 	}
 	if jsonOut {
 		var raw struct {
@@ -275,7 +275,7 @@ func (a *App) controlRemote(ctx context.Context, remote *remoteTarget, action, v
 	}
 	var result surface.ControlResult
 	if err := json.Unmarshal(data, &result); err != nil {
-		return fmt.Errorf("decode %s answer for %s: %w", action, remote.label(), err)
+		return fmt.Errorf("decode %s answer for %s: %w", action, remote.Label(), err)
 	}
 	if result.Change != nil {
 		return printModelChange(remote.ID, *result.Change, args)
@@ -283,6 +283,6 @@ func (a *App) controlRemote(ctx context.Context, remote *remoteTarget, action, v
 	if hasFlag(args, "--json") {
 		return emit(result)
 	}
-	printControl(remote.label(), &result)
+	printControl(remote.Label(), &result)
 	return nil
 }

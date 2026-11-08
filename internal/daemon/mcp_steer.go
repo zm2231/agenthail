@@ -15,7 +15,7 @@ func (d *Daemon) mcpSteer(ctx context.Context, caller *mcpCaller, input mcpSteer
 	if strings.TrimSpace(input.Message) == "" {
 		return nil, refuse("invalid", "message is required.")
 	}
-	target, err := d.mcpControlTarget(caller, input.Target, false)
+	target, err := d.mcpControlTarget(ctx, caller, input.Target, false)
 	if err != nil {
 		return nil, err
 	}

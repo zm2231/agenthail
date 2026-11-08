@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -17,6 +18,7 @@ const (
 type visibleSession struct {
 	surface.Session
 	order int64
+	host  *registry.HostSessionRef
 }
 
 func (d *Daemon) mcpVisibleSessions(caller *mcpCaller, filter string) ([]visibleSession, error) {
@@ -55,6 +57,36 @@ func (d *Daemon) mcpVisibleSessions(caller *mcpCaller, filter string) ([]visible
 		if self || everything || descendants[ref.ID] || d.sameProject(caller, *session) {
 			visible = append(visible, visibleSession{Session: *session, order: ref.Order})
 		}
+	}
+	return visible, nil
+}
+
+// mcpVisibleHostSessions lists the paired hosts' sessions the caller may read:
+// every one with read.all, else those in the caller's project.
+func (d *Daemon) mcpVisibleHostSessions(caller *mcpCaller, filter string) ([]visibleSession, error) {
+	if filter == mcpFilterMine {
+		return nil, nil
+	}
+	everything := caller.has("read.all") && filter != mcpFilterProject
+	inProject := caller.has("read.project") && caller.project != nil
+	if !everything && !inProject {
+		return nil, nil
+	}
+	refs, err := d.Registry.LiveHostSessions()
+	if err != nil {
+		return nil, err
+	}
+	visible := []visibleSession{}
+	for index := range refs {
+		ref := refs[index]
+		if !everything && hostProjectID(ref.Project) != caller.project.ID {
+			continue
+		}
+		session, err := d.Registry.Session(ref.ID)
+		if err != nil {
+			continue
+		}
+		visible = append(visible, visibleSession{Session: *session, order: ref.Order, host: &ref})
 	}
 	return visible, nil
 }

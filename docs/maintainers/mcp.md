@@ -84,7 +84,7 @@ A session reads:
 - every session it spawned, transitively through `session_origins.creator_session_id` (`control.descendants`);
 - the live local sessions of its own project (`read.project`). A session's project is the registered project containing its cwd; a session with no project reads only itself and its descendants.
 
-Archived sessions and sessions owned by other hosts are outside every scope. A session outside the caller's scope is refused with `out_of_scope`; an unknown one with `not_found`.
+Archived sessions are outside every scope. `agenthail_sessions` also lists the paired hosts' sessions this host mirrors and can currently reach, under the same rules: those whose owning host puts them in the caller's project (matched by the project id that is the same on every computer) with `read.project`, every one with `read.all`. Each carries its host-qualified id and a `host` with the paired host's `id`, `name` and `state`. Every other read tool stays on this host. A session outside the caller's scope is refused with `out_of_scope`; an unknown one with `not_found`.
 
 ## Tools
 
@@ -153,9 +153,18 @@ A wait that times out sets `wake` on the running tasks the caller started. Each 
 
 ### Control scope
 
-`mcpControlTarget` decides whether a caller may act on a target, in this order:
+`mcpControlTarget` resolves the target with the CLI's resolver (`internal/targets`): `@lead`, a coordinator's `@name`, `host::@alias`, `host::id`, and an unqualified target looked up on this host and every paired host, where a match on more than one is refused as `invalid`, never picked. A host or target that matches nothing is `not_found`. A session on a paired host is reached only by a queued `agenthail_send`, under the same rules as a local one, so crossing a host never widens a caller's reach:
 
-1. The caller's own session is `invalid`; a session owned by another host is `out_of_scope` (reach a project's coordinator there with `agenthail_send` and `project`).
+- `control.all` reaches any of them;
+- otherwise the session must be in the caller's project (`out_of_scope`, `detail.rule: different_project`), and be that project's coordinator or, with `control.project`, any of its sessions (`detail.rule: not_your_lead`);
+- `mode: now` and every other write refuse it (`detail.rule: not_queued`);
+- a target the paired host matched only by a name fragment is `invalid`.
+
+The project and the coordinator role come from the paired host's own answer to `/api/v1/resolve` (its `project` and `lead` fields), never from this host's mirror, which can lag a move or a handover. When the host cannot answer, the target is matched against the mirror only to name it, and the send is refused as retryable `unavailable` (`detail.rule: project_unconfirmed`).
+
+A local target is then decided in this order:
+
+1. The caller's own session is `invalid`.
 2. A session above the caller (its spawner chain through `session_origins`) is reachable only by a queued `agenthail_send`; every other write refuses it with `out_of_scope`. This comes before any capability, so a coordinator never controls the session that spawned it, even in its own project.
 3. `control.all` reaches every other local session.
 4. `control.descendants` reaches the sessions the caller spawned, transitively, and `control.project` reaches its project's live sessions, each only when the target's ceiling is within the caller's (`exceeds_ceiling` otherwise).

@@ -8,7 +8,7 @@ type mcpInterruptInput struct {
 }
 
 func (d *Daemon) mcpInterrupt(ctx context.Context, caller *mcpCaller, input mcpInterruptInput) (any, error) {
-	target, err := d.mcpControlTarget(caller, input.Target, false)
+	target, err := d.mcpControlTarget(ctx, caller, input.Target, false)
 	if err != nil {
 		return nil, err
 	}

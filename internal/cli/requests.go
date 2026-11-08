@@ -121,12 +121,12 @@ func (a *App) cmdPermissionMode(args []string) error {
 		}
 		var result surface.ControlResult
 		if err := json.Unmarshal(data, &result); err != nil {
-			return fmt.Errorf("decode permission-mode answer for %s: %w", remote.label(), err)
+			return fmt.Errorf("decode permission-mode answer for %s: %w", remote.Label(), err)
 		}
 		if hasFlag(args, "--json") {
 			return emit(result)
 		}
-		printControl(remote.label(), &result)
+		printControl(remote.Label(), &result)
 		return nil
 	}
 	controller, ok := surf.(surface.Controller)
@@ -150,7 +150,7 @@ func (a *App) requestState(ctx context.Context, target string) (surface.RequestS
 		return surface.RequestState{}, "", err
 	}
 	if remote != nil {
-		return a.daemonRequests(ctx, remote.ID, remote.label())
+		return a.daemonRequests(ctx, remote.ID, remote.Label())
 	}
 	label := a.resolveDisplay(sess.ID)
 	if a.daemonIsRunning() {
@@ -193,7 +193,7 @@ func (a *App) respond(ctx context.Context, target, requestID string, decision su
 			Outcome string `json:"outcome"`
 		}
 		if err := json.Unmarshal(data, &result); err != nil {
-			return "", fmt.Errorf("decode answer for %s: %w", remote.label(), err)
+			return "", fmt.Errorf("decode answer for %s: %w", remote.Label(), err)
 		}
 		return result.Outcome, nil
 	}
