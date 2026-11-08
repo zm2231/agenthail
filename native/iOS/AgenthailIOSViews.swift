@@ -905,7 +905,10 @@ struct IOSComposer: View {
                 .disabled(sending)
         }
         if !detail.readOnly, let settings = detail.turnSettings, !settings.isEmpty {
+            // The chips scroll, so they claim no width of their own when the footer decides whether one row fits.
             IOSTurnSettingChips(model: model, sessionID: session.id, settings: settings) { showingModels = true }
+                .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
         }
     }
 
