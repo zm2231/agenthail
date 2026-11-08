@@ -135,8 +135,16 @@ func (f *federatedSurface) Resolve(_ context.Context, id string) (*surface.Sessi
 	return &session, nil
 }
 
-func (f *federatedSurface) Observe(context.Context, *surface.Session) (*surface.TurnObservation, error) {
-	return &surface.TurnObservation{Status: surface.StatusIdle}, nil
+// Observe reports what the listing says, as a real surface reads the turn
+// from the same thread status its listing does.
+func (f *federatedSurface) Observe(_ context.Context, session *surface.Session) (*surface.TurnObservation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	listed, ok := f.sessions[session.ID]
+	if !ok {
+		return &surface.TurnObservation{Status: surface.StatusIdle}, nil
+	}
+	return &surface.TurnObservation{Status: listed.Status, WaitingOn: listed.WaitingOn}, nil
 }
 
 type federationNode struct {
