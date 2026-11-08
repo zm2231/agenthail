@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -1217,5 +1218,99 @@ func TestAHostRequestIsRecordedAsAnswerable(t *testing.T) {
 	recorded, err := r.SessionWaiting(id)
 	if err != nil || recorded == nil || !observed.Answerable || !recorded.Answerable || recorded.ID != observed.ID {
 		t.Fatalf("observed %+v, recorded %+v, %v; want the host's request, answerable", observed, recorded, err)
+	}
+}
+
+type syncLog struct {
+	mu   sync.Mutex
+	text strings.Builder
+}
+
+func (l *syncLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.text.Write(p)
+}
+
+func (l *syncLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.text.String()
+}
+
+func TestARetiringHostThatStopsAnsweringIsLoggedOnceAndFollowedUntilItExits(t *testing.T) {
+	dir, err := os.MkdirTemp("", "rh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socket := filepath.Join(dir, fmt.Sprintf("claude-host.%d.sock", os.Getpid()))
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var answering atomic.Bool
+	var dropped atomic.Int32
+	var open sync.Map
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			open.Store(conn, true)
+			go func() {
+				defer open.Delete(conn)
+				defer conn.Close()
+				line, err := bufio.NewReader(conn).ReadBytes('\n')
+				if err != nil {
+					return
+				}
+				if !answering.Load() {
+					dropped.Add(1)
+					return
+				}
+				var request struct {
+					Method string `json:"method"`
+				}
+				_ = json.Unmarshal(line, &request)
+				if request.Method == "hello" {
+					fmt.Fprintf(conn, `{"id":1,"result":{"protocol":%d,"pid":%d}}`+"\n", claudehost.Protocol, os.Getpid())
+					return
+				}
+				fmt.Fprint(conn, `{"id":1,"result":{"seq":0}}`+"\n")
+				_, _ = io.Copy(io.Discard, conn)
+			}()
+		}
+	}()
+
+	d := newTestDaemon(t, hostRegistry(t), nil)
+	logged := &syncLog{}
+	d.log = log.New(logged, "", 0)
+	followed := make(chan struct{})
+	go func() {
+		defer close(followed)
+		d.watchRetiringClaudeHost(t.Context(), claudehost.Client{Socket: socket})
+	}()
+	testkit.Eventually(t, "the daemon to ask the silent host three times", 15*time.Second, func() bool { return dropped.Load() >= 3 })
+	if lines := strings.Count(logged.String(), "is not answering"); lines != 1 || strings.Contains(logged.String(), "has exited") {
+		t.Fatalf("log = %q, want the silence logged once and no exit", logged.String())
+	}
+
+	answering.Store(true)
+	testkit.Eventually(t, "the host answering again to be logged", 15*time.Second, func() bool { return strings.Contains(logged.String(), "answers again") })
+
+	listener.Close()
+	open.Range(func(conn, _ any) bool {
+		conn.(net.Conn).Close()
+		return true
+	})
+	select {
+	case <-followed:
+	case <-time.After(15 * time.Second):
+		t.Fatal("the daemon kept following the retiring host after its socket went away")
+	}
+	if got := logged.String(); strings.Count(got, "is not answering") != 1 || strings.Count(got, "answers again") != 1 || !strings.Contains(got, "has exited") {
+		t.Fatalf("log = %q, want one silence, one recovery and the exit", got)
 	}
 }

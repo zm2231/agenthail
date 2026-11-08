@@ -116,28 +116,39 @@ func (d *Daemon) watchClaudeHostRequests(ctx context.Context) {
 }
 
 // watchRetiringClaudeHost follows a retiring host's requests until it exits.
-// Its exit ends the requests it held, so the catalog is read again then.
+// Its exit ends the requests it held, so the catalog is read again then. A
+// host that stops answering is still followed, since it may answer again.
 func (d *Daemon) watchRetiringClaudeHost(ctx context.Context, host claudehost.Client) {
 	d.log.Printf("Claude host: following the retiring host on %s until its sessions close", host.Socket)
 	var after uint64
+	silent := false
 	for ctx.Err() == nil {
-		start, _ := host.Subscribe(ctx, after, func(event claudehost.Event) {
-			after = event.Seq
-			d.recordPeerHold(event)
-			if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" || event.Kind == "exited" {
-				d.claudeHostChanged()
-			}
-		})
-		if start.Gap {
-			after = start.Seq
-			d.claudeHostChanged()
-			continue
-		}
 		helloCtx, cancel := context.WithTimeout(ctx, time.Second)
 		_, err := host.Hello(helloCtx)
 		cancel()
-		if err != nil {
+		if err != nil && host.Gone() {
 			break
+		}
+		if err != nil && !silent && ctx.Err() == nil {
+			d.log.Printf("Claude host: the retiring host on %s is not answering: %s", host.Socket, err)
+		}
+		if err == nil && silent {
+			d.log.Printf("Claude host: the retiring host on %s answers again", host.Socket)
+		}
+		silent = err != nil
+		if err == nil {
+			start, _ := host.Subscribe(ctx, after, func(event claudehost.Event) {
+				after = event.Seq
+				d.recordPeerHold(event)
+				if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" || event.Kind == "exited" {
+					d.claudeHostChanged()
+				}
+			})
+			if start.Gap {
+				after = start.Seq
+				d.claudeHostChanged()
+				continue
+			}
 		}
 		select {
 		case <-ctx.Done():
