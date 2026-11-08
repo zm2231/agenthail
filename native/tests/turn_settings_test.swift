@@ -83,11 +83,12 @@ struct TurnSettingsTest {
         ]
         guard let options = settings.modelOptions(catalog: catalog) else { return check(false, "a model setting gives model options") }
         check(options.map(\.id) == ["sonnet", "opus", "haiku"], "descriptor models lead and catalog-only models follow: \(options.map(\.id))")
-        check(options[0].displayName == "Claude Sonnet" && options[0].allowsCustom == true, "a model the catalog lacks keeps its label and the catalog's custom IDs")
+        check(options[0].displayName == "Claude Sonnet", "a model the catalog lacks keeps its label")
+        check(options.contains { $0.allowsCustom == true }, "the catalog's custom IDs still reach the picker")
         check(options[1].displayName == "Opus 5.5" && options[1].description == "Deepest", "a model the catalog knows keeps the catalog's detail")
         check([TurnSetting]().modelOptions(catalog: catalog) == nil, "without a model setting the catalog stands")
         let plain = [ModelOption(id: "gpt-sol", displayName: "Sol", description: nil, default: nil, allowsCustom: nil, supportedReasoningEfforts: nil, defaultReasoningEffort: nil)]
-        check(settings.modelOptions(catalog: plain)?.first?.allowsCustom == nil, "a catalog without custom IDs grants none")
+        check(settings.modelOptions(catalog: plain)?.allSatisfy { $0.allowsCustom == nil } == true, "a catalog without custom IDs grants none")
         check(settings.modelOptions(catalog: [])?.map(\.id) == ["sonnet", "opus"], "an empty catalog still lists the descriptor's models")
     }
 

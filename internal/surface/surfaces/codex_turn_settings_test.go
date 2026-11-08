@@ -151,6 +151,19 @@ func TestCodexTurnSettingsLostToAnotherWriterAreAnOwnershipConflict(t *testing.T
 	requireOwnershipConflict(t, codex.SetTurnSetting(context.Background(), session, surface.TurnSettingEffort, "high"))
 }
 
+func TestCodexTurnSettingsOfferNoBlankModelWhenTheThreadHasNone(t *testing.T) {
+	models := []surface.ModelOption{{ID: "gpt-sol", DisplayName: "GPT Sol"}}
+	settings := codexTurnSettings(codexThreadSettings{}, models)
+	if len(settings) == 0 || settings[0].Key != surface.TurnSettingModel {
+		t.Fatalf("model setting missing: %+v", settings)
+	}
+	for _, option := range settings[0].Options {
+		if option.ID == "" {
+			t.Fatalf("a thread without a model offers a blank model: %+v", settings[0].Options)
+		}
+	}
+}
+
 func TestCodexThreadSettingsComeFromTheNewestRecord(t *testing.T) {
 	path := t.TempDir() + "/rollout.jsonl"
 	appendLine(t, path, `{"type":"turn_context","payload":{"model":"gpt-luna","effort":"low","collaboration_mode":{"mode":"plan"}}}`)

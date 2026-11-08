@@ -44,7 +44,7 @@ func codexTurnSettings(current codexThreadSettings, models []surface.ModelOption
 			running = &models[i]
 		}
 	}
-	if running == nil {
+	if running == nil && current.Model != "" {
 		model.Options = append(model.Options, surface.TurnSettingOption{ID: current.Model, Label: current.Model})
 	}
 	settings := []surface.TurnSetting{model}
