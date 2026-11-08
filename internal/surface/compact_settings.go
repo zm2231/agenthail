@@ -8,11 +8,29 @@ import (
 )
 
 const (
-	CompactSettingAuto   = "autoCompact"
-	CompactSettingWindow = "compactWindow"
+	CompactSettingAuto          = "autoCompact"
+	CompactSettingWindow        = "compactWindow"
+	CompactSettingSessionWindow = "sessionCompactWindow"
 )
 
-const TurnSettingAppliesNewSessions = "newSessions"
+const (
+	TurnSettingAppliesNewSessions = "newSessions"
+	TurnSettingAppliesNextMessage = "nextMessage"
+)
+
+const CompactWindowRootDefault = "default"
+
+func IsCompactSetting(key string) bool {
+	return key == CompactSettingAuto || key == CompactSettingWindow || key == CompactSettingSessionWindow
+}
+
+func SessionCompactWindowSetting(value string, pending *string) TurnSetting {
+	setting := CompactWindowSetting(value, TurnSettingAppliesNextMessage, "")
+	setting.Key = CompactSettingSessionWindow
+	setting.Options = append([]TurnSettingOption{{ID: CompactWindowRootDefault, Label: "Root default"}}, setting.Options...)
+	setting.Pending = pending
+	return setting
+}
 
 const (
 	CompactAutoOn  = "on"

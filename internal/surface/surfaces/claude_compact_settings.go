@@ -30,7 +30,19 @@ func (c *Claude) CompactSettings(ctx context.Context, sess *surface.Session) ([]
 		return nil, err
 	}
 	_, window := claudeWindowFor(file, claudeSessionModels(sess, listed)...)
-	return append(settings, surface.CompactWindowSetting(window, surface.TurnSettingAppliesNewSessions, root.Name)), nil
+	settings = append(settings, surface.CompactWindowSetting(window, surface.TurnSettingAppliesNewSessions, root.Name))
+	if claudeHosted(sess) {
+		current, pending := listed.AutoCompactWindow, listed.PendingAutoCompactWindow
+		if !hosted {
+			kept, _ := c.hostSettings(sess.ID)
+			current, pending = kept.AutoCompactWindow, kept.PendingAutoCompactWindow
+		}
+		if current == "" {
+			current = surface.CompactWindowRootDefault
+		}
+		settings = append(settings, surface.SessionCompactWindowSetting(current, pending))
+	}
+	return settings, nil
 }
 
 func (c *Claude) SetCompactSetting(ctx context.Context, sess *surface.Session, key, value string) error {
@@ -46,6 +58,24 @@ func (c *Claude) SetCompactSetting(ctx context.Context, sess *surface.Session, k
 			return err
 		}
 		_, err := c.host.client.SetAutoCompact(ctx, sess.ID, value == surface.CompactAutoOn)
+		c.host.forget()
+		if err != nil {
+			return claudeHostDeliveryError(err)
+		}
+		return nil
+	case surface.CompactSettingSessionWindow:
+		if value != surface.CompactWindowRootDefault {
+			if err := surface.ValidCompactWindow(value); err != nil {
+				return err
+			}
+		}
+		if !claudeHosted(sess) {
+			return fmt.Errorf("%w: only a session the Claude host runs takes its own compact window", surface.ErrUnsupported)
+		}
+		if err := c.EnsureWritable(ctx, sess); err != nil {
+			return err
+		}
+		_, err := c.host.client.SetAutoCompactWindow(ctx, sess.ID, value)
 		c.host.forget()
 		if err != nil {
 			return claudeHostDeliveryError(err)

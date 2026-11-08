@@ -44,6 +44,15 @@ const DRAIN_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS) 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERMISSION_MODES = new Set(['default', 'manual', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+
+function validCompactWindow(window) {
+  if (window === 'default' || window === 'auto') return true;
+  return /^\d+$/.test(window) && Number(window) >= 100000 && Number(window) <= 1000000;
+}
+
+function compactWindowSetting(window) {
+  return window === 'auto' ? 'auto' : Number(window);
+}
 const MAX_REQUEST_INPUT = 16 << 10;
 const MAX_REQUEST_TEXT = 2000;
 const MAX_SETTINGS = 2000;
@@ -110,6 +119,7 @@ class Session {
     this.cwd = cwd;
     this.permissionMode = permissionMode;
     this.model = model;
+    this.window = 'default';
     this.pending = new Map();
     this.pid = 0;
     this.started = '';
@@ -263,13 +273,15 @@ class Session {
 
   retireIfDone({ turnEnded = false } = {}) {
     if (this.guessesIdle && !turnEnded) return;
-    if (!draining || this.ended || !this.query || !this.retirable()) return;
+    const leaving = draining ? this.retirable() : this.pendingWindow !== undefined && this.settled();
+    if (this.ended || !this.query || !leaving) return;
     if (this.measuring) {
       this.measuring.then(() => this.retireIfDone({ turnEnded }));
       return;
     }
     const stopped = this.describeTasks();
-    log(`retiring session ${this.id} (pid ${this.pid}), now idle${stopped.length ? `, stopping ${stopped.length} background tasks` : ''}`);
+    if (!draining) log(`closing session ${this.id} (pid ${this.pid}) so its next message opens it with compact window ${this.pendingWindow}`);
+    else log(`retiring session ${this.id} (pid ${this.pid}), now idle${stopped.length ? `, stopping ${stopped.length} background tasks` : ''}`);
     if (stopped.length) emit(this.id, 'retired', { notice: retiredNotice(stopped) });
     this.end();
     this.query.close();
@@ -308,7 +320,7 @@ class Session {
   }
 
   remember() {
-    settings.set(this.id, { permissionMode: this.permissionMode, model: this.model, ...(this.effort ? { effort: this.effort } : {}), ...(typeof this.autoCompactEnabled === 'boolean' ? { autoCompactEnabled: this.autoCompactEnabled } : {}), ...(this.checker ? { checker: this.checker } : {}), updatedAt: new Date().toISOString() });
+    settings.set(this.id, { permissionMode: this.permissionMode, model: this.model, ...(this.effort ? { effort: this.effort } : {}), ...(typeof this.autoCompactEnabled === 'boolean' ? { autoCompactEnabled: this.autoCompactEnabled } : {}), ...(this.window !== 'default' ? { autoCompactWindow: this.window } : {}), ...(this.pendingWindow !== undefined ? { pendingAutoCompactWindow: this.pendingWindow } : {}), ...(this.checker ? { checker: this.checker } : {}), updatedAt: new Date().toISOString() });
     writeSettings();
   }
 
@@ -327,6 +339,8 @@ class Session {
       contextModel: this.context?.model ?? '',
       autoCompact: this.context?.autoCompact ?? null,
       autoCompactEnabled: this.autoCompactEnabled ?? null,
+      autoCompactWindow: this.window ?? 'default',
+      pendingAutoCompactWindow: this.pendingWindow ?? null,
       requests: [...this.pending.values()].map((p) => p.request),
       tasks: this.describeTasks(),
       taskTurnOwed: this.taskTurnOwed(),
@@ -402,6 +416,22 @@ const methods = {
     s.autoCompactEnabled = enabled;
     s.remember();
     await s.measure({ modelUsage: s.context?.model ? { [s.context.model]: { contextWindow: s.context.window } } : {} }).catch(() => {});
+    return s.describe();
+  },
+  setAutoCompactWindow: async ({ sessionId, window }) => {
+    if (typeof window !== 'string' || !validCompactWindow(window)) throw new HostError('invalid', 'window is default, auto or a token count from 100000 to 1000000');
+    const kept = sessions.has(sessionId) ? undefined : settings.get(sessionId);
+    if (kept && !kept.checker) {
+      const { pendingAutoCompactWindow, ...rest } = kept;
+      const current = kept.autoCompactWindow ?? 'default';
+      settings.set(sessionId, window === current ? rest : { ...rest, pendingAutoCompactWindow: window });
+      writeSettings();
+      return { sessionId, autoCompactWindow: current, pendingAutoCompactWindow: window === current ? null : window };
+    }
+    const s = unsandboxed(sessionId);
+    s.pendingWindow = window === s.window ? undefined : window;
+    s.remember();
+    s.retireIfDone();
     return s.describe();
   },
   setPermissionMode: async ({ sessionId, permissionMode }) => {
@@ -518,6 +548,13 @@ async function open(params) {
   const s = new Session(id, cwd, permissionMode, model);
   s.effort = effort;
   if (typeof kept?.autoCompactEnabled === 'boolean') s.autoCompactEnabled = kept.autoCompactEnabled;
+  const keptWindow = validCompactWindow(kept?.autoCompactWindow ?? '') ? kept.autoCompactWindow : 'default';
+  const pendingWindow = validCompactWindow(kept?.pendingAutoCompactWindow ?? '') ? kept.pendingAutoCompactWindow : undefined;
+  s.window = pendingWindow ?? keptWindow;
+  const flagSettings = {
+    ...(typeof s.autoCompactEnabled === 'boolean' ? { autoCompactEnabled: s.autoCompactEnabled } : {}),
+    ...(s.window !== 'default' ? { autoCompactWindow: compactWindowSetting(s.window) } : {}),
+  };
   s.checker = params.checker?.run ?? '';
   s.mcpToken = params.mcp?.token ?? '';
   sessions.set(id, s);
@@ -538,7 +575,7 @@ async function open(params) {
           ...(permissionMode ? { permissionMode } : {}),
           ...(model ? { model } : {}),
           ...(effort ? { effort } : {}),
-          ...(typeof s.autoCompactEnabled === 'boolean' ? { settings: { autoCompactEnabled: s.autoCompactEnabled } } : {}),
+          ...(Object.keys(flagSettings).length ? { settings: flagSettings } : {}),
           ...(params.agent ? { agent: params.agent } : {}),
           extraArgs,
           // Every session may be switched into bypassPermissions later, which
@@ -575,10 +612,17 @@ async function open(params) {
     s.end();
     s.query?.close();
     if (!s.done) sessions.delete(id);
-    throw new HostError(error instanceof StartError && error.refused ? 'refused' : 'open_failed', error.message);
+    let message = error.message;
+    if (pendingWindow !== undefined) {
+      const { pendingAutoCompactWindow, ...rest } = kept;
+      settings.set(id, rest);
+      writeSettings();
+      message += `; the session keeps compact window ${keptWindow} instead of ${pendingWindow}`;
+    }
+    throw new HostError(error instanceof StartError && error.refused ? 'refused' : 'open_failed', message);
   }
   s.setCommands(init.commands);
-  if (params.permissionMode || params.model || s.checker) s.remember();
+  if (params.permissionMode || params.model || s.checker || pendingWindow !== undefined) s.remember();
   s.setState('idle');
   if (s.checker) await take(s, { uuid: randomUUID(), text: params.checker.prompt });
   return s.describe();

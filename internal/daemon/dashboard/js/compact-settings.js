@@ -1,14 +1,19 @@
 import { escape } from "./format.js";
 
-const names = { autoCompact: "Auto-compact", compactWindow: "Compact at" };
+const names = { autoCompact: "Auto-compact", compactWindow: "Compact at", sessionCompactWindow: "This session" };
 
 export function compactSettingsOf(history) {
   return Array.isArray(history?.compactSettings) ? history.compactSettings : [];
 }
 
 export function compactSettingNote(setting) {
+  if (typeof setting.pending === "string") {
+    const label = setting.options.find((option) => option.id === setting.pending)?.label ?? setting.pending;
+    return `${label} from the next message`;
+  }
   if (setting.applies === "newSessions") return setting.scope ? `For new sessions on ${setting.scope}` : "For new sessions";
   if (setting.applies === "nextTurn") return "From the next turn";
+  if (setting.applies === "nextMessage") return "Restarts the session when idle";
   return "";
 }
 

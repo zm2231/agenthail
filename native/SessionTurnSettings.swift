@@ -14,19 +14,25 @@ struct TurnSetting: Decodable, Equatable, Sendable {
     static let mode = "mode"
     static let autoCompact = "autoCompact"
     static let compactWindow = "compactWindow"
+    static let sessionCompactWindow = "sessionCompactWindow"
 
     let key: String
     let value: String
     let options: [Option]
     let applies: String
     var scope: String? = nil
+    var pending: String? = nil
 
     var appliesNextTurn: Bool { applies == "nextTurn" }
     var appliesNote: String? {
+        if let pending {
+            return "\(options.first { $0.id == pending }?.label ?? pending) from the next message"
+        }
         switch applies {
-        case "newSessions": scope.map { "For new sessions on \($0)" } ?? "For new sessions"
-        case "nextTurn": "From the next turn"
-        default: nil
+        case "newSessions": return scope.map { "For new sessions on \($0)" } ?? "For new sessions"
+        case "nextTurn": return "From the next turn"
+        case "nextMessage": return "Restarts the session when idle"
+        default: return nil
         }
     }
     var current: Option? { options.first { $0.id == value } }
@@ -46,6 +52,7 @@ struct TurnSetting: Decodable, Equatable, Sendable {
         switch key {
         case Self.autoCompact: "Auto-compact"
         case Self.compactWindow: "Compact at"
+        case Self.sessionCompactWindow: "This session"
         default: key.prefix(1).uppercased() + key.dropFirst()
         }
     }

@@ -171,7 +171,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		if key == "" || value == "" {
 			return actionResult{}, invalidRequest("setting and value are required")
 		}
-		if key == surface.CompactSettingAuto || key == surface.CompactSettingWindow {
+		if surface.IsCompactSetting(key) {
 			compact, ok := adapter.(surface.CompactSettingsProvider)
 			if !ok {
 				return actionResult{}, invalidRequest("this session has no compact settings")

@@ -127,8 +127,10 @@ func (c *Claude) PrepareMove(ctx context.Context, sess *surface.Session, request
 }
 
 type claudeKeptSettings struct {
-	PermissionMode string `json:"permissionMode"`
-	Model          string `json:"model"`
+	PermissionMode           string  `json:"permissionMode"`
+	Model                    string  `json:"model"`
+	AutoCompactWindow        string  `json:"autoCompactWindow"`
+	PendingAutoCompactWindow *string `json:"pendingAutoCompactWindow"`
 }
 
 // hostSettings is the permission mode and model the conversation last ran

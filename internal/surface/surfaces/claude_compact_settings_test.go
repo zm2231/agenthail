@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestAHostSessionTurnsAutocompactOffNowAndItsWindowGoesToTheRoot(t *testing.T) {
@@ -92,6 +94,44 @@ func TestAWindowChangeBeforeClaudeNamesItsModelGoesToTheChosenModelsWindow(t *te
 	}
 	if gjson.GetBytes(data, "modelSettings.claude-opus-5-5.autoCompactWindow").Int() != 600000 || gjson.GetBytes(data, "autoCompactWindow").Int() != 300000 {
 		t.Fatalf("settings = %s", data)
+	}
+}
+
+func TestASessionsOwnCompactWindowStaysPendingUntilItsNextMessage(t *testing.T) {
+	c, fixture := hostedClaude(t)
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	sess := listedSession(t, c, id)
+	ctx := context.Background()
+
+	if err := c.SetCompactSetting(ctx, sess, surface.CompactSettingSessionWindow, "50000"); !errors.Is(err, surface.ErrInvalidTurnSetting) {
+		t.Fatalf("a window Claude ignores was accepted: %v", err)
+	}
+	if err := c.SetCompactSetting(ctx, sess, surface.CompactSettingSessionWindow, "150000"); err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the idle session to close for its new window", 10*time.Second, func() bool {
+		_, open := c.host.session(ctx, id, sess.PID)
+		return !open
+	})
+	settings, err := c.CompactSettings(ctx, sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own := settingValue(t, settings, surface.CompactSettingSessionWindow)
+	if own.Value != surface.CompactWindowRootDefault || own.Pending == nil || *own.Pending != "150000" || own.Applies != surface.TurnSettingAppliesNextMessage {
+		t.Fatalf("own window = %+v", own)
+	}
+	if err := c.SetCompactSetting(ctx, sess, surface.CompactSettingSessionWindow, surface.CompactWindowRootDefault); err != nil {
+		t.Fatal(err)
+	}
+	settings, err = c.CompactSettings(ctx, sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if own := settingValue(t, settings, surface.CompactSettingSessionWindow); own.Pending != nil {
+		t.Fatalf("choosing the window in effect again leaves %q pending", *own.Pending)
 	}
 }
 
