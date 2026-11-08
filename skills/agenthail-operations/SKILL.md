@@ -418,11 +418,13 @@ Messages a person types in the dashboard or the Mac/iPhone app carry `"author": 
 `send` queues a busy target by default. `--no-queue` requires immediate
 delivery and never queues: a busy target refuses it, nothing is sent, and the
 error names the next step, `agenthail queue <target> "msg"` to deliver when the
-turn ends or `agenthail steer <target> "msg"` to reach the turn now, unless the
-busy-delivery setting `steer` steers it into the turn. A busy target's send
-otherwise waits for the turn, except that a Claude session with a socket takes
-it at its next tool call, and the `steer` setting steers it when the target
-takes steers and the sender may steer it.
+turn ends or `agenthail steer <target> "msg"` to reach the turn now, unless it
+can go now: a Claude session with a socket takes it over the socket at its next
+tool call whatever the busy-delivery setting, and otherwise the setting `steer`
+steers it into the turn. A busy target's send otherwise waits for the turn,
+except that a Claude session with a socket takes it at its next tool call, and
+the `steer` setting steers it when the target takes steers and the sender may
+steer it.
 `steer` on an idle target has no turn to reach and says to run
 `agenthail send <target> "msg"`; a steer from an agent that may not steer the
 target goes as a send would, and its receipt says so. A target waiting on you
