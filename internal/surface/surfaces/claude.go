@@ -63,6 +63,34 @@ func (c *Claude) ObserveClaudeRuns(ctx context.Context) ([]surface.ClaudeRunObse
 	return ObserveClaudeRuns(ctx, c.home)
 }
 
+func (c *Claude) ObserveSessionClaudeRuns(ctx context.Context, session *surface.Session) ([]surface.ClaudeRunObservation, error) {
+	runs, err := ObserveClaudeRuns(ctx, c.home)
+	if err != nil {
+		return nil, err
+	}
+	record, live := c.liveRecord(*session)
+	if !live {
+		return surface.CurrentClaudeRuns(runs, session.ID, time.Time{}), nil
+	}
+	started, known := claudeProcessStart(record)
+	if !known {
+		return []surface.ClaudeRunObservation{}, nil
+	}
+	return surface.CurrentClaudeRuns(runs, session.ID, started), nil
+}
+
+func claudeProcessStart(record map[string]any) (time.Time, bool) {
+	if at, ok := record["startedAt"].(float64); ok && at > 0 {
+		return time.UnixMilli(int64(at)), true
+	}
+	if pid, _ := record["pid"].(float64); pid > 0 {
+		if started, err := processStartedAt(int(pid)); err == nil {
+			return started, true
+		}
+	}
+	return time.Time{}, false
+}
+
 func (c *Claude) ObserveClaudeSubagents(ctx context.Context, session *surface.Session) ([]surface.ClaudeSubagentLink, error) {
 	return c.subagents.observeSession(ctx, session)
 }

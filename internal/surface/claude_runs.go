@@ -33,7 +33,32 @@ type ClaudeSubagentLink struct {
 
 type ClaudeRunObserver interface {
 	ObserveClaudeRuns(context.Context) ([]ClaudeRunObservation, error)
+	ObserveSessionClaudeRuns(ctx context.Context, session *Session) ([]ClaudeRunObservation, error)
 	// ObserveClaudeSubagents lists the subagents of one Claude session.
 	ObserveClaudeSubagents(ctx context.Context, session *Session) ([]ClaudeSubagentLink, error)
 	ObserveAllClaudeSubagents(ctx context.Context) ([]ClaudeSubagentLink, error)
+}
+
+// With no running process (zero processStart) only the latest run is current.
+func CurrentClaudeRuns(runs []ClaudeRunObservation, sessionID string, processStart time.Time) []ClaudeRunObservation {
+	current := []ClaudeRunObservation{}
+	var latest *ClaudeRunObservation
+	for i, run := range runs {
+		if run.SessionID != sessionID && run.ResumeSessionID != sessionID {
+			continue
+		}
+		if !processStart.IsZero() {
+			if !run.UpdatedAt.Before(processStart) {
+				current = append(current, run)
+			}
+			continue
+		}
+		if latest == nil || run.UpdatedAt.After(latest.UpdatedAt) {
+			latest = &runs[i]
+		}
+	}
+	if latest != nil {
+		current = append(current, *latest)
+	}
+	return current
 }

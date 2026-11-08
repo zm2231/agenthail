@@ -48,7 +48,7 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 		writeAPIError(w, http.StatusConflict, "conflict", "surface is not configured")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), sessionMetadataTimeout)
 	defer cancel()
 	effective := surface.EffectiveCapabilities(adapter, session)
 	requests := map[string]func() (any, error){}
@@ -72,14 +72,7 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 	}
 	if observer, ok := adapter.(surface.ClaudeRunObserver); ok {
 		requests["claudeRuns"] = func() (any, error) {
-			runs, err := observer.ObserveClaudeRuns(ctx)
-			filtered := []surface.ClaudeRunObservation{}
-			for _, run := range runs {
-				if run.SessionID == session.ID || run.ResumeSessionID == session.ID {
-					filtered = append(filtered, run)
-				}
-			}
-			return filtered, err
+			return observer.ObserveSessionClaudeRuns(ctx, session)
 		}
 		allSubagents := r.URL.Query().Get("subagents") == "all"
 		requests["claudeSubagents"] = func() (any, error) {
@@ -106,7 +99,7 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 		case result := <-results:
 			delete(requests, result.field)
 			if result.err != nil {
-				errorsByField[result.field] = "Metadata unavailable."
+				errorsByField[result.field] = metadataFailure(result.err)
 			} else if page, ok := result.value.(claudeSubagentPage); ok {
 				response[result.field] = page.links
 				response["claudeSubagentsTotal"] = page.total
@@ -114,8 +107,12 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 				response[result.field] = result.value
 			}
 		case <-ctx.Done():
+			reason := metadataFailure(ctx.Err())
+			if r.Context().Err() != nil {
+				reason = metadataFailure(r.Context().Err())
+			}
 			for field := range requests {
-				errorsByField[field] = "Metadata unavailable."
+				errorsByField[field] = reason
 			}
 			requests = nil
 		}
