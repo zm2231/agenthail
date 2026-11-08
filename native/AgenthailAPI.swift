@@ -410,6 +410,10 @@ final class AgenthailAPI: @unchecked Sendable {
         return page.items
     }
 
+    func decisions(host: String? = nil, timeout: TimeInterval = 25) async throws -> DecisionsPage {
+        try await request(try Self.listPath("/api/v1/decisions", ["host": host]), method: "GET", body: nil, timeout: timeout)
+    }
+
     func inbox(host: String? = nil, before: Int64? = nil, timeout: TimeInterval = 25) async throws -> InboxMessagePage {
         try await request(try Self.listPath("/api/v1/inbox", ["host": host, "before": before.map(String.init)]), method: "GET", body: nil, timeout: timeout)
     }

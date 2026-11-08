@@ -27,6 +27,7 @@ SOURCES=(
   AgenthailAPI.swift
   KeptDelivery.swift
   InboxMessage.swift
+  Decisions.swift
   PeerEnvelope.swift
   TaggedResponses.swift
   AgenthailModel.swift

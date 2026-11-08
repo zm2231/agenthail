@@ -11,7 +11,7 @@ import (
 )
 
 func (d *Daemon) registerDecisionsAPI(mux *http.ServeMux, dashboard *dashboardServer) {
-	mux.HandleFunc("/api/v1/decisions", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.decisionsHandler)))
+	mux.HandleFunc("/api/v1/decisions", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("", d.decisionsHandler))))
 }
 
 func (d *Daemon) decisionsHandler(w http.ResponseWriter, r *http.Request) {

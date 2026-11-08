@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,6 +89,18 @@ func TestAWorkersPromptIsHandledByItsLeadUntilTheLeadIsWaitingOnThePersonToo(t *
 	}
 	if worker.SessionID != "worker" || worker.Group != decisionWaiting || len(worker.Requests) != 1 || worker.Requests[0].ID != "worker-prompt" {
 		t.Fatalf("worker=%+v", worker)
+	}
+}
+
+func TestDecisionsForAPairedHostAreAnsweredThroughItAndAnUnknownHostIsRefused(t *testing.T) {
+	local, _, record := pairedFederation(t)
+	forwarded := local.request(t, http.MethodGet, "/api/v1/decisions?host="+record.ID, nil)
+	if forwarded.Code != http.StatusOK || !strings.Contains(forwarded.Body.String(), `"decisions":[]`) {
+		t.Fatalf("status=%d body=%s", forwarded.Code, forwarded.Body.String())
+	}
+	unknown := local.request(t, http.MethodGet, "/api/v1/decisions?host=nowhere", nil)
+	if unknown.Code != http.StatusNotFound || !strings.Contains(unknown.Body.String(), "host_not_found") {
+		t.Fatalf("an unknown host answered %d: %s", unknown.Code, unknown.Body.String())
 	}
 }
 

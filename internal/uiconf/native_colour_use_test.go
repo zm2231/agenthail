@@ -35,6 +35,7 @@ var statusColours = map[string]statusColour{
 			"QuestionPagerView.swift":           {2, "questions not answered yet"},
 			"RequestCard.swift":                 {1, "an end-of-turn ask waiting on the person"},
 			"iOS/AgenthailIOSViews.swift":       {6, "needs-you rows and reasons, the waiting label, a goal needing the person, sign-in to fix, an end-of-turn ask"},
+			"iOS/DecisionSections.swift":        {3, "a decision holding up other sessions, on its row and in its sheet, and the request waiting in the sheet"},
 			"iOS/HolderPicker.swift":            {1, "a terminal must be picked before sending"},
 			"iOS/QueueTailRows.swift":           {1, "a message that was not delivered"},
 			"iOS/SessionControls.swift":         {1, "an undelivered message in the inbox"},
