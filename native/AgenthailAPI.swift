@@ -556,6 +556,14 @@ final class AgenthailAPI: @unchecked Sendable {
         try await post("/api/v1/pairings", body: ["name": name, "scopes": ["read", "control"]])
     }
 
+    func claudeCompactSettings() async throws -> ClaudeCompactResponse {
+        try await get("/api/v1/claude/compact-settings")
+    }
+
+    func saveClaudeCompactSettings(_ body: [String: Any]) async throws -> ClaudeCompactRoot {
+        try await post("/api/v1/claude/compact-settings", body: body)
+    }
+
     func createLoginLink(remote: Bool) async throws -> LoginLinkResponse {
         try await post("/api/v1/dashboard/login-links", body: ["remote": remote])
     }

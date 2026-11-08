@@ -25,8 +25,10 @@ struct DesktopSettings: View {
                 .tabItem { Label("Delivery", systemImage: "arrow.triangle.branch") }
             ActivitySettings(model: model)
                 .tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
+            ClaudeCompactSettings(model: model)
+                .tabItem { Label("Claude", systemImage: "rectangle.compress.vertical") }
         }
-        .frame(width: 620, height: 520)
+        .frame(width: 700, height: 520)
         .task { await model.loadOperations() }
     }
 }
