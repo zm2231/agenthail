@@ -96,7 +96,29 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Jump to latest"].exists, "a returned session opened away from its latest row")
     }
 
-    func testJumpingToLatestKeepsTheDraftFocusAndOpenRows() {
+    func testJumpingToLatestKeepsTheDraftFocusAndOpenRows() { keepsDraftFocus() }
+
+    func testRepeatJumpKeepsDraftFocusTenTimes() { repeatTen("keeps draft focus (:99)", keepsDraftFocus) }
+
+    func testRepeatJumpWhileStreamingTenTimes() { repeatTen("while streaming (:119)", streamingJump) }
+
+    private func repeatTen(_ name: String, _ body: () -> Void) {
+        var failed: [Int] = []
+        for run in 1...10 {
+            let before = testRun?.failureCount ?? 0
+            body()
+            XCUIApplication().terminate()
+            if (testRun?.failureCount ?? 0) > before { failed.append(run) }
+        }
+        let text = "\(name): \(failed.count) of 10 runs failed, runs \(failed)"
+        print("REPEAT-RESULT \(text)")
+        let attachment = XCTAttachment(string: text)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func keepsDraftFocus() {
         let app = launch(streaming: false)
         app.buttons[sessionID].tapWhenReady(timeout: 15)
         let timeline = app.scrollViews["session-timeline"]
@@ -133,7 +155,9 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         XCTAssertEqual(row.value as? String, "Expanded", "an open tool row closed on Jump to latest")
     }
 
-    func testJumpingToLatestWhileStreamingShowsTheLatestRows() {
+    func testJumpingToLatestWhileStreamingShowsTheLatestRows() { streamingJump() }
+
+    private func streamingJump() {
         let app = launch(direct: captured)
         if !captured { app.buttons[sessionID].tapWhenReady(timeout: 15) }
         let timeline = app.scrollViews["session-timeline"]
