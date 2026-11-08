@@ -94,6 +94,12 @@ struct SessionPaneTest {
         check(tabbed.selectedSessionID == nil && tabbed.tabs.active == new, "stepping onto the New Session tab shows it")
         tabbed.showStarted("S")
         check(tabbed.tabs.tabs.map(\.id) == ["A", "S"] && tabbed.tabs.active == "S" && tabbed.selectedSessionID == "S" && tabbed.newSession == nil, "a started session takes over the New Session tab")
+        tabbed.keepTab("S")
+        let tabReaders = PaneChanges(tabbed) { _ = $0.tabs }
+        tabbed.select("S")
+        tabbed.keepTab("S")
+        tabbed.activateTab("S")
+        check(tabReaders.count == 0 && tabbed.tabs.active == "S", "reselecting the active kept tab leaves tab readers alone: \(tabReaders.count)")
         func row(_ id: String) -> SessionState {
             SessionState(id: id, surface: "codex", name: id, alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
         }

@@ -9,7 +9,7 @@ struct StatusItemsTest {
     static func main() {
         let model = AgenthailModel(connecting: false)
         let pane = model.openPane()
-        let state = StatusItemsState(items: ["working", "needs-you", "hosts", "terminal"], short: false, working: 2, needsYou: 1, hosts: "this Mac", terminalFocusable: false)
+        let state = StatusItemsState(items: ["working", "needs-you", "hosts", "terminal"], short: false, working: 2, needsYou: 1, hosts: "this Mac")
         let host = NSHostingView(rootView: StatusItems(state: state, model: model, pane: pane).equatable().fixedSize())
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 200), styleMask: .borderless, backing: .buffered, defer: false)
         window.contentView = host

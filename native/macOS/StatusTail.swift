@@ -28,8 +28,7 @@ struct StatusTail: View {
             short: density == .icons,
             working: shown.contains("working") ? model.workingCount : 0,
             needsYou: shown.contains("needs-you") ? model.needsYou.count : 0,
-            hosts: shown.contains("hosts") ? StatusItemsState.hosts(model.daemon?.hosts ?? []) : "",
-            terminalFocusable: shown.contains("terminal") && pane.displayedSession?.runtime?.focusable == true
+            hosts: shown.contains("hosts") ? StatusItemsState.hosts(model.daemon?.hosts ?? []) : ""
         )
     }
 }

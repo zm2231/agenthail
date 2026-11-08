@@ -257,11 +257,17 @@ final class SessionPane: Identifiable {
     func select(_ id: String, keep: Bool = false) {
         let id = model.resolveSessionID(id)
         if tabsEnabled, !closed {
-            tabs.open(id, keep: keep, preview: model.interface.config.tabPreview)
+            changeTabs { $0.open(id, keep: keep, preview: model.interface.config.tabPreview) }
         } else {
             newSession = nil
         }
         show(id)
+    }
+
+    private func changeTabs(_ change: (inout SessionTabs) -> Void) {
+        var next = tabs
+        change(&next)
+        if next != tabs { tabs = next }
     }
 
     /// Shows New Session: with tabs, in its own tab, opened once.
@@ -274,7 +280,7 @@ final class SessionPane: Identifiable {
         if fresh, let project = model.projects.first(where: { $0.id == scope.projectID }), let checkout = PaneScope.newSessionCheckout(project) {
             newSession?.place(host: ProjectMenu.host(of: checkout), folder: checkout.rootPath)
         }
-        if tabsEnabled { tabs.open(SessionTabs.newSession, keep: true) }
+        if tabsEnabled { changeTabs { $0.open(SessionTabs.newSession, keep: true) } }
         if let message { newSession?.take(message) }
         clearSelection()
     }
@@ -309,7 +315,7 @@ final class SessionPane: Identifiable {
         let id = model.resolveSessionID(id)
         let shared = newSession?.takeHeld() ?? []
         if tabsEnabled, !closed {
-            tabs.replace(SessionTabs.newSession, with: id)
+            changeTabs { $0.replace(SessionTabs.newSession, with: id) }
         } else {
             newSession = nil
         }
@@ -322,21 +328,21 @@ final class SessionPane: Identifiable {
         let draft = NewSessionDraft(model: model, selected: selectedSession)
         shared.forEach(draft.take)
         newSession = draft
-        tabs.add(SessionTabs.newSession)
+        changeTabs { $0.add(SessionTabs.newSession) }
     }
 
     func activateTab(_ id: String) {
-        tabs.activate(id)
+        changeTabs { $0.activate(id) }
         showActiveTab()
     }
 
     func keepTab(_ id: String) {
-        tabs.keep(id)
+        changeTabs { $0.keep(id) }
     }
 
     func closeTab(_ id: String) {
         let wasActive = tabs.active == id
-        tabs.close(id)
+        changeTabs { $0.close(id) }
         if wasActive && !holdsPage { showActiveTab() }
     }
 
@@ -356,13 +362,13 @@ final class SessionPane: Identifiable {
     }
 
     func closeOtherTabs(_ id: String) {
-        tabs.closeOthers(id)
+        changeTabs { $0.closeOthers(id) }
         if !holdsPage { showActiveTab() }
     }
 
     func stepTab(_ offset: Int) {
         guard let next = tabs.neighbour(offset) else { return }
-        tabs.activate(next)
+        changeTabs { $0.activate(next) }
         showActiveTab()
     }
 
@@ -407,14 +413,15 @@ final class SessionPane: Identifiable {
 
     private func reconcileTabs(_ sessions: [SessionState]) {
         if tabs.tabs.isEmpty, let selected = selectedSessionID {
-            tabs.open(selected, keep: true)
+            changeTabs { $0.open(selected, keep: true) }
         }
         let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var next = tabs
-        let dropped = next.reconcile(resolve: model.resolveSessionID) { id in
-            id == SessionTabs.newSession || byID[id].map { $0.archived != true } == true
+        var dropped: [String] = []
+        changeTabs {
+            dropped = $0.reconcile(resolve: model.resolveSessionID) { id in
+                id == SessionTabs.newSession || byID[id].map { $0.archived != true } == true
+            }
         }
-        if next != tabs { tabs = next }
         if let archived = dropped.lazy.compactMap({ byID[self.model.resolveSessionID($0)] }).first(where: { $0.archived == true }) {
             archivedTab = archived
         }
@@ -729,7 +736,7 @@ final class SessionPane: Identifiable {
         let attachments = composerDraft.attachments
         composer = ""
         composerDraft.attachments = []
-        tabs.keep(sessionID)
+        changeTabs { $0.keep(sessionID) }
         model.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery, turnOptions: codex ? composerDraft.turnOptions : nil)
         composerDraft.recordSending(text)
         composerDraft.restoreStashAfterSend()
