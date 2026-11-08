@@ -428,10 +428,10 @@ func TestElsewhereWaitingMessageSaysWhereAnUnheldPromptIsAnswered(t *testing.T) 
 	}{
 		{surface.RuntimeClaudeCLI, false, surface.WaitingApproval, "builder needs your approval in its terminal"},
 		{surface.RuntimeClaudeCLI, false, surface.WaitingQuestion, "builder asks you a question in its terminal"},
-		{surface.RuntimeCodexDesktop, false, surface.WaitingInput, "builder needs your input"},
+		{surface.RuntimeCodexDesktop, false, surface.WaitingInput, "builder needs your input. Agenthail can't answer it; answer it where it runs"},
 		{surface.RuntimeClaudeHost, true, surface.WaitingApproval, "builder is waiting on a prompt Agenthail can't reach. Stop and resume it to clear it"},
 		{surface.RuntimeClaudeBackground, true, surface.WaitingQuestion, "builder is waiting on a prompt Agenthail can't reach. Stop and resume it to clear it"},
-		{surface.RuntimeCodexAppServer, false, surface.WaitingApproval, "builder needs your approval"},
+		{surface.RuntimeCodexAppServer, false, surface.WaitingApproval, "builder needs your approval. Agenthail can't answer it; answer it where it runs"},
 		{surface.RuntimeClaudeCLI, false, surface.WaitingDialog, "builder has a dialog open in its terminal"},
 	} {
 		if got := elsewhereWaitingMessage("builder", surface.Waiting{Kind: test.kind}, test.runtime, test.restartable); got != test.want {

@@ -324,6 +324,8 @@ func elsewhereWaitingMessage(name string, waiting surface.Waiting, runtime surfa
 			return fmt.Sprintf("%s is waiting on a prompt Agenthail can't reach. Stop and resume it to clear it", name)
 		case runtime == surface.RuntimeClaudeCLI:
 			return fmt.Sprintf("%s %s in its terminal", name, asks)
+		default:
+			return fmt.Sprintf("%s %s. Agenthail can't answer it; answer it where it runs", name, asks)
 		}
 	}
 	return fmt.Sprintf("%s %s", name, asks)

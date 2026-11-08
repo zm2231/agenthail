@@ -804,7 +804,7 @@ func TestCodexInputRequestIsNotifiedAsInputNotApproval(t *testing.T) {
 		t.Fatalf("detail waiting=%+v", waiting)
 	}
 	testkit.Eventually(t, "the waiting notification", 5*time.Second, func() bool { return pushes.count("session.waiting") == 1 })
-	if push := pushes.first("session.waiting"); push["message"] != notificationSurfaceName(surface.KindCodex)+" needs your input" {
+	if push := pushes.first("session.waiting"); push["message"] != notificationSurfaceName(surface.KindCodex)+" needs your input. Agenthail can't answer it; answer it where it runs" {
 		t.Fatalf("push=%v", push)
 	}
 }
