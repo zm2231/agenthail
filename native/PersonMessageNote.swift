@@ -2,6 +2,11 @@ import Foundation
 
 enum PersonMessageNote {
     static let deliveredAsNote = "Delivered as a note"
+    static let sendsAsNote = "Sends as a note"
+
+    static func statusLine(_ capabilities: Capabilities) -> String {
+        capabilities.reachesAsNote ? sendsAsNote : ""
+    }
 
     static func text(_ capabilities: Capabilities, canAdopt: Bool) -> String {
         guard capabilities.reachesAsNote else { return "" }

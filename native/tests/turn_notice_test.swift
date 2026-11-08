@@ -32,6 +32,8 @@ struct TurnNoticeTest {
         let host = try? JSONDecoder().decode(Capabilities.self, from: Data(current.utf8))
         check(host?.reachesAsNote == true && host?.remoteControl == true, "a host's personMessage and remoteControl decode")
 
+        check(PersonMessageNote.statusLine(Capabilities(send: true, personMessage: "note", remoteControl: true)) == "Sends as a note", "the status line names the note in a few words; the banner holds the sentence")
+        check(PersonMessageNote.statusLine(Capabilities(send: true)).isEmpty, "a session that takes the person's turn leaves the status line to the rest")
         check(PersonMessageNote.receiptNote("note") == "Delivered as a note", "a send that went as a note says so")
         check(PersonMessageNote.receiptNote("turn") == nil && PersonMessageNote.receiptNote(nil) == nil, "a send that went as the person's turn, or is still queued, adds nothing")
         let receipt = #"{"evidence":"delivered","status":"sent","sessionId":"T","deliveredAs":"note"}"#
