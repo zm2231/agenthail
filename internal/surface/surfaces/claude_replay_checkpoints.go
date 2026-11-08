@@ -23,8 +23,11 @@ const (
 	replayRegionLimit       = 8
 	replayRegionCheckpoints = 16
 	replayPrintBytes        = 256
-	replayReportedLimit     = 1024
 )
+
+// replayReportedLimit bounds the transcripts remembered as reported; once
+// that many are, the set starts over and a transcript may be reported again.
+const replayReportedLimit = 1024
 
 // A replayRegion holds trackers saved while replaying one turn. Any offset
 // in that turn has the same replay start, so a replay there resumes from the
