@@ -144,6 +144,7 @@ struct MacPagingTest {
         model.sessionRefinement = SessionRefinement()
         model.mainPane.showAll()
         check(!model.pages.listings.keys.contains { $0.projectID != nil } && model.reader.pageErrors.isEmpty, "project listings no open pane shows are released: \(model.pages.listings.keys.filter { $0.projectID != nil })")
+        check(!ids().contains("far-a") && !ids().contains("far-b"), "sessions only a released listing held leave the known sessions: \(ids())")
         model.sessionFilter = .recent
 
         model.findSessions("zet")

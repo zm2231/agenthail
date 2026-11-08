@@ -232,7 +232,10 @@ final class AgenthailModel {
 
     func dropUnusedScopes() {
         let kept = Set(panes.compactMap { $0.scope.projectID.map(scopeRequest) } + panes.compactMap { $0.shownProjectID.map(earlierRequest) })
-        reader.requests.filter { $0.projectID != nil && !kept.contains($0) }.forEach(reader.drop)
+        let unused = reader.requests.filter { $0.projectID != nil && !kept.contains($0) }
+        guard !unused.isEmpty else { return }
+        unused.forEach(reader.drop)
+        rederive()
     }
 
     deinit {
