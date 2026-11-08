@@ -292,9 +292,9 @@ if __name__ == "__main__":
         }
         for path, body in {"/api/v1/projects/activity": {"projects": []}, "/api/v1/history": {"items": [], "hasMore": False, "nextBefore": 0, "kinds": []},
                            "/api/v1/decisions": {"decisions": [
-                               {"group": "stopped", "sessionId": "terminal", "projectId": "web-app", "kind": "request", "reason": "Waiting in its terminal", "since": NOW,
+                               {"group": "stopped", "sessionId": "terminal", "projectId": "web-app", "kind": "request", "reason": "Answer in its terminal", "since": NOW,
                                 "answerable": False, "requestError": "this session's requests are not answered through Agenthail"},
-                               {"group": "stopped", "sessionId": "limit", "projectId": "web-app", "kind": "usageLimit", "reason": "Usage limit, resumes when it lifts", "since": NOW, "answerable": False},
+                               {"group": "stopped", "sessionId": "limit", "projectId": "web-app", "kind": "usageLimit", "reason": "Resumes when the limit lifts", "since": NOW, "answerable": False},
                                {"group": "stopped", "sessionId": "stopped", "projectId": "web-app", "kind": "stopped", "reason": "the model returned an error", "since": NOW, "answerable": False}],
                                "leadHandling": []}, "/api/v1/usage": {"sets": []}, "/api/v1/models": {"models": []},
                            "/api/v1/session-options": {"surfaces": [{"id": "claude", "workspace": True}], "projects": [], "claudeConfigRoots": []},
