@@ -14,6 +14,7 @@ struct ComposerTextView: NSViewRepresentable {
     var editor: ComposerEditor? = nil
     var onCaret: ((Int) -> Void)? = nil
     var completionKey: ((CompletionKey) -> Bool)? = nil
+    var draftID: String? = nil
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -26,6 +27,7 @@ struct ComposerTextView: NSViewRepresentable {
         textView.setAccessibilityLabel(accessibilityLabel ?? placeholder)
         textView.string = text
         context.coordinator.sync = ComposerTextSync(text)
+        context.coordinator.draftID = draftID
         textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
         textView.command = { ComposerCommand.matching($0, in: .shared) }
         textView.onCommand = { [weak coordinator = context.coordinator] in coordinator?.parent.onCommand?($0) ?? false }
@@ -59,6 +61,11 @@ struct ComposerTextView: NSViewRepresentable {
         }
         textView.setAccessibilityLabel(accessibilityLabel ?? placeholder)
         textView.placeholderColor = NSColor(DesktopPalette.text2.resolve(in: context.environment))
+        if context.coordinator.draftID != draftID {
+            context.coordinator.draftID = draftID
+            context.coordinator.sync = ComposerTextSync(text)
+            textView.load(text)
+        }
         textView.show(bound: text, sync: context.coordinator.sync)
         if focused, textView.window != nil, textView.window?.firstResponder !== textView {
             DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
@@ -74,6 +81,7 @@ struct ComposerTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerTextView
         var sync: ComposerTextSync
+        var draftID: String?
 
         init(_ parent: ComposerTextView) {
             self.parent = parent
