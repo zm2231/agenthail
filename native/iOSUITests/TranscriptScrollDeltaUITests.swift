@@ -19,8 +19,9 @@ final class TranscriptScrollDeltaUITests: XCTestCase {
         var best: String?
         while let next = pending.popLast() {
             if next.elementType == .staticText, next.label.count > 12 {
-                seen[next.label, default: 0] += 1
-                if band.contains(CGPoint(x: next.frame.midX, y: next.frame.midY)) { best = next.label }
+                let key = String(next.label.prefix(48))
+                seen[key, default: 0] += 1
+                if band.contains(CGPoint(x: next.frame.midX, y: next.frame.midY)) { best = key }
             }
             pending += next.children
         }
@@ -29,7 +30,7 @@ final class TranscriptScrollDeltaUITests: XCTestCase {
 
     private func drag(_ timeline: XCUIElement, from: CGFloat, to: CGFloat, direction: String) throws -> Drag {
         guard let label = try midScreenText(timeline) else { return Drag(direction: direction, label: "-", moved: nil) }
-        let row = timeline.staticTexts[label]
+        let row = timeline.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
         let before = row.frame.minY
         timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
             .press(forDuration: 0.05, thenDragTo: timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to)), withVelocity: 300, thenHoldForDuration: 0.4)
