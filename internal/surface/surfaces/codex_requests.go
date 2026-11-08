@@ -272,21 +272,23 @@ func codexAnswer(open codexOpenRequest, decision surface.Decision) (any, string,
 		return nil, "", fmt.Errorf("unknown behavior %q", decision.Behavior)
 	}
 	allow := decision.Behavior == "allow"
+	switch {
+	case decision.Stop && (allow || !open.request.Stoppable):
+		return nil, "", errors.New("this request offers no denial that stops the turn")
+	case decision.Always && allow && !open.request.AlwaysAllow:
+		return nil, "", errors.New("this request offers no rule to always allow it")
+	case decision.Always && !allow && !open.request.AlwaysDeny:
+		return nil, "", errors.New("this request offers no rule to always deny it")
+	}
 	switch open.method {
 	case codexCommandApproval:
 		offered := codexDecisions(open.params)
 		switch {
 		case allow && decision.Always:
-			if offered.always == nil {
-				return nil, "", errors.New("this request offers no rule to always allow it")
-			}
 			return map[string]any{"decision": offered.always}, "allowed", nil
 		case allow:
 			return map[string]any{"decision": "accept"}, "allowed", nil
 		case decision.Always:
-			if offered.never == nil {
-				return nil, "", errors.New("this request offers no rule to always deny it")
-			}
 			return map[string]any{"decision": offered.never}, "denied", nil
 		case decision.Stop || !offered.decline:
 			return map[string]any{"decision": "cancel"}, "denied", nil
