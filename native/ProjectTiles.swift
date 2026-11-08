@@ -4,12 +4,44 @@ struct ProjectTiles: Equatable {
     var shown: [ProjectState]
     var more: [ProjectState]
 
-    static func order(_ projects: [ProjectState], limit: Int) -> ProjectTiles {
-        let open = projects.filter { $0.archived != true && ($0.activity?.sessionCount ?? 0 > 0 || !$0.leads.isEmpty) }
+    struct Lead: Equatable {
+        var lastActive: Date?
+        var active: Bool
+
+        static let recentWindow: TimeInterval = 7 * 24 * 60 * 60
+
+        init(lastActive: Date?, active: Bool) {
+            self.lastActive = lastActive
+            self.active = active
+        }
+
+        init(currentReason: String?, waiting: Bool, lastActive: String?) {
+            self.init(lastActive: lastActive.flatMap(TimestampParser.date), active: waiting || currentReason == "working" || currentReason == "queued")
+        }
+
+        init(_ session: SessionState) {
+            self.init(currentReason: session.currentReason, waiting: session.waitingOn != nil, lastActive: session.lastActive)
+        }
+
+        func recent(at now: Date) -> Bool {
+            active || lastActive.map { now.timeIntervalSince($0) <= Self.recentWindow } == true
+        }
+    }
+
+    static func order(_ projects: [ProjectState], limit: Int, waiting: [String: Int] = [:], leads: [String: Lead] = [:], now: Date = Date()) -> ProjectTiles {
+        func group(_ project: ProjectState) -> Int {
+            if waiting[project.id] ?? 0 > 0 { return 0 }
+            return leads[project.id]?.recent(at: now) == true ? 1 : 2
+        }
+        func time(_ project: ProjectState) -> Date {
+            max(project.activity?.lastActive.flatMap(TimestampParser.date) ?? .distantPast, leads[project.id]?.lastActive ?? .distantPast)
+        }
+        let open = projects.filter { $0.archived != true && ($0.activity?.sessionCount ?? 0 > 0 || !$0.leads.isEmpty || waiting[$0.id] ?? 0 > 0) }
         let recent = open.sorted { lhs, rhs in
-            let left = lhs.activity?.lastActive.flatMap(TimestampParser.date) ?? .distantPast
-            let right = rhs.activity?.lastActive.flatMap(TimestampParser.date) ?? .distantPast
-            if left != right { return left > right }
+            let (left, right) = (group(lhs), group(rhs))
+            if left != right { return left < right }
+            let (leftTime, rightTime) = (time(lhs), time(rhs))
+            if leftTime != rightTime { return leftTime > rightTime }
             return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
         }
         let shown = Array(recent.prefix(limit))

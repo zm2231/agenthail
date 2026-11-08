@@ -1,7 +1,7 @@
 import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape } from "./format.js";
-import { orderTiles, tileLetter, needsYouByProject, projectColour, projectColourID } from "./project-tiles.js";
+import { orderTiles, tileLetter, tileLeads, needsYouByProject, projectColour, projectColourID } from "./project-tiles.js";
 import { shownDecisions } from "./decision-card.js";
 import { openProject, leaveProject } from "./project-pane.js";
 import { syncDecisionPane } from "./pane-scope.js";
@@ -22,7 +22,7 @@ export function renderTiles() {
   const projects = app.state.projects || [];
   const decisions = shownDecisions();
   const counts = needsYouByProject(decisions, projects);
-  const { shown, more } = orderTiles(projects, tileLimit);
+  const { shown, more } = orderTiles(projects, tileLimit, { waiting: counts, leads: tileLeads(projects, app.state.sessions || []) });
   const scope = app.scope || "all";
   const owner = app.state.daemon?.host?.id || "";
   const moreCount = more.reduce((sum, project) => sum + (counts[project.id] || 0), 0);
