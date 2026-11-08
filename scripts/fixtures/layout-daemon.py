@@ -230,9 +230,10 @@ if __name__ == "__main__":
         def page(sessions):
             count = {"families": len(sessions), "sessions": len(sessions)}
             projects = list(dict.fromkeys(s["project"]["id"] for s in sessions))
-            return {"sessions": sessions, "view": {
+            return {**RESPONSES["/api/v1/snapshot"], "sessions": sessions, "totalSessions": len(sessions), "view": {
                 "counts": {scope: count for scope in ("running", "current", "recent", "all", "archived")}, "surfaces": [],
-                "projects": [{"id": p, "name": p, "counts": count, "collapsedFamilyIds": []} for p in projects],
+                "projects": [{"id": p, "name": p, "counts": {"families": len(ids), "sessions": len(ids)}, "collapsedFamilyIds": ids}
+                             for p, ids in ((p, [s["id"] for s in sessions if s["project"]["id"] == p]) for p in projects)],
                 "families": [{"id": s["id"], "rootId": s["id"], "projectId": s["project"]["id"], "checkoutId": s["checkout"]["id"],
                               "members": [{"id": s["id"], "depth": 0, "contextOnly": False, "pinned": False}], "pinned": False, "workingSubagents": 0}
                              for s in sessions]}}
@@ -245,6 +246,11 @@ if __name__ == "__main__":
         SCOPED.update({scope: page(active) for scope in ("current", "recent", "all", "running")})
         SCOPED["archived"] = page(archived)
         RESPONSES["/api/v1/projects/activity"] = {"projects": []}
+        RESPONSES["/api/v1/history"] = {"items": [], "hasMore": False, "nextBefore": 0, "kinds": []}
+        RESPONSES["/api/v1/decisions"] = {"decisions": [], "leadHandling": []}
+        RESPONSES["/api/v1/session-options"] = {"surfaces": [{"id": "claude", "workspace": True}], "projects": [], "claudeConfigRoots": []}
+        RESPONSES["/api/v1/usage"] = {"sets": []}
+        RESPONSES["/api/v1/models"] = {"models": []}
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.update({"/api/v1/events", "/api/v1/catalog-events"})
