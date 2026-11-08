@@ -22,7 +22,7 @@ func codexBackgroundRollout() []string {
 
 func loadedCodex(threadID string) *Codex {
 	c := NewCodex("")
-	c.noteLoaded(&codexRuntimes{managed: &managedCodexClient{}, managedLoaded: map[string]bool{threadID: true}})
+	c.noteLoaded(&codexRuntimes{desktop: &desktopCodexClient{}, desktopLoaded: map[string]bool{threadID: true}})
 	return c
 }
 
@@ -74,7 +74,7 @@ func TestAThreadNoRuntimeHasLoadedRunsNoBackgroundWork(t *testing.T) {
 		t.Fatalf("never loaded background=%+v", background)
 	}
 	c := loadedCodex("thread")
-	c.noteLoaded(&codexRuntimes{managed: &managedCodexClient{}, managedLoaded: map[string]bool{}})
+	c.noteLoaded(&codexRuntimes{desktop: &desktopCodexClient{}, desktopLoaded: map[string]bool{}})
 	if background := codexBackgroundAt(t, c, "thread", path); background != nil {
 		t.Fatalf("unloaded background=%+v", background)
 	}
@@ -91,7 +91,7 @@ func TestAThreadNoRuntimeHasLoadedRunsNoBackgroundWork(t *testing.T) {
 
 func TestARuntimeWhoseLoadedThreadsCouldNotBeListedKeepsItsLastListing(t *testing.T) {
 	c := loadedCodex("thread")
-	c.noteLoaded(&codexRuntimes{managed: &managedCodexClient{}})
+	c.noteLoaded(&codexRuntimes{desktop: &desktopCodexClient{}})
 	if !c.threadLoaded("thread") {
 		t.Fatal("a failed listing forgot the loaded thread")
 	}

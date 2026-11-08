@@ -56,7 +56,8 @@ type Waiting struct {
 // an ambient task, such as a monitor waiting for events, is listed but does not
 // keep the session's work from being done. Since is when the oldest running
 // task started. Source is where the tasks were read: the Claude host, the
-// transcript, or only the process's own status, which names no tasks.
+// runtime's own listing, the transcript, or only the process's own status,
+// which names no tasks.
 type BackgroundTasks struct {
 	Running bool             `json:"running"`
 	Tasks   []BackgroundTask `json:"tasks,omitempty"`
@@ -66,6 +67,7 @@ type BackgroundTasks struct {
 
 const (
 	BackgroundSourceHost       = "host"
+	BackgroundSourceRuntime    = "runtime"
 	BackgroundSourceTranscript = "transcript"
 	BackgroundSourceStatus     = "status"
 )

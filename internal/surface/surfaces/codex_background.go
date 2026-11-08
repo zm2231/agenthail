@@ -29,9 +29,24 @@ func (c *Codex) Background(ctx context.Context, session surface.Session) *surfac
 }
 
 // Background processes live in the app-server that has the thread loaded.
+// Codex's app-server daemon lists them; Desktop's are what its transcript
+// shows started and not yet finished.
 func (c *Codex) codexBackground(ctx context.Context, threadID, path string, info os.FileInfo) *surface.BackgroundTasks {
+	switch c.loadedBy(threadID) {
+	case codexTransportManaged:
+		return c.runtimeBackground(ctx, threadID, path, info)
+	case codexTransportDesktop:
+		return c.transcriptBackground(ctx, path, info)
+	}
+	return nil
+}
+
+func (c *Codex) transcriptBackground(ctx context.Context, path string, info os.FileInfo) *surface.BackgroundTasks {
+	if info == nil {
+		return nil
+	}
 	commands := c.backgroundCommands(ctx, path, info)
-	if len(commands) == 0 || !c.threadLoaded(threadID) {
+	if len(commands) == 0 {
 		return nil
 	}
 	tasks := make([]surface.BackgroundTask, 0, len(commands))
@@ -118,6 +133,17 @@ func (c *Codex) noteLoaded(runtimes *codexRuntimes) {
 			c.loadedThreads[runtime.name] = runtime.loaded
 		}
 	}
+}
+
+func (c *Codex) loadedBy(threadID string) string {
+	c.backgroundMu.Lock()
+	defer c.backgroundMu.Unlock()
+	for runtime, loaded := range c.loadedThreads {
+		if loaded[threadID] {
+			return runtime
+		}
+	}
+	return ""
 }
 
 func (c *Codex) threadLoaded(threadID string) bool {
