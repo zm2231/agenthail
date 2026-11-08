@@ -190,7 +190,31 @@ type actionGate struct {
 	ledgerPullHold atomic.Pointer[snapshotHold]
 	replayHold     atomic.Pointer[snapshotHold]
 	pullsRefused   atomic.Bool
+	// snapshotsServed counts the snapshots this host is asked for.
+	snapshotsServed atomic.Int32
+	// streamsEnded counts the catalog streams that have ended, as when the
+	// follower drops one after an event it could not apply.
+	streamsEnded atomic.Int32
 }
+
+// unreadableUpserts rewrites the catalog stream's upsert of a session named
+// "unreadable ..." into one whose session is a number, as a host with another
+// payload shape might send. Its snapshot still carries the row.
+type unreadableUpserts struct{ http.ResponseWriter }
+
+func (w unreadableUpserts) Write(p []byte) (int, error) {
+	if bytes.Contains(p, []byte("event: session.upserted\n")) && bytes.Contains(p, []byte(`"name":"unreadable `)) {
+		if _, err := w.ResponseWriter.Write(bytes.Replace(p, []byte(`"data":{"session":{`), []byte(`"data":{"session":7,"was":{`), 1)); err != nil {
+			return 0, err
+		}
+		return len(p), nil
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+func (w unreadableUpserts) Flush() { http.NewResponseController(w.ResponseWriter).Flush() }
+
+func (w unreadableUpserts) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 const (
 	confirmApplied = 1
@@ -265,6 +289,11 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 		}
 		if r.URL.Path == "/api/v1/catalog-events" {
 			n.gate.streams.Add(1)
+			w = unreadableUpserts{ResponseWriter: w}
+			defer n.gate.streamsEnded.Add(1)
+		}
+		if r.URL.Path == "/api/v1/snapshot" {
+			n.gate.snapshotsServed.Add(1)
 		}
 		if hold := n.gate.versions.Load(); hold != nil && r.URL.Path == "/api/v1/version" {
 			hold.waiting.Add(1)
@@ -1049,6 +1078,68 @@ func TestFederationAppliesRemoteCatalogEventsIncrementally(t *testing.T) {
 	testkit.Eventually(t, "busy status and removal mirrored", 10*time.Second, func() bool {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) == 1 && rows[0].ID == qualified && rows[0].Status == surface.StatusBusy
+	})
+}
+
+// renameRemote renames one of the remote host's sessions and publishes it.
+func renameRemote(remote *federationNode, id, name string) {
+	remote.fake.mu.Lock()
+	session := remote.fake.sessions[id]
+	session.Name = name
+	remote.fake.sessions[id] = session
+	remote.fake.mu.Unlock()
+	remote.daemon.discoverCatalog(context.Background())
+}
+
+func mirroredName(t *testing.T, local *federationNode, hostID, id string) string {
+	for _, row := range sessionsOf(local.snapshot(t), hostID) {
+		if row.ID == hosts.Qualify(hostID, id) {
+			return row.Name
+		}
+	}
+	return ""
+}
+
+func TestAnEventTheMirrorCannotReadIsRepairedFromASnapshotAndARepeatBacksOff(t *testing.T) {
+	local, remote, record := pairedFederationWith(t, func(f *federation) { f.retryMin = time.Hour })
+	served := remote.gate.snapshotsServed.Load()
+	renameRemote(remote, "remote-a", "unreadable 1")
+	testkit.Eventually(t, "the rename the mirror could not read reaches it through a snapshot", 10*time.Second, func() bool {
+		return mirroredName(t, local, record.ID, "remote-a") == "unreadable 1"
+	})
+	if got := remote.gate.snapshotsServed.Load() - served; got != 1 {
+		t.Fatalf("snapshots after one unreadable event = %d, want 1", got)
+	}
+	ended := remote.gate.streamsEnded.Load()
+	renameRemote(remote, "remote-a", "unreadable 2")
+	testkit.Eventually(t, "the follower drops the stream at the second unreadable event", 10*time.Second, func() bool {
+		return remote.gate.streamsEnded.Load() > ended
+	})
+	time.Sleep(300 * time.Millisecond)
+	if got := remote.gate.snapshotsServed.Load() - served; got != 1 {
+		t.Fatalf("snapshots after two unreadable events in a row = %d, want 1: the repeat waits out the backoff", got)
+	}
+	if got := mirroredName(t, local, record.ID, "remote-a"); got != "unreadable 1" {
+		t.Fatalf("mirrored name = %q, want the first rename until the backoff ends", got)
+	}
+}
+
+func TestAMirrorWriteThatFailsIsRepairedFromASnapshot(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	if _, err := local.reg.WriteDB().Exec(`CREATE TRIGGER fail_mirror BEFORE INSERT ON catalog_sessions WHEN NEW.session_id='remote-a' BEGIN SELECT RAISE(ABORT, 'injected mirror failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	hold := &snapshotHold{release: make(chan struct{})}
+	remote.gate.snapshots.Store(hold)
+	renameRemote(remote, "remote-a", "renamed")
+	testkit.Eventually(t, "the mirror asks for a snapshot after its write fails", 10*time.Second, func() bool { return hold.waiting.Load() > 0 })
+	if _, err := local.reg.WriteDB().Exec(`DROP TRIGGER fail_mirror`); err != nil {
+		t.Fatal(err)
+	}
+	remote.gate.snapshots.Store(nil)
+	close(hold.release)
+	testkit.Eventually(t, "the rename mirrored from the snapshot", 10*time.Second, func() bool {
+		return mirroredName(t, local, record.ID, "remote-a") == "renamed"
 	})
 }
 

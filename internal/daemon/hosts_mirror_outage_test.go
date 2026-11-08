@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -103,5 +104,26 @@ func TestALocalRegistryErrorNeverMarksTheHostDown(t *testing.T) {
 		if row.UnavailableReason != "" || row.Host.State != hostStateConnected {
 			t.Fatalf("a local error marked %s %s: %q", row.ID, row.Host.State, row.UnavailableReason)
 		}
+	}
+}
+
+// A payload shape this build cannot read fails again as soon as the follower
+// resumes; the snapshots that repair it must settle at one per ceiling rather
+// than start over at once.
+func TestRepairSnapshotsForEventsThatKeepFailingSettleAtTheCeiling(t *testing.T) {
+	var backoff repairBackoff
+	now := time.Unix(0, 0)
+	var waits []time.Duration
+	for range 8 {
+		wait := backoff.next(now, time.Second, 8*time.Second)
+		waits = append(waits, wait)
+		now = now.Add(wait + 100*time.Millisecond)
+	}
+	want := []time.Duration{0, time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 8 * time.Second, 8 * time.Second, 8 * time.Second}
+	if !slices.Equal(waits, want) {
+		t.Fatalf("waits = %v, want %v", waits, want)
+	}
+	if wait := backoff.next(now.Add(9*time.Second), time.Second, 8*time.Second); wait != 0 {
+		t.Fatalf("a failure long after the follower resumed waits %s, want a snapshot at once", wait)
 	}
 }

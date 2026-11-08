@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -12,6 +13,20 @@ type localMirrorError struct{ err error }
 func (e localMirrorError) Error() string { return "local registry: " + e.err.Error() }
 
 func (e localMirrorError) Unwrap() error { return e.err }
+
+// catalogApplyError is a catalog event the follower could not apply. Its
+// cursor stays before the event, and the mirror reconciles from a snapshot.
+type catalogApplyError struct {
+	host string
+	seq  uint64
+	err  error
+}
+
+func (e catalogApplyError) Error() string {
+	return fmt.Sprintf("host %s catalog event %d: %s", e.host, e.seq, e.err)
+}
+
+func (e catalogApplyError) Unwrap() error { return e.err }
 
 func localMirror(err error) error {
 	if err == nil {
@@ -42,7 +57,8 @@ func (d *Daemon) hostAnswered(host *pairedHost, outage *hostOutage) {
 
 func (d *Daemon) hostFailed(host *pairedHost, outage *hostOutage, err error) {
 	var local localMirrorError
-	if errors.As(err, &local) {
+	var unapplied catalogApplyError
+	if errors.As(err, &local) || errors.As(err, &unapplied) {
 		d.logRuntimeError("host "+host.record.Name+" mirror", err)
 		return
 	}

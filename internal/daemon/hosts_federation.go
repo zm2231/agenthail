@@ -410,6 +410,7 @@ func (d *Daemon) setHostState(host *pairedHost, state, detail string, contacted 
 func (d *Daemon) runHostMirror(ctx context.Context, host *pairedHost) {
 	delay := d.federation.retryMin
 	var outage hostOutage
+	var repair repairBackoff
 	for ctx.Err() == nil {
 		connected, err := d.mirrorHostOnce(ctx, host, &outage)
 		if ctx.Err() != nil {
@@ -418,16 +419,43 @@ func (d *Daemon) runHostMirror(ctx context.Context, host *pairedHost) {
 		if connected {
 			delay = d.federation.retryMin
 		}
+		wait := delay
+		var unapplied catalogApplyError
+		if errors.As(err, &unapplied) {
+			wait = repair.next(time.Now(), d.federation.retryMin, hostRetryMax)
+		}
 		if err != nil {
 			d.hostFailed(host, &outage, err)
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(delay):
+		case <-time.After(wait):
 		}
 		delay = min(delay*2, hostRetryMax)
 	}
+}
+
+// repairBackoff spaces the snapshots that repair catalog events the follower
+// could not apply. The first is taken at once. A failure within ceiling of
+// the follower resuming waits a doubling delay instead, since a payload shape
+// this build cannot read fails on every event that carries it.
+type repairBackoff struct {
+	resumed time.Time
+	delay   time.Duration
+}
+
+func (b *repairBackoff) next(now time.Time, floor, ceiling time.Duration) time.Duration {
+	switch {
+	case b.resumed.IsZero() || now.Sub(b.resumed) > ceiling:
+		b.delay = 0
+	case b.delay == 0:
+		b.delay = floor
+	default:
+		b.delay = min(b.delay*2, ceiling)
+	}
+	b.resumed = now.Add(b.delay)
+	return b.delay
 }
 
 func hostFailureState(err error) string {
@@ -617,6 +645,7 @@ func (d *Daemon) followHostCatalog(ctx context.Context, host *pairedHost, after 
 	}
 	defer response.Body.Close()
 	reader := sse.NewReader(response.Body)
+	refused := map[string]bool{}
 	for {
 		event, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -633,7 +662,14 @@ func (d *Daemon) followHostCatalog(ctx context.Context, host *pairedHost, after 
 			return false, fmt.Errorf("host %s sent an invalid catalog event: %w", host.record.Name, err)
 		}
 		if err := d.applyHostCatalogEvent(host, envelope); err != nil {
-			d.logRuntimeError("host "+host.record.Name+" catalog event", err)
+			var owned registry.SessionOwnedError
+			if !errors.As(err, &owned) {
+				return false, catalogApplyError{host: host.record.Name, seq: envelope.Seq, err: err}
+			}
+			if !refused[owned.SessionID] {
+				refused[owned.SessionID] = true
+				d.logRuntimeError("host "+host.record.Name+" catalog event", err)
+			}
 		}
 		if err := d.Registry.RecordHostCatalogCursor(host.record.ID, host.epoch, envelope.Seq); err != nil {
 			return false, localMirror(err)
