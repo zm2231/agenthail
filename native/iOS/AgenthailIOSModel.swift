@@ -48,6 +48,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published private(set) var projects: [String: ListedProject] = [:]
     @Published private(set) var projectOrder: [String] = []
     @Published private(set) var holderPicks: [String: HolderPin] = [:]
+    lazy var decisionFeed = DecisionFeed(key: { [unowned self] in decisionsKey }, load: { [unowned self] in await loadDecisions() })
     private(set) var sessionFamilies: [SessionFamily] = []
     private(set) var sessionAttention: [String: SessionAttention] = [:]
     private var listedTree: (scope: SessionFilter, search: String, tree: SessionTree)?
@@ -525,8 +526,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         try await InboxPage.load(from: inboxHosts(), before: cursors, partial: partial)
     }
 
-    func decisionInbox() async throws -> DecisionInbox {
-        await DecisionInbox.load(from: try inboxHosts())
+    var decisionsKey: String {
+        let direct = hostOrder.compactMap { connections[$0] }.map { "\($0.id):\($0.shownReachable):\($0.catalogStreamCursor)" }
+        return (direct + catalog.hosts.map(\.id)).joined(separator: ",")
+    }
+
+    func loadDecisions() async -> DecisionInbox {
+        guard let hosts = try? inboxHosts() else { return DecisionInbox() }
+        return await DecisionInbox.load(from: hosts)
     }
 
     func answerDecision(_ request: SessionRequest, sessionID: String, decision: RequestDecision) async -> DecisionAnswer {

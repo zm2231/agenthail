@@ -14,9 +14,9 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertTrue(app.buttons["session-computer::crowded-3"].exists, "a project shows the daemon's five")
         XCTAssertFalse(app.buttons["session-computer::crowded-4"].exists, "a sixth idle session waits behind Show more")
         let more = app.buttons["more-computer::project-fieldnotes"]
-        XCTAssertEqual(more.label, "Show 3 more")
         let list: XCUIElement = app.isPad ? app.buttons["session-computer::crowded-3"] : app
-        list.swipeUp()
+        for _ in 0..<3 where !more.isHittable { list.swipeUp() }
+        XCTAssertEqual(more.label, "Show 3 more")
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "show more"
         shot.lifetime = .keepAlways

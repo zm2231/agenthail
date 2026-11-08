@@ -28,13 +28,19 @@ struct ProjectTilesTest {
         for vector in vectors.cases {
             check(ProjectTiles.colour(vector.id) == vector.colour, "\(vector.id) takes colour \(ProjectTiles.colour(vector.id)), the dashboard gives it \(vector.colour)")
         }
+        for vector in vectors.colourIds {
+            let id = ProjectTiles.colourID(vector.id, owner: vector.owner)
+            check(id == vector.colourId && ProjectTiles.colour(id) == vector.colour, "\(vector.name): \(id) takes colour \(ProjectTiles.colour(id))")
+        }
         print("project tiles ok")
     }
 
     struct ColourVectors: Decodable {
         struct Case: Decodable { let id: String; let colour: Int }
+        struct Owned: Decodable { let name: String; let id: String; let owner: String; let colourId: String; let colour: Int }
         let count: Int
         let cases: [Case]
+        let colourIds: [Owned]
     }
 
     static let colourFixture = URL(fileURLWithPath: #filePath)

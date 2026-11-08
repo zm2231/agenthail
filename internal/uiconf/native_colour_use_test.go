@@ -39,6 +39,7 @@ var statusColours = map[string]statusColour{
 			"macOS/DecisionInboxPane.swift":     {2, "a decision holding up other sessions, and the request waiting in the card"},
 			"macOS/DecisionList.swift":          {1, "a decision holding up other sessions, on its row"},
 			"macOS/SidebarTiles.swift":          {1, "the count of decisions waiting on the person, on the Inbox tile"},
+			"iOS/PhoneProjectTiles.swift":       {1, "the count of decisions waiting on the person, on a project tile"},
 			"iOS/HolderPicker.swift":            {1, "a terminal must be picked before sending"},
 			"iOS/QueueTailRows.swift":           {1, "a message that was not delivered"},
 			"iOS/SessionControls.swift":         {1, "an undelivered message in the inbox"},
@@ -92,7 +93,8 @@ var statusColours = map[string]statusColour{
 		job:  "which project something belongs to, on the project's tile mark; never a state",
 		uses: regexp.MustCompile(`DesktopPalette\.project\(|PhonePalette\.project\(|PaletteTokens\.projects\[`),
 		files: map[string]colourUse{
-			"macOS/SidebarTiles.swift": {1, "a project tile's letter mark"},
+			"macOS/SidebarTiles.swift":    {1, "a project tile's letter mark"},
+			"iOS/PhoneProjectTiles.swift": {1, "a project tile's letter mark"},
 		},
 	},
 }

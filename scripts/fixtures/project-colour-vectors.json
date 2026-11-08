@@ -7,11 +7,19 @@
     {"id": "github.com/example/web", "colour": 3},
     {"id": "github.com/example/docs", "colour": 4},
     {"id": "github.com/example/mobile", "colour": 5},
+    {"id": "repo:github.com/example/api", "colour": 5},
     {"id": "server-1::notes", "colour": 1},
     {"id": "laptop::scratch", "colour": 5},
     {"id": "café", "colour": 1},
     {"id": "日本語", "colour": 3},
     {"id": "🚀 launch", "colour": 1},
     {"id": "", "colour": 1}
+  ],
+  "colourIds": [
+    {"name": "a keyless project on the computer that owns it", "id": "notes", "owner": "server-1", "colourId": "server-1::notes", "colour": 1},
+    {"name": "the same keyless project relayed through another computer", "id": "server-1::notes", "owner": "laptop", "colourId": "server-1::notes", "colour": 1},
+    {"name": "a repository project on any computer", "id": "repo:github.com/example/api", "owner": "server-1", "colourId": "repo:github.com/example/api", "colour": 5},
+    {"name": "the same repository project on another computer", "id": "repo:github.com/example/api", "owner": "laptop", "colourId": "repo:github.com/example/api", "colour": 5},
+    {"name": "a project before the computer's own id is known", "id": "scratch", "owner": "", "colourId": "scratch", "colour": 5}
   ]
 }

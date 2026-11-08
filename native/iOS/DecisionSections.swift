@@ -147,10 +147,14 @@ struct DecisionSheet: View {
         switch await model.answerDecision(request, sessionID: item.sessionId, decision: decision) {
         case .answered:
             failure = nil
+            model.decisionFeed.answered(request, in: item.sessionId)
             next(after: request)
         case .failed(let result):
             failure = result.message
-            if result.dropsCard { next(after: request) }
+            if result.dropsCard {
+                model.decisionFeed.answered(request, in: item.sessionId)
+                next(after: request)
+            }
         case .busy:
             break
         }

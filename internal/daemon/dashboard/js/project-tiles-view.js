@@ -1,7 +1,7 @@
 import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape } from "./format.js";
-import { orderTiles, tileLetter, needsYouByProject, projectColour } from "./project-tiles.js";
+import { orderTiles, tileLetter, needsYouByProject, projectColour, projectColourID } from "./project-tiles.js";
 import { shownDecisions } from "./decision-card.js";
 import { openProject, leaveProject } from "./project-pane.js";
 import { syncDecisionPane } from "./pane-scope.js";
@@ -24,6 +24,7 @@ export function renderTiles() {
   const counts = needsYouByProject(decisions, projects);
   const { shown, more } = orderTiles(projects, tileLimit);
   const scope = app.scope || "all";
+  const owner = app.state.daemon?.host?.id || "";
   const moreCount = more.reduce((sum, project) => sum + (counts[project.id] || 0), 0);
   const moreSelected = more.some((project) => project.id === scope);
   const options = more.map((project) => `<option value="${escape(project.id)}"${project.id === scope ? " selected" : ""}>${escape(project.displayName || project.id)}${project.archived ? " (archived)" : ""}</option>`).join("");
@@ -31,7 +32,7 @@ export function renderTiles() {
     ? `<label class="project-tile${moreSelected ? " active" : ""}" title="${more.length} more ${more.length === 1 ? "project" : "projects"}"><span class="tile-mark">…${moreCount ? `<span class="tile-badge">${moreCount}</span>` : ""}</span><span class="tile-name">+${more.length}</span><select data-scope-more aria-label="More projects"><option value="">More projects</option>${options}</select></label>`
     : "";
   row.innerHTML = tile("inbox", "▤", "Inbox", decisions.length, scope === "inbox")
-    + shown.map((project) => tile(project.id, escape(tileLetter(project.displayName || project.id)), project.displayName || project.id, counts[project.id] || 0, scope === project.id, projectColour(project.id))).join("")
+    + shown.map((project) => tile(project.id, escape(tileLetter(project.displayName || project.id)), project.displayName || project.id, counts[project.id] || 0, scope === project.id, projectColour(projectColourID(project.id, owner)))).join("")
     + menu
     + tile("all", "≡", "All", 0, scope === "all");
 }

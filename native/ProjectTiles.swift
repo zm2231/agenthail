@@ -18,6 +18,10 @@ struct ProjectTiles: Equatable {
         return ProjectTiles(shown: shown, more: rest)
     }
 
+    static func colourID(_ projectID: String, owner hostID: String) -> String {
+        hostID.isEmpty || projectID.isEmpty || projectID.contains("::") || projectID.hasPrefix("repo:") ? projectID : hostID + "::" + projectID
+    }
+
     static func colour(_ projectID: String) -> Int {
         var hash: UInt32 = 2_166_136_261
         for byte in projectID.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }

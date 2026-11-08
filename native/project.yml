@@ -45,6 +45,7 @@ targets:
       - path: QueueSteer.swift
       - path: InboxMessage.swift
       - path: Decisions.swift
+      - path: DecisionFeed.swift
       - path: PeerEnvelope.swift
       - path: TaggedResponses.swift
       - path: UIConfig.swift
@@ -211,6 +212,8 @@ targets:
     platform: iOS
     sources:
       - path: iOSTests
+      - path: ../scripts/fixtures/project-colour-vectors.json
+        buildPhase: resources
     dependencies:
       - target: AgenthailIOS
     settings:
