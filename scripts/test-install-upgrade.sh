@@ -37,6 +37,14 @@ mkdir -p "$AGENTHAIL_BUILD_CACHE"
 cp "$node_dist.tar.gz" "$AGENTHAIL_BUILD_CACHE/"
 
 cleanup() {
+	local status=$?
+	if [ "$status" -ne 0 ]; then
+		for log in "$TMP"/*/.agenthail/daemon.log "$TMP"/*/.agenthail/fake-launchd.log; do
+			[ -f "$log" ] || continue
+			echo "--- $log" >&2
+			tail -n 100 "$log" >&2
+		done
+	fi
 	[ -z "$OTHER_HOME_DAEMON" ] || kill "$OTHER_HOME_DAEMON" 2>/dev/null || true
 	if [ -x "$NEW_BIN/agenthail" ]; then
 		HOME="$TEST_HOME" PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" "$NEW_BIN/agenthail" daemon uninstall >/dev/null 2>&1 || true
@@ -59,6 +67,15 @@ cleanup() {
 	rm -rf "$TMP"
 }
 trap cleanup EXIT
+
+daemon_pid() {
+	local file="$1/.agenthail/daemon.pid"
+	if [ ! -s "$file" ]; then
+		echo "error: no daemon is running for $1" >&2
+		return 1
+	fi
+	cat "$file"
+}
 
 mkdir -p "$TEST_HOME" "$CUSTOM_HOME" "$SUPERVISED_HOME" "$FAKE_BIN"
 cp "$ROOT/scripts/fixtures/fake-launchctl.sh" "$FAKE_BIN/launchctl"
@@ -249,9 +266,9 @@ test "$(readlink "$CONFIGURED_CODEX/skills/agenthail-operations")" = "$SKILL_DAT
 grep -Fqx 'mine' "$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"
 
 install_once "$CUSTOM_HOME" "$CUSTOM_BIN" "$CUSTOM_DATA_1" >/dev/null
-CUSTOM_PID_1="$(cat "$CUSTOM_HOME/.agenthail/daemon.pid")"
+CUSTOM_PID_1="$(daemon_pid "$CUSTOM_HOME")"
 install_once "$CUSTOM_HOME" "$CUSTOM_BIN" "$CUSTOM_DATA_1" >"$TMP/custom-in-place.log"
-CUSTOM_PID_2="$(cat "$CUSTOM_HOME/.agenthail/daemon.pid")"
+CUSTOM_PID_2="$(daemon_pid "$CUSTOM_HOME")"
 test "$CUSTOM_PID_1" != "$CUSTOM_PID_2"
 grep -Fq 'stopping supervised daemon for upgrade' "$TMP/custom-in-place.log"
 grep -Fq 'reinstalling supervised daemon' "$TMP/custom-in-place.log"
@@ -266,7 +283,8 @@ fi
 unset AGENTHAIL_INSTALL_TEST_FAIL_AFTER_ACTIVATION
 test -f "$CUSTOM_DATA_1/rollback-sentinel"
 test "$(shasum -a 256 "$CUSTOM_BIN/agenthail" | awk '{print $1}')" = "$CUSTOM_WRAPPER_BEFORE"
-test "$(cat "$CUSTOM_HOME/.agenthail/daemon.pid")" != "$CUSTOM_PID_2"
+CUSTOM_PID_3="$(daemon_pid "$CUSTOM_HOME")"
+test "$CUSTOM_PID_3" != "$CUSTOM_PID_2"
 grep -Fq 'injected post-activation failure' "$TMP/custom-rollback.log"
 HOME="$CUSTOM_HOME" PATH="$FAKE_BIN:$CUSTOM_BIN:/opt/homebrew/bin:/usr/bin:/bin" agenthail daemon status >/dev/null
 
@@ -278,12 +296,13 @@ grep -Fq 'refusing to overwrite unmanaged executable' "$TMP/custom-data-collisio
 grep -Fq "$(printf '%q' "$CUSTOM_DATA_1/agenthail")" "$CUSTOM_BIN/agenthail"
 
 install_once "$SUPERVISED_HOME" "$SUPERVISED_BIN" "$SUPERVISED_DATA_1" >/dev/null
-SUPERVISED_PID_1="$(cat "$SUPERVISED_HOME/.agenthail/daemon.pid")"
+SUPERVISED_PID_1="$(daemon_pid "$SUPERVISED_HOME")"
 if install_once "$SUPERVISED_HOME" "$SUPERVISED_BIN" "$SUPERVISED_DATA_2" >"$TMP/supervised-data-collision.log" 2>&1; then
 	echo "error: supervised data-directory migration unexpectedly overwrote the managed wrapper" >&2
 	exit 1
 fi
-test "$(cat "$SUPERVISED_HOME/.agenthail/daemon.pid")" = "$SUPERVISED_PID_1"
+SUPERVISED_PID_2="$(daemon_pid "$SUPERVISED_HOME")"
+test "$SUPERVISED_PID_2" = "$SUPERVISED_PID_1"
 grep -Fq 'refusing to overwrite unmanaged executable' "$TMP/supervised-data-collision.log"
 SUPERVISED_PLIST="$SUPERVISED_HOME/Library/LaunchAgents/com.agenthail.daemon.plist"
 test "$(plutil -extract ProgramArguments.0 raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_DATA_1/agenthail"

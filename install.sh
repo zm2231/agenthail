@@ -102,6 +102,19 @@ if [ "${#OWNED_WRAPPERS[@]}" -gt 0 ]; then
 elif [ ! -e "$DATA_DIR/agenthail" ]; then
 	FRESH_INSTALL=1
 fi
+# launchd starts the daemon only after bootstrap returns, so a rollback that
+# loads the previous service waits for that daemon as an install does.
+await_daemon() {
+	local wrapper="$1"
+	local deadline=$((SECONDS + 180))
+	while [ "$SECONDS" -lt "$deadline" ]; do
+		case "$("$wrapper" daemon status 2>/dev/null || true)" in
+			*"daemon: running"*) return 0 ;;
+		esac
+		sleep 0.2
+	done
+	echo "warning: the previous daemon did not start again; see $HOME/.agenthail/daemon.log" >&2
+}
 cleanup() {
 	exit_code=$?
 	rm -rf "$STAGE_DIR" "$NEXT_DIR"
@@ -126,6 +139,7 @@ cleanup() {
 		if [ "$RUNTIME_STOPPED" -eq 1 ]; then
 			if [ "$REINSTALL_SERVICE" -eq 1 ] && [ -f "$SERVICE_PLIST" ]; then
 				launchctl bootstrap "gui/$UID" "$SERVICE_PLIST" >/dev/null 2>&1 || true
+				[ -x "$TARGET_WRAPPER" ] && await_daemon "$TARGET_WRAPPER"
 			elif [ "$RESTART_DAEMON" -eq 1 ]; then
 				control_wrapper="$INSTALL_DIR/agenthail"
 				if [ ! -x "$control_wrapper" ] && [ -n "$EXISTING_WRAPPER" ]; then
