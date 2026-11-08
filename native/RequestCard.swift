@@ -13,13 +13,24 @@ struct RequestCard: View {
     var surface: AnyShapeStyle? = AnyShapeStyle(.regularMaterial)
     var actionTint: AnyShapeStyle? = nil
     var focusesPager = false
+    var agentSurface = ""
     @State private var form = ElicitationForm()
+    @State private var replying = false
+    @State private var reply = ""
 
-    var heading: String { Self.heading(request, asker: asker) }
+    var heading: String { Self.heading(request, asker: asker, surface: agentSurface) }
 
-    static func heading(_ request: SessionRequest, asker: String) -> String {
+    static func heading(_ request: SessionRequest, asker: String, surface: String = "") -> String {
         if request.isAsk { return "\(asker) asks: \(request.title ?? "")" }
-        return request.isQuestion ? "Claude asks" : "Claude wants your approval"
+        let agent = surface.isEmpty ? "The agent" : SessionRefinement.surfaceLabel(surface)
+        return request.isQuestion ? "\(agent) asks" : "\(agent) wants your approval"
+    }
+
+    static let denyingChoices: Set<String> = ["deny", "never", "stop"]
+
+    static func approvalButtons(_ actions: [SessionRequest.Action]) -> (allowing: [SessionRequest.Action], denying: [SessionRequest.Action], reply: SessionRequest.Action?) {
+        let buttons = actions.filter { $0.id != RequestNotifications.replyChoice }
+        return (buttons.filter { !denyingChoices.contains($0.id) }, buttons.filter { denyingChoices.contains($0.id) }, actions.first { $0.id == RequestNotifications.replyChoice })
     }
 
     var body: some View {
@@ -53,18 +64,7 @@ struct RequestCard: View {
                     if let path = request.blockedPath, !path.isEmpty {
                         Text(path).font(.caption.monospaced()).foregroundStyle(RoleStyle(.muted))
                     }
-                    HStack {
-                        Button("Allow") { send(.allow) }
-                            .buttonStyle(.borderedProminent)
-                        if request.alwaysAllow {
-                            Button("Always allow") { send(.alwaysAllow) }
-                                .buttonStyle(.bordered)
-                        }
-                        Spacer()
-                        Button("Deny", role: .destructive) { send(.deny) }
-                            .buttonStyle(.bordered)
-                    }
-                    .disabled(answering)
+                    approvalView
                 }
             }
         }
@@ -72,6 +72,41 @@ struct RequestCard: View {
         .background { if let surface { RoundedRectangle(cornerRadius: 12).fill(surface) } }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("request-\(request.id)")
+    }
+
+    @ViewBuilder
+    private var approvalView: some View {
+        let buttons = Self.approvalButtons(request.actions)
+        VStack(alignment: .trailing, spacing: 8) {
+            HStack {
+                ForEach(buttons.allowing, id: \.id) { action in
+                    if action.id == "allow" {
+                        Button(action.title) { send(.choice(action.id)) }.buttonStyle(.borderedProminent)
+                    } else {
+                        Button(action.title) { send(.choice(action.id)) }.buttonStyle(.bordered)
+                    }
+                }
+                Spacer()
+            }
+            HStack {
+                Spacer()
+                if let action = buttons.reply, !replying {
+                    Button(action.title) { replying = true }.buttonStyle(.bordered)
+                }
+                ForEach(buttons.denying, id: \.id) { action in
+                    Button(action.title, role: .destructive) { send(.choice(action.id)) }.buttonStyle(.bordered)
+                }
+            }
+            if replying, buttons.reply != nil {
+                HStack {
+                    TextField("Message", text: $reply).textFieldStyle(.roundedBorder)
+                    Button("Send", role: .destructive) { send(RequestDecision(choice: RequestNotifications.replyChoice, message: reply)) }
+                        .buttonStyle(.bordered)
+                        .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .disabled(answering)
     }
 
     @ViewBuilder

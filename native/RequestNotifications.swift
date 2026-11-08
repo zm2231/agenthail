@@ -26,7 +26,8 @@ private struct OpenRequests: Decodable {
 enum RequestNotifications {
     static let categoryPrefix = "AGENTHAIL_REQ_"
     static let replyChoice = "reply"
-    static let choices: Set<String> = ["allow", "always", "deny", "o0", "o1", "o2", "o3", replyChoice]
+    static let choices: Set<String> = ["allow", "always", "deny", "never", "stop", "o0", "o1", "o2", "o3", replyChoice]
+    static let destructiveChoices: Set<String> = ["deny", "never", "stop"]
     static let maxActions = 5
     static let retainedRequests = 32
 
@@ -84,7 +85,7 @@ enum RequestNotifications {
             if action.id == replyChoice {
                 return UNTextInputNotificationAction(identifier: action.id, title: action.title, options: [.authenticationRequired], textInputButtonTitle: "Send", textInputPlaceholder: "Message")
             }
-            return UNNotificationAction(identifier: action.id, title: action.title, options: action.id == "deny" ? [.authenticationRequired, .destructive] : [.authenticationRequired])
+            return UNNotificationAction(identifier: action.id, title: action.title, options: destructiveChoices.contains(action.id) ? [.authenticationRequired, .destructive] : [.authenticationRequired])
         }
         return UNNotificationCategory(identifier: categoryIdentifier(requestID: requestID), actions: buttons, intentIdentifiers: [])
     }

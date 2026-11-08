@@ -76,7 +76,8 @@ struct DecisionInboxPane: View {
                     RequestCard(request: request, answering: answering, accent: AnyShapeStyle(DesktopPalette.accentText),
                                 respond: { decision in Task { await answer(request, decision, item, in: items) } },
                                 asker: model.sessionName(item.sessionId), attention: AnyShapeStyle(DesktopPalette.attention),
-                                surface: nil, actionTint: AnyShapeStyle(DesktopPalette.accent), focusesPager: true)
+                                surface: nil, actionTint: AnyShapeStyle(DesktopPalette.accent), focusesPager: true,
+                                agentSurface: model.cells.session(item.sessionId)?.surface ?? "")
                         .id(item.sessionId + "/" + request.id)
                     if let recommended = DecisionInbox.recommended(request) {
                         Button("Accept recommended") { Task { await answer(request, recommended, item, in: items) } }

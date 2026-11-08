@@ -125,7 +125,8 @@ struct DecisionSheet: View {
                         }
                         RequestCard(request: request, answering: model.answeringRequest != nil, accent: AnyShapeStyle(PhonePalette.accentText),
                                     respond: { decision in Task { await answer(request, decision) } },
-                                    asker: title, attention: AnyShapeStyle(PhonePalette.attention), actionTint: AnyShapeStyle(PhonePalette.accent))
+                                    asker: title, attention: AnyShapeStyle(PhonePalette.attention), actionTint: AnyShapeStyle(PhonePalette.accent),
+                                    agentSurface: model.snapshot?.sessions.first { $0.id == item.sessionId }?.surface ?? "")
                             .id(request.id)
                     }
                 }
