@@ -53,7 +53,7 @@ A non-Claude source receives a generated `@handle` only when it sends to a Claud
 
 The worker's `/tmp/cc-socks/<pid>.sock` cannot be a restart-stable reply address: Claude validates that destination as a live, PID-named socket and replies to the literal `from` value in the received envelope. A durable design therefore starts one separate, per-source relay process only for a non-Claude source; that relay owns its own live PID-named socket across peer-worker replacement. The manager passes that relay socket through the private worker control request, while the published envelope keeps the source's canonical identity and reserved handle. The relay verifies each inbound Claude sender against a current same-user native record, retains provenance only for the live socket it observed, and queues into the source's logical registry session. It must neither store/reuse a retired worker socket nor infer a source from an untrusted literal ID. Native Claude-to-Claude sends continue to use the caller's actual native socket and do not create a relay or a person or CLI peer. Accepted peer frames emit one `received` status receipt; queue insertion remains transport acceptance, not model completion. Status receipts and the no-route notice are written and closed without waiting for the sender to close its end, so a sender that never closes does not hold the connection answering it. The acceptance gate is one native reply delivered exactly once after replacing the source helper, using fresh disposable sessions.
 
-`transport_accepted` evidence means the socket closed after accepting bytes. It is not a completed model turn. A receiving Claude may hold or deny a message under its own policy; asynchronous status receipts appear in history. Claude holds a message to a session that runs without permission prompts unless its sender states that it does too. Every message is sent under its delivery's uuid, so Claude's reports name the delivery. When the Claude host runs the target, its `peer_message_hold` reports set the delivery to `held`, listed among delivery problems with the cause in plain words and announced to an agent sender with one `[agenthail delivery held ...]` notice, then to delivered when Claude releases it or to failed when Claude drops it. A release also settles the message's queued retry and withdraws a held notice not yet sent, so the outbox never sends a released message a second time. A hosted session has no prompt to approve a held message, so it expires. The sender's peer worker records an expired, refused or dropped receipt the same way. `Claude.sendPeer` puts the predicted hold on the send result's notice: `crossSessionInbound` from managed, project-local, project and config-root settings in that order, and without a setting the sender's and a hosted target's permission class (bypass or prompting); a terminal target's mode is unknown, so its notice says the message waits for approval there if the modes differ. A message to a busy session is queued by Claude and read by the model with the result of the running tool call (`queued_command` attachment, observed with Claude Code 2.1.316), so it reaches a running turn without being a steer. A `<cross-session-message>` that arrives as a host stdin turn is held like any other unverified envelope and expires, so an agent's words never go there: `ownTurn` in `claude_steer.go` refuses an agent sender for a steer and a Remote Control post with `surface.ErrNotOwnTurn` (the CLI run outside any session keeps its `[from agenthail-cli]` label there), and `delivery.Dispatcher.Steer` sends an agent's steer to a socket session as a peer message instead. Native message IDs cannot be correlated reliably with transcript turn IDs, so `send --reply`, `--stream`, and slash commands are rejected. Transcript reads remain available. Compact, model, interrupt, and steer require a separately resolved Remote Control attachment; see [Remote Control evidence](#remote-control-evidence). Those controls do not enter the peer message socket or ordinary message queue. A socket failure does not trigger a second send through HTTP.
+`transport_accepted` evidence means the socket closed after accepting bytes. It is not a completed model turn. A receiving Claude may hold or deny a message under its own policy; asynchronous status receipts appear in history. Claude holds a message to a session that runs without permission prompts unless its sender states that it does too. Every message is sent under its delivery's uuid, so Claude's reports name the delivery. When the Claude host runs the target, its `peer_message_hold` reports set the delivery to `held`, listed among delivery problems with the cause in plain words and announced to an agent sender with one `[agenthail delivery held ...]` notice, then to delivered when Claude releases it or to failed when Claude drops it. A release also settles the message's queued retry and withdraws a held notice not yet sent, so the outbox never sends a released message a second time. A hosted session has no prompt to approve a held message, so it expires. The sender's peer worker records an expired, refused or dropped receipt the same way. `Claude.sendPeer` puts the predicted hold on the send result's notice: `crossSessionInbound` from managed, project-local, project and config-root settings in that order, and without a setting the sender's and a hosted target's permission class (bypass or prompting); a terminal target's mode is unknown, so its notice says the message waits for approval there if the modes differ. A message to a busy session is queued by Claude and read by the model with the result of the running tool call (`queued_command` attachment, observed with Claude Code 2.1.316), so it reaches a running turn without being a steer. A `<cross-session-message>` that arrives as a host stdin turn is held like any other unverified envelope and expires, so an agent's words never go there: `ownTurn` in `claude_steer.go` refuses an agent sender for a steer and a Remote Control post with `surface.ErrNotOwnTurn` (the CLI run outside any session keeps its `[from agenthail-cli]` label there), and `delivery.Dispatcher.Steer` sends an agent's steer to a socket session as a peer message instead. Native message IDs cannot be correlated reliably with transcript turn IDs, so `send --reply`, `--stream`, and slash commands are rejected. Transcript reads remain available. Compact, model, interrupt, and steer require a separately resolved Remote Control attachment or a session the Claude host runs; see [Remote Control evidence](#remote-control-evidence) and [Claude host evidence](#claude-host-evidence). Those controls do not enter the peer message socket or ordinary message queue. A socket failure does not trigger a second send through HTTP.
 
 ## Lifecycle and verification
 
@@ -109,3 +109,64 @@ starting at the posted event. An accepted request whose response or effect is no
 observed before the deadline is `unknown`, carries its request id, and is not
 retried. History records each control under the kind that reads back as its
 evidence, with the request id as the result.
+
+## Claude host evidence
+
+A session the Claude host runs takes its controls from the host, not from
+Remote Control (`Claude.hostControl`). The host calls the Agent SDK, which sends
+Claude a `control_request` and resolves when the `control_response` carrying its
+request id arrives. A host call that times out or loses the host is `unknown`.
+
+| Control | Request | Evidence |
+| --- | --- | --- |
+| model | `setModel` | `delivered` when Claude answers the SDK's `set_model`; the output is the model the host lists afterwards |
+| permission-mode | `setPermissionMode` | `delivered` when Claude answers; only hosted sessions offer it |
+| effort | `setEffort` | `delivered` when Claude answers the SDK's flag settings; set through the session's turn settings, not `agenthail control` |
+| interrupt | `interrupt` | `delivered` when Claude answers the interrupt; unlike Remote Control it does not wait for the turn to end |
+| steer | `send`, priority `now` | `delivered` once Claude reads the message from its input; `unknown` if it has not within the host's take timeout |
+| compact | `/compact` as Agenthail's own turn | as for Remote Control: `delivered` when a `compact_boundary` follows the exact request |
+| status, context, usage, rename | none | not offered: `ErrUnsupported`, and the session's capabilities say it has no commands |
+
+## Slash text
+
+Agenthail runs a slash command for a control only when it is on the list above,
+and confirms each one as the tables say. Any other text that starts with `/` is a
+message, and what happens to it depends on its sender and transport.
+
+What happens today:
+
+| Sender | Transport | Today |
+| --- | --- | --- |
+| the person (composer, `author: person`) | Remote Control or the Claude host | posted as a user turn; Claude runs it as it would run typed text |
+| the person | peer socket only | refused: the socket cannot run a command |
+| an agent, relay or channel | peer socket | refused (`peerSlashCommand`) |
+| an agent | Remote Control only, with no socket | held until the session has a socket (`ErrNotOwnTurn`); never posted |
+| `agenthail send` outside any session | Remote Control | prefixed `[from Agenthail CLI, no reply route]`, so Claude reads it as text |
+| Agenthail itself (goal, compact) | Remote Control or the Claude host | runs; these are its own controls |
+| any sender | Codex | refused: the app-server would hand `/name` to the model as plain text |
+
+Proposed contract: text the person types runs as Claude would run it, or is
+refused where the transport cannot run it, never delivered as text that looks
+like it ran. Text from an agent, a relay or a channel stays literal message text
+and never runs a command. The table differs from that contract in two places:
+
+- An agent, relay or channel message starting with `/` is refused on the peer
+  socket instead of delivered as literal text. Removing the refusal first needs
+  a check that Claude keeps a peer message starting with `/` as text and does
+  not run it; that has not been observed.
+- Codex refuses `/name` from every sender. For an agent this is stricter than
+  the contract; for the person it is the contract's refusal, since Codex runs
+  slash commands only in its own composer.
+
+## Terminal-only commands
+
+Claude reports, on the `system/init` message of each turn, the commands whose
+interface is bound to a local terminal (`terminal_slash_commands`). On Claude
+Code 2.1.319 they are `doctor`, `color`, `focus` and `reload-plugins`. The host
+leaves them out of a hosted session's command list, so the dashboard does not
+offer them there.
+
+Sessions the host does not run get their list from the host's per-folder listing,
+which starts Claude without a turn. Claude sends no `system/init` without a turn,
+so that listing does not know which commands are terminal-only and offers all of
+them.
