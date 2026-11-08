@@ -7,11 +7,11 @@ import { decisionGroups, decisionsKey, loadDecisions } from "./decisions.js";
 export async function refreshDecisions(loader = loadDecisions) {
   const key = decisionsKey();
   if (app.decisionsKey === key) return;
-  if (app.decisionsLoading) {
-    app.decisionsAgain = true;
+  if (app.decisionsLoading !== undefined) {
+    if (app.decisionsLoading !== key) app.decisionsAgain = true;
     return;
   }
-  app.decisionsLoading = true;
+  app.decisionsLoading = key;
   app.decisionsAgain = false;
   try {
     const loaded = await loader();
@@ -25,7 +25,7 @@ export async function refreshDecisions(loader = loadDecisions) {
       app.decisionsDropped = true;
     }
   } finally {
-    app.decisionsLoading = false;
+    app.decisionsLoading = undefined;
   }
   if (app.decisionsAgain || decisionsKey() !== key) {
     app.decisionsAgain = false;

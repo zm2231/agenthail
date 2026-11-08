@@ -116,6 +116,16 @@ assert.ok(!elements.list.innerHTML.includes("old prompt"));
 assert.equal(app.decisionsKey.endsWith("epoch:4"), true);
 assert.equal(app.decisions.decisions.length, 0, "the newest load is the one kept");
 
+app.state.catalogSeq = 6;
+const rendering = vm.runInContext("refreshDecisions(slowLoader)", context);
+const sameStart = loads;
+await vm.runInContext("refreshDecisions(slowLoader)", context);
+pending.shift()(stale);
+await rendering;
+assert.equal(loads, sameStart, "a render asking again for the position being loaded starts no load");
+assert.equal(app.decisions.decisions[0].sessionId, "stale-session", "and does not drop the load it asked for");
+assert.equal(app.decisionsKey.endsWith("epoch:6"), true);
+
 const busy = (n) => ({ decisions: [{ group: "waiting", sessionId: `busy-${n}`, kind: "request", reason: "r", answerable: false }], leadHandling: [], unreachable: [], outdated: [] });
 const streamStart = loads;
 app.state.catalogSeq = 10;
