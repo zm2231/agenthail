@@ -2,7 +2,7 @@ import SwiftUI
 
 struct DecisionList: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
 
     var body: some View {
         let feed = model.decisionFeed

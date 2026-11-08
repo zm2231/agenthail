@@ -34,15 +34,26 @@ struct StatusItems: View, @MainActor Equatable {
         case "hosts":
             StatusLabel(title: state.short ? nil : state.hosts, spoken: state.hosts) { Image(systemName: "desktopcomputer") }
         case "terminal":
-            Button { if let session = pane.displayedSession { model.focusInTerminal(session) } } label: {
-                StatusLabel(title: state.short ? nil : "Terminal", spoken: "Terminal") { Image(systemName: "terminal") }
-            }
-            .buttonStyle(ReadableButtonStyle())
-            .disabled(!state.terminalFocusable)
-            .help("Show this session's terminal")
+            TerminalStatusItem(model: model, pane: pane, short: state.short)
         default:
             EmptyView()
         }
+    }
+}
+
+private struct TerminalStatusItem: View {
+    let model: AgenthailModel
+    let pane: SessionPane
+    let short: Bool
+
+    var body: some View {
+        let session = pane.displayedSession
+        Button { if let session { model.focusInTerminal(session) } } label: {
+            StatusLabel(title: short ? nil : "Terminal", spoken: "Terminal") { Image(systemName: "terminal") }
+        }
+        .buttonStyle(ReadableButtonStyle())
+        .disabled(session?.runtime?.focusable != true)
+        .help("Show this session's terminal")
     }
 }
 

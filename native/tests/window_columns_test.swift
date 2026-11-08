@@ -8,7 +8,7 @@ final class Measured {
 }
 
 struct Columns: View {
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let measured: Measured
     var widest = false
 

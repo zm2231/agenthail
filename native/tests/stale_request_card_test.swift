@@ -1,5 +1,4 @@
 @testable import AgenthailHelpers
-import Combine
 import Foundation
 
 final class StaleRequestStub: URLProtocol, @unchecked Sendable {
@@ -55,26 +54,20 @@ struct StaleRequestCardTest {
         let quiet = SessionState(id: "S", surface: "claude", name: "s", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
         await pane.syncRequests(for: quiet)
         check(pane.requests == nil, "a session that can't answer requests clears the cards")
-        var published = 0
-        let watch = pane.objectWillChange.sink { published += 1 }
+        let watch = PaneChanges(pane)
         await pane.syncRequests(for: quiet)
-        watch.cancel()
-        check(published == 0, "resyncing a session that can't answer requests publishes nothing: \(published)")
+        check(watch.count == 0, "resyncing a session that can't answer requests changes nothing: \(watch.count)")
 
         StaleRequestStub.requestsReply = (200, #"{"permissionMode":"","requests":[]}"#)
-        var sets: [SessionRequests?] = []
-        var errorSets = 0
-        let requestWatch = pane.$requests.dropFirst().sink { sets.append($0) }
-        let errorWatch = pane.$requestError.dropFirst().sink { _ in errorSets += 1 }
+        let requestWatch = PaneChanges(pane) { _ = $0.requests }
+        let errorWatch = PaneChanges(pane) { _ = $0.requestError }
         await pane.syncRequests(for: session)
-        check(sets.count == 1 && sets[0]?.requests.isEmpty == true, "reopening sets the loaded requests once: \(sets)")
+        check(requestWatch.count == 1 && pane.requests?.requests.isEmpty == true, "reopening sets the loaded requests once: \(requestWatch.count)")
         var waiting = session
         waiting.waitingOn = WaitingState(kind: "question", id: "q")
         await pane.syncRequests(for: waiting)
-        requestWatch.cancel()
-        errorWatch.cancel()
-        check(sets.count == 1, "rereading the same requests sets nothing: \(sets.count)")
-        check(errorSets == 0, "a request read with no error to clear sets nothing: \(errorSets)")
+        check(requestWatch.count == 1, "rereading the same requests changes nothing: \(requestWatch.count)")
+        check(errorWatch.count == 0, "a request read with no error to clear changes nothing: \(errorWatch.count)")
         print("stale request card tests passed")
     }
 

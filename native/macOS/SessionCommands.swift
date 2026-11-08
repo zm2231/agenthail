@@ -4,7 +4,7 @@ struct SessionCommands: Commands {
     var model: AgenthailModel
     let voice: VoiceController
     @ObservedObject private var shortcuts = ShortcutStore.shared
-    @FocusedObject private var pane: SessionPane?
+    @FocusedValue(SessionPane.self) private var pane
     @Environment(\.openWindow) private var openWindow
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
 

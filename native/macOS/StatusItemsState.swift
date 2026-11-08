@@ -6,7 +6,6 @@ struct StatusItemsState: Equatable {
     let working: Int
     let needsYou: Int
     let hosts: String
-    let terminalFocusable: Bool
 
     static func hosts(_ hosts: [HostHealth]) -> String {
         (["this Mac"] + hosts.filter { $0.state == "connected" }.map(\.name)).joined(separator: " · ")

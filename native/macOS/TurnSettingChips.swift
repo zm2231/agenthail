@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct TurnSettingChips: View {
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     @State private var pending: TurnSettingChoice?
 
     private var settings: [TurnSetting] { pane.detail?.turnSettings ?? [] }

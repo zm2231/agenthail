@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SubagentsSection: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let session: SessionState
 
     var body: some View {

@@ -4,7 +4,7 @@ struct SidebarTiles: View {
     static let projectLimit = 5
 
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
 
     var body: some View {
         let inbox = model.decisionFeed.inbox

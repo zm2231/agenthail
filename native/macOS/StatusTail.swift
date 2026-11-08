@@ -2,7 +2,7 @@ import SwiftUI
 
 struct StatusTail: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     @ObservedObject var usage: UsageMonitor
     let items: [String]
     let density: StatusDensity
@@ -28,8 +28,7 @@ struct StatusTail: View {
             short: density == .icons,
             working: shown.contains("working") ? model.workingCount : 0,
             needsYou: shown.contains("needs-you") ? model.needsYou.count : 0,
-            hosts: shown.contains("hosts") ? StatusItemsState.hosts(model.daemon?.hosts ?? []) : "",
-            terminalFocusable: shown.contains("terminal") && pane.displayedSession?.runtime?.focusable == true
+            hosts: shown.contains("hosts") ? StatusItemsState.hosts(model.daemon?.hosts ?? []) : ""
         )
     }
 }

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct DecisionInboxPane: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     @State private var answering = false
     @State private var failure: String?
     @FocusState private var focused: Bool

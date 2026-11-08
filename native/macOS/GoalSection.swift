@@ -2,7 +2,7 @@ import SwiftUI
 
 struct GoalSection: View {
     var model: AgenthailModel
-    @ObservedObject var pane: SessionPane
+    var pane: SessionPane
     let session: SessionState
     @State private var editor = GoalEditorState()
     @State private var text = ""

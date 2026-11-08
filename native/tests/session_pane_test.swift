@@ -1,5 +1,4 @@
 @testable import AgenthailHelpers
-import Combine
 import Foundation
 import Network
 import Observation
@@ -8,18 +7,16 @@ import Observation
 final class TimelineRecorder {
     private let pane: SessionPane
     private var watching = true
-    private var published: AnyCancellable?
     private(set) var shown: [[String]] = []
 
     init(_ pane: SessionPane) {
         self.pane = pane
-        published = pane.$detail.sink { [weak self] in self?.shown.append($0?.timeline?.items.map(\.id) ?? []) }
+        shown.append(pane.timelineItems.map(\.id))
         watch()
     }
 
     func stop() {
         watching = false
-        published = nil
     }
 
     private func watch() {
@@ -97,6 +94,12 @@ struct SessionPaneTest {
         check(tabbed.selectedSessionID == nil && tabbed.tabs.active == new, "stepping onto the New Session tab shows it")
         tabbed.showStarted("S")
         check(tabbed.tabs.tabs.map(\.id) == ["A", "S"] && tabbed.tabs.active == "S" && tabbed.selectedSessionID == "S" && tabbed.newSession == nil, "a started session takes over the New Session tab")
+        tabbed.keepTab("S")
+        let tabReaders = PaneChanges(tabbed) { _ = $0.tabs }
+        tabbed.select("S")
+        tabbed.keepTab("S")
+        tabbed.activateTab("S")
+        check(tabReaders.count == 0 && tabbed.tabs.active == "S", "reselecting the active kept tab leaves tab readers alone: \(tabReaders.count)")
         func row(_ id: String) -> SessionState {
             SessionState(id: id, surface: "codex", name: id, alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
         }
@@ -231,15 +234,15 @@ struct SessionPaneTest {
 
         let watched = model.openPane()
         watched.select("E")
-        var changes = 0
-        let observation = watched.objectWillChange.sink { changes += 1 }
+        check(PaneChanges.trackedFields(of: watched) == PaneChanges.trackedCount, "PaneChanges reads every tracked pane property: \(PaneChanges.trackedFields(of: watched)) tracked, \(PaneChanges.trackedCount) read")
+        let changes = PaneChanges(watched)
         watched.composer = "a"
-        check(!watched.draftIsEmpty && changes == 1, "typing the first character republishes the pane once")
+        check(!watched.draftIsEmpty && changes.count == 1, "typing the first character changes the pane once: \(changes.count)")
         watched.composer = "ab"
         watched.composer = "abc"
-        check(changes == 1, "further typing does not republish the pane")
+        check(changes.count == 1, "further typing does not change the pane: \(changes.count)")
         watched.composer = "  "
-        check(watched.draftIsEmpty && changes == 2, "clearing the draft republishes the pane")
+        check(watched.draftIsEmpty && changes.count == 2, "clearing the draft changes the pane: \(changes.count)")
         model.draft(for: "E").text = "from another pane"
         check(!watched.draftIsEmpty, "edits from a pane sharing the draft are observed")
         watched.select("F")
@@ -248,7 +251,12 @@ struct SessionPaneTest {
         check(!watched.draftIsEmpty && !watched.composerDraft.isEmpty, "an attachment alone makes the draft sendable")
         watched.composerDraft.attachments = []
         check(watched.draftIsEmpty, "removing the last attachment empties the draft")
-        observation.cancel()
+        let columns = PaneChanges(watched) { _ = ($0.sidebarDocks, $0.sidebarOverlay, $0.inspectorVisible, $0.inspectorDocks, $0.inspectorOverlay) }
+        let selection = PaneChanges(watched) { _ = $0.selectedSessionID }
+        let unseen = PaneChanges(watched) { _ = $0.model.finishedUnseen }
+        watched.select("E")
+        check(selection.count >= 1 && columns.count == 0, "a selection change reaches selection readers only: selection \(selection.count), columns \(columns.count)")
+        check(unseen.count == 0, "selecting a session that was not finished-unseen leaves its readers alone: \(unseen.count)")
 
         func conflict(_ json: String) -> AgenthailAPIError { AgenthailAPI.streamConflict(Data(json.utf8)) }
         if case .streamGap = conflict(#"{"error":{"code":"stream_gap","message":"gone"}}"#) {} else { check(false, "a retained-cursor conflict is a gap") }
@@ -629,8 +637,7 @@ struct SessionPaneTest {
         let streamingModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(streamingPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
         let streamingPane = streamingModel.openPane()
         let shownTimelines = TimelineRecorder(streamingPane)
-        var olderPublishes = 0
-        let olderShown = streamingPane.$olderItems.sink { _ in olderPublishes += 1 }
+        let olderShown = PaneChanges(streamingPane) { _ = $0.olderItems }
         streamingPane.select("D")
         let rowsDeadline = Date().addingTimeInterval(5)
         while streamingPane.timelineItems.map(\.id) != ["a", "c"], Date() < rowsDeadline { try? await Task.sleep(for: .milliseconds(20)) }
@@ -638,11 +645,9 @@ struct SessionPaneTest {
         check(pageRequests == 1, "streamed rows apply without reading the page again: \(pageRequests) page reads, rows \(streamingPane.timelineItems.map(\.id))")
         check(streamingPane.streamedRows.isEmpty, "rows applied with no page read in flight are not kept: \(streamingPane.streamedRows.count)")
         check(!shownTimelines.shown.contains(["a", "b", "c"]), "rows that arrive together render once: \(shownTimelines.shown)")
-        check(olderPublishes <= 3, "rows that leave the earlier pages alone do not publish them: \(olderPublishes) publishes")
+        check(olderShown.count <= 2, "rows that leave the earlier pages alone do not change them: \(olderShown.count) changes")
         shownTimelines.stop()
-        olderShown.cancel()
-        var completionChanges = 0
-        let completionWatch = streamingPane.objectWillChange.sink { completionChanges += 1 }
+        let completion = PaneChanges(streamingPane) { _ = $0.detail }
         streamingServer.push(frame(104, row(104, "d", kind: "done", text: "")), to: "session-stream")
         let turnDeadline = Date().addingTimeInterval(5)
         while pageRequests < 2, Date() < turnDeadline { try? await Task.sleep(for: .milliseconds(20)) }
@@ -654,8 +659,7 @@ struct SessionPaneTest {
         check(pageRequests == 2, "a streamed turn reloads the page once, when it finishes, not per row: \(pageRequests) page reads")
         check(streamingPane.timelineItems.map(\.id) == ["a", "c", "d", "e"] && streamingPane.timelineItems[0].text == "a2", "a row streamed while the reload was in flight survives it, in the order a reload would show: \(streamingPane.timelineItems.map(\.id))")
         check(streamingPane.streamedRows.isEmpty, "the rows kept for a page read are dropped once it lands: \(streamingPane.streamedRows.count)")
-        check(streamingPane.detail?.context?.usedTokens == 5000 && completionChanges > 0, "a streamed turn's completion still reaches readers outside the transcript: context \(streamingPane.detail?.context?.usedTokens ?? -1), pane changes \(completionChanges)")
-        completionWatch.cancel()
+        check(streamingPane.detail?.context?.usedTokens == 5000 && completion.count > 0, "a streamed turn's completion still reaches readers outside the transcript: context \(streamingPane.detail?.context?.usedTokens ?? -1), detail changes \(completion.count)")
 
         func pageAt(_ seq: Int, _ items: [(String, String)]) -> String {
             let rows = items.map { #"{"id":"\#($0.0)","kind":"message","role":"assistant","title":"message","text":"\#($0.1)","truncated":false}"# }.joined(separator: ",")
@@ -678,14 +682,13 @@ struct SessionPaneTest {
         while streamingPane.pageReadsInFlight > 0, Date() < landedDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         check(streamingPane.timelineItems.map(\.id) == ["a", "c", "e"] && streamingPane.timelineItems.first?.text == "a3", "an older page that lands last keeps an update streamed while both reads were open: \(streamingPane.timelineItems.map { "\($0.id)=\($0.text)" })")
         check(streamingPane.streamedRows.isEmpty, "rows kept for overlapping reads are dropped once the last lands: \(streamingPane.streamedRows.count)")
-        var paneChanges = 0
-        let paneWatch = streamingPane.objectWillChange.sink { paneChanges += 1 }
+        let paneWatch = PaneChanges(streamingPane)
         let timelineWatch = TimelineRecorder(streamingPane)
         streamingServer.push(frame(107, row(107, "c", text: "c2")), to: "session-stream")
         let feedDeadline = Date().addingTimeInterval(5)
         while streamingPane.timelineItems.first(where: { $0.id == "c" })?.text != "c2", Date() < feedDeadline { try? await Task.sleep(for: .milliseconds(10)) }
         try? await Task.sleep(for: SessionPane.streamPublishInterval * 2)
-        paneWatch.cancel()
+        let paneChanges = paneWatch.count
         timelineWatch.stop()
         check(streamingPane.timelineItems.first(where: { $0.id == "c" })?.text == "c2", "a streamed row reaches the transcript: \(streamingPane.timelineItems.map { "\($0.id)=\($0.text)" })")
         check(timelineWatch.shown.count >= 2, "a streamed row notifies views that read the timeline: \(timelineWatch.shown)")
