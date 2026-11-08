@@ -66,7 +66,6 @@ struct SidebarRowTest {
             ("title", SidebarRowState(session: session("a"), title: "renamed")),
             ("unseen", SidebarRowState(session: session("a"), title: "a", finishedUnseen: true)),
             ("lead", SidebarRowState(session: session("a"), title: "a", canMakeLead: true)),
-            ("reason", SidebarRowState(session: session("a"), title: "a", showsReason: true)),
             ("session", SidebarRowState(session: session("a", archived: true), title: "a")),
             ("family", SidebarRowState(session: session("a"), title: "a", family: SessionFamily(root: session("a"), members: [], workingSubagents: 1))),
         ]

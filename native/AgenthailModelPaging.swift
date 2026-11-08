@@ -51,6 +51,28 @@ extension AgenthailModel {
 
     func hasEarlier(_ projectID: String) -> Bool { pages.hasMore(earlierRequest(projectID)) }
 
+    func scopeRequest(_ projectID: String) -> ScopeRequest {
+        let archived = projects.first { $0.id == projectID }?.archived == true
+        let refinement = sessionRefinement
+        return ScopeRequest(scope: archived ? SessionFilter.archived.viewScope : sessionFilter.viewScope, projectID: projectID, surface: refinement.surface, status: refinement.status?.rawValue)
+    }
+
+    func scopeTree(_ projectID: String) -> SessionTree {
+        let request = scopeRequest(projectID)
+        let view = reader.views[request]
+        let ids = Set((view?.families ?? []).flatMap { $0.members.map(\.id) })
+        let rows = Dictionary(uniqueKeysWithValues: ids.compactMap { id in cells.session(id).map { (id, $0) } })
+        let attention = sessionAttention.filter { ids.contains($0.key) }
+        return scopeTrees.tree(for: request, view: view, rows: rows, attention: attention, keeping: reader.requests)
+    }
+
+    func scopeHasMore(_ projectID: String) -> Bool { pages.hasMore(scopeRequest(projectID)) }
+
+    func readScope(_ projectID: String) async {
+        dropUnusedScopes()
+        await reader.readMore(scopeRequest(projectID))
+    }
+
     func listMore() async {
         guard let request = listRequest else { return }
         await reader.readMore(request)

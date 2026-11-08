@@ -13,6 +13,7 @@ final class ScopeReader {
 
     private(set) var pages = ScopePages()
     private(set) var pageError: String?
+    private(set) var pageErrors: [ScopeRequest: String] = [:]
     private(set) var views: [ScopeRequest: ScopePage.View] = [:]
     private(set) var foundView: ScopePage.View?
     private(set) var foundQuery: String?
@@ -34,12 +35,13 @@ final class ScopeReader {
         reads = [:]
     }
 
-    var requests: Set<ScopeRequest> { Set(pages.listings.keys).union(reads.keys) }
+    var requests: Set<ScopeRequest> { Set(pages.listings.keys).union(reads.keys).union(pageErrors.keys) }
 
     func drop(_ request: ScopeRequest) {
         reads.removeValue(forKey: request)?.cancel()
         pages.drop(request)
         views.removeValue(forKey: request)
+        pageErrors.removeValue(forKey: request)
     }
 
     func adoptCurrent() { pages.adopt(source.current()) }
@@ -60,6 +62,7 @@ final class ScopeReader {
             let page = try await api.scopePage(request, cursor: read.cursor, timeout: source.timeout())
             guard source.active(), !Task.isCancelled else { return }
             pageError = nil
+            pageErrors.removeValue(forKey: request)
             if pages.append(page, to: request, after: read) {
                 views[request] = read.cursor == nil ? page.view : views[request]?.merging(page.view) ?? page.view
                 adoptCurrent()
@@ -67,6 +70,7 @@ final class ScopeReader {
         } catch {
             guard source.active(), !Task.isCancelled else { return }
             pageError = error.localizedDescription
+            pageErrors[request] = error.localizedDescription
         }
         source.changed()
     }

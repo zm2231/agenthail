@@ -7,6 +7,11 @@ struct ProjectState: Decodable, Hashable, Identifiable {
         let rootPath: String
         var added: Bool? = nil
         var archived: Bool? = nil
+        var linkedFrom: Ref? = nil
+    }
+
+    struct Ref: Decodable, Hashable {
+        let id: String
     }
 
     struct Lead: Decodable, Hashable {
@@ -24,6 +29,7 @@ struct ProjectState: Decodable, Hashable, Identifiable {
     var coordinators: [Lead]? = nil
     var archived: Bool? = nil
     var activity: ProjectActivity? = nil
+    var linked: [Ref]? = nil
 
     var leads: [Lead] { coordinators ?? [] }
 }

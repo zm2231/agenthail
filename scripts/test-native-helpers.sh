@@ -32,6 +32,7 @@ SOURCES=(
   TaggedResponses.swift
   AgenthailModel.swift
   AgenthailModelPaging.swift
+  ScopeTreeCache.swift
   AgenthailModels.swift
   ComposerAttachment.swift
   ComposerStore.swift
@@ -62,6 +63,7 @@ SOURCES=(
   RequestNotifications.swift
   SessionSelection.swift
   ProjectActions.swift
+  ProjectTiles.swift
   ProjectContents.swift
   ProjectNow.swift
   ScopePages.swift
@@ -154,9 +156,11 @@ SOURCES=(
   macOS/NewSessionLabels.swift
   macOS/SessionPane.swift
   macOS/MacDecisions.swift
+  macOS/PaneScope.swift
   macOS/DecisionFeed.swift
   macOS/DecisionInboxPane.swift
   macOS/SidebarRow.swift
+  macOS/SidebarSectionInputs.swift
   macOS/StatusItemsState.swift
   macOS/StatusItems.swift
   macOS/ReadableButtonStyle.swift

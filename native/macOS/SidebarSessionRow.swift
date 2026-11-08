@@ -15,7 +15,7 @@ struct SidebarSessionRow: View, @MainActor Equatable {
         Button {
             actions.select(keep: NSEvent.modifierFlags.contains(.command))
         } label: {
-            SessionRowView(session: session, title: state.title, family: state.family, needsYou: state.needsYou, reason: state.reason, finishedUnseen: state.finishedUnseen)
+            SessionRowView(session: session, title: state.title, family: state.family, needsYou: state.needsYou, finishedUnseen: state.finishedUnseen)
                 .padding(.vertical, DesktopSpace.xs)
                 .padding(.horizontal, DesktopSpace.s)
                 .frame(maxWidth: .infinity, alignment: .leading)

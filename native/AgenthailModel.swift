@@ -79,6 +79,7 @@ final class AgenthailModel {
         }
     }
     @ObservationIgnored private(set) lazy var reader = makeReader()
+    @ObservationIgnored let scopeTrees = ScopeTreeCache()
     var pages: ScopePages { reader.pages }
     private(set) var currentView: ScopePage.View? {
         didSet {
@@ -235,6 +236,15 @@ final class AgenthailModel {
         guard pane !== mainPane else { return }
         pane.close()
         panes.removeAll { $0 === pane }
+        dropUnusedScopes()
+    }
+
+    func dropUnusedScopes() {
+        let kept = Set(panes.compactMap { $0.scope.projectID.map(scopeRequest) } + panes.compactMap { $0.shownProjectID.map(earlierRequest) })
+        let unused = reader.requests.filter { $0.projectID != nil && !kept.contains($0) }
+        guard !unused.isEmpty else { return }
+        unused.forEach(reader.drop)
+        rederive()
     }
 
     deinit {

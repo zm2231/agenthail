@@ -53,7 +53,6 @@ struct DecisionInboxPane: View {
         .onChange(of: item?.id, initial: true) {
             if !(item.map(Self.pagesQuestions) ?? false) { focused = true }
         }
-        .task(id: model.decisionsKey) { await model.refreshDecisionsSoon() }
         .scrimText()
         .backdropSurface(DesktopPalette.window)
     }

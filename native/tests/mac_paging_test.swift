@@ -27,6 +27,14 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
         return #"{"sessions":[\#(ids.map { row($0, current: current) }.joined(separator: ","))],"hostEpoch":"\#(epoch)","catalogSeq":5,"view":\#(view)\#(next.map { #","nextCursor":"\#($0)""# } ?? "")}"#
     }
 
+    static func projectPage(_ ids: [String], project: String) -> String {
+        let identity = #""project":{"id":"\#(project)","displayName":"\#(project)","rootPath":"/\#(project)","kind":"git"}"#
+        let rows = ids.map { row($0).replacingOccurrences(of: #""open":true"#, with: #""open":true,\#(identity)"#) }
+        let families = ids.map { #"{"id":"\#($0)","rootId":"\#($0)","projectId":"\#(project)","checkoutId":"","members":[{"id":"\#($0)","depth":0,"contextOnly":false,"pinned":false}],"pinned":false,"workingSubagents":0}"# }
+        let view = #"{"counts":{"all":{"families":\#(ids.count),"sessions":\#(ids.count)}},"surfaces":[],"projects":[{"id":"\#(project)","name":"\#(project)","counts":{"families":\#(ids.count),"sessions":\#(ids.count)},"collapsedFamilyIds":[]}],"families":[\#(families.joined(separator: ","))]}"#
+        return #"{"sessions":[\#(rows.joined(separator: ","))],"hostEpoch":"\#(epoch)","catalogSeq":5,"view":\#(view)}"#
+    }
+
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "paging.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
@@ -37,11 +45,12 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
         Self.lock.withLock { Self.requests.append(url.path + "?" + (url.query ?? "")) }
         let body: String
         switch (url.path, query["scope"], query["cursor"], query["q"]) {
+        case ("/api/v1/snapshot", _, _, _) where query["projectId"] == "far": body = Self.projectPage(query["status"] == nil ? ["far-a", "far-b"] : ["far-a"], project: "far")
         case ("/api/v1/projects/activity", _, _, _): body = #"{"projects":[]}"#
         case ("/api/v1/history", _, _, _): body = #"{"items":[],"hasMore":false,"nextBefore":0,"kinds":[]}"#
         case ("/api/v1/snapshot", nil, _, _):
             let epoch = Self.lock.withLock { Self.baseEpochs.isEmpty ? Self.epoch : Self.baseEpochs.removeFirst() }
-            body = #"{"updatedAt":"2026-11-03T12:00:00Z","hostEpoch":"\#(epoch)","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"queue":[],"channels":[],"relays":[],"attention":[],"codexRecentHours":5}"#
+            body = #"{"updatedAt":"2026-11-03T12:00:00Z","hostEpoch":"\#(epoch)","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"projects":[{"id":"far","displayName":"far","kind":"git","checkouts":[{"host":{"id":"","name":"mac","state":"local"},"projectId":"far","rootPath":"/far","added":true}],"coordinators":[]}],"queue":[],"channels":[],"relays":[],"attention":[],"codexRecentHours":5}"#
         case ("/api/v1/snapshot", "current", _, _): body = Self.page(["live", "lead"], next: nil, current: true)
         case ("/api/v1/snapshot", "all", _, let q?) where !q.isEmpty: body = Self.page(q == "zet" || q == "gps" ? ["zeta"] : q == "ze" ? ["live", "zeta"] : [], next: nil)
         case ("/api/v1/snapshot", "all", nil, _): body = Self.page(Self.firstAll, next: "p2", refreshAt: query["status"] == nil ? nil : "2026-11-03T12:00:00Z")
@@ -61,7 +70,8 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
     }
 
     private func finish(_ url: URL, _ body: String) {
-        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        let status = url.query?.contains("projectId=broken") == true ? 500 : 200
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
@@ -114,6 +124,27 @@ struct MacPagingTest {
         check(model.filterCounts[.recent] == 2 && model.filterCounts[.running] == 1, "a refined list counts every tab by the daemon: \(model.filterCounts)")
         check(model.pages.listings.keys.filter { $0.projectID == nil }.count == 1, "only the shown list is kept")
         model.sessionRefinement = SessionRefinement()
+
+        model.mainPane.showScope(project: "far")
+        let scopedIDs = { model.scopeTree("far").projects.flatMap { $0.checkouts.flatMap(\.families) }.map(\.id) }
+        check(!ids().contains("far-a") && scopedIDs().isEmpty && model.scopeHasMore("far"), "a project whose sessions aren't in the loaded pages starts with its own listing unread")
+        await model.readScope("far")
+        check(PagingDaemon.requests.contains { $0.contains("scope=all") && $0.contains("projectId=far") }, "a project scope reads that project's listing: \(PagingDaemon.requests.suffix(3))")
+        check(scopedIDs() == ["far-a", "far-b"] && !model.scopeHasMore("far"), "the scoped rail lists the project's own listing: \(scopedIDs())")
+        let builds = model.scopeTrees.builds
+        model.applyCatalogEvents([try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":6,"type":"session.upserted","data":{"session":\#(PagingDaemon.row("live", status: "busy", current: true))}}"#.utf8))])
+        _ = scopedIDs()
+        check(model.scopeTrees.builds == builds, "an unrelated session's upsert does not rebuild the scoped tree")
+        model.sessionRefinement = SessionRefinement(status: .working, surface: "claude")
+        await model.readScope("far")
+        check(PagingDaemon.requests.contains { $0.contains("projectId=far") && $0.contains("status=working") && $0.contains("surface=claude") }, "a refinement narrows the project's listing at the daemon")
+        check(scopedIDs() == ["far-a"] && model.pages.listings.keys.filter { $0.projectID == "far" && $0 != model.earlierRequest("far") }.count == 1, "only the shown refinement's project listing is kept beside the project page's own: \(scopedIDs()) \(model.pages.listings.keys.filter { $0.projectID == "far" })")
+        await model.readScope("broken")
+        check(model.reader.pageErrors[model.scopeRequest("broken")] != nil && model.reader.pageErrors[model.scopeRequest("far")] == nil && model.pages.listings[model.scopeRequest("far")] != nil, "a page error belongs to the scope whose read failed, not the one a pane shows: \(model.reader.pageErrors)")
+        model.sessionRefinement = SessionRefinement()
+        model.mainPane.showAll()
+        check(!model.pages.listings.keys.contains { $0.projectID != nil } && model.reader.pageErrors.isEmpty, "project listings no open pane shows are released: \(model.pages.listings.keys.filter { $0.projectID != nil })")
+        check(!ids().contains("far-a") && !ids().contains("far-b"), "sessions only a released listing held leave the known sessions: \(ids())")
         model.sessionFilter = .recent
 
         model.findSessions("zet")

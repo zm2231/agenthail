@@ -124,6 +124,7 @@ struct DesktopWindow: View {
         .onChange(of: pane.selectedSessionID) { pane.closeSidebarOverlay() }
         .onChange(of: pane.newSession != nil) { pane.closeSidebarOverlay() }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pane.fitWindow(width: $0) }
+        .task(id: model.decisionsKey) { await model.refreshDecisionsSoon() }
     }
 }
 
@@ -167,7 +168,9 @@ struct SessionSidebar: View {
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     var body: some View {
-        let tree = model.sessionTree
+        let scoped = pane.scope.projectID
+        let tree = scoped.map(model.scopeTree) ?? model.sessionTree
+        let hasMore = scoped.map(model.scopeHasMore) ?? model.listHasMore
         VStack(spacing: 0) {
             if holdsWindowButtons && chromeTop == 0 {
                 Color.clear
@@ -198,49 +201,15 @@ struct SessionSidebar: View {
                     } else if !model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         searchResults
                     } else {
-                    if !tree.needsYou.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
-                            SidebarCaption("Needs you")
-                            ForEach(tree.needsYou) { session in
-                                sessionButton(session, title: model.title(of: session), attention: tree.attention[session.id], showsReason: true)
-                            }
-                        }
-                    }
-                    ForEach(tree.projects) { project in
-                        let expanded = expandedProjects.contains(project.id)
-                        let shown = project.shown(expanded: expanded, keeping: pane.selectedSessionID)
-                        let single = project.checkouts.count == 1 ? project.checkouts.first : nil
-                        VStack(alignment: .leading, spacing: 1) {
-                            ProjectHeaderView(name: project.name, hosts: project.hosts, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.counts.sessions)
-                                .opensProject(project.identity?.id, model: model, pane: pane)
-                                .contextMenu {
-                                    if let identity = project.identity {
-                                        Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
-                                        if let state = model.projects.first(where: { $0.id == identity.id }) {
-                                            Divider()
-                                            ProjectMenuButtons(model: model, pane: pane, project: state)
-                                        }
-                                    }
-                                }
-                            ForEach(shown.checkouts) { checkout in
-                                if single == nil {
-                                    CheckoutRowView(checkout: checkout, host: project.spansHosts ? project.hostLabel(of: checkout) : nil)
-                                }
-                                ForEach(checkout.families) { family in
-                                    familyRows(family, attention: tree.attention)
-                                }
-                            }
-                            if let more = project.moreLabel(expanded: expanded, keeping: pane.selectedSessionID) {
-                                Button(more) {
-                                    if expanded { expandedProjects.remove(project.id) } else { expandedProjects.insert(project.id) }
-                                }
-                                .buttonStyle(.plain)
-                                .font(.system(size: DesktopType.secondary))
-                                .foregroundStyle(DesktopPalette.text2)
-                                .padding(.leading, 35)
-                                .padding(.vertical, DesktopSpace.xs)
-                            }
-                        }
+                    ForEach(scopedProjects(tree)) { project in
+                        SidebarProjectSection(
+                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(project.id), selectedID: pane.selectedSessionID, attention: tree.attention, expandedFamilies: expandedFamilies, shownProjectID: pane.shownProjectID),
+                            model: model,
+                            pane: pane,
+                            toggleProject: { toggle(project.id, in: $expandedProjects) },
+                            toggleFamily: { toggle($0, in: $expandedFamilies) }
+                        )
+                        .equatable()
                     }
                     ForEach(projectsWithoutSessions(tree)) { project in
                         ProjectHeaderView(name: project.displayName, hosts: ProjectMenu.hosts(of: project), branch: nil, dirty: false, archived: false)
@@ -251,20 +220,22 @@ struct SessionSidebar: View {
                                 ProjectMenuButtons(model: model, pane: pane, project: project)
                             }
                     }
-                    if tree.projects.isEmpty && projectsWithoutSessions(tree).isEmpty && !model.listHasMore {
+                    if scopedProjects(tree).isEmpty && projectsWithoutSessions(tree).isEmpty && !hasMore {
                         Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
                             .font(.system(size: DesktopType.body))
                             .foregroundStyle(DesktopPalette.text2)
                             .padding(.horizontal, DesktopSpace.s)
                     }
-                    if model.listHasMore {
+                    if hasMore, let request = scoped.map(model.scopeRequest) ?? model.listRequest {
                         ProgressView()
                             .controlSize(.small)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, DesktopSpace.s)
-                            .task(id: model.pages.listings[model.listRequest!]?.rows.count ?? -1) { await model.listMore() }
+                            .task(id: ListPageKey(request: request, rows: model.pages.listings[request]?.rows.count ?? -1)) {
+                                if let scoped { await model.readScope(scoped) } else { await model.listMore() }
+                            }
                     }
-                    if let error = model.reader.pageError, model.listRequest != nil {
+                    if let request = scoped.map(model.scopeRequest) ?? model.listRequest, let error = model.reader.pageErrors[request] {
                         Text(error)
                             .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(DesktopPalette.text2)
@@ -361,10 +332,14 @@ extension SessionSidebar {
 
     private var searchMatches: (local: [SessionState], remote: [SessionSearchItem]) {
         let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        let local = model.pages.found
+        let local = model.pages.found.filter { pane.scope.keeps(projectID: $0.project?.id) }
         let localIDs = Set(local.map(\.id))
-        let remote = query.count >= 3 ? model.searchResults.filter { !localIDs.contains($0.session.id) } : []
+        let remote = query.count >= 3 ? model.searchResults.filter { !localIDs.contains($0.session.id) && pane.scope.keeps(projectID: $0.session.project?.id) } : []
         return (local, remote)
+    }
+
+    private func scopedProjects(_ tree: SessionTree) -> [SessionTree.Project] {
+        tree.projects.filter { pane.scope.keeps(projectID: $0.identity?.id) }
     }
 
     private func visibleOrder(_ tree: SessionTree) -> [String] {
@@ -372,8 +347,8 @@ extension SessionSidebar {
             let matches = searchMatches
             return matches.local.map(\.id) + matches.remote.map(\.session.id)
         }
-        var ids = tree.needsYou.map(\.id)
-        for project in tree.projects {
+        var ids: [String] = []
+        for project in scopedProjects(tree) {
             let shown = project.shown(expanded: expandedProjects.contains(project.id), keeping: pane.selectedSessionID)
             for family in shown.checkouts.flatMap(\.families) {
                 let rows = [family.root.id] + (familyExpanded(family) ? family.members.map(\.id) : [])
@@ -387,37 +362,14 @@ extension SessionSidebar {
         !family.members.isEmpty && (expandedFamilies.contains(family.id) || family.members.contains { $0.id == pane.selectedSessionID })
     }
 
-    @ViewBuilder
-    private func familyRows(_ family: SessionFamily, attention: [String: SessionAttention]) -> some View {
-        let expanded = familyExpanded(family)
-        HStack(spacing: 0) {
-            sessionButton(family.root, title: family.root.title, family: family, attention: attention[family.root.id])
-            if !family.members.isEmpty {
-                Button {
-                    if expandedFamilies.contains(family.id) { expandedFamilies.remove(family.id) } else { expandedFamilies.insert(family.id) }
-                } label: {
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: DesktopType.caption, weight: .semibold))
-                        .frame(width: 18, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(DesktopPalette.text2)
-                .accessibilityLabel(expanded ? "Hide subagents" : "Show subagents")
-            }
-        }
-        if expanded {
-            ForEach(family.members) { member in
-                sessionButton(member.session, title: SessionFamilies.label(member.session), attention: attention[member.id])
-                    .padding(.leading, CGFloat(member.depth) * 16)
-            }
-        }
+    private func toggle(_ id: String, in set: Binding<Set<String>>) {
+        if set.wrappedValue.contains(id) { set.wrappedValue.remove(id) } else { set.wrappedValue.insert(id) }
     }
 
     private func projectsWithoutSessions(_ tree: SessionTree) -> [ProjectState] {
         guard model.sessionFilter == .recent || model.sessionFilter == .all, !model.sessionRefinement.isActive else { return [] }
         let listed = Set(tree.projects.compactMap(\.identity?.id))
-        return model.projects.filter { $0.archived != true && !listed.contains($0.id) }
+        return model.projects.filter { $0.archived != true && !listed.contains($0.id) && pane.scope.keeps(projectID: $0.id) }
     }
 
     private func step(_ order: [String], by offset: Int) {
@@ -431,12 +383,8 @@ extension SessionSidebar {
         }
     }
 
-    private func sessionButton(_ session: SessionState, title: String, family: SessionFamily? = nil, attention: SessionAttention?, showsReason: Bool = false) -> some View {
-        SidebarSessionRow(
-            state: SidebarRowState(session: session, title: title, family: family, attention: attention, showsReason: showsReason, finishedUnseen: model.finishedUnseen.contains(session.id), selected: pane.selectedSessionID == session.id, canMakeLead: ProjectMenu.canMakeLead(session, projects: model.projects)),
-            actions: SidebarRowActions(shown: session, model: model, pane: pane)
-        )
-        .equatable()
+    private func sessionButton(_ session: SessionState, title: String, attention: SessionAttention?) -> some View {
+        SidebarRowButton(session: session, title: title, attention: attention, selectedID: pane.selectedSessionID, model: model, pane: pane)
     }
 }
 
@@ -553,26 +501,18 @@ struct SessionRowView: View {
     var title: String? = nil
     var family: SessionFamily? = nil
     let needsYou: Bool
-    /// Why the session needs the person, shown under its title.
-    var reason: String? = nil
     var finishedUnseen = false
     var saysWaiting = false
 
     var body: some View {
         let kind = SessionDisplayKind.of(session)
-        HStack(alignment: reason == nil ? .center : .firstTextBaseline, spacing: 9) {
+        HStack(alignment: .center, spacing: 9) {
             StatusIndicator(session: session, needsYou: needsYou, finishedUnseen: finishedUnseen)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title ?? session.title)
                     .lineLimit(1)
                     .foregroundStyle(kind != .unavailable && (session.open || kind == .working) ? DesktopPalette.text : DesktopPalette.text2)
-                if let reason {
-                    Text(reason)
-                        .font(.system(size: DesktopType.meta))
-                        .foregroundStyle(DesktopPalette.text2)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                } else if kind == .working, let activity = session.activity {
+                if kind == .working, let activity = session.activity {
                     TimelineView(.everyMinute) { context in
                         if let note = activity.note(now: context.date) {
                             Text(note)
@@ -642,7 +582,7 @@ struct SessionRowView: View {
         .font(.system(size: DesktopType.body))
         .padding(.leading, 6)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(needsYou ? "Needs you\(reason.map { ": \($0)" } ?? "") · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
+        .accessibilityValue(needsYou ? "Needs you · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
         .help(SessionFacts.rowDetail(session))
     }
 }

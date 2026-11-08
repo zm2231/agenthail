@@ -30,6 +30,7 @@ final class ObservedScope {
 
     var pages: ScopePages { observed.pages }
     var pageError: String? { observed.pageError }
+    var pageErrors: [ScopeRequest: String] { observed.pageErrors }
     var views: [ScopeRequest: ScopePage.View] { observed.views }
     var requests: Set<ScopeRequest> { observed.requests }
     var foundView: ScopePage.View? { observed.foundView }

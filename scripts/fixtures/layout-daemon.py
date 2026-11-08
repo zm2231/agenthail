@@ -178,6 +178,16 @@ if __name__ == "__main__":
             ],
             "leadHandling": [{"sessionId": "fixture-worker", "heldBy": SESSION["id"], "role": "worker", "reason": "Asks to run the migration", "since": NOW}],
         }
+        local = {"id": "", "name": "this Mac", "state": "local"}
+        RESPONSES["/api/v1/snapshot"]["projects"] = [
+            {"id": SESSION["project"]["id"], "displayName": SESSION["project"]["displayName"], "kind": "git", "checkouts": [{"host": local, "projectId": SESSION["project"]["id"], "rootPath": SESSION["cwd"]}]},
+            {"id": "release-notes", "displayName": "release-notes", "kind": "folder", "checkouts": [{"host": local, "projectId": "release-notes", "rootPath": "/tmp/release-notes"}],
+             "coordinators": [{"name": "notes-lead", "surface": "claude"}]},
+        ]
+        RESPONSES["/api/v1/projects/activity"] = {"projects": [
+            {"id": SESSION["project"]["id"], "lastActive": NOW, "sessionCount": 1, "checkouts": [{"projectId": SESSION["project"]["id"], "sessionCount": 1}]},
+            {"id": "release-notes", "sessionCount": 0, "checkouts": []},
+        ]}
     if sys.argv[1:2] == ["agents"]:
         # An idle session whose transcript holds agent messages, sends and a fold, in the given theme.
         SESSION["status"] = "idle"

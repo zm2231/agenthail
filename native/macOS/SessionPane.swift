@@ -23,7 +23,9 @@ final class SessionPane: ObservableObject, Identifiable {
         }
     }
     @Published private(set) var newSession: NewSessionDraft?
-    @Published private(set) var shownProjectID: String?
+    @Published private(set) var shownProjectID: String? {
+        didSet { if shownProjectID != oldValue { model.dropUnusedScopes() } }
+    }
     @Published var archivedTab: SessionState? {
         didSet { if archivedTab?.id != oldValue?.id { archivedTabError = nil } }
     }
@@ -186,16 +188,37 @@ final class SessionPane: ObservableObject, Identifiable {
     var selectedSession: SessionState? { model.session(selectedSessionID) }
     var displayedSession: SessionState? { shownProjectID == nil ? selectedSession ?? removedSession : nil }
 
-    @Published private(set) var showsInbox = false
+    @Published private(set) var scope = PaneScope.all {
+        didSet { if scope != oldValue { model.dropUnusedScopes() } }
+    }
+    private var scopeArchived = false
     @Published var selectedDecisionID: String?
 
+    var showsInbox: Bool { scope == .inbox }
     private var holdsPage: Bool { shownProjectID != nil || showsInbox }
 
     func showInbox() {
         guard !closed else { return }
         clearSelection()
         shownProjectID = nil
-        showsInbox = true
+        scope = .inbox
+    }
+
+    func showScope(project id: String) {
+        showProject(id)
+        guard !closed else { return }
+        scopeArchived = model.projects.contains { $0.id == id && $0.archived == true }
+        scope = .project(id)
+    }
+
+    private func dropMissingScope() {
+        guard let id = scope.projectID else { return }
+        if PaneScope.holds(id, in: model.projects, wasArchived: scopeArchived) {
+            scopeArchived = model.projects.contains { $0.id == id && $0.archived == true }
+            return
+        }
+        scope = .all
+        if shownProjectID == id { shownProjectID = nil }
     }
 
     func answerDecision(_ request: SessionRequest, in sessionID: String, decision: RequestDecision) async -> DecisionAnswer {
@@ -210,15 +233,16 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     func showAll() {
-        guard showsInbox else { return }
-        showsInbox = false
+        guard scope != .all || shownProjectID != nil else { return }
+        scope = .all
+        shownProjectID = nil
         if tabsEnabled { showActiveTab() }
     }
 
     func showProject(_ id: String) {
         guard !closed else { return }
         clearSelection()
-        showsInbox = false
+        if scope.projectID != id { scope = .all }
         shownProjectID = id
     }
     var timelineItems: [TimelineItem] {
@@ -241,9 +265,13 @@ final class SessionPane: ObservableObject, Identifiable {
     /// Shows New Session: with tabs, in its own tab, opened once.
     func openNewSession(message: String? = nil) {
         guard !closed else { return }
-        showsInbox = false
+        if scope == .inbox { scope = .all }
         shownProjectID = nil
-        if newSession == nil { newSession = NewSessionDraft(model: model, selected: selectedSession) }
+        let fresh = newSession == nil
+        if fresh { newSession = NewSessionDraft(model: model, selected: selectedSession) }
+        if fresh, let project = model.projects.first(where: { $0.id == scope.projectID }), let checkout = PaneScope.newSessionCheckout(project) {
+            newSession?.place(host: ProjectMenu.host(of: checkout), folder: checkout.rootPath)
+        }
         if tabsEnabled { tabs.open(SessionTabs.newSession, keep: true) }
         if let message { newSession?.take(message) }
         clearSelection()
@@ -396,7 +424,7 @@ final class SessionPane: ObservableObject, Identifiable {
     private func show(_ id: String) {
         guard !closed else { return }
         shownProjectID = nil
-        showsInbox = false
+        if scope == .inbox || (scope.projectID != nil && model.session(id)?.project?.id != scope.projectID) { scope = .all }
         guard id != selectedSessionID || detail == nil else { return }
         removedSession = nil
         selectedSnapshot = model.knownSessions.first { $0.id == id }
@@ -560,6 +588,7 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func reconcile() {
         guard !closed, model.snapshot != nil else { return }
+        dropMissingScope()
         let sessions = model.knownSessions
         if tabsEnabled {
             reconcileTabs(sessions)
