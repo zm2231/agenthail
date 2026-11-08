@@ -219,7 +219,17 @@ struct ComposerTextViewTest {
         check(!textView.hasMarkedText() && textView.string == "draft \n\nshared from another app" && bound == textView.string, "text from outside ends the composition and stays: \(textView.string.debugDescription) \(bound.debugDescription)")
         textView.insertText("!", replacementRange: textView.selectedRange())
         check(bound == "draft \n\nshared from another app!", "typing afterwards continues from it: \(bound.debugDescription)")
+
+        var nextDraft = "next session's draft"
+        let nextSync = ComposerTextSync(nextDraft)
+        let nextEcho = TextEcho { text in nextSync.viewChanged(to: text) { nextDraft = $0 } }
+        textView.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0), replacementRange: textView.selectedRange())
+        textView.delegate = nextEcho
+        textView.load(nextDraft)
+        check(!textView.hasMarkedText() && textView.string == "next session's draft" && nextDraft == "next session's draft", "switching sessions mid-composition shows the next draft and writes nothing into it: \(textView.string.debugDescription) \(nextDraft.debugDescription)")
+        check(bound == "draft \n\nshared from another app!", "switching sessions mid-composition leaves the previous draft alone: \(bound.debugDescription)")
         withExtendedLifetime(echo) {}
+        withExtendedLifetime(nextEcho) {}
     }
 }
 

@@ -186,8 +186,9 @@ final class ComposerNSTextView: NSTextView {
         if let shown = sync.textToShow(bound: text), string != shown { replaceAll(with: shown) }
     }
 
+    // unmarkText would report the composed text to the delegate, which by now writes to the next session's draft.
     func load(_ text: String) {
-        if hasMarkedText() { unmarkText() }
+        if hasMarkedText() { inputContext?.discardMarkedText() }
         string = text
         undo.removeAllActions()
         setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
