@@ -91,6 +91,14 @@ struct ComposerTextViewTest {
         check(textView.string == "/model " && textView.selectedRange() == NSRange(location: 7, length: 0), "a replaced draft puts the caret at its end")
         undo.undo()
         check(textView.string == "typed", "a replaced draft is one undo step: \(textView.string.debugDescription)")
+        undo.beginUndoGrouping()
+        textView.insertText(" more", replacementRange: textView.selectedRange())
+        undo.endUndoGrouping()
+        textView.load("other session's draft")
+        check(textView.string == "other session's draft" && textView.selectedRange() == NSRange(location: 21, length: 0), "loading another draft shows it with the caret at its end")
+        check(!undo.canUndo, "loading another draft leaves nothing to undo from the previous one")
+        undo.undo()
+        check(textView.string == "other session's draft", "undo after loading another draft keeps it: \(textView.string.debugDescription)")
         undo.groupsByEvent = true
 
         let board = NSPasteboard(name: NSPasteboard.Name("agenthail.composer-text-view-test.\(UUID().uuidString)"))
@@ -211,7 +219,17 @@ struct ComposerTextViewTest {
         check(!textView.hasMarkedText() && textView.string == "draft \n\nshared from another app" && bound == textView.string, "text from outside ends the composition and stays: \(textView.string.debugDescription) \(bound.debugDescription)")
         textView.insertText("!", replacementRange: textView.selectedRange())
         check(bound == "draft \n\nshared from another app!", "typing afterwards continues from it: \(bound.debugDescription)")
+
+        var nextDraft = "next session's draft"
+        let nextSync = ComposerTextSync(nextDraft)
+        let nextEcho = TextEcho { text in nextSync.viewChanged(to: text) { nextDraft = $0 } }
+        textView.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0), replacementRange: textView.selectedRange())
+        textView.delegate = nextEcho
+        textView.load(nextDraft)
+        check(!textView.hasMarkedText() && textView.string == "next session's draft" && nextDraft == "next session's draft", "switching sessions mid-composition shows the next draft and writes nothing into it: \(textView.string.debugDescription) \(nextDraft.debugDescription)")
+        check(bound == "draft \n\nshared from another app!", "switching sessions mid-composition leaves the previous draft alone: \(bound.debugDescription)")
         withExtendedLifetime(echo) {}
+        withExtendedLifetime(nextEcho) {}
     }
 }
 

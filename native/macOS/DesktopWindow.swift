@@ -1441,8 +1441,7 @@ struct ComposerView: View {
                             .help("Attach files or images")
                             .accessibilityLabel("Attach files or images")
                         }
-                        ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", lines: ComposerNSTextView.composerLines, onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret in updateCompletion { $0.caret = caret } }, completionKey: completionKey) { submit(alternate: false) }
-                            .id(session.id)
+                        ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", lines: ComposerNSTextView.composerLines, onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret in updateCompletion { $0.caret = caret } }, completionKey: completionKey, draftID: session.id) { submit(alternate: false) }
                             .frame(minHeight: 28)
                             .padding(.horizontal, DesktopSpace.xs)
                         HStack(spacing: DesktopSpace.xs) {

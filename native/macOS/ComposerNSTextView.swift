@@ -16,6 +16,9 @@ final class ComposerNSTextView: NSTextView {
     }
     var pasteboard = NSPasteboard.general
     private var shiftHeld = false
+    private let undo = UndoManager()
+
+    override var undoManager: UndoManager? { undo }
 
     static func make() -> ComposerNSTextView {
         let view = ComposerNSTextView(usingTextLayoutManager: true)
@@ -181,6 +184,15 @@ final class ComposerNSTextView: NSTextView {
 
     func show(bound text: String, sync: ComposerTextSync) {
         if let shown = sync.textToShow(bound: text), string != shown { replaceAll(with: shown) }
+    }
+
+    // unmarkText would report the composed text to the delegate, which by now writes to the next session's draft.
+    func load(_ text: String) {
+        if hasMarkedText() { inputContext?.discardMarkedText() }
+        string = text
+        undo.removeAllActions()
+        setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        scrollRangeToVisible(selectedRange())
     }
 
     func replaceAll(with text: String) {
