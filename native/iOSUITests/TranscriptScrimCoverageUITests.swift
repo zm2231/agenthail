@@ -21,9 +21,11 @@ final class TranscriptScrimCoverageUITests: XCTestCase {
         XCTAssertTrue(timeline.waitForExistence(timeout: 10))
         XCTAssertTrue(timeline.waitUntilRowsStill(), "the transcript kept moving after opening")
         let name = "\(dark ? "dark" : "light") \(landscape ? "landscape" : "portrait")"
+        struct Line { let pass: Int; let label: String; let frame: CGRect; let under: Float }
         var report = [name]
-        var bad = 0
-        for pass in 0..<3 {
+        var lines: [Line] = []
+        var arts: [Float] = []
+        for pass in 0..<4 {
             if pass > 0 {
                 timeline.swipeDown(velocity: .slow)
                 _ = timeline.waitUntilRowsStill()
@@ -31,27 +33,42 @@ final class TranscriptScrimCoverageUITests: XCTestCase {
             let shot = XCUIScreen.main.screenshot()
             let image = shot.image
             let view = timeline.frame
-            let top = app.navigationBars.firstMatch.frame.maxY + 60
-            let art = try chroma(image, in: CGRect(x: 1, y: view.midY - 40, width: 3, height: 80))
-            report.append(String(format: "pass %d: art chroma beside the column %.3f, shot %@ window %@", pass, art, "\(image.size)", "\(app.windows.firstMatch.frame.size)"))
+            let top = app.navigationBars.firstMatch.frame.maxY + 8
+            let composer = app.textViews["composer-input"]
+            let bottom = composer.exists ? composer.frame.minY : view.maxY
+            var art: Float = 0
+            for x in [view.minX + 1, view.maxX - 4] {
+                for y in [0.3, 0.5, 0.7] { art = max(art, try chroma(image, in: CGRect(x: x, y: view.minY + view.height * y - 20, width: 3, height: 40))) }
+            }
+            arts.append(art)
+            report.append(String(format: "pass %d: art chroma at the edges %.3f, shot %@ window %@", pass, art, "\(image.size)", "\(app.windows.firstMatch.frame.size)"))
             var pending = [try timeline.snapshot()]
             while let next = pending.popLast() {
                 pending += next.children
                 let frame = next.frame.insetBy(dx: 1, dy: 1)
                 guard next.elementType == .staticText, frame.width > 24, frame.height > 8,
-                      frame.minY > top, frame.maxY < view.maxY - 120, frame.minX >= 0, frame.maxX <= view.maxX else { continue }
-                let under = try chroma(image, in: frame)
-                let covered = under < max(0.06, art * 0.5)
-                if !covered { bad += 1 }
-                if !covered || report.count < 12 {
-                    report.append(String(format: "  %@ %.3f at %@ '%@'", covered ? "ok " : "BARE", under, "\(frame.integral)", String(next.label.prefix(40))))
-                }
+                      frame.minY > top, frame.maxY < bottom, frame.minX >= 0, frame.maxX <= view.maxX else { continue }
+                lines.append(Line(pass: pass, label: next.label, frame: frame, under: try chroma(image, in: frame)))
             }
             let attachment = XCTAttachment(screenshot: shot)
             attachment.name = "\(name) pass \(pass)"
             attachment.lifetime = .keepAlways
             add(attachment)
         }
+        var bad = 0
+        var counted = 0
+        for line in lines {
+            let fixed = lines.contains { $0.pass != line.pass && $0.label == line.label && $0.frame == line.frame }
+            let art = arts[line.pass]
+            guard !fixed, art > 0.1 else { continue }
+            counted += 1
+            let covered = line.under < art * 0.5
+            if !covered { bad += 1 }
+            if !covered || counted <= 30 {
+                report.append(String(format: "  pass %d %@ %.3f (art %.3f) at %@ '%@'", line.pass, covered ? "ok " : "BARE", line.under, art, "\(line.frame.integral)", String(line.label.prefix(40))))
+            }
+        }
+        report.append("lines that moved, over art: \(counted), bare: \(bad)")
         let text = report.joined(separator: "\n")
         print("SCRIM-COVERAGE\n\(text)")
         let attachment = XCTAttachment(string: text)
