@@ -7,6 +7,8 @@ import { displayName, rawDisplayName } from "./session-labels.js";
 import { remoteHostName } from "./hosts.js";
 import { sessionButton } from "./session-row.js";
 import { escape, labels } from "./format.js";
+import { scopeKeeps } from "./pane-scope.js";
+import { renderInboxScope } from "./decision-card.js";
 
 export const sessionBatchSize = () =>
   window.matchMedia("(max-width: 800px)").matches ? 8 : 80;
@@ -32,6 +34,13 @@ export function renderSessions() {
     $("#session-more").hidden = true;
     return;
   }
+  if (app.scope === "inbox") {
+    $("#session-tools").classList.add("hidden");
+    $("#filter-summary").textContent = "";
+    $("#session-more").hidden = true;
+    renderInboxScope();
+    return;
+  }
   if (app.inboxMode === "projects") {
     const projects = renderProjects(query);
     $("#conversation-count").textContent = `${projects.count}`;
@@ -47,13 +56,14 @@ export function renderSessions() {
   $("#session-filters").hidden = false;
   $("#show-archived-row").hidden = false;
   const paged = app.inboxMode === "all";
-  const sessions = paged ? scopedSessions() : scopedSessions().filter((session) =>
-    !query || `${displayName(session)} ${session.surface} ${session.name} ${remoteHostName(session)}`.toLowerCase().includes(query));
+  const sessions = (paged ? scopedSessions() : scopedSessions().filter((session) =>
+    !query || `${displayName(session)} ${session.surface} ${session.name} ${remoteHostName(session)}`.toLowerCase().includes(query)))
+    .filter((session) => scopeKeeps(app.scope, session.project?.id));
   const visible = sessions.slice(0, app.sessionLimit);
   const listScopes = listOrderScopes();
   const total = paged ? listScopes.reduce((sum, key) => sum + (listedTotal(key) ?? 0), 0) : sessions.length;
   const hasMore = paged && (visible.length < sessions.length || listScopes.some(listingHasMore));
-  const historyResults = app.codexSearch.query === query ? app.codexSearch.results : [];
+  const historyResults = (app.codexSearch.query === query ? app.codexSearch.results : []).filter((result) => scopeKeeps(app.scope, result.project?.id));
   $("#conversation-count").textContent = `${total}`;
   $("#session-tools").classList.toggle("hidden", app.inboxMode !== "all");
   syncInboxModeButtons();

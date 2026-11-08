@@ -115,6 +115,7 @@ jobs:
           node scripts/test-dashboard-live-order.mjs
           node scripts/test-dashboard-project-now.mjs
           node scripts/test-dashboard-project-tiles.mjs
+          node scripts/test-dashboard-decision-card.mjs
           node scripts/test-dashboard-holders.mjs
           node scripts/test-dashboard-model.mjs
           node scripts/test-dashboard-turn-settings.mjs

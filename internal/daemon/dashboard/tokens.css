@@ -626,7 +626,83 @@ textarea:focus-visible {
 }
 .decision-holds {
   margin-right: 8px;
-  color: var(--bad);
+  color: var(--warn);
+  font-weight: 600;
+}
+.project-tiles {
+  display: flex;
+  gap: 2px;
+  margin: 4px 0 10px;
+}
+.project-tile {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.project-tile:hover,
+.project-tile.active {
+  background: var(--hover);
+  color: var(--ink);
+}
+.tile-mark {
+  position: relative;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--ink);
+  font-weight: 600;
+}
+.tile-badge {
+  position: absolute;
+  top: -6px;
+  right: -9px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 600;
+}
+.tile-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-tile select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.decision-pane {
+  padding: 24px;
+  overflow-y: auto;
+}
+.decision-card-head h2 {
+  margin: 4px 0;
+}
+.decision-card-head p {
+  margin: 4px 0;
+  color: var(--muted);
+}
+.decision-group-name {
+  font-size: 12px;
   font-weight: 600;
 }
 .decision-lead,

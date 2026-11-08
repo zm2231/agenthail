@@ -1,34 +1,39 @@
 import { app } from "./state.js";
-import { pagerFor, choose, type, next, goTo, move, decision, renderChips, renderPage, renderActions } from "./question-pager.js";
+import { pagerFor, choose, type, next, goTo, move, decision, renderChips, renderPage, renderActions, sessionCard } from "./question-pager.js";
 
-function requestOf(form) {
-  return (app.requests?.requests || []).find((request) => request.id === form.dataset.requestQuestion);
+const camel = (attribute) => attribute.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+
+function sessionRequest(id) {
+  return (app.requests?.requests || []).find((request) => request.id === id);
 }
 
-function refresh(form, pager, { page = true } = {}) {
-  form.querySelector(".pager-chips").innerHTML = renderChips(pager);
-  if (page) form.querySelector(".pager-page").innerHTML = renderPage(pager);
-  form.querySelector(".request-actions").innerHTML = renderActions(pager, form.dataset.requestQuestion);
-  if (page) form.focus({ preventScroll: true });
-}
+export function bindQuestionPager(respond, { card = sessionCard, lookup = sessionRequest } = {}) {
+  const selector = `form[data-${card.question}]`;
+  const key = camel(card.question);
+  const sending = new Set();
+  const requestOf = (form) => lookup(form.dataset[key]);
 
-const sending = new Set();
+  const refresh = (form, pager, { page = true } = {}) => {
+    form.querySelector(".pager-chips").innerHTML = renderChips(pager);
+    if (page) form.querySelector(".pager-page").innerHTML = renderPage(pager);
+    form.querySelector(".request-actions").innerHTML = renderActions(pager, form.dataset[key], card.respond);
+    if (page) form.focus({ preventScroll: true });
+  };
 
-async function send(form, pager, answers, respond) {
-  const requestId = form.dataset.requestQuestion;
-  if (sending.has(requestId)) return;
-  sending.add(requestId);
-  form.querySelectorAll("button").forEach((button) => { button.disabled = true; });
-  try {
-    await respond(requestId, decision(pager, answers));
-  } finally {
-    sending.delete(requestId);
-  }
-}
+  const send = async (form, pager, answers) => {
+    const requestId = form.dataset[key];
+    if (sending.has(requestId)) return;
+    sending.add(requestId);
+    form.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+    try {
+      await respond(requestId, decision(pager, answers));
+    } finally {
+      sending.delete(requestId);
+    }
+  };
 
-export function bindQuestionPager(respond) {
   document.addEventListener("click", async (event) => {
-    const form = event.target.closest("form[data-request-question]");
+    const form = event.target.closest(selector);
     const request = form && requestOf(form);
     if (!request) return;
     const pager = pagerFor(request);
@@ -41,13 +46,13 @@ export function bindQuestionPager(respond) {
     const pick = event.target.closest("[data-pager-pick]");
     if (!pick) return;
     const answers = choose(pager, Number(pick.dataset.pagerPick));
-    if (answers) await send(form, pager, answers, respond);
+    if (answers) await send(form, pager, answers);
     else refresh(form, pager);
   });
   document.addEventListener("input", (event) => {
     const note = event.target.matches("[data-pager-note]");
     if (!note && !event.target.matches("[data-pager-other]")) return;
-    const form = event.target.closest("form[data-request-question]");
+    const form = event.target.closest(selector);
     const request = form && requestOf(form);
     if (!request) return;
     const pager = pagerFor(request);
@@ -59,18 +64,18 @@ export function bindQuestionPager(respond) {
     refresh(form, pager, { page: false });
   });
   document.addEventListener("submit", async (event) => {
-    const form = event.target.closest("form[data-request-question]");
+    const form = event.target.closest(selector);
     if (!form) return;
     event.preventDefault();
     const request = requestOf(form);
     if (!request) return;
     const pager = pagerFor(request);
     const answers = next(pager);
-    if (answers) await send(form, pager, answers, respond);
+    if (answers) await send(form, pager, answers);
     else refresh(form, pager);
   });
   document.addEventListener("keydown", (event) => {
-    const form = event.target.closest?.("form[data-request-question]");
+    const form = event.target.closest?.(selector);
     if (!form || event.target.matches("input, textarea, select") || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
     const request = requestOf(form);
     if (!request) return;

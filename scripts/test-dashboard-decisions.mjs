@@ -68,7 +68,8 @@ assert.match(html, /data-retry="31"/, "a held delivery keeps its buttons in Stop
 assert.ok(!html.includes("1 message needs a decision"), "a local held delivery is listed once, with its buttons, not again as a decision");
 assert.match(html, /data-decision="server::far"/, "a remote delivery problem opens its session");
 assert.match(html, /Holds up 1/);
-assert.match(html, /data-session="worker"[^>]*>Answer</);
+assert.match(html, /data-open-decision="worker"[^>]*>Answer</, "answering opens the Inbox card on that decision");
+assert.match(html, /data-session="server::far"[^>]*>Open</, "a decision that cannot be answered here opens its session");
 assert.ok(html.includes("Bash: make &lt;release&gt;"), "request text is escaped");
 assert.match(html, /web app · builder/);
 assert.match(html, /Handled by a lead/);

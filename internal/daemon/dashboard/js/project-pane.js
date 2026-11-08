@@ -12,7 +12,7 @@ export function syncProjectPane() {
   if (!pane) return;
   const project = shownProject();
   pane.hidden = !project;
-  document.querySelector(".notebook:not(.project-pane)").hidden = Boolean(project);
+  document.querySelector(".notebook:not(.project-pane):not(.decision-pane)").hidden = Boolean(project) || app.scope === "inbox";
   pane.innerHTML = project ? renderProjectView(project) : "";
 }
 

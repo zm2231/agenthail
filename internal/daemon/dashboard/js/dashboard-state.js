@@ -21,6 +21,7 @@ import { catalogRead } from "./catalog-live.js";
 import { rereadSoon } from "./order-refresh.js";
 import { friendlyError, toast } from "./feedback.js";
 import { refreshShownProject } from "./project-pane.js";
+import { dropMissingScope, renderTiles } from "./project-tiles-view.js";
 
 export function renderAll() {
   try {
@@ -32,7 +33,9 @@ export function renderAll() {
   }
   renderSurfaceFilter();
   renderStartSurfaceOptions();
+  dropMissingScope();
   renderSessions();
+  renderTiles();
   refreshShownProject();
   renderOperations();
   if (app.settings && app.operationsTab === "settings") renderSettings();

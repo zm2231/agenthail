@@ -118,8 +118,8 @@ export function renderPage(pager) {
   return `${header}<p class="pager-question">${escape(question.question)}</p>${links(question)}${options}<label><span>Other</span><input type="text" data-pager-other placeholder="Your own answer" value="${escape(pager.typed[pager.step] || "")}"></label>${isSingle(pager) ? noteField(pager) : ""}`;
 }
 
-export function renderActions(pager, requestId) {
-  const decline = pager.ask ? "" : `<button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(requestId)}">Decline</button>`;
+export function renderActions(pager, requestId, respondAttribute = "request-respond") {
+  const decline = pager.ask ? "" : `<button class="soft-button" type="button" data-${respondAttribute}="deny" data-request-id="${escape(requestId)}">Decline</button>`;
   let primary = "";
   if (onReview(pager) || (isSingle(pager) && !isOneTap(pager))) {
     primary = `<button class="primary-button" type="submit"${canSubmit(pager) ? "" : " disabled"}>${isSingle(pager) ? "Submit" : "Submit answers"}</button>`;
@@ -131,7 +131,9 @@ export function renderActions(pager, requestId) {
   return primary + decline;
 }
 
-export function renderQuestionCard(request, created, heading = "Claude asks") {
+export const sessionCard = { question: "request-question", respond: "request-respond" };
+
+export function renderQuestionCard(request, created, heading = "Claude asks", card = sessionCard) {
   const pager = pagerFor(request);
-  return `<form class="request-card question-pager" tabindex="-1" data-request-question="${escape(request.id)}"><h3>${escape(heading)}${created}</h3><div class="pager-chips" aria-label="Questions">${renderChips(pager)}</div><div class="pager-page">${renderPage(pager)}</div><div class="request-actions">${renderActions(pager, request.id)}</div></form>`;
+  return `<form class="request-card question-pager" tabindex="-1" data-${card.question}="${escape(request.id)}"><h3>${escape(heading)}${created}</h3><div class="pager-chips" aria-label="Questions">${renderChips(pager)}</div><div class="pager-page">${renderPage(pager)}</div><div class="request-actions">${renderActions(pager, request.id, card.respond)}</div></form>`;
 }

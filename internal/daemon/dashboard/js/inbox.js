@@ -3,6 +3,8 @@ import { $ } from "./dom.js";
 import { escape, timeAgo } from "./format.js";
 import { displayName } from "./session-labels.js";
 import { decisionGroups, decisionsKey, loadDecisions } from "./decisions.js";
+import { renderInboxScope, shownDecisions } from "./decision-card.js";
+import { renderTiles } from "./project-tiles-view.js";
 
 export async function refreshDecisions(loader = loadDecisions) {
   const key = decisionsKey();
@@ -21,6 +23,8 @@ export async function refreshDecisions(loader = loadDecisions) {
       app.decisionsKey = current ? key : undefined;
       app.decisionsDropped = false;
       renderInbox();
+      renderTiles();
+      if (app.scope === "inbox") renderInboxScope();
     } else {
       app.decisionsDropped = true;
     }
@@ -64,8 +68,10 @@ function decisionItem(item) {
   const holds = item.holdsUp?.length ? `<span class="decision-holds">Holds up ${item.holdsUp.length}</span>` : "";
   const more = (item.requests || []).length > 1 ? ` · ${item.requests.length} requests` : "";
   const since = item.since ? ` · ${timeAgo(item.since)}` : "";
-  const label = item.answerable ? "Answer" : "Open";
-  return `<article class="attention-item" data-decision="${escape(item.sessionId)}"><div><div class="attention-target">${escape(place)}</div><strong>${escape(headline || item.reason)}</strong><p>${holds}${escape(item.reason)}${escape(more)}${escape(since)}</p></div><div class="operation-actions"><button class="${item.answerable ? "primary-button" : "soft-button"}" data-session="${escape(item.sessionId)}" type="button">${label}</button></div></article>`;
+  const open = item.answerable
+    ? `<button class="primary-button" data-open-decision="${escape(item.sessionId)}" type="button">Answer</button>`
+    : `<button class="soft-button" data-session="${escape(item.sessionId)}" type="button">Open</button>`;
+  return `<article class="attention-item" data-decision="${escape(item.sessionId)}"><div><div class="attention-target">${escape(place)}</div><strong>${escape(headline || item.reason)}</strong><p>${holds}${escape(item.reason)}${escape(more)}${escape(since)}</p></div><div class="operation-actions">${open}</div></article>`;
 }
 
 // Deliveries and lead replacements on this computer carry their own buttons, so their rows stand in for the matching decisions.
@@ -79,7 +85,7 @@ function group(title, rows) {
 
 export function renderInbox() {
   const panel = $("#inbox-panel");
-  const inbox = app.decisions || { decisions: [], leadHandling: [], unreachable: [], outdated: [] };
+  const inbox = { ...(app.decisions || { leadHandling: [], unreachable: [], outdated: [] }), decisions: shownDecisions() };
   const stopped = [
     ...(app.state.attention || []).map(attentionItem),
     ...(app.state.deliveryProblems || []).map(deliveryProblemItem),
