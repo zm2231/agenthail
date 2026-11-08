@@ -24,6 +24,9 @@ type cdpConn struct {
 
 func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
 	if c.desktopURL == "" {
+		if codexDesktopRunsHere {
+			return nil, fmt.Errorf("Codex Desktop is not used from this Codex home (%s); %s", codexHome(), codexDesktopOptIn)
+		}
 		return nil, fmt.Errorf("Codex Desktop does not run on %s; set AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT to reach one", runtime.GOOS)
 	}
 	targets, err := surface.ProbeOnce(ctx, codexDesktopProbe{c.desktopURL}, func() ([]codexCDPTarget, error) {
