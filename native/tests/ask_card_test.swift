@@ -32,6 +32,10 @@ struct AskCardTest {
         let claude = SessionRequest(id: "a1", kind: "approval", tool: "Bash", actions: [.init(id: "allow", title: "Allow"), .init(id: "deny", title: "Deny"), .init(id: "reply", title: "Deny with message…")])
         let claudeButtons = RequestCard.approvalButtons(claude.actions)
         check(claudeButtons.allowing.map(\.id) == ["allow"] && claudeButtons.denying.map(\.id) == ["deny"] && claudeButtons.reply?.title == "Deny with message…", "a Claude approval offers a message with its denial: \(claudeButtons)")
+        let legacy = try! JSONDecoder().decode(SessionRequests.self, from: Data(#"{"permissionMode":"","requests":[{"id":"r1","kind":"approval","tool":"Bash","title":"Claude wants to run true","alwaysAllow":true,"createdAt":"2026-10-20T00:00:00Z"}]}"#.utf8)).requests[0]
+        let legacyButtons = RequestCard.approvalButtons(legacy.actions)
+        check(legacy.actions.isEmpty && legacyButtons.allowing.isEmpty && legacyButtons.denying.isEmpty && legacyButtons.reply == nil, "an approval from a computer that sends no choices offers no buttons it could refuse")
+        check(RequestCard.noChoicesNote.contains("answer it where the session runs"), "and the card says where to answer it instead")
         let replyBody = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(RequestDecision(choice: "reply", message: "Use the staging host"))) as! [String: Any]
         check(replyBody["choice"] as? String == "reply" && replyBody["message"] as? String == "Use the staging host" && replyBody.count == 2, "a message denial is sent as the reply choice with its text: \(replyBody)")
 

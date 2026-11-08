@@ -74,9 +74,22 @@ struct RequestCard: View {
         .accessibilityIdentifier("request-\(request.id)")
     }
 
+    static let noChoicesNote = "This computer sent no choices for this request, so answer it where the session runs. Updating Agenthail there lets you answer it here."
+
     @ViewBuilder
     private var approvalView: some View {
         let buttons = Self.approvalButtons(request.actions)
+        if request.actions.isEmpty {
+            Text(Self.noChoicesNote).font(.footnote).foregroundStyle(RoleStyle(.muted))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("request-no-choices")
+        } else {
+            approvalButtonsView(buttons)
+        }
+    }
+
+    @ViewBuilder
+    private func approvalButtonsView(_ buttons: (allowing: [SessionRequest.Action], denying: [SessionRequest.Action], reply: SessionRequest.Action?)) -> some View {
         VStack(alignment: .trailing, spacing: 8) {
             HStack {
                 ForEach(buttons.allowing, id: \.id) { action in
