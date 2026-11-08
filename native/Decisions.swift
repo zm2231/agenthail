@@ -113,11 +113,12 @@ struct DecisionInbox: Equatable {
         let host = item.hostID ?? ""
         let prefix = host + "::"
         let id = !host.isEmpty && named.hasPrefix(prefix) ? String(named.dropFirst(prefix.count)) : named
-        if projects.contains(where: { $0.id == id }) { return id }
+        if projects.contains(where: { $0.id == named }) { return named }
         guard !host.isEmpty else { return nil }
+        let names: Set<String> = [named, id]
         return projects.first { project in
-            project.checkouts.contains { $0.host.id == host && ($0.projectId == id || $0.linkedFrom?.id == id) }
-                || project.linked?.contains { $0.id == id } == true
+            project.checkouts.contains { $0.host.id == host && (names.contains($0.projectId) || $0.linkedFrom.map { names.contains($0.id) } == true) }
+                || project.linked?.contains { names.contains($0.id) } == true
         }?.id
     }
 
