@@ -11,7 +11,10 @@ struct TranscriptBlock: Identifiable, Equatable {
         case notice(String)
         case instructions(String)
         case image(SessionAttachment)
+        case unknown(title: String, kind: String, text: String)
     }
+
+    static let toolKinds: Set<String> = ["toolCall", "toolResult", "reasoning", "tool", "command"]
 
     let id: String
     let kind: Kind
@@ -85,8 +88,13 @@ struct TranscriptBlock: Identifiable, Equatable {
                 blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: text.isEmpty ? .annotation(item.eventTitle) : .notice(item.eventLine), truncated: item.truncated))
             case "context", "goal", "done", "phase":
                 continue
-            default:
+            case let kind where toolKinds.contains(kind):
                 tools.append(item)
+            default:
+                flushTools()
+                let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let kind = item.kind.isEmpty ? "unknown" : item.kind
+                blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .unknown(title: title.isEmpty ? "Unknown timeline item" : title, kind: kind, text: item.text), truncated: item.truncated, timestamp: item.timestamp))
             }
         }
         flushTools()
