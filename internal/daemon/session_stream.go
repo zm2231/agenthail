@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sse"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -153,7 +154,7 @@ func writeSessionStreamEntry(w http.ResponseWriter, sessionID string, entry regi
 }
 
 func writeSessionStreamEnvelope(w io.Writer, envelope sessionStreamEnvelope) error {
-	encoded, err := marshalAPIJSON(envelope)
+	encoded, err := apitime.Marshal(envelope)
 	if err != nil {
 		return err
 	}

@@ -1,10 +1,16 @@
 package cli
 
 import (
-	"encoding/json"
 	"os"
+
+	"github.com/zm2231/agenthail/internal/apitime"
 )
 
 func emit(value any) error {
-	return json.NewEncoder(os.Stdout).Encode(value)
+	encoded, err := apitime.Marshal(value)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(append(encoded, '\n'))
+	return err
 }

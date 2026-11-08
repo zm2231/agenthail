@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/sse"
 )
@@ -47,7 +48,7 @@ func (d *Daemon) ledgerVersion(key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	body, err := json.Marshal(result)
+	body, err := apitime.Marshal(result)
 	if err != nil {
 		return "", err
 	}
@@ -124,7 +125,7 @@ func (d *Daemon) apiLedgerReadHandler(w http.ResponseWriter, r *http.Request) {
 		writeLedgerError(w, err)
 		return
 	}
-	body, err := json.Marshal(result)
+	body, err := apitime.Marshal(result)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "encode_failed", err.Error())
 		return

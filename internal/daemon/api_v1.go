@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -441,7 +442,7 @@ func constantTokenEqual(left, right string) bool {
 }
 
 func writeSSEEvent(w io.Writer, event apiEvent) {
-	payload, _ := marshalAPIJSON(event)
+	payload, _ := apitime.Marshal(event)
 	fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.ID, event.Type, payload)
 }
 

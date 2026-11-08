@@ -1,4 +1,4 @@
-package daemon
+package apitime
 
 import (
 	"bytes"
@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestAPIJSONPreservesPayloads(t *testing.T) {
+func TestMarshalPreservesPayloads(t *testing.T) {
 	cases := []struct{ name, input, want string }{
 		{"stream envelope", `{"seq":18446744073709551615,"data":{"ts":"2026-10-24T01:02:03-05:00","body":"quoted \"ts\":\"2026-10-24T01:02:03Z\"","goal":null}}`, `{"seq":18446744073709551615,"data":{"ts":"2026-10-24T06:02:03.000000000Z","body":"quoted \"ts\":\"2026-10-24T01:02:03Z\"","goal":null}}`},
 		{"timestamp arrays", `{"createdAt":["2026-10-24 01:02:03",["2026-10-24T01:02:03Z"],{"body":"2026-10-24T01:02:03Z"},null,42]}`, `{"createdAt":["2026-10-24T01:02:03.000000000Z",["2026-10-24T01:02:03.000000000Z"],{"body":"2026-10-24T01:02:03Z"},null,42]}`},
@@ -18,7 +18,7 @@ func TestAPIJSONPreservesPayloads(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := marshalAPIJSON(json.RawMessage(tc.input))
+			got, err := Marshal(json.RawMessage(tc.input))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -36,15 +36,15 @@ func TestAPIJSONPreservesPayloads(t *testing.T) {
 			}
 		})
 	}
-	if _, err := marshalAPIJSON(make(chan int)); err == nil {
+	if _, err := Marshal(make(chan int)); err == nil {
 		t.Fatal("unsupported values must fail")
 	}
-	if _, err := marshalAPIJSON(json.RawMessage(`{`)); err == nil {
+	if _, err := Marshal(json.RawMessage(`{`)); err == nil {
 		t.Fatal("invalid raw JSON must fail")
 	}
 }
 
-func FuzzAPIJSONNormalizesOnlyTimestampFields(f *testing.F) {
+func FuzzMarshalNormalizesOnlyTimestampFields(f *testing.F) {
 	for _, seed := range []string{
 		`{"seq":1,"data":{"ts":"2026-10-24T01:02:03-05:00","body":"quoted \"ts\":\"2026-10-24T01:02:03Z\""}}`,
 		`{"createdAt":["2026-10-24 01:02:03",["2026-10-24T01:02:03Z"],{"body":"2026-10-24T01:02:03Z"},null,42]}`,
@@ -59,7 +59,7 @@ func FuzzAPIJSONNormalizesOnlyTimestampFields(f *testing.F) {
 		if !json.Valid([]byte(input)) {
 			return
 		}
-		got, err := marshalAPIJSON(json.RawMessage(input))
+		got, err := Marshal(json.RawMessage(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,26 +72,26 @@ func FuzzAPIJSONNormalizesOnlyTimestampFields(f *testing.F) {
 			}
 			return value
 		}
-		var normalize func(any, string) any
-		normalize = func(value any, field string) any {
+		var expect func(any, string) any
+		expect = func(value any, field string) any {
 			switch typed := value.(type) {
 			case map[string]any:
 				for key, item := range typed {
-					typed[key] = normalize(item, key)
+					typed[key] = expect(item, key)
 				}
 			case []any:
 				for index, item := range typed {
-					typed[index] = normalize(item, field)
+					typed[index] = expect(item, field)
 				}
 			case string:
-				if _, ok := apiTimestampFields[field]; ok {
-					return normalizeAPITimestamp(typed)
+				if _, ok := fields[field]; ok {
+					return normalize(typed)
 				}
 			}
 			return value
 		}
-		if want := normalize(decode([]byte(input)), ""); !reflect.DeepEqual(decode(got), want) {
-			t.Fatalf("marshalAPIJSON(%s) = %s", input, got)
+		if want := expect(decode([]byte(input)), "");!reflect.DeepEqual(decode(got), want) {
+			t.Fatalf("Marshal(%s) = %s", input, got)
 		}
 	})
 }

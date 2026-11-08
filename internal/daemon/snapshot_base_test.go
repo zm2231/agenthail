@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -148,7 +149,7 @@ func TestProjectActivityMatchesTheSnapshotsProjectsAfterAnArchive(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	wire, _ := marshalAPIJSON(newProjectActivity(state))
+	wire, _ := apitime.Marshal(newProjectActivity(state))
 	var want projectActivityPage
 	if err := json.Unmarshal(wire, &want); err != nil {
 		t.Fatal(err)
