@@ -711,6 +711,33 @@ test('model, effort and permission mode change live and a resume keeps them', as
   d.close();
 });
 
+test('a resume passes the same arguments with or without an autocompact choice, apart from it', async () => {
+  const f = fixture();
+  const first = await startHost(f);
+  const c = new Client(f.socket);
+  const plain = randomUUID();
+  const chosen = randomUUID();
+  await c.call('open', { sessionId: plain, cwd: f.cwd });
+  await c.call('open', { sessionId: chosen, cwd: f.cwd });
+  await c.call('setAutoCompact', { sessionId: chosen, enabled: false });
+  first.kill('SIGKILL');
+  await first.exited;
+  c.close();
+
+  await startHost(f);
+  const d = new Client(f.socket);
+  const spawned = () => fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1).argv;
+  await d.call('open', { resume: plain, cwd: f.cwd });
+  const without = spawned();
+  await d.call('open', { resume: chosen, cwd: f.cwd });
+  const withChoice = spawned();
+  const settingsArgs = (argv) => argv.flatMap((a, i) => (a.startsWith('--settings') ? [a] : argv[i - 1] === '--settings' ? [a] : []));
+  assert.deepEqual(settingsArgs(without), [], `no choice passes no settings: ${without.join(' ')}`);
+  const normalize = (argv, id) => argv.filter((a, i) => !a.startsWith('--settings') && argv[i - 1] !== '--settings').map((a) => a.replaceAll(id, 'ID'));
+  assert.deepEqual(normalize(withChoice, chosen), normalize(without, plain), 'the choice adds only its settings');
+  d.close();
+});
+
 test('autocompact turns off live and a resume keeps it off', async () => {
   const f = fixture();
   const first = await startHost(f);

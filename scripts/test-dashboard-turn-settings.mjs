@@ -78,6 +78,12 @@ assert.deepEqual([...panel.matchAll(/data-turn-setting="(\w+)"/g)].map((match) =
 assert.match(panel, /For new sessions on work/, "a root window says it is for new sessions on that root");
 assert.match(panel, /<option value="" selected disabled>Default<\/option>/, "an unset window reads as the default");
 assert.equal(compactModules["compact-settings"].renderCompactSettings({ ...compactDetail, readOnly: true }), "", "a read-only session shows no compact settings");
+assert.equal(compactModules["compact-settings"].renderCompactSettings(detail), "", "a session without compact settings shows none");
+assert.equal(compactModules["compact-settings"].compactSettingsOf(detail).length, 0, "a session without compact settings has none to change");
+const timelineModules = await dashboardModules(["timeline"], {});
+const signature = timelineModules.timeline.timelineSignature;
+const session = { id: "s1", status: "idle" };
+assert.equal(signature(session, [], null, {}, "", [], [], [], 0, false, false), signature(session, [], null, {}, "", [], [], [], 0, false, false, []), "a session without compact settings keeps the transcript signature it had");
 context.app.history = compactDetail;
 assert.equal(await context.changeTurnSetting("compactWindow", "400000"), true);
 assert.deepEqual(posted.at(-1), { name: "turn-setting", setting: "compactWindow", value: "400000" }, "a compact window posts turn-setting");
