@@ -1005,9 +1005,9 @@ struct IOSComposer: View {
             }
         }
         .sheet(isPresented: $showingModels) {
-            SearchableModelSelectionSheet(initialOptions: loadedModels ?? detail.models ?? [], currentSelectedID: detail.turnSettings?.setting(TurnSetting.model)?.value ?? detail.model, allowsDefault: false, onSelect: { value in
+            SearchableModelSelectionSheet(initialOptions: detail.modelOptions(catalog: loadedModels), currentSelectedID: detail.selectedModelID, allowsDefault: false, onSelect: { value in
                 if let value { Task { await model.setTurnSetting(TurnSetting.model, to: value, sessionID: session.id) } }
-            }, reload: { try await loadModels() })
+            }, reload: { detail.modelOptions(catalog: try await loadModels()) })
         }
         .onChange(of: session.id) { _, _ in loadedModels = nil }
         .task(id: mentionRequest) { await loadMentionFiles(mentionRequest) }
@@ -1605,12 +1605,12 @@ struct SessionInspector: View {
             .sheet(isPresented: $adopting) { IOSAdoptSessionSheet(model: model, session: model.routedSession(liveSession) ?? liveSession, sessionID: liveSession.id) }
             .task(id: SubagentFetchKey(liveSession, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: liveSession) }
             .sheet(isPresented: $showingModels) {
-                SearchableModelSelectionSheet(initialOptions: detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in
+                SearchableModelSelectionSheet(initialOptions: detail.modelOptions(), currentSelectedID: detail.selectedModelID, allowsDefault: false, onSelect: { value in
                     if let value {
                         Task { await model.setTurnSetting(TurnSetting.model, to: value, sessionID: session.id) }
                         dismiss()
                     }
-                }, reload: { try await model.creationModels(surface: session.surface, host: session.remoteHostID) })
+                }, reload: { detail.modelOptions(catalog: try await model.creationModels(surface: session.surface, host: session.remoteHostID)) })
             }
         }
     }

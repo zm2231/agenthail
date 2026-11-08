@@ -1566,7 +1566,7 @@ struct ComposerView: View {
     private var showsSteerNow: Bool { session.isWorking && canSteer && hasText && !draftIsCommand && resolvedAction(alternate: false) == .queue }
     private var modelSuggestions: [CompletionItem]? {
         guard draft.attachments.isEmpty, scopedCompletion.dismissed != draft.text, let query = SlashCommand.modelQuery(for: draft.text), session.capabilities.model else { return nil }
-        let options = pane.detail?.models ?? []
+        let options = pane.detail?.modelOptions() ?? []
         if options.contains(where: { $0.id == query }) { return [] }
         return options
             .filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) || $0.displayName.localizedCaseInsensitiveContains(query) }
@@ -2020,8 +2020,8 @@ struct DetailsTab: View {
     @State private var showTokens = false
     @State private var pendingMode: TurnSettingChoice?
     private var modelOptions: [ModelOption] {
-        if let options = pane.detail?.models, !options.isEmpty { return options }
-        return model.modelCatalog[session.modelCatalogKey] ?? []
+        let catalog = pane.detail?.models.flatMap { $0.isEmpty ? nil : $0 } ?? model.modelCatalog[session.modelCatalogKey] ?? []
+        return pane.detail?.modelOptions(catalog: catalog) ?? catalog
     }
 
     private var catalogNeeded: String? {
@@ -2089,7 +2089,7 @@ struct DetailsTab: View {
                 if let background = session.backgroundTasks {
                     detailRow("Background", ([background.summary] + (background.tasks ?? []).map(\.line) + [background.sourceNote].compactMap { $0 }).joined(separator: "\n"))
                 }
-                let modelName = pane.detail?.model
+                let modelName = pane.detail?.selectedModelID
                 if canControl && session.capabilities.model, case let options = modelOptions, !options.isEmpty {
                     GridRow {
                         Text("Model").foregroundStyle(DesktopPalette.text2)

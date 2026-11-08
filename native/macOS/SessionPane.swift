@@ -697,7 +697,7 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     func resolvedModelID(_ query: String) -> String {
-        let options = detail?.models ?? []
+        let options = detail?.modelOptions() ?? []
         return options.first { $0.id.caseInsensitiveCompare(query) == .orderedSame || $0.displayName.caseInsensitiveCompare(query) == .orderedSame }?.id ?? query
     }
 

@@ -49,4 +49,23 @@ struct TurnSetting: Decodable, Equatable, Sendable {
 
 extension Array where Element == TurnSetting {
     func setting(_ key: String) -> TurnSetting? { first { $0.key == key } }
+
+    // The session's descriptor decides which models it offers; the catalog only adds detail.
+    func modelOptions(catalog: [ModelOption]) -> [ModelOption]? {
+        guard let setting = setting(TurnSetting.model) else { return nil }
+        let custom: Bool? = catalog.contains { $0.allowsCustom == true } ? true : nil
+        return setting.options.map { option in
+            catalog.first { $0.id == option.id }
+                ?? ModelOption(id: option.id, displayName: option.label, description: nil, default: nil, allowsCustom: custom, supportedReasoningEfforts: nil, defaultReasoningEffort: nil)
+        }
+    }
+}
+
+extension SessionDetail {
+    func modelOptions(catalog: [ModelOption]? = nil) -> [ModelOption] {
+        let known = catalog ?? models ?? []
+        return turnSettings?.modelOptions(catalog: known) ?? known
+    }
+
+    var selectedModelID: String? { turnSettings?.setting(TurnSetting.model)?.value ?? model }
 }
