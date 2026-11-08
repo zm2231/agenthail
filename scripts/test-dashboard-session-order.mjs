@@ -31,7 +31,7 @@ const context = {
   fetch: async (url) => {
     requested.push(url);
     if (!pages[url]) return { ok: false, status: 404 };
-    return { ok: true, status: 200, json: async () => structuredClone(pages[url]) };
+    return { ok: true, status: 200, headers: { get: (name) => (name === "ETag" ? pages[url].etag ?? null : null) }, json: async () => structuredClone(pages[url]) };
   },
   responseError: async (response) => new Error(`refused ${response.status}`),
 };
@@ -40,11 +40,30 @@ const { app } = context;
 const ids = (key) => context.orderedSessions(key).map((session) => session.id).join(",");
 
 let { base, refreshAt } = await context.loadSessionOrder();
-assert.deepEqual(requested.sort(), ["/api/state?sessions=none", path({ scope: "current", members: "1", limit: "200" })].sort(), "the Current list reads the base and Current, nothing else");
+assert.deepEqual(requested.sort(), ["/api/state?sessions=none", "/api/v1/projects/activity", path({ scope: "current", members: "1", limit: "200" })].sort(), "the Current list reads the base, project activity and Current, nothing else");
 assert.equal(base.daemon.running, true);
 assert.equal(refreshAt, Date.parse("2026-11-05T12:10:00Z"));
 assert.deepEqual([...context.listedRows().keys()], ["b"], "rows come from the pages read");
 assert.equal(context.orderIsMissing(), false);
+const activityTag = (epoch) => `"${epoch}-${"a".repeat(24)}"`;
+pages["/api/v1/projects/activity"] = { etag: activityTag("e1"), projects: [{ id: "p", sessionCount: 2 }] };
+assert.deepEqual((await context.loadSessionOrder()).activity, [{ id: "p", sessionCount: 2 }], "project activity from the same daemon run comes with the order");
+let activityReads = 0;
+const steady = context.fetch;
+context.fetch = async (url) => {
+  if (url === "/api/v1/projects/activity") pages[url] = activityReads++ === 0 ? { etag: activityTag("e0"), projects: [] } : { etag: activityTag("e1"), projects: [{ id: "p", sessionCount: 4 }] };
+  return steady(url);
+};
+assert.deepEqual((await context.loadSessionOrder()).activity, [{ id: "p", sessionCount: 4 }], "activity from another daemon run is read again, never joined onto this run's projects");
+context.fetch = steady;
+delete pages["/api/v1/projects/activity"];
+assert.deepEqual((await context.loadSessionOrder()).activity, [{ id: "p", sessionCount: 4 }], "a failed activity read keeps the last one from the same run");
+pages["/api/state?sessions=none"].hostEpoch = "e9";
+context.fetch = async (url) => (url.startsWith("/api/state?scope") ? { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ ...structuredClone(pages[url] || pages[path({ scope: "current", members: "1", limit: "200" })]), hostEpoch: "e9" }) } : steady(url));
+assert.equal((await context.loadSessionOrder()).activity.length, 0, "activity kept from an earlier run is not joined onto a restarted daemon's projects");
+context.fetch = steady;
+pages["/api/state?sessions=none"].hostEpoch = "e1";
+await context.loadSessionOrder();
 
 app.inboxMode = "all";
 assert.equal(context.orderIsMissing(), true, "a list that shows All needs All read");

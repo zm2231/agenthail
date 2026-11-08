@@ -19,14 +19,13 @@ let unconfirmed = [];
 const order = (sessions, base = {}) => {
   rows = new Map(sessions.map((session) => [session.id, session]));
   context.app.sessionOrder = { current: { counts: { current: sessions.length } } };
-  return { base: { daemon: { running: true }, ...base }, refreshAt: Infinity };
+  return { base: { daemon: { running: true }, ...base }, refreshAt: Infinity, activity: [{ id: "p", sessionCount: 3, lastActive: "2026-11-08T10:00:00Z" }] };
 };
 const context = {
   app: { loading: false, hasState: false, audit: {} },
   loadTools: () => loadRenderer(),
   loadSessionOrder: (fresh) => { orderReads++; return readOrder(fresh); },
   readHistory: async () => { calls.push("history"); return [{ id: 7 }]; },
-  readProjectActivity: async () => { calls.push("activity"); return [{ id: "p", sessionCount: 3, lastActive: "2026-11-08T10:00:00Z" }]; },
   listedRows: () => new Map(rows),
   findSessions: async (ids) => { found.push(...ids); return new Map(ids.map((id) => [id, { id, name: "deep" }])); },
   unconfirmedSendsOutside: (known) => unconfirmed.filter((item) => !known(item.sessionId)),
@@ -50,10 +49,10 @@ const context = {
 };
 await dashboardModules(["dashboard-state"], context);
 const first = context.load();
-assert.deepEqual(calls, ["tools", "order", "history", "activity"], "tools, the base with its listings, history and project activity are read together");
+assert.deepEqual(calls, ["tools", "order", "history"], "tools, the base with its listings and activity, and history are read together");
 await context.load();
 await context.load();
-assert.equal(calls.length, 4, "overlapping refreshes do not start duplicate requests");
+assert.equal(calls.length, 3, "overlapping refreshes do not start duplicate requests");
 releaseState(order([{ id: "one" }], { projects: [{ id: "p", displayName: "P" }, { id: "q", displayName: "Q" }] }));
 await new Promise(setImmediate);
 assert.equal(rendered, 0, "rendering requires the renderer to be ready");
@@ -64,12 +63,12 @@ assert.equal(context.app.state.sessions[0].id, "one");
 assert.deepEqual(context.app.state.counts, { current: 1 }, "list counts come from the daemon's view");
 assert.deepEqual(context.app.state.history, [{ id: 7 }]);
 assert.deepEqual(context.app.state.projects.map((project) => [project.id, project.sessionCount, project.lastActive]), [["p", 3, "2026-11-08T10:00:00Z"], ["q", 0, undefined]], "projects carry their activity, which the base snapshot leaves out");
-assert.equal(calls.length, 8, "the refreshes asked for during a load run once after it");
+assert.equal(calls.length, 6, "the refreshes asked for during a load run once after it");
 releaseState(order([{ id: "one" }]));
 releaseTools();
 await new Promise(setImmediate);
 await new Promise(setImmediate);
-assert.equal(calls.length, 8);
+assert.equal(calls.length, 6);
 assert.equal(context.app.loading, false);
 
 loadRenderer = async () => {};

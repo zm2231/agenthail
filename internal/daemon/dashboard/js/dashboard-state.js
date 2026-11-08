@@ -16,7 +16,7 @@ import { renderChat } from "./chat.js";
 import { mobileConversationView } from "./navigation.js";
 import { defaultSession } from "./session-scope.js";
 import { listedRows, loadSessionOrder, orderIsMissing } from "./session-order.js";
-import { findSessions, readHistory, readProjectActivity } from "./session-pages.js";
+import { findSessions, readHistory } from "./session-pages.js";
 import { withActivity } from "./project-tiles.js";
 import { catalogRead } from "./catalog-live.js";
 import { rereadSoon } from "./order-refresh.js";
@@ -65,13 +65,11 @@ export async function load(fresh = false, selectDefault = true) {
     }
   }, 2000);
   try {
-    const [, { base: state, refreshAt, catalogSeq }, history, activity] = await Promise.all([
+    const [, { base: state, refreshAt, catalogSeq, activity }, history] = await Promise.all([
       loadTools(),
       loadSessionOrder(fresh),
       readHistory(),
-      readProjectActivity().catch(() => app.projectActivity || []),
     ]);
-    app.projectActivity = activity;
     clearTimeout(app.orderRefresh);
     if (Number.isFinite(refreshAt)) app.orderRefresh = setTimeout(() => rereadSoon(0), Math.max(0, refreshAt - Date.now()));
     const rows = listedRows();
@@ -80,7 +78,7 @@ export async function load(fresh = false, selectDefault = true) {
     if (missing.length) for (const [id, row] of await findSessions(missing).catch(() => new Map())) rows.set(id, row);
     app.state = {
       ...state,
-      projects: withActivity(state.projects || [], activity),
+      projects: withActivity(state.projects || [], activity || []),
       counts: app.sessionOrder.current.counts,
       history,
       surfaces: state.surfaces || [],

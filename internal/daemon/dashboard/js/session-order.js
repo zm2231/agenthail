@@ -1,5 +1,5 @@
 import { app } from "./state.js";
-import { readBase, readListing } from "./session-pages.js";
+import { readBase, readListing, readProjectActivity } from "./session-pages.js";
 
 export const projectKey = (id, scope = "all") => `project:${scope}:${id}`;
 
@@ -69,12 +69,15 @@ export function orderIsMissing() {
 export async function loadSessionOrder(fresh = false) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const keys = neededOrderScopes();
-    const [base, listings] = await Promise.all([readBase(fresh), Promise.all(keys.map((key) => readListing(listingSpec(key))))]);
+    const [base, listings, read] = await Promise.all([readBase(fresh), Promise.all(keys.map((key) => readListing(listingSpec(key)))), readProjectActivity().catch(() => null)]);
     if (!listings.every((listing) => !listing.mixed && listing.hostEpoch === base.hostEpoch)) continue;
+    if (read && read.hostEpoch !== base.hostEpoch) continue;
     app.sessionOrder = Object.fromEntries(keys.map((key, index) => [key, listings[index]]));
+    if (read) app.projectActivity = read;
+    const activity = app.projectActivity?.hostEpoch === base.hostEpoch ? app.projectActivity.projects : [];
     const refreshAt = listings.map((listing) => listing.view.refreshAt).filter(Boolean).map(Date.parse).reduce((first, at) => Math.min(first, at), Infinity);
     const catalogSeq = Math.min(base.catalogSeq ?? 0, ...listings.map((listing) => listing.catalogSeq));
-    return { base, refreshAt, catalogSeq };
+    return { base, refreshAt, catalogSeq, activity };
   }
   throw new Error("The computer restarted while the dashboard was reading it. Trying again.");
 }

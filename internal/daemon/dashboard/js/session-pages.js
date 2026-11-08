@@ -13,7 +13,10 @@ export function readBase(fresh = false) {
 }
 
 export async function readProjectActivity() {
-  return (await readJSON("/api/v1/projects/activity")).projects || [];
+  const response = await fetch("/api/v1/projects/activity");
+  if (!response.ok) throw await responseError(response);
+  const tag = (response.headers.get("ETag") || "").replace(/^W\//, "").replace(/^"|"$/g, "");
+  return { hostEpoch: tag.replace(/-[0-9a-f]{24}$/, ""), projects: (await response.json()).projects || [] };
 }
 
 export async function readHistory() {
