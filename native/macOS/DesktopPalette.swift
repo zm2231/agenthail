@@ -119,7 +119,8 @@ enum DesktopSpace {
 
 enum DesktopColumns {
     static let sidebar = (min: CGFloat(248), ideal: CGFloat(300), max: CGFloat(340))
-    static let detail = (min: CGFloat(340), ideal: CGFloat(892))
+    /// Wider than the sidebar's max: docked, the window's minimum is twice the sidebar, so the sidebar collapses before it pins the window.
+    static let detail = (min: CGFloat(372), ideal: CGFloat(892))
     static let inspector = (min: CGFloat(270), ideal: CGFloat(284), max: CGFloat(300))
     static let reading: CGFloat = 1040
     static let wide: CGFloat = 1120
@@ -131,6 +132,13 @@ enum DesktopColumns {
         let column = max(min(pane - 2 * gutter, reading), 0)
         let spare = max((pane - 2 * gutter - column) / 2, 0)
         return (column, min(spare, wide - reading))
+    }
+}
+
+extension View {
+    /// Docked, the sidebar's inset is counted twice in a measured minimum, so the collapse threshold holds the minimum instead.
+    func conversationColumn(sidebarDocks: Bool) -> some View {
+        frame(minWidth: sidebarDocks ? 0 : DesktopColumns.detail.min, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
     }
 }
 

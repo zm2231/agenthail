@@ -83,6 +83,7 @@ struct DesktopWindow: View {
             .navigationSplitViewColumnWidth(min: sidebar.min, ideal: sidebar.ideal, max: sidebar.max)
         } detail: {
             ConversationPane(model: model, pane: pane, gaps: contentGaps, holdsWindowButtons: !pane.sidebarDocks, showsSidebarToggle: !pane.sidebarDocks)
+                .conversationColumn(sidebarDocks: pane.sidebarDocks)
                 .opacity(model.isConnected || !model.hasSnapshot ? 1 : 0.6)
                 .hidesSplitDividers()
                 .belowWindowChrome()
