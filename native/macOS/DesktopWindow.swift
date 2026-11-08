@@ -518,9 +518,7 @@ struct SessionRowView: View {
         HStack(alignment: .center, spacing: 9) {
             StatusIndicator(session: session, needsYou: needsYou, finishedUnseen: finishedUnseen)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title ?? session.title)
-                    .lineLimit(1)
-                    .foregroundStyle(kind != .unavailable && (session.open || kind == .working) ? DesktopPalette.text : DesktopPalette.text2)
+                titleLine(kind: kind)
                 if kind == .working {
                     TimelineView(.everyMinute) { context in
                         if let note = SessionRowNote.text(session, now: context.date) { noteText(note, kind: kind) }
@@ -529,6 +527,19 @@ struct SessionRowView: View {
                     noteText(note, kind: kind)
                 }
             }
+        }
+        .font(.system(size: DesktopType.body))
+        .padding(.leading, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(needsYou ? "Needs you · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
+        .help(SessionFacts.rowDetail(session))
+    }
+
+    private func titleLine(kind: SessionDisplayKind) -> some View {
+        HStack(alignment: .center, spacing: 9) {
+            Text(title ?? session.title)
+                .lineLimit(1)
+                .foregroundStyle(kind != .unavailable && (session.open || kind == .working) ? DesktopPalette.text : DesktopPalette.text2)
             if saysWaiting && kind == .waiting {
                 Text(SessionDisplayKind.label(session))
                     .font(.system(size: DesktopType.caption, weight: .medium))
@@ -592,11 +603,6 @@ struct SessionRowView: View {
                     .foregroundStyle(DesktopPalette.text2)
             }
         }
-        .font(.system(size: DesktopType.body))
-        .padding(.leading, 6)
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(needsYou ? "Needs you · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
-        .help(SessionFacts.rowDetail(session))
     }
 
     private func noteText(_ note: String, kind: SessionDisplayKind) -> some View {
