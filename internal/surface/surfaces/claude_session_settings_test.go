@@ -2,6 +2,9 @@ package surfaces
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -43,9 +46,15 @@ func TestAStoppedClaudeSessionReportsItsSettingsFromItsTranscriptWithoutStarting
 	appendLine(t, session.Transcript, `{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[]}}`)
 	appendLine(t, session.Transcript, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}`)
 
+	invocations := filepath.Join(fixture.Home, "argv")
+	before, _ := os.ReadFile(invocations)
+
 	settings, err := c.SessionSettings(context.Background(), &session)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if after, _ := os.ReadFile(invocations); string(after) != string(before) {
+		t.Fatalf("reading settings ran Claude: %q", strings.TrimPrefix(string(after), string(before)))
 	}
 	if m := settings.Model; m == nil || m.Value != "claude-opus-5-5" || m.Source != surface.SettingFromTranscript {
 		t.Fatalf("model = %+v", m)
@@ -58,5 +67,8 @@ func TestAStoppedClaudeSessionReportsItsSettingsFromItsTranscriptWithoutStarting
 	}
 	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 0 {
 		t.Fatalf("reading settings started the conversation: %+v", spawns)
+	}
+	if settings.Model.Listed != nil {
+		t.Fatalf("listed=%v with no model list read yet, want it unknown", *settings.Model.Listed)
 	}
 }

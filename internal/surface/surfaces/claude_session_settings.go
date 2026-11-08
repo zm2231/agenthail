@@ -9,10 +9,7 @@ import (
 
 func (c *Claude) SessionSettings(ctx context.Context, sess *surface.Session) (surface.RuntimeSettings, error) {
 	var settings surface.RuntimeSettings
-	models, err := c.Models(ctx)
-	if err != nil {
-		models = nil
-	}
+	models := c.loadedModels()
 	if claudeHosted(sess) {
 		if listed, ok := c.host.session(ctx, sess.ID, sess.PID); ok {
 			settings.Model = modelSetting(listed.Model, surface.SettingFromRuntime, models)
