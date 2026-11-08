@@ -105,6 +105,40 @@
       ],
       "shown": ["quiet"],
       "more": ["led"]
+    },
+    {
+      "name": "idle projects fill the tiles left after active ones, most recent first, then by name",
+      "limit": 4,
+      "projects": [
+        {"id": "bare", "sessionCount": 0},
+        {"id": "shelved", "sessionCount": 0, "archived": true},
+        {"id": "dusty", "sessionCount": 0, "lastActive": "2026-11-01T12:00:00Z"},
+        {"id": "acorn", "sessionCount": 0},
+        {"id": "alpha", "sessionCount": 1, "lastActive": "2026-10-20T12:00:00Z"}
+      ],
+      "shown": ["alpha", "dusty", "acorn", "bare"],
+      "more": ["shelved"]
+    },
+    {
+      "name": "an idle project never takes a tile an active one needs",
+      "limit": 2,
+      "projects": [
+        {"id": "dusty", "sessionCount": 0, "lastActive": "2026-11-07T12:00:00Z"},
+        {"id": "alpha", "sessionCount": 1, "lastActive": "2026-10-20T12:00:00Z"},
+        {"id": "beta", "sessionCount": 2, "lastActive": "2026-10-01T12:00:00Z"}
+      ],
+      "shown": ["alpha", "beta"],
+      "more": ["dusty"]
+    },
+    {
+      "name": "times within the same millisecond tie and order by name on every app",
+      "limit": 1,
+      "projects": [
+        {"id": "zulu", "sessionCount": 1, "lastActive": "2026-11-08T11:00:00.123999999Z"},
+        {"id": "yankee", "sessionCount": 1, "lastActive": "2026-11-08T11:00:00.123456789Z"}
+      ],
+      "shown": ["yankee"],
+      "more": ["zulu"]
     }
   ]
 }

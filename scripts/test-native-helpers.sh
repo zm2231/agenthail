@@ -174,6 +174,7 @@ SOURCES=(
   macOS/DecisionInboxPane.swift
   macOS/SidebarRow.swift
   macOS/SidebarSectionInputs.swift
+  macOS/TileGrid.swift
   macOS/StatusItemsState.swift
   macOS/StatusItems.swift
   macOS/ReadableButtonStyle.swift
