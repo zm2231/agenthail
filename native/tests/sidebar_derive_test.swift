@@ -71,6 +71,16 @@ struct SidebarDeriveTest {
         model.snapshot = listing([session("a", status: "idle"), session("a-child", status: "busy", parent: "a"), session("c", status: "busy")], attention: [question])
         model.adoptCurrentView(view([("proj-c", [family("c", project: "proj-c")], ["c"]), ("proj-a", [family("a", project: "proj-a", members: ["a-child"])], ["a"])], seq: 3))
         check(model.sessionTree.needsYou.map(\.id) == ["a-child"], "Needs you follows the view's members: \(model.sessionTree.needsYou.map(\.id))")
+        check(model.needsYou.map(\.id) == ["a-child"], "the window chrome's Needs you matches the sidebar's")
+
+        let tree = Notified(), chrome = Notified(), composer = Notified()
+        withObservationTracking { _ = model.sessionTree } onChange: { MainActor.assumeIsolated { tree.hit = true } }
+        withObservationTracking { _ = model.needsYou } onChange: { MainActor.assumeIsolated { chrome.hit = true } }
+        withObservationTracking { _ = model.queuedItems(for: "a-child") } onChange: { MainActor.assumeIsolated { composer.hit = true } }
+        model.snapshot?.sessions[2] = session("c", status: "idle")
+        check(tree.hit, "another row changing reaches the sidebar")
+        check(!chrome.hit, "another row changing leaves the window chrome's Needs you alone")
+        check(!composer.hit, "another row changing leaves the composer's queue alone")
 
         model.adoptCurrentView(view([("proj-c", [family("c", project: "proj-c"), family("c2", project: "proj-c"), family("c3", project: "proj-c")], ["c"])], seq: 4))
         model.snapshot?.sessions += [session("c2", status: "idle"), session("c3", status: "idle")]

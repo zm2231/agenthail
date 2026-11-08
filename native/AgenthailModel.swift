@@ -162,6 +162,8 @@ final class AgenthailModel {
     }
     private(set) var sessionAttention: [String: SessionAttention] = [:]
     private(set) var sessionTree = SessionTree.empty
+    /// Kept apart from the tree so window chrome isn't redrawn by every row change.
+    private(set) var needsYou: [SessionState] = []
     private var orderHold = OrderHold()
 
     /// Rebuilds the sidebar's sessions, attention and tree when one of their
@@ -176,6 +178,7 @@ final class AgenthailModel {
         let rows = Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let shown = orderHold.shown(list: listView, current: currentView, rows: rows)
         sessionTree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention)
+        needsYou = sessionTree.needsYou
     }
 
     /// Keeps the sidebar's order while the person aims at it; rows still update in place.
@@ -1109,7 +1112,7 @@ final class AgenthailModel {
     }
 
     func queuedItems(for sessionID: String) -> [QueueState] {
-        QueueSteer.waiting((snapshot?.queue ?? []).filter { $0.sessionId == sessionID })
+        QueueSteer.waiting(queue.filter { $0.sessionId == sessionID })
     }
 
     func steerQueued(_ item: QueueState, capabilities: Capabilities) {
