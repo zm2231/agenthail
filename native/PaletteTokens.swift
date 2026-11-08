@@ -39,4 +39,13 @@ enum PaletteTokens {
         .diffRemoved: (0x951E16, 0xFF918A),
         .peer: (0x1D1D1F, 0xECECEE),
     ]
+
+    static let projects: [(fill: Pair, ink: Pair)] = [
+        (fill: (0xD8E4BC, 0x38421C), ink: (0x354400, 0xD5E7AF)),
+        (fill: (0xB6EAE3, 0x074742), ink: (0x004B44, 0xA4EFE5)),
+        (fill: (0xB9E6FB, 0x124356), ink: (0x004562, 0xA9E9FF)),
+        (fill: (0xE1D7FF, 0x403659), ink: (0x423166, 0xE2D5FF)),
+        (fill: (0xF1D2F3, 0x4D324F), ink: (0x542A57, 0xF8CEFB)),
+        (fill: (0xFEC0D6, 0x562F3E), ink: (0x60263F, 0xFFCAE0)),
+    ]
 }

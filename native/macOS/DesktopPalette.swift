@@ -64,6 +64,11 @@ enum DesktopPalette {
     static let failedBackground = dynamic(PaletteTokens.failed)
     static let failedLine = dynamic(light: 0xF5C9C5, dark: 0x5A2B28)
 
+    static func project(_ projectID: String) -> (fill: Color, ink: Color) {
+        let colour = PaletteTokens.projects[ProjectTiles.colour(projectID)]
+        return (dynamic(colour.fill), dynamic(colour.ink))
+    }
+
     static func statusColor(_ session: SessionState, needsYou: Bool, finishedUnseen: Bool = false) -> DesktopStyle {
         if needsYou { return attention }
         if SessionDisplayKind.of(session) == .working { return working }

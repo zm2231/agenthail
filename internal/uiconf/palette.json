@@ -34,5 +34,13 @@
       "hover": {"dark": "#241b17", "light": "#ede6e2"},
       "code": {"dark": "#050302", "light": "#f1eeea"}
     }
-  }
+  },
+  "projects": [
+    {"name": "moss", "fill": {"dark": "#38421c", "light": "#d8e4bc"}, "ink": {"dark": "#d5e7af", "light": "#354400"}},
+    {"name": "teal", "fill": {"dark": "#074742", "light": "#b6eae3"}, "ink": {"dark": "#a4efe5", "light": "#004b44"}},
+    {"name": "cyan", "fill": {"dark": "#124356", "light": "#b9e6fb"}, "ink": {"dark": "#a9e9ff", "light": "#004562"}},
+    {"name": "violet", "fill": {"dark": "#403659", "light": "#e1d7ff"}, "ink": {"dark": "#e2d5ff", "light": "#423166"}},
+    {"name": "orchid", "fill": {"dark": "#4d324f", "light": "#f1d2f3"}, "ink": {"dark": "#f8cefb", "light": "#542a57"}},
+    {"name": "berry", "fill": {"dark": "#562f3e", "light": "#fec0d6"}, "ink": {"dark": "#ffcae0", "light": "#60263f"}}
+  ]
 }

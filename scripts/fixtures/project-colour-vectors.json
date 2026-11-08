@@ -1,0 +1,17 @@
+{
+  "count": 6,
+  "cases": [
+    {"id": "github.com/example/billing", "colour": 0},
+    {"id": "github.com/example/api", "colour": 1},
+    {"id": "github.com/example/site", "colour": 2},
+    {"id": "github.com/example/web", "colour": 3},
+    {"id": "github.com/example/docs", "colour": 4},
+    {"id": "github.com/example/mobile", "colour": 5},
+    {"id": "server-1::notes", "colour": 1},
+    {"id": "laptop::scratch", "colour": 5},
+    {"id": "café", "colour": 1},
+    {"id": "日本語", "colour": 3},
+    {"id": "🚀 launch", "colour": 1},
+    {"id": "", "colour": 1}
+  ]
+}
