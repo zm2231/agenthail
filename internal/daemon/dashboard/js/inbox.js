@@ -12,14 +12,18 @@ export async function refreshDecisions(loader = loadDecisions) {
     return;
   }
   app.decisionsLoading = true;
+  app.decisionsAgain = false;
   try {
-    app.decisions = await loader();
-    app.decisionsKey = key;
-    renderInbox();
+    const loaded = await loader();
+    if (!app.decisionsAgain && decisionsKey() === key) {
+      app.decisions = loaded;
+      app.decisionsKey = key;
+      renderInbox();
+    }
   } finally {
     app.decisionsLoading = false;
   }
-  if (app.decisionsAgain) {
+  if (app.decisionsAgain || decisionsKey() !== key) {
     app.decisionsAgain = false;
     await refreshDecisions(loader);
   }
