@@ -334,7 +334,7 @@ func claudeTurnStateAt(ctx context.Context, file *os.File, offset int64) (*claud
 }
 
 func newClaudeTurnStartSearch() *turnStartSearch {
-	return newTurnStartSearch(claudeLineMayStartTurn, claudeSearchStartsTurn)
+	return newTurnStartSearch(claudeLineMayStartTurn, decodeCompactRecord, claudeSearchStartsTurn)
 }
 
 func claudeSearchStartsTurn(record map[string]any) bool {
@@ -380,7 +380,7 @@ func replayItemCount(record map[string]any, exact bool, line []byte) func() int 
 			return len(claudeTimelineItems(record))
 		}
 		var full map[string]any
-		if decodeShrunkRecord(line, &full) != nil {
+		if decodeCompactRecord(line, &full) != nil {
 			return 0
 		}
 		return len(claudeTimelineItems(full))
@@ -399,7 +399,7 @@ func decodeReplayRecord(line []byte) (record map[string]any, exact bool) {
 		return record, false
 	}
 	record = nil
-	if decodeShrunkRecord(line, &record) != nil {
+	if decodeCompactRecord(line, &record) != nil {
 		return nil, false
 	}
 	return record, true
@@ -488,7 +488,7 @@ func turnReplayStart(ctx context.Context, file *os.File, offset int64, starts *t
 }
 
 func transcriptRecordBefore(ctx context.Context, file *os.File, offset int64, candidate func([]byte) bool, match func(map[string]any) bool) (int64, bool, error) {
-	return newTurnStartSearch(candidate, match).before(ctx, file, offset)
+	return newTurnStartSearch(candidate, decodeShrunkRecord, match).before(ctx, file, offset)
 }
 
 func lineContains(needle []byte) func([]byte) bool {

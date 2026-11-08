@@ -102,7 +102,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 			recordOffset := lineOffset
 			lineOffset += int64(len(line))
 			var record map[string]any
-			if decodeShrunkRecord(line, &record) != nil {
+			if decodeCompactRecord(line, &record) != nil {
 				continue
 			}
 			turnID, ended, interrupted := turns.observe(record, recordOffset, line, func() int { return len(claudeTimelineItems(record)) })

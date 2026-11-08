@@ -165,7 +165,7 @@ func codexTurnMeterAt(ctx context.Context, file *os.File, offset int64) (*codexT
 }
 
 func newCodexTurnStartSearch() *turnStartSearch {
-	return newTurnStartSearch(lineContains([]byte(`_started"`)), codexRecordStartsTurn)
+	return newTurnStartSearch(lineContains([]byte(`_started"`)), decodeShrunkRecord, codexRecordStartsTurn)
 }
 
 func codexTurnMeterFrom(ctx context.Context, file *os.File, offset int64, starts *turnStartSearch) (*codexTurnMeter, error) {
