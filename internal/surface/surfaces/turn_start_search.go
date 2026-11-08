@@ -12,6 +12,7 @@ import (
 // bytes below what it already read.
 type turnStartSearch struct {
 	candidate func([]byte) bool
+	decode    func([]byte, *map[string]any) error
 	match     func(map[string]any) bool
 	scanned   bool
 	floor     int64
@@ -20,8 +21,8 @@ type turnStartSearch struct {
 	found     []int64
 }
 
-func newTurnStartSearch(candidate func([]byte) bool, match func(map[string]any) bool) *turnStartSearch {
-	return &turnStartSearch{candidate: candidate, match: match}
+func newTurnStartSearch(candidate func([]byte) bool, decode func([]byte, *map[string]any) error, match func(map[string]any) bool) *turnStartSearch {
+	return &turnStartSearch{candidate: candidate, decode: decode, match: match}
 }
 
 func (s *turnStartSearch) before(ctx context.Context, file *os.File, offset int64) (int64, bool, error) {
@@ -44,7 +45,7 @@ func (s *turnStartSearch) before(ctx context.Context, file *os.File, offset int6
 			return true
 		}
 		var record map[string]any
-		if decodeShrunkRecord(line, &record) == nil && s.match(record) {
+		if s.decode(line, &record) == nil && s.match(record) {
 			at, hit = start, true
 			return false
 		}
