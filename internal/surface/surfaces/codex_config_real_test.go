@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -60,6 +61,11 @@ const realReloadCodexVersion = "0.151.0"
 // 9000 input tokens.
 func realManagedCodex(t *testing.T) {
 	t.Helper()
+	realManagedCodexWith(t, &mockResponses{})
+}
+
+func realManagedCodexWith(t *testing.T, model http.Handler) {
+	t.Helper()
 	if _, err := exec.LookPath("codex"); err != nil {
 		t.Skip("codex is not installed")
 	}
@@ -67,7 +73,7 @@ func realManagedCodex(t *testing.T) {
 	if err != nil || !codexAtLeast(strings.TrimPrefix(strings.TrimSpace(string(out)), "codex-cli "), realReloadCodexVersion) {
 		t.Skipf("codex %q is older than %s, the oldest whose reload this test was checked against", out, realReloadCodexVersion)
 	}
-	server := httptest.NewServer(&mockResponses{})
+	server := httptest.NewServer(model)
 	t.Cleanup(server.Close)
 	home, err := os.MkdirTemp("/tmp", "ah-cx-")
 	if err != nil {
@@ -93,7 +99,9 @@ func realManagedCodex(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	// codex is a launcher whose app-server runs as its child, so only killing
+	// the whole group stops the server.
+	t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); _ = cmd.Wait() })
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if client, err := dialManagedCodex(context.Background()); err == nil {

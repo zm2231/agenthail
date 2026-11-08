@@ -47,7 +47,7 @@ func (a *App) cmdRequests(args []string) error {
 // names: allow, always, deny, or for a question its answer.
 func (a *App) cmdAnswer(args []string) error {
 	positional := stripFlags(args)
-	usage := fmt.Errorf(`usage: agenthail answer <target> <allow|always|deny|"answer"> [--request <id>] [--reason "text"] [--answers '{"question":"answer"}'] [--json]`)
+	usage := fmt.Errorf(`usage: agenthail answer <target> <allow|always|deny|never|stop|"answer"> [--request <id>] [--reason "text"] [--answers '{"question":"answer"}'] [--json]`)
 	if len(positional) < 1 || len(positional) > 2 || (len(positional) == 1 && flagVal(args, "--answers") == "") {
 		return usage
 	}
@@ -271,7 +271,7 @@ func pickRequest(requests []surface.Request, id string) (surface.Request, error)
 }
 
 // requestDecision reads a person's reply to request. An approval takes allow,
-// always or deny. A question takes deny, or its answer: a number picks that
+// always or deny, and never or stop when it offers them. A question takes deny, or its answer: a number picks that
 // option, other text is the answer itself, and --answers answers several
 // questions at once. allow and always are never taken as a question's answer.
 // An MCP server's request takes deny, or allow with --answers holding its
@@ -283,6 +283,17 @@ func requestDecision(request surface.Request, reply, answers, reason string) (su
 	switch reply {
 	case "deny":
 		return surface.Decision{Behavior: "deny", Message: reason}, nil
+	case "never", "stop":
+		if request.Kind == surface.WaitingQuestion {
+			return surface.Decision{}, fmt.Errorf("request %s is a question: answer with an option's number, your own text, or deny", request.ID)
+		}
+		if reply == "never" && !request.AlwaysDeny {
+			return surface.Decision{}, fmt.Errorf("request %s offers no rule to always deny it", request.ID)
+		}
+		if reply == "stop" && !request.Stoppable {
+			return surface.Decision{}, fmt.Errorf("request %s offers no denial that stops the turn", request.ID)
+		}
+		return surface.Decision{Behavior: "deny", Always: reply == "never", Stop: reply == "stop"}, nil
 	case "allow", "always":
 		if request.Kind == surface.WaitingQuestion {
 			return surface.Decision{}, fmt.Errorf("request %s is a question: answer with an option's number, your own text, or deny", request.ID)
@@ -290,7 +301,7 @@ func requestDecision(request surface.Request, reply, answers, reason string) (su
 		return surface.Decision{Behavior: "allow", Always: reply == "always"}, nil
 	}
 	if request.Kind != surface.WaitingQuestion {
-		return surface.Decision{}, fmt.Errorf("request %s asks to run %s: answer allow, always or deny", request.ID, request.Tool)
+		return surface.Decision{}, fmt.Errorf("request %s asks to run %s: answer allow, always, deny, never or stop", request.ID, request.Tool)
 	}
 	decision := surface.Decision{Behavior: "allow", Answers: map[string]string{}}
 	if answers != "" {
@@ -349,10 +360,19 @@ func printRequest(request surface.Request) {
 			fmt.Printf("    %d. %s  %s\n", i+1, option.Label, option.Description)
 		}
 	}
-	if request.AlwaysAllow {
-		fmt.Println("  answer: allow, always or deny")
-	} else if request.Kind != surface.WaitingQuestion {
-		fmt.Println("  answer: allow or deny")
+	if request.Kind != surface.WaitingQuestion {
+		choices := []string{"allow"}
+		if request.AlwaysAllow {
+			choices = append(choices, "always")
+		}
+		choices = append(choices, "deny")
+		if request.AlwaysDeny {
+			choices = append(choices, "never")
+		}
+		if request.Stoppable {
+			choices = append(choices, "stop")
+		}
+		fmt.Printf("  answer: %s\n", strings.Join(choices, ", "))
 	}
 }
 

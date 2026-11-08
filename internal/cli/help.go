@@ -47,7 +47,7 @@ Session commands:
   permission-mode <target> [mode] [--json]
                                  Get or set the permission mode of a session the Claude host runs
   requests <target> [--json]     List the tool approvals and questions a session waits on you for
-  answer <target> <allow|always|deny|"answer"> [--request id] [--reason text] [--answers json]
+  answer <target> <allow|always|deny|never|stop|"answer"> [--request id] [--reason text] [--answers json]
                                  Answer the oldest open request, or the one --request names
   interrupt <target> [--json] [--timeout 30s]
                                  Stop current turn; Claude waits for the turn to end

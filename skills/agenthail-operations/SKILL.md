@@ -301,7 +301,7 @@ Create Claude sessions with `agenthail thread create claude "task" --alias worke
 The session runs in Agenthail's Claude host, which needs the daemon running. It
 has no Remote Control. A tool its permission mode does not allow, and every
 question it asks, waits for an answer: `agenthail requests <target>` lists them
-and `agenthail answer <target> allow|always|deny|"answer"` answers the oldest.
+and `agenthail answer <target> allow|always|deny|never|stop|"answer"` answers the oldest; `never` and `stop` only where the request offers them.
 An MCP server's request for input (kind `input`) is answered with
 `agenthail answer <target> allow --answers '{"field":value}'`, `allow` alone
 for a link the person opened, or `deny`.

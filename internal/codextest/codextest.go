@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -83,6 +84,7 @@ type Daemon struct {
 	next      int
 	server    *http.Server
 	responses []map[string]any
+	open      []map[string]any
 }
 
 // connection is one client of the fake. Like the app-server, it receives a
@@ -211,7 +213,11 @@ func (d *Daemon) serve(ws *websocket.Conn) {
 		if method == "" {
 			d.mu.Lock()
 			d.responses = append(d.responses, request)
+			resolved := d.resolveLocked(id)
 			d.mu.Unlock()
+			if resolved != nil {
+				d.Notify("serverRequest/resolved", resolved)
+			}
 			continue
 		}
 		params, _ := request["params"].(map[string]any)
@@ -246,6 +252,93 @@ func (d *Daemon) serve(ws *websocket.Conn) {
 			response = map[string]any{"id": id, "error": result["error"]}
 		}
 		conn.write(response)
+		if !failed && method == "thread/resume" {
+			threadID, _ := params["threadId"].(string)
+			for _, open := range d.openFor(threadID) {
+				conn.write(open)
+			}
+		}
+	}
+}
+
+// OpenRequest holds a server request open on a thread the way the
+// app-server holds an approval or a question: it goes to every connection
+// subscribed to the thread now, again to each connection that resumes the
+// thread later, and stays open until a client answers it. The thread reports
+// the matching waiting flag meanwhile; the first answer resolves it, which
+// every subscriber hears as serverRequest/resolved.
+func (d *Daemon) OpenRequest(id any, method string, params map[string]any) {
+	message := map[string]any{"id": id, "method": method, "params": params}
+	threadID, _ := params["threadId"].(string)
+	d.mu.Lock()
+	d.open = append(d.open, message)
+	d.flagLocked(threadID)
+	var subscribers []*connection
+	for conn := range d.conns {
+		if conn.subscribed[threadID] {
+			subscribers = append(subscribers, conn)
+		}
+	}
+	d.mu.Unlock()
+	for _, conn := range subscribers {
+		conn.write(message)
+	}
+}
+
+// Answer resolves an open request the way another client's answer does.
+func (d *Daemon) Answer(id any) {
+	d.mu.Lock()
+	resolved := d.resolveLocked(id)
+	d.mu.Unlock()
+	if resolved != nil {
+		d.Notify("serverRequest/resolved", resolved)
+	}
+}
+
+func (d *Daemon) openFor(threadID string) []map[string]any {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var open []map[string]any
+	for _, message := range d.open {
+		if params, _ := message["params"].(map[string]any); params["threadId"] == threadID {
+			open = append(open, message)
+		}
+	}
+	return open
+}
+
+func (d *Daemon) resolveLocked(id any) map[string]any {
+	for index, message := range d.open {
+		if fmt.Sprint(message["id"]) != fmt.Sprint(id) {
+			continue
+		}
+		d.open = append(d.open[:index:index], d.open[index+1:]...)
+		params, _ := message["params"].(map[string]any)
+		threadID, _ := params["threadId"].(string)
+		d.flagLocked(threadID)
+		return map[string]any{"threadId": threadID, "requestId": message["id"]}
+	}
+	return nil
+}
+
+func (d *Daemon) flagLocked(threadID string) {
+	thread := d.threads[threadID]
+	if thread == nil {
+		return
+	}
+	thread.ActiveFlags = nil
+	for _, message := range d.open {
+		params, _ := message["params"].(map[string]any)
+		if params["threadId"] != threadID {
+			continue
+		}
+		flag := "waitingOnApproval"
+		if message["method"] == "item/tool/requestUserInput" {
+			flag = "waitingOnUserInput"
+		}
+		if !slices.Contains(thread.ActiveFlags, flag) {
+			thread.ActiveFlags = append(thread.ActiveFlags, flag)
+		}
 	}
 }
 
