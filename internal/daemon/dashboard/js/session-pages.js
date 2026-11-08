@@ -12,6 +12,10 @@ export function readBase(fresh = false) {
   return readJSON(`/api/state?sessions=none${fresh ? "&fresh=1" : ""}`);
 }
 
+export async function readProjectActivity() {
+  return (await readJSON("/api/v1/projects/activity")).projects || [];
+}
+
 export async function readHistory() {
   return (await readJSON("/api/v1/history?limit=50")).items || [];
 }

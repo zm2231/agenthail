@@ -27,6 +27,11 @@ function byName(a, b) {
   return String(a.displayName || a.id).localeCompare(String(b.displayName || b.id), undefined, { numeric: true, sensitivity: "base" });
 }
 
+export function withActivity(projects, activity) {
+  const byID = new Map(activity.map((entry) => [entry.id, entry]));
+  return projects.map((project) => ({ ...project, lastActive: byID.get(project.id)?.lastActive, sessionCount: byID.get(project.id)?.sessionCount ?? 0 }));
+}
+
 export function orderTiles(projects, limit) {
   const open = projects.filter((project) => !project.archived && ((project.sessionCount || 0) > 0 || (project.coordinators || []).length > 0));
   const recent = open.sort((a, b) => (Date.parse(b.lastActive || "") || 0) - (Date.parse(a.lastActive || "") || 0) || byName(a, b));
