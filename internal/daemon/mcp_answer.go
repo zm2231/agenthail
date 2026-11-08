@@ -12,7 +12,7 @@ type mcpAnswerInput struct {
 	mcpWrite
 	Target    string            `json:"target" jsonschema:"A session id or @alias you spawned or, as coordinator, lead."`
 	RequestID string            `json:"requestId" jsonschema:"The open request's id, as agenthail_requests lists it."`
-	Decision  string            `json:"decision" jsonschema:"allow, always (keep allowing with the rule the request offers; for the person's voice operator only) or deny."`
+	Decision  string            `json:"decision" jsonschema:"allow, always (keep allowing with the rule the request offers; for the person's voice operator only), deny, never (keep denying) or stop (deny and end the turn)."`
 	Message   string            `json:"message,omitempty" jsonschema:"With deny: why, which the session reads."`
 	Answers   map[string]string `json:"answers,omitempty" jsonschema:"With allow on a question: one answer per question, keyed by its text."`
 	Content   json.RawMessage   `json:"content,omitempty" jsonschema:"With allow on an MCP server's input request: its form's field values."`
@@ -36,8 +36,12 @@ func (d *Daemon) mcpAnswer(ctx context.Context, caller *mcpCaller, input mcpAnsw
 		decision.Behavior, decision.Always = "allow", true
 	case "deny":
 		decision.Behavior = "deny"
+	case "never":
+		decision.Behavior, decision.Always = "deny", true
+	case "stop":
+		decision.Behavior, decision.Stop = "deny", true
 	default:
-		return nil, refuse("invalid", "decision is allow, always or deny.")
+		return nil, refuse("invalid", "decision is allow, always, deny, never or stop.")
 	}
 	target, err := d.mcpControlTarget(caller, input.Target, false)
 	if err != nil {

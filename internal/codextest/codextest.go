@@ -285,6 +285,16 @@ func (d *Daemon) OpenRequest(id any, method string, params map[string]any) {
 	}
 }
 
+// Answer resolves an open request the way another client's answer does.
+func (d *Daemon) Answer(id any) {
+	d.mu.Lock()
+	resolved := d.resolveLocked(id)
+	d.mu.Unlock()
+	if resolved != nil {
+		d.Notify("serverRequest/resolved", resolved)
+	}
+}
+
 func (d *Daemon) openFor(threadID string) []map[string]any {
 	d.mu.Lock()
 	defer d.mu.Unlock()

@@ -88,9 +88,6 @@ func TestACodexApprovalAnotherClientLeftOpenIsAnsweredThroughAgenthail(t *testin
 	if waiting := observation.WaitingOn; waiting == nil || waiting.ID != want || !waiting.Answerable || waiting.Kind != surface.WaitingApproval {
 		t.Fatalf("observed wait %+v, want an answerable approval %s", waiting, want)
 	}
-	if listed := listedCodexSession(t, codex, threadID); !surface.SameWaiting(listed.WaitingOn, observation.WaitingOn) {
-		t.Fatalf("the listing waits on %+v, the observation on %+v", listed.WaitingOn, observation.WaitingOn)
-	}
 	state, err := codex.Requests(ctx, &session)
 	if err != nil {
 		t.Fatal(err)

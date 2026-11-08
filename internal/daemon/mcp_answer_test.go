@@ -192,3 +192,24 @@ func TestASpawnerNamesItsWorkerButNotTheOtherWay(t *testing.T) {
 		t.Fatalf("worker naming its spawner: code=%q", code)
 	}
 }
+
+func TestAnAgentDeniesWithTheRuleOrStopsTheTurnWhereTheRequestOffersIt(t *testing.T) {
+	f := newMCPAnswerFixture(t)
+	for _, c := range []struct {
+		choice string
+		want   surface.Decision
+	}{{"never", surface.Decision{Behavior: "deny", Always: true}}, {"stop", surface.Decision{Behavior: "deny", Stop: true}}} {
+		f.surface.mu.Lock()
+		f.surface.open["worker"] = []surface.Request{{ID: "worker-" + c.choice, Kind: surface.WaitingApproval, Tool: "Bash", AlwaysDeny: true, Stoppable: true, NoReason: true}}
+		f.surface.mu.Unlock()
+		if out, refused := callMCP(t, f.lead, "agenthail_answer", map[string]any{"target": "worker", "requestId": "worker-" + c.choice, "decision": c.choice, "clientRequestId": "n-" + c.choice}); refused {
+			t.Fatalf("%s: %v", c.choice, out)
+		}
+		f.surface.mu.Lock()
+		got := f.surface.answered["worker/worker-"+c.choice]
+		f.surface.mu.Unlock()
+		if got.Behavior != c.want.Behavior || got.Always != c.want.Always || got.Stop != c.want.Stop {
+			t.Fatalf("%s reached the session as %+v", c.choice, got)
+		}
+	}
+}

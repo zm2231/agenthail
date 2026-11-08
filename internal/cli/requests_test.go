@@ -165,3 +165,19 @@ func TestAnInputRequestIsAnsweredWithItsFieldsOrDeclined(t *testing.T) {
 		t.Fatal("an input request took answers that are not an object")
 	}
 }
+
+func TestAnApprovalTakesNeverOrStopOnlyWhereItOffersThem(t *testing.T) {
+	offered := surface.Request{ID: "t:call_1", Kind: surface.WaitingApproval, Tool: "Bash", AlwaysDeny: true, Stoppable: true}
+	if decision, err := requestDecision(offered, "never", "", ""); err != nil || decision.Behavior != "deny" || !decision.Always || decision.Stop {
+		t.Fatalf("never: %+v %v", decision, err)
+	}
+	if decision, err := requestDecision(offered, "stop", "", ""); err != nil || decision.Behavior != "deny" || !decision.Stop || decision.Always {
+		t.Fatalf("stop: %+v %v", decision, err)
+	}
+	plain := surface.Request{ID: "r1", Kind: surface.WaitingApproval, Tool: "Bash"}
+	for _, reply := range []string{"never", "stop"} {
+		if _, err := requestDecision(plain, reply, "", ""); err == nil {
+			t.Fatalf("%s was taken for a request that does not offer it", reply)
+		}
+	}
+}

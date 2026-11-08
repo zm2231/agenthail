@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -50,60 +49,13 @@ type codexOpenRequest struct {
 	params  map[string]any
 }
 
-// codexWaits keeps the precise wait an observation read for each thread, so
-// a listing, which carries only the thread's waiting flag, names the same
-// request without resuming the thread.
-type codexWaits struct {
-	mu   sync.Mutex
-	byID map[string]codexWait
-}
-
-type codexWait struct {
-	flag    surface.WaitingKind
-	waiting surface.Waiting
-}
-
-func (w *codexWaits) remember(threadID string, flag surface.WaitingKind, waiting *surface.Waiting) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.byID == nil {
-		w.byID = map[string]codexWait{}
-	}
-	if waiting == nil {
-		delete(w.byID, threadID)
-		return
-	}
-	w.byID[threadID] = codexWait{flag: flag, waiting: *waiting}
-}
-
-// precise returns the wait last read for a thread still waiting on the same
-// kind of request, and forgets one the thread no longer waits on.
-func (w *codexWaits) precise(threadID string, listed *surface.Waiting) *surface.Waiting {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	known, ok := w.byID[threadID]
-	if !ok {
-		return listed
-	}
-	if listed == nil || listed.Kind != known.flag {
-		delete(w.byID, threadID)
-		return listed
-	}
-	waiting := known.waiting
-	return &waiting
-}
-
-// applyKnownWait gives a listed session the precise wait an observation read.
-func (c *Codex) applyKnownWait(session *surface.Session) {
-	session.WaitingOn = c.waits.precise(session.ID, session.WaitingOn)
-}
-
 // preciseWait replaces a thread's flag-only wait with its oldest open
-// request when the reader carries requests; otherwise the flag stands.
+// request when the reader carries requests; otherwise the flag stands. A
+// listing carries only the flag, which cannot tell one request from the next,
+// so it keeps the flag-only wait and the catalog confirms it by observing.
 func (c *Codex) preciseWait(ctx context.Context, client codexClient, sess *surface.Session, flagged *surface.Waiting) *surface.Waiting {
 	answerer, ok := client.(codexAnswerer)
 	if !ok || flagged == nil {
-		c.waits.remember(sess.ID, "", nil)
 		return flagged
 	}
 	open, err := c.codexOpenRequests(ctx, answerer, sess)
@@ -111,9 +63,7 @@ func (c *Codex) preciseWait(ctx context.Context, client codexClient, sess *surfa
 		return flagged
 	}
 	oldest := open[0].request
-	waiting := &surface.Waiting{Kind: oldest.Kind, ID: oldest.ID, Since: oldest.CreatedAt, Answerable: true}
-	c.waits.remember(sess.ID, flagged.Kind, waiting)
-	return waiting
+	return &surface.Waiting{Kind: oldest.Kind, ID: oldest.ID, Since: oldest.CreatedAt, Answerable: true}
 }
 
 // codexOpenRequests subscribes client to the thread and returns the requests
@@ -463,7 +413,6 @@ func (c *Codex) Respond(ctx context.Context, sess *surface.Session, requestID st
 	if err := client.Respond(target.rpcID, result); err != nil {
 		return "", fmt.Errorf("answer Codex: %w", err)
 	}
-	c.waits.remember(sess.ID, "", nil)
 	timer := time.NewTimer(codexResolveWait)
 	defer timer.Stop()
 	key := codexRPCKey(target.rpcID)
