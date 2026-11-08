@@ -13,7 +13,7 @@ struct PhoneProjectTiles: View {
 
     var body: some View {
         let projects = model.qualifiedProjects
-        let counts = model.decisionFeed.inbox.needsYou(in: projects)
+        let counts = model.inboxStops.needsYou(in: projects, projectOf: model.projectOfSession())
         let tiles = ProjectTiles.order(projects, limit: Self.limit(sizeClass), waiting: counts, leads: model.tileLeads)
         if !tiles.shown.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {

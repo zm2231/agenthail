@@ -5,6 +5,7 @@ import { displayName } from "./session-labels.js";
 import { postAction } from "./actions.js";
 import { toast } from "./feedback.js";
 import { decisionGroups } from "./decisions.js";
+import { inboxStops } from "./inbox-stops.js";
 import { renderQuestionCard } from "./question-pager.js";
 import { bindQuestionPager } from "./question-pager-events.js";
 
@@ -33,6 +34,10 @@ export function shownDecisions() {
     const requests = item.requests.filter((request) => !answered.has(mark(item.sessionId, request.id)));
     return requests.length ? [{ ...item, requests }] : [];
   });
+}
+
+export function currentStops() {
+  return inboxStops({ attention: app.state.attention || [], deliveries: app.state.deliveryProblems || [], replacements: app.state.leadReplacements || [], decisions: shownDecisions() });
 }
 
 export function selectedDecision() {

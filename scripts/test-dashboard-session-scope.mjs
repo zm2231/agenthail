@@ -72,7 +72,7 @@ const tiles = vm.createContext({
   leaveProject: () => { tiles.app.selectedProject = null; },
   syncDecisionPane: () => {},
   renderSessions: () => {},
-  shownDecisions: () => [],
+  currentStops: () => ({ stopped: [], decisions: [], count: 0 }),
   $: () => null,
 });
 await dashboardModules(["project-tiles-view"], tiles);
@@ -101,7 +101,7 @@ const painted = { innerHTML: "" };
 const row = vm.createContext({
   app: { scope: "all", state: { projects: [{ id: "github.com/example/web", displayName: "web", sessionCount: 1, lastActive: "2026-11-08T10:00:00Z" }, { id: "shelved", archived: true }] } },
   showView: () => {}, openProject: () => {}, leaveProject: () => {}, syncDecisionPane: () => {}, renderSessions: () => {},
-  shownDecisions: () => [],
+  currentStops: () => ({ stopped: [], decisions: [], count: 0 }),
   $: () => painted,
 });
 await dashboardModules(["project-tiles-view"], row);

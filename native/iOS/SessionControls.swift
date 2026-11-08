@@ -116,7 +116,7 @@ struct QueueListView: View {
                 }
                 if loading && page.isEmpty { ProgressView("Loading deliveries") }
                 if !showHistory {
-                    DecisionSections(model: model, inbox: model.decisionFeed.inbox, open: open) { Task { await reload() } }
+                    DecisionSections(model: model, inbox: model.shownDecisions, open: open) { Task { await reload() } }
                     let review = current.filter { $0.status == "dead" }
                     let pending = current.filter { $0.status != "dead" }
                     if !review.isEmpty {
@@ -128,7 +128,7 @@ struct QueueListView: View {
                     if !pending.isEmpty {
                         Section("Waiting to deliver") { ForEach(pending, id: \.listID) { item in queueRow(item) } }
                     }
-                    if !loading && error == nil && model.connectionError == nil && current.isEmpty && model.decisionFeed.loaded && model.decisionFeed.inbox.isEmpty {
+                    if !loading && error == nil && model.connectionError == nil && current.isEmpty && model.decisionFeed.loaded && model.shownDecisions.isEmpty && model.deliveryProblems.isEmpty && model.leadReplacements.isEmpty {
                         ContentUnavailableView("Nothing needs you", systemImage: "tray", description: Text("Questions and approvals waiting on you, and instructions waiting to send, appear here. Everything else is in History."))
                             .listRowSeparator(.hidden)
                     }

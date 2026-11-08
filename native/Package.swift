@@ -36,6 +36,7 @@ let package = Package(
                 "InboxMessage.swift",
                 "Decisions.swift",
                 "DecisionFeed.swift",
+                "InboxStops.swift",
                 "PeerEnvelope.swift",
                 "TaggedResponses.swift",
                 "UIConfig.swift",

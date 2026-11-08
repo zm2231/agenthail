@@ -46,6 +46,7 @@ targets:
       - path: InboxMessage.swift
       - path: Decisions.swift
       - path: DecisionFeed.swift
+      - path: InboxStops.swift
       - path: PeerEnvelope.swift
       - path: TaggedResponses.swift
       - path: UIConfig.swift
@@ -215,6 +216,8 @@ targets:
       - path: ../scripts/fixtures/project-colour-vectors.json
         buildPhase: resources
       - path: ../scripts/fixtures/tile-order-vectors.json
+        buildPhase: resources
+      - path: ../scripts/fixtures/inbox-stop-vectors.json
         buildPhase: resources
     dependencies:
       - target: AgenthailIOS

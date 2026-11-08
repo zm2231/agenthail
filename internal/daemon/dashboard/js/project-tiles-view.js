@@ -1,8 +1,9 @@
 import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape } from "./format.js";
-import { fillTiles, orderTiles, tileColumns, tileLetter, tileLeads, needsYouByProject, projectColour, projectColourID } from "./project-tiles.js";
-import { shownDecisions } from "./decision-card.js";
+import { fillTiles, orderTiles, tileColumns, tileLetter, tileLeads, projectColour, projectColourID } from "./project-tiles.js";
+import { currentStops } from "./decision-card.js";
+import { stopsByProject } from "./inbox-stops.js";
 import { openProject, leaveProject } from "./project-pane.js";
 import { syncDecisionPane } from "./pane-scope.js";
 import { renderSessions } from "./sessions.js";
@@ -20,8 +21,9 @@ export function renderTiles() {
   const row = $("#project-tiles");
   if (!row) return;
   const projects = app.state.projects || [];
-  const decisions = shownDecisions();
-  const counts = needsYouByProject(decisions, projects);
+  const stops = currentStops();
+  const sessions = new Map((app.state.sessions || []).map((session) => [session.id, session]));
+  const counts = stopsByProject(stops, projects, (id) => sessions.get(id)?.project?.id);
   const leads = tileLeads(projects, app.state.sessions || []);
   shownColumns = tileColumns(row.clientWidth);
   const { shown, more } = fillTiles(shownColumns, (limit) => orderTiles(projects, limit, { waiting: counts, leads }));
@@ -33,7 +35,7 @@ export function renderTiles() {
   const menu = more.length
     ? `<label class="project-tile${moreSelected ? " active" : ""}" title="${more.length} more ${more.length === 1 ? "project" : "projects"}"><span class="tile-mark">…${moreCount ? `<span class="tile-badge">${moreCount}</span>` : ""}</span><span class="tile-name">+${more.length}</span><select data-scope-more aria-label="More projects"><option value="">More projects</option>${options}</select></label>`
     : "";
-  row.innerHTML = tile("inbox", "▤", "Inbox", decisions.length, scope === "inbox")
+  row.innerHTML = tile("inbox", "▤", "Inbox", stops.count, scope === "inbox")
     + shown.map((project) => tile(project.id, escape(tileLetter(project.displayName || project.id)), project.displayName || project.id, counts[project.id] || 0, scope === project.id, projectColour(projectColourID(project.id, owner)))).join("")
     + menu
     + tile("all", "≡", "All", 0, scope === "all");

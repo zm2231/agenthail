@@ -121,7 +121,7 @@ struct MainTabs: View {
             NavigationStack { QueueListView(model: model) }
                 .solidTabBar()
                 .tabItem { Label("Inbox", systemImage: "tray") }
-                .badge(model.decisionFeed.count)
+                .badge(model.inboxStops.count)
                 .tag(1)
             NavigationStack { SettingsView(model: model) }
                 .solidTabBar()

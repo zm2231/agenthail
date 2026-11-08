@@ -177,23 +177,23 @@ struct ProjectPane: View {
 
     @ViewBuilder
     private var decisions: some View {
-        let items = model.decisionFeed.inbox.decisions(in: project.id, of: model.projects)
+        let items = model.inboxStops.rows(in: project.id, of: model.projects) { model.session($0)?.project?.id }
         if !items.isEmpty {
             card("Needs you · \(items.count)") {
                 ForEach(items) { item in
                     Button {
                         pane.showInbox()
-                        pane.selectedDecisionID = item.id
+                        pane.selectedDecisionID = item.paneID
                     } label: {
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(model.sessionName(item.sessionId)).font(.system(size: DesktopType.body)).foregroundStyle(DesktopPalette.text).lineLimit(1)
-                            Text(DecisionInboxPane.summary(item)).font(.system(size: DesktopType.meta)).foregroundStyle(DesktopPalette.text2).lineLimit(2)
+                            Text(item.title(name: model.sessionName)).font(.system(size: DesktopType.body)).foregroundStyle(DesktopPalette.text).lineLimit(1)
+                            Text(item.paneSummary).font(.system(size: DesktopType.meta)).foregroundStyle(DesktopPalette.text2).lineLimit(2)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("project-decision-" + item.sessionId)
+                    .accessibilityIdentifier("project-decision-" + item.paneID)
                 }
             }
         }

@@ -48,8 +48,26 @@ struct ProjectScreen: View {
 
     private func content(_ project: ListedProject, _ contents: ProjectContents) -> some View {
         let computers = Set(project.state.checkouts.map(\.host.id)).count
-        let waiting = DecisionInbox(decisions: model.decisionFeed.inbox.decisions(in: projectID, of: model.qualifiedProjects))
+        let rows = model.inboxStops.rows(in: projectID, of: model.qualifiedProjects, projectOf: model.projectOfSession())
+        let waiting = DecisionInbox(decisions: rows.compactMap { if case .decision(let item) = $0 { item } else { nil } })
+        let stops = rows.filter { if case .decision = $0 { false } else { true } }
         return List {
+            if !stops.isEmpty {
+                Section("\(DecisionGroup.stopped.title) · \(stops.count)") {
+                    ForEach(stops) { stop in
+                        Button { openSession(stop.sessionID) } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(stop.title(name: model.sessionName)).font(.headline).lineLimit(2)
+                                Text(stop.summary).font(.caption).foregroundStyle(PhonePalette.muted).lineLimit(2)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("project-stop-" + stop.id)
+                    }
+                }
+            }
             if !waiting.isEmpty {
                 DecisionSections(model: model, inbox: waiting, open: openSession) { model.decisionFeed.refresh() }
             }

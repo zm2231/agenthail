@@ -90,7 +90,7 @@ struct HostCatalog {
                 candidates[merged.id, default: []].append(Candidate(row: merged, route: SessionRoute(hostID: host.id, sessionID: row.id), reachable: host.reachable, holding: host.holding, direct: local))
             }
             attention += snapshot.attention.map { item in
-                AttentionState(id: item.id, sessionId: Self.qualify(host.id, item.sessionId), target: item.target, queueId: item.queueId, reason: item.reason, requestedAction: item.requestedAction, createdAt: item.createdAt)
+                AttentionState(id: item.id, sessionId: Self.qualify(host.id, item.sessionId), target: item.target, queueId: item.queueId, reason: item.reason, requestedAction: item.requestedAction, createdAt: item.createdAt, hostID: host.id)
             }
             deliveryProblems += (snapshot.deliveryProblems ?? []).map { problem in
                 DeliveryProblem(deliveryId: problem.deliveryId, sessionId: Self.qualify(host.id, problem.sessionId), sourceSessionId: problem.sourceSessionId.map { Self.qualify(host.id, $0) }, attentionSessionId: problem.attentionSessionId.map { Self.qualify(host.id, $0) }, message: problem.message, reason: problem.reason, status: problem.status, at: problem.at, hostID: host.id)

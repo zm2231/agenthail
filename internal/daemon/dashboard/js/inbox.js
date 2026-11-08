@@ -3,7 +3,7 @@ import { $ } from "./dom.js";
 import { escape, timeAgo } from "./format.js";
 import { displayName } from "./session-labels.js";
 import { decisionGroups, decisionsKey, loadDecisions } from "./decisions.js";
-import { renderInboxScope, shownDecisions } from "./decision-card.js";
+import { currentStops, renderInboxScope } from "./decision-card.js";
 import { renderTiles } from "./project-tiles-view.js";
 
 export async function refreshDecisions(loader = loadDecisions) {
@@ -74,10 +74,7 @@ function decisionItem(item) {
   return `<article class="attention-item" data-decision="${escape(item.sessionId)}"><div><div class="attention-target">${escape(place)}</div><strong>${escape(headline || item.reason)}</strong><p>${holds}${escape(item.reason)}${escape(more)}${escape(since)}</p></div><div class="operation-actions">${open}</div></article>`;
 }
 
-// Deliveries and lead replacements on this computer carry their own buttons, so their rows stand in for the matching decisions.
-function stoppedDecisions(decisions) {
-  return decisions.filter((item) => item.group === "stopped" && !(item.hostId === "" && (item.kind === "incoming" || item.kind === "outgoing")));
-}
+const stopRow = { queue: attentionItem, delivery: deliveryProblemItem, replacement: leadReplacementItem, decision: decisionItem };
 
 function group(title, rows) {
   return rows.length ? `<section class="decision-group"><h3>${escape(title)} · ${rows.length}</h3>${rows.join("")}</section>` : "";
@@ -85,14 +82,10 @@ function group(title, rows) {
 
 export function renderInbox() {
   const panel = $("#inbox-panel");
-  const inbox = { ...(app.decisions || { leadHandling: [], unreachable: [], outdated: [] }), decisions: shownDecisions() };
-  const stopped = [
-    ...(app.state.attention || []).map(attentionItem),
-    ...(app.state.deliveryProblems || []).map(deliveryProblemItem),
-    ...(app.state.leadReplacements || []).map(leadReplacementItem),
-    ...stoppedDecisions(inbox.decisions).map(decisionItem),
-  ];
-  const groups = decisionGroups.map(([key, title]) => group(title, key === "stopped" ? stopped : inbox.decisions.filter((item) => item.group === key).map(decisionItem)));
+  const inbox = app.decisions || { leadHandling: [], unreachable: [], outdated: [] };
+  const stops = currentStops();
+  const stopped = stops.stopped.map((stop) => stopRow[stop.kind](stop.item));
+  const groups = decisionGroups.map(([key, title]) => group(title, key === "stopped" ? stopped : stops.decisions.filter((item) => item.group === key).map(decisionItem)));
   const leads = inbox.leadHandling.map((item) => `<p class="decision-lead" data-lead-handled="${escape(item.sessionId)}">${escape(nameOf(item.sessionId))}: ${escape(nameOf(item.heldBy))} is answering its prompt</p>`);
   const notes = [
     ...inbox.unreachable.map((name) => `<p class="decision-note">${escape(name)} isn't answering. Its decisions aren't shown.</p>`),

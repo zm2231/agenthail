@@ -171,7 +171,10 @@ SOURCES=(
   macOS/MacDecisions.swift
   macOS/PaneScope.swift
   DecisionFeed.swift
+  InboxStops.swift
   macOS/DecisionInboxPane.swift
+  macOS/MacInboxStops.swift
+  macOS/InboxStopCard.swift
   macOS/SidebarRow.swift
   macOS/SidebarSectionInputs.swift
   macOS/TileGrid.swift

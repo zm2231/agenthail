@@ -1,0 +1,55 @@
+{
+  "cases": [
+    {
+      "name": "a computer's own Inbox",
+      "localHosts": [""],
+      "projects": [
+        {"id": "web", "displayName": "web", "checkouts": []},
+        {"id": "api", "displayName": "api", "checkouts": []},
+        {"id": "server::tools", "displayName": "tools", "checkouts": []}
+      ],
+      "sessions": {"s-web": "web", "s-api": "api", "s-api-2": "api", "server::s-tool": "server::tools"},
+      "attention": [
+        {"id": 1, "sessionId": "s-web", "target": "fix the build", "queueId": 7, "reason": "Delivery failed", "requestedAction": "Retry or cancel this message", "createdAt": "2026-11-08T10:00:00Z"}
+      ],
+      "deliveries": [
+        {"deliveryId": 3, "sessionId": "s-api", "message": "check the schema", "reason": "target_gone", "status": "failed", "at": "2026-11-08T10:05:00Z"}
+      ],
+      "replacements": [
+        {"id": 5, "projectId": "api", "name": "lead", "sessionId": "s-api-2", "previousSessionId": "s-api", "changedBy": "you", "reason": "context full", "at": "2026-11-08T10:10:00Z"}
+      ],
+      "decisions": [
+        {"group": "stopped", "sessionId": "s-web", "projectId": "web", "kind": "outgoing", "reason": "1 message not delivered", "answerable": false, "hostId": ""},
+        {"group": "stopped", "sessionId": "server::s-tool", "projectId": "server::tools", "kind": "incoming", "reason": "A message to it failed", "answerable": false, "hostId": "server"},
+        {"group": "stopped", "sessionId": "s-loose", "kind": "usageLimit", "reason": "Usage limit until 3:00", "answerable": false, "hostId": ""},
+        {"group": "waiting", "sessionId": "s-api", "projectId": "api", "kind": "request", "reason": "Needs your approval", "answerable": true, "hostId": ""}
+      ],
+      "stopped": ["queue:/7", "delivery:/3", "replacement:/5", "decision:server::s-tool", "decision:s-loose"],
+      "decisionsShown": ["server::s-tool", "s-loose", "s-api"],
+      "counts": {"web": 1, "api": 3, "server::tools": 1},
+      "total": 6
+    },
+    {
+      "name": "a phone paired to that computer",
+      "localHosts": ["studio"],
+      "projects": [
+        {"id": "studio::web", "displayName": "web", "checkouts": []},
+        {"id": "server::tools", "displayName": "tools", "checkouts": []}
+      ],
+      "sessions": {"studio::s-web": "studio::web", "server::s-tool": "server::tools"},
+      "attention": [],
+      "deliveries": [
+        {"deliveryId": 3, "sessionId": "studio::s-web", "message": "check the schema", "reason": "target_gone", "status": "failed", "at": "2026-11-08T10:05:00Z", "hostID": "studio"}
+      ],
+      "replacements": [],
+      "decisions": [
+        {"group": "stopped", "sessionId": "studio::s-web", "projectId": "studio::web", "kind": "outgoing", "reason": "1 message not delivered", "answerable": false, "hostId": "studio"},
+        {"group": "stopped", "sessionId": "server::s-tool", "projectId": "server::tools", "kind": "incoming", "reason": "A message to it failed", "answerable": false, "hostId": "server"}
+      ],
+      "stopped": ["delivery:studio/3", "decision:server::s-tool"],
+      "decisionsShown": ["server::s-tool"],
+      "counts": {"studio::web": 1, "server::tools": 1},
+      "total": 2
+    }
+  ]
+}
