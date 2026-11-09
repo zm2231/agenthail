@@ -85,6 +85,7 @@ type Daemon struct {
 	// WithdrawNotification outside tests.
 	withdrawDesktop func(identifier string) error
 	background      *backgroundWork
+	triggers        *triggerService
 	events          *eventHub
 	catalog         *catalogHub
 	catalogEnded    catalogEnded
@@ -200,6 +201,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		federation:        newFederation(),
 		uploads:           uploads.New(uploadsDir(reg)),
 		background:        newBackgroundWork(),
+		triggers:          newTriggerService(),
 		limitResumes:      newLimitResumer(),
 		goalSweep:         newGoalSweeper(),
 		workWake:          make(chan struct{}, 1),
@@ -332,6 +334,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	} else if recovered > 0 {
 		d.log.Printf("dead-lettered %d message(s) with an uncertain delivery outcome", recovered)
 	}
+	d.startTriggers()
 	d.startFederation(ctx)
 	defer d.stopFederation()
 	catalogDone := make(chan struct{})

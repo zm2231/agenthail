@@ -51,14 +51,6 @@ func (d *Daemon) onHost() string {
 	return ""
 }
 
-func (d *Daemon) recordTurnNotice(sessionID, turnID string, notice turnCompletedNotice) {
-	if err := d.Registry.RecordTurnNotice(sessionID, registry.TurnNotice{TurnID: turnID, Outcome: notice.outcome, RequestID: notice.requestID, At: time.Now()}); err != nil {
-		d.log.Printf("record turn notice %s: %s", d.resolveDisplay(sessionID), err)
-		return
-	}
-	d.requestCatalogDiscovery()
-}
-
 func mirroredTurnCompletion(projection string) *dashboardTurnCompletion {
 	var row struct {
 		TurnCompletion *dashboardTurnCompletion `json:"turnCompletion"`

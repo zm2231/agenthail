@@ -48,14 +48,21 @@ func (d *Daemon) releaseUnobservedHold(ctx context.Context, adapter surface.Surf
 	if err := d.Registry.ClearCompletionNotification(session.ID); err != nil {
 		d.log.Printf("clear completion notification %s: %s", d.resolveDisplay(session.ID), err)
 	}
-	if completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && !session.Delegated() {
-		notice := d.endTurnNotifications(session, previous.HeldCompletionTurnID, fmt.Sprintf("%s finished", d.resolveDisplay(session.ID)), fmt.Sprintf("%s finished%s", notificationSurfaceName(session.Surface), d.onHost()))
-		d.notifyTurnCompleted(notice, session.ID, previous.HeldCompletionTurnID)
+	if completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) {
+		turnID := previous.HeldCompletionTurnID
+		var noticed *turnCompletedNotice
+		if !session.Delegated() {
+			notice := d.endTurnNotifications(session, turnID, fmt.Sprintf("%s finished", d.resolveDisplay(session.ID)), fmt.Sprintf("%s finished%s", notificationSurfaceName(session.Surface), d.onHost()))
+			noticed = &notice
+		}
+		d.recordCompletion(session, turnID, false, noticed)
+		if noticed != nil {
+			d.notifyTurnCompleted(*noticed, session.ID, turnID)
+		}
 	}
 }
 
 func (d *Daemon) notifyTurnCompleted(notice turnCompletedNotice, sessionID, turnID string) {
-	d.recordTurnNotice(sessionID, turnID, notice)
 	dedupeKey := completionDedupeKey(d.hostIdentity().ID, sessionID, turnID)
 	d.background.start(func(ctx context.Context) {
 		if err := d.notifyDesktop("Agenthail", notice.desktop, sessionID, "", notice.requestID, notice.actions); err != nil {
