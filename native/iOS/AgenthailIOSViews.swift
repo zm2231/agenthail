@@ -1792,10 +1792,7 @@ struct IOSSessionRow: View {
                 if !showsTime {
                     EmptyView()
                 } else if kind == .working {
-                    TimelineView(.everyMinute) { context in
-                        Text(SessionRowTime.working(session, now: context.date)).font(.caption).foregroundStyle(PhonePalette.muted)
-                            .lineLimit(1).fixedSize()
-                    }
+                    PhoneWorkingTime(session: session)
                 } else if let value = session.lastActive, let date = TimestampParser.date(value) {
                     Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(PhonePalette.muted)
                         .lineLimit(1).fixedSize()
@@ -1813,11 +1810,7 @@ struct IOSSessionRow: View {
             if kind == .unavailable, let reason = session.unavailableReason {
                 Text(reason).font(.caption).foregroundStyle(PhonePalette.muted)
             } else if kind == .working, let activity = session.activity {
-                TimelineView(.everyMinute) { context in
-                    if let note = activity.note(now: context.date) {
-                        Text(note).font(.caption).foregroundStyle(PhonePalette.muted)
-                    }
-                }
+                PhoneWorkingNote(activity: activity)
             }
             if session.queueCount > 0 || session.isReadOnly || (family?.workingSubagents ?? 0) > 0 || !session.sharedHolders.isEmpty {
                 layout {
