@@ -15,19 +15,7 @@ fi
 
 mkdir -p "$(dirname "$OUTPUT")"
 OUTPUT="$(cd "$(dirname "$OUTPUT")" && pwd)/$(basename "$OUTPUT")"
-mkdir -p "$CACHE"
-download() {
-	url="$1"
-	path="$2"
-	sha="$3"
-	if [ ! -f "$path" ] || ! printf '%s  %s\n' "$sha" "$path" | shasum -a 256 -c - >/dev/null 2>&1; then
-		rm -f "$path"
-		curl -fL --retry 3 --retry-all-errors -o "$path" "$url"
-	fi
-	printf '%s  %s\n' "$sha" "$path" | shasum -a 256 -c -
-}
-
-download "$PYTHON_URL" "$CACHE/$PYTHON_ARCHIVE" "$PYTHON_SHA256"
+"$ROOT/scripts/verified-download.sh" "$PYTHON_URL" "$CACHE/$PYTHON_ARCHIVE" "$PYTHON_SHA256"
 NODE_DIST="$("$ROOT/scripts/fetch-node.sh" --dist darwin arm64)"
 
 rm -rf "$OUTPUT"

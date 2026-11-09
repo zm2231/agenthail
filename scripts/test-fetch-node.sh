@@ -30,6 +30,11 @@ const server = createServer((request, response) => {
 	const fault = faults.shift() ?? "ok";
 	writeFileSync(modeFile, faults.join(" "));
 	appendFileSync(logFile, `${request.url} ${fault}\n`);
+	if (fault === "504") {
+		response.writeHead(504);
+		response.end();
+		return;
+	}
 	response.writeHead(200, { "content-type": "application/gzip", "content-length": body.length });
 	if (fault === "drop") {
 		response.write(body.subarray(0, body.length >> 1), () => request.socket.destroy());
@@ -59,6 +64,7 @@ odd="$TMP/odd\" dollar\$ back\\slash"
 
 fetch() {
 	AGENTHAIL_BUILD_CACHE="$odd/cache" AGENTHAIL_NODE_DIST_URL="$mirror" \
+		AGENTHAIL_DOWNLOAD_ATTEMPTS="${AGENTHAIL_DOWNLOAD_ATTEMPTS:-4}" AGENTHAIL_DOWNLOAD_BACKOFF_SECONDS="${AGENTHAIL_DOWNLOAD_BACKOFF_SECONDS:-0}" \
 		"$ROOT/scripts/fetch-node.sh" "$os" "$arch" "$odd/root"
 }
 
@@ -79,9 +85,21 @@ grep -q 'attempt 2 of 4 .* failed (curl exit 0, got [0-9a-f]\{64\}, want ' "$TMP
 test "$(requests)" = 3
 
 before="$(requests)"
+echo 504 504 504 504 >"$TMP/faults"
 fetch
 expect_staged
 test "$(requests)" = "$before"
+: >"$TMP/faults"
+
+rm -rf "$odd/cache" "$odd/root"
+echo 504 504 >"$TMP/faults"
+before="$(requests)"
+started="$(date +%s)"
+AGENTHAIL_DOWNLOAD_BACKOFF_SECONDS=1 fetch 2>"$TMP/outage.err"
+expect_staged
+test "$(($(requests) - before))" = 3
+test "$(grep -c 'failed (curl exit 22, ' "$TMP/outage.err")" = 2
+test "$(($(date +%s) - started))" -ge 3
 
 rm -rf "$odd/cache" "$odd/root"
 echo corrupt corrupt corrupt corrupt corrupt corrupt >"$TMP/faults"

@@ -369,6 +369,7 @@ jobs:
         with:
           path: ~/Library/Caches/agenthail-build/node-v*.tar.gz
           key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
+          restore-keys: agenthail-node-${{ runner.os }}-${{ runner.arch }}-
       - name: Shipped Node download test
         run: PATH="$(dirname "$(command -v node)"):/opt/homebrew/bin:/usr/bin:/bin" scripts/test-fetch-node.sh
       - name: Install and upgrade test
@@ -391,8 +392,11 @@ jobs:
           cache: true
       - uses: actions/cache@v5
         with:
-          path: ~/Library/Caches/agenthail-build/node-v*.tar.gz
-          key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
+          path: |
+            ~/Library/Caches/agenthail-build/node-v*.tar.gz
+            ~/Library/Caches/agenthail-build/cpython-*.tar.gz
+          key: agenthail-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh', 'scripts/build-runtime-bundle.sh') }}
+          restore-keys: agenthail-runtime-${{ runner.os }}-${{ runner.arch }}-
       - name: Build package
         env:
           AGENTHAIL_ALLOW_UNNOTARIZED: "1"
