@@ -280,7 +280,7 @@ func (c *Codex) refuseUnmovableThread(ctx context.Context, client codexClient, s
 	if kind := codexWaitingKind(thread["status"]); kind != "" {
 		return surface.MoveRefusal{Reason: fmt.Sprintf("it is waiting on the person (%s); answer it first", kind)}
 	}
-	active, err := c.activeTurnID(ctx, client, sess.ID)
+	active, err := c.activeTurnID(ctx, client, sess.ID, "")
 	if err != nil {
 		return fmt.Errorf("inspect active turn: %w", err)
 	}
@@ -371,7 +371,7 @@ func (c *Codex) ArchiveMove(conversation, moveID string) error {
 		return err
 	}
 	defer client.Close()
-	active, err := c.activeTurnID(ctx, client, conversation)
+	active, err := c.activeTurnID(ctx, client, conversation, "")
 	if err != nil {
 		return fmt.Errorf("inspect active turn: %w", err)
 	}

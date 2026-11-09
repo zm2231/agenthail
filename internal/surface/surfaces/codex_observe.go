@@ -86,7 +86,7 @@ func dropUnconfirmedTurn(thread *codexThread, observation *surface.TurnObservati
 // ended, for at most codexUnsettledTurnWait: a starting turn shows running
 // once its thread turns active, and a turn a crashed server left behind never
 // does.
-func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID string) (string, error) {
+func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID, expected string) (string, error) {
 	deadline := time.Now().Add(codexUnsettledTurnWait)
 	for {
 		newest, err := codexNewestTurn(ctx, conn, threadID)
@@ -99,7 +99,9 @@ func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID str
 		if newest != nil && codexTurnUnsettled(newest) && c.turnStarts.running(threadID, str(newest, "id")) {
 			return str(newest, "id"), nil
 		}
-		if newest == nil || !codexTurnUnsettled(newest) || !time.Now().Before(deadline) {
+		unsettled := newest != nil && codexTurnUnsettled(newest)
+		unlisted := expected != "" && str(newest, "id") != expected
+		if !(unsettled || unlisted) || !time.Now().Before(deadline) {
 			return "", nil
 		}
 		select {

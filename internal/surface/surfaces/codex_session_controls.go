@@ -45,7 +45,7 @@ func (c *Codex) interruptTurn(ctx context.Context, sess *surface.Session, expect
 }
 
 func (c *Codex) interruptActiveTurn(ctx context.Context, conn codexClient, threadID, expectedTurnID string) error {
-	turnID, err := c.activeTurnID(ctx, conn, threadID)
+	turnID, err := c.activeTurnID(ctx, conn, threadID, expectedTurnID)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
 	}
@@ -81,7 +81,7 @@ func (c *Codex) SteerWithImages(ctx context.Context, sess *surface.Session, mess
 		return err
 	}
 	defer conn.Close()
-	turnID, err := c.activeTurnID(ctx, conn, sess.ID)
+	turnID, err := c.activeTurnID(ctx, conn, sess.ID, "")
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
 	}

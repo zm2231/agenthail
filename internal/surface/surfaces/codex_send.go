@@ -35,7 +35,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		return nil, err
 	}
 	defer conn.Close()
-	active, err := c.activeTurnID(ctx, conn, sess.ID)
+	active, err := c.activeTurnID(ctx, conn, sess.ID, "")
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("inspect active turn: %w", err))
 	}

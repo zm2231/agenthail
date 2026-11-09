@@ -82,7 +82,7 @@ func TestATurnStartedBeforeTheCodexAppServerRestartedIsNotRunning(t *testing.T) 
 	if _, err := client.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, 30*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if id, err := codex.activeTurnID(ctx, client, threadID); err != nil || id != "" {
+	if id, err := codex.activeTurnID(ctx, client, threadID, ""); err != nil || id != "" {
 		t.Fatalf("a turn the restarted app-server lost reads as running: %q %v", id, err)
 	}
 }

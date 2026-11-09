@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -532,21 +533,25 @@ func TestCodexManagedStreamForwardsGoalAndContextNotificationsForItsThread(t *te
 }
 
 func TestCodexManagedInterruptTargetsOnlyTheConfirmedTurn(t *testing.T) {
+	running := map[string]any{"id": "turn-a", "status": map[string]any{"type": "inProgress"}}
 	for _, test := range []struct {
 		name      string
-		active    string
+		listed    []map[string]any
 		interrupt bool
 	}{
-		{name: "replacement turn is never interrupted", active: "turn-b"},
-		{name: "confirmed turn is interrupted", active: "turn-a", interrupt: true},
+		{name: "replacement turn is never interrupted", listed: []map[string]any{{"id": "turn-b", "status": map[string]any{"type": "inProgress"}}}},
+		{name: "confirmed turn is interrupted", listed: []map[string]any{running}, interrupt: true},
+		{name: "confirmed turn is interrupted once it is listed after the turn before it", listed: []map[string]any{{"id": "turn-z", "status": "completed", "completedAt": 1}, running}, interrupt: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			var lists atomic.Int32
 			fake := startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
 				switch method {
 				case "thread/resume":
 					return map[string]any{"thread": map[string]any{"id": "thread"}}
 				case "thread/turns/list":
-					return map[string]any{"data": []any{map[string]any{"id": test.active, "status": map[string]any{"type": "inProgress"}}}}
+					listed := test.listed[min(int(lists.Add(1))-1, len(test.listed)-1)]
+					return map[string]any{"data": []any{listed}}
 				case "turn/interrupt":
 					return map[string]any{}
 				}

@@ -136,7 +136,7 @@ func TestThreadTurnsAreListedByTheTopLevelLimit(t *testing.T) {
 	}
 
 	client := dialTestManagedCodex(t)
-	if _, err := codex.activeTurnID(context.Background(), client, "thread"); err != nil {
+	if _, err := codex.activeTurnID(context.Background(), client, "thread", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := codex.listThreadItems(context.Background(), client, "thread", "turn"); err != nil {

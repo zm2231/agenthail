@@ -100,12 +100,12 @@ func TestATurnThisProcessStartedIsRunningWhileCodexListsItUnsettled(t *testing.T
 	t.Cleanup(func() { codexUnsettledTurnWait = wait })
 	c := &Codex{}
 	starting := listedTurnClient{turns: []any{map[string]any{"id": "turn-2", "status": "interrupted", "completedAt": nil}, listedTurn("turn-1", "completed")}}
-	if id, err := c.activeTurnID(context.Background(), starting, "t"); err != nil || id != "" {
+	if id, err := c.activeTurnID(context.Background(), starting, "t", ""); err != nil || id != "" {
 		t.Fatalf("a turn another client started was taken as running without being listed running: %q %v", id, err)
 	}
 	c.turnStarts.begin("t", nil)
 	c.turnStarts.identify("t", "turn-2")
-	if id, err := c.activeTurnID(context.Background(), starting, "t"); err != nil || id != "turn-2" {
+	if id, err := c.activeTurnID(context.Background(), starting, "t", ""); err != nil || id != "turn-2" {
 		t.Fatalf("a turn this process started read as not running: %q %v", id, err)
 	}
 }
