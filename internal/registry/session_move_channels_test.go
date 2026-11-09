@@ -1,6 +1,9 @@
 package registry
 
 import (
+	"encoding/json"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -60,74 +63,72 @@ func TestTheChannelsOfAMovingSessionCannotChange(t *testing.T) {
 	}
 }
 
-func TestAMovedSessionKeepsTheChannelsOfItsFormerHostUntilItMovesOn(t *testing.T) {
-	const self, home = "h0123456789ef", "h0123456789cd"
+func registryWithHosts(t *testing.T, hosts ...string) *Registry {
+	t.Helper()
 	r := openTestRegistry(t)
-	for _, host := range []PairedHost{{ID: home, Name: "home", Endpoint: "https://home.example.ts.net:7412", Address: "100.64.0.3", Token: "ahd_home"}, {ID: moveTarget, Name: "server", Endpoint: "https://server.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_server"}} {
+	for index, id := range hosts {
+		host := PairedHost{ID: id, Name: "host-" + id, Endpoint: "https://" + id + ".example.ts.net:7412", Address: "100.64.0." + strconv.Itoa(index+2), Token: "ahd_" + id}
 		if _, err := r.AddHost(host); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := r.CreateChannel("local"); err != nil {
-		t.Fatal(err)
-	}
-	carried := MoveCarry{Channels: []MovedChannel{{Name: "builders", Home: home}, {Name: "local", Home: self}}}
-	if err := r.CheckMovedChannels(moveConversation, self, []MovedChannel{{Name: "elsewhere", Home: "h-unpaired"}}); err == nil || !strings.Contains(err.Error(), "not paired here") {
-		t.Fatalf("a channel kept on an unpaired host was accepted: %v", err)
-	}
-	if _, err := r.PrepareMoveIn("move-in", moveConversation, home, []byte(`{}`)); err != nil {
+	return r
+}
+
+func takeMoved(t *testing.T, r *Registry, from, self string, carry MoveCarry) {
+	t.Helper()
+	if _, err := r.PrepareMoveIn("move-in", moveConversation, from, []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetMoveState("move-in", MoveReceived, "", MovePrepared); err != nil {
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 7, Transcript: "/tmp/t.jsonl", HasLocal: true}
-	if _, err := r.TakeMovedSession("move-in", session, "", time.Time{}, nil, carried, self); err != nil {
+	if _, err := r.TakeMovedSession("move-in", session, "", time.Time{}, nil, carry, self); err != nil {
 		t.Fatal(err)
 	}
-	if got, found, err := r.RemoteChannel(moveConversation, "builders"); err != nil || !found || got != home {
-		t.Fatalf("#builders kept at %q found=%v err=%v", got, found, err)
+}
+
+func TestSameNamedChannelsOnTwoHostsBothMoveOnWithTheSession(t *testing.T) {
+	const home, here, next = "h0123456789cd", "h0123456789ef", "h0123456789aa"
+	r := registryWithHosts(t, home, next)
+	if err := r.CheckMovedChannels(here, []MovedChannel{{Name: "elsewhere", Home: "h0123456789bb"}}); err == nil || !strings.Contains(err.Error(), "not paired here") {
+		t.Fatalf("a channel kept on an unpaired host was accepted: %v", err)
 	}
-	if _, found, _ := r.RemoteChannel(moveConversation, "local"); found {
-		t.Fatal("a channel this host keeps was recorded as another host's")
+	if _, err := r.CreateChannel("builders"); err != nil {
+		t.Fatal(err)
 	}
-	onward, err := r.MoveCarry(moveConversation, self)
-	if err != nil || len(onward.Channels) != 1 || onward.Channels[0] != (MovedChannel{Name: "builders", Home: home}) {
+	takeMoved(t, r, home, here, MoveCarry{Channels: []MovedChannel{{Name: "builders", Home: home}, {Name: "builders", Home: here}}})
+	if homes, err := r.RemoteChannelHomes(moveConversation, "builders"); err != nil || !slices.Equal(homes, []string{home}) {
+		t.Fatalf("#builders kept on %v err=%v, want only the former host's recorded", homes, err)
+	}
+	if err := r.AddToChannel("builders", moveConversation); err != nil {
+		t.Fatalf("a session in another host's #builders could not join this host's: %v", err)
+	}
+	onward, err := r.MoveCarry(moveConversation, here)
+	if err != nil || !slices.Equal(onward.Channels, []MovedChannel{{Name: "builders", Home: home}, {Name: "builders", Home: here}}) {
 		t.Fatalf("moving on carries channels %+v err=%v", onward.Channels, err)
 	}
-	if err := r.BeginMoveOut("move-out", moveConversation, moveTarget, []byte(`{}`), onward, self); err != nil {
+
+	beyond := registryWithHosts(t, home, here)
+	takeMoved(t, beyond, here, next, onward)
+	if homes, err := beyond.RemoteChannelHomes(moveConversation, "builders"); err != nil || !slices.Equal(homes, []string{home, here}) {
+		t.Fatalf("the next host keeps #builders on %v err=%v, want both hosts'", homes, err)
+	}
+
+	if err := r.BeginMoveOut("move-out", moveConversation, next, []byte(`{}`), onward, here); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetMoveState("move-out", MoveSent, "", MovePreparing); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.CompleteMoveOut("move-out", testPlaceholder); err != nil {
+	if _, err := r.CompleteMoveOut("move-out", MovePlaceholder{EntityID: next + "::" + moveConversation, Projection: json.RawMessage(`{"id":"` + next + "::" + moveConversation + `","surface":"claude"}`), UnavailableReason: "moved"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, _ := r.RemoteChannel(moveConversation, "builders"); found {
-		t.Fatal("the host the session left still posts for it to #builders")
+	if homes, _ := r.RemoteChannelHomes(moveConversation, "builders"); len(homes) != 0 {
+		t.Fatalf("the host the session left still posts for it to #builders on %v", homes)
 	}
-}
-
-func TestAChannelNameNamesOneChannelForASession(t *testing.T) {
-	const self = "h0123456789ef"
-	r := channelledMoveRegistry(t)
-	if err := r.CheckMovedChannels(moveConversation, self, []MovedChannel{{Name: "builders", Home: moveTarget}}); err == nil || !strings.Contains(err.Error(), "this host's own #builders") {
-		t.Fatalf("a session in this host's #builders took #builders of another host: %v", err)
-	}
-	if err := r.CheckMovedChannels("second", self, []MovedChannel{{Name: "ops", Home: self}, {Name: "ops", Home: moveTarget}}); err == nil || !strings.Contains(err.Error(), "two channels named #ops") {
-		t.Fatalf("a move with two channels of one name was accepted: %v", err)
-	}
-	if _, err := r.db.Exec(`INSERT INTO remote_channels(channel_name,home_host_id,session_id) VALUES('reviewers',?,?)`, moveTarget, moveConversation); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.AddToChannel("reviewers", moveConversation); err == nil || !strings.Contains(err.Error(), "already in #reviewers on host") {
-		t.Fatalf("a session in another host's #reviewers joined this host's: %v", err)
-	}
-	if _, err := r.db.Exec(`INSERT INTO remote_channels(channel_name,home_host_id,session_id) VALUES('builders',?,?)`, moveTarget, moveConversation); err != nil {
-		t.Fatal(err)
-	}
-	if reason, err := r.SessionMoveRefusal(moveConversation, true); err != nil || !strings.Contains(reason, "two channels named #builders") {
-		t.Fatalf("refusal=%q err=%v, want the session's two #builders named", reason, err)
+	if members, err := r.ChannelMembers("builders"); err != nil || len(members) != 1 {
+		t.Fatalf("this host's #builders members=%v err=%v, want the session kept", members, err)
 	}
 }

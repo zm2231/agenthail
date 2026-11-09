@@ -157,15 +157,13 @@ A channel stays on the host that keeps it; only the session moves.
 
 - A post to the channel on that host reaches the moved session on its new
   host through a held send, like a post to any member on a paired host.
-- A post from the moved session to a channel that its new host does not
-  have goes to the host that keeps the channel. While that host is
-  unreachable, the post is held and delivered once it reconnects, under the
-  post's idempotency key, even when the new host has its own channel of
-  that name.
-- A channel name names one channel for a session wherever it runs. A session
-  cannot join a host's channel while it is in another host's channel of the
-  same name, and a move that would put it in two is refused, naming the
-  channel to leave.
+- A post from the moved session to a channel it took with it goes to the
+  host that keeps the channel. While that host is unreachable, the post is
+  held and delivered once it reconnects, under the post's idempotency key.
+- A session can be in channels of the same name on several hosts, and a move
+  carries each of them. A bare name that names channels on more than one
+  host is refused with their qualified names, such as `home::#builders`; a
+  name qualified with a host always picks that host's channel.
 - The keeping host leaves the poster out of its own post, and accepts a
   post from a paired host's session only while that session is a member.
   When the channel is gone, or the session is no longer a member, the new

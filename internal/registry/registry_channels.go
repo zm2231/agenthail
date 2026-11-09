@@ -2,7 +2,6 @@ package registry
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -22,12 +21,6 @@ func (r *Registry) AddToChannel(channelName, sessionID string) error {
 	}
 	defer tx.Rollback()
 	if err := channelsSettledTx(tx, sessionID); err != nil {
-		return err
-	}
-	var home string
-	if err := tx.QueryRow(`SELECT home_host_id FROM remote_channels WHERE session_id=? AND channel_name=?`, sessionID, channelName).Scan(&home); err == nil {
-		return fmt.Errorf("session %s is already in #%s on host %s; leave it there first", sessionID, channelName, home)
-	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	res, err := tx.Exec(`INSERT OR IGNORE INTO channel_members (channel_id,session_id) SELECT id,? FROM channels WHERE name = ?`, sessionID, channelName)

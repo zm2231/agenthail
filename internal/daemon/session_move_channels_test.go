@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -72,9 +75,8 @@ func TestAMovedSessionPostsToItsChannelThroughTheHostThatKeepsIt(t *testing.T) {
 	onTarget := claudetest.ListenPeerManager(t, target.host.Home)
 
 	movedHere(t, source, session)
-	inChannel(t, target, "builders")
-	if home, found, err := target.reg.RemoteChannel(session.ID, "builders"); err != nil || !found || home != toSource.ID {
-		t.Fatalf("the target keeps #builders for the session at %q found=%v err=%v", home, found, err)
+	if homes, err := target.reg.RemoteChannelHomes(session.ID, "builders"); err != nil || len(homes) != 1 || homes[0] != toSource.ID {
+		t.Fatalf("the target keeps #builders for the session on %v err=%v", homes, err)
 	}
 	code, answer := channelSend(t, target.federationNode, "", map[string]any{"action": "channel-send", "channel": "#builders", "message": "from the new host", "sourceSessionId": session.ID})
 	if code != http.StatusOK || len(answer.Hosts) != 1 || answer.Hosts[0].State != channelLegReached {
@@ -84,6 +86,27 @@ func TestAMovedSessionPostsToItsChannelThroughTheHostThatKeepsIt(t *testing.T) {
 		t.Fatalf("recipients=%+v, want only the member on the channel's host, not the sender", answer.Recipients)
 	}
 	testkit.Eventually(t, "the member to get the post", 15*time.Second, func() bool { return onSource.Containing("from the new host") == 1 })
+
+	inChannel(t, target, "builders")
+	code, answer = channelSend(t, target.federationNode, "", map[string]any{"action": "channel-send", "channel": "#builders", "message": "which builders", "sourceSessionId": session.ID})
+	own := target.daemon.hostIdentity().Name + "::#builders"
+	if code != http.StatusBadRequest || len(answer.Hosts) != 0 {
+		t.Fatalf("status=%d answer=%+v, want a bare name that names channels on two hosts refused", code, answer)
+	}
+	if body := channelSendBody(t, target.federationNode, "#builders", session.ID); !strings.Contains(body, "home::#builders") || !strings.Contains(body, own) {
+		t.Fatalf("the refusal %s does not name both channels", body)
+	}
+	code, answer = channelSend(t, target.federationNode, "", map[string]any{"action": "channel-send", "channel": "home::#builders", "message": "named the home one", "sourceSessionId": session.ID})
+	if code != http.StatusOK || len(answer.Hosts) != 1 || answer.Hosts[0].State != channelLegReached {
+		t.Fatalf("status=%d answer=%+v, want the qualified post on the channel's host", code, answer)
+	}
+	testkit.Eventually(t, "the member to get the qualified post", 15*time.Second, func() bool { return onSource.Containing("named the home one") == 1 })
+	if body := channelSendBody(t, target.federationNode, own, session.ID); !strings.Contains(body, "no members other than the sender") {
+		t.Fatalf("a post naming this host's own #builders answered %s, want it posted here", body)
+	}
+	if got := onSource.Containing("which builders"); got != 0 {
+		t.Fatalf("a refused post was delivered %d times", got)
+	}
 
 	reply := source.daemon.doAction(context.Background(), principal{ID: localDashboardPrincipal, Kind: principalPerson}, dashboardActionRequest{Action: "channel-send", Channel: "#builders", Message: "for the moved session", SourceSessionID: member.ID})
 	if reply.Status != http.StatusOK {
@@ -146,8 +169,8 @@ func TestAMovedSessionThatLeftItsChannelStopsPostingToIt(t *testing.T) {
 	if code == http.StatusOK || len(answer.Hosts) != 1 || answer.Hosts[0].State != channelLegRefused || answer.Hosts[0].Rule != channelRuleNotMember {
 		t.Fatalf("status=%d answer=%+v, want the channel's host to refuse a session that left", code, answer)
 	}
-	if _, found, err := target.reg.RemoteChannel(session.ID, "builders"); err != nil || found {
-		t.Fatalf("the target still keeps #builders for the session: found=%v err=%v", found, err)
+	if homes, err := target.reg.RemoteChannelHomes(session.ID, "builders"); err != nil || len(homes) != 0 {
+		t.Fatalf("the target still keeps #builders for the session on %v err=%v", homes, err)
 	}
 	if got := onSource.Containing("after leaving"); got != 0 {
 		t.Fatalf("the member got a post from a session that left %d times", got)
@@ -174,4 +197,15 @@ func TestATargetThatCannotTakeChannelsLeavesTheSessionInItsChannel(t *testing.T)
 	if members, err := source.reg.ChannelMembers("builders"); err != nil || len(members) != 1 || members[0] != session.ID {
 		t.Fatalf("members=%v err=%v after the refused move", members, err)
 	}
+}
+
+func channelSendBody(t *testing.T, node *federationNode, channel, source string) string {
+	t.Helper()
+	encoded, _ := json.Marshal(map[string]any{"action": "channel-send", "channel": channel, "message": "probe", "sourceSessionId": source})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(encoded))
+	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+	request.AddCookie(browserCookie(t, node.reg))
+	response := httptest.NewRecorder()
+	node.handler.ServeHTTP(response, request)
+	return response.Body.String()
 }

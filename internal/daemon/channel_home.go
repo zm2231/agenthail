@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/hosts"
 )
 
 const (
@@ -16,15 +17,70 @@ const (
 	channelRuleNotMember = "not_a_member"
 )
 
-// channelHome is the host that keeps a channel a session took with it when it
-// moved here.
-func (d *Daemon) channelHome(ctx context.Context, request dashboardActionRequest) (string, string, bool, error) {
-	if _, fromHost := requestingHost(ctx); fromHost || request.SourceSessionID == "" {
-		return "", "", false, nil
+// channelDestination names the channel a post goes to and the paired host
+// that keeps it, or no host for one of this host's. A name qualified with a
+// host picks that host's channel; a bare name that names channels on more
+// than one host is refused with their qualified names.
+func (d *Daemon) channelDestination(ctx context.Context, request dashboardActionRequest) (string, string, error) {
+	hostRef, name, qualified := splitChannelRef(request.Channel)
+	if _, fromHost := requestingHost(ctx); fromHost || qualified && d.isLocalHostRef(hostRef) {
+		return name, "", nil
 	}
-	name := strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")
-	home, found, err := d.Registry.RemoteChannel(request.SourceSessionID, name)
-	return name, home, found, err
+	if qualified {
+		host, paired := d.pairedHost(hostRef)
+		if !paired {
+			return "", "", fmt.Errorf("no paired host is named %q", hostRef)
+		}
+		homes, err := d.channelHomes(request.SourceSessionID, name)
+		if err != nil {
+			return "", "", err
+		}
+		if !slices.Contains(homes, host.record.ID) {
+			return "", "", fmt.Errorf("%s is not in #%s on host %s", d.resolveDisplay(request.SourceSessionID), name, host.record.Name)
+		}
+		return name, host.record.ID, nil
+	}
+	homes, err := d.channelHomes(request.SourceSessionID, name)
+	if err != nil || len(homes) == 0 {
+		return name, "", err
+	}
+	var choices []string
+	if _, err := broadcast.Resolve(d.Registry, name); err == nil {
+		choices = append(choices, d.hostIdentity().Name+"::#"+name)
+	}
+	if len(homes) == 1 && len(choices) == 0 {
+		return name, homes[0], nil
+	}
+	for _, home := range homes {
+		label := home
+		if host, paired := d.pairedHost(home); paired {
+			label = host.record.Name
+		}
+		choices = append(choices, label+"::#"+name)
+	}
+	return "", "", fmt.Errorf("#%s names channels on more than one host: %s; name one of them", name, strings.Join(choices, ", "))
+}
+
+func (d *Daemon) channelHomes(session, name string) ([]string, error) {
+	if session == "" {
+		return nil, nil
+	}
+	return d.Registry.RemoteChannelHomes(session, name)
+}
+
+func splitChannelRef(ref string) (string, string, bool) {
+	ref = strings.TrimPrefix(strings.TrimSpace(ref), "#")
+	host, name, qualified := hosts.Split(ref)
+	return host, strings.TrimPrefix(name, "#"), qualified
+}
+
+// localChannelRef is ref with this host's qualifier taken off, so scope
+// checks see the channel a local post goes to.
+func (d *Daemon) localChannelRef(ref string) string {
+	if host, name, qualified := splitChannelRef(ref); qualified && d.isLocalHostRef(host) {
+		return name
+	}
+	return ref
 }
 
 // postToChannelHome posts as a moved session to a channel its former host

@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS remote_channels (
 	channel_name TEXT NOT NULL,
 	home_host_id TEXT NOT NULL,
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-	PRIMARY KEY (session_id, channel_name)
+	PRIMARY KEY (session_id, home_host_id, channel_name)
 );
 CREATE TABLE IF NOT EXISTS routes (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,

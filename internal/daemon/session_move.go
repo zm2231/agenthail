@@ -665,7 +665,7 @@ func (d *Daemon) apiMovePrepareHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
 		return
 	}
-	if err := d.Registry.CheckMovedChannels(manifest.Conversation, d.hostIdentity().ID, manifest.Channels); err != nil {
+	if err := d.Registry.CheckMovedChannels(d.hostIdentity().ID, manifest.Channels); err != nil {
 		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
 		return
 	}
