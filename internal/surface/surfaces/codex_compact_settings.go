@@ -36,7 +36,7 @@ func (c *Codex) SetCompactSetting(ctx context.Context, sess *surface.Session, ke
 		return fmt.Errorf("%w: this Codex has no config store", surface.ErrUnsupported)
 	}
 	if sess.Status == surface.StatusBusy {
-		return fmt.Errorf("%w: the thread is working; change its compact window once it is idle", surface.ErrInvalidTurnSetting)
+		return errCompactWhileWorking()
 	}
 	var limit any
 	if value != surface.CompactAuto {
@@ -67,6 +67,15 @@ func (c *Codex) SetCompactSetting(ctx context.Context, sess *surface.Session, ke
 
 // A reload Codex refused is undone before any follower resumes with it.
 func (c *Codex) reloadThread(ctx context.Context, client codexClient, sess *surface.Session, undo func() error) error {
+	if busy, err := c.turnInFlight(ctx, client, sess.ID); err != nil || busy {
+		if err == nil {
+			err = errCompactWhileWorking()
+		}
+		if undoErr := undo(); undoErr != nil {
+			err = fmt.Errorf("%w; restoring the previous compact window also failed: %v", err, undoErr)
+		}
+		return err
+	}
 	release := c.subscriptions.exclusive(sess.ID)
 	var dropped []codexClient
 	for _, follower := range c.subscriptions.clients(sess.ID) {
@@ -99,6 +108,10 @@ func (c *Codex) reloadThread(ctx context.Context, client codexClient, sess *surf
 	}
 	release()
 	return err
+}
+
+func errCompactWhileWorking() error {
+	return fmt.Errorf("%w: the thread is working; change its compact window once it is idle", surface.ErrInvalidTurnSetting)
 }
 
 var codexReloadWait = 10 * time.Second

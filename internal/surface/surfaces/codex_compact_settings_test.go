@@ -165,7 +165,7 @@ func TestAFollowerThatCannotFollowAgainAfterAReloadIsClosed(t *testing.T) {
 	}
 }
 
-func TestAFollowerAfterAFailedReloadResumesWithTheOldWindow(t *testing.T) {
+func TestAFollowerAfterAFailedReloadJoinsWithoutTheRefusedWindow(t *testing.T) {
 	var refuse atomic.Bool
 	fake, codex, session := settingsThread(t, func(method string, params map[string]any) map[string]any {
 		if method == "thread/resume" && refuse.Load() && params["excludeTurns"] != true {
@@ -189,8 +189,7 @@ func TestAFollowerAfterAFailedReloadResumesWithTheOldWindow(t *testing.T) {
 	}
 	resumes := fake.Calls("thread/resume")
 	last := resumes[len(resumes)-1]
-	config, _ := last["config"].(map[string]any)
-	if last["excludeTurns"] != true || config[codexCompactLimit] != float64(150000) {
+	if last["excludeTurns"] != true || last["config"] != nil {
 		t.Fatalf("the follower resumed with %v after the reload failed", last)
 	}
 }

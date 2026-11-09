@@ -2,7 +2,9 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -61,20 +63,45 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 // The caller holds the thread's subscription gate.
 func (c *Codex) resumeFollower(ctx context.Context, client codexClient, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
 	threadID, _ := params["threadId"].(string)
-	response, err := c.resumeThread(ctx, client, session, params, wait)
+	response, err := c.joinOrResumeThread(ctx, client, session, params, wait)
 	if err == nil {
 		c.subscriptions.add(threadID, client)
 	}
 	return response, err
 }
 
+// Codex rebuilds a loaded thread that no client subscribes to when a resume's
+// overrides differ from its config, and the rebuild aborts a turn that is just
+// starting. So a resume of a thread this app-server already has loaded joins
+// it with no overrides; only a cold load carries them.
+func (c *Codex) joinOrResumeThread(ctx context.Context, client codexClient, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
+	threadID, _ := params["threadId"].(string)
+	loaded, err := c.loadedThreadIDs(ctx, client, 0)
+	if err != nil {
+		return nil, fmt.Errorf("thread/loaded/list: %w", err)
+	}
+	if !slices.Contains(loaded, threadID) {
+		return c.resumeThread(ctx, client, session, params, wait)
+	}
+	join := map[string]any{"threadId": threadID}
+	if exclude, ok := params["excludeTurns"]; ok {
+		join["excludeTurns"] = exclude
+	}
+	credentials := c.mcpCredentials()
+	if credentials == nil {
+		return client.Request(ctx, codexThreadResume, join, wait)
+	}
+	reload, err := c.withOverrides(session, params)
+	if err != nil {
+		return nil, err
+	}
+	return c.resumeKeepingMCP(ctx, client, credentials, session, join, reload, wait)
+}
+
 func (c *Codex) resumeThread(ctx context.Context, client codexClient, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
-	if store := c.codexConfigStore(); store != nil && session != nil && session.ID != "" {
-		overrides, err := store.CodexConfigOverrides(session.ID)
-		if err != nil {
-			return nil, fmt.Errorf("read the thread's config overrides: %w", err)
-		}
-		params = withConfig(params, overrides)
+	params, err := c.withOverrides(session, params)
+	if err != nil {
+		return nil, err
 	}
 	if credentials := c.mcpCredentials(); credentials != nil {
 		return c.resumeWithCredential(ctx, client, credentials, session, params, wait)
@@ -82,11 +109,29 @@ func (c *Codex) resumeThread(ctx context.Context, client codexClient, session *s
 	return client.Request(ctx, codexThreadResume, params, wait)
 }
 
+func (c *Codex) withOverrides(session *surface.Session, params map[string]any) (map[string]any, error) {
+	store := c.codexConfigStore()
+	if store == nil || session == nil || session.ID == "" {
+		return params, nil
+	}
+	overrides, err := store.CodexConfigOverrides(session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("read the thread's config overrides: %w", err)
+	}
+	return withConfig(params, overrides), nil
+}
+
 // A loaded thread ignores a resume's config, so only a reload replaces a token it holds.
 func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, credentials MCPCredentials, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
 	if token, ok := credentials.Live(session.ID); ok {
 		return client.Request(ctx, codexThreadResume, withMCPConfig(params, credentials.URL(), token), wait)
 	}
+	return c.resumeKeepingMCP(ctx, client, credentials, session, params, params, wait)
+}
+
+// resumeKeepingMCP sends params, then reloads the thread with reload and a
+// fresh credential when its agenthail MCP server is not connected.
+func (c *Codex) resumeKeepingMCP(ctx context.Context, client codexClient, credentials MCPCredentials, session *surface.Session, params, reload map[string]any, wait time.Duration) (map[string]any, error) {
 	response, err := client.Request(ctx, codexThreadResume, params, wait)
 	if err != nil {
 		return response, err
@@ -101,7 +146,7 @@ func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, cr
 			return response, nil
 		}
 	}
-	if reattached, err := c.reattachMCP(ctx, client, credentials, session.ID, params, wait); err != nil {
+	if reattached, err := c.reattachMCP(ctx, client, credentials, session.ID, reload, wait); err != nil {
 		credentials.Unattached(session.ID, err)
 	} else {
 		response = reattached
@@ -115,6 +160,11 @@ func (c *Codex) mcpCurrent(threadID string) bool {
 }
 
 func (c *Codex) reattachMCP(ctx context.Context, client codexClient, credentials MCPCredentials, threadID string, params map[string]any, wait time.Duration) (map[string]any, error) {
+	if busy, err := c.turnInFlight(ctx, client, threadID); err != nil {
+		return nil, fmt.Errorf("check for a running turn before reloading: %w", err)
+	} else if busy {
+		return nil, errors.New("a turn is starting or running, so the thread is not reloaded; the server attaches at a resume once the thread is idle")
+	}
 	token, err := credentials.Rotate(threadID)
 	if err != nil {
 		return nil, fmt.Errorf("rotate the credential: %w", err)

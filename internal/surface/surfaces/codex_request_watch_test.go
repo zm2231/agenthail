@@ -115,13 +115,14 @@ func TestAReloadDoesNotKeepTheWatchOnAThreadThatStoppedWaitingMeanwhile(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	daemon.CompleteTurn(managedThreadID, "done")
 	done := make(chan error, 1)
 	go func() {
 		done <- codex.reloadThread(ctx, reloader, &surface.Session{ID: managedThreadID}, func() error { return nil })
 	}()
 	<-reloading
 	daemon.Answer(1)
-	daemon.Notify("thread/status/changed", map[string]any{"threadId": managedThreadID, "status": waitingStatus()})
+	daemon.Notify("thread/status/changed", map[string]any{"threadId": managedThreadID, "status": map[string]any{"type": "idle"}})
 	time.Sleep(200 * time.Millisecond)
 	close(proceed)
 	if err := <-done; err != nil {

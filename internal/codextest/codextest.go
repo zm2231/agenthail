@@ -257,6 +257,10 @@ func (d *Daemon) serve(ws *websocket.Conn) {
 			response = map[string]any{"id": id, "error": result["error"]}
 		}
 		conn.write(response)
+		if !failed && method == "turn/start" {
+			threadID, _ := params["threadId"].(string)
+			d.Notify("thread/status/changed", map[string]any{"threadId": threadID, "status": map[string]any{"type": "active", "activeFlags": []any{}}})
+		}
 		if !failed && method == "thread/resume" {
 			threadID, _ := params["threadId"].(string)
 			for _, open := range d.openFor(threadID) {
@@ -851,7 +855,11 @@ func turnJSON(turn Turn) map[string]any {
 	if turn.Assistant != "" {
 		items = append(items, map[string]any{"id": turn.ID + "-reply", "type": "agentMessage", "phase": "final_answer", "text": turn.Assistant})
 	}
-	return map[string]any{"id": turn.ID, "status": turn.Status, "items": items}
+	value := map[string]any{"id": turn.ID, "status": turn.Status, "items": items, "completedAt": nil}
+	if turn.Status != "inProgress" {
+		value["completedAt"] = 1
+	}
+	return value
 }
 
 func (d *Daemon) LoadedIDs() []string {

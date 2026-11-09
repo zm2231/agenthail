@@ -30,6 +30,14 @@ against those actual message envelopes.
 
 Codex enforces one writer per thread: the app-server process that has a thread loaded holds a per-thread lock in `$CODEX_HOME/thread-writer-locks/`, and a second process that tries to load it gets `thread <id> already has an active writer`. Codex returns that as the generic invalid-request code, so Agenthail matches the message. A process unloads a thread, releasing the lock, after it has had no subscribers and no active turn for `thread_unload_delay_secs` (default 1800).
 
+A `thread/resume` whose overrides (`config`, `cwd`, `model` and the other settings) differ from a loaded thread's rebuilds the thread when no connection subscribes to it and Codex counts it idle; the rebuild aborts a turn that is starting or running, and while it runs `thread/read` can report that turn as `interrupted` on the reloading connection. Three rules keep Agenthail from doing that:
+
+- A resume of a thread the app-server lists in `thread/loaded/list` joins it with only `threadId` and `excludeTurns`; the session's overrides and MCP token go only on a load. If the list cannot be read, the resume fails rather than risk a reload.
+- The two deliberate reloads, a new compact window and a replaced MCP token, first check for a turn in flight: the thread is `active`, a turn in `thread/turns/list` is in progress, or this process started a turn on the thread that Codex has not yet listed as ended. Until the thread turns `active`, Codex lists an in-progress turn as `interrupted` with a null `completedAt`, and a new thread lists no turns until its first one ends. So a started turn counts as ended only once it is listed with `completedAt`, behind a newer turn, or behind a full page of newer turns. `thread/compact/start` names no turn and answers before Codex creates one, and the listing cannot tell that turn from another client's, so a compaction holds reloads for 5 minutes. A compact window is then refused as the thread working; a token is left for a later resume once the thread is idle.
+- A connection that starts a turn (`turn/start` on create and send, `thread/compact/start`) stays open, and so subscribed, until Codex reports the thread `active` or the turn completed, at most 10 seconds. This covers a reload that checked just before the start; past the bound the check above still holds the reload off.
+
+Codex refuses to join a new thread until its first turn ends (`list_turns is not supported yet`), so a stream follows that turn by reads and subscribes on its next status change. `codex_resume_real_test.go` checks this against a real app-server (Codex 0.163).
+
 Agenthail reaches two app-servers and has one route to each:
 
 - `desktop`: Codex Desktop's private app-server, through the renderer bridge.

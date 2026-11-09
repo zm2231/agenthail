@@ -139,7 +139,7 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	if err := applyCodexLaunchSettings(ctx, client, session, options.Model, options.LaunchSettings, turnParams); err != nil {
 		return session, nil, err
 	}
-	turnResponse, err := client.Request(ctx, "turn/start", turnParams, 10*time.Second)
+	turnResponse, err := c.startTurn(ctx, client, threadID, "turn/start", turnParams, 10*time.Second)
 	if err != nil {
 		return session, nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/start: %w", err))
 	}

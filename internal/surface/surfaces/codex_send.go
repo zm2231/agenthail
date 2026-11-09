@@ -49,7 +49,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	if err := applyCodexTurnOptions(options.Model, options.TurnOptions, params); err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
-	resp, err := conn.Request(ctx, "turn/start", params, 10*time.Second)
+	resp, err := c.startTurn(ctx, conn, sess.ID, "turn/start", params, 10*time.Second)
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/start: %w", err))
 	}
