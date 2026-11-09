@@ -226,6 +226,9 @@ func (r *Registry) RemoveHost(hostID string) ([]CatalogEvent, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := arrivingHostTx(tx, hostID); err != nil {
+		return nil, err
+	}
 	result, err := tx.Exec(`DELETE FROM hosts WHERE host_id=?`, hostID)
 	if err != nil {
 		return nil, err

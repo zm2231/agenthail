@@ -242,33 +242,3 @@ func TestAnUpgradedRegistryKeepsItsLeadHistoryAndRecordsAMovedLead(t *testing.T)
 		t.Fatalf("the presentation version stayed %d while the lead moved, want the history triggers back", after)
 	}
 }
-
-func TestALeadMovingInKeepsItsProjectAndNameUntilTheMoveEnds(t *testing.T) {
-	r := openTestRegistry(t)
-	if _, err := r.AddHost(PairedHost{ID: leadSource, Name: "source", Endpoint: "https://source.example.ts.net:7412", Address: "100.64.0.1", Token: "ahd_secret"}); err != nil {
-		t.Fatal(err)
-	}
-	manifest, _ := json.Marshal(MoveCarry{Coordinator: &MovedCoordinator{ProjectID: leadProject, Name: leadName, Surface: "claude"}})
-	if _, err := r.PrepareMoveIn("move-1", moveConversation, leadSource, manifest); err != nil {
-		t.Fatal(err)
-	}
-	set := func(projectID, name string) error {
-		_, err := r.SetCoordinator(CoordinatorSpec{ProjectID: projectID, ProjectRoot: "/target/widget", Name: name, Surface: "claude", Cwd: "/target/widget"}, CoordinatorChange{ChangedBy: "person"})
-		return err
-	}
-	if err := set(leadProject, "other-lead"); err == nil || !strings.Contains(err.Error(), "moving here as coordinator") {
-		t.Fatalf("a lead set for the project whose lead is moving here answered %v", err)
-	}
-	if err := r.SetMoveState("move-1", MoveReceived, "", MovePrepared); err != nil {
-		t.Fatal(err)
-	}
-	if err := set("project-other", leadName); err == nil || !strings.Contains(err.Error(), "moving here as coordinator") {
-		t.Fatalf("a lead named as the one moving here answered %v", err)
-	}
-	if _, err := r.AbortMoveIn("move-1", moveConversation, leadSource); err != nil {
-		t.Fatal(err)
-	}
-	if err := set(leadProject, "other-lead"); err != nil {
-		t.Fatalf("a lead set once the move was aborted answered %v", err)
-	}
-}

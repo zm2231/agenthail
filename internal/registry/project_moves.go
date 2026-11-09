@@ -95,18 +95,24 @@ func (r *Registry) ObserveRepositoryKey(root, key string) (ProjectMoveOutcome, e
 		return ProjectMoveOutcome{}, err
 	}
 	defer tx.Rollback()
+	outcome, err := r.observeRepositoryKeyTx(tx, root, key)
+	if err != nil {
+		return outcome, err
+	}
+	return outcome, tx.Commit()
+}
+
+func (r *Registry) observeRepositoryKeyTx(tx *sql.Tx, root, key string) (ProjectMoveOutcome, error) {
 	var previous string
-	err = tx.QueryRow(`SELECT project_key FROM repository_keys WHERE workspace_root=?`, root).Scan(&previous)
+	err := tx.QueryRow(`SELECT project_key FROM repository_keys WHERE workspace_root=?`, root).Scan(&previous)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ProjectMoveOutcome{}, err
 	}
 	var outcome ProjectMoveOutcome
 	switch previous {
 	case key:
-		if _, err := tx.Exec(`DELETE FROM project_move_refusals WHERE from_key=?`, key); err != nil {
-			return outcome, err
-		}
-		return outcome, tx.Commit()
+		_, err := tx.Exec(`DELETE FROM project_move_refusals WHERE from_key=?`, key)
+		return outcome, err
 	case "":
 	default:
 		identity, err := hostIdentityTx(tx)
@@ -117,15 +123,17 @@ func (r *Registry) ObserveRepositoryKey(root, key string) (ProjectMoveOutcome, e
 		if outcome, err = applyProjectMoveTx(tx, move); err != nil {
 			return outcome, err
 		}
+		if outcome.Waiting {
+			_, err := tx.Exec(`UPDATE project_moves_waiting SET workspace_root=? WHERE from_key=? AND to_key=? AND changed_at_ms=? AND origin_host=?`, root, previous, key, move.ChangedAt.UnixMilli(), identity)
+			return outcome, err
+		}
 		if outcome.Refused != nil {
-			return outcome, tx.Commit()
+			return outcome, nil
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO repository_keys(workspace_root,project_key) VALUES(?,?)
-		ON CONFLICT(workspace_root) DO UPDATE SET project_key=excluded.project_key`, root, key); err != nil {
-		return outcome, err
-	}
-	return outcome, tx.Commit()
+	_, err = tx.Exec(`INSERT INTO repository_keys(workspace_root,project_key) VALUES(?,?)
+		ON CONFLICT(workspace_root) DO UPDATE SET project_key=excluded.project_key`, root, key)
+	return outcome, err
 }
 
 func (r *Registry) AdoptProjectMoves(moves []ProjectMove) ([]ProjectMoveOutcome, error) {

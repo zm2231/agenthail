@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -28,8 +31,47 @@ func (d *Daemon) observeRepositoryKey(root, key string) {
 	if w.seen == nil {
 		w.seen = map[string]string{}
 	}
-	w.seen[root] = key
+	if !outcome.Waiting {
+		w.seen[root] = key
+	}
 	d.projectMovesApplied([]registry.ProjectMoveOutcome{outcome})
+}
+
+const waitingProjectMovesTick = time.Minute
+
+func (d *Daemon) followMoveIns(ctx context.Context) {
+	ticker := time.NewTicker(waitingProjectMovesTick)
+	defer ticker.Stop()
+	var wake <-chan struct{}
+	if path, err := d.Registry.ChangeSignal(registry.ChangeMoveIns); err != nil {
+		d.log.Printf("follow moves arriving here, releasing the project moves they hold on a timer: %s", err)
+	} else {
+		follow := filewake.Follow(path)
+		defer follow.Release()
+		wake = follow.C()
+	}
+	for {
+		d.releaseWaitingProjectMoves()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-wake:
+		}
+	}
+}
+
+func (d *Daemon) releaseWaitingProjectMoves() {
+	outcomes, err := d.Registry.ReleaseWaitingProjectMoves()
+	if err != nil {
+		d.log.Printf("project moves held for a move arriving here: %s", err)
+		return
+	}
+	if len(outcomes) == 0 {
+		return
+	}
+	d.projectMovesApplied(outcomes)
+	d.publishProjectMoves()
 }
 
 func (d *Daemon) adoptProjectMoves(moves []registry.ProjectMove) ([]registry.ProjectMoveOutcome, error) {

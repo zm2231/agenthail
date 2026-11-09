@@ -761,6 +761,21 @@ CREATE TABLE IF NOT EXISTS project_move_refusals (
 	reason TEXT NOT NULL,
 	at_ms INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS project_moves_waiting (
+	from_key TEXT PRIMARY KEY,
+	to_key TEXT NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL,
+	workspace_root TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS move_dropped_relays (
+	move_id TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	relay_id INTEGER NOT NULL,
+	to_session TEXT NOT NULL,
+	at_ms INTEGER NOT NULL,
+	PRIMARY KEY (move_id, relay_id)
+);
 CREATE TABLE IF NOT EXISTS repository_keys (
 	workspace_root TEXT PRIMARY KEY,
 	project_key TEXT NOT NULL

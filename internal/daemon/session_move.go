@@ -100,6 +100,8 @@ type moveStatus struct {
 	Session *surface.Session `json:"session,omitempty"`
 	Root    string           `json:"root,omitempty"`
 	Carries []string         `json:"carries,omitempty"`
+
+	DroppedRelays []registry.DroppedRelay `json:"droppedRelays,omitempty"`
 }
 
 const (
@@ -128,12 +130,13 @@ type sessionMoveRequest struct {
 }
 
 type sessionMoveResult struct {
-	Move                         registry.SessionMove `json:"move"`
-	Host                         dashboardHost        `json:"host"`
-	Stopped                      string               `json:"stopped,omitempty"`
-	Alias                        string               `json:"alias,omitempty"`
-	Root                         string               `json:"root,omitempty"`
-	MCPServersWithoutCredentials []string             `json:"mcpServersWithoutCredentials,omitempty"`
+	Move                         registry.SessionMove    `json:"move"`
+	Host                         dashboardHost           `json:"host"`
+	Stopped                      string                  `json:"stopped,omitempty"`
+	Alias                        string                  `json:"alias,omitempty"`
+	Root                         string                  `json:"root,omitempty"`
+	MCPServersWithoutCredentials []string                `json:"mcpServersWithoutCredentials,omitempty"`
+	DroppedRelays                []registry.DroppedRelay `json:"droppedRelays,omitempty"`
 }
 
 // MoveRefusedError is a move that did not happen and left the session here.
@@ -255,7 +258,7 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	if err := d.Registry.SetMoveState(manifest.ID, registry.MoveSent, "", registry.MovePreparing); err != nil {
 		return result, err
 	}
-	err = d.settleMoveOut(ctx, host, mover, manifest.ID, session.ID)
+	result.DroppedRelays, err = d.settleMoveOut(ctx, host, mover, manifest.ID, session.ID)
 	result.Move, _ = d.Registry.SessionMove(manifest.ID)
 	return result, err
 }
@@ -290,29 +293,29 @@ func (d *Daemon) prepareMoveOnHost(ctx context.Context, host *pairedHost, manife
 // settleMoveOut drives a sent move, whose files are archived, to done or
 // failed: it asks the target what it holds and acts on the answer. A move
 // whose answer cannot be had stays sent and returns MoveUnknownError.
-func (d *Daemon) settleMoveOut(ctx context.Context, host *pairedHost, mover surface.SessionMover, moveID, conversation string) error {
+func (d *Daemon) settleMoveOut(ctx context.Context, host *pairedHost, mover surface.SessionMover, moveID, conversation string) ([]registry.DroppedRelay, error) {
 	status, err := d.moveStatusOnHost(ctx, host, moveID)
 	if err != nil {
-		return MoveUnknownError{MoveID: moveID, Err: err}
+		return nil, MoveUnknownError{MoveID: moveID, Err: err}
 	}
 	switch status.State {
 	case registry.MoveResumed:
-		return d.completeMoveOut(ctx, host, moveID)
+		return status.DroppedRelays, d.completeMoveOut(ctx, host, moveID)
 	case registry.MoveAborted:
-		return d.restoreMoveOut(mover, moveID, conversation, "the host refused the move")
+		return nil, d.restoreMoveOut(mover, moveID, conversation, "the host refused the move")
 	case moveNoRecord:
-		return d.abandonMoveOut(ctx, host, mover, moveID, conversation, fmt.Errorf("the host has no record of the move"))
+		return nil, d.abandonMoveOut(ctx, host, mover, moveID, conversation, fmt.Errorf("the host has no record of the move"))
 	}
 	status, err = d.transferMove(ctx, host, mover, moveID, conversation)
 	switch {
 	case err == nil && status.State == registry.MoveResumed:
-		return d.completeMoveOut(ctx, host, moveID)
+		return status.DroppedRelays, d.completeMoveOut(ctx, host, moveID)
 	case moveRefusal(err):
-		return d.abandonMoveOut(ctx, host, mover, moveID, conversation, err)
+		return nil, d.abandonMoveOut(ctx, host, mover, moveID, conversation, err)
 	case err != nil:
-		return MoveUnknownError{MoveID: moveID, Err: err}
+		return nil, MoveUnknownError{MoveID: moveID, Err: err}
 	}
-	return MoveUnknownError{MoveID: moveID, Err: fmt.Errorf("the host answered %s", status.State)}
+	return nil, MoveUnknownError{MoveID: moveID, Err: fmt.Errorf("the host answered %s", status.State)}
 }
 
 // abandonMoveOut ends a move the target has not resumed: once the target
@@ -506,7 +509,7 @@ func (d *Daemon) resumeHostMoves(ctx context.Context, host *pairedHost) {
 			d.logRuntimeError("move "+move.ID, fmt.Errorf("no adapter can move %s", move.Conversation))
 			continue
 		}
-		err := d.settleMoveOut(ctx, host, mover, move.ID, move.Conversation)
+		_, err := d.settleMoveOut(ctx, host, mover, move.ID, move.Conversation)
 		release()
 		var refused MoveRefusedError
 		if err != nil && !errors.As(err, &refused) {
@@ -615,7 +618,19 @@ func (d *Daemon) apiMoveStatusHandler(w http.ResponseWriter, r *http.Request) {
 		writeDashboardJSON(w, http.StatusOK, moveStatus{State: moveNoRecord})
 		return
 	}
+	if move.State == registry.MoveResumed {
+		writeDashboardJSON(w, http.StatusOK, d.resumedMove(move, nil))
+		return
+	}
 	writeDashboardJSON(w, http.StatusOK, moveStatus{State: move.State, Detail: move.Detail})
+}
+
+func (d *Daemon) resumedMove(move registry.SessionMove, session *surface.Session) moveStatus {
+	dropped, err := d.Registry.MoveDroppedRelays(move.ID)
+	if err != nil {
+		d.log.Printf("move %s: read the relays it did not take over: %s", move.ID, err)
+	}
+	return moveStatus{State: registry.MoveResumed, Session: session, DroppedRelays: dropped}
 }
 
 func validMoveID(id string) bool {
@@ -772,7 +787,7 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 	switch move.State {
 	case registry.MoveResumed:
 		session, _ := d.Registry.Session(move.Conversation)
-		writeDashboardJSON(w, http.StatusOK, moveStatus{State: move.State, Session: session})
+		writeDashboardJSON(w, http.StatusOK, d.resumedMove(move, session))
 		return
 	case registry.MoveAborted:
 		writeAPIError(w, http.StatusConflict, "move_aborted", "That move was aborted.")
@@ -888,7 +903,7 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 		d.dashboard.invalidate()
 	}
 	d.requestCatalogDiscovery()
-	writeDashboardJSON(w, http.StatusOK, moveStatus{State: registry.MoveResumed, Session: session})
+	writeDashboardJSON(w, http.StatusOK, d.resumedMove(move, session))
 }
 
 func (d *Daemon) apiMoveAbortHandler(w http.ResponseWriter, r *http.Request) {

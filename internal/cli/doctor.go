@@ -237,8 +237,11 @@ func (a *App) cmdDoctor(args []string) error {
 	cancel()
 	var notCarried []registry.ProjectMoveRefusal
 	var notCarriedErr error
+	var droppedRelays []registry.DroppedRelay
+	var droppedRelaysErr error
 	if r := a.registry(); r != nil {
 		notCarried, notCarriedErr = r.ProjectMoveRefusals()
+		droppedRelays, droppedRelaysErr = r.DroppedRelays()
 	}
 	uiProblems, uiErr := a.uiConfProblems()
 	if hasFlag(args, "--json") {
@@ -256,6 +259,10 @@ func (a *App) cmdDoctor(args []string) error {
 			report["hostPairingError"] = hostsErr.Error()
 		}
 		report["connection"] = connection
+		report["relaysNotTakenOverOnMove"] = droppedRelays
+		if droppedRelaysErr != nil {
+			report["relaysNotTakenOverOnMoveError"] = droppedRelaysErr.Error()
+		}
 		report["uiConf"] = map[string]any{"problems": uiProblems}
 		if uiErr != nil {
 			report["uiConfError"] = uiErr.Error()
@@ -355,6 +362,12 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		if notCarriedErr != nil {
 			fmt.Printf("project history: unknown (%s)\n", notCarriedErr)
+		}
+		for _, dropped := range droppedRelays {
+			fmt.Printf("session %s moved here on %s: %s\n", dropped.SessionID, dropped.At.Local().Format(time.DateTime), dropped.Reason())
+		}
+		if droppedRelaysErr != nil {
+			fmt.Printf("relays of moved sessions: unknown (%s)\n", droppedRelaysErr)
 		}
 		if uiErr != nil {
 			fmt.Printf("ui.conf: unknown (%s)\n", uiErr)
