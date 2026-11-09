@@ -21,7 +21,10 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    [adopt](session-operations.md) does: it closes a host session only once
    idle, stops a background job, and stops a terminal process only with
    `--stop-terminal`. The lock is held until the move ends, so no Agenthail
-   process here resumes the conversation in the meantime.
+   process here resumes the conversation in the meantime. With the session
+   held, the source reads its completions once more and its relays forward
+   what they have not; a completion they still cannot forward refuses the
+   move when it is declared.
 2. **Declare.** The source reads where the conversation's working directory
    sits in its repository: the remote's canonical key, the folder inside the
    repository, and a commit that some remote branch contains. Only a clean
@@ -31,8 +34,11 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    session: each relay's target, pattern, handoff, whether it fires once, and
    the last goal it forwarded. The target of each relay is named with the host
    that runs it. The move is recorded `preparing`, in a transaction that
-   refuses it if the session's relays are no longer the ones it listed. A
-   relay cannot be added from the session until the move ends.
+   refuses it if the session's relays are no longer the ones it listed or
+   have a completion they have not forwarded. Until the move ends, the
+   relays from the session stay as declared: adding, removing or pausing
+   one, a coordinator handover that moves relays to or from the session,
+   and forwarding a completion are all refused.
 3. **Prepare** (`POST /api/v1/session-move/prepare`). The target finds its own
    checkout of the repository through its added projects and the projects of
    its sessions. When the checkout lacks the commit, it fetches. It refuses
