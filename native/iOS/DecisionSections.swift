@@ -93,7 +93,7 @@ struct DecisionSections: View {
     }
 
     private func name(of sessionID: String) -> String {
-        model.snapshot?.sessions.first { $0.id == sessionID }?.displayName ?? sessionID
+        model.session(sessionID)?.displayName ?? sessionID
     }
 }
 
@@ -126,7 +126,7 @@ struct DecisionSheet: View {
                         RequestCard(request: request, answering: model.answeringRequest != nil, accent: AnyShapeStyle(PhonePalette.accentText),
                                     respond: { decision in Task { await answer(request, decision) } },
                                     asker: title, attention: AnyShapeStyle(PhonePalette.attention), actionTint: AnyShapeStyle(PhonePalette.accent),
-                                    agentSurface: model.snapshot?.sessions.first { $0.id == item.sessionId }?.surface ?? "")
+                                    agentSurface: model.session(item.sessionId)?.surface ?? "")
                             .id(request.id)
                     }
                 }
@@ -166,6 +166,6 @@ struct DecisionSheet: View {
     }
 
     private func name(_ sessionID: String) -> String {
-        model.snapshot?.sessions.first { $0.id == sessionID }?.displayName ?? sessionID
+        model.session(sessionID)?.displayName ?? sessionID
     }
 }

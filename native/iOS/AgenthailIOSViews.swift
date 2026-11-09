@@ -201,10 +201,10 @@ struct SessionRouteView: View {
     let sessionID: String
 
     private var session: SessionState? {
-        if let value = model.snapshot?.sessions.first(where: { $0.id == sessionID }) { return value }
+        if let value = model.session(sessionID) { return value }
         let cached = model.searchResults.first(where: { $0.id == sessionID })?.session ?? model.fetchedSubagents.session(sessionID)
         guard let detail = model.selectedDetail, detail.session.id == sessionID else { return cached }
-        return detail.shown(over: cached, host: model.snapshot?.daemon.pairedHost(owning: sessionID))
+        return detail.shown(over: cached, host: model.pairedHost(owning: sessionID))
     }
     var body: some View {
         Group {
@@ -269,7 +269,7 @@ struct ConversationListView: View {
             if !tree.needsYou.isEmpty {
                 Section {
                     ForEach(tree.needsYou) { session in
-                        sessionButton(session, reason: tree.attention[session.id]?.reason, identifierPrefix: "needs-you-")
+                        row(.value(session), id: session.id, reason: tree.attention[session.id]?.reason, identifierPrefix: "needs-you-")
                     }
                 } header: {
                     Label {
@@ -383,7 +383,7 @@ struct ConversationListView: View {
                     if model.searching { ProgressView("Searching") }
                     if let error = model.searchError { Text(error).font(.footnote).foregroundStyle(PhonePalette.muted) }
                     ForEach(model.searchResults.filter { result in !families.contains(where: { $0.contains(result.id) }) }) { result in
-                        sessionButton(result.session, snippet: result.snippet)
+                        row(.value(result.session), id: result.id, snippet: result.snippet)
                     }
                 }
             }
@@ -452,7 +452,7 @@ struct ConversationListView: View {
     @ViewBuilder
     private func familyRows(_ family: SessionFamily) -> some View {
         let expanded = !family.members.isEmpty && (expandedFamilies.contains(family.id) || family.members.contains { $0.id == selectedID })
-        sessionButton(family.root, family: family)
+        row(.root(family), id: family.id)
         if !family.members.isEmpty {
             Button { toggle(family) } label: {
                 Label(expanded ? "Hide subagents" : "Show \(family.members.count == 1 ? "1 subagent" : "\(family.members.count) subagents")",
@@ -469,7 +469,7 @@ struct ConversationListView: View {
         }
         if expanded {
             ForEach(family.members) { member in
-                sessionButton(member.session, title: SessionFamilies.label(member.session))
+                row(.member(member), id: member.id)
                     .padding(.leading, CGFloat(member.depth) * 16)
             }
         }
@@ -479,34 +479,9 @@ struct ConversationListView: View {
         if !expandedFamilies.insert(family.id).inserted { expandedFamilies.remove(family.id) }
     }
 
-    private func sessionButton(_ session: SessionState, title: String? = nil, family: SessionFamily? = nil, snippet: String? = nil, reason: String? = nil, identifierPrefix: String = "session-") -> some View {
-        let ring = SessionRing.kind(session, needsYou: tree.attention[session.id] != nil)
-        return Button { openSession(session.id) } label: {
-            HStack(alignment: .top, spacing: 12) {
-                SessionAvatar(surface: session.surface, ring: ring)
-                VStack(alignment: .leading, spacing: 5) {
-                    IOSSessionRow(session: session, title: title, family: family, showsHost: model.showsHostNames)
-                    if let reason {
-                        Text(reason).font(.subheadline).foregroundStyle(PhonePalette.attention).lineLimit(2)
-                    }
-                    if let snippet, !snippet.isEmpty {
-                        Text(snippet).font(.subheadline).foregroundStyle(PhonePalette.muted).lineLimit(2)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }.contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityValue(ring.spoken ?? "")
-        .listRowBackground(GlassRowBackground(selected: selectedID == session.id))
-        .swipeActions(edge: .trailing) {
-            if snippet == nil {
-                Button(session.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") {
-                    Task { await model.setArchived(sessionID: session.id, session.archived != true) }
-                }
-            }
-        }
-        .accessibilityIdentifier(identifierPrefix + session.id)
+    private func row(_ source: SessionListRow.Source, id: String, snippet: String? = nil, reason: String? = nil, identifierPrefix: String = "session-") -> SessionListRow {
+        SessionListRow(model: model, source: source, needsYou: tree.attention[id] != nil, selected: selectedID == id,
+                       snippet: snippet, reason: reason, identifierPrefix: identifierPrefix, open: openSession)
     }
 }
 
@@ -518,7 +493,7 @@ struct SessionScreen: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var typeSize
     let session: SessionState
-    private var liveSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
+    private var liveSession: SessionState { model.session(session.id) ?? session }
     @State private var showingInfo = false
     @State private var showingVoice = false
     @State private var activityOnly = false
@@ -538,7 +513,7 @@ struct SessionScreen: View {
     private static let rowSpacing: CGFloat = 12
 
     private var displayTitle: String {
-        session.subagent == nil ? SessionStyle.title(session) : SessionFamilies.title(session, in: model.snapshot?.sessions ?? [])
+        session.subagent == nil ? SessionStyle.title(session) : model.cells.title(of: session)
     }
 
     private var detail: SessionDetail? {
@@ -1466,7 +1441,7 @@ struct SessionInspector: View {
         guard let liveDetail = model.selectedDetail, liveDetail.session.id == session.id else { return initialDetail }
         return liveDetail
     }
-    private var liveSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
+    private var liveSession: SessionState { model.session(session.id) ?? session }
     var body: some View {
         NavigationStack {
             List {
@@ -2063,7 +2038,7 @@ struct RecentPromptsSheet: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(prompt.text).lineLimit(3).foregroundStyle(.primary)
-                            if allSessions, let title = model.snapshot?.sessions.first(where: { $0.id == prompt.sessionId })?.title {
+                            if allSessions, let title = model.session(prompt.sessionId)?.title {
                                 Text(title).font(.footnote).foregroundStyle(PhonePalette.muted)
                             }
                         }

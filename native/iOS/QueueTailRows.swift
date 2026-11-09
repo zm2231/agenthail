@@ -174,7 +174,7 @@ struct QueueTailTracking: ViewModifier {
     }
 
     private var turnRunning: Bool {
-        (model.snapshot?.sessions.first { $0.id == session.id } ?? session).status == "busy"
+        (model.session(session.id) ?? session).status == "busy"
     }
 
     private func settle() { tail.update(active: active, timeline: timeline, turnRunning: turnRunning, now: Date()) }

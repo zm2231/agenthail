@@ -34,7 +34,8 @@ var statusColours = map[string]statusColour{
 		files: map[string]colourUse{
 			"QuestionPagerView.swift":           {2, "questions not answered yet"},
 			"RequestCard.swift":                 {1, "an end-of-turn ask waiting on the person"},
-			"iOS/AgenthailIOSViews.swift":       {6, "needs-you rows and reasons, the waiting label, a goal needing the person, sign-in to fix, an end-of-turn ask"},
+			"iOS/AgenthailIOSViews.swift":       {5, "the needs-you header, the waiting label, a goal needing the person, sign-in to fix, an end-of-turn ask"},
+			"iOS/SessionListRow.swift":          {1, "a needs-you row's reason"},
 			"iOS/DecisionSections.swift":        {3, "a decision holding up other sessions, on its row and in its sheet, and the request waiting in the sheet"},
 			"macOS/DecisionInboxPane.swift":     {2, "a decision holding up other sessions, and the request waiting in the card"},
 			"macOS/DecisionList.swift":          {1, "a decision holding up other sessions, on its row"},
