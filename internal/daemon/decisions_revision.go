@@ -18,11 +18,11 @@ const decisionsSettle = 250 * time.Millisecond
 
 // Peers mirror own, never rev, so one host's change cannot echo between paired hosts.
 type decisionsRevision struct {
-	mu      sync.Mutex
-	own     string
-	rev     string
-	peers   map[string]string
-	wake    chan struct{}
+	mu    sync.Mutex
+	own   string
+	rev   string
+	peers map[string]string
+	wake  chan struct{}
 }
 
 func newDecisionsRevision() *decisionsRevision {
