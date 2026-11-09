@@ -31,13 +31,13 @@ func (d *Daemon) doChannelDeliver(ctx context.Context, _ principal, request dash
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
 	if !listed {
-		return d.channelReply(broadcast.Result{Target: target}, nil)
+		return d.channelReply(broadcast.Result{Target: target}, nil, nil)
 	}
 	result, err := d.channelBroadcaster(request.PersonName).Send(operationCtx, target, request.Message, label, source)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	return d.channelReply(result, nil)
+	return d.channelReply(result, nil, nil)
 }
 
 // A session of the sending host reaches only its own project here, as a

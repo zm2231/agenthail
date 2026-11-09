@@ -71,7 +71,7 @@ func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboa
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		remote, legs = d.channelHostLegs(operationCtx, target, request.Message, source)
+		remote, legs = d.channelHostLegs(operationCtx, target, request.Message, source, request.ExceptHosts)
 	}()
 	result, sendErr := d.channelBroadcaster("").Send(operationCtx, target, request.Message, label, source)
 	<-done
@@ -82,7 +82,7 @@ func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboa
 	if target.ProjectID != "" && len(result.Recipients) == 0 && len(legs) == 0 {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("#%s has no members other than the sender", target.Name))
 	}
-	return d.channelReply(result, legs)
+	return d.channelReply(result, legs, request.ExceptHosts)
 }
 
 func (d *Daemon) channelSender(request dashboardActionRequest) (string, string, error) {
@@ -109,8 +109,11 @@ func (d *Daemon) channelBroadcaster(personName string) broadcast.Broadcaster {
 	return broadcast.Broadcaster{Registry: d.Registry, Coordinators: service, Delivery: daemonBroadcastDelivery{d: d, sender: coordinator.Sender{Service: service}, personName: personName}}
 }
 
-func (d *Daemon) channelReply(result broadcast.Result, legs []channelHostLeg) (actionResult, error) {
+func (d *Daemon) channelReply(result broadcast.Result, legs []channelHostLeg, except []string) (actionResult, error) {
 	fields := result.Fields()
+	if len(except) > 0 {
+		fields["exceptHosts"] = except
+	}
 	unreachable := []string{}
 	problems := []string{}
 	for _, leg := range legs {

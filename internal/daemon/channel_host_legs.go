@@ -45,7 +45,7 @@ type channelDeliverAnswer struct {
 
 // A paired host's request is answered from this host only, so it never
 // reaches a third host or travels back.
-func (d *Daemon) channelHostLegs(ctx context.Context, target broadcast.Target, message, source string) ([]broadcast.Recipient, []channelHostLeg) {
+func (d *Daemon) channelHostLegs(ctx context.Context, target broadcast.Target, message, source string, except []string) ([]broadcast.Recipient, []channelHostLeg) {
 	if _, fromHost := requestingHost(ctx); fromHost || target.ProjectID == "" {
 		return nil, nil
 	}
@@ -53,6 +53,7 @@ func (d *Daemon) channelHostLegs(ctx context.Context, target broadcast.Target, m
 	if err != nil {
 		return nil, []channelHostLeg{{State: channelLegRefused, Detail: err.Error()}}
 	}
+	hostIDs = slices.DeleteFunc(hostIDs, func(id string) bool { return slices.Contains(except, id) })
 	if len(hostIDs) == 0 {
 		return nil, nil
 	}
