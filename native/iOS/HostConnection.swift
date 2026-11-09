@@ -35,8 +35,7 @@ final class HostConnection {
     private(set) var build: AgenthailBuild?
     private(set) var catalogStreamCursor: UInt64 = 0
     private(set) var snapshotSeq: UInt64 = 0
-    private var refreshGeneration: UInt64 = 0
-    private var appliedGeneration: UInt64 = 0
+    private var refreshOrder = RefreshOrder()
     var refreshTimeout: TimeInterval = 25
     private var snapshotCoversEventStream = false
     private var stopped = false
@@ -173,23 +172,22 @@ final class HostConnection {
     func refresh(fresh: Bool = false) async -> Bool {
         let started = Date()
         let seq = delegate?.nextStateRequest() ?? 0
-        refreshGeneration += 1
-        let generation = refreshGeneration
+        let request = refreshOrder.begin()
         do {
             async let parts = api.snapshotBaseAndCurrent(fresh: fresh, timeout: refreshTimeout)
             async let activity = api.projectActivity(fresh: fresh, timeout: refreshTimeout)
             let (base, readCurrent) = try await parts
             let loaded = try await DashboardSnapshot(base: base, current: readCurrent, activity: activity)
             guard !stopped else { return false }
-            guard generation > appliedGeneration else { return true }
-            appliedGeneration = generation
+            guard refreshOrder.adopts(request) else { return true }
             if let retired = loaded.rekeyed, !retired.isEmpty { delegate?.host(self, rekeyed: retired) }
             let before = Set(snapshot?.sessions.map(\.id) ?? [])
             snapshot = loaded.keepingCatalog(of: snapshot, appliedThrough: catalogStreamCursor)
             reader.refreshed(removedFromCurrent: !before.subtracting(snapshot?.sessions.map(\.id) ?? []).isEmpty)
             snapshotSeq = seq
             _ = drops?.peersConnected(via: id, Set((loaded.daemon.hosts ?? []).filter { $0.state == "connected" }.map(\.id)))
-            recovered(by: "snapshot")
+            let settles = refreshOrder.settles(request)
+            if settles { recovered(by: "snapshot") }
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             if catalogHostEpoch != loaded.hostEpoch {
                 if catalogHostEpoch != nil { reader.rereadAll() }
@@ -200,7 +198,7 @@ final class HostConnection {
                 catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
             }
             adoptCurrentView(readCurrent)
-            connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The computer could not refresh its agents.") : nil
+            if settles { connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The computer could not refresh its agents.") : nil }
             delegate?.hostDidChange(self)
             await delegate?.hostRefreshed(self)
             return true
@@ -209,6 +207,7 @@ final class HostConnection {
             if ConnectionGrace.isTransport(error) {
                 drops?.failed(host: id, path: "request", error: ConnectionDropLog.code(error), elapsed: Date().timeIntervalSince(started), shown: shownReachable ? .held : .offline)
             }
+            guard !error.isCancellation, !Task.isCancelled, refreshOrder.settles(request) else { return false }
             connectionError = error.localizedDescription
             delegate?.hostDidChange(self)
             return false

@@ -188,6 +188,7 @@
 		80C27162BD625090EFA0DBCB /* MetadataOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F91185845FD3DB37E5314A7 /* MetadataOverlay.swift */; };
 		80EC2ADEDE76EB38E1F626F7 /* RoleInlineStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C68E3B42BDF798F4D08404A5 /* RoleInlineStyle.swift */; };
 		810B67DDEC67BAAF0A10BC48 /* Decisions.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA231376181572ED24E88AC0 /* Decisions.swift */; };
+		8311183358C4E8744ABC0DCA /* RefreshOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3B9B5F1C9C2B4251CD8A8D0 /* RefreshOrder.swift */; };
 		843ADC1E668251BE4B62E0A9 /* UsageMetersLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DD225A93AE1A2026E7B5A2 /* UsageMetersLine.swift */; };
 		84AFE005DFA7159DC412701B /* TapWhenReady.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B076C97F3E9777192BE7445 /* TapWhenReady.swift */; };
 		8523C9FE13A49C19BAB84F32 /* StreamBatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C933DAD93E085284E4848C02 /* StreamBatchTests.swift */; };
@@ -651,6 +652,7 @@
 		D02B9D728B9D26DC8B6C9398 /* VoiceEvaluationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEvaluationTests.swift; sourceTree = "<group>"; };
 		D197B86D0D088564B7458F3F /* ConnectionDropsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionDropsTests.swift; sourceTree = "<group>"; };
 		D31C90794BE0EC19254B01F4 /* RequestNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestNotifications.swift; sourceTree = "<group>"; };
+		D3B9B5F1C9C2B4251CD8A8D0 /* RefreshOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshOrder.swift; sourceTree = "<group>"; };
 		D40FFE3524747E62A3B565CB /* ProjectBroadcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectBroadcast.swift; sourceTree = "<group>"; };
 		D57BDA000DBED58AF19264A4 /* InboxHistoryRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxHistoryRow.swift; sourceTree = "<group>"; };
 		D65997FC6F2FDC05350DC086 /* SessionDisplayKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDisplayKind.swift; sourceTree = "<group>"; };
@@ -988,6 +990,7 @@
 				9EC6049ED87C0DEBBBB1524B /* QuestionPagerParts.swift */,
 				13D1E5984938119C1E3E0EA0 /* QuestionPagerView.swift */,
 				C4993D97FFAEEC0A0D94AC31 /* QueueSteer.swift */,
+				D3B9B5F1C9C2B4251CD8A8D0 /* RefreshOrder.swift */,
 				C800688A87625B8D90D02678 /* RelativeAge.swift */,
 				6605625C3EA875A925130A58 /* RelayFacts.swift */,
 				C64D3D86919EFE5E0B284026 /* RequestAnswer.swift */,
@@ -1436,6 +1439,7 @@
 				97B9396205A9E617E923C581 /* QueueTail.swift in Sources */,
 				DAF62BD65AF069755FCF14DC /* QueueTailRows.swift in Sources */,
 				C9E2CDEE75EC438C739579E0 /* QueuedMessageSheet.swift in Sources */,
+				8311183358C4E8744ABC0DCA /* RefreshOrder.swift in Sources */,
 				EFD3B6EF89801C2385D384A3 /* RefusedSend.swift in Sources */,
 				EB26FB4773C37B9BFB4DDFD8 /* RelativeAge.swift in Sources */,
 				6D80FA16695D45DFA1745BD2 /* RelayFacts.swift in Sources */,

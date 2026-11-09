@@ -98,6 +98,7 @@ let package = Package(
                 "MinuteClock.swift",
                 "MenuSessions.swift",
                 "ConnectionGrace.swift",
+                "RefreshOrder.swift",
                 "CatalogBatch.swift",
                 "CatalogInbox.swift",
                 "CatalogFeed.swift",
