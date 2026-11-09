@@ -39,6 +39,14 @@ func movedRefusal(sessionID, hostID, hostName string) error {
 	return &actionError{Status: http.StatusConflict, Code: movedCode, Message: fmt.Sprintf("session %s moved to host %s; send it there", sessionID, hostName), Extra: map[string]any{movedToHostField: hostID}}
 }
 
+func (d *Daemon) coordinatorMovedRefusal(name, hostID string) error {
+	hostName := hostID
+	if host, found := d.pairedHost(hostID); found {
+		hostName = host.record.Name
+	}
+	return &actionError{Status: http.StatusConflict, Code: movedCode, Message: fmt.Sprintf("coordinator @%s moved to host %s; send it there", name, hostName), Extra: map[string]any{movedToHostField: hostID}}
+}
+
 func (d *Daemon) movedAnswer(err error) error {
 	var moved registry.MovedError
 	if !errors.As(err, &moved) {

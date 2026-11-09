@@ -70,7 +70,7 @@ func TestAMoveIsRefusedWhenItsRelaysChangeAfterItDeclaredThem(t *testing.T) {
 	if _, err := r.AddRelayRoute(moveConversation, "second", ".*", false, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), declared, ""); err == nil || !strings.Contains(err.Error(), "relays or channels of") {
+	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), declared, ""); err == nil || !strings.Contains(err.Error(), "changed while the move was prepared") {
 		t.Fatalf("a move that declared one of two relays began: %v", err)
 	}
 }

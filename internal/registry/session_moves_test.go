@@ -158,13 +158,13 @@ func TestAMoveInIsPreparedOnceAbortedForGoodAndTakesTheSourcesRow(t *testing.T) 
 		t.Fatal("a move aborted before it arrived was prepared")
 	}
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 77, Transcript: "/home/user/.claude/projects/x/t.jsonl", HasLocal: true}
-	if _, err := r.TakeMovedSession("move-2", session, "builder", time.Time{}, nil, MoveCarry{}, ""); !errors.As(err, &MoveConflictError{}) {
+	if _, err := r.TakeMovedSession("move-2", session, "builder", time.Time{}, nil, MoveCarry{}, "", MovedCoordinatorPlace{}); !errors.As(err, &MoveConflictError{}) {
 		t.Fatalf("a move that never received its files took the session: %v", err)
 	}
 	if err := r.SetMoveState("move-2", MoveReceived, "", MovePrepared); err != nil {
 		t.Fatal(err)
 	}
-	events, err := r.TakeMovedSession("move-2", session, "builder", time.Time{}, nil, MoveCarry{}, "")
+	events, err := r.TakeMovedSession("move-2", session, "builder", time.Time{}, nil, MoveCarry{}, "", MovedCoordinatorPlace{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestAMovedInSessionTakesTheSourcesPinAndNotOneLeftHere(t *testing.T) {
 		if err := r.SetMoveState(move, MoveReceived, "", MovePrepared); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := r.TakeMovedSession(move, session, "", pinnedAt, nil, MoveCarry{}, ""); err != nil {
+		if _, err := r.TakeMovedSession(move, session, "", pinnedAt, nil, MoveCarry{}, "", MovedCoordinatorPlace{}); err != nil {
 			t.Fatal(err)
 		}
 		if got, err := r.SessionPinnedAt(moveConversation); err != nil || !got.Equal(pinnedAt) {
@@ -251,13 +251,13 @@ func TestAMoveInTakesASessionAThirdHostNoLongerServes(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, HasLocal: true}
-	if _, err := r.TakeMovedSession("move-1", session, "", time.Time{}, nil, MoveCarry{}, ""); !errors.As(err, &SessionOwnedError{}) {
+	if _, err := r.TakeMovedSession("move-1", session, "", time.Time{}, nil, MoveCarry{}, "", MovedCoordinatorPlace{}); !errors.As(err, &SessionOwnedError{}) {
 		t.Fatalf("a move took a session another host still serves: %v", err)
 	}
 	if _, _, err := r.RemoveHostCatalogRow(third, moveConversation, entity, "gone"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.TakeMovedSession("move-1", session, "", time.Time{}, nil, MoveCarry{}, ""); err != nil {
+	if _, err := r.TakeMovedSession("move-1", session, "", time.Time{}, nil, MoveCarry{}, "", MovedCoordinatorPlace{}); err != nil {
 		t.Fatalf("a move could not take a session its last host stopped serving: %v", err)
 	}
 	if owner, _ := r.SessionHost(moveConversation); owner != "" {

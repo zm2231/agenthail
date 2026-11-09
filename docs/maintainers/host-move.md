@@ -13,8 +13,9 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
 ## Protocol
 
 1. **Hold.** The source refuses a session that another host owns, that
-   another move holds, that has a delivery in flight, or the coordinator
-   role. It also refuses a relay from the session that is tied to
+   another move holds, or that has a delivery in flight. It refuses the
+   coordinator of a project that is not a Git repository, which is not the
+   same project on another host. It also refuses a relay from the session that is tied to
    a channel, or that has a captured completion it has not forwarded yet,
    naming the relay. The Claude adapter then takes the
    conversation lock and stops the process that holds it the way
@@ -48,14 +49,17 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    their credentials again on the target. It lists the channels the session
    belongs to, each named with the host that keeps it: the source for its own
    channels, or the host a channel came from when the session moved here
-   before. A declaration larger than a host reads for a prepare (140 KiB)
+   before. When the session is a project's coordinator, it declares the role:
+   the project, the coordinator's name, agent, model, permission mode and
+   instructions, who set it, and since when it has been the coordinator. A
+   declaration larger than a host reads for a prepare (140 KiB)
    refuses the move. The move is recorded `preparing`, in a transaction that
-   refuses it if the session's relays or channels are no longer the ones it
-   listed, or its relays have a completion they have not forwarded. Until the
-   move ends, the relays and channels of the session stay as declared: adding
-   or removing a relay, joining or leaving a channel, a coordinator handover
-   that moves relays to or from the session, and forwarding a completion are
-   all refused.
+   refuses it if the session's relays, channels or coordinator role are no
+   longer the ones it listed, or its relays have a completion they have not
+   forwarded. Until the move ends, these stay as declared: adding or removing
+   a relay, joining or leaving a channel, setting, replacing, handing over or
+   clearing the project's coordinator, and forwarding a completion are all
+   refused.
 3. **Prepare** (`POST /api/v1/session-move/prepare`). The target finds its own
    checkout of the repository through its added projects and the projects of
    its sessions. When the checkout lacks the commit, it fetches. It refuses
@@ -67,8 +71,13 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    source named, or if a channel is kept on a host it has not paired. When
    project settings come with the move, it also refuses if the landing root's
    `.claude.json` is not a JSON object or its `projects` is not an object.
+   When the coordinator role comes with the move, it refuses if the working
+   directory lands in another project here, if that project already has a
+   coordinator here, or if the coordinator's name already coordinates another
+   project or names another session here.
    Otherwise it records the move `prepared` and keeps the declaration, and
-   answers with what it can carry (`relays`, `channels`, `claude-project`). A
+   answers with what it can carry (`relays`, `channels`, `claude-project`,
+   `coordinator`). A
    target that does not name one the move needs (an Agenthail too old to take
    it) fails the move before any file leaves, naming what it cannot take. The
    files that arrive later are held to that declaration.
@@ -127,7 +136,10 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    what comes after the move. Last, in one transaction, it registers the
    session as local, takes over the row the source mirrored there, binds the
    alias if it is free, creates the relays, records which host keeps each
-   channel that is not its own, and records the move `resumed`.
+   channel that is not its own, makes the session the project's coordinator
+   with its own checkout as the project root and working directory, and
+   records the move `resumed`. The coordinator keeps the time it became the
+   coordinator, and its history records the move.
 6. **Flip.** The source, in one transaction:
    - gives the row to the target, clearing its process, transcript and local
      flags;
@@ -139,6 +151,8 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    - deletes its records of channels other hosts keep for the session. The
      session stays a member of this host's own channels, which now reach it
      on the target through held sends;
+   - gives up the coordinator role, recording the move in the project's
+     coordinator history;
    - turns each queued message into a send held for the target, under its
      delivery key, and fails a queued message with attachments and any
      queued operation the target cannot take as a send;
@@ -168,6 +182,29 @@ On the target, every request must come from a paired host's token, which has
 the `control` and `host` scopes. The token names the source; the request body
 does not. `GET /api/v1/session-move?id=` answers `none` for a move this host
 has no record of from that host.
+
+## The coordinator during a move
+
+While the coordinator's session is held for a move, a send to the
+coordinator here is queued, not delivered and not started anew; it leaves
+with the queue at the flip as a send held for the target.
+
+From the target's prepare until its take, or until the move is aborted,
+the target refuses to set a coordinator for the moving coordinator's
+project or under its name, so the take cannot fail after the session
+resumes there.
+
+Between the target's take and the source's flip, both hosts list the
+coordinator, and a third host sees both. Every host lists one: the row of
+the host that runs the conversation as it sees it, and until it knows that,
+the source's, which the target's row names as the host it moved from. A
+host is never without the coordinator while either row is listed.
+
+After the flip, a send to the coordinator by name that reaches the source,
+from a paired host that has not yet heard of the move or from a delivery
+here that looked the coordinator up before the flip, is answered `409`
+`moved` with `movedToHost`. A paired host sends it once more, straight to
+the target.
 
 ## Channels after a move
 

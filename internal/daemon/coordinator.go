@@ -194,6 +194,9 @@ func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorReque
 	var err error
 	if name != "" {
 		if spec, err = d.Registry.CoordinatorNamed(name); err != nil {
+			if to, movedErr := d.Registry.CoordinatorMovedTo(name); movedErr == nil && to != "" {
+				return actionResult{}, d.coordinatorMovedRefusal(name, to)
+			}
 			return actionResult{}, actionFailed(http.StatusNotFound, "no_coordinator", fmt.Sprintf("%s has no coordinator @%s", d.hostIdentity().Name, name))
 		}
 	} else if spec, err = d.projectLead(project); err != nil {
@@ -227,6 +230,11 @@ func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorReque
 	var refused *actionError
 	if errors.As(err, &refused) {
 		return actionResult{}, err
+	}
+	if err != nil && spec.HostID == "" {
+		if to, movedErr := d.Registry.CoordinatorMovedTo(spec.Name); movedErr == nil && to != "" {
+			return actionResult{}, d.coordinatorMovedRefusal(spec.Name, to)
+		}
 	}
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadGateway, "delivery_failed", err.Error())

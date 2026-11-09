@@ -42,6 +42,7 @@ type CoordinatorSpec struct {
 	SessionID      string    `json:"sessionId,omitempty"`
 	ChangedBy      string    `json:"changedBy,omitempty"`
 	ChangedAt      time.Time `json:"changedAt"`
+	MovedFrom      string    `json:"movedFrom,omitempty"`
 }
 
 // CoordinatorEntry is what a host publishes about its own coordinators to
@@ -54,10 +55,11 @@ type CoordinatorEntry struct {
 	SessionID   string    `json:"sessionId,omitempty"`
 	ChangedBy   string    `json:"changedBy,omitempty"`
 	ChangedAt   time.Time `json:"changedAt"`
+	MovedFrom   string    `json:"movedFrom,omitempty"`
 }
 
 func (spec CoordinatorSpec) Entry() CoordinatorEntry {
-	return CoordinatorEntry{ProjectID: spec.ProjectID, ProjectRoot: spec.ProjectRoot, Name: spec.Name, Surface: spec.Surface, SessionID: spec.SessionID, ChangedBy: spec.ChangedBy, ChangedAt: spec.ChangedAt}
+	return CoordinatorEntry{ProjectID: spec.ProjectID, ProjectRoot: spec.ProjectRoot, Name: spec.Name, Surface: spec.Surface, SessionID: spec.SessionID, ChangedBy: spec.ChangedBy, ChangedAt: spec.ChangedAt, MovedFrom: spec.MovedFrom}
 }
 
 // CoordinatorChange is who changes a coordinator, and how. SessionID names
@@ -124,12 +126,12 @@ func (r *Registry) CoordinatorLockPath(projectID string) string {
 
 const coordinatorColumns = `c.project_id,c.host_id,c.project_root,c.name,c.surface,c.cwd,c.model,c.permission_mode,c.instructions,
 	CASE WHEN c.host_id='' THEN COALESCE((SELECT a.session_id FROM aliases a WHERE a.name=c.name),'') ELSE c.session_id END,
-	c.changed_by,c.changed_at_ms`
+	c.changed_by,c.changed_at_ms,c.moved_from`
 
 func scanCoordinator(row rowScanner) (CoordinatorSpec, error) {
 	var spec CoordinatorSpec
 	var changedAt int64
-	if err := row.Scan(&spec.ProjectID, &spec.HostID, &spec.ProjectRoot, &spec.Name, &spec.Surface, &spec.Cwd, &spec.Model, &spec.PermissionMode, &spec.Instructions, &spec.SessionID, &spec.ChangedBy, &changedAt); err != nil {
+	if err := row.Scan(&spec.ProjectID, &spec.HostID, &spec.ProjectRoot, &spec.Name, &spec.Surface, &spec.Cwd, &spec.Model, &spec.PermissionMode, &spec.Instructions, &spec.SessionID, &spec.ChangedBy, &changedAt, &spec.MovedFrom); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return spec, ErrNoCoordinator
 		}
@@ -166,12 +168,20 @@ func (r *Registry) LocalCoordinators() ([]CoordinatorSpec, error) {
 // ProjectCoordinators lists every host's coordinator of a project. More
 // than one is a conflict that a replace resolves.
 func (r *Registry) ProjectCoordinators(projectID string) ([]CoordinatorSpec, error) {
-	return r.queryCoordinators(r.read, `c.project_id=?`, projectID)
+	specs, err := r.queryCoordinators(r.read, `c.project_id=?`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return r.oneCoordinatorPerConversation(specs)
 }
 
 // CoordinatorsNamed lists every host's coordinator with that name.
 func (r *Registry) CoordinatorsNamed(name string) ([]CoordinatorSpec, error) {
-	return r.queryCoordinators(r.read, `c.name=?`, name)
+	specs, err := r.queryCoordinators(r.read, `c.name=?`, name)
+	if err != nil {
+		return nil, err
+	}
+	return r.oneCoordinatorPerConversation(specs)
 }
 
 func (r *Registry) checkCoordinatorTx(tx *sql.Tx, spec CoordinatorSpec, change CoordinatorChange, peersCleared bool) (*CoordinatorSpec, error) {
@@ -180,6 +190,12 @@ func (r *Registry) checkCoordinatorTx(tx *sql.Tx, spec CoordinatorSpec, change C
 	}
 	if strings.EqualFold(spec.Name, LeadAlias) {
 		return nil, ErrReservedAlias
+	}
+	if err := coordinatorChangeWhileMovingTx(tx, spec.ProjectID); err != nil {
+		return nil, err
+	}
+	if err := coordinatorArrivingTx(tx, spec.ProjectID, spec.Name); err != nil {
+		return nil, err
 	}
 	existing, err := r.queryCoordinators(tx, `c.project_id=?`, spec.ProjectID)
 	if err != nil {
@@ -422,6 +438,9 @@ func (r *Registry) ClearCoordinator(projectID, changedBy string, expected time.T
 	if !expected.IsZero() && previous.ChangedAt.UnixMilli() != expected.UnixMilli() {
 		return previous, ErrCoordinatorChanged
 	}
+	if err := coordinatorChangeWhileMovingTx(tx, projectID); err != nil {
+		return previous, err
+	}
 	for _, statement := range []string{`DELETE FROM coordinators WHERE project_id=? AND host_id=''`, `DELETE FROM coordinator_replaced WHERE project_id=?`} {
 		if _, err := tx.Exec(statement, projectID); err != nil {
 			return previous, err
@@ -501,7 +520,7 @@ func (r *Registry) CoordinatorSince(projectID, sessionID string) (time.Time, boo
 		return time.Time{}, false, err
 	}
 	var at sql.NullInt64
-	if err := r.read.QueryRow(`SELECT MAX(at_ms) FROM coordinator_history WHERE project_id=? AND session_id=? AND action IN ('set','replaced')`, projectID, sessionID).Scan(&at); err != nil || !at.Valid {
+	if err := r.read.QueryRow(`SELECT MAX(at_ms) FROM coordinator_history WHERE project_id=? AND session_id=? AND action IN ('set','replaced','moved')`, projectID, sessionID).Scan(&at); err != nil || !at.Valid {
 		return time.Time{}, false, err
 	}
 	return time.UnixMilli(at.Int64).UTC(), true, nil
@@ -587,8 +606,8 @@ func putHostCoordinatorTx(tx *sql.Tx, hostID string, entry CoordinatorEntry) err
 	if entry.ProjectID == "" || entry.Name == "" {
 		return fmt.Errorf("a mirrored coordinator needs a project and a name")
 	}
-	_, err := tx.Exec(`INSERT INTO coordinators (project_id,host_id,project_root,name,surface,session_id,changed_by,changed_at_ms) VALUES (?,?,?,?,?,?,?,?)`,
-		entry.ProjectID, hostID, entry.ProjectRoot, entry.Name, entry.Surface, entry.SessionID, entry.ChangedBy, entry.ChangedAt.UnixMilli())
+	_, err := tx.Exec(`INSERT INTO coordinators (project_id,host_id,project_root,name,surface,session_id,changed_by,changed_at_ms,moved_from) VALUES (?,?,?,?,?,?,?,?,?)`,
+		entry.ProjectID, hostID, entry.ProjectRoot, entry.Name, entry.Surface, entry.SessionID, entry.ChangedBy, entry.ChangedAt.UnixMilli(), entry.MovedFrom)
 	return err
 }
 
@@ -649,6 +668,9 @@ func (r *Registry) HandOverCoordinator(spec CoordinatorSpec, previous, next stri
 	}
 	if owner != previous {
 		return 0, ErrCoordinatorMoved
+	}
+	if err := coordinatorChangeWhileMovingTx(tx, spec.ProjectID); err != nil {
+		return 0, err
 	}
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE name=? OR session_id=?`, spec.Name, next); err != nil {
 		return 0, err

@@ -64,6 +64,7 @@ var moveCarries = []moveCarry{
 	{"relays", "it cannot take over the relays from a moved session", func(m moveManifest) bool { return len(m.Relays) > 0 }},
 	{"channels", "it cannot take over the channels of a moved session", func(m moveManifest) bool { return len(m.Channels) > 0 }},
 	{"claude-project", "it cannot take the project's Claude settings", func(m moveManifest) bool { return m.ClaudeProject != nil }},
+	{"coordinator", "it cannot take over the coordinator role of a moved session", func(m moveManifest) bool { return m.Coordinator != nil }},
 }
 
 func moveCarryKinds() []string {
@@ -669,6 +670,19 @@ func (d *Daemon) apiMovePrepareHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
 		return
 	}
+	if manifest.Coordinator != nil {
+		place, err := d.movedCoordinatorPlace(r.Context(), target.cwd)
+		if err == nil {
+			err = d.Registry.CheckMovedCoordinator(manifest.Conversation, manifest.Coordinator, place.projectID)
+		}
+		if err == nil && manifest.Alias != manifest.Coordinator.Name {
+			err = fmt.Errorf("coordinator @%s moves only with its name", manifest.Coordinator.Name)
+		}
+		if err != nil {
+			writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
+			return
+		}
+	}
 	encoded, _ := json.Marshal(manifest)
 	move, err := d.Registry.PrepareMoveIn(manifest.ID, manifest.Conversation, hostID, encoded)
 	if err != nil {
@@ -851,8 +865,15 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusBadGateway, "move_unknown", fmt.Sprintf("Session %s resumed here, but its history could not be read for the relays it takes over: %s", session.ID, err))
 		return
 	}
+	var place movedLeadPlace
+	if manifest.Coordinator != nil {
+		if place, err = d.movedCoordinatorPlace(ctx, target.cwd); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "move_unrecorded", fmt.Sprintf("Session %s resumed here, but the project it coordinates could not be found: %s", session.ID, err))
+			return
+		}
+	}
 	d.catalog.mu.Lock()
-	_, err = d.Registry.TakeMovedSession(move.ID, *session, manifest.Alias, manifest.PinnedAt, origin, manifest.MoveCarry, d.hostIdentity().ID)
+	_, err = d.Registry.TakeMovedSession(move.ID, *session, manifest.Alias, manifest.PinnedAt, origin, manifest.MoveCarry, d.hostIdentity().ID, place.MovedCoordinatorPlace)
 	if err == nil {
 		d.publishCommittedHostWriteLocked("move " + move.ID)
 	}
@@ -966,4 +987,20 @@ func (d *Daemon) incomingOrigin(sessionID string, origin *moveOrigin) (*registry
 	}
 	recorded.CreatorID, err = d.Registry.EnsureUnrepliableSender(origin.CreatorHost, origin.Creator, origin.CreatorName)
 	return recorded, err
+}
+
+type movedLeadPlace struct {
+	registry.MovedCoordinatorPlace
+	projectID string
+}
+
+func (d *Daemon) movedCoordinatorPlace(ctx context.Context, cwd string) (movedLeadPlace, error) {
+	project, err := ResolvePathProject(ctx, d.Registry, cwd)
+	if err != nil {
+		return movedLeadPlace{}, err
+	}
+	if project == nil {
+		return movedLeadPlace{MovedCoordinatorPlace: registry.MovedCoordinatorPlace{Cwd: cwd}}, nil
+	}
+	return movedLeadPlace{MovedCoordinatorPlace: registry.MovedCoordinatorPlace{ProjectRoot: project.RootPath, Cwd: cwd}, projectID: project.ID}, nil
 }

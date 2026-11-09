@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -86,6 +87,14 @@ func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.Coordi
 		return nil, false, err
 	}
 	payload, err := hosts.ReadResponse(response)
+	var refused hosts.StatusError
+	if errors.As(err, &refused) && refused.Code == movedCode {
+		if next, found := d.pairedHost(refused.MovedToHost); found && next != host && !redirectedAfterMove(ctx) {
+			spec.HostID = next.record.ID
+			return d.sendToPeerCoordinator(context.WithValue(ctx, redirectedAfterMoveKey{}, true), spec, message, options)
+		}
+		return nil, false, &actionError{Status: http.StatusConflict, Code: movedCode, Message: refused.Message, Extra: map[string]any{movedToHostField: refused.MovedToHost}}
+	}
 	if err != nil {
 		return nil, false, err
 	}
