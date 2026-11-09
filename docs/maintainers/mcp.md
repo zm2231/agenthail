@@ -115,7 +115,7 @@ Archived sessions are outside every scope. `agenthail_sessions` also lists the p
 | `agenthail_report` | A task's child reports `done` or `failed` with its result; the first report settles the task and later ones update `latest` | the child of a task |
 | `agenthail_result` | A task's state, result and `latest`, by `taskId` or child `target`, clipped to the output limit | the parent, or a reader of the child |
 | `agenthail_wait` | Wait until a task settles, its child asks for something, or its goal stops | the parent, or a reader of the child |
-| `agenthail_channel_send` | Post to a channel or project as the caller | any session |
+| `agenthail_channel_send` | Post to a channel or project as the caller | any session; a project only its own, unless `control.all` |
 | `agenthail_channel` | Create, delete, rename or list channels and change their members | `control.all` |
 | `agenthail_relay` | Add, remove or list relays | `control.all` |
 | `agenthail_queue` | Retry or cancel one queued instruction, or clear a session's pending ones | `control.all` |
@@ -159,6 +159,8 @@ A wait that times out sets `wake` on the running tasks the caller started. Each 
 - otherwise the session must be in the caller's project (`out_of_scope`, `detail.rule: different_project`), and be that project's coordinator or, with `control.project`, any of its sessions (`detail.rule: not_your_lead`);
 - `mode: now` and every other write refuse it (`detail.rule: not_queued`);
 - a target the paired host matched only by a name fragment is `invalid`.
+
+`agenthail_channel_send` to a project (`#<project>`) reaches that project's workers, so it takes the same reach: a caller posts only to its own project's channel unless it holds `control.all`, and is otherwise refused with `out_of_scope`, `detail.rule: different_project`, before anything is sent. Another project's coordinator stays reachable by `agenthail_send` with `project`. A stored channel keeps its members, and the person's posts are not limited. The CLI's `agenthail channel send` posts as the CLI, like `agenthail send`, and is not limited either. A paired host applies the same rule to a project post that reaches it (see hosts.md).
 
 The project and the coordinator role come from the paired host's own answer to `/api/v1/resolve` (its `project` and `lead` fields), never from this host's mirror, which can lag a move or a handover. When the host cannot answer, the target is matched against the mirror only to name it, and the send is refused as retryable `unavailable` (`detail.rule: project_unconfirmed`).
 
