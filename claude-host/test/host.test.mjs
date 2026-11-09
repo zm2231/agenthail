@@ -326,7 +326,7 @@ test('every session opens with consent to bypassPermissions and asks the host ab
   c.close();
 });
 
-test('a session opened with its agenthail credential has the agenthail MCP server, and a new credential replaces it live', async () => {
+test('a session opened with its agenthail credential gets the agenthail MCP server over the control channel, never in argv or env, and a new credential replaces it live', async () => {
   const f = fixture();
   await startHost(f);
   const c = new Client(f.socket);
@@ -341,16 +341,50 @@ test('a session opened with its agenthail credential has the agenthail MCP serve
     const at = spawned.argv.indexOf(name);
     return at >= 0 ? spawned.argv[at + 1] : undefined;
   };
-  const config = JSON.parse(flag('--mcp-config'));
-  const server = config.mcpServers.agenthail;
+  assert.equal(flag('--mcp-config'), undefined, spawned.argv.join(' '));
+  assert.ok(!spawned.argv.some((a) => a.includes('ahs_first')), 'the credential is not in argv');
+  assert.ok(!spawned.envValues.some((v) => v.includes('ahs_first')), 'the credential is not in the environment');
+  assert.equal(flag('--allowedTools'), 'mcp__agenthail', spawned.argv.join(' '));
+  const sets = () => fs.readFileSync(path.join(f.claudeDir, 'controls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.subtype === 'mcp_set_servers');
+  const [first] = sets();
+  const server = first?.servers.agenthail;
   assert.ok(server?.type === 'http' && server.url === url && server.timeout === 3_700_000, 'the agenthail server is an http server at the daemon url');
   assert.ok(server.headers?.Authorization === 'Bearer ahs_first', 'the agenthail server carries the session credential');
-  assert.equal(flag('--allowedTools'), 'mcp__agenthail', spawned.argv.join(' '));
   await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_first' } });
   await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_second' } });
-  const controls = fs.readFileSync(path.join(f.claudeDir, 'controls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.subtype === 'mcp_set_servers');
-  assert.equal(controls.length, 1);
-  assert.ok(controls[0].servers.agenthail.headers.Authorization === 'Bearer ahs_second', 'the live swap carries the new credential');
+  const controls = sets();
+  assert.equal(controls.length, 2);
+  assert.ok(controls[1].servers.agenthail.headers.Authorization === 'Bearer ahs_second', 'the live swap carries the new credential');
+  c.close();
+});
+
+test('a session takes no message and no other credential until its own agenthail server is attached, and the last credential asked for wins', async () => {
+  const f = fixture();
+  await startHost(f, { env: { FAKE_CLAUDE_INITIALIZE_MS: '150', FAKE_CLAUDE_MCP_SET_MS: '300' } });
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  const url = 'http://127.0.0.1:7412/mcp';
+  const opening = c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_first' } });
+  await sleep(50);
+  const sent = c.call('send', { sessionId: id, uuid: randomUUID(), text: 'hello' });
+  const replaced = c.call('replaceMcp', { sessionId: id, mcp: { url, token: 'ahs_second' } });
+  const reopened = c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_third' } });
+  await Promise.all([opening, sent, replaced, reopened]);
+  const order = fs.readFileSync(path.join(f.claudeDir, 'order.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const firstUser = order.findIndex((e) => e.kind === 'user');
+  assert.ok(firstUser > 0 && order[0].kind === 'mcp' && order[0].authorization === 'Bearer ahs_first', JSON.stringify(order));
+  assert.equal(order.filter((e) => e.kind === 'mcp').at(-1).authorization, 'Bearer ahs_third', JSON.stringify(order));
+  c.close();
+});
+
+test('a Claude that exits while its agenthail server is attached fails to open instead of reporting ready', async () => {
+  const f = fixture();
+  await startHost(f, { env: { FAKE_CLAUDE_MCP_SET_EXIT: '1' } });
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  await assert.rejects(c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url: 'http://127.0.0.1:7412/mcp', token: 'ahs_first' } }), /exited while starting/);
+  for (let i = 0; i < 100 && (await c.call('list')).sessions.some((s) => s.sessionId === id); i++) await sleep(20);
+  assert.ok(!(await c.call('list')).sessions.some((s) => s.sessionId === id), 'the session is not listed');
   c.close();
 });
 
@@ -360,7 +394,8 @@ test('a new credential that the agenthail server refuses is reported, not taken 
   const c = new Client(f.socket);
   const id = randomUUID();
   const url = 'http://127.0.0.1:7412/mcp';
-  await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_first' } });
+  const opened = await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_first' } });
+  assert.match(opened.mcpError, /connection refused/, 'a server refused at open is reported');
   const reopened = await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_second' } });
   assert.match(reopened.mcpError, /connection refused/);
   await assert.rejects(c.call('replaceMcp', { sessionId: id, mcp: { url, token: 'ahs_third' } }), /connection refused/);
@@ -1774,7 +1809,7 @@ test('a checker runs sandboxed: no built-in tools, none of the person setup, and
   fs.writeFileSync(
     agenthail,
     `#!${process.execPath}
-require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ argv: process.argv.slice(2), token: process.env.AGENTHAIL_CHECK_TOKEN }) + '\\n');
+require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ argv: process.argv.slice(2), env: process.env.AGENTHAIL_CHECK_TOKEN ?? null, token: require('node:fs').readFileSync(0, 'utf8') }) + '\\n');
 process.stdout.write('{"result":"reported"}');
 `,
     { mode: 0o755 },
@@ -1840,7 +1875,7 @@ process.stdout.write('{"result":"reported"}');
   assert.ok(!hooks.some((h) => h.event === 'SessionStart' || h.event === 'UserPromptSubmit'), 'the checker runs none of the session-context hooks');
   assert.match(JSON.stringify(reply.reported), /reported/);
   const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  assert.deepEqual(ran, [{ argv: ['ledger', 'check-report', id, '--json', '--missing', 'typo tolerance', '--in', 'claude-prompt:2'], token: 'run-secret' }]);
+  assert.deepEqual(ran, [{ argv: ['ledger', 'check-report', id, '--json', '--missing', 'typo tolerance', '--in', 'claude-prompt:2'], env: null, token: 'run-secret' }]);
   assert.ok(!JSON.stringify(c.events).includes('run-secret'), 'the run token never leaves the host');
   await c.call('close', { sessionId: id });
   await assert.rejects(c.call('open', { resume: id, cwd: f.cwd }), /narrowing checker; it is not resumed/);

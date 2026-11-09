@@ -46,7 +46,7 @@ const contextReport = () => {
   const window = Number.isInteger(settings.autoCompactWindow) ? Math.min(settings.autoCompactWindow, modelWindow) : modelWindow;
   return { model, maxTokens: window, rawMaxTokens: window, autoCompactThreshold: window - 33000, isAutoCompactEnabled: true, autocompactSource: Number.isInteger(settings.autoCompactWindow) ? 'settings' : 'auto' };
 };
-fs.appendFileSync(path.join(dir, 'spawns.jsonl'), JSON.stringify({ pid: process.pid, sessionId, argv, cwd: process.cwd(), env: Object.keys(process.env), configDir: process.env.CLAUDE_CONFIG_DIR ?? null, todoTools: process.env.CLAUDE_CODE_ENABLE_TODO_TOOLS ?? null, claudeaiMcp: process.env.ENABLE_CLAUDEAI_MCP_SERVERS ?? null }) + '\n');
+fs.appendFileSync(path.join(dir, 'spawns.jsonl'), JSON.stringify({ pid: process.pid, sessionId, argv, cwd: process.cwd(), env: Object.keys(process.env), envValues: Object.values(process.env), configDir: process.env.CLAUDE_CONFIG_DIR ?? null, todoTools: process.env.CLAUDE_CODE_ENABLE_TODO_TOOLS ?? null, claudeaiMcp: process.env.ENABLE_CLAUDEAI_MCP_SERVERS ?? null }) + '\n');
 // A refuse-<session id> file makes the CLI exit before it starts, printing the
 // file's text the way Claude reports a session it cannot open.
 const refusal = path.join(dir, `refuse-${sessionId}`);
@@ -476,7 +476,13 @@ lines.on('line', (line) => {
       mcp_set_servers: process.env.FAKE_CLAUDE_MCP_SET_ERROR ? { added: [], removed: [], errors: { agenthail: process.env.FAKE_CLAUDE_MCP_SET_ERROR } } : {},
     };
     const response = responses[subtype] ?? {};
-    const answer = () => write({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response } });
+    const answer = () => {
+      if (subtype === 'mcp_set_servers') order({ kind: 'mcp', authorization: message.request.servers?.agenthail?.headers?.Authorization ?? null });
+      write({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response } });
+    };
+    // FAKE_CLAUDE_MCP_SET_EXIT exits instead of connecting the agenthail server; FAKE_CLAUDE_MCP_SET_MS connects it slowly.
+    if (subtype === 'mcp_set_servers' && process.env.FAKE_CLAUDE_MCP_SET_EXIT) process.exit(1);
+    if (subtype === 'mcp_set_servers' && process.env.FAKE_CLAUDE_MCP_SET_MS) return void setTimeout(answer, Number(process.env.FAKE_CLAUDE_MCP_SET_MS));
     // FAKE_CLAUDE_INITIALIZE_MS delays starting, as a slow disk or many plugins may.
     if (subtype === 'initialize' && process.env.FAKE_CLAUDE_INITIALIZE_MS) return void setTimeout(answer, Number(process.env.FAKE_CLAUDE_INITIALIZE_MS));
     // FAKE_CLAUDE_CONTEXT_REPORT_MS delays the context report, as a busy Claude may.
@@ -485,9 +491,13 @@ lines.on('line', (line) => {
   } else if (message.type === 'control_response') {
     pending.get(message.response.request_id)?.(message.response.response);
   } else if (message.type === 'user') {
+    order({ kind: 'user', uuid: message.uuid });
     turns = turns.then(() => turn(message));
   }
 });
+function order(entry) {
+  fs.appendFileSync(path.join(dir, 'order.jsonl'), JSON.stringify({ sessionId, ...entry }) + '\n');
+}
 // Claude cannot ask anyone once its input closes: it refuses the prompts
 // still open, finishes its turns and exits. With FAKE_CLAUDE_OUTLIVES_INPUT
 // it keeps running and serving its messaging socket instead, as a Claude

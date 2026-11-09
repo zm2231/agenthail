@@ -12,18 +12,6 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func spawnMCPConfig(spawn claudehosttest.Spawn) string {
-	for index, arg := range spawn.Argv {
-		if value, ok := strings.CutPrefix(arg, "--mcp-config="); ok {
-			return value
-		}
-		if arg == "--mcp-config" && index+1 < len(spawn.Argv) {
-			return spawn.Argv[index+1]
-		}
-	}
-	return ""
-}
-
 func TestAStartedClaudeHostConversationCarriesItsClaimedCredential(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	host := claudehosttest.New(t, "")
@@ -39,7 +27,8 @@ func TestAStartedClaudeHostConversationCarriesItsClaimedCredential(t *testing.T)
 	if len(spawns) != 1 {
 		t.Fatalf("spawns=%d", len(spawns))
 	}
-	bearer := strings.Contains(spawnMCPConfig(spawns[0]), "Bearer ahs_pending")
+	attached := host.Attached(t, session.ID)
+	bearer := len(attached) == 1 && attached[0].PID == spawns[0].PID && strings.HasPrefix(attached[0].Bearer, "ahs_pending") && !strings.Contains(strings.Join(spawns[0].Argv, " "), attached[0].Bearer)
 	allowed := slices.Contains(spawns[0].Argv, "mcp__agenthail") || slices.Contains(spawns[0].Argv, "--allowedTools=mcp__agenthail")
 	if !bearer || !allowed {
 		t.Fatalf("pending bearer passed=%v, agenthail tools allowed=%v", bearer, allowed)
@@ -60,7 +49,7 @@ func TestACheckerOpensWithoutTheAgenthailServer(t *testing.T) {
 	if _, err := c.StartChecker(context.Background(), surface.CheckerStart{Run: run, Token: "run-secret", Cwd: host.Cwd, Message: "check"}); err != nil {
 		t.Fatal(err)
 	}
-	if spawns := host.Spawns(t, run); len(spawns) != 1 || strings.Contains(spawnMCPConfig(spawns[0]), "agenthail") || len(credentials.claims) != 0 {
+	if spawns := host.Spawns(t, run); len(spawns) != 1 || len(host.Attached(t, run)) != 0 || len(credentials.claims) != 0 {
 		t.Fatalf("checker spawns=%d claims=%d, a checker must not get the agenthail server", len(spawns), len(credentials.claims))
 	}
 }

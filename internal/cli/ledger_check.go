@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -52,7 +53,7 @@ func (a *App) ledgerCheckReport(args []string) error {
 	if len(w.positional) != 2 || len(missing) != len(from) || w.bools["--none"] == (len(missing) > 0) {
 		return fmt.Errorf("%s", ledgerCheckUsage)
 	}
-	token := os.Getenv("AGENTHAIL_CHECK_TOKEN")
+	token := checkToken(os.Stdin)
 	if token == "" {
 		return fmt.Errorf("check-report is the narrowing checker's own command; only the checker Agenthail started can report")
 	}
@@ -75,4 +76,12 @@ func (a *App) ledgerCheckReport(args []string) error {
 	}
 	fmt.Printf("intent ledger: %s checked, pending cuts %s\n", outcome.GoalID, strings.Join(outcome.Cuts, ", "))
 	return nil
+}
+
+func checkToken(stdin *os.File) string {
+	if info, err := stdin.Stat(); err != nil || info.Mode()&os.ModeCharDevice != 0 {
+		return ""
+	}
+	data, _ := io.ReadAll(io.LimitReader(stdin, 4096))
+	return strings.TrimSpace(string(data))
 }

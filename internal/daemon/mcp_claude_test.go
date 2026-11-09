@@ -2,12 +2,9 @@ package daemon
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -21,25 +18,12 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-func spawnBearer(t *testing.T, spawn claudehosttest.Spawn) string {
+func (f *mcpClaudeFixture) spawnBearer(t *testing.T, spawn claudehosttest.Spawn) string {
 	t.Helper()
-	for index, arg := range spawn.Argv {
-		value, inline := strings.CutPrefix(arg, "--mcp-config=")
-		if !inline {
-			if arg != "--mcp-config" || index+1 >= len(spawn.Argv) {
-				continue
-			}
-			value = spawn.Argv[index+1]
+	for _, attach := range f.host.Attached(t, spawn.SessionID) {
+		if attach.PID == spawn.PID {
+			return attach.Bearer
 		}
-		var config struct {
-			MCPServers map[string]struct {
-				Headers map[string]string `json:"headers"`
-			} `json:"mcpServers"`
-		}
-		if err := json.Unmarshal([]byte(value), &config); err != nil {
-			t.Fatal(err)
-		}
-		return strings.TrimPrefix(config.MCPServers["agenthail"].Headers["Authorization"], "Bearer ")
 	}
 	return ""
 }
@@ -83,33 +67,18 @@ func (f *mcpClaudeFixture) create(t *testing.T) (string, string) {
 	if id == "" || len(spawns) != 1 {
 		t.Fatalf("id=%q spawns=%d", id, len(spawns))
 	}
-	return id, spawnBearer(t, spawns[0])
+	return id, f.spawnBearer(t, spawns[0])
 }
 
 func (f *mcpClaudeFixture) replacedTokens(t *testing.T, sessionID string) []string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(f.host.ClaudeDir, "controls.jsonl"))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
+	started := map[int]bool{}
 	var tokens []string
-	for _, line := range claudehosttest.Lines(data) {
-		var control struct {
-			SessionID string `json:"sessionId"`
-			Subtype   string `json:"subtype"`
-			Servers   map[string]struct {
-				Headers map[string]string `json:"headers"`
-			} `json:"servers"`
+	for _, attach := range f.host.Attached(t, sessionID) {
+		if started[attach.PID] {
+			tokens = append(tokens, attach.Bearer)
 		}
-		if err := json.Unmarshal(line, &control); err != nil {
-			t.Fatal(err)
-		}
-		if control.SessionID == sessionID && control.Subtype == "mcp_set_servers" {
-			tokens = append(tokens, strings.TrimPrefix(control.Servers["agenthail"].Headers["Authorization"], "Bearer "))
-		}
+		started[attach.PID] = true
 	}
 	return tokens
 }
@@ -156,7 +125,7 @@ func TestACoordinatorStartedByItsFirstMessageHoldsItsLeadCredentialAtOnce(t *tes
 		t.Fatalf("spec=%+v err=%v", spec, err)
 	}
 	spawns := f.host.Spawns(t, spec.SessionID)
-	if len(spawns) != 1 || !slices.Contains(f.capabilities(t, spawnBearer(t, spawns[0])), any("control.project")) {
+	if len(spawns) != 1 || !slices.Contains(f.capabilities(t, f.spawnBearer(t, spawns[0])), any("control.project")) {
 		t.Fatalf("spawns=%d, the coordinator's first credential cannot control its project", len(spawns))
 	}
 	if replaced := f.replacedTokens(t, spec.SessionID); len(replaced) != 0 {
