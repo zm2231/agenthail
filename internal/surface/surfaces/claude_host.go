@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,7 +111,7 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 		}
 		h.listed = time.Now()
 	}
-	return h.sessions
+	return maps.Clone(h.sessions)
 }
 
 func (h *claudeHost) keepUnseen(previous map[string]int, previousOpen map[string]claudehost.Session, previousListed map[string]time.Time) {
