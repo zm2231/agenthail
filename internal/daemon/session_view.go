@@ -22,6 +22,13 @@ type SessionViewMember struct {
 	Depth       int    `json:"depth"`
 	ContextOnly bool   `json:"contextOnly"`
 	Pinned      bool   `json:"pinned"`
+	Worker      bool   `json:"worker,omitempty"`
+}
+
+type SessionViewWorkers struct {
+	Count    int `json:"count"`
+	Working  int `json:"working"`
+	NeedsYou int `json:"needsYou"`
 }
 
 type SessionViewFamily struct {
@@ -32,6 +39,7 @@ type SessionViewFamily struct {
 	Members          []SessionViewMember `json:"members"`
 	Pinned           bool                `json:"pinned"`
 	WorkingSubagents int                 `json:"workingSubagents"`
+	Workers          *SessionViewWorkers `json:"workers,omitempty"`
 	activity         time.Time
 	key              sessionViewKey
 }
