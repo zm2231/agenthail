@@ -58,7 +58,8 @@ var statusColours = map[string]statusColour{
 		job:  "live work: a turn running, background work, subagents working, a live call",
 		uses: statusColourUses("working", "working"),
 		files: map[string]colourUse{
-			"iOS/AgenthailIOSViews.swift":    {6, "working and background-work labels, working subagents"},
+			"iOS/AgenthailIOSViews.swift":    {5, "working and background-work labels, working subagents"},
+			"iOS/SessionStatusLabel.swift":   {1, "the session header's working status"},
 			"iOS/SessionListChrome.swift":    {5, "the working and finishing rings, a live call"},
 			"iOS/UsageAccountsSheet.swift":   {1, "sessions working on an account"},
 			"macOS/DesktopWindow.swift":      {2, "working subagents and the finishing ring"},
