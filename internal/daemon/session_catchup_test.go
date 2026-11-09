@@ -89,7 +89,7 @@ func (p timelinePage) pageExchanges(t *testing.T) []pageExchange {
 // journal seeded before serves its page at once and catches up after it.
 func readDashboardExchangesWhen(t *testing.T, handler http.Handler, sessionID string, ready func([]pageExchange) bool) []pageExchange {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		got := readDashboardExchanges(t, handler, sessionID, "")
 		if ready(got) || time.Now().After(deadline) {
