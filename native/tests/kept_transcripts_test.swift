@@ -30,8 +30,11 @@ struct KeptTranscriptsTest {
     @MainActor
     static func main() {
         let ids = ["A", "B", "C", "D", "E", "F"]
+        func listing(_ ids: [String]) -> DashboardSnapshot {
+            DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: ids.map(session), totalSessions: ids.count, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        }
         let model = AgenthailModel(connecting: false)
-        model.snapshot = DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: ids.map(session), totalSessions: ids.count, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        model.snapshot = listing(ids)
         let pane = model.openPane()
         let kept = pane.keptTranscripts
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
@@ -50,6 +53,9 @@ struct KeptTranscriptsTest {
         check(kept.host(for: "A")?.superview == nil && container.subviews == [kept.host(for: "B")!], "only the shown transcript is in the window")
         frozenA?.select("C")
         check(frozenA?.selectedSessionID == "A", "a frozen copy never loads another session")
+        check(frozenA?.loadsAttachments == false && pane.loadsAttachments, "a frozen copy loads no attachments; the live pane does")
+        let live = pane.frozenTranscript()
+        check(live.timelineItems.map(\.id) == pane.timelineItems.map(\.id) && (live.detail == nil) == (pane.detail == nil) && live.olderItems == pane.olderItems && live.olderCursor == pane.olderCursor && live.loadingOlder == pane.loadingOlder && live.olderError == pane.olderError && live.detailStale == pane.detailStale && live.detailRefreshFailed == pane.detailRefreshFailed && live.detailLoadError == pane.detailLoadError && live.removedSession == pane.removedSession && live.inspectorShown == pane.inspectorShown, "a frozen copy carries everything the transcript reads")
 
         open("A")
         check(log.lastPane("A") === pane && !kept.isFrozen("A") && kept.isFrozen("B"), "returning to a kept transcript binds it to the live pane again and freezes the one left")
@@ -64,6 +70,13 @@ struct KeptTranscriptsTest {
         open("A")
         pane.openNewSession()
         check(kept.isFrozen("A"), "leaving a transcript for another page freezes it")
+
+        open("B")
+        model.snapshot = listing(ids.filter { $0 != "B" })
+        pane.reconcile()
+        check(pane.removedSession?.id == "B" && !kept.isFrozen("B"), "a removed session stays shown on the live pane")
+        pane.closeRemovedSession()
+        check(kept.isFrozen("B"), "closing a removed session freezes its transcript before the pane lets it go")
 
         pane.close()
         check(kept.keptIDs.isEmpty && container.subviews.isEmpty, "closing the pane drops every kept transcript")

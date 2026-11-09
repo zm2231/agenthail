@@ -487,11 +487,18 @@ final class SessionPane: Identifiable {
         copy.detail = live ?? detail
         copy.olderItems = olderItems
         copy.olderCursor = olderCursor
+        copy.loadingOlder = loadingOlder
+        copy.olderError = olderError
+        copy.detailStale = detailStale
+        copy.detailRefreshFailed = detailRefreshFailed
+        copy.detailLoadError = detailLoadError
         copy.inspectorVisible = inspectorVisible
         copy.inspectorDocks = inspectorDocks
         copy.inspectorOverlay = inspectorOverlay
         return copy
     }
+
+    var loadsAttachments: Bool { !closed }
 
     func close() {
         closed = true
@@ -654,6 +661,7 @@ final class SessionPane: Identifiable {
             if next == nil { openNewSession() }
             return
         }
+        keptTranscripts.freeze(self)
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()
         detailReloadTask = nil
@@ -668,6 +676,7 @@ final class SessionPane: Identifiable {
 
     func closeRemovedSession() {
         guard removedSession != nil else { return }
+        keptTranscripts.freeze(self)
         removedSession = nil
         selectedSnapshot = nil
         frozenOlderCursor = nil
