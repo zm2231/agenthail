@@ -48,6 +48,7 @@ SOURCES=(
   ObservationWait.swift
   ObservedScope.swift
   SessionCells.swift
+  MenuSessions.swift
   ConnectionGrace.swift
   CatalogBatch.swift
   CatalogInbox.swift

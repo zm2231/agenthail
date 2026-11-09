@@ -1,8 +1,8 @@
 import Observation
 
-@MainActor
+// Written only by SessionCells on the main actor; tree code reads it from nonisolated value types.
 @Observable
-final class SessionCell {
+final class SessionCell: @unchecked Sendable {
     var state: SessionState
 
     init(_ state: SessionState) { self.state = state }
@@ -20,6 +20,8 @@ final class SessionCells {
         _ = ids
         return cells[id]?.state
     }
+
+    var byID: [String: SessionCell] { cells }
 
     func adopt(_ sessions: [SessionState]) {
         var next: [String: SessionCell] = [:]

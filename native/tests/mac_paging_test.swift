@@ -1,5 +1,6 @@
 @testable import AgenthailHelpers
 import Foundation
+import Observation
 
 final class PagingDaemon: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requests: [String] = []
@@ -77,6 +78,11 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
     }
 }
 
+@MainActor
+final class Told {
+    var hit = false
+}
+
 @main
 struct MacPagingTest {
     static func check(_ condition: Bool, _ message: String) {
@@ -90,6 +96,18 @@ struct MacPagingTest {
         let deadline = Date().addingTimeInterval(3)
         while !condition() && Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
         return condition()
+    }
+
+    static func upsert(_ row: String, seq: Int) -> CatalogStreamEvent {
+        try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":\#(seq),"type":"session.upserted","data":{"session":\#(row)}}"#.utf8))
+    }
+
+    @MainActor
+    static func told(_ read: @escaping @MainActor () -> Void, when change: () -> Void) -> Bool {
+        let fired = Told()
+        withObservationTracking { read() } onChange: { MainActor.assumeIsolated { fired.hit = true } }
+        change()
+        return fired.hit
     }
 
     @MainActor
@@ -135,6 +153,8 @@ struct MacPagingTest {
         model.applyCatalogEvents([try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":6,"type":"session.upserted","data":{"session":\#(PagingDaemon.row("live", status: "busy", current: true))}}"#.utf8))])
         _ = scopedIDs()
         check(model.scopeTrees.builds == builds, "an unrelated session's upsert does not rebuild the scoped tree")
+        check(!told({ _ = model.scopeTree("far") }, when: { model.applyCatalogEvents([upsert(PagingDaemon.row("far-a", name: "far-a renamed").replacingOccurrences(of: #""open":true"#, with: #""open":true,"project":{"id":"far","displayName":"far","rootPath":"/far","kind":"git"}"#), seq: 7)]) }), "a scoped row changing in place leaves the scoped tree alone")
+        check(model.scopeTree("far").flat.first { $0.id == "far-a" }?.root.name == "far-a renamed", "while the scoped row shows its new state")
         model.sessionRefinement = SessionRefinement(status: .working, surface: "claude")
         await model.readScope("far")
         check(PagingDaemon.requests.contains { $0.contains("projectId=far") && $0.contains("status=working") && $0.contains("surface=claude") }, "a refinement narrows the project's listing at the daemon")
@@ -144,7 +164,13 @@ struct MacPagingTest {
         model.sessionRefinement = SessionRefinement()
         model.mainPane.showAll()
         check(!model.pages.listings.keys.contains { $0.projectID != nil } && model.reader.pageErrors.isEmpty, "project listings no open pane shows are released: \(model.pages.listings.keys.filter { $0.projectID != nil })")
-        check(!ids().contains("far-a") && !ids().contains("far-b"), "sessions only a released listing held leave the known sessions: \(ids())")
+        check(ids().contains("far-a") && !ids().contains("far-b"), "a session the catalog carries stays known, one only a released listing held leaves: \(ids())")
+        model.showsArchived = true
+        await model.readArchived()
+        check(model.archivedTree().flat.map(\.id) == ["shelved"], "the archived list reads its own listing: \(model.archivedTree().flat.map(\.id))")
+        check(!told({ _ = model.archivedTree() }, when: { model.applyCatalogEvents([upsert(PagingDaemon.row("shelved", name: "shelved renamed"), seq: 8)]) }), "an archived row changing in place leaves the archived tree alone")
+        check(model.archivedTree().flat.first?.root.name == "shelved renamed", "while the archived row shows its new state")
+        model.showsArchived = false
         model.sessionFilter = .recent
 
         model.findSessions("zet")

@@ -16,7 +16,7 @@ struct UsageChips: View {
             } else {
                 Button { showing.toggle() } label: {
                     HStack(spacing: DesktopSpace.m) {
-                        ForEach(UsageProxies.strip(accounts)) { UsageChip(account: $0, sessions: model.knownSessions, bars: bars, now: context.date) }
+                        ForEach(UsageProxies.strip(accounts)) { UsageChip(account: $0, sessions: { model.knownSessions }, bars: bars, now: context.date) }
                     }
                 }
                 .buttonStyle(ReadableButtonStyle())
@@ -57,7 +57,7 @@ extension UsageProblemTone {
 
 private struct UsageChip: View {
     let account: UsageAccount
-    let sessions: [SessionState]
+    let sessions: () -> [SessionState]
     let bars: Bool
     let now: Date
 
@@ -77,7 +77,7 @@ private struct UsageChip: View {
             Text(UsageMeterText.percent(worst.percent))
                 .monospacedDigit()
                 .foregroundStyle(account.critical ? DesktopPalette.failed : DesktopPalette.text2)
-        } else if let tone = account.problemTone(sessions) {
+        } else if let tone = account.problemTone(sessions()) {
             Image(systemName: "exclamationmark.circle").foregroundStyle(tone.desktopStyle)
         } else {
             Text("–").foregroundStyle(DesktopPalette.muted)

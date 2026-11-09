@@ -78,7 +78,8 @@ struct SidebarDeriveTest {
         withObservationTracking { _ = model.needsYouCount } onChange: { MainActor.assumeIsolated { chrome.hit = true } }
         withObservationTracking { _ = model.queuedItems(for: "a-child") } onChange: { MainActor.assumeIsolated { composer.hit = true } }
         model.snapshot?.sessions[2] = session("c", status: "idle")
-        check(tree.hit, "another row changing reaches the sidebar")
+        check(!tree.hit, "another row changing in place leaves the sidebar's tree alone")
+        check(model.sessionTree.projects.first?.checkouts.first?.families.first?.root.status == "idle", "while the tree's row shows its new state")
         check(!chrome.hit, "another row changing leaves the window chrome's Needs you alone")
         check(!composer.hit, "another row changing leaves the composer's queue alone")
 

@@ -42,7 +42,7 @@ extension AgenthailModel {
     var refinementSurfaces: [String] {
         let view = listRequest.flatMap { reader.views[$0] } ?? currentView
         let listed = view?.surfaces.map(\.surface) ?? []
-        return Array(Set(listed + (snapshot?.surfaces ?? []).map(\.name))).sorted()
+        return Array(Set(listed + surfaceNames)).sorted()
     }
 
     func earlierRequest(_ projectID: String) -> ScopeRequest { ScopeRequest(scope: "all", projectID: projectID) }
@@ -57,13 +57,16 @@ extension AgenthailModel {
         return ScopeRequest(scope: archived ? SessionFilter.archived.viewScope : sessionFilter.viewScope, projectID: projectID, surface: refinement.surface, status: refinement.status?.rawValue)
     }
 
-    func scopeTree(_ projectID: String) -> SessionTree {
-        let request = scopeRequest(projectID)
-        let view = reader.views[request]
-        let ids = Set((view?.families ?? []).flatMap { $0.members.map(\.id) })
-        let rows = Dictionary(uniqueKeysWithValues: ids.compactMap { id in cells.session(id).map { (id, $0) } })
-        let attention = sessionAttention.filter { ids.contains($0.key) }
-        return scopeTrees.tree(for: request, view: view, rows: rows, attention: attention, keeping: reader.requests)
+    func scopeTree(_ projectID: String) -> SessionTree { scopedTrees[scopeRequest(projectID)] ?? .empty }
+
+    func buildScopedTrees() -> [ScopeRequest: SessionTree] {
+        let archived = SessionFilter.archived.viewScope
+        return reader.views.reduce(into: [:]) { trees, entry in
+            guard entry.key.projectID != nil || entry.key.scope == archived else { return }
+            let ids = Set(entry.value.families.flatMap { $0.members.map(\.id) })
+            let rows = Dictionary(uniqueKeysWithValues: ids.compactMap { id in cells.session(id).map { (id, $0) } })
+            trees[entry.key] = scopeTrees.tree(for: entry.key, view: entry.value, rows: rows, attention: sessionAttention.filter { ids.contains($0.key) }, cells: cells.byID, keeping: reader.requests)
+        }
     }
 
     func scopeHasMore(_ projectID: String) -> Bool { pages.hasMore(scopeRequest(projectID)) }
@@ -82,13 +85,7 @@ extension AgenthailModel {
         SessionListLayout.archivedRequest(filter: sessionFilter, refinement: sessionRefinement, shows: showsArchived)
     }
 
-    func archivedTree() -> SessionTree {
-        guard let request = archivedRequest else { return .empty }
-        let view = reader.views[request]
-        let ids = Set((view?.families ?? []).flatMap { $0.members.map(\.id) })
-        let rows = Dictionary(uniqueKeysWithValues: ids.compactMap { id in cells.session(id).map { (id, $0) } })
-        return scopeTrees.tree(for: request, view: view, rows: rows, attention: sessionAttention.filter { ids.contains($0.key) }, keeping: reader.requests)
-    }
+    func archivedTree() -> SessionTree { archivedRequest.flatMap { scopedTrees[$0] } ?? .empty }
 
     var archivedHasMore: Bool { archivedRequest.map { pages.hasMore($0) || pages.listings[$0] == nil } ?? false }
 

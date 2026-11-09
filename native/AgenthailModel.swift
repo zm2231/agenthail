@@ -148,6 +148,7 @@ final class AgenthailModel {
     private(set) var deliveryProblems: [DeliveryProblem] = []
     private(set) var leadReplacements: [LeadReplacement] = []
     private(set) var projects: [ProjectState] = []
+    private(set) var surfaceNames: [String] = []
     private(set) var codexRecentHours = 5
     private(set) var busyDelivery = FollowUpAction.queue
 
@@ -160,6 +161,7 @@ final class AgenthailModel {
         deliveryProblems = snapshot?.deliveryProblems ?? []
         leadReplacements = snapshot?.leadReplacements ?? []
         projects = snapshot?.projects ?? []
+        surfaceNames = (snapshot?.surfaces ?? []).map(\.name)
         codexRecentHours = snapshot?.codexRecentHours ?? 5
         busyDelivery = FollowUpAction(rawValue: snapshot?.busyDelivery ?? "") ?? .queue
     }
@@ -178,7 +180,11 @@ final class AgenthailModel {
     }
     private(set) var sessionAttention: [String: SessionAttention] = [:]
     private(set) var sessionTree = SessionTree.empty
+    private(set) var subagentIDs: [String: [String]] = [:]
+    private(set) var menuSessions = MenuSessions()
+    private(set) var scopedTrees: [ScopeRequest: SessionTree] = [:]
     private var orderHold = OrderHold()
+    @ObservationIgnored private var heldCells: [String: SessionCell] = [:]
 
     /// Rebuilds the sidebar's sessions, attention and tree when one of their
     /// inputs changes, so views read them instead of rebuilding them.
@@ -187,11 +193,30 @@ final class AgenthailModel {
         let listedIDs = Set(listed.map(\.id))
         knownSessions = listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
         cells.adopt(knownSessions)
+        subagentIDs = knownSessions.reduce(into: [:]) { ids, row in
+            if let parent = row.subagent?.parentId { ids[parent, default: []].append(row.id) }
+        }
         workingCount = knownSessions.filter { $0.archived != true && SessionDisplayKind.of($0) == .working }.count
         sessionAttention = SessionAttention.build(sessions: knownSessions, attention: snapshot?.attention ?? [], deliveryProblems: deliveryProblems)
         let rows = Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let shown = orderHold.shown(list: listView, current: currentView, rows: rows)
-        sessionTree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention)
+        sessionTree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: treeCells(shown.rows))
+        scopedTrees = buildScopedTrees()
+        menuSessions = MenuSessions.build(needsYou: sessionTree.needsYou, current: currentView, rows: rows, attention: sessionAttention)
+    }
+
+    private func treeCells(_ rows: [String: SessionState]) -> [String: SessionCell] {
+        var all = cells.byID
+        guard orderHold.held else {
+            heldCells = [:]
+            return all
+        }
+        for (id, row) in rows where all[id] == nil {
+            let cell = heldCells[id] ?? SessionCell(row)
+            heldCells[id] = cell
+            all[id] = cell
+        }
+        return all
     }
 
     /// Keeps the sidebar's order while the person aims at it; rows still update in place.
@@ -320,7 +345,7 @@ final class AgenthailModel {
     }
 
     func subagents(of sessionID: String) -> [SessionState] {
-        SessionFamilies.children(of: sessionID, listed: knownSessions, fetched: fetchedSubagents.children(of: sessionID))
+        SessionFamilies.children(of: sessionID, listed: (subagentIDs[sessionID] ?? []).compactMap(cells.session), fetched: fetchedSubagents.children(of: sessionID))
     }
 
     @discardableResult

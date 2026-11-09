@@ -19,7 +19,7 @@ enum SessionListLayout {
     static func order(_ families: [SessionFamily], expanded: (SessionFamily) -> Bool) -> [String] {
         var ids: [String] = []
         for family in families {
-            let rows = [family.root.id] + (expanded(family) ? family.members.map(\.id) : [])
+            let rows = [family.id] + (expanded(family) ? family.members.map(\.id) : [])
             ids += rows.filter { !ids.contains($0) }
         }
         return ids

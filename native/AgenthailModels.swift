@@ -880,23 +880,53 @@ struct SubagentRollup: Codable, Hashable {
 
 struct SessionFamily: Identifiable, Equatable {
     struct Member: Identifiable, Equatable {
-        let session: SessionState
+        let id: String
         let depth: Int
-        var id: String { session.id }
+        private let cell: SessionCell
+
+        var session: SessionState { cell.state }
+
+        init(session: SessionState, depth: Int) { self.init(cell: SessionCell(session), depth: depth) }
+
+        init(cell: SessionCell, depth: Int) {
+            id = cell.state.id
+            self.depth = depth
+            self.cell = cell
+        }
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.id == rhs.id && lhs.depth == rhs.depth && lhs.cell === rhs.cell
+        }
     }
 
-    let root: SessionState
+    let id: String
     let members: [Member]
     let workingSubagents: Int
+    private let rootCell: SessionCell
 
-    var id: String { root.id }
+    var root: SessionState { rootCell.state }
     var isWorking: Bool { root.isWorking || workingSubagents > 0 }
     var isCurrent: Bool { isWorking || sessions.contains(where: \.current) }
     var sessions: [SessionState] { [root] + members.map(\.session) }
 
+    init(root: SessionState, members: [Member], workingSubagents: Int) {
+        self.init(root: SessionCell(root), members: members, workingSubagents: workingSubagents)
+    }
+
+    init(root: SessionCell, members: [Member], workingSubagents: Int) {
+        id = root.state.id
+        rootCell = root
+        self.members = members
+        self.workingSubagents = workingSubagents
+    }
+
     func contains(_ sessionID: String?) -> Bool {
         guard let sessionID else { return false }
-        return root.id == sessionID || members.contains { $0.id == sessionID }
+        return id == sessionID || members.contains { $0.id == sessionID }
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && lhs.rootCell === rhs.rootCell && lhs.workingSubagents == rhs.workingSubagents && lhs.members == rhs.members
     }
 }
 

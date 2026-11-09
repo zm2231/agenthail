@@ -6,8 +6,7 @@ struct SubagentsSection: View {
     let session: SessionState
 
     var body: some View {
-        let sessions = model.knownSessions
-        let parent = session.subagent.flatMap { identity in sessions.first { $0.id == identity.parentId } ?? model.fetchedSubagents.session(identity.parentId) }
+        let parent = session.subagent.flatMap { identity in model.session(identity.parentId) ?? model.fetchedSubagents.session(identity.parentId) }
         let children = model.inDaemonOrder(model.subagents(of: session.id))
         let current = pane.detail?.session.id == session.id ? pane.detail : nil
         let observed = ClaudeSubagentList(current?.claudeSubagents ?? [], total: current?.claudeSubagentsTotal, expanded: pane.showsAllClaudeSubagents)
@@ -20,7 +19,7 @@ struct SubagentsSection: View {
                     Button {
                         model.openSubagent(parent, in: pane)
                     } label: {
-                        Label("Spawned by \(SessionFamilies.title(parent, in: sessions))", systemImage: "arrow.turn.left.up")
+                        Label("Spawned by \(model.title(of: parent))", systemImage: "arrow.turn.left.up")
                             .lineLimit(1)
                     }
                     .buttonStyle(.plain)

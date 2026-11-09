@@ -14,7 +14,7 @@ struct SidebarTiles: View {
         }
         let count = TileGrid.columns(width: width)
         let tiles = TileGrid.fill(columns: count) { ProjectTiles.order(model.projects, limit: $0, waiting: counts, leads: leads) }
-        let owner = model.snapshot?.daemon.host?.id ?? ""
+        let owner = model.daemon?.host?.id ?? ""
         let columns = Array(repeating: GridItem(.flexible(), spacing: TileGrid.spacing, alignment: .top), count: count)
         LazyVGrid(columns: columns, alignment: .leading, spacing: TileGrid.spacing) {
             tile("Inbox", mark: .symbol("tray"), count: model.needsYouCount, selected: pane.scope == .inbox, id: "sidebar-tile-inbox", action: pane.showInbox)
