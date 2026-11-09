@@ -169,10 +169,17 @@ jobs:
         run: |
           command -v xcodegen >/dev/null || brew install xcodegen
           scripts/test-xcodegen-project.sh
+      - uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/swiftpm
+          key: ios-swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native/Agenthail.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: ios-swiftpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Resolve Swift packages
+        run: scripts/ios-swiftpm.sh resolve
       - name: iOS release device build
         if: env.SIGNED != 'true'
         run: |
-          xcodebuild build -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO
+          scripts/ios-swiftpm.sh xcodebuild build -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO
           scripts/ios-release-plist-check.sh "$RUNNER_TEMP/derived/Build/Products/Release-iphoneos/Agenthail.app"
       - name: Import iOS signing assets
         if: env.SIGNED == 'true'
