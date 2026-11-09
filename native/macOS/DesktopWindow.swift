@@ -31,6 +31,9 @@ struct DesktopWindow: View {
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.adoptingSession) { AdoptSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.projectSheet) { ProjectSheetView(model: model, pane: pane, sheet: $0) }
+        .sheet(item: $pane.messagingProject) { project in
+            ProjectMessageSheet(project: project) { message, key in try await model.broadcast(to: project, message: message, idempotencyKey: key) }
+        }
         .alert(pane.projectConfirmation?.message ?? "", isPresented: Binding(get: { pane.projectConfirmation != nil }, set: { if !$0 { pane.projectConfirmation = nil } }), presenting: pane.projectConfirmation) { confirmation in
             Button(confirmation.action, role: .destructive) { pane.confirm(confirmation) }
             Button("Cancel", role: .cancel) {}
@@ -222,6 +225,7 @@ struct SessionSidebar: View {
                             .contextMenu {
                                 Button("Archive Project") { model.setProjectArchived(project.id, true) }
                                 Divider()
+                                Button("Message…") { pane.messagingProject = project }
                                 ProjectMenuButtons(model: model, pane: pane, project: project)
                             }
                     }

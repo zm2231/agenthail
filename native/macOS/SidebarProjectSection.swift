@@ -22,6 +22,10 @@ struct SidebarProjectSection: View, @MainActor Equatable {
                         Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
                         if let state = model.projects.first(where: { $0.id == identity.id }) {
                             Divider()
+                            if state.archived != true {
+                                Button("Message…") { pane.messagingProject = state }
+                                    .help("Send one message to every active conversation in \(state.displayName)")
+                            }
                             ProjectMenuButtons(model: model, pane: pane, project: state)
                         }
                     }

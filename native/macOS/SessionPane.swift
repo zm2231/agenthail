@@ -54,6 +54,7 @@ final class SessionPane: Identifiable {
     var renamingSession: SessionState?
     var adoptingSession: SessionState?
     var projectSheet: ProjectSheet?
+    var messagingProject: ProjectState?
     var projectConfirmation: ProjectConfirmation?
     private(set) var forking = false
     private(set) var controlPending = false

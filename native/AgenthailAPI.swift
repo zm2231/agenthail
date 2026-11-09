@@ -1,5 +1,7 @@
 import Foundation
 
+struct LeadNameRefused: Error {}
+
 enum AgenthailAPIError: LocalizedError {
     case unavailable(String)
     case incompatible(Int)
@@ -433,7 +435,19 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 
     func nameSession(id: String, alias: String) async throws {
-        let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "alias", "sessionId": id, "alias": alias])
+        var request = authorizedRequest(path: "/api/v1/actions")
+        request.httpMethod = "POST"
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["action": "alias", "sessionId": id, "alias": alias])
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        setIdempotencyHeader(on: &request, path: "/api/v1/actions", method: "POST", key: nil)
+        let (data, response) = try await session.data(for: request)
+        // On an empty name the daemon's plain conflict is only a lead's name; a host answers with its own code.
+        if alias.isEmpty, (response as? HTTPURLResponse)?.statusCode == 409,
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           (object["error"] as? [String: Any])?["code"] as? String == "conflict" {
+            throw LeadNameRefused()
+        }
+        try validate(response: response, data: data)
     }
 
     func creationModels(surface: String, host: String? = nil) async throws -> [ModelOption] {

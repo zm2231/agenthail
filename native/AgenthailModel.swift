@@ -1096,6 +1096,9 @@ final class AgenthailModel {
         do {
             try await api.nameSession(id: sessionID, alias: alias)
         } catch {
+            if error is LeadNameRefused {
+                return SessionHandle.leadRefusal(knownSessions.first { $0.id == sessionID }?.alias)
+            }
             return AgenthailAPIError.userMessage(error)
         }
         _ = await refresh(fresh: true)
