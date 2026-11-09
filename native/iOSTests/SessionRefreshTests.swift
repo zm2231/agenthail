@@ -57,6 +57,32 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testTextGrowingInAReplyReachesItsRowWithoutRedrawingTheScreen() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(journalSeq: 10)
+        let model = makeModel()
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
+        func event(_ seq: Int, id: String, kind: String = "message", body: String) throws -> SessionStreamEvent {
+            try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":\#(seq),"type":"item","data":{"itemId":"\#(id)","version":\#(seq),"kind":"\#(kind)","op":"upsert","role":"assistant","title":"assistant","ts":"2026-10-03T12:00:0\#(seq % 10)Z","body":"\#(body)","truncated":false}}"#.utf8))
+        }
+        model.applySessionStreamEvent(try event(11, id: "live", body: "The build"))
+        let screen = ObservationProbe { _ = model.selectedDetail }
+        let row = try XCTUnwrap(model.timelineCells.cell("live"))
+        let rowProbe = ObservationProbe { _ = row.item }
+
+        model.applySessionStreamEvent(try event(12, id: "live", body: "The build passes"))
+        XCTAssertFalse(screen.changed(), "text growing in a reply redrew the screen")
+        XCTAssertTrue(rowProbe.changed(), "the reply's row was not told its text grew")
+        XCTAssertEqual(model.selectedDetail?.timeline?.items.first { $0.id == "live" }?.text, "The build passes")
+
+        model.applySessionStreamEvent(try event(13, id: "next", body: "A new reply"))
+        XCTAssertTrue(screen.changed(), "a new row did not reach the screen")
+        model.applySessionStreamEvent(try event(14, id: "live", kind: "reasoning", body: "Now reasoning"))
+        XCTAssertTrue(screen.changed(), "a row that changed kind did not reach the screen")
+    }
+
+    @MainActor
     func testARefreshThatAddsNoEarlierRowsLeavesOlderActivityAlone() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()

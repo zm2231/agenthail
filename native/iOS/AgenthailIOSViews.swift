@@ -584,7 +584,7 @@ struct SessionScreen: View {
                     let leading = items.first?.id
                     ForEach(items) { item in
                         let row = TranscriptRowID.item(item.id)
-                        IOSTimelineRow(item: item, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).rebuilt(row, generation: rowsGeneration).tracksOlderPlace(row, leading: item.id == leading, in: olderPlace).probesScrollJump(row).onAppear { if item.id == items.last?.id { openingRowAppeared(row) } }.id(row)
+                        LiveTimelineRow(item: item, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).rebuilt(row, generation: rowsGeneration).tracksOlderPlace(row, leading: item.id == leading, in: olderPlace).probesScrollJump(row).onAppear { if item.id == items.last?.id { openingRowAppeared(row) } }.id(row)
                     }
                 } else {
                     let groups = self.groups
@@ -638,6 +638,7 @@ struct SessionScreen: View {
                 position.scrollTo(y: $0.wrappedValue)
             })
             .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
+            .environment(\.timelineCells, detail == nil ? nil : model.timelineCells)
             .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.expandAgentMessages, expandAgents)
             .environment(\.cachedAttachment, RowAction(owner: session.id) { [model, id = session.id] in model.cachedAttachment(for: $0, sessionID: id) })
@@ -685,12 +686,13 @@ struct SessionScreen: View {
         } action: { _, value in
             overflows = value
         }
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+        .onScrollGeometryChange(for: TranscriptEnd.self) { geometry in
             olderPlace.read(geometry)
-            return geometry.contentSize.height
+            return TranscriptEnd(geometry)
         } action: { old, new in
+            guard new.contentHeight != old.contentHeight else { return }
             olderPlace.contentChanged()
-            if landed, followingLatest, !userScrolling, new > old { scrollToLatest() }
+            if landed, followingLatest, !userScrolling, new.contentHeight > old.contentHeight, new.distance >= TranscriptEdge.reach { scrollToLatest() }
         }
         .onAppear { olderPlace.scroll = { [position = $position] in position.wrappedValue = $0 } }
         .refreshable { await model.refreshSession(session.id) }

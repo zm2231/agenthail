@@ -11,8 +11,14 @@ enum PreviewStream {
         return 1 / rate
     }()
     static let started = Date()
+    static let textHeavy: Bool = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--preview-stream-shape"), index + 1 < arguments.count else { return false }
+        return arguments[index + 1] == "text"
+    }()
+    static let cycle = textHeavy ? 24 : 6
     nonisolated(unsafe) static var base: UInt64 = 0
-    nonisolated(unsafe) static var history = 160
+    nonisolated(unsafe) static var history = textHeavy ? 640 : 160
 
     static let paused = ProcessInfo.processInfo.arguments.contains("--preview-stream-paused")
 
@@ -26,8 +32,8 @@ enum PreviewStream {
 
     static func event(_ k: Int, session: String) -> [String: Any] {
         let ts = ISO8601DateFormatter().string(from: started.addingTimeInterval(Double(k - history) * interval))
-        let step = k % 6
-        let turn = k / 6
+        let step = k % cycle
+        let turn = k / cycle
         var data: [String: Any] = ["version": k, "op": "upsert", "ts": ts, "truncated": false]
         if k < history, k % 40 == 2 {
             let record = (1...300).map { "{\"call_id\":\"call-\(turn)-\($0)\",\"status\":\"completed\",\"aggregated_output\":\"ok\"}" }.joined(separator: ",\n")
@@ -41,6 +47,11 @@ enum PreviewStream {
             data.merge(["itemId": "result-\(turn)", "kind": "toolResult", "title": "Bash result", "callId": "call-\(turn)", "body": (1...80).map { "ok \(turn).\($0) Reconnect\($0).swift" }.joined(separator: "\n")]) { $1 }
         case 2:
             data.merge(["itemId": "thought-\(turn)", "kind": "reasoning", "title": "Thinking", "body": "Checking whether turn \(turn) keeps the queued instruction attached across the reconnect."]) { $1 }
+        case _ where textHeavy:
+            let words = (0..<((step - 2) * 12)).map { index in
+                index % 60 == 0 ? "Turn \(turn) part \(index / 60 + 1):" : index % 60 == 59 ? "identity.\n\n" : ["The", "pending", "build", "survives", "reconnecting", "and", "the", "queued", "instruction", "keeps", "its"][index % 11]
+            }
+            data.merge(["itemId": "reply-\(turn)", "kind": "message", "role": "assistant", "title": "assistant", "body": words.joined(separator: " ")]) { $1 }
         default:
             let paragraphs = (0...(step - 3)).map { "Paragraph \($0 + 1) of reply \(turn). " + String(repeating: "The pending build survives reconnecting and the queued instruction keeps its identity. ", count: 3 + turn % 4) }
             let structure = step >= 4 && turn % 2 == 0 ? ["## Checks for turn \(turn)\n\n- Reconnect\n  - Queue identity\n    1. Saved\n    2. Replayed\n\n```swift\nawait session.resume(turn: \(turn))\n```\n\n| Check | Result |\n| --- | --- |\n| Reconnect | Passed |\n| Identity | Passed |"] : []
