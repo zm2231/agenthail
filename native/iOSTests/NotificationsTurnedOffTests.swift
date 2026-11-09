@@ -31,12 +31,15 @@ final class NotificationsTurnedOffTests: XCTestCase {
         defer { relaunched.forgetHost("hmac") }
         try await connect(relaunched)
         relaunched.registerPushToken("a1b2c3")
+        XCTAssertEqual(relaunched.notificationStatus, "Not enabled", "a device token does not start setup")
         relaunched.setAppActive(true)
-        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(relaunched.notificationStatus, "Not enabled", "coming back to the app does not start setup")
+        for _ in 0..<200 where !PushRecordingProtocol.log.contains("POST /v1/attest/challenge") {
+            try await Task.sleep(for: .milliseconds(10))
+        }
 
         XCTAssertFalse(PushRecordingProtocol.log.contains("PUT /api/v1/device/push"), "no push target is set again: \(PushRecordingProtocol.log.all)")
         XCTAssertFalse(PushRecordingProtocol.log.contains("POST /v1/attest/challenge"), "no relay registration starts: \(PushRecordingProtocol.log.all)")
-        XCTAssertNotEqual(relaunched.notificationStatus, "Enabling")
     }
 
     func testWithoutTurningOffAConnectedComputerStartsSetup() async throws {
@@ -46,6 +49,7 @@ final class NotificationsTurnedOffTests: XCTestCase {
         defer { model.forgetHost("hmac") }
         try await connect(model)
         model.registerPushToken("a1b2c3")
+        XCTAssertEqual(model.notificationStatus, "Enabling", "a device token starts setup at once")
         for _ in 0..<200 where !PushRecordingProtocol.log.contains("POST /v1/attest/challenge") {
             try await Task.sleep(for: .milliseconds(10))
         }
