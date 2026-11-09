@@ -660,9 +660,11 @@ func extractMoveArchive(staging string, in surface.MoveIn, archive io.Reader) er
 			}
 			transcript = true
 			sink = io.MultiWriter(file, sum)
-		} else if parts += header.Size; header.Size < 0 || parts > in.PartsSize {
+		} else if header.Size < 0 || header.Size > in.PartsSize-parts {
 			_ = file.Close()
 			return fmt.Errorf("the moved conversation's other files are more than the %d bytes the move declared", in.PartsSize)
+		} else {
+			parts += header.Size
 		}
 		written, copyErr := io.Copy(sink, reader)
 		closeErr := file.Close()

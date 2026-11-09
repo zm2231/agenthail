@@ -31,11 +31,11 @@ func (c *Codex) InterruptTurn(ctx context.Context, sess *surface.Session, expect
 }
 
 func (c *Codex) interruptTurn(ctx context.Context, sess *surface.Session, expectedTurnID string) error {
-	lock, err := acquireCodexWriteLock(ctx)
+	release, err := acquireCodexThreadWrite(ctx, sess.ID)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
 	}
-	defer releaseCodexWriteLock(lock)
+	defer release()
 	conn, err := c.openWriter(ctx, sess)
 	if err != nil {
 		return err
@@ -71,11 +71,11 @@ func (c *Codex) SteerWithImages(ctx context.Context, sess *surface.Session, mess
 		return err
 	}
 	message = surface.LabelSender(ctx, message)
-	lock, err := acquireCodexWriteLock(ctx)
+	release, err := acquireCodexThreadWrite(ctx, sess.ID)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
 	}
-	defer releaseCodexWriteLock(lock)
+	defer release()
 	conn, err := c.openWriter(ctx, sess)
 	if err != nil {
 		return err

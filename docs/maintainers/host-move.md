@@ -1,7 +1,7 @@
 # Moving a session to another host
 
-`agenthail move <session> --to <host>` hands an idle Claude conversation to a
-paired host. The conversation keeps its id and its history. After the move,
+`agenthail move <session> --to <host>` hands an idle Claude conversation or
+Codex thread to a paired host. The conversation keeps its id and its history. After the move,
 the other host's Claude writes to it, and this host has no process, transcript
 or alias for it. The row stays listed here as the other host's session, so
 every read, send and action on it routes there, like any
@@ -154,6 +154,46 @@ target lists them with TaskList, because the Claude host turns on Claude's
 task tools for every session it runs. A target without Claude Remote Control
 runs the moved session without a claude.ai listing, as it runs all its
 sessions.
+
+## Codex threads
+
+A Codex thread moves by the same protocol, with these differences.
+
+- **Hold.** The Codex adapter takes a per-thread lock that every Agenthail
+  write to the thread checks while it holds the Codex write lock. A send,
+  steer or setting change during the move is refused as unavailable, so
+  queued deliveries retry and, after the flip, go to the target. The thread
+  must be idle: no running turn, nothing asked of the person, and no
+  message in Codex's own queue, since Codex starts a queued message as soon
+  as an idle thread resumes. A thread that has spawned subagent threads, a
+  subagent thread, and a forked thread whose history continues another
+  thread's rollout are refused; the refusal names the subagent threads.
+- **Declare.** The current rollout's size and SHA-256 are the transcript;
+  the thread's other rollout files, which `thread/revert` leaves, are the
+  parts. The thread's name and goal go in the declaration's `state`, since
+  Codex keeps them outside the rollout.
+- **Archive.** `thread/archive` unloads the thread from the runtime that has
+  it loaded, Codex Desktop or the app-server daemon, and moves its rollouts
+  to `archived_sessions/`. Codex then refuses to resume it. Archiving ends a
+  running turn, so it rechecks that the thread is idle under the Codex write
+  lock first. A Codex process outside Agenthail that holds the thread makes
+  the archive fail and the move with it. The archived files are listed in
+  `$CODEX_HOME/agenthail-moved/<id>/<move id>/archived.json`, and only that
+  move's restore runs `thread/unarchive`.
+- **Transfer.** The tar holds only the thread's rollout files, flat and
+  regular. The target places each in `sessions/<date in its name>/`, keeping
+  any shorter copy under `agenthail-moved/<id>/<move id>/previous/`, and
+  resumes it in its Codex app-server daemon with `thread/resume` in the
+  mapped working directory. It then sets the name and goal again; both are
+  safe to repeat when a transfer is retried. A copy the target archived when
+  the thread last left it must begin the arriving rollout, and is unarchived
+  before it is replaced, so a thread can move back.
+- **Abort.** The target sets aside the files it placed, named in
+  `placed.json`, into the move's `dropped/` folder, unless its app-server has
+  the thread loaded, which answers `move_running`.
+
+A goal's time and tokens used do not carry; the target starts them at zero.
+There is no `--root` for Codex threads.
 
 ## Moving to another account on the same host
 

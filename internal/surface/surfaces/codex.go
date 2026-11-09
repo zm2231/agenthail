@@ -37,6 +37,7 @@ type Codex struct {
 	codexConfigAttachment
 	subscriptions codexSubscriptions
 	turnStarts    codexTurnStarts
+	moves         codexMovesHeld
 }
 
 // codexDesktopRunsHere is whether Codex Desktop can run on this machine;
