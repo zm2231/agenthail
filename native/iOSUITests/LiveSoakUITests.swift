@@ -27,6 +27,7 @@ final class LiveSoakUITests: XCTestCase {
         requireLive(downRow.waitForExistence(timeout: 30) && upRow.waitForExistence(timeout: 30), "both hosts list their conversations", app)
 
         try control.stop(host: 0)
+        addTeardownBlock { try? control.start(host: 0) }
         let unavailable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Unavailable"), object: downRow)
         requireLive(XCTWaiter.wait(for: [unavailable], timeout: 90) == .completed, "the stopped host's conversation is marked unavailable", app)
 

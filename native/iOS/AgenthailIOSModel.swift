@@ -2548,6 +2548,9 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         if host.id == hostOrder.first { appearance.load(from: host.api) }
         if let pushDeviceToken { registerPush(host, deviceToken: pushDeviceToken) }
         else { refreshNotificationRegistration() }
+#if DEBUG
+        if LiveTestHosts.alertsOnConnect() { operationError = "\(host.name): \(LiveTestHosts.connectAlert)" }
+#endif
     }
 
     func hostAppearanceChanged(_ host: HostConnection) {

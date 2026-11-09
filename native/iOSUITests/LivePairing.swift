@@ -2,9 +2,9 @@ import XCTest
 
 @MainActor
 extension XCTestCase {
-    func launchForLiveHosts() -> XCUIApplication {
+    func launchForLiveHosts(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--live-test-loopback"]
+        app.launchArguments = ["--live-test-loopback"] + extra
         app.launch()
         return app
     }
