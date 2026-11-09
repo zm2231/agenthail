@@ -692,11 +692,6 @@ type HostSend struct {
 	RelayHops int
 }
 
-func (r *Registry) localSession(id string) bool {
-	owner, err := r.SessionHost(id)
-	return err == nil && owner == ""
-}
-
 // QueueHostSend holds a send for its host.
 func (r *Registry) QueueHostSend(send HostSend) (int64, error) {
 	request, err := r.hostSendRequest(send)
@@ -711,9 +706,13 @@ func (r *Registry) QueueHostSend(send HostSend) (int64, error) {
 // the name this host has for them, the CLI as no sender at all. It reports
 // false for any other sender.
 func (r *Registry) ForwardSender(request map[string]any, source string) (bool, error) {
+	return forwardSender(r.read, request, source)
+}
+
+func forwardSender(q catalogQuerier, request map[string]any, source string) (bool, error) {
 	switch source {
 	case surface.PersonSessionID:
-		name, err := r.PersonName()
+		name, err := personName(q)
 		if err != nil {
 			return false, err
 		}
@@ -733,24 +732,37 @@ func (r *Registry) ForwardSender(request map[string]any, source string) (bool, e
 }
 
 func (r *Registry) hostSendRequest(send HostSend) ([]byte, error) {
+	return hostSendRequest(r.read, send)
+}
+
+// hostSendRequest reads through q: inside a write transaction it must be that
+// transaction, since the writer pool has its one connection.
+func hostSendRequest(q catalogQuerier, send HostSend) ([]byte, error) {
 	request := map[string]any{"action": "send", "sessionId": send.SessionID, "message": send.Message}
-	own, err := r.ForwardSender(request, send.SourceSessionID)
+	own, err := forwardSender(q, request, send.SourceSessionID)
 	if err != nil {
 		return nil, err
 	}
-	if !own && send.SourceSessionID != "" && r.localSession(send.SourceSessionID) {
-		identity, err := r.HostIdentity()
-		if err != nil {
+	if !own && send.SourceSessionID != "" {
+		var owner, name, alias string
+		err := q.QueryRow(`SELECT s.host_id,s.name,COALESCE((SELECT a.name FROM aliases a WHERE a.session_id=s.id),'') FROM sessions s WHERE s.id=?`, send.SourceSessionID).Scan(&owner, &name, &alias)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
-		name := send.SourceSessionID
-		if alias, err := r.ReverseAlias(send.SourceSessionID); err == nil && alias != "" {
-			name = "@" + alias
-		} else if session, err := r.Session(send.SourceSessionID); err == nil && session.Name != "" {
-			name = session.Name
+		if err == nil && owner == "" {
+			var identity string
+			if err := q.QueryRow(`SELECT host_id FROM host_identity WHERE id=1`).Scan(&identity); err != nil {
+				return nil, err
+			}
+			label := send.SourceSessionID
+			if alias != "" {
+				label = "@" + alias
+			} else if name != "" {
+				label = name
+			}
+			request["sourceSessionId"] = hosts.Qualify(identity, send.SourceSessionID)
+			request["sourceName"] = label
 		}
-		request["sourceSessionId"] = hosts.Qualify(identity.ID, send.SourceSessionID)
-		request["sourceName"] = name
 	}
 	if send.BusyDelivery != "" {
 		request["busyDelivery"] = send.BusyDelivery

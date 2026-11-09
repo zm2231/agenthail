@@ -100,14 +100,14 @@ func (r *Registry) ReleaseLimitStop(sessionID, turnID string, from []LimitResume
 	if err != nil || !released {
 		return false, err
 	}
-	var queueID int64
+	var queued enqueued
 	if notice != "" {
-		var queued int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&queued); err != nil {
+		var pending int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&pending); err != nil {
 			return false, err
 		}
-		if queued == 0 {
-			if queueID, _, err = enqueueMessageTx(tx, r.now(), sessionID, notice, deliveryKey, surface.SendOptions{}, 0, QueueOperationMessage, queueIntent{}); err != nil {
+		if pending == 0 {
+			if queued, err = enqueueMessageTx(tx, r.now(), sessionID, notice, deliveryKey, surface.SendOptions{}, 0, QueueOperationMessage, queueIntent{}); err != nil {
 				return false, err
 			}
 		}
@@ -115,8 +115,9 @@ func (r *Registry) ReleaseLimitStop(sessionID, turnID string, from []LimitResume
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-	if queueID != 0 {
-		_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: queueID, Message: notice})
+	r.signalHeld(queued)
+	if queued.ID != 0 {
+		_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: queued.ID, Message: notice})
 	}
 	return true, nil
 }

@@ -265,9 +265,13 @@ func TestAMoveInTakesASessionAThirdHostNoLongerServes(t *testing.T) {
 	}
 }
 
-func TestAMessageQueuedForASessionAfterItMovedIsHeldForItsNewHost(t *testing.T) {
+func movedAway(t *testing.T) *Registry {
+	t.Helper()
 	r := moveRegistry(t)
-	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), nil, ""); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "peer", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Name: "peer", PID: 42, Transcript: "/tmp/p.jsonl", HasLocal: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), MoveCarry{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetMoveState("move-1", MoveSent, "", MovePreparing); err != nil {
@@ -276,14 +280,80 @@ func TestAMessageQueuedForASessionAfterItMovedIsHeldForItsNewHost(t *testing.T) 
 	if _, err := r.CompleteMoveOut("move-1", testPlaceholder); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.QueueDeliveryWithIntent(moveConversation, "waited for the move", "", surface.SendOptions{}); err != nil {
-		t.Fatal(err)
+	return r
+}
+
+func TestEveryMessageQueuedForASessionAfterItMovedIsHeldForItsNewHost(t *testing.T) {
+	queue := []struct {
+		name    string
+		message string
+		queue   func(*Registry, string) error
+	}{
+		{"a person's send", "from the person", func(r *Registry, m string) error {
+			_, _, err := r.QueueDeliveryWithIntent(moveConversation, m, "", surface.SendOptions{SourceSessionID: surface.PersonSessionID})
+			return err
+		}},
+		{"a send on a recorded intent", "from a peer", func(r *Registry, m string) error {
+			intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "peer", TargetSessionID: moveConversation, Message: m, Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+			if err != nil {
+				return err
+			}
+			_, _, err = r.QueueDeliveryUsingIntent(intent.ID, m, "", surface.SendOptions{})
+			return err
+		}},
+		{"a notice that its own send failed", "delivery failure", func(r *Registry, m string) error {
+			intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: moveConversation, TargetSessionID: "peer", Message: "to the peer", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+			if err != nil {
+				return err
+			}
+			_, err = r.FailDeliveryIntentWithNotice(intent.ID, "the peer refused it")
+			return err
+		}},
 	}
-	if item, err := r.ClaimNextMessage(moveConversation, time.Now()); err != nil || item != nil {
-		t.Fatalf("a message for a session that left was claimed here: %+v err=%v", item, err)
+	for _, test := range queue {
+		t.Run(test.name, func(t *testing.T) {
+			r := movedAway(t)
+			if err := test.queue(r, test.message); err != nil {
+				t.Fatal(err)
+			}
+			if item, err := r.ClaimNextMessage(moveConversation, time.Now()); err != nil || item != nil {
+				t.Fatalf("a message for a session that left was claimed here: %+v err=%v", item, err)
+			}
+			held, err := r.HostDeliveries(moveTarget)
+			if err != nil || len(held) != 1 || held[0].SessionID != moveConversation || !strings.Contains(string(held[0].Request), test.message) {
+				t.Fatalf("held=%+v err=%v, want the message held for the session's new host", held, err)
+			}
+		})
 	}
-	held, err := r.HostDeliveries(moveTarget)
-	if err != nil || len(held) != 1 || held[0].SessionID != moveConversation || !strings.Contains(string(held[0].Request), "waited for the move") {
-		t.Fatalf("held=%+v err=%v, want the message held for the session's new host", held, err)
+}
+
+func TestWhatCannotFollowASessionThatMovedIsRefusedWhenQueued(t *testing.T) {
+	refused := []struct {
+		name  string
+		queue func(*Registry) error
+	}{
+		{"a send with a file", func(r *Registry) error {
+			_, _, err := r.QueueDeliveryWithIntent(moveConversation, "with a file", "", surface.SendOptions{SourceSessionID: surface.PersonSessionID, Uploads: surface.Uploads{{Name: "notes.txt", Path: "/tmp/notes.txt"}}})
+			return err
+		}},
+		{"a goal", func(r *Registry) error {
+			_, err := r.QueueGoal(moveConversation, "/goal ship it")
+			return err
+		}},
+		{"a compaction", func(r *Registry) error {
+			_, err := r.QueueCompact(moveConversation)
+			return err
+		}},
+	}
+	for _, test := range refused {
+		t.Run(test.name, func(t *testing.T) {
+			r := movedAway(t)
+			if err := test.queue(r); !errors.Is(err, ErrQueuedAfterMove) {
+				t.Fatalf("queueing it answered %v, want it refused because the session moved", err)
+			}
+			if count := r.QueueCount(moveConversation); count != 0 {
+				t.Fatalf("%d items stayed queued here for a session that left", count)
+			}
+		})
 	}
 }

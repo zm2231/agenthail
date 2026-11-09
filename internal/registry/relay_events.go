@@ -258,12 +258,15 @@ func (r *Registry) consumeRelay(route RouteRow, event RelayEvent, payload, busyD
 		return 0, fmt.Errorf("relay route changed concurrently; retry consumption")
 	}
 	var queueID int64
+	held := hostSend != nil
 	if payload != "" {
 		key := fmt.Sprintf("relay:%d:%s", route.ID, event.CompletionID)
 		if hostSend != nil {
 			queueID, err = queueHostDeliveryTx(tx, r.now(), route.ToSession, payload, key, hostSend, false)
 		} else {
-			queueID, _, err = enqueueMessageTx(tx, r.now(), route.ToSession, payload, key, surface.SendOptions{SourceSessionID: route.FromSession, BusyDelivery: busyDelivery}, event.RelayHops+1, QueueOperationMessage, queueIntent{Sender: route.FromSession})
+			var queued enqueued
+			queued, err = enqueueMessageTx(tx, r.now(), route.ToSession, payload, key, surface.SendOptions{SourceSessionID: route.FromSession, BusyDelivery: busyDelivery}, event.RelayHops+1, QueueOperationMessage, queueIntent{Sender: route.FromSession})
+			queueID, held = queued.ID, queued.Held
 		}
 		if err != nil {
 			return 0, err
@@ -275,5 +278,11 @@ func (r *Registry) consumeRelay(route RouteRow, event RelayEvent, payload, busyD
 			return 0, err
 		}
 	}
-	return queueID, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	if held {
+		r.signalChange(ChangeHostDeliveries)
+	}
+	return queueID, nil
 }
