@@ -235,6 +235,7 @@ type codexEvent struct {
 	Params   map[string]any `json:"params"`
 	// RequestID is set on a server request, which expects an answer.
 	RequestID json.RawMessage `json:"-"`
+	received  int64
 }
 
 func codexContainsID(value any, ids ...string) bool {

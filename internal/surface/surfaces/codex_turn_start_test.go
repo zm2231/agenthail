@@ -112,7 +112,10 @@ func TestATurnThisProcessStartedIsRunningWhileCodexListsItUnsettled(t *testing.T
 
 type notifiedTurnClient struct {
 	listedTurnClient
+	unread   []codexEvent
+	reply    []codexEvent
 	events   []codexEvent
+	received int64
 	notified chan struct{}
 }
 
@@ -124,27 +127,43 @@ func (c *notifiedTurnClient) DrainNotifications() []codexEvent {
 
 func (c *notifiedTurnClient) Notified() <-chan struct{} { return c.notified }
 
-func (c *notifiedTurnClient) Request(ctx context.Context, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
-	if method == "thread/compact/start" {
-		started := func(id string) codexEvent {
-			return codexEvent{Method: "turn/started", Params: map[string]any{"threadId": "t", "turn": map[string]any{"id": id}}}
-		}
-		c.events = []codexEvent{
-			started("turn-2"),
-			{Method: "item/started", Params: map[string]any{"threadId": "t", "turnId": "turn-2", "item": map[string]any{"type": "agentMessage"}}},
-			{Method: "turn/completed", Params: map[string]any{"threadId": "t", "turn": map[string]any{"id": "turn-2"}}},
-			started("turn-3"),
-			{Method: "item/started", Params: map[string]any{"threadId": "t", "turnId": "turn-3", "item": map[string]any{"type": "contextCompaction"}}},
-		}
-		return map[string]any{"result": map[string]any{}}, nil
+func (c *notifiedTurnClient) receive(events []codexEvent) {
+	for _, event := range events {
+		c.received++
+		event.received = c.received
+		c.events = append(c.events, event)
 	}
-	return c.listedTurnClient.Request(ctx, method, params, wait)
+}
+
+func (c *notifiedTurnClient) requestOrdered(ctx context.Context, method string, params map[string]any, wait time.Duration) (map[string]any, int64, error) {
+	if method != "thread/compact/start" {
+		response, err := c.listedTurnClient.Request(ctx, method, params, wait)
+		return response, c.received, err
+	}
+	c.receive(c.unread)
+	after := c.received
+	c.receive(c.reply)
+	return map[string]any{"result": map[string]any{}}, after, nil
+}
+
+func turnStartedEvent(id string) codexEvent {
+	return codexEvent{Method: "turn/started", Params: map[string]any{"threadId": "t", "turn": map[string]any{"id": id}}}
+}
+
+func itemStartedEvent(turnID, itemType string) codexEvent {
+	return codexEvent{Method: "item/started", Params: map[string]any{"threadId": "t", "turnId": turnID, "item": map[string]any{"type": itemType}}}
 }
 
 func TestACompactionIsMatchedToItsOwnTurnNotAnotherClientsThatEndsFirst(t *testing.T) {
 	c := &Codex{}
 	other := listedTurnClient{turns: []any{listedTurn("turn-2", "completed"), listedTurn("turn-1", "completed")}}
-	client := &notifiedTurnClient{listedTurnClient: other, notified: make(chan struct{})}
+	client := &notifiedTurnClient{listedTurnClient: other, notified: make(chan struct{}), reply: []codexEvent{
+		turnStartedEvent("turn-2"),
+		itemStartedEvent("turn-2", "agentMessage"),
+		{Method: "turn/completed", Params: map[string]any{"threadId": "t", "turn": map[string]any{"id": "turn-2"}}},
+		turnStartedEvent("turn-3"),
+		itemStartedEvent("turn-3", "contextCompaction"),
+	}}
 	if _, err := c.startTurn(context.Background(), client, "t", "thread/compact/start", map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -154,5 +173,23 @@ func TestACompactionIsMatchedToItsOwnTurnNotAnotherClientsThatEndsFirst(t *testi
 	done := listedTurnClient{turns: []any{listedTurn("turn-3", "completed"), listedTurn("turn-2", "completed"), listedTurn("turn-1", "completed")}}
 	if busy, err := c.turnInFlight(context.Background(), done, "t"); err != nil || busy {
 		t.Fatalf("the compaction's own ended turn did not release its hold: busy=%v err=%v", busy, err)
+	}
+}
+
+func TestACompactionIsNotMatchedToAnEarlierTurnReceivedDuringItsRequest(t *testing.T) {
+	wait := codexTurnStartWait
+	codexTurnStartWait = 50 * time.Millisecond
+	t.Cleanup(func() { codexTurnStartWait = wait })
+	c := &Codex{}
+	earlier := listedTurnClient{turns: []any{listedTurn("turn-2", "completed"), listedTurn("turn-1", "completed")}}
+	client := &notifiedTurnClient{listedTurnClient: earlier, notified: make(chan struct{}), unread: []codexEvent{
+		turnStartedEvent("turn-2"),
+		itemStartedEvent("turn-2", "contextCompaction"),
+	}}
+	if _, err := c.startTurn(context.Background(), client, "t", "thread/compact/start", map[string]any{"threadId": "t"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if busy, err := c.turnInFlight(context.Background(), earlier, "t"); err != nil || !busy {
+		t.Fatalf("a turn received before the compaction was answered released its hold: busy=%v err=%v", busy, err)
 	}
 }

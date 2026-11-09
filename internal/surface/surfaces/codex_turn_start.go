@@ -115,8 +115,8 @@ func (s *codexTurnStarts) pending(threadID string) bool {
 // thread idle, and a resume whose overrides differ reloads an idle thread no
 // connection subscribes to, aborting the turn. The start stays recorded until
 // its turn is listed ended. thread/compact/start names no turn and answers
-// before Codex creates one, so its turn is the one this connection then sees
-// start and run a contextCompaction item.
+// before Codex creates one, so its turn is the one this connection receives
+// after the answer and sees run a contextCompaction item.
 func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
 	var server os.FileInfo
 	if managed, ok := client.(*managedCodexClient); ok {
@@ -126,7 +126,14 @@ func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, met
 		notifier.DrainNotifications()
 	}
 	c.turnStarts.begin(threadID, server)
-	response, err := client.Request(ctx, method, params, wait)
+	var response map[string]any
+	var err error
+	after := int64(-1)
+	if ordered, ok := client.(codexOrderedClient); ok {
+		response, after, err = ordered.requestOrdered(ctx, method, params, wait)
+	} else {
+		response, err = client.Request(ctx, method, params, wait)
+	}
 	var refused *codexRPCError
 	if errors.As(err, &refused) {
 		c.turnStarts.end(threadID)
@@ -140,7 +147,7 @@ func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, met
 	if id != "" {
 		c.turnStarts.identify(threadID, id)
 	}
-	if found := awaitTurnUnderway(ctx, client, threadID, id == ""); found != "" {
+	if found := awaitTurnUnderway(ctx, client, threadID, id == "", after); found != "" {
 		c.turnStarts.identify(threadID, found)
 	}
 	return response, nil
@@ -162,10 +169,18 @@ func codexRecentTurns(ctx context.Context, client codexClient, threadID string, 
 	return turns, nil
 }
 
+// codexOrderedClient answers a request with the receive count of the
+// notifications it read before the answer.
+type codexOrderedClient interface {
+	requestOrdered(context.Context, string, map[string]any, time.Duration) (map[string]any, int64, error)
+}
+
 // awaitTurnUnderway waits for threadID to turn active or its turn to
-// complete. With findTurn it waits instead for the turn a compaction started
-// and returns its id.
-func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string, findTurn bool) string {
+// complete. With findTurn it waits instead for the turn a compaction started,
+// one received after the answer, which came after the first after
+// notifications, and returns its id; a client that cannot order its answer
+// finds none.
+func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string, findTurn bool, after int64) string {
 	notifier, ok := client.(codexNotifier)
 	if !ok {
 		return ""
@@ -185,7 +200,7 @@ func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string,
 				if event.Method == "turn/completed" || event.Method == "thread/status/changed" && codexStatusType(event.Params["status"]) == "active" {
 					return ""
 				}
-			case event.Method == "turn/started":
+			case event.Method == "turn/started" && after >= 0 && event.received > after:
 				started[str(turn, "id")] = true
 			case event.Method == "item/started" && str(item, "type") == "contextCompaction" && started[str(event.Params, "turnId")]:
 				return str(event.Params, "turnId")
