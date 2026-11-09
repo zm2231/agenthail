@@ -195,6 +195,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private(set) var waitingSessions: [String] = []
     private(set) var sessionCount = 0
     private(set) var usageSessions: [SessionState] = []
+    private(set) var hostGroups: [String: HostGroups] = [:]
     private(set) var sessionProjects: [String: String] = [:]
     private var projectSessionIDs: [String: [String]] = [:]
     @ObservationIgnored private var sessionStreamTask: Task<Void, Never>?
@@ -370,6 +371,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         waitingSessions = sessions.filter { $0.waitingOn != nil || $0.pendingAskID != nil }.map { "\($0.id):\($0.waitingOn?.id ?? $0.pendingAskID ?? "")" }
         sessionCount = sessions.count
         usageSessions = sessions.filter { $0.archived != true && ($0.isWorking || $0.current) }
+        hostGroups = Dictionary(ordered.compactMap { host in host.snapshot.map { (host.id, HostGroups(channels: $0.channels, relays: $0.relays)) } }, uniquingKeysWith: { first, _ in first })
         sessionProjects = Dictionary(sessions.compactMap { row in row.project.map { (row.id, $0.id) } }, uniquingKeysWith: { first, _ in first })
         projectSessionIDs = inDaemonOrder(sessions).reduce(into: [:]) { ids, row in
             if let project = row.project?.id { ids[project, default: []].append(row.id) }

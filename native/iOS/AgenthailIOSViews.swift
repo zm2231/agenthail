@@ -1908,6 +1908,8 @@ struct SettingsView: View {
                             }
                         }
                         if model.hosts.count > 1 { LabeledContent("Notifications", value: host.notifications) }
+                        NavigationLink("Channels & handoffs") { HostGroupsScreen(model: model, hostID: host.id, hostName: host.name) }
+                            .accessibilityIdentifier("host-groups-" + host.id)
                         Button("Reconnect") { model.reconnect(host: host.id) }
                         Button("Remove \(host.name)", role: .destructive) { model.removeHost(host.id) }
                     } header: {
