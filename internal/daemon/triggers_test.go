@@ -295,7 +295,7 @@ func TestOnlyTheLocalCLICanTestRetryOrReloadTriggers(t *testing.T) {
 	if err != nil || finished == nil {
 		t.Fatalf("run=%+v err=%v", finished, err)
 	}
-	if err := r.FinishTriggerRun(finished.ID, registry.TriggerOutcome{State: registry.TriggerFailed, ExitCode: 1}, registry.HistoryEntry{Kind: "trigger", SessionID: "from", Result: "flag exited 1"}); err != nil {
+	if err := r.FinishTriggerRun(finished.ID, registry.TriggerOutcome{State: registry.TriggerFailed, ExitCode: 1}); err != nil {
 		t.Fatal(err)
 	}
 	for _, body := range []string{`{"action":"reload"}`, `{"action":"test","trigger":"flag"}`, fmt.Sprintf(`{"action":"retry","runId":%d}`, finished.ID)} {

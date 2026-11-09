@@ -235,15 +235,7 @@ func (d *Daemon) runNextTrigger(ctx context.Context, trigger triggers.Trigger) b
 }
 
 func (d *Daemon) finishTriggerRun(run registry.TriggerRun, outcome registry.TriggerOutcome) {
-	result := fmt.Sprintf("%s %s", run.Trigger, outcome.State)
-	if outcome.State == registry.TriggerFailed && outcome.ExitCode > 0 {
-		result = fmt.Sprintf("%s exited %d", run.Trigger, outcome.ExitCode)
-	}
-	if run.Test {
-		result += " (test)"
-	}
-	history := registry.HistoryEntry{Kind: "trigger", SessionID: run.SessionID, CompletionID: run.TurnID, Result: result, Error: outcome.Error}
-	if err := d.Registry.FinishTriggerRun(run.ID, outcome, history); err != nil {
+	if err := d.Registry.FinishTriggerRun(run.ID, outcome); err != nil {
 		d.log.Printf("finish trigger run %d: %s", run.ID, err)
 		return
 	}

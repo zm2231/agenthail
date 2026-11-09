@@ -96,11 +96,29 @@ func (r *Registry) RecordCompletion(sessionID string, notice *TurnNotice, runs [
 // InterruptTriggerRuns marks every run left running by a daemon that
 // stopped. They are not run again unless retried.
 func (r *Registry) InterruptTriggerRuns() (int64, error) {
-	result, err := r.db.Exec(`UPDATE trigger_runs SET state=?,error='the daemon stopped while it ran',finished_at_ms=? WHERE state=?`, TriggerInterrupted, time.Now().UnixMilli(), TriggerRunning)
+	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected()
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT `+triggerRunColumns+` FROM trigger_runs WHERE state=? ORDER BY id`, TriggerRunning)
+	if err != nil {
+		return 0, err
+	}
+	running, err := appendRows(make([]TriggerRun, 0), rows, func(row rowScanner) (TriggerRun, error) { return scanTriggerRun(row) })
+	if err != nil {
+		return 0, err
+	}
+	outcome := TriggerOutcome{State: TriggerInterrupted, Error: "the daemon stopped while it ran"}
+	for _, run := range running {
+		if _, err := tx.Exec(`UPDATE trigger_runs SET state=?,error=?,finished_at_ms=? WHERE id=?`, outcome.State, outcome.Error, time.Now().UnixMilli(), run.ID); err != nil {
+			return 0, err
+		}
+		if err := recordHistory(tx, triggerRunHistory(run, outcome)); err != nil {
+			return 0, err
+		}
+	}
+	return int64(len(running)), tx.Commit()
 }
 
 func (r *Registry) StartNextTriggerRun(trigger string) (*TriggerRun, error) {
@@ -127,18 +145,19 @@ func (r *Registry) StartNextTriggerRun(trigger string) (*TriggerRun, error) {
 	return &run, nil
 }
 
-func (r *Registry) FinishTriggerRun(id int64, outcome TriggerOutcome, history HistoryEntry) error {
+func (r *Registry) FinishTriggerRun(id int64, outcome TriggerOutcome) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var trigger string
-	if err := tx.QueryRow(`SELECT trigger_name FROM trigger_runs WHERE id=? AND state=?`, id, TriggerRunning).Scan(&trigger); errors.Is(err, sql.ErrNoRows) {
+	run, err := scanTriggerRun(tx.QueryRow(`SELECT `+triggerRunColumns+` FROM trigger_runs WHERE id=? AND state=?`, id, TriggerRunning))
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrTriggerRunNotFound
 	} else if err != nil {
 		return err
 	}
+	trigger := run.Trigger
 	if _, err := tx.Exec(`UPDATE trigger_runs SET state=?,exit_code=?,signal=?,stdout=?,stderr=?,error=?,finished_at_ms=? WHERE id=?`,
 		outcome.State, outcome.ExitCode, outcome.Signal, outcome.Stdout, outcome.Stderr, boundHistoryText(outcome.Error), time.Now().UnixMilli(), id); err != nil {
 		return err
@@ -148,7 +167,7 @@ func (r *Registry) FinishTriggerRun(id int64, outcome TriggerOutcome, history Hi
 		trigger, TriggerPending, TriggerRunning, trigger, TriggerPending, TriggerRunning, keptFinishedTriggerRuns); err != nil {
 		return err
 	}
-	if err := recordHistory(tx, history); err != nil {
+	if err := recordHistory(tx, triggerRunHistory(run, outcome)); err != nil {
 		return err
 	}
 	return tx.Commit()
