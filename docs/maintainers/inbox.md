@@ -18,7 +18,7 @@ An intent's sender is the agent that sent the message, or one of Agenthail's own
 
 - `agenthail-person`: the person, from any of their apps;
 - `agenthail-cli`: `agenthail send`, a script or an API call;
-- `agenthail`: Agenthail itself, for its notices and ledger readbacks, Claude peer messages queued for the target, and any sender that is not a registered session.
+- `agenthail`: Agenthail itself, for its notices and ledger turn-gate notices, Claude peer messages queued for the target, and any sender that is not a registered session.
 
 Failure, refusal and held notices go only to agent senders (`readsNotices`), so a message from Agenthail itself never starts another notice. The session a notice is about stays in the queue row's `source_session_id`, and the inbox shows it as the item's source.
 

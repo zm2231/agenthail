@@ -153,19 +153,19 @@ func (v boardView) print(attachment ledger.Attachment, shown int) {
 		fmt.Println(r)
 	}
 	printAttachment(attachment, shown)
-	if empty && len(attachment.Unattached) == 0 && len(attachment.Elsewhere) == 0 {
+	if empty && len(attachment.Provisional) == 0 && len(attachment.Elsewhere) == 0 {
 		fmt.Println("no goals, asks, decisions or captured words yet")
 	}
 }
 
 func printAttachment(attachment ledger.Attachment, shown int) {
-	if n := len(attachment.Unattached); n > 0 {
-		words := attachment.Unattached
+	if n := len(attachment.Provisional); n > 0 {
+		words := attachment.Provisional
 		if shown > 0 && n > shown {
 			words = words[n-shown:]
-			fmt.Printf("captured words not attached (%d), newest %d; --all lists every one:\n", n, shown)
+			fmt.Printf("provisional until attached (%d), newest %d; --provisional lists every one:\n", n, shown)
 		} else {
-			fmt.Printf("unattached (%d):\n", n)
+			fmt.Printf("provisional until attached (%d):\n", n)
 		}
 		for _, u := range words {
 			text := strings.Join(strings.Fields(u.Text), " ")

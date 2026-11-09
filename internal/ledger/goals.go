@@ -45,11 +45,11 @@ func (s *Store) Attachment(projectKey string, board *Board) (Attachment, error) 
 	return attachment(s.read, projectKey, board, "")
 }
 
-func (s *Store) UnattachedFor(projectKey, targetID string) ([]UtteranceView, error) {
+func (s *Store) ProvisionalFor(projectKey, targetID string) ([]UtteranceView, error) {
 	board, err := s.Board(projectKey)
 	if err != nil {
 		return nil, err
 	}
 	state, err := attachment(s.read, projectKey, board, targetID)
-	return state.Unattached, err
+	return state.Provisional, err
 }

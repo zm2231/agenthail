@@ -69,7 +69,7 @@ func TestTheLedgerReadRouteServesEachViewWithAnETagOfItsContent(t *testing.T) {
 		t.Fatalf("etag %q is not a strong quoted tag", etag)
 	}
 	capture, _ := board["capture"].(map[string]any)
-	unattached, _ := board["unattached"].(map[string]any)
+	unattached, _ := board["provisional"].(map[string]any)
 	newest, _ := unattached["newest"].([]any)
 	counts, _ := board["counts"].(map[string]any)
 	if capture["state"] != "enabled" || capture["attach"] != "checkpoints" || unattached["total"] != 6.0 || len(newest) != 5 || counts["work"] != 1.0 {

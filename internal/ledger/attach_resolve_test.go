@@ -3,6 +3,7 @@ package ledger_test
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,7 +22,7 @@ func TestWordsForTheProjectGetAGoalNamedAfterIt(t *testing.T) {
 	capture(t, s, project, "claude-prompt:1", "build search")
 	capture(t, s, project, "claude-prompt:2", "and an export")
 	first := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:1", As: ledger.AsNewAsk, To: ledger.ProjectTarget, Clauses: []string{"build search"}})
-	readback(t, first, "+widget-A1 on widget-G1 (widget) with 1 clause (widget-C1) (--to project read as widget-G1 (widget), a goal made for the project); 1 unattached: claude-prompt:2")
+	readback(t, first, "+widget-A1 on widget-G1 (widget) with 1 clause (widget-C1) (--to project read as widget-G1 (widget), a goal made for the project); 1 provisional: claude-prompt:2")
 	second := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsNewAsk, Clauses: []string{"build an export"}})
 	readback(t, second, "+widget-A2 on widget-G1 (widget) with 1 clause (widget-C2) (no --to, read as widget-G1 (widget))")
 	if goals := board(t, s).Goals(); len(goals) != 1 || goals[0].Name != "widget" {
@@ -36,10 +37,10 @@ func TestExtendingAGoalPicksItsOnlyAskOrStartsOne(t *testing.T) {
 	capture(t, s, project, "claude-prompt:3", "also a dashboard")
 	capture(t, s, project, "claude-prompt:4", "and alerts")
 	one := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsExtends, To: "widget-G1", Clauses: []string{"rank by recency"}})
-	readback(t, one, "+1 clause on widget-A1 (widget-C2) (--to widget-G1 read as widget-A1); 2 unattached: claude-prompt:3, claude-prompt:4")
+	readback(t, one, "+1 clause on widget-A1 (widget-C2) (--to widget-G1 read as widget-A1); 2 provisional: claude-prompt:3, claude-prompt:4")
 	dashboards := goal(t, s, "Dashboards")
 	none := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:3", As: ledger.AsExtends, To: dashboards, Clauses: []string{"a dashboard"}})
-	readback(t, none, "+widget-A2 on widget-G2 (Dashboards) with 1 clause (widget-C3) (widget-G2 (Dashboards) has no ask, so --as extends became a new ask on it); 1 unattached: claude-prompt:4")
+	readback(t, none, "+widget-A2 on widget-G2 (Dashboards) with 1 clause (widget-C3) (widget-G2 (Dashboards) has no ask, so --as extends became a new ask on it); 1 provisional: claude-prompt:4")
 	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:4", As: ledger.AsNewAsk, To: dashboards, Clauses: []string{"alerts"}})
 	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:4", As: ledger.AsDelegates, To: dashboards}, "widget-G2 (Dashboards) has 2 asks; name the one to delegate: widget-A2, widget-A3")
 	several := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:4", As: ledger.AsExtends, To: dashboards, Clauses: []string{"page on alerts"}})
@@ -55,9 +56,9 @@ func TestAWorkItemOrClauseStandsForWhatItHangsOff(t *testing.T) {
 	capture(t, s, project, "claude-prompt:3", "never block the ui")
 	capture(t, s, project, "claude-prompt:4", "we keep logs a week")
 	asked := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsDecides, To: "widget-W1", Clauses: []string{"use sqlite fts"}})
-	readback(t, asked, "+widget-D1 decided on widget-G1 (Search) (--to widget-W1 read as widget-C1; --to widget-C1 read as widget-G1 (Search)); 2 unattached: claude-prompt:3, claude-prompt:4")
+	readback(t, asked, "+widget-D1 decided on widget-G1 (Search) (--to widget-W1 read as widget-C1; --to widget-C1 read as widget-G1 (Search)); 2 provisional: claude-prompt:3, claude-prompt:4")
 	constraint := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:3", As: ledger.AsConstrains, To: "widget-C1", Clauses: []string{"never block the ui"}})
-	readback(t, constraint, "+1 constraint on widget-A1 (widget-C2) (--to widget-C1 read as widget-A1); 1 unattached: claude-prompt:4")
+	readback(t, constraint, "+1 constraint on widget-A1 (widget-C2) (--to widget-C1 read as widget-A1); 1 provisional: claude-prompt:4")
 	found := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:4", As: ledger.AsDecides, To: "widget-W2", Clauses: []string{"keep logs a week"}})
 	readback(t, found, "+widget-D2 decided on the project (found work widget-W2 hangs off no clause, so --to widget-W2 read as the project)")
 }
@@ -84,9 +85,14 @@ func TestConversationAndPlainReactionsAreRecordedAndSayWhatWasLeftOut(t *testing
 	capture(t, s, project, "claude-prompt:3", "love that")
 	capture(t, s, project, "claude-prompt:4", "yes, cache it, and per user")
 	talk := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsConversation, To: "widget-G1", Clauses: []string{"nice"}})
-	readback(t, talk, "claude-prompt:2 is conversation; --to widget-G1 and the --clause not recorded: conversation binds nothing (attach --as constrains to bind it); 2 unattached: claude-prompt:3, claude-prompt:4")
+	readback(t, talk, "claude-prompt:2 is conversation; noted: nice; --to widget-G1 not recorded: conversation binds nothing (attach --as constrains to bind it); 2 provisional: claude-prompt:3, claude-prompt:4")
+	for _, u := range board(t, s).Utterances() {
+		if u.ID == "claude-prompt:2" && (!slices.Equal(u.Notes, []string{"nice"}) || len(u.GoalIDs) != 0) {
+			t.Fatalf("conversation kept %+v, want only the note", u)
+		}
+	}
 	plain := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:3", As: ledger.AsReacts, To: "widget-C1"})
-	readback(t, plain, "claude-prompt:3 is a reaction to widget-C1; nothing changed (add --adopt or --reject to change it); 1 unattached: claude-prompt:4")
+	readback(t, plain, "claude-prompt:3 is a reaction to widget-C1; nothing changed (add --adopt or --reject to change it); 1 provisional: claude-prompt:4")
 	if c := clause(t, board(t, s), "widget-C1"); c.State != ledger.StateCaptured || len(c.Cuts) != 0 {
 		t.Fatalf("a plain reaction changed the clause: %+v", c)
 	}

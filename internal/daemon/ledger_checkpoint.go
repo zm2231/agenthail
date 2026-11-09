@@ -32,11 +32,11 @@ func (d *Daemon) ledgerCheckpoint(session surface.Session) (string, error) {
 		if !scope.checkpoints {
 			continue
 		}
-		words, err := store.UnattachedFor(target.key, session.ID)
+		words, err := store.ProvisionalFor(target.key, session.ID)
 		if err != nil {
 			return "", err
 		}
-		if text := ledger.CheckpointInstruction(target.key, words); text != "" {
+		if text := ledger.ProvisionalNote(target.key, len(words)); text != "" {
 			parts = append(parts, text)
 		}
 	}

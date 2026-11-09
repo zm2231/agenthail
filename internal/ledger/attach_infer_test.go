@@ -8,7 +8,7 @@ import (
 	"github.com/zm2231/agenthail/internal/ledger"
 )
 
-var boardTail = regexp.MustCompile(`(; \d+ unattached: [^;]*)?(; open questions: .*)?$`)
+var boardTail = regexp.MustCompile(`(; \d+ provisional: [^;]*)?(; open questions: .*)?$`)
 
 func withoutBoardTail(readback string) string {
 	return boardTail.ReplaceAllString(readback, "")

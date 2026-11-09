@@ -8,11 +8,11 @@ Every change is an event in an append-only log; the board you read is rebuilt fr
 
 ## Capture and scope
 
-Every project with a lead captures the person's words to that lead, from the moment it became the lead, and asks it to attach each message: a Claude lead gets the readback after each prompt and a Codex lead gets it queued, as in an enabled project. Unlike an enabled project, the lead's turn is not held at its end for words it leaves unattached. A project that attaches at checkpoints asks its lead at those checkpoints instead. Its forks are captured and asked the same way from their creation. The bare `agenthail ledger` command lists the newest five of those words with a count; `--all` lists every one.
+Every project with a lead captures the person's words to that lead, from the moment it became the lead. Its forks are captured the same way from their creation. Each message is recorded verbatim and stays *provisional* until a session attaches it. Nothing waits on a provisional message: no turn is held for it, and no session is told to attach it before replying. A Claude session in scope sees one line after each prompt saying how many of the person's messages are provisional; in a project that attaches at checkpoints, it sees that line only at those checkpoints. The bare `agenthail ledger` command lists the newest five provisional messages with a count; `--all` shows the whole board with every one, and `--provisional` lists only them.
 
 ```
-agenthail ledger enable              # capture the person's words to every session in this project, and ask each to attach them
-agenthail ledger enable --attach checkpoints   # the same, but ask at checkpoints instead of with each message
+agenthail ledger enable              # capture the person's words to every session in this project
+agenthail ledger enable --attach checkpoints   # the same, but show the provisional count at checkpoints instead of with each message
 agenthail ledger enable @session     # the same for one session, and the forks made from it afterwards
 agenthail ledger disable             # capture nothing in this project, not even the lead's words
 agenthail ledger disable @session    # take back a session's grant
@@ -30,7 +30,7 @@ A captured message is an *utterance*, identified by a ref such as `claude-prompt
 
 ## Attaching words: goals, asks and clauses
 
-In an enabled project, or for a granted session, the session the person spoke to attaches each message, so the ledger records what it means. After capture, the session is told the utterance ref. It replies with the readback that `attach` prints, so the person sees how their words were recorded.
+Attaching a provisional message records what it means and confirms it. Any session in scope can attach the person's words; `agenthail ledger --provisional` lists the ones waiting, with their utterance refs. The session replies with the readback that `attach` prints, so the person sees how their words were recorded.
 
 ```
 agenthail ledger goal "Search"                                   # create a goal, or show it
@@ -51,7 +51,7 @@ agenthail ledger attach <utterance> --as extends --to <ask> --clause "and the do
 - `extends` or `delegates` with `--to <goal>` uses the goal's only ask. If the goal has no ask, or more than one, `extends` starts a new ask on it, and `delegates` asks you to name one.
 - `decides` with an ask or a clause decides on its goal.
 - `refines` or `reacts` with `--to <ask>` uses the ask's only clause.
-- `conversation` keeps no `--to` or `--clause`, and says so.
+- `conversation` binds nothing. A `--clause` is kept as a note on the attach; a `--to` is dropped, and the readback says so.
 - `reacts` with none of `--adopt`, `--reject` or `--ack` records a reaction that changes nothing.
 
 `attach` refuses only an id that names nothing, and a request it cannot carry out as written, such as adopting a clause that is not a proposal.
@@ -75,15 +75,15 @@ A work item counts as the clause it serves. Nothing that rewrites or drops the p
 agenthail ledger attach <utterance> --to <ask> --clause "and the docs"   # intent ledger: +1 clause on <ask> (...) (no --as, read as extends: --to is an ask)
 ```
 
-### When a session is asked to attach
+### When a session hears about provisional words
 
-`agenthail ledger enable` asks each session to attach every message before it replies, and the turn gate below holds it for words it left unattached. `agenthail ledger enable --attach checkpoints` asks nothing per message. Instead, the words a session has not attached yet are shown at points it reaches anyway:
+`agenthail ledger enable` shows each Claude session the provisional count after every prompt. `agenthail ledger enable --attach checkpoints` shows nothing per message. Instead, the count appears at points a session reaches anyway:
 
-- adding, claiming or submitting a work item (`ledger add`, `start`, `review`, and the same writes over MCP, whose result carries them as `ledgerCheckpoint`);
+- adding, claiming or submitting a work item (`ledger add`, `start`, `review`, and the same writes over MCP, whose result carries it as `ledgerCheckpoint`);
 - the start of a session, a resume and a compaction;
-- `agenthail ledger`, which lists the project's unattached words.
+- `agenthail ledger`, which lists the project's provisional words.
 
-The session then attaches them with one `--and` call. In this mode the turn gate still holds a session for clauses it owns without progress, but not for unattached words. Running `enable` again with the other `--attach` value switches the mode without changing when capture began.
+Either way the count is a note, not a request: attach the words with one `--and` call when you know what they mean. Running `enable` again with the other `--attach` value switches the mode without changing when capture began.
 
 `--as` says how the message relates to what is already on the board:
 
@@ -97,7 +97,7 @@ The session then attaches them with one `--and` call. In this mode the turn gate
 | `delegates` | Hands an ask to another session (`--session`) |
 | `decides` | Records a decision |
 | `answers` | Answers an open question |
-| `conversation` | Not a request; nothing is added |
+| `conversation` | Not a request; nothing is added beyond an optional `--clause` note |
 
 Use the person's own words and their broadest reading. Anything narrowed or left out becomes a *cut*, which the person has to acknowledge.
 
@@ -119,18 +119,17 @@ agenthail ledger progress <clause> --ref <commit|file|PR|evidence>
 agenthail ledger wait <clause> --condition "..." --deadline 4h
 ```
 
-The bare `agenthail ledger` command shows goals, open asks, decisions and words not attached yet. `ledger goals`, `ledger asks` and `ledger ask <id>` show more detail.
+The bare `agenthail ledger` command shows goals, open asks, decisions and provisional words. `ledger goals`, `ledger asks` and `ledger ask <id>` show more detail.
 
 ### The turn gate
 
-At the end of a turn, a session that owns clauses, or has unattached words in a project that asks it to attach each message (enabled, or granted to the session), is held until it does one of these:
+At the end of a turn, a session that owns clauses in a project that is enabled or granted to it is held until it does one of these:
 
-- attaches the words;
 - reports progress on its clauses;
 - records a wait;
 - depends on someone else's work.
 
-The gate does not hold a session while the person has spoken to it in the last 10 minutes. After 3 holds on the same item, the item is waived so a session is never stuck.
+Provisional words never hold a turn. The gate does not hold a session while the person has spoken to it in the last 10 minutes. After 3 holds on the same clause, the clause is waived so a session is never stuck.
 
 ### Narrowing checks and cuts
 
@@ -270,7 +269,7 @@ GET /api/v1/ledger/events                                   # ledger.changed, on
 ```
 
 - **Views.** `view` is one of:
-  - `board`, the default: capture state, sync state, counts, the first page of goals, and the newest five unattached words with their total;
+  - `board`, the default: capture state, sync state, counts, the first page of goals, and the newest five provisional words with their total (`provisional`);
   - one list, paged: `goals`, `asks`, `decisions`, `questions` or `work`;
   - `ready`, the ranked next work;
   - `item`: one work item with its context, or one ask, as `agenthail ledger show --json` prints it.

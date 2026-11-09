@@ -17,7 +17,7 @@ func captureOf(t *testing.T, node *federationNode, session, prompt, text string)
 
 func TestTheLeadOfAGitProjectIsCapturedAndAskedToAttach(t *testing.T) {
 	mac, _, _ := widgetOnTwoHosts(t)
-	if got := captureOf(t, mac, "lead", "p-1", "build search"); !got.Captured || !got.Attach || got.ProjectKey != widgetKey || len(got.Unattached) != 0 {
+	if got := captureOf(t, mac, "lead", "p-1", "build search"); !got.Captured || !got.Attach || got.ProjectKey != widgetKey || got.Provisional != 1 {
 		t.Fatalf("the lead's words in a project nobody enabled: %+v", got)
 	}
 	if got := captureOf(t, mac, "local-a", "p-2", "not the lead"); got.Captured {
@@ -26,7 +26,7 @@ func TestTheLeadOfAGitProjectIsCapturedAndAskedToAttach(t *testing.T) {
 	if err := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Enable(widgetKey, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
-	if got := captureOf(t, mac, "lead", "p-3", "and keep it fast"); !got.Captured || !got.Attach || len(got.Unattached) != 1 {
+	if got := captureOf(t, mac, "lead", "p-3", "and keep it fast"); !got.Captured || !got.Attach || got.Provisional != 2 {
 		t.Fatalf("the lead's words once the project is enabled: %+v", got)
 	}
 }

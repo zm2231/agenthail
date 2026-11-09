@@ -22,24 +22,16 @@ type ledgerCaptureResponse struct {
 	Attach     bool     `json:"attach,omitempty"`
 	ProjectKey string   `json:"projectKey,omitempty"`
 	Ref        string   `json:"ref,omitempty"`
-	Unattached []string `json:"unattached,omitempty"`
+	Provisional int `json:"provisional,omitempty"`
 }
 
-const ledgerUnattachedShown = 5
-
-func (d *Daemon) unattachedBefore(key, sessionID, ref string) []string {
-	pending, err := d.ledgerStore().UnattachedFor(key, sessionID)
+func (d *Daemon) provisionalCount(key, sessionID string) int {
+	words, err := d.ledgerStore().ProvisionalFor(key, sessionID)
 	if err != nil {
-		d.log.Printf("ledger capture: list unattached words for %s in %s: %s", sessionID, key, err)
-		return nil
+		d.log.Printf("ledger capture: count provisional words for %s in %s: %s", sessionID, key, err)
+		return 0
 	}
-	var refs []string
-	for _, u := range pending {
-		if u.ID != ref && len(refs) < ledgerUnattachedShown {
-			refs = append(refs, u.ID)
-		}
-	}
-	return refs
+	return len(words)
 }
 
 func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +77,7 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 	case !record.attach:
 		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{Captured: true, ProjectKey: record.key, Ref: ref})
 	default:
-		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{Captured: true, Attach: true, ProjectKey: record.key, Ref: ref, Unattached: d.unattachedBefore(record.key, session.ID, ref)})
+		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{Captured: true, Attach: true, ProjectKey: record.key, Ref: ref, Provisional: d.provisionalCount(record.key, session.ID)})
 	}
 }
 

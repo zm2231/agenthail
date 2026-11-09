@@ -64,8 +64,8 @@ func (d *Daemon) ledgerTargets(store *ledger.Store, session surface.Session) ([]
 	return targets, access, nil
 }
 
-// ledgerScope is when the person's words to a session start counting in a project, whether the session is asked to attach them, and whether
-// its turn is held at the end for words it left unattached.
+// ledgerScope is when the person's words to a session start counting in a project, whether the session sees how many are provisional, and
+// whether its turn is held at the end for clauses it owns.
 type ledgerScope struct {
 	since       time.Time
 	inScope     bool
@@ -75,7 +75,7 @@ type ledgerScope struct {
 }
 
 // ledgerSince is the earliest grant that puts sessionID in the project's ledger scope. Enabling the project, granting the session or leading
-// the project asks it to attach; only enabling or granting holds its turn.
+// the project shows it the provisional count; only enabling or granting holds its turn.
 func (d *Daemon) ledgerSince(store *ledger.Store, target ledgerTarget, sessionID string, access ledgerAccess) (ledgerScope, error) {
 	captured, err := store.Scope(target.key)
 	if err != nil || captured.State == ledger.LedgerDisabled {

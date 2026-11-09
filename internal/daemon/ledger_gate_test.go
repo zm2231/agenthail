@@ -93,7 +93,7 @@ func TestG2QueuesTheOpenWorkIntoAManagedSessionAtTurnEnd(t *testing.T) {
 	}
 }
 
-func TestG2GatesEachProjectTheSessionWorksIn(t *testing.T) {
+func TestG2HoldsOnlyOwnedClausesInEachProjectTheSessionWorksIn(t *testing.T) {
 	f := newGateFixture(t, registry.OriginAgent, surface.RuntimeClaudeHost)
 	f.ownClause(t, time.Now().Add(-time.Hour))
 	other := addLedgerProject(t, f.r, "proj-other", "repo:github.com/acme/infra")
@@ -108,12 +108,12 @@ func TestG2GatesEachProjectTheSessionWorksIn(t *testing.T) {
 	if len(f.fake.sent) != 1 || f.r.QueueCount(f.session.ID) != 0 {
 		t.Fatalf("want one notice for the turn, got %d sent and %d queued", len(f.fake.sent), f.r.QueueCount(f.session.ID))
 	}
-	if notice := f.fake.sent[0]; !strings.Contains(notice, "in repo:github.com/acme/widget:\n    widget-C1: build search") || !strings.Contains(notice, "in repo:github.com/acme/infra:\n    claude-prompt:9") {
-		t.Fatalf("notice does not cover both projects: %q", notice)
+	if notice := f.fake.sent[0]; !strings.Contains(notice, "in repo:github.com/acme/widget:\n    widget-C1: build search") || strings.Contains(notice, "acme/infra") || strings.Contains(notice, "claude-prompt:9") {
+		t.Fatalf("notice should name the owned clause and not the granted project's provisional words: %q", notice)
 	}
 	f.completeTurn(t, "turn-1")
-	if gates := daemonEvents(t, f.r, "ledger.gate"); len(gates) != 2 {
-		t.Fatalf("gate events = %d, want one per project and turn", len(gates))
+	if gates := daemonEvents(t, f.r, "ledger.gate"); len(gates) != 1 {
+		t.Fatalf("gate events = %d, want one for the project with an owned clause", len(gates))
 	}
 }
 

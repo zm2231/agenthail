@@ -33,7 +33,7 @@ func TestAProjectThatAttachesAtCheckpointsAsksNothingPerMessage(t *testing.T) {
 	if len(f.fake.sent) != 0 || f.r.QueueCount(f.session.ID) != 0 {
 		t.Fatalf("G2 held the turn for unattached words: %q", f.fake.sent)
 	}
-	if text := checkpoint(t, f); !strings.Contains(text, "claude-prompt:2: add search to the docs site") || !strings.Contains(text, "--and") {
+	if text := checkpoint(t, f); text != ledger.ProvisionalNote(f.project.key, 1) {
 		t.Fatalf("checkpoint = %q", text)
 	}
 	f.ownClause(t, time.Now().Add(-time.Hour))
@@ -64,7 +64,7 @@ func TestAProjectThatAttachesAtCheckpointsAsksNothingPerMessage(t *testing.T) {
 		t.Fatalf("a refused batch wrote %d events", after-before)
 	}
 
-	if got := ledgerPost(t, handler, ledgerCaptureRequest{SessionID: f.session.ID, PromptID: "p-1", Prompt: "and the changelog"}); !got.Captured || got.Attach || len(got.Unattached) != 0 {
+	if got := ledgerPost(t, handler, ledgerCaptureRequest{SessionID: f.session.ID, PromptID: "p-1", Prompt: "and the changelog"}); !got.Captured || got.Attach || got.Provisional != 0 {
 		t.Fatalf("a message in checkpoint mode: %+v", got)
 	}
 	if err := f.project.store.Enable(f.project.key, ledger.AttachEachPrompt); err != nil {
@@ -91,7 +91,7 @@ func TestASessionGrantedIntoACheckpointProjectSeesItsWordsThere(t *testing.T) {
 	if _, _, err := other.store.RecordUtterance(u); err != nil {
 		t.Fatal(err)
 	}
-	if text := checkpoint(t, f); !strings.Contains(text, "in repo:github.com/acme/infra") || !strings.Contains(text, "claude-prompt:9: rotate keys") {
+	if text := checkpoint(t, f); text != ledger.ProvisionalNote(other.key, 1) {
 		t.Fatalf("checkpoint for a granted project = %q", text)
 	}
 	f.completeTurn(t, "turn-1")
@@ -100,7 +100,7 @@ func TestASessionGrantedIntoACheckpointProjectSeesItsWordsThere(t *testing.T) {
 	}
 }
 
-func TestMCPWorkWritesInCheckpointModeCarryTheWordsLeftToAttach(t *testing.T) {
+func TestMCPWorkWritesInCheckpointModeCarryTheProvisionalCount(t *testing.T) {
 	d, _, handler, _, _, widget := questionDaemon(t)
 	if err := widget.store.Enable(widget.key, ledger.AttachAtCheckpoints); err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestMCPWorkWritesInCheckpointModeCarryTheWordsLeftToAttach(t *testing.T) {
 	worker, _ := d.Registry.Session("s1")
 	session := mcpSession(t, server, issueMCPToken(t, d, *worker))
 	add, refused := callMCP(t, session, "agenthail_ledger_write", map[string]any{"op": "work", "clientRequestId": "w1", "request": map[string]any{"action": "add", "text": "rename the flag"}})
-	if text, _ := add["ledgerCheckpoint"].(string); refused || !strings.Contains(text, ledger.PromptRef("p-1")+": rename the flag") || add["readback"] == nil {
+	if text, _ := add["ledgerCheckpoint"].(string); refused || text != ledger.ProvisionalNote(widget.key, 1) || add["readback"] == nil {
 		t.Fatalf("work add over MCP: %v", add)
 	}
 	comment, refused := callMCP(t, session, "agenthail_ledger_write", map[string]any{"op": "work", "clientRequestId": "w2", "request": map[string]any{"action": "comment", "itemId": "widget-W1", "text": "started"}})
@@ -128,7 +128,7 @@ func TestALeadInAProjectThatAttachesAtCheckpointsIsAskedAtCheckpointsOnly(t *tes
 	if got := ledgerPost(t, f.d.dashboardHandler(&dashboardServer{token: "test-token"}), ledgerCaptureRequest{SessionID: f.session.ID, PromptID: "p-0", Prompt: "and the docs"}); !got.Captured || got.Attach {
 		t.Fatalf("the lead was asked per message in a project that attaches at checkpoints: %+v", got)
 	}
-	if text := checkpoint(t, f); !strings.Contains(text, "and the docs") {
+	if text := checkpoint(t, f); text != ledger.ProvisionalNote(f.project.key, 1) {
 		t.Fatalf("checkpoint = %q", text)
 	}
 	f.completeTurn(t, "turn-1")

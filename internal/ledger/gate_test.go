@@ -105,20 +105,20 @@ func TestG2DefersWhileThePersonIsTalkingToTheSession(t *testing.T) {
 	}
 }
 
-func TestG2BlocksUnattachedWordsAndChecksEachTurnOnce(t *testing.T) {
+func TestG2NeverHoldsATurnForProvisionalWords(t *testing.T) {
 	s := newStore(t)
-	capture(t, s, project, "claude-prompt:1", "build search")
-	first := gate(t, s, "t1", quiet)
-	if first.Result != ledger.GateBlocked || !slices.Equal(first.Blocked, []string{"claude-prompt:1"}) {
-		t.Fatalf("unattached = %+v", first)
+	capture(t, s, project, "claude-prompt:9", "and keep it fast")
+	if r := gate(t, s, "t1", quiet); r.Result != "" || gateEvents(t, s, ledger.EventGate) != 0 {
+		t.Fatalf("provisional words gated the turn: %+v", r)
 	}
-	again := gate(t, s, "t1", quiet.Add(time.Minute))
-	if again.Result != ledger.GateBlocked || gateEvents(t, s, ledger.EventGate) != 1 {
+	searchAsk(t, s)
+	first := gate(t, s, "t2", quiet)
+	if first.Result != ledger.GateBlocked || !slices.Equal(first.Blocked, []string{"widget-C1"}) {
+		t.Fatalf("an owned clause without progress = %+v, want only the clause blocked", first)
+	}
+	again := gate(t, s, "t2", quiet.Add(time.Minute))
+	if !again.Repeat || gateEvents(t, s, ledger.EventGate) != 1 {
 		t.Fatalf("a turn was gated twice: %+v", again)
-	}
-	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:1", As: ledger.AsConversation})
-	if r := gate(t, s, "t2", quiet.Add(2*time.Minute)); r.Result != "" {
-		t.Fatalf("after attaching = %+v", r)
 	}
 }
 

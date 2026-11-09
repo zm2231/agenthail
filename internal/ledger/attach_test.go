@@ -128,8 +128,8 @@ func TestNewAskBindsStatedClausesToTheReceivingSession(t *testing.T) {
 		t.Fatalf("clause = %+v", c)
 	}
 	state, err := s.Attachment(project, b)
-	if err != nil || len(state.Unattached) != 0 {
-		t.Fatalf("unattached = %+v err=%v", state.Unattached, err)
+	if err != nil || len(state.Provisional) != 0 {
+		t.Fatalf("provisional = %+v err=%v", state.Provisional, err)
 	}
 }
 
@@ -189,7 +189,7 @@ func TestRejectingAProposalIsNotACut(t *testing.T) {
 	attach(t, s, ledger.AttachRequest{As: ledger.AsExtends, To: "widget-A1", Clauses: []string{"cache results"}, Source: ledger.SourceProposed})
 	result := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C2", Reject: true})
 	c := clause(t, board(t, s), "widget-C2")
-	if c.State != ledger.StateRejected || len(c.Cuts) != 0 || result.Readback != "intent ledger: widget-C2 rejected; 1 unattached: claude-prompt:3" {
+	if c.State != ledger.StateRejected || len(c.Cuts) != 0 || result.Readback != "intent ledger: widget-C2 rejected; 1 provisional: claude-prompt:3" {
 		t.Fatalf("rejected proposal = %+v readback %q", c, result.Readback)
 	}
 	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C2", Adopt: true}, "was rejected")
@@ -288,7 +288,7 @@ func TestReadbackNamesWhatIsStillUnattached(t *testing.T) {
 	capture(t, s, project, "claude-prompt:1", "hi")
 	capture(t, s, project, "claude-prompt:2", "build search")
 	result := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:1", As: ledger.AsConversation})
-	if result.Readback != "intent ledger: claude-prompt:1 is conversation; 1 unattached: claude-prompt:2" {
+	if result.Readback != "intent ledger: claude-prompt:1 is conversation; 1 provisional: claude-prompt:2" {
 		t.Fatalf("readback = %q", result.Readback)
 	}
 	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: "summarizes"}, "unknown --as")
@@ -309,7 +309,7 @@ func TestAnUtteranceAttachedInOneProjectIsAttachedElsewhereInTheOther(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Unattached) != 0 || state.Elsewhere["claude-prompt:1"] != (ledger.Elsewhere{ProjectKey: other, GoalID: "infra-G1"}) {
+	if len(state.Provisional) != 0 || state.Elsewhere["claude-prompt:1"] != (ledger.Elsewhere{ProjectKey: other, GoalID: "infra-G1"}) {
 		t.Fatalf("attachment = %+v", state)
 	}
 }

@@ -81,7 +81,7 @@ func TestAScheduledPromptIsNotThePersonsWordsInEitherOrder(t *testing.T) {
 	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "typed-1", Prompt: "ship it"})
 	source.append(liveEvent(typedPrompt("typed-1", "typed-1", "ship it", now)))
 
-	unattached, err := p.store.UnattachedFor(p.key, s.ID)
+	unattached, err := p.store.ProvisionalFor(p.key, s.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

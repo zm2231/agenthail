@@ -46,7 +46,7 @@ func TestLedgerAPIAttachesCapturedWordsToAGoal(t *testing.T) {
 	}
 }
 
-func TestLedgerAPICaptureNamesTheSessionsEarlierUnattachedWords(t *testing.T) {
+func TestLedgerAPICaptureCountsTheSessionsProvisionalWords(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-u", "repo:github.com/acme/widget")
 	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
@@ -61,8 +61,8 @@ func TestLedgerAPICaptureNamesTheSessionsEarlierUnattachedWords(t *testing.T) {
 		t.Fatalf("attach status=%d body=%s", code, body)
 	}
 	resp := ledgerPost(t, handler, ledgerCaptureRequest{SessionID: "s1", PromptID: "p-4", Prompt: "and a receipt"})
-	if len(resp.Unattached) != 1 || resp.Unattached[0] != ledger.PromptRef("p-2") {
-		t.Fatalf("unattached = %v, want only the earlier unattached prompt of s1", resp.Unattached)
+	if resp.Provisional != 2 {
+		t.Fatalf("provisional = %d, want s1's two unattached prompts and not s2's", resp.Provisional)
 	}
 }
 

@@ -126,7 +126,7 @@ func TestRederivingAnOlderJournalReclassifiesAnEarlierHookCapture(t *testing.T) 
 	if len(reclassified) != 1 || reclassified[0] != "reclassified:"+ledger.PromptRef("wake-old") {
 		t.Fatalf("want one reclassification of the wakeup, got %v", reclassified)
 	}
-	unattached, err := p.store.UnattachedFor(p.key, s.ID)
+	unattached, err := p.store.ProvisionalFor(p.key, s.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

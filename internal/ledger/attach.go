@@ -84,7 +84,7 @@ func (s *Store) Attach(req AttachRequest) (AttachResult, error) {
 			return AttachResult{}, refuse("%s is attached elsewhere: %s", req.UtteranceID, other)
 		}
 	}
-	attach, err := json.Marshal(AttachPayload{UtteranceID: req.UtteranceID, SessionID: req.SessionID, As: plan.req.As, To: plan.req.To, GoalID: plan.goalID, Effects: plan.effects})
+	attach, err := json.Marshal(AttachPayload{UtteranceID: req.UtteranceID, SessionID: req.SessionID, As: plan.req.As, To: plan.req.To, GoalID: plan.goalID, Effects: plan.effects, Note: plan.note})
 	if err != nil {
 		return AttachResult{}, err
 	}
@@ -118,6 +118,7 @@ type attachPlan struct {
 	effects   []string
 	summary   string
 	notes     []string
+	note      string
 
 	madeGoal, madeGoalName string
 }
@@ -177,24 +178,15 @@ func (p *attachPlan) relate() error {
 		return p.answer()
 	}
 	p.summary = req.UtteranceID + " is conversation"
-	if dropped := p.unrecorded(); dropped != "" {
-		p.summary += "; " + dropped + " not recorded: conversation binds nothing (attach --as constrains to bind it)"
+	if len(req.Clauses) > 0 {
+		p.note = strings.Join(req.Clauses, "; ")
+		p.summary += "; noted: " + p.note
+	}
+	if req.To != "" {
+		p.summary += "; --to " + req.To + " not recorded: conversation binds nothing (attach --as constrains to bind it)"
 	}
 	p.req.To = ""
 	return nil
-}
-
-func (p *attachPlan) unrecorded() string {
-	var parts []string
-	if p.req.To != "" {
-		parts = append(parts, "--to "+p.req.To)
-	}
-	if n := len(p.req.Clauses); n == 1 {
-		parts = append(parts, "the --clause")
-	} else if n > 1 {
-		parts = append(parts, fmt.Sprintf("%d --clause texts", n))
-	}
-	return strings.Join(parts, " and ")
 }
 
 func (p *attachPlan) add(typ EventType, payload any) error {

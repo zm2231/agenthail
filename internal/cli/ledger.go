@@ -133,12 +133,12 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 		fmt.Println("enable with: agenthail ledger enable")
 		return nil
 	}
-	capture, coverage := "lead", "capturing the person's words to the project's lead, which attaches each message; its turn is not held for words it leaves unattached. To ask every session to attach each message: agenthail ledger enable"
+	capture, coverage := "lead", "capturing the person's words to the project's lead; each message stays provisional until it is attached, and nothing waits on it. To capture every session's words: agenthail ledger enable"
 	if scope.State == ledger.LedgerEnabled {
 		capture = "enabled"
-		coverage = "capturing since " + scope.Since.Local().Format(time.DateTime) + "; words from before then are not in the ledger"
+		coverage = "capturing since " + scope.Since.Local().Format(time.DateTime) + "; words from before then are not in the ledger; each message stays provisional until it is attached"
 		if scope.Attach == ledger.AttachAtCheckpoints {
-			coverage += "\nsessions attach the person's words at checkpoints: adding, claiming or submitting work, starting or compacting, and here"
+			coverage += "\nsessions hear how many are provisional at checkpoints: adding, claiming or submitting work, starting or compacting, and here"
 		}
 	}
 
@@ -149,6 +149,13 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	attachment, err := store.Attachment(key, board)
 	if err != nil {
 		return err
+	}
+	if hasFlag(args, "--provisional") && !hasFlag(args, "--json") {
+		if len(attachment.Provisional) == 0 {
+			fmt.Println("no provisional messages")
+		}
+		printAttachment(ledger.Attachment{Provisional: attachment.Provisional}, 0)
+		return nil
 	}
 	view := newBoardView(board)
 	g2, g2Err := a.ledgerG2(key)
@@ -167,7 +174,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 			"g2Waivers":          view.waivers,
 			"retractions":        append([]ledger.Retraction{}, view.retractions...),
 			"checks":             board.GoalChecks(),
-			"unattached":         attachment.Unattached,
+			"provisional":        attachment.Provisional,
 			"attachedElsewhere":  attachment.Elsewhere,
 			"notCarried":         notCarried,
 		}
@@ -196,9 +203,6 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	if scope.State == ledger.LedgerEnabled {
 		fmt.Println(g2Line(g2, g2Err))
 		view.print(attachment, 0)
-		if scope.Attach == ledger.AttachAtCheckpoints && len(attachment.Unattached) > 0 {
-			fmt.Println(ledgerAttachInOneCall)
-		}
 		return nil
 	}
 	shown := ledgerLeadWordsShown
@@ -210,9 +214,6 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 }
 
 const ledgerLeadWordsShown = 5
-
-const ledgerAttachInOneCall = `attach your own in one call, one fragment per intent:
-  agenthail ledger attach <utterance> --to <...> --clause "..." [--as <...>] --and <utterance> ...`
 
 func (a *App) ledgerAsks(store *ledger.Store, args []string) error {
 	key, err := ledgerProjectKey(a)

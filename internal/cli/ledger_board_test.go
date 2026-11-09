@@ -37,19 +37,22 @@ func TestLedgerBoardSaysWhatItCaptures(t *testing.T) {
 		}
 	}
 	out := board()
-	if !strings.Contains(out, "to the project's lead, which attaches each message") || strings.Contains(out, "G2:") {
+	if !strings.Contains(out, "to the project's lead; each message stays provisional until it is attached, and nothing waits on it") || strings.Contains(out, "G2:") {
 		t.Fatalf("unset project board %q", out)
 	}
-	if !strings.Contains(out, "captured words not attached (7), newest 5") || strings.Contains(out, "word b") || !strings.Contains(out, "word g") {
+	if !strings.Contains(out, "provisional until attached (7), newest 5; --provisional lists every one") || strings.Contains(out, "word b") || !strings.Contains(out, "word g") {
 		t.Fatalf("an unset project lists more than the newest words %q", out)
 	}
 	if out := board("--all"); !strings.Contains(out, "word a") {
 		t.Fatalf("--all leaves words out %q", out)
 	}
+	if out := board("--provisional"); !strings.HasPrefix(out, "provisional until attached (7):\n") || !strings.Contains(out, "word a") || strings.Contains(out, "capturing") {
+		t.Fatalf("--provisional should list only every provisional message %q", out)
+	}
 	if err := ls.Enable("board-key", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
-	if out := board(); !strings.Contains(out, "capturing since") || !strings.Contains(out, "not in the ledger") || !strings.Contains(out, "G2:") || !strings.Contains(out, "unattached (7):") {
+	if out := board(); !strings.Contains(out, "capturing since") || !strings.Contains(out, "not in the ledger") || !strings.Contains(out, "G2:") || !strings.Contains(out, "provisional until attached (7):") {
 		t.Fatalf("enabled project board %q", out)
 	}
 	var enabled struct {
@@ -62,7 +65,7 @@ func TestLedgerBoardSaysWhatItCaptures(t *testing.T) {
 	if err := ls.Enable("board-key", ledger.AttachAtCheckpoints); err != nil {
 		t.Fatal(err)
 	}
-	if out := board(); !strings.Contains(out, "attach the person's words at checkpoints") || !strings.Contains(out, "attach your own in one call") {
+	if out := board(); !strings.Contains(out, "sessions hear how many are provisional at checkpoints") || strings.Contains(out, "ledger attach") {
 		t.Fatalf("checkpoint board %q", out)
 	}
 	var mode struct {
@@ -79,7 +82,7 @@ func TestLedgerBoardSaysWhatItCaptures(t *testing.T) {
 	}
 }
 
-func TestLedgerBoardShowsGoalsProvenanceAndUnattachedWords(t *testing.T) {
+func TestLedgerBoardShowsGoalsProvenanceAndProvisionalWords(t *testing.T) {
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
 	const key, other = "repo:github.com/acme/widget", "repo:github.com/acme/infra"
@@ -115,7 +118,7 @@ func TestLedgerBoardShowsGoalsProvenanceAndUnattachedWords(t *testing.T) {
 	for _, want := range []string{
 		"widget-G1 Checkout  asks widget-A1",
 		"widget-C1: add a cart  [captured, stated] owner=s1 from claude-prompt:1",
-		"unattached (1):\n  claude-prompt:2 to s1: and fix the deploy",
+		"provisional until attached (1):\n  claude-prompt:2 to s1: and fix the deploy",
 		"claude-prompt:3 attached elsewhere: repo:github.com/acme/infra infra-G1",
 	} {
 		if !strings.Contains(out, want) {

@@ -16,7 +16,7 @@ type ledgerTarget struct {
 	projectID string
 }
 
-// personWordsRecord says where the person's words were recorded and whether the session must attach them there.
+// personWordsRecord says where the person's words were recorded and whether the session is shown the provisional count there.
 type personWordsRecord struct {
 	key      string
 	captured bool

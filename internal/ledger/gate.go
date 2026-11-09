@@ -38,13 +38,7 @@ func (s *Store) GateTurn(projectKey, sessionID, turnID string, now time.Time) (G
 	}
 	owned := board.ClausesOwnedBy(sessionID)
 	sort.Slice(owned, func(i, j int) bool { return idNumber(owned[i].ID) < idNumber(owned[j].ID) })
-	var pending Attachment
-	if board.capture.Attach != AttachAtCheckpoints {
-		if pending, err = attachment(tx, projectKey, board, sessionID); err != nil {
-			return GateResult{}, err
-		}
-	}
-	if len(owned) == 0 && len(pending.Unattached) == 0 {
+	if len(owned) == 0 {
 		return result, nil
 	}
 	if board.personActive(sessionID, now) {
@@ -60,11 +54,6 @@ func (s *Store) GateTurn(projectKey, sessionID, turnID string, now time.Time) (G
 		if !progressed[c.ID] && !c.liveWait(sessionID, now) && !board.blockedOnOthers(c, sessionID) && !board.gates.waived[gateKey(sessionID, c.ID)] {
 			open = append(open, c.ID)
 			result.Open = append(result.Open, c)
-		}
-	}
-	for _, u := range pending.Unattached {
-		if !board.gates.waived[gateKey(sessionID, u.ID)] {
-			open = append(open, u.ID)
 		}
 	}
 	for _, item := range open {
