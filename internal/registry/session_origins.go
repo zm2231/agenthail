@@ -73,8 +73,19 @@ func (r *Registry) SessionOrigin(sessionID string) (SessionOrigin, bool, error) 
 	return origin, true, nil
 }
 
+const agentStarterSelect = `SELECT o.session_id,o.creator_session_id,COALESCE(s.host_id,'') FROM session_origins o LEFT JOIN sessions s ON s.id=o.creator_session_id WHERE o.via='agent'`
+
+func (r *Registry) AgentStarter(sessionID string) (string, error) {
+	var id, starter, host string
+	err := r.read.QueryRow(agentStarterSelect+` AND o.session_id=?`, sessionID).Scan(&id, &starter, &host)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return hosts.Qualify(host, starter), err
+}
+
 func (r *Registry) AgentStarters() (map[string]string, error) {
-	rows, err := r.read.Query(`SELECT o.session_id,o.creator_session_id,COALESCE(s.host_id,'') FROM session_origins o LEFT JOIN sessions s ON s.id=o.creator_session_id WHERE o.via='agent'`)
+	rows, err := r.read.Query(agentStarterSelect)
 	if err != nil {
 		return nil, err
 	}

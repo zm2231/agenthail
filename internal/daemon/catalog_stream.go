@@ -662,7 +662,7 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	if err != nil {
 		return false
 	}
-	starters, err := d.Registry.AgentStarters()
+	starter, err := d.Registry.AgentStarter(session.ID)
 	if err != nil {
 		return false
 	}
@@ -683,7 +683,7 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	}
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, limitResume, open, leads[session.ID], config)
-		row.RegisteredAt, row.StartedBy = registered, starters[session.ID]
+		row.RegisteredAt, row.StartedBy = registered, starter
 		if hasWork {
 			row.Worktree = newWorkView(work)
 		}
