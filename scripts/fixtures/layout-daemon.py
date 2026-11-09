@@ -48,6 +48,7 @@ ANSWER_REPLIES = {
 HELD_STREAMS = set()
 STREAMS = {}
 SCOPED = {}
+GROUP_REPLIES = {}
 ACTIONS_LOG = os.environ.get("AGENTHAIL_FIXTURE_ACTIONS_LOG", "")
 REQUESTS_LOG = os.environ.get("AGENTHAIL_FIXTURE_REQUESTS_LOG", "")
 
@@ -106,6 +107,9 @@ class Handler(BaseHTTPRequestHandler):
             with open(ACTIONS_LOG, "ab") as log:
                 log.write(body + b"\n")
         status, reply = 200, {"ok": True, "result": {"outcome": "answered"}}
+        action = json.loads(body or b"{}")
+        if GROUP_REPLIES and action.get("action") in GROUP_REPLIES:
+            status, reply = GROUP_REPLIES[action["action"]](action)
         if SESSION.get("endTurn") and json.loads(body or b"{}").get("requestId") == SESSION["endTurn"].get("requestId"):
             status, reply = ANSWER_REPLIES.get(os.environ.get("AGENTHAIL_FIXTURE_ANSWER", ""), (status, reply))
             if status != 502 or "may have reached" in reply["error"]["message"]:
@@ -274,6 +278,61 @@ if __name__ == "__main__":
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.update({"/api/v1/events", "/api/v1/catalog-events"})
+    if sys.argv[1:2] == ["groups"]:
+        # A project with a named session and its lead, and a project with no sessions yet.
+        def grouped(id, name, alias):
+            return {**SESSION, "id": id, "name": name, "alias": alias, "status": "idle", "cwd": "/srv/web-app",
+                    "project": {"id": "web-app", "displayName": "web-app", "rootPath": "/srv/web-app", "kind": "git"},
+                    "checkout": {"id": "web-app-main", "path": "/srv/web-app", "branch": "main", "dirty": False, "isMain": True}}
+
+        sessions = [grouped("builder", "Fix the login redirect", "builder"), grouped("lead", "Coordinate the release", "lead")]
+        count = {"families": len(sessions), "sessions": len(sessions)}
+        page = {**RESPONSES["/api/v1/snapshot"], "sessions": sessions, "totalSessions": len(sessions), "view": {
+            "counts": {scope: count for scope in ("current", "recent", "all")} | {"running": {"families": 0, "sessions": 0}, "archived": {"families": 0, "sessions": 0}},
+            "surfaces": [], "projects": [{"id": "web-app", "name": "web-app", "counts": count, "collapsedFamilyIds": [s["id"] for s in sessions]}],
+            "families": [{"id": s["id"], "rootId": s["id"], "projectId": "web-app", "checkoutId": "web-app-main",
+                          "members": [{"id": s["id"], "depth": 0, "contextOnly": False, "pinned": False}], "pinned": False, "workingSubagents": 0} for s in sessions]}}
+        local = {"id": "", "name": "this Mac", "state": "local"}
+        page["projects"] = [
+            {"id": "web-app", "displayName": "web-app", "kind": "git", "checkouts": [{"host": local, "projectId": "web-app", "rootPath": "/srv/web-app"}],
+             "coordinators": [{"host": local, "name": "lead", "surface": "claude", "sessionId": "lead"}]},
+            {"id": "docs-site", "displayName": "docs-site", "kind": "git", "checkouts": [{"host": local, "projectId": "docs-site", "rootPath": "/srv/docs-site"}]},
+        ]
+        RESPONSES["/api/v1/snapshot"] = page
+        SCOPED.update({scope: page for scope in ("current", "recent", "all", "running")})
+        RESPONSES["/api/v1/session"] = {
+            "session": {k: sessions[0][k] for k in ("id", "surface", "name", "status", "lastActive", "cwd")},
+            "exchanges": [], "capabilities": CAPABILITIES, "readOnly": False, "readOnlyReason": "",
+            "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": []},
+        }
+        for path, body in {"/api/v1/projects/activity": {"projects": [
+                               {"id": "web-app", "lastActive": NOW, "sessionCount": 2, "checkouts": [{"projectId": "web-app", "sessionCount": 2}]},
+                               {"id": "docs-site", "sessionCount": 0, "checkouts": []}]},
+                           "/api/v1/history": {"items": [], "hasMore": False, "nextBefore": 0, "kinds": []},
+                           "/api/v1/decisions": {"decisions": [], "leadHandling": []}, "/api/v1/usage": {"sets": []}, "/api/v1/models": {"models": []},
+                           "/api/v1/session-options": {"surfaces": [{"id": "claude", "workspace": True}], "projects": [], "claudeConfigRoots": []},
+                           "/api/v1/session-commands": {"commands": [], "unavailable": ""}, "/api/v1/session-metadata": {},
+                           "/api/v1/prompts": {"prompts": [], "nextBefore": None}, "/api/v1/requests": {"permissionMode": "", "requests": []}}.items():
+            RESPONSES[path] = body
+
+        def alias(action):
+            if action.get("alias") == "" and action.get("sessionId") == "lead":
+                return 409, {"error": {"code": "conflict", "message": "@lead is a project coordinator's name; change it with 'agenthail coordinator set --replace' or 'agenthail coordinator clear'"}}
+            for session in sessions:
+                if session["id"] == action.get("sessionId"):
+                    session["alias"] = action.get("alias") or None
+            return 200, {"ok": True, "alias": action.get("alias", "")}
+
+        def channel(action):
+            members = [{"coordinator": "@lead", "outcome": "sent"}, {"sessionId": "builder", "outcome": "queued"}] if action.get("channel") == "#web-app" else []
+            if not members:
+                return 400, {"error": {"code": "invalid_request", "message": "no active conversations in " + action.get("channel", "")}}
+            return 200, {"ok": True, "target": action["channel"], "recipients": members, "sent": 1, "queued": 1, "submitted": 0, "failed": 0}
+
+        GROUP_REPLIES.update({"alias": alias, "channel-send": channel})
+        theme = sys.argv[2] if len(sys.argv) > 2 else "system"
+        RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
+        HELD_STREAMS.update({"/api/v1/events", "/api/v1/catalog-events", "/api/v1/session-stream"})
     if sys.argv[1:2] == ["labels"]:
         def labelled(id, name, **fields):
             return {**SESSION, "id": id, "name": name, "alias": None, "status": "idle", "cwd": "/srv/web-app",
