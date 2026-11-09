@@ -229,6 +229,13 @@ struct SessionPreview: View {
         ]
         let projects: [[String: Any]] = [["id": "project-fieldnotes", "displayName": "fieldnotes", "checkouts": [["host": ["id": "computer", "name": "computer", "state": "local"], "projectId": "project-fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "added": true]], "coordinators": [["name": "release-lead", "surface": "codex", "sessionId": "codex-demo"]]]]
         var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": previewSnapshotQueue,"channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24, "projects": projects]
+        if ProcessInfo.processInfo.arguments.contains("--preview-checkouts") {
+            var checked = snapshot["sessions"] as! [[String: Any]]
+            checked[0]["checkout"] = ["id": "checkout-main", "path": "/Users/demo/projects/fieldnotes", "branch": "main", "isMain": true, "dirty": false]
+            checked[1]["checkout"] = ["id": "checkout-fix", "path": "/Users/demo/projects/fieldnotes/.worktrees/fix-login", "branch": "fix-login", "isMain": false, "dirty": true]
+            checked[2]["checkout"] = ["id": "checkout-agenthail", "path": "/Users/demo/projects/agenthail", "branch": "main", "isMain": true, "dirty": true]
+            snapshot["sessions"] = checked
+        }
         if ProcessInfo.processInfo.arguments.contains("--preview-two-computers") {
             let vps: [String: Any] = ["id": "h0123456789ab", "name": "vps.example.ts.net", "state": "connected"]
             snapshot["daemon"] = ["running": true, "hosts": [vps]]

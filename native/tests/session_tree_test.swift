@@ -28,6 +28,15 @@ struct SessionTreeTest {
 
     static func main() {
         expect(SessionTree.parseTimestamp("2026-10-04T12:00:00.000000000Z") == now, "fractional RFC3339 timestamps parse as UTC")
+        expect(SessionTree.checkoutLabel(session("plain", checkout: ".worktrees/history-truth", branch: nil)) == "history-truth", "a checkout without a branch is named by its folder, not its whole path")
+        expect(SessionTree.checkoutLabel(session("detached", branch: nil, detached: "0123456789ab")) == "detached at 0123456", "a detached checkout names its commit")
+        var root = session("root", branch: nil)
+        root.checkout = CheckoutIdentity(id: "root", path: "/", branch: nil, detachedHead: nil, isMain: true, dirty: false)
+        var slashed = session("slashed", branch: nil)
+        slashed.checkout = CheckoutIdentity(id: "slashed", path: "/repo/tools/", branch: nil, detachedHead: nil, isMain: true, dirty: false)
+        expect(SessionTree.checkoutLabels([root, slashed]) == ["/", "tools"], "the root folder reads as / and a trailing slash still names the folder")
+        let alike = SessionTree.checkoutLabels([session("a", checkout: "a/build", branch: nil), session("b", checkout: "b/build", branch: nil), session("c", checkout: "tools", branch: nil), session("d", checkout: "x/build")])
+        expect(alike == ["a/build", "b/build", "tools", "main"], "folders that read alike gain their parent, others stay short, branches are unchanged: \(alike)")
         rendersTheDaemonOrder()
         groupsCheckoutsAndHosts()
         joinsComputers()

@@ -3,6 +3,7 @@
 # change transcript or test-harness paths. nightly: also every night. The ui-all label runs every tier.
 # live: only under cmd/ios-live-harness, in the iOS live nightly run, never in the tiers above.
 
+smoke CheckoutRowsUITests/testEachWorktreeIsNamedWithItsBranchAndUncommittedChanges
 smoke ComposerCompletionUITests/testSuggestionsCompleteCommandsAndFilesAboveTheKeyboard
 smoke ComposerSendUITests/testARefusedSendShowsWhyWithRetryAndKeepsTheText
 smoke HolderPickerUITests/testAConversationOpenInTwoTerminalsAsksWhichOneToSendTo

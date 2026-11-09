@@ -86,7 +86,7 @@ struct SessionTree: Equatable {
         let id: String
         /// The host the checkout is on, nil on this host.
         let host: SessionHost?
-        let label: String
+        var label: String
         let branchLabel: String?
         let isMain: Bool
         let dirty: Bool
@@ -109,7 +109,29 @@ struct SessionTree: Equatable {
     }
 
     static func checkoutLabel(_ session: SessionState) -> String {
-        branchLabel(session) ?? session.checkout?.path ?? session.cwd ?? "unknown checkout"
+        checkoutLabels([session])[0]
+    }
+
+    static func checkoutLabels(_ roots: [SessionState]) -> [String] {
+        let paths = roots.map { root in
+            branchLabel(root) == nil ? (root.checkout?.path ?? root.cwd).map { URL(fileURLWithPath: $0).pathComponents.filter { $0 != "/" } } : nil
+        }
+        var depth = paths.map { _ in 1 }
+        func label(_ index: Int) -> String {
+            if let branch = branchLabel(roots[index]) { return branch }
+            guard let parts = paths[index] else { return "unknown checkout" }
+            guard !parts.isEmpty else { return "/" }
+            return parts.suffix(depth[index]).joined(separator: "/")
+        }
+        while true {
+            let labels = roots.indices.map(label)
+            let grow = roots.indices.filter { index in
+                guard let parts = paths[index], depth[index] < parts.count else { return false }
+                return roots.indices.contains { $0 != index && paths[$0] != nil && labels[$0] == labels[index] }
+            }
+            if grow.isEmpty { return labels }
+            for index in grow { depth[index] += 1 }
+        }
     }
 
     static func branchLabel(_ session: SessionState) -> String? {
