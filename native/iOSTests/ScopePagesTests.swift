@@ -26,7 +26,18 @@ final class ScopePagesTests: XCTestCase {
     }
 
     private func listed(_ filter: SessionFilter, search: String = "") -> Set<String> {
-        Set(model.sessionTree(scope: filter, search: search).projects.flatMap { $0.checkouts.flatMap { $0.families.flatMap { $0.sessions.map(\.id) } } })
+        model.scope = filter
+        return Set(model.sessionTree(search: search).projects.flatMap { $0.checkouts.flatMap { $0.families.flatMap { $0.sessions.map(\.id) } } })
+    }
+
+    private func more(_ filter: SessionFilter) async {
+        model.scope = filter
+        await model.listMore()
+    }
+
+    private func canMore(_ filter: SessionFilter) -> Bool {
+        model.scope = filter
+        return model.canListMore
     }
 
     private func catalog(_ type: String, seq: UInt64, _ data: String) throws -> CatalogStreamEvent {
@@ -53,15 +64,15 @@ final class ScopePagesTests: XCTestCase {
         ScopeServer.state.set("two", current: [], scopes: ["all": [[ScopeServer.row("c")]]])
         let model = try await connect(["one", "two"])
         XCTAssertEqual(listed(.all), [], "All lists only what the daemons' All pages list")
-        XCTAssertTrue(model.canListMore(.all))
+        XCTAssertTrue(canMore(.all))
 
-        await model.listMore(.all)
+        await more(.all)
         XCTAssertEqual(listed(.all), ["one::live", "one::a", "two::c"])
         XCTAssertEqual(model.snapshot?.sessions.first { $0.id == "one::live" }?.name, "fresh", "a page's copy replaced the current one")
-        XCTAssertTrue(model.canListMore(.all))
-        await model.listMore(.all)
+        XCTAssertTrue(canMore(.all))
+        await more(.all)
         XCTAssertEqual(listed(.all), ["one::live", "one::a", "one::b", "two::c"])
-        XCTAssertFalse(model.canListMore(.all))
+        XCTAssertFalse(canMore(.all))
         XCTAssertTrue(ScopeServer.state.requests("one").contains { $0.contains("scope=all") && $0.contains("cursor=1") })
         XCTAssertEqual(ScopeServer.state.requests("two").filter { $0.contains("scope=all") }.count, 1, "a finished computer was read again")
         XCTAssertEqual(model.snapshot?.sessions.filter { $0.id == "one::live" }.count, 1)
@@ -70,20 +81,20 @@ final class ScopePagesTests: XCTestCase {
     func testAPageKeepsLoadingWhenTheRowThatAskedForItGoesAway() async throws {
         ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("a")], [ScopeServer.row("b")]]])
         let model = try await connect(["one"])
-        await model.listMore(.all)
+        await more(.all)
         ScopeServer.state.slowPages("one", seconds: 0.3)
-        let shown = Task { await model.listMore(.all) }
+        let shown = Task { await self.more(.all) }
         try await Task.sleep(for: .milliseconds(50))
         shown.cancel()
-        await model.listMore(.all)
+        await more(.all)
         XCTAssertEqual(listed(.all), ["one::a", "one::b"], "a page asked for by a row that went away was dropped and never read again")
-        XCTAssertFalse(model.canListMore(.all))
+        XCTAssertFalse(canMore(.all))
     }
 
     func testAnArchivedSessionLeavesTheLoadedPages() async throws {
         ScopeServer.state.set("one", current: [ScopeServer.row("live")], scopes: ["all": [[ScopeServer.row("live"), ScopeServer.row("old"), ScopeServer.row("kept")]]])
         let model = try await connect(["one"])
-        await model.listMore(.all)
+        await more(.all)
         XCTAssertEqual(listed(.all), ["one::live", "one::old", "one::kept"])
         ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("kept")]]])
 
@@ -109,7 +120,7 @@ final class ScopePagesTests: XCTestCase {
     func testASessionThatLeavesCurrentStaysInAll() async throws {
         ScopeServer.state.set("one", current: [ScopeServer.row("live"), ScopeServer.row("other")], scopes: ["all": [[ScopeServer.row("live"), ScopeServer.row("other"), ScopeServer.row("a")], [ScopeServer.row("b")]]])
         let model = try await connect(["one"])
-        await model.listMore(.all)
+        await more(.all)
         XCTAssertEqual(listed(.all), ["one::live", "one::other", "one::a"])
         ScopeServer.state.set("one", current: [ScopeServer.row("other")], scopes: ["all": [[ScopeServer.row("live"), ScopeServer.row("other")], [ScopeServer.row("a")]]])
         let host = try XCTUnwrap(model.connection("one"))
@@ -124,7 +135,7 @@ final class ScopePagesTests: XCTestCase {
     func testASessionARefreshDropsFromCurrentStaysInAll() async throws {
         ScopeServer.state.set("one", current: [ScopeServer.row("live")], scopes: ["all": [[ScopeServer.row("a")], [ScopeServer.row("b")]]])
         let model = try await connect(["one"])
-        await model.listMore(.all)
+        await more(.all)
         ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("live"), ScopeServer.row("a")], [ScopeServer.row("b")]]])
         let count = ScopeServer.state.requests("one").count
         _ = await model.connection("one")?.refresh(fresh: true)
@@ -136,35 +147,36 @@ final class ScopePagesTests: XCTestCase {
     func testAComputerWhoseCatalogWasResetRereadsItsPages() async throws {
         ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("a")], [ScopeServer.row("b")]]])
         let model = try await connect(["one"])
-        await model.listMore(.all)
-        XCTAssertTrue(model.canListMore(.all))
+        await more(.all)
+        XCTAssertTrue(canMore(.all))
         ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("c")]]], epoch: "reset")
         let count = ScopeServer.state.requests("one").count
         _ = await model.connection("one")?.refresh(fresh: true)
         try await waitForReread("one", after: count)
         XCTAssertEqual(listed(.all), ["one::c"])
-        XCTAssertFalse(model.canListMore(.all))
+        XCTAssertFalse(canMore(.all))
     }
 
     func testAnOlderSearchAnswerDoesNotReplaceANewerOne() async throws {
         ScopeServer.state.set("one", current: [], scopes: [:], searches: ["ze": ([ScopeServer.row("slow", name: "zeal")], .milliseconds(800)), "zet": ([ScopeServer.row("fast", name: "zeta")], .zero)])
         let model = try await connect(["one"])
-        let older = Task { await model.searchScope("ze", filter: .all) }
+        model.scope = .all
+        let older = Task { await self.model.searchScope("ze") }
         try await Task.sleep(for: .milliseconds(100))
-        await model.searchScope("zet", filter: .all)
+        await model.searchScope("zet")
         XCTAssertEqual(listed(.all, search: "zet"), ["one::fast"])
         _ = await older.value
         XCTAssertEqual(model.connection("one")?.pages.found.map(\.id), ["fast"], "an older search answer replaced the newer one")
         XCTAssertTrue(ScopeServer.state.requests("one").contains { $0.contains("scope=all") && $0.contains("q=zet") })
 
-        await model.searchScope("", filter: .all)
+        await model.searchScope("")
         XCTAssertEqual(model.connection("one")?.pages.found.count, 0)
     }
 
     func testAnUnreachableComputerKeepsItsRowsAndResumesItsCursor() async throws {
         ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("a")], [ScopeServer.row("b")]]])
         let model = try await connect(["one"])
-        await model.listMore(.all)
+        await more(.all)
         let host = try XCTUnwrap(model.connection("one"))
         host.recordStreamInterruption(probeError: AgenthailAPIError.unavailable("offline"))
 
@@ -172,13 +184,56 @@ final class ScopePagesTests: XCTestCase {
         XCTAssertEqual(row.host?.state, "unreachable")
         XCTAssertTrue(row.unavailableReason?.hasSuffix("can't be reached") == true)
         let before = ScopeServer.state.requests("one").count
-        await model.listMore(.all)
+        await more(.all)
         XCTAssertEqual(ScopeServer.state.requests("one").count, before, "an unreachable computer was asked for a page")
 
         _ = await host.refresh(fresh: true)
-        await model.listMore(.all)
+        await more(.all)
         XCTAssertTrue(ScopeServer.state.requests("one").last { $0.contains("scope=all") }?.contains("cursor=1") == true, "the next page did not resume from the held cursor")
         XCTAssertEqual(listed(.all), ["one::a", "one::b"])
+    }
+
+    func testOnlyUnfilteredRecentStaysOnTheStreamedCurrentView() {
+        XCTAssertNil(AgenthailIOSModel.listRequest(.recent, SessionRefinement()))
+        XCTAssertEqual(AgenthailIOSModel.listRequest(.all, SessionRefinement()), ScopeRequest(scope: "all"))
+        XCTAssertEqual(AgenthailIOSModel.listRequest(.recent, SessionRefinement(status: .working)), ScopeRequest(scope: "current", status: "working"))
+        XCTAssertEqual(AgenthailIOSModel.listRequest(.archived, SessionRefinement(surface: "codex")), ScopeRequest(scope: "archived", surface: "codex"))
+    }
+
+    func testAFilterIsReadFromEveryComputerAndCountsEveryScope() async throws {
+        var busy = ScopeServer.row("busy")
+        busy["status"] = "busy"
+        var far = ScopeServer.row("far")
+        far["status"] = "busy"
+        var idle = ScopeServer.row("idle")
+        idle["status"] = "idle"
+        idle["queueCount"] = 0
+        ScopeServer.state.set("one", current: [idle], scopes: ["current": [[busy]]])
+        ScopeServer.state.set("two", current: [], scopes: ["current": [[far]]])
+        let model = try await connect(["one", "two"])
+        model.refinement = SessionRefinement(status: .working)
+        XCTAssertTrue(model.canListMore, "a filtered Recent waits for its first page")
+        await model.listMore()
+        XCTAssertEqual(listed(.recent), ["one::busy", "two::far"])
+        for host in ["one", "two"] {
+            XCTAssertTrue(ScopeServer.state.requests(host).contains { $0.contains("scope=current") && $0.contains("status=working") }, "\(host): \(ScopeServer.state.requests(host))")
+        }
+        let counts = model.sessionList(search: "").counts
+        XCTAssertEqual(counts[.recent], 2, "the chip counts come from the filtered view on both computers")
+        XCTAssertEqual(counts[.running], 2)
+        XCTAssertEqual(counts[.archived], 0)
+
+        model.refinement = SessionRefinement()
+        XCTAssertEqual(listed(.recent), ["one::idle"], "clearing the filter returns to the streamed Current view")
+        XCTAssertEqual(model.sessionList(search: "").counts[.recent], 1)
+    }
+
+    func testASelectedSurfaceNoComputerListsStaysChoosable() async throws {
+        ScopeServer.state.set("one", current: [ScopeServer.row("a")], scopes: [:])
+        let model = try await connect(["one"])
+        model.refinement = SessionRefinement(surface: "gone")
+        XCTAssertTrue(model.sessionList(search: "").surfaces.contains("gone"), "a filter on a surface that went away was dropped from the menu")
+        XCTAssertTrue(model.refinement.isActive)
     }
 
     func testAMentionFindsASessionOutsideTheCurrentOnes() async throws {
@@ -254,7 +309,7 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             if !host.projects.isEmpty { base["projects"] = host.projects }
             base["catalogSeq"] = 1
             respond(200, Self.json(base))
-        case "/api/v1/snapshot" where query["scope"] == "current":
+        case "/api/v1/snapshot" where query["scope"] == "current" && query["status"] == nil && query["surface"] == nil:
             respond(200, PreviewOrder.withView(Self.json(["sessions": host.current.map { var row = $0; row["current"] = true; return row }, "hostEpoch": host.epoch, "catalogSeq": 1])))
         case "/api/v1/snapshot" where query["q"] != nil:
             let search = host.searches[query["q"]!] ?? ([], .zero)

@@ -225,10 +225,9 @@ struct SessionRouteView: View {
 }
 
 struct ConversationListView: View {
-    var model: AgenthailIOSModel
+    @Bindable var model: AgenthailIOSModel
     var selectedID: String? = nil
     let openSession: (String) -> Void
-    @State private var scope = SessionFilter.recent
     @State private var showingNewSession = false
     @State private var search = ""
     @State private var expandedProjects: Set<String> = []
@@ -240,10 +239,10 @@ struct ConversationListView: View {
     @StateObject private var usage = UsageFeed()
     @ScaledMetric(relativeTo: .body) private var titleInset: CGFloat = 53
 
-    private var tree: SessionTree { model.sessionTree(scope: scope, search: search) }
+    private var scope: SessionFilter { model.scope }
 
     private func projectsWithoutSessions(_ tree: SessionTree) -> [ListedProject] {
-        guard (scope == .recent || scope == .all) && search.isEmpty else { return [] }
+        guard (scope == .recent || scope == .all) && search.isEmpty && !model.refinement.isActive else { return [] }
         let listed = Set(tree.projects.compactMap(\.identity?.id))
         return model.projectOrder.filter { !listed.contains($0) }.compactMap { model.projects[$0] }.filter { $0.state.archived != true }
     }
@@ -252,7 +251,8 @@ struct ConversationListView: View {
 #if DEBUG
         let _ = BodyRuns.hit("ConversationListView")
 #endif
-        let tree = tree
+        let list = model.sessionList(search: search)
+        let tree = list.tree
         let families = tree.projects.flatMap { $0.checkouts.flatMap(\.families) }
         List {
             if search.isEmpty {
@@ -261,10 +261,16 @@ struct ConversationListView: View {
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
-            SessionScopeChips(scope: $scope, runningCount: tree.counts[.running] ?? 0)
+            SessionScopeChips(scope: $model.scope, counts: list.counts)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+            if model.refinement.isActive {
+                IOSSessionFilterChips(model: model)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
             UsageMetersRow(feed: usage, model: model, open: openSession)
             if let error = model.connectionError {
                 Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(PhonePalette.muted)
@@ -319,15 +325,15 @@ struct ConversationListView: View {
                     }
                 }
             }
-            let listingMore = search.isEmpty && model.canListMore(scope)
-            if let error = model.listingError, scope != .recent {
-                Button { Task { await model.listMore(scope) } } label: {
+            let listingMore = search.isEmpty && model.canListMore
+            if let error = model.listingError, model.listRequest != nil {
+                Button { Task { await model.listMore() } } label: {
                     Label(error, systemImage: "arrow.clockwise").font(.footnote).foregroundStyle(PhonePalette.muted)
                 }
                 .accessibilityIdentifier("list-more-retry")
             } else if listingMore {
                 ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
-                    .task(id: "\(scope.rawValue)|\(model.sessionCount)") { await model.listMore(scope) }
+                    .task(id: "\(String(describing: model.listRequest))|\(model.sessionCount)") { await model.listMore() }
                     .accessibilityIdentifier("list-more")
             }
             if families.isEmpty && model.searchPending(search) {
@@ -335,6 +341,16 @@ struct ConversationListView: View {
                     .font(.footnote)
                     .foregroundStyle(PhonePalette.muted)
                     .listRowBackground(Color.clear)
+            } else if families.isEmpty && model.refinement.isActive && !model.searching && !listingMore {
+                ContentUnavailableView {
+                    Label("No sessions match these filters.", systemImage: "line.3.horizontal.decrease.circle")
+                } actions: {
+                    Button("Clear Filters") { model.refinement = SessionRefinement() }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("clear-filters")
+                }
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             } else if families.isEmpty && empty.isEmpty && !model.searching && !listingMore {
                 ContentUnavailableView {
                     Label(scope == .running ? "No agents working" : scope == .archived ? "Nothing archived" : "No sessions here", systemImage: "bubble.left.and.bubble.right")
@@ -365,15 +381,16 @@ struct ConversationListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: "Search sessions")
         .task(id: search) { await model.searchSessions(search) }
-        .task(id: "\(scope.rawValue)\u{0}\(search)") {
+        .task(id: "\(scope.rawValue)\u{0}\(String(describing: model.refinement))\u{0}\(search)") {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-            await model.searchScope(search, filter: scope)
+            await model.searchScope(search)
         }
         .task(id: model.usageReaders.map(ObjectIdentifier.init)) { await usage.run(model.usageReaders) }
         .toolbar {
             if model.isPaired {
                 ToolbarItem(placement: .topBarLeading) { VoiceToolbarButton(model: model) }
             }
+            ToolbarItem(placement: .topBarTrailing) { IOSSessionFilterMenu(model: model, surfaces: list.surfaces) }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button("New session", systemImage: "square.and.pencil") {
@@ -434,7 +451,7 @@ struct ConversationListView: View {
     }
 
     private func row(_ source: SessionListRow.Source, id: String, snippet: String? = nil, reason: String? = nil, identifierPrefix: String = "session-") -> SessionListRow {
-        SessionListRow(model: model, source: source, needsYou: tree.attention[id] != nil, selected: selectedID == id,
+        SessionListRow(model: model, source: source, needsYou: model.sessionTree(search: search).attention[id] != nil, selected: selectedID == id,
                        snippet: snippet, reason: reason, identifierPrefix: identifierPrefix, open: openSession)
     }
 }

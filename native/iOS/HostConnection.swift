@@ -218,7 +218,7 @@ final class HostConnection {
 
     func view(_ request: ScopeRequest) -> ScopePage.View? { reader.views[request] }
 
-    func search(_ query: String, scope: String) async { await reader.search(query, in: ScopeRequest(scope: scope)) }
+    func search(_ query: String, in request: ScopeRequest) async { await reader.search(query, in: request) }
 
     func mentions(_ query: String) async throws -> [SessionState] { try await reader.mentions(query) }
 
