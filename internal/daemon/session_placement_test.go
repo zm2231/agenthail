@@ -92,6 +92,7 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"ReadOnlyReason":    func(r *dashboardSession, _ time.Time) { r.ReadOnlyReason = "elsewhere" },
 	"Transport":         func(r *dashboardSession, _ time.Time) { r.Transport = "desktop" },
 	"ForkedFrom":        func(r *dashboardSession, _ time.Time) { r.ForkedFrom = "s05" },
+	"StartedBy":         func(r *dashboardSession, _ time.Time) { r.StartedBy = "s05" },
 	"ObservedAt":        func(r *dashboardSession, now time.Time) { r.ObservedAt = now },
 	"UnavailableReason": func(r *dashboardSession, _ time.Time) { r.UnavailableReason = "gone" },
 	"Worktree": func(r *dashboardSession, _ time.Time) {

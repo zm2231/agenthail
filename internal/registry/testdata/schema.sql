@@ -1,4 +1,4 @@
--- schemaVersion 83
+-- schemaVersion 84
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -1207,6 +1207,24 @@ END;
 
 -- trigger catalog_presentation_version_session_keep_alive_update
 CREATE TRIGGER catalog_presentation_version_session_keep_alive_update AFTER UPDATE OF session_id,failed_at_ms,error ON session_keep_alive WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.failed_at_ms IS NOT OLD.failed_at_ms OR NEW.error IS NOT OLD.error)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_origins_delete
+CREATE TRIGGER catalog_presentation_version_session_origins_delete AFTER DELETE ON session_origins
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_origins_insert
+CREATE TRIGGER catalog_presentation_version_session_origins_insert AFTER INSERT ON session_origins
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_origins_update
+CREATE TRIGGER catalog_presentation_version_session_origins_update AFTER UPDATE OF created_at,creator_session_id,session_id,via ON session_origins WHEN (NEW.created_at IS NOT OLD.created_at OR NEW.creator_session_id IS NOT OLD.creator_session_id OR NEW.session_id IS NOT OLD.session_id OR NEW.via IS NOT OLD.via)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
