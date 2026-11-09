@@ -257,6 +257,10 @@ func (d *Daemon) serve(ws *websocket.Conn) {
 			response = map[string]any{"id": id, "error": result["error"]}
 		}
 		conn.write(response)
+		if !failed && method == "turn/start" {
+			threadID, _ := params["threadId"].(string)
+			d.Notify("thread/status/changed", map[string]any{"threadId": threadID, "status": map[string]any{"type": "active", "activeFlags": []any{}}})
+		}
 		if !failed && method == "thread/resume" {
 			threadID, _ := params["threadId"].(string)
 			for _, open := range d.openFor(threadID) {

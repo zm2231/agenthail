@@ -19,16 +19,38 @@ var (
 // turns until that turn ends.
 type codexTurnStarts struct {
 	mu      sync.Mutex
-	started map[string]time.Time
+	started map[string]codexTurnStart
+}
+
+type codexTurnStart struct {
+	at     time.Time
+	turnID string
 }
 
 func (s *codexTurnStarts) begin(threadID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.started == nil {
-		s.started = map[string]time.Time{}
+		s.started = map[string]codexTurnStart{}
 	}
-	s.started[threadID] = time.Now()
+	s.started[threadID] = codexTurnStart{at: time.Now()}
+}
+
+func (s *codexTurnStarts) identify(threadID, turnID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if start, ok := s.started[threadID]; ok {
+		start.turnID = turnID
+		s.started[threadID] = start
+	}
+}
+
+func (s *codexTurnStarts) ended(threadID, turnID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if start, ok := s.started[threadID]; ok && start.turnID != "" && start.turnID == turnID {
+		delete(s.started, threadID)
+	}
 }
 
 func (s *codexTurnStarts) end(threadID string) {
@@ -40,8 +62,8 @@ func (s *codexTurnStarts) end(threadID string) {
 func (s *codexTurnStarts) pending(threadID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	at, ok := s.started[threadID]
-	return ok && time.Since(at) < codexTurnStartLimit
+	start, ok := s.started[threadID]
+	return ok && time.Since(start.at) < codexTurnStartLimit
 }
 
 // startTurn sends a request that starts a turn on threadID, then keeps client
@@ -58,6 +80,11 @@ func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, met
 	}
 	if err != nil {
 		return response, err
+	}
+	result, _ := response["result"].(map[string]any)
+	turn, _ := result["turn"].(map[string]any)
+	if id := str(turn, "id"); id != "" {
+		c.turnStarts.identify(threadID, id)
 	}
 	if awaitTurnUnderway(ctx, client, threadID) {
 		c.turnStarts.end(threadID)
@@ -123,6 +150,7 @@ func (c *Codex) turnInFlight(ctx context.Context, client codexClient, threadID s
 			c.turnStarts.end(threadID)
 			return true, nil
 		}
+		c.turnStarts.ended(threadID, str(turn, "id"))
 	}
 	return c.turnStarts.pending(threadID), nil
 }
