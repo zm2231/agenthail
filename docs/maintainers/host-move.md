@@ -177,14 +177,38 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    A paired host that has not yet heard of the move may still send any action
    to the source; the source does not pass it on, but answers `moved` the
    same way, and the sending host sends it once more, straight to the target.
-   A third host keeps the session under the source, as it takes no other
-   host's row for a session the source owns there, so every send it makes
-   reaches the source first. The source answers `moved`
-   before it checks the sender, because a sender on the third host is not one
-   the source can send as; the target checks it when the send arrives there.
-   This covers sends the third host held as well, such as a relay: the held
-   send goes once more, with its key, to the target, and is settled by the
-   target's answer. An MCP tool reports `moved` as a retryable refusal.
+   The source answers `moved` before it checks the sender, because a sender
+   on a third host is not one the source can send as; the target checks it
+   when the send arrives there. This covers sends a paired host held as well,
+   such as a relay: the held send goes once more, with its key, to the
+   target, and is settled by the target's answer. An MCP tool reports `moved`
+   as a retryable refusal.
+
+### A third host
+
+A third host takes no host's row for a session another host owns there, so
+no host can claim a session by listing it. It records the session under the
+target only on the source's own word, given over the source's own
+connection:
+
+- the source's catalog stream removes the session with `movedToHost`;
+- the source's snapshot lists the sessions it moved out, with where each
+  went, for a host that reconnects after a gap;
+- the source answers `moved` to a send the third host made to it directly.
+
+A `moved` answer the third host got from any other host changes nothing.
+Once the third host records the target, its held sends for the session go
+there, and it reaches the session with the source gone. It keeps the
+target's row it refused while the source still owned the session, and lists
+it when the source hands over. It keeps at most 1024 such rows per host,
+forgets them when that host's catalog is reloaded, and drops them when the
+host is unpaired.
+
+If the third host misses all of these, for example because it was cut off
+from the source for the whole move and the source never returns, it keeps
+the session under the source. `agenthail doctor` names the sessions held for
+a host that has not answered for a day, and removing that host
+(`agenthail hosts remove <host>`) releases them.
 
 On the target, every request must come from a paired host's token, which has
 the `control` and `host` scopes. The token names the source; the request body

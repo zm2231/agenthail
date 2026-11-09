@@ -21,9 +21,14 @@ func (d *Daemon) forwardHostAction(ctx context.Context, p principal, key string,
 	if err == nil {
 		answer, readErr := readHostAnswer(host, response)
 		if readErr == nil {
-			if next, found := d.pairedHost(movedTo(answer)); found && next != host && !redirectedAfterMove(ctx) {
-				if transitErr := d.hostTransit(ctx, next); transitErr == nil {
-					return d.forwardHostAction(context.WithValue(ctx, redirectedAfterMoveKey{}, true), p, key, next, request, body)
+			if to := movedTo(answer); to != "" && !redirectedAfterMove(ctx) {
+				if sessionID, _ := request["sessionId"].(string); sessionID != "" && d.ownedBy(host, sessionID) {
+					defer d.handOverHostSession(host, sessionID, to)
+				}
+				if next, found := d.pairedHost(to); found && next != host {
+					if transitErr := d.hostTransit(ctx, next); transitErr == nil {
+						return d.forwardHostAction(context.WithValue(ctx, redirectedAfterMoveKey{}, true), p, key, next, request, body)
+					}
 				}
 			}
 			return replyWith(answer.write)

@@ -503,7 +503,7 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 	var events []CatalogEvent
 	var observedAt string
 	if err := tx.QueryRow(`SELECT observed_at FROM catalog_sessions WHERE session_id=?`, move.Conversation).Scan(&observedAt); err == nil {
-		payload, _ := json.Marshal(map[string]string{"sessionId": move.Conversation, "reason": "moved_to_host"})
+		payload, _ := json.Marshal(map[string]string{"sessionId": move.Conversation, "reason": "moved_to_host", "movedToHost": move.PeerHost})
 		event, created, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: "session.removed:" + move.Conversation + ":move:" + move.ID, Type: "session.removed", EntityID: move.Conversation, Payload: payload})
 		if err != nil {
 			return nil, false, err
