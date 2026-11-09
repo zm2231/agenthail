@@ -6,6 +6,7 @@ struct DecisionInboxPane: View {
     @State private var answering = false
     @State private var failure: String?
     @FocusState private var focused: Bool
+    @State private var typing = TextEditingProbe()
 
     static func summary(_ item: DecisionItem) -> String {
         let requests = item.openRequests
@@ -41,12 +42,14 @@ struct DecisionInboxPane: View {
         .focusable()
         .focused($focused)
         .focusEffectDisabled()
+        .background(TextEditingProbeView(probe: typing))
         .onKeyPress(characters: CharacterSet(charactersIn: "jk")) { press in
+            guard !typing.editing else { return .ignored }
             move(press.characters == "j" ? 1 : -1, in: stops.entries, from: entry)
             return .handled
         }
         .onKeyPress(keys: [.return]) { press in
-            guard DecisionInbox.acceptsRecommended(press.modifiers), !answering, let item, item.answerable,
+            guard !typing.editing, DecisionInbox.acceptsRecommended(press.modifiers), !answering, let item, item.answerable,
                   let request = item.openRequests.first, let recommended = DecisionInbox.recommended(request) else { return .ignored }
             Task { await answer(request, recommended, item, following: following) }
             return .handled

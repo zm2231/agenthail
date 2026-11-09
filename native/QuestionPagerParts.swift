@@ -22,9 +22,15 @@ struct PagerLinks: View {
     }
 }
 
+enum PagerTextField: Hashable {
+    case other
+    case note
+}
+
 struct PagerNoteField: View {
     @Binding var note: String
     let disabled: Bool
+    var typing: FocusState<PagerTextField?>.Binding
 
     var body: some View {
         VStack(spacing: 2) {
@@ -32,6 +38,7 @@ struct PagerNoteField: View {
                 .lineLimit(1...3)
                 .textFieldStyle(.plain)
                 .font(.callout)
+                .focused(typing, equals: .note)
                 .disabled(disabled)
                 .accessibilityIdentifier("question-pager-note")
             Rectangle().fill(.separator).frame(height: 1)
@@ -44,15 +51,15 @@ struct PagerOtherRow: View {
     let picked: Bool
     @Binding var text: String
     let disabled: Bool
+    var typing: FocusState<PagerTextField?>.Binding
     let choose: () -> Void
     let submit: () -> Void
-    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
                 choose()
-                focused = true
+                typing.wrappedValue = .other
             } label: {
                 HStack(alignment: .firstTextBaseline) {
                     #if os(macOS)
@@ -69,8 +76,8 @@ struct PagerOtherRow: View {
             if picked {
                 TextField("Other answer", text: $text, prompt: Text("Your answer"))
                     .textFieldStyle(.roundedBorder)
-                    .focused($focused)
-                    .onAppear { focused = true }
+                    .focused(typing, equals: .other)
+                    .onAppear { typing.wrappedValue = .other }
                     .onSubmit(submit)
                     .disabled(disabled)
             }

@@ -185,6 +185,7 @@ SOURCES=(
   DecisionFeed.swift
   InboxStops.swift
   macOS/DecisionInboxPane.swift
+  macOS/TextEditingProbe.swift
   macOS/MacInboxStops.swift
   macOS/InboxStopCard.swift
   macOS/SidebarRow.swift
