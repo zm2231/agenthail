@@ -511,6 +511,8 @@ struct ConversationListView: View {
 }
 
 struct SessionScreen: View {
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    private var compactHeight: Bool { verticalSizeClass == .compact && !typeSize.isAccessibilitySize }
     @ObservedObject var model: AgenthailIOSModel
     @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -770,7 +772,8 @@ struct SessionScreen: View {
             if ScrollJumpProbe.enabled { ScrollJumpLabel() }
         }#endif
         .edgeBar(.top, spacing: 0) {
-            if let detail { SessionSummary(detail: detail, session: liveSession) { showingInfo = true } }
+            if compactHeight { Color.clear.frame(height: 0) }
+            else if let detail { SessionSummary(detail: detail, session: liveSession) { showingInfo = true } }
         }
         .edgeBar(.bottom) {
             VStack(spacing: 0) {
@@ -816,10 +819,23 @@ struct SessionScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                VStack(spacing: 2) {
-                    Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
-                    if let cwd = detail?.session.cwd, !cwd.isEmpty {
-                        Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.host?.name ?? "computer")).font(.caption2).foregroundStyle(PhonePalette.muted).lineLimit(1)
+                if compactHeight, let detail {
+                    Button { showingInfo = true } label: {
+                        HStack(spacing: 8) {
+                            Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
+                            SessionStatusLabel(detail: detail, session: liveSession).labelStyle(.titleAndIcon).lineLimit(1)
+                            Text(detail.model ?? SessionStyle.agentName(detail.session.surface)).font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Open session details, context, model and controls")
+                    .accessibilityIdentifier("session-summary")
+                } else {
+                    VStack(spacing: 2) {
+                        Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
+                        if let cwd = detail?.session.cwd, !cwd.isEmpty {
+                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.host?.name ?? "computer")).font(.caption2).foregroundStyle(PhonePalette.muted).lineLimit(1)
+                        }
                     }
                 }
             }
@@ -887,6 +903,7 @@ struct IOSComposer: View {
     @ObservedObject var model: AgenthailIOSModel
     @ObservedObject var draft: ComposerDraft
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     let session: SessionState
     let detail: SessionDetail
     let showQueuedRow: (() -> Void)?
@@ -918,11 +935,30 @@ struct IOSComposer: View {
             && detail.capabilities.send
     }
 
-    @ViewBuilder private var turnControls: some View {
-        if detail.capabilities.attach && detail.capabilities.send {
+    private var compactHeight: Bool { verticalSizeClass == .compact && !dynamicTypeSize.isAccessibilitySize }
+    private var attachShown: Bool { detail.capabilities.attach && detail.capabilities.send }
+
+    private func textView(lines: ClosedRange<Int>) -> some View {
+        IOSComposerTextView(
+            text: $draft.text,
+            placeholder: steering ? "Steer this turn…" : "Message this agent…",
+            label: steering ? "Instruction for the current turn" : "Message to this agent",
+            lines: lines,
+            pasteAttachments: attachShown && !sending ? { model.paste($0) } : nil,
+            editor: editor,
+            onCaret: { caret in updateCompletion { $0.caret = caret } }
+        )
+    }
+
+    @ViewBuilder private var attachControl: some View {
+        if attachShown {
             ComposerAttachmentMenu(model: model)
                 .disabled(sending)
         }
+    }
+
+    @ViewBuilder private var turnControls: some View {
+        attachControl
         if !detail.readOnly, let settings = detail.turnSettings, !settings.isEmpty {
             // The chips scroll, so they claim no width of their own when the footer decides whether one row fits.
             IOSTurnSettingChips(model: model, sessionID: session.id, settings: settings) { showingModels = true }
@@ -989,27 +1025,30 @@ struct IOSComposer: View {
                         updateCompletion { $0.dismissed = draft.text }
                     }
                 }
-                IOSComposerTextView(
-                    text: $draft.text,
-                    placeholder: steering ? "Steer this turn…" : "Message this agent…",
-                    label: steering ? "Instruction for the current turn" : "Message to this agent",
-                    lines: dynamicTypeSize.isAccessibilitySize ? 1 ... 2 : 1 ... 6,
-                    pasteAttachments: detail.capabilities.attach && detail.capabilities.send && !sending ? { model.paste($0) } : nil,
-                    editor: editor,
-                    onCaret: { caret in updateCompletion { $0.caret = caret } }
-                )
-                .padding(.horizontal, 8).padding(.top, 8)
-                let row = HStack(spacing: 8) { turnControls; Spacer(minLength: 0); sendControls }
-                if dynamicTypeSize.isAccessibilitySize {
-                    ViewThatFits(in: .horizontal) {
-                        row
-                        VStack(alignment: .leading, spacing: 8) {
-                            turnControls
-                            HStack(spacing: 8) { Spacer(minLength: 0); sendControls }
+                if compactHeight {
+                    HStack(spacing: 8) {
+                        attachControl
+                        textView(lines: 1 ... 2).padding(.leading, attachShown ? 0 : 8)
+                        if !detail.readOnly, let settings = detail.turnSettings, !settings.isEmpty {
+                            IOSTurnSettingsMenu(model: model, sessionID: session.id, settings: settings) { showingModels = true }
                         }
+                        sendControls
                     }
                 } else {
-                    row
+                    textView(lines: dynamicTypeSize.isAccessibilitySize ? 1 ... 2 : 1 ... 6)
+                        .padding(.horizontal, 8).padding(.top, 8)
+                    let row = HStack(spacing: 8) { turnControls; Spacer(minLength: 0); sendControls }
+                    if dynamicTypeSize.isAccessibilitySize {
+                        ViewThatFits(in: .horizontal) {
+                            row
+                            VStack(alignment: .leading, spacing: 8) {
+                                turnControls
+                                HStack(spacing: 8) { Spacer(minLength: 0); sendControls }
+                            }
+                        }
+                    } else {
+                        row
+                    }
                 }
             }
             .padding(10)
@@ -1396,17 +1435,7 @@ struct SessionSummary: View {
         .accessibilityHint("Open session details, context, model and controls")
         .accessibilityIdentifier("session-summary")
     }
-    private var status: some View {
-        TimelineView(.everyMinute) { context in
-            statusLabel(now: context.date)
-        }
-    }
-    private func statusLabel(now: Date) -> some View {
-        let kind = SessionDisplayKind.of(session, now: now)
-        return Label(SessionDisplayKind.label(session, now: now, waitingPlace: detail.waitingPlace, limit: detail.limitLabel), systemImage: kind.symbol)
-            .font(.subheadline)
-            .foregroundStyle(kind == .working ? AnyShapeStyle(PhonePalette.working) : AnyShapeStyle(PhonePalette.muted))
-    }
+    private var status: some View { SessionStatusLabel(detail: detail, session: session) }
 	@ViewBuilder private var context: some View {
 		if let context = detail.context {
 			Group {

@@ -313,6 +313,9 @@ struct SessionPreview: View {
         let rows: [String]
         switch UserDefaults.standard.string(forKey: "preview-tail") {
         case "none": rows = []
+        case "review":
+            let dead = #"{"id":26,"sessionId":"demo","target":"Make the build reliable","status":"dead","evidence":"unknown","attempts":1,"lastError":"Delivery outcome is unknown. Check the session before retrying.","author":"person","message":"Verify the signing step before the next release.","queuedAt":"2026-09-11T18:20:00.000000000Z"}"#
+            rows = [own(22, "Keep the regression check with the fix."), dead]
         case "many": rows = [picture, own(22, "Then rerun the suite."), own(23, "Add a note to the changelog."), own(24, "Close the old issue once it's green."), own(25, "And tag the release.")]
         default: rows = [picture]
         }

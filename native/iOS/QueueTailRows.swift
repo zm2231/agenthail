@@ -5,6 +5,8 @@ struct QueueTailRows: View {
     @Binding var tail: QueueTail
     let readOnly: Bool
     var generation = 0
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var retrying: QueueTail.Row?
     @State private var reading: QueueTail.Row?
 
@@ -40,7 +42,7 @@ struct QueueTailRows: View {
                     Text("It may already have reached the agent. Check the session first.")
                 }
                 .sheet(isPresented: Binding(get: { reading?.id == row.id }, set: { if !$0 { reading = nil } })) {
-                    QueuedMessageSheet(item: row.item)
+                    QueuedMessageSheet(item: row.item, reason: row.reason)
                 }
         }
     }
@@ -48,11 +50,14 @@ struct QueueTailRows: View {
     private func bubble(_ row: QueueTail.Row) -> some View {
         let item = row.item
         let names = (item.attachments ?? []).map(\.name).joined(separator: ", ")
+        let compact = verticalSizeClass == .compact && !dynamicTypeSize.isAccessibilitySize
+        let heading = Text(row.heading)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(row.isDead ? AnyShapeStyle(PhonePalette.attention) : AnyShapeStyle(PhonePalette.muted))
         return VStack(alignment: .leading, spacing: 4) {
-            Text(row.heading)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(row.isDead ? AnyShapeStyle(PhonePalette.attention) : AnyShapeStyle(PhonePalette.muted))
+            if !compact { heading }
             HStack(spacing: 6) {
+                if compact { heading.lineLimit(1).fixedSize() }
                 Button { reading = row } label: {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(PeerEnvelope(item.message).body.split(separator: "\n").first.map(String.init) ?? "")
@@ -69,13 +74,13 @@ struct QueueTailRows: View {
                 .accessibilityIdentifier("queue-tail-read-\(item.id)")
                 actions(row)
             }
-            if let reason = row.reason {
+            if !compact, let reason = row.reason {
                 Text(reason)
                     .font(.footnote).foregroundStyle(PhonePalette.muted)
                     .accessibilityIdentifier("queue-tail-reason-\(item.id)")
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(.horizontal, 14).padding(.vertical, compact ? 4 : 8)
         .background(SessionStyle.surface, in: RoundedRectangle(cornerRadius: 16))
         .padding(.leading, 16)
         .accessibilityElement(children: .contain)

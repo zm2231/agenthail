@@ -10,7 +10,7 @@ struct IOSTurnSettingChips: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 if let setting = settings.setting(TurnSetting.model) {
-                    Button(action: showModels) { chip(setting.valueLabel) }
+                    Button(action: showModels) { Self.chip(setting.valueLabel) }
                         .buttonStyle(.plain)
                         .accessibilityLabel(setting.chipAccessibilityLabel)
                         .accessibilityIdentifier("composer-model-picker")
@@ -31,29 +31,14 @@ struct IOSTurnSettingChips: View {
 
     private func menu(_ setting: TurnSetting, options: [TurnSetting.Option]) -> some View {
         Menu {
-            Section(setting.appliesNextTurn ? "From the next turn" : "") {
-                Picker(setting.chipName, selection: selection(setting, options: options)) {
-                    ForEach(options, id: \.id) { option in
-                        Text(option.label).tag(option.id)
-                    }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            }
+            TurnSettingPicker(model: model, sessionID: sessionID, setting: setting, options: options)
         } label: {
-            chip(setting.valueLabel)
+            Self.chip(setting.valueLabel)
         }
         .accessibilityLabel(setting.chipAccessibilityLabel)
     }
 
-    private func selection(_ setting: TurnSetting, options: [TurnSetting.Option]) -> Binding<String> {
-        Binding(get: { setting.value }) { id in
-            guard let option = options.first(where: { $0.id == id }), setting.pick(option) == .apply else { return }
-            Task { await model.setTurnSetting(setting.key, to: option.id, sessionID: sessionID) }
-        }
-    }
-
-    private func chip(_ text: String) -> some View {
+    static func chip(_ text: String) -> some View {
         Text(text).font(.caption.weight(.medium))
             .foregroundStyle(.primary)
             .lineLimit(1)
