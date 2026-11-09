@@ -28,6 +28,7 @@ type CatalogPresentationRow struct {
 	LastActive, RegisteredAt               time.Time
 	Subagent                               *CatalogPresentationSubagent
 	StartedBy                              string
+	Task                                   bool
 	WaitingOn, BackgroundTasks, UsageLimit json.RawMessage
 	TurnStop                               json.RawMessage
 	Alias                                  sql.NullString
@@ -150,7 +151,7 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 		if err := rows.Scan(&row.ID, &row.HostID, &row.Name, &row.Surface, &row.Status, &row.Cwd, &lastActive, &row.RuntimeKind, &row.Source, &row.Transport,
 			&row.UnavailableReason, &subagent.ParentID, &subagent.RootID, &subagent.Depth, &subagent.Nickname, &subagent.Role, &waiting, &background, &limit, &stop,
 			&row.Alias, &row.QueueCount, &row.Archived, &row.Freshness.Generation, &row.Freshness.Stale, &row.Attention, &row.Retired, &registered,
-			&pinnedAt, &keepAliveFailedAt, &row.KeepAlive.Error, &snoozedAt, &snoozedUntil, &snoozeWake, &row.StartedBy, &starterHost); err != nil {
+			&pinnedAt, &keepAliveFailedAt, &row.KeepAlive.Error, &snoozedAt, &snoozedUntil, &snoozeWake, &row.StartedBy, &starterHost, &row.Task); err != nil {
 			return nil, err
 		}
 		row.StartedBy = hosts.Qualify(starterHost, row.StartedBy)
@@ -236,7 +237,8 @@ const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.stat
  sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,
  cs.projection_generation,(cs.misses>0 OR cs.discovery_failures>0 OR (s.host_id!='' AND cs.unavailable_reason!='')),
  COALESCE(at.reason,''),cs.retired,s.registered_at,s.pinned_at_ms,COALESCE(ka.failed_at_ms,0),COALESCE(ka.error,''),
- s.snoozed_at_ms,s.snoozed_until_ms,s.snooze_wake,COALESCE(o.creator_session_id,''),COALESCE(sc.host_id,'')
+ s.snoozed_at_ms,s.snoozed_until_ms,s.snooze_wake,COALESCE(o.creator_session_id,''),COALESCE(sc.host_id,''),
+ EXISTS (SELECT 1 FROM tasks t WHERE t.child_session_id=s.id)
  `
 
 const catalogPresentationJoins = ` JOIN sessions s ON s.id=cs.session_id

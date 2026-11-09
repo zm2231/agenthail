@@ -151,6 +151,21 @@ func (r *Registry) RunningTaskChildren() (map[string]bool, error) {
 	return children, nil
 }
 
+func (r *Registry) TaskChildren() (map[string]bool, error) {
+	ids, err := queryRows(r.read, []string{}, func(scan rowScanner) (string, error) {
+		var id string
+		return id, scan.Scan(&id)
+	}, `SELECT child_session_id FROM tasks`)
+	if err != nil {
+		return nil, err
+	}
+	children := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		children[id] = true
+	}
+	return children, nil
+}
+
 // ArmTaskWake asks for a notice when a running task settles.
 func (r *Registry) ArmTaskWake(id int64) error {
 	_, err := r.db.Exec(`UPDATE tasks SET wake=1 WHERE id=? AND state='running'`, id)
