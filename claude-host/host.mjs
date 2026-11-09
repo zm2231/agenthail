@@ -147,13 +147,19 @@ class Session {
     this.commands = null;
     this.terminalCommands = new Set();
     this.mcpToken = '';
+    this.opening = Promise.resolve();
+    this.attaching = Promise.resolve();
   }
 
-  async attachAgenthail(mcp) {
-    const result = await this.query.setMcpServers(agenthailServer(mcp));
-    const failed = result?.errors?.[AGENTHAIL_MCP];
-    if (failed) throw new HostError('mcp_failed', `the agenthail MCP server did not connect: ${failed}`);
-    this.mcpToken = mcp.token;
+  attachAgenthail(mcp) {
+    const attached = this.attaching.catch(() => {}).then(async () => {
+      const result = await this.query.setMcpServers(agenthailServer(mcp));
+      const failed = result?.errors?.[AGENTHAIL_MCP];
+      if (failed) throw new HostError('mcp_failed', `the agenthail MCP server did not connect: ${failed}`);
+      this.mcpToken = mcp.token;
+    });
+    this.attaching = attached;
+    return attached;
   }
 
   // setCommands keeps the commands a person can run in the session, without
@@ -400,6 +406,7 @@ const methods = {
   replaceMcp: async ({ sessionId, mcp }) => {
     validMcp(mcp);
     const s = unsandboxed(sessionId);
+    await s.opening;
     await s.attachAgenthail(mcp);
     return s.describe();
   },
@@ -532,6 +539,7 @@ async function open(params) {
   };
   const existing = sessions.get(id);
   if (existing) {
+    await existing.opening;
     if (params.mcp && params.mcp.token !== existing.mcpToken) {
       const failed = await existing.attachAgenthail(params.mcp).then(() => '', (error) => error.message);
       if (failed) return { ...existing.describe(), mcpError: failed };
@@ -559,7 +567,9 @@ async function open(params) {
     ...(s.window !== 'default' ? { autoCompactWindow: compactWindowSetting(s.window) } : {}),
   };
   s.checker = params.checker?.run ?? '';
-  s.mcpToken = params.mcp?.token ?? '';
+  let opened;
+  s.opening = new Promise((resolve, reject) => (opened = { resolve, reject }));
+  s.opening.catch(() => {});
   sessions.set(id, s);
   let exited;
   const exit = new Promise((resolve) => (exited = resolve));
@@ -585,7 +595,7 @@ async function open(params) {
           // Claude allows only when it started with consent to it. Claude still
           // asks canUseTool for questions in bypassPermissions.
           allowDangerouslySkipPermissions: true,
-          ...(params.mcp ? { mcpServers: agenthailServer(params.mcp), allowedTools: [`mcp__${AGENTHAIL_MCP}`] } : {}),
+          ...(params.mcp ? { allowedTools: [`mcp__${AGENTHAIL_MCP}`] } : {}),
           ...(args.agenthail ? { hooks: sessionContextHooks(s) } : {}),
           canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
         };
@@ -622,13 +632,31 @@ async function open(params) {
       writeSettings();
       message += `; the session keeps compact window ${keptWindow} instead of ${pendingWindow}`;
     }
-    throw new HostError(error instanceof StartError && error.refused ? 'refused' : 'open_failed', message);
+    const failure = new HostError(error instanceof StartError && error.refused ? 'refused' : 'open_failed', message);
+    opened.reject(failure);
+    throw failure;
   }
   s.setCommands(init.commands);
+  // The credential goes over the control channel: --mcp-config would put it in Claude's argv.
+  let mcpError = '';
+  if (params.mcp) {
+    const gone = exit.then((status) => Promise.reject(new StartError(`Claude exited while starting: ${s.stderr.trim() || 'no output'}`, status)));
+    try {
+      await Promise.race([s.attachAgenthail(params.mcp), gone]);
+    } catch (error) {
+      if (error instanceof StartError) {
+        const failure = new HostError('open_failed', error.message);
+        opened.reject(failure);
+        throw failure;
+      }
+      mcpError = error.message;
+    }
+  }
   if (params.permissionMode || params.model || s.checker || pendingWindow !== undefined) s.remember();
   s.setState('idle');
+  opened.resolve();
   if (s.checker) await take(s, { uuid: randomUUID(), text: params.checker.prompt });
-  return s.describe();
+  return mcpError ? { ...s.describe(), mcpError } : s.describe();
 }
 
 // runnableCommands is one entry per name a person can type. Rows can share a
@@ -897,6 +925,7 @@ function decide({ request, input, suggestions }, decision) {
 async function send(params) {
   const s = session(params.sessionId);
   if (s.checker) throw new HostError('invalid', `session ${s.id} is a narrowing checker; it takes no messages`);
+  await s.opening;
   return take(s, params);
 }
 

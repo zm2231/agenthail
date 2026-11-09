@@ -325,6 +325,40 @@ func (f *Fixture) Spawns(t testing.TB, sessionID string) []Spawn {
 	return out
 }
 
+type Attach struct {
+	PID    int
+	Bearer string
+}
+
+func (f *Fixture) Attached(t testing.TB, sessionID string) []Attach {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.ClaudeDir, "controls.jsonl"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []Attach
+	for _, line := range Lines(data) {
+		var control struct {
+			SessionID string `json:"sessionId"`
+			PID       int    `json:"pid"`
+			Subtype   string `json:"subtype"`
+			Servers   map[string]struct {
+				Headers map[string]string `json:"headers"`
+			} `json:"servers"`
+		}
+		if err := json.Unmarshal(line, &control); err != nil {
+			t.Fatal(err)
+		}
+		if control.SessionID == sessionID && control.Subtype == "mcp_set_servers" {
+			out = append(out, Attach{PID: control.PID, Bearer: strings.TrimPrefix(control.Servers["agenthail"].Headers["Authorization"], "Bearer ")})
+		}
+	}
+	return out
+}
+
 // Refuse makes the fake CLI exit with message before it starts the session.
 func (f *Fixture) Refuse(t testing.TB, sessionID, message string) {
 	t.Helper()

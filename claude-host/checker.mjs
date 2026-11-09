@@ -88,11 +88,12 @@ export function checkerOptions({ run, token, configDir, agenthail }) {
     (input) =>
       new Promise((resolve) => {
         if (!agenthail) return resolve({ isError: true, content: [{ type: 'text', text: 'agenthail is not available to this host' }] });
-        const env = { ...process.env, AGENTHAIL_CHECK_TOKEN: token };
-        execFile(agenthail, reportArgs(run, input), { env, timeout: REPORT_TIMEOUT_MS, maxBuffer: 1 << 20 }, (error, stdout, stderr) => {
+        const child = execFile(agenthail, reportArgs(run, input), { timeout: REPORT_TIMEOUT_MS, maxBuffer: 1 << 20 }, (error, stdout, stderr) => {
           const text = (error ? stderr || error.message : stdout).trim();
           resolve({ isError: Boolean(error), content: [{ type: 'text', text: text || 'reported' }] });
         });
+        child.stdin.on('error', () => {});
+        child.stdin.end(token);
       }),
   );
   const { model, env, auth } = carried(configDir);

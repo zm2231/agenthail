@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -27,11 +28,12 @@ func TestCheckCommandsPostWhatTheCheckerAndTheProposerSay(t *testing.T) {
 		}
 		return out
 	}
-	t.Setenv("AGENTHAIL_CHECK_TOKEN", "")
-	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"check-report", "run-1", "--none"}) }); err == nil || !strings.Contains(err.Error(), "only the checker") {
-		t.Fatalf("check-report without the run token: %v", err)
-	}
+	stdinHolding(t, "")
 	t.Setenv("AGENTHAIL_CHECK_TOKEN", "run-secret")
+	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"check-report", "run-1", "--none"}) }); err == nil || !strings.Contains(err.Error(), "only the checker") {
+		t.Fatalf("check-report without the run token on stdin: %v", err)
+	}
+	stdinHolding(t, "run-secret\n")
 	if out := run("check-report", "run-1", "--missing", "typo tolerance", "--in", "claude-prompt:2", "--missing", "csv export", "--in", "claude-prompt:2"); !strings.Contains(out, "pending cuts widget-X1") {
 		t.Fatalf("check-report output %q", out)
 	}
@@ -58,4 +60,21 @@ func TestCheckCommandsPostWhatTheCheckerAndTheProposerSay(t *testing.T) {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}
+}
+
+func stdinHolding(t *testing.T, text string) {
+	t.Helper()
+	stdin, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stdin.WriteString(text); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stdin.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdin
+	os.Stdin = stdin
+	t.Cleanup(func() { os.Stdin = previous; stdin.Close() })
 }

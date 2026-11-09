@@ -165,7 +165,7 @@ func TestACoordinatorThatFailsToBecomeTheLeadNeverControlsTheProject(t *testing.
 		if len(spawns) != 1 {
 			t.Fatalf("spawns=%d", len(spawns))
 		}
-		if slices.Contains(f.capabilities(t, spawnBearer(t, spawns[0])), any("control.project")) {
+		if slices.Contains(f.capabilities(t, f.spawnBearer(t, spawns[0])), any("control.project")) {
 			t.Fatal("a session that never became the lead controls its project")
 		}
 	})
