@@ -190,7 +190,7 @@ func cliFixture(t *testing.T, fake *cliSurface) (*App, *registry.Registry) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	return &App{Registry: r, Surfaces: []SurfaceEntry{{Name: string(fake.kind), Surface: fake}}, DefaultTimeout: DefaultCommandTimeout, catalogDaemonRunning: func() bool { return false }, daemonService: &fakeService{}}, r
+	return &App{Registry: r, Surfaces: []SurfaceEntry{{Name: string(fake.kind), Surface: fake}}, DefaultTimeout: DefaultCommandTimeout, catalogDaemonRunning: func() bool { return false }, daemonService: &fakeService{}, scopeOverride: allowAgentScope}, r
 }
 
 // A real Claude surface starts host and Claude processes, which a loaded

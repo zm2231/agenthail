@@ -89,6 +89,31 @@ func TestAWorkersPermissionPromptGoesToItsLeadOnceWithHowToAnswer(t *testing.T) 
 	}
 }
 
+func TestALeadWithAgenthailToolsIsToldTheToolsToAnswerWith(t *testing.T) {
+	f := newNoticeFixture(t)
+	f.setLead(t, "lead")
+	if _, err := f.d.Registry.IssueSessionCredential("lead", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
+	notices := f.notices(t)
+	if len(notices) != 1 {
+		t.Fatalf("notices=%+v", notices)
+	}
+	for _, want := range []string{`agenthail_requests {"sessionId":"@builder","requestId":"approve-1"}`, `agenthail_answer {"target":"@builder","requestId":"approve-1"`} {
+		if !strings.Contains(notices[0].Message, want) {
+			t.Fatalf("the notice %q does not say %q", notices[0].Message, want)
+		}
+	}
+	if strings.Contains(notices[0].Message, "agenthail answer ") {
+		t.Fatalf("a lead with tools is told the CLI: %q", notices[0].Message)
+	}
+	end := endTurnNotice("@builder", "@builder", registry.TurnEnd{Headline: "pick one"}, true)
+	if !strings.Contains(end, `agenthail_send {"target":"@builder","message":"<answer>"}`) {
+		t.Fatalf("end-turn notice=%q", end)
+	}
+}
+
 func TestAPromptGoesToTheSpawnerWhenTheProjectHasNoLead(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)

@@ -328,7 +328,8 @@ func (a *App) isLocalHost(ref string) (bool, error) {
 	return strings.EqualFold(ref, identity.ID) || strings.EqualFold(ref, identity.Name), nil
 }
 
-func (a *App) createRemoteThread(hostText string, request threadCreateRequest, creator string, args []string) error {
+// An empty hostText starts the session on this host as the calling agent, bounded by its reach.
+func (a *App) createThreadThroughDaemon(hostText string, request threadCreateRequest, creator string, args []string) error {
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
 		return err
@@ -338,9 +339,9 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 		return err
 	}
 	defer cancel()
-	client, err := a.daemonAPI()
-	if err != nil {
-		return err
+	where := " on host " + hostText
+	if hostText == "" {
+		where = ""
 	}
 	payload, err := actionPayload(struct {
 		surface.TurnOptions
@@ -358,7 +359,20 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 			payload[key] = value
 		}
 	}
-	data, status, err := client.action(ctx, payload)
+	var data []byte
+	var status int
+	if hostText == "" {
+		data, status, err = a.agentCreate(ctx, payload)
+		if err != nil {
+			return err
+		}
+	} else {
+		client, clientErr := a.daemonAPI()
+		if clientErr != nil {
+			return clientErr
+		}
+		data, status, err = client.action(ctx, payload)
+	}
 	var response struct {
 		OK         bool                `json:"ok"`
 		Status     string              `json:"status"`
@@ -370,22 +384,25 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 		Result     *surface.SendResult `json:"result"`
 		Account    *claudepick.Pick    `json:"account"`
 		Worktree   *threadWorktree     `json:"worktree"`
-		Error      string              `json:"error"`
+		Error      json.RawMessage     `json:"error"`
 	}
+	message := ""
 	if err != nil {
 		var statusErr hosts.StatusError
 		if !errors.As(err, &statusErr) || statusErr.Status != http.StatusBadGateway {
-			return fmt.Errorf("create on host %s: %w", hostText, err)
+			return fmt.Errorf("create%s: %w", where, err)
 		}
-		response.Error = statusErr.Message
+		message = statusErr.Message
 	} else if decodeErr := json.Unmarshal(data, &response); decodeErr != nil {
 		return fmt.Errorf("decode create response (HTTP %d): %w", status, decodeErr)
+	} else {
+		message = createErrorText(response.Error)
 	}
-	output := threadCreateOutput{OK: err == nil && response.OK, Status: response.Status, Retryable: response.Retryable, Detail: response.Detail, Warning: response.Warning, DeliveryID: response.DeliveryID, Session: response.Session, Delivery: response.Result, Alias: request.alias, Account: response.Account, Worktree: response.Worktree, Error: response.Error}
+	output := threadCreateOutput{OK: err == nil && response.OK, Status: response.Status, Retryable: response.Retryable, Detail: response.Detail, Warning: response.Warning, DeliveryID: response.DeliveryID, Session: response.Session, Delivery: response.Result, Alias: request.alias, Account: response.Account, Worktree: response.Worktree, Error: message}
 	output.Unknown = output.Status == string(registry.DeliveryIntentSubmitted)
 	if !output.OK {
 		if output.Error == "" {
-			output.Error = fmt.Sprintf("create on host %s failed", hostText)
+			output.Error = fmt.Sprintf("create%s failed", where)
 		}
 		return emitThreadFailure(request, output, errors.New(output.Error))
 	}
@@ -393,12 +410,15 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 		return emit(output)
 	}
 	if output.Session == nil {
-		return fmt.Errorf("host %s created no session", hostText)
+		return fmt.Errorf("create%s started no session", where)
 	}
 	_, raw, _ := hosts.Split(output.Session.ID)
-	label := hostText + hosts.Separator + string(output.Session.Surface) + "/" + raw
+	label := string(output.Session.Surface) + "/" + raw
 	if request.alias != "" {
-		label = hostText + hosts.Separator + "@" + request.alias
+		label = "@" + request.alias
+	}
+	if hostText != "" {
+		label = hostText + hosts.Separator + label
 	}
 	switch {
 	case output.Unknown:
@@ -411,6 +431,21 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 	printThreadWorktree(output.Worktree)
 	printPickedAccount(output.Account)
 	return nil
+}
+
+// A create's error is text in its receipt and an object in the API's error envelope.
+func createErrorText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var envelope struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &envelope) == nil {
+		return envelope.Message
+	}
+	return ""
 }
 
 func (a *App) cmdHosts(args []string) error {

@@ -45,6 +45,11 @@ func (a *App) cmdCoordinator(args []string) error {
 	if len(positional) == 0 {
 		return a.coordinatorShow(flagVal(args, "--cwd"), hasFlag(args, "--json"))
 	}
+	if positional[0] == "set" || positional[0] == "new" || positional[0] == "clear" {
+		if err := a.operatorScope(context.Background(), "Choosing a project's coordinator"); err != nil {
+			return err
+		}
+	}
 	switch positional[0] {
 	case "list":
 		if len(positional) != 1 {
@@ -457,6 +462,9 @@ func (a *App) coordinatorClear(path string, jsonOut bool) error {
 func (a *App) sendToNamedCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message string, args []string) error {
 	if spec.HostID == "" && (hasFlag(args, "--stream") || hasFlag(args, "--reply")) {
 		return fmt.Errorf("the coordinator has no conversation yet; send without --stream or --reply, then read it with 'agenthail last'")
+	}
+	if _, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "lead-send", Project: spec.ProjectID, Mode: sendMode(args)}); err != nil {
+		return err
 	}
 	source, err := a.sourceSessionID(ctx, flagVal(args, "--from"))
 	if err != nil {

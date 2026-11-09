@@ -59,9 +59,8 @@ func callerCardJSON(t *testing.T, app *App, variable, id string) agentcard.Card 
 
 func TestASessionAnAgentStartsReportsToThatAgent(t *testing.T) {
 	app, _, cwd := cardFixture(t)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "planner-conversation")
 	if _, err := captureStdout(t, func() error {
-		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--alias", "builder", "--json"})
+		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--alias", "builder", "--from", "@planner", "--json"})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -185,6 +184,7 @@ func TestASessionWhoseWorkerHasNoLeadIsToldItAnswersItsPrompts(t *testing.T) {
 	if text := helpAgentAs(t, app, "planner-conversation"); strings.Contains(text, "permission prompts") {
 		t.Fatalf("a session with no workers is told it answers prompts:\n%s", text)
 	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	if _, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", elsewhere, "--from", "@planner", "--json"})
 	}); err != nil {

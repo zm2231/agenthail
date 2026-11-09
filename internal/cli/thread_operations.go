@@ -57,7 +57,17 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 			return err
 		}
 		if remote != nil {
+			if operation != "logs" && operation != "status" {
+				if err := a.controlScope(ctx, nil, remote); err != nil {
+					return err
+				}
+			}
 			return a.threadOperationRemote(ctx, remote, operation, positional, args)
+		}
+	}
+	if operation != "logs" && operation != "status" {
+		if err := a.controlScope(ctx, session, nil); err != nil {
+			return err
 		}
 	}
 	var output any

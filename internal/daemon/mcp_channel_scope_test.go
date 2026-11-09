@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -45,6 +47,31 @@ func TestAnAgentPostsOnlyToItsOwnProjectsChannel(t *testing.T) {
 	detail, _ := out["detail"].(map[string]any)
 	if !refused || out["code"] != "out_of_scope" || detail["rule"] != "different_project" || widgetPosts() != 1 {
 		t.Fatalf("another project's agent posting: refused=%v out=%v posts=%d", refused, out, widgetPosts())
+	}
+
+	project, err := broadcast.FindProject(r, "widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: project.ID, ProjectRoot: widget, Name: "widget-lead", Surface: string(surface.KindClaude), Cwd: widget}, registry.CoordinatorChange{SessionID: to.ID, ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	leadMessages := func() int {
+		count := 0
+		for _, message := range fake.sent {
+			if strings.Contains(message, "from gadget to the widget lead") {
+				count++
+			}
+		}
+		return count
+	}
+	if out, refused := callMCP(t, foreign, "agenthail_send", map[string]any{"project": "widget", "message": "from gadget to the widget lead", "clientRequestId": "lead-queued"}); refused || leadMessages() != 1 {
+		t.Fatalf("another project's agent queueing to its coordinator: %v sent=%d", out, leadMessages())
+	}
+	out, refused = callMCP(t, foreign, "agenthail_send", map[string]any{"project": "widget", "message": "from gadget to the widget lead", "mode": "now", "clientRequestId": "lead-now"})
+	detail, _ = out["detail"].(map[string]any)
+	if !refused || out["code"] != "out_of_scope" || detail["rule"] != "different_project" || leadMessages() != 1 {
+		t.Fatalf("another project's agent sending now to its coordinator: refused=%v out=%v sent=%d", refused, out, leadMessages())
 	}
 
 	if out, refused := callMCP(t, asOperator(t, d, server, operator.ID), "agenthail_channel_send", map[string]any{"channel": "#widget", "message": "from the operator", "clientRequestId": "operator"}); refused || widgetPosts() != 3 {

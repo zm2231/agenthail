@@ -139,6 +139,11 @@ func (a *App) cmdProject(args []string) error {
 		return err
 	}
 	defer cancel()
+	if positional[0] != "list" && positional[0] != "ls" {
+		if err := a.operatorScope(ctx, "Adding, removing, renaming or archiving a project"); err != nil {
+			return err
+		}
+	}
 	client, err := a.daemonAPI()
 	if err != nil {
 		return err
@@ -363,6 +368,9 @@ func (a *App) threadSessionAction(target string, payload map[string]any) (map[st
 	defer cancel()
 	session, _, remote, err := a.resolveAnyTarget(ctx, target)
 	if err != nil {
+		return nil, err
+	}
+	if err := a.controlScope(ctx, session, remote); err != nil {
 		return nil, err
 	}
 	if remote != nil {

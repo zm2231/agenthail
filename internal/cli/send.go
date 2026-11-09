@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/coordinator"
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
@@ -76,9 +77,19 @@ func (a *App) cmdSend(args []string) error {
 		return err
 	}
 	if remote != nil {
+		if _, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "send", Target: remote.ID, Mode: sendMode(args)}); err != nil {
+			return err
+		}
 		return a.sendRemote(ctx, remote, message, args, timeout)
 	}
 	spec, coordinated := coord.Of(sess.ID)
+	scope := daemon.ScopeRequest{Action: "send", Target: sess.ID, Mode: sendMode(args)}
+	if coordinated {
+		scope = daemon.ScopeRequest{Action: "lead-send", Project: spec.ProjectID, Mode: sendMode(args)}
+	}
+	if _, err := a.agentScope(ctx, scope); err != nil {
+		return err
+	}
 	source, err := a.sourceSessionID(ctx, fromLabel)
 	if err != nil {
 		return err

@@ -58,6 +58,11 @@ func (a *App) cmdQueue(args []string) error {
 		}
 		return nil
 	}
+	if len(args) == 2 && (args[0] == "retry" || args[0] == "rm" || args[0] == "cancel" || args[0] == "clear") {
+		if err := a.queueManageScope(context.Background(), args[0], args[1]); err != nil {
+			return err
+		}
+	}
 	if len(args) > 0 && args[0] == "retry" {
 		if len(args) != 2 {
 			return fmt.Errorf("usage: agenthail queue retry <id>")
@@ -126,6 +131,17 @@ func (a *App) cmdQueue(args []string) error {
 	sess, surf, remote, err := a.resolveDeliveryTarget(ctx, positional[0])
 	if err != nil {
 		return fmt.Errorf("%w\n%s", err, queueUsage)
+	}
+	scope := daemon.ScopeRequest{Action: "send", Mode: "queue"}
+	if remote != nil {
+		scope.Target = remote.ID
+	} else if spec, coordinated := a.coordinator().Of(sess.ID); coordinated {
+		scope = daemon.ScopeRequest{Action: "lead-send", Mode: "queue", Project: spec.ProjectID}
+	} else {
+		scope.Target = sess.ID
+	}
+	if _, err := a.agentScope(ctx, scope); err != nil {
+		return err
 	}
 	if remote != nil {
 		message, err := messageText(strings.Join(positional[1:], " "))

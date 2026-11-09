@@ -56,6 +56,13 @@ func (a *App) cmdAnswer(args []string) error {
 		return err
 	}
 	defer cancel()
+	sess, _, remote, err := a.resolveAnyTarget(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	if err := a.controlScope(ctx, sess, remote); err != nil {
+		return err
+	}
 	state, label, err := a.requestState(ctx, positional[0])
 	if err != nil {
 		return err
@@ -112,6 +119,9 @@ func (a *App) cmdPermissionMode(args []string) error {
 	mode := positional[1]
 	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
+		return err
+	}
+	if err := a.controlScope(ctx, sess, remote); err != nil {
 		return err
 	}
 	if remote != nil {
