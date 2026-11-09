@@ -45,6 +45,7 @@ struct SessionPreview: View {
                 guard let config = Self.previewAppearance else { return }
                 model.appearance.preview(config, wallpapers: Self.previewWallpapers(config))
             }
+            .task { await PreviewBackgroundUpserts.run(model, sparing: session.id) }
     }
 
     /// An `image:` backdrop is read from the path in the argument, which the
