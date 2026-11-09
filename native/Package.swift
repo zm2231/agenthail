@@ -93,6 +93,8 @@ let package = Package(
                 "SessionCells.swift",
                 "SessionHandle.swift",
                 "ProjectBroadcast.swift",
+                "RelativeAge.swift",
+                "RelayFacts.swift",
                 "MinuteClock.swift",
                 "MenuSessions.swift",
                 "ConnectionGrace.swift",

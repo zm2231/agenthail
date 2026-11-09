@@ -125,7 +125,8 @@ SOURCES=(
   VoiceCallDiagnostics.swift
   VoiceOperatorModel.swift
   macOS/AccentContrast.swift
-  macOS/RelativeAge.swift
+  RelativeAge.swift
+  RelayFacts.swift
   macOS/DesktopStyle.swift
   macOS/AppearanceDraft.swift
   macOS/AgenthailLink.swift
