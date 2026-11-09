@@ -239,9 +239,12 @@ func (a *App) cmdDoctor(args []string) error {
 	var notCarriedErr error
 	var droppedRelays []registry.DroppedRelay
 	var droppedRelaysErr error
+	var silentHosts []registry.SilentHost
+	var silentHostsErr error
 	if r := a.registry(); r != nil {
 		notCarried, notCarriedErr = r.ProjectMoveRefusals()
 		droppedRelays, droppedRelaysErr = r.DroppedRelays()
+		silentHosts, silentHostsErr = r.SilentHostSessions(silentHostAfter, time.Now())
 	}
 	uiProblems, uiErr := a.uiConfProblems()
 	if hasFlag(args, "--json") {
@@ -262,6 +265,10 @@ func (a *App) cmdDoctor(args []string) error {
 		report["relaysNotTakenOverOnMove"] = droppedRelays
 		if droppedRelaysErr != nil {
 			report["relaysNotTakenOverOnMoveError"] = droppedRelaysErr.Error()
+		}
+		report["sessionsHeldForSilentHosts"] = silentHosts
+		if silentHostsErr != nil {
+			report["sessionsHeldForSilentHostsError"] = silentHostsErr.Error()
 		}
 		report["uiConf"] = map[string]any{"problems": uiProblems}
 		if uiErr != nil {
@@ -368,6 +375,12 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		if droppedRelaysErr != nil {
 			fmt.Printf("relays of moved sessions: unknown (%s)\n", droppedRelaysErr)
+		}
+		for _, host := range silentHosts {
+			fmt.Println(silentHostLine(host))
+		}
+		if silentHostsErr != nil {
+			fmt.Printf("sessions held for silent hosts: unknown (%s)\n", silentHostsErr)
 		}
 		if uiErr != nil {
 			fmt.Printf("ui.conf: unknown (%s)\n", uiErr)
@@ -480,4 +493,22 @@ func (a *App) cmdDoctor(args []string) error {
 
 func (a *App) isDaemonServiceLoaded() bool {
 	return a.service().Loaded()
+}
+
+const silentHostAfter = 24 * time.Hour
+
+func silentHostLine(host registry.SilentHost) string {
+	since := "it was paired"
+	if !host.LastContact.IsZero() {
+		since = host.LastContact.Local().Format(time.DateTime)
+	}
+	shown := host.Sessions
+	if len(shown) > 3 {
+		shown = shown[:3]
+	}
+	names := strings.Join(shown, ", ")
+	if more := len(host.Sessions) - len(shown); more > 0 {
+		names += fmt.Sprintf(" and %d more", more)
+	}
+	return fmt.Sprintf("host %s has not answered since %s and still holds %d sessions (%s); a session that moved to another host meanwhile is reached only through it. Run agenthail hosts remove %s to release them if it is gone", host.Name, since, len(host.Sessions), names, host.Name)
 }

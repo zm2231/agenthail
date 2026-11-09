@@ -122,6 +122,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	}
 	if catalogMirror(ctx) && page == nil {
 		state.RetiredClock, state.RetiredIDs = &mirrorRetired.Clock, mirrorRetired.IDs
+		if state.MovedSessions, err = d.Registry.MovedOutSessions(); err != nil {
+			return dashboardState{}, fmt.Errorf("read moved sessions: %w", err)
+		}
 	}
 	for _, consumer := range signin.Consumers {
 		state.Signin = append(state.Signin, d.signinConsumer(consumer))

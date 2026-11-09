@@ -311,11 +311,19 @@ func TestAHeldSendFollowsOneMovedAnswerAndThenGivesUp(t *testing.T) {
 	source, target, third := moveMesh(t, nil)
 	session := startMovable(t, source)
 	feeder := startMovable(t, third)
-	mirroredOn(t, third, source, mustHostID(t, source.federationNode), session.ID)
+	sourceID, targetID := mustHostID(t, source.federationNode), mustHostID(t, target.federationNode)
+	mirroredOn(t, third, source, sourceID, session.ID)
 	relayFrom(t, third, feeder, session.ID)
 	if _, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "b"}); err != nil {
 		t.Fatal(err)
 	}
+	ownedBy := func(want string) func() bool {
+		return func() bool {
+			host, err := third.reg.SessionHost(session.ID)
+			return err == nil && host == want
+		}
+	}
+	testkit.Eventually(t, "the third host to record the session on its new host", 15*time.Second, ownedBy(targetID))
 	refused := func(t *testing.T, text, by, to string) {
 		t.Helper()
 		reply := takeTurn(t, third, feeder.ID, text)
@@ -335,10 +343,10 @@ func TestAHeldSendFollowsOneMovedAnswerAndThenGivesUp(t *testing.T) {
 	}
 
 	t.Run("a second moved answer", func(t *testing.T) {
-		back := mustHostID(t, source.federationNode)
-		target.gate.movedTo.Store(&back)
+		target.gate.movedTo.Store(&sourceID)
 		t.Cleanup(func() { target.gate.movedTo.Store(nil) })
-		refused(t, "bounced back", "b", back)
+		refused(t, "bounced back", "a", "b")
+		testkit.Eventually(t, "the host that owned the session to hand it where it said", 15*time.Second, ownedBy(sourceID))
 	})
 
 	t.Run("a moved answer naming a host not paired here", func(t *testing.T) {

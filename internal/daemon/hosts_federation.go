@@ -82,7 +82,8 @@ type pairedHost struct {
 	ledgerConfirmed map[string]bool
 	// hidden holds rows the host serves whose id is already a local session,
 	// guarded by mu. Only the mirror loop writes it.
-	hidden map[string]dashboardSession
+	hidden  map[string]dashboardSession
+	refused map[string]dashboardSession
 }
 
 func newFederation() *federation {
@@ -523,6 +524,7 @@ type remoteSnapshot struct {
 	OwnDecisions string                      `json:"ownDecisionsRev"`
 	ProjectLinks []registry.ProjectLink      `json:"projectLinks"`
 	ProjectMoves []registry.ProjectMove      `json:"projectMoves"`
+	MovedOut     []registry.MovedSession     `json:"movedSessions"`
 }
 
 func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *hostOutage) (bool, error) {
@@ -558,7 +560,7 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 		return 0, err
 	}
 	host.mu.Lock()
-	host.hidden = nil
+	host.hidden, host.refused = nil, nil
 	host.mu.Unlock()
 	keep := map[string]struct{}{}
 	complete := snapshot.RetiredClock != nil
@@ -619,6 +621,9 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 	}
 	if err := d.adoptProjectLinks(snapshot.ProjectLinks); err != nil {
 		return 0, localMirror(err)
+	}
+	for _, moved := range snapshot.MovedOut {
+		d.handOverHostSession(host, moved.SessionID, moved.MovedToHost)
 	}
 	host.epoch = snapshot.HostEpoch
 	if err := d.Registry.RecordHostCatalogCursor(host.record.ID, snapshot.HostEpoch, snapshot.CatalogSeq); err != nil {
@@ -701,12 +706,17 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 		return d.mirrorOrHide(host, payload.Session, true)
 	case "session.removed":
 		var payload struct {
-			SessionID string `json:"sessionId"`
+			SessionID   string `json:"sessionId"`
+			MovedToHost string `json:"movedToHost"`
 		}
 		if err := json.Unmarshal(envelope.Data, &payload); err != nil {
 			return err
 		}
 		if payload.SessionID == "" || strings.Contains(payload.SessionID, hosts.Separator) {
+			return nil
+		}
+		host.dropRefused(payload.SessionID)
+		if payload.MovedToHost != "" && d.handOverHostSession(host, payload.SessionID, payload.MovedToHost) {
 			return nil
 		}
 		host.setHidden(payload.SessionID, nil)
@@ -810,8 +820,12 @@ func (d *Daemon) mirrorOrHide(host *pairedHost, row dashboardSession, live bool)
 		host.setHidden(row.ID, &row)
 		return nil
 	}
+	if errors.As(err, &owned) && owned.HostID != host.record.ID {
+		host.keepRefused(row)
+	}
 	if err == nil {
 		host.setHidden(row.ID, nil)
+		host.dropRefused(row.ID)
 	}
 	return err
 }
@@ -1017,6 +1031,9 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 	answer := d.postHostDelivery(ctx, host, item)
 	var moved hosts.StatusError
 	if errors.As(answer.readErr, &moved) && moved.Code == movedCode {
+		if owner := host; d.ownedBy(owner, item.SessionID) {
+			defer d.handOverHostSession(owner, item.SessionID, moved.MovedToHost)
+		}
 		if next, found := d.pairedHost(moved.MovedToHost); found && next != host {
 			host, answer = next, d.postHostDelivery(ctx, next, item)
 		}
