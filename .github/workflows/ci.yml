@@ -76,6 +76,13 @@ jobs:
       - name: Race tests
         # sqlite's generated C is not instrumented here; release.yml runs the race tests with it instrumented.
         run: AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+      - name: Real Codex app-server tests
+        # The race tests skip these when codex is not installed; here each must pass.
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/codex" --no-audit --no-fund @openai/codex@0.163.0
+          PATH="$RUNNER_TEMP/codex/node_modules/.bin:$PATH" go test ./internal/surface/surfaces/ -run '^(TestACodexCompactionHoldsReloadsOnlyUntilItsTurnEnds|TestATurnStartedBeforeTheCodexAppServerRestartedIsNotRunning)$' -count=1 -v | tee "$RUNNER_TEMP/codex-real.log"
+          test "$(grep -c -- '^--- PASS: ' "$RUNNER_TEMP/codex-real.log")" -eq 2
       - name: Build
         run: go build ./...
       - name: Vet

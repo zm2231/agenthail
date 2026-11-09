@@ -64,7 +64,9 @@ func realManagedCodex(t *testing.T) {
 	realManagedCodexWith(t, &mockResponses{})
 }
 
-func realManagedCodexWith(t *testing.T, model http.Handler) {
+// realManagedCodexWith returns a function that kills the app-server and
+// starts a new one on the same CODEX_HOME.
+func realManagedCodexWith(t *testing.T, model http.Handler) (restart func()) {
 	t.Helper()
 	if _, err := exec.LookPath("codex"); err != nil {
 		t.Skip("codex is not installed")
@@ -92,26 +94,46 @@ func realManagedCodexWith(t *testing.T, model http.Handler) {
 	}
 	t.Setenv("CODEX_HOME", codexHome)
 	t.Setenv("HOME", home)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	cmd := processGroupCommand(ctx, "codex", "app-server", "--disable", "plugins", "--listen", "unix://"+managedCodexSocketPath())
-	cmd.Env = []string{"HOME=" + home, "CODEX_HOME=" + codexHome, "PATH=" + os.Getenv("PATH"), "MOCK_KEY=x", "TMPDIR=" + filepath.Join(home, "tmp")}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
+	start := func() func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		cmd := processGroupCommand(ctx, "codex", "app-server", "--disable", "plugins", "--listen", "unix://"+managedCodexSocketPath())
+		cmd.Env = []string{"HOME=" + home, "CODEX_HOME=" + codexHome, "PATH=" + os.Getenv("PATH"), "MOCK_KEY=x", "TMPDIR=" + filepath.Join(home, "tmp")}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		// codex is a launcher whose app-server runs as its child, so only killing
+		// the whole group stops the server.
+		stop := func() {
+			group := cmd.Process.Pid
+			_ = syscall.Kill(-group, syscall.SIGKILL)
+			_ = cmd.Wait()
+			cancel()
+			for deadline := time.Now().Add(5 * time.Second); syscall.Kill(-group, 0) != syscall.ESRCH; time.Sleep(50 * time.Millisecond) {
+				if time.Now().After(deadline) {
+					t.Errorf("the real app-server's process group %d outlived its stop", group)
+					return
+				}
+			}
+		}
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			if client, err := dialManagedCodex(context.Background()); err == nil {
+				_ = client.Close()
+				return stop
+			}
+			if time.Now().After(deadline) {
+				stop()
+				t.Fatal("the real app-server did not listen on the control socket")
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
-	// codex is a launcher whose app-server runs as its child, so only killing
-	// the whole group stops the server.
-	t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); _ = cmd.Wait() })
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		if client, err := dialManagedCodex(context.Background()); err == nil {
-			_ = client.Close()
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the real app-server did not listen on the control socket")
-		}
-		time.Sleep(100 * time.Millisecond)
+	stop := start()
+	t.Cleanup(func() { stop() })
+	return func() {
+		stop()
+		_ = os.Remove(managedCodexSocketPath())
+		stop = start()
 	}
 }
 

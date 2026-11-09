@@ -43,25 +43,42 @@ type managedCodexClient struct {
 
 	mu            sync.Mutex
 	next          int
-	waiters       map[int]chan map[string]any
+	waiters       map[int]chan codexReply
+	received      int64
 	notifications []codexEvent
 	err           error
 	closed        chan struct{}
 	notified      chan struct{}
+	server        os.FileInfo
 }
 
 const managedNotificationLimit = 1000
+
+// codexReply is a response with the receive count of the notifications the
+// connection read before it.
+type codexReply struct {
+	message map[string]any
+	after   int64
+}
 
 func newManagedCodexClient(ws *websocket.Conn) *managedCodexClient {
 	client := &managedCodexClient{
 		ws:       ws,
 		next:     1,
-		waiters:  map[int]chan map[string]any{},
+		waiters:  map[int]chan codexReply{},
 		closed:   make(chan struct{}),
 		notified: make(chan struct{}, 1),
 	}
 	go client.read()
 	return client
+}
+
+// codexServerRestarted reports whether the managed app-server whose control
+// socket was server no longer listens there. A restarted server binds a new
+// socket file, and every turn the old one ran is gone.
+func codexServerRestarted(server os.FileInfo) bool {
+	current, err := os.Stat(managedCodexSocketPath())
+	return err != nil || !os.SameFile(current, server) || !current.ModTime().Equal(server.ModTime())
 }
 
 func managedCodexSocketPath() string {
@@ -70,7 +87,8 @@ func managedCodexSocketPath() string {
 
 func dialManagedCodex(ctx context.Context) (*managedCodexClient, error) {
 	socketPath := managedCodexSocketPath()
-	if _, err := os.Stat(socketPath); err != nil {
+	server, err := os.Stat(socketPath)
+	if err != nil {
 		return nil, fmt.Errorf("managed Codex app-server is unavailable: %w", err)
 	}
 	dialer := websocket.Dialer{
@@ -87,6 +105,7 @@ func dialManagedCodex(ctx context.Context) (*managedCodexClient, error) {
 		return nil, fmt.Errorf("connect managed Codex app-server: %w", err)
 	}
 	client := newManagedCodexClient(ws)
+	client.server = server
 	if _, err := client.Request(ctx, "initialize", map[string]any{
 		"clientInfo":   map[string]any{"name": "agenthail", "version": "1"},
 		"capabilities": map[string]any{"experimentalApi": true},
@@ -129,9 +148,10 @@ func (c *managedCodexClient) read() {
 				c.mu.Lock()
 				waiter := c.waiters[int(id)]
 				delete(c.waiters, int(id))
+				after := c.received
 				c.mu.Unlock()
 				if waiter != nil {
-					waiter <- message
+					waiter <- codexReply{message: message, after: after}
 				}
 			}
 			continue
@@ -140,7 +160,8 @@ func (c *managedCodexClient) read() {
 		c.mu.Lock()
 		// A server request carries an id the answer must repeat exactly,
 		// whether Codex sent a number or a string.
-		c.notifications = append(c.notifications, codexEvent{Method: method, Params: params, RequestID: envelope.ID})
+		c.received++
+		c.notifications = append(c.notifications, codexEvent{Method: method, Params: params, RequestID: envelope.ID, received: c.received})
 		if len(c.notifications) > managedNotificationLimit {
 			c.notifications = c.notifications[len(c.notifications)-managedNotificationLimit:]
 		}
@@ -160,17 +181,22 @@ func (c *managedCodexClient) fail(err error) {
 		return
 	}
 	c.err = err
-	c.waiters = map[int]chan map[string]any{}
+	c.waiters = map[int]chan codexReply{}
 	close(c.closed)
 }
 
 func (c *managedCodexClient) Request(ctx context.Context, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
-	waiter := make(chan map[string]any, 1)
+	response, _, err := c.requestOrdered(ctx, method, params, wait)
+	return response, err
+}
+
+func (c *managedCodexClient) requestOrdered(ctx context.Context, method string, params map[string]any, wait time.Duration) (map[string]any, int64, error) {
+	waiter := make(chan codexReply, 1)
 	c.mu.Lock()
 	if c.err != nil {
 		err := c.err
 		c.mu.Unlock()
-		return nil, err
+		return nil, 0, err
 	}
 	id := c.next
 	c.next++
@@ -186,28 +212,28 @@ func (c *managedCodexClient) Request(ctx context.Context, method string, params 
 	c.writeMu.Unlock()
 	if err != nil {
 		forget()
-		return nil, err
+		return nil, 0, err
 	}
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
-	case response := <-waiter:
-		if envelope, ok := response["error"].(map[string]any); ok {
+	case reply := <-waiter:
+		if envelope, ok := reply.message["error"].(map[string]any); ok {
 			code, _ := envelope["code"].(float64)
-			return nil, &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message")}
+			return nil, reply.after, &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message")}
 		}
-		return response, nil
+		return reply.message, reply.after, nil
 	case <-ctx.Done():
 		forget()
-		return nil, ctx.Err()
+		return nil, 0, ctx.Err()
 	case <-timer.C:
 		forget()
-		return nil, fmt.Errorf("%s: app-server request timed out after %s: %w", method, wait, os.ErrDeadlineExceeded)
+		return nil, 0, fmt.Errorf("%s: app-server request timed out after %s: %w", method, wait, os.ErrDeadlineExceeded)
 	case <-c.closed:
 		c.mu.Lock()
 		err := c.err
 		c.mu.Unlock()
-		return nil, err
+		return nil, 0, err
 	}
 }
 
