@@ -79,6 +79,7 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["composer-turn-settings"].exists, "one chip keeps the turn settings in view")
         XCTAssertFalse(app.descendants(matching: .any)["composer-effort"].exists, "the chip row folds into the one chip")
         XCTAssertTrue(app.descendants(matching: .any)["session-summary"].exists, "the status stays in the header")
+        XCTAssertTrue(app.staticTexts["Working"].exists, "the header names the status, not just its icon")
 
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "landscape at the latest row"

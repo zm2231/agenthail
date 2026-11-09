@@ -823,7 +823,7 @@ struct SessionScreen: View {
                     Button { showingInfo = true } label: {
                         HStack(spacing: 8) {
                             Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
-                            SessionStatusLabel(detail: detail, session: liveSession).lineLimit(1)
+                            SessionStatusLabel(detail: detail, session: liveSession).labelStyle(.titleAndIcon).lineLimit(1)
                             Text(detail.model ?? SessionStyle.agentName(detail.session.surface)).font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1)
                         }
                     }
