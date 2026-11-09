@@ -14,14 +14,15 @@ struct RenameSessionSheet: View {
         _text = State(initialValue: session.alias ?? "")
     }
 
-    private var problem: String? { SessionHandle.problem(with: text) }
+    private var problem: String? { SessionHandle.renameProblem(text, current: session.alias) }
+    private var clearing: Bool { SessionHandle.clears(text, current: session.alias) }
     private var unchanged: Bool { SessionHandle.normalized(text) == (session.alias ?? "") }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesktopSpace.m) {
             Text("Rename \(session.title)")
                 .font(.headline)
-            Text("Other agents and links use this name to reach the session.")
+            Text((session.alias ?? "").isEmpty ?"Other agents and links use this name to reach the session." : "Other agents and links use this name to reach the session. Leave it empty to clear it.")
                 .font(.system(size: DesktopType.secondary))
                 .foregroundStyle(DesktopPalette.text2)
             HStack(spacing: DesktopSpace.xs) {
@@ -39,7 +40,7 @@ struct RenameSessionSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(saving ? "Saving…" : "Save", action: save)
+                Button(saving ? "Saving…" : clearing ? "Clear Name" : "Save", action: save)
                     .keyboardShortcut(.defaultAction)
                     .disabled(saving || problem != nil || unchanged)
             }

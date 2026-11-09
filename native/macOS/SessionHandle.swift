@@ -13,4 +13,12 @@ enum SessionHandle {
         if handle.contains(where: { $0.isWhitespace || $0 == "/" || $0 == "#" }) { return "Names can't contain spaces, /, or #." }
         return nil
     }
+
+    static func clears(_ text: String, current: String?) -> Bool {
+        normalized(text).isEmpty && !(current ?? "").isEmpty
+    }
+
+    static func renameProblem(_ text: String, current: String?) -> String? {
+        clears(text, current: current) ? nil : problem(with: text)
+    }
 }

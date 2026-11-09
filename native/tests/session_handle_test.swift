@@ -7,6 +7,10 @@ struct SessionHandleTest {
         check(SessionHandle.normalized("  @builder ") == "builder", "a leading @ and outer spaces are dropped")
         check(SessionHandle.problem(with: "@builder") == nil, "a simple handle is valid")
         check(SessionHandle.problem(with: "  ") != nil, "an empty name is refused")
+        check(SessionHandle.clears(" @ ", current: "builder") && SessionHandle.renameProblem(" @ ", current: "builder") == nil, "emptying a named session clears its name")
+        check(!SessionHandle.clears("", current: nil) && SessionHandle.renameProblem("", current: nil) != nil, "an unnamed session still needs a name")
+        check(!SessionHandle.clears("", current: "") && SessionHandle.renameProblem("", current: "") != nil, "an empty current name is no name")
+        check(!SessionHandle.clears("other", current: "builder") && SessionHandle.renameProblem("bad name", current: "builder") != nil, "a new name is still checked")
         check(SessionHandle.problem(with: "@") != nil, "a bare @ is refused")
         for bad in ["two words", "a/b", "a#b", "tab\tname"] {
             check(SessionHandle.problem(with: bad) != nil, "\(bad) is refused")
