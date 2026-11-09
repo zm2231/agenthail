@@ -84,7 +84,10 @@ struct AgenthailIOSApp: App {
                 if ProcessInfo.processInfo.arguments.contains("--preview-voice") {
                     AgenthailVoiceOperatorSheet(model: VoiceOperatorModel(preview: true), rowMemory: TranscriptRowMemory(), openSession: { _ in })
                 } else if ProcessInfo.processInfo.arguments.contains("--preview-session") {
-                    SessionPreview().overlay(alignment: .topLeading) { SceneEvaluationStamp(count: SceneEvaluations.next()) }
+                    SessionPreview().overlay(alignment: .topLeading) {
+                        SceneEvaluationStamp(count: SceneEvaluations.next())
+                        if BodyRuns.enabled { BodyRunsProbe() }
+                    }
                 } else { connectedRoot }
 #else
                 connectedRoot
