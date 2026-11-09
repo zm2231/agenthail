@@ -1,10 +1,10 @@
 import Foundation
 
 extension SessionTree {
-    static func ordered(list listed: ScopePage.View?, current: ScopePage.View?, rows: [String: SessionState], attention: [String: SessionAttention]) -> SessionTree {
+    static func ordered(list listed: ScopePage.View?, current: ScopePage.View?, rows: [String: SessionState], attention: [String: SessionAttention], cells: [String: SessionCell] = [:]) -> SessionTree {
         var projects: [Project] = []
         for viewProject in listed?.projects ?? [] {
-            let families = (listed?.families ?? []).filter { $0.projectId == viewProject.id }.compactMap { family(from: $0, rows: rows) }
+            let families = (listed?.families ?? []).filter { $0.projectId == viewProject.id }.compactMap { family(from: $0, rows: rows, cells: cells) }
             guard let first = families.first else { continue }
             var project = Project(id: viewProject.id, name: viewProject.name, identity: first.root.project, checkouts: [])
             project.collapsed = Set(viewProject.collapsedFamilyIds)
@@ -24,14 +24,18 @@ extension SessionTree {
         for filter in SessionFilter.allCases {
             counts[filter] = (current ?? listed)?.counts[filter.viewScope]?.families
         }
-        let flat = (listed?.families ?? []).compactMap { family(from: $0, rows: rows) }
+        let flat = (listed?.families ?? []).compactMap { family(from: $0, rows: rows, cells: cells) }
         return SessionTree(projects: projects, needsYou: needsYou(in: current ?? listed, rows: rows, attention: attention), attention: attention, counts: counts, flat: flat)
     }
 
-    static func family(from view: ViewFamily, rows: [String: SessionState]) -> SessionFamily? {
-        guard let root = rows[view.rootId] else { return nil }
+    static func family(from view: ViewFamily, rows: [String: SessionState], cells: [String: SessionCell] = [:]) -> SessionFamily? {
+        func cell(_ id: String) -> SessionCell? {
+            guard let row = rows[id] else { return nil }
+            return cells[id] ?? SessionCell(row)
+        }
+        guard let root = cell(view.rootId) else { return nil }
         let members = view.members.filter { $0.id != view.rootId }.compactMap { member in
-            rows[member.id].map { SessionFamily.Member(session: $0, depth: member.depth) }
+            cell(member.id).map { SessionFamily.Member(cell: $0, depth: member.depth) }
         }
         return SessionFamily(root: root, members: members, workingSubagents: view.workingSubagents)
     }

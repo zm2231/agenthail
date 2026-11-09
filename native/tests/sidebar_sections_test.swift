@@ -48,7 +48,8 @@ struct SidebarSectionsTest {
         model.snapshot?.sessions[3] = session("b1", project: "b", status: "busy")
         let afterB = keys(model)
         check(afterB["a"] == before["a"], "a row changing in one project leaves the other project's section alone")
-        check(afterB["b"] != before["b"], "the changed row's project redraws")
+        check(afterB["b"] == before["b"], "a row changing in place leaves its own project's section alone too")
+        check(familyKey(afterB["b"], "b1")?.family.root.status == "busy", "the row redraws from its own cell")
 
         model.snapshot?.sessions[2] = session("a2", project: "a", status: "busy")
         let afterA2 = keys(model, expanded: ["a"])

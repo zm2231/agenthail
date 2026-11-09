@@ -274,10 +274,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
             let header = NSMenuItem(title: section.title, action: nil, keyEquivalent: "")
             header.isEnabled = false
             menu.addItem(header)
-            for session in section.sessions {
-                let item = NSMenuItem(title: SessionMenuSection.label(session, in: model.knownSessions, reason: section.reasons[session.id]), action: #selector(openSession(_:)), keyEquivalent: "")
+            for id in section.ids {
+                guard let title = section.label(id, in: model) else { continue }
+                let item = NSMenuItem(title: title, action: #selector(openSession(_:)), keyEquivalent: "")
                 item.target = self
-                item.representedObject = session.id
+                item.representedObject = id
                 menu.addItem(item)
             }
         }
@@ -484,30 +485,44 @@ private enum MenuBarArtwork {
 
 private struct SessionMenuSection: Identifiable {
     let title: String
-    let sessions: [SessionState]
-    var reasons: [String: String] = [:]
+    let ids: [String]
+    var showsReason = false
     var id: String { title }
 
     @MainActor
-    static func build(_ model: AgenthailModel, limit: Int = 5) -> [SessionMenuSection] {
-        let attention = model.sessionAttention
-        let needsYou = model.sessionTree.needsYou
-        let rows = Dictionary(model.knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let others = (model.currentView?.families ?? []).compactMap { SessionTree.family(from: $0, rows: rows) }.filter { attention[$0.root.id] == nil }
+    static func build(_ model: AgenthailModel) -> [SessionMenuSection] {
+        let menu = model.menuSessions
         return [
-            SessionMenuSection(title: "Needs you", sessions: Array(needsYou.prefix(limit)), reasons: attention.mapValues(\.reason)),
-            SessionMenuSection(title: "Working", sessions: Array(others.filter(working).map(\.root).prefix(limit))),
-            SessionMenuSection(title: "Recent", sessions: Array(others.filter { !working($0) }.map(\.root).prefix(limit)))
-        ].filter { !$0.sessions.isEmpty }
+            SessionMenuSection(title: "Needs you", ids: menu.needsYou, showsReason: true),
+            SessionMenuSection(title: "Working", ids: menu.working),
+            SessionMenuSection(title: "Recent", ids: menu.recent)
+        ].filter { !$0.ids.isEmpty }
     }
 
-    static func label(_ session: SessionState, in sessions: [SessionState], reason: String? = nil) -> String {
-        if let reason { return "\(SessionFamilies.title(session, in: sessions))  ·  \(reason)" }
-        return "\(SessionFamilies.title(session, in: sessions))  ·  \(session.surface.capitalized)\(SessionDisplayKind.of(session) == .working ? "" : "  ·  " + relativeAge(session.lastActive))"
+    @MainActor
+    func label(_ id: String, in model: AgenthailModel) -> String? {
+        guard let session = model.session(id) else { return nil }
+        let title = model.title(of: session)
+        if showsReason, let reason = model.sessionAttention[id]?.reason { return "\(title)  ·  \(reason)" }
+        return "\(title)  ·  \(session.surface.capitalized)\(SessionDisplayKind.of(session) == .working ? "" : "  ·  " + relativeAge(session.lastActive))"
     }
+}
 
-    private static func working(_ family: SessionFamily) -> Bool {
-        family.isWorking && SessionDisplayKind.of(family.root) != .unavailable
+private struct SessionMenuItem: View {
+    let model: AgenthailModel
+    let section: SessionMenuSection
+    let id: String
+    let open: () -> Void
+
+    var body: some View {
+        if let label = section.label(id, in: model) {
+            Button {
+                model.mainPane.select(id)
+                open()
+            } label: {
+                Text(label)
+            }
+        }
     }
 }
 
@@ -520,7 +535,7 @@ private struct AgenthailMenuContent: View {
         Label(model.isConnected ? "Connected" : "Agenthail isn't running", systemImage: model.isConnected ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
         ForEach(SessionMenuSection.build(model)) { section in
             Section(section.title) {
-                ForEach(section.sessions) { session in sessionItem(session, reason: section.reasons[session.id]) }
+                ForEach(section.ids, id: \.self) { id in SessionMenuItem(model: model, section: section, id: id, open: open) }
             }
         }
         Divider()
@@ -543,15 +558,6 @@ private struct AgenthailMenuContent: View {
         Divider()
         Button("Quit Agenthail") { NSApplication.shared.terminate(nil) }
             .keyboardShortcut("q")
-    }
-
-    private func sessionItem(_ session: SessionState, reason: String?) -> some View {
-        Button {
-            model.mainPane.select(session.id)
-            open()
-        } label: {
-            Text(SessionMenuSection.label(session, in: model.knownSessions, reason: reason))
-        }
     }
 
     private func open() {
