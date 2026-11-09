@@ -102,6 +102,51 @@ func TestARelayFromAMovedSessionForwardsOnlyItsNextCompletionFromTheNewHost(t *t
 	}
 }
 
+func TestACompletionNotYetRelayedWhenTheSessionMovesIsForwardedOnceByTheSource(t *testing.T) {
+	source, target, record, _ := movePair(t)
+	session := startMovable(t, source)
+	listener := startMovable(t, target)
+	mirroredOn(t, source, target, record.ID, listener.ID)
+	relayFrom(t, source, session, listener.ID)
+	last := takeTurn(t, source, session.ID, "just before the move")
+
+	if _, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"}); err != nil {
+		t.Fatal(err)
+	}
+	if forwarded := relayForwards(t, source, listener.ID, last); forwarded != 1 {
+		t.Fatalf("the source forwarded the last completion before the move %d times", forwarded)
+	}
+	moved, err := target.reg.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := takeTurn(t, target, session.ID, "after the move")
+	testkit.Eventually(t, "the relay to forward the next completion", 15*time.Second, func() bool {
+		target.daemon.syncRelays(context.Background(), target.claude, moved)
+		return relayForwards(t, target, listener.ID, next) == 1
+	})
+	if again := relayForwards(t, target, listener.ID, last); again != 0 {
+		t.Fatalf("the target forwarded the completion the source had forwarded %d times", again)
+	}
+}
+
+// relayForwards counts the completions carrying text node's relays forwarded
+// to session.
+func relayForwards(t *testing.T, node *moveNode, session, text string) int {
+	t.Helper()
+	entries, err := node.reg.ListHistory(200, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if entry.Kind == "relay" && entry.SessionID == session && strings.Contains(entry.Message, text) {
+			count++
+		}
+	}
+	return count
+}
+
 // relayed counts the messages node queued for session that carry text.
 func relayed(t *testing.T, node *moveNode, session, text string) int {
 	t.Helper()

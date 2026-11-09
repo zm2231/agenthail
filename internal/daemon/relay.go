@@ -116,44 +116,68 @@ func (d *Daemon) syncRelays(ctx context.Context, adapter surface.Surface, sessio
 }
 
 func (d *Daemon) syncRelaysObserved(ctx context.Context, scan relayScan, adapter surface.Surface, session *surface.Session, observed *sessionObservation) {
-	routes, err := d.Registry.ListRoutes()
+	active, err := d.activeRelaysFrom(session.ID)
 	if err != nil {
 		d.log.Printf("list relays: %s", err)
 		return
 	}
-	var active []registry.RouteRow
-	for _, route := range routes {
-		if route.Active && route.FromSession == session.ID {
-			active = append(active, route)
-		}
-	}
 	if len(active) == 0 {
 		return
 	}
-	reader, ok := scan.reader(adapter)
-	captureErr := error(nil)
-	if !ok {
-		captureErr = fmt.Errorf("source does not support replayable completions")
-	} else {
-		cursor, err := d.Registry.RelaySourceCursor(session.ID)
-		if err == nil {
-			readCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
-			batch, readErr := reader.ReadCompletions(readCtx, session, cursor)
-			cancel()
-			err = readErr
-			if err == nil {
-				err = d.Registry.CaptureRelayCompletions(session.ID, cursor, batch)
-				if err == nil && len(batch.Events) > 0 {
-					d.publishEvent("state.changed", session.ID, map[string]string{"source": "relay-capture"})
-				}
-				if errors.Is(err, registry.ErrRelayCursorMoved) {
-					err = nil
-				}
-			}
-		}
-		captureErr = err
+	d.consumeRelays(ctx, adapter, session, active, d.captureRelays(ctx, scan, adapter, session), observed)
+}
+
+func (d *Daemon) activeRelaysFrom(session string) ([]registry.RouteRow, error) {
+	routes, err := d.Registry.ListRoutes()
+	if err != nil {
+		return nil, err
 	}
-	d.consumeRelays(ctx, adapter, session, active, captureErr, observed)
+	var active []registry.RouteRow
+	for _, route := range routes {
+		if route.Active && route.FromSession == session {
+			active = append(active, route)
+		}
+	}
+	return active, nil
+}
+
+func (d *Daemon) captureRelays(ctx context.Context, scan relayScan, adapter surface.Surface, session *surface.Session) error {
+	reader, ok := scan.reader(adapter)
+	if !ok {
+		return fmt.Errorf("source does not support replayable completions")
+	}
+	cursor, err := d.Registry.RelaySourceCursor(session.ID)
+	if err != nil {
+		return err
+	}
+	readCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+	batch, err := reader.ReadCompletions(readCtx, session, cursor)
+	cancel()
+	if err != nil {
+		return err
+	}
+	err = d.Registry.CaptureRelayCompletions(session.ID, cursor, batch)
+	if err == nil && len(batch.Events) > 0 {
+		d.publishEvent("state.changed", session.ID, map[string]string{"source": "relay-capture"})
+	}
+	if errors.Is(err, registry.ErrRelayCursorMoved) {
+		return nil
+	}
+	return err
+}
+
+// forwardRelaysBeforeMove forwards what the held session's relays have not:
+// the target reads its completions only from after the move.
+func (d *Daemon) forwardRelaysBeforeMove(ctx context.Context, adapter surface.Surface, session *surface.Session) error {
+	active, err := d.activeRelaysFrom(session.ID)
+	if err != nil || len(active) == 0 {
+		return err
+	}
+	if err := d.captureRelays(ctx, nil, adapter, session); err != nil {
+		return fmt.Errorf("read its completions for its relays: %w", err)
+	}
+	d.consumeRelays(ctx, adapter, session, active, nil, observeOnce(adapter, session, observeAdapter))
+	return nil
 }
 
 func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, from *surface.Session, routes []registry.RouteRow, captureErr error, observed *sessionObservation) {

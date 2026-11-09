@@ -35,12 +35,8 @@ func (r *Registry) AddRelayRoute(from, to, pattern string, once bool, handoff st
 		return 0, err
 	}
 	defer tx.Rollback()
-	var moving bool
-	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`, from).Scan(&moving); err != nil {
+	if err := relaysMovingTx(tx, from); err != nil {
 		return 0, err
-	}
-	if moving {
-		return 0, fmt.Errorf("relay source %s is moving to another host; add the relay once the move has finished", from)
 	}
 	var cycle int
 	err = tx.QueryRow(`
@@ -76,6 +72,9 @@ func (r *Registry) MoveRelayRoutes(from, to string) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := relaysMovingTx(tx, from, to); err != nil {
+		return err
+	}
 	for _, query := range routeMoves {
 		if _, err := tx.Exec(query, from, to); err != nil {
 			return err
@@ -120,8 +119,14 @@ func (r *Registry) RemoveRoute(id int64) error {
 	}
 	defer tx.Rollback()
 	var source string
-	if err := tx.QueryRow(`SELECT from_session FROM routes WHERE id=?`, id).Scan(&source); err != nil {
+	var active bool
+	if err := tx.QueryRow(`SELECT from_session,active FROM routes WHERE id=?`, id).Scan(&source, &active); err != nil {
 		return fmt.Errorf("relay route %d does not exist: %w", id, err)
+	}
+	if active {
+		if err := relaysMovingTx(tx, source); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(`DELETE FROM routes WHERE id=?`, id); err != nil {
 		return err
@@ -174,12 +179,20 @@ func (r *Registry) ListRoutes() ([]RouteRow, error) {
 }
 
 func (r *Registry) DeactivateRoute(id int64) error {
-	res, err := r.db.Exec(`UPDATE routes SET active=0 WHERE id=? AND active=1`, id)
+	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n != 1 {
+	defer tx.Rollback()
+	var source string
+	if err := tx.QueryRow(`SELECT from_session FROM routes WHERE id=? AND active=1`, id).Scan(&source); err != nil {
 		return fmt.Errorf("active relay route %d does not exist", id)
 	}
-	return nil
+	if err := relaysMovingTx(tx, source); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE routes SET active=0 WHERE id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

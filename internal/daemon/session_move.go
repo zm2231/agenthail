@@ -160,6 +160,9 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 		return sessionMoveResult{}, err
 	}
 	defer out.Release()
+	if err := d.forwardRelaysBeforeMove(ctx, adapter, session); err != nil {
+		return sessionMoveResult{}, MoveRefusedError{Reason: fmt.Sprintf("session %s cannot move: %s", session.ID, err)}
+	}
 	checkout, err := sourceCheckout(ctx, out.Cwd)
 	if err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
@@ -184,7 +187,7 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	}
 	release, _ := claimMove(manifest.ID)
 	defer release()
-	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, host.record.ID, encoded, relayIDs(relays)); err != nil {
+	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, host.record.ID, encoded, relays, d.hostIdentity().ID); err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
 	}
 	result := sessionMoveResult{Host: host.ref(), Stopped: out.Stopped, Alias: alias}
@@ -237,14 +240,6 @@ func (d *Daemon) prepareMoveOnHost(ctx context.Context, host *pairedHost, manife
 		return fmt.Errorf("update Agenthail on %s; it cannot take over the relays from a moved session", host.record.Name)
 	}
 	return nil
-}
-
-func relayIDs(relays []registry.MovedRelay) []int64 {
-	ids := make([]int64, 0, len(relays))
-	for _, relay := range relays {
-		ids = append(ids, relay.ID)
-	}
-	return ids
 }
 
 // settleMoveOut drives a sent move, whose files are archived, to done or

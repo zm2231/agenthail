@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -131,8 +132,9 @@ func (r *Registry) SessionMoveRefusal(conversation string, carryRelays bool) (st
 
 // BeginMoveOut records a move out as preparing. Only one move out of a
 // conversation can be unfinished at a time, and relays are the active relays
-// from it the move declared: one added since refuses the move.
-func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []byte, relays []int64) error {
+// from it the move declared: any change to them since refuses the move, as
+// does a completion they have not forwarded.
+func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []byte, relays []MovedRelay, self string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -145,10 +147,17 @@ func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []by
 	if busy {
 		return fmt.Errorf("a move of %s has not finished", conversation)
 	}
-	if same, err := sameRelaysTx(tx, conversation, relays); err != nil {
+	current, err := movedRelays(tx, conversation, self)
+	if err != nil {
 		return err
-	} else if !same {
+	}
+	if !slices.Equal(current, relays) {
 		return fmt.Errorf("the relays from %s changed while the move was prepared; move it again", conversation)
+	}
+	if reason, err := relayMoveRefusal(tx, conversation); err != nil {
+		return err
+	} else if reason != "" {
+		return errors.New(reason)
 	}
 	stamp := formatTimestamp(r.now())
 	if _, err := tx.Exec(`INSERT INTO session_moves(id,conversation,peer_host,role,state,manifest,created_at,updated_at) VALUES(?,?,?,'out',?,?,?,?)`, id, conversation, peerHost, MovePreparing, manifest, stamp, stamp); err != nil {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"slices"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -24,7 +23,11 @@ type MovedRelay struct {
 }
 
 func (r *Registry) MovedRelays(conversation, self string) ([]MovedRelay, error) {
-	return queryRows(r.read, []MovedRelay{}, func(row rowScanner) (MovedRelay, error) {
+	return movedRelays(r.read, conversation, self)
+}
+
+func movedRelays(q rowQuerier, conversation, self string) ([]MovedRelay, error) {
+	return queryRows(q, []MovedRelay{}, func(row rowScanner) (MovedRelay, error) {
 		var relay MovedRelay
 		var once int
 		err := row.Scan(&relay.ID, &relay.ToSession, &relay.ToHost, &relay.Pattern, &once, &relay.Handoff, &relay.LastGoalKey)
@@ -57,17 +60,17 @@ func relayMoveRefusal(q catalogQuerier, conversation string) (string, error) {
 	return "", nil
 }
 
-func sameRelaysTx(tx *sql.Tx, conversation string, declared []int64) (bool, error) {
-	current, err := queryRows(tx, []int64{}, func(row rowScanner) (int64, error) {
-		var id int64
-		return id, row.Scan(&id)
-	}, `SELECT id FROM routes WHERE from_session=? AND active=1 ORDER BY id`, conversation)
-	if err != nil {
-		return false, err
+func relaysMovingTx(tx *sql.Tx, sessions ...string) error {
+	for _, session := range sessions {
+		var moving bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`, session).Scan(&moving); err != nil {
+			return err
+		}
+		if moving {
+			return fmt.Errorf("relay source %s is moving to another host; change its relays once the move has finished", session)
+		}
 	}
-	sorted := slices.Clone(declared)
-	slices.Sort(sorted)
-	return slices.Equal(current, sorted), nil
+	return nil
 }
 
 func dropMovedRelaysTx(tx *sql.Tx, conversation string) error {

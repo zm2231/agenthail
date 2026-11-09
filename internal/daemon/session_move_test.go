@@ -398,7 +398,7 @@ func TestAMoveSentByADaemonThatStoppedIsSettledFromTheTargetsRecord(t *testing.T
 				t.Fatal("the move is already claimed")
 			}
 			t.Cleanup(release)
-			if err := source.reg.BeginMoveOut(manifest.ID, session.ID, record.ID, encoded, nil); err != nil {
+			if err := source.reg.BeginMoveOut(manifest.ID, session.ID, record.ID, encoded, nil, ""); err != nil {
 				t.Fatal(err)
 			}
 			if err := source.daemon.prepareMoveOnHost(context.Background(), host, manifest); err != nil {
@@ -457,7 +457,7 @@ func TestADaemonThatStoppedWhilePreparingAMoveFailsIt(t *testing.T) {
 	session := startMovable(t, source)
 	moveID := "6a1b0c9d-1111-4222-8333-944455556666"
 	manifest, _ := json.Marshal(moveManifest{ID: moveID, Conversation: session.ID, Surface: session.Surface})
-	if err := source.reg.BeginMoveOut(moveID, session.ID, record.ID, manifest, nil); err != nil {
+	if err := source.reg.BeginMoveOut(moveID, session.ID, record.ID, manifest, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := source.claude.ArchiveMove(session.ID, moveID); err != nil {

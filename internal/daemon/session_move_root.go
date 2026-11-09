@@ -47,7 +47,7 @@ func (d *Daemon) moveSessionToRoot(ctx context.Context, request sessionMoveReque
 	}
 	release, _ := claimMove(manifest.ID)
 	defer release()
-	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, self, encoded, nil); err != nil {
+	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, self, encoded, nil, self); err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
 	}
 	result := sessionMoveResult{Host: d.localHost(), Stopped: out.Stopped, Alias: alias, Root: request.Root}

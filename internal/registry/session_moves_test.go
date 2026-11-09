@@ -41,10 +41,10 @@ func TestAMoveOutHoldsItsConversationsQueueAndHandsItToTheTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), nil); err != nil {
+	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), nil, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.BeginMoveOut("move-2", moveConversation, moveTarget, []byte(`{}`), nil); err == nil {
+	if err := r.BeginMoveOut("move-2", moveConversation, moveTarget, []byte(`{}`), nil, ""); err == nil {
 		t.Fatal("a second move of the same conversation began")
 	}
 	if item, err := r.ClaimNextMessage(moveConversation, time.Now()); err != nil || item != nil {
@@ -111,7 +111,7 @@ func TestAFailedMoveOutReleasesItsConversation(t *testing.T) {
 	if _, err := r.QueueMessageWithOptions(moveConversation, "waits for the move", "key-1", surface.SendOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), nil); err != nil {
+	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetMoveState("move-1", MoveFailed, "refused", MovePreparing, MoveSent); err != nil {
