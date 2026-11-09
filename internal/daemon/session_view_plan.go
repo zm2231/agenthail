@@ -4,16 +4,15 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type sessionViewPlan struct {
 	view     SessionView
 	rows     map[string]*dashboardSession
 	roots    map[string]string
+	parent   map[string]string
+	worker   map[string]bool
 	children map[string][]string
-	working  map[string]int
 	now      time.Time
 }
 
@@ -46,7 +45,7 @@ func presentationPinned(row *dashboardSession) bool {
 }
 
 func newSessionViewPlan(rows []dashboardSession, scope string, filters SessionViewFilters, now time.Time) sessionViewPlan {
-	p := sessionViewPlan{view: SessionView{Scope: scope, Filters: filters, AsOf: now, Counts: map[string]SessionViewCount{}, Projects: []SessionViewProject{}, Families: []SessionViewFamily{}, Surfaces: []SessionViewSurface{}}, rows: make(map[string]*dashboardSession, len(rows)), roots: map[string]string{}, children: map[string][]string{}, working: map[string]int{}, now: now}
+	p := sessionViewPlan{view: SessionView{Scope: scope, Filters: filters, AsOf: now, Counts: map[string]SessionViewCount{}, Projects: []SessionViewProject{}, Families: []SessionViewFamily{}, Surfaces: []SessionViewSurface{}}, rows: make(map[string]*dashboardSession, len(rows)), roots: map[string]string{}, parent: map[string]string{}, worker: map[string]bool{}, children: map[string][]string{}, now: now}
 	for _, row := range rows {
 		if row.Display == nil {
 			display := sessionDisplay(row, now)
@@ -54,36 +53,28 @@ func newSessionViewPlan(rows []dashboardSession, scope string, filters SessionVi
 		}
 		p.rows[row.ID] = &row
 	}
+	p.link()
 	for _, row := range rows {
 		seen := map[string]bool{}
 		at := row.ID
 		for at != "" && !seen[at] {
 			seen[at] = true
-			parent, found := p.rows[at]
+			member, found := p.rows[at]
 			if !found {
 				break
 			}
-			if parent.Subagent == nil {
-				if !parent.Delegated && parent.Source != "subAgent" {
+			if p.parent[at] == "" {
+				if !member.Delegated && member.Source != "subAgent" {
 					p.roots[row.ID] = at
 				}
 				break
 			}
-			at = parent.Subagent.ParentID
+			at = p.parent[at]
 		}
-		if row.Subagent != nil && p.roots[row.ID] != "" {
-			p.children[row.Subagent.ParentID] = append(p.children[row.Subagent.ParentID], row.ID)
+		if parent := p.parent[row.ID]; parent != "" && p.roots[row.ID] != "" {
+			p.children[parent] = append(p.children[parent], row.ID)
 		}
 		p.deadlines(row)
-	}
-	for id, root := range p.roots {
-		row := p.rows[id]
-		if id != root && row.Status == surface.StatusBusy {
-			p.working[root]++
-		}
-		if row.ObservedSubagents != nil {
-			p.working[root] += row.ObservedSubagents.Working
-		}
 	}
 	for parent := range p.children {
 		sort.Slice(p.children[parent], func(i, j int) bool {
@@ -152,7 +143,7 @@ func (p *sessionViewPlan) qualifies(row *dashboardSession, scope string, filters
 	if root == nil {
 		return false
 	}
-	if row.ID != root.ID && !row.Archived && !presentationMatches(row, "recent", p.now) {
+	if row.Subagent != nil && row.ID != root.ID && !row.Archived && !presentationMatches(row, "recent", p.now) {
 		return false
 	}
 	if filters.ProjectID != "" && (root.Project == nil || root.Project.ID != filters.ProjectID) {
@@ -169,18 +160,16 @@ func (p *sessionViewPlan) families(scope string, filters SessionViewFilters) []S
 			continue
 		}
 		matched[id] = true
-		for at := id; at != "" && !needed[at]; {
+	}
+	for id := range matched {
+		for at := id; at != "" && !needed[at]; at = p.up(at, matched) {
 			needed[at] = true
-			row := p.rows[at]
-			if row.Subagent == nil {
-				break
-			}
-			at = row.Subagent.ParentID
 		}
 	}
+	working := p.workingSubagents(matched)
 	families := []SessionViewFamily{}
 	for id, row := range p.rows {
-		if p.roots[id] != id || !needed[id] {
+		if p.roots[id] == "" || !needed[id] || p.up(id, matched) != "" {
 			continue
 		}
 		family := SessionViewFamily{ID: id, RootID: id, Members: []SessionViewMember{}}
@@ -199,8 +188,21 @@ func (p *sessionViewPlan) families(scope string, filters SessionViewFilters) []S
 			}
 			member := p.rows[at]
 			pinned := matched[at] && presentationPinned(member)
-			family.Members = append(family.Members, SessionViewMember{ID: at, Depth: depth, ContextOnly: !matched[at], Pinned: pinned})
+			worker := depth > 0 && p.worker[at]
+			family.Members = append(family.Members, SessionViewMember{ID: at, Depth: depth, ContextOnly: !matched[at], Pinned: pinned, Worker: worker})
 			family.Pinned = family.Pinned || pinned
+			if worker && matched[at] {
+				if family.Workers == nil {
+					family.Workers = &SessionViewWorkers{}
+				}
+				family.Workers.Count++
+				if presentationWorking(member) {
+					family.Workers.Working++
+				}
+				if presentationNeedsYou(member) {
+					family.Workers.NeedsYou++
+				}
+			}
 			if matched[at] && presentationNeedsYou(member) {
 				needsYou = true
 				if since := presentationWaitingSince(member); !since.IsZero() && (waitingSince.IsZero() || since.Before(waitingSince)) {
@@ -211,11 +213,13 @@ func (p *sessionViewPlan) families(scope string, filters SessionViewFilters) []S
 				family.activity = member.LastActive
 			}
 			for _, child := range p.children[at] {
-				walk(child, depth+1)
+				if p.up(child, matched) == at {
+					walk(child, depth+1)
+				}
 			}
 		}
 		walk(id, 0)
-		family.WorkingSubagents = p.working[id]
+		family.WorkingSubagents = working[id]
 		family.key = sessionViewKey{Band: sessionBandIdle, At: family.activity, ID: id}
 		switch {
 		case needsYou:
