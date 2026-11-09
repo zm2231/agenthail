@@ -8,7 +8,7 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
             addTeardownBlock { @MainActor in XCUIDevice.shared.orientation = .portrait }
         }
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-reading", "--preview-tail", "-preview-tail", "review", "--preview-theme", "dark"] + extra
+        app.launchArguments = ["--preview-session", "--preview-reading", "--preview-tail", "-preview-tail", "review", "--preview-follow", "--preview-theme", "dark"] + extra
         app.launch()
         let timeline = app.scrollViews["session-timeline"]
         XCTAssertTrue(timeline.waitForExistence(timeout: 10))
