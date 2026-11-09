@@ -264,29 +264,55 @@ func TestOnlyTheLocalCLICanTestRetryOrReloadTriggers(t *testing.T) {
 	if err := configureTriggers(t, d, fmt.Sprintf(`{"version":1,"triggers":[{"name":"flag","touch":%q}]}`, flag)); err != nil {
 		t.Fatal(err)
 	}
-	pairing, err := r.CreateDevicePairing("Phone", []string{"read", "control", "settings"}, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, deviceToken, err := r.CompleteDevicePairing(pairing.Secret, "Phone", "")
-	if err != nil {
-		t.Fatal(err)
+	token := func(name, hostID string, scopes ...string) string {
+		pairing, err := r.CreateDevicePairing(name, scopes, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		device, token, err := r.CompleteDevicePairing(pairing.Secret, name, hostID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if device.IsHost() != (hostID != "") {
+			t.Fatalf("%s: host=%v", name, device.IsHost())
+		}
+		return token
 	}
 	handler := dashboardRouter(d)
-	device := signinAPIClient{t: t, handler: handler, token: deviceToken}
-	var page triggersPage
-	if code := device.do(http.MethodGet, "/api/v1/triggers", "", &page); code != http.StatusOK || len(page.Status.Triggers) != 1 {
-		t.Fatalf("a paired device could not read triggers: code=%d page=%+v", code, page)
+	phone := signinAPIClient{t: t, handler: handler, token: token("Phone", "", "read", "control", "settings")}
+	peer := signinAPIClient{t: t, handler: handler, token: token("vps", "h0123456789ab", "read", "control", registry.HostScope)}
+	for name, remote := range map[string]signinAPIClient{"a device": phone, "a paired host": peer} {
+		var page triggersPage
+		if code := remote.do(http.MethodGet, "/api/v1/triggers", "", &page); code != http.StatusOK || len(page.Status.Triggers) != 1 {
+			t.Fatalf("%s could not read triggers: code=%d page=%+v", name, code, page)
+		}
 	}
-	for _, body := range []string{`{"action":"reload"}`, `{"action":"test","trigger":"flag"}`, `{"action":"retry","runId":1}`} {
-		if code := device.do(http.MethodPost, "/api/v1/triggers", body, nil); code != http.StatusForbidden {
-			t.Fatalf("a device token posted %s: %d", body, code)
+	retryable := registry.TriggerRun{Trigger: "flag", DedupeKey: "h:from:done", SessionID: "from", TurnID: "done", Completion: json.RawMessage(`{}`)}
+	if err := r.RecordCompletion("from", nil, []registry.TriggerRun{retryable}); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := r.StartNextTriggerRun("flag")
+	if err != nil || finished == nil {
+		t.Fatalf("run=%+v err=%v", finished, err)
+	}
+	if err := r.FinishTriggerRun(finished.ID, registry.TriggerOutcome{State: registry.TriggerFailed, ExitCode: 1}); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{`{"action":"reload"}`, `{"action":"test","trigger":"flag"}`, fmt.Sprintf(`{"action":"retry","runId":%d}`, finished.ID)} {
+		for name, remote := range map[string]signinAPIClient{"a device token": phone, "a paired host's token": peer} {
+			var refused signinAPIError
+			if code := remote.do(http.MethodPost, "/api/v1/triggers", body, &refused); code != http.StatusForbidden || refused.Error.Code != "local_only" {
+				t.Fatalf("%s posted %s: %d %+v", name, body, code, refused)
+			}
 		}
 		if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/triggers", body); response.Code != http.StatusForbidden {
 			t.Fatalf("a browser posted %s: %d", body, response.Code)
 		}
 	}
-	if runs, _ := r.ListTriggerRuns(registry.TriggerRunFilter{}); len(runs) != 0 {
+	if run, err := r.TriggerRun(finished.ID); err != nil || run.State != registry.TriggerFailed || run.Attempts != 1 {
+		t.Fatalf("a refused retry changed the run: %+v %v", run, err)
+	}
+	if runs, _ := r.ListTriggerRuns(registry.TriggerRunFilter{}); len(runs) != 1 {
 		t.Fatalf("a refused request queued %+v", runs)
 	}
 
@@ -295,7 +321,7 @@ func TestOnlyTheLocalCLICanTestRetryOrReloadTriggers(t *testing.T) {
 	if code := cli.do(http.MethodPost, "/api/v1/triggers", `{"action":"test","trigger":"flag"}`, &tested); code != http.StatusOK || !tested.Test {
 		t.Fatalf("code=%d run=%+v", code, tested)
 	}
-	waitForTriggerRuns(t, r, "flag", 1)
+	waitForTriggerRuns(t, r, "flag", 2)
 	if err := os.Remove(flag); err != nil {
 		t.Fatalf("the test run did not touch the file: %v", err)
 	}
@@ -340,5 +366,30 @@ func TestARunQueuedAsItsTriggerFinishesDrainingStillRuns(t *testing.T) {
 		if run.State != registry.TriggerSucceeded {
 			t.Fatalf("runs=%+v", runs)
 		}
+	}
+}
+
+func TestAPairedHostsTurnFiresTriggersOnlyOnThatHost(t *testing.T) {
+	viewer, host, record := pairedFederation(t)
+	withoutDesktop(host.daemon)
+	recordDesktop(viewer.daemon)
+	for _, node := range []*federationNode{viewer, host} {
+		node.daemon.triggers.path = filepath.Join(t.TempDir(), "triggers.json")
+		body := fmt.Sprintf(`{"version":1,"triggers":[{"name":"any","touch":%q,"delegated":true}]}`, filepath.Join(t.TempDir(), "flag"))
+		if err := os.WriteFile(node.daemon.triggers.path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := node.daemon.reloadTriggers(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hostTurn(t, host, "remote-a", "turn-1", "", nil)
+	awaitMirroredCompletion(t, viewer, "remote-a", "turn-1")
+	settleNotices(t, host, record.ID, viewer)
+	if runs := waitForTriggerRuns(t, host.reg, "any", 1); len(runs) != 1 || runs[0].TurnID != "turn-1" {
+		t.Fatalf("host runs=%+v", runs)
+	}
+	if runs, err := viewer.reg.ListTriggerRuns(registry.TriggerRunFilter{}); err != nil || len(runs) != 0 {
+		t.Fatalf("the viewer fired its own trigger for a mirrored turn: %+v %v", runs, err)
 	}
 }

@@ -94,17 +94,14 @@ func (t *triggerService) matching(c triggers.Completion) []triggers.Trigger {
 	return matched
 }
 
-// recordCompletion records a terminal completion of a session this host
-// owns: its turn notice when it notifies, and a run for every trigger it
-// matches, in one transaction.
+// Only this host's observer calls recordCompletion, and it watches only
+// sessions this host owns, so a paired host's turn never fires a trigger here.
 func (d *Daemon) recordCompletion(session *surface.Session, turnID string, failed bool, notice *turnCompletedNotice) {
+	completion := d.triggerCompletion(session, turnID, failed)
+	encoded, _ := json.Marshal(completion)
 	var runs []registry.TriggerRun
-	if !d.hostOwned(session.ID) {
-		completion := d.triggerCompletion(session, turnID, failed)
-		encoded, _ := json.Marshal(completion)
-		for _, trigger := range d.triggers.matching(completion) {
-			runs = append(runs, registry.TriggerRun{Trigger: trigger.Name, DedupeKey: completion.DedupeKey(), SessionID: session.ID, TurnID: turnID, Completion: encoded})
-		}
+	for _, trigger := range d.triggers.matching(completion) {
+		runs = append(runs, registry.TriggerRun{Trigger: trigger.Name, DedupeKey: completion.DedupeKey(), SessionID: session.ID, TurnID: turnID, Completion: encoded})
 	}
 	var recorded *registry.TurnNotice
 	if notice != nil {

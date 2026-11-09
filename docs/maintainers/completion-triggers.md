@@ -14,7 +14,7 @@ A trigger fires on the same terminal completion that sends the desktop notificat
 
 The outcome is `finished`, or `failed` when the reply carries an error. A turn held while background work runs fires once, when that work clears, just as the notification does.
 
-Only sessions this host owns fire. A paired host's completions arrive here through the mirror (`notifyMirroredCompletion`), and they fire triggers only on their own host. So a completion runs each trigger once, on the machine where the work happened. If two hosts were both configured, a mirrored completion would otherwise fire twice.
+Only sessions this host owns fire: the observer watches only sessions with no owning host (`WatchedSessions`). A paired host's completions arrive here through the mirror (`notifyMirroredCompletion`), which records no trigger run, so they fire triggers only on their own host. So a completion runs each trigger once, on the machine where the work happened. If two hosts were both configured, a mirrored completion would otherwise fire twice.
 
 By default a session another agent started (`session.Delegated()`) fires no trigger, which matches notifications. A trigger opts in with `"delegated": true`. A delegated session's turns are therefore armed like any other; only the notification skips them.
 
@@ -157,7 +157,8 @@ The table arrived with schema 80. Rekeying a Claude session to its conversation 
 - Timeout kills the process group, including a child that ignores SIGTERM. The run is `timed_out`.
 - A failing command is `failed` with its exit code. A missing or unsafe executable is refused at load.
 - `touch` creates a 0600 file and refuses a symlink, leaving its target untouched.
-- Only the local CLI token can reload, retry or test; a device token and a browser are refused.
+- Only the local CLI token can reload, retry or test; a device token, a paired host's token and a browser are refused, and a refused retry leaves the run as it was.
+- A paired host's turn fires that host's trigger and none on the viewer that mirrors it.
 - Duplicates: the same completion observed twice, and a held completion released after a restart, each run once.
 - Restart: a `pending` run executes after restart, and a `running` one becomes `interrupted` and does not rerun.
 - Concurrency: with three triggers on one completion, at most two run at once, and one trigger's runs execute in order.
