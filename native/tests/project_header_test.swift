@@ -56,12 +56,13 @@ struct ProjectHeaderTest {
         let project = ProjectState(id: "p1", displayName: "Agenthail")
 
         var led = ProjectState(id: "p1", displayName: "Agenthail")
-        led.coordinators = [ProjectState.Lead(name: "lead", surface: "claude", sessionId: "lead")]
+        led.coordinators = [ProjectState.Lead(name: "lead", surface: "claude", sessionId: "lead"),
+                            ProjectState.Lead(host: SessionHost(id: "h2", name: "server", state: "connected"), name: "worker", surface: "codex", sessionId: "worker")]
         var snapshot = DashboardSnapshot(updatedAt: "2026-11-09T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
         snapshot.projects = [led]
         model.snapshot = snapshot
         let hostRefused = await model.rename("h2::worker", to: "")
-        check(hostRefused?.contains("needs an update") == true, "a host's 409 for a session that is no lead keeps its own text: \(hostRefused ?? "nil")")
+        check(hostRefused?.contains("needs an update") == true, "a host's 409 keeps its own text, even for a lead on that host:\(hostRefused ?? "nil")")
         let leadRefused = await model.rename("lead", to: "")
         check(leadRefused?.hasPrefix("This name is this project's lead. Change or clear it with Change Lead…") == true, "a lead's refused clear names the app's way to change it: \(leadRefused ?? "nil")")
         check(leadRefused?.contains("agenthail coordinator") == false, "it gives no CLI advice")
