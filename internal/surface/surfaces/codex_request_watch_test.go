@@ -1,11 +1,15 @@
 package surfaces
 
 import (
+	"context"
+	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/codextest"
+	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -76,6 +80,57 @@ func TestTheStatusWatchSubscribesToAThreadAlreadyWaitingWhenItAttaches(t *testin
 	before := changes.Load()
 	daemon.OpenRequest(2, codexCommandApproval, approvalOn(managedThreadID, "call_b"))
 	testkit.Eventually(t, "a second request to wake the catalog", 5*time.Second, func() bool { return changes.Load() > before })
+}
+
+func TestRequestsHeardWhileTheWatchIsStillSubscribingWakeTheCatalog(t *testing.T) {
+	watch := newRequestWatch(nil, nil)
+	watch.want[managedThreadID], watch.busy[managedThreadID] = true, true
+	opened := codexEvent{Method: codexCommandApproval, RequestID: json.RawMessage("2"), Params: map[string]any{"threadId": managedThreadID}}
+	resolved := codexEvent{Method: codexRequestResolved, Params: map[string]any{"threadId": managedThreadID, "requestId": float64(1)}}
+	elsewhere := codexEvent{Method: codexCommandApproval, RequestID: json.RawMessage("3"), Params: map[string]any{"threadId": otherManagedThreadID}}
+	if !watch.heard(opened) || !watch.heard(resolved) || watch.heard(elsewhere) {
+		t.Fatalf("opened=%v resolved=%v elsewhere=%v", watch.heard(opened), watch.heard(resolved), watch.heard(elsewhere))
+	}
+}
+
+func TestAReloadDoesNotKeepTheWatchOnAThreadThatStoppedWaitingMeanwhile(t *testing.T) {
+	fastTerminalPolls(t)
+	reloading, proceed := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	daemon := startManagedCodex(t, func(method string, params map[string]any) map[string]any {
+		if method == codexThreadResume && params["excludeTurns"] == nil {
+			once.Do(func() { close(reloading); <-proceed })
+		}
+		return nil
+	})
+	daemon.AddThread(runningThread(managedThreadID))
+	daemon.Load(managedThreadID)
+	daemon.OpenRequest(1, codexCommandApproval, approvalOn(managedThreadID, "call_a"))
+	codex := watchedCodex(t, managedThreadID)
+	testkit.Eventually(t, "the watch to subscribe to the waiting thread", 5*time.Second, func() bool {
+		return resumesOf(daemon, managedThreadID) == 1 && daemon.Subscribers(managedThreadID) == 1
+	})
+	ctx := context.Background()
+	reloader, err := dialManagedCodex(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- codex.reloadThread(ctx, reloader, &surface.Session{ID: managedThreadID}, func() error { return nil })
+	}()
+	<-reloading
+	daemon.Answer(1)
+	daemon.Notify("thread/status/changed", map[string]any{"threadId": managedThreadID, "status": waitingStatus()})
+	time.Sleep(200 * time.Millisecond)
+	close(proceed)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	_ = reloader.Close()
+	testkit.Eventually(t, "no one to follow the thread once it stopped waiting", 5*time.Second, func() bool {
+		return daemon.Subscribers(managedThreadID) == 0
+	})
 }
 
 func TestTheStatusWatchNeverLoadsAThreadItsAppServerDoesNotHave(t *testing.T) {

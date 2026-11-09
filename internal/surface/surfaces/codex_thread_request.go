@@ -30,11 +30,7 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 	if method == codexThreadResume {
 		threadID, _ := params["threadId"].(string)
 		defer c.subscriptions.shared(threadID)()
-		response, err := c.resumeThread(ctx, client, session, params, wait)
-		if err == nil {
-			c.subscriptions.add(threadID, client)
-		}
-		return response, err
+		return c.resumeFollower(ctx, client, session, params, wait)
 	}
 	credentials := c.mcpCredentials()
 	if credentials == nil {
@@ -60,6 +56,16 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 		return response, nil
 	}
 	return nil, fmt.Errorf("codexThreadRequest does not send %s", method)
+}
+
+// The caller holds the thread's subscription gate.
+func (c *Codex) resumeFollower(ctx context.Context, client codexClient, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
+	threadID, _ := params["threadId"].(string)
+	response, err := c.resumeThread(ctx, client, session, params, wait)
+	if err == nil {
+		c.subscriptions.add(threadID, client)
+	}
+	return response, err
 }
 
 func (c *Codex) resumeThread(ctx context.Context, client codexClient, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {

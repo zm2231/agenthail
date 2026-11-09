@@ -38,11 +38,17 @@ func (c *Codex) managedStreamRead(ctx context.Context, client codexClient, threa
 // thread's item, turn and token notifications. It subscribes only to a loaded
 // thread, since resuming one that is not loaded would load it.
 func (c *Codex) subscribeManagedThread(ctx context.Context, client codexClient, threadID string) bool {
+	defer c.subscriptions.shared(threadID)()
+	return c.followLoadedThread(ctx, client, threadID)
+}
+
+// The caller holds the thread's subscription gate.
+func (c *Codex) followLoadedThread(ctx context.Context, client codexClient, threadID string) bool {
 	loaded, err := c.loadedThreadIDs(ctx, client, 0)
 	if err != nil || !slices.Contains(loaded, threadID) {
 		return false
 	}
-	_, err = c.codexThreadRequest(ctx, client, codexThreadResume, &surface.Session{ID: threadID}, map[string]any{"threadId": threadID, "excludeTurns": true}, 5*time.Second)
+	_, err = c.resumeFollower(ctx, client, &surface.Session{ID: threadID}, map[string]any{"threadId": threadID, "excludeTurns": true}, 5*time.Second)
 	return err == nil
 }
 

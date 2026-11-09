@@ -86,8 +86,10 @@ func (w *requestWatch) reconcile(ctx context.Context, threadID string) {
 		if subscribe {
 			result.subscribed = w.codex.subscribeManagedThread(ctx, w.client, threadID)
 		} else {
+			release := w.codex.subscriptions.shared(threadID)
 			w.codex.subscriptions.remove(threadID, w.client)
 			_, _ = w.client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": threadID}, 5*time.Second)
+			release()
 		}
 		select {
 		case w.results <- result:
@@ -97,25 +99,30 @@ func (w *requestWatch) reconcile(ctx context.Context, threadID string) {
 	}()
 }
 
-// A thread no longer loaded is not subscribed; its next status change tries again.
-func (w *requestWatch) finish(ctx context.Context, result requestSubscription) {
+// finish reports a new subscription, since requests may have opened or
+// resolved before it took. A thread no longer loaded is not subscribed; its
+// next status change tries again.
+func (w *requestWatch) finish(ctx context.Context, result requestSubscription) bool {
 	delete(w.busy, result.threadID)
+	subscribed := result.subscribed && !w.have[result.threadID]
 	if result.subscribed {
 		w.have[result.threadID] = true
 	} else {
 		delete(w.have, result.threadID)
 		if w.want[result.threadID] {
 			delete(w.want, result.threadID)
-			return
+			return false
 		}
 	}
 	w.reconcile(ctx, result.threadID)
+	return subscribed
 }
 
+// A thread being subscribed counts too: the resume's replies can arrive before its result.
 func (w *requestWatch) heard(event codexEvent) bool {
 	if len(event.RequestID) == 0 && event.Method != codexRequestResolved {
 		return false
 	}
 	threadID, _ := event.Params["threadId"].(string)
-	return w.have[threadID]
+	return w.have[threadID] || w.want[threadID]
 }

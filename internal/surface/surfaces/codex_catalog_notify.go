@@ -62,7 +62,9 @@ func (c *Codex) forwardCodexStatusChanges(ctx context.Context, client *managedCo
 			}
 			watch.start(ctx, time.Now())
 		case result := <-requests.results:
-			requests.finish(ctx, result)
+			if requests.finish(ctx, result) {
+				changed()
+			}
 		case seeded := <-requests.seeded:
 			requests.applySeed(ctx, seeded)
 		case <-client.Notified():

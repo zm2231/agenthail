@@ -326,6 +326,19 @@ func (d *Daemon) resolveLocked(id any) map[string]any {
 	return nil
 }
 
+// Subscribers counts the connections following a thread now.
+func (d *Daemon) Subscribers(threadID string) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	count := 0
+	for conn := range d.conns {
+		if conn.subscribed[threadID] {
+			count++
+		}
+	}
+	return count
+}
+
 // A thread another connection still follows stays loaded, as in the app-server.
 func (d *Daemon) unloadUnwatchedLocked(threadID string) {
 	if d.heldBy[threadID] {
