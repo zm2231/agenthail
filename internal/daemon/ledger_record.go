@@ -24,7 +24,7 @@ type personWordsRecord struct {
 }
 
 // recordPersonWords records u in every project whose scope covers the session: its folder's project and any project it was opted into.
-// The record names the first project that asks the session to attach, else the first that recorded the words.
+// The record names the first project that shows the session its provisional count, else the first that recorded the words.
 func (d *Daemon) recordPersonWords(session surface.Session, u ledger.Utterance) (personWordsRecord, error) {
 	record, err := d.recordPersonWordsOnce(session, u)
 	var refusal *ledger.Refusal
