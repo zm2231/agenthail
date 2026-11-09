@@ -162,6 +162,10 @@ func TestOnlyTheOperatorAlwaysAllows(t *testing.T) {
 	if f.answered("worker/worker-prompt") {
 		t.Fatal("a refused always-allow reached the worker")
 	}
+	audits := mcpAudits(t, f.r)
+	if len(audits) != 1 || audits[0].SessionID != "worker" || audits[0].Message != "agenthail_answer rule=ceiling_permission" || audits[0].Result != "exceeds_ceiling" {
+		t.Fatalf("audits=%+v, want the refusal with its target and rule", audits)
+	}
 }
 
 func TestAPermissionModeChangeStaysWithinTheWorkersCeiling(t *testing.T) {

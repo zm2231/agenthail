@@ -38,8 +38,9 @@ func (d *Daemon) mcpAction(ctx context.Context, caller *mcpCaller, tool string, 
 	}
 	reply := d.performAction(ctx, sessionPrincipal(caller.session.ID), actionFormatAPIv1, body, key)
 	result, refusal := mcpActionOutcome(reply)
-	d.recordMCPWrite(caller, tool, request.SessionID, write.ClientRequestID, refusal)
+	d.recordMCPWrite(caller, tool, mcpAuditTarget(request), write.ClientRequestID, refusal)
 	if refusal != nil {
+		refusal.audited = true
 		return nil, refusal
 	}
 	return result, nil
@@ -80,6 +81,18 @@ func mcpActionOutcome(reply actionReply) (json.RawMessage, *mcpRefusal) {
 	return nil, mcpRefusalFor(&actionError{Status: reply.Status, Code: failure.Error.Code, Message: failure.Error.Message, Extra: extra})
 }
 
+func mcpAuditTarget(request dashboardActionRequest) string {
+	switch {
+	case request.SessionID != "":
+		return request.SessionID
+	case request.Channel != "":
+		return "#" + request.Channel
+	case request.Project != "":
+		return "project:" + request.Project
+	}
+	return ""
+}
+
 func mcpUnknownOutcome() *mcpRefusal {
 	return &mcpRefusal{Code: "busy", Message: "A request with this clientRequestId is still running or its outcome was not recorded; retry with the same clientRequestId to read its result.", Retryable: true, Detail: map[string]any{"outcome": "unknown"}}
 }
@@ -90,6 +103,20 @@ func (d *Daemon) recordMCPWrite(caller *mcpCaller, tool, target, clientRequestID
 		outcome = refusal.Code
 	}
 	if err := d.Registry.RecordHistory(registry.HistoryEntry{Kind: "mcp", SessionID: target, SourceSessionID: caller.session.ID, Message: tool + " " + clientRequestID, Result: outcome}); err != nil {
+		d.log.Printf("mcp: audit %s: %s", tool, err)
+	}
+}
+
+// Scope refusals come before any action, so every tool's are recorded here rather than by mcpAction.
+func (d *Daemon) recordMCPScopeRefusal(caller *mcpCaller, tool string, refusal *mcpRefusal) {
+	if refusal.audited || refusal.Code != "out_of_scope" && refusal.Code != "exceeds_ceiling" {
+		return
+	}
+	rule, _ := refusal.Detail["rule"].(string)
+	if axis, ok := refusal.Detail["axis"].(string); rule == "" && ok {
+		rule = "ceiling_" + axis
+	}
+	if err := d.Registry.RecordHistory(registry.HistoryEntry{Kind: "mcp", SessionID: refusal.target, SourceSessionID: caller.session.ID, Message: tool + " rule=" + rule, Result: refusal.Code, Error: refusal.Message}); err != nil {
 		d.log.Printf("mcp: audit %s: %s", tool, err)
 	}
 }

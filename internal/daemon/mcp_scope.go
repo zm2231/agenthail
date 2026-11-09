@@ -117,7 +117,7 @@ func (d *Daemon) mcpReadableSession(caller *mcpCaller, ref string) (*surface.Ses
 	if _, err := d.Registry.Session(id); err != nil {
 		return nil, refuse("not_found", fmt.Sprintf("No session %s.", ref))
 	}
-	return nil, refuse("out_of_scope", fmt.Sprintf("Session %s is not yours, not one you spawned, and not in your project.", ref))
+	return nil, scopeRefusal(id, "not_visible", fmt.Sprintf("Session %s is not yours, not one you spawned, and not in your project.", ref))
 }
 
 var errBadCursor = refuse("invalid", "The cursor is invalid; use the nextCursor a previous call returned.")

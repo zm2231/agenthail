@@ -120,11 +120,9 @@ func TestARepeatedClientRequestIDActsOnceAndADifferentRequestConflicts(t *testin
 	}
 }
 
-func TestEveryWriteLeavesOneAuditEntry(t *testing.T) {
-	f := newMCPWriteFixture(t)
-	callMCP(t, f.parent, "agenthail_send", map[string]any{"target": "to", "message": "audited", "clientRequestId": "a1"})
-	callMCP(t, f.child, "agenthail_steer", map[string]any{"target": "from", "message": "no", "clientRequestId": "a2"})
-	history, err := f.r.ListHistory(50, "")
+func mcpAudits(t *testing.T, r *registry.Registry) []registry.HistoryEntry {
+	t.Helper()
+	history, err := r.ListHistory(50, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +132,73 @@ func TestEveryWriteLeavesOneAuditEntry(t *testing.T) {
 			audits = append(audits, entry)
 		}
 	}
-	if len(audits) != 1 || audits[0].SourceSessionID != "from" || audits[0].Result != "ok" || !strings.Contains(audits[0].Message, "a1") {
-		t.Fatalf("audits=%+v, want one ok entry for the send; refusals before an action are not writes", audits)
+	return audits
+}
+
+func TestEveryWriteAndEveryScopeRefusalLeavesOneAuditEntry(t *testing.T) {
+	f := newMCPWriteFixture(t)
+	callMCP(t, f.parent, "agenthail_send", map[string]any{"target": "to", "message": "audited", "clientRequestId": "a1"})
+	upward := map[string]map[string]any{
+		"agenthail_steer":     {"target": "from", "message": "no", "clientRequestId": "a2"},
+		"agenthail_interrupt": {"target": "from", "clientRequestId": "a3"},
+		"agenthail_goal":      {"target": "from", "action": "pause", "clientRequestId": "a4"},
+		"agenthail_send":      {"target": "from", "message": "now", "mode": "now", "clientRequestId": "a5"},
+	}
+	for tool, args := range upward {
+		if code := refusalCode(t, f.child, tool, args); code != "out_of_scope" {
+			t.Fatalf("%s: code=%q, want out_of_scope", tool, code)
+		}
+	}
+	audits := mcpAudits(t, f.r)
+	if len(audits) != 1+len(upward) {
+		t.Fatalf("audits=%+v, want the send and one entry per refusal", audits)
+	}
+	refused := map[string]bool{}
+	for _, entry := range audits {
+		switch entry.Result {
+		case "ok":
+			if entry.SourceSessionID != "from" || !strings.Contains(entry.Message, "a1") {
+				t.Fatalf("send audit=%+v", entry)
+			}
+		case "out_of_scope":
+			tool, rule, _ := strings.Cut(entry.Message, " ")
+			if entry.SourceSessionID != "to" || entry.SessionID != "from" || rule != "rule=down_only" || entry.Error == "" {
+				t.Fatalf("refusal audit=%+v, want caller, target, rule and the refusal", entry)
+			}
+			refused[tool] = true
+		default:
+			t.Fatalf("unexpected audit %+v", entry)
+		}
+	}
+	for tool := range upward {
+		if !refused[tool] {
+			t.Fatalf("%s's refusal left no audit entry: %+v", tool, audits)
+		}
+	}
+}
+
+func TestAnActionAuditNamesItsSessionChannelOrProject(t *testing.T) {
+	for want, request := range map[string]dashboardActionRequest{
+		"s1":         {SessionID: "s1", Channel: "ignored"},
+		"#docs":      {Channel: "docs"},
+		"project:p1": {Project: "p1"},
+	} {
+		if got := mcpAuditTarget(request); got != want {
+			t.Fatalf("target=%q, want %q", got, want)
+		}
+	}
+}
+
+func TestAScopeRefusalIsAuditedOnceAndOtherRefusalsAreNot(t *testing.T) {
+	f := newMCPWriteFixture(t)
+	caller := &mcpCaller{session: surface.Session{ID: "to"}}
+	recorded := scopeRefusal("from", "down_only", "no")
+	recorded.audited = true
+	f.d.recordMCPScopeRefusal(caller, "agenthail_steer", recorded)
+	f.d.recordMCPScopeRefusal(caller, "agenthail_read", refuse("not_found", "No session x."))
+	f.d.recordMCPScopeRefusal(caller, "agenthail_session_settings", (&mcpRefusal{Code: "exceeds_ceiling", Message: "above", Detail: map[string]any{"axis": "permission"}}).about("from"))
+	audits := mcpAudits(t, f.r)
+	if len(audits) != 1 || audits[0].Message != "agenthail_session_settings rule=ceiling_permission" || audits[0].SessionID != "from" || audits[0].Result != "exceeds_ceiling" {
+		t.Fatalf("audits=%+v, want only the ceiling refusal", audits)
 	}
 }

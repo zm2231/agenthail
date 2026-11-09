@@ -31,7 +31,7 @@ func (d *Daemon) mcpAnswer(ctx context.Context, caller *mcpCaller, input mcpAnsw
 		decision.Behavior = "allow"
 	case "always":
 		if !caller.has("control.all") {
-			return nil, &mcpRefusal{Code: "exceeds_ceiling", Message: "Always allow adds a lasting rule that can raise the session's permission mode; allow this one request instead.", Detail: map[string]any{"axis": "permission"}}
+			return nil, (&mcpRefusal{Code: "exceeds_ceiling", Message: "Always allow adds a lasting rule that can raise the session's permission mode; allow this one request instead.", Detail: map[string]any{"axis": "permission"}}).about(strings.TrimSpace(input.Target))
 		}
 		decision.Behavior, decision.Always = "allow", true
 	case "deny":
