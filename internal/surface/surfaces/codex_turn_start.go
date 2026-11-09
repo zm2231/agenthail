@@ -11,6 +11,7 @@ import (
 var (
 	codexTurnStartWait  = 10 * time.Second
 	codexTurnStartLimit = 5 * time.Minute
+	codexTurnStartScan  = 20
 )
 
 // codexTurnStarts records the turns this process started that Codex has not
@@ -45,18 +46,18 @@ func (s *codexTurnStarts) identify(threadID, turnID string) {
 	}
 }
 
-func (s *codexTurnStarts) ended(threadID, turnID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if start, ok := s.started[threadID]; ok && start.turnID != "" && start.turnID == turnID {
-		delete(s.started, threadID)
-	}
-}
-
 func (s *codexTurnStarts) end(threadID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.started, threadID)
+}
+
+func (s *codexTurnStarts) settle(threadID string, ended map[string]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if start, ok := s.started[threadID]; ok && ended[start.turnID] {
+		delete(s.started, threadID)
+	}
 }
 
 func (s *codexTurnStarts) pending(threadID string) bool {
@@ -70,7 +71,8 @@ func (s *codexTurnStarts) pending(threadID string) bool {
 // open, and so subscribed, until Codex reports the thread active or the turn
 // completed, for at most codexTurnStartWait. Until then Codex counts the
 // thread idle, and a resume whose overrides differ reloads an idle thread no
-// connection subscribes to, aborting the turn.
+// connection subscribes to, aborting the turn. The start stays recorded until
+// Codex lists its turn as done.
 func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
 	c.turnStarts.begin(threadID)
 	response, err := client.Request(ctx, method, params, wait)
@@ -85,17 +87,49 @@ func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, met
 	turn, _ := result["turn"].(map[string]any)
 	if id := str(turn, "id"); id != "" {
 		c.turnStarts.identify(threadID, id)
-	}
-	if awaitTurnUnderway(ctx, client, threadID) {
+	} else if id, listed := newestTurnInProgress(ctx, client, threadID); id != "" {
+		c.turnStarts.identify(threadID, id)
+	} else if listed {
 		c.turnStarts.end(threadID)
 	}
+	awaitTurnUnderway(ctx, client, threadID)
 	return response, nil
 }
 
-func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string) bool {
+func newestTurnInProgress(ctx context.Context, client codexClient, threadID string) (string, bool) {
+	turns, err := codexRecentTurns(ctx, client, threadID, 1)
+	if err != nil {
+		return "", false
+	}
+	if len(turns) == 0 {
+		return "", true
+	}
+	if _, finished, _ := codexTurnState(turns[0]["status"]); finished && turns[0]["completedAt"] != nil {
+		return "", true
+	}
+	return str(turns[0], "id"), true
+}
+
+func codexRecentTurns(ctx context.Context, client codexClient, threadID string, limit int) ([]map[string]any, error) {
+	response, err := client.Request(ctx, "thread/turns/list", map[string]any{"threadId": threadID, "limit": limit, "sortDirection": "desc", "itemsView": "notLoaded"}, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	result, _ := response["result"].(map[string]any)
+	values, _ := result["data"].([]any)
+	turns := make([]map[string]any, 0, len(values))
+	for _, value := range values {
+		if turn, ok := value.(map[string]any); ok {
+			turns = append(turns, turn)
+		}
+	}
+	return turns, nil
+}
+
+func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string) {
 	notifier, ok := client.(codexNotifier)
 	if !ok {
-		return false
+		return
 	}
 	timer := time.NewTimer(codexTurnStartWait)
 	defer timer.Stop()
@@ -105,22 +139,25 @@ func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string)
 				continue
 			}
 			if event.Method == "turn/completed" || event.Method == "thread/status/changed" && codexStatusType(event.Params["status"]) == "active" {
-				return true
+				return
 			}
 		}
 		select {
 		case <-notifier.Notified():
 		case <-timer.C:
-			return false
+			return
 		case <-ctx.Done():
-			return false
+			return
 		}
 	}
 }
 
 // turnInFlight reports whether a turn on threadID is starting or running, so
-// a reload now would abort it. Right after turn/start Codex still reports the
-// thread idle but already lists the turn in progress.
+// a reload now would abort it. Right after turn/start Codex can still report
+// the thread idle and list the turn interrupted with no completedAt, and a new
+// thread's first turn is not listed until it ends, so a start this process
+// recorded counts until its turn is listed with completedAt or behind a newer
+// turn.
 func (c *Codex) turnInFlight(ctx context.Context, client codexClient, threadID string) (bool, error) {
 	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
 	if err != nil {
@@ -130,27 +167,25 @@ func (c *Codex) turnInFlight(ctx context.Context, client codexClient, threadID s
 	thread, _ := result["thread"].(map[string]any)
 	switch codexStatusType(thread["status"]) {
 	case "active":
-		c.turnStarts.end(threadID)
 		return true, nil
 	case "notLoaded":
 		return false, nil
 	}
-	response, err = client.Request(ctx, "thread/turns/list", map[string]any{"threadId": threadID, "limit": 1, "sortDirection": "desc", "itemsView": "notLoaded"}, 5*time.Second)
+	turns, err := codexRecentTurns(ctx, client, threadID, codexTurnStartScan)
 	if codexTurnsNotListedYet(err) {
 		return c.turnStarts.pending(threadID), nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("thread/turns/list: %w", err)
 	}
-	result, _ = response["result"].(map[string]any)
-	turns, _ := result["data"].([]any)
-	if len(turns) > 0 {
-		turn, _ := turns[0].(map[string]any)
-		if _, done, _ := codexTurnState(turn["status"]); !done {
-			c.turnStarts.end(threadID)
+	ended := map[string]bool{}
+	for i, turn := range turns {
+		if _, finished, _ := codexTurnState(turn["status"]); !finished {
 			return true, nil
+		} else if i > 0 || turn["completedAt"] != nil {
+			ended[str(turn, "id")] = true
 		}
-		c.turnStarts.ended(threadID, str(turn, "id"))
 	}
+	c.turnStarts.settle(threadID, ended)
 	return c.turnStarts.pending(threadID), nil
 }
