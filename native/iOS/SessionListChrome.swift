@@ -122,7 +122,7 @@ struct SessionScopeChips: View {
             .background {
                 if selected { Capsule().fill(PhonePalette.accent) }
             }
-            .floatingGlass(in: Capsule(), interactive: true)
+            .floatingGlass(in: Capsule(), interactive: true, lifted: false)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

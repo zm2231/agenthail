@@ -60,7 +60,7 @@ struct IOSSessionFilterChips: View {
             .foregroundStyle(Color.primary)
             .padding(.horizontal, 12)
             .frame(minHeight: 44)
-            .floatingGlass(in: Capsule(), interactive: true)
+            .floatingGlass(in: Capsule(), interactive: true, lifted: false)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

@@ -360,8 +360,8 @@ extension View {
         modifier(PhoneBackdropModifier(surface: surface))
     }
 
-    func floatingGlass<S: Shape>(in shape: S, interactive: Bool = false) -> some View {
-        modifier(FloatingGlass(shape: shape, interactive: interactive))
+    func floatingGlass<S: Shape>(in shape: S, interactive: Bool = false, lifted: Bool = true) -> some View {
+        modifier(FloatingGlass(shape: shape, interactive: interactive, lifted: lifted))
     }
 }
 
