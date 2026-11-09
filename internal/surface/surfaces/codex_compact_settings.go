@@ -91,12 +91,13 @@ func (c *Codex) reloadThread(ctx context.Context, client codexClient, sess *surf
 	default:
 		err = fmt.Errorf("%w; Codex may have taken the new compact window, so it stays set and applies the next time Codex loads this thread", err)
 	}
-	release()
+	// Restored under the gate, so a follower leaving meanwhile leaves after it is restored.
 	for _, follower := range dropped {
-		if !c.subscribeManagedThread(ctx, follower, sess.ID) {
+		if !c.followLoadedThread(ctx, follower, sess.ID) {
 			_ = follower.Close()
 		}
 	}
+	release()
 	return err
 }
 

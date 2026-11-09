@@ -141,8 +141,9 @@ func (d *Daemon) observeTurnLocked(ctx context.Context, adapter surface.Surface,
 	if record.Announce {
 		d.announceWaiting(*session, *record.Waiting)
 	}
-	observation.WaitingOn = record.Waiting
-	return observation, record.Changed, nil
+	openChanged := d.openSets.keep(session.ID, waiting, record.Waiting)
+	observation.WaitingOn = d.openSets.attach(session.ID, record.Waiting)
+	return observation, record.Changed || openChanged, nil
 }
 
 // catalogWaiting returns what a listed session is waiting on. A listing that
@@ -159,11 +160,11 @@ func (d *Daemon) catalogWaiting(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("read waiting %s: %s", d.resolveDisplay(session.ID), err)
 		return listed
 	}
-	if surface.SameWaiting(recorded, listed) {
+	if surface.SameWaiting(recorded, listed) && d.openSets.agrees(session.ID, listed) {
 		if recorded != nil && !announced {
 			d.announceWaiting(session, *recorded)
 		}
-		return recorded
+		return d.openSets.attach(session.ID, recorded)
 	}
 	observeCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
