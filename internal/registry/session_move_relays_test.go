@@ -108,7 +108,6 @@ func TestTheRelaysOfAMovingSessionCannotChange(t *testing.T) {
 	changes := map[string]func() error{
 		"add":                func() error { _, err := r.AddRelayRoute(moveConversation, "second", ".*", false, ""); return err },
 		"remove":             func() error { return r.RemoveRoute(id) },
-		"deactivate":         func() error { return r.DeactivateRoute(id) },
 		"hand over from it":  func() error { return r.MoveRelayRoutes(moveConversation, "second") },
 		"hand over to it":    func() error { return r.MoveRelayRoutes("second", moveConversation) },
 		"forward completion": func() error { _, err := r.ConsumeRelay(before[0], events[0], "done", "", ""); return err },

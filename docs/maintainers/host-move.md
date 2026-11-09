@@ -36,9 +36,9 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    that runs it. The move is recorded `preparing`, in a transaction that
    refuses it if the session's relays are no longer the ones it listed or
    have a completion they have not forwarded. Until the move ends, the
-   relays from the session stay as declared: adding, removing or pausing
-   one, a coordinator handover that moves relays to or from the session,
-   and forwarding a completion are all refused.
+   relays from the session stay as declared: adding or removing one, a
+   coordinator handover that moves relays to or from the session, and
+   forwarding a completion are all refused.
 3. **Prepare** (`POST /api/v1/session-move/prepare`). The target finds its own
    checkout of the repository through its added projects and the projects of
    its sessions. When the checkout lacks the commit, it fetches. It refuses

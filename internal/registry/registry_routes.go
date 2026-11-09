@@ -179,20 +179,12 @@ func (r *Registry) ListRoutes() ([]RouteRow, error) {
 }
 
 func (r *Registry) DeactivateRoute(id int64) error {
-	tx, err := r.db.Begin()
+	res, err := r.db.Exec(`UPDATE routes SET active=0 WHERE id=? AND active=1`, id)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	var source string
-	if err := tx.QueryRow(`SELECT from_session FROM routes WHERE id=? AND active=1`, id).Scan(&source); err != nil {
+	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("active relay route %d does not exist", id)
 	}
-	if err := relaysMovingTx(tx, source); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`UPDATE routes SET active=0 WHERE id=?`, id); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
