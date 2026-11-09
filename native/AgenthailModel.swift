@@ -1096,8 +1096,9 @@ final class AgenthailModel {
         do {
             try await api.nameSession(id: sessionID, alias: alias)
         } catch {
-            // The daemon refuses clearing a name with 409 only when it is a project lead's.
-            if alias.isEmpty, case .request(409, _)? = error as? AgenthailAPIError {
+            // A lead's name is refused with 409; a remote host can also answer 409, so the session must be a known lead.
+            if alias.isEmpty, case .request(409, _)? = error as? AgenthailAPIError,
+               projects.contains(where: { $0.leads.contains { ProjectContents.leadSessionID($0) == sessionID } }) {
                 return SessionHandle.leadRefusal(knownSessions.first { $0.id == sessionID }?.alias)
             }
             return AgenthailAPIError.userMessage(error)

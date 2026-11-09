@@ -35,6 +35,9 @@ struct ProjectHeaderTest {
                 if request.contains("\"sessionId\":\"lead\"") {
                     return reply("409 Conflict", #"{"error":{"code":"conflict","message":"@lead is a project coordinator's name; change it with 'agenthail coordinator set --replace' or 'agenthail coordinator clear'"}}"#)
                 }
+                if request.contains("\"sessionId\":\"h2::worker\"") {
+                    return reply("409 Conflict", #"{"error":{"code":"host_incompatible","message":"Host server needs an update before it can be reached"}}"#)
+                }
                 return reply("400 Bad Request", #"{"error":{"code":"invalid_request","message":"session not found"}}"#)
             }
             if request.contains("\"message\":\"partial\"") {
@@ -52,6 +55,13 @@ struct ProjectHeaderTest {
         let model = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(port)")!, token: "t", session: URLSession(configuration: .ephemeral)))
         let project = ProjectState(id: "p1", displayName: "Agenthail")
 
+        var led = ProjectState(id: "p1", displayName: "Agenthail")
+        led.coordinators = [ProjectState.Lead(name: "lead", surface: "claude", sessionId: "lead")]
+        var snapshot = DashboardSnapshot(updatedAt: "2026-11-09T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        snapshot.projects = [led]
+        model.snapshot = snapshot
+        let hostRefused = await model.rename("h2::worker", to: "")
+        check(hostRefused?.contains("needs an update") == true, "a host's 409 for a session that is no lead keeps its own text: \(hostRefused ?? "nil")")
         let leadRefused = await model.rename("lead", to: "")
         check(leadRefused?.hasPrefix("This name is this project's lead. Change or clear it with Change Lead…") == true, "a lead's refused clear names the app's way to change it: \(leadRefused ?? "nil")")
         check(leadRefused?.contains("agenthail coordinator") == false, "it gives no CLI advice")
