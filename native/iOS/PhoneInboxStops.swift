@@ -2,7 +2,7 @@ import Foundation
 
 extension AgenthailIOSModel {
     var inboxStops: InboxStops {
-        InboxStops.build(attention: snapshot?.attention ?? [], deliveries: deliveryProblems, replacements: leadReplacements,
+        InboxStops.build(attention: attention, deliveries: deliveryProblems, replacements: leadReplacements,
                          inbox: decisionFeed.inbox, localHosts: Set(hosts.map(\.id)))
     }
 
@@ -13,11 +13,11 @@ extension AgenthailIOSModel {
     }
 
     func sessionName(_ sessionID: String) -> String {
-        snapshot?.sessions.first { $0.id == sessionID }?.displayName ?? sessionID
+        session(sessionID)?.displayName ?? sessionID
     }
 
     func projectOfSession() -> (String) -> String? {
-        let projects = Dictionary((snapshot?.sessions ?? []).compactMap { session in session.project.map { (session.id, $0.id) } }, uniquingKeysWith: { first, _ in first })
+        let projects = sessionProjects
         return { projects[$0] }
     }
 }

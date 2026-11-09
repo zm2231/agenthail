@@ -2,7 +2,7 @@ import SwiftUI
 
 /// What the composer says about a message that was refused or has no answer yet.
 struct ComposerSendStatus: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let session: SessionState
     @State private var confirmingPutBack = false
 

@@ -3,7 +3,7 @@ import SwiftUI
 /// Shown only for a Claude conversation open in several terminals: the daemon
 /// refuses any write to it that does not name one.
 struct IOSHolderPicker: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let session: SessionState
 
     private var holders: [SessionHolder] { session.sharedHolders }

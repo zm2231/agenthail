@@ -17,6 +17,7 @@ struct PairedHostStatus: Identifiable, Equatable {
     let notifications: String
     var person: PersonState? = nil
     var build: AgenthailBuild? = nil
+    var busyDelivery: String? = nil
 }
 
 struct ListedProject: Equatable {
@@ -25,15 +26,20 @@ struct ListedProject: Equatable {
 }
 
 @MainActor
-final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
+@Observable
+final class AgenthailIOSModel: HostConnectionDelegate {
     static let voiceHostKey = "voiceHost"
-    var hostRefreshWait: Duration = HostRefresh.wait
+    @ObservationIgnored var hostRefreshWait: Duration = HostRefresh.wait
 
-    @Published private(set) var snapshot: DashboardSnapshot? {
+    private(set) var snapshot: DashboardSnapshot? {
         didSet {
-            sessionFamilies = SessionFamilies.build(snapshot?.sessions ?? [])
+            cells.adopt(snapshot?.sessions ?? [])
+            daemon = snapshot?.daemon
+            subagentIDs = (snapshot?.sessions ?? []).reduce(into: [:]) { ids, row in
+                if let parent = row.subagent?.parentId { ids[parent, default: []].append(row.id) }
+            }
             sessionAttention = SessionAttention.build(sessions: snapshot?.sessions ?? [], attention: snapshot?.attention ?? [], deliveryProblems: snapshot?.deliveryProblems ?? [])
-            listedTree = nil
+            rederiveTree()
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
                 let picks = HolderPins.shared.all
@@ -41,94 +47,98 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             }
         }
     }
-    @Published private(set) var hosts: [PairedHostStatus] = []
+    private(set) var hosts: [PairedHostStatus] = []
     /// Which transcript rows were opened in each session, kept while the app runs.
     let rowMemory = TranscriptRowMemory()
-    @Published private(set) var creationHosts: [CreationHost] = []
-    @Published private(set) var projects: [String: ListedProject] = [:]
-    @Published private(set) var projectOrder: [String] = []
-    @Published private(set) var holderPicks: [String: HolderPin] = [:]
-    lazy var decisionFeed = DecisionFeed(key: { [unowned self] in decisionsKey }, load: { [unowned self] in await loadDecisions() })
-    private(set) var sessionFamilies: [SessionFamily] = []
+    private(set) var creationHosts: [CreationHost] = []
+    private(set) var projects: [String: ListedProject] = [:]
+    private(set) var projectOrder: [String] = []
+    private(set) var holderPicks: [String: HolderPin] = [:]
+    @ObservationIgnored lazy var decisionFeed = DecisionFeed(key: { [unowned self] in decisionsKey }, load: { [unowned self] in await loadDecisions() })
+    let cells = SessionCells()
+    private var subagentIDs: [String: [String]] = [:]
+    private var daemon: DaemonState?
     private(set) var sessionAttention: [String: SessionAttention] = [:]
-    private var listedTree: (scope: SessionFilter, search: String, tree: SessionTree)?
-    private var orderHold = OrderHold()
-    private var heldList: ScopePage.View?
-    private var heldKey: (scope: SessionFilter, search: String)?
-    private var shownOrder: [ScopePage.View?] = []
-    @Published var selectedDetail: SessionDetail? {
+    @ObservationIgnored private var listedTree: (key: ListKey, tree: SessionTree)?
+    private(set) var listRevision: UInt64 = 0
+    @ObservationIgnored private var orderHold = OrderHold()
+    @ObservationIgnored private var heldList: ScopePage.View?
+    @ObservationIgnored private var heldKey: ListKey?
+    @ObservationIgnored private var heldCells: [String: SessionCell] = [:]
+    @ObservationIgnored private var shownOrder: [ScopePage.View?] = []
+    var selectedDetail: SessionDetail? {
         didSet { paintOpeningSession() }
     }
-    @Published var sessionRequests: SessionRequests?
-    @Published var answeringRequest: String?
-    @Published private(set) var retiredAsks = RetiredAsks()
-    private var sessionRequestsKey: String?
-    @Published var selectedSessionID: String? {
+    var sessionRequests: SessionRequests?
+    var answeringRequest: String?
+    private(set) var retiredAsks = RetiredAsks()
+    @ObservationIgnored private var sessionRequestsKey: String?
+    var selectedSessionID: String? {
         didSet {
             guard selectedSessionID != oldValue else { return }
             sessionServer = selectedSessionID.flatMap(server(for:))
             endOpenInterval("left")
         }
     }
-    @Published private(set) var connectionError: String?
-    @Published private(set) var reconnecting = false
-    @Published var operationError: String?
-    @Published var pairing = false
-    @Published private(set) var completedPairings = 0
+    private(set) var connectionError: String?
+    private(set) var reconnecting = false
+    var operationError: String?
+    var pairing = false
+    private(set) var completedPairings = 0
     let draft = ComposerDraft()
     let appearance = PhoneAppearance()
     var composer: String {
         get { draft.text }
         set { draft.text = newValue }
     }
-    @Published var sessionError: String?
-    @Published var loadingSession = false
-    @Published var sendingSessionIDs: Set<String> = []
+    var sessionError: String?
+    var loadingSession = false
+    var sendingSessionIDs: Set<String> = []
     private static let signposter = OSSignposter(subsystem: "com.agenthail.ios", category: "SessionOpen")
     private static let composerLog = Logger(subsystem: "com.agenthail.ios", category: "Composer")
-    private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState, session: String, painted: Bool, resumes: Bool)?
+    @ObservationIgnored private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState, session: String, painted: Bool, resumes: Bool)?
     private var attachmentCache: [String: Data] = [:]
-    private var attachmentCacheBytes = 0
+    @ObservationIgnored private var attachmentCacheBytes = 0
     private let attachmentCacheLimit = 20 * 1024 * 1024
     private let attachmentLoads = SharedLoads<Data?>()
-    @Published var deliveryStatus: [String: String] = [:]
-    @Published var controlOutput: [String: String] = [:]
-    @Published var deliveryIDs: [String: Int64] = [:]
-    private var deliveryQueueIDs: [String: Int64] = [:]
-    private var refreshingDeliveries = false
-    @Published var olderActivity: [TimelineItem] = []
-    @Published var activityCursor: Int64?
-    @Published var loadingOlderActivity = false
-    @Published var olderActivityError: String?
-    @Published var searchResults: [SessionSearchItem] = []
-    @Published var searchError: String?
-    @Published var searching = false
-    private var searchQuery = ""
-    private var sessionRequestID = UUID()
+    var deliveryStatus: [String: String] = [:]
+    var controlOutput: [String: String] = [:]
+    var deliveryIDs: [String: Int64] = [:]
+    @ObservationIgnored private var deliveryQueueIDs: [String: Int64] = [:]
+    @ObservationIgnored private var refreshingDeliveries = false
+    var olderActivity: [TimelineItem] = []
+    var activityCursor: Int64?
+    var loadingOlderActivity = false
+    var olderActivityError: String?
+    var searchResults: [SessionSearchItem] = []
+    var searchError: String?
+    var searching = false
+    @ObservationIgnored private var searchQuery = ""
+    @ObservationIgnored private var sessionRequestID = UUID()
     private var drafts: [String: String] = [:] {
         didSet { saveComposerStateSoon() }
     }
-    @Published private(set) var stashes: [String: ComposerStash] = [:] {
+    private(set) var stashes: [String: ComposerStash] = [:] {
         didSet { saveComposerStateSoon() }
     }
     private let sendQueue = SendQueue()
-    @Published private(set) var pendingSends: [String: [PendingSend]] = [:]
-    @Published var failedSends: [String: String] = [:]
-    @Published private(set) var refusedSends: [String: RefusedSend] = [:]
-    private var keptDeliveries: [String: KeptDelivery] = [:]
+    private(set) var pendingSends: [String: [PendingSend]] = [:]
+    var failedSends: [String: String] = [:]
+    private(set) var refusedSends: [String: RefusedSend] = [:]
+    @ObservationIgnored private var keptDeliveries: [String: KeptDelivery] = [:]
     private var lostAttachments: [String: [String]] = [:]
-    private var composerStore: ComposerStore?
-    private var waitingComposerStore: ComposerStore?
-    private var protectedDataObserver: NSObjectProtocol?
+    @ObservationIgnored private var composerStore: ComposerStore?
+    @ObservationIgnored private var waitingComposerStore: ComposerStore?
+    @ObservationIgnored private var protectedDataObserver: NSObjectProtocol?
     private static let composerFileKeptNotice = "Saved drafts couldn’t be loaded. Their file was kept on this iPhone."
     private static let composerUnreadNotice = "Saved drafts couldn’t be read. Until they can, drafts and unconfirmed messages are lost if Agenthail closes."
-    private var composerWaitAnnounced = false
-    private var composerSave: Task<Void, Never>?
-    private var draftChanges: AnyCancellable?
-    @Published var composerAttachments: [ComposerAttachment] = [] {
+    @ObservationIgnored private var composerWaitAnnounced = false
+    @ObservationIgnored private var composerSave: Task<Void, Never>?
+    @ObservationIgnored private var draftChanges: AnyCancellable?
+    var composerAttachments: [ComposerAttachment] = [] {
         didSet { saveComposerStateSoon() }
     }
-    @Published var attachmentProblem: String?
+    var attachmentProblem: String?
     private var attachmentDrafts: [String: [ComposerAttachment]] = [:] {
         didSet { saveComposerStateSoon() }
     }
@@ -149,75 +159,87 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let environment: String
         let endpoint: String
     }
-    private var creationRequestIdentity: CreationRequestIdentity?
-    private var creationRequestKey: String?
-    @Published var notificationStatus = "Not enabled"
-    @Published var requestedSessionID: String?
-    @Published var forgetCandidate: PairedHostStatus?
-    @Published var showPairingConfirmation = false
-    @Published var voiceHostID: String? {
+    @ObservationIgnored private var creationRequestIdentity: CreationRequestIdentity?
+    @ObservationIgnored private var creationRequestKey: String?
+    var notificationStatus = "Not enabled"
+    var requestedSessionID: String?
+    var forgetCandidate: PairedHostStatus?
+    var showPairingConfirmation = false
+    var voiceHostID: String? {
         didSet { UserDefaults.standard.set(voiceHostID, forKey: Self.voiceHostKey) }
     }
 
-    @Published var creatingSession = false
-    @Published var creationError: String?
-    @Published var creationWarning: String?
-    @Published private(set) var creationCanStartAgain = false
-    @Published var pendingControls: Set<String> = []
-    @Published private(set) var fetchedSubagents = SubagentPageCache()
-    private var subagentServers: [String: HostConnection?] = [:]
-    private var subagentFailedUnreachable: Set<String> = []
+    var creatingSession = false
+    var creationError: String?
+    var creationWarning: String?
+    private(set) var creationCanStartAgain = false
+    var pendingControls: Set<String> = []
+    private(set) var fetchedSubagents = SubagentPageCache()
+    @ObservationIgnored private var subagentServers: [String: HostConnection?] = [:]
+    @ObservationIgnored private var subagentFailedUnreachable: Set<String> = []
 
-    private var connections: [String: HostConnection] = [:]
+    // HostConnection and the catalog are not observed; views read the parts rebuild() derives from them.
+    @ObservationIgnored private var connections: [String: HostConnection] = [:]
     private var hostOrder: [String] = []
-    private var catalog = HostCatalog()
-    private var sessionStreamTask: Task<Void, Never>?
+    @ObservationIgnored private var catalog = HostCatalog()
+    private var routing = HostCatalog.Routing()
+    private(set) var isPaired = false
+    private(set) var showsHostNames = false
+    private(set) var usageReaders: [AgenthailAPI] = []
+    private(set) var listing = ListingState()
+    private(set) var decisionsKey = ""
+    private(set) var queue: [QueueState] = []
+    private(set) var attention: [AttentionState] = []
+    private(set) var deliveryProblems: [DeliveryProblem] = []
+    private(set) var leadReplacements: [LeadReplacement] = []
+    private(set) var waitingSessions: [String] = []
+    private(set) var sessionCount = 0
+    private(set) var usageSessions: [SessionState] = []
+    private(set) var sessionProjects: [String: String] = [:]
+    private var projectSessionIDs: [String: [String]] = [:]
+    @ObservationIgnored private var sessionStreamTask: Task<Void, Never>?
     static let streamPublishInterval: Duration = .milliseconds(100)
-    private var sessionMetadataTask: Task<Void, Never>?
-    private var sessionServer: HostConnection?
-    private(set) var sessionStreamCursor: UInt64 = 0
-    private var pageReadsInFlight = 0
+    @ObservationIgnored private var sessionMetadataTask: Task<Void, Never>?
+    @ObservationIgnored private var sessionServer: HostConnection?
+    @ObservationIgnored private(set) var sessionStreamCursor: UInt64 = 0
+    @ObservationIgnored private var pageReadsInFlight = 0
     /// Rows streamed while a page read is in flight, so a page read before
     /// some of them arrived can be brought up to date.
-    private var rowsDuringPageRead: [SessionStreamEvent] = []
+    @ObservationIgnored private var rowsDuringPageRead: [SessionStreamEvent] = []
     /// Set when the stream changed what a page would show in a way the shown
     /// detail does not hold, so its position cannot be cached until a page read.
-    private var streamOutranPage = false
-    private(set) lazy var store: SessionStore = {
+    @ObservationIgnored private var streamOutranPage = false
+    @ObservationIgnored private(set) lazy var store: SessionStore = {
         let store = SessionStore(limits: .phone)
         store.pinned = { [unowned self] id in id == selectedSessionID || drafts[id]?.isEmpty == false }
         store.working = { [unowned self] id in snapshot?.sessions.first { $0.id == id }?.isWorking == true }
         return store
     }()
     private var sessionMetadata = MetadataOverlay()
-    private var stateRequests: UInt64 = 0
-    private var selectedSessionStateSeq: UInt64 = 0
-    private var unlistedStateRead: Task<Void, Never>?
-    private var unlistedStatePending: String?
+    @ObservationIgnored private var stateRequests: UInt64 = 0
+    @ObservationIgnored private var selectedSessionStateSeq: UInt64 = 0
+    @ObservationIgnored private var unlistedStateRead: Task<Void, Never>?
+    @ObservationIgnored private var unlistedStatePending: String?
     private var sessionStreamUnsupported = false
-    private var unsupportedRefreshTask: Task<Void, Never>?
-    private var sessionReload: (id: String, task: Task<Void, Never>)?
+    @ObservationIgnored private var unsupportedRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var sessionReload: (id: String, task: Task<Void, Never>)?
     private var pendingPairing: PairingLink?
-    private var pushDeviceToken: String?
-    private var pushStatus: [String: String] = [:]
-    private var registeringPush: Set<String> = []
+    @ObservationIgnored private var pushDeviceToken: String?
+    @ObservationIgnored private var pushStatus: [String: String] = [:]
+    @ObservationIgnored private var registeringPush: Set<String> = []
     private let networkSession: URLSession
     private let connectionDrops: ConnectionDrops?
     private let automaticallyConnect: Bool
     private let previewPaired: Bool
 
-    var isPaired: Bool { !hostOrder.isEmpty && (previewPaired || connections.values.contains { !$0.isPreview }) }
-    var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
-    var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
-    var leadReplacements: [LeadReplacement] { snapshot?.leadReplacements ?? [] }
+    func session(_ id: String?) -> SessionState? { cells.session(id) }
+    func pairedHost(owning sessionID: String) -> SessionHost? { daemon?.pairedHost(owning: sessionID) }
 
     /// Names the lead that replaced a request's session; the computer serving the request gives the id unqualified.
     func leadName(_ id: String, requestFrom sessionID: String) -> String {
-        let qualified = HostCatalog.qualify(catalog.route(for: sessionID)?.hostID ?? HostCatalog.owner(of: sessionID) ?? "", id)
-        return snapshot?.sessions.first { $0.id == qualified }?.displayName ?? id
+        let qualified = HostCatalog.qualify(routing.route(for: sessionID)?.hostID ?? HostCatalog.owner(of: sessionID) ?? "", id)
+        return session(qualified)?.displayName ?? id
     }
-    var showsHostNames: Bool { Set((snapshot?.sessions ?? []).compactMap(\.host?.id)).count > 1 || hostOrder.count > 1 }
-    var usageReaders: [AgenthailAPI] { hostOrder.compactMap { connections[$0] }.filter(\.reachable).map(\.api) }
 
     init(autoConnect: Bool = true, session: URLSession = .shared, drops: ConnectionDrops? = .shared, composerStore: ComposerStore? = nil) {
         networkSession = session
@@ -294,8 +316,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let order = orderSignature
         if order != shownOrder {
             shownOrder = order
-            listedTree = nil
-            objectWillChange.send()
+            rederiveTree()
         }
         store.carry(rekeys)
         hosts = ordered.map { connection in
@@ -303,7 +324,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                              reachable: connection.reachable, reconnecting: connection.reconnecting, error: connection.connectionError,
                              surfaces: (connection.snapshot?.surfaces ?? []).filter(\.needsAttention), signin: connection.snapshot?.signin ?? [],
                              peers: connection.snapshot?.daemon.hosts ?? [], notifications: pushStatus[connection.id] ?? "Not enabled",
-                             person: connection.snapshot?.person, build: connection.build)
+                             person: connection.snapshot?.person, build: connection.build, busyDelivery: connection.snapshot?.busyDelivery)
         }
         var listed: [String: ListedProject] = [:]
         var listedOrder: [String] = []
@@ -326,9 +347,33 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         else if ordered.count == 1 { connectionError = failing[0].connectionError }
         else { connectionError = failing.map { "\($0.name): \($0.connectionError ?? "")" }.joined(separator: "\n") }
         reconnecting = ordered.contains(where: \.reconnecting)
+        deriveParts(ordered)
         if let voice = voiceHostID, connections[voice] == nil { voiceHostID = nil }
         rebindSelectedSession()
         refetchMovedSubagents()
+    }
+
+    private func deriveParts(_ ordered: [HostConnection]) {
+        let sessions = snapshot?.sessions ?? []
+        routing = catalog.routing
+        isPaired = !hostOrder.isEmpty && (previewPaired || connections.values.contains { !$0.isPreview })
+        showsHostNames = Set(sessions.compactMap(\.host?.id)).count > 1 || hostOrder.count > 1
+        let readers = ordered.filter(\.reachable).map(\.api)
+        if !usageReaders.elementsEqual(readers, by: ===) { usageReaders = readers }
+        listing = ListingState.read(listedHosts, projects: projects, earlier: earlierTargets)
+        let reached = catalog.hosts.map { host in "\(host.id):\(host.state):\(catalog.target(forHost: host.id).map { "\($0.hostID)>\($0.remote ?? "")" } ?? "none")" }
+        decisionsKey = (ordered.map { "\($0.id):\($0.shownReachable):\($0.snapshot?.decisionsRev ?? "older")" } + reached).joined(separator: ",")
+        queue = snapshot?.queue ?? []
+        attention = snapshot?.attention ?? []
+        deliveryProblems = snapshot?.deliveryProblems ?? []
+        leadReplacements = snapshot?.leadReplacements ?? []
+        waitingSessions = sessions.filter { $0.waitingOn != nil || $0.pendingAskID != nil }.map { "\($0.id):\($0.waitingOn?.id ?? $0.pendingAskID ?? "")" }
+        sessionCount = sessions.count
+        usageSessions = sessions.filter { $0.archived != true && ($0.isWorking || $0.current) }
+        sessionProjects = Dictionary(sessions.compactMap { row in row.project.map { (row.id, $0.id) } }, uniquingKeysWith: { first, _ in first })
+        projectSessionIDs = inDaemonOrder(sessions).reduce(into: [:]) { ids, row in
+            if let project = row.project?.id { ids[project, default: []].append(row.id) }
+        }
     }
 
     private func refetchMovedSubagents() {
@@ -410,7 +455,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func routedSession(_ session: SessionState) -> SessionState? {
-        guard let route = catalog.route(for: session.id) else { return nil }
+        guard let route = routing.route(for: session.id) else { return nil }
         var routed = session
         routed.id = route.sessionID
         return routed
@@ -419,7 +464,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     func routedAPI(for sessionID: String) -> AgenthailAPI? { (try? resolve(sessionID))?.api }
 
     func busyDelivery(for sessionID: String) -> String? {
-        catalog.route(for: sessionID).flatMap { connections[$0.hostID]?.snapshot?.busyDelivery }
+        routing.route(for: sessionID).flatMap { route in hosts.first { $0.id == route.hostID }?.busyDelivery }
     }
 
     var voiceHost: PairedHostStatus? {
@@ -428,18 +473,18 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     func canCallByVoice(_ session: SessionState) -> Bool {
         guard let voice = voiceHost, voice.reachable, session.host?.id == voice.id,
-              let route = catalog.route(for: session.id) else { return false }
+              let route = routing.route(for: session.id) else { return false }
         return route.hostID == voice.id
     }
 
     func connectionState(for sessionID: String) -> (error: String?, reconnecting: Bool) {
-        let hostID = catalog.route(for: sessionID)?.hostID ?? catalog.server(of: sessionID) ?? HostCatalog.owner(of: sessionID)
-        guard let connection = hostID.flatMap({ connections[$0] }) else { return (nil, false) }
-        return (connection.connectionError, connection.reconnecting)
+        let hostID = routing.route(for: sessionID)?.hostID ?? routing.server(of: sessionID) ?? HostCatalog.owner(of: sessionID)
+        guard let host = hosts.first(where: { $0.id == hostID }) else { return (nil, false) }
+        return (host.error, host.reconnecting)
     }
 
     func voiceTargetID(for session: SessionState) -> String {
-        catalog.route(for: session.id)?.sessionID ?? ""
+        routing.route(for: session.id)?.sessionID ?? ""
     }
 
     func voiceSessionID(_ id: String) -> String {
@@ -512,7 +557,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func subagents(of sessionID: String) -> [SessionState] {
-        SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents.children(of: sessionID))
+        SessionFamilies.children(of: sessionID, listed: (subagentIDs[sessionID] ?? []).compactMap(session), fetched: fetchedSubagents.children(of: sessionID))
     }
 
     private func inboxHosts() throws -> [InboxPage.Host] {
@@ -528,12 +573,6 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     func inboxPage(before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
         try await InboxPage.load(from: inboxHosts(), before: cursors, partial: partial)
-    }
-
-    var decisionsKey: String {
-        let direct = hostOrder.compactMap { connections[$0] }.map { "\($0.id):\($0.shownReachable):\($0.snapshot?.decisionsRev ?? "older")" }
-        let reached = catalog.hosts.map { host in "\(host.id):\(host.state):\(catalog.target(forHost: host.id).map { "\($0.hostID)>\($0.remote ?? "")" } ?? "none")" }
-        return (direct + reached).joined(separator: ",")
     }
 
     func loadDecisions() async -> DecisionInbox {
@@ -621,8 +660,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     func queueSteer(_ item: QueueState) -> (capabilities: Capabilities, refusal: String?)? {
         guard !item.isHistorical, !QueueSteer.waiting([item]).isEmpty else { return nil }
         let id = item.sessionId
-        let known = snapshot?.sessions.first { $0.id == id }
-            ?? selectedDetail.flatMap { $0.session.id == id ? $0.sessionState(open: false, host: snapshot?.daemon.pairedHost(owning: id)) : nil }
+        let known = session(id)
+            ?? selectedDetail.flatMap { $0.session.id == id ? $0.sessionState(open: false, host: pairedHost(owning: id)) : nil }
         guard let session = known, session.status == "busy", session.waitingOn == nil, session.capabilities.steer, !session.isReadOnly else { return nil }
         return (session.capabilities, QueueSteer.refusal(item, capabilities: session.capabilities))
     }
@@ -812,11 +851,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func canAddFolder(_ session: SessionState) -> Bool {
-        ProjectMenu.canAddFolder(session) && catalog.route(for: session.id) != nil
+        ProjectMenu.canAddFolder(session) && routing.route(for: session.id) != nil
     }
 
     func canMakeLead(_ session: SessionState) -> Bool {
-        guard ProjectMenu.canMakeLead(session, projects: []), catalog.route(for: session.id) != nil else { return false }
+        guard ProjectMenu.canMakeLead(session, projects: []), routing.route(for: session.id) != nil else { return false }
         return !projects.values.contains { listed in
             listed.state.leads.contains { lead in
                 guard let sessionID = lead.sessionId else { return false }
@@ -1120,7 +1159,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         await SessionScopes.readMore(SessionScopes.targets(filter, on: listedHosts))
     }
 
-    func canListMore(_ filter: SessionFilter) -> Bool { SessionScopes.hasMore(SessionScopes.targets(filter, on: listedHosts)) }
+    func canListMore(_ filter: SessionFilter) -> Bool { listing.more.contains(filter) }
 
     private func earlierTargets(_ project: ListedProject) -> [ScopeTarget] {
         let request = ScopeRequest(scope: "all", projectID: project.state.id)
@@ -1135,9 +1174,15 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     func listEarlier(_ project: ListedProject) async { await SessionScopes.readMore(earlierTargets(project)) }
 
-    func hasEarlier(_ project: ListedProject) -> Bool { SessionScopes.hasMore(earlierTargets(project)) }
+    func hasEarlier(_ project: ListedProject) -> Bool { listing.earlier.contains(ProjectContents.key(of: project)) }
 
-    var listingError: String? { SessionScopes.error(on: listedHosts) }
+    var listingError: String? { listing.error }
+
+    func projectSessions(_ project: ListedProject) -> [SessionState] {
+        let ids = projectSessionIDs[ProjectContents.key(of: project)] ?? []
+        let lead = project.state.leads.first.flatMap { ProjectContents.leadSessionID($0, of: project) }
+        return (lead.map { ids.contains($0) ? ids : ids + [$0] } ?? ids).compactMap(session)
+    }
 
     func searchScope(_ query: String, filter: SessionFilter) async {
         await SessionScopes.search(query.trimmingCharacters(in: .whitespacesAndNewlines), filter: filter, on: listedHosts)
@@ -1148,17 +1193,49 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         return rows.map { HostCatalog.merge($0, servedBy: host.id, ownerName: { id in self.catalog.hosts.first { $0.id == id }?.name }, reachable: true).row }
     }
 
-    /// The session list for a scope and search, built once per catalog change
-    /// rather than on every view update.
+    struct ListKey: Equatable {
+        let scope: SessionFilter
+        let search: String
+    }
+
+    // Families hold session cells, so a change inside one session leaves the tree equal.
     func sessionTree(scope: SessionFilter, search: String) -> SessionTree {
-        if let listed = listedTree, listed.scope == scope, listed.search == search { return listed.tree }
-        if orderHold.held, heldKey?.scope != scope || heldKey?.search != search { orderHold.release() }
-        let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let shown = orderHold.shown(list: listOrder(scope: scope, search: search), current: currentOrder, rows: rows)
-        let tree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention)
-        heldList = shown.list
-        listedTree = (scope, search, tree)
+        _ = listRevision
+        let key = ListKey(scope: scope, search: search)
+        if let listed = listedTree, listed.key == key { return listed.tree }
+        let tree = buildTree(key)
+        listedTree = (key, tree)
         return tree
+    }
+
+    private func rederiveTree() {
+        let key = listedTree?.key ?? ListKey(scope: .recent, search: "")
+        let tree = buildTree(key)
+        if let listed = listedTree, listed.tree == tree { return }
+        listedTree = (key, tree)
+        listRevision &+= 1
+    }
+
+    private func buildTree(_ key: ListKey) -> SessionTree {
+        if orderHold.held, heldKey != key { orderHold.release() }
+        let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let shown = orderHold.shown(list: listOrder(scope: key.scope, search: key.search), current: currentOrder, rows: rows)
+        heldList = shown.list
+        return SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: treeCells(shown.rows))
+    }
+
+    private func treeCells(_ rows: [String: SessionState]) -> [String: SessionCell] {
+        var all = cells.byID
+        guard orderHold.held else {
+            heldCells = [:]
+            return all
+        }
+        for (id, row) in rows where all[id] == nil {
+            let cell = heldCells[id] ?? SessionCell(row)
+            heldCells[id] = cell
+            all[id] = cell
+        }
+        return all
     }
 
     private var orderHosts: [HostConnection] { listedHosts.filter(\.shownReachable) + listedHosts.filter { !$0.shownReachable } }
@@ -1170,7 +1247,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     var currentOrder: ScopePage.View? { joinedOrder(\.currentView) }
 
     /// Sessions in the daemon's order: Current first, then each loaded listing; others keep their place after.
-    func inDaemonOrder(_ sessions: [SessionState]) -> [SessionState] {
+    private func inDaemonOrder(_ sessions: [SessionState]) -> [SessionState] {
         var order: [String: Int] = [:]
         let listings = listedHosts.flatMap { host in host.reader.requests.sorted().compactMap { host.view($0)?.renamed { HostCatalog.qualify(host.id, $0) } } }
         for member in ([currentOrder].compactMap { $0 } + listings).flatMap({ $0.families.flatMap(\.members) }) where order[member.id] == nil {
@@ -1186,10 +1263,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         listedHosts.flatMap { host in [host.currentView, host.reader.foundView] + host.reader.requests.sorted().map(host.view) }
     }
 
-    func searchPending(_ search: String) -> Bool {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return listedHosts.contains { $0.shownReachable && $0.reader.searchPending(query) }
-    }
+    func searchPending(_ search: String) -> Bool { listing.searchPending(search) }
 
     func listOrder(scope: SessionFilter, search: String) -> ScopePage.View? {
         if !search.isEmpty { return joinedOrder { $0.reader.foundView } }
@@ -1203,11 +1277,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         if holding {
             let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             orderHold.hold(list: heldList, current: currentOrder, rows: rows)
-            heldKey = listedTree.map { ($0.scope, $0.search) }
+            heldKey = listedTree?.key
         } else {
             orderHold.release()
-            listedTree = nil
-            objectWillChange.send()
+            rederiveTree()
         }
     }
 

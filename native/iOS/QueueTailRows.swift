@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct QueueTailRows: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @Binding var tail: QueueTail
     let readOnly: Bool
     var generation = 0
@@ -158,14 +158,14 @@ struct QueueTailRows: View {
 }
 
 struct QueueTailTracking: ViewModifier {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @Binding var tail: QueueTail
     let session: SessionState
     let timeline: [TimelineItem]
     @State private var loaded: [QueueState]?
 
     private var snapshotRows: [QueueState] {
-        (model.snapshot?.queue ?? []).map { InboxPage.qualified($0, host: $0.hostID ?? "") }.filter { $0.sessionId == session.id }
+        model.queue.map { InboxPage.qualified($0, host: $0.hostID ?? "") }.filter { $0.sessionId == session.id }
     }
     private var active: [QueueState] { loaded ?? snapshotRows }
     private var refreshKey: String {
@@ -174,7 +174,7 @@ struct QueueTailTracking: ViewModifier {
     }
 
     private var turnRunning: Bool {
-        (model.snapshot?.sessions.first { $0.id == session.id } ?? session).status == "busy"
+        (model.session(session.id) ?? session).status == "busy"
     }
 
     private func settle() { tail.update(active: active, timeline: timeline, turnRunning: turnRunning, now: Date()) }

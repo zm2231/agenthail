@@ -12,9 +12,8 @@ extension AgenthailIOSModel {
     }
 
     var tileLeads: [String: ProjectTiles.Lead] {
-        let sessions = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return projects.reduce(into: [:]) { leads, entry in
-            guard let lead = entry.value.state.leads.first, let id = ProjectContents.leadSessionID(lead, of: entry.value), let session = sessions[id] else { return }
+        projects.reduce(into: [:]) { leads, entry in
+            guard let lead = entry.value.state.leads.first, let id = ProjectContents.leadSessionID(lead, of: entry.value), let session = session(id) else { return }
             leads[entry.key] = ProjectTiles.Lead(session)
         }
     }

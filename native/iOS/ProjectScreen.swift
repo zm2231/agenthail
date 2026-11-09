@@ -18,7 +18,7 @@ private extension View {
 }
 
 struct ProjectScreen: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let projectID: String
     let openSession: (String) -> Void
     @State private var sheet: ProjectSheet?
@@ -31,7 +31,7 @@ struct ProjectScreen: View {
     var body: some View {
         Group {
             if let project {
-                content(project, ProjectContents.build(project, sessions: model.inDaemonOrder(model.snapshot?.sessions ?? [])))
+                content(project, ProjectContents.build(project, sessions: model.projectSessions(project)))
             } else {
                 ContentUnavailableView("Project not found", systemImage: "folder", description: Text("It may have been removed or its computer is not paired."))
             }

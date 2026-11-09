@@ -4,7 +4,7 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct ComposerAttachmentMenu: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @State private var choosingPhotos = false
     @State private var photoSelection: [PhotosPickerItem] = []
     @State private var takingPhoto = false
@@ -85,7 +85,7 @@ struct ComposerAttachmentMenu: View {
 }
 
 struct ComposerAttachmentStrip: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {

@@ -3,7 +3,7 @@ import UIKit
 import ImageIO
 
 struct AgenthailIOSRoot: View {
-    @ObservedObject var model: AgenthailIOSModel
+    @Bindable var model: AgenthailIOSModel
 
     var body: some View {
         AppearanceScope(appearance: model.appearance) {
@@ -34,7 +34,7 @@ struct AgenthailIOSRoot: View {
 }
 
 struct PairingScreen: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
 
     var body: some View {
         NavigationStack { PairingForm(model: model) }
@@ -42,7 +42,7 @@ struct PairingScreen: View {
 }
 
 struct PairingForm: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     var adding = false
     @State private var scanning = false
     @State private var pastedURL = ""
@@ -108,11 +108,14 @@ struct PairingForm: View {
 }
 
 struct MainTabs: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection = 0
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("MainTabs")
+#endif
         TabView(selection: $selection) {
             ConversationFlow(model: model)
                 .solidTabBar()
@@ -147,7 +150,7 @@ struct MainTabs: View {
 }
 
 struct ConversationFlow: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var path: [String] = []
@@ -197,14 +200,14 @@ struct ConversationFlow: View {
 }
 
 struct SessionRouteView: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let sessionID: String
 
     private var session: SessionState? {
-        if let value = model.snapshot?.sessions.first(where: { $0.id == sessionID }) { return value }
+        if let value = model.session(sessionID) { return value }
         let cached = model.searchResults.first(where: { $0.id == sessionID })?.session ?? model.fetchedSubagents.session(sessionID)
         guard let detail = model.selectedDetail, detail.session.id == sessionID else { return cached }
-        return detail.shown(over: cached, host: model.snapshot?.daemon.pairedHost(owning: sessionID))
+        return detail.shown(over: cached, host: model.pairedHost(owning: sessionID))
     }
     var body: some View {
         Group {
@@ -222,7 +225,7 @@ struct SessionRouteView: View {
 }
 
 struct ConversationListView: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     var selectedID: String? = nil
     let openSession: (String) -> Void
     @State private var scope = SessionFilter.recent
@@ -245,6 +248,9 @@ struct ConversationListView: View {
     }
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("ConversationListView")
+#endif
         let tree = tree
         let families = tree.projects.flatMap { $0.checkouts.flatMap(\.families) }
         List {
@@ -258,7 +264,7 @@ struct ConversationListView: View {
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
-            UsageMetersRow(feed: usage, sessions: model.snapshot?.sessions ?? [], open: openSession)
+            UsageMetersRow(feed: usage, model: model, open: openSession)
             if let error = model.connectionError {
                 Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(PhonePalette.muted)
                     .listRowBackground(GlassRowBackground(selected: false))
@@ -269,7 +275,7 @@ struct ConversationListView: View {
             if !tree.needsYou.isEmpty {
                 Section {
                     ForEach(tree.needsYou) { session in
-                        sessionButton(session, reason: tree.attention[session.id]?.reason, identifierPrefix: "needs-you-")
+                        row(.value(session), id: session.id, reason: tree.attention[session.id]?.reason, identifierPrefix: "needs-you-")
                     }
                 } header: {
                     Label {
@@ -359,7 +365,7 @@ struct ConversationListView: View {
                 .accessibilityIdentifier("list-more-retry")
             } else if listingMore {
                 ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
-                    .task(id: "\(scope.rawValue)|\(model.snapshot?.sessions.count ?? 0)") { await model.listMore(scope) }
+                    .task(id: "\(scope.rawValue)|\(model.sessionCount)") { await model.listMore(scope) }
                     .accessibilityIdentifier("list-more")
             }
             if families.isEmpty && model.searchPending(search) {
@@ -383,7 +389,7 @@ struct ConversationListView: View {
                     if model.searching { ProgressView("Searching") }
                     if let error = model.searchError { Text(error).font(.footnote).foregroundStyle(PhonePalette.muted) }
                     ForEach(model.searchResults.filter { result in !families.contains(where: { $0.contains(result.id) }) }) { result in
-                        sessionButton(result.session, snippet: result.snippet)
+                        row(.value(result.session), id: result.id, snippet: result.snippet)
                     }
                 }
             }
@@ -452,7 +458,7 @@ struct ConversationListView: View {
     @ViewBuilder
     private func familyRows(_ family: SessionFamily) -> some View {
         let expanded = !family.members.isEmpty && (expandedFamilies.contains(family.id) || family.members.contains { $0.id == selectedID })
-        sessionButton(family.root, family: family)
+        row(.root(family), id: family.id)
         if !family.members.isEmpty {
             Button { toggle(family) } label: {
                 Label(expanded ? "Hide subagents" : "Show \(family.members.count == 1 ? "1 subagent" : "\(family.members.count) subagents")",
@@ -469,7 +475,7 @@ struct ConversationListView: View {
         }
         if expanded {
             ForEach(family.members) { member in
-                sessionButton(member.session, title: SessionFamilies.label(member.session))
+                row(.member(member), id: member.id)
                     .padding(.leading, CGFloat(member.depth) * 16)
             }
         }
@@ -479,46 +485,21 @@ struct ConversationListView: View {
         if !expandedFamilies.insert(family.id).inserted { expandedFamilies.remove(family.id) }
     }
 
-    private func sessionButton(_ session: SessionState, title: String? = nil, family: SessionFamily? = nil, snippet: String? = nil, reason: String? = nil, identifierPrefix: String = "session-") -> some View {
-        let ring = SessionRing.kind(session, needsYou: tree.attention[session.id] != nil)
-        return Button { openSession(session.id) } label: {
-            HStack(alignment: .top, spacing: 12) {
-                SessionAvatar(surface: session.surface, ring: ring)
-                VStack(alignment: .leading, spacing: 5) {
-                    IOSSessionRow(session: session, title: title, family: family, showsHost: model.showsHostNames)
-                    if let reason {
-                        Text(reason).font(.subheadline).foregroundStyle(PhonePalette.attention).lineLimit(2)
-                    }
-                    if let snippet, !snippet.isEmpty {
-                        Text(snippet).font(.subheadline).foregroundStyle(PhonePalette.muted).lineLimit(2)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }.contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityValue(ring.spoken ?? "")
-        .listRowBackground(GlassRowBackground(selected: selectedID == session.id))
-        .swipeActions(edge: .trailing) {
-            if snippet == nil {
-                Button(session.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") {
-                    Task { await model.setArchived(sessionID: session.id, session.archived != true) }
-                }
-            }
-        }
-        .accessibilityIdentifier(identifierPrefix + session.id)
+    private func row(_ source: SessionListRow.Source, id: String, snippet: String? = nil, reason: String? = nil, identifierPrefix: String = "session-") -> SessionListRow {
+        SessionListRow(model: model, source: source, needsYou: tree.attention[id] != nil, selected: selectedID == id,
+                       snippet: snippet, reason: reason, identifierPrefix: identifierPrefix, open: openSession)
     }
 }
 
 struct SessionScreen: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     private var compactHeight: Bool { verticalSizeClass == .compact && !typeSize.isAccessibilitySize }
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var typeSize
     let session: SessionState
-    private var liveSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
+    private var liveSession: SessionState { model.session(session.id) ?? session }
     @State private var showingInfo = false
     @State private var showingVoice = false
     @State private var activityOnly = false
@@ -538,7 +519,7 @@ struct SessionScreen: View {
     private static let rowSpacing: CGFloat = 12
 
     private var displayTitle: String {
-        session.subagent == nil ? SessionStyle.title(session) : SessionFamilies.title(session, in: model.snapshot?.sessions ?? [])
+        session.subagent == nil ? SessionStyle.title(session) : model.cells.title(of: session)
     }
 
     private var detail: SessionDetail? {
@@ -692,6 +673,9 @@ struct SessionScreen: View {
     }
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("SessionScreen")
+#endif
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Self.rowSpacing) {
                 Group {
@@ -809,7 +793,7 @@ struct SessionScreen: View {
                             .padding()
                     } else {
                         TurnNoticeCard(sessionID: liveSession.id, notice: liveSession.composerTurnNotice)
-                        IOSComposer(model: model, draft: model.draft, session: session, detail: detail, showQueuedRow: showQueuedRow)
+                        IOSComposer(model: model, draft: model.draft, store: model.store, session: session, detail: detail, showQueuedRow: showQueuedRow)
                     }
                 }
             }
@@ -900,8 +884,9 @@ struct SessionScreen: View {
 }
 
 struct IOSComposer: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @ObservedObject var draft: ComposerDraft
+    @ObservedObject var store: SessionStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     let session: SessionState
@@ -993,6 +978,9 @@ struct IOSComposer: View {
     }
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("IOSComposer")
+#endif
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
                 if let status = model.deliveryStatus[session.id], model.failedSends[session.id] == nil, model.pendingSends[session.id]?.contains(where: \.unconfirmed) != true {
@@ -1093,7 +1081,7 @@ struct IOSComposer: View {
 
     private var completion: (items: [CompletionItem], notice: String?) {
         guard let token = completionToken else { return ([], nil) }
-        let runtime = model.store.commands[session.id]
+        let runtime = store.commands[session.id]
         let mentioning = token.trigger == .mention
         let files = scopedCompletion.files
         let items = ComposerCompletion.items(for: token, appCommands: [], runtime: runtime, sessions: mentioning ? ComposerCompletion.sessions(mentionable(token.query), from: session) : [], files: mentioning && files?.query == token.query ? files?.files ?? [] : [])
@@ -1261,6 +1249,9 @@ struct IOSTimelineRow: View {
 	@State private var loadedBody: RowChoice<RetainedBodyResult>?
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("IOSTimelineRow")
+#endif
         if item.kind == "done" {
             EmptyView()
         } else if let agent = item.agent, agent.isIncoming {
@@ -1452,7 +1443,7 @@ struct SessionSummary: View {
 }
 
 struct SessionInspector: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let session: SessionState
     let initialDetail: SessionDetail
     @Environment(\.dismiss) private var dismiss
@@ -1465,7 +1456,7 @@ struct SessionInspector: View {
         guard let liveDetail = model.selectedDetail, liveDetail.session.id == session.id else { return initialDetail }
         return liveDetail
     }
-    private var liveSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
+    private var liveSession: SessionState { model.session(session.id) ?? session }
     var body: some View {
         NavigationStack {
             List {
@@ -1784,6 +1775,9 @@ struct IOSSessionRow: View {
     }
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("IOSSessionRow")
+#endif
         let kind = SessionDisplayKind.of(session)
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1850,7 +1844,7 @@ struct IOSHostBadge: View {
 }
 
 struct SettingsView: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     var body: some View {
         List {
             Group {
@@ -1970,7 +1964,7 @@ struct SettingsView: View {
 }
 
 struct IOSAdoptSessionSheet: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @StateObject private var controller: SessionAdoptController
     @Environment(\.dismiss) private var dismiss
 
@@ -2033,7 +2027,7 @@ struct IOSAdoptSessionSheet: View {
 }
 
 struct RecentPromptsSheet: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let session: SessionState
     let use: (String) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -2062,7 +2056,7 @@ struct RecentPromptsSheet: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(prompt.text).lineLimit(3).foregroundStyle(.primary)
-                            if allSessions, let title = model.snapshot?.sessions.first(where: { $0.id == prompt.sessionId })?.title {
+                            if allSessions, let title = model.session(prompt.sessionId)?.title {
                                 Text(title).font(.footnote).foregroundStyle(PhonePalette.muted)
                             }
                         }
