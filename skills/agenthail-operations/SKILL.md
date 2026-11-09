@@ -729,7 +729,6 @@ $ agenthail channel send crew "standup at 10"
   [FAIL] @reviewer: Codex session is read only: Codex Desktop created it, or Codex recorded no creator, and the Desktop bridge is unavailable; run 'agenthail launch codex'
   [ OK ] @scout: Sent to s-scout.
 #crew: 1 sent, 2 queued, 1 submitted, 1 failed
-warning: daemon is not running; queued channel deliveries will wait until 'agenthail daemon start'
 error: #crew had 1 failed delivery(s)
 ```
 
@@ -741,14 +740,17 @@ Each outcome means:
 - **`[SUBMIT]`:** the message may already be there; read `agenthail last <member>` before resending.
 - **`[FAIL]`:** the member was refused with its reason, for example one that became read-only after it joined. The other members still get the message.
 
-Queued messages wait for the daemon, and the send warns when it is not running. Any failure exits 1, so report the failed members and retry only those with `agenthail send`.
+The send goes through the daemon and is refused while the daemon is stopped. Any failure exits 1, so report the failed members and retry only those with `agenthail send`.
+
+A project send (`#<project>`) gives each paired host that holds the project one request. That host delivers to its own conversations and coordinator by its own busy rules. A host that cannot be reached is named and the message is held for it, delivered once when it answers. From a session in another project the paired host refuses it with `rule` `different_project`; the person and the CLI reach any project.
 
 `--json` prints one object:
 - `target`
 - `recipients`: one per member, each with `sessionId`, `coordinator`, `hostId`, `outcome` (`sent`, `queued`, `submitted` or `failed`) and `detail`
 - `sent`, `queued`, `submitted`, `failed`: the counts
+- for a project send, `hosts` (each with `id`, `name`, `state` `reached`, `held`, `unknown` or `refused`, `recipients`, `detail` and `rule`) and `unreachable`, the names of the hosts it is held for
 
-The command still exits 1 when any member failed. The daemon's `channel-send` action (API and MCP) returns these fields too, alongside the error in its 409 partial-failure response.
+The command still exits 1 when any member failed or a host refused. The daemon's `channel-send` action (API and MCP) returns these fields too, alongside the error in its 409 partial-failure response.
 
 `channel list --json` gives each channel's `name` and `members`. Each member has `sessionId`, `display` and, for a member on a paired host, `hostId`.
 

@@ -38,6 +38,17 @@ func (d *Daemon) routeLinkAction(ctx context.Context, request map[string]any, ac
 			request[field], rewritten = relative, true
 		}
 	}
+	if action == "channel-send" && owner != nil {
+		delete(request, "sourceProjectId")
+		if source, _ := request["sourceSessionId"].(string); source != "" {
+			if routed, rawID, err := d.routeSession(source); err == nil && routed == nil {
+				source = rawID
+			}
+			if project := d.sourceProjectID(source); project != "" {
+				request["sourceProjectId"], rewritten = project, true
+			}
+		}
+	}
 	sourceRewritten, err := d.routeSource(ctx, request, owner)
 	if err != nil {
 		return nil, false, err

@@ -40,6 +40,7 @@ var notSessionViewInputs = map[string]string{
 	"session_context": sessionOnly, "session_moves": sessionOnly, "session_rekeys": sessionOnly, "tasks": sessionOnly,
 	"session_origins": voiceOperators, "host_queue_dirty": queueMarks, "idle_compactions": idleAttempts,
 	"session_codex_config": codexConfig, "trigger_runs": "only GET /api/v1/triggers reads trigger runs; a finished run reaches a session view as its delivery_history entry",
+	"host_held_actions": "a held channel leg belongs to a paired host, not a session; it reaches a session view only as the host's deliveries",
 }
 
 func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T) {

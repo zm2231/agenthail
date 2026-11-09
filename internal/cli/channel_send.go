@@ -2,89 +2,87 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"os"
+	"net/http"
+	"strings"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
-	"github.com/zm2231/agenthail/internal/coordinator"
-	"github.com/zm2231/agenthail/internal/daemon"
-	"github.com/zm2231/agenthail/internal/delivery"
-	"github.com/zm2231/agenthail/internal/registry"
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
-// cliBroadcastDelivery sends a channel's coordinators their message through
-// the daemon, and every other member directly.
-type cliBroadcastDelivery struct {
-	app     *App
-	service coordinator.Service
+type channelHostOutcome struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	State      string `json:"state"`
+	Recipients int    `json:"recipients"`
+	Detail     string `json:"detail,omitempty"`
+	Rule       string `json:"rule,omitempty"`
 }
 
-func (c cliBroadcastDelivery) Session(ctx context.Context, sessionID, message, source string) (*delivery.Receipt, error) {
-	if spec, coordinated := c.service.Of(sessionID); coordinated {
-		receipt, _, err := c.Coordinator(ctx, spec, message, source)
-		return receipt, err
-	}
-	session, adapter, err := c.app.resolveTarget(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return c.app.dispatcher().DeliverWithOptions(ctx, adapter, session, message, "", surface.SendOptions{SourceSessionID: source})
+type channelReceipt struct {
+	broadcast.Result
+	Hosts       []channelHostOutcome `json:"hosts,omitempty"`
+	Unreachable []string             `json:"unreachable,omitempty"`
 }
 
-func (c cliBroadcastDelivery) Coordinator(ctx context.Context, spec registry.CoordinatorSpec, message, source string) (*delivery.Receipt, string, error) {
-	answer, err := c.app.coordinatorSend(ctx, spec, message, surface.SendOptions{SourceSessionID: source}, false)
-	if err != nil {
-		return nil, "", err
+func (r channelReceipt) refused() int {
+	count := 0
+	for _, host := range r.Hosts {
+		if host.State == "refused" {
+			count++
+		}
 	}
-	return &answer.Result, answer.Result.SessionID, nil
+	return count
 }
 
 func (a *App) channelSend(ctx context.Context, name, message, fromLabel string, jsonOut bool) error {
-	target, err := broadcast.Resolve(a.registry(), name)
-	if err != nil {
-		return err
-	}
 	sourceID, err := a.sourceSessionID(ctx, fromLabel)
 	if err != nil {
 		return err
 	}
-	service := a.coordinator()
+	client, err := a.daemonAPI()
+	if err != nil {
+		return fmt.Errorf("a channel send goes through the daemon, which reaches every paired host: %w", err)
+	}
+	payload := map[string]any{"action": "channel-send", "channel": name, "message": message}
 	if sourceID != "" {
-		sourceID = service.Canonical(sourceID)
+		payload["sourceSessionId"] = sourceID
 	}
-	if fromLabel == "" && sourceID != "" {
-		fromLabel = a.resolveDisplay(sourceID)
-	}
-	if fromLabel == "" {
-		fromLabel = "the Agenthail CLI"
-	}
-	broadcaster := broadcast.Broadcaster{Registry: a.registry(), Coordinators: service, Delivery: cliBroadcastDelivery{app: a, service: service}}
-	result, err := broadcaster.Send(ctx, target, message, fromLabel, sourceID)
+	data, status, err := client.actionReceipt(ctx, payload)
 	if err != nil {
 		return err
 	}
-	queued, failed := result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeFailed)
+	var receipt channelReceipt
+	if status != http.StatusOK && (status != http.StatusConflict || json.Unmarshal(data, &receipt) != nil || len(receipt.Recipients) == 0 && len(receipt.Hosts) == 0) {
+		return actionError(data)
+	}
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		return err
+	}
 	if jsonOut {
-		if err := emit(result.Fields()); err != nil {
+		var fields map[string]any
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return err
+		}
+		delete(fields, "error")
+		if err := emit(fields); err != nil {
 			return err
 		}
 	} else {
-		a.printChannelResult(result)
+		a.printChannelResult(receipt)
 	}
-	if queued > 0 {
-		if _, running := daemon.IsRunning(); !running {
-			fmt.Fprintln(os.Stderr, "warning: daemon is not running; queued channel deliveries will wait until 'agenthail daemon start'")
-		}
-	}
-	if failed > 0 {
-		return fmt.Errorf("#%s had %d failed delivery(s)", target.Label(), failed)
+	failed, refused := receipt.Count(broadcast.OutcomeFailed), receipt.refused()
+	switch {
+	case refused > 0:
+		return fmt.Errorf("#%s had %d failed delivery(s) and %d host(s) refused it", receipt.Target.Label(), failed, refused)
+	case failed > 0:
+		return fmt.Errorf("#%s had %d failed delivery(s)", receipt.Target.Label(), failed)
 	}
 	return nil
 }
 
-func (a *App) printChannelResult(result broadcast.Result) {
-	for _, recipient := range result.Recipients {
+func (a *App) printChannelResult(receipt channelReceipt) {
+	for _, recipient := range receipt.Recipients {
 		label := recipient.Coordinator
 		if label == "" {
 			label = a.sessionDisplay(recipient.SessionID)
@@ -96,5 +94,13 @@ func (a *App) printChannelResult(result broadcast.Result) {
 			fmt.Printf("  %s %s\n", tag, label)
 		}
 	}
-	fmt.Printf("#%s: %d sent, %d queued, %d submitted, %d failed\n", result.Target.Label(), result.Count(broadcast.OutcomeSent), result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeSubmitted), result.Count(broadcast.OutcomeFailed))
+	for _, host := range receipt.Hosts {
+		if host.State != "reached" {
+			fmt.Printf("  [%s] host %s: %s\n", strings.ToUpper(host.State), host.Name, host.Detail)
+		}
+	}
+	fmt.Printf("#%s: %d sent, %d queued, %d submitted, %d failed\n", receipt.Target.Label(), receipt.Count(broadcast.OutcomeSent), receipt.Count(broadcast.OutcomeQueued), receipt.Count(broadcast.OutcomeSubmitted), receipt.Count(broadcast.OutcomeFailed))
+	if len(receipt.Unreachable) > 0 {
+		fmt.Printf("held for unreachable host(s): %s\n", strings.Join(receipt.Unreachable, ", "))
+	}
 }

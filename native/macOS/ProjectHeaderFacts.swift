@@ -37,7 +37,19 @@ enum ProjectHeaderFacts {
         let missed = result.recipients.filter { $0.outcome == "failed" }.map { recipient in
             [label(recipient), recipient.detail.flatMap { $0.isEmpty ? nil : $0 }].compactMap { $0 }.joined(separator: ": ")
         }
-        let sent = "Sent to \(reached.count)\(reached.isEmpty ? "" : ": " + reached.joined(separator: ", "))."
-        return missed.isEmpty ? sent : "\(sent) Not delivered to \(missed.joined(separator: "; "))."
+        var notice = "Sent to \(reached.count)\(reached.isEmpty ? "" : ": " + reached.joined(separator: ", "))."
+        if !missed.isEmpty {
+            notice += " Not delivered to \(missed.joined(separator: "; "))."
+        }
+        if let unreachable = result.unreachable, !unreachable.isEmpty {
+            notice += " Held for \(unreachable.joined(separator: ", ")) until it answers."
+        }
+        let refused = (result.hosts ?? []).filter { $0.state == "refused" }.map { host in
+            [host.name, host.detail.flatMap { $0.isEmpty ? nil : $0 }].compactMap { $0 }.joined(separator: ": ")
+        }
+        if !refused.isEmpty {
+            notice += " Refused by \(refused.joined(separator: "; "))."
+        }
+        return notice
     }
 }

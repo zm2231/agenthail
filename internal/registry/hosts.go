@@ -258,7 +258,7 @@ func (r *Registry) RemoveHost(hostID string) ([]CatalogEvent, error) {
 			events = append(events, event)
 		}
 	}
-	for _, statement := range []string{`DELETE FROM sessions WHERE host_id=?`, `DELETE FROM coordinators WHERE host_id=?`} {
+	for _, statement := range []string{`DELETE FROM sessions WHERE host_id=?`, `DELETE FROM coordinators WHERE host_id=?`, `DELETE FROM host_held_actions WHERE host_id=?`} {
 		if _, err := tx.Exec(statement, hostID); err != nil {
 			return nil, err
 		}

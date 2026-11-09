@@ -1,9 +1,8 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -14,27 +13,21 @@ import (
 
 const fanoutGolden = "testdata/channel_fanout_example.txt"
 
-type fanoutSurface struct {
-	*cliSurface
-	results map[string]*surface.SendResult
-	errs    map[string]error
+// The daemon's answer for the fixture's crew: idle, busy, unacknowledged, read-only and paired-host members.
+func crewReceipt() string {
+	return `{"error":{"code":"conflict","message":"channel delivery: 1 sent, 2 queued, 1 submitted, 1 failed"},` +
+		`"target":{"name":"crew","channel":"crew"},"sent":1,"queued":2,"submitted":1,"failed":1,"recipients":[` +
+		`{"sessionId":"` + vpsBuilder.ID + `","hostId":"` + vpsHostID + `","outcome":"queued","detail":"held for its host"},` +
+		`{"sessionId":"s-analyst","outcome":"submitted","detail":"Submitted to s-analyst."},` +
+		`{"sessionId":"s-coder","outcome":"queued","detail":"Queued for s-coder; sends when current turn ends."},` +
+		`{"sessionId":"s-reviewer","outcome":"failed","detail":"Codex session is read only: Codex Desktop created it, or Codex recorded no creator, and the Desktop bridge is unavailable; run 'agenthail launch codex'"},` +
+		`{"sessionId":"s-scout","outcome":"sent","detail":"Sent to s-scout."}]}`
 }
 
-func (f *fanoutSurface) Send(_ context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
-	f.sent = append(f.sent, session.ID+": "+message)
-	if err := f.errs[session.ID]; err != nil {
-		return nil, err
-	}
-	if result := f.results[session.ID]; result != nil {
-		return result, nil
-	}
-	return &surface.SendResult{UUID: "turn-" + session.ID, Accepted: true}, nil
-}
-
-func fanoutFixture(t *testing.T) (*App, *fanoutSurface) {
+func fanoutFixture(t *testing.T) (*App, *cliSurface, *fakeDaemonAPI) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	app, _, fake, _ := federatedCLIFixture(t, true)
+	app, _, fake, api := federatedCLIFixture(t, true)
 	writable := func(id string, status surface.SessionStatus) surface.Session {
 		return surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: status}
 	}
@@ -44,18 +37,14 @@ func fanoutFixture(t *testing.T) (*App, *fanoutSurface) {
 		"s-analyst":  writable("s-analyst", surface.StatusIdle),
 		"s-reviewer": writable("s-reviewer", surface.StatusIdle),
 	}
-	fanout := &fanoutSurface{
-		cliSurface: fake,
-		results:    map[string]*surface.SendResult{"s-coder": {UUID: "turn-coder", Accepted: false}},
-		errs:       map[string]error{"s-analyst": surface.DeliveryOutcomeUnknown(errors.New("the acknowledgement was lost"))},
-	}
-	app.Surfaces[0].Surface = fanout
 	for _, name := range []string{"scout", "coder", "analyst", "reviewer"} {
 		if _, err := captureStdout(t, func() error { return app.Run([]string{"identify", "codex:s-" + name, name}) }); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return app, fanout
+	api.responses = map[string]string{"channel-send": crewReceipt()}
+	api.statuses = map[string]int{"channel-send": http.StatusConflict}
+	return app, fake, api
 }
 
 func runTranscript(t *testing.T, app *App, args ...string) string {
@@ -81,7 +70,7 @@ func runTranscript(t *testing.T, app *App, args ...string) string {
 }
 
 func TestTheDocumentedChannelFanOutExampleIsRealOutput(t *testing.T) {
-	app, fanout := fanoutFixture(t)
+	app, fake, api := fanoutFixture(t)
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"channel", "create", "crew"}) }); err != nil {
 		t.Fatal(err)
 	}
@@ -95,9 +84,6 @@ func TestTheDocumentedChannelFanOutExampleIsRealOutput(t *testing.T) {
 	} {
 		transcript.WriteString(runTranscript(t, app, args...))
 	}
-	reviewer := fanout.sessions["s-reviewer"]
-	reviewer.Transport = "readOnly"
-	fanout.sessions["s-reviewer"] = reviewer
 	transcript.WriteString(runTranscript(t, app, "channel", "send", "crew", "standup at 10"))
 	got := transcript.String()
 	if os.Getenv("AGENTHAIL_UPDATE_GOLDEN") == "1" {
@@ -121,21 +107,17 @@ func TestTheDocumentedChannelFanOutExampleIsRealOutput(t *testing.T) {
 			t.Errorf("%s does not carry the fan-out example verbatim", doc)
 		}
 	}
-	if len(fanout.sent) != 3 {
-		t.Fatalf("sent=%q, want the idle, busy and uncertain members tried and the read-only one refused before sending", fanout.sent)
+	actions, _ := api.recorded()
+	if len(actions) != 1 || actions[0]["action"] != "channel-send" || actions[0]["channel"] != "crew" || actions[0]["message"] != "standup at 10" {
+		t.Fatalf("actions=%v, want one channel-send to the daemon", actions)
+	}
+	if len(fake.sent) != 0 {
+		t.Fatalf("the CLI delivered %q itself", fake.sent)
 	}
 }
 
 func TestChannelSendJSONReportsEveryMember(t *testing.T) {
-	app, fanout := fanoutFixture(t)
-	for _, args := range [][]string{{"channel", "create", "crew"}, {"channel", "add", "crew", "@scout"}, {"channel", "add", "crew", "@coder"}, {"channel", "add", "crew", "@reviewer"}, {"channel", "add", "crew", "vps::@builder"}} {
-		if _, err := captureStdout(t, func() error { return app.Run(args) }); err != nil {
-			t.Fatalf("%v: %v", args, err)
-		}
-	}
-	reviewer := fanout.sessions["s-reviewer"]
-	reviewer.Transport = "readOnly"
-	fanout.sessions["s-reviewer"] = reviewer
+	app, _, _ := fanoutFixture(t)
 	output, err := captureStdout(t, func() error { return app.Run([]string{"channel", "send", "crew", "--json", "standup"}) })
 	if err == nil || !strings.Contains(err.Error(), "1 failed") {
 		t.Fatalf("a failed member must still fail the command: %v", err)
@@ -147,27 +129,40 @@ func TestChannelSendJSONReportsEveryMember(t *testing.T) {
 		Queued     int                   `json:"queued"`
 		Submitted  int                   `json:"submitted"`
 		Failed     int                   `json:"failed"`
+		Error      any                   `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(output), &body); err != nil {
 		t.Fatalf("output is not one JSON object: %q (%v)", output, err)
 	}
-	if body.Target.Channel != "crew" || body.Sent != 1 || body.Queued != 2 || body.Submitted != 0 || body.Failed != 1 || len(body.Recipients) != 4 {
+	if body.Target.Channel != "crew" || body.Sent != 1 || body.Queued != 2 || body.Submitted != 1 || body.Failed != 1 || len(body.Recipients) != 5 || body.Error != nil {
 		t.Fatalf("body=%+v", body)
 	}
-	outcomes := map[string]broadcast.Recipient{}
-	for _, recipient := range body.Recipients {
-		outcomes[recipient.SessionID] = recipient
+}
+
+func TestChannelSendNamesAHostItCouldNotReach(t *testing.T) {
+	app, _, api := fanoutFixture(t)
+	api.responses["channel-send"] = `{"ok":true,"target":{"name":"widget","projectId":"repo:github.com/example/widget","project":"widget"},"sent":1,"queued":0,"submitted":0,"failed":0,` +
+		`"recipients":[{"sessionId":"s-scout","outcome":"sent","detail":"Sent to s-scout."}],` +
+		`"hosts":[{"id":"` + vpsHostID + `","name":"vps","state":"held","recipients":0,"detail":"host vps is unreachable; held until it reconnects"}],"unreachable":["vps"]}`
+	api.statuses = nil
+	output, err := captureStdout(t, func() error { return app.Run([]string{"channel", "send", "#widget", "standup"}) })
+	if err != nil || !strings.Contains(output, "[HELD] host vps: host vps is unreachable; held until it reconnects") || !strings.Contains(output, "held for unreachable host(s): vps") {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
-	if outcomes["s-scout"].Outcome != "sent" || outcomes["s-coder"].Outcome != "queued" || outcomes["s-reviewer"].Outcome != "failed" || !strings.Contains(outcomes["s-reviewer"].Detail, "read only") {
-		t.Fatalf("outcomes=%+v", outcomes)
-	}
-	if remote := outcomes[vpsBuilder.ID]; remote.Outcome != "queued" || remote.HostID != vpsHostID || remote.Detail != "held for its host" {
-		t.Fatalf("paired-host member=%+v", remote)
+}
+
+func TestChannelSendFailsWhenAHostRefusesIt(t *testing.T) {
+	app, _, api := fanoutFixture(t)
+	api.responses["channel-send"] = `{"error":{"code":"conflict","message":"channel delivery: 0 sent"},"target":{"name":"widget","projectId":"repo:github.com/example/widget","project":"widget"},"sent":0,"queued":0,"submitted":0,"failed":0,"recipients":[],` +
+		`"hosts":[{"id":"` + vpsHostID + `","name":"vps","state":"refused","recipients":0,"detail":"the sender is in project gadget, not widget","rule":"different_project"}],"unreachable":[]}`
+	output, err := captureStdout(t, func() error { return app.Run([]string{"channel", "send", "#widget", "standup"}) })
+	if err == nil || !strings.Contains(err.Error(), "1 host(s) refused it") || !strings.Contains(output, "[REFUSED] host vps: the sender is in project gadget") {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 
 func TestChannelListJSONNamesEachMemberAndItsHost(t *testing.T) {
-	app, _ := fanoutFixture(t)
+	app, _, _ := fanoutFixture(t)
 	for _, args := range [][]string{{"channel", "create", "crew"}, {"channel", "add", "crew", "@scout"}, {"channel", "add", "crew", "vps::@builder"}, {"channel", "create", "empty"}} {
 		if _, err := captureStdout(t, func() error { return app.Run(args) }); err != nil {
 			t.Fatalf("%v: %v", args, err)

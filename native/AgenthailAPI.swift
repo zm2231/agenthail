@@ -680,7 +680,7 @@ final class AgenthailAPI: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         setIdempotencyHeader(on: &request, path: path, method: "POST", key: idempotencyKey)
         let (data, response) = try await session.data(for: request)
-        if (response as? HTTPURLResponse)?.statusCode == 409, let partial = try? JSONDecoder().decode(ChannelSendResult.self, from: data), !partial.recipients.isEmpty {
+        if (response as? HTTPURLResponse)?.statusCode == 409, let partial = try? JSONDecoder().decode(ChannelSendResult.self, from: data), !partial.recipients.isEmpty || !(partial.hosts ?? []).isEmpty {
             return partial
         }
         try validate(response: response, data: data)
@@ -1089,7 +1089,15 @@ struct ChannelSendResult: Decodable {
         var detail: String?
     }
 
+    struct Host: Decodable, Equatable {
+        let name: String
+        let state: String
+        var detail: String?
+    }
+
     let recipients: [Recipient]
+    var hosts: [Host]? = nil
+    var unreachable: [String]? = nil
 }
 struct DeliveryReceipt: Decodable {
     let deliveryId: Int64?

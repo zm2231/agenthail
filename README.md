@@ -283,7 +283,6 @@ $ agenthail channel send crew "standup at 10"
   [FAIL] @reviewer: Codex session is read only: Codex Desktop created it, or Codex recorded no creator, and the Desktop bridge is unavailable; run 'agenthail launch codex'
   [ OK ] @scout: Sent to s-scout.
 #crew: 1 sent, 2 queued, 1 submitted, 1 failed
-warning: daemon is not running; queued channel deliveries will wait until 'agenthail daemon start'
 error: #crew had 1 failed delivery(s)
 ```
 
@@ -295,9 +294,9 @@ Each member gets the message as its own send, marked `[from <sender> via #<chann
 - **Submitted members** (`[SUBMIT]`) may already have the message; read `agenthail last <member>` before sending again.
 - **Failed members** (`[FAIL]`) did not get it, and the line gives the reason. A member that became read-only after it joined (`channel add` refuses read-only sessions) fails this way. Other members still get the message.
 
-Messages queued for any member wait until the daemon runs, and the send warns when it is not running. Any failed member makes the command exit 1.
+`channel send` goes through the daemon, which delivers it and reaches paired hosts; with the daemon stopped it is refused. Any failed member makes the command exit 1.
 
-With `--json`, `channel send` prints one object instead. It has `target`; `recipients`, one per member, with `sessionId`, `coordinator`, `hostId`, `outcome` (`sent`, `queued`, `submitted` or `failed`) and `detail`; and the `sent`, `queued`, `submitted` and `failed` counts. It still exits 1 when a member failed. The daemon API's `channel-send` action returns the same fields: in its success body, and alongside the error in its 409 partial-failure response. `agenthail channel list --json` prints each channel's `name` and `members`, each member with `sessionId`, `display` and, on a paired host, `hostId`.
+With `--json`, `channel send` prints one object instead. It has `target`; `recipients`, one per member, with `sessionId`, `coordinator`, `hostId`, `outcome` (`sent`, `queued`, `submitted` or `failed`) and `detail`; and the `sent`, `queued`, `submitted` and `failed` counts. A project send also has `hosts`, one per paired host that holds the project, with `id`, `name`, `state` (`reached`, `held`, `unknown` or `refused`), `recipients`, `detail` and, for a refusal under an agent's reach, `rule`; and `unreachable`, the names of the hosts it is held for. It still exits 1 when a member failed or a host refused. The daemon API's `channel-send` action returns the same fields: in its success body, and alongside the error in its 409 partial-failure response. `agenthail channel list --json` prints each channel's `name` and `members`, each member with `sessionId`, `display` and, on a paired host, `hostId`.
 
 To reach every conversation in a project, address the project by name or id instead of a channel; you need no channel for it:
 
@@ -305,7 +304,7 @@ To reach every conversation in a project, address the project by name or id inst
 agenthail channel send '#agenthail' "Main is frozen until the release is tagged"
 ```
 
-The message goes to the project's conversations on every paired host that are working or were active in the last day, plus the project's coordinator, and not to the sender. The output lists who got it. The dashboard's project row has a Message button that does the same. A channel cannot take a project's name. If a project appears with the name of an existing channel, sends to that name are refused until you rename the channel with `agenthail channel rename <channel> <new-name>`.
+The message goes to the project's conversations on every paired host that are working or were active in the last day, plus the project's coordinator, and not to the sender. Each paired host that holds the project gets one request and delivers to its own conversations and coordinator, by its own busy-delivery rules. A host that cannot be reached is named in the output, and the message is held for it and delivered once when it answers. A session sending from another project is refused by the paired host (`rule` `different_project`), as a direct send across hosts would be; the person and the CLI reach any project. The output lists who got it. The dashboard's project row has a Message button that does the same. A channel cannot take a project's name. If a project appears with the name of an existing channel, sends to that name are refused until you rename the channel with `agenthail channel rename <channel> <new-name>`.
 
 ## Start work without opening another window
 

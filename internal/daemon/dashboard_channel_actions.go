@@ -40,46 +40,96 @@ func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboa
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
+	if _, fromHost := requestingHost(ctx); fromHost && target.ProjectID != "" {
+		scoped := request
+		scoped.ProjectID = target.ProjectID
+		if err := channelDeliverScope(scoped); err != nil {
+			return actionResult{}, err
+		}
+	}
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
-	if request.Author != "" && request.Author != surface.AuthorPerson || request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
-		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "author must be \"person\" and name no source session when set")
-	}
-	service := d.coordinator()
-	source, label := request.SourceSessionID, "the Agenthail CLI"
-	switch {
-	case source != "":
-		label = d.resolveDisplay(service.Canonical(source))
-	case request.Author == surface.AuthorPerson:
-		source = surface.PersonSessionID
-		if label, err = d.Registry.PersonName(); err != nil {
-			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
-		}
-	}
-	broadcaster := broadcast.Broadcaster{Registry: d.Registry, Coordinators: service, Delivery: daemonBroadcastDelivery{d: d, sender: coordinator.Sender{Service: service}}}
-	result, err := broadcaster.Send(operationCtx, target, request.Message, label, source)
+	source, label, err := d.channelSender(request)
 	if err != nil {
-		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
+		return actionResult{}, err
 	}
-	sent, queued, submitted, failed := result.Count(broadcast.OutcomeSent), result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeSubmitted), result.Count(broadcast.OutcomeFailed)
-	fields := result.Fields()
-	if failed > 0 {
-		outcomes := make([]string, 0, len(result.Recipients))
-		for _, recipient := range result.Recipients {
-			label := recipient.Coordinator
-			if label == "" {
-				label = d.resolveDisplay(recipient.SessionID)
-			}
-			outcome := label + " " + recipient.Outcome
-			if recipient.Outcome == broadcast.OutcomeFailed && recipient.Detail != "" {
-				outcome += ": " + recipient.Detail
-			}
-			outcomes = append(outcomes, outcome)
+	var legs []channelHostLeg
+	var remote []broadcast.Recipient
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		remote, legs = d.channelHostLegs(operationCtx, target, request.Message, source)
+	}()
+	result, sendErr := d.channelBroadcaster("").Send(operationCtx, target, request.Message, label, source)
+	<-done
+	if sendErr != nil {
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", sendErr.Error())
+	}
+	result.Recipients = append(result.Recipients, remote...)
+	if target.ProjectID != "" && len(result.Recipients) == 0 && len(legs) == 0 {
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("#%s has no members other than the sender", target.Name))
+	}
+	return d.channelReply(result, legs)
+}
+
+func (d *Daemon) channelSender(request dashboardActionRequest) (string, string, error) {
+	if request.Author != "" && request.Author != surface.AuthorPerson || request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
+		return "", "", actionFailed(http.StatusBadRequest, "invalid_request", "author must be \"person\" and name no source session when set")
+	}
+	switch {
+	case request.SourceSessionID != "":
+		return request.SourceSessionID, d.resolveDisplay(d.coordinator().Canonical(request.SourceSessionID)), nil
+	case request.Author == surface.AuthorPerson && request.PersonName != "":
+		return surface.PersonSessionID, request.PersonName, nil
+	case request.Author == surface.AuthorPerson:
+		name, err := d.Registry.PersonName()
+		if err != nil {
+			return "", "", actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
-		return actionResult{}, &actionError{Status: http.StatusConflict, Code: "conflict", Message: fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed (%s)", sent, queued, submitted, failed, strings.Join(outcomes, "; ")), Extra: fields}
+		return surface.PersonSessionID, name, nil
 	}
-	fields["ok"] = true
-	return actionOK(fields), nil
+	return "", "the Agenthail CLI", nil
+}
+
+func (d *Daemon) channelBroadcaster(personName string) broadcast.Broadcaster {
+	service := d.coordinator()
+	return broadcast.Broadcaster{Registry: d.Registry, Coordinators: service, Delivery: daemonBroadcastDelivery{d: d, sender: coordinator.Sender{Service: service}, personName: personName}}
+}
+
+func (d *Daemon) channelReply(result broadcast.Result, legs []channelHostLeg) (actionResult, error) {
+	fields := result.Fields()
+	unreachable := []string{}
+	problems := []string{}
+	for _, leg := range legs {
+		switch leg.State {
+		case channelLegHeld, channelLegUnknown:
+			unreachable = append(unreachable, leg.Name)
+		case channelLegRefused:
+			problems = append(problems, fmt.Sprintf("host %s refused: %s", leg.Name, leg.Detail))
+		}
+	}
+	if legs != nil {
+		fields["hosts"], fields["unreachable"] = legs, unreachable
+	}
+	for _, recipient := range result.Recipients {
+		if recipient.Outcome != broadcast.OutcomeFailed {
+			continue
+		}
+		label := recipient.Coordinator
+		if label == "" {
+			label = d.resolveDisplay(recipient.SessionID)
+		}
+		problems = append(problems, label+" failed: "+recipient.Detail)
+	}
+	if len(problems) == 0 {
+		fields["ok"] = true
+		return actionOK(fields), nil
+	}
+	message := fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed (%s)", result.Count(broadcast.OutcomeSent), result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeSubmitted), result.Count(broadcast.OutcomeFailed), strings.Join(problems, "; "))
+	if len(unreachable) > 0 {
+		message += "; held for unreachable " + strings.Join(unreachable, ", ")
+	}
+	return actionResult{}, &actionError{Status: http.StatusConflict, Code: "conflict", Message: message, Extra: fields}
 }
 
 func (d *Daemon) doChannelRename(_ context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {

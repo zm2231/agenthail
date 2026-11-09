@@ -14,8 +14,17 @@ import (
 )
 
 type daemonBroadcastDelivery struct {
-	d      *Daemon
-	sender coordinator.Sender
+	d          *Daemon
+	sender     coordinator.Sender
+	personName string
+}
+
+func (b daemonBroadcastDelivery) options(source string) surface.SendOptions {
+	options := surface.SendOptions{SourceSessionID: source}
+	if source == surface.PersonSessionID && b.personName != "" {
+		options.Author, options.PersonName = surface.AuthorPerson, b.personName
+	}
+	return options
 }
 
 func (b daemonBroadcastDelivery) Session(ctx context.Context, sessionID, message, source string) (*delivery.Receipt, error) {
@@ -30,16 +39,11 @@ func (b daemonBroadcastDelivery) Session(ctx context.Context, sessionID, message
 	if err := b.d.ensureDashboardWritable(ctx, adapter, session); err != nil {
 		return nil, err
 	}
-	return b.sender.DeliverWithOptions(ctx, adapter, session, message, "", surface.SendOptions{SourceSessionID: source})
+	return b.sender.DeliverWithOptions(ctx, adapter, session, message, "", b.options(source))
 }
 
 func (b daemonBroadcastDelivery) Coordinator(ctx context.Context, spec registry.CoordinatorSpec, message, source string) (*delivery.Receipt, string, error) {
-	options := surface.SendOptions{SourceSessionID: source}
-	if spec.HostID != "" {
-		receipt, _, err := b.d.sendToPeerCoordinator(ctx, spec, message, options)
-		return receipt, "", err
-	}
-	outcome, err := b.sender.Service.Deliver(ctx, spec, message, options)
+	outcome, err := b.sender.Service.Deliver(ctx, spec, message, b.options(source))
 	if err != nil {
 		return nil, "", err
 	}
