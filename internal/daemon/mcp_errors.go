@@ -39,6 +39,8 @@ func mcpCodeFor(status int, code string) (mcpRefusal, bool) {
 		return mcpRefusal{Code: "refused"}, true
 	case status == http.StatusNotFound:
 		return mcpRefusal{Code: "not_found"}, true
+	case status == http.StatusConflict && code == movedCode:
+		return mcpRefusal{Code: "moved", Retryable: true}, true
 	case status == http.StatusConflict && code == "stale":
 		return mcpRefusal{Code: "not_found", Detail: map[string]any{"stale": true}}, true
 	case status == http.StatusConflict && (code == "move_busy" || code == "session_adopt_busy"):

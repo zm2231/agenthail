@@ -2,6 +2,8 @@ package registry
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -35,12 +37,23 @@ const (
 )
 
 func (r *Registry) QueueGoal(sessionID, command string) (int64, error) {
-	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,operation,status,updated_at) VALUES (?,?,?,'pending',datetime('now'))`, sessionID, command, QueueOperationGoal)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if err := refuseAfterMoveTx(tx, sessionID); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,status,updated_at) VALUES (?,?,?,'pending',datetime('now'))`, sessionID, command, QueueOperationGoal)
 	if err != nil {
 		return 0, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: command})
@@ -75,6 +88,9 @@ func queueCompactTx(tx *sql.Tx, sessionID string) (int64, bool, error) {
 	if err != sql.ErrNoRows {
 		return 0, false, err
 	}
+	if err := refuseAfterMoveTx(tx, sessionID); err != nil {
+		return 0, false, err
+	}
 	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,status,updated_at) VALUES (?,?,?,'pending',datetime('now'))`, sessionID, "/compact", QueueOperationCompact)
 	if err != nil {
 		return 0, false, err
@@ -103,48 +119,67 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 		return 0, 0, err
 	}
 	defer tx.Rollback()
-	id, deliveryID, err := enqueueMessageTx(tx, r.now(), sessionID, message, deliveryKey, options, relayHops, operation, intent)
+	queued, err := enqueueMessageTx(tx, r.now(), sessionID, message, deliveryKey, options, relayHops, operation, intent)
 	if err != nil {
 		return 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, 0, err
 	}
-	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, SourceSessionID: options.SourceSessionID, QueueID: id, Message: message, Result: options.Model})
-	return id, deliveryID, nil
+	r.signalHeld(queued)
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, SourceSessionID: options.SourceSessionID, QueueID: queued.ID, Message: message, Result: options.Model})
+	return queued.ID, queued.DeliveryID, nil
 }
 
-func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, intent queueIntent) (int64, int64, error) {
+// enqueued is a queue row and its delivery intent. Held means the row went
+// to its session's host as a held send, which the caller signals once its
+// transaction commits.
+type enqueued struct {
+	ID         int64
+	DeliveryID int64
+	Held       bool
+}
+
+func (r *Registry) signalHeld(queued enqueued) {
+	if queued.Held {
+		r.signalChange(ChangeHostDeliveries)
+	}
+}
+
+func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, intent queueIntent) (enqueued, error) {
 	if options.BusyDelivery == "steer" && !options.QueuesAsSteer() {
 		options.BusyDelivery = "queue"
 	}
 	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,person_name,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, options.BusyDelivery, options.Author, options.Uploads, options.PersonName)
 	if err != nil {
 		if deliveryKey == "" || !strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return 0, 0, err
+			return enqueued{}, err
 		}
 		var id int64
 		if err := tx.QueryRow(`SELECT id FROM message_queue WHERE delivery_key=? AND delivery_key!=''`, deliveryKey).Scan(&id); err != nil {
-			return 0, 0, err
+			return enqueued{}, err
 		}
 		if operation != QueueOperationMessage {
-			return id, 0, nil
+			return enqueued{ID: id}, nil
 		}
 		deliveryID, err := intent.attachExisting(tx, sessionID, message, id, relayHops > 0)
-		return id, deliveryID, err
+		return enqueued{ID: id, DeliveryID: deliveryID}, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return 0, 0, err
+		return enqueued{}, err
 	}
-	if operation != QueueOperationMessage {
-		return id, 0, nil
+	queued := enqueued{ID: id}
+	if operation == QueueOperationMessage {
+		if queued.DeliveryID, err = intent.attach(tx, sessionID, message, id, relayHops > 0); err != nil {
+			return enqueued{}, err
+		}
 	}
-	deliveryID, err := intent.attach(tx, sessionID, message, id, relayHops > 0)
+	queued.Held, err = holdForOwnerTx(tx, id, sessionID, message, deliveryKey, options, relayHops, operation)
 	if err != nil {
-		return 0, 0, err
+		return enqueued{}, err
 	}
-	return id, deliveryID, nil
+	return queued, nil
 }
 
 func (r *Registry) readExists(query string, args ...any) (bool, error) {
@@ -187,4 +222,57 @@ func (r *Registry) QueueCounts() (map[string]int, error) {
 		counts[sessionID] = count
 	}
 	return counts, rows.Err()
+}
+
+// MovedError refuses an item queued for a session a paired host now owns
+// that cannot follow it as a held send: an operation, or a message with
+// files, as the move fails the ones already queued. The caller sends it to
+// HostID instead.
+type MovedError struct {
+	SessionID string
+	HostID    string
+}
+
+func (e MovedError) Error() string {
+	return fmt.Sprintf("session %s moved to host %s before this was queued; send it there", e.SessionID, e.HostID)
+}
+
+// holdForOwnerTx makes a message queued for a session another host owns,
+// one that moved while the send waited for it, a send held for that host, as
+// the move made the messages already queued for it.
+func holdForOwnerTx(tx *sql.Tx, id int64, sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation) (bool, error) {
+	owner, err := sessionOwnerTx(tx, sessionID)
+	if err != nil || owner == "" {
+		return false, err
+	}
+	if operation != QueueOperationMessage || len(options.Uploads) > 0 {
+		return false, MovedError{SessionID: sessionID, HostID: owner}
+	}
+	key := deliveryKey
+	if key == "" {
+		key = fmt.Sprintf("held-%s-%d", sessionID, id)
+	}
+	request, err := hostSendRequest(tx, HostSend{SessionID: sessionID, Message: message, Key: key, SourceSessionID: options.SourceSessionID, BusyDelivery: options.BusyDelivery, RelayHops: relayHops})
+	if err != nil {
+		return false, err
+	}
+	_, err = tx.Exec(`UPDATE message_queue SET host_request=?,delivery_key=?,evidence=?,updated_at=datetime('now') WHERE id=?`, request, key, surface.EvidenceQueued, id)
+	return err == nil, err
+}
+
+func sessionOwnerTx(tx *sql.Tx, sessionID string) (string, error) {
+	var owner string
+	err := tx.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, sessionID).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return owner, err
+}
+
+func refuseAfterMoveTx(tx *sql.Tx, sessionID string) error {
+	owner, err := sessionOwnerTx(tx, sessionID)
+	if err == nil && owner != "" {
+		return MovedError{SessionID: sessionID, HostID: owner}
+	}
+	return err
 }

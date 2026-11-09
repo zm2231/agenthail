@@ -79,6 +79,10 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		return d.doSessionOperation(ctx, adapter, session, request.Action, request.Fork, strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"), strings.TrimSpace(request.SourceSessionID), request.NativeQueue)
 	}
 	if err := d.ensureDashboardWritable(ctx, adapter, session); err != nil {
+		var owned registry.SessionOwnedError
+		if errors.As(err, &owned) && owned.HostID != "" {
+			return actionResult{}, registry.MovedError(owned)
+		}
 		return actionResult{}, conflict(err.Error())
 	}
 	effective := surface.EffectiveCapabilities(adapter, session)

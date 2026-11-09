@@ -55,7 +55,7 @@ func (c *Claude) PrepareMove(ctx context.Context, sess *surface.Session, request
 	if !claudeConversationID(conversation) {
 		return nil, fmt.Errorf("Claude session %q is not a conversation id", sess.ID)
 	}
-	unlock, err := c.lockConversation(ctx, conversation)
+	unlock, err := c.holdForMove(ctx, conversation)
 	if err != nil {
 		return nil, err
 	}

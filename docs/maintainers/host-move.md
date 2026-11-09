@@ -21,7 +21,11 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    [adopt](session-operations.md) does: it closes a host session only once
    idle, stops a background job, and stops a terminal process only with
    `--stop-terminal`. The lock is held until the move ends, so no Agenthail
-   process here resumes the conversation in the meantime. With the session
+   process here resumes the conversation in the meantime. The hold also marks
+   the conversation as moving, so a send that finds the lock taken does not
+   wait out the move: it is queued as held and leaves with the queue at the
+   flip. A send that gets the lock only after the conversation left is held
+   the same way. With the session
    held, the source reads its completions once more and its relays forward
    what they have not; a completion they still cannot forward refuses the
    move when it is declared.
@@ -145,6 +149,20 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    Held sends then drain to the target, and the target's catalog replaces the
    placeholder row. If the target reported the session while it was still
    local here, its row was hidden; the flip shows it at once.
+
+   A message queued for the session after the flip becomes a send held for
+   the target as well, in the transaction that queues it, whichever path
+   queues it: a send, a relay, or a notice. A goal, a compaction or a send
+   with attached files cannot be held that way, as the flip fails those
+   already queued; an action that resolved the session here before the flip
+   and reaches it after is refused with `409` code `moved` and
+   `movedToHost`. The same action made again routes to the target, which now
+   owns the session.
+
+   A paired host that has not yet heard of the move may still send any action
+   to the source; the source does not pass it on, but answers `moved` the
+   same way, and the sending host sends it once more, straight to the target.
+   An MCP tool reports `moved` as a retryable refusal.
 
 On the target, every request must come from a paired host's token, which has
 the `control` and `host` scopes. The token names the source; the request body

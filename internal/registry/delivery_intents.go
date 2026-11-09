@@ -50,7 +50,11 @@ func (r *Registry) EnsureSender(id string) error {
 // person name, else the full name of the account Agenthail runs under, else
 // its login.
 func (r *Registry) PersonName() (string, error) {
-	name, err := r.PersonNameSetting()
+	return personName(r.db)
+}
+
+func personName(q catalogQuerier) (string, error) {
+	name, err := personNameSetting(q)
 	if err != nil || name != "" {
 		return name, err
 	}
@@ -60,8 +64,12 @@ func (r *Registry) PersonName() (string, error) {
 // PersonNameSetting is the name set with agenthail person name, empty when
 // none is.
 func (r *Registry) PersonNameSetting() (string, error) {
+	return personNameSetting(r.db)
+}
+
+func personNameSetting(q catalogQuerier) (string, error) {
 	var name string
-	err := r.db.QueryRow(`SELECT name FROM sessions WHERE id=?`, surface.PersonSessionID).Scan(&name)
+	err := q.QueryRow(`SELECT name FROM sessions WHERE id=?`, surface.PersonSessionID).Scan(&name)
 	if err != nil && err != sql.ErrNoRows {
 		return "", err
 	}
@@ -527,17 +535,18 @@ func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey
 		return 0, 0, fmt.Errorf("delivery intent %d is not submitted", intentID)
 	}
 	options.SourceSessionID = senderSessionID
-	queueID, boundID, err := enqueueMessageTx(tx, r.now(), targetSessionID, message, deliveryKey, options, 0, QueueOperationMessage, queueIntent{Bind: intentID})
+	queued, err := enqueueMessageTx(tx, r.now(), targetSessionID, message, deliveryKey, options, 0, QueueOperationMessage, queueIntent{Bind: intentID})
 	if err != nil {
 		return 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, 0, err
 	}
-	if boundID == intentID {
-		_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: targetSessionID, SourceSessionID: senderSessionID, QueueID: queueID, Message: message})
+	r.signalHeld(queued)
+	if queued.DeliveryID == intentID {
+		_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: targetSessionID, SourceSessionID: senderSessionID, QueueID: queued.ID, Message: message})
 	}
-	return queueID, boundID, nil
+	return queued.ID, queued.DeliveryID, nil
 }
 
 // FailDeliveryIntentWithNotice makes the failure durable before returning. If

@@ -21,6 +21,11 @@ func (d *Daemon) forwardHostAction(ctx context.Context, p principal, key string,
 	if err == nil {
 		answer, readErr := readHostAnswer(host, response)
 		if readErr == nil {
+			if next, found := d.pairedHost(movedTo(answer)); found && next != host && !redirectedAfterMove(ctx) {
+				if transitErr := d.hostTransit(ctx, next); transitErr == nil {
+					return d.forwardHostAction(context.WithValue(ctx, redirectedAfterMoveKey{}, true), p, key, next, request, body)
+				}
+			}
 			return replyWith(answer.write)
 		}
 		err = readErr
@@ -85,4 +90,11 @@ func (d *Daemon) apiRelaysHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"relays": routes})
+}
+
+type redirectedAfterMoveKey struct{}
+
+func redirectedAfterMove(ctx context.Context) bool {
+	redirected, _ := ctx.Value(redirectedAfterMoveKey{}).(bool)
+	return redirected
 }

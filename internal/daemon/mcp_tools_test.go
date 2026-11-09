@@ -166,6 +166,7 @@ func TestEveryActionErrorMapsToAnMCPCode(t *testing.T) {
 	}{
 		{409, "stale", "not_found", false, true},
 		{409, "move_busy", "busy", true, false},
+		{409, "moved", "moved", true, false},
 		{502, "control_failed", "busy", true, false},
 		{502, "create_unknown", "busy", false, false},
 		{409, "move_refused", "refused", false, false},
