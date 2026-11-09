@@ -950,6 +950,7 @@ type TurnObservation struct {
 	CompletedTurnID string           `json:"completedTurnId,omitempty"`
 	InputTurnID     string           `json:"inputTurnId,omitempty"`
 	WaitingOn       *Waiting         `json:"waitingOn,omitempty"`
+	WaitingUnknown  bool             `json:"-"`
 	BackgroundTasks *BackgroundTasks `json:"backgroundTasks,omitempty"`
 	UsageLimit      *UsageLimit      `json:"usageLimit,omitempty"`
 	TurnStop        *TurnStop        `json:"turnStop,omitempty"`

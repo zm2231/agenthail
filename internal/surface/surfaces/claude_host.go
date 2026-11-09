@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,16 +19,21 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const claudeHostListTTL = time.Second
+const (
+	claudeHostListTTL       = time.Second
+	claudeHostListTimeout   = 500 * time.Millisecond
+	claudeHostSilentOpenTTL = 5 * time.Second
+)
 
 type claudeHost struct {
-	client   claudehost.Client
-	state    string
-	mu       sync.Mutex
-	listed   time.Time
-	sessions map[string]int
-	open     map[string]claudehost.Session
-	partial  bool
+	client     claudehost.Client
+	state      string
+	mu         sync.Mutex
+	listed     time.Time
+	sessions   map[string]int
+	open       map[string]claudehost.Session
+	openListed map[string]time.Time
+	partial    bool
 }
 
 // claudeHosted reports whether the host runs the session's conversation. Its
@@ -74,17 +80,21 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if time.Since(h.listed) > claudeHostListTTL {
-		listCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		listCtx, cancel := context.WithTimeout(ctx, claudeHostListTimeout)
+		started := time.Now()
 		listing, err := h.client.List(listCtx)
+		took := time.Since(started)
 		cancel()
-		previous, previousOpen := h.sessions, h.open
+		previous, previousOpen, previousListed, wasPartial := h.sessions, h.open, h.openListed, h.partial
 		h.sessions = map[string]int{}
 		h.open = map[string]claudehost.Session{}
+		h.openListed = map[string]time.Time{}
 		h.partial = err != nil || len(listing.Unanswered) > 0
 		if err == nil {
 			for _, session := range listing.Sessions {
 				h.sessions[session.SessionID] = session.PID
 				h.open[session.SessionID] = session
+				h.openListed[session.SessionID] = started
 			}
 			for _, orphan := range listing.Orphans {
 				h.sessions[orphan.SessionID] = orphan.PID
@@ -93,14 +103,17 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 			h.readState()
 		}
 		if h.partial {
-			h.keepUnseen(previous, previousOpen)
+			h.keepUnseen(previous, previousOpen, previousListed)
+		}
+		if h.partial != wasPartial {
+			logClaudeHostListing(h.partial, took, err, listing.Unanswered)
 		}
 		h.listed = time.Now()
 	}
 	return h.sessions
 }
 
-func (h *claudeHost) keepUnseen(previous map[string]int, previousOpen map[string]claudehost.Session) {
+func (h *claudeHost) keepUnseen(previous map[string]int, previousOpen map[string]claudehost.Session, previousListed map[string]time.Time) {
 	for id, pid := range previous {
 		if _, seen := h.sessions[id]; seen || !claudeProcessAlive(pid) {
 			continue
@@ -108,7 +121,22 @@ func (h *claudeHost) keepUnseen(previous map[string]int, previousOpen map[string
 		h.sessions[id] = pid
 		if session, ok := previousOpen[id]; ok && session.PID == pid {
 			h.open[id] = session
+			h.openListed[id] = previousListed[id]
 		}
+	}
+}
+
+func logClaudeHostListing(partial bool, took time.Duration, err error, unanswered []string) {
+	took = took.Round(time.Millisecond)
+	switch {
+	case !partial:
+		log.Printf("Claude host: the session listing answers again (%s)", took)
+	case errors.Is(err, context.DeadlineExceeded):
+		log.Printf("Claude host: the session listing timed out after %s; sessions last listed keep their requests for %s", took, claudeHostSilentOpenTTL)
+	case err != nil:
+		log.Printf("Claude host: the session listing failed after %s: %s; sessions last listed keep their requests for %s", took, err, claudeHostSilentOpenTTL)
+	default:
+		log.Printf("Claude host: %s did not answer the session listing (%s); sessions last listed keep their requests for %s", strings.Join(unanswered, ", "), took, claudeHostSilentOpenTTL)
 	}
 }
 
@@ -117,6 +145,18 @@ func (h *claudeHost) unanswered() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.partial
+}
+
+func (h *claudeHost) requestsKnown(conversation string, pid int) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.partial {
+		return true
+	}
+	if session, ok := h.open[conversation]; ok && session.PID == pid {
+		return time.Since(h.openListed[conversation]) <= claudeHostSilentOpenTTL
+	}
+	return h.sessions[conversation] != pid
 }
 
 // session is the host's listing of the conversation it runs as process pid.
