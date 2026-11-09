@@ -43,6 +43,7 @@ class MemoryNamespace {
   constructor(DurableObject) { this.DurableObject = DurableObject }
   env = {}
   instances = new Map()
+  arrivals = []
   getByName(id) {
     if (!this.instances.has(id)) {
       const storage = new MemoryDurableStorage()
@@ -50,7 +51,13 @@ class MemoryNamespace {
       this.instances.set(id, { storage, object })
     }
     const { object } = this.instances.get(id)
-    return { fetch: (url, init) => object.fetch(new Request(url, init)) }
+    return {
+      fetch: (url, init) => {
+        const response = object.fetch(new Request(url, init))
+        this.arrivals.shift()?.()
+        return response
+      }
+    }
   }
 }
 
@@ -351,14 +358,17 @@ test("registration rate limits repeated clients", async () => {
 })
 
 test("worker converts provider failures into a typed service error", async () => {
-  const env = environment()
+  const env = await apnsEnvironment()
   const registered = await register(request("POST", await registrationBody(env)), env, acceptAttestation)
   const registration = await registered.json()
-  const response = await worker.fetch(new Request("https://push.test/v1/send", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...registration, title: "Agenthail", message: "Done" })
-  }), env)
+  let response
+  await withAPNs(["throw"], async () => {
+    response = await worker.fetch(new Request("https://push.test/v1/send", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...registration, title: "Agenthail", message: "Done" })
+    }), env)
+  })
   assert.equal(response.status, 503)
   assert.deepEqual(await response.json(), { error: "push_service_unavailable" })
 })
@@ -601,7 +611,10 @@ async function withAPNs(statuses, run) {
   globalThis.fetch = async (url, init) => {
     const status = statuses.shift() ?? 200
     if (status === "throw") throw new TypeError("network connection lost")
-    if (typeof status === "object") await status.until
+    if (typeof status === "object") {
+      status.reached?.()
+      await status.until
+    }
     delivered.push({ url, payload: JSON.parse(init.body) })
     return new Response(null, { status: typeof status === "object" ? status.status : status })
   }
@@ -611,6 +624,15 @@ async function withAPNs(statuses, run) {
     globalThis.fetch = realFetch
   }
   return delivered
+}
+
+// Room for a send that did not wait to reach APNs first; one that waits stays blocked however long this runs.
+async function eventLoopTurns(count) {
+  for (let turn = 0; turn < count; turn++) await new Promise(resolve => setImmediate(resolve))
+}
+
+function nextArrival(namespace) {
+  return new Promise(resolve => namespace.arrivals.push(resolve))
 }
 
 const finished = { title: "Agenthail", message: "Codex finished on forge", eventType: "turn.completed" }
@@ -705,19 +727,24 @@ test("a notification APNs refused is delivered by the next computer that sends i
   }
 })
 
-test("a computer sending while another's send is in flight waits for it", async () => {
+test("a computer sending while another's send is in flight waits for it", { timeout: 10_000 }, async () => {
   for (const [winnerStatus, loserAnswer, calls] of [[200, { ok: true, deduped: true }, 1], [500, { ok: true }, 2]]) {
     const env = await apnsEnvironment()
     const phone = "ab".repeat(32)
     const viaHost = await registerFixture(env, "host", phone)
     const viaViewer = await registerFixture(env, "viewer", phone)
-    let answer
-    const slow = { status: winnerStatus, until: new Promise(resolve => { answer = resolve }) }
+    let answer, reached, loserAtAPNs = false
+    const atAPNs = new Promise(resolve => { reached = resolve })
+    const slow = { status: winnerStatus, until: new Promise(resolve => { answer = resolve }), reached }
     const answers = []
-    const delivered = await withAPNs([slow, 200], async () => {
+    const delivered = await withAPNs([slow, { status: 200, reached: () => { loserAtAPNs = true } }], async () => {
       const winner = send(request("POST", { ...viaHost, ...finished, dedupeKey: turnKey }), env)
+      await atAPNs
+      const arrived = nextArrival(env.PUSH_DEDUPE)
       const loser = send(request("POST", { ...viaViewer, ...finished, dedupeKey: turnKey }), env)
-      await new Promise(resolve => setTimeout(resolve, 10))
+      await arrived
+      await eventLoopTurns(5)
+      assert.equal(loserAtAPNs, false, `winner ${winnerStatus}: the second send reached APNs while the first was in flight`)
       answer()
       answers.push((await winner).status, await (await loser).json())
     })
