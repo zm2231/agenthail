@@ -128,12 +128,31 @@ func (f *peerFixture) controlSockets(pid int) []string {
 	return paths
 }
 
-func killProcess(t *testing.T, pid int) {
-	t.Helper()
+// The OS reaps a peer before the manager closes its done, so wait for both.
+func (f *peerFixture) killProcess(pid int) {
+	f.t.Helper()
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-		t.Fatal(err)
+		f.t.Fatal(err)
 	}
-	testkit.Eventually(t, fmt.Sprintf("process %d to exit", pid), 5*time.Second, func() bool { return syscall.Kill(pid, 0) != nil })
+	testkit.Eventually(f.t, fmt.Sprintf("process %d to exit", pid), 5*time.Second, func() bool { return syscall.Kill(pid, 0) != nil })
+	var done chan struct{}
+	f.manager.mu.Lock()
+	for _, entries := range []map[string]*child{f.manager.children, f.manager.relays} {
+		for _, entry := range entries {
+			if entry.process.Pid == pid {
+				done = entry.done
+			}
+		}
+	}
+	f.manager.mu.Unlock()
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		f.t.Fatalf("the manager never saw process %d exit", pid)
+	}
 }
 
 func sendPeerFrame(t *testing.T, socket string, frame map[string]any) {
@@ -283,7 +302,7 @@ func TestManagerOwnsOnePeerPerSessionAndHealsLostWorkers(t *testing.T) {
 	if healed.PID == older.PID {
 		t.Fatal("missing control endpoint did not replace its worker")
 	}
-	killProcess(t, healed.PID)
+	f.killProcess(healed.PID)
 	if err := Ensure(f.ctx, f.home, "older"); err != nil {
 		t.Fatalf("worker restart: %v", err)
 	}
@@ -370,7 +389,7 @@ func TestManagerReplyRelayLifecycle(t *testing.T) {
 		t.Fatal("missing control endpoint did not replace its helper")
 	}
 
-	killProcess(t, replacementHelper.PID)
+	f.killProcess(replacementHelper.PID)
 	recordPath := f.recordPath(replacementHelper.PID)
 	var record map[string]any
 	data, err := os.ReadFile(recordPath)
@@ -409,7 +428,7 @@ func TestManagerReplyRelayLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	killProcess(t, relayPID)
+	f.killProcess(relayPID)
 	send("send after relay restart")
 	restarted := native.replySocket(t)
 	if restarted == relay {
