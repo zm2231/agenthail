@@ -440,39 +440,73 @@ func codexThreadLockPath(threadID string) string {
 	return filepath.Join(home, ".agenthail", "codex-threads", threadID+".lock")
 }
 
-func openCodexThreadLock(threadID string) (*os.File, error) {
-	if !validCodexMoveThread(threadID) {
-		return nil, fmt.Errorf("Codex thread id %q is not valid", threadID)
-	}
-	if err := os.MkdirAll(filepath.Dir(codexThreadLockPath(threadID)), 0700); err != nil {
-		return nil, err
-	}
-	return os.OpenFile(codexThreadLockPath(threadID), os.O_CREATE|os.O_RDWR, 0600)
-}
-
-// holdCodexThread waits for any write to the thread to end and holds it
-// against every later one until release.
-func holdCodexThread(ctx context.Context, threadID string) (release func(), err error) {
-	file, err := openCodexThreadLock(threadID)
-	if err != nil {
-		return nil, err
-	}
+// lockedCodexThread takes the thread's lock file, creating it, and returns it
+// once the file it locked is still the one at the path; a release unlinks the
+// path before unlocking, so a lock on an unlinked file holds nothing.
+func lockedCodexThread(ctx context.Context, path string) (*os.File, error) {
 	for {
-		if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
-			return func() { releaseCodexWriteLock(file) }, nil
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return nil, err
 		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+		if err != nil {
+			return nil, err
+		}
+		if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+			if sameFile(file, path) {
+				return file, nil
+			}
+			releaseCodexWriteLock(file)
+			continue
+		}
+		_ = file.Close()
 		select {
 		case <-ctx.Done():
-			_ = file.Close()
-			return nil, fmt.Errorf("wait for writes to Codex thread %s: %w", threadID, ctx.Err())
+			return nil, ctx.Err()
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
 }
 
+func sameFile(file *os.File, path string) bool {
+	held, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	named, err := os.Stat(path)
+	return err == nil && os.SameFile(held, named)
+}
+
+// holdCodexThread waits for any write to the thread to end and holds it
+// against every later one until release. The lock file exists only while a
+// move holds the thread: after taking it, the hold passes through the write
+// lock once, so a write that started before the file existed has ended and
+// every later write finds the file.
+func holdCodexThread(ctx context.Context, threadID string) (release func(), err error) {
+	if !validCodexMoveThread(threadID) {
+		return nil, fmt.Errorf("Codex thread id %q is not valid", threadID)
+	}
+	path := codexThreadLockPath(threadID)
+	file, err := lockedCodexThread(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("wait for writes to Codex thread %s: %w", threadID, err)
+	}
+	release = func() {
+		_ = os.Remove(path)
+		releaseCodexWriteLock(file)
+	}
+	fence, err := acquireCodexWriteLock(ctx)
+	if err != nil {
+		release()
+		return nil, fmt.Errorf("wait for writes to Codex thread %s: %w", threadID, err)
+	}
+	releaseCodexWriteLock(fence)
+	return release, nil
+}
+
 // acquireCodexThreadWrite takes the Codex write lock for a write to one
-// thread, refusing while a move holds the thread. Writers take the thread
-// only while they hold the write lock, so they never wait on each other here.
+// thread, refusing while a move holds the thread. A lock file no move holds
+// was left by a move that did not finish, and is removed.
 func acquireCodexThreadWrite(ctx context.Context, threadID string) (release func(), err error) {
 	lock, err := acquireCodexWriteLock(ctx)
 	if err != nil {
@@ -481,7 +515,11 @@ func acquireCodexThreadWrite(ctx context.Context, threadID string) (release func
 	if !validCodexMoveThread(threadID) {
 		return func() { releaseCodexWriteLock(lock) }, nil
 	}
-	thread, err := openCodexThreadLock(threadID)
+	path := codexThreadLockPath(threadID)
+	thread, err := os.OpenFile(path, os.O_RDWR, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return func() { releaseCodexWriteLock(lock) }, nil
+	}
 	if err != nil {
 		releaseCodexWriteLock(lock)
 		return nil, err
@@ -491,10 +529,11 @@ func acquireCodexThreadWrite(ctx context.Context, threadID string) (release func
 		releaseCodexWriteLock(lock)
 		return nil, errCodexThreadMoving
 	}
-	return func() {
-		releaseCodexWriteLock(thread)
-		releaseCodexWriteLock(lock)
-	}, nil
+	if sameFile(thread, path) {
+		_ = os.Remove(path)
+	}
+	releaseCodexWriteLock(thread)
+	return func() { releaseCodexWriteLock(lock) }, nil
 }
 
 func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writable bool, method string, params map[string]any, wait time.Duration) (map[string]any, error) {

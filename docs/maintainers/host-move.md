@@ -160,7 +160,9 @@ sessions.
 A Codex thread moves by the same protocol, with these differences.
 
 - **Hold.** The Codex adapter takes a per-thread lock that every Agenthail
-  write to the thread checks while it holds the Codex write lock. A send,
+  write to the thread checks while it holds the Codex write lock. The lock
+  file, `~/.agenthail/codex-threads/<thread>.lock`, exists only while a move
+  holds it; a write removes one that no move holds. A send,
   steer or setting change during the move is refused as unavailable, so
   queued deliveries retry and, after the flip, go to the target. The thread
   must be idle: no running turn, nothing asked of the person, and no
