@@ -22,6 +22,8 @@ type boardView struct {
 	waivers     []ledger.GateWaiver
 	checks      map[string]ledger.GoalChecks
 	retractions []ledger.Retraction
+	filed       map[string][]ledger.UtteranceView
+	sorts       ledger.SortStats
 }
 
 func ledgerIDNumber(id string) int {
@@ -39,7 +41,13 @@ func byLedgerID[T any](items []T, id func(T) string) {
 
 func newBoardView(board *ledger.Board) boardView {
 	v := boardView{goals: board.Goals(), asks: board.OpenAsks(), decisions: board.Decisions(), constraints: board.ProjectConstraints(),
-		questions: sortedQuestions(board, true), targetCuts: board.TargetCuts(), waivers: board.G2Waivers(), allAsks: map[string]ledger.Ask{}, checks: map[string]ledger.GoalChecks{}, retractions: board.Retractions()}
+		questions: sortedQuestions(board, true), targetCuts: board.TargetCuts(), waivers: board.G2Waivers(), allAsks: map[string]ledger.Ask{}, checks: map[string]ledger.GoalChecks{}, retractions: board.Retractions(),
+		filed: map[string][]ledger.UtteranceView{}, sorts: board.SortStats()}
+	for _, u := range board.Utterances() {
+		if u.Sorted != nil && !u.Attached {
+			v.filed[u.Sorted.GoalID] = append(v.filed[u.Sorted.GoalID], u)
+		}
+	}
 	for _, c := range board.GoalChecks() {
 		v.checks[c.GoalID] = c
 	}
@@ -123,6 +131,12 @@ func (v boardView) print(attachment ledger.Attachment, shown int) {
 		for _, c := range g.Constraints {
 			printClause("  constraint ", c)
 		}
+		for _, u := range v.filed[g.ID] {
+			fmt.Printf("  filed automatically (%.2f) %s to %s: %s\n", u.Sorted.Confidence, u.ID, u.TargetID, oneLine(u.Text))
+		}
+	}
+	if line := v.sorts.String(); line != "" {
+		fmt.Println(line)
 	}
 	for _, ask := range v.asks {
 		fmt.Printf("%s [%s] goal=%s from %s\n", ask.ID, ask.Type, ask.GoalID, ask.SourceUtterance)
@@ -168,11 +182,7 @@ func printAttachment(attachment ledger.Attachment, shown int) {
 			fmt.Printf("provisional until attached (%d):\n", n)
 		}
 		for _, u := range words {
-			text := strings.Join(strings.Fields(u.Text), " ")
-			if len(text) > 80 {
-				text = text[:77] + "..."
-			}
-			fmt.Printf("  %s to %s: %s\n", u.ID, u.TargetID, text)
+			fmt.Printf("  %s to %s: %s\n", u.ID, u.TargetID, oneLine(u.Text))
 		}
 	}
 	refs := make([]string, 0, len(attachment.Elsewhere))
@@ -183,6 +193,14 @@ func printAttachment(attachment ledger.Attachment, shown int) {
 	for _, ref := range refs {
 		fmt.Printf("%s attached elsewhere: %s\n", ref, attachment.Elsewhere[ref])
 	}
+}
+
+func oneLine(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) > 80 {
+		text = text[:77] + "..."
+	}
+	return text
 }
 
 func (a *App) ledgerGoals(store *ledger.Store, args []string) error {

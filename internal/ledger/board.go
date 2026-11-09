@@ -51,6 +51,7 @@ type UtteranceView struct {
 	At         string      `json:"ts"`
 	GoalIDs    []string    `json:"goalIds,omitempty"`
 	Attached   bool        `json:"attached"`
+	Sorted     *Sorted     `json:"sorted,omitempty"`
 	Notes      []string    `json:"notes,omitempty"`
 	Truncated  *Truncation `json:"truncated,omitempty"`
 }
@@ -235,6 +236,8 @@ func (b *Board) dispatch(event Event) error {
 		err = b.applyCutWithdrawn(event.Payload)
 	case EventReclassified:
 		err = b.applyReclassified(event.Payload)
+	case EventSorted:
+		err = b.applySorted(event.Payload)
 	case EventCapture:
 		err = b.applyCapture(event)
 	}
@@ -311,7 +314,12 @@ func (b *Board) Utterances() []UtteranceView {
 	defer b.mu.RUnlock()
 	result := make([]UtteranceView, 0, len(b.utteranceOrder))
 	for _, ref := range b.utteranceOrder {
-		result = append(result, *b.utterances[ref])
+		u := *b.utterances[ref]
+		if u.Sorted != nil {
+			sorted := *u.Sorted
+			u.Sorted = &sorted
+		}
+		result = append(result, u)
 	}
 	return result
 }

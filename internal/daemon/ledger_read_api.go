@@ -25,6 +25,7 @@ func (d *Daemon) ledgerRead(key string, req ledger.ReadRequest) (map[string]any,
 	if last, ok := d.ledgerSync.last(key); ok {
 		req.Sync = &ledger.SyncHealth{OwnerHead: last.Head, Error: last.Error}
 	}
+	req.Sorter = d.sorterHealth()
 	result, err := d.ledgerStore().Read(key, req)
 	if err != nil {
 		return nil, err

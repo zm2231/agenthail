@@ -57,6 +57,9 @@ func (d *Daemon) recordPersonWordsOnce(session surface.Session, u ledger.Utteran
 		if err != nil {
 			return personWordsRecord{key: target.key}, err
 		}
+		if inserted {
+			d.queueSort(target.key, u.Ref, u.At)
+		}
 		if u.HookMissed(inserted) {
 			d.publishEvent(ledger.EventCaptureMissed, session.ID, map[string]string{"projectKey": target.key, "ref": u.Ref, "sessionId": session.ID, "reason": "unknown"})
 		}

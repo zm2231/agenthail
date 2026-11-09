@@ -85,6 +85,21 @@ agenthail ledger attach <utterance> --to <ask> --clause "and the docs"   # inten
 
 Either way the count is a note, not a request: attach the words with one `--and` call when you know what they mean. Running `enable` again with the other `--attach` value switches the mode without changing when capture began.
 
+### Filing messages automatically
+
+A local model can file a provisional message under one of the project's goals. It is off until `~/.agenthail/config.json` names it:
+
+```json
+{"ledgerSorter": {"url": "http://192.0.2.10:8100", "model": "d1-3b"}}
+```
+
+The daemon then sends each new message to `<url>/v1/systemone`, with a `"token"` sent as a bearer token if the key has one. The question names every goal as the board stood when the message was recorded, with up to twelve of its newest clauses, and gives the agent's previous reply as context. Words captured on this host are sorted by this host.
+
+- **Filing.** Only an existing goal of the message's own project, chosen with confidence 0.9 or more, files the message. The board then lists it under that goal as `filed automatically (0.93)`, and it no longer counts as provisional. "A new topic", "thanks only" and anything less sure leave it provisional.
+- **Attaching wins.** A session can still attach a filed message. The attach replaces the filing; if it names another goal, the board counts it as overridden (`auto-filed N, overridden M`), so the 0.9 cutoff can be checked against real use.
+- **No waiting.** Capture only queues the message. One worker asks the model, one message at a time, and waits at most 10 seconds for each answer. The queue holds 64 messages; one that doesn't fit stays provisional.
+- **When the model is down.** A failed or unreadable answer leaves the message provisional and is not retried at once. The board read reports `sorter` with the model, `unavailableSince`, the last `error`, the count of `failures`, and how many messages were `dropped` from a full queue. After the first answer that follows, the daemon sorts again the messages this host captured from the first failure or dropped message on, going back no further than 24 hours. The daemon logs each change between up and down once.
+
 `--as` says how the message relates to what is already on the board:
 
 | `--as` | Meaning |
@@ -269,7 +284,7 @@ GET /api/v1/ledger/events                                   # ledger.changed, on
 ```
 
 - **Views.** `view` is one of:
-  - `board`, the default: capture state, sync state, counts, the first page of goals, and the newest five provisional words with their total (`provisional`);
+  - `board`, the default: capture state, sync state, counts, the first page of goals, and the newest five provisional words with their total (`provisional`), how many messages were filed automatically and overridden (`autoFiled`), and, when a sorter is configured, its health (`sorter`);
   - one list, paged: `goals`, `asks`, `decisions`, `questions` or `work`;
   - `ready`, the ranked next work;
   - `item`: one work item with its context, or one ask, as `agenthail ledger show --json` prints it.

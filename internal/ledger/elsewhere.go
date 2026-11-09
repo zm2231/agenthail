@@ -69,7 +69,7 @@ func attachment(q querier, projectKey string, board *Board, targetID string) (At
 	}
 	out := Attachment{Elsewhere: map[string]Elsewhere{}}
 	for _, u := range board.Utterances() {
-		if u.Attached || (targetID != "" && u.TargetID != targetID) {
+		if u.Attached || u.Sorted != nil || (targetID != "" && u.TargetID != targetID) {
 			continue
 		}
 		if e, ok := elsewhere[u.ID]; ok {
