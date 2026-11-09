@@ -141,7 +141,7 @@ The observer checks this on every pass. Running tasks' children are always watch
 
 The first terminal turn is the result, even if a follow-up was already on its way. That follow-up's turn goes to `latest`.
 
-A Codex process that hasn't loaded a thread reads its running turn as `interrupted`, so that status from such a reader settles nothing, and relays and completion notices don't treat it as the turn's end. The same read can't tell a running turn from one whose owner died, so such a child stays open until it is archived or its turn is seen to complete, and holds no spawn slot meanwhile. A child that exited but can still be resumed also stays open and holds no slot. A child's row is not pruned while it has a task, so a result stays readable.
+Codex lists a running turn as `interrupted` with no `completedAt` whenever its thread is not active: to a process that hasn't loaded the thread, while the turn is starting, and after the server that ran it crashed. Such a turn settles nothing, and relays and completion notices don't treat it as the turn's end; a turn Codex recorded an end for carries `completedAt`. The same read can't tell a running turn from one whose owner died, so such a child stays open until it is archived or its turn is seen to complete, and holds no spawn slot meanwhile. A child that exited but can still be resumed also stays open and holds no slot. A child's row is not pruned while it has a task, so a result stays readable.
 
 After settling, a report only updates `latest`, and `agenthail_result` records a turn that finished since. Settled children are not watched. Until a task settles, its idle child counts toward the caller's running-session limit. Rows are durable, so a result survives a daemon restart.
 

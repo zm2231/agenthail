@@ -38,7 +38,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 		thread.Waiting = codexWaitingKind(value["status"])
 		observation = codexObservation(thread)
 	}
-	observation = dropUnconfirmedTurn(ctx, conn, thread, observation)
+	observation = dropUnconfirmedTurn(thread, observation)
 	observation.WaitingOn = c.preciseWait(ctx, conn, sess, observation.WaitingOn)
 	if path := codexTranscriptPath(sess); path != "" {
 		if info, err := os.Stat(path); err == nil {
@@ -51,14 +51,6 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 
 const codexTurnInterrupted = "turn interrupted"
 
-// A process that hasn't loaded a thread reads its running turn as interrupted,
-// so that status from such a reader says nothing about the turn. Its completed
-// status is reliable.
-func codexThreadNotLoaded(ctx context.Context, conn codexClient, threadID string) bool {
-	notLoaded, err := codexThreadReadsNotLoaded(ctx, conn, threadID)
-	return err != nil || notLoaded
-}
-
 func codexThreadReadsNotLoaded(ctx context.Context, conn codexClient, threadID string) (bool, error) {
 	response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
 	if err != nil {
@@ -70,13 +62,13 @@ func codexThreadReadsNotLoaded(ctx context.Context, conn codexClient, threadID s
 	return str(status, "type") == "notLoaded", nil
 }
 
-func dropUnconfirmedTurn(ctx context.Context, conn codexClient, thread *codexThread, observation *surface.TurnObservation) *surface.TurnObservation {
+func dropUnconfirmedTurn(thread *codexThread, observation *surface.TurnObservation) *surface.TurnObservation {
 	for index := len(thread.Turns) - 1; index >= 0; index-- {
 		turn := thread.Turns[index]
 		if turn.ID == "" || !turn.Done {
 			continue
 		}
-		if turn.Error != codexTurnInterrupted || !codexThreadNotLoaded(ctx, conn, thread.ID) {
+		if !turn.Unsettled {
 			return observation
 		}
 		thread.Turns = append(thread.Turns[:index:index], thread.Turns[index+1:]...)
@@ -89,26 +81,50 @@ func dropUnconfirmedTurn(ctx context.Context, conn codexClient, thread *codexThr
 
 // activeTurnID returns the thread's running turn, or "" when none runs. A new
 // thread whose turns cannot be listed yet has none, so its first turn can start.
+// A newest turn listed unsettled is listed again until it shows running or
+// ended, for at most codexUnsettledTurnWait: a starting turn shows running
+// once its thread turns active, and a turn a crashed server left behind never
+// does.
 func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID string) (string, error) {
+	deadline := time.Now().Add(codexUnsettledTurnWait)
+	for {
+		newest, err := codexNewestTurn(ctx, conn, threadID)
+		if err != nil {
+			return "", err
+		}
+		if status, _, _ := codexTurnState(newest["status"]); status == surface.StatusBusy {
+			return str(newest, "id"), nil
+		}
+		if newest == nil || !codexTurnUnsettled(newest) || !time.Now().Before(deadline) {
+			return "", nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+var codexUnsettledTurnWait = 2 * time.Second
+
+func codexNewestTurn(ctx context.Context, conn codexClient, threadID string) (map[string]any, error) {
 	response, err := conn.Request(ctx, "thread/turns/list", map[string]any{
 		"threadId":      threadID,
 		"limit":         1,
 		"sortDirection": "desc",
 	}, 5*time.Second)
 	if codexTurnsNotListedYet(err) {
-		return "", nil
+		return nil, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("thread/turns/list: %w", err)
+		return nil, fmt.Errorf("thread/turns/list: %w", err)
 	}
 	result, _ := response["result"].(map[string]any)
 	turns, _ := result["data"].([]any)
-	for _, raw := range turns {
-		turn, _ := raw.(map[string]any)
-		status, _, _ := codexTurnState(turn["status"])
-		if status == surface.StatusBusy {
-			return str(turn, "id"), nil
-		}
+	if len(turns) == 0 {
+		return nil, nil
 	}
-	return "", nil
+	newest, _ := turns[0].(map[string]any)
+	return newest, nil
 }

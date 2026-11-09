@@ -18,6 +18,7 @@ type codexTurn struct {
 	AssistantItems []codexAssistantItem
 	Done           bool
 	Error          string
+	Unsettled      bool
 	Stop           *surface.TurnStop
 }
 
@@ -104,7 +105,7 @@ func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID strin
 	for index, rawTurn := range turns {
 		entry, _ := rawTurn.(map[string]any)
 		status, done, turnError := codexTurnState(entry["status"])
-		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Stop: codexTurnStop(entry)}
+		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry)}
 		items, _ := entry["items"].([]any)
 		if len(items) == 0 && turn.ID != "" && hydrate[index] {
 			page, pageErr := c.listThreadItems(ctx, conn, thread.ID, turn.ID)
@@ -176,7 +177,7 @@ func (c *Codex) threadFromTurns(ctx context.Context, conn codexClient, threadID 
 	for index, rawTurn := range turns {
 		entry, _ := rawTurn.(map[string]any)
 		status, done, turnError := codexTurnState(entry["status"])
-		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Stop: codexTurnStop(entry)}
+		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry)}
 		items, _ := entry["items"].([]any)
 		if len(items) == 0 && turn.ID != "" && hydrate[index] {
 			page, pageErr := c.listThreadItems(ctx, conn, thread.ID, turn.ID)
@@ -311,6 +312,15 @@ func codexTurnState(value any) (surface.SessionStatus, bool, string) {
 	default:
 		return surface.SessionStatus(status), false, ""
 	}
+}
+
+// codexTurnUnsettled reports a listed turn Codex shows interrupted without
+// recording an end. Codex lists an in-progress turn that way whenever its
+// thread is not active: while the turn starts, to a process that has not
+// loaded the thread, and after a crash, so such a turn may still be running.
+func codexTurnUnsettled(entry map[string]any) bool {
+	_, _, failure := codexTurnState(entry["status"])
+	return failure == codexTurnInterrupted && entry["completedAt"] == nil
 }
 
 func codexItemText(item map[string]any) string {
