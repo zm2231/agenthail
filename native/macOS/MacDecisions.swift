@@ -11,8 +11,8 @@ extension AgenthailModel {
     static let decisionTimeout: TimeInterval = 6
 
     var decisionsKey: String {
-        let hosts = (snapshot?.daemon.hosts ?? []).map { "\($0.id):\($0.state)" }.joined(separator: ",")
-        return "\(catalogPosition.epoch ?? ""):\(catalogPosition.cursor)|\(hosts)"
+        let hosts = (daemon?.hosts ?? []).map { "\($0.id):\($0.state)" }.joined(separator: ",")
+        return "\(decisionsRev ?? "older"):\(hosts)"
     }
 
     func refreshDecisionsSoon() async {
@@ -26,6 +26,7 @@ extension AgenthailModel {
         let local = snapshot?.daemon.host?.name ?? "This Mac"
         let paired = snapshot?.daemon.hosts ?? []
         var inbox = DecisionInbox()
+        if snapshot != nil && decisionsRev == nil { inbox.outdated.append(local) }
         for host in paired where host.state != "connected" {
             if host.state == "incompatible" { inbox.outdated.append(host.name) } else { inbox.unreachable.append(host.name) }
         }

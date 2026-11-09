@@ -55,6 +55,13 @@ struct CatalogBatchTest {
         let dismissed = capped.snapshot.applyingCatalog([event(62, "delivery.dismissed", #"{"deliveryId":51}"#)], after: 61)
         check(dismissed.snapshot.deliveryProblems?.first?.deliveryId == 50 && !dismissed.sessionsChanged, "a dismissed problem leaves")
 
+        check(base.decisionsRev == nil, "a snapshot without a decisions revision is from an older host")
+        let decided = base.applyingCatalog([event(11, "decisions.changed", #"{"rev":"r1","own":"o1"}"#)], after: 10)
+        check(decided.snapshot.decisionsRev == "r1" && !decided.sessionsChanged && decided.changed, "a decisions change names the revision without touching sessions")
+        let progress = decided.snapshot.applyingCatalog([upserted(12, "a", "busy")], after: 11)
+        check(progress.snapshot.decisionsRev == "r1", "a session's progress leaves the decisions revision alone")
+        check(decided.snapshot.keepingCatalog(of: progress.snapshot, appliedThrough: 12).decisionsRev == "r1" && base.keepingCatalog(of: decided.snapshot, appliedThrough: 11).decisionsRev == "r1", "a refresh older than the applied events keeps the revision they set")
+
         let health = base.applyingCatalog([event(11, "surface.health", #"{"surface":"claude","health":"unavailable","detail":"down"}"#)], after: 10)
         check(health.snapshot.surfaces[0].health == "unavailable" && !health.snapshot.surfaces[0].connected && !health.needsSnapshot, "a health event updates its surface")
 

@@ -58,6 +58,9 @@ private extension CatalogBatch {
             problems.removeAll { $0.deliveryId == deliveryID }
             problems.insert(problem, at: 0)
             snapshot.deliveryProblems = Array(problems.prefix(50))
+        case "decisions.changed":
+            guard let rev = data.rev else { return }
+            snapshot.decisionsRev = rev
         case "delivery.dismissed":
             guard let deliveryID = data.deliveryId else { return }
             snapshot.deliveryProblems?.removeAll { $0.deliveryId == deliveryID }

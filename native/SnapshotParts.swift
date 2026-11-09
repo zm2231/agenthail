@@ -19,6 +19,7 @@ struct SnapshotBase: Decodable {
     var person: PersonState? = nil
     var projects: [ProjectState]? = nil
     var leadReplacements: [LeadReplacement]? = nil
+    var decisionsRev: String? = nil
 }
 
 struct ScopeSessions {
@@ -145,6 +146,6 @@ extension DashboardSnapshot {
                       var project = project
                       project.activity = byID[project.id]
                       return project
-                  }, leadReplacements: base.leadReplacements)
+                  }, leadReplacements: base.leadReplacements, decisionsRev: base.decisionsRev)
     }
 }

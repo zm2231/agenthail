@@ -46,6 +46,10 @@ export function patch(envelope) {
     if (before) replace({ ...before, queueCount: data.queueCount });
     return { changed: Boolean(before), news: true };
   }
+  if (type === "decisions.changed") {
+    app.state.decisionsRev = data.rev;
+    return { changed: true, news: false };
+  }
   return { changed: false, news: type.startsWith("delivery.") || type.startsWith("coordinator.") };
 }
 

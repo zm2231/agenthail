@@ -130,6 +130,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	for _, spec := range coordinators {
 		state.Coordinators = append(state.Coordinators, spec.Entry())
 	}
+	state.OwnDecisionsRev, state.DecisionsRev = d.decisions.current()
 	if state.ProjectLinks, err = d.sharedProjectLinks(); err != nil {
 		return dashboardState{}, fmt.Errorf("read project links: %w", err)
 	}

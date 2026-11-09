@@ -71,6 +71,5 @@ export async function loadDecisions(fetchImpl = fetch) {
 
 export function decisionsKey() {
   const hosts = decisionHosts().map((host) => `${host.id}:${host.state}`).join(",");
-  const catalog = app.state?.catalogSeq === undefined ? `updated:${app.state?.updatedAt || ""}` : `${app.state?.hostEpoch || ""}:${app.state.catalogSeq}`;
-  return `${hosts}|${catalog}`;
+  return `${hosts}|${app.state?.decisionsRev ?? "older"}`;
 }

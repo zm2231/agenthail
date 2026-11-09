@@ -171,6 +171,7 @@ func (d *Daemon) removeHostHandler(w http.ResponseWriter, r *http.Request) {
 		d.logRuntimeError("host "+record.Name+" removal catalog", flushErr)
 	}
 	d.revokeRemoteDevice(record.Token, record.Endpoint, record.Address)
+	d.decisions.setPeer(record.ID, "")
 	d.publishEvent("host.removed", record.ID, map[string]any{"id": record.ID, "name": record.Name})
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

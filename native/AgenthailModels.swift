@@ -1409,6 +1409,8 @@ struct DashboardSnapshot: Decodable {
     /// Only a whole-catalog snapshot carries projects; a page leaves them out.
     var projects: [ProjectState]? = nil
     var leadReplacements: [LeadReplacement]? = nil
+    /// What this host's decisions are built from; an older host sends none.
+    var decisionsRev: String? = nil
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
         daemon == other.daemon &&
@@ -1426,7 +1428,8 @@ struct DashboardSnapshot: Decodable {
             signin == other.signin &&
             person == other.person &&
             projects == other.projects &&
-            leadReplacements == other.leadReplacements
+            leadReplacements == other.leadReplacements &&
+            decisionsRev == other.decisionsRev
     }
 
     /// Sessions, surfaces and delivery problems change only through catalog
@@ -1438,6 +1441,7 @@ struct DashboardSnapshot: Decodable {
         merged.totalSessions = current.totalSessions
         merged.surfaces = current.surfaces
         merged.deliveryProblems = current.deliveryProblems
+        merged.decisionsRev = current.decisionsRev
         return merged
     }
 }
@@ -2165,6 +2169,7 @@ struct CatalogStreamData: Decodable {
     let status: String?
     let at: String?
     let rekeyedTo: String?
+    let rev: String?
 }
 
 struct TimelineItem: Decodable, Identifiable, Equatable {
