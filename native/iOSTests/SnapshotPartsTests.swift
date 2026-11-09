@@ -41,15 +41,50 @@ final class SnapshotPartsTests: XCTestCase {
         XCTAssertEqual(host.snapshot?.sessions.map(\.id), ["root"])
     }
 
+    private func olderRefreshHeld(_ host: HostConnection) async throws -> Task<Bool, Never> {
+        let older = Task { await host.refresh(fresh: true) }
+        for _ in 0..<500 where !PartsServer.state.holdingScope("parts") { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(PartsServer.state.holdingScope("parts"), "the older refresh never reached the computer")
+        return older
+    }
+
     func testALateOlderRefreshDoesNotReplaceANewerOne() async throws {
-        PartsServer.state.set(host: "parts", scopes: [[PartsServer.row("older")], [PartsServer.row("newer")]], baseSeq: 1, scopeSeq: 1, firstScopeDelay: .milliseconds(800))
+        PartsServer.state.set(host: "parts", scopes: [[PartsServer.row("older")], [PartsServer.row("newer")]], baseSeq: 1, scopeSeq: 1, holdsFirstScope: true)
         let host = connection()
-        let slow = Task { await host.refresh(fresh: true) }
-        try await Task.sleep(for: .milliseconds(100))
+        let older = try await olderRefreshHeld(host)
         _ = await host.refresh(fresh: true)
         XCTAssertEqual(host.snapshot?.sessions.map(\.id), ["newer"])
-        _ = await slow.value
+        PartsServer.state.releaseScope("parts")
+        _ = await older.value
         XCTAssertEqual(host.snapshot?.sessions.map(\.id), ["newer"], "a slower, older refresh replaced the newer state")
+    }
+
+    func testALateOlderFailureDoesNotShowAnErrorOverANewerSuccess() async throws {
+        PartsServer.state.set(host: "parts", scopes: [[PartsServer.row("older")], [PartsServer.row("newer")]], baseSeq: 1, scopeSeq: 1, holdsFirstScope: true, failingScopeReads: [0])
+        let host = connection()
+        let older = try await olderRefreshHeld(host)
+        let refreshed = await host.refresh(fresh: true)
+        XCTAssertTrue(refreshed)
+        XCTAssertNil(host.connectionError)
+        PartsServer.state.releaseScope("parts")
+        let failed = await older.value
+        XCTAssertFalse(failed)
+        XCTAssertNil(host.connectionError, "a slower, older refresh that failed showed its error over the newer success")
+        XCTAssertEqual(host.snapshot?.sessions.map(\.id), ["newer"])
+    }
+
+    func testALateOlderSuccessShowsItsStateButKeepsTheNewerFailure() async throws {
+        PartsServer.state.set(host: "parts", scopes: [[PartsServer.row("older")], [PartsServer.row("newer")]], baseSeq: 1, scopeSeq: 1, holdsFirstScope: true, failingScopeReads: [1])
+        let host = connection()
+        let older = try await olderRefreshHeld(host)
+        let refreshed = await host.refresh(fresh: true)
+        XCTAssertFalse(refreshed)
+        XCTAssertNotNil(host.connectionError)
+        PartsServer.state.releaseScope("parts")
+        let succeeded = await older.value
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(host.snapshot?.sessions.map(\.id), ["older"], "a snapshot newer than any shown was dropped")
+        XCTAssertNotNil(host.connectionError, "an older success cleared the newer failure")
     }
 
     func testAComputerRolledBackToAnOlderAgenthailStopsRetryingItsStream() async throws {
@@ -125,6 +160,9 @@ final class PartsServer: URLProtocol, @unchecked Sendable {
             var baseSeq: UInt64
             var scopeSeq: UInt64
             var firstScopeDelay: Duration
+            var holdsFirstScope = false
+            var failingScopeReads: Set<Int> = []
+            var heldScope: (() -> Void)? = nil
             var scopeReads = 0
             var requests: [String] = []
             var notModified = false
@@ -136,8 +174,17 @@ final class PartsServer: URLProtocol, @unchecked Sendable {
         private var hosts: [String: Host] = [:]
 
         func reset() { lock.withLock { hosts = [:] } }
-        func set(host: String, scopes: [[[String: Any]]], baseSeq: UInt64, scopeSeq: UInt64, firstScopeDelay: Duration = .zero) {
-            lock.withLock { hosts[host] = Host(scopes: scopes, baseSeq: baseSeq, scopeSeq: scopeSeq, firstScopeDelay: firstScopeDelay) }
+        func set(host: String, scopes: [[[String: Any]]], baseSeq: UInt64, scopeSeq: UInt64, firstScopeDelay: Duration = .zero, holdsFirstScope: Bool = false, failingScopeReads: Set<Int> = []) {
+            lock.withLock { hosts[host] = Host(scopes: scopes, baseSeq: baseSeq, scopeSeq: scopeSeq, firstScopeDelay: firstScopeDelay, holdsFirstScope: holdsFirstScope, failingScopeReads: failingScopeReads) }
+        }
+        func holdingScope(_ host: String) -> Bool { lock.withLock { hosts[host]?.heldScope != nil } }
+        func hold(_ host: String, _ answer: @escaping () -> Void) { lock.withLock { hosts[host]?.heldScope = answer } }
+        func releaseScope(_ host: String) {
+            let answer = lock.withLock { () -> (() -> Void)? in
+                defer { hosts[host]?.heldScope = nil }
+                return hosts[host]?.heldScope
+            }
+            answer?()
         }
         func requests(for host: String) -> [String] { lock.withLock { hosts[host]?.requests ?? [] } }
         func sentNotModified(for host: String) -> Bool { lock.withLock { hosts[host]?.notModified ?? false } }
@@ -146,14 +193,14 @@ final class PartsServer: URLProtocol, @unchecked Sendable {
         func speak(_ host: String, protocol version: Int) { lock.withLock { hosts[host]?.protocolVersion = version } }
         func page(_ host: String, _ pages: [[[String: Any]]]) { lock.withLock { hosts[host]?.pages = pages } }
         func host(_ name: String) -> Host? { lock.withLock { hosts[name] } }
-        func nextScope(_ name: String) -> (rows: [[String: Any]], delay: Duration, seq: UInt64)? {
+        func nextScope(_ name: String) -> (rows: [[String: Any]], delay: Duration, seq: UInt64, fails: Bool, holds: Bool)? {
             lock.withLock {
                 guard var host = hosts[name] else { return nil }
-                let index = min(host.scopeReads, host.scopes.count - 1)
-                let delay = host.scopeReads == 0 ? host.firstScopeDelay : .zero
+                let read = host.scopeReads
+                let index = min(read, host.scopes.count - 1)
                 host.scopeReads += 1
                 hosts[name] = host
-                return (host.scopes[index], delay, host.scopeSeq)
+                return (host.scopes[index], read == 0 ? host.firstScopeDelay : .zero, host.scopeSeq, host.failingScopeReads.contains(read), read == 0 && host.holdsFirstScope)
             }
         }
     }
@@ -210,10 +257,12 @@ final class PartsServer: URLProtocol, @unchecked Sendable {
         case "/api/v1/snapshot" where url.query?.contains("scope=current") == true:
             guard let scope = Self.state.nextScope(name) else { return respond(503, "{}") }
             let body = String(data: try! JSONSerialization.data(withJSONObject: ["sessions": scope.rows, "hostEpoch": "epoch", "catalogSeq": scope.seq, "totalSessions": scope.rows.count]), encoding: .utf8)!
+            let (status, reply) = scope.fails ? (500, #"{"error":{"message":"scope failed"}}"#) : (200, body)
+            if scope.holds { return Self.state.hold(name) { self.respond(status, reply) } }
             let delay = scope.delay.components
             let seconds = Double(delay.seconds) + Double(delay.attoseconds) / 1e18
-            if seconds == 0 { return respond(200, body) }
-            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { self.respond(200, body) }
+            if seconds == 0 { return respond(status, reply) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { self.respond(status, reply) }
         default:
             respond(200, "{}")
         }

@@ -106,6 +106,7 @@ targets:
       - path: RelayFacts.swift
       - path: MinuteClock.swift
       - path: ConnectionGrace.swift
+      - path: RefreshOrder.swift
       - path: SnapshotRefreshPolicy.swift
       - path: CatalogBatch.swift
       - path: CatalogInbox.swift

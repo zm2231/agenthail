@@ -123,6 +123,7 @@ final class AgenthailModel {
     @ObservationIgnored private var connectionTask: Task<Void, Never>?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshOrder = RefreshOrder()
     @ObservationIgnored private(set) var pendingRefresh = EventRefresh()
     @ObservationIgnored private var statusRefreshTask: Task<Void, Never>?
     @ObservationIgnored private(set) var lastEventID: UInt64 = 0
@@ -353,6 +354,7 @@ final class AgenthailModel {
     @discardableResult
     func refresh(fresh: Bool = false) async -> Bool {
         guard let api else { return false }
+        let request = refreshOrder.begin()
         setLoading(snapshot == nil)
         do {
             async let parts = api.snapshotBaseAndCurrent(fresh: fresh)
@@ -360,13 +362,15 @@ final class AgenthailModel {
             async let history = api.history(limit: 50)
             let ((readBase, readCurrent), readActivity, readHistory) = try await (parts, activity, history)
             let loaded = DashboardSnapshot(base: readBase, current: readCurrent, activity: readActivity, history: readHistory.items)
-            adoptRefreshed(loaded)
-            adoptCurrentView(readCurrent)
-            lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
-            clearConnectionError()
-            reconcilePanes()
+            if refreshOrder.adopts(request) {
+                adoptRefreshed(loaded)
+                adoptCurrentView(readCurrent)
+                lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
+                reconcilePanes()
+            }
+            if refreshOrder.settles(request) { clearConnectionError() }
         } catch {
-            connectionFailed(error)
+            if !error.isCancellation, !Task.isCancelled, refreshOrder.settles(request) { connectionFailed(error) }
             setLoading(false)
             return false
         }
@@ -1526,16 +1530,6 @@ final class AgenthailModel {
         if isConnected { Self.connectionLog.notice("daemon shown unreachable: \(error.localizedDescription, privacy: .public)") }
         connectionError = AgenthailAPIError.userMessage(error)
         daemonSlow = error.isTimeout
-    }
-}
-
-extension Error {
-    var isCancellation: Bool {
-        self is CancellationError || (self as? URLError)?.code == .cancelled
-    }
-
-    var isTimeout: Bool {
-        (self as? URLError)?.code == .timedOut
     }
 }
 
