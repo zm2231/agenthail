@@ -21,13 +21,13 @@ func relayedMoveRegistry(t *testing.T) (*Registry, int64) {
 	return r, id
 }
 
-func movedRelaysOf(t *testing.T, r *Registry) []MovedRelay {
+func carryOf(t *testing.T, r *Registry) MoveCarry {
 	t.Helper()
-	relays, err := r.MovedRelays(moveConversation, "")
+	carry, err := r.MoveCarry(moveConversation, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return relays
+	return carry
 }
 
 func TestAMoveRefusesARelayTiedToAChannelNamingTheRelay(t *testing.T) {
@@ -63,7 +63,7 @@ func TestAMoveIsRefusedWhenItsRelaysChangeAfterItDeclaredThem(t *testing.T) {
 	if reason, _ := r.SessionMoveRefusal(moveConversation, true); reason != "" {
 		t.Fatalf("a relay the move carries refused it: %q", reason)
 	}
-	declared := movedRelaysOf(t, r)
+	declared := carryOf(t, r)
 	if err := r.RegisterSession(surface.Session{ID: "second", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestAMoveIsRefusedWhenItsRelaysChangeAfterItDeclaredThem(t *testing.T) {
 
 func TestAMoveRefusesACompletionCapturedAfterItDeclaredItsRelays(t *testing.T) {
 	r, _ := relayedMoveRegistry(t)
-	declared := movedRelaysOf(t, r)
+	declared := carryOf(t, r)
 	if err := r.CaptureRelayCompletions(moveConversation, "", surface.CompletionBatch{Cursor: "c1", Events: []surface.Completion{{ID: "turn-1", Text: "done"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestTheRelaysOfAMovingSessionCannotChange(t *testing.T) {
 	if err := r.RegisterSession(surface.Session{ID: "second", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), movedRelaysOf(t, r), ""); err != nil {
+	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), carryOf(t, r), ""); err != nil {
 		t.Fatal(err)
 	}
 	before, err := r.ListRoutes()
@@ -128,7 +128,7 @@ func TestTheRelaysOfAMovingSessionCannotChange(t *testing.T) {
 
 func TestACompletedMoveOutLeavesNoRelayFromTheSessionHere(t *testing.T) {
 	r, _ := relayedMoveRegistry(t)
-	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), movedRelaysOf(t, r), ""); err != nil {
+	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), carryOf(t, r), ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetMoveState("move-1", MoveSent, "", MovePreparing); err != nil {

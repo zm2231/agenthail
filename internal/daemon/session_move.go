@@ -42,8 +42,8 @@ type moveManifest struct {
 	State          json.RawMessage       `json:"state,omitempty"`
 	Root           string                `json:"root,omitempty"`
 	Origin         *moveOrigin           `json:"origin,omitempty"`
-	Relays         []registry.MovedRelay `json:"relays,omitempty"`
-	ClaudeProject  *moveClaudeProject    `json:"claudeProject,omitempty"`
+	registry.MoveCarry
+	ClaudeProject *moveClaudeProject `json:"claudeProject,omitempty"`
 }
 
 // moveClaudeProject is the project's Claude settings a moving conversation
@@ -53,12 +53,35 @@ type moveClaudeProject struct {
 	WithoutCredentials []string        `json:"withoutCredentials,omitempty"`
 }
 
-// moveCarryRelays and moveCarryClaudeProject are the kinds a target names
-// among what it carries when it can take them.
-const (
-	moveCarryRelays        = "relays"
-	moveCarryClaudeProject = "claude-project"
-)
+// A target names a kind in its prepare answer when it takes it over.
+type moveCarry struct {
+	kind     string
+	refusal  string
+	declared func(moveManifest) bool
+}
+
+var moveCarries = []moveCarry{
+	{"relays", "it cannot take over the relays from a moved session", func(m moveManifest) bool { return len(m.Relays) > 0 }},
+	{"channels", "it cannot take over the channels of a moved session", func(m moveManifest) bool { return len(m.Channels) > 0 }},
+	{"claude-project", "it cannot take the project's Claude settings", func(m moveManifest) bool { return m.ClaudeProject != nil }},
+}
+
+func moveCarryKinds() []string {
+	kinds := make([]string, 0, len(moveCarries))
+	for _, carry := range moveCarries {
+		kinds = append(kinds, carry.kind)
+	}
+	return kinds
+}
+
+func missingCarry(manifest moveManifest, carries []string) string {
+	for _, carry := range moveCarries {
+		if carry.declared(manifest) && !slices.Contains(carries, carry.kind) {
+			return carry.refusal
+		}
+	}
+	return ""
+}
 
 // moveOrigin is who started a moving session, named by the host that owns
 // the creator so the target can find it among its own and mirrored sessions.
@@ -188,11 +211,11 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	if err != nil {
 		return sessionMoveResult{}, err
 	}
-	relays, err := d.Registry.MovedRelays(session.ID, d.hostIdentity().ID)
+	carry, err := d.Registry.MoveCarry(session.ID, d.hostIdentity().ID)
 	if err != nil {
 		return sessionMoveResult{}, err
 	}
-	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, PinnedAt: pinnedAt, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, State: out.State, Root: request.Root, Origin: origin, Relays: relays}
+	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, PinnedAt: pinnedAt, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, State: out.State, Root: request.Root, Origin: origin, MoveCarry: carry}
 	if len(out.ProjectSettings) > 0 {
 		manifest.ClaudeProject = &moveClaudeProject{Settings: out.ProjectSettings, WithoutCredentials: out.SettingsWithoutCredentials}
 	}
@@ -205,7 +228,7 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	}
 	release, _ := claimMove(manifest.ID)
 	defer release()
-	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, host.record.ID, encoded, relays, d.hostIdentity().ID); err != nil {
+	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, host.record.ID, encoded, carry, d.hostIdentity().ID); err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
 	}
 	result := sessionMoveResult{Host: host.ref(), Stopped: out.Stopped, Alias: alias}
@@ -257,11 +280,8 @@ func (d *Daemon) prepareMoveOnHost(ctx context.Context, host *pairedHost, manife
 	if manifest.Root != "" && (!decoded || prepared.Root != manifest.Root) {
 		return fmt.Errorf("update Agenthail on %s; it cannot place a moved session in a chosen account", host.record.Name)
 	}
-	if len(manifest.Relays) > 0 && (!decoded || !slices.Contains(prepared.Carries, moveCarryRelays)) {
-		return fmt.Errorf("update Agenthail on %s; it cannot take over the relays from a moved session", host.record.Name)
-	}
-	if manifest.ClaudeProject != nil && (!decoded || !slices.Contains(prepared.Carries, moveCarryClaudeProject)) {
-		return fmt.Errorf("update Agenthail on %s; it cannot take the project's Claude settings", host.record.Name)
+	if refusal := missingCarry(manifest, prepared.Carries); refusal != "" {
+		return fmt.Errorf("update Agenthail on %s; %s", host.record.Name, refusal)
 	}
 	return nil
 }
@@ -645,13 +665,17 @@ func (d *Daemon) apiMovePrepareHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
 		return
 	}
+	if err := d.Registry.CheckMovedChannels(d.hostIdentity().ID, manifest.Channels); err != nil {
+		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
+		return
+	}
 	encoded, _ := json.Marshal(manifest)
 	move, err := d.Registry.PrepareMoveIn(manifest.ID, manifest.Conversation, hostID, encoded)
 	if err != nil {
 		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, moveStatus{State: move.State, Cwd: target.cwd, Root: manifest.Root, Carries: []string{moveCarryRelays, moveCarryClaudeProject}})
+	writeDashboardJSON(w, http.StatusOK, moveStatus{State: move.State, Cwd: target.cwd, Root: manifest.Root, Carries: moveCarryKinds()})
 }
 
 // seedMovedRelays reads the moved session's completions so far, so the
@@ -828,7 +852,7 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	d.catalog.mu.Lock()
-	_, err = d.Registry.TakeMovedSession(move.ID, *session, manifest.Alias, manifest.PinnedAt, origin, manifest.Relays, d.hostIdentity().ID)
+	_, err = d.Registry.TakeMovedSession(move.ID, *session, manifest.Alias, manifest.PinnedAt, origin, manifest.MoveCarry, d.hostIdentity().ID)
 	if err == nil {
 		d.publishCommittedHostWriteLocked("move " + move.ID)
 	}

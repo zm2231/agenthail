@@ -78,6 +78,12 @@ CREATE TABLE IF NOT EXISTS channel_members (
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	PRIMARY KEY (channel_id, session_id)
 );
+CREATE TABLE IF NOT EXISTS remote_channels (
+	channel_name TEXT NOT NULL,
+	home_host_id TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	PRIMARY KEY (session_id, channel_name)
+);
 CREATE TABLE IF NOT EXISTS routes (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	from_session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
