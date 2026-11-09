@@ -532,7 +532,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     var decisionsKey: String {
         let direct = hostOrder.compactMap { connections[$0] }.map { "\($0.id):\($0.shownReachable):\($0.snapshot?.decisionsRev ?? "older")" }
-        return (direct + catalog.hosts.map(\.id)).joined(separator: ",")
+        let reached = catalog.hosts.map { host in "\(host.id):\(host.state):\(catalog.target(forHost: host.id).map { "\($0.hostID)>\($0.remote ?? "")" } ?? "none")" }
+        return (direct + reached).joined(separator: ",")
     }
 
     func loadDecisions() async -> DecisionInbox {
