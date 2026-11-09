@@ -97,6 +97,14 @@ func (r *Registry) RelaySourceCursor(sessionID string) (string, error) {
 }
 
 func (r *Registry) CaptureRelayCompletions(sessionID, previous string, batch surface.CompletionBatch) error {
+	key, err := relaySourceKeyOf(r.read, sessionID)
+	if err != nil {
+		return err
+	}
+	return r.captureRelayCompletionsByKey(key, previous, batch)
+}
+
+func (r *Registry) captureRelayCompletionsByKey(key, previous string, batch surface.CompletionBatch) error {
 	if batch.Cursor == "" {
 		return fmt.Errorf("completion reader returned an empty cursor")
 	}
@@ -108,10 +116,6 @@ func (r *Registry) CaptureRelayCompletions(sessionID, previous string, batch sur
 		return err
 	}
 	defer tx.Rollback()
-	key, err := relaySourceKeyOf(tx, sessionID)
-	if err != nil {
-		return err
-	}
 	if _, err := tx.Exec(`INSERT INTO relay_sources(source_key,cursor) VALUES(?,'') ON CONFLICT DO NOTHING`, key); err != nil {
 		return err
 	}

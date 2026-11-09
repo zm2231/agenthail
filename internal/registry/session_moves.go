@@ -87,9 +87,11 @@ func (r *Registry) SessionMoves(unfinished bool) ([]SessionMove, error) {
 }
 
 // SessionMoveRefusal names what keeps a local session from moving: another
-// host owning it, a move already holding it, a delivery in flight, an active
-// relay, a channel or the coordinator role. It is empty when nothing does.
-func (r *Registry) SessionMoveRefusal(conversation string) (string, error) {
+// host owning it, a move already holding it, a delivery in flight, a relay
+// from it the move cannot carry, any relay of it when relays stay (a move
+// between accounts), a channel or the coordinator role. It is empty when
+// nothing does.
+func (r *Registry) SessionMoveRefusal(conversation string, carryRelays bool) (string, error) {
 	var owner string
 	if err := r.read.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, conversation).Scan(&owner); err != nil {
 		return "", err
@@ -103,9 +105,14 @@ func (r *Registry) SessionMoveRefusal(conversation string) (string, error) {
 	}{
 		{`SELECT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`, "a move of it has not finished"},
 		{`SELECT EXISTS(SELECT 1 FROM message_queue WHERE session_id=? AND status='inflight')`, "a message to it is being delivered"},
-		{`SELECT EXISTS(SELECT 1 FROM routes WHERE active=1 AND (from_session=?1 OR to_session=?1))`, "it is part of an active relay"},
 		{`SELECT EXISTS(SELECT 1 FROM channel_members WHERE session_id=?)`, "it is in a channel"},
 		{`SELECT EXISTS(SELECT 1 FROM coordinators c JOIN aliases a ON a.name=c.name WHERE c.host_id='' AND a.session_id=?)`, "it is a project coordinator"},
+	}
+	if !carryRelays {
+		checks = append(checks, struct {
+			query  string
+			reason string
+		}{`SELECT EXISTS(SELECT 1 FROM routes WHERE active=1 AND (from_session=?1 OR to_session=?1))`, "it is part of an active relay"})
 	}
 	for _, check := range checks {
 		var found bool
@@ -116,12 +123,16 @@ func (r *Registry) SessionMoveRefusal(conversation string) (string, error) {
 			return check.reason, nil
 		}
 	}
-	return "", nil
+	if !carryRelays {
+		return "", nil
+	}
+	return relayMoveRefusal(r.read, conversation)
 }
 
 // BeginMoveOut records a move out as preparing. Only one move out of a
-// conversation can be unfinished at a time.
-func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []byte) error {
+// conversation can be unfinished at a time, and relays are the active relays
+// from it the move declared: one added since refuses the move.
+func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []byte, relays []int64) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -133,6 +144,11 @@ func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []by
 	}
 	if busy {
 		return fmt.Errorf("a move of %s has not finished", conversation)
+	}
+	if same, err := sameRelaysTx(tx, conversation, relays); err != nil {
+		return err
+	} else if !same {
+		return fmt.Errorf("the relays from %s changed while the move was prepared; move it again", conversation)
 	}
 	stamp := formatTimestamp(r.now())
 	if _, err := tx.Exec(`INSERT INTO session_moves(id,conversation,peer_host,role,state,manifest,created_at,updated_at) VALUES(?,?,?,'out',?,?,?,?)`, id, conversation, peerHost, MovePreparing, manifest, stamp, stamp); err != nil {
@@ -261,7 +277,7 @@ func (r *Registry) AbortMoveIn(id, conversation, sourceHost string) (SessionMove
 // source host mirrored here is taken over; a row another host owns is taken
 // only once that host no longer serves it.
 // The source's alias is bound here when it is free.
-func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alias string, pinnedAt time.Time, origin *SessionOrigin) ([]CatalogEvent, error) {
+func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alias string, pinnedAt time.Time, origin *SessionOrigin, relays []MovedRelay, self string) ([]CatalogEvent, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, err
@@ -334,6 +350,11 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 			return nil, err
 		}
 		if _, err := tx.Exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,?,?) ON CONFLICT(session_id) DO UPDATE SET via=excluded.via,creator_session_id=excluded.creator_session_id`, session.ID, string(origin.Via), origin.CreatorID); err != nil {
+			return nil, err
+		}
+	}
+	if move.State == MoveReceived {
+		if err := insertMovedRelaysTx(tx, session.ID, self, relays); err != nil {
 			return nil, err
 		}
 	}
@@ -475,6 +496,9 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 			return nil, false, err
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, err
+	}
+	if err := dropMovedRelaysTx(tx, move.Conversation); err != nil {
 		return nil, false, err
 	}
 	if _, err := tx.Exec(`UPDATE sessions SET host_id=?,pid=0,transcript='',has_local=0,bridge='',pinned_at_ms=0,stopped_at_ms=0,updated_at=datetime('now') WHERE id=? AND host_id=''`, move.PeerHost, move.Conversation); err != nil {

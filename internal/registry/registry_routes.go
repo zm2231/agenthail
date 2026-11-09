@@ -35,6 +35,13 @@ func (r *Registry) AddRelayRoute(from, to, pattern string, once bool, handoff st
 		return 0, err
 	}
 	defer tx.Rollback()
+	var moving bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`, from).Scan(&moving); err != nil {
+		return 0, err
+	}
+	if moving {
+		return 0, fmt.Errorf("relay source %s is moving to another host; add the relay once the move has finished", from)
+	}
 	var cycle int
 	err = tx.QueryRow(`
 		WITH RECURSIVE reachable(id) AS (
@@ -124,11 +131,8 @@ func (r *Registry) RemoveRoute(id int64) error {
 		return err
 	}
 	if err == nil {
-		orphaned := `source_key=? AND NOT EXISTS(SELECT 1 FROM routes JOIN sessions s ON s.id=routes.from_session WHERE ` + relaySourceKey + `=?)`
-		for _, table := range []string{"relay_sources", "relay_events"} {
-			if _, err := tx.Exec(`DELETE FROM `+table+` WHERE `+orphaned, key, key); err != nil {
-				return err
-			}
+		if err := dropOrphanRelaySourceTx(tx, key); err != nil {
+			return err
 		}
 	}
 	return tx.Commit()

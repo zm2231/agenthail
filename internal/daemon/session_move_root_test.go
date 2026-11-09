@@ -88,7 +88,7 @@ func TestAnIdleSessionMovesToAnotherAccountOnItsHostWithItsProjectConfig(t *test
 	if !gjson.GetBytes(target, key).Exists() || gjson.GetBytes(target, key+".mcpServers").Raw != gjson.GetBytes(source, key+".mcpServers").Raw {
 		t.Fatalf("the target account's project entry is %s", target)
 	}
-	if reason, _ := node.reg.SessionMoveRefusal(session.ID); reason != "" {
+	if reason, _ := node.reg.SessionMoveRefusal(session.ID, false); reason != "" {
 		t.Fatalf("a finished move still holds the session: %s", reason)
 	}
 }
@@ -106,7 +106,7 @@ func TestAMoveToAnUnknownOrTheSameAccountLeavesTheSessionWhereItWas(t *testing.T
 	if transcriptUnder(filepath.Join(node.host.Home, ".claude"), session.ID) == "" || transcriptUnder(second, session.ID) != "" {
 		t.Fatal("a refused move took the transcript away")
 	}
-	if reason, _ := node.reg.SessionMoveRefusal(session.ID); reason != "" {
+	if reason, _ := node.reg.SessionMoveRefusal(session.ID, false); reason != "" {
 		t.Fatalf("a refused move still holds the session: %s", reason)
 	}
 }
@@ -180,7 +180,7 @@ func TestADaemonThatStoppedDuringARootMoveSettlesItWhenItStarts(t *testing.T) {
 	self := node.daemon.hostIdentity().ID
 	moveID := "6a1b0c9d-1111-4222-8333-944455550001"
 	manifest, _ := json.Marshal(moveManifest{ID: moveID, Conversation: session.ID, SourceHost: self, Surface: surface.KindClaude, Root: "work"})
-	if err := node.reg.BeginMoveOut(moveID, session.ID, self, manifest); err != nil {
+	if err := node.reg.BeginMoveOut(moveID, session.ID, self, manifest, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := node.claude.ArchiveMove(session.ID, moveID); err != nil {
