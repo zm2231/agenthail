@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -55,6 +56,10 @@ func TestAnAgentsCLIStartIsBoundedByItsCeiling(t *testing.T) {
 	payload, _ = json.Marshal(map[string]any{"surface": "claude", "cwd": root, "message": "help", "configRoot": "/elsewhere/.claude"})
 	if refused := askScope(t, f.daemon, ScopeRequest{SessionID: created.Session.ID, Action: "create", Create: payload}, "127.0.0.1:50000"); refused.code != "invalid" {
 		t.Fatalf("the child choosing an unconfigured Claude root: %+v", refused)
+	}
+	audits := mcpAudits(t, f.registry)
+	if len(audits) != 1 || audits[0].Result != "exceeds_ceiling" || audits[0].SourceSessionID != created.Session.ID || !strings.HasPrefix(audits[0].SessionID, "new:codex") || !strings.HasPrefix(audits[0].Message, "cli create rule=ceiling_") || audits[0].Error == "" {
+		t.Fatalf("audits=%+v, want one entry for the ceiling refusal and none for the invalid root", audits)
 	}
 	if starts := f.lifecycle.Daemon().Calls("thread/start"); len(starts) != 2 {
 		t.Fatalf("thread/start=%d, want the parent's and one child's", len(starts))
