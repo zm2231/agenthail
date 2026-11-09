@@ -12,7 +12,11 @@ enum PreviewOrder {
             || ((row["observedSubagents"] as? [String: Any])?["working"] as? Int ?? 0) > 0
     }
 
-    static func status(_ row: [String: Any]) -> String { working(row) ? "working" : "idle" }
+    static func status(_ row: [String: Any]) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: row),
+              let session = try? JSONDecoder().decode(SessionState.self, from: data) else { return nil }
+        return SessionDisplayKind.of(session).rawValue
+    }
 
     static func scoped(_ json: String, _ scope: String?, status wanted: String? = nil, surface: String? = nil) -> String {
         guard var object = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],

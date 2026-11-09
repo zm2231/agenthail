@@ -193,6 +193,26 @@ final class ScopePagesTests: XCTestCase {
         XCTAssertEqual(listed(.all), ["one::a", "one::b"])
     }
 
+    func testThePreviewFiltersByTheSharedStatusRule() throws {
+        var waiting = ScopeServer.row("waiting")
+        waiting["status"] = "busy"
+        waiting["waitingOn"] = ["kind": "question", "id": "q"]
+        var limited = ScopeServer.row("limited")
+        limited["status"] = "idle"
+        limited["queueCount"] = 0
+        limited["usageLimit"] = ["kind": "session"]
+        var busy = ScopeServer.row("busy")
+        busy["status"] = "busy"
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: ["sessions": [waiting, limited, busy]]), as: UTF8.self)
+        func ids(_ status: String) throws -> [String] {
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(PreviewOrder.scoped(json, "all", status: status).utf8)) as? [String: Any])
+            return (object["sessions"] as? [[String: Any]])?.compactMap { $0["id"] as? String } ?? []
+        }
+        XCTAssertEqual(try ids("waiting"), ["waiting"], "a busy session waiting on you is Waiting, not Working")
+        XCTAssertEqual(try ids("working"), ["busy"])
+        XCTAssertEqual(try ids("limited"), ["limited"])
+    }
+
     func testOnlyUnfilteredRecentStaysOnTheStreamedCurrentView() {
         XCTAssertNil(AgenthailIOSModel.listRequest(.recent, SessionRefinement()))
         XCTAssertEqual(AgenthailIOSModel.listRequest(.all, SessionRefinement()), ScopeRequest(scope: "all"))
