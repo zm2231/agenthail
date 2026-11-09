@@ -199,7 +199,8 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 	if err != nil {
 		return nil, err
 	}
-	if current == "" || !containsString(owned, current) {
+	current, found := ownedRollout(owned, current)
+	if !found {
 		return nil, fmt.Errorf("Codex thread %s has no rollout under %s", sess.ID, codexSessionsDir())
 	}
 	lineage, err := codexRolloutLineage(current, sess.ID)
@@ -207,7 +208,7 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 		return nil, surface.MoveRefusal{Reason: fmt.Sprintf("its history continues a rollout it cannot carry (%v); a forked thread cannot move yet", err)}
 	}
 	for _, segment := range lineage {
-		if !containsString(owned, segment.source) {
+		if _, found := ownedRollout(owned, segment.source); !found {
 			return nil, surface.MoveRefusal{Reason: fmt.Sprintf("its history continues %s, outside this thread's rollouts", filepath.Base(segment.source))}
 		}
 	}
@@ -244,6 +245,21 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 		release()
 	}
 	return out, nil
+}
+
+// ownedRollout compares with symlinks resolved, since Codex may report a
+// rollout under the resolved form of a CODEX_HOME that passes through a link.
+func ownedRollout(owned []string, path string) (string, bool) {
+	if path == "" {
+		return "", false
+	}
+	want := resolvedCodexPath(path)
+	for _, candidate := range owned {
+		if resolvedCodexPath(candidate) == want {
+			return candidate, true
+		}
+	}
+	return "", false
 }
 
 func containsString(values []string, value string) bool {

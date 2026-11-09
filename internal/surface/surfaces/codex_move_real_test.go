@@ -22,7 +22,11 @@ type codexMachine struct {
 func realCodexMachine(t *testing.T) *codexMachine {
 	t.Helper()
 	realManagedCodex(t)
-	machine := &codexMachine{home: os.Getenv("HOME"), codexHome: os.Getenv("CODEX_HOME"), cwd: t.TempDir(), codex: isolatedManagedRuntime(t)}
+	cwd, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine := &codexMachine{home: os.Getenv("HOME"), codexHome: os.Getenv("CODEX_HOME"), cwd: cwd, codex: isolatedManagedRuntime(t)}
 	machine.codex.SetCodexConfigStore(newMemoryCodexConfig())
 	return machine
 }

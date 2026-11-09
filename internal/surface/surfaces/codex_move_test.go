@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -133,5 +134,50 @@ func TestAMovedThreadsOtherRolloutsCannotExceedTheDeclaredSize(t *testing.T) {
 	_, err := isolatedManagedRuntime(t).ReceiveMove(context.Background(), in, &archive, func() error { return nil })
 	if err == nil || !strings.Contains(err.Error(), "more than the 10 bytes") {
 		t.Fatalf("ReceiveMove returned %v for rollouts past the declared size", err)
+	}
+}
+
+func TestAThreadIsHeldForAMoveWhenCodexReportsItsRolloutThroughTheResolvedHome(t *testing.T) {
+	home, err := filepath.EvalSymlinks(codextest.Home(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := home + "-link"
+	if err := os.Symlink(home, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(link) })
+	t.Setenv("CODEX_HOME", link)
+	t.Setenv("HOME", link)
+	rollout := filepath.Join(home, "sessions", "2026", "11", "09", "rollout-2026-11-09T10-00-00-"+managedThreadID+".jsonl")
+	codextest.Serve(t, link, func(method string, _ map[string]any) map[string]any {
+		switch method {
+		case "thread/loaded/list":
+			return map[string]any{"data": []any{managedThreadID}}
+		case "thread/read":
+			return map[string]any{"thread": map[string]any{"id": managedThreadID, "source": "agenthail", "path": rollout, "cwd": "/srv/work", "status": map[string]any{"type": "idle"}}}
+		case "thread/turns/list", "thread/list", "thread/queue/list":
+			return map[string]any{"data": []any{}}
+		case "thread/goal/get":
+			return map[string]any{}
+		}
+		return nil
+	})
+	body := []byte(`{"type":"session_meta","payload":{"id":"` + managedThreadID + `"}}` + "\n")
+	if err := os.MkdirAll(filepath.Dir(rollout), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rollout, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	codex := isolatedManagedRuntime(t)
+	session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Source: "agenthail", Transport: codexTransportManaged}
+	out, err := codex.PrepareMove(context.Background(), session, surface.AdoptRequest{})
+	if err != nil {
+		t.Fatalf("a thread under a linked CODEX_HOME could not be held: %v", err)
+	}
+	defer out.Release()
+	if out.Size != int64(len(body)) {
+		t.Fatalf("the move declared %d bytes of a %d-byte rollout", out.Size, len(body))
 	}
 }
