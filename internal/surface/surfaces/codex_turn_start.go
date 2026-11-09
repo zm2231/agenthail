@@ -176,10 +176,10 @@ type codexOrderedClient interface {
 }
 
 // awaitTurnUnderway waits for threadID to turn active or its turn to
-// complete. With findTurn it waits instead for the turn a compaction started,
-// which the connection receives after answering the compact request (whose
-// answer followed its first after notifications), and returns that turn's id.
-// A client that cannot order notifications against an answer finds none.
+// complete. With findTurn it waits instead for the turn a compaction started
+// and returns its id. after is the connection's receive count when the compact
+// answer arrived; only a notification counted beyond it can name the turn, and
+// a client that cannot count against its answers finds none.
 func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string, findTurn bool, after int64) string {
 	notifier, ok := client.(codexNotifier)
 	if !ok {
