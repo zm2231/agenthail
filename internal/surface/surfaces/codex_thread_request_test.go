@@ -18,6 +18,7 @@ type scriptedThreadClient struct {
 	calls     []scriptedCall
 	connected []bool
 	loaded    bool
+	active    bool
 }
 
 func (c *scriptedThreadClient) Request(_ context.Context, method string, params map[string]any, _ time.Duration) (map[string]any, error) {
@@ -27,7 +28,9 @@ func (c *scriptedThreadClient) Request(_ context.Context, method string, params 
 		return map[string]any{"result": map[string]any{"thread": map[string]any{"id": "new-thread"}}}, nil
 	case "thread/read":
 		status := "notLoaded"
-		if c.loaded {
+		if c.active {
+			status = "active"
+		} else if c.loaded {
 			status = "idle"
 		}
 		return map[string]any{"result": map[string]any{"thread": map[string]any{"status": map[string]any{"type": status}}}}, nil
@@ -169,7 +172,7 @@ func TestAThreadThatUnloadedBeforeResumeIsReattachedWithARotatedToken(t *testing
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"thread/read", codexThreadResume, "mcpServerStatus/list", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
+	want := []string{"thread/read", codexThreadResume, "mcpServerStatus/list", "thread/read", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
 	got := client.methods()
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v", got)
@@ -179,7 +182,7 @@ func TestAThreadThatUnloadedBeforeResumeIsReattachedWithARotatedToken(t *testing
 			t.Fatalf("calls=%v", got)
 		}
 	}
-	if credentials.rotations != 1 || bearerOf(client.calls[4].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
+	if credentials.rotations != 1 || bearerOf(client.calls[5].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
 		t.Fatalf("rotations=%d unattached=%v, the re-attach did not carry the rotated bearer", credentials.rotations, credentials.unattached)
 	}
 }
@@ -192,12 +195,29 @@ func TestALoadedThreadWhoseCredentialPassedItsLimitIsReloadedWithANewToken(t *te
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"thread/read", codexThreadResume, "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
+	want := []string{"thread/read", codexThreadResume, "thread/read", "thread/turns/list", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
 	if got := client.methods(); !slices.Equal(got, want) {
 		t.Fatalf("calls=%v", got)
 	}
-	if credentials.rotations != 1 || bearerOf(client.calls[3].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
+	if credentials.rotations != 1 || bearerOf(client.calls[5].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
 		t.Fatalf("rotations=%d unattached=%v, the expired token stayed attached", credentials.rotations, credentials.unattached)
+	}
+}
+
+func TestAThreadWithATurnRunningIsNotReloadedForItsCredential(t *testing.T) {
+	credentials := &fakeCredentials{expired: true}
+	c := &Codex{}
+	c.SetMCPCredentials(credentials)
+	client := &scriptedThreadClient{loaded: true, active: true}
+	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"thread/read", codexThreadResume, "thread/read"}
+	if got := client.methods(); !slices.Equal(got, want) {
+		t.Fatalf("calls=%v", got)
+	}
+	if credentials.rotations != 0 || len(credentials.unattached) != 1 {
+		t.Fatalf("rotations=%d unattached=%v", credentials.rotations, credentials.unattached)
 	}
 }
 

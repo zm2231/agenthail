@@ -49,11 +49,10 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	if err := applyCodexTurnOptions(options.Model, options.TurnOptions, params); err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
-	resp, err := conn.Request(ctx, "turn/start", params, 10*time.Second)
+	resp, err := c.startTurn(ctx, conn, sess.ID, "turn/start", params, 10*time.Second)
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/start: %w", err))
 	}
-	awaitTurnUnderway(ctx, conn, sess.ID)
 	turnID := sess.ID
 	if result, _ := resp["result"].(map[string]any); result != nil {
 		if turn, _ := result["turn"].(map[string]any); turn != nil && str(turn, "id") != "" {
@@ -63,38 +62,6 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		}
 	}
 	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
-}
-
-var codexTurnStartWait = 10 * time.Second
-
-// awaitTurnUnderway keeps the connection that started a turn open until Codex
-// reports the thread active. Until then Codex counts the thread idle, and a
-// resume whose overrides differ reloads an idle thread no connection
-// subscribes to, aborting the turn; starting the turn subscribed this one.
-func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string) {
-	notifier, ok := client.(codexNotifier)
-	if !ok {
-		return
-	}
-	timer := time.NewTimer(codexTurnStartWait)
-	defer timer.Stop()
-	for {
-		for _, event := range notifier.DrainNotifications() {
-			if str(event.Params, "threadId") != threadID {
-				continue
-			}
-			if event.Method == "turn/completed" || event.Method == "thread/status/changed" && codexStatusType(event.Params["status"]) == "active" {
-				return
-			}
-		}
-		select {
-		case <-notifier.Notified():
-		case <-timer.C:
-			return
-		case <-ctx.Done():
-			return
-		}
-	}
 }
 
 // NativeImages is true on every route: each Codex transport speaks the

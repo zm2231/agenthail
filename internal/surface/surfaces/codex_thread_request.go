@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -154,6 +155,11 @@ func (c *Codex) mcpCurrent(threadID string) bool {
 }
 
 func (c *Codex) reattachMCP(ctx context.Context, client codexClient, credentials MCPCredentials, threadID string, params map[string]any, wait time.Duration) (map[string]any, error) {
+	if busy, err := c.turnInFlight(ctx, client, threadID); err != nil {
+		return nil, fmt.Errorf("check for a running turn before reloading: %w", err)
+	} else if busy {
+		return nil, errors.New("a turn is starting or running, so the thread is not reloaded; the server attaches at a resume once the thread is idle")
+	}
 	token, err := credentials.Rotate(threadID)
 	if err != nil {
 		return nil, fmt.Errorf("rotate the credential: %w", err)

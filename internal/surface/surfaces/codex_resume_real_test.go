@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -110,32 +111,6 @@ func TestATurnSentToAnIdleThreadSurvivesAgenthailFollowingIt(t *testing.T) {
 	}
 }
 
-func TestATurnSentToAnIdleThreadSurvivesAReloadForItsCompactWindow(t *testing.T) {
-	codex, follower := followingRuntime(t)
-	ctx := context.Background()
-	session, sent, err := codex.StartSession(ctx, surface.SessionStartOptions{Message: "first", Cwd: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if end := rolloutTurnEnd(t, session.ID, sent.UUID); end != "task_complete" {
-		t.Fatalf("the first turn ended with %s", end)
-	}
-	session.Status = surface.StatusIdle
-	sent, err = codex.Send(ctx, session, "second")
-	if err != nil || !sent.Accepted {
-		t.Fatalf("send to the idle thread: %+v %v", sent, err)
-	}
-	if _, err := codex.codexConfigStore().SetCodexConfigOverride(session.ID, codexCompactLimit, 100000); err != nil {
-		t.Fatal(err)
-	}
-	if err := codex.reloadThread(ctx, follower, session, func() error { return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if end := rolloutTurnEnd(t, session.ID, sent.UUID); end != "task_complete" {
-		t.Fatalf("the sent turn ended with %s", end)
-	}
-}
-
 func TestATurnAnotherClientStartsSurvivesAgenthailFollowingItWithItsOverrides(t *testing.T) {
 	realManagedCodexWith(t, &slowResponses{delay: 2 * time.Second})
 	ctx := context.Background()
@@ -171,5 +146,39 @@ func TestATurnAnotherClientStartsSurvivesAgenthailFollowingItWithItsOverrides(t 
 	turnID := gjson.Get(codexJSON(turn), "result.turn.id").String()
 	if end := rolloutTurnEnd(t, threadID, turnID); end != "task_complete" {
 		t.Fatalf("the turn ended with %s", end)
+	}
+}
+
+func TestATurnStillStartingAfterTheStartWaitIsNotReloaded(t *testing.T) {
+	codex, follower := followingRuntime(t)
+	wait := codexTurnStartWait
+	codexTurnStartWait = 0
+	t.Cleanup(func() { codexTurnStartWait = wait })
+	ctx := context.Background()
+	reload := func(session *surface.Session) {
+		t.Helper()
+		if _, err := codex.codexConfigStore().SetCodexConfigOverride(session.ID, codexCompactLimit, 100000); err != nil {
+			t.Fatal(err)
+		}
+		if err := codex.reloadThread(ctx, follower, session, func() error { return nil }); !errors.Is(err, surface.ErrInvalidTurnSetting) {
+			t.Fatalf("a reload while a turn starts returned %v", err)
+		}
+		codex.subscribeManagedThread(ctx, follower, session.ID)
+	}
+	session, sent, err := codex.StartSession(ctx, surface.SessionStartOptions{Message: "first", Cwd: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reload(session)
+	if end := rolloutTurnEnd(t, session.ID, sent.UUID); end != "task_complete" {
+		t.Fatalf("the first turn ended with %s", end)
+	}
+	session.Status = surface.StatusIdle
+	if sent, err = codex.Send(ctx, session, "second"); err != nil || !sent.Accepted {
+		t.Fatalf("send to the idle thread: %+v %v", sent, err)
+	}
+	reload(session)
+	if end := rolloutTurnEnd(t, session.ID, sent.UUID); end != "task_complete" {
+		t.Fatalf("the sent turn ended with %s", end)
 	}
 }
