@@ -841,6 +841,10 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession, live bo
 	if row.ForkedFrom != "" {
 		row.ForkedFrom = hosts.Qualify(host.record.ID, row.ForkedFrom)
 	}
+	row.StartedBy = hosts.Qualify(host.record.ID, row.StartedBy)
+	if ref, id, qualified := hosts.Split(row.StartedBy); qualified && d.isLocalHostRef(ref) {
+		row.StartedBy = id
+	}
 	if row.Runtime != nil {
 		runtime := *row.Runtime
 		runtime.Focusable = false

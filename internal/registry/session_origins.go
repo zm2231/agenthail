@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/zm2231/agenthail/internal/hosts"
 )
 
 type OriginVia string
@@ -69,6 +71,34 @@ func (r *Registry) SessionOrigin(sessionID string) (SessionOrigin, bool, error) 
 	}
 	origin.Via = OriginVia(via)
 	return origin, true, nil
+}
+
+const agentStarterSelect = `SELECT o.session_id,o.creator_session_id,COALESCE(s.host_id,'') FROM session_origins o LEFT JOIN sessions s ON s.id=o.creator_session_id WHERE o.via='agent'`
+
+func (r *Registry) AgentStarter(sessionID string) (string, error) {
+	var id, starter, host string
+	err := r.read.QueryRow(agentStarterSelect+` AND o.session_id=?`, sessionID).Scan(&id, &starter, &host)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return hosts.Qualify(host, starter), err
+}
+
+func (r *Registry) AgentStarters() (map[string]string, error) {
+	rows, err := r.read.Query(agentStarterSelect)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	starters := map[string]string{}
+	for rows.Next() {
+		var id, starter, host string
+		if err := rows.Scan(&id, &starter, &host); err != nil {
+			return nil, err
+		}
+		starters[id] = hosts.Qualify(host, starter)
+	}
+	return starters, rows.Err()
 }
 
 func (r *Registry) StartedByDaemon(sessionID string) (bool, error) {

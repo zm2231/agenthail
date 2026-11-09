@@ -19,6 +19,7 @@ type presentationInput struct {
 
 var presentationInputs = []presentationInput{
 	{table: "aliases"},
+	{table: "session_origins"},
 	{table: "attention_items"},
 	{table: "limit_resumes"},
 	{table: "delivery_intents", when: outgoingIntentRow},

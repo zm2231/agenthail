@@ -208,6 +208,10 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read project leads: %w", err)
 	}
+	starters, err := d.Registry.AgentStarters()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read who started each session: %w", err)
+	}
 	works, err := d.Registry.SessionWork()
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read session worktrees: %w", err)
@@ -245,6 +249,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			observedAt = now.UTC()
 		}
 		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, leads[session.ID], config)
+		entry.StartedBy = starters[session.ID]
 		if work, found := works[session.ID]; found {
 			entry.Worktree = newWorkView(work)
 		}

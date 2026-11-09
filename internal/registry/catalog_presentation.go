@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/hosts"
 )
 
 type CatalogPresentationSubagent struct {
@@ -25,6 +27,7 @@ type CatalogPresentationRow struct {
 	UnavailableReason                      string
 	LastActive, RegisteredAt               time.Time
 	Subagent                               *CatalogPresentationSubagent
+	StartedBy                              string
 	WaitingOn, BackgroundTasks, UsageLimit json.RawMessage
 	TurnStop                               json.RawMessage
 	Alias                                  sql.NullString
@@ -143,13 +146,14 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 		var subagent CatalogPresentationSubagent
 		var waiting, background, limit, stop string
 		var pinnedAt, keepAliveFailedAt, snoozedAt, snoozedUntil int64
-		var snoozeWake string
+		var snoozeWake, starterHost string
 		if err := rows.Scan(&row.ID, &row.HostID, &row.Name, &row.Surface, &row.Status, &row.Cwd, &lastActive, &row.RuntimeKind, &row.Source, &row.Transport,
 			&row.UnavailableReason, &subagent.ParentID, &subagent.RootID, &subagent.Depth, &subagent.Nickname, &subagent.Role, &waiting, &background, &limit, &stop,
 			&row.Alias, &row.QueueCount, &row.Archived, &row.Freshness.Generation, &row.Freshness.Stale, &row.Attention, &row.Retired, &registered,
-			&pinnedAt, &keepAliveFailedAt, &row.KeepAlive.Error, &snoozedAt, &snoozedUntil, &snoozeWake); err != nil {
+			&pinnedAt, &keepAliveFailedAt, &row.KeepAlive.Error, &snoozedAt, &snoozedUntil, &snoozeWake, &row.StartedBy, &starterHost); err != nil {
 			return nil, err
 		}
+		row.StartedBy = hosts.Qualify(starterHost, row.StartedBy)
 		row.PinnedAt, row.KeepAlive.FailedAt = unixMilliOrZero(pinnedAt), unixMilliOrZero(keepAliveFailedAt)
 		row.Snooze = scanSnooze(snoozedAt, snoozedUntil, snoozeWake)
 		if row.RegisteredAt, err = parseRegisteredAt(registered); err != nil {
@@ -232,11 +236,13 @@ const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.stat
  sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,
  cs.projection_generation,(cs.misses>0 OR cs.discovery_failures>0 OR (s.host_id!='' AND cs.unavailable_reason!='')),
  COALESCE(at.reason,''),cs.retired,s.registered_at,s.pinned_at_ms,COALESCE(ka.failed_at_ms,0),COALESCE(ka.error,''),
- s.snoozed_at_ms,s.snoozed_until_ms,s.snooze_wake
+ s.snoozed_at_ms,s.snoozed_until_ms,s.snooze_wake,COALESCE(o.creator_session_id,''),COALESCE(sc.host_id,'')
  `
 
 const catalogPresentationJoins = ` JOIN sessions s ON s.id=cs.session_id
  LEFT JOIN aliases a ON a.session_id=s.id
+ LEFT JOIN session_origins o ON o.session_id=s.id AND o.via='agent'
+ LEFT JOIN sessions sc ON sc.id=o.creator_session_id
  LEFT JOIN (SELECT session_id,COUNT(*) n FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id) q ON q.session_id=s.id
  LEFT JOIN session_archive sa ON sa.session_id=s.id
  LEFT JOIN session_keep_alive ka ON ka.session_id=s.id AND s.pinned_at_ms>0
