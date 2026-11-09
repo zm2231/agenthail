@@ -169,8 +169,12 @@ func (a *App) threadOperationRemote(ctx context.Context, remote *remoteTarget, o
 
 // queueRemote hands the message to the host's own busy queue; the daemon
 // holds it if the host cannot be reached.
-func (a *App) queueRemote(ctx context.Context, remote *remoteTarget, message string) error {
-	result, err := a.remoteAction(ctx, remote, "queue for", map[string]any{"action": "send", "message": message, "busyDelivery": "queue"})
+func (a *App) queueRemote(ctx context.Context, remote *remoteTarget, message, source string) error {
+	payload := map[string]any{"action": "send", "message": message, "busyDelivery": "queue"}
+	if source != "" {
+		payload["sourceSessionId"] = source
+	}
+	result, err := a.remoteAction(ctx, remote, "queue for", payload)
 	if err != nil {
 		return err
 	}
