@@ -23,9 +23,9 @@ struct SessionListLayoutTest {
         check(tree.flat.first { $0.id == "b" }?.members.map(\.id) == ["b1"], "a flat family keeps its subagents")
         check(SessionTree.empty.flat.isEmpty, "an empty tree has no flat families")
 
-        check(SessionListLayout.order(tree.flat, expanded: { _ in false }) == ["a", "b", "c"], "keyboard order follows the flat list")
-        check(SessionListLayout.order(tree.flat, expanded: { $0.id == "b" }) == ["a", "b", "b1", "c"], "an expanded family adds its subagents after it")
-        check(SessionListLayout.order(tree.flat + tree.flat, expanded: { _ in false }) == ["a", "b", "c"], "a session listed twice is stepped through once")
+        check(SessionListLayout.order(tree.flat, shown: { _ in [] }) == ["a", "b", "c"], "keyboard order follows the flat list")
+        check(SessionListLayout.order(tree.flat, shown: { $0.id == "b" ? $0.members : [] }) == ["a", "b", "b1", "c"], "an expanded family adds its subagents after it")
+        check(SessionListLayout.order(tree.flat + tree.flat, shown: { _ in [] }) == ["a", "b", "c"], "a session listed twice is stepped through once")
 
         check(SessionListLayout.shownFamilies(tree, grouped: false, projectExpanded: { _ in false }, keeping: nil).map(\.id) == ["a", "b", "c"], "without grouping the archived section is the flat list")
         check(SessionListLayout.shownFamilies(tree, grouped: true, projectExpanded: { _ in true }, keeping: nil).map(\.id) == ["a", "c", "b"], "with grouping the archived section follows its projects")

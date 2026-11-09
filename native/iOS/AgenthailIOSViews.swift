@@ -422,10 +422,31 @@ struct ConversationListView: View {
             .accessibilityIdentifier("subagents-" + family.id)
         }
         if expanded {
-            ForEach(family.members) { member in
-                row(.member(member), id: member.id)
-                    .padding(.leading, CGFloat(member.depth) * 16)
+            memberRows(family.crew)
+            if !family.taskRuns.isEmpty {
+                let tasksExpanded = family.tasksExpanded(chosen: familyChoices, selectedID: selectedID)
+                Button { familyChoices[family.tasksID] = !tasksExpanded } label: {
+                    Label(SessionFamilies.tasksToggle(family, expanded: tasksExpanded), systemImage: tasksExpanded ? "chevron.down" : "chevron.right")
+                        .font(.footnote)
+                        .foregroundStyle(PhonePalette.muted)
+                        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, titleInset + 16)
+                .listRowBackground(GlassRowBackground(selected: false))
+                .accessibilityIdentifier("tasks-" + family.id)
+                if tasksExpanded {
+                    memberRows(family.taskRuns)
+                }
             }
+        }
+    }
+
+    private func memberRows(_ members: [SessionFamily.Member]) -> some View {
+        ForEach(members) { member in
+            row(.member(member), id: member.id)
+                .padding(.leading, CGFloat(member.depth) * 16)
         }
     }
 

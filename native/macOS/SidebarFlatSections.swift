@@ -10,10 +10,8 @@ struct SidebarFlatFamilies: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             ForEach(families) { family in
-                let expanded = family.isExpanded(chosen: familyChoices, selectedID: pane.selectedSessionID)
-                SidebarFamilyRows(key: SidebarFamilyKey(family: family, expanded: expanded, selectedID: pane.selectedSessionID, attention: attention), model: model, pane: pane) {
-                    familyChoices[family.id] = !expanded
-                }
+                let key = SidebarFamilyKey(family: family, expanded: family.isExpanded(chosen: familyChoices, selectedID: pane.selectedSessionID), tasksExpanded: family.tasksExpanded(chosen: familyChoices, selectedID: pane.selectedSessionID), selectedID: pane.selectedSessionID, attention: attention)
+                SidebarFamilyRows(key: key, model: model, pane: pane) { familyChoices[$0] = !$1 }
                 .equatable()
             }
         }

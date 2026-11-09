@@ -364,15 +364,11 @@ extension SessionSidebar {
             project.shown(expanded: expandedProjects.contains(project.id), keeping: pane.selectedSessionID).checkouts.flatMap(\.families)
         }
         let archived = pane.scope.projectID == nil && !model.listHasMore ? SessionListLayout.shownFamilies(model.archivedTree(), grouped: groupsByProject, projectExpanded: { expandedProjects.contains(SessionListLayout.archivedProjectID($0)) }, keeping: pane.selectedSessionID) : []
-        return SessionListLayout.order(families + archived, expanded: familyExpanded)
+        return SessionListLayout.order(families + archived) { $0.shownMembers(chosen: familyChoices, selectedID: pane.selectedSessionID) }
     }
 
     private var showsFlat: Bool {
         !groupsByProject && pane.scope.projectID == nil
-    }
-
-    private func familyExpanded(_ family: SessionFamily) -> Bool {
-        family.isExpanded(chosen: familyChoices, selectedID: pane.selectedSessionID)
     }
 
     private func toggle(_ id: String, in set: Binding<Set<String>>) {

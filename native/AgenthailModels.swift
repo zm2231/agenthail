@@ -882,21 +882,23 @@ struct SessionFamily: Identifiable, Equatable {
         let id: String
         let depth: Int
         let isWorker: Bool
+        let isTask: Bool
         private let cell: SessionCell
 
         var session: SessionState { cell.state }
 
-        init(session: SessionState, depth: Int, isWorker: Bool = false) { self.init(cell: SessionCell(session), depth: depth, isWorker: isWorker) }
+        init(session: SessionState, depth: Int, isWorker: Bool = false, isTask: Bool = false) { self.init(cell: SessionCell(session), depth: depth, isWorker: isWorker, isTask: isTask) }
 
-        init(cell: SessionCell, depth: Int, isWorker: Bool = false) {
+        init(cell: SessionCell, depth: Int, isWorker: Bool = false, isTask: Bool = false) {
             id = cell.state.id
             self.depth = depth
             self.isWorker = isWorker
+            self.isTask = isTask
             self.cell = cell
         }
 
         static func == (lhs: Self, rhs: Self) -> Bool {
-            lhs.id == rhs.id && lhs.depth == rhs.depth && lhs.isWorker == rhs.isWorker && lhs.cell === rhs.cell
+            lhs.id == rhs.id && lhs.depth == rhs.depth && lhs.isWorker == rhs.isWorker && lhs.isTask == rhs.isTask && lhs.cell === rhs.cell
         }
     }
 
@@ -904,6 +906,10 @@ struct SessionFamily: Identifiable, Equatable {
     let members: [Member]
     let workingSubagents: Int
     let workers: WorkerRollup?
+    let tasks: WorkerRollup?
+    // A task run takes the members nested under it.
+    let crew: [Member]
+    let taskRuns: [Member]
     private let rootCell: SessionCell
 
     var root: SessionState { rootCell.state }
@@ -912,16 +918,28 @@ struct SessionFamily: Identifiable, Equatable {
     var sessions: [SessionState] { [root] + members.map(\.session) }
     var startsExpanded: Bool { (workers?.working ?? 0) + (workers?.needsYou ?? 0) > 0 }
 
-    init(root: SessionState, members: [Member], workingSubagents: Int, workers: WorkerRollup? = nil) {
-        self.init(root: SessionCell(root), members: members, workingSubagents: workingSubagents, workers: workers)
+    var tasksID: String { id + "#tasks" }
+
+    init(root: SessionState, members: [Member], workingSubagents: Int, workers: WorkerRollup? = nil, tasks: WorkerRollup? = nil) {
+        self.init(root: SessionCell(root), members: members, workingSubagents: workingSubagents, workers: workers, tasks: tasks)
     }
 
-    init(root: SessionCell, members: [Member], workingSubagents: Int, workers: WorkerRollup? = nil) {
+    init(root: SessionCell, members: [Member], workingSubagents: Int, workers: WorkerRollup? = nil, tasks: WorkerRollup? = nil) {
         id = root.state.id
         rootCell = root
         self.members = members
         self.workingSubagents = workingSubagents
         self.workers = workers
+        self.tasks = tasks
+        var crew: [Member] = [], taskRuns: [Member] = []
+        var runDepth: Int?
+        for member in members {
+            if let depth = runDepth, member.depth <= depth { runDepth = nil }
+            if runDepth == nil && member.isTask { runDepth = member.depth }
+            if runDepth == nil { crew.append(member) } else { taskRuns.append(member) }
+        }
+        self.crew = crew
+        self.taskRuns = taskRuns
     }
 
     func contains(_ sessionID: String?) -> Bool {
@@ -935,8 +953,19 @@ struct SessionFamily: Identifiable, Equatable {
         return chosen[id] ?? startsExpanded
     }
 
+    func tasksExpanded(chosen: [String: Bool], selectedID: String?) -> Bool {
+        guard !taskRuns.isEmpty else { return false }
+        if taskRuns.contains(where: { $0.id == selectedID }) { return true }
+        return chosen[tasksID] ?? false
+    }
+
+    func shownMembers(chosen: [String: Bool], selectedID: String?) -> [Member] {
+        guard isExpanded(chosen: chosen, selectedID: selectedID) else { return [] }
+        return crew + (tasksExpanded(chosen: chosen, selectedID: selectedID) ? taskRuns : [])
+    }
+
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.id == rhs.id && lhs.rootCell === rhs.rootCell && lhs.workingSubagents == rhs.workingSubagents && lhs.workers == rhs.workers && lhs.members == rhs.members
+        lhs.id == rhs.id && lhs.rootCell === rhs.rootCell && lhs.workingSubagents == rhs.workingSubagents && lhs.workers == rhs.workers && lhs.tasks == rhs.tasks && lhs.members == rhs.members
     }
 }
 
@@ -1073,14 +1102,27 @@ enum SessionFamilies {
         return parts.joined(separator: ", ")
     }
 
+    static func taskSummary(_ tasks: WorkerRollup) -> String {
+        var parts = ["\(tasks.count) \(tasks.count == 1 ? "one-off run" : "one-off runs")"]
+        if tasks.working > 0 { parts.append("\(tasks.working) running") }
+        if tasks.needsYou > 0 { parts.append("\(tasks.needsYou) \(tasks.needsYou == 1 ? "needs" : "need") you") }
+        return parts.joined(separator: ", ")
+    }
+
+    static func tasksToggle(_ family: SessionFamily, expanded: Bool) -> String {
+        let count = family.taskRuns.filter(\.isTask).count
+        guard !expanded else { return count == 1 ? "Hide one-off run" : "Hide one-off runs" }
+        return "Show " + taskSummary(family.tasks ?? WorkerRollup(count: count, working: 0, needsYou: 0))
+    }
+
     static func membersNoun(_ family: SessionFamily) -> String {
-        let workers = family.members.contains(where: \.isWorker)
-        let subagents = family.members.contains { !$0.isWorker }
-        switch (workers, subagents) {
-        case (true, true): return "workers and subagents"
-        case (true, false): return "workers"
-        default: return "subagents"
-        }
+        let kinds = [
+            ("workers", family.members.contains(where: \.isWorker)),
+            ("one-off runs", family.members.contains(where: \.isTask)),
+            ("subagents", family.members.contains { !$0.isWorker && !$0.isTask }),
+        ].filter(\.1).map(\.0)
+        guard let last = kinds.last else { return "subagents" }
+        return kinds.count == 1 ? last : kinds.dropLast().joined(separator: ", ") + " and " + last
     }
 
     static func membersCount(_ family: SessionFamily) -> String {
