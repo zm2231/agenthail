@@ -60,7 +60,7 @@ func (d *Daemon) apiScopeHandler(w http.ResponseWriter, r *http.Request) {
 	if request.Action == "create" {
 		created, err := d.agentCreate(r.Context(), caller, request.Create)
 		if err != nil {
-			writeScopeRefusal(w, mcpRefusalFor(err))
+			d.refuseScope(w, caller, request.Action, err)
 			return
 		}
 		created.write(w)
@@ -68,10 +68,16 @@ func (d *Daemon) apiScopeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	reply, err := d.agentScope(r, caller, request)
 	if err != nil {
-		writeScopeRefusal(w, mcpRefusalFor(err))
+		d.refuseScope(w, caller, request.Action, err)
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, reply)
+}
+
+func (d *Daemon) refuseScope(w http.ResponseWriter, caller *mcpCaller, action string, err error) {
+	refusal := mcpRefusalFor(err)
+	d.recordMCPScopeRefusal(caller, "cli "+action, refusal)
+	writeScopeRefusal(w, refusal)
 }
 
 func (d *Daemon) scopeCaller(sessionID string) (*mcpCaller, error) {
@@ -143,7 +149,7 @@ func (d *Daemon) agentConfigRoot(caller *mcpCaller, choice string) (string, erro
 	if own := surface.ClaudeSessionConfigRoot(d.claudeConfigRoots(), caller.session.Transcript); own != nil && own.Root == root {
 		return root, nil
 	}
-	return "", &mcpRefusal{Code: "out_of_scope", Message: "A session you start runs on your own Claude account; only your project's coordinator places sessions on another root.", Detail: map[string]any{"rule": "config_root"}}
+	return "", scopeRefusal("new:claude", "config_root", "A session you start runs on your own Claude account; only your project's coordinator places sessions on another root.")
 }
 
 func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request ScopeRequest) (ScopeReply, error) {
@@ -183,7 +189,7 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request ScopeReq
 			return ScopeReply{}, err
 		}
 		if own == "" || own != strings.TrimSpace(request.Project) {
-			return ScopeReply{}, &mcpRefusal{Code: "out_of_scope", Message: "You may write only your own project's ledger; run the command in your own project's folder, or ask that project's coordinator.", Detail: map[string]any{"rule": "different_project"}}
+			return ScopeReply{}, scopeRefusal("project:"+strings.TrimSpace(request.Project), "different_project", "You may write only your own project's ledger; run the command in your own project's folder, or ask that project's coordinator.")
 		}
 		return ScopeReply{ProjectID: own}, nil
 	case "operator":

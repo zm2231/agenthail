@@ -58,7 +58,7 @@ func TestAnAgentKeepsItsClaudeRootAndItsCoordinatorPlacesAny(t *testing.T) {
 	if root, err := d.agentConfigRoot(workerCaller, own); err != nil || root != own {
 		t.Fatalf("a worker on its own root: %q %v", root, err)
 	}
-	if root, err := d.agentConfigRoot(workerCaller, "other-root"); err == nil || mcpRefusalFor(err).Detail["rule"] != "config_root" {
+	if root, err := d.agentConfigRoot(workerCaller, "other-root"); err == nil || mcpRefusalFor(err).Detail["rule"] != "config_root" || mcpRefusalFor(err).target != "new:claude" {
 		t.Fatalf("a worker on another root: %q %v", root, err)
 	}
 	if root, err := d.agentConfigRoot(leadCaller, "other-root"); err != nil || root != other {
