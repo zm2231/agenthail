@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/atomicfile"
@@ -119,6 +120,38 @@ func codexThreadRollouts(dir, threadID string, nested bool) ([]string, error) {
 	return files, nil
 }
 
+// codexMovesHeld is the rollout each held move declared, so ArchiveMove can
+// tell whether archiving changed it.
+type codexMovesHeld struct {
+	mu       sync.Mutex
+	declared map[string]codexDeclaredRollout
+}
+
+type codexDeclaredRollout struct {
+	name, sha256 string
+}
+
+func (h *codexMovesHeld) hold(threadID string, declared codexDeclaredRollout) func() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.declared == nil {
+		h.declared = map[string]codexDeclaredRollout{}
+	}
+	h.declared[threadID] = declared
+	return func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		delete(h.declared, threadID)
+	}
+}
+
+func (h *codexMovesHeld) of(threadID string) (codexDeclaredRollout, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	declared, ok := h.declared[threadID]
+	return declared, ok
+}
+
 func codexSessionsDir() string { return filepath.Join(codexHome(), "sessions") }
 
 func codexArchivedDir() string { return filepath.Join(codexHome(), "archived_sessions") }
@@ -205,7 +238,11 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 		}
 		out.PartsSize += info.Size()
 	}
-	out.Release = release
+	forget := c.moves.hold(sess.ID, codexDeclaredRollout{name: state.Rollout, sha256: out.SHA256})
+	out.Release = func() {
+		forget()
+		release()
+	}
 	return out, nil
 }
 
@@ -285,8 +322,14 @@ func (c *Codex) ArchiveMove(conversation, moveID string) error {
 	if !validCodexMoveThread(conversation) || !claudeConversationID(moveID) {
 		return fmt.Errorf("Codex session %q or move %q is not a valid id", conversation, moveID)
 	}
-	if record, found, err := readCodexMoveRecord(conversation, moveID, "archived"); err != nil || found && codexAllArchived(record) {
+	declared, held := c.moves.of(conversation)
+	if !held {
+		return fmt.Errorf("Codex thread %s is not held for a move here", conversation)
+	}
+	if record, found, err := readCodexMoveRecord(conversation, moveID, "archived"); err != nil {
 		return err
+	} else if found && codexAllArchived(record) {
+		return checkArchivedRollout(conversation, declared)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*codexMoveWait)
 	defer cancel()
@@ -327,6 +370,19 @@ func (c *Codex) ArchiveMove(conversation, moveID string) error {
 	}
 	if !codexAllArchived(record) {
 		return fmt.Errorf("Codex archived thread %s but not all of %s", conversation, strings.Join(record.Files, ", "))
+	}
+	return checkArchivedRollout(conversation, declared)
+}
+
+// checkArchivedRollout refuses a move whose rollout Codex wrote to while
+// archiving it, since the target holds the files to what was declared.
+func checkArchivedRollout(conversation string, declared codexDeclaredRollout) error {
+	_, digest, err := hashFile(filepath.Join(codexArchivedDir(), declared.name))
+	if err != nil {
+		return err
+	}
+	if digest != declared.sha256 {
+		return fmt.Errorf("Codex wrote to thread %s's rollout as it archived it, so it no longer matches what the move declared; move it again", conversation)
 	}
 	return nil
 }
@@ -521,7 +577,8 @@ func (c *Codex) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.R
 	if err := c.placeMoveIn(in, staging, files); err != nil {
 		return nil, err
 	}
-	_, err = client.Request(ctx, "thread/resume", map[string]any{"threadId": in.Conversation, "cwd": in.Cwd}, 2*codexMoveWait)
+	moved := &surface.Session{ID: in.Conversation, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: in.Cwd}
+	_, err = c.codexThreadRequest(ctx, client, codexThreadResume, moved, map[string]any{"threadId": in.Conversation, "cwd": in.Cwd}, 2*codexMoveWait)
 	if err != nil {
 		if isCodexTimeout(err) || surface.IsDeliveryOutcomeUnknown(err) {
 			return nil, fmt.Errorf("%w: thread/resume: %v", surface.ErrMoveInPlaced, err)
@@ -699,8 +756,10 @@ func extractCodexMoveArchive(staging string, in surface.MoveIn, state codexMoveS
 				return nil, fmt.Errorf("the moved rollout is %d bytes, not the %d the move declared", header.Size, in.Size)
 			}
 			current = true
-		} else if parts += header.Size; header.Size < 0 || parts > in.PartsSize {
+		} else if header.Size < 0 || header.Size > in.PartsSize-parts {
 			return nil, fmt.Errorf("the moved thread's other rollouts are more than the %d bytes the move declared", in.PartsSize)
+		} else {
+			parts += header.Size
 		}
 		file, err := os.OpenFile(filepath.Join(staging, name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if err != nil {
