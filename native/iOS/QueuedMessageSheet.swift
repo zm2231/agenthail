@@ -2,6 +2,7 @@ import SwiftUI
 
 struct QueuedMessageSheet: View {
     let item: QueueState
+    var reason: String?
     @Environment(\.dismiss) private var dismiss
 
     private var details: [(name: String, value: String)] {
@@ -18,8 +19,9 @@ struct QueuedMessageSheet: View {
                         Text(item.holdLabel).font(.footnote).foregroundStyle(PhonePalette.muted)
                             .accessibilityIdentifier("queued-message-hold")
                     }
-                    if let reason = item.lastError, !reason.isEmpty {
+                    if let reason = reason ?? item.lastError, !reason.isEmpty {
                         Text(reason).font(.footnote).foregroundStyle(PhonePalette.muted).textSelection(.enabled)
+                            .accessibilityIdentifier("queued-message-reason")
                     }
                     VStack(spacing: 6) {
                         ForEach(details, id: \.name) { detail in
