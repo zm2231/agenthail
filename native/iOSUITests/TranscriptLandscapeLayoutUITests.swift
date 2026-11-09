@@ -2,18 +2,25 @@ import XCTest
 
 @MainActor
 final class TranscriptLandscapeLayoutUITests: XCTestCase {
-    private func open(landscape: Bool) -> XCUIApplication {
+    private func open(landscape: Bool, extra: [String] = []) -> XCUIApplication {
         if landscape {
             XCUIDevice.shared.orientation = .landscapeLeft
             addTeardownBlock { @MainActor in XCUIDevice.shared.orientation = .portrait }
         }
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-reading", "--preview-theme", "dark"]
+        app.launchArguments = ["--preview-session", "--preview-reading", "--preview-tail", "-preview-tail", "review", "--preview-theme", "dark"] + extra
         app.launch()
         let timeline = app.scrollViews["session-timeline"]
         XCTAssertTrue(timeline.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["queue-computer/26"].waitForExistence(timeout: 10), "the delivery row did not load")
         XCTAssertTrue(timeline.waitUntilRowsStill())
         return app
+    }
+
+    func testLandscapeAtAnAccessibilityTextSizeKeepsTheRegularLayout() {
+        let app = open(landscape: true, extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
+        XCTAssertTrue(app.descendants(matching: .any)["queue-tail-reason-26"].exists, "the delivery reason stays on the row")
+        XCTAssertFalse(app.descendants(matching: .any)["composer-turn-settings"].exists, "the composer keeps its regular layout")
     }
 
     private func headerBottom(_ app: XCUIApplication) -> CGFloat {
@@ -66,9 +73,9 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
         }
         XCTAssertFalse(above.isEmpty, "at the latest row no transcript row shows above the queued ones")
 
-        XCTAssertTrue(app.buttons["queue-tail-retry-2"].isHittable, "Send again stays on the one-line delivery row")
-        XCTAssertTrue(app.buttons["queue-tail-dismiss-2"].isHittable, "Dismiss stays on the one-line delivery row")
-        XCTAssertFalse(app.descendants(matching: .any)["queue-tail-reason-2"].exists, "the reason moves into the sheet")
+        XCTAssertTrue(app.buttons["queue-tail-retry-26"].isHittable, "Send again stays on the one-line delivery row")
+        XCTAssertTrue(app.buttons["queue-tail-dismiss-26"].isHittable, "Dismiss stays on the one-line delivery row")
+        XCTAssertFalse(app.descendants(matching: .any)["queue-tail-reason-26"].exists, "the reason moves into the sheet")
         XCTAssertTrue(app.descendants(matching: .any)["composer-turn-settings"].exists, "one chip keeps the turn settings in view")
         XCTAssertFalse(app.descendants(matching: .any)["composer-effort"].exists, "the chip row folds into the one chip")
         XCTAssertTrue(app.descendants(matching: .any)["session-summary"].exists, "the status stays in the header")
@@ -78,7 +85,7 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
         shot.lifetime = .keepAlways
         add(shot)
 
-        app.buttons["queue-tail-read-2"].tap()
+        app.buttons["queue-tail-read-26"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["queued-message-reason"].waitForExistence(timeout: 5), "the sheet shows the delivery reason")
         app.buttons["Done"].tap()
 
@@ -89,7 +96,7 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
         let app = open(landscape: false)
         XCTAssertTrue(app.descendants(matching: .any)["composer-effort"].exists, "portrait keeps the chip row")
         XCTAssertFalse(app.descendants(matching: .any)["composer-turn-settings"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["queue-tail-reason-2"].exists, "portrait keeps the reason on the row")
+        XCTAssertTrue(app.descendants(matching: .any)["queue-tail-reason-26"].waitForExistence(timeout: 10), "portrait keeps the reason on the row")
         try assertFirstRowRestsBelowTheHeader(app, "in portrait")
     }
 }

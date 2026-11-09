@@ -6,6 +6,7 @@ struct QueueTailRows: View {
     let readOnly: Bool
     var generation = 0
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var retrying: QueueTail.Row?
     @State private var reading: QueueTail.Row?
 
@@ -49,7 +50,7 @@ struct QueueTailRows: View {
     private func bubble(_ row: QueueTail.Row) -> some View {
         let item = row.item
         let names = (item.attachments ?? []).map(\.name).joined(separator: ", ")
-        let compact = verticalSizeClass == .compact
+        let compact = verticalSizeClass == .compact && !dynamicTypeSize.isAccessibilitySize
         let heading = Text(row.heading)
             .font(.footnote.weight(.semibold))
             .foregroundStyle(row.isDead ? AnyShapeStyle(PhonePalette.attention) : AnyShapeStyle(PhonePalette.muted))
