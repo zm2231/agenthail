@@ -98,7 +98,19 @@ if [ -z "$udid" ]; then
   runtime="$(xcrun simctl list runtimes --json | jq -r '.runtimes | map(select(.isAvailable and (.identifier | contains("iOS")))) | last | .identifier')"
   # The iPad UI tests are written for the 11-inch iPad Pro; Xcode lists the 13-inch first.
   device="$(xcrun simctl list devicetypes --json | jq -r --arg family "$family" --arg prefer "$prefer" '.devicetypes | (map(select(.name | startswith($prefer))) | first) // (map(select(.name | startswith($family))) | first) | .identifier')"
-  udid="$(xcrun simctl create "$name" "$device" "$runtime")"
+  if command -v simslim >/dev/null; then
+    # The device takes its name only once slimmed and shut down, so a failed slim is never found and reused.
+    udid="$(xcrun simctl create "$name (slimming)" "$device" "$runtime")"
+    if ! { simslim on "$udid" --profile "$(dirname "$(readlink -f "$0")")/simslim-profile.json" >&2 &&
+      xcrun simctl shutdown "$udid" && xcrun simctl rename "$udid" "$name"; }; then
+      xcrun simctl shutdown "$udid" 2>/dev/null || true
+      xcrun simctl delete "$udid" || echo "$0: could not delete $udid; delete '$name (slimming)' by hand" >&2
+      echo "$0: could not slim and name a new $name simulator" >&2
+      exit 1
+    fi
+  else
+    udid="$(xcrun simctl create "$name" "$device" "$runtime")"
+  fi
 fi
 
 case "${2:-}" in

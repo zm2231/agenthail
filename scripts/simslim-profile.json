@@ -1,0 +1,5 @@
+{
+  "name": "agenthail",
+  "description": "Agenthail simulators: push and calls stay on for notification and voice work",
+  "except": ["store", "messaging"]
+}
