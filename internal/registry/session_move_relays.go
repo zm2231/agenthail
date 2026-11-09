@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -101,14 +102,8 @@ func (r *Registry) CheckMovedRelays(conversation, self string, relays []MovedRel
 }
 
 func checkMovedRelay(q catalogQuerier, conversation, self string, relay MovedRelay) error {
-	if relay.ToSession == conversation {
-		return fmt.Errorf("relay #%d targets the session it relays from", relay.ID)
-	}
-	if relay.Handoff != HandoffTurnFinished && relay.Handoff != HandoffGoalCompleted {
-		return fmt.Errorf("relay #%d has handoff %q, which this host does not know", relay.ID, relay.Handoff)
-	}
-	if _, err := regexp.Compile(relay.Pattern); err != nil {
-		return fmt.Errorf("relay #%d has an invalid pattern: %w", relay.ID, err)
+	if err := checkMovedRelayShape(conversation, relay); err != nil {
+		return err
 	}
 	want := relay.ToHost
 	if want == self {
@@ -122,10 +117,36 @@ func checkMovedRelay(q catalogQuerier, conversation, self string, relay MovedRel
 	return err
 }
 
-func insertMovedRelaysTx(tx *sql.Tx, conversation, self string, relays []MovedRelay) error {
+func checkMovedRelayShape(conversation string, relay MovedRelay) error {
+	if relay.ToSession == conversation {
+		return fmt.Errorf("relay #%d targets the session it relays from", relay.ID)
+	}
+	if relay.Handoff != HandoffTurnFinished && relay.Handoff != HandoffGoalCompleted {
+		return fmt.Errorf("relay #%d has handoff %q, which this host does not know", relay.ID, relay.Handoff)
+	}
+	if _, err := regexp.Compile(relay.Pattern); err != nil {
+		return fmt.Errorf("relay #%d has an invalid pattern: %w", relay.ID, err)
+	}
+	return nil
+}
+
+func insertMovedRelaysTx(tx *sql.Tx, moveID, conversation string, relays []MovedRelay, now time.Time) error {
 	for _, relay := range relays {
-		if err := checkMovedRelay(tx, conversation, self, relay); err != nil {
+		if err := checkMovedRelayShape(conversation, relay); err != nil {
 			return err
+		}
+		var seen bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)`, relay.ToSession).Scan(&seen); err != nil {
+			return err
+		}
+		if !seen {
+			if _, err := tx.Exec(`INSERT OR IGNORE INTO move_dropped_relays(move_id,session_id,relay_id,to_session,at_ms) VALUES(?,?,?,?,?)`, moveID, conversation, relay.ID, relay.ToSession, now.UnixMilli()); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`INSERT INTO delivery_history(kind,session_id,route_id,result) VALUES('session-operation',?,?,?)`, conversation, relay.ID, DroppedRelay{RelayID: relay.ID, ToSession: relay.ToSession}.Reason()); err != nil {
+				return err
+			}
+			continue
 		}
 		if _, err := tx.Exec(`INSERT INTO routes(from_session,to_session,pattern,once_only,handoff,last_goal_key,event_cursor) VALUES(?,?,?,?,?,?,COALESCE((SELECT MAX(id) FROM relay_events),0))`, conversation, relay.ToSession, relay.Pattern, b2i(relay.Once), relay.Handoff, relay.LastGoalKey); err != nil {
 			return err
@@ -166,4 +187,34 @@ func relaySourceKeyFor(session *surface.Session) (string, error) {
 		return "", errNoRelayTranscript
 	}
 	return "claude:" + session.Transcript, nil
+}
+
+type DroppedRelay struct {
+	MoveID    string    `json:"moveId"`
+	SessionID string    `json:"sessionId"`
+	RelayID   int64     `json:"relayId"`
+	ToSession string    `json:"toSession"`
+	At        time.Time `json:"at"`
+}
+
+func (d DroppedRelay) Reason() string {
+	return fmt.Sprintf("relay #%d was not taken over: session %s, which it sends to, left this host's view during the move", d.RelayID, d.ToSession)
+}
+
+func (r *Registry) MoveDroppedRelays(moveID string) ([]DroppedRelay, error) {
+	return r.droppedRelays(`WHERE move_id=?`, moveID)
+}
+
+func (r *Registry) DroppedRelays() ([]DroppedRelay, error) {
+	return r.droppedRelays(``)
+}
+
+func (r *Registry) droppedRelays(where string, args ...any) ([]DroppedRelay, error) {
+	return queryRows(r.read, []DroppedRelay{}, func(row rowScanner) (DroppedRelay, error) {
+		var dropped DroppedRelay
+		var at int64
+		err := row.Scan(&dropped.MoveID, &dropped.SessionID, &dropped.RelayID, &dropped.ToSession, &at)
+		dropped.At = time.UnixMilli(at).UTC()
+		return dropped, err
+	}, `SELECT move_id,session_id,relay_id,to_session,at_ms FROM move_dropped_relays `+where+` ORDER BY at_ms,move_id,relay_id`, args...)
 }

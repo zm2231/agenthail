@@ -219,11 +219,15 @@ func (d *Daemon) startFederation(ctx context.Context) {
 	d.federation.mu.Lock()
 	d.federation.ctx = ctx
 	d.federation.running = true
-	d.federation.wg.Add(1)
+	d.federation.wg.Add(2)
 	d.federation.mu.Unlock()
 	go func() {
 		defer d.federation.wg.Done()
 		d.followHostDeliveries(ctx)
+	}()
+	go func() {
+		defer d.federation.wg.Done()
+		d.followMoveIns(ctx)
 	}()
 	d.failInterruptedMoves()
 	paired, err := d.Registry.ListHosts()

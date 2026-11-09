@@ -180,7 +180,7 @@ func (r *Registry) SetMoveState(id, state, detail string, from ...string) error 
 	if err := setMoveStateTx(tx, r.now(), id, state, detail, from...); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return r.commitMoveIn(tx)
 }
 
 func setMoveStateTx(tx *sql.Tx, now time.Time, id, state, detail string, from ...string) error {
@@ -246,7 +246,7 @@ func (r *Registry) PrepareMoveIn(id, conversation, sourceHost string, manifest [
 	if err != nil {
 		return SessionMove{}, err
 	}
-	return move, tx.Commit()
+	return move, r.commitMoveIn(tx)
 }
 
 // AbortMoveIn records that a move in will never be taken. A move not seen
@@ -282,7 +282,7 @@ func (r *Registry) AbortMoveIn(id, conversation, sourceHost string) (SessionMove
 	if err != nil {
 		return SessionMove{}, err
 	}
-	return move, tx.Commit()
+	return move, r.commitMoveIn(tx)
 }
 
 // TakeMovedSession makes an arrived conversation a local session of this
@@ -367,7 +367,7 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 		}
 	}
 	if move.State == MoveReceived {
-		if err := insertMovedRelaysTx(tx, session.ID, self, carry.Relays); err != nil {
+		if err := insertMovedRelaysTx(tx, moveID, session.ID, carry.Relays, r.now()); err != nil {
 			return nil, err
 		}
 		if err := insertMovedChannelsTx(tx, session.ID, self, carry.Channels); err != nil {
@@ -380,7 +380,7 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 	if err := setMoveStateTx(tx, r.now(), moveID, MoveResumed, "", MoveReceived); err != nil {
 		return nil, err
 	}
-	return events, tx.Commit()
+	return events, r.commitMoveIn(tx)
 }
 
 // countUnheld counts the queued items a move fails rather than hands over.
@@ -597,4 +597,12 @@ func (r *Registry) MovedTo(conversation string) (string, error) {
 		return "", nil
 	}
 	return host, err
+}
+
+func (r *Registry) commitMoveIn(tx *sql.Tx) error {
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.signalChange(ChangeMoveIns)
+	return nil
 }

@@ -1,4 +1,4 @@
--- schemaVersion 84
+-- schemaVersion 85
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -514,6 +514,16 @@ CREATE TABLE message_queue (
 	person_name TEXT NOT NULL DEFAULT ''
 );
 
+-- table move_dropped_relays
+CREATE TABLE move_dropped_relays (
+	move_id TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	relay_id INTEGER NOT NULL,
+	to_session TEXT NOT NULL,
+	at_ms INTEGER NOT NULL,
+	PRIMARY KEY (move_id, relay_id)
+);
+
 -- table paired_devices
 CREATE TABLE paired_devices (
 	id TEXT PRIMARY KEY,
@@ -556,6 +566,15 @@ CREATE TABLE project_moves (
 	to_key TEXT NOT NULL,
 	changed_at_ms INTEGER NOT NULL,
 	origin_host TEXT NOT NULL
+);
+
+-- table project_moves_waiting
+CREATE TABLE project_moves_waiting (
+	from_key TEXT PRIMARY KEY,
+	to_key TEXT NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL,
+	workspace_root TEXT NOT NULL DEFAULT ''
 );
 
 -- table projects

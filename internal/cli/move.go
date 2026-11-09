@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 const moveUsage = `usage: agenthail move <target> --to <host> [--root <account>] [--wait <duration>] [--stop-terminal] [--json]
@@ -95,10 +97,11 @@ func (a *App) cmdMove(args []string) (moveErr error) {
 			Host struct {
 				Name string `json:"name"`
 			} `json:"host"`
-			Stopped                      string   `json:"stopped"`
-			Alias                        string   `json:"alias"`
-			Root                         string   `json:"root"`
-			MCPServersWithoutCredentials []string `json:"mcpServersWithoutCredentials"`
+			Stopped                      string                  `json:"stopped"`
+			Alias                        string                  `json:"alias"`
+			Root                         string                  `json:"root"`
+			MCPServersWithoutCredentials []string                `json:"mcpServersWithoutCredentials"`
+			DroppedRelays                []registry.DroppedRelay `json:"droppedRelays"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(data, &answer); err != nil {
@@ -123,6 +126,9 @@ func (a *App) cmdMove(args []string) (moveErr error) {
 		}
 		if servers := answer.Result.MCPServersWithoutCredentials; len(servers) > 0 {
 			fmt.Printf("MCP servers carried without their env and headers, to add again on %s: %s\n", answer.Result.Host.Name, strings.Join(servers, ", "))
+		}
+		for _, dropped := range answer.Result.DroppedRelays {
+			fmt.Println(dropped.Reason())
 		}
 		return nil
 	case answer.Unknown:

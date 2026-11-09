@@ -162,29 +162,6 @@ func (r *Registry) MovingOut(session string) (bool, error) {
 	return moving, err
 }
 
-func coordinatorArrivingTx(tx *sql.Tx, projectID, name string) error {
-	rows, err := tx.Query(`SELECT conversation,manifest FROM session_moves WHERE role='in' AND state IN ('prepared','received')`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var conversation string
-		var manifest []byte
-		if err := rows.Scan(&conversation, &manifest); err != nil {
-			return err
-		}
-		var carry MoveCarry
-		if json.Unmarshal(manifest, &carry) != nil || carry.Coordinator == nil {
-			continue
-		}
-		if lead := carry.Coordinator; lead.ProjectID == projectID || lead.Name == name {
-			return fmt.Errorf("session %s is moving here as coordinator @%s of %s; change the coordinator once the move has finished", conversation, lead.Name, lead.ProjectID)
-		}
-	}
-	return rows.Err()
-}
-
 func coordinatorChangeWhileMovingTx(tx *sql.Tx, projectID string) error {
 	var session string
 	err := tx.QueryRow(`SELECT a.session_id FROM coordinators c JOIN aliases a ON a.name=c.name WHERE c.project_id=? AND c.host_id=''`, projectID).Scan(&session)

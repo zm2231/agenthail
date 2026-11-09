@@ -135,7 +135,8 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    reads the conversation's completions so far, so its relays forward only
    what comes after the move. Last, in one transaction, it registers the
    session as local, takes over the row the source mirrored there, binds the
-   alias if it is free, creates the relays, records which host keeps each
+   alias if it is free, creates the relays whose target it still sees, wherever
+   that target now runs, records which host keeps each
    channel that is not its own, makes the session the project's coordinator
    with its own checkout as the project root and working directory, and
    records the move `resumed`. The coordinator keeps the time it became the
@@ -183,16 +184,41 @@ the `control` and `host` scopes. The token names the source; the request body
 does not. `GET /api/v1/session-move?id=` answers `none` for a move this host
 has no record of from that host.
 
+## What the target holds for a move arriving
+
+From its prepare until its take, or until the move is aborted or superseded,
+the target holds what the move will take, so that the take cannot fail once
+the session has resumed there. It reads what to hold from the moves it has
+prepared or received, so the hold ends with the move and needs no expiry.
+
+- **Name.** Naming another session with the arriving session's alias is
+  refused, and a generated name passes over it.
+- **Coordinator.** Setting a coordinator for the arriving coordinator's
+  project, or under its name, is refused.
+- **Hosts.** Unpairing a host that keeps a channel the session takes, or that
+  runs a session one of its relays sends to, is refused.
+- **Project keys.** A change of project key, from this host's repository or a
+  paired host's `project.moved`, that moves another key onto the arriving
+  coordinator's project or moves that project's key away waits. It is not
+  refused, and `doctor` does not list it. When the move is taken, aborted or
+  superseded, the daemon applies it, and does again what it does after any
+  project move. The daemon also tries waiting moves every minute and when it
+  starts.
+- **Relays.** A relay's target can move or leave this host's view through
+  paired hosts' changes, which this host cannot refuse. A relay whose target
+  now runs on another host is taken over as it is. A relay whose target this
+  host no longer sees is not taken over. The move's answer names it, the
+  `agenthail move` output prints it, the session's history records it, and
+  `doctor` lists it.
+
+A refused change says which session is moving here and what it holds; it can
+be made again once the move has finished.
+
 ## The coordinator during a move
 
 While the coordinator's session is held for a move, a send to the
 coordinator here is queued, not delivered and not started anew; it leaves
 with the queue at the flip as a send held for the target.
-
-From the target's prepare until its take, or until the move is aborted,
-the target refuses to set a coordinator for the moving coordinator's
-project or under its name, so the take cannot fail after the session
-resumes there.
 
 Between the target's take and the source's flip, both hosts list the
 coordinator, and a third host sees both. Every host lists one: the row of

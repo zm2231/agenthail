@@ -194,7 +194,7 @@ func (r *Registry) checkCoordinatorTx(tx *sql.Tx, spec CoordinatorSpec, change C
 	if err := coordinatorChangeWhileMovingTx(tx, spec.ProjectID); err != nil {
 		return nil, err
 	}
-	if err := coordinatorArrivingTx(tx, spec.ProjectID, spec.Name); err != nil {
+	if err := arrivingCoordinatorTx(tx, spec.ProjectID, spec.Name); err != nil {
 		return nil, err
 	}
 	existing, err := r.queryCoordinators(tx, `c.project_id=?`, spec.ProjectID)
@@ -387,6 +387,9 @@ func (r *Registry) WithdrawCoordinator(undo CoordinatorUndo, changedBy string) e
 			return fmt.Errorf("session %s is now @%s: %w", sessionID, other, ErrCoordinatorChanged)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err := arrivingAliasTx(tx, name, sessionID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO aliases (name,session_id) VALUES (?,?)`, name, sessionID); err != nil {
@@ -676,6 +679,9 @@ func (r *Registry) HandOverCoordinator(spec CoordinatorSpec, previous, next stri
 		return 0, err
 	}
 	if _, err := tx.Exec(`DELETE FROM coordinator_replaced WHERE session_id=?`, next); err != nil {
+		return 0, err
+	}
+	if err := arrivingAliasTx(tx, spec.Name, next); err != nil {
 		return 0, err
 	}
 	if _, err := tx.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?)`, spec.Name, next); err != nil {

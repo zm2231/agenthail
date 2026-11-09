@@ -78,6 +78,9 @@ func bindAliasTx(tx *sql.Tx, name, sessionID string) error {
 	if err == nil && owner != sessionID {
 		return AliasTakenError{Name: name, Owner: owner}
 	}
+	if err := arrivingAliasTx(tx, name, sessionID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id = ?`, sessionID); err != nil {
 		return err
 	}
@@ -117,6 +120,12 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 		}
 		var reserved AliasReservedError
 		if err := aliasReservedTx(tx, candidate, "", r.now()); errors.As(err, &reserved) {
+			continue
+		} else if err != nil {
+			return "", err
+		}
+		var arriving MoveInReservedError
+		if err := arrivingAliasTx(tx, candidate, sessionID); errors.As(err, &arriving) {
 			continue
 		} else if err != nil {
 			return "", err
