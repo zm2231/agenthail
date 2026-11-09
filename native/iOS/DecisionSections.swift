@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct DecisionSections: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let inbox: DecisionInbox
     let open: (String) -> Void
     let changed: () -> Void
@@ -98,7 +98,7 @@ struct DecisionSections: View {
 }
 
 struct DecisionSheet: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let item: DecisionItem
     let title: String
     let open: () -> Void

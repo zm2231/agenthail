@@ -3,7 +3,7 @@ import SwiftUI
 
 // Public demo data exercises the real session views without pairing or network access.
 struct SessionPreview: View {
-    @StateObject private var model: AgenthailIOSModel
+    @State private var model: AgenthailIOSModel
     private let session: SessionState
     private let detail: SessionDetail
 
@@ -37,7 +37,7 @@ struct SessionPreview: View {
         if ProcessInfo.processInfo.arguments.contains("--preview-delivery") {
             model.deliveryStatus[session.id] = "Queued for the agent"
         }
-        _model = StateObject(wrappedValue: model)
+        _model = State(initialValue: model)
     }
     var body: some View {
         AppearanceScope(appearance: model.appearance) { previewBody }

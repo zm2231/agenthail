@@ -135,7 +135,7 @@ struct SessionScopeChips: View {
 /// Opens the voice sheet from the Sessions toolbar, so it never sits over the
 /// list or the tab bar.
 struct VoiceToolbarButton: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
     @State private var presented = false
     @State private var operatorID: String?

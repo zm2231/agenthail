@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct PhoneProjectTiles: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let open: (String) -> Void
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var typeSize

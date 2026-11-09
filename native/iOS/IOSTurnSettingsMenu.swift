@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct IOSTurnSettingsMenu: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let sessionID: String
     let settings: [TurnSetting]
     let showModels: () -> Void
