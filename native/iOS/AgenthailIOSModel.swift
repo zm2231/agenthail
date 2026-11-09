@@ -20,11 +20,6 @@ struct PairedHostStatus: Identifiable, Equatable {
     var busyDelivery: String? = nil
 }
 
-struct ListedProject: Equatable {
-    let state: ProjectState
-    let hostID: String
-}
-
 @MainActor
 @Observable
 final class AgenthailIOSModel: HostConnectionDelegate {
@@ -327,17 +322,10 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                              peers: connection.snapshot?.daemon.hosts ?? [], notifications: pushStatus[connection.id] ?? "Not enabled",
                              person: connection.snapshot?.person, build: connection.build, busyDelivery: connection.snapshot?.busyDelivery)
         }
-        var listed: [String: ListedProject] = [:]
-        var listedOrder: [String] = []
-        for connection in ordered {
-            for project in connection.snapshot?.projects ?? [] {
-                let id = HostCatalog.qualify(connection.id, project.id)
-                if listed[id] == nil {
-                    listed[id] = ListedProject(state: project, hostID: connection.id)
-                    listedOrder.append(id)
-                }
-            }
-        }
+        let names = Dictionary(ordered.map { ($0.id, $0.name) } + catalog.hosts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        let routes = catalog
+        let (listed, listedOrder) = ProjectListing.merge(ordered.map { ProjectListing.Server(id: $0.id, projects: $0.snapshot?.projects ?? []) },
+                                                         name: { names[$0] }, reachable: { routes.target(forHost: $0) != nil })
         if projects != listed { projects = listed }
         if projectOrder != listedOrder { projectOrder = listedOrder }
         creationHosts = catalog.hosts.map { host in
@@ -821,31 +809,71 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func renameProject(_ project: ListedProject, to title: String) async -> ProjectChange {
-        await projectChange(refreshing: project.hostID) {
-            try await self.listingAPI(project).renameProject(project.state.id, title: title)
-            return "Renamed to \(title)."
+        let owners = project.state.checkouts.filter { $0.added == true }.map { ProjectRouting.owner($0.host, of: project) }
+        return await projectChange(refreshing: nil) {
+            try await self.eachOwner(of: owners, in: project, done: "Renamed to \(title).") { api, projectID in
+                try await api.renameProject(projectID, title: title)
+            }
         }
     }
 
     func removeProject(_ projectID: String, of project: ListedProject) async -> ProjectChange {
-        await projectChange(refreshing: project.hostID) {
-            try await self.listingAPI(project).projectAction("project-remove", projectID: projectID)
+        let owner = HostCatalog.owner(of: projectID) ?? project.hostID
+        return await projectChange(refreshing: nil) {
+            let (api, target) = try self.reach(owner)
+            try await api.projectAction("project-remove", projectID: target.remote == nil ? ProjectRouting.local(projectID, of: owner) : projectID)
             return "Project removed."
         }
     }
 
     func clearLead(of project: ListedProject) async -> ProjectChange {
-        await projectChange(refreshing: project.hostID) {
-            try await self.listingAPI(project).clearLead(projectID: project.state.id)
-            return "\(project.state.displayName) has no lead now."
+        let owners = project.state.leads.map { ProjectRouting.owner($0.host, of: project) }
+        return await projectChange(refreshing: nil) {
+            try await self.eachOwner(of: owners, in: project, done: "\(project.state.displayName) has no lead now.") { api, projectID in
+                try await api.clearLead(projectID: projectID)
+            }
         }
     }
 
     func startLead(of project: ListedProject, in checkout: ProjectState.Checkout, surface: String, name: String, replace: Bool) async -> ProjectChange {
-        await projectChange(refreshing: project.hostID) {
-            let lead = try await self.listingAPI(project).startLead(surface: surface, folder: checkout.rootPath, host: ProjectMenu.host(of: checkout), name: name, replace: replace)
+        await projectChange(refreshing: nil) {
+            let (api, target) = try self.reach(ProjectRouting.owner(checkout.host, of: project))
+            let lead = try await api.startLead(surface: surface, folder: checkout.rootPath, host: target.remote, name: name, replace: replace)
             return "@\(lead.name) leads \(project.state.displayName); its first message starts it."
         }
+    }
+
+    private func eachOwner(of owners: [String], in project: ListedProject, done: String, _ action: (AgenthailAPI, String) async throws -> Void) async throws -> String {
+        var routes: [(owner: String, target: HostTarget)] = []
+        var unreached: [String] = []
+        for owner in owners.isEmpty ? [project.hostID] : owners where !routes.contains(where: { $0.owner == owner }) && !unreached.contains(owner) {
+            guard let target = catalog.target(forHost: owner) else { unreached.append(owner); continue }
+            routes.append((owner, target))
+        }
+        func send(_ route: (owner: String, target: HostTarget)) async throws {
+            guard let api = connections[route.target.hostID]?.api else { throw AgenthailAPIError.unavailable("\(hostName(route.owner)) can't be reached.") }
+            try await action(api, route.target.remote.map { $0 + HostCatalog.separator + project.state.id } ?? project.state.id)
+        }
+        if unreached.isEmpty, routes.count == 1 {
+            try await send(routes[0])
+            return done
+        }
+        var failures = unreached.map { "\(hostName($0)) can't be reached" }
+        var succeeded = false
+        for route in routes {
+            do {
+                try await send(route)
+                succeeded = true
+            } catch {
+                failures.append("\(hostName(route.owner)): \(AgenthailAPIError.userMessage(error))")
+            }
+        }
+        guard !failures.isEmpty else { return done }
+        throw AgenthailAPIError.unavailable((succeeded ? done + " Not changed on " : "Not changed on ") + failures.joined(separator: "; ") + ".")
+    }
+
+    private func hostName(_ hostID: String) -> String {
+        connections[hostID]?.name ?? catalog.hosts.first { $0.id == hostID }?.name ?? hostID
     }
 
     func listed(_ state: ProjectState) -> ListedProject? {
@@ -861,8 +889,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         return !projects.values.contains { listed in
             listed.state.leads.contains { lead in
                 guard let sessionID = lead.sessionId else { return false }
-                let owner = lead.host.map { $0.state == "local" ? listed.hostID : $0.id } ?? listed.hostID
-                return HostCatalog.qualify(owner, sessionID) == session.id
+                return HostCatalog.qualify(ProjectRouting.owner(lead.host, of: listed), sessionID) == session.id
             }
         }
     }
@@ -875,14 +902,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func creationHost(for checkout: ProjectState.Checkout, of project: ListedProject) -> String {
-        ProjectMenu.host(of: checkout) ?? project.hostID
-    }
-
-    private func listingAPI(_ project: ListedProject) throws -> AgenthailAPI {
-        guard let connection = connections[project.hostID], connection.shownReachable else {
-            throw AgenthailAPIError.unavailable("\(connections[project.hostID]?.name ?? "That computer") can't be reached.")
-        }
-        return connection.api
+        ProjectRouting.owner(checkout.host, of: project)
     }
 
     private func projectChange(refreshing hostID: String?, _ body: () async throws -> String) async -> ProjectChange {
@@ -1166,7 +1186,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private func earlierTargets(_ project: ListedProject) -> [ScopeTarget] {
         let request = ScopeRequest(scope: "all", projectID: project.state.id)
         let shared = project.state.id.hasPrefix(HostCatalog.repositoryPrefix)
-        let direct = shared ? project.state.checkouts.map(\.host.id).filter { $0 != project.hostID } : []
+        let direct = shared ? project.servers + project.state.checkouts.map { ProjectRouting.owner($0.host, of: project) } : []
         var seen: Set<String> = []
         return ([project.hostID] + direct).compactMap { hostID in
             guard seen.insert(hostID).inserted, let host = connections[hostID] else { return nil }

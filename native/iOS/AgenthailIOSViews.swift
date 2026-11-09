@@ -349,12 +349,23 @@ struct ConversationListView: View {
             let empty = projectsWithoutSessions(tree)
             if !empty.isEmpty {
                 Section("Projects without sessions") {
-                    ForEach(empty, id: \.state.id) { listed in
+                    ForEach(empty) { listed in
+                        let computers = HostNames.ordered(listed.state.checkouts.map(\.host))
                         Menu {
                             IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace, messaging: $messagingProject)
                         } label: {
-                            Label(listed.state.displayName, systemImage: "folder").foregroundStyle(.primary)
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(listed.state.displayName).foregroundStyle(.primary)
+                                    if computers.count > 1 {
+                                        Text(computers.joined(separator: ", ")).font(.caption).foregroundStyle(PhonePalette.muted)
+                                    }
+                                }
+                            } icon: {
+                                Image(systemName: "folder")
+                            }
                         }
+                        .accessibilityIdentifier("empty-project-" + listed.id)
                     }
                 }
             }
