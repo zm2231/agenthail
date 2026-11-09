@@ -1110,7 +1110,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                 }
                 let previous = connections[hostID]
                 repairingPush.insert(hostID)
-                cancelPushSetup(hostID)
+                await cancelPushSetup(hostID)?.value
                 if let previous {
                     if let relayURL = previous.pushRelayURL, let stored = storedPush(hostID),
                        let failure = await revokeBeforeRepair(PushRelayClient(baseURL: relayURL, session: networkSession), stored.registration) {
@@ -2289,7 +2289,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     func setAppActive(_ active: Bool) {
         appActive = active
         if !active {
-            pushRetries.keys.forEach(cancelPushSetup)
+            for id in Array(pushRetries.keys) { cancelPushSetup(id) }
             return
         }
         guard let pushDeviceToken else { return }
@@ -2312,11 +2312,13 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         return "The notification relay would not remove this iPhone's earlier registration, so the computer was not paired again: \(failure.localizedDescription)"
     }
 
-    private func cancelPushSetup(_ hostID: String) {
-        guard let retry = pushRetries.removeValue(forKey: hostID) else { return }
+    @discardableResult
+    private func cancelPushSetup(_ hostID: String) -> Task<Void, Never>? {
+        guard let retry = pushRetries.removeValue(forKey: hostID) else { return nil }
         retry.task.cancel()
         if pushStatus[hostID] == "Enabling" { pushStatus[hostID] = "Reconnect to finish setup" }
         updateNotificationStatus()
+        return retry.task
     }
 
     private func registerPush(_ connection: HostConnection, deviceToken: String) {
@@ -2371,6 +2373,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
            stored.environment == PushRelayClient.environment, stored.endpoint == endpoint {
             do {
                 try await relay.validate(stored.registration)
+                try Task.checkCancellation()
                 try await connection.api.configurePush(installationID: stored.registration.installationId, credential: stored.registration.credential)
                 pushStatus[hostID] = "Enabled"
                 return
@@ -2666,7 +2669,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     private func disableNotifications(status: String) async {
-        pushRetries.keys.forEach(cancelPushSetup)
+        for id in Array(pushRetries.keys) { cancelPushSetup(id) }
         deviceRegistrationFailure = nil
         for id in hostOrder {
             guard let connection = connections[id], !connection.isPreview else { continue }
