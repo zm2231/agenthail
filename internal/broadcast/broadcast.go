@@ -230,8 +230,8 @@ func (r Result) Fields() map[string]any {
 
 type Delivery interface {
 	Session(ctx context.Context, sessionID, message, sourceSessionID string) (*delivery.Receipt, error)
-	// Coordinator delivers to a coordinator on this host or a paired one and
-	// reports the conversation that took it, which may be one it started.
+	// Coordinator delivers to one of this host's coordinators and reports the
+	// conversation that took it, which may be one it started.
 	Coordinator(ctx context.Context, spec registry.CoordinatorSpec, message, sourceSessionID string) (*delivery.Receipt, string, error)
 }
 
@@ -255,11 +255,11 @@ func (b Broadcaster) Send(ctx context.Context, target Target, message, label, so
 	coordinators = slices.DeleteFunc(coordinators, func(spec registry.CoordinatorSpec) bool {
 		return sourceSessionID != "" && spec.SessionID == sourceSessionID
 	})
-	if len(members) == 0 && len(coordinators) == 0 {
+	if len(members) == 0 && len(coordinators) == 0 && target.ProjectID == "" {
 		return result, fmt.Errorf("#%s has no members other than the sender", target.Name)
 	}
 	for _, spec := range coordinators {
-		result.Recipients = append(result.Recipients, b.toCoordinator(ctx, target, spec, payload, sourceSessionID))
+		result.Recipients = append(result.Recipients, b.toCoordinator(ctx, spec, payload, sourceSessionID))
 	}
 	for _, member := range members {
 		result.Recipients = append(result.Recipients, b.toSession(ctx, target, member, payload, sourceSessionID))
@@ -267,27 +267,24 @@ func (b Broadcaster) Send(ctx context.Context, target Target, message, label, so
 	return result, nil
 }
 
-// A project's coordinators are reached even when idle past the active
-// window, since a send starts or resumes one anyway.
+// A project's members are this host's own: each paired host that holds the
+// project resolves and delivers to its own. Coordinators are reached even when
+// idle past the active window, since a send starts or resumes one anyway.
 func (b Broadcaster) members(target Target, now time.Time) ([]string, []registry.CoordinatorSpec, error) {
 	if target.ProjectID == "" {
 		members, err := b.Registry.ChannelMembers(target.Channel)
 		return members, nil, err
 	}
-	coordinators, err := b.Registry.ProjectCoordinators(target.ProjectID)
+	specs, err := b.Registry.ProjectCoordinators(target.ProjectID)
 	if err != nil {
 		return nil, nil, err
 	}
+	coordinators := slices.DeleteFunc(specs, func(spec registry.CoordinatorSpec) bool { return spec.HostID != "" })
 	coordinated := map[string]bool{}
 	for _, spec := range coordinators {
-		if spec.SessionID == "" {
-			continue
+		if spec.SessionID != "" {
+			coordinated[spec.SessionID] = true
 		}
-		rawID := spec.SessionID
-		if spec.HostID != "" {
-			_, rawID, _ = hosts.Split(spec.SessionID)
-		}
-		coordinated[spec.HostID+"\x00"+rawID] = true
 	}
 	snapshot, err := b.Registry.CatalogSnapshot()
 	if err != nil {
@@ -300,7 +297,7 @@ func (b Broadcaster) members(target Target, now time.Time) ([]string, []registry
 	var members []string
 	for _, record := range snapshot.Sessions {
 		item, ok := sessionProject(record)
-		if !ok || item.ID != target.ProjectID || record.Freshness.Stale || coordinated[record.HostID+"\x00"+record.Session.ID] {
+		if !ok || item.ID != target.ProjectID || record.HostID != "" || record.Freshness.Stale || coordinated[record.Session.ID] {
 			continue
 		}
 		if !surface.RecentlyActive(record.Session, now) {
@@ -315,14 +312,7 @@ func (b Broadcaster) members(target Target, now time.Time) ([]string, []registry
 	return members, coordinators, nil
 }
 
-// A paired host's row carries that host's archive flags in its projection.
 func archived(record registry.CatalogSessionState, item Project, archive registry.ArchiveState) bool {
-	if record.HostID != "" {
-		var mirrored struct {
-			Archived bool `json:"archived"`
-		}
-		return json.Unmarshal([]byte(record.ProjectionFingerprint), &mirrored) == nil && mirrored.Archived
-	}
 	if _, found := archive.Sessions[record.Session.ID]; found {
 		return true
 	}
@@ -330,21 +320,13 @@ func archived(record registry.CatalogSessionState, item Project, archive registr
 	return found
 }
 
-func (b Broadcaster) toCoordinator(ctx context.Context, target Target, spec registry.CoordinatorSpec, payload, source string) Recipient {
-	recipient := Recipient{Coordinator: "@" + spec.Name, HostID: spec.HostID, SessionID: spec.SessionID}
-	if spec.HostID != "" {
-		recipient.Coordinator = spec.HostID + "::@" + spec.Name
-		if _, rawID, qualified := hosts.Split(spec.SessionID); qualified {
-			if owner, err := b.Registry.SessionHost(rawID); err == nil && owner == spec.HostID {
-				return b.queueForHost(target, recipient, rawID, payload, source)
-			}
-		}
-	}
+func (b Broadcaster) toCoordinator(ctx context.Context, spec registry.CoordinatorSpec, payload, source string) Recipient {
+	recipient := Recipient{Coordinator: "@" + spec.Name, SessionID: spec.SessionID}
 	receipt, sessionID, err := b.Delivery.Coordinator(ctx, spec, payload, source)
 	if err != nil {
 		return failed(recipient, err)
 	}
-	if spec.HostID == "" && sessionID != "" {
+	if sessionID != "" {
 		recipient.SessionID = sessionID
 	}
 	return received(recipient, receipt)

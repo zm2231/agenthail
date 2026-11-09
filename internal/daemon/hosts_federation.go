@@ -57,6 +57,8 @@ type federation struct {
 	// reach this host, which pulls it.
 	ledgerSyncEvery time.Duration
 	retryMin        time.Duration
+	// Set before the per-host loops start; they read it unlocked.
+	patience time.Duration
 }
 
 type pairedHost struct {
@@ -84,7 +86,7 @@ type pairedHost struct {
 }
 
 func newFederation() *federation {
-	return &federation{hosts: map[string]*pairedHost{}, downGrace: hostDownGrace, ledgerSyncEvery: ledgerSyncInterval, retryMin: hostRetryMin}
+	return &federation{hosts: map[string]*pairedHost{}, downGrace: hostDownGrace, ledgerSyncEvery: ledgerSyncInterval, retryMin: hostRetryMin, patience: hostDeliveryPatience}
 }
 
 func (h *pairedHost) status() (string, string) {
@@ -977,6 +979,7 @@ func (d *Daemon) followHostDeliveries(ctx context.Context) {
 func (d *Daemon) drainHostDeliveries(ctx context.Context, host *pairedHost) {
 	host.drain.Lock()
 	defer host.drain.Unlock()
+	defer d.drainHostHeldActions(ctx, host)
 	pending, err := d.Registry.HostDeliveries(host.record.ID)
 	if err != nil {
 		d.logRuntimeError("host "+host.record.Name+" deliveries", err)
@@ -1003,6 +1006,11 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 	if !claimed {
 		return
 	}
+	unconfirmed := func() {
+		if time.Since(inflightAt) > d.federation.patience {
+			_ = d.Registry.DeadLetterUnknown(item.ID, fmt.Errorf("host %s has not confirmed the message", host.record.Name))
+		}
+	}
 	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, item.Request, http.Header{actionIdempotencyHeader: []string{item.Key}})
 	if err != nil {
 		var notSent hosts.NotSentError
@@ -1010,7 +1018,9 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 			if releaseErr := d.Registry.ReleaseHostDelivery(item.ID); releaseErr != nil {
 				d.logRuntimeError("host "+host.record.Name+" delivery", releaseErr)
 			}
+			return
 		}
+		unconfirmed()
 		return
 	}
 	submitted := response.StatusCode == http.StatusAccepted
@@ -1023,11 +1033,8 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 		_, _ = d.Registry.DeadLetterMessage(item.ID, surface.DeliveryTerminal(errors.New(hosts.Unproven(host.record.Name)), surface.DeliveryHostUnproven))
 	case errors.As(readErr, &status):
 		_, _ = d.Registry.DeadLetterMessage(item.ID, fmt.Errorf("host %s refused the message: %s", host.record.Name, status.Error()))
-	case readErr != nil:
-	case submitted:
-		if time.Since(inflightAt) > hostDeliveryPatience {
-			_ = d.Registry.DeadLetterUnknown(item.ID, fmt.Errorf("host %s has not confirmed the message", host.record.Name))
-		}
+	case readErr != nil, submitted:
+		unconfirmed()
 	default:
 		var outcome struct {
 			Result struct {

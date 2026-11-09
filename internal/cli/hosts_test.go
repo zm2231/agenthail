@@ -197,17 +197,16 @@ func TestChannelsAndRelaysReachARemoteSession(t *testing.T) {
 		t.Fatalf("members=%v err=%v", members, err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	api.responses = map[string]string{"channel-send": `{"ok":true,"target":{"name":"ops","channel":"ops"},"sent":0,"queued":1,"submitted":0,"failed":0,"recipients":[{"sessionId":"` + vpsBuilder.ID + `","hostId":"` + vpsHostID + `","outcome":"queued","detail":"held for its host"}]}`}
 	if output, err := captureStdout(t, func() error { return app.Run([]string{"channel", "send", "ops", "status?"}) }); err != nil || !strings.Contains(output, "[QUEUE] vps::@builder: held for its host") {
 		t.Fatalf("channel send output=%q err=%v", output, err)
 	}
-	if held, err := app.Registry.HostDeliveries(vpsHostID); err != nil || len(held) != 1 || held[0].SessionID != "remote-1" {
-		t.Fatalf("held=%+v err=%v", held, err)
-	}
+	api.responses = nil
 	if output, err := captureStdout(t, func() error { return app.Run([]string{"relay", "add", "vps::@builder", "vps::@builder", "done"}) }); err != nil || !strings.Contains(output, "relay on host vps") {
 		t.Fatalf("relay add output=%q err=%v", output, err)
 	}
 	actions, _ := api.recorded()
-	if len(actions) != 1 || actions[0]["action"] != "relay-add" || actions[0]["fromId"] != vpsBuilder.ID || actions[0]["pattern"] != "done" {
+	if len(actions) != 2 || actions[0]["action"] != "channel-send" || actions[1]["action"] != "relay-add" || actions[1]["fromId"] != vpsBuilder.ID || actions[1]["pattern"] != "done" {
 		t.Fatalf("actions=%v", actions)
 	}
 	if err := app.Run([]string{"send", "nowhere::x", "hi"}); err == nil || !strings.Contains(err.Error(), `no paired host is named "nowhere"`) {

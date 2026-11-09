@@ -19,6 +19,7 @@ var typedActions = map[string]actionOperation{
 	"channel-create":       (*Daemon).doChannelCreate,
 	"channel-delete":       (*Daemon).doChannelDelete,
 	"channel-send":         (*Daemon).doChannelSend,
+	"channel-deliver":      (*Daemon).doChannelDeliver,
 	"channel-rename":       (*Daemon).doChannelRename,
 	"channel-add":          (*Daemon).doChannelMembership,
 	"channel-remove":       (*Daemon).doChannelMembership,

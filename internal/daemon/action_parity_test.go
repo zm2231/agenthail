@@ -173,6 +173,7 @@ func parityCases() []parityCase {
 		{name: "channel-add", action: "channel-add", body: `{"action":"channel-add","channel":"team","targetId":"to"}`, setup: withChannel},
 		{name: "channel-remove", action: "channel-remove", body: `{"action":"channel-remove","channel":"team","targetId":"to"}`, setup: withChannel},
 		{name: "channel-send", action: "channel-send", body: `{"action":"channel-send","channel":"team","message":"standup","sourceSessionId":"from"}`, setup: withChannel},
+		{name: "channel-deliver not from a host", action: "channel-deliver", body: `{"action":"channel-deliver","projectId":"repo:github.com/example/widget","message":"standup"}`},
 		{name: "relay-add", action: "relay-add", body: `{"action":"relay-add","fromId":"from","toId":"to","pattern":".*"}`},
 		{name: "relay-remove", action: "relay-remove", body: `{"action":"relay-remove","relayId":1}`, setup: withRelay},
 		{name: "runtime-ensure", action: "runtime-ensure", body: `{"action":"runtime-ensure"}`},

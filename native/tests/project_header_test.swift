@@ -22,6 +22,9 @@ struct ProjectHeaderTest {
         let none = try JSONDecoder().decode(ChannelSendResult.self, from: Data(#"{"recipients":[{"sessionId":"s4","outcome":"failed"}]}"#.utf8))
         check(ProjectHeaderFacts.sent(none) { $0 } == "Sent to 0. Not delivered to s4.", "a broadcast that reached no one says so: \(ProjectHeaderFacts.sent(none) { $0 })")
 
+        let hosts = try JSONDecoder().decode(ChannelSendResult.self, from: Data(#"{"recipients":[{"coordinator":"@lead","outcome":"sent"}],"hosts":[{"id":"h1","name":"studio","state":"held","recipients":0},{"id":"h2","name":"vps","state":"refused","recipients":0,"detail":"the sender is in project gadget, not widget","rule":"different_project"}],"unreachable":["studio"]}"#.utf8))
+        check(ProjectHeaderFacts.sent(hosts) { $0 } == "Sent to 1: @lead. Held for studio until it answers. Refused by vps: the sender is in project gadget, not widget.", "the notice names unreachable and refusing hosts: \(ProjectHeaderFacts.sent(hosts) { $0 })")
+
         try await broadcasts()
         print("ok")
     }

@@ -236,6 +236,20 @@ CREATE TABLE IF NOT EXISTS delivery_history (
 	bridge TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS delivery_history_created_at ON delivery_history(created_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS host_held_actions (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	host_id TEXT NOT NULL,
+	delivery_key TEXT NOT NULL UNIQUE,
+	label TEXT NOT NULL DEFAULT '',
+	request BLOB NOT NULL,
+	status TEXT NOT NULL,
+	attempts INTEGER NOT NULL DEFAULT 1,
+	inflight_at_ms INTEGER NOT NULL DEFAULT 0,
+	outcome TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL,
+	updated_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS host_held_actions_open ON host_held_actions(host_id, id) WHERE status IN ('pending','inflight');
 CREATE TABLE IF NOT EXISTS trigger_runs (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	trigger_name TEXT NOT NULL,

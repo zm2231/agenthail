@@ -75,14 +75,19 @@ func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
 	local, remote, record := widgetOnTwoHosts(t)
 	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "standup", "sourceSessionId": "local-a"})
 	var answer struct {
-		Target     broadcast.Target      `json:"target"`
-		Recipients []broadcast.Recipient `json:"recipients"`
+		Target      broadcast.Target      `json:"target"`
+		Recipients  []broadcast.Recipient `json:"recipients"`
+		Hosts       []channelHostLeg      `json:"hosts"`
+		Unreachable []string              `json:"unreachable"`
 	}
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &answer) != nil {
 		t.Fatalf("send status=%d body=%s", response.Code, response.Body)
 	}
 	if answer.Target.ProjectID != "repo:github.com/example/widget" || len(answer.Recipients) != 3 {
 		t.Fatalf("answer=%+v", answer)
+	}
+	if len(answer.Hosts) != 1 || answer.Hosts[0].ID != record.ID || answer.Hosts[0].State != channelLegReached || answer.Hosts[0].Recipients != 2 || answer.Unreachable == nil || len(answer.Unreachable) != 0 {
+		t.Fatalf("the receipt does not join the paired host's leg: hosts=%+v unreachable=%v", answer.Hosts, answer.Unreachable)
 	}
 	byRef := map[string]broadcast.Recipient{}
 	for _, recipient := range answer.Recipients {
@@ -95,10 +100,10 @@ func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
 	if lead := byRef["@widget-lead"]; lead.Outcome != broadcast.OutcomeSent {
 		t.Fatalf("the coordinator outside the active window was not reached: %+v", answer.Recipients)
 	}
-	if lead := byRef[record.ID+"::@vps-lead"]; lead.Outcome != broadcast.OutcomeQueued {
+	if lead := byRef[record.ID+"::@vps-lead"]; lead.Outcome != broadcast.OutcomeSent || lead.HostID != record.ID {
 		t.Fatalf("the paired host's coordinator was not reached once as its coordinator: %+v", answer.Recipients)
 	}
-	if member := byRef[hosts.Qualify(record.ID, "remote-c")]; member.Outcome != broadcast.OutcomeQueued {
+	if member := byRef[hosts.Qualify(record.ID, "remote-c")]; member.Outcome != broadcast.OutcomeSent || member.HostID != record.ID {
 		t.Fatalf("recipients=%+v", answer.Recipients)
 	}
 	testkit.Eventually(t, "the remote member received the message", 10*time.Second, func() bool {

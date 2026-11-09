@@ -56,6 +56,7 @@ type dashboardActionRequest struct {
 	PID             int                        `json:"pid"`
 	PIDStartedAt    int64                      `json:"pidStartedAt"`
 	ProjectID       string                     `json:"projectId"`
+	SourceProjectID string                     `json:"sourceProjectId"`
 	Project         string                     `json:"project"`
 	Path            string                     `json:"path"`
 	Title           string                     `json:"title"`

@@ -228,18 +228,41 @@ A channel lives where it was made. A remote member is stored by its raw id and
 mirrored row; `channel-send` holds the message for that member's host and
 delivers to local members directly.
 
-A project channel has no stored members. `channel-send` to `#<project>` reads
-them from the catalog when it sends: every row, local or mirrored, whose
-project `id` is the project's, that is not stale or archived and is working
-or was active within `surface.ActiveWindow`, the window peer advertising uses.
-The project's coordinators are always included. A coordinator on this host
-gets the message through `internal/coordinator`, which starts or resumes it. A
-paired host's coordinator with a session is held for that host like any
-member; one without a session gets a `coordinator-send` to its host, which
-starts it. Only a project with a repository key spans hosts, since a project
-without one has a host-qualified `id`. The answer lists every recipient with
-its outcome. `internal/broadcast` holds the resolution and the delivery for
-both the CLI and the action.
+A project channel has no stored members, and each host decides its own.
+`channel-send` to `#<project>` delivers to this host's members, read from its
+catalog: every local row whose project `id` is the project's, that is not
+stale or archived and is working or was active within `surface.ActiveWindow`,
+the window peer advertising uses, plus the project's coordinators on this
+host, which `internal/coordinator` starts or resumes. `internal/broadcast`
+holds that resolution and delivery; only the daemon runs it, and the CLI posts
+the action.
+
+Every paired host that holds the project (`CatalogProjectHosts`, stale rows
+included, plus the hosts of the project's coordinators) gets one
+`channel-deliver` action at the same time, keyed `<action key>:<host id>`.
+That host resolves and delivers to its own members the same way, by its own
+busy rules, and answers with its recipients. It accepts `channel-deliver` only
+from a paired host and passes it on to no one. A sender that is a session must
+come with `sourceProjectId`: the host refuses a missing one
+(`project_unconfirmed`) or another project's (`different_project`) with that
+`rule` in the error's `detail`, the reach a direct send across hosts has. The
+person, the CLI and Agenthail reach any project. A `channel-send` routed to a
+paired host with `host` carries the sender's `sourceProjectId` the same way,
+and that host applies the same rule to a project send.
+
+A leg follows the rules of a held send. A host that never got the request
+(`NotSentError`) is held pending; one that may have got it without answering is
+held inflight. Both go in `host_held_actions` (schema 81) with their key and body, and the
+host's delivery drain replays them after its held sends, so the host's action
+receipts make a replay of an applied leg return its stored answer. A refusal,
+or no confirmation within `hostDeliveryPatience`, ends the row and adds a
+history entry. The answer joins every leg: `recipients` with paired hosts'
+recipients qualified, `hosts` with each host's `state` (`reached`, `held`,
+`unknown`, `refused`), and `unreachable`. A refused leg makes it a 409, like a
+failed member. A host on a build without `channel-deliver` refuses it
+(`sessionId is required`) rather than delivering, so nothing reaches it twice.
+Only a project with a repository key spans hosts, since a project without one
+has a host-qualified `id`.
 
 ## Starting a session on a host
 

@@ -61,11 +61,20 @@ func (a *App) daemonAPI() (*daemonAPIClient, error) {
 }
 
 func (c *daemonAPIClient) call(ctx context.Context, method, path string, query url.Values, payload any, header http.Header) ([]byte, int, error) {
+	response, err := c.do(ctx, method, path, query, payload, header)
+	if err != nil {
+		return nil, 0, err
+	}
+	data, err := hosts.ReadResponse(response)
+	return data, response.StatusCode, err
+}
+
+func (c *daemonAPIClient) do(ctx context.Context, method, path string, query url.Values, payload any, header http.Header) (*http.Response, error) {
 	var body io.Reader
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		body = bytes.NewReader(encoded)
 	}
@@ -75,7 +84,7 @@ func (c *daemonAPIClient) call(ctx context.Context, method, path string, query u
 	}
 	request, err := http.NewRequestWithContext(ctx, method, target, body)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	for key, values := range header {
 		for _, value := range values {
@@ -88,10 +97,9 @@ func (c *daemonAPIClient) call(ctx context.Context, method, path string, query u
 	request.Header.Set("Authorization", "Bearer "+c.token)
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return nil, 0, fmt.Errorf("reach the local daemon: %w", err)
+		return nil, fmt.Errorf("reach the local daemon: %w", err)
 	}
-	data, err := hosts.ReadResponse(response)
-	return data, response.StatusCode, err
+	return response, nil
 }
 
 func (c *daemonAPIClient) getJSON(ctx context.Context, path string, query url.Values, value any) error {
@@ -108,4 +116,17 @@ func (c *daemonAPIClient) getJSON(ctx context.Context, path string, query url.Va
 func (c *daemonAPIClient) action(ctx context.Context, payload map[string]any) ([]byte, int, error) {
 	header := http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemon.ActionActorHeader: []string{daemon.CLIActor}}
 	return c.call(ctx, http.MethodPost, "/api/v1/actions", nil, payload, header)
+}
+
+// actionReceipt is action keeping the body of a refusal, whose fields can
+// carry a partial outcome.
+func (c *daemonAPIClient) actionReceipt(ctx context.Context, payload map[string]any) ([]byte, int, error) {
+	header := http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemon.ActionActorHeader: []string{daemon.CLIActor}}
+	response, err := c.do(ctx, http.MethodPost, "/api/v1/actions", nil, payload, header)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	return data, response.StatusCode, err
 }

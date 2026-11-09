@@ -1,4 +1,4 @@
--- schemaVersion 80
+-- schemaVersion 81
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -41,6 +41,9 @@ CREATE INDEX device_connection_drops_recent ON device_connection_drops(device_id
 
 -- index device_pairings_expires
 CREATE INDEX device_pairings_expires ON device_pairings(expires_at);
+
+-- index host_held_actions_open
+CREATE INDEX host_held_actions_open ON host_held_actions(host_id, id) WHERE status IN ('pending','inflight');
 
 -- index idle_compactions_queue
 CREATE INDEX idle_compactions_queue ON idle_compactions(queue_id) WHERE queue_id!=0;
@@ -372,6 +375,21 @@ CREATE TABLE device_push_targets (
 	credential TEXT NOT NULL,
 	enabled INTEGER NOT NULL DEFAULT 1,
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table host_held_actions
+CREATE TABLE host_held_actions (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	host_id TEXT NOT NULL,
+	delivery_key TEXT NOT NULL UNIQUE,
+	label TEXT NOT NULL DEFAULT '',
+	request BLOB NOT NULL,
+	status TEXT NOT NULL,
+	attempts INTEGER NOT NULL DEFAULT 1,
+	inflight_at_ms INTEGER NOT NULL DEFAULT 0,
+	outcome TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL,
+	updated_at_ms INTEGER NOT NULL
 );
 
 -- table host_identity

@@ -186,28 +186,6 @@ func TestALeadIsNotReachedWithoutTheDaemon(t *testing.T) {
 	}
 }
 
-func TestAChannelReachesItsCoordinatorThroughTheDaemon(t *testing.T) {
-	c := newCoordinatorCLI(t).withGoneCoordinator(t)
-	if _, err := c.r.CreateChannel("team"); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.r.AddToChannel("team", goneConversation); err != nil {
-		t.Fatal(err)
-	}
-	c.answers(startedAnswer)
-	output, err := c.run(t, "channel", "send", "team", "standup")
-	if err != nil || !strings.Contains(output, "#team: 1 sent") {
-		t.Fatalf("output=%q err=%v", output, err)
-	}
-	sends := c.sends(t)
-	if len(sends) != 1 || sends[0]["name"] != "fixture-lead" || !strings.HasSuffix(sends[0]["message"].(string), "via #team] standup") {
-		t.Fatalf("sends=%v", sends)
-	}
-	if spawned := c.claude.Invocations(); spawned != 0 {
-		t.Fatalf("the CLI ran Claude %d times itself", spawned)
-	}
-}
-
 func TestBareCoordinatorNameIsAFragmentNotTheCoordinator(t *testing.T) {
 	c := newCoordinatorCLI(t)
 	c.define(t, registry.CoordinatorSpec{ProjectID: "project-fixture", Name: "fixture-lead", Cwd: c.cwd}, "")
