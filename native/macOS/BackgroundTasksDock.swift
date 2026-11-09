@@ -1,19 +1,37 @@
 import SwiftUI
 
 struct BackgroundTasksDock: View {
+    let sessionID: String
     let background: BackgroundTasks
-    @State private var expanded = false
+    @AppStorage(BackgroundDockChoices.dismissedKey) private var dismissed = ""
+    @AppStorage(BackgroundDockChoices.openKey) private var openChoices = ""
 
     var body: some View {
-        let compact = background.isAmbientOnly
-        let open = !compact || expanded
+        if BackgroundDockChoices.shows(background, for: sessionID, dismissed: dismissed) {
+            dock(open: BackgroundDockChoices.isOpen(background, for: sessionID, choices: openChoices))
+        }
+    }
+
+    private func dock(open: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            if compact {
-                Button { expanded.toggle() } label: { header(compact: true) }
+            HStack(spacing: DesktopSpace.s) {
+                Button {
+                    openChoices = BackgroundDockChoices.toggling(background, for: sessionID, in: openChoices)
+                } label: { header(open: open) }
                     .buttonStyle(.plain)
-                    .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-            } else {
-                header(compact: false)
+                    .accessibilityValue(open ? "Expanded" : "Collapsed")
+                    .accessibilityIdentifier("background-tasks-toggle")
+                Button {
+                    dismissed = BackgroundDockChoices.dismissing(background, for: sessionID, in: dismissed)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: DesktopType.caption))
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(DesktopPalette.text2)
+                .help("Hide until the background tasks change")
+                .accessibilityLabel("Hide until the background tasks change")
+                .accessibilityIdentifier("background-tasks-dismiss")
             }
             if open {
                 TimelineView(.everyMinute) { context in
@@ -44,7 +62,7 @@ struct BackgroundTasksDock: View {
         .accessibilityIdentifier("background-tasks")
     }
 
-    private func header(compact: Bool) -> some View {
+    private func header(open: Bool) -> some View {
         HStack(spacing: DesktopSpace.s) {
             Image(systemName: "gearshape.2")
                 .foregroundStyle(DesktopPalette.text2)
@@ -52,11 +70,9 @@ struct BackgroundTasksDock: View {
                 .fontWeight(.medium)
                 .foregroundStyle(DesktopPalette.text)
             Spacer(minLength: 4)
-            if compact {
-                Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                    .font(.system(size: DesktopType.caption))
-                    .foregroundStyle(DesktopPalette.text2)
-            }
+            Image(systemName: open ? "chevron.up" : "chevron.down")
+                .font(.system(size: DesktopType.caption))
+                .foregroundStyle(DesktopPalette.text2)
         }
         .contentShape(Rectangle())
     }

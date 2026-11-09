@@ -684,7 +684,6 @@ struct BackgroundTasks: Codable, Hashable {
     /// Where the list came from, when it is not Claude's own report.
     var sourceNote: String? {
         switch source {
-        case "transcript": return "Read from the transcript."
         case "status": return "Claude reports a background shell but not which one."
         default: return nil
         }

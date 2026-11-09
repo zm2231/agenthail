@@ -1414,7 +1414,7 @@ struct ComposerView: View {
                 .scrimText()
             }
             if let background = session.backgroundTasks, background.isShown {
-                BackgroundTasksDock(background: background)
+                BackgroundTasksDock(sessionID: session.id, background: background)
                     .id(session.id)
                     .padding(.horizontal, 10)
                     .padding(.bottom, DesktopSpace.s)

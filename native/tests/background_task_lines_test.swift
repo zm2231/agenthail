@@ -14,6 +14,35 @@ struct BackgroundTaskLinesTest {
         check(!BackgroundTasks(running: true, tasks: [shell, server], source: "host").isAmbientOnly, "a running task opens the full list")
         check(BackgroundTasks(running: false, tasks: [server], source: "host").summary == "Only ambient tasks run", "the compact line uses the dashboard's words")
         check(BackgroundTasks(running: true, tasks: [], source: "runtime").sourceNote == nil, "a list from the runtime needs no note, like the host's")
+        check(BackgroundTasks(running: true, tasks: [shell], source: "transcript").sourceNote == nil, "a list read from the transcript needs no note")
+        check(BackgroundTasks(running: true, tasks: [], source: "status").sourceNote != nil, "a shell Claude reports without a list keeps its note")
+
+        let working = BackgroundTasks(running: true, tasks: [shell, server], source: "host")
+        let reordered = BackgroundTasks(running: true, tasks: [server, shell], source: "host")
+        let added = BackgroundTasks(running: true, tasks: [shell, server, BackgroundTask(id: "a2", kind: "agent")], source: "host")
+        let finished = BackgroundTasks(running: false, tasks: [server], source: "host")
+        typealias Choices = BackgroundDockChoices
+        check(Choices.shows(working, for: "s1", dismissed: ""), "the dock shows until dismissed")
+        let hidden = Choices.dismissing(working, for: "s1", in: "")
+        check(!Choices.shows(working, for: "s1", dismissed: hidden), "dismissing hides the dock")
+        check(!Choices.shows(reordered, for: "s1", dismissed: hidden), "the same tasks in another order stay hidden")
+        check(Choices.shows(working, for: "s2", dismissed: hidden), "dismissing one session leaves another's dock")
+        check(Choices.shows(added, for: "s1", dismissed: hidden), "a new task brings the dock back")
+        check(Choices.shows(finished, for: "s1", dismissed: hidden), "a task finishing brings the dock back")
+        let again = Choices.dismissing(added, for: "s1", in: hidden)
+        check(!Choices.shows(added, for: "s1", dismissed: again) && Choices.value("s1", in: again) == added.taskSet, "dismissing again replaces the session's entry")
+        check(!Choices.shows(BackgroundTasks(running: false, tasks: [], source: "host"), for: "s1", dismissed: ""), "nothing to show stays hidden")
+        check(Choices.value("s", in: hidden) == nil, "a session id that prefixes another is its own entry")
+        let many = (0..<600).reduce("") { Choices.dismissing(working, for: "s\($1)", in: $0) }
+        check(many.split(separator: "\n").count == Choices.remembered && Choices.value("s599", in: many) != nil && Choices.value("s0", in: many) == nil, "only the latest sessions are remembered")
+
+        check(Choices.isOpen(working, for: "s1", choices: ""), "running tasks open the list")
+        check(!Choices.isOpen(finished, for: "s1", choices: ""), "ambient tasks alone start collapsed")
+        let collapsed = Choices.toggling(working, for: "s1", in: "")
+        check(!Choices.isOpen(working, for: "s1", choices: collapsed), "the list collapses")
+        check(Choices.isOpen(working, for: "s2", choices: collapsed), "collapsing one session leaves another open")
+        check(Choices.isOpen(working, for: "s1", choices: Choices.toggling(working, for: "s1", in: collapsed)), "the list opens again")
+        check(Choices.isOpen(finished, for: "s3", choices: Choices.toggling(finished, for: "s3", in: "")), "an ambient list opens")
 
         check(shell.sinceText() == nil && shell.timedLine() == "Shell: npm run build", "a task without a start time has no since")
         let now = Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date())!
