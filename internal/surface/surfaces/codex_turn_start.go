@@ -24,10 +24,8 @@ type codexTurnStarts struct {
 }
 
 type codexTurnStart struct {
-	at         time.Time
-	turnID     string
-	after      string
-	afterKnown bool
+	at     time.Time
+	turnID string
 }
 
 func (s *codexTurnStarts) begin(threadID string) {
@@ -54,19 +52,11 @@ func (s *codexTurnStarts) end(threadID string) {
 	delete(s.started, threadID)
 }
 
-func (s *codexTurnStarts) follow(threadID, after string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if start, ok := s.started[threadID]; ok {
-		start.after, start.afterKnown = after, true
-		s.started[threadID] = start
-	}
-}
-
 // settle ends a start once turns, the newest first and none running, show its
 // turn ended: listed with completedAt or behind a newer turn, or gone from a
-// full page. A start whose response named no turn ends once the newest turn is
-// newer than the one listed before the start and has completedAt.
+// full page. A start whose response named no turn, a compaction, cannot be told
+// from another client's turn in the listing, so it holds until
+// codexTurnStartLimit.
 func (s *codexTurnStarts) settle(threadID string, turns []map[string]any, full bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -75,9 +65,6 @@ func (s *codexTurnStarts) settle(threadID string, turns []map[string]any, full b
 		return
 	}
 	if start.turnID == "" {
-		if start.afterKnown && len(turns) > 0 && str(turns[0], "id") != start.after && turns[0]["completedAt"] != nil {
-			delete(s.started, threadID)
-		}
 		return
 	}
 	for i, turn := range turns {
@@ -123,21 +110,6 @@ func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, met
 	}
 	awaitTurnUnderway(ctx, client, threadID)
 	return response, nil
-}
-
-// startCompaction starts a compaction, whose response names no turn, so the
-// start is matched to the first turn newer than the one listed before it.
-func (c *Codex) startCompaction(ctx context.Context, client codexClient, threadID string) (map[string]any, error) {
-	before, listErr := codexRecentTurns(ctx, client, threadID, 1)
-	response, err := c.startTurn(ctx, client, threadID, "thread/compact/start", map[string]any{"threadId": threadID}, 10*time.Second)
-	if err == nil && listErr == nil {
-		after := ""
-		if len(before) > 0 {
-			after = str(before[0], "id")
-		}
-		c.turnStarts.follow(threadID, after)
-	}
-	return response, err
 }
 
 func codexRecentTurns(ctx context.Context, client codexClient, threadID string, limit int) ([]map[string]any, error) {

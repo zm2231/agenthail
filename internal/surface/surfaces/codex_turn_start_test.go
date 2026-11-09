@@ -75,18 +75,21 @@ func TestAStartWhoseTurnFellPastTheScannedTurnsNoLongerHoldsReloads(t *testing.T
 	}
 }
 
-func TestACompactionHoldsReloadsUntilATurnNewerThanItsStartIsListedEnded(t *testing.T) {
-	for _, before := range [][]any{nil, {listedTurn("turn-1", "completed")}} {
-		c := &Codex{}
-		if _, err := c.startCompaction(context.Background(), listedTurnClient{turns: before}, "t"); err != nil {
-			t.Fatal(err)
+func TestACompactionHoldsReloadsUntilTheStartLimitWhateverTurnsAreListed(t *testing.T) {
+	c := &Codex{}
+	before := []any{listedTurn("turn-1", "completed")}
+	if _, err := c.startTurn(context.Background(), listedTurnClient{turns: before}, "t", "thread/compact/start", map[string]any{"threadId": "t"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	for _, turns := range [][]any{nil, before, append([]any{listedTurn("turn-2", "completed")}, before...)} {
+		if busy, err := c.turnInFlight(context.Background(), listedTurnClient{turns: turns}, "t"); err != nil || !busy {
+			t.Fatalf("a compaction let a reload through over %v: busy=%v err=%v", turns, busy, err)
 		}
-		if busy, err := c.turnInFlight(context.Background(), listedTurnClient{turns: before}, "t"); err != nil || !busy {
-			t.Fatalf("a compaction whose turn is not listed yet let a reload through over %v: busy=%v err=%v", before, busy, err)
-		}
-		done := listedTurnClient{turns: append([]any{listedTurn("turn-2", "completed")}, before...)}
-		if busy, err := c.turnInFlight(context.Background(), done, "t"); err != nil || busy {
-			t.Fatalf("a compaction whose turn is listed ended still holds reloads: busy=%v err=%v", busy, err)
-		}
+	}
+	limit := codexTurnStartLimit
+	codexTurnStartLimit = 0
+	t.Cleanup(func() { codexTurnStartLimit = limit })
+	if busy, err := c.turnInFlight(context.Background(), listedTurnClient{turns: before}, "t"); err != nil || busy {
+		t.Fatalf("a compaction past the start limit still holds reloads: busy=%v err=%v", busy, err)
 	}
 }

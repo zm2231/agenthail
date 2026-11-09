@@ -17,7 +17,7 @@ func (c *Codex) GoalClear(ctx context.Context, sess *surface.Session) error {
 
 func (c *Codex) Compact(ctx context.Context, sess *surface.Session) error {
 	_, err := c.requestSessionWith(ctx, sess, true, func(client codexClient) (map[string]any, error) {
-		return c.startCompaction(ctx, client, sess.ID)
+		return c.startTurn(ctx, client, sess.ID, "thread/compact/start", map[string]any{"threadId": sess.ID}, 10*time.Second)
 	})
 	return err
 }
