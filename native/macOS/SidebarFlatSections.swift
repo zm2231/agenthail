@@ -5,14 +5,14 @@ struct SidebarFlatFamilies: View {
     let attention: [String: SessionAttention]
     let model: AgenthailModel
     let pane: SessionPane
-    @Binding var toggledFamilies: Set<String>
+    @Binding var familyChoices: [String: Bool]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             ForEach(families) { family in
-                let expanded = family.isExpanded(toggled: toggledFamilies, selectedID: pane.selectedSessionID)
+                let expanded = family.isExpanded(chosen: familyChoices, selectedID: pane.selectedSessionID)
                 SidebarFamilyRows(key: SidebarFamilyKey(family: family, expanded: expanded, selectedID: pane.selectedSessionID, attention: attention), model: model, pane: pane) {
-                    if toggledFamilies.contains(family.id) { toggledFamilies.remove(family.id) } else { toggledFamilies.insert(family.id) }
+                    familyChoices[family.id] = !expanded
                 }
                 .equatable()
             }
@@ -25,7 +25,7 @@ struct SidebarArchivedSection: View {
     let pane: SessionPane
     let grouped: Bool
     @Binding var expandedProjects: Set<String>
-    @Binding var toggledFamilies: Set<String>
+    @Binding var familyChoices: [String: Bool]
 
     var body: some View {
         if let request = model.archivedRequest {
@@ -36,16 +36,16 @@ struct SidebarArchivedSection: View {
                     ForEach(tree.projects) { project in
                         let id = SessionListLayout.archivedProjectID(project.id)
                         SidebarProjectSection(
-                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(id), selectedID: pane.selectedSessionID, attention: tree.attention, toggledFamilies: toggledFamilies, shownProjectID: pane.shownProjectID),
+                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(id), selectedID: pane.selectedSessionID, attention: tree.attention, familyChoices: familyChoices, shownProjectID: pane.shownProjectID),
                             model: model,
                             pane: pane,
                             toggleProject: { flip(id, in: $expandedProjects) },
-                            toggleFamily: { flip($0, in: $toggledFamilies) }
+                            toggleFamily: { familyChoices[$0] = !$1 }
                         )
                         .equatable()
                     }
                 } else {
-                    SidebarFlatFamilies(families: tree.flat, attention: tree.attention, model: model, pane: pane, toggledFamilies: $toggledFamilies)
+                    SidebarFlatFamilies(families: tree.flat, attention: tree.attention, model: model, pane: pane, familyChoices: $familyChoices)
                 }
                 if model.archivedHasMore {
                     ProgressView()

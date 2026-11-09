@@ -232,7 +232,7 @@ struct ConversationListView: View {
     @State private var showingNewSession = false
     @State private var search = ""
     @State private var expandedProjects: Set<String> = []
-    @State private var toggledFamilies: Set<String> = []
+    @State private var familyChoices: [String: Bool] = [:]
     @State private var projectSheet: ProjectSheet?
     @State private var projectConfirmation: ProjectConfirmation?
     @State private var newSessionPlace: NewSessionPlace?
@@ -405,10 +405,10 @@ struct ConversationListView: View {
 
     @ViewBuilder
     private func familyRows(_ family: SessionFamily) -> some View {
-        let expanded = family.isExpanded(toggled: toggledFamilies, selectedID: selectedID)
+        let expanded = family.isExpanded(chosen: familyChoices, selectedID: selectedID)
         row(.root(family), id: family.id)
         if !family.members.isEmpty {
-            Button { toggle(family) } label: {
+            Button { familyChoices[family.id] = !expanded } label: {
                 Label(expanded ? "Hide \(SessionFamilies.membersNoun(family))" : "Show \(SessionFamilies.membersCount(family))",
                       systemImage: expanded ? "chevron.down" : "chevron.right")
                     .font(.footnote)
@@ -427,10 +427,6 @@ struct ConversationListView: View {
                     .padding(.leading, CGFloat(member.depth) * 16)
             }
         }
-    }
-
-    private func toggle(_ family: SessionFamily) {
-        if !toggledFamilies.insert(family.id).inserted { toggledFamilies.remove(family.id) }
     }
 
     private func row(_ source: SessionListRow.Source, id: String, snippet: String? = nil, reason: String? = nil, identifierPrefix: String = "session-") -> SessionListRow {

@@ -27,8 +27,8 @@ struct SidebarSectionsTest {
     }
 
     @MainActor
-    static func keys(_ model: AgenthailModel, expanded: Set<String> = [], selected: String? = nil, families: Set<String> = [], shownProject: String? = nil) -> [String: SidebarSectionKey] {
-        Dictionary(uniqueKeysWithValues: model.sessionTree.projects.map { ($0.id, SidebarSectionKey(project: $0, expanded: expanded.contains($0.id), selectedID: selected, attention: model.sessionTree.attention, toggledFamilies: families, shownProjectID: shownProject)) })
+    static func keys(_ model: AgenthailModel, expanded: Set<String> = [], selected: String? = nil, families: [String: Bool] = [:], shownProject: String? = nil) -> [String: SidebarSectionKey] {
+        Dictionary(uniqueKeysWithValues: model.sessionTree.projects.map { ($0.id, SidebarSectionKey(project: $0, expanded: expanded.contains($0.id), selectedID: selected, attention: model.sessionTree.attention, familyChoices: families, shownProjectID: shownProject)) })
     }
 
     @MainActor
@@ -54,7 +54,7 @@ struct SidebarSectionsTest {
         model.snapshot?.sessions[2] = session("a2", project: "a", status: "busy")
         let afterA2 = keys(model, expanded: ["a"])
         check(familyKey(afterA2["a"], "a1") == familyKey(keys(model, expanded: ["a"])["a"], "a1"), "family keys are stable for an unchanged family")
-        check(familyKey(afterA2["a"], "a1") == familyKey(SidebarSectionKey(project: before["a"]!.project, expanded: true, selectedID: nil, attention: [:], toggledFamilies: [], shownProjectID: nil), "a1"), "a sibling family changing leaves a family's rows alone")
+        check(familyKey(afterA2["a"], "a1") == familyKey(SidebarSectionKey(project: before["a"]!.project, expanded: true, selectedID: nil, attention: [:], familyChoices: [:], shownProjectID: nil), "a1"), "a sibling family changing leaves a family's rows alone")
 
         let opened = keys(model, shownProject: "a")
         check(opened["a"]?.isShownProject == true && opened["a"] != keys(model)["a"], "opening a project with nothing selected in it redraws its header")
@@ -74,7 +74,7 @@ struct SidebarSectionsTest {
 
         let child = keys(model, selected: "a1-child")
         check(familyKey(child["a"], "a1")?.expanded == true, "selecting a subagent opens its family")
-        check(familyKey(keys(model, families: ["a1"])["a"], "a1")?.expanded == true && familyKey(keys(model)["a"], "a1")?.expanded == false, "toggling a family opens and closes it")
+        check(familyKey(keys(model, families: ["a1": true])["a"], "a1")?.expanded == true && familyKey(keys(model)["a"], "a1")?.expanded == false, "toggling a family opens and closes it")
 
         let question = AttentionState(id: 1, sessionId: "a2", target: "a2", queueId: 0, reason: "Waiting on you", requestedAction: "answer", createdAt: "2026-10-23T08:00:00Z")
         let quiet = keys(model, expanded: ["a"])

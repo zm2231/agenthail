@@ -929,11 +929,10 @@ struct SessionFamily: Identifiable, Equatable {
         return id == sessionID || members.contains { $0.id == sessionID }
     }
 
-    /// `toggled` holds the families the person flipped from how they start.
-    func isExpanded(toggled: Set<String>, selectedID: String?) -> Bool {
+    func isExpanded(chosen: [String: Bool], selectedID: String?) -> Bool {
         guard !members.isEmpty else { return false }
         if members.contains(where: { $0.id == selectedID }) { return true }
-        return startsExpanded != toggled.contains(id)
+        return chosen[id] ?? startsExpanded
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool {

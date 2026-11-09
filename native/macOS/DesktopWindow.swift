@@ -168,7 +168,7 @@ struct SessionSidebar: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.windowChromeTop) private var chromeTop
     @State private var expandedProjects: Set<String> = []
-    @State private var toggledFamilies: Set<String> = []
+    @State private var familyChoices: [String: Bool] = [:]
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @AppStorage(SessionListLayout.groupsKey) private var groupsByProject = true
 
@@ -207,15 +207,15 @@ struct SessionSidebar: View {
                         searchResults
                     } else {
                     if showsFlat {
-                        SidebarFlatFamilies(families: tree.flat, attention: tree.attention, model: model, pane: pane, toggledFamilies: $toggledFamilies)
+                        SidebarFlatFamilies(families: tree.flat, attention: tree.attention, model: model, pane: pane, familyChoices: $familyChoices)
                     } else {
                     ForEach(scopedProjects(tree)) { project in
                         SidebarProjectSection(
-                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(project.id), selectedID: pane.selectedSessionID, attention: tree.attention, toggledFamilies: toggledFamilies, shownProjectID: pane.shownProjectID),
+                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(project.id), selectedID: pane.selectedSessionID, attention: tree.attention, familyChoices: familyChoices, shownProjectID: pane.shownProjectID),
                             model: model,
                             pane: pane,
                             toggleProject: { toggle(project.id, in: $expandedProjects) },
-                            toggleFamily: { toggle($0, in: $toggledFamilies) }
+                            toggleFamily: { familyChoices[$0] = !$1 }
                         )
                         .equatable()
                     }
@@ -252,7 +252,7 @@ struct SessionSidebar: View {
                             .padding(.horizontal, DesktopSpace.s)
                     }
                     if scoped == nil && !hasMore {
-                        SidebarArchivedSection(model: model, pane: pane, grouped: groupsByProject, expandedProjects: $expandedProjects, toggledFamilies: $toggledFamilies)
+                        SidebarArchivedSection(model: model, pane: pane, grouped: groupsByProject, expandedProjects: $expandedProjects, familyChoices: $familyChoices)
                     }
                     }
                 }
@@ -372,7 +372,7 @@ extension SessionSidebar {
     }
 
     private func familyExpanded(_ family: SessionFamily) -> Bool {
-        family.isExpanded(toggled: toggledFamilies, selectedID: pane.selectedSessionID)
+        family.isExpanded(chosen: familyChoices, selectedID: pane.selectedSessionID)
     }
 
     private func toggle(_ id: String, in set: Binding<Set<String>>) {
