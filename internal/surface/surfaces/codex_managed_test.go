@@ -390,6 +390,19 @@ func TestCodexManagedStreamEmitsAuthoritativeTurnEvents(t *testing.T) {
 			},
 		},
 		{
+			name:   "turn listed interrupted with no completedAt while it starts is followed to its end",
+			turnID: "new",
+			reads: []map[string]any{
+				managedTurn("new", "interrupted"),
+				managedTurn("new", "completed", agentMessage("answer", "final_answer", "done")),
+			},
+			check: func(t *testing.T, events []surface.StreamEvent, err error) {
+				if err != nil || len(events) != 2 || events[0].Text != "done" || !events[0].Final || events[1].Kind != "done" {
+					t.Fatalf("err=%v events=%+v", err, events)
+				}
+			},
+		},
+		{
 			name:   "failed turn reports an error and no final answer",
 			turnID: "failed",
 			reads: []map[string]any{
