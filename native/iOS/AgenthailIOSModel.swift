@@ -227,6 +227,12 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     @ObservationIgnored private var deviceRegistrationFailure: String?
     @ObservationIgnored private var appActive = true
     @ObservationIgnored private var repairingPush: Set<String> = []
+    @ObservationIgnored private let notificationDefaults: UserDefaults
+    private static let notificationsOffKey = "notificationsTurnedOff"
+    private var pushTurnedOff: Bool {
+        get { notificationDefaults.bool(forKey: Self.notificationsOffKey) }
+        set { notificationDefaults.set(newValue, forKey: Self.notificationsOffKey) }
+    }
     var notificationProblems: [String] = []
     private let networkSession: URLSession
     private let connectionDrops: ConnectionDrops?
@@ -242,7 +248,8 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         return session(qualified)?.displayName ?? id
     }
 
-    init(autoConnect: Bool = true, session: URLSession = .shared, drops: ConnectionDrops? = .shared, composerStore: ComposerStore? = nil) {
+    init(autoConnect: Bool = true, session: URLSession = .shared, drops: ConnectionDrops? = .shared, composerStore: ComposerStore? = nil, notificationDefaults: UserDefaults = .standard) {
+        self.notificationDefaults = notificationDefaults
         networkSession = session
         connectionDrops = drops
         automaticallyConnect = autoConnect
@@ -261,6 +268,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     init(api: AgenthailAPI, paired: Bool = false, hostID: String = "computer", hostName: String = "computer", composerStore: ComposerStore? = nil) {
+        notificationDefaults = .standard
         networkSession = .shared
         connectionDrops = nil
         automaticallyConnect = false
@@ -2225,6 +2233,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func requestNotifications() {
+        pushTurnedOff = false
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
             if granted {
                 DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
@@ -2240,6 +2249,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func turnOffNotifications() {
+        pushTurnedOff = true
         Task { await disableNotifications(status: "Not enabled") }
     }
 
@@ -2323,7 +2333,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     private func registerPush(_ connection: HostConnection, deviceToken: String) {
         let hostID = connection.id
-        guard !connection.isPreview, appActive, !repairingPush.contains(hostID) else { return }
+        guard !connection.isPreview, appActive, !pushTurnedOff, !repairingPush.contains(hostID) else { return }
         if let running = pushRetries[hostID] {
             if running.connection == ObjectIdentifier(connection) { return }
             cancelPushSetup(hostID)
@@ -2669,7 +2679,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     private func disableNotifications(status: String) async {
-        for id in Array(pushRetries.keys) { cancelPushSetup(id) }
+        for id in Array(pushRetries.keys) { await cancelPushSetup(id)?.value }
         deviceRegistrationFailure = nil
         for id in hostOrder {
             guard let connection = connections[id], !connection.isPreview else { continue }
