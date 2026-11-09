@@ -92,7 +92,10 @@ func TestAWorkerWhoseStarterIsArchivedMissingOrFilteredOutIsItsOwnRoot(t *testin
 	f.add("of-archived", "archived-lead", "main")
 	f.add("of-missing", "ghost", "main")
 	f.add("claude-lead", "", "main", func(r *dashboardSession) { r.Surface = surface.KindClaude })
-	f.add("codex-worker", "claude-lead", "main")
+	f.add("archived-worker", "archived-lead", "main", func(r *dashboardSession) { r.Archived = true })
+	f.add("codex-worker", "claude-lead", "main", func(r *dashboardSession) {
+		r.ObservedSubagents = &surface.SubagentRollup{Count: 2, Working: 2}
+	})
 	f.add("unplaced-lead", "", "")
 	f.add("of-unplaced", "unplaced-lead", "")
 	plan := f.plan(SessionViewFilters{})
@@ -101,12 +104,16 @@ func TestAWorkerWhoseStarterIsArchivedMissingOrFilteredOutIsItsOwnRoot(t *testin
 			t.Fatalf("%s is %+v under %s, want its own root", id, member, family.RootID)
 		}
 	}
-	if family, _ := familyOf(t, plan, "codex-worker"); family.RootID != "claude-lead" {
-		t.Fatalf("unfiltered, the worker is under %s, want claude-lead", family.RootID)
+	if family, _ := familyOf(t, plan, "codex-worker"); family.RootID != "claude-lead" || family.WorkingSubagents != 2 {
+		t.Fatalf("unfiltered, the worker's family is %+v, want claude-lead's with its 2 working subagents", family)
 	}
 	filtered := f.plan(SessionViewFilters{Surface: string(surface.KindCodex)})
-	if family, member := familyOf(t, filtered, "codex-worker"); family.RootID != "codex-worker" || member.ContextOnly || len(family.Members) != 1 {
-		t.Fatalf("filtered to codex, the worker is %+v, want its own root without its starter as context", family)
+	if family, member := familyOf(t, filtered, "codex-worker"); family.RootID != "codex-worker" || member.ContextOnly || len(family.Members) != 1 || family.WorkingSubagents != 2 {
+		t.Fatalf("filtered to codex, the worker is %+v, want its own root with its 2 working subagents and without its starter", family)
+	}
+	archived := newSessionViewPlan(f.rows, "archived", SessionViewFilters{}, f.now)
+	if family, member := familyOf(t, archived, "archived-worker"); family.RootID != "archived-worker" || member.Worker {
+		t.Fatalf("in Archived, an archived worker of an archived starter is %+v under %s, want its own root", member, family.RootID)
 	}
 }
 

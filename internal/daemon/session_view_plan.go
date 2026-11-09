@@ -4,8 +4,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type sessionViewPlan struct {
@@ -15,7 +13,6 @@ type sessionViewPlan struct {
 	parent   map[string]string
 	worker   map[string]bool
 	children map[string][]string
-	working  map[string]int
 	now      time.Time
 }
 
@@ -48,7 +45,7 @@ func presentationPinned(row *dashboardSession) bool {
 }
 
 func newSessionViewPlan(rows []dashboardSession, scope string, filters SessionViewFilters, now time.Time) sessionViewPlan {
-	p := sessionViewPlan{view: SessionView{Scope: scope, Filters: filters, AsOf: now, Counts: map[string]SessionViewCount{}, Projects: []SessionViewProject{}, Families: []SessionViewFamily{}, Surfaces: []SessionViewSurface{}}, rows: make(map[string]*dashboardSession, len(rows)), roots: map[string]string{}, parent: map[string]string{}, worker: map[string]bool{}, children: map[string][]string{}, working: map[string]int{}, now: now}
+	p := sessionViewPlan{view: SessionView{Scope: scope, Filters: filters, AsOf: now, Counts: map[string]SessionViewCount{}, Projects: []SessionViewProject{}, Families: []SessionViewFamily{}, Surfaces: []SessionViewSurface{}}, rows: make(map[string]*dashboardSession, len(rows)), roots: map[string]string{}, parent: map[string]string{}, worker: map[string]bool{}, children: map[string][]string{}, now: now}
 	for _, row := range rows {
 		if row.Display == nil {
 			display := sessionDisplay(row, now)
@@ -78,15 +75,6 @@ func newSessionViewPlan(rows []dashboardSession, scope string, filters SessionVi
 			p.children[parent] = append(p.children[parent], row.ID)
 		}
 		p.deadlines(row)
-	}
-	for id, root := range p.roots {
-		row := p.rows[id]
-		if id != root && row.Subagent != nil && row.Status == surface.StatusBusy {
-			p.working[root]++
-		}
-		if row.ObservedSubagents != nil {
-			p.working[root] += row.ObservedSubagents.Working
-		}
 	}
 	for parent := range p.children {
 		sort.Slice(p.children[parent], func(i, j int) bool {
@@ -178,6 +166,7 @@ func (p *sessionViewPlan) families(scope string, filters SessionViewFilters) []S
 			needed[at] = true
 		}
 	}
+	working := p.workingSubagents(matched)
 	families := []SessionViewFamily{}
 	for id, row := range p.rows {
 		if p.roots[id] == "" || !needed[id] || p.up(id, matched) != "" {
@@ -230,7 +219,7 @@ func (p *sessionViewPlan) families(scope string, filters SessionViewFilters) []S
 			}
 		}
 		walk(id, 0)
-		family.WorkingSubagents = p.working[id]
+		family.WorkingSubagents = working[id]
 		family.key = sessionViewKey{Band: sessionBandIdle, At: family.activity, ID: id}
 		switch {
 		case needsYou:

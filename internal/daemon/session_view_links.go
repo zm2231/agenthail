@@ -3,6 +3,8 @@ package daemon
 import (
 	"slices"
 	"sort"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (p *sessionViewPlan) link() {
@@ -12,7 +14,7 @@ func (p *sessionViewPlan) link() {
 			continue
 		}
 		starter := p.rows[row.StartedBy]
-		if row.StartedBy == "" || starter == nil || !sameFamilyPlace(row, starter) {
+		if row.StartedBy == "" || starter == nil || starter.Archived || !sameFamilyPlace(row, starter) {
 			continue
 		}
 		p.parent[id], p.worker[id] = row.StartedBy, true
@@ -22,16 +24,21 @@ func (p *sessionViewPlan) link() {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	const visiting, done = 1, 2
+	state := map[string]int{}
 	for _, id := range ids {
-		index := map[string]int{}
 		var path []string
-		for at := id; at != ""; at = p.parent[at] {
-			if i, seen := index[at]; seen {
-				p.cutWorkerLink(path[i:])
-				break
-			}
-			index[at] = len(path)
+		at := id
+		for at != "" && state[at] == 0 {
+			state[at] = visiting
 			path = append(path, at)
+			at = p.parent[at]
+		}
+		if at != "" && state[at] == visiting {
+			p.cutWorkerLink(path[slices.Index(path, at):])
+		}
+		for _, visited := range path {
+			state[visited] = done
 		}
 	}
 }
@@ -52,6 +59,36 @@ func (p *sessionViewPlan) up(id string, matched map[string]bool) string {
 		return ""
 	}
 	return parent
+}
+
+func (p *sessionViewPlan) workingSubagents(matched map[string]bool) map[string]int {
+	rootOf := map[string]string{}
+	var root func(string) string
+	root = func(id string) string {
+		if known, ok := rootOf[id]; ok {
+			return known
+		}
+		found := id
+		if parent := p.up(id, matched); parent != "" {
+			found = root(parent)
+		}
+		rootOf[id] = found
+		return found
+	}
+	working := map[string]int{}
+	for id, row := range p.rows {
+		if p.roots[id] == "" {
+			continue
+		}
+		at := root(id)
+		if id != at && row.Subagent != nil && row.Status == surface.StatusBusy {
+			working[at]++
+		}
+		if row.ObservedSubagents != nil {
+			working[at] += row.ObservedSubagents.Working
+		}
+	}
+	return working
 }
 
 func sameFamilyPlace(a, b *dashboardSession) bool {
