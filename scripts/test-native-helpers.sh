@@ -174,6 +174,7 @@ SOURCES=(
   macOS/PairingProgress.swift
   macOS/ProjectHeaderFacts.swift
   macOS/SessionPane.swift
+  macOS/KeptTranscripts.swift
   macOS/MacDecisions.swift
   macOS/PaneScope.swift
   DecisionFeed.swift
