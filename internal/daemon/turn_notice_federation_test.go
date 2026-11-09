@@ -422,6 +422,7 @@ func TestASessionFirstSeenWithAFinishedTurnDoesNotNotify(t *testing.T) {
 	}
 	hostTurn(t, host, "remote-new", "turn-2", "", nil)
 	testkit.Eventually(t, "its next turn notified", 10*time.Second, func() bool { return len(mac.list()) == 1 })
+	settleNotices(t, host, record.ID, viewer)
 	if shown := relay.shown("phone"); len(shown) != 1 || shown[0]["sessionId"] != hosts.Qualify(record.ID, "remote-new") {
 		t.Fatalf("the phone showed %+v", shown)
 	}
