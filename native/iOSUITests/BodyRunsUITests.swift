@@ -49,6 +49,14 @@ final class BodyRunsUITests: XCTestCase {
         }
     }
 
+    func testTextStreamingIntoAReplyLeavesTheScreenAlone() {
+        let runs = runs(["--preview-stream", "--preview-stream-rate", "10", "--preview-stream-shape", "text"])
+        print(Self.line("text-streaming", runs))
+        let streamed = runs["streamed", default: 0]
+        XCTAssertGreaterThan(streamed, 50, "the open session kept streaming")
+        XCTAssertLessThanOrEqual(runs["SessionScreen", default: 0], streamed * 2 / 3, "text growing in a reply redrew the whole screen")
+    }
+
     func testAnotherSessionsUpdatesRedrawOnlyItsRowInTheList() {
         let runs = runs(["--preview-app"])
         print(Self.line("list", runs))

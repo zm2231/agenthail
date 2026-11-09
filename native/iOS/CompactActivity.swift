@@ -136,9 +136,9 @@ struct CompactActivityGroup: View, @MainActor Equatable {
                 }
             }
         } else if group.isReply, let reply = group.items.first {
-            IOSTimelineRow(item: reply, finished: group.finished, attachmentLoader: attachmentLoader)
+            LiveTimelineRow(item: reply, finished: group.finished, attachmentLoader: attachmentLoader)
         } else {
-            ForEach(group.items) { IOSTimelineRow(item: $0, attachmentLoader: attachmentLoader) }
+            ForEach(group.items) { LiveTimelineRow(item: $0, attachmentLoader: attachmentLoader) }
         }
     }
 

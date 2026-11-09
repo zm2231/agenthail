@@ -61,8 +61,26 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     @ObservationIgnored private var heldKey: ListKey?
     @ObservationIgnored private var heldCells: [String: SessionCell] = [:]
     @ObservationIgnored private var shownOrder: [ScopePage.View?] = []
+    @ObservationIgnored private var detailStorage: SessionDetail?
+    private var detailRevision: UInt64 = 0
+    @ObservationIgnored let timelineCells = TimelineCells()
     var selectedDetail: SessionDetail? {
-        didSet { paintOpeningSession() }
+        get {
+            _ = detailRevision
+            return detailStorage
+        }
+        set {
+            detailStorage = newValue
+            detailRevision &+= 1
+            timelineCells.adopt(newValue?.timeline?.items ?? [])
+            paintOpeningSession()
+        }
+    }
+
+    private func streamText(into detail: SessionDetail) {
+        detailStorage = detail
+        timelineCells.adopt(detail.timeline?.items ?? [])
+        paintOpeningSession()
     }
     var sessionRequests: SessionRequests?
     var answeringRequest: String?
@@ -2515,6 +2533,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         var older = olderActivity
         var error = sessionError
         var changed = false
+        var textOnly = true
         for event in events where event.stream == "session" && event.sessionId == route.sessionID {
             if pageReadsInFlight > 0, !replaying { rowsDuringPageRead.append(event) }
             sessionStreamCursor = max(sessionStreamCursor, event.seq)
@@ -2525,10 +2544,12 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                 sessionMetadata.stream(context: event.data.context)
                 detail.context = event.data.context
                 changed = true
+                textOnly = false
             case "goal":
                 sessionMetadata.stream(goal: event.data.goal)
                 detail.goal = event.data.goal
                 changed = true
+                textOnly = false
             case "source-error" where event.data.op == "reset":
                 error = event.data.reason ?? "The session source restarted."
                 streamOutranPage = true
@@ -2537,8 +2558,11 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                 if event.data.op == "remove" {
                     timeline.items.removeAll { $0.id == event.data.itemId }
                     older.removeAll { $0.id == event.data.itemId }
+                    textOnly = false
                 } else {
-                    SessionStore.place(Self.timelineItem(event), in: &timeline, older: &older)
+                    let item = Self.timelineItem(event)
+                    if !(timeline.items.first { $0.id == item.id }.map { Self.onlyTextGrew(from: $0, to: item) } ?? false) { textOnly = false }
+                    SessionStore.place(item, in: &timeline, older: &older)
                 }
                 detail.timeline = timeline
                 error = nil
@@ -2546,7 +2570,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             }
         }
         if older != olderActivity { olderActivity = older }
-        if changed { selectedDetail = detail }
+        if changed, textOnly { streamText(into: detail) } else if changed { selectedDetail = detail }
         if error != sessionError { sessionError = error }
         if changed, !replaying, snapshot?.sessions.contains(where: { $0.id == selected }) != true { readUnlistedState(selected) }
     }
@@ -2579,6 +2603,15 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         guard detail.liveState != read.liveState else { return }
         detail.liveState = read.liveState
         selectedDetail = detail
+    }
+
+    static func onlyTextGrew(from old: TimelineItem, to new: TimelineItem) -> Bool {
+        guard old.kind == "message", old.role == "assistant", old.agent == nil else { return false }
+        var grown = old
+        grown.text = new.text
+        grown.truncated = new.truncated
+        grown.timestamp = new.timestamp
+        return grown == new
     }
 
     private static func timelineItem(_ event: SessionStreamEvent) -> TimelineItem {
