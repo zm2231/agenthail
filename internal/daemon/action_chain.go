@@ -53,6 +53,9 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 		}
 		return d.decodeAction(ctx, p, raw, key)
 	}
+	if err := d.movedFromHere(ctx, host, request); err != nil {
+		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, err) })
+	}
 	if err := d.hostTransit(ctx, host); err != nil {
 		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, err) })
 	}

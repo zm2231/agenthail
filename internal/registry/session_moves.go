@@ -578,3 +578,14 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 	}
 	return events, false, tx.Commit()
 }
+
+// MovedTo is the host this host last moved conversation to, "" when it never
+// moved it away.
+func (r *Registry) MovedTo(conversation string) (string, error) {
+	var host string
+	err := r.read.QueryRow(`SELECT peer_host FROM session_moves WHERE conversation=? AND role='out' AND state=? ORDER BY updated_at DESC, rowid DESC LIMIT 1`, conversation, MoveDone).Scan(&host)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return host, err
+}

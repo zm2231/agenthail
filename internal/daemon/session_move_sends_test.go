@@ -2,12 +2,15 @@ package daemon
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -70,6 +73,77 @@ func TestASendThatArrivesWhileItsSessionIsHeldForAMoveReachesItOnceOnTheNewHost(
 	})
 	source.daemon.drainHostDeliveries(context.Background(), host)
 	if got := onTarget.Containing("while it moves"); got != 1 {
+		t.Fatalf("the send reached the moved session %d times", got)
+	}
+}
+
+type staleCatalog struct {
+	frozen atomic.Bool
+}
+
+func (s *staleCatalog) wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/catalog-events" {
+			w = frozenWriter{ResponseWriter: w, frozen: &s.frozen}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type frozenWriter struct {
+	http.ResponseWriter
+	frozen *atomic.Bool
+}
+
+func (w frozenWriter) Write(data []byte) (int, error) {
+	for w.frozen.Load() {
+		time.Sleep(10 * time.Millisecond)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w frozenWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok && !w.frozen.Load() {
+		flusher.Flush()
+	}
+}
+
+func TestASendFromAThirdHostThatHasNotSeenTheMoveReachesTheSessionOnItsNewHost(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	claudetest.New(t)
+	source, target, third := newMoveNode(t), newMoveNode(t), newMoveNode(t)
+	stale := &staleCatalog{}
+	source.handler = stale.wrap(source.handler)
+	pairMoveNodes(t, source, target)
+	source.serve(t, nil)
+	roots := x509.NewCertPool()
+	roots.AddCert(source.server.Certificate())
+	roots.AddCert(target.server.Certificate())
+	third.start(t, roots)
+	toSource := third.pair(t, source.federationNode, "source")
+	third.pair(t, target.federationNode, "server")
+	session := startMovable(t, source)
+	claudetest.ListenPeerManager(t, source.host.Home)
+	onTarget := claudetest.ListenPeerManager(t, target.host.Home)
+	mirroredOn(t, third, source, toSource.ID, session.ID)
+
+	stale.frozen.Store(true)
+	if _, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"}); err != nil {
+		t.Fatal(err)
+	}
+	if owner, _ := third.reg.SessionHost(session.ID); owner != toSource.ID {
+		t.Fatalf("the third host already sees the session on %q", owner)
+	}
+	reply := sendAsPerson(third.daemon, fmt.Sprintf(`{"action":"send","sessionId":%q,"message":"to where it was"}`, hosts.Qualify(toSource.ID, session.ID)))
+	stale.frozen.Store(false)
+	if reply.Status != http.StatusOK {
+		t.Fatalf("a send to the session's former host answered %d: %s", reply.Status, reply.Body)
+	}
+	testkit.Eventually(t, "the send to reach the session on its new host", 15*time.Second, func() bool {
+		return onTarget.Containing("to where it was") >= 1
+	})
+	if got := onTarget.Containing("to where it was"); got != 1 {
 		t.Fatalf("the send reached the moved session %d times", got)
 	}
 }
