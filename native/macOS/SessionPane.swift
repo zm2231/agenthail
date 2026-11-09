@@ -8,7 +8,8 @@ import os
 final class SessionPane: Identifiable {
     let id = UUID()
     let restoresSelection: Bool
-    let rowMemory = TranscriptRowMemory()
+    let rowMemory: TranscriptRowMemory
+    let keptTranscripts = KeptTranscripts()
     unowned let model: AgenthailModel
 
     private(set) var selectedSessionID: String? {
@@ -146,9 +147,10 @@ final class SessionPane: Identifiable {
         }
     }
 
-    init(model: AgenthailModel, restoresSelection: Bool) {
+    init(model: AgenthailModel, restoresSelection: Bool, rowMemory: TranscriptRowMemory? = nil) {
         self.model = model
         self.restoresSelection = restoresSelection
+        self.rowMemory = rowMemory ?? TranscriptRowMemory()
         if restoresSelection, let data = UserDefaults.standard.data(forKey: Self.tabsKey), let saved = try? JSONDecoder().decode(SessionTabs.self, from: data) {
             tabs = saved
         }
@@ -382,6 +384,7 @@ final class SessionPane: Identifiable {
 
     private func clearSelection() {
         guard selectedSessionID != nil || removedSession != nil else { return }
+        keptTranscripts.freeze(self)
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()
         detailReloadTask = nil
@@ -435,6 +438,7 @@ final class SessionPane: Identifiable {
         shownProjectID = nil
         if scope == .inbox || (scope.projectID != nil && model.session(id)?.project?.id != scope.projectID) { scope = .all }
         guard id != selectedSessionID || detail == nil else { return }
+        if id != selectedSessionID { keptTranscripts.freeze(self) }
         removedSession = nil
         selectedSnapshot = model.knownSessions.first { $0.id == id }
         if let selectedSnapshot { model.pin(selectedSnapshot) }
@@ -475,8 +479,28 @@ final class SessionPane: Identifiable {
         loadCommands(id)
     }
 
+    func frozenTranscript() -> SessionPane {
+        let copy = SessionPane(model: model, restoresSelection: false, rowMemory: rowMemory)
+        copy.closed = true
+        copy.selectedSessionID = selectedSessionID
+        copy.removedSession = removedSession
+        copy.detail = live ?? detail
+        copy.olderItems = olderItems
+        copy.olderCursor = olderCursor
+        copy.loadingOlder = loadingOlder
+        copy.olderError = olderError
+        copy.detailStale = detailStale
+        copy.detailRefreshFailed = detailRefreshFailed
+        copy.detailLoadError = detailLoadError
+        copy.inspectorVisible = inspectorVisible
+        copy.inspectorDocks = inspectorDocks
+        copy.inspectorOverlay = inspectorOverlay
+        return copy
+    }
+
     func close() {
         closed = true
+        keptTranscripts.removeAll()
         endOpenInterval("closed")
         streamAwaitsCursor = false
         sessionStreamTask?.cancel()
@@ -635,6 +659,7 @@ final class SessionPane: Identifiable {
             if next == nil { openNewSession() }
             return
         }
+        keptTranscripts.freeze(self)
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()
         detailReloadTask = nil
@@ -649,6 +674,7 @@ final class SessionPane: Identifiable {
 
     func closeRemovedSession() {
         guard removedSession != nil else { return }
+        keptTranscripts.freeze(self)
         removedSession = nil
         selectedSnapshot = nil
         frozenOlderCursor = nil

@@ -653,7 +653,10 @@ struct ConversationPane: View {
                 .contentTitleBand(band, toggle: showsSidebarToggle ? pane : nil)
                 .solidContentPane(gaps: gaps)
         } else if let session = pane.displayedSession {
-            TranscriptView(pane: pane, session: session, sends: model.localSends[session.id] ?? [])
+            GeometryReader { geometry in
+                KeptTranscriptHost(model: model, pane: pane, session: session, insets: geometry.safeAreaInsets)
+                    .ignoresSafeArea(.all, edges: .vertical)
+            }
                 .task(id: RequestSync.viewKey(session)) { await pane.syncRequests(for: session) }
                 .topFade(below: chromeTop == 0 ? ConversationHeader.height : ConversationHeader.underTabsHeight)
                 .safeAreaInset(edge: .top, spacing: 0) {
@@ -1151,7 +1154,7 @@ struct AttachmentImageView: View {
     }
 
     private func load() async {
-        guard let sessionID = pane.displayedSession?.id else { return }
+        guard image == nil, let sessionID = pane.displayedSession?.id else { return }
         do {
             let data = try await model.attachmentData(sessionID: sessionID, attachment: attachment)
             if let decoded = NSImage(data: data) { image = decoded } else { failed = true }
