@@ -108,8 +108,9 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 			row.Subagent.ParentID = hosts.Qualify(record.HostID, row.Subagent.ParentID)
 			row.Subagent.RootID = hosts.Qualify(record.HostID, row.Subagent.RootID)
 		}
-		if row.StartedBy != "" {
-			row.StartedBy = hosts.Qualify(record.HostID, row.StartedBy)
+		row.StartedBy = hosts.Qualify(record.HostID, row.StartedBy)
+		if ref, id, qualified := hosts.Split(row.StartedBy); qualified && d.isLocalHostRef(ref) {
+			row.StartedBy = id
 		}
 		if record.HostID == "" {
 			local := host
