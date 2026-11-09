@@ -177,7 +177,14 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    A paired host that has not yet heard of the move may still send any action
    to the source; the source does not pass it on, but answers `moved` the
    same way, and the sending host sends it once more, straight to the target.
-   An MCP tool reports `moved` as a retryable refusal.
+   A third host keeps the session under the source, as it takes no other
+   host's row for a session the source owns there, so every send it makes
+   reaches the source first. The source answers `moved`
+   before it checks the sender, because a sender on the third host is not one
+   the source can send as; the target checks it when the send arrives there.
+   This covers sends the third host held as well, such as a relay: the held
+   send goes once more, with its key, to the target, and is settled by the
+   target's answer. An MCP tool reports `moved` as a retryable refusal.
 
 On the target, every request must come from a paired host's token, which has
 the `control` and `host` scopes. The token names the source; the request body

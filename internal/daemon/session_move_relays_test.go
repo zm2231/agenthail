@@ -286,3 +286,80 @@ func TestATargetThatCannotTakeRelaysLeavesTheSessionAndItsRelayWhereTheyWere(t *
 		t.Fatal("the refused move took the conversation's transcript away")
 	}
 }
+
+func TestARelayOnAThirdHostToASessionThatMovedReachesItOnItsNewHost(t *testing.T) {
+	source, target, third := moveMesh(t, nil)
+	session := startMovable(t, source)
+	feeder := startMovable(t, third)
+	mirroredOn(t, third, source, mustHostID(t, source.federationNode), session.ID)
+	relayFrom(t, third, feeder, session.ID)
+
+	if _, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	reply := takeTurn(t, third, feeder.ID, "for the session that moved on")
+	testkit.Eventually(t, "the third host's relay to reach the session on its new host", 15*time.Second, func() bool {
+		third.daemon.syncRelays(context.Background(), third.claude, feeder)
+		return relayed(t, target, session.ID, reply) == 1
+	})
+	if got := relayed(t, source, session.ID, reply); got != 0 {
+		t.Fatalf("the host the session left queued the relay %d times", got)
+	}
+}
+
+func TestAHeldSendFollowsOneMovedAnswerAndThenGivesUp(t *testing.T) {
+	source, target, third := moveMesh(t, nil)
+	session := startMovable(t, source)
+	feeder := startMovable(t, third)
+	mirroredOn(t, third, source, mustHostID(t, source.federationNode), session.ID)
+	relayFrom(t, third, feeder, session.ID)
+	if _, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	refused := func(t *testing.T, text, by, to string) {
+		t.Helper()
+		reply := takeTurn(t, third, feeder.ID, text)
+		testkit.Eventually(t, "the held relay to settle", 15*time.Second, func() bool {
+			third.daemon.syncRelays(context.Background(), third.claude, feeder)
+			for _, row := range queuedOn(t, third, session.ID, reply) {
+				if row.Status == "dead" {
+					return true
+				}
+			}
+			return false
+		})
+		rows := queuedOn(t, third, session.ID, reply)
+		if len(rows) != 1 || !strings.Contains(rows[0].LastError, "host "+by+" refused the message") || !strings.Contains(rows[0].LastError, "moved to host "+to) {
+			t.Fatalf("the held relay settled as %+v, want it dead with %s's moved answer", rows, by)
+		}
+	}
+
+	t.Run("a second moved answer", func(t *testing.T) {
+		back := mustHostID(t, source.federationNode)
+		target.gate.movedTo.Store(&back)
+		t.Cleanup(func() { target.gate.movedTo.Store(nil) })
+		refused(t, "bounced back", "b", back)
+	})
+
+	t.Run("a moved answer naming a host not paired here", func(t *testing.T) {
+		nowhere := "h0000000000ff"
+		source.gate.movedTo.Store(&nowhere)
+		t.Cleanup(func() { source.gate.movedTo.Store(nil) })
+		refused(t, "sent nowhere", "a", nowhere)
+	})
+}
+
+func queuedOn(t *testing.T, node *moveNode, session, text string) []registry.QueueRow {
+	t.Helper()
+	rows, err := node.reg.ListQueue(true, node.daemon.adapters())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []registry.QueueRow
+	for _, row := range rows {
+		if row.SessionID == session && strings.Contains(row.Message, text) {
+			found = append(found, row)
+		}
+	}
+	return found
+}
