@@ -31,6 +31,12 @@ struct ProjectHeaderTest {
         let server = try StubServer { request in
             guard request.hasPrefix("POST /api/v1/actions") else { return reply("200 OK", "{}") }
             requests.append(request)
+            if request.contains("\"action\":\"alias\"") {
+                if request.contains("\"sessionId\":\"lead\"") {
+                    return reply("409 Conflict", #"{"error":{"code":"conflict","message":"@lead is a project coordinator's name; change it with 'agenthail coordinator set --replace' or 'agenthail coordinator clear'"}}"#)
+                }
+                return reply("400 Bad Request", #"{"error":{"code":"invalid_request","message":"session not found"}}"#)
+            }
             if request.contains("\"message\":\"partial\"") {
                 return reply("409 Conflict", ##"{"error":{"code":"conflict","message":"channel delivery: 1 sent, 0 queued, 0 submitted, 1 failed (@lead sent; s2 failed: host unreachable)"},"target":"#p1","recipients":[{"coordinator":"@lead","outcome":"sent"},{"sessionId":"s2","outcome":"failed","detail":"host unreachable"}],"sent":1,"queued":0,"submitted":0,"failed":1}"##)
             }
@@ -45,6 +51,13 @@ struct ProjectHeaderTest {
         let port = await server.ready()
         let model = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(port)")!, token: "t", session: URLSession(configuration: .ephemeral)))
         let project = ProjectState(id: "p1", displayName: "Agenthail")
+
+        let leadRefused = await model.rename("lead", to: "")
+        check(leadRefused?.hasPrefix("This name is this project's lead. Change or clear it with Change Lead…") == true, "a lead's refused clear names the app's way to change it: \(leadRefused ?? "nil")")
+        check(leadRefused?.contains("agenthail coordinator") == false, "it gives no CLI advice")
+        let otherRefused = await model.rename("gone", to: "")
+        check(otherRefused?.contains("session not found") == true, "any other refusal keeps the daemon's text: \(otherRefused ?? "nil")")
+        requests.removeAll()
 
         let notice = try await model.broadcast(to: project, message: "ship it", idempotencyKey: "k1")
         let posted = requests.first ?? ""

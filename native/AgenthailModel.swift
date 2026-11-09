@@ -1096,6 +1096,10 @@ final class AgenthailModel {
         do {
             try await api.nameSession(id: sessionID, alias: alias)
         } catch {
+            // The daemon refuses clearing a name with 409 only when it is a project lead's.
+            if alias.isEmpty, case .request(409, _)? = error as? AgenthailAPIError {
+                return SessionHandle.leadRefusal(knownSessions.first { $0.id == sessionID }?.alias)
+            }
             return AgenthailAPIError.userMessage(error)
         }
         _ = await refresh(fresh: true)
