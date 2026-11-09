@@ -7,7 +7,7 @@ struct NewSessionPlace: Identifiable {
 }
 
 struct IOSProjectMenuItems: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let project: ListedProject
     @Binding var sheet: ProjectSheet?
     @Binding var confirmation: ProjectConfirmation?
@@ -41,7 +41,7 @@ struct IOSProjectMenuItems: View {
 }
 
 struct IOSProjectSheetView: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let sheet: ProjectSheet
 
     var body: some View {
@@ -59,7 +59,7 @@ struct IOSProjectSheetView: View {
 }
 
 private struct IOSAddProjectForm: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @State var host: String
     @State var folder: String
     @State private var title = ""
@@ -109,7 +109,7 @@ private struct IOSAddProjectForm: View {
 }
 
 private struct IOSRenameProjectForm: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let project: ListedProject
     @State private var title: String
     @State private var saving = false
@@ -153,7 +153,7 @@ private struct IOSRenameProjectForm: View {
 }
 
 private struct IOSProjectLeadForm: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let project: ListedProject
     @State private var checkout = 0
     @State private var surface = "claude"
@@ -215,7 +215,7 @@ private struct IOSProjectLeadForm: View {
 }
 
 struct IOSSessionProjectControls: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let session: SessionState
     @State private var replacing: String?
 

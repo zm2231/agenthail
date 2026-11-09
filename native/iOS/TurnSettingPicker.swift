@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct TurnSettingPicker: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let sessionID: String
     let setting: TurnSetting
     let options: [TurnSetting.Option]

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct IOSCompactSettingRows: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let sessionID: String
     let settings: [TurnSetting]
 

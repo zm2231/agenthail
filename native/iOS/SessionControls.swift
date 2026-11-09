@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SessionEditingControls: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let detail: SessionDetail
     @State private var editingGoal = false
     @State private var editingBudget = false
@@ -59,7 +59,7 @@ struct SessionEditingControls: View {
 }
 
 struct QueueListView: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var error: String?
     @State private var page = InboxPage()

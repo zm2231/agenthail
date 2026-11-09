@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct QueueTailRows: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @Binding var tail: QueueTail
     let readOnly: Bool
     var generation = 0
@@ -158,7 +158,7 @@ struct QueueTailRows: View {
 }
 
 struct QueueTailTracking: ViewModifier {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @Binding var tail: QueueTail
     let session: SessionState
     let timeline: [TimelineItem]

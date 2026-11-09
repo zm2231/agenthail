@@ -3,7 +3,7 @@ import UIKit
 import ImageIO
 
 struct AgenthailIOSRoot: View {
-    @ObservedObject var model: AgenthailIOSModel
+    @Bindable var model: AgenthailIOSModel
 
     var body: some View {
         AppearanceScope(appearance: model.appearance) {
@@ -34,7 +34,7 @@ struct AgenthailIOSRoot: View {
 }
 
 struct PairingScreen: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
 
     var body: some View {
         NavigationStack { PairingForm(model: model) }
@@ -42,7 +42,7 @@ struct PairingScreen: View {
 }
 
 struct PairingForm: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     var adding = false
     @State private var scanning = false
     @State private var pastedURL = ""
@@ -108,7 +108,7 @@ struct PairingForm: View {
 }
 
 struct MainTabs: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection = 0
 
@@ -147,7 +147,7 @@ struct MainTabs: View {
 }
 
 struct ConversationFlow: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var path: [String] = []
@@ -197,7 +197,7 @@ struct ConversationFlow: View {
 }
 
 struct SessionRouteView: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let sessionID: String
 
     private var session: SessionState? {
@@ -222,7 +222,7 @@ struct SessionRouteView: View {
 }
 
 struct ConversationListView: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     var selectedID: String? = nil
     let openSession: (String) -> Void
     @State private var scope = SessionFilter.recent
@@ -513,7 +513,7 @@ struct ConversationListView: View {
 struct SessionScreen: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     private var compactHeight: Bool { verticalSizeClass == .compact && !typeSize.isAccessibilitySize }
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -809,7 +809,7 @@ struct SessionScreen: View {
                             .padding()
                     } else {
                         TurnNoticeCard(sessionID: liveSession.id, notice: liveSession.composerTurnNotice)
-                        IOSComposer(model: model, draft: model.draft, session: session, detail: detail, showQueuedRow: showQueuedRow)
+                        IOSComposer(model: model, draft: model.draft, store: model.store, session: session, detail: detail, showQueuedRow: showQueuedRow)
                     }
                 }
             }
@@ -900,8 +900,9 @@ struct SessionScreen: View {
 }
 
 struct IOSComposer: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @ObservedObject var draft: ComposerDraft
+    @ObservedObject var store: SessionStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     let session: SessionState
@@ -1093,7 +1094,7 @@ struct IOSComposer: View {
 
     private var completion: (items: [CompletionItem], notice: String?) {
         guard let token = completionToken else { return ([], nil) }
-        let runtime = model.store.commands[session.id]
+        let runtime = store.commands[session.id]
         let mentioning = token.trigger == .mention
         let files = scopedCompletion.files
         let items = ComposerCompletion.items(for: token, appCommands: [], runtime: runtime, sessions: mentioning ? ComposerCompletion.sessions(mentionable(token.query), from: session) : [], files: mentioning && files?.query == token.query ? files?.files ?? [] : [])
@@ -1452,7 +1453,7 @@ struct SessionSummary: View {
 }
 
 struct SessionInspector: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let session: SessionState
     let initialDetail: SessionDetail
     @Environment(\.dismiss) private var dismiss
@@ -1850,7 +1851,7 @@ struct IOSHostBadge: View {
 }
 
 struct SettingsView: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     var body: some View {
         List {
             Group {
@@ -1970,7 +1971,7 @@ struct SettingsView: View {
 }
 
 struct IOSAdoptSessionSheet: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @StateObject private var controller: SessionAdoptController
     @Environment(\.dismiss) private var dismiss
 
@@ -2033,7 +2034,7 @@ struct IOSAdoptSessionSheet: View {
 }
 
 struct RecentPromptsSheet: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let session: SessionState
     let use: (String) -> Void
     @Environment(\.dismiss) private var dismiss

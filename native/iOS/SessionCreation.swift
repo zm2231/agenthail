@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct NewSessionSheet: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     @Environment(\.dismiss) private var dismiss
     @State private var hosts: CreationHostPicker
     @State private var selectedSurface = ""

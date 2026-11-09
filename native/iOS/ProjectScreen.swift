@@ -18,7 +18,7 @@ private extension View {
 }
 
 struct ProjectScreen: View {
-    @ObservedObject var model: AgenthailIOSModel
+    var model: AgenthailIOSModel
     let projectID: String
     let openSession: (String) -> Void
     @State private var sheet: ProjectSheet?

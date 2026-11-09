@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 import XCTest
 @testable import Agenthail
@@ -64,13 +63,11 @@ final class SessionRefreshTests: XCTestCase {
         model.selectedSessionID = "computer::demo"
         await model.refreshSession("computer::demo")
         model.olderActivity = [TimelineItem(id: "earlier", kind: "message", role: "assistant", title: "assistant", text: "earlier", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)]
-        var emissions = 0
-        let watching = model.$olderActivity.dropFirst().sink { _ in emissions += 1 }
-        defer { watching.cancel() }
+        let probe = ObservationProbe { _ = model.olderActivity }
 
         await model.refreshSession("computer::demo")
 
-        XCTAssertEqual(emissions, 0)
+        XCTAssertFalse(probe.changed())
     }
 
     @MainActor
@@ -119,12 +116,14 @@ final class SessionRefreshTests: XCTestCase {
     func testOpeningASessionThatCannotAnswerRequestsPublishesNothing() async {
         let model = AgenthailIOSModel(autoConnect: false)
         let session = SessionState(id: "computer::demo", surface: "claude", name: "demo", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: false, readOnlyReason: nil)
-        var published = 0
-        let watch = model.objectWillChange.sink { published += 1 }
+        let probe = ObservationProbe {
+            _ = model.sessionRequests
+            _ = model.retiredAsks
+            _ = model.operationError
+        }
         await model.syncRequests(for: session)
-        watch.cancel()
         XCTAssertNil(model.sessionRequests)
-        XCTAssertEqual(published, 0)
+        XCTAssertFalse(probe.changed())
     }
 
     @MainActor
@@ -136,21 +135,20 @@ final class SessionRefreshTests: XCTestCase {
         var capabilities = Capabilities()
         capabilities.respond = true
         var session = SessionState(id: "computer::demo", surface: "claude", name: "demo", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: capabilities, readOnly: false, readOnlyReason: nil)
-        var sets: [SessionRequests?] = []
-        let watch = model.$sessionRequests.dropFirst().sink { sets.append($0) }
-        defer { watch.cancel() }
+        let probe = ObservationProbe { _ = model.sessionRequests }
 
         await model.syncRequests(for: session)
-        XCTAssertEqual(sets.map { $0?.permissionMode }, ["default"])
+        XCTAssertTrue(probe.changed())
+        XCTAssertEqual(model.sessionRequests?.permissionMode, "default")
         session.waitingOn = WaitingState(kind: "question", id: "q")
         await model.syncRequests(for: session)
-        XCTAssertEqual(sets.count, 1, "rereading the same requests sets nothing")
+        XCTAssertFalse(probe.changed(), "rereading the same requests sets nothing")
 
         await model.loadSession("computer::other")
-        XCTAssertEqual(sets.count, 2)
+        XCTAssertTrue(probe.changed())
         XCTAssertNil(model.sessionRequests)
         await model.loadSession("computer::demo")
-        XCTAssertEqual(sets.count, 2, "opening a session with no request state sets nothing")
+        XCTAssertFalse(probe.changed(), "opening a session with no request state sets nothing")
     }
 
     @MainActor
