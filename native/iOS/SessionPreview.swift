@@ -229,6 +229,14 @@ struct SessionPreview: View {
         ]
         let projects: [[String: Any]] = [["id": "project-fieldnotes", "displayName": "fieldnotes", "checkouts": [["host": ["id": "computer", "name": "computer", "state": "local"], "projectId": "project-fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "added": true]], "coordinators": [["name": "release-lead", "surface": "codex", "sessionId": "codex-demo"]]]]
         var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": previewSnapshotQueue,"channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24, "projects": projects]
+        if ProcessInfo.processInfo.arguments.contains("--preview-two-computers") {
+            let vps: [String: Any] = ["id": "h0123456789ab", "name": "vps.example.ts.net", "state": "connected"]
+            snapshot["daemon"] = ["running": true, "hosts": [vps]]
+            var spanning = projects
+            spanning[0]["checkouts"] = (projects[0]["checkouts"] as! [[String: Any]]) + [["host": vps, "projectId": "h0123456789ab::project-fieldnotes", "rootPath": "/home/demo/work/fieldnotes", "added": true]]
+            spanning[0]["coordinators"] = (projects[0]["coordinators"] as! [[String: Any]]) + [["host": vps, "name": "server-lead", "surface": "claude", "sessionId": "remote-demo"]]
+            snapshot["projects"] = spanning
+        }
         if ProcessInfo.processInfo.arguments.contains("--preview-questions") {
             var asking = snapshot["sessions"] as! [[String: Any]]
             asking[0]["waitingOn"] = previewQuestions

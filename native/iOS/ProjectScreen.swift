@@ -74,7 +74,14 @@ struct ProjectScreen: View {
                 DecisionSections(model: model, inbox: waiting, open: openSession) { model.decisionFeed.refresh() }
             }
             if contents.now.count > 0 { nowSection(contents.now) }
-            Section("Lead") { leadCard(project, contents) }
+            Section("Lead") {
+                leadCard(project, contents)
+                if let leads = ProjectContents.leadsLine(project) {
+                    Text(leads)
+                        .font(.caption).foregroundStyle(PhonePalette.muted)
+                        .accessibilityIdentifier("project-leads")
+                }
+            }
             if contents.now.count == 0 { nowSection(contents.now) }
             if showingEarlier {
                 Section("Earlier") {
@@ -88,14 +95,11 @@ struct ProjectScreen: View {
                 }
             }
             Section {
-                HStack(spacing: 10) {
-                    Button("New session") { newSession(project) }.buttonStyle(.borderedProminent)
-                    Button(contents.lead == nil ? "New lead" : "Change lead") { sheet = .lead(project.state) }.buttonStyle(.bordered)
-                    if project.state.archived != true {
-                        Button("Message…") { messaging = project }.buttonStyle(.bordered)
-                            .accessibilityIdentifier("project-message")
-                    }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { projectActions(project, contents, fill: false) }
+                    VStack(spacing: 10) { projectActions(project, contents, fill: true) }
                 }
+                .lineLimit(1)
                 .frame(maxWidth: .infinity)
                 .listRowBackground(Color.clear)
             }
@@ -117,6 +121,18 @@ struct ProjectScreen: View {
                     Label("Project settings", systemImage: "ellipsis.circle")
                 }
             }
+        }
+    }
+
+    @ViewBuilder private func projectActions(_ project: ListedProject, _ contents: ProjectContents, fill: Bool) -> some View {
+        Button { newSession(project) } label: { Text("New session").frame(maxWidth: fill ? .infinity : nil) }
+            .buttonStyle(.borderedProminent)
+        Button { sheet = .lead(project.state) } label: { Text(contents.lead == nil ? "New lead" : "Change lead").frame(maxWidth: fill ? .infinity : nil) }
+            .buttonStyle(.bordered)
+        if project.state.archived != true {
+            Button { messaging = project } label: { Text("Message…").frame(maxWidth: fill ? .infinity : nil) }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("project-message")
         }
     }
 
