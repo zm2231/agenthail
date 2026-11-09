@@ -87,6 +87,7 @@ type Daemon struct {
 	background      *backgroundWork
 	events          *eventHub
 	catalog         *catalogHub
+	decisions       *decisionsRevision
 	catalogEnded    catalogEnded
 	// catalogLiveMu guards catalogLive, which discovery replaces and the
 	// status pass reads from its own goroutine. It is held only for map
@@ -228,6 +229,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		d.log.Printf("catalog surfaces: %s", err)
 	}
 	d.catalog = newCatalogHub(reg)
+	d.decisions = newDecisionsRevision()
 	d.catalogIdentities.changed = d.requestCatalogDiscovery
 	d.catalogIdentities.observeRoot = d.observeRepositoryKey
 	if prompts := d.claudePrompts(); prompts != nil {
@@ -358,6 +360,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runPRSweeps(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
+	go d.runDecisionsRevision(ctx)
 	d.background.start(d.runJournalSweeps)
 	d.proxyUsageSets(time.Now())
 	uiDone := make(chan struct{})

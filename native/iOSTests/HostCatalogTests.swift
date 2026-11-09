@@ -241,6 +241,32 @@ final class HostCatalogTests: XCTestCase {
         return row
     }
 
+    @MainActor
+    func testDecisionsAskAgainWhenAComputerReachedThroughAnotherGoesAndComesBackButNotForProgress() throws {
+        KeychainStore.removeAll()
+        addTeardownBlock { KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hlaptop", "https://laptop.invalid", name: "laptop")
+        let model = AgenthailIOSModel(autoConnect: false)
+        func laptop(server state: String, rev: String, progress: Int = 0) -> DashboardSnapshot {
+            var row = Self.row("own", name: "own")
+            row.queueCount = progress
+            var snapshot = Self.snapshot([row])
+            snapshot.daemonHosts([HostHealth(id: "hserver", name: "server", state: state)])
+            snapshot.decisionsRev = rev
+            return snapshot
+        }
+        model.setHostSnapshot(laptop(server: "connected", rev: "r1"), host: "hlaptop")
+        let reached = model.decisionsKey
+        model.setHostSnapshot(laptop(server: "connected", rev: "r1", progress: 3), host: "hlaptop")
+        XCTAssertEqual(model.decisionsKey, reached, "a session's progress does not ask again")
+        model.setHostSnapshot(laptop(server: "unreachable", rev: "r1"), host: "hlaptop")
+        XCTAssertNotEqual(model.decisionsKey, reached, "the server going down asks again, so its decisions leave")
+        model.setHostSnapshot(laptop(server: "connected", rev: "r1"), host: "hlaptop")
+        XCTAssertEqual(model.decisionsKey, reached, "and coming back asks again")
+        model.setHostSnapshot(laptop(server: "connected", rev: "r2"), host: "hlaptop")
+        XCTAssertNotEqual(model.decisionsKey, reached, "a decisions change asks again")
+    }
+
     static func row(_ id: String, name: String) -> SessionState {
         SessionState(id: id, surface: "claude", name: name, alias: nil, status: "idle", lastActive: nil, queueCount: 0,
                      open: true, current: true, currentReason: nil, capabilities: Capabilities(send: true, steer: true), readOnly: false, readOnlyReason: nil)

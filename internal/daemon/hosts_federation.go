@@ -514,6 +514,7 @@ type remoteSnapshot struct {
 	RetiredClock *int64                      `json:"retiredClock"`
 	RetiredIDs   []string                    `json:"retiredIds"`
 	Coordinators []registry.CoordinatorEntry `json:"coordinators"`
+	OwnDecisions string                      `json:"ownDecisionsRev"`
 	ProjectLinks []registry.ProjectLink      `json:"projectLinks"`
 	ProjectMoves []registry.ProjectMove      `json:"projectMoves"`
 }
@@ -617,6 +618,7 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 	if err := d.Registry.RecordHostCatalogCursor(host.record.ID, snapshot.HostEpoch, snapshot.CatalogSeq); err != nil {
 		return 0, localMirror(err)
 	}
+	d.decisions.setPeer(host.record.ID, snapshot.OwnDecisions)
 	return snapshot.CatalogSeq, nil
 }
 
@@ -743,6 +745,14 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 		}
 		_, err := d.adoptProjectMoves([]registry.ProjectMove{move})
 		return err
+	case "decisions.changed":
+		var payload struct {
+			Own string `json:"own"`
+		}
+		if err := json.Unmarshal(envelope.Data, &payload); err != nil {
+			return err
+		}
+		d.decisions.setPeer(host.record.ID, payload.Own)
 	}
 	return nil
 }

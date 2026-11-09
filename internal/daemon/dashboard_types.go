@@ -115,6 +115,8 @@ type dashboardState struct {
 	ProjectMoves       []registry.ProjectMove      `json:"projectMoves"`
 	LeadReplacements   []dashboardLeadReplacement  `json:"leadReplacements"`
 	Person             dashboardPerson             `json:"person"`
+	DecisionsRev       string                      `json:"decisionsRev"`
+	OwnDecisionsRev    string                      `json:"ownDecisionsRev"`
 	catalogPageApplied bool
 	catalogPageFilter  string
 	catalogPageOffset  int

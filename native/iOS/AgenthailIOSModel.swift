@@ -531,13 +531,17 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     var decisionsKey: String {
-        let direct = hostOrder.compactMap { connections[$0] }.map { "\($0.id):\($0.shownReachable):\($0.catalogStreamCursor)" }
-        return (direct + catalog.hosts.map(\.id)).joined(separator: ",")
+        let direct = hostOrder.compactMap { connections[$0] }.map { "\($0.id):\($0.shownReachable):\($0.snapshot?.decisionsRev ?? "older")" }
+        let reached = catalog.hosts.map { host in "\(host.id):\(host.state):\(catalog.target(forHost: host.id).map { "\($0.hostID)>\($0.remote ?? "")" } ?? "none")" }
+        return (direct + reached).joined(separator: ",")
     }
 
     func loadDecisions() async -> DecisionInbox {
         guard let hosts = try? inboxHosts() else { return DecisionInbox() }
-        return await DecisionInbox.load(from: hosts)
+        var inbox = await DecisionInbox.load(from: hosts)
+        let older = hostOrder.compactMap { connections[$0] }.filter { $0.snapshot != nil && $0.snapshot?.decisionsRev == nil }.map(\.name)
+        inbox.outdated = Array(Set(inbox.outdated + older)).sorted()
+        return inbox
     }
 
     func answerDecision(_ request: SessionRequest, sessionID: String, decision: RequestDecision) async -> DecisionAnswer {

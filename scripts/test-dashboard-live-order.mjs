@@ -54,10 +54,15 @@ send(14, "surface.health", {});
 assert.equal(calls.reread, 6, "delivery and coordinator events are news; others are not");
 context.catalogEvent({ data: JSON.stringify({ stream: "other", seq: 99, type: "session.queue", data: {} }) }, hooks);
 assert.equal(calls.reread, 6);
+const renders = calls.render;
+send(15, "decisions.changed", { rev: "r9", own: "o9" });
+assert.equal(app.state.decisionsRev, "r9", "a decisions change names the new revision");
+assert.equal(calls.render, renders + 1, "and renders so the inbox asks for the new decisions");
+assert.equal(calls.reread, 6, "without rereading the list");
 
 const stream = context.catalogStream();
 assert.equal(stream.ready(), true);
-assert.equal(stream.path(), "/api/v1/catalog-events?after=14", "the stream resumes after the last event this tab applied");
+assert.equal(stream.path(), "/api/v1/catalog-events?after=15", "the stream resumes after the last event this tab applied");
 stream.seen({ id: "20" });
 assert.equal(stream.path(), "/api/v1/catalog-events?after=20");
 stream.gap();

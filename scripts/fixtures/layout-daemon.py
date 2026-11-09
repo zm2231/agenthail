@@ -373,7 +373,7 @@ if __name__ == "__main__":
 
         rows = [row("shown"), row("hidden", "busy")] + [row(f"s{n:03d}") for n in range(count - 2)]
         listed = {"families": len(rows), "sessions": len(rows)}
-        page = {**RESPONSES["/api/v1/snapshot"], "sessions": rows, "totalSessions": len(rows), "view": {
+        page = {**RESPONSES["/api/v1/snapshot"], "sessions": rows, "totalSessions": len(rows), "decisionsRev": "fixture-1", "view": {
             "counts": {scope: listed for scope in ("running", "current", "recent", "all")} | {"archived": {"families": 0, "sessions": 0}}, "surfaces": [],
             "projects": [{"id": SESSION["project"]["id"], "name": SESSION["project"]["displayName"], "counts": listed, "collapsedFamilyIds": [r["id"] for r in rows]}],
             "families": [{"id": r["id"], "rootId": r["id"], "projectId": SESSION["project"]["id"], "checkoutId": SESSION["checkout"]["id"],
