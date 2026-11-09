@@ -22,10 +22,6 @@ type MovedRelay struct {
 	LastGoalKey string `json:"lastGoalKey,omitempty"`
 }
 
-func (r *Registry) MovedRelays(conversation, self string) ([]MovedRelay, error) {
-	return movedRelays(r.read, conversation, self)
-}
-
 func movedRelays(q rowQuerier, conversation, self string) ([]MovedRelay, error) {
 	return queryRows(q, []MovedRelay{}, func(row rowScanner) (MovedRelay, error) {
 		var relay MovedRelay
@@ -62,11 +58,9 @@ func relayMoveRefusal(q catalogQuerier, conversation string) (string, error) {
 
 func relaysMovingTx(tx *sql.Tx, sessions ...string) error {
 	for _, session := range sessions {
-		var moving bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`, session).Scan(&moving); err != nil {
+		if moving, err := movingOutTx(tx, session); err != nil {
 			return err
-		}
-		if moving {
+		} else if moving {
 			return fmt.Errorf("relay source %s is moving to another host; change its relays once the move has finished", session)
 		}
 	}

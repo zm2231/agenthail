@@ -86,6 +86,7 @@ func TestTheScopeEndpointDecidesAsTheSessionsMCPToolsDo(t *testing.T) {
 		{"another project's agent sending its coordinator now", ScopeRequest{SessionID: outsider.ID, Action: "lead-send", Mode: "now", Project: "widget"}, http.StatusForbidden, "out_of_scope", "different_project"},
 		{"a member posting to its project", ScopeRequest{SessionID: worker.ID, Action: "channel-send", Channel: "#widget"}, http.StatusOK, "", ""},
 		{"another project's agent posting", ScopeRequest{SessionID: outsider.ID, Action: "channel-send", Channel: "#widget"}, http.StatusForbidden, "out_of_scope", "different_project"},
+		{"another project's agent posting by this host's qualified name", ScopeRequest{SessionID: outsider.ID, Action: "channel-send", Channel: d.hostIdentity().Name + "::#widget"}, http.StatusForbidden, "out_of_scope", "different_project"},
 		{"an agent managing the queue", ScopeRequest{SessionID: worker.ID, Action: "operator", Operation: "Managing the queue"}, http.StatusForbidden, "capability_missing", ""},
 		{"a worker managing its own project's queue items", ScopeRequest{SessionID: worker.ID, Action: "operator", Sessions: []string{worker.ID, lead.ID}}, http.StatusForbidden, "capability_missing", ""},
 		{"the coordinator managing its project's queue items", ScopeRequest{SessionID: lead.ID, Action: "operator", Sessions: []string{worker.ID, lead.ID}}, http.StatusOK, "", ""},

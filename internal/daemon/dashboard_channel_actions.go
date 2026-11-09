@@ -36,9 +36,22 @@ func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboa
 	if strings.TrimSpace(request.Channel) == "" || strings.TrimSpace(request.Message) == "" {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "channel and message are required")
 	}
-	target, err := broadcast.Resolve(d.Registry, request.Channel)
+	name, home, err := d.channelDestination(ctx, request)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
+	}
+	if home != "" {
+		operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+		defer cancel()
+		return d.postToChannelHome(operationCtx, home, name, request)
+	}
+	request.Channel = name
+	target, resolveErr := broadcast.Resolve(d.Registry, request.Channel)
+	if err := d.channelPostScope(ctx, request, resolveErr, target, request.SourceSessionID); err != nil {
+		return actionResult{}, err
+	}
+	if resolveErr != nil {
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", resolveErr.Error())
 	}
 	if _, fromHost := requestingHost(ctx); fromHost && target.ProjectID != "" {
 		scoped := request

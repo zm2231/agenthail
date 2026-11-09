@@ -165,7 +165,7 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request ScopeReq
 		}
 		return ScopeReply{ProjectID: project.ID}, nil
 	case "channel-send":
-		if target, err := broadcast.Resolve(d.Registry, request.Channel); err == nil && target.ProjectID != "" {
+		if target, err := broadcast.Resolve(d.Registry, d.localChannelRef(request.Channel)); err == nil && target.ProjectID != "" {
 			if refusal := mcpProjectPostScope(caller, target); refusal != nil {
 				return ScopeReply{}, refusal
 			}

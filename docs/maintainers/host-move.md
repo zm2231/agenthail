@@ -13,8 +13,8 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
 ## Protocol
 
 1. **Hold.** The source refuses a session that another host owns, that
-   another move holds, that has a delivery in flight, a channel or the
-   coordinator role. It also refuses a relay from the session that is tied to
+   another move holds, that has a delivery in flight, or the coordinator
+   role. It also refuses a relay from the session that is tied to
    a channel, or that has a captured completion it has not forwarded yet,
    naming the relay. The Claude adapter then takes the
    conversation lock and stops the process that holds it the way
@@ -41,13 +41,17 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    the onboarding flags. Per-machine state such as costs and the last session
    stays. Each MCP server goes without its `env` and `headers`, which may
    hold credentials. The move result names those servers so the person adds
-   their credentials again on the target. A declaration larger than a host
-   reads for a prepare (140 KiB) refuses the move. The move is recorded `preparing`, in a transaction that
-   refuses it if the session's relays are no longer the ones it listed or
-   have a completion they have not forwarded. Until the move ends, the
-   relays from the session stay as declared: adding or removing one, a
-   coordinator handover that moves relays to or from the session, and
-   forwarding a completion are all refused.
+   their credentials again on the target. It lists the channels the session
+   belongs to, each named with the host that keeps it: the source for its own
+   channels, or the host a channel came from when the session moved here
+   before. A declaration larger than a host reads for a prepare (140 KiB)
+   refuses the move. The move is recorded `preparing`, in a transaction that
+   refuses it if the session's relays or channels are no longer the ones it
+   listed, or its relays have a completion they have not forwarded. Until the
+   move ends, the relays and channels of the session stay as declared: adding
+   or removing a relay, joining or leaving a channel, a coordinator handover
+   that moves relays to or from the session, and forwarding a completion are
+   all refused.
 3. **Prepare** (`POST /api/v1/session-move/prepare`). The target finds its own
    checkout of the repository through its added projects and the projects of
    its sessions. When the checkout lacks the commit, it fetches. It refuses
@@ -55,13 +59,15 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    after the fetch, if the working directory's project folder name would be
    longer than Claude writes verbatim (200 characters), or if it already
    holds a transcript of the conversation that the incoming one does not
-   extend, or if a relay's target is not a session it sees on the host the
-   source named. When project settings come with the move, it also refuses if
-   the landing root's `.claude.json` is not a JSON object or its `projects` is
-   not an object. Otherwise it records the move `prepared` and keeps the
-   declaration, and answers with what it can carry. A target that does not
-   name relays or `claude-project` (an Agenthail too old to take them) fails a
-   move that carries them before any file leaves. The files that arrive later are held to that declaration.
+   extend, if a relay's target is not a session it sees on the host the
+   source named, or if a channel is kept on a host it has not paired. When
+   project settings come with the move, it also refuses if the landing root's
+   `.claude.json` is not a JSON object or its `projects` is not an object.
+   Otherwise it records the move `prepared` and keeps the declaration, and
+   answers with what it can carry (`relays`, `channels`, `claude-project`). A
+   target that does not name one the move needs (an Agenthail too old to take
+   it) fails the move before any file leaves, naming what it cannot take. The
+   files that arrive later are held to that declaration.
    They cannot redefine it.
 4. **Archive.** Still holding the lock, the source moves the conversation's
    files out of `projects/` and `tasks/` into
@@ -116,7 +122,8 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    reads the conversation's completions so far, so its relays forward only
    what comes after the move. Last, in one transaction, it registers the
    session as local, takes over the row the source mirrored there, binds the
-   alias if it is free, creates the relays, and records the move `resumed`.
+   alias if it is free, creates the relays, records which host keeps each
+   channel that is not its own, and records the move `resumed`.
 6. **Flip.** The source, in one transaction:
    - gives the row to the target, clearing its process, transcript and local
      flags;
@@ -125,6 +132,9 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
      the completions captured for them. Relays to the session stay: they
      deliver to the target through held sends, like any relay to a paired
      host's session;
+   - deletes its records of channels other hosts keep for the session. The
+     session stays a member of this host's own channels, which now reach it
+     on the target through held sends;
    - turns each queued message into a send held for the target, under its
      delivery key, and fails a queued message with attachments and any
      queued operation the target cannot take as a send;
@@ -140,6 +150,25 @@ On the target, every request must come from a paired host's token, which has
 the `control` and `host` scopes. The token names the source; the request body
 does not. `GET /api/v1/session-move?id=` answers `none` for a move this host
 has no record of from that host.
+
+## Channels after a move
+
+A channel stays on the host that keeps it; only the session moves.
+
+- A post to the channel on that host reaches the moved session on its new
+  host through a held send, like a post to any member on a paired host.
+- A post from the moved session to a channel it took with it goes to the
+  host that keeps the channel. While that host is unreachable, the post is
+  held and delivered once it reconnects, under the post's idempotency key.
+- A session can be in channels of the same name on several hosts, and a move
+  carries each of them. A bare name that names channels on more than one
+  host is refused with their qualified names, such as `home::#builders`; a
+  name qualified with a host always picks that host's channel.
+- The keeping host leaves the poster out of its own post, and accepts a
+  post from a paired host's session only while that session is a member.
+  When the channel is gone, or the session is no longer a member, the new
+  host stops sending its posts there.
+- A relay tied to a channel still refuses the move.
 
 ## Failure model
 

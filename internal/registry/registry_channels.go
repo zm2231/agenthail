@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -14,20 +15,28 @@ func (r *Registry) CreateChannel(name string) (string, error) {
 }
 
 func (r *Registry) AddToChannel(channelName, sessionID string) error {
-	res, err := r.db.Exec(`INSERT OR IGNORE INTO channel_members (channel_id,session_id) SELECT id,? FROM channels WHERE name = ?`, sessionID, channelName)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := channelsSettledTx(tx, sessionID); err != nil {
+		return err
+	}
+	res, err := tx.Exec(`INSERT OR IGNORE INTO channel_members (channel_id,session_id) SELECT id,? FROM channels WHERE name = ?`, sessionID, channelName)
 	if err != nil {
 		return err
 	}
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
 		var exists int
-		if err := r.db.QueryRow(`SELECT COUNT(*) FROM channels WHERE name=?`, channelName).Scan(&exists); err != nil {
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM channels WHERE name=?`, channelName).Scan(&exists); err != nil {
 			return err
 		}
 		if exists == 0 {
 			return fmt.Errorf("channel %q does not exist", channelName)
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 type ChannelRow struct {
@@ -88,14 +97,22 @@ func b2i(b bool) int {
 }
 
 func (r *Registry) RemoveFromChannel(channelName, sessionID string) error {
-	res, err := r.db.Exec(`DELETE FROM channel_members WHERE channel_id = (SELECT id FROM channels WHERE name = ?) AND session_id = ?`, channelName, sessionID)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := channelsSettledTx(tx, sessionID); err != nil {
+		return err
+	}
+	res, err := tx.Exec(`DELETE FROM channel_members WHERE channel_id = (SELECT id FROM channels WHERE name = ?) AND session_id = ?`, channelName, sessionID)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("session %q is not a member of channel %q", sessionID, channelName)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *Registry) ChannelExists(channelName string) (bool, error) {
@@ -127,6 +144,15 @@ func (r *Registry) DeleteChannel(channelName string) error {
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("channel %q does not exist", channelName)
+	}
+	return nil
+}
+
+func channelsSettledTx(tx *sql.Tx, sessionID string) error {
+	if moving, err := movingOutTx(tx, sessionID); err != nil {
+		return err
+	} else if moving {
+		return fmt.Errorf("session %s is moving to another host; change its channels once the move has finished", sessionID)
 	}
 	return nil
 }

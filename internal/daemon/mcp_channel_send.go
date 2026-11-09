@@ -18,7 +18,7 @@ func (d *Daemon) mcpChannelSend(ctx context.Context, caller *mcpCaller, input mc
 	if strings.TrimSpace(input.Channel) == "" || strings.TrimSpace(input.Message) == "" {
 		return nil, refuse("invalid", "channel and message are required.")
 	}
-	if target, err := broadcast.Resolve(d.Registry, input.Channel); err == nil && target.ProjectID != "" {
+	if target, err := broadcast.Resolve(d.Registry, d.localChannelRef(input.Channel)); err == nil && target.ProjectID != "" {
 		if refusal := mcpProjectPostScope(caller, target); refusal != nil {
 			return nil, refusal
 		}
