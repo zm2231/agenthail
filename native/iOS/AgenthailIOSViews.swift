@@ -113,6 +113,9 @@ struct MainTabs: View {
     @State private var selection = 0
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("MainTabs")
+#endif
         TabView(selection: $selection) {
             ConversationFlow(model: model)
                 .solidTabBar()
@@ -245,6 +248,9 @@ struct ConversationListView: View {
     }
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("ConversationListView")
+#endif
         let tree = tree
         let families = tree.projects.flatMap { $0.checkouts.flatMap(\.families) }
         List {
@@ -667,6 +673,9 @@ struct SessionScreen: View {
     }
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("SessionScreen")
+#endif
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Self.rowSpacing) {
                 Group {
@@ -969,6 +978,9 @@ struct IOSComposer: View {
     }
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("IOSComposer")
+#endif
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
                 if let status = model.deliveryStatus[session.id], model.failedSends[session.id] == nil, model.pendingSends[session.id]?.contains(where: \.unconfirmed) != true {
@@ -1237,6 +1249,9 @@ struct IOSTimelineRow: View {
 	@State private var loadedBody: RowChoice<RetainedBodyResult>?
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("IOSTimelineRow")
+#endif
         if item.kind == "done" {
             EmptyView()
         } else if let agent = item.agent, agent.isIncoming {
@@ -1760,6 +1775,9 @@ struct IOSSessionRow: View {
     }
 
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("IOSSessionRow")
+#endif
         let kind = SessionDisplayKind.of(session)
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
