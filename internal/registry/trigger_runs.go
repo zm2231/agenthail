@@ -85,9 +85,17 @@ func (r *Registry) RecordCompletion(sessionID string, notice *TurnNotice, runs [
 		if len(completion) == 0 {
 			completion = json.RawMessage(`{}`)
 		}
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO trigger_runs(trigger_name,dedupe_key,session_id,turn_id,completion,test,state,error,queued_at_ms,finished_at_ms) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-			run.Trigger, run.DedupeKey, run.SessionID, run.TurnID, string(completion), run.Test, state, message, now, finished); err != nil {
+		inserted, err := tx.Exec(`INSERT OR IGNORE INTO trigger_runs(trigger_name,dedupe_key,session_id,turn_id,completion,test,state,error,queued_at_ms,finished_at_ms) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			run.Trigger, run.DedupeKey, run.SessionID, run.TurnID, string(completion), run.Test, state, message, now, finished)
+		if err != nil {
 			return err
+		}
+		if n, err := inserted.RowsAffected(); err != nil {
+			return err
+		} else if n == 1 && state == TriggerSkipped {
+			if err := recordHistory(tx, triggerRunHistory(run, TriggerOutcome{State: state, Error: message})); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit()

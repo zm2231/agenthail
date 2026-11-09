@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -51,5 +52,36 @@ func TestEveryWayATriggerRunEndsLeavesItsHistoryEntry(t *testing.T) {
 	}
 	if entry := entryFor("t2"); entry == nil || entry.Result != "flag interrupted" || entry.Error == "" {
 		t.Fatalf("an interrupted run's entry is %+v, want flag interrupted with the reason", entry)
+	}
+
+	backlog := make([]registry.TriggerRun, 0, registry.MaxTriggerBacklog)
+	for i := range registry.MaxTriggerBacklog {
+		turn := fmt.Sprintf("w%d", i)
+		backlog = append(backlog, registry.TriggerRun{Trigger: "flag", DedupeKey: "h:from:" + turn, SessionID: from.ID, TurnID: turn, Completion: json.RawMessage(`{}`)})
+	}
+	if err := r.RecordCompletion(from.ID, nil, backlog); err != nil {
+		t.Fatal(err)
+	}
+	over := []registry.TriggerRun{{Trigger: "flag", DedupeKey: "h:from:t3", SessionID: from.ID, TurnID: "t3", Completion: json.RawMessage(`{}`)}}
+	for range 2 {
+		if err := r.RecordCompletion(from.ID, nil, over); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if entry := entryFor("t3"); entry == nil || entry.Result != "flag skipped" || entry.Error == "" {
+		t.Fatalf("a skipped run's entry is %+v, want flag skipped with the reason", entry)
+	}
+	history, err := r.ListHistory(200, from.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skipped := 0
+	for _, entry := range history {
+		if entry.Kind == "trigger" && entry.CompletionID == "t3" {
+			skipped++
+		}
+	}
+	if skipped != 1 {
+		t.Fatalf("a completion recorded twice left %d skipped entries, want 1", skipped)
 	}
 }
