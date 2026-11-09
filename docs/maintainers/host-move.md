@@ -151,7 +151,10 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    local here, its row was hidden; the flip shows it at once.
 
    A message queued for the session after the flip becomes a send held for
-   the target as well. A paired host that has not yet heard of the move may
+   the target as well, in the transaction that queues it, whichever path
+   queues it: a send, a relay, or a notice. A goal, a compaction or a send
+   with attached files is refused instead, as the flip fails those already
+   queued. A paired host that has not yet heard of the move may
    still send to the source; the source does not pass that on, but refuses it
    with code `moved` and `movedToHost`, and the sending host sends it once
    more, straight to the target.
