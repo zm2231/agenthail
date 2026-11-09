@@ -18,6 +18,8 @@ extension SessionTree {
                     project.checkouts.append(Checkout(id: checkoutID, host: root.remoteHostName == nil ? nil : root.host, label: checkoutLabel(root), branchLabel: branchLabel(root), isMain: root.checkout?.isMain ?? true, dirty: root.checkout?.dirty ?? false, families: [family]))
                 }
             }
+            let labels = checkoutLabels(project.checkouts.compactMap { $0.families.first?.root })
+            for index in project.checkouts.indices where index < labels.count { project.checkouts[index].label = labels[index] }
             projects.append(project)
         }
         var counts: [SessionFilter: Int] = [:]

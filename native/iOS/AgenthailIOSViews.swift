@@ -292,59 +292,9 @@ struct ConversationListView: View {
                 }
             }
             ForEach(tree.projects) { project in
-                let expanded = expandedProjects.contains(project.id)
-                Section {
-                    ForEach(project.shown(expanded: expanded, keeping: selectedID).checkouts.flatMap(\.families)) { family in familyRows(family) }
-                    if let more = project.moreLabel(expanded: expanded, keeping: selectedID) {
-                        Button(more) {
-                            if expanded { expandedProjects.remove(project.id) } else { expandedProjects.insert(project.id) }
-                        }
-                        .font(.footnote)
-                        .foregroundStyle(PhonePalette.accentText)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .listRowBackground(GlassRowBackground(selected: false))
-                        .accessibilityIdentifier("more-" + project.id)
-                    }
-                } header: {
-                    HStack(spacing: 10) {
-                        HStack(spacing: 8) {
-                            Image(systemName: project.identity == nil ? "tray" : project.archived ? "archivebox" : "folder")
-                            Text(project.name)
-                                .font(.subheadline.weight(.semibold))
-                                .lineLimit(1)
-                            if let host = project.hostLabel, model.showsHostNames {
-                                IOSHostBadge(name: host)
-                            }
-                            Spacer(minLength: 0)
-                            Text("\(project.counts.sessions)")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(PhonePalette.muted)
-                        }
-                        .glassLabel()
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .foregroundStyle(.primary)
-                        .textCase(nil)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityAddTraits(.isHeader)
-                        .contextMenu {
-                            if let identity = project.identity {
-                                Button(project.archived ? "Unarchive Project" : "Archive Project", systemImage: "archivebox") {
-                                    Task { await model.setProjectArchived(identity.id, !project.archived) }
-                                }
-                                if let listed = model.projects[identity.id] {
-                                    IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace, messaging: $messagingProject)
-                                }
-                            }
-                        }
-                        .accessibilityLabel(project.hostLabel.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
-                        .accessibilityValue(project.sessionCountLabel)
-                        .accessibilityIdentifier("project-" + project.id)
-                        if let identity = project.identity, model.projects[identity.id] != nil {
-                            openProjectButton(identity.id, name: project.name)
-                        }
-                    }
-                }
+                IOSProjectSection(model: model, project: project, selectedID: selectedID, expandedProjects: $expandedProjects,
+                                  sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace, messaging: $messagingProject,
+                                  openSession: openSession) { family in familyRows(family) }
             }
             let empty = projectsWithoutSessions(tree)
             if !empty.isEmpty {
@@ -451,23 +401,6 @@ struct ConversationListView: View {
             Button("Cancel", role: .cancel) {}
         }
         .refreshable { await model.refresh(fresh: true) }
-    }
-
-    private func openProjectButton(_ projectID: String, name: String) -> some View {
-        Button { openSession(ConversationRoute.project(projectID)) } label: {
-            HStack(spacing: 2) {
-                Text("Project")
-                Image(systemName: "chevron.right")
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(PhonePalette.accentText)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .textCase(nil)
-        .accessibilityLabel("Open project \(name)")
-        .accessibilityIdentifier("open-project-" + projectID)
     }
 
     @ViewBuilder
