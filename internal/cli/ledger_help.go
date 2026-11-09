@@ -46,7 +46,7 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
 
  The person's intent:
   ledger [--all|--provisional]   Show goals, open asks, decisions and the person's provisional words for the current project;
-                                 --provisional lists only the words not attached yet
+                                 --provisional lists only the provisional words
   ledger goals                   List goals with the clauses gathered under each
   ledger goal <name>             Create a goal, or show the one with that name
   ledger asks | ledger ask <ask_id>

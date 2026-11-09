@@ -202,7 +202,7 @@ func TestLedgerEnableAndDisableAskTheDaemon(t *testing.T) {
 		return out
 	}
 	key := "repo:github.com/acme/widget"
-	if out := run("enable", "--attach", "checkpoints"); !strings.Contains(out, "at checkpoints") {
+	if out := run("enable", "--attach", "checkpoints"); !strings.Contains(out, "stay provisional until attached, and sessions see how many at checkpoints") || strings.Contains(out, "sessions attach") {
 		t.Fatalf("enable output %q", out)
 	}
 	run("enable", "s1")
@@ -235,6 +235,9 @@ func TestLedgerEnableAndDisableAskTheDaemon(t *testing.T) {
 		if out := run(args...); strings.Join(strings.Fields(out), "") != want {
 			t.Errorf("%v printed %s, want %s", args, out, want)
 		}
+	}
+	if out := run("enable"); !strings.Contains(out, "stay provisional until attached, and sessions see how many after each message") || strings.Contains(out, "before replying") {
+		t.Fatalf("enable output %q", out)
 	}
 }
 

@@ -58,7 +58,7 @@ func attachedElsewhereAll(q querier, projectKey string) (map[string]Elsewhere, e
 }
 
 type Attachment struct {
-	Provisional []UtteranceView       `json:"provisional"`
+	Provisional []UtteranceView      `json:"provisional"`
 	Elsewhere   map[string]Elsewhere `json:"attachedElsewhere,omitempty"`
 }
 

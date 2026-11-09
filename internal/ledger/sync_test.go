@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -252,6 +253,23 @@ func TestAPullThatReordersRebuildsTheBoardInOwnerOrder(t *testing.T) {
 	item, _ := board(t, mac.store).WorkItem("widget-W1")
 	if got := item.Timeline[len(item.Timeline)-1].Text; got != "written first on the mac" {
 		t.Fatalf("mac timeline ends with %q, want the owner's order", got)
+	}
+}
+
+func TestAConversationNoteReplicatesAndSurvivesARebuild(t *testing.T) {
+	mac, owner := newSyncHost(t), newSyncHost(t)
+	searchAsk(t, mac.store)
+	adopt(t, project, mac, owner)
+	capture(t, mac.store, project, "claude-prompt:talk", "nice, that reads well")
+	attach(t, mac.store, ledger.AttachRequest{UtteranceID: "claude-prompt:talk", As: ledger.AsConversation, Clauses: []string{"likes the wording"}})
+	syncOnce(t, project, mac, owner)
+	sameLedger(t, project, mac, owner)
+	for _, host := range []syncHost{mac, owner} {
+		for _, u := range board(t, host.store).Utterances() {
+			if u.ID == "claude-prompt:talk" && (!u.Attached || !slices.Equal(u.Notes, []string{"likes the wording"})) {
+				t.Fatalf("the conversation note did not carry over: %+v", u)
+			}
+		}
 	}
 }
 

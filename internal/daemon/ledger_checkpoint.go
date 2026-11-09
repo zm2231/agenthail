@@ -61,7 +61,7 @@ func (d *Daemon) apiLedgerCheckpointHandler(w http.ResponseWriter, r *http.Reque
 	text, err := d.ledgerCheckpoint(*session)
 	if err != nil {
 		d.log.Printf("ledger checkpoint for %s: %s", req.SessionID, err)
-		writeAPIError(w, http.StatusInternalServerError, "checkpoint_failed", "The words still to attach could not be read.")
+		writeAPIError(w, http.StatusInternalServerError, "checkpoint_failed", "The provisional words could not be counted.")
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, ledgerCheckpointResponse{Instruction: text})

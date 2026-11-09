@@ -286,10 +286,10 @@ func (a *App) ledgerEnable(args []string) error {
 		return nil
 	}
 	if answer.Attach == ledger.AttachAtCheckpoints {
-		fmt.Printf("ledger enabled for %s; sessions attach the person's words at checkpoints: adding, claiming or submitting work, starting or compacting, and agenthail ledger\n", answer.ProjectKey)
+		fmt.Printf("ledger enabled for %s; the person's words stay provisional until attached, and sessions see how many at checkpoints: adding, claiming or submitting work, starting or compacting, and agenthail ledger\n", answer.ProjectKey)
 		return nil
 	}
-	fmt.Printf("ledger enabled for %s; sessions attach each of the person's messages before replying\n", answer.ProjectKey)
+	fmt.Printf("ledger enabled for %s; the person's words stay provisional until attached, and sessions see how many after each message\n", answer.ProjectKey)
 	return nil
 }
 

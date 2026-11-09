@@ -18,11 +18,11 @@ type ledgerCaptureRequest struct {
 }
 
 type ledgerCaptureResponse struct {
-	Captured   bool     `json:"captured"`
-	Attach     bool     `json:"attach,omitempty"`
-	ProjectKey string   `json:"projectKey,omitempty"`
-	Ref        string   `json:"ref,omitempty"`
-	Provisional int `json:"provisional,omitempty"`
+	Captured    bool   `json:"captured"`
+	Attach      bool   `json:"attach,omitempty"`
+	ProjectKey  string `json:"projectKey,omitempty"`
+	Ref         string `json:"ref,omitempty"`
+	Provisional int    `json:"provisional,omitempty"`
 }
 
 func (d *Daemon) provisionalCount(key, sessionID string) int {
