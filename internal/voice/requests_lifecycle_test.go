@@ -80,6 +80,12 @@ func TestARequestDeliveredAcrossASourceErrorIsFollowedByTheNewFollower(t *testin
 	if err := <-delegated; err != nil {
 		t.Fatal(err)
 	}
+	// The target journals its prompt before it streams, so the reply cannot overtake it.
+	select {
+	case <-target.streaming:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the target never streamed the request's turn")
+	}
 	target.journal.emit(sessionstream.Event{ItemID: "reply", Version: 1, Kind: "text", Role: "assistant", TurnID: "target-turn", Body: "All 40 tests pass.", Final: true})
 	target.journal.emit(sessionstream.Event{ItemID: "done", Version: 1, Kind: "done", TurnID: "target-turn"})
 	testkit.Eventually(t, "the reply as the request's own", 5*time.Second, func() bool {
