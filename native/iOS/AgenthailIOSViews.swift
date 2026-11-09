@@ -258,7 +258,7 @@ struct ConversationListView: View {
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
-            UsageMetersRow(feed: usage, sessions: model.snapshot?.sessions ?? [], open: openSession)
+            UsageMetersRow(feed: usage, model: model, open: openSession)
             if let error = model.connectionError {
                 Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(PhonePalette.muted)
                     .listRowBackground(GlassRowBackground(selected: false))
@@ -359,7 +359,7 @@ struct ConversationListView: View {
                 .accessibilityIdentifier("list-more-retry")
             } else if listingMore {
                 ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
-                    .task(id: "\(scope.rawValue)|\(model.snapshot?.sessions.count ?? 0)") { await model.listMore(scope) }
+                    .task(id: "\(scope.rawValue)|\(model.sessionCount)") { await model.listMore(scope) }
                     .accessibilityIdentifier("list-more")
             }
             if families.isEmpty && model.searchPending(search) {

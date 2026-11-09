@@ -165,7 +165,7 @@ struct QueueTailTracking: ViewModifier {
     @State private var loaded: [QueueState]?
 
     private var snapshotRows: [QueueState] {
-        (model.snapshot?.queue ?? []).map { InboxPage.qualified($0, host: $0.hostID ?? "") }.filter { $0.sessionId == session.id }
+        model.queue.map { InboxPage.qualified($0, host: $0.hostID ?? "") }.filter { $0.sessionId == session.id }
     }
     private var active: [QueueState] { loaded ?? snapshotRows }
     private var refreshKey: String {

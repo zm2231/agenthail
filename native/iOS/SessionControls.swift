@@ -75,11 +75,9 @@ struct QueueListView: View {
     private var history: [InboxMessage] { page.history }
     private var pollsHistory: Bool { showHistory && scenePhase == .active }
     private var activeInSnapshot: [String] {
-        (model.snapshot?.queue ?? []).map { "\($0.id):\($0.status)" }
+        model.queue.map { "\($0.id):\($0.status)" }
     }
-    private var waitingInSnapshot: [String] {
-        (model.snapshot?.sessions ?? []).filter { $0.waitingOn != nil || $0.pendingAskID != nil }.map { "\($0.id):\($0.waitingOn?.id ?? $0.pendingAskID ?? "")" }
-    }
+    private var waitingInSnapshot: [String] { model.waitingSessions }
 
     var body: some View {
         List {
