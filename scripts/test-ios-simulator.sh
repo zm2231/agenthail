@@ -17,6 +17,9 @@ case "$1 $2 ${3:-}" in
   "simctl list devicetypes") echo "${DEVICE_TYPES:?}" ;;
   "simctl create"*) printf '%s\n' "$@" >"$CREATED"; echo UDID-NEW ;;
   "simctl boot"*|"simctl bootstatus"*) ;;
+  "simctl shutdown"*) echo "$3" >"$SHUTDOWN" ;;
+  "simctl delete"*) echo "$3" >"$DELETED"; exit "${DELETE_EXIT:-0}" ;;
+  "simctl rename"*) [ "${RENAME_EXIT:-0}" = 0 ] || exit 1; echo "$3 $4" >"$RENAMED" ;;
   *) echo "unexpected xcrun $*" >&2; exit 1 ;;
 esac
 EOF
@@ -30,8 +33,16 @@ cat >"$WORK/bin/defaults" <<'EOF'
 [ -n "${XCODE_DERIVED_DATA:-}" ] || exit 1
 echo "$XCODE_DERIVED_DATA"
 EOF
-chmod +x "$WORK/bin/"*
-export PATH="$WORK/bin:$PATH" LOCKED="$WORK/locked" CREATED="$WORK/created"
+mkdir -p "$WORK/slim"
+cat >"$WORK/slim/simslim" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$SLIMMED"
+exit "${SIMSLIM_EXIT:-0}"
+EOF
+chmod +x "$WORK/bin/"* "$WORK/slim/simslim"
+ln -s "$(command -v jq)" "$WORK/bin/jq"
+# A closed PATH, so a simslim installed on this machine never stands in for the stub.
+export PATH="$WORK/bin:/usr/bin:/bin" LOCKED="$WORK/locked" CREATED="$WORK/created" SLIMMED="$WORK/slimmed" SHUTDOWN="$WORK/shutdown" DELETED="$WORK/deleted" RENAMED="$WORK/renamed"
 
 failures=0
 fail() {
@@ -111,6 +122,36 @@ created() {
 [ "$(created "$pro13,$pro11,$phone" ipad)" = iPad-Pro-11-inch-M5 ] || fail "a new iPad simulator is not the 11-inch iPad Pro the iPad UI tests are written for"
 [ "$(created "$air,$phone" ipad)" = iPad-Air-13-inch-M3 ] || fail "without an 11-inch iPad Pro no iPad simulator was created"
 [ "$(AGENTHAIL_SIMULATOR_NAME="Agenthail CI phone" created "$phone,$pro11" iphone)" = iPhone-17-Pro ] || fail "the iPhone simulator type changed"
+
+slim() {
+  rm -f "$SLIMMED" "$SHUTDOWN" "$DELETED" "$RENAMED" "$CREATED"
+  slim_status=0
+  DEVICE_TYPES="{\"devicetypes\":[$phone]}" "$@" >/dev/null 2>&1 || slim_status=$?
+  slimmed="$(cat "$SLIMMED" 2>/dev/null | tr '\n' ' ' || true)"
+  shutdown="$(cat "$SHUTDOWN" 2>/dev/null || true)"
+  renamed="$(cat "$RENAMED" 2>/dev/null || true)"
+  created_as="$(sed -n 3p "$CREATED" 2>/dev/null || true)"
+}
+slim env PATH="$WORK/slim:$PATH" AGENTHAIL_SIMULATOR_NAME="Agenthail CI phone" "$ROOT/scripts/ios-simulator.sh" iphone
+[ "$slimmed" = "on UDID-NEW --profile $ROOT/scripts/simslim-profile.json " ] || fail "a new simulator was not slimmed with the committed profile: $slimmed"
+[ "$shutdown" = UDID-NEW ] || fail "a slimmed new simulator was not handed back shut down: $shutdown"
+[ "$created_as" = "Agenthail CI phone (slimming)" ] || fail "a simulator being slimmed already had the name runs look up: $created_as"
+[ "$renamed" = "UDID-NEW Agenthail CI phone" ] || fail "a slimmed simulator did not take its name: $renamed"
+ln -s "$ROOT/scripts/ios-simulator.sh" "$WORK/linked-simulator.sh"
+slim env PATH="$WORK/slim:$PATH" AGENTHAIL_SIMULATOR_NAME="Agenthail CI phone" "$WORK/linked-simulator.sh" iphone
+[ "$slimmed" = "on UDID-NEW --profile $ROOT/scripts/simslim-profile.json " ] || fail "the script run through a link did not find the committed profile: $slimmed"
+slim env PATH="$WORK/slim:$PATH" "$ROOT/scripts/ios-simulator.sh" iphone
+[ -z "$slimmed" ] || fail "an existing simulator was slimmed in place: $slimmed"
+slim env AGENTHAIL_SIMULATOR_NAME="Agenthail CI phone" "$ROOT/scripts/ios-simulator.sh" iphone
+{ [ "$slim_status" = 0 ] && [ -z "$shutdown" ] && [ -z "$renamed" ] && [ "$created_as" = "Agenthail CI phone" ]; } || fail "a new simulator without simslim installed was not created as before: exit $slim_status, created as $created_as, shutdown $shutdown, renamed $renamed"
+for delete_exit in 0 1; do
+  slim env PATH="$WORK/slim:$PATH" SIMSLIM_EXIT=1 DELETE_EXIT=$delete_exit AGENTHAIL_SIMULATOR_NAME="Agenthail CI phone" "$ROOT/scripts/ios-simulator.sh" iphone
+  [ "$slim_status" != 0 ] || fail "a failed slim handed the simulator back as if it worked (delete exit $delete_exit)"
+  [ -z "$renamed" ] || fail "a failed slim gave its simulator the name runs look up (delete exit $delete_exit): $renamed"
+  [ "$(cat "$DELETED" 2>/dev/null || true)" = UDID-NEW ] || fail "a failed slim did not try to delete its simulator (delete exit $delete_exit)"
+done
+slim env PATH="$WORK/slim:$PATH" RENAME_EXIT=1 AGENTHAIL_SIMULATOR_NAME="Agenthail CI phone" "$ROOT/scripts/ios-simulator.sh" iphone
+{ [ "$slim_status" != 0 ] && [ "$(cat "$DELETED" 2>/dev/null || true)" = UDID-NEW ]; } || fail "a slimmed simulator that could not take its name was left behind: exit $slim_status"
 
 if [ "$failures" -gt 0 ]; then
   exit 1
