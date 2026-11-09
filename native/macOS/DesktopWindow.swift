@@ -1160,11 +1160,11 @@ struct AttachmentImageView: View {
                     .overlay { ProgressView().controlSize(.small) }
             }
         }
-        .task(id: "\(attachment.id)-\(retryCount)-\(pane.loadsAttachments)") { await load() }
+        .task(id: "\(attachment.id)-\(retryCount)") { await load() }
     }
 
     private func load() async {
-        guard image == nil, pane.loadsAttachments, let sessionID = pane.displayedSession?.id else { return }
+        guard image == nil, let sessionID = pane.displayedSession?.id else { return }
         do {
             let data = try await model.attachmentData(sessionID: sessionID, attachment: attachment)
             if let decoded = NSImage(data: data) { image = decoded } else { failed = true }

@@ -52,6 +52,8 @@ final class KeptTranscripts {
               let index = entries.firstIndex(where: { $0.id == id }), entries[index].frozen == nil else { return }
         let frozen = pane.frozenTranscript()
         entries[index].frozen = frozen
+        // Out of the window first: a detached host starts no tasks, so nothing frozen loads.
+        entries[index].host.removeFromSuperview()
         views.bind(entries[index].host, frozen, entries[index].session)
     }
 

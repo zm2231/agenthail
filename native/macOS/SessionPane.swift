@@ -498,8 +498,6 @@ final class SessionPane: Identifiable {
         return copy
     }
 
-    var loadsAttachments: Bool { !closed }
-
     func close() {
         closed = true
         keptTranscripts.removeAll()

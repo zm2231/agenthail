@@ -4,19 +4,21 @@ import Foundation
 
 @MainActor
 final class BindLog {
-    private(set) var binds: [(id: String, pane: SessionPane)] = []
+    private(set) var binds: [(id: String, pane: SessionPane, attached: Bool)] = []
 
     func views() -> KeptTranscripts.Views {
         KeptTranscripts.Views(
             make: { [self] pane, session in
-                binds.append((session.id, pane))
+                binds.append((session.id, pane, false))
                 let host = NSView()
                 host.identifier = NSUserInterfaceItemIdentifier(session.id)
                 return host
             },
-            bind: { [self] host, pane, session in binds.append((session.id, pane)) }
+            bind: { [self] host, pane, session in binds.append((session.id, pane, host.superview != nil)) }
         )
     }
+
+    func frozenBindsInWindow(live: SessionPane) -> Int { binds.filter { $0.pane !== live && $0.attached }.count }
 
     func lastPane(_ id: String) -> SessionPane? { binds.last { $0.id == id }?.pane }
 }
@@ -53,7 +55,7 @@ struct KeptTranscriptsTest {
         check(kept.host(for: "A")?.superview == nil && container.subviews == [kept.host(for: "B")!], "only the shown transcript is in the window")
         frozenA?.select("C")
         check(frozenA?.selectedSessionID == "A", "a frozen copy never loads another session")
-        check(frozenA?.loadsAttachments == false && pane.loadsAttachments, "a frozen copy loads no attachments; the live pane does")
+        check(log.binds.contains { $0.pane === frozenA } && log.frozenBindsInWindow(live: pane) == 0, "a transcript leaves the window before it is bound to its frozen copy, so it starts no loads")
         let live = pane.frozenTranscript()
         check(live.timelineItems.map(\.id) == pane.timelineItems.map(\.id) && (live.detail == nil) == (pane.detail == nil) && live.olderItems == pane.olderItems && live.olderCursor == pane.olderCursor && live.loadingOlder == pane.loadingOlder && live.olderError == pane.olderError && live.detailStale == pane.detailStale && live.detailRefreshFailed == pane.detailRefreshFailed && live.detailLoadError == pane.detailLoadError && live.removedSession == pane.removedSession && live.inspectorShown == pane.inspectorShown, "a frozen copy carries everything the transcript reads")
 
@@ -77,6 +79,7 @@ struct KeptTranscriptsTest {
         check(pane.removedSession?.id == "B" && !kept.isFrozen("B"), "a removed session stays shown on the live pane")
         pane.closeRemovedSession()
         check(kept.isFrozen("B"), "closing a removed session freezes its transcript before the pane lets it go")
+        check(log.frozenBindsInWindow(live: pane) == 0, "no path binds a frozen copy while its host is in the window")
 
         pane.close()
         check(kept.keptIDs.isEmpty && container.subviews.isEmpty, "closing the pane drops every kept transcript")
