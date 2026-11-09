@@ -109,3 +109,50 @@ func TestATurnThisProcessStartedIsRunningWhileCodexListsItUnsettled(t *testing.T
 		t.Fatalf("a turn this process started read as not running: %q %v", id, err)
 	}
 }
+
+type notifiedTurnClient struct {
+	listedTurnClient
+	events   []codexEvent
+	notified chan struct{}
+}
+
+func (c *notifiedTurnClient) DrainNotifications() []codexEvent {
+	events := c.events
+	c.events = nil
+	return events
+}
+
+func (c *notifiedTurnClient) Notified() <-chan struct{} { return c.notified }
+
+func (c *notifiedTurnClient) Request(ctx context.Context, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
+	if method == "thread/compact/start" {
+		started := func(id string) codexEvent {
+			return codexEvent{Method: "turn/started", Params: map[string]any{"threadId": "t", "turn": map[string]any{"id": id}}}
+		}
+		c.events = []codexEvent{
+			started("turn-2"),
+			{Method: "item/started", Params: map[string]any{"threadId": "t", "turnId": "turn-2", "item": map[string]any{"type": "agentMessage"}}},
+			{Method: "turn/completed", Params: map[string]any{"threadId": "t", "turn": map[string]any{"id": "turn-2"}}},
+			started("turn-3"),
+			{Method: "item/started", Params: map[string]any{"threadId": "t", "turnId": "turn-3", "item": map[string]any{"type": "contextCompaction"}}},
+		}
+		return map[string]any{"result": map[string]any{}}, nil
+	}
+	return c.listedTurnClient.Request(ctx, method, params, wait)
+}
+
+func TestACompactionIsMatchedToItsOwnTurnNotAnotherClientsThatEndsFirst(t *testing.T) {
+	c := &Codex{}
+	other := listedTurnClient{turns: []any{listedTurn("turn-2", "completed"), listedTurn("turn-1", "completed")}}
+	client := &notifiedTurnClient{listedTurnClient: other, notified: make(chan struct{})}
+	if _, err := c.startTurn(context.Background(), client, "t", "thread/compact/start", map[string]any{"threadId": "t"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if busy, err := c.turnInFlight(context.Background(), other, "t"); err != nil || !busy {
+		t.Fatalf("another client's ended turn released the compaction's hold: busy=%v err=%v", busy, err)
+	}
+	done := listedTurnClient{turns: []any{listedTurn("turn-3", "completed"), listedTurn("turn-2", "completed"), listedTurn("turn-1", "completed")}}
+	if busy, err := c.turnInFlight(context.Background(), done, "t"); err != nil || busy {
+		t.Fatalf("the compaction's own ended turn did not release its hold: busy=%v err=%v", busy, err)
+	}
+}

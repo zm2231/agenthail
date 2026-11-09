@@ -189,8 +189,6 @@ func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string,
 				started[str(turn, "id")] = true
 			case event.Method == "item/started" && str(item, "type") == "contextCompaction" && started[str(event.Params, "turnId")]:
 				return str(event.Params, "turnId")
-			case event.Method == "turn/completed" && started[str(turn, "id")]:
-				return str(turn, "id")
 			}
 		}
 		select {
