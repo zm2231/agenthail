@@ -162,9 +162,7 @@ final class SessionExperienceTests: XCTestCase {
 
     @MainActor
     private func makeModel() -> AgenthailIOSModel {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [SessionExperienceProtocol.self]
-        return AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: config)))
+        AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: FixtureScope.open(self).session([SessionExperienceProtocol.self])))
     }
     private func session(id: String, busy: Bool) -> SessionState {
         SessionState(id: id, surface: "claude", name: id, alias: nil, status: busy ? "busy" : "idle", lastActive: nil, queueCount: 0,
@@ -197,7 +195,9 @@ private final class SessionExperienceProtocol: URLProtocol, @unchecked Sendable 
     static let state = SessionExperienceState()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         var status = 200
         var body = "{}"
         if request.url!.path == "/api/v1/session" {

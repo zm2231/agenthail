@@ -87,9 +87,7 @@ final class ProjectRoutingTests: XCTestCase {
         ProjectActionProtocol.state.reset()
         try AgenthailIOSTests.pair("hlaptop", "https://laptop.invalid", name: "laptop")
         try AgenthailIOSTests.pair("hserver", "https://server.invalid", name: "server")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ProjectActionProtocol.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([ProjectActionProtocol.self]))
         for (hostID, root, lead) in [("hlaptop", "/Users/a/widget", "front"), ("hserver", "/srv/widget", "back")] {
             let json = #"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24,"projects":[{"id":"\#(Self.repo)","displayName":"widget","checkouts":[{"host":{"id":"\#(hostID)","name":"\#(hostID)","state":"local"},"projectId":"\#(Self.repo)","rootPath":"\#(root)","added":true}],"coordinators":[{"host":{"id":"\#(hostID)","name":"\#(hostID)","state":"local"},"name":"\#(lead)","surface":"claude"}]}]}"#
             model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(json.utf8)), host: hostID)
@@ -126,9 +124,7 @@ final class ProjectRoutingTests: XCTestCase {
         KeychainStore.removeAll()
         ProjectActionProtocol.state.reset()
         try AgenthailIOSTests.pair("hlaptop", "https://laptop.invalid", name: "laptop")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ProjectActionProtocol.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([ProjectActionProtocol.self]))
         defer { KeychainStore.removeAll() }
         let local = #"{"id":"hlaptop","name":"laptop","state":"local"}"#
         let peer = #"{"id":"hserver","name":"server","state":"connected"}"#
@@ -171,7 +167,9 @@ private final class ProjectActionProtocol: URLProtocol, @unchecked Sendable {
     static let state = State()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         var status = 503
         var text = #"{"error":{"message":"unavailable"}}"#
         if request.url?.path == "/api/v1/actions" {

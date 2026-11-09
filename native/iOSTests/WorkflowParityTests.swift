@@ -188,8 +188,7 @@ final class WorkflowParityTests: XCTestCase {
     @MainActor
     func testFailedCreationReceiptsStayErrorsUnlessRequested() async throws {
         ParityProtocol.state.reset(failReceipt: true)
-        let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [ParityProtocol.self]
-        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: config))
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: FixtureScope.open(self).session([ParityProtocol.self]))
         do {
             _ = try await api.createSession(surface: "codex", message: "Build", cwd: "/project", model: "")
             XCTFail("a failure receipt is an error unless requested")
@@ -469,8 +468,7 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor private func makeModel() -> AgenthailIOSModel {
-        let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [ParityProtocol.self]
-        return AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string:"https://fixture.invalid")!, token:"fixture", session: URLSession(configuration: config)))
+        AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string:"https://fixture.invalid")!, token:"fixture", session: FixtureScope.open(self).session([ParityProtocol.self])))
     }
 }
 
@@ -516,7 +514,9 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
     static let state = State()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         var status = 200
         var text = #"{"surfaces":[{"id":"codex","workspace":true}],"projects":[{"id":"p-project","displayName":"project","rootPath":"/project","kind":"git"}]}"#
         if request.url?.path == "/api/v1/actions" {

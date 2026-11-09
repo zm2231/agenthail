@@ -8,10 +8,8 @@ final class SnapshotPartsTests: XCTestCase {
     }
 
     private func connection(_ hostID: String = "parts") -> HostConnection {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [PartsServer.self]
         let credential = PairedHostCredential(hostID: hostID, hostName: hostID, endpoint: URL(string: "https://\(hostID).tailnet.ts.net")!, token: "fixture", pairedAt: Date())
-        return HostConnection(credential: credential, session: URLSession(configuration: configuration))
+        return HostConnection(credential: credential, session: FixtureScope.open(self).session([PartsServer.self]))
     }
 
     func testAHostSnapshotIsItsBaseWithCurrentSessionsAndTheirSubagents() async throws {
@@ -108,9 +106,7 @@ final class SnapshotPartsTests: XCTestCase {
         defer { KeychainStore.removeAll() }
         try AgenthailIOSTests.pair("parts", "https://parts.tailnet.ts.net")
         PartsServer.state.set(host: "parts", scopes: [[PartsServer.row("root")]], baseSeq: 1, scopeSeq: 1)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [PartsServer.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([PartsServer.self]))
         defer { model.forgetHost("parts") }
         _ = await model.refresh(fresh: true)
         XCTAssertEqual(model.snapshot?.sessions.map(\.id), ["parts::root"])
@@ -127,9 +123,7 @@ final class SnapshotPartsTests: XCTestCase {
         try AgenthailIOSTests.pair("slow", "https://slow.tailnet.ts.net")
         PartsServer.state.set(host: "fast", scopes: [[PartsServer.row("fast-session")]], baseSeq: 1, scopeSeq: 1)
         PartsServer.state.set(host: "slow", scopes: [[PartsServer.row("slow-session")]], baseSeq: 1, scopeSeq: 1, firstScopeDelay: .seconds(4))
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [PartsServer.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([PartsServer.self]))
         model.hostRefreshWait = .milliseconds(500)
         let clock = ContinuousClock()
         let started = clock.now
@@ -219,7 +213,9 @@ final class PartsServer: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         let url = request.url!
         let name = String(url.host!.split(separator: ".")[0])
         let pathAndQuery = url.path + (url.query.map { "?" + $0 } ?? "")
@@ -258,11 +254,11 @@ final class PartsServer: URLProtocol, @unchecked Sendable {
             guard let scope = Self.state.nextScope(name) else { return respond(503, "{}") }
             let body = String(data: try! JSONSerialization.data(withJSONObject: ["sessions": scope.rows, "hostEpoch": "epoch", "catalogSeq": scope.seq, "totalSessions": scope.rows.count]), encoding: .utf8)!
             let (status, reply) = scope.fails ? (500, #"{"error":{"message":"scope failed"}}"#) : (200, body)
-            if scope.holds { return Self.state.hold(name) { self.respond(status, reply) } }
+            if scope.holds { return Self.state.hold(name) { self.served { self.respond(status, reply) } } }
             let delay = scope.delay.components
             let seconds = Double(delay.seconds) + Double(delay.attoseconds) / 1e18
             if seconds == 0 { return respond(status, reply) }
-            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { self.respond(status, reply) }
+            later(seconds) { self.respond(status, reply) }
         default:
             respond(200, "{}")
         }

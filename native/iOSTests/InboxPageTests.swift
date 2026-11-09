@@ -11,7 +11,9 @@ private final class InboxHostProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
 
-    override func startLoading() {
+    override func startLoading() { served(reply) }
+
+    private func reply() {
         let url = request.url!
         Self.lock.withLock { Self.requests.append(url.host! + url.path + "?" + (url.query ?? "")) }
         if url.path == "/api/v1/actions" { Self.recordAction(request, host: url.host!) }
@@ -90,9 +92,7 @@ private final class InboxHostProtocol: URLProtocol, @unchecked Sendable {
 @MainActor
 final class InboxPageTests: XCTestCase {
     private func host(_ name: String, remote: String? = nil) -> InboxPage.Host {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [InboxHostProtocol.self]
-        return InboxPage.Host(id: name, name: name, api: AgenthailAPI(baseURL: URL(string: "https://\(name).invalid")!, token: "t", session: URLSession(configuration: configuration)), remote: remote)
+        InboxPage.Host(id: name, name: name, api: AgenthailAPI(baseURL: URL(string: "https://\(name).invalid")!, token: "t", session: FixtureScope.open(self).session([InboxHostProtocol.self])), remote: remote)
     }
 
     func testAnUnreachableHostDoesNotHoldTheOthersPastItsShortTimeout() async throws {
@@ -202,9 +202,7 @@ final class InboxPageTests: XCTestCase {
         addTeardownBlock { KeychainStore.removeAll(); InboxHostProtocol.failing = [] }
         try AgenthailIOSTests.pair("hlaptop", "https://fast.invalid", name: "laptop")
         try AgenthailIOSTests.pair("hserver", "https://older.invalid", name: "server")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [InboxHostProtocol.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([InboxHostProtocol.self]))
         var row = HostCatalogTests.row("hserver::s", name: "s")
         row.host = SessionHost(id: "hserver", name: "server", state: "connected")
         var laptop = HostCatalogTests.snapshot([row])
@@ -253,9 +251,7 @@ final class InboxPageTests: XCTestCase {
         defer { KeychainStore.removeAll() }
         try AgenthailIOSTests.pair("hlaptop", "https://fast.invalid", name: "laptop")
         try AgenthailIOSTests.pair("hdesk", "https://older.invalid", name: "desk")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [InboxHostProtocol.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([InboxHostProtocol.self]))
         var laptop = HostCatalogTests.snapshot([])
         laptop.daemonHosts([HostHealth(id: "hserver", name: "server", state: "connected")])
         model.setHostSnapshot(laptop, host: "hlaptop")

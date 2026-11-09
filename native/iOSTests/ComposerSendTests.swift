@@ -874,9 +874,7 @@ final class ComposerSendTests: XCTestCase {
     }
 
     private func makeAPI() -> AgenthailAPI {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ComposerSendProtocol.self]
-        return AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+        AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: FixtureScope.open(self).session([ComposerSendProtocol.self]))
     }
 
     private func makeDetail(status: String = "idle") throws -> SessionDetail {
@@ -954,7 +952,9 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
 
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         guard request.url?.path == "/api/v1/actions" else { return respond(200, "{}") }
         switch Self.state.next(Attempt(key: request.value(forHTTPHeaderField: "Idempotency-Key"), raw: requestBody() ?? Data())) {
         case .answer(let status, let text): respond(status, text)

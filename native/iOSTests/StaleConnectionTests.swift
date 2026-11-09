@@ -7,9 +7,7 @@ final class StaleConnectionTests: XCTestCase {
         KeychainStore.removeAll()
         try AgenthailIOSTests.pair("hstale", "https://stale.tailnet.ts.net", token: "fixture")
         StaleConnectionProtocol.state.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [StaleConnectionProtocol.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([StaleConnectionProtocol.self]))
         defer { model.forgetHost("hstale"); KeychainStore.removeAll() }
         model.connect()
         for _ in 0..<150 where model.snapshot?.daemon.stale != false {
@@ -26,9 +24,7 @@ final class StaleConnectionTests: XCTestCase {
         KeychainStore.removeAll()
         try AgenthailIOSTests.pair("hheld", "https://held.tailnet.ts.net", token: "fixture")
         HeldSnapshotProtocol.state.reset(holdAt: 1)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [HeldSnapshotProtocol.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([HeldSnapshotProtocol.self]))
         defer { KeychainStore.removeAll() }
         model.connect()
         for _ in 0..<150 where !HeldSnapshotProtocol.state.holding {
@@ -48,9 +44,7 @@ final class StaleConnectionTests: XCTestCase {
         KeychainStore.removeAll()
         try AgenthailIOSTests.pair("hheld", "https://held.tailnet.ts.net", token: "fixture")
         HeldSnapshotProtocol.state.reset(holdAt: 2)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [HeldSnapshotProtocol.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([HeldSnapshotProtocol.self]))
         defer { KeychainStore.removeAll() }
         model.connect()
         for _ in 0..<150 where !HeldSnapshotProtocol.state.holding {
@@ -69,9 +63,7 @@ final class StaleConnectionTests: XCTestCase {
         KeychainStore.removeAll()
         try AgenthailIOSTests.pair("hup", "https://up.tailnet.ts.net")
         try AgenthailIOSTests.pair("hdown", "https://down.tailnet.ts.net")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [SplitHostsProtocol.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([SplitHostsProtocol.self]))
         defer { KeychainStore.removeAll() }
         model.connect()
         for _ in 0..<150 where model.connectionError == nil || model.snapshot == nil {
@@ -91,9 +83,7 @@ final class StaleConnectionTests: XCTestCase {
         MirrorDropProtocol.state.reset()
         try AgenthailIOSTests.pair("hmirror", "https://mirror.tailnet.ts.net")
         try AgenthailIOSTests.pair("hdown", "https://down.tailnet.ts.net")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [MirrorDropProtocol.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([MirrorDropProtocol.self]))
         defer { KeychainStore.removeAll() }
         model.connect()
         for _ in 0..<150 where model.snapshot == nil || !MirrorDropProtocol.state.streaming {
@@ -117,7 +107,7 @@ final class StaleConnectionTests: XCTestCase {
         ServedSessionProtocol.state.reset(holdDetailOn: "old")
         defer { ServedSessionProtocol.state.release(); KeychainStore.removeAll() }
         try AgenthailIOSTests.pair("hsrv", "https://old.tailnet.ts.net", name: "srv")
-        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session(self))
         model.connect()
         for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
         let load = Task { await model.loadSession("hsrv::demo") }
@@ -147,7 +137,7 @@ final class StaleConnectionTests: XCTestCase {
         ServedSessionProtocol.state.hold("old", ["/api/v1/session-commands"])
         defer { ServedSessionProtocol.state.release(); KeychainStore.removeAll() }
         try AgenthailIOSTests.pair("hsrv", "https://old.tailnet.ts.net", name: "srv")
-        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session(self))
         model.connect()
         for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
         await model.loadSession("hsrv::demo")
@@ -173,7 +163,7 @@ final class StaleConnectionTests: XCTestCase {
         ServedSessionProtocol.state.reset(holdDetailOn: nil)
         defer { KeychainStore.removeAll() }
         try AgenthailIOSTests.pair("hsrv", "https://srv.tailnet.ts.net", name: "srv")
-        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session(self))
         model.connect()
         for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
         let files = await model.sessionFiles("hsrv::demo", query: "read me")
@@ -190,7 +180,7 @@ final class StaleConnectionTests: XCTestCase {
         ServedSessionProtocol.state.hold("old", ["/api/v1/session-files"])
         defer { ServedSessionProtocol.state.release(); KeychainStore.removeAll() }
         try AgenthailIOSTests.pair("hsrv", "https://old.tailnet.ts.net", name: "srv")
-        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session(self))
         model.connect()
         for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
         let request = Task { await model.sessionFiles("hsrv::demo", query: "a") }
@@ -218,7 +208,7 @@ final class StaleConnectionTests: XCTestCase {
         ServedSessionProtocol.state.reset(holdDetailOn: nil)
         defer { ServedSessionProtocol.state.release(); KeychainStore.removeAll() }
         try AgenthailIOSTests.pair("hsrv", "https://old.tailnet.ts.net", name: "srv")
-        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session(self))
         model.connect()
         for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
         await model.loadSession("hsrv::demo")
@@ -253,7 +243,7 @@ final class StaleConnectionTests: XCTestCase {
         ServedSessionProtocol.state.reset(holdDetailOn: nil)
         defer { ServedSessionProtocol.state.release(); KeychainStore.removeAll() }
         try AgenthailIOSTests.pair("hsrv", "https://old.tailnet.ts.net", name: "srv")
-        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session(self))
         model.connect()
         for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
         await model.loadSession("hsrv::demo")
@@ -282,7 +272,7 @@ final class StaleConnectionTests: XCTestCase {
         defer { KeychainStore.removeAll() }
         try AgenthailIOSTests.pair("hown", "https://own.tailnet.ts.net")
         try AgenthailIOSTests.pair("hmirror", "https://mirror.tailnet.ts.net")
-        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session(self))
         model.connect()
         for _ in 0..<150 where model.connection("hown")?.reachable != true || model.connection("hmirror")?.reachable != true {
             try await Task.sleep(for: .milliseconds(20))
@@ -324,7 +314,7 @@ final class StaleConnectionTests: XCTestCase {
         ServedSessionProtocol.state.reset(holdDetailOn: nil)
         defer { KeychainStore.removeAll() }
         try AgenthailIOSTests.pair("hown", "https://own.tailnet.ts.net")
-        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session(self))
         model.connect()
         for _ in 0..<150 where model.connection("hown")?.reachable != true { try await Task.sleep(for: .milliseconds(20)) }
         var parent = try XCTUnwrap(model.snapshot?.sessions.first { $0.id == "hown::demo" })
@@ -356,7 +346,7 @@ final class StaleConnectionTests: XCTestCase {
         ServedSessionProtocol.state.reset(holdDetailOn: nil)
         defer { KeychainStore.removeAll() }
         try AgenthailIOSTests.pair("hmirror", "https://mirror.tailnet.ts.net")
-        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session(self))
         model.connect()
         for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
         await model.loadSession("hbuild::s9")
@@ -383,13 +373,15 @@ private final class MirrorDropProtocol: URLProtocol, @unchecked Sendable {
         func hold(_ request: MirrorDropProtocol) { lock.withLock { stream = request } }
         func dropMirror() {
             let held = lock.withLock { dropped = true; let held = stream; stream = nil; return held }
-            held?.finish()
+            held?.served { held?.finish() }
         }
     }
     static let state = State()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         if answeredProjectActivity() { return }
         guard request.url?.host == "mirror.tailnet.ts.net", !Self.state.offline else {
             respond(503, #"{"error":"offline"}"#, finish: true)
@@ -425,7 +417,9 @@ private final class MirrorDropProtocol: URLProtocol, @unchecked Sendable {
 private final class SplitHostsProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         if answeredProjectActivity() { return }
         guard request.url?.host == "up.tailnet.ts.net" else {
             respond(503, #"{"error":"offline"}"#, finish: true)
@@ -469,13 +463,15 @@ private final class HeldSnapshotProtocol: URLProtocol, @unchecked Sendable {
         func catalog() { lock.withLock { catalogs += 1 } }
         func release() {
             guard let request = lock.withLock({ held }) else { return }
-            request.respond(SessionPreview.snapshotJSON)
+            request.served { request.respond(SessionPreview.snapshotJSON) }
         }
     }
     static let state = State()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         if answeredProjectActivity() { return }
         switch request.url!.path {
         case "/api/v1/snapshot":
@@ -523,7 +519,9 @@ private final class StaleConnectionProtocol: URLProtocol, @unchecked Sendable {
     static let state = State()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         if answeredProjectActivity() { return }
         let path = request.url!.path
         let body: String
@@ -575,29 +573,33 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
         func bringOnline(_ host: String) { condition.withLock { _ = down.remove(host) } }
         func takeOffline(_ host: String) {
             let open = condition.withLock { down.insert(host); return opened.removeValue(forKey: host) ?? [] }
-            for request in open { request.client?.urlProtocolDidFinishLoading(request) }
+            for request in open { request.served { request.client?.urlProtocolDidFinishLoading(request) } }
         }
         func emit(_ host: String, _ json: String) {
-            let stream = condition.withLock { streams[host] }
-            stream?.client?.urlProtocol(stream!, didLoad: Data("id: 9\ndata: \(json)\n\n".utf8))
+            guard let stream = condition.withLock({ streams[host] }) else { return }
+            stream.served { stream.client?.urlProtocol(stream, didLoad: Data("id: 9\ndata: \(json)\n\n".utf8)) }
         }
-        func waitIfHeld(_ host: String, _ path: String) {
+        init() {
+            let condition = condition
+            FixtureScope.wakeOnRetire { condition.withLock { condition.broadcast() } }
+        }
+        func waitIfHeld(_ request: URLRequest, _ host: String, _ path: String) {
             condition.lock(); defer { condition.unlock() }
             guard holdOn == host, holdPaths.contains(path) else { return }
             waiting += 1
-            while holdOn == host { condition.wait() }
+            while holdOn == host, FixtureScope.owns(request) { condition.wait() }
             waiting -= 1
         }
     }
     static let state = State()
-    static var session: URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ServedSessionProtocol.self]
-        return URLSession(configuration: configuration)
+    static func session(_ test: XCTestCase) -> URLSession {
+        FixtureScope.open(test).session([ServedSessionProtocol.self])
     }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         if answeredProjectActivity() { return }
         let host = request.url?.host?.split(separator: ".").first.map(String.init) ?? ""
         let path = request.url!.path
@@ -635,8 +637,8 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
             respond(String(decoding: try! JSONSerialization.data(withJSONObject: value), as: UTF8.self))
         case "/api/v1/session":
             let older = request.url?.query?.contains("timelineBefore") == true
-            DispatchQueue.global().async { [self] in
-                Self.state.waitIfHeld(host, path)
+            later { [self] in
+                Self.state.waitIfHeld(request, host, path)
                 if older, Self.state.gapped(host) {
                     respond(#"{"error":{"code":"history_gap","message":"Older history is no longer retained."}}"#, status: 409)
                     return
@@ -652,21 +654,21 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
                 respond(String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self))
             }
         case "/api/v1/requests":
-            DispatchQueue.global().async { [self] in
-                Self.state.waitIfHeld(host, path)
+            later { [self] in
+                Self.state.waitIfHeld(request, host, path)
                 respond(#"{"permissionMode":"\#(host)","requests":[]}"#)
             }
         case "/api/v1/session-commands":
-            DispatchQueue.global().async { [self] in
-                Self.state.waitIfHeld(host, path)
+            later { [self] in
+                Self.state.waitIfHeld(request, host, path)
                 respond(#"{"commands":[{"name":"\#(host)","description":"","argumentHint":"","insert":"/\#(host)"}],"unavailable":""}"#)
             }
         case "/api/v1/session-files":
             let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
             let id = items.first { $0.name == "id" }?.value ?? ""
             let query = items.first { $0.name == "q" }?.value ?? ""
-            DispatchQueue.global().async { [self] in
-                Self.state.waitIfHeld(host, path)
+            later { [self] in
+                Self.state.waitIfHeld(request, host, path)
                 respond(#"{"files":[{"path":"\#(host)/\#(id)/\#(query)","dir":false}],"truncated":false}"#)
             }
         case "/api/v1/session-stream":

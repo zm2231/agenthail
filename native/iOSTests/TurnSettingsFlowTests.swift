@@ -47,9 +47,7 @@ final class TurnSettingsFlowTests: XCTestCase {
 
     func testExplicitSteerReplaysItsKey() async throws {
         TurnSettingsFlowProtocol.state.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
-        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: FixtureScope.open(self).session([TurnSettingsFlowProtocol.self]))
 
         _ = try await api.sendInstruction(action: "steer", sessionID: "codex-flow", message: "Steer the active turn", idempotencyKey: "stable-steer-key")
         _ = try await api.sendInstruction(action: "steer", sessionID: "codex-flow", message: "Steer the active turn", idempotencyKey: "stable-steer-key")
@@ -60,9 +58,7 @@ final class TurnSettingsFlowTests: XCTestCase {
 
     func testActionCanReplayStableLogicalKey() async throws {
         TurnSettingsFlowProtocol.state.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
-        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: FixtureScope.open(self).session([TurnSettingsFlowProtocol.self]))
 
         try await api.action("send", sessionID: "codex-flow", message: "Retry this normally", idempotencyKey: "stable-send-key")
         try await api.action("send", sessionID: "codex-flow", message: "Retry this normally", idempotencyKey: "stable-send-key")
@@ -74,9 +70,7 @@ final class TurnSettingsFlowTests: XCTestCase {
 
     func testSendCarriesExplicitBusyDeliveryOnlyWhenChosen() async throws {
         TurnSettingsFlowProtocol.state.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
-        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: FixtureScope.open(self).session([TurnSettingsFlowProtocol.self]))
 
         _ = try await api.sendInstruction(action: "send", sessionID: "codex-flow", message: "Follow the default")
         _ = try await api.sendInstruction(action: "send", sessionID: "codex-flow", message: "Steer now", busyDelivery: "steer")
@@ -87,9 +81,7 @@ final class TurnSettingsFlowTests: XCTestCase {
 
     func testActionGetsGeneratedKeyButReadsDoNot() async throws {
         TurnSettingsFlowProtocol.state.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
-        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: FixtureScope.open(self).session([TurnSettingsFlowProtocol.self]))
 
         _ = try await api.sendInstruction(action: "send", sessionID: "codex-flow", message: "Send once")
         try await api.action("goal-set", sessionID: "codex-flow", message: "Set a goal")
@@ -174,9 +166,7 @@ final class TurnSettingsFlowTests: XCTestCase {
 
     @MainActor
     private func makeModel() -> AgenthailIOSModel {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
-        return AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: FixtureScope.open(self).session([TurnSettingsFlowProtocol.self])))
     }
 
     private func makeFixture(status: String) throws -> (session: SessionState, detail: SessionDetail) {
@@ -264,7 +254,9 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         var status = 200
         var body = #"{"ok":true}"#
         if request.url?.path == "/api/v1/actions" {

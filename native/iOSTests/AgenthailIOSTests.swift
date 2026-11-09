@@ -30,8 +30,7 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     func testEmptyEventStreamMarksConnectionHealthy() async throws {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [EmptyEventStreamURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([EmptyEventStreamURLProtocol.self])
         let api = AgenthailAPI(baseURL: URL(string: "https://mac.tailnet.ts.net")!, token: "token", session: URLSession(configuration: configuration))
         let probe = EventConnectionProbe()
         do {
@@ -49,8 +48,7 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     func testCatalogStreamDecodesItsIndependentCursorEvent() async throws {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [CatalogEventStreamURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([CatalogEventStreamURLProtocol.self])
         let api = AgenthailAPI(baseURL: URL(string: "https://mac.tailnet.ts.net")!, token: "token", session: URLSession(configuration: configuration))
         let probe = CatalogConnectionProbe()
         do {
@@ -268,8 +266,7 @@ final class AgenthailIOSTests: XCTestCase {
     @MainActor
     func testRetainedBodyLoadsAllBoundedRanges() async throws {
         RetainedBodyURLProtocol.state.reset(total: 40_000)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [RetainedBodyURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([RetainedBodyURLProtocol.self])
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
         model.selectedSessionID = "computer::demo"
         let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
@@ -283,8 +280,7 @@ final class AgenthailIOSTests: XCTestCase {
 
     func testSessionAttachmentFetchIsAuthenticatedAndBounded() async throws {
         AttachmentURLProtocol.state.reset(oversized: false)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [AttachmentURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([AttachmentURLProtocol.self])
         let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "secret", session: URLSession(configuration: configuration))
         let data = try await api.sessionAttachment(sessionID: "demo", id: "image-1")
         XCTAssertEqual(data, Data([137, 80, 78, 71]))
@@ -304,8 +300,7 @@ final class AgenthailIOSTests: XCTestCase {
     @MainActor
     func testRetainedBodyReportsEightMiBCapInsteadOfPretendingPrefixIsFull() async throws {
         RetainedBodyURLProtocol.state.reset(total: (8 << 20) + 1)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [RetainedBodyURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([RetainedBodyURLProtocol.self])
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
         model.selectedSessionID = "computer::demo"
         let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
@@ -319,8 +314,7 @@ final class AgenthailIOSTests: XCTestCase {
     @MainActor
     func testRetainedBodyRejectsInvalidUTF8RangeBoundary() async throws {
         RetainedBodyURLProtocol.state.reset(total: 40_000, invalidBoundary: true)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [RetainedBodyURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([RetainedBodyURLProtocol.self])
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
         model.selectedSessionID = "computer::demo"
         let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
@@ -414,8 +408,7 @@ final class AgenthailIOSTests: XCTestCase {
         KeychainStore.removeAll()
         try Self.pair("hmac", "https://mac.tailnet.ts.net")
         FlakyConnectionURLProtocol.state.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [FlakyConnectionURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([FlakyConnectionURLProtocol.self])
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
         model.resumeConnection()
         for _ in 0..<150 where !FlakyConnectionURLProtocol.state.connected {
@@ -438,8 +431,7 @@ final class AgenthailIOSTests: XCTestCase {
         KeychainStore.removeAll()
         try Self.pair("hmac", "https://mac.tailnet.ts.net")
         IncompatibleConnectionURLProtocol.requests.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [IncompatibleConnectionURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([IncompatibleConnectionURLProtocol.self])
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
         model.connect()
         try await Task.sleep(for: .milliseconds(1200))
@@ -456,8 +448,7 @@ final class AgenthailIOSTests: XCTestCase {
         IncompatibleConnectionURLProtocol.requests.reset()
         IncompatibleConnectionURLProtocol.version = #"{"protocol":1,"minimumProtocol":1,"maximumProtocol":1}"#
         defer { IncompatibleConnectionURLProtocol.version = #"{"protocol":3,"minimumProtocol":3,"maximumProtocol":3}"# }
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [IncompatibleConnectionURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([IncompatibleConnectionURLProtocol.self])
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
         model.connect()
         try await Task.sleep(for: .milliseconds(1200))
@@ -506,8 +497,7 @@ final class AgenthailIOSTests: XCTestCase {
         KeychainStore.removeAll()
         try Self.pair("hold", "https://old.tailnet.ts.net:7412", name: "old")
         ReplacementURLProtocol.recorder.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ReplacementURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([ReplacementURLProtocol.self])
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
         model.handlePairingURL(Self.pairingLink("new", host: "hnew"))
         model.confirmPairing()
@@ -524,8 +514,7 @@ final class AgenthailIOSTests: XCTestCase {
         KeychainStore.removeAll()
         try Self.pair("hother", "https://other.tailnet.ts.net", name: "other", token: "other-token")
         ReplacementURLProtocol.recorder.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ReplacementURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([ReplacementURLProtocol.self])
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
         model.handlePairingURL(Self.pairingLink("new", host: "hother", name: "other"))
         XCTAssertEqual(model.pairingConfirmationTitle, "Reconnect other?")
@@ -548,8 +537,7 @@ final class AgenthailIOSTests: XCTestCase {
         let stored = #"{"registration":{"installationId":"old-installation","credential":"old-credential","expiresAt":9223372036854775807},"deviceToken":"device","environment":"sandbox","endpoint":"https://new.tailnet.ts.net:7412"}"#
         try KeychainStore.set(stored, account: "push:hnew")
         ReplacementURLProtocol.recorder.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ReplacementURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([ReplacementURLProtocol.self])
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
         model.handlePairingURL(Self.pairingLink("new", host: "hnew"))
         XCTAssertEqual(model.pairingConfirmationTitle, "Reconnect new?")
@@ -577,8 +565,7 @@ final class AgenthailIOSTests: XCTestCase {
         let registration = PushRegistration(installationId: "old-installation", credential: "old-credential", expiresAt: Int64.max)
         try KeychainStore.set(try JSONEncoder().encode(registration).base64EncodedString(), account: "pushRegistration")
         ReplacementURLProtocol.recorder.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ReplacementURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([ReplacementURLProtocol.self])
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
         for _ in 0..<100 where KeychainStore.get("token") != nil { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertFalse(model.isPaired)
@@ -599,8 +586,7 @@ final class AgenthailIOSTests: XCTestCase {
 
     func testPushRelayChecksStoredCredential() async throws {
         ReplacementURLProtocol.recorder.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ReplacementURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([ReplacementURLProtocol.self])
         let relay = PushRelayClient(baseURL: URL(string: "https://relay.example")!, session: URLSession(configuration: configuration))
         try await relay.validate(PushRegistration(installationId: "installation", credential: "credential", expiresAt: Int64.max))
         XCTAssertTrue(ReplacementURLProtocol.recorder.snapshot().contains("POST relay.example/v1/register/check"))
@@ -668,7 +654,9 @@ private final class RetainedBodyURLProtocol: URLProtocol, @unchecked Sendable {
     static let state = RetainedBodyState()
     override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/api/v1/session-stream-body" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
         let query = Dictionary(uniqueKeysWithValues: components.queryItems!.map { ($0.name, $0.value ?? "") })
         let start = Int(query["start"]!)!
@@ -723,7 +711,9 @@ private final class EmptyEventStreamURLProtocol: URLProtocol, @unchecked Sendabl
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         let response = HTTPURLResponse(
             url: request.url!,
             statusCode: 200,
@@ -740,7 +730,9 @@ private final class EmptyEventStreamURLProtocol: URLProtocol, @unchecked Sendabl
 private final class CatalogEventStreamURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         XCTAssertEqual(request.url?.path, "/api/v1/catalog-events")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Last-Event-ID"), "41")
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/event-stream"])!
@@ -795,7 +787,9 @@ private final class FlakyConnectionURLProtocol: URLProtocol, @unchecked Sendable
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         if answeredProjectActivity() { return }
         let path = request.url?.path ?? ""
         if path == "/api/v1/version", Self.state.nextVersionRequest() == 1 {
@@ -837,7 +831,9 @@ private final class IncompatibleConnectionURLProtocol: URLProtocol, @unchecked S
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         Self.requests.record(request)
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
         let body = Self.version
@@ -906,7 +902,9 @@ private final class AttachmentURLProtocol: URLProtocol, @unchecked Sendable {
     static let state = AttachmentState()
     override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/api/v1/session-attachment" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         Self.state.record(request)
         let (status, body, headers) = Self.state.response()
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!, cacheStoragePolicy: .notAllowed)
@@ -922,7 +920,9 @@ private final class ReplacementURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         Self.recorder.record(request)
         let paired = request.url?.path == "/api/v1/pair"
         let host = request.url?.host?.split(separator: ".").first.map(String.init) ?? ""
