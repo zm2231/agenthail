@@ -672,11 +672,13 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await post("/api/v1/actions", body: body, idempotencyKey: idempotencyKey)
     }
 
-    func channelSend(_ channel: String, message: String, idempotencyKey: String) async throws -> ChannelSendResult {
+    func channelSend(_ channel: String, message: String, idempotencyKey: String, exceptHosts: [String] = []) async throws -> ChannelSendResult {
         let path = "/api/v1/actions"
         var request = authorizedRequest(path: path)
         request.httpMethod = "POST"
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["action": "channel-send", "channel": channel, "message": message, "author": "person"])
+        var body: [String: Any] = ["action": "channel-send", "channel": channel, "message": message, "author": "person"]
+        if !exceptHosts.isEmpty { body["exceptHosts"] = exceptHosts }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         setIdempotencyHeader(on: &request, path: path, method: "POST", key: idempotencyKey)
         let (data, response) = try await session.data(for: request)
@@ -1090,6 +1092,7 @@ struct ChannelSendResult: Decodable {
     }
 
     struct Host: Decodable, Equatable {
+        var id: String? = nil
         let name: String
         let state: String
         var detail: String?
@@ -1098,6 +1101,7 @@ struct ChannelSendResult: Decodable {
     let recipients: [Recipient]
     var hosts: [Host]? = nil
     var unreachable: [String]? = nil
+    var exceptHosts: [String]? = nil
 }
 struct DeliveryReceipt: Decodable {
     let deliveryId: Int64?

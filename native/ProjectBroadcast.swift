@@ -26,6 +26,10 @@ enum ProjectBroadcast {
         if !refused.isEmpty {
             notice += " Refused by \(refused.joined(separator: "; "))."
         }
+        let unreached = (result.hosts ?? []).filter { $0.state == "unreached" }.map(\.name)
+        if !unreached.isEmpty {
+            notice += " Couldn't reach \(unreached.joined(separator: ", "))."
+        }
         return notice
     }
 }

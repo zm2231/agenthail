@@ -116,6 +116,36 @@ func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
 	})
 }
 
+func TestAProjectChannelSendSkipsTheHostsTheSenderAlreadyReached(t *testing.T) {
+	local, remote, record := widgetOnTwoHosts(t)
+	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "standup", "exceptHosts": []string{record.ID}})
+	var answer struct {
+		Recipients  []broadcast.Recipient `json:"recipients"`
+		Hosts       []channelHostLeg      `json:"hosts"`
+		ExceptHosts []string              `json:"exceptHosts"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &answer) != nil {
+		t.Fatalf("send status=%d body=%s", response.Code, response.Body)
+	}
+	if len(answer.Hosts) != 0 {
+		t.Fatalf("an excepted host was sent a leg: %+v", answer.Hosts)
+	}
+	for _, recipient := range answer.Recipients {
+		if recipient.HostID == record.ID {
+			t.Fatalf("a recipient on the excepted host was reached: %+v", answer.Recipients)
+		}
+	}
+	if len(answer.Recipients) == 0 {
+		t.Fatal("the local conversations were not reached")
+	}
+	if len(answer.ExceptHosts) != 1 || answer.ExceptHosts[0] != record.ID {
+		t.Fatalf("the reply does not echo exceptHosts: %v", answer.ExceptHosts)
+	}
+	if delivered := remote.fake.delivered(); len(delivered) != 0 {
+		t.Fatalf("the excepted host delivered %v", delivered)
+	}
+}
+
 func TestAChannelNameAProjectAnswersToIsRefused(t *testing.T) {
 	d, r, fake, from, to := daemonFixture(t)
 	if response := runDashboardAction(t, d, `{"action":"channel-create","channel":"widget"}`); response.Code != http.StatusOK {

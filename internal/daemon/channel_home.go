@@ -98,7 +98,7 @@ func (d *Daemon) postToChannelHome(ctx context.Context, home, name string, reque
 			return actionResult{}, err
 		}
 	}
-	return d.channelReply(broadcast.Result{Target: target, Recipients: recipients}, []channelHostLeg{leg})
+	return d.channelReply(broadcast.Result{Target: target, Recipients: recipients}, []channelHostLeg{leg}, nil)
 }
 
 // channelPostScope lets a paired host's session post to a channel here only
