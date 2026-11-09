@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -150,6 +151,12 @@ func migrateTx(tx *sql.Tx) error {
 		if err := ensureColumn(tx, "coordinator_history", column.name, column.decl); err != nil {
 			return err
 		}
+	}
+	if err := allowMovedCoordinatorHistory(tx); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "coordinators", "moved_from", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
 	}
 	for _, column := range []struct {
 		name string
@@ -592,6 +599,29 @@ func columnExists(tx *sql.Tx, table, name string) (bool, error) {
 		}
 	}
 	return found, rows.Close()
+}
+
+// SQLite cannot change a CHECK in place, so the table is made again.
+func allowMovedCoordinatorHistory(tx *sql.Tx) error {
+	var definition string
+	if err := tx.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='coordinator_history'`).Scan(&definition); err != nil {
+		return err
+	}
+	if strings.Contains(definition, "'moved'") {
+		return nil
+	}
+	const columns = `id,project_id,action,name,session_id,previous_name,previous_session_id,changed_by,at_ms,reason,acknowledged_at_ms,announced_at_ms,notify_sender,person_notified_at_ms`
+	for _, step := range []string{
+		`ALTER TABLE coordinator_history RENAME TO coordinator_history_unmoved`,
+		schema,
+		`INSERT INTO coordinator_history (` + columns + `) SELECT ` + columns + ` FROM coordinator_history_unmoved`,
+		`DROP TABLE coordinator_history_unmoved`,
+	} {
+		if _, err := tx.Exec(step); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensureColumn(tx *sql.Tx, table, name, declaration string) error {

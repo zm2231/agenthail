@@ -14,7 +14,7 @@ Each host keeps its coordinators in the `coordinators` table, keyed by project i
 
 The name defaults to `<project>-lead`. A name that any host's other coordinator uses, or that names another session on the owning host, is refused. Because the name is what binds the coordinator to its session, it moves only through the coordinator commands: `identify`, a new session's name and a removed alias cannot rename the coordinator's session, give its name to another session, or take the name of a coordinator that has not started.
 
-Every set, replace and clear appends a `coordinator_history` row naming who made the change: the calling session as `host::session`, or the person or device acting (for example `the CLI`).
+Every set, replace and clear appends a `coordinator_history` row naming who made the change: the calling session as `host::session`, or the person or device acting (for example `the CLI`). A coordinator moves to a paired host with its session (`agenthail move`): the source and the target each append a `moved` row, and the target keeps the time the session became the coordinator. [Moving a session to another host](host-move.md#the-coordinator-during-a-move) describes the role during the move.
 
 ## Commands
 

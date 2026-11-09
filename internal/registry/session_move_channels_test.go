@@ -37,7 +37,7 @@ func TestAMoveIsRefusedWhenItsChannelsChangeAfterItDeclaredThem(t *testing.T) {
 	if err := r.AddToChannel("reviewers", moveConversation); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), declared, ""); err == nil || !strings.Contains(err.Error(), "channels of") {
+	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), declared, ""); err == nil || !strings.Contains(err.Error(), "changed while the move was prepared") {
 		t.Fatalf("a move that declared one of two channels began: %v", err)
 	}
 }
@@ -84,7 +84,7 @@ func takeMoved(t *testing.T, r *Registry, from, self string, carry MoveCarry) {
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 7, Transcript: "/tmp/t.jsonl", HasLocal: true}
-	if _, err := r.TakeMovedSession("move-in", session, "", time.Time{}, nil, carry, self); err != nil {
+	if _, err := r.TakeMovedSession("move-in", session, "", time.Time{}, nil, carry, self, MovedCoordinatorPlace{}); err != nil {
 		t.Fatal(err)
 	}
 }

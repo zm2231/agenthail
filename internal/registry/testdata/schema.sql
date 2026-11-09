@@ -1,4 +1,4 @@
--- schemaVersion 82
+-- schemaVersion 83
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -246,7 +246,7 @@ CREATE TABLE channels (
 CREATE TABLE coordinator_history (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	project_id TEXT NOT NULL,
-	action TEXT NOT NULL CHECK (action IN ('set','replaced','cleared')),
+	action TEXT NOT NULL CHECK (action IN ('set','replaced','cleared','moved')),
 	name TEXT NOT NULL,
 	session_id TEXT NOT NULL DEFAULT '',
 	previous_name TEXT NOT NULL DEFAULT '',
@@ -280,6 +280,7 @@ CREATE TABLE coordinators (
 	session_id TEXT NOT NULL DEFAULT '',
 	changed_by TEXT NOT NULL DEFAULT '',
 	changed_at_ms INTEGER NOT NULL,
+	moved_from TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (project_id, host_id),
 	UNIQUE (name, host_id)
 );
@@ -1093,7 +1094,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_coordinators_update
-CREATE TRIGGER catalog_presentation_version_coordinators_update AFTER UPDATE OF changed_at_ms,changed_by,cwd,host_id,instructions,model,name,permission_mode,project_id,project_root,session_id,surface ON coordinators WHEN (NEW.changed_at_ms IS NOT OLD.changed_at_ms OR NEW.changed_by IS NOT OLD.changed_by OR NEW.cwd IS NOT OLD.cwd OR NEW.host_id IS NOT OLD.host_id OR NEW.instructions IS NOT OLD.instructions OR NEW.model IS NOT OLD.model OR NEW.name IS NOT OLD.name OR NEW.permission_mode IS NOT OLD.permission_mode OR NEW.project_id IS NOT OLD.project_id OR NEW.project_root IS NOT OLD.project_root OR NEW.session_id IS NOT OLD.session_id OR NEW.surface IS NOT OLD.surface)
+CREATE TRIGGER catalog_presentation_version_coordinators_update AFTER UPDATE OF changed_at_ms,changed_by,cwd,host_id,instructions,model,moved_from,name,permission_mode,project_id,project_root,session_id,surface ON coordinators WHEN (NEW.changed_at_ms IS NOT OLD.changed_at_ms OR NEW.changed_by IS NOT OLD.changed_by OR NEW.cwd IS NOT OLD.cwd OR NEW.host_id IS NOT OLD.host_id OR NEW.instructions IS NOT OLD.instructions OR NEW.model IS NOT OLD.model OR NEW.moved_from IS NOT OLD.moved_from OR NEW.name IS NOT OLD.name OR NEW.permission_mode IS NOT OLD.permission_mode OR NEW.project_id IS NOT OLD.project_id OR NEW.project_root IS NOT OLD.project_root OR NEW.session_id IS NOT OLD.session_id OR NEW.surface IS NOT OLD.surface)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

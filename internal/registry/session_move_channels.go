@@ -15,15 +15,16 @@ type MovedChannel struct {
 }
 
 type MoveCarry struct {
-	Relays   []MovedRelay   `json:"relays,omitempty"`
-	Channels []MovedChannel `json:"channels,omitempty"`
+	Relays      []MovedRelay      `json:"relays,omitempty"`
+	Channels    []MovedChannel    `json:"channels,omitempty"`
+	Coordinator *MovedCoordinator `json:"coordinator,omitempty"`
 }
 
 func (r *Registry) MoveCarry(conversation, self string) (MoveCarry, error) {
 	return moveCarry(r.read, conversation, self)
 }
 
-func moveCarry(q rowQuerier, conversation, self string) (MoveCarry, error) {
+func moveCarry(q catalogQuerier, conversation, self string) (MoveCarry, error) {
 	relays, err := movedRelays(q, conversation, self)
 	if err != nil {
 		return MoveCarry{}, err
@@ -37,11 +38,15 @@ func moveCarry(q rowQuerier, conversation, self string) (MoveCarry, error) {
 	if err != nil {
 		return MoveCarry{}, err
 	}
-	return MoveCarry{Relays: relays, Channels: channels}, nil
+	lead, err := movedCoordinator(q, conversation)
+	if err != nil {
+		return MoveCarry{}, err
+	}
+	return MoveCarry{Relays: relays, Channels: channels, Coordinator: lead}, nil
 }
 
 func (c MoveCarry) equal(other MoveCarry) bool {
-	return slices.Equal(c.Relays, other.Relays) && slices.Equal(c.Channels, other.Channels)
+	return slices.Equal(c.Relays, other.Relays) && slices.Equal(c.Channels, other.Channels) && sameCoordinatorCarry(c.Coordinator, other.Coordinator)
 }
 
 func movingOutTx(tx *sql.Tx, session string) (bool, error) {

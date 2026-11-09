@@ -86,9 +86,10 @@ func (e UnansweredError) Error() string {
 }
 
 type StatusError struct {
-	Status  int
-	Code    string
-	Message string
+	Status      int
+	Code        string
+	Message     string
+	MovedToHost string
 }
 
 func (e StatusError) Error() string {
@@ -240,10 +241,11 @@ func ReadResponse(response *http.Response) ([]byte, error) {
 			Code    string `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
+		MovedToHost string `json:"movedToHost"`
 	}
 	statusErr := StatusError{Status: response.StatusCode}
 	if json.Unmarshal(body, &envelope) == nil && envelope.Error.Message != "" {
-		statusErr.Code, statusErr.Message = envelope.Error.Code, envelope.Error.Message
+		statusErr.Code, statusErr.Message, statusErr.MovedToHost = envelope.Error.Code, envelope.Error.Message, envelope.MovedToHost
 	} else {
 		statusErr.Message = strings.TrimSpace(string(body))
 	}

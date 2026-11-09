@@ -105,13 +105,13 @@ func (r *Registry) SessionMoveRefusal(conversation string, carry bool) (string, 
 	}{
 		{`SELECT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`, "a move of it has not finished"},
 		{`SELECT EXISTS(SELECT 1 FROM message_queue WHERE session_id=? AND status='inflight')`, "a message to it is being delivered"},
-		{`SELECT EXISTS(SELECT 1 FROM coordinators c JOIN aliases a ON a.name=c.name WHERE c.host_id='' AND a.session_id=?)`, "it is a project coordinator"},
 	}
 	if !carry {
 		checks = append(checks, []struct {
 			query  string
 			reason string
 		}{
+			{`SELECT EXISTS(SELECT 1 FROM coordinators c JOIN aliases a ON a.name=c.name WHERE c.host_id='' AND a.session_id=?)`, "it is a project coordinator"},
 			{`SELECT EXISTS(SELECT 1 FROM channel_members WHERE session_id=?)`, "it is in a channel"},
 			{`SELECT EXISTS(SELECT 1 FROM routes WHERE active=1 AND (from_session=?1 OR to_session=?1))`, "it is part of an active relay"},
 		}...)
@@ -127,6 +127,9 @@ func (r *Registry) SessionMoveRefusal(conversation string, carry bool) (string, 
 	}
 	if !carry {
 		return "", nil
+	}
+	if reason, err := coordinatorMoveRefusal(r.read, conversation); err != nil || reason != "" {
+		return reason, err
 	}
 	return relayMoveRefusal(r.read, conversation)
 }
@@ -153,7 +156,7 @@ func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []by
 		return err
 	}
 	if !current.equal(carry) {
-		return fmt.Errorf("the relays or channels of %s changed while the move was prepared; move it again", conversation)
+		return fmt.Errorf("the relays, channels or coordinator role of %s changed while the move was prepared; move it again", conversation)
 	}
 	if reason, err := relayMoveRefusal(tx, conversation); err != nil {
 		return err
@@ -287,7 +290,7 @@ func (r *Registry) AbortMoveIn(id, conversation, sourceHost string) (SessionMove
 // source host mirrored here is taken over; a row another host owns is taken
 // only once that host no longer serves it.
 // The source's alias is bound here when it is free.
-func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alias string, pinnedAt time.Time, origin *SessionOrigin, carry MoveCarry, self string) ([]CatalogEvent, error) {
+func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alias string, pinnedAt time.Time, origin *SessionOrigin, carry MoveCarry, self string, place MovedCoordinatorPlace) ([]CatalogEvent, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, err
@@ -368,6 +371,9 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 			return nil, err
 		}
 		if err := insertMovedChannelsTx(tx, session.ID, self, carry.Channels); err != nil {
+			return nil, err
+		}
+		if err := insertMovedCoordinatorTx(tx, session.ID, alias, move.PeerHost, carry.Coordinator, place, r.now()); err != nil {
 			return nil, err
 		}
 	}
@@ -512,6 +518,9 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 		return nil, false, err
 	}
 	if err := dropMovedChannelsTx(tx, move.Conversation); err != nil {
+		return nil, false, err
+	}
+	if err := dropMovedCoordinatorTx(tx, move.Conversation, r.now()); err != nil {
 		return nil, false, err
 	}
 	if err := dropMovedRelaysTx(tx, move.Conversation); err != nil {

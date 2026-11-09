@@ -38,13 +38,14 @@ CREATE TABLE IF NOT EXISTS coordinators (
 	session_id TEXT NOT NULL DEFAULT '',
 	changed_by TEXT NOT NULL DEFAULT '',
 	changed_at_ms INTEGER NOT NULL,
+	moved_from TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (project_id, host_id),
 	UNIQUE (name, host_id)
 );
 CREATE TABLE IF NOT EXISTS coordinator_history (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	project_id TEXT NOT NULL,
-	action TEXT NOT NULL CHECK (action IN ('set','replaced','cleared')),
+	action TEXT NOT NULL CHECK (action IN ('set','replaced','cleared','moved')),
 	name TEXT NOT NULL,
 	session_id TEXT NOT NULL DEFAULT '',
 	previous_name TEXT NOT NULL DEFAULT '',
