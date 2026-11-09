@@ -254,6 +254,7 @@
 		C9E2CDEE75EC438C739579E0 /* QueuedMessageSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C9DBDB0225CD4EBD719FBC /* QueuedMessageSheet.swift */; };
 		CA5EFE06AFCB3B16B7D68A0C /* JumpToLatestChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F5938AD49C91DC82E5B1C11 /* JumpToLatestChecks.swift */; };
 		CB7E151CC73022B124CEB449 /* QuestionPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1902C9B6F57108C641D1188C /* QuestionPager.swift */; };
+		CB910CF054E9E1262EBBE1F2 /* SessionHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF2D1032D78507E84F6B5E38 /* SessionHandle.swift */; };
 		CBCA932E315251D8765B458D /* ActivityReadingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3244752A0EB724F241568485 /* ActivityReadingTests.swift */; };
 		CE1DAECB6E4E2BF6A8E2D5ED /* DecisionFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DF9223C452DED9B13C0FC9 /* DecisionFeed.swift */; };
 		CF3F8DFD9D100FE9DFC34C2B /* EdgeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F1A55B3CCA5FB4FD55DBC5B /* EdgeBar.swift */; };
@@ -591,6 +592,7 @@
 		BBAD49A071DD1D2381C657BA /* InboxStopsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStopsTests.swift; sourceTree = "<group>"; };
 		BC5D8FABFB3FBB000AB19E56 /* OrderHoldTracking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrderHoldTracking.swift; sourceTree = "<group>"; };
 		BDAB7D6CA7902276BFF459B0 /* QRCodeScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeScanner.swift; sourceTree = "<group>"; };
+		BF2D1032D78507E84F6B5E38 /* SessionHandle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionHandle.swift; sourceTree = "<group>"; };
 		BF500C1DA5AFE6F58961158D /* VoiceOperator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOperator.swift; sourceTree = "<group>"; };
 		C205C0DA5074706408587DDE /* AgenthailIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AgenthailIOS.entitlements; sourceTree = "<group>"; };
 		C23917663303D1F0107FDCCA /* ScopeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopeReader.swift; sourceTree = "<group>"; };
@@ -955,6 +957,7 @@
 				1844979BB8DD4D3D070B71EA /* SessionDetailState.swift */,
 				D65997FC6F2FDC05350DC086 /* SessionDisplayKind.swift */,
 				34684739278D1CFFBC4D807F /* SessionEndTurn.swift */,
+				BF2D1032D78507E84F6B5E38 /* SessionHandle.swift */,
 				55F7B3BFFC4892371633C31A /* SessionNames.swift */,
 				F1B6B0035445CBC2ABCA5BB2 /* SessionRowTime.swift */,
 				5754FCCBE0D9C3A064B3D17E /* SessionSelection.swift */,
@@ -1396,6 +1399,7 @@
 				B9C8F96E65376C2BC0ACD091 /* SessionDetailState.swift in Sources */,
 				301ACB310F833ACD38519EBD /* SessionDisplayKind.swift in Sources */,
 				1B3B458D8C65A1F4B5F3CA6C /* SessionEndTurn.swift in Sources */,
+				CB910CF054E9E1262EBBE1F2 /* SessionHandle.swift in Sources */,
 				D4B4B613E7DC1D43939370FC /* SessionListChrome.swift in Sources */,
 				4798E2D17E6B930C15C32F57 /* SessionListRow.swift in Sources */,
 				08E5F0CAB166A694C27B6448 /* SessionNames.swift in Sources */,

@@ -40,20 +40,42 @@ struct SessionEditingControls: View {
                         TextField(editingName ? "Name" : "Objective", text: $text, axis: .vertical).lineLimit(2...8)
                             .textInputAutocapitalization(editingName ? .never : .sentences).autocorrectionDisabled(editingName)
                     }
-                    if editingName { Text("Use 1–80 characters without spaces, /, or #.").font(.footnote) }
-                    if let error { Text(error).foregroundStyle(PhonePalette.failed) }
+                    if editingName {
+                        Text((detail.alias ?? "").isEmpty ? "Use 1–80 characters without spaces, /, or #." : "Use 1–80 characters without spaces, /, or #. Leave it empty to clear the name.").font(.footnote)
+                    }
+                    if let message = error ?? (editingName && !text.isEmpty ? nameProblem : nil) { Text(message).foregroundStyle(PhonePalette.failed) }
                 }
                 .navigationTitle(editingBudget ? "Token budget" : editingName ? "Name conversation" : "Edit goal")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingName = false; editingGoal = false; editingBudget = false }.disabled(model.pendingControls.contains(detail.session.id)) }
-                    ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save(editingBudget ? "goal-budget" : editingName ? "alias" : editingGoal && detail.goal?.objective.isEmpty == false ? "goal-edit" : "goal-set", text: editingBudget ? budgetText : text) } }.disabled((editingBudget ? budgetText : text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pendingControls.contains(detail.session.id)) }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(clearingName ? "Clear Name" : "Save") { Task { await save(sheetAction, text: sheetText) } }
+                            .disabled(!canSave || model.pendingControls.contains(detail.session.id))
+                    }
                 }.interactiveDismissDisabled(model.pendingControls.contains(detail.session.id))
             }
         }
     }
+    private var nameProblem: String? { SessionHandle.renameProblem(text, current: detail.alias) }
+    private var clearingName: Bool { editingName && SessionHandle.clears(text, current: detail.alias) }
+    private var sheetAction: String {
+        if editingBudget { return "goal-budget" }
+        if editingName { return "alias" }
+        return detail.goal?.objective.isEmpty == false ? "goal-edit" : "goal-set"
+    }
+    private var sheetText: String {
+        if editingBudget { return budgetText }
+        return editingName ? SessionHandle.normalized(text) : text
+    }
+    private var canSave: Bool {
+        if editingName { return nameProblem == nil && SessionHandle.normalized(text) != (detail.alias ?? "") }
+        return !(editingBudget ? budgetText : text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private func save(_ action: String, text: String? = nil) async {
         error = nil
         do { try await model.editSession(id: detail.session.id, action: action, text: text ?? self.text); editingName = false; editingGoal = false; editingBudget = false }
+        catch is LeadNameRefused { self.error = SessionHandle.leadRefusal(detail.alias) }
         catch { self.error = error.localizedDescription }
     }
 }

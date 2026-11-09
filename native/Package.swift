@@ -91,6 +91,7 @@ let package = Package(
                 "ObservationWait.swift",
                 "ObservedScope.swift",
                 "SessionCells.swift",
+                "SessionHandle.swift",
                 "MinuteClock.swift",
                 "MenuSessions.swift",
                 "ConnectionGrace.swift",
