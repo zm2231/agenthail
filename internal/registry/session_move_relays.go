@@ -22,10 +22,6 @@ type MovedRelay struct {
 	LastGoalKey string `json:"lastGoalKey,omitempty"`
 }
 
-func (r *Registry) MovedRelays(conversation, self string) ([]MovedRelay, error) {
-	return movedRelays(r.read, conversation, self)
-}
-
 func movedRelays(q rowQuerier, conversation, self string) ([]MovedRelay, error) {
 	return queryRows(q, []MovedRelay{}, func(row rowScanner) (MovedRelay, error) {
 		var relay MovedRelay

@@ -1,4 +1,4 @@
--- schemaVersion 81
+-- schemaVersion 82
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -623,6 +623,14 @@ CREATE TABLE relay_provenance (
 CREATE TABLE relay_sources (
     source_key TEXT PRIMARY KEY,
     cursor TEXT NOT NULL
+);
+
+-- table remote_channels
+CREATE TABLE remote_channels (
+	channel_name TEXT NOT NULL,
+	home_host_id TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	PRIMARY KEY (session_id, channel_name)
 );
 
 -- table removed_project_ledgers
