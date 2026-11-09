@@ -19,7 +19,7 @@ func (d *Daemon) moveSessionToRoot(ctx context.Context, request sessionMoveReque
 	if err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: fmt.Sprintf("session %s not found", request.SessionID)}
 	}
-	if reason, err := d.Registry.SessionMoveRefusal(session.ID); err != nil {
+	if reason, err := d.Registry.SessionMoveRefusal(session.ID, false); err != nil {
 		return sessionMoveResult{}, err
 	} else if reason != "" {
 		return sessionMoveResult{}, MoveRefusedError{Reason: fmt.Sprintf("session %s cannot move: %s", session.ID, reason)}
@@ -47,7 +47,7 @@ func (d *Daemon) moveSessionToRoot(ctx context.Context, request sessionMoveReque
 	}
 	release, _ := claimMove(manifest.ID)
 	defer release()
-	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, self, encoded); err != nil {
+	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, self, encoded, nil, self); err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
 	}
 	result := sessionMoveResult{Host: d.localHost(), Stopped: out.Stopped, Alias: alias, Root: request.Root}

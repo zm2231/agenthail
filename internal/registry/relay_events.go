@@ -97,6 +97,14 @@ func (r *Registry) RelaySourceCursor(sessionID string) (string, error) {
 }
 
 func (r *Registry) CaptureRelayCompletions(sessionID, previous string, batch surface.CompletionBatch) error {
+	key, err := relaySourceKeyOf(r.read, sessionID)
+	if err != nil {
+		return err
+	}
+	return r.captureRelayCompletionsByKey(key, previous, batch)
+}
+
+func (r *Registry) captureRelayCompletionsByKey(key, previous string, batch surface.CompletionBatch) error {
 	if batch.Cursor == "" {
 		return fmt.Errorf("completion reader returned an empty cursor")
 	}
@@ -108,10 +116,6 @@ func (r *Registry) CaptureRelayCompletions(sessionID, previous string, batch sur
 		return err
 	}
 	defer tx.Rollback()
-	key, err := relaySourceKeyOf(tx, sessionID)
-	if err != nil {
-		return err
-	}
 	if _, err := tx.Exec(`INSERT INTO relay_sources(source_key,cursor) VALUES(?,'') ON CONFLICT DO NOTHING`, key); err != nil {
 		return err
 	}
@@ -239,6 +243,9 @@ func (r *Registry) consumeRelay(route RouteRow, event RelayEvent, payload, busyD
 		return 0, err
 	}
 	defer tx.Rollback()
+	if err := relaysMovingTx(tx, route.FromSession); err != nil {
+		return 0, err
+	}
 	res, err := tx.Exec(`UPDATE routes SET event_cursor=?,last_goal_key=?,last_error='',active=CASE WHEN once_only=1 AND ? THEN 0 ELSE active END WHERE id=? AND active=1 AND event_cursor=? AND from_session=? AND to_session=? AND EXISTS(SELECT 1 FROM relay_events e JOIN sessions s ON s.id=routes.from_session WHERE e.id=? AND e.source_key=`+relaySourceKey+`)`, event.ID, goalKey, final, route.ID, route.EventCursor, route.FromSession, route.ToSession, event.ID)
 	if err != nil {
 		return 0, err

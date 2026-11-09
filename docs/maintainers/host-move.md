@@ -13,19 +13,32 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
 ## Protocol
 
 1. **Hold.** The source refuses a session that another host owns, that
-   another move holds, that has a delivery in flight, an active relay, a
-   channel or the coordinator role. The Claude adapter then takes the
+   another move holds, that has a delivery in flight, a channel or the
+   coordinator role. It also refuses a relay from the session that is tied to
+   a channel, or that has a captured completion it has not forwarded yet,
+   naming the relay. The Claude adapter then takes the
    conversation lock and stops the process that holds it the way
    [adopt](session-operations.md) does: it closes a host session only once
    idle, stops a background job, and stops a terminal process only with
    `--stop-terminal`. The lock is held until the move ends, so no Agenthail
-   process here resumes the conversation in the meantime.
+   process here resumes the conversation in the meantime. With the session
+   held, the source reads its completions once more and its relays forward
+   what they have not; a completion they still cannot forward refuses the
+   move when it is declared.
 2. **Declare.** The source reads where the conversation's working directory
    sits in its repository: the remote's canonical key, the folder inside the
    repository, and a commit that some remote branch contains. Only a clean
    tree can move. It also records the transcript's size and SHA-256, the
    alias, the title, and the model and permission mode the conversation last
-   ran with in this machine's Claude host. The move is recorded `preparing`.
+   ran with in this machine's Claude host. It lists the active relays from the
+   session: each relay's target, pattern, handoff, whether it fires once, and
+   the last goal it forwarded. The target of each relay is named with the host
+   that runs it. The move is recorded `preparing`, in a transaction that
+   refuses it if the session's relays are no longer the ones it listed or
+   have a completion they have not forwarded. Until the move ends, the
+   relays from the session stay as declared: adding or removing one, a
+   coordinator handover that moves relays to or from the session, and
+   forwarding a completion are all refused.
 3. **Prepare** (`POST /api/v1/session-move/prepare`). The target finds its own
    checkout of the repository through its added projects and the projects of
    its sessions. When the checkout lacks the commit, it fetches. It refuses
@@ -33,8 +46,11 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    after the fetch, if the working directory's project folder name would be
    longer than Claude writes verbatim (200 characters), or if it already
    holds a transcript of the conversation that the incoming one does not
-   extend. Otherwise it records the move `prepared` and keeps the
-   declaration. The files that arrive later are held to that declaration.
+   extend, or if a relay's target is not a session it sees on the host the
+   source named. Otherwise it records the move `prepared` and keeps the
+   declaration, and answers with what it can carry. A target that does not
+   name relays (an Agenthail too old to take them) fails a move with relays
+   before any file leaves. The files that arrive later are held to that declaration.
    They cannot redefine it.
 4. **Archive.** Still holding the lock, the source moves the conversation's
    files out of `projects/` and `tasks/` into
@@ -75,14 +91,19 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    If Claude refuses to start, the target sets the placed files aside in its
    own `agenthail-moved/<id>/<move id>/` and records the move `aborted` before
    it answers, so nothing there finds a copy to run beside the source's and a
-   repeated transfer is refused. Last,
-   in one transaction, it registers the session as local, takes over the row
-   the source mirrored there, binds the alias if it is free, and records the
-   move `resumed`.
+   repeated transfer is refused. When relays come with the session, it then
+   reads the conversation's completions so far, so its relays forward only
+   what comes after the move. Last, in one transaction, it registers the
+   session as local, takes over the row the source mirrored there, binds the
+   alias if it is free, creates the relays, and records the move `resumed`.
 6. **Flip.** The source, in one transaction:
    - gives the row to the target, clearing its process, transcript and local
      flags;
    - drops the alias;
+   - deletes the relays from the session, which the target now runs, and
+     the completions captured for them. Relays to the session stay: they
+     deliver to the target through held sends, like any relay to a paired
+     host's session;
    - turns each queued message into a send held for the target, under its
      delivery key, and fails a queued message with attachments and any
      queued operation the target cannot take as a send;

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,23 +26,28 @@ import (
 // any of its files leave. The target keeps it and holds the files it then
 // receives to it.
 type moveManifest struct {
-	ID             string              `json:"id"`
-	Conversation   string              `json:"conversation"`
-	SourceHost     string              `json:"sourceHost"`
-	Surface        surface.SurfaceKind `json:"surface"`
-	Checkout       moveCheckout        `json:"checkout"`
-	Alias          string              `json:"alias,omitempty"`
-	PinnedAt       time.Time           `json:"pinnedAt,omitzero"`
-	Title          string              `json:"title,omitempty"`
-	Model          string              `json:"model,omitempty"`
-	PermissionMode string              `json:"permissionMode,omitempty"`
-	Size           int64               `json:"size"`
-	SHA256         string              `json:"sha256"`
-	PartsSize      int64               `json:"partsSize"`
-	State          json.RawMessage     `json:"state,omitempty"`
-	Root           string              `json:"root,omitempty"`
-	Origin         *moveOrigin         `json:"origin,omitempty"`
+	ID             string                `json:"id"`
+	Conversation   string                `json:"conversation"`
+	SourceHost     string                `json:"sourceHost"`
+	Surface        surface.SurfaceKind   `json:"surface"`
+	Checkout       moveCheckout          `json:"checkout"`
+	Alias          string                `json:"alias,omitempty"`
+	PinnedAt       time.Time             `json:"pinnedAt,omitzero"`
+	Title          string                `json:"title,omitempty"`
+	Model          string                `json:"model,omitempty"`
+	PermissionMode string                `json:"permissionMode,omitempty"`
+	Size           int64                 `json:"size"`
+	SHA256         string                `json:"sha256"`
+	PartsSize      int64                 `json:"partsSize"`
+	State          json.RawMessage       `json:"state,omitempty"`
+	Root           string                `json:"root,omitempty"`
+	Origin         *moveOrigin           `json:"origin,omitempty"`
+	Relays         []registry.MovedRelay `json:"relays,omitempty"`
 }
+
+// moveCarryRelays is the kind a target names among what it carries when it
+// can take a moving session's relays.
+const moveCarryRelays = "relays"
 
 // moveOrigin is who started a moving session, named by the host that owns
 // the creator so the target can find it among its own and mirrored sessions.
@@ -58,6 +64,7 @@ type moveStatus struct {
 	Cwd     string           `json:"cwd,omitempty"`
 	Session *surface.Session `json:"session,omitempty"`
 	Root    string           `json:"root,omitempty"`
+	Carries []string         `json:"carries,omitempty"`
 }
 
 const (
@@ -119,7 +126,7 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	if err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: fmt.Sprintf("session %s not found", request.SessionID)}
 	}
-	if reason, err := d.Registry.SessionMoveRefusal(session.ID); err != nil {
+	if reason, err := d.Registry.SessionMoveRefusal(session.ID, true); err != nil {
 		return sessionMoveResult{}, err
 	} else if reason != "" {
 		return sessionMoveResult{}, MoveRefusedError{Reason: fmt.Sprintf("session %s cannot move: %s", session.ID, reason)}
@@ -153,6 +160,9 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 		return sessionMoveResult{}, err
 	}
 	defer out.Release()
+	if err := d.forwardRelaysBeforeMove(ctx, adapter, session); err != nil {
+		return sessionMoveResult{}, MoveRefusedError{Reason: fmt.Sprintf("session %s cannot move: %s", session.ID, err)}
+	}
 	checkout, err := sourceCheckout(ctx, out.Cwd)
 	if err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
@@ -166,14 +176,18 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	if err != nil {
 		return sessionMoveResult{}, err
 	}
-	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, PinnedAt: pinnedAt, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, State: out.State, Root: request.Root, Origin: origin}
+	relays, err := d.Registry.MovedRelays(session.ID, d.hostIdentity().ID)
+	if err != nil {
+		return sessionMoveResult{}, err
+	}
+	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, PinnedAt: pinnedAt, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, State: out.State, Root: request.Root, Origin: origin, Relays: relays}
 	encoded, err := json.Marshal(manifest)
 	if err != nil {
 		return sessionMoveResult{}, err
 	}
 	release, _ := claimMove(manifest.ID)
 	defer release()
-	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, host.record.ID, encoded); err != nil {
+	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, host.record.ID, encoded, relays, d.hostIdentity().ID); err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
 	}
 	result := sessionMoveResult{Host: host.ref(), Stopped: out.Stopped, Alias: alias}
@@ -214,12 +228,16 @@ func (d *Daemon) prepareMoveOnHost(ctx context.Context, host *pairedHost, manife
 	if errors.As(err, &status) && status.Status == http.StatusNotFound && status.Code == "" {
 		return fmt.Errorf("update Agenthail on %s; it cannot take moved sessions", host.record.Name)
 	}
-	if err != nil || manifest.Root == "" {
+	if err != nil {
 		return err
 	}
 	var prepared moveStatus
-	if json.Unmarshal(answer, &prepared) != nil || prepared.Root != manifest.Root {
+	decoded := json.Unmarshal(answer, &prepared) == nil
+	if manifest.Root != "" && (!decoded || prepared.Root != manifest.Root) {
 		return fmt.Errorf("update Agenthail on %s; it cannot place a moved session in a chosen account", host.record.Name)
+	}
+	if len(manifest.Relays) > 0 && (!decoded || !slices.Contains(prepared.Carries, moveCarryRelays)) {
+		return fmt.Errorf("update Agenthail on %s; it cannot take over the relays from a moved session", host.record.Name)
 	}
 	return nil
 }
@@ -599,13 +617,36 @@ func (d *Daemon) apiMovePrepareHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
 		return
 	}
+	if err := d.Registry.CheckMovedRelays(manifest.Conversation, d.hostIdentity().ID, manifest.Relays); err != nil {
+		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
+		return
+	}
 	encoded, _ := json.Marshal(manifest)
 	move, err := d.Registry.PrepareMoveIn(manifest.ID, manifest.Conversation, hostID, encoded)
 	if err != nil {
 		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, moveStatus{State: move.State, Cwd: target.cwd, Root: manifest.Root})
+	writeDashboardJSON(w, http.StatusOK, moveStatus{State: move.State, Cwd: target.cwd, Root: manifest.Root, Carries: []string{moveCarryRelays}})
+}
+
+// seedMovedRelays reads the moved session's completions so far, so the
+// relays it takes over forward only those that come after the move.
+func (d *Daemon) seedMovedRelays(ctx context.Context, session *surface.Session, relays []registry.MovedRelay) error {
+	if len(relays) == 0 {
+		return nil
+	}
+	adapter, err := d.adapters().For(session)
+	if err != nil {
+		return err
+	}
+	reader, ok := adapter.(surface.CompletionReader)
+	if !ok {
+		return fmt.Errorf("%s sessions cannot be relay sources", session.Surface)
+	}
+	readCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+	defer cancel()
+	return d.Registry.SeedMovedRelaySource(readCtx, reader, session)
 }
 
 func moveInOf(manifest moveManifest, cwd string) surface.MoveIn {
@@ -732,8 +773,12 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusInternalServerError, "move_unrecorded", fmt.Sprintf("Session %s resumed here, but who started it could not be recorded: %s", session.ID, err))
 		return
 	}
+	if err := d.seedMovedRelays(ctx, session, manifest.Relays); err != nil {
+		writeAPIError(w, http.StatusBadGateway, "move_unknown", fmt.Sprintf("Session %s resumed here, but its history could not be read for the relays it takes over: %s", session.ID, err))
+		return
+	}
 	d.catalog.mu.Lock()
-	_, err = d.Registry.TakeMovedSession(move.ID, *session, manifest.Alias, manifest.PinnedAt, origin)
+	_, err = d.Registry.TakeMovedSession(move.ID, *session, manifest.Alias, manifest.PinnedAt, origin, manifest.Relays, d.hostIdentity().ID)
 	if err == nil {
 		d.publishCommittedHostWriteLocked("move " + move.ID)
 	}

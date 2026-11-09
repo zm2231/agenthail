@@ -35,6 +35,9 @@ func (r *Registry) AddRelayRoute(from, to, pattern string, once bool, handoff st
 		return 0, err
 	}
 	defer tx.Rollback()
+	if err := relaysMovingTx(tx, from); err != nil {
+		return 0, err
+	}
 	var cycle int
 	err = tx.QueryRow(`
 		WITH RECURSIVE reachable(id) AS (
@@ -69,6 +72,9 @@ func (r *Registry) MoveRelayRoutes(from, to string) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := relaysMovingTx(tx, from, to); err != nil {
+		return err
+	}
 	for _, query := range routeMoves {
 		if _, err := tx.Exec(query, from, to); err != nil {
 			return err
@@ -113,8 +119,14 @@ func (r *Registry) RemoveRoute(id int64) error {
 	}
 	defer tx.Rollback()
 	var source string
-	if err := tx.QueryRow(`SELECT from_session FROM routes WHERE id=?`, id).Scan(&source); err != nil {
+	var active bool
+	if err := tx.QueryRow(`SELECT from_session,active FROM routes WHERE id=?`, id).Scan(&source, &active); err != nil {
 		return fmt.Errorf("relay route %d does not exist: %w", id, err)
+	}
+	if active {
+		if err := relaysMovingTx(tx, source); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(`DELETE FROM routes WHERE id=?`, id); err != nil {
 		return err
@@ -124,11 +136,8 @@ func (r *Registry) RemoveRoute(id int64) error {
 		return err
 	}
 	if err == nil {
-		orphaned := `source_key=? AND NOT EXISTS(SELECT 1 FROM routes JOIN sessions s ON s.id=routes.from_session WHERE ` + relaySourceKey + `=?)`
-		for _, table := range []string{"relay_sources", "relay_events"} {
-			if _, err := tx.Exec(`DELETE FROM `+table+` WHERE `+orphaned, key, key); err != nil {
-				return err
-			}
+		if err := dropOrphanRelaySourceTx(tx, key); err != nil {
+			return err
 		}
 	}
 	return tx.Commit()

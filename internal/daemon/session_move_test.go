@@ -82,6 +82,18 @@ func movePair(t *testing.T) (*moveNode, *moveNode, registry.PairedHost, string) 
 // repository, the source's at a pushed commit.
 func pairMoveNodes(t *testing.T, source, target *moveNode) (*moveNode, *moveNode, registry.PairedHost, string) {
 	t.Helper()
+	checkout := checkoutsForMove(t, source, target)
+	target.serve(t, nil)
+	source.start(t, testRoots(target.server))
+	record := source.pair(t, target.federationNode, "server")
+	testkit.Eventually(t, "the target connected", 10*time.Second, func() bool { return source.daemon.hostConnected(record.ID) })
+	return source, target, record, checkout
+}
+
+// checkoutsForMove gives source and target checkouts of one repository, the
+// source's at a pushed commit, and adds the target's as a project there.
+func checkoutsForMove(t *testing.T, source, target *moveNode) string {
+	t.Helper()
 	repo := source.host.Cwd
 	runGit(t, repo, "init", "--quiet", "--initial-branch=main")
 	runGit(t, repo, "remote", "add", "origin", moveRemote)
@@ -98,14 +110,10 @@ func pairMoveNodes(t *testing.T, source, target *moveNode) (*moveNode, *moveNode
 	if err := target.reg.AddProject(registry.ProjectRecord{ID: "project-widget", WorkspaceRoot: checkout, Title: "widget", Added: true}); err != nil {
 		t.Fatal(err)
 	}
-	target.serve(t, nil)
-	source.start(t, testRoots(target.server))
-	record := source.pair(t, target.federationNode, "server")
-	testkit.Eventually(t, "the target connected", 10*time.Second, func() bool { return source.daemon.hostConnected(record.ID) })
 	if head := runGit(t, checkout, "rev-parse", "HEAD"); head != commit {
 		t.Fatalf("target checkout at %s, want %s", head, commit)
 	}
-	return source, target, record, checkout
+	return checkout
 }
 
 func startMovable(t *testing.T, node *moveNode) *surface.Session {
@@ -390,7 +398,7 @@ func TestAMoveSentByADaemonThatStoppedIsSettledFromTheTargetsRecord(t *testing.T
 				t.Fatal("the move is already claimed")
 			}
 			t.Cleanup(release)
-			if err := source.reg.BeginMoveOut(manifest.ID, session.ID, record.ID, encoded); err != nil {
+			if err := source.reg.BeginMoveOut(manifest.ID, session.ID, record.ID, encoded, nil, ""); err != nil {
 				t.Fatal(err)
 			}
 			if err := source.daemon.prepareMoveOnHost(context.Background(), host, manifest); err != nil {
@@ -449,7 +457,7 @@ func TestADaemonThatStoppedWhilePreparingAMoveFailsIt(t *testing.T) {
 	session := startMovable(t, source)
 	moveID := "6a1b0c9d-1111-4222-8333-944455556666"
 	manifest, _ := json.Marshal(moveManifest{ID: moveID, Conversation: session.ID, Surface: session.Surface})
-	if err := source.reg.BeginMoveOut(moveID, session.ID, record.ID, manifest); err != nil {
+	if err := source.reg.BeginMoveOut(moveID, session.ID, record.ID, manifest, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := source.claude.ArchiveMove(session.ID, moveID); err != nil {
