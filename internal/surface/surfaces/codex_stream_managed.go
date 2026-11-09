@@ -103,11 +103,12 @@ func (c *Codex) followManagedTurnClient(ctx context.Context, client codexClient,
 		// A change reported while reading may postdate the read.
 		reread := changed()
 		if turn := codexTurnByID(thread, turnID); turn != nil {
-			if turn.Done && turn.Error != "" {
+			done := turn.Done && !turn.Unsettled
+			if done && turn.Error != "" {
 				return fmt.Errorf("Codex turn %s did not complete successfully: %s", turn.ID, turn.Error)
 			}
 			assistant, hasAssistant := turn.authoritativeAssistant()
-			if hasAssistant && turn.Done {
+			if hasAssistant && done {
 				if !finalEmitted {
 					onEvent(codexManagedAuthoritativeStreamEvent(turn.ID, assistant))
 					finalEmitted = true
@@ -118,7 +119,7 @@ func (c *Codex) followManagedTurnClient(ctx context.Context, client codexClient,
 				key := "managed:" + turn.ID
 				onEvent(surface.StreamEvent{ID: key + ":text", ProviderKey: key + ":text", Version: uint64(len(assistant.Text)), Operation: "upsert", TurnID: turn.ID, Kind: "text", Text: assistant.Text})
 			}
-			if turn.Done {
+			if done {
 				key := "managed:" + turn.ID
 				version := uint64(len(turn.Assistant))
 				if hasAssistant {

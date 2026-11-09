@@ -707,7 +707,7 @@ func (d *Daemon) lifecycle(method string, params map[string]any, result map[stri
 		}
 		turns := make([]any, 0, len(thread.Turns))
 		for index := len(thread.Turns) - 1; index >= 0; index-- {
-			turns = append(turns, turnJSON(thread.Turns[index]))
+			turns = append(turns, turnJSON(thread.Turns[index], d.loaded[threadID]))
 		}
 		return map[string]any{"data": turns}
 	case "turn/start":
@@ -727,7 +727,7 @@ func (d *Daemon) lifecycle(method string, params map[string]any, result map[stri
 		}
 		thread.Turns = append(thread.Turns, turn)
 		d.appendRollout(thread, map[string]any{"type": "turn_context", "payload": map[string]any{"turn_id": turn.ID, "model": turn.Model, "effort": turn.Effort, "collaboration_mode": collaborationMode(&Thread{Model: turn.Model, Effort: turn.Effort, Mode: turn.Mode})}})
-		return map[string]any{"turn": turnJSON(turn)}
+		return map[string]any{"turn": turnJSON(turn, true)}
 	case "thread/settings/update":
 		thread := d.threads[threadID]
 		if thread == nil || !d.loaded[threadID] {
@@ -843,20 +843,23 @@ func (d *Daemon) threadJSON(thread *Thread, includeTurns bool) map[string]any {
 	if includeTurns {
 		turns := make([]any, 0, len(thread.Turns))
 		for _, turn := range thread.Turns {
-			turns = append(turns, turnJSON(turn))
+			turns = append(turns, turnJSON(turn, d.loaded[thread.ID]))
 		}
 		value["turns"] = turns
 	}
 	return value
 }
 
-func turnJSON(turn Turn) map[string]any {
+// turnJSON lists a turn as Codex does: an interrupted turn read by a process
+// that has not loaded its thread may still be running there, so it has no
+// completedAt.
+func turnJSON(turn Turn, loaded bool) map[string]any {
 	items := []any{map[string]any{"id": turn.ID + "-user", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": turn.User}}}}
 	if turn.Assistant != "" {
 		items = append(items, map[string]any{"id": turn.ID + "-reply", "type": "agentMessage", "phase": "final_answer", "text": turn.Assistant})
 	}
 	value := map[string]any{"id": turn.ID, "status": turn.Status, "items": items, "completedAt": nil}
-	if turn.Status != "inProgress" {
+	if turn.Status != "inProgress" && (turn.Status != "interrupted" || loaded) {
 		value["completedAt"] = 1
 	}
 	return value

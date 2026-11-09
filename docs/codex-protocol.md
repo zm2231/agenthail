@@ -65,6 +65,8 @@ Runtime status carries a typed `problem` that selects the repair: `bridge-unavai
 
 Turns run inside the app-server, so they survive Agenthail restarts. The next send to an idle thread resumes it first. If the daemon dies mid-turn, Codex reports that turn as `interrupted` after the daemon restarts, and the next send resumes the thread and starts a new turn (verified against Codex 0.163). A turn or steer whose request was written but whose response was lost stays unknown and is never retried automatically.
 
+Until a thread turns `active`, `thread/turns/list` and `thread/read` list its in-progress turn as `interrupted` with a null `completedAt`. That happens right after `turn/start` returns, to a process that has not loaded the thread, and for a turn whose server crashed, which stays that way after a plain resume (verified against Codex 0.163). A turn Codex ended carries `completedAt`. Agenthail therefore never moves a relay cursor past such a turn, reports it as unconfirmed rather than failed, and before a send, steer or interrupt decides no turn is running, counts it as running if this process started it, or lists it again for up to 2 seconds.
+
 ## Protocol scope
 
 `thread/search` is available through the app-server experimental API capability. Agenthail requests that capability when it initializes its managed app-server and calls the method only for an explicit history search. Desktop requests use the Desktop app-server’s existing capability set. If a newer Codex version promotes the method to the normal protocol, the method name and request shape remain the same. If an older version does not support it, Agenthail retains its local conversation catalog and reports that full Codex history search is unavailable rather than scanning rollout files.

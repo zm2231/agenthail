@@ -62,12 +62,12 @@ func (c *Codex) readCompletions(ctx context.Context, conn codexClient, threadID,
 				stop = true
 				break
 			}
-			_, done, failure := codexTurnState(turn["status"])
+			_, done, _ := codexTurnState(turn["status"])
 			if !done {
 				continue
 			}
 			if boundary == "" {
-				if failure == codexTurnInterrupted && codexThreadNotLoaded(ctx, conn, threadID) {
+				if codexTurnUnsettled(turn) {
 					continue
 				}
 				boundary = id

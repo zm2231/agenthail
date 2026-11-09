@@ -93,3 +93,19 @@ func TestACompactionHoldsReloadsUntilTheStartLimitWhateverTurnsAreListed(t *test
 		t.Fatalf("a compaction past the start limit still holds reloads: busy=%v err=%v", busy, err)
 	}
 }
+
+func TestATurnThisProcessStartedIsRunningWhileCodexListsItUnsettled(t *testing.T) {
+	wait := codexUnsettledTurnWait
+	codexUnsettledTurnWait = 0
+	t.Cleanup(func() { codexUnsettledTurnWait = wait })
+	c := &Codex{}
+	starting := listedTurnClient{turns: []any{map[string]any{"id": "turn-2", "status": "interrupted", "completedAt": nil}, listedTurn("turn-1", "completed")}}
+	if id, err := c.activeTurnID(context.Background(), starting, "t"); err != nil || id != "" {
+		t.Fatalf("a turn another client started was taken as running without being listed running: %q %v", id, err)
+	}
+	c.turnStarts.begin("t")
+	c.turnStarts.identify("t", "turn-2")
+	if id, err := c.activeTurnID(context.Background(), starting, "t"); err != nil || id != "turn-2" {
+		t.Fatalf("a turn this process started read as not running: %q %v", id, err)
+	}
+}
