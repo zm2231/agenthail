@@ -11,7 +11,10 @@ change.
 ## Contracts
 
 `GET /api/v1/snapshot` reads only the registry. It accepts `scope`, `projectId`
-and `q` filters plus a stable page cursor, and returns saved rows plus
+and `q` filters plus a stable page cursor. Instead of `projectId` it takes
+`cwd`, an absolute folder, and lists the project a session working there would
+join; a folder no added project holds is `404 not_found`. `agenthail list
+--cwd` sends it, and returns saved rows plus
 `hostEpoch` and `catalogSeq`, captured in the same registry read transaction.
 Each row retains the existing session summary fields and adds
 `project` (`id`, `localId`, `displayName`, `rootPath`, `kind`, `added`, and

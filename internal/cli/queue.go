@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -190,20 +191,16 @@ func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, tar
 	if projectSelector != "" && cwd != "" {
 		return nil, fmt.Errorf("choose either --cwd or --project")
 	}
-	var views map[string]listCatalogView
-	projectID := ""
 	if projectSelector != "" || cwd != "" {
-		snapshot, err := a.registry().CatalogSnapshot()
+		projects, err := daemon.CatalogSessionProjects(a.registry())
 		if err != nil {
-			return nil, fmt.Errorf("read daemon catalog: %w", err)
-		}
-		views = make(map[string]listCatalogView, len(snapshot.Sessions))
-		for _, record := range snapshot.Sessions {
-			views[record.Session.ID] = catalogListView(record)
-		}
-		if projectID, err = a.selectedProject(ctx, views, projectSelector, cwd); err != nil {
 			return nil, err
 		}
+		projectID, err := a.scopeProject(ctx, projects, projectSelector, cwd)
+		if err != nil {
+			return nil, err
+		}
+		rows = projects.In(rows, projectID)
 	}
 	filtered := make([]registry.QueueRow, 0, len(rows))
 	for _, row := range rows {
@@ -212,11 +209,6 @@ func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, tar
 		}
 		if mineID != "" && row.SessionID != mineID && row.SourceSessionID != mineID {
 			continue
-		}
-		if projectID != "" {
-			if project := views[row.SessionID].Project; project == nil || project.ID != projectID {
-				continue
-			}
 		}
 		filtered = append(filtered, row)
 	}

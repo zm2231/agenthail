@@ -22,8 +22,18 @@ type sessionViewRequest struct {
 	Members  bool
 }
 
-func parseSessionViewRequest(r *http.Request) (sessionViewRequest, error) {
+func parseSessionViewRequest(r *http.Request, projectHolding func(folder string) (string, error)) (sessionViewRequest, error) {
 	q := r.URL.Query()
+	if q.Has("cwd") {
+		if q.Has("projectId") {
+			return sessionViewRequest{}, fmt.Errorf("choose either cwd or projectId")
+		}
+		projectID, err := projectHolding(q.Get("cwd"))
+		if err != nil {
+			return sessionViewRequest{}, err
+		}
+		q.Set("projectId", projectID)
+	}
 	request := sessionViewRequest{Scope: q.Get("scope"), Limit: 50, Revision: q.Get("revision"), IDs: q["sessionId"], Filters: SessionViewFilters{ProjectID: q.Get("projectId"), Query: strings.ToLower(strings.TrimSpace(q.Get("q"))), Surface: q.Get("surface"), Status: q.Get("status"), Attention: q.Get("attention") == "1", SelectedID: q.Get("selectedId")}}
 	if request.Scope == "" || !validCatalogScope(request.Scope) {
 		return request, fmt.Errorf("use running, current, recent, all, or archived")
@@ -79,13 +89,16 @@ func (d *Daemon) sessionViewHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
-	request, err := parseSessionViewRequest(r)
+	request, err := parseSessionViewRequest(r, func(folder string) (string, error) { return ProjectHolding(r.Context(), d.Registry, folder) })
 	if err != nil {
-		code := "invalid_view"
+		status, code := http.StatusBadRequest, "invalid_view"
 		if errors.Is(err, errPresentationCursor) {
 			code = "invalid_cursor"
 		}
-		writeAPIError(w, http.StatusBadRequest, code, err.Error())
+		if errors.Is(err, ErrNoProject) {
+			status, code = http.StatusNotFound, "not_found"
+		}
+		writeAPIError(w, status, code, err.Error())
 		return
 	}
 	state, err := d.readSessionView(r.Context(), request)

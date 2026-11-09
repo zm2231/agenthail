@@ -6,6 +6,7 @@ import (
 	"net/url"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/workspace"
 )
 
 func (a *App) cmdList(args []string) error {
@@ -38,11 +39,11 @@ func (a *App) cmdList(args []string) error {
 		}
 		query.Set("projectId", id)
 	} else if cwd != "" {
-		id, err := a.selectedProject(ctx, nil, "", cwd)
+		folder, err := workspace.NormalizeCWD(cwd)
 		if err != nil {
-			return err
+			return fmt.Errorf("normalize --cwd: %w", err)
 		}
-		query.Set("projectId", id)
+		query.Set("cwd", folder)
 	}
 	state, err := readListViewConsistent(ctx, client, query)
 	if err != nil {

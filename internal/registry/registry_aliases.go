@@ -176,6 +176,31 @@ func (r *Registry) ReplyTarget(sessionID string) (string, error) {
 	return "", nil
 }
 
+// RemoveSessionAlias drops the session's name, if it has one, and returns
+// it.
+func (r *Registry) RemoveSessionAlias(sessionID string) (string, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	var name string
+	if err := tx.QueryRow(`SELECT name FROM aliases WHERE session_id = ?`, sessionID).Scan(&name); errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	if coordinated, err := coordinatorNamedTx(tx, name); err != nil {
+		return "", err
+	} else if coordinated {
+		return "", CoordinatorAliasError{Name: name}
+	}
+	if _, err := tx.Exec(`DELETE FROM aliases WHERE name = ?`, name); err != nil {
+		return "", err
+	}
+	return name, tx.Commit()
+}
+
 func (r *Registry) RemoveAlias(name string) error {
 	tx, err := r.db.Begin()
 	if err != nil {

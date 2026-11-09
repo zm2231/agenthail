@@ -13,8 +13,9 @@ export function bindChatEvents() {
     const input = form.querySelector("input");
     try {
       if (tool === "alias") {
-        await action("alias", { alias: input.value.trim() });
-        toast("Conversation name saved.");
+        const alias = input.value.trim();
+        await action("alias", { alias });
+        toast(alias ? "Conversation name saved." : "Conversation name cleared.");
         await load();
       } else if (tool === "goal-budget") {
         const value = input.value.trim();
