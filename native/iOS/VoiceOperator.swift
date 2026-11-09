@@ -91,7 +91,7 @@ struct AgenthailVoiceOperatorSheet: View {
                             if let timeline = detail.timeline {
                                 if let unavailable = timeline.unavailableReason { Text(unavailable).foregroundStyle(PhonePalette.muted) }
                                 ForEach(TimelineGroup.make(timeline.items)) { group in
-                                    CompactActivityGroup(group: group, attachmentLoader: { item in await model.activityAttachment(item) }) { followingLatest = false }
+                                    CompactActivityGroup(group: group, owner: detail.session.id, attachmentLoader: { item in await model.activityAttachment(item) }) { followingLatest = false }.equatable()
                                 }
                                 if timeline.truncated { Text("Earlier activity is in the full timeline.").font(.caption) }
                             }
@@ -107,7 +107,7 @@ struct AgenthailVoiceOperatorSheet: View {
                 }
                 Color.clear.frame(height: 1).id("voice-bottom")
             }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
-            .environment(\.revealRow) { position.scrollTo(y: $0.wrappedValue) }
+            .environment(\.revealRow, RowAction(owner: "voice") { position.scrollTo(y: $0.wrappedValue) })
             .coordinateSpace(.named(TranscriptRows.contentSpace))
             }
             .scrollPosition($position)

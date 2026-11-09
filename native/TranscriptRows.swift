@@ -64,6 +64,21 @@ struct RowChoice<Value> {
     fileprivate let value: Value
 }
 
+// Equal per owner so rows skip redrawing; `perform` must reach live state (the model, @State), never captured values.
+struct RowAction<Input, Output>: Equatable {
+    private let owner: String
+    private let perform: @MainActor (Input) -> Output
+
+    init(owner: String, perform: @escaping @MainActor (Input) -> Output) {
+        self.owner = owner
+        self.perform = perform
+    }
+
+    @MainActor func callAsFunction(_ input: Input) -> Output { perform(input) }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.owner == rhs.owner }
+}
+
 extension EnvironmentValues {
     @Entry var transcriptRows = TranscriptRows()
     /// What became of each call on screen that has no result.
@@ -72,7 +87,7 @@ extension EnvironmentValues {
     /// `contentTop`, sits at the top. Set by the view that owns the scroll view. A collapse from the end calls it
     /// in the same transaction: it scrolls to an offset rather than to a row id, because once the offset is past
     /// the shrunken content no row is laid out and an id lands on the stack's estimated heights.
-    @Entry var revealRow: (Binding<CGFloat>) -> Void = { _ in }
+    @Entry var revealRow = RowAction<Binding<CGFloat>, Void>(owner: "") { _ in }
 }
 
 extension TranscriptRows {
