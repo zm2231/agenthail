@@ -24,8 +24,10 @@ type codexTurnStarts struct {
 }
 
 type codexTurnStart struct {
-	at     time.Time
-	turnID string
+	at         time.Time
+	turnID     string
+	after      string
+	afterKnown bool
 }
 
 func (s *codexTurnStarts) begin(threadID string) {
@@ -52,10 +54,41 @@ func (s *codexTurnStarts) end(threadID string) {
 	delete(s.started, threadID)
 }
 
-func (s *codexTurnStarts) settle(threadID string, ended map[string]bool) {
+func (s *codexTurnStarts) follow(threadID, after string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if start, ok := s.started[threadID]; ok && ended[start.turnID] {
+	if start, ok := s.started[threadID]; ok {
+		start.after, start.afterKnown = after, true
+		s.started[threadID] = start
+	}
+}
+
+// settle ends a start once turns, the newest first and none running, show its
+// turn ended: listed with completedAt or behind a newer turn, or gone from a
+// full page. A start whose response named no turn ends once the newest turn is
+// newer than the one listed before the start and has completedAt.
+func (s *codexTurnStarts) settle(threadID string, turns []map[string]any, full bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	start, ok := s.started[threadID]
+	if !ok {
+		return
+	}
+	if start.turnID == "" {
+		if start.afterKnown && len(turns) > 0 && str(turns[0], "id") != start.after && turns[0]["completedAt"] != nil {
+			delete(s.started, threadID)
+		}
+		return
+	}
+	for i, turn := range turns {
+		if str(turn, "id") == start.turnID {
+			if i > 0 || turn["completedAt"] != nil {
+				delete(s.started, threadID)
+			}
+			return
+		}
+	}
+	if full {
 		delete(s.started, threadID)
 	}
 }
@@ -72,7 +105,7 @@ func (s *codexTurnStarts) pending(threadID string) bool {
 // completed, for at most codexTurnStartWait. Until then Codex counts the
 // thread idle, and a resume whose overrides differ reloads an idle thread no
 // connection subscribes to, aborting the turn. The start stays recorded until
-// Codex lists its turn as done.
+// its turn is listed ended.
 func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
 	c.turnStarts.begin(threadID)
 	response, err := client.Request(ctx, method, params, wait)
@@ -87,27 +120,24 @@ func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, met
 	turn, _ := result["turn"].(map[string]any)
 	if id := str(turn, "id"); id != "" {
 		c.turnStarts.identify(threadID, id)
-	} else if id, listed := newestTurnInProgress(ctx, client, threadID); id != "" {
-		c.turnStarts.identify(threadID, id)
-	} else if listed {
-		c.turnStarts.end(threadID)
 	}
 	awaitTurnUnderway(ctx, client, threadID)
 	return response, nil
 }
 
-func newestTurnInProgress(ctx context.Context, client codexClient, threadID string) (string, bool) {
-	turns, err := codexRecentTurns(ctx, client, threadID, 1)
-	if err != nil {
-		return "", false
+// startCompaction starts a compaction, whose response names no turn, so the
+// start is matched to the first turn newer than the one listed before it.
+func (c *Codex) startCompaction(ctx context.Context, client codexClient, threadID string) (map[string]any, error) {
+	before, listErr := codexRecentTurns(ctx, client, threadID, 1)
+	response, err := c.startTurn(ctx, client, threadID, "thread/compact/start", map[string]any{"threadId": threadID}, 10*time.Second)
+	if err == nil && listErr == nil {
+		after := ""
+		if len(before) > 0 {
+			after = str(before[0], "id")
+		}
+		c.turnStarts.follow(threadID, after)
 	}
-	if len(turns) == 0 {
-		return "", true
-	}
-	if _, finished, _ := codexTurnState(turns[0]["status"]); finished && turns[0]["completedAt"] != nil {
-		return "", true
-	}
-	return str(turns[0], "id"), true
+	return response, err
 }
 
 func codexRecentTurns(ctx context.Context, client codexClient, threadID string, limit int) ([]map[string]any, error) {
@@ -178,14 +208,11 @@ func (c *Codex) turnInFlight(ctx context.Context, client codexClient, threadID s
 	if err != nil {
 		return false, fmt.Errorf("thread/turns/list: %w", err)
 	}
-	ended := map[string]bool{}
-	for i, turn := range turns {
+	for _, turn := range turns {
 		if _, finished, _ := codexTurnState(turn["status"]); !finished {
 			return true, nil
-		} else if i > 0 || turn["completedAt"] != nil {
-			ended[str(turn, "id")] = true
 		}
 	}
-	c.turnStarts.settle(threadID, ended)
+	c.turnStarts.settle(threadID, turns, len(turns) >= codexTurnStartScan)
 	return c.turnStarts.pending(threadID), nil
 }
