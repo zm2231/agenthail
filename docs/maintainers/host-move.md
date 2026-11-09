@@ -160,8 +160,12 @@ A channel stays on the host that keeps it; only the session moves.
 - A post from the moved session to a channel that its new host does not
   have goes to the host that keeps the channel. While that host is
   unreachable, the post is held and delivered once it reconnects, under the
-  post's idempotency key. A channel of the new host's own with the same name
-  takes precedence.
+  post's idempotency key, even when the new host has its own channel of
+  that name.
+- A channel name names one channel for a session wherever it runs. A session
+  cannot join a host's channel while it is in another host's channel of the
+  same name, and a move that would put it in two is refused, naming the
+  channel to leave.
 - The keeping host leaves the poster out of its own post, and accepts a
   post from a paired host's session only while that session is a member.
   When the channel is gone, or the session is no longer a member, the new

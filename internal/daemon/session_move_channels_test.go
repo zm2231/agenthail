@@ -72,6 +72,7 @@ func TestAMovedSessionPostsToItsChannelThroughTheHostThatKeepsIt(t *testing.T) {
 	onTarget := claudetest.ListenPeerManager(t, target.host.Home)
 
 	movedHere(t, source, session)
+	inChannel(t, target, "builders")
 	if home, found, err := target.reg.RemoteChannel(session.ID, "builders"); err != nil || !found || home != toSource.ID {
 		t.Fatalf("the target keeps #builders for the session at %q found=%v err=%v", home, found, err)
 	}

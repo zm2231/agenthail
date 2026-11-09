@@ -36,18 +36,14 @@ func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboa
 	if strings.TrimSpace(request.Channel) == "" || strings.TrimSpace(request.Message) == "" {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "channel and message are required")
 	}
-	target, resolveErr := broadcast.Resolve(d.Registry, request.Channel)
-	if resolveErr != nil {
-		name, home, found, err := d.channelHome(ctx, request)
-		if err != nil {
-			return actionResult{}, err
-		}
-		if found {
-			operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
-			defer cancel()
-			return d.postToChannelHome(operationCtx, home, name, request)
-		}
+	if name, home, found, err := d.channelHome(ctx, request); err != nil {
+		return actionResult{}, err
+	} else if found {
+		operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+		defer cancel()
+		return d.postToChannelHome(operationCtx, home, name, request)
 	}
+	target, resolveErr := broadcast.Resolve(d.Registry, request.Channel)
 	if err := d.channelPostScope(ctx, request, resolveErr, target, request.SourceSessionID); err != nil {
 		return actionResult{}, err
 	}

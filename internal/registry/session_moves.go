@@ -128,6 +128,9 @@ func (r *Registry) SessionMoveRefusal(conversation string, carry bool) (string, 
 	if !carry {
 		return "", nil
 	}
+	if reason, err := channelMoveRefusal(r.read, conversation); err != nil || reason != "" {
+		return reason, err
+	}
 	return relayMoveRefusal(r.read, conversation)
 }
 
@@ -154,6 +157,9 @@ func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []by
 	}
 	if !current.equal(carry) {
 		return fmt.Errorf("the relays or channels of %s changed while the move was prepared; move it again", conversation)
+	}
+	if err := checkMovedChannels(tx, conversation, self, carry.Channels); err != nil {
+		return err
 	}
 	if reason, err := relayMoveRefusal(tx, conversation); err != nil {
 		return err

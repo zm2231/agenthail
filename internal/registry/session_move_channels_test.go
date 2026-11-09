@@ -72,7 +72,7 @@ func TestAMovedSessionKeepsTheChannelsOfItsFormerHostUntilItMovesOn(t *testing.T
 		t.Fatal(err)
 	}
 	carried := MoveCarry{Channels: []MovedChannel{{Name: "builders", Home: home}, {Name: "local", Home: self}}}
-	if err := r.CheckMovedChannels(self, []MovedChannel{{Name: "elsewhere", Home: "h-unpaired"}}); err == nil || !strings.Contains(err.Error(), "not paired here") {
+	if err := r.CheckMovedChannels(moveConversation, self, []MovedChannel{{Name: "elsewhere", Home: "h-unpaired"}}); err == nil || !strings.Contains(err.Error(), "not paired here") {
 		t.Fatalf("a channel kept on an unpaired host was accepted: %v", err)
 	}
 	if _, err := r.PrepareMoveIn("move-in", moveConversation, home, []byte(`{}`)); err != nil {
@@ -106,5 +106,28 @@ func TestAMovedSessionKeepsTheChannelsOfItsFormerHostUntilItMovesOn(t *testing.T
 	}
 	if _, found, _ := r.RemoteChannel(moveConversation, "builders"); found {
 		t.Fatal("the host the session left still posts for it to #builders")
+	}
+}
+
+func TestAChannelNameNamesOneChannelForASession(t *testing.T) {
+	const self = "h0123456789ef"
+	r := channelledMoveRegistry(t)
+	if err := r.CheckMovedChannels(moveConversation, self, []MovedChannel{{Name: "builders", Home: moveTarget}}); err == nil || !strings.Contains(err.Error(), "this host's own #builders") {
+		t.Fatalf("a session in this host's #builders took #builders of another host: %v", err)
+	}
+	if err := r.CheckMovedChannels("second", self, []MovedChannel{{Name: "ops", Home: self}, {Name: "ops", Home: moveTarget}}); err == nil || !strings.Contains(err.Error(), "two channels named #ops") {
+		t.Fatalf("a move with two channels of one name was accepted: %v", err)
+	}
+	if _, err := r.db.Exec(`INSERT INTO remote_channels(channel_name,home_host_id,session_id) VALUES('reviewers',?,?)`, moveTarget, moveConversation); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddToChannel("reviewers", moveConversation); err == nil || !strings.Contains(err.Error(), "already in #reviewers on host") {
+		t.Fatalf("a session in another host's #reviewers joined this host's: %v", err)
+	}
+	if _, err := r.db.Exec(`INSERT INTO remote_channels(channel_name,home_host_id,session_id) VALUES('builders',?,?)`, moveTarget, moveConversation); err != nil {
+		t.Fatal(err)
+	}
+	if reason, err := r.SessionMoveRefusal(moveConversation, true); err != nil || !strings.Contains(reason, "two channels named #builders") {
+		t.Fatalf("refusal=%q err=%v, want the session's two #builders named", reason, err)
 	}
 }
