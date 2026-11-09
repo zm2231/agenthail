@@ -881,42 +881,47 @@ struct SessionFamily: Identifiable, Equatable {
     struct Member: Identifiable, Equatable {
         let id: String
         let depth: Int
+        let isWorker: Bool
         private let cell: SessionCell
 
         var session: SessionState { cell.state }
 
-        init(session: SessionState, depth: Int) { self.init(cell: SessionCell(session), depth: depth) }
+        init(session: SessionState, depth: Int, isWorker: Bool = false) { self.init(cell: SessionCell(session), depth: depth, isWorker: isWorker) }
 
-        init(cell: SessionCell, depth: Int) {
+        init(cell: SessionCell, depth: Int, isWorker: Bool = false) {
             id = cell.state.id
             self.depth = depth
+            self.isWorker = isWorker
             self.cell = cell
         }
 
         static func == (lhs: Self, rhs: Self) -> Bool {
-            lhs.id == rhs.id && lhs.depth == rhs.depth && lhs.cell === rhs.cell
+            lhs.id == rhs.id && lhs.depth == rhs.depth && lhs.isWorker == rhs.isWorker && lhs.cell === rhs.cell
         }
     }
 
     let id: String
     let members: [Member]
     let workingSubagents: Int
+    let workers: WorkerRollup?
     private let rootCell: SessionCell
 
     var root: SessionState { rootCell.state }
     var isWorking: Bool { root.isWorking || workingSubagents > 0 }
     var isCurrent: Bool { isWorking || sessions.contains(where: \.current) }
     var sessions: [SessionState] { [root] + members.map(\.session) }
+    var startsExpanded: Bool { (workers?.working ?? 0) + (workers?.needsYou ?? 0) > 0 }
 
-    init(root: SessionState, members: [Member], workingSubagents: Int) {
-        self.init(root: SessionCell(root), members: members, workingSubagents: workingSubagents)
+    init(root: SessionState, members: [Member], workingSubagents: Int, workers: WorkerRollup? = nil) {
+        self.init(root: SessionCell(root), members: members, workingSubagents: workingSubagents, workers: workers)
     }
 
-    init(root: SessionCell, members: [Member], workingSubagents: Int) {
+    init(root: SessionCell, members: [Member], workingSubagents: Int, workers: WorkerRollup? = nil) {
         id = root.state.id
         rootCell = root
         self.members = members
         self.workingSubagents = workingSubagents
+        self.workers = workers
     }
 
     func contains(_ sessionID: String?) -> Bool {
@@ -924,8 +929,15 @@ struct SessionFamily: Identifiable, Equatable {
         return id == sessionID || members.contains { $0.id == sessionID }
     }
 
+    /// `toggled` holds the families the person flipped from how they start.
+    func isExpanded(toggled: Set<String>, selectedID: String?) -> Bool {
+        guard !members.isEmpty else { return false }
+        if members.contains(where: { $0.id == selectedID }) { return true }
+        return startsExpanded != toggled.contains(id)
+    }
+
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.id == rhs.id && lhs.rootCell === rhs.rootCell && lhs.workingSubagents == rhs.workingSubagents && lhs.members == rhs.members
+        lhs.id == rhs.id && lhs.rootCell === rhs.rootCell && lhs.workingSubagents == rhs.workingSubagents && lhs.workers == rhs.workers && lhs.members == rhs.members
     }
 }
 
@@ -1053,6 +1065,29 @@ enum SessionFamilies {
 
     static func subagentSummary(_ family: SessionFamily) -> String {
         "\(family.workingSubagents) \(family.workingSubagents == 1 ? "subagent" : "subagents") working"
+    }
+
+    static func workerSummary(_ workers: WorkerRollup) -> String {
+        var parts = ["\(workers.count) \(workers.count == 1 ? "worker" : "workers")"]
+        if workers.working > 0 { parts.append("\(workers.working) working") }
+        if workers.needsYou > 0 { parts.append("\(workers.needsYou) \(workers.needsYou == 1 ? "needs" : "need") you") }
+        return parts.joined(separator: ", ")
+    }
+
+    static func membersNoun(_ family: SessionFamily) -> String {
+        let workers = family.members.contains(where: \.isWorker)
+        let subagents = family.members.contains { !$0.isWorker }
+        switch (workers, subagents) {
+        case (true, true): return "workers and subagents"
+        case (true, false): return "workers"
+        default: return "subagents"
+        }
+    }
+
+    static func membersCount(_ family: SessionFamily) -> String {
+        let noun = membersNoun(family)
+        guard family.members.count == 1 else { return "\(family.members.count) \(noun)" }
+        return "1 \(noun.dropLast())"
     }
 
     static func label(_ session: SessionState) -> String {

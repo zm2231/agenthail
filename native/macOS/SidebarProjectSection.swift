@@ -74,7 +74,7 @@ struct SidebarFamilyRows: View, @MainActor Equatable {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DesktopPalette.text2)
-                .accessibilityLabel(key.expanded ? "Hide subagents" : "Show subagents")
+                .accessibilityLabel(key.expanded ? "Hide \(SessionFamilies.membersNoun(family))" : "Show \(SessionFamilies.membersCount(family))")
             }
         }
         if key.expanded {

@@ -6,16 +6,16 @@ struct SidebarSectionKey: Equatable {
     let expanded: Bool
     let selectedID: String?
     let attention: [String: SessionAttention]
-    let expandedFamilies: Set<String>
+    let toggledFamilies: Set<String>
     let isShownProject: Bool
 
-    init(project: SessionTree.Project, expanded: Bool, selectedID: String?, attention: [String: SessionAttention], expandedFamilies: Set<String>, shownProjectID: String?) {
+    init(project: SessionTree.Project, expanded: Bool, selectedID: String?, attention: [String: SessionAttention], toggledFamilies: Set<String>, shownProjectID: String?) {
         self.project = project
         self.expanded = expanded
         isShownProject = shownProjectID != nil && project.identity?.id == shownProjectID
         self.selectedID = project.checkouts.contains { $0.families.contains { $0.contains(selectedID) } } ? selectedID : nil
         self.attention = attention
-        self.expandedFamilies = expandedFamilies
+        self.toggledFamilies = toggledFamilies
     }
 
     var shown: SessionTree.Project { project.shown(expanded: expanded, keeping: selectedID) }
@@ -26,7 +26,7 @@ struct SidebarSectionKey: Equatable {
         let selected = family.contains(selectedID) ? selectedID : nil
         return SidebarFamilyKey(
             family: family,
-            expanded: !family.members.isEmpty && (expandedFamilies.contains(family.id) || family.members.contains { $0.id == selected }),
+            expanded: family.isExpanded(toggled: toggledFamilies, selectedID: selected),
             selectedID: selected,
             attention: Dictionary(ids.compactMap { id in attention[id].map { (id, $0) } }, uniquingKeysWith: { first, _ in first })
         )

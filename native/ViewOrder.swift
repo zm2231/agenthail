@@ -12,6 +12,13 @@ struct ViewMember: Decodable, Equatable, Identifiable {
     let depth: Int
     let contextOnly: Bool
     let pinned: Bool
+    var worker: Bool? = nil
+}
+
+struct WorkerRollup: Decodable, Equatable {
+    let count: Int
+    let working: Int
+    let needsYou: Int
 }
 
 struct ViewFamily: Decodable, Equatable, Identifiable {
@@ -22,6 +29,7 @@ struct ViewFamily: Decodable, Equatable, Identifiable {
     let members: [ViewMember]
     let pinned: Bool
     let workingSubagents: Int
+    var workers: WorkerRollup? = nil
 }
 
 extension ScopePage.View {
@@ -39,7 +47,7 @@ extension ScopePage.View {
         var copy = self
         copy.projects = projects.map { ViewProject(id: name($0.id), name: $0.name, counts: $0.counts, collapsedFamilyIds: $0.collapsedFamilyIds.map(name)) }
         copy.families = families.map { family in
-            ViewFamily(id: name(family.id), rootId: name(family.rootId), projectId: name(family.projectId), checkoutId: family.checkoutId.isEmpty ? "" : name(family.checkoutId), members: family.members.map { ViewMember(id: name($0.id), depth: $0.depth, contextOnly: $0.contextOnly, pinned: $0.pinned) }, pinned: family.pinned, workingSubagents: family.workingSubagents)
+            ViewFamily(id: name(family.id), rootId: name(family.rootId), projectId: name(family.projectId), checkoutId: family.checkoutId.isEmpty ? "" : name(family.checkoutId), members: family.members.map { ViewMember(id: name($0.id), depth: $0.depth, contextOnly: $0.contextOnly, pinned: $0.pinned, worker: $0.worker) }, pinned: family.pinned, workingSubagents: family.workingSubagents, workers: family.workers)
         }
         return copy
     }

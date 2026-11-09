@@ -5,14 +5,14 @@ struct SidebarFlatFamilies: View {
     let attention: [String: SessionAttention]
     let model: AgenthailModel
     let pane: SessionPane
-    @Binding var expandedFamilies: Set<String>
+    @Binding var toggledFamilies: Set<String>
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             ForEach(families) { family in
-                let expanded = !family.members.isEmpty && (expandedFamilies.contains(family.id) || family.members.contains { $0.id == pane.selectedSessionID })
+                let expanded = family.isExpanded(toggled: toggledFamilies, selectedID: pane.selectedSessionID)
                 SidebarFamilyRows(key: SidebarFamilyKey(family: family, expanded: expanded, selectedID: pane.selectedSessionID, attention: attention), model: model, pane: pane) {
-                    if expandedFamilies.contains(family.id) { expandedFamilies.remove(family.id) } else { expandedFamilies.insert(family.id) }
+                    if toggledFamilies.contains(family.id) { toggledFamilies.remove(family.id) } else { toggledFamilies.insert(family.id) }
                 }
                 .equatable()
             }
@@ -25,7 +25,7 @@ struct SidebarArchivedSection: View {
     let pane: SessionPane
     let grouped: Bool
     @Binding var expandedProjects: Set<String>
-    @Binding var expandedFamilies: Set<String>
+    @Binding var toggledFamilies: Set<String>
 
     var body: some View {
         if let request = model.archivedRequest {
@@ -36,16 +36,16 @@ struct SidebarArchivedSection: View {
                     ForEach(tree.projects) { project in
                         let id = SessionListLayout.archivedProjectID(project.id)
                         SidebarProjectSection(
-                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(id), selectedID: pane.selectedSessionID, attention: tree.attention, expandedFamilies: expandedFamilies, shownProjectID: pane.shownProjectID),
+                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(id), selectedID: pane.selectedSessionID, attention: tree.attention, toggledFamilies: toggledFamilies, shownProjectID: pane.shownProjectID),
                             model: model,
                             pane: pane,
                             toggleProject: { flip(id, in: $expandedProjects) },
-                            toggleFamily: { flip($0, in: $expandedFamilies) }
+                            toggleFamily: { flip($0, in: $toggledFamilies) }
                         )
                         .equatable()
                     }
                 } else {
-                    SidebarFlatFamilies(families: tree.flat, attention: tree.attention, model: model, pane: pane, expandedFamilies: $expandedFamilies)
+                    SidebarFlatFamilies(families: tree.flat, attention: tree.attention, model: model, pane: pane, toggledFamilies: $toggledFamilies)
                 }
                 if model.archivedHasMore {
                     ProgressView()

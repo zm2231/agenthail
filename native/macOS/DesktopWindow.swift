@@ -168,7 +168,7 @@ struct SessionSidebar: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.windowChromeTop) private var chromeTop
     @State private var expandedProjects: Set<String> = []
-    @State private var expandedFamilies: Set<String> = []
+    @State private var toggledFamilies: Set<String> = []
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @AppStorage(SessionListLayout.groupsKey) private var groupsByProject = true
 
@@ -207,15 +207,15 @@ struct SessionSidebar: View {
                         searchResults
                     } else {
                     if showsFlat {
-                        SidebarFlatFamilies(families: tree.flat, attention: tree.attention, model: model, pane: pane, expandedFamilies: $expandedFamilies)
+                        SidebarFlatFamilies(families: tree.flat, attention: tree.attention, model: model, pane: pane, toggledFamilies: $toggledFamilies)
                     } else {
                     ForEach(scopedProjects(tree)) { project in
                         SidebarProjectSection(
-                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(project.id), selectedID: pane.selectedSessionID, attention: tree.attention, expandedFamilies: expandedFamilies, shownProjectID: pane.shownProjectID),
+                            key: SidebarSectionKey(project: project, expanded: expandedProjects.contains(project.id), selectedID: pane.selectedSessionID, attention: tree.attention, toggledFamilies: toggledFamilies, shownProjectID: pane.shownProjectID),
                             model: model,
                             pane: pane,
                             toggleProject: { toggle(project.id, in: $expandedProjects) },
-                            toggleFamily: { toggle($0, in: $expandedFamilies) }
+                            toggleFamily: { toggle($0, in: $toggledFamilies) }
                         )
                         .equatable()
                     }
@@ -252,7 +252,7 @@ struct SessionSidebar: View {
                             .padding(.horizontal, DesktopSpace.s)
                     }
                     if scoped == nil && !hasMore {
-                        SidebarArchivedSection(model: model, pane: pane, grouped: groupsByProject, expandedProjects: $expandedProjects, expandedFamilies: $expandedFamilies)
+                        SidebarArchivedSection(model: model, pane: pane, grouped: groupsByProject, expandedProjects: $expandedProjects, toggledFamilies: $toggledFamilies)
                     }
                     }
                 }
@@ -372,7 +372,7 @@ extension SessionSidebar {
     }
 
     private func familyExpanded(_ family: SessionFamily) -> Bool {
-        !family.members.isEmpty && (expandedFamilies.contains(family.id) || family.members.contains { $0.id == pane.selectedSessionID })
+        family.isExpanded(toggled: toggledFamilies, selectedID: pane.selectedSessionID)
     }
 
     private func toggle(_ id: String, in set: Binding<Set<String>>) {
@@ -563,6 +563,17 @@ struct SessionRowView: View {
                 .foregroundStyle(DesktopPalette.working)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFamilies.subagentSummary(family))
+            }
+            if let workers = family?.workers, workers.count > 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "person.3")
+                    Text("\(workers.count)")
+                }
+                .font(.system(size: DesktopType.caption).monospacedDigit())
+                .foregroundStyle(workers.needsYou > 0 ? DesktopPalette.attention : workers.working > 0 ? DesktopPalette.working : DesktopPalette.text2)
+                .help(SessionFamilies.workerSummary(workers))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(SessionFamilies.workerSummary(workers))
             }
             if let plan = session.livePlan {
                 HStack(spacing: 3) {
