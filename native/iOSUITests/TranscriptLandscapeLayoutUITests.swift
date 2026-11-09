@@ -37,7 +37,7 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
         let window = app.windows.firstMatch
         let middle = (headerBottom(app) + composerTop(app)) / 2
         let start = window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: window.frame.midX, dy: middle - distance / 2))
-        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: distance)), withVelocity: 1500, thenHoldForDuration: 0.05)
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: distance)), withVelocity: 2000, thenHoldForDuration: 0)
     }
 
     private func rows(_ app: XCUIApplication) throws -> [XCUIElementSnapshot] {
@@ -50,12 +50,24 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
         return found
     }
 
+    private func firstRow(_ app: XCUIApplication) throws -> XCUIElementSnapshot? {
+        let bar = app.navigationBars.firstMatch.frame.maxY
+        return try rows(app).filter { $0.frame.maxY > bar }.min { $0.frame.minY < $1.frame.minY }
+    }
+
     private func assertFirstRowRestsBelowTheHeader(_ app: XCUIApplication, _ context: String) throws {
-        for _ in 0..<20 { drag(app, by: 120) }
-        XCTAssertTrue(app.scrollViews["session-timeline"].waitUntilRowsStill())
+        var last: String?
+        var settled = false
+        for _ in 0..<15 {
+            for _ in 0..<5 { drag(app, by: 160) }
+            _ = app.scrollViews["session-timeline"].waitUntilRowsStill()
+            let key = try firstRow(app).map { "\($0.label)@\(Int($0.frame.minY))" }
+            if key != nil, key == last { settled = true; break }
+            last = key
+        }
+        XCTAssertTrue(settled, "the transcript never came to rest at its top \(context)")
         let header = headerBottom(app)
-        let first = try rows(app).filter { $0.frame.maxY > app.navigationBars.firstMatch.frame.maxY }.min { $0.frame.minY < $1.frame.minY }
-        let top = try XCTUnwrap(first, "no row on screen at the top \(context)")
+        let top = try XCTUnwrap(try firstRow(app), "no row on screen at the top \(context)")
         XCTAssertGreaterThanOrEqual(top.frame.minY, header - 0.5, "at the top the first row '\(top.label.prefix(40))' starts behind the header \(context)")
     }
 
