@@ -67,7 +67,7 @@ func (c *Codex) readCompletions(ctx context.Context, conn codexClient, threadID,
 				continue
 			}
 			if boundary == "" {
-				if failure == codexTurnInterrupted && codexThreadNotLoaded(ctx, conn, threadID) {
+				if failure == codexTurnInterrupted && turn["completedAt"] == nil {
 					continue
 				}
 				boundary = id
