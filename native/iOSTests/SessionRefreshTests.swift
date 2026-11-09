@@ -505,6 +505,29 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testAnEarlierModelsRequestsNeverReachTheNextModelsCounts() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        let earlier = makeModel()
+        earlier.selectedSessionID = "computer::demo"
+        SessionRefreshProtocol.state.holdDetail()
+        let held = Task { await earlier.refreshSession("computer::demo") }
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailHeld }
+
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        _ = makeModel()
+        await held.value
+        XCTAssertNil(earlier.selectedDetail, "a held reply reached a model from an earlier test")
+        await earlier.refreshSession("computer::demo")
+        await earlier.loadSession("computer::other")
+
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, 0)
+        XCTAssertEqual(SessionRefreshProtocol.state.streamRequests, 0)
+        XCTAssertEqual(SessionRefreshProtocol.state.metadataURLs, [])
+        XCTAssertFalse(SessionRefreshProtocol.state.detailHeld)
+        earlier.selectedSessionID = nil
+    }
+
+    @MainActor
     private func openUnsupportedSession() async throws -> AgenthailIOSModel {
         SessionRefreshProtocol.state.reset(streamUnsupported: true)
         SessionRefreshProtocol.state.set(snapshotCanStream: false)
@@ -521,7 +544,9 @@ final class SessionRefreshTests: XCTestCase {
     private func makeModel() -> AgenthailIOSModel {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [SessionRefreshProtocol.self]
-        return AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        let host = "fixture-\(UUID().uuidString.lowercased()).invalid"
+        SessionRefreshProtocol.state.serve(host)
+        return AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://\(host)")!, token: "fixture", session: URLSession(configuration: configuration)))
     }
 
     @MainActor
@@ -547,6 +572,10 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         private var seq: Int?
         var journalSeq: Int? { condition.withLock { seq } }
         func set(journalSeq value: Int?) { condition.withLock { seq = value } }
+        private var servedHost: String?
+        func serve(_ host: String) { condition.withLock { servedHost = host; condition.broadcast() } }
+        func serves(_ url: URL?) -> Bool { condition.withLock { owns(url) } }
+        private func owns(_ url: URL?) -> Bool { url?.host != nil && url?.host == servedHost }
 
         var detailFetches: Int { condition.withLock { fetches } }
         var streamUnsupported: Bool { condition.withLock { unsupported } }
@@ -556,7 +585,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             condition.withLock {
                 fetches = 0; unsupported = streamUnsupported; detail = "busy"; snapshot = "busy"
                 holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false; passing = 0; seq = nil
-                canStream = true; streams = 0; fields = "{}"; streamPaths = []; metadataPaths = []; unlisted = false
+                canStream = true; streams = 0; fields = "{}"; streamPaths = []; metadataPaths = []; unlisted = false; servedHost = nil
                 condition.broadcast()
             }
         }
@@ -574,39 +603,55 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         func set(streamUnsupported value: Bool) { condition.withLock { unsupported = value } }
         private var streamPaths: [String] = []
         var streamURLs: [String] { condition.withLock { streamPaths } }
-        func streamRequested(_ url: URL?) { condition.withLock { streams += 1; streamPaths.append(url?.absoluteString ?? "") } }
+        func streamRequested(_ url: URL?) -> Bool? {
+            condition.withLock {
+                guard owns(url) else { return nil }
+                streams += 1; streamPaths.append(url?.absoluteString ?? "")
+                return unsupported
+            }
+        }
         private var metadataPaths: [String] = []
         var metadataURLs: [String] { condition.withLock { metadataPaths } }
-        func metadataRequested(_ url: URL?) { condition.withLock { metadataPaths.append(url?.absoluteString ?? "") } }
+        func metadataRequested(_ url: URL?) -> Bool {
+            condition.withLock {
+                guard owns(url) else { return false }
+                metadataPaths.append(url?.absoluteString ?? "")
+                return true
+            }
+        }
         func holdSnapshot() { condition.withLock { holdingSnapshot = true } }
         func passNextSnapshot() { condition.withLock { passing += 1 } }
         func holdDetail() { condition.withLock { holdingDetail = true } }
         func releaseSnapshot() { condition.withLock { holdingSnapshot = false; condition.broadcast() } }
         func releaseDetail() { condition.withLock { holdingDetail = false; condition.broadcast() } }
 
-        func detailResponse() -> String {
+        func detailResponse(_ url: URL?) -> String? {
             condition.lock(); defer { condition.unlock() }
+            guard owns(url) else { return nil }
             fetches += 1
             let status = detail
             let journalSeq = seq
             if holdingDetail, !detailWaiting {
                 detailWaiting = true
-                while holdingDetail { condition.wait() }
+                while holdingDetail, owns(url) { condition.wait() }
                 detailWaiting = false
             }
+            guard owns(url) else { return nil }
             return SessionRefreshProtocol.detail(status: status, journalSeq: journalSeq)
         }
 
-        func snapshotResponse() -> String {
+        func snapshotResponse(_ url: URL?) -> String? {
             condition.lock(); defer { condition.unlock() }
+            guard owns(url) else { return nil }
             let status = snapshot, overrides = fields, leftOut = unlisted
             if passing > 0 {
                 passing -= 1
             } else if holdingSnapshot {
                 snapshotWaiting = true
-                while holdingSnapshot { condition.wait() }
+                while holdingSnapshot, owns(url) { condition.wait() }
                 snapshotWaiting = false
             }
+            guard owns(url) else { return nil }
             return SessionRefreshProtocol.snapshot(status: status, canStream: canStream, fields: overrides, unlisted: leftOut)
         }
     }
@@ -650,6 +695,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        guard Self.state.serves(request.url) else { return refuse() }
         if answeredProjectActivity() { return }
         var status = 200
         var body = #"{"items":[]}"#
@@ -658,17 +704,18 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             let detail = request.url?.path == "/api/v1/session"
             let scope = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "scope" }?.value
             DispatchQueue.global().async { [self] in
-                finish(status: 200, body: detail ? Self.state.detailResponse() : Self.scoped(Self.state.snapshotResponse(), scope))
+                guard let answer = detail ? Self.state.detailResponse(request.url) : Self.state.snapshotResponse(request.url) else { return refuse() }
+                finish(status: 200, body: detail ? answer : Self.scoped(answer, scope))
             }
             return
         case "/api/v1/session-metadata":
-            Self.state.metadataRequested(request.url)
+            guard Self.state.metadataRequested(request.url) else { return refuse() }
             body = Self.metadata
         case "/api/v1/requests":
             body = #"{"permissionMode":"default","requests":[]}"#
         case "/api/v1/session-stream":
-            Self.state.streamRequested(request.url)
-            if Self.state.streamUnsupported {
+            guard let unsupported = Self.state.streamRequested(request.url) else { return refuse() }
+            if unsupported {
                 status = 409
                 body = #"{"error":{"code":"stream_unsupported","message":"no stream"}}"#
             } else {
@@ -686,6 +733,10 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
+    }
+
+    private func refuse() {
+        client?.urlProtocol(self, didFailWithError: URLError(.cancelled))
     }
 
     override func stopLoading() {}
