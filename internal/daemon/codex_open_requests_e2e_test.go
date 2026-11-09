@@ -59,21 +59,27 @@ func TestEveryCodexRequestOpeningOrClosingMovesTheRowAndTheDecisionsRevision(t *
 			return waiting != nil && waiting.ID == want[0] && slices.Equal(waiting.Open, want)
 		}
 	}
-	movesFrom := func(previous string) func() bool {
-		return func() bool { rev := h.decisionsRev(); return rev != "" && rev != previous }
+	// The revision settles one pass after the row changes.
+	caughtUp := func(what, previous string, want ...string) string {
+		var rev string
+		testkit.Eventually(t, what, 10*time.Second, func() bool {
+			if !opens(want...)() {
+				return false
+			}
+			own, err := h.daemon.ownDecisionsRevision(t.Context())
+			rev = h.decisionsRev()
+			return err == nil && rev == own && rev != previous && opens(want...)()
+		})
+		return rev
 	}
 
 	codex := lifecycle.Daemon()
 	codex.OpenRequest(7, "item/commandExecution/requestApproval", codexApproval(id, "call_a"))
 	codex.Notify("thread/status/changed", map[string]any{"threadId": id, "status": map[string]any{"type": "active", "activeFlags": []any{"waitingOnApproval"}}})
-	testkit.Eventually(t, "the row to wait on the one request", 10*time.Second, opens(first))
-	testkit.Eventually(t, "a decisions revision", 5*time.Second, movesFrom(""))
-	one := h.decisionsRev()
+	one := caughtUp("the row and decisions revision to wait on the one request", "", first)
 
 	codex.OpenRequest(8, "item/commandExecution/requestApproval", codexApproval(id, "call_b"))
-	testkit.Eventually(t, "the row to list the second request", 10*time.Second, opens(first, second))
-	testkit.Eventually(t, "the decisions revision to move for the second request", 5*time.Second, movesFrom(one))
-	two := h.decisionsRev()
+	two := caughtUp("the row and decisions revision to list the second request", one, first, second)
 
 	time.Sleep(2500 * time.Millisecond)
 	if !opens(first, second)() || h.decisionsRev() != two {
@@ -81,6 +87,5 @@ func TestEveryCodexRequestOpeningOrClosingMovesTheRowAndTheDecisionsRevision(t *
 	}
 
 	codex.Answer(8)
-	testkit.Eventually(t, "the row to drop the request answered elsewhere", 10*time.Second, opens(first))
-	testkit.Eventually(t, "the decisions revision to move for the answer", 5*time.Second, movesFrom(two))
+	caughtUp("the row and decisions revision to drop the request answered elsewhere", two, first)
 }
