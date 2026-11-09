@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -60,18 +61,26 @@ func boundHistoryText(value string) string {
 	return value[:maxHistoryText] + "\n[truncated]"
 }
 
+type historyWriter interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 func (r *Registry) RecordHistory(entry HistoryEntry) error {
+	return recordHistory(r.db, entry)
+}
+
+func recordHistory(w historyWriter, entry HistoryEntry) error {
 	if entry.Kind == "" {
 		return fmt.Errorf("history kind is required")
 	}
-	res, err := r.db.Exec(`INSERT INTO delivery_history(kind,session_id,source_session_id,route_id,queue_id,completion_id,message,result,error,operation,send_route,bridge) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,COALESCE(NULLIF(?10,''),(SELECT operation FROM message_queue WHERE id=?5 AND ?5>0),''),?11,?12)`,
+	res, err := w.Exec(`INSERT INTO delivery_history(kind,session_id,source_session_id,route_id,queue_id,completion_id,message,result,error,operation,send_route,bridge) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,COALESCE(NULLIF(?10,''),(SELECT operation FROM message_queue WHERE id=?5 AND ?5>0),''),?11,?12)`,
 		entry.Kind, entry.SessionID, entry.SourceSessionID, entry.RouteID, entry.QueueID, entry.CompletionID,
 		boundHistoryText(entry.Message), boundHistoryText(entry.Result), boundHistoryText(entry.Error), entry.Operation, entry.SendRoute, entry.Bridge)
 	if err != nil {
 		return err
 	}
 	if id, idErr := res.LastInsertId(); idErr == nil {
-		_, _ = r.db.Exec(`DELETE FROM delivery_history WHERE id <= ?`, id-maxHistoryRows)
+		_, _ = w.Exec(`DELETE FROM delivery_history WHERE id <= ?`, id-maxHistoryRows)
 	}
 	return nil
 }

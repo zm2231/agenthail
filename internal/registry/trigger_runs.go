@@ -127,7 +127,7 @@ func (r *Registry) StartNextTriggerRun(trigger string) (*TriggerRun, error) {
 	return &run, nil
 }
 
-func (r *Registry) FinishTriggerRun(id int64, outcome TriggerOutcome) error {
+func (r *Registry) FinishTriggerRun(id int64, outcome TriggerOutcome, history HistoryEntry) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -146,6 +146,9 @@ func (r *Registry) FinishTriggerRun(id int64, outcome TriggerOutcome) error {
 	if _, err := tx.Exec(`DELETE FROM trigger_runs WHERE trigger_name=? AND state NOT IN (?,?) AND id NOT IN (
 		SELECT id FROM trigger_runs WHERE trigger_name=? AND state NOT IN (?,?) ORDER BY id DESC LIMIT ?)`,
 		trigger, TriggerPending, TriggerRunning, trigger, TriggerPending, TriggerRunning, keptFinishedTriggerRuns); err != nil {
+		return err
+	}
+	if err := recordHistory(tx, history); err != nil {
 		return err
 	}
 	return tx.Commit()

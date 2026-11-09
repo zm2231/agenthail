@@ -235,10 +235,6 @@ func (d *Daemon) runNextTrigger(ctx context.Context, trigger triggers.Trigger) b
 }
 
 func (d *Daemon) finishTriggerRun(run registry.TriggerRun, outcome registry.TriggerOutcome) {
-	if err := d.Registry.FinishTriggerRun(run.ID, outcome); err != nil {
-		d.log.Printf("finish trigger run %d: %s", run.ID, err)
-		return
-	}
 	result := fmt.Sprintf("%s %s", run.Trigger, outcome.State)
 	if outcome.State == registry.TriggerFailed && outcome.ExitCode > 0 {
 		result = fmt.Sprintf("%s exited %d", run.Trigger, outcome.ExitCode)
@@ -246,8 +242,10 @@ func (d *Daemon) finishTriggerRun(run registry.TriggerRun, outcome registry.Trig
 	if run.Test {
 		result += " (test)"
 	}
-	if err := d.Registry.RecordHistory(registry.HistoryEntry{Kind: "trigger", SessionID: run.SessionID, CompletionID: run.TurnID, Result: result, Error: outcome.Error}); err != nil {
-		d.log.Printf("record trigger history: %s", err)
+	history := registry.HistoryEntry{Kind: "trigger", SessionID: run.SessionID, CompletionID: run.TurnID, Result: result, Error: outcome.Error}
+	if err := d.Registry.FinishTriggerRun(run.ID, outcome, history); err != nil {
+		d.log.Printf("finish trigger run %d: %s", run.ID, err)
+		return
 	}
 	d.publishEvent("trigger.finished", run.SessionID, map[string]any{"runId": run.ID, "trigger": run.Trigger, "state": outcome.State})
 }
