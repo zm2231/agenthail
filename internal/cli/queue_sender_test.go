@@ -17,7 +17,7 @@ func TestAQueuedMessageNamesTheAgentThatQueuedIt(t *testing.T) {
 	if err := r.RegisterSession(sessions["worker"]); err != nil {
 		t.Fatal(err)
 	}
-	queue := func(message string) (string, string) {
+	queue := func(message string, intentID int64) (string, string) {
 		t.Helper()
 		if _, err := captureStdout(t, func() error { return app.Run([]string{"queue", "claude:busy", message}) }); err != nil {
 			t.Fatal(err)
@@ -26,24 +26,24 @@ func TestAQueuedMessageNamesTheAgentThatQueuedIt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		intent, err := r.DeliveryIntent(intentID)
+		if err != nil {
+			t.Fatalf("queued %q without a delivery intent: %v", message, err)
+		}
 		for _, row := range rows {
-			if row.Message == message {
-				intent, err := r.DeliveryIntentUUIDForQueue(row.ID)
-				if err != nil || intent == "" {
-					t.Fatalf("queued %q without a delivery intent: %q %v", message, intent, err)
-				}
-				return row.SourceSessionID, intent
+			if row.Message == message && intent.QueueID == row.ID {
+				return row.SourceSessionID, intent.SenderSessionID
 			}
 		}
-		t.Fatalf("%q was not queued", message)
+		t.Fatalf("%q was not queued under delivery intent %d", message, intentID)
 		return "", ""
 	}
-	if source, _ := queue("from a shell"); source != "" {
-		t.Fatalf("a message queued outside any agent session names a sender: %q", source)
+	if source, sender := queue("from a shell", 1); source != "" || sender != surface.SourcelessSender("") {
+		t.Fatalf("a message queued outside any agent session names sender %q (intent %q)", source, sender)
 	}
 	t.Setenv("AGENTHAIL_SESSION_ID", "worker")
-	if source, _ := queue("from the worker"); source != "worker" {
-		t.Fatalf("a message an agent queued does not name it as sender: %q", source)
+	if source, sender := queue("from the worker", 2); source != "worker" || sender != "worker" {
+		t.Fatalf("a message an agent queued names sender %q (intent %q), want worker", source, sender)
 	}
 }
 
