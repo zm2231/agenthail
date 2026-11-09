@@ -81,7 +81,8 @@ func dropUnconfirmedTurn(thread *codexThread, observation *surface.TurnObservati
 
 // activeTurnID returns the thread's running turn, or "" when none runs. A new
 // thread whose turns cannot be listed yet has none, so its first turn can start.
-// A newest turn listed unsettled is listed again until it shows running or
+// A newest turn listed unsettled is running if this process started it and
+// has not seen it end; otherwise it is listed again until it shows running or
 // ended, for at most codexUnsettledTurnWait: a starting turn shows running
 // once its thread turns active, and a turn a crashed server left behind never
 // does.
@@ -93,6 +94,9 @@ func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID str
 			return "", err
 		}
 		if status, _, _ := codexTurnState(newest["status"]); status == surface.StatusBusy {
+			return str(newest, "id"), nil
+		}
+		if newest != nil && codexTurnUnsettled(newest) && c.turnStarts.running(threadID, str(newest, "id")) {
 			return str(newest, "id"), nil
 		}
 		if newest == nil || !codexTurnUnsettled(newest) || !time.Now().Before(deadline) {

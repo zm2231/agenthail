@@ -80,6 +80,13 @@ func (s *codexTurnStarts) settle(threadID string, turns []map[string]any, full b
 	}
 }
 
+func (s *codexTurnStarts) running(threadID, turnID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	start, ok := s.started[threadID]
+	return ok && turnID != "" && start.turnID == turnID && time.Since(start.at) < codexTurnStartLimit
+}
+
 func (s *codexTurnStarts) pending(threadID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
