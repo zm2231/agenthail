@@ -26,7 +26,9 @@ final class LiveBackAfterReconnectUITests: XCTestCase {
         var interruptedOpens = 0
         for round in 1...6 {
             app.tab("Sessions").tapWhenReady(timeout: 20)
-            app.buttons["scope-all"].tapWhenReady(timeout: 20)
+            let scopeAll = app.buttons["scope-all"]
+            for _ in 0..<6 where !scopeAll.isHittable { app.swipeDown() }
+            scopeAll.tapWhenReady(timeout: 20)
             app.swipeUp()
             app.swipeDown()
             if downRow.waitForExistence(timeout: 10), downRow.isHittable {
