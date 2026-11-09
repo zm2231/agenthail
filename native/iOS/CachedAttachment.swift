@@ -1,5 +1,5 @@
 import SwiftUI
 
 extension EnvironmentValues {
-    @Entry var cachedAttachment: @MainActor (TimelineItem) -> Data? = { _ in nil }
+    @Entry var cachedAttachment = RowAction<TimelineItem, Data?>(owner: "") { _ in nil }
 }

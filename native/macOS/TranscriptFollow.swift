@@ -113,12 +113,12 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             }
             .environment(\.holdTranscriptPlace, HoldTranscriptPlace(hold: holdPlace))
             .environment(\.transcriptClip, layout.clip)
-            .environment(\.revealRow) { top in
+            .environment(\.revealRow, RowAction(owner: String(describing: transcript)) { top in
                 following = false
                 layout.releaseHold()
                 layout.revealed = RevealedRow(top: top)
                 position.scrollTo(y: top.wrappedValue)
-            }
+            })
             .onDisappear { layout.cancelCheck() }
             .onChange(of: transcript) {
                 generation &+= 1

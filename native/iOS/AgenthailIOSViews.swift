@@ -656,7 +656,8 @@ struct SessionScreen: View {
                 } else {
                     let groups = self.groups
                     ForEach(groups) { group in
-                        CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
+                        CompactActivityGroup(group: group, owner: session.id, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
+                            .equatable()
                             .rebuilt(group.id, generation: rowsGeneration)
                             .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).probesScrollJump(group.id)
                             .onAppear { if group.id == groups.last?.id { openingRowAppeared(group.id) } }.id(group.id)
@@ -698,15 +699,15 @@ struct SessionScreen: View {
                     if let detail { QueueTailRows(model: model, tail: $queueTail, readOnly: detail.readOnly, generation: rowsGeneration) }
                 }.transcriptScrimRow()
             }
-            .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
-            .environment(\.revealRow) {
+            .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? RowAction(owner: session.id) { model.editAndResend($0) } : nil)
+            .environment(\.revealRow, RowAction(owner: session.id) {
                 olderPlace.release()
                 position.scrollTo(y: $0.wrappedValue)
-            }
+            })
             .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.expandAgentMessages, expandAgents)
-            .environment(\.cachedAttachment) { [model, id = session.id] in model.cachedAttachment(for: $0, sessionID: id) }
+            .environment(\.cachedAttachment, RowAction(owner: session.id) { [model, id = session.id] in model.cachedAttachment(for: $0, sessionID: id) })
             .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 20)
@@ -1138,7 +1139,7 @@ struct IOSComposer: View {
 }
 
 extension EnvironmentValues {
-    @Entry var editMessage: ((String) -> Void)? = nil
+    @Entry var editMessage: RowAction<String, Void>? = nil
 }
 
 struct IOSMessage: View {

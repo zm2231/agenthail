@@ -5,7 +5,7 @@ extension TimelineItem {
     var isSaid: Bool { kind == "message" || kind == "text" }
 }
 
-struct TimelineGroup: Identifiable {
+struct TimelineGroup: Identifiable, Equatable {
     let id: String
     var items: [TimelineItem]
     var foldLabel: String? = nil
@@ -75,8 +75,9 @@ struct TimelineGroup: Identifiable {
 
 /// A run of tool activity between messages: one quiet line per call, the files it changed as chips, and a
 /// single summary line in place of the lines when the run is long.
-struct CompactActivityGroup: View {
+struct CompactActivityGroup: View, @MainActor Equatable {
     let group: TimelineGroup
+    var owner = ""
     var attachmentLoader: ((TimelineItem) async -> Data?)? = nil
     var onInspect: () -> Void = {}
     @State private var opened: RowChoice<Bool>?
@@ -84,7 +85,12 @@ struct CompactActivityGroup: View {
     @Environment(\.transcriptRows) private var rows
     @Environment(\.revealRow) private var revealRow
 
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.group == rhs.group && lhs.owner == rhs.owner }
+
     var body: some View {
+#if DEBUG
+        let _ = BodyRuns.hit("CompactActivityGroup")
+#endif
         if group.foldLabel != nil {
             IOSAgentFoldRow(group: group)
         } else if group.isSend {

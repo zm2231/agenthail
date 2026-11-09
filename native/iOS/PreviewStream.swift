@@ -103,7 +103,9 @@ final class PreviewStreamFeed: @unchecked Sendable {
                 let data = PreviewStream.lines(after: sent, through: k, session: session)
                 if !data.isEmpty {
                     send(data)
+                    let events = Int(PreviewStream.base + UInt64(k) - sent)
                     sent = PreviewStream.base + UInt64(k)
+                    await MainActor.run { for _ in 0..<events { BodyRuns.hit("streamed") } }
                 }
                 try? await Task.sleep(for: .milliseconds(100))
             }

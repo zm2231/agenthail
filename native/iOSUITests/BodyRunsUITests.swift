@@ -39,6 +39,16 @@ final class BodyRunsUITests: XCTestCase {
         }
     }
 
+    func testStreamingIntoACrowdedTranscriptRedrawsOnlyTheGrowingMessage() {
+        let runs = runs(["--preview-stream", "--preview-stream-rate", "10"])
+        print(Self.line("streaming", runs))
+        let streamed = runs["streamed", default: 0]
+        XCTAssertGreaterThan(streamed, 50, "the open session kept streaming")
+        for view in ["CompactActivityGroup", "IOSTimelineRow"] {
+            XCTAssertLessThanOrEqual(runs[view, default: 0], streamed * 2, "\(view) redrew rows the stream did not change")
+        }
+    }
+
     func testAnotherSessionsUpdatesRedrawOnlyItsRowInTheList() {
         let runs = runs(["--preview-app"])
         print(Self.line("list", runs))
