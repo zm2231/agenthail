@@ -158,6 +158,26 @@ struct SessionTreeTest {
         let built = tree.projects[0].checkouts[0].families[0]
         expect(built.members.map(\.id) == ["ada", "euclid", "bo"] && built.members.map(\.depth) == [1, 2, 1], "members and depths come from the view")
         expect(built.workingSubagents == 2 && SessionFamilies.subagentSummary(built) == "2 subagents working", "working subagents come from the view")
+        expect(!built.members.contains(where: \.isWorker) && built.workers == nil && SessionFamilies.membersCount(built) == "3 subagents", "a family of subagents has no workers")
+
+        let decoded = try! JSONDecoder().decode(ViewFamily.self, from: Data(#"{"id":"lead","rootId":"lead","projectId":"agenthail","checkoutId":"main","members":[{"id":"lead","depth":0,"contextOnly":false,"pinned":true},{"id":"w1","depth":1,"contextOnly":false,"pinned":true,"worker":true},{"id":"w2","depth":1,"contextOnly":false,"pinned":false,"worker":true},{"id":"ada","depth":1,"contextOnly":false,"pinned":false}],"pinned":true,"workingSubagents":0,"workers":{"count":2,"working":1,"needsYou":1}}"#.utf8))
+        expect(decoded.members.map { $0.worker == true } == [false, true, true, false] && decoded.workers == WorkerRollup(count: 2, working: 1, needsYou: 1), "worker members and the workers rollup decode")
+        let older = try! JSONDecoder().decode(ViewFamily.self, from: Data(#"{"id":"x","rootId":"x","projectId":"p","checkoutId":"","members":[{"id":"x","depth":0,"contextOnly":false,"pinned":false}],"pinned":false,"workingSubagents":0}"#.utf8))
+        expect(older.workers == nil && older.members[0].worker == nil, "a daemon without workers still decodes")
+        let crew = [session("lead"), session("w1", status: "busy"), session("w2"), member("ada", parent: "lead", root: "lead", depth: 1, nickname: "Ada", status: "idle")]
+        let team = SessionTree.ordered(list: view([decoded], projects: [("agenthail", [])]), current: nil, rows: rows(crew), attention: [:]).projects[0].checkouts[0].families[0]
+        expect(team.members.map(\.isWorker) == [true, true, false] && team.workers == decoded.workers, "the family keeps which members are workers and the rollup")
+        expect(SessionFamilies.workerSummary(team.workers!) == "2 workers, 1 working, 1 needs you", "the rollup reads as one line")
+        expect(SessionFamilies.membersNoun(team) == "workers and subagents" && SessionFamilies.membersCount(team) == "3 workers and subagents", "a mixed family names both")
+        expect(team.startsExpanded && team.isExpanded(chosen: [:], selectedID: nil), "a family with a working or waiting worker starts open")
+        expect(!team.isExpanded(chosen: ["lead": false], selectedID: nil), "the person can close it")
+        expect(team.isExpanded(chosen: ["lead": false], selectedID: "w2"), "a selected member keeps it open")
+        let quiet = SessionFamily(root: crew[0], members: team.members, workingSubagents: 0, workers: WorkerRollup(count: 2, working: 0, needsYou: 0))
+        expect(!quiet.startsExpanded && !quiet.isExpanded(chosen: [:], selectedID: nil) && quiet.isExpanded(chosen: ["lead": true], selectedID: nil), "a family of idle workers starts closed and opens when the person opens it")
+        expect(!quiet.isExpanded(chosen: ["lead": false], selectedID: nil), "a family the person closed while a worker ran stays closed once its workers go idle")
+        expect(team.isExpanded(chosen: ["lead": true], selectedID: nil), "a family the person opened while its workers were idle stays open once one starts working")
+        expect(SessionFamilies.workerSummary(WorkerRollup(count: 1, working: 0, needsYou: 0)) == "1 worker", "one idle worker")
+        expect(SessionFamilies.membersCount(SessionFamily(root: crew[0], members: [team.members[0]], workingSubagents: 0)) == "1 worker", "one worker member")
 
         func waiting(_ id: String, kind: String) -> SessionState {
             var state = session(id)

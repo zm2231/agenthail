@@ -231,7 +231,7 @@ struct ConversationListView: View {
     @State private var showingNewSession = false
     @State private var search = ""
     @State private var expandedProjects: Set<String> = []
-    @State private var expandedFamilies: Set<String> = []
+    @State private var familyChoices: [String: Bool] = [:]
     @State private var projectSheet: ProjectSheet?
     @State private var projectConfirmation: ProjectConfirmation?
     @State private var newSessionPlace: NewSessionPlace?
@@ -422,11 +422,11 @@ struct ConversationListView: View {
 
     @ViewBuilder
     private func familyRows(_ family: SessionFamily) -> some View {
-        let expanded = !family.members.isEmpty && (expandedFamilies.contains(family.id) || family.members.contains { $0.id == selectedID })
+        let expanded = family.isExpanded(chosen: familyChoices, selectedID: selectedID)
         row(.root(family), id: family.id)
         if !family.members.isEmpty {
-            Button { toggle(family) } label: {
-                Label(expanded ? "Hide subagents" : "Show \(family.members.count == 1 ? "1 subagent" : "\(family.members.count) subagents")",
+            Button { familyChoices[family.id] = !expanded } label: {
+                Label(expanded ? "Hide \(SessionFamilies.membersNoun(family))" : "Show \(SessionFamilies.membersCount(family))",
                       systemImage: expanded ? "chevron.down" : "chevron.right")
                     .font(.footnote)
                     .foregroundStyle(PhonePalette.muted)
@@ -444,10 +444,6 @@ struct ConversationListView: View {
                     .padding(.leading, CGFloat(member.depth) * 16)
             }
         }
-    }
-
-    private func toggle(_ family: SessionFamily) {
-        if !expandedFamilies.insert(family.id).inserted { expandedFamilies.remove(family.id) }
     }
 
     private func row(_ source: SessionListRow.Source, id: String, snippet: String? = nil, reason: String? = nil, identifierPrefix: String = "session-") -> SessionListRow {
@@ -1774,12 +1770,21 @@ struct IOSSessionRow: View {
             } else if kind == .working, let activity = session.activity {
                 PhoneWorkingNote(activity: activity)
             }
-            if session.queueCount > 0 || session.isReadOnly || (family?.workingSubagents ?? 0) > 0 || !session.sharedHolders.isEmpty {
+            if session.queueCount > 0 || session.isReadOnly || (family?.workingSubagents ?? 0) > 0 || (family?.workers?.count ?? 0) > 0 || !session.sharedHolders.isEmpty {
                 layout {
                     if let family, family.workingSubagents > 0 {
                         Label(SessionFamilies.subagentSummary(family), systemImage: "person.2")
                             .font(.caption)
                             .foregroundStyle(PhonePalette.working)
+                    }
+                    if let workers = family?.workers, workers.count > 0 {
+                        if workers.needsYou > 0 {
+                            Label(SessionFamilies.workerSummary(workers), systemImage: "person.3").font(.caption).foregroundStyle(PhonePalette.attention)
+                        } else if workers.working > 0 {
+                            Label(SessionFamilies.workerSummary(workers), systemImage: "person.3").font(.caption).foregroundStyle(PhonePalette.working)
+                        } else {
+                            Label(SessionFamilies.workerSummary(workers), systemImage: "person.3").font(.caption)
+                        }
                     }
                     if session.queueCount > 0 { Label("\(session.queueCount) waiting", systemImage: "tray").font(.caption) }
                     if !session.sharedHolders.isEmpty { Label("\(session.sharedHolders.count) terminals", systemImage: "terminal").font(.caption) }

@@ -5,7 +5,7 @@ struct SidebarProjectSection: View, @MainActor Equatable {
     let model: AgenthailModel
     let pane: SessionPane
     let toggleProject: () -> Void
-    let toggleFamily: (String) -> Void
+    let toggleFamily: (String, Bool) -> Void
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.key == rhs.key && lhs.model === rhs.model && lhs.pane === rhs.pane
@@ -35,7 +35,8 @@ struct SidebarProjectSection: View, @MainActor Equatable {
                     CheckoutRowView(checkout: checkout, host: project.spansHosts ? project.hostLabel(of: checkout) : nil)
                 }
                 ForEach(checkout.families) { family in
-                    SidebarFamilyRows(key: key.family(family), model: model, pane: pane, toggle: { toggleFamily(family.id) })
+                    let familyKey = key.family(family)
+                    SidebarFamilyRows(key: familyKey, model: model, pane: pane, toggle: { toggleFamily(family.id, familyKey.expanded) })
                         .equatable()
                 }
             }
@@ -74,7 +75,7 @@ struct SidebarFamilyRows: View, @MainActor Equatable {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DesktopPalette.text2)
-                .accessibilityLabel(key.expanded ? "Hide subagents" : "Show subagents")
+                .accessibilityLabel(key.expanded ? "Hide \(SessionFamilies.membersNoun(family))" : "Show \(SessionFamilies.membersCount(family))")
             }
         }
         if key.expanded {
