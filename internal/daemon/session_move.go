@@ -38,6 +38,7 @@ type moveManifest struct {
 	Size           int64               `json:"size"`
 	SHA256         string              `json:"sha256"`
 	PartsSize      int64               `json:"partsSize"`
+	State          json.RawMessage     `json:"state,omitempty"`
 	Root           string              `json:"root,omitempty"`
 	Origin         *moveOrigin         `json:"origin,omitempty"`
 }
@@ -144,6 +145,10 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 		}
 	}
 	out, err := mover.PrepareMove(ctx, session, surface.AdoptRequest{StopTerminal: request.StopTerminal, Wait: time.Duration(request.WaitSeconds) * time.Second})
+	var refusal surface.MoveRefusal
+	if errors.As(err, &refusal) {
+		return sessionMoveResult{}, MoveRefusedError{Reason: fmt.Sprintf("session %s cannot move: %s", session.ID, refusal.Reason)}
+	}
 	if err != nil {
 		return sessionMoveResult{}, err
 	}
@@ -161,7 +166,7 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	if err != nil {
 		return sessionMoveResult{}, err
 	}
-	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, PinnedAt: pinnedAt, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, Root: request.Root, Origin: origin}
+	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, PinnedAt: pinnedAt, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, State: out.State, Root: request.Root, Origin: origin}
 	encoded, err := json.Marshal(manifest)
 	if err != nil {
 		return sessionMoveResult{}, err
@@ -604,7 +609,7 @@ func (d *Daemon) apiMovePrepareHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func moveInOf(manifest moveManifest, cwd string) surface.MoveIn {
-	return surface.MoveIn{MoveID: manifest.ID, Conversation: manifest.Conversation, Cwd: cwd, Title: manifest.Title, Model: manifest.Model, PermissionMode: manifest.PermissionMode, Size: manifest.Size, SHA256: manifest.SHA256, PartsSize: manifest.PartsSize, Root: manifest.Root}
+	return surface.MoveIn{MoveID: manifest.ID, Conversation: manifest.Conversation, Cwd: cwd, Title: manifest.Title, Model: manifest.Model, PermissionMode: manifest.PermissionMode, Size: manifest.Size, SHA256: manifest.SHA256, PartsSize: manifest.PartsSize, State: manifest.State, Root: manifest.Root}
 }
 
 // moveNotResumed refuses, under the conversation's hold, to set aside the

@@ -2,6 +2,7 @@ package surface
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 )
@@ -21,6 +22,12 @@ var ErrMoveInPlaced = errors.New("the conversation's files may still be in place
 // A failed root move whose files could not all be put back; recovery settles it.
 var ErrRootMoveUnsettled = errors.New("the conversation's files may be split between config roots")
 
+// MoveRefusal is a conversation PrepareMove will not move, for a reason the
+// person can act on.
+type MoveRefusal struct{ Reason string }
+
+func (e MoveRefusal) Error() string { return e.Reason }
+
 // MoveOut is an idle conversation held for a move to another host. Its
 // transcript stays unchanged until Release, which ends the hold.
 type MoveOut struct {
@@ -33,6 +40,9 @@ type MoveOut struct {
 	SHA256         string `json:"sha256"`
 	// PartsSize is the bytes of every other file the move carries.
 	PartsSize int64 `json:"partsSize"`
+	// State is what the runtime keeps of the conversation outside its
+	// files, which the target puts back.
+	State json.RawMessage `json:"state,omitempty"`
 	// Stopped names the process the hold ended, as an adoption does.
 	Stopped string `json:"stopped,omitempty"`
 	Release func() `json:"-"`
@@ -50,6 +60,7 @@ type MoveIn struct {
 	Size           int64
 	SHA256         string
 	PartsSize      int64
+	State          json.RawMessage
 	Root           string
 }
 

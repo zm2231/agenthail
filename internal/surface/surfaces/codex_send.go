@@ -25,11 +25,11 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		return nil, err
 	}
 	message = surface.LabelSender(ctx, message)
-	lock, err := acquireCodexWriteLock(ctx)
+	release, err := acquireCodexThreadWrite(ctx, sess.ID)
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
-	defer releaseCodexWriteLock(lock)
+	defer release()
 	conn, err := c.openWriter(ctx, sess)
 	if err != nil {
 		return nil, err

@@ -80,11 +80,11 @@ func (c *Codex) SetTurnSetting(ctx context.Context, sess *surface.Session, key, 
 			return err
 		}
 	}
-	lock, err := acquireCodexWriteLock(ctx)
+	release, err := acquireCodexThreadWrite(ctx, sess.ID)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
 	}
-	defer releaseCodexWriteLock(lock)
+	defer release()
 	client, err := c.openRoute(ctx, sess)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
