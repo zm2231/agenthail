@@ -14,6 +14,7 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Codex Voice orchestrator: setup, flow, limits, and verification](codex-voice.md)
 - [Code mode: tool calls written as scripts, detection and presentation](code-mode.md)
 - [Push notification service](push-relay.md)
+- [Completion triggers: a command or file touch when a turn finishes](completion-triggers.md)
 - [Mobile session fidelity audit](mobile-session-ux.md)
 - [Desktop parity: web dashboard vs Mac app](desktop-parity.md)
 - [Subagents: identity, families, targets, and cost](subagents.md)

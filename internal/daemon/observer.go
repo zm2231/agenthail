@@ -230,7 +230,8 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	}
 	held, released := heldCompletion(previous, observation, completionChanged)
 	terminalCompletion := completionChanged && observation.ActiveTurnID == "" && !surface.BackgroundRunning(observation.BackgroundTasks) || released
-	if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && !session.Delegated() && observation.Reply != nil && observation.Reply.Done {
+	completed := terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && observation.Reply != nil && observation.Reply.Done
+	if completed && !session.Delegated() {
 		notificationOutcome = turnOutcomeFinished
 		if observation.Reply.Error != "" {
 			notificationOutcome = turnOutcomeFailed
@@ -243,7 +244,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 			d.log.Printf("clear completion notification %s: %s", d.resolveDisplay(session.ID), err)
 		}
 	}
-	if found && !session.Delegated() && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
+	if found && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
 		d.armCompletionNotification(session.ID)
 	}
 	d.settleTaskFromObservation(ctx, adapter, session, observation)
@@ -280,6 +281,13 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 			observed := *session
 			d.background.start(func(ctx context.Context) { d.linkCreatedPRs(ctx, adapter, observed) })
 		}
+	}
+	if completed {
+		var noticed *turnCompletedNotice
+		if notice.desktop != "" {
+			noticed = &notice
+		}
+		d.recordCompletion(session, observation.CompletedTurnID, observation.Reply.Error != "", noticed)
 	}
 	if notice.desktop != "" {
 		d.notifyTurnCompleted(notice, session.ID, observation.CompletedTurnID)

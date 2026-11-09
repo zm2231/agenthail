@@ -1,4 +1,4 @@
--- schemaVersion 79
+-- schemaVersion 80
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -116,6 +116,9 @@ CREATE INDEX tasks_parent ON tasks(parent_session_id);
 
 -- index tasks_running
 CREATE INDEX tasks_running ON tasks(child_session_id) WHERE state='running';
+
+-- index trigger_runs_state
+CREATE INDEX trigger_runs_state ON trigger_runs(state, trigger_name, id);
 
 -- index work_records_session
 CREATE UNIQUE INDEX work_records_session ON work_records(session_id) WHERE session_id<>'';
@@ -883,6 +886,28 @@ CREATE TABLE tasks (
 	wake INTEGER NOT NULL DEFAULT 0,
 	created_at_ms INTEGER NOT NULL,
 	settled_at_ms INTEGER NOT NULL DEFAULT 0
+);
+
+-- table trigger_runs
+CREATE TABLE trigger_runs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	trigger_name TEXT NOT NULL,
+	dedupe_key TEXT NOT NULL,
+	session_id TEXT NOT NULL DEFAULT '',
+	turn_id TEXT NOT NULL DEFAULT '',
+	completion TEXT NOT NULL DEFAULT '{}',
+	test INTEGER NOT NULL DEFAULT 0,
+	state TEXT NOT NULL,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	exit_code INTEGER NOT NULL DEFAULT 0,
+	signal TEXT NOT NULL DEFAULT '',
+	stdout TEXT NOT NULL DEFAULT '',
+	stderr TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	queued_at_ms INTEGER NOT NULL,
+	started_at_ms INTEGER NOT NULL DEFAULT 0,
+	finished_at_ms INTEGER NOT NULL DEFAULT 0,
+	UNIQUE (trigger_name, dedupe_key)
 );
 
 -- table turn_ends

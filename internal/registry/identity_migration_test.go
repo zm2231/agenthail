@@ -172,6 +172,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 		t.Fatal(err)
 	}
 	exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action) VALUES(?,?,'held','retry')`, rekeyedBridge, queued)
+	exec(`INSERT INTO trigger_runs(trigger_name,dedupe_key,session_id,turn_id,state,queued_at_ms) VALUES('log','h:s:t',?,'t','succeeded',1)`, rekeyedBridge)
 	exec(`INSERT INTO delivery_history(kind,session_id,source_session_id) VALUES('send',?,?)`, rekeyedBridge, collidedBridge)
 	exec(`INSERT INTO delivery_history(kind,session_id,error) VALUES('busy',?,'target is busy')`, historyOrphan)
 	if _, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: rekeyedBridge, TargetSessionID: collidedBridge, Message: "hello", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted}); err != nil {

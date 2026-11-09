@@ -236,6 +236,27 @@ CREATE TABLE IF NOT EXISTS delivery_history (
 	bridge TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS delivery_history_created_at ON delivery_history(created_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS trigger_runs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	trigger_name TEXT NOT NULL,
+	dedupe_key TEXT NOT NULL,
+	session_id TEXT NOT NULL DEFAULT '',
+	turn_id TEXT NOT NULL DEFAULT '',
+	completion TEXT NOT NULL DEFAULT '{}',
+	test INTEGER NOT NULL DEFAULT 0,
+	state TEXT NOT NULL,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	exit_code INTEGER NOT NULL DEFAULT 0,
+	signal TEXT NOT NULL DEFAULT '',
+	stdout TEXT NOT NULL DEFAULT '',
+	stderr TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	queued_at_ms INTEGER NOT NULL,
+	started_at_ms INTEGER NOT NULL DEFAULT 0,
+	finished_at_ms INTEGER NOT NULL DEFAULT 0,
+	UNIQUE (trigger_name, dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS trigger_runs_state ON trigger_runs(state, trigger_name, id);
 CREATE TABLE IF NOT EXISTS attention_items (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

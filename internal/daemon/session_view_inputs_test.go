@@ -39,7 +39,7 @@ var notSessionViewInputs = map[string]string{
 	"alias_reservations": sessionOnly, "launcher_pending": sessionOnly, "pending_ceilings": sessionOnly, "session_ceilings": sessionOnly,
 	"session_context": sessionOnly, "session_moves": sessionOnly, "session_rekeys": sessionOnly, "tasks": sessionOnly,
 	"session_origins": voiceOperators, "host_queue_dirty": queueMarks, "idle_compactions": idleAttempts,
-	"session_codex_config": codexConfig,
+	"session_codex_config": codexConfig, "trigger_runs": "only GET /api/v1/triggers reads trigger runs; a finished run reaches a session view as its delivery_history entry",
 }
 
 func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T) {
