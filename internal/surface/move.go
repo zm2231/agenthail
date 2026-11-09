@@ -44,24 +44,34 @@ type MoveOut struct {
 	// files, which the target puts back.
 	State json.RawMessage `json:"state,omitempty"`
 	// Stopped names the process the hold ended, as an adoption does.
-	Stopped string `json:"stopped,omitempty"`
-	Release func() `json:"-"`
+	Stopped                    string          `json:"stopped,omitempty"`
+	ProjectSettings            json.RawMessage `json:"projectSettings,omitempty"`
+	SettingsWithoutCredentials []string        `json:"settingsWithoutCredentials,omitempty"`
+	Release                    func()          `json:"-"`
 }
 
 // MoveIn is a conversation arriving from another host: where it runs here
 // and what its transcript must be.
 type MoveIn struct {
-	MoveID         string
-	Conversation   string
-	Cwd            string
-	Title          string
-	Model          string
-	PermissionMode string
-	Size           int64
-	SHA256         string
-	PartsSize      int64
-	State          json.RawMessage
-	Root           string
+	MoveID          string
+	Conversation    string
+	Cwd             string
+	Title           string
+	Model           string
+	PermissionMode  string
+	Size            int64
+	SHA256          string
+	PartsSize       int64
+	State           json.RawMessage
+	Root            string
+	ProjectSettings json.RawMessage
+}
+
+// ProjectSettingsCarrier merges a moving conversation's project settings into
+// this machine before it resumes. The undo removes only what the merge added,
+// and a repeated merge adds nothing.
+type ProjectSettingsCarrier interface {
+	CarryProjectSettings(in MoveIn) (func() error, error)
 }
 
 // MoveToRoot runs under the hold PrepareMove returned.

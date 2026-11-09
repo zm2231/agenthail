@@ -33,7 +33,16 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    ran with in this machine's Claude host. It lists the active relays from the
    session: each relay's target, pattern, handoff, whether it fires once, and
    the last goal it forwarded. The target of each relay is named with the host
-   that runs it. The move is recorded `preparing`, in a transaction that
+   that runs it. It reads the project's Claude settings: the entry for the
+   working directory in the `.claude.json` of the root the conversation runs
+   under. It keeps only folder trust, `allowedTools`, the MCP server keys
+   (`mcpServers`, `enabledMcpjsonServers`, `disabledMcpjsonServers`,
+   `mcpContextUris`), the CLAUDE.md include approvals, `ignorePatterns` and
+   the onboarding flags. Per-machine state such as costs and the last session
+   stays. Each MCP server goes without its `env` and `headers`, which may
+   hold credentials. The move result names those servers so the person adds
+   their credentials again on the target. A declaration larger than a host
+   reads for a prepare (140 KiB) refuses the move. The move is recorded `preparing`, in a transaction that
    refuses it if the session's relays are no longer the ones it listed or
    have a completion they have not forwarded. Until the move ends, the
    relays from the session stay as declared: adding or removing one, a
@@ -47,10 +56,12 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    longer than Claude writes verbatim (200 characters), or if it already
    holds a transcript of the conversation that the incoming one does not
    extend, or if a relay's target is not a session it sees on the host the
-   source named. Otherwise it records the move `prepared` and keeps the
+   source named. When project settings come with the move, it also refuses if
+   the landing root's `.claude.json` is not a JSON object or its `projects` is
+   not an object. Otherwise it records the move `prepared` and keeps the
    declaration, and answers with what it can carry. A target that does not
-   name relays (an Agenthail too old to take them) fails a move with relays
-   before any file leaves. The files that arrive later are held to that declaration.
+   name relays or `claude-project` (an Agenthail too old to take them) fails a
+   move that carries them before any file leaves. The files that arrive later are held to that declaration.
    They cannot redefine it.
 4. **Archive.** Still holding the lock, the source moves the conversation's
    files out of `projects/` and `tasks/` into
@@ -82,6 +93,16 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    - It reads the tar only while it holds the conversation and the move is
      still `received`, so a move that the source has already aborted places
      nothing.
+
+   Before it reads the tar, it merges the project's Claude settings into the
+   landing root's `.claude.json`, under its own checkout's folder. Both sides
+   key the entry by the folder's physical path, as Claude does (on macOS,
+   `/private/tmp/...` for a folder under `/tmp`). It merges the
+   way a move between accounts on one machine does: it adds what is missing,
+   object members and array items included, and never overwrites a value
+   already there. Everything up to recording the move undoes the merge if it
+   fails, removing only what it added. A merge repeated by a retried transfer
+   adds nothing.
 
    Only then does it rename the files into
    `<root>/projects/<folder for the working directory>/` and `<root>/tasks/`.

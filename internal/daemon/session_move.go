@@ -43,11 +43,22 @@ type moveManifest struct {
 	Root           string                `json:"root,omitempty"`
 	Origin         *moveOrigin           `json:"origin,omitempty"`
 	Relays         []registry.MovedRelay `json:"relays,omitempty"`
+	ClaudeProject  *moveClaudeProject    `json:"claudeProject,omitempty"`
 }
 
-// moveCarryRelays is the kind a target names among what it carries when it
-// can take a moving session's relays.
-const moveCarryRelays = "relays"
+// moveClaudeProject is the project's Claude settings a moving conversation
+// takes along, and the MCP servers that go without their credentials.
+type moveClaudeProject struct {
+	Settings           json.RawMessage `json:"settings"`
+	WithoutCredentials []string        `json:"withoutCredentials,omitempty"`
+}
+
+// moveCarryRelays and moveCarryClaudeProject are the kinds a target names
+// among what it carries when it can take them.
+const (
+	moveCarryRelays        = "relays"
+	moveCarryClaudeProject = "claude-project"
+)
 
 // moveOrigin is who started a moving session, named by the host that owns
 // the creator so the target can find it among its own and mirrored sessions.
@@ -93,11 +104,12 @@ type sessionMoveRequest struct {
 }
 
 type sessionMoveResult struct {
-	Move    registry.SessionMove `json:"move"`
-	Host    dashboardHost        `json:"host"`
-	Stopped string               `json:"stopped,omitempty"`
-	Alias   string               `json:"alias,omitempty"`
-	Root    string               `json:"root,omitempty"`
+	Move                         registry.SessionMove `json:"move"`
+	Host                         dashboardHost        `json:"host"`
+	Stopped                      string               `json:"stopped,omitempty"`
+	Alias                        string               `json:"alias,omitempty"`
+	Root                         string               `json:"root,omitempty"`
+	MCPServersWithoutCredentials []string             `json:"mcpServersWithoutCredentials,omitempty"`
 }
 
 // MoveRefusedError is a move that did not happen and left the session here.
@@ -181,9 +193,15 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 		return sessionMoveResult{}, err
 	}
 	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, PinnedAt: pinnedAt, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, State: out.State, Root: request.Root, Origin: origin, Relays: relays}
+	if len(out.ProjectSettings) > 0 {
+		manifest.ClaudeProject = &moveClaudeProject{Settings: out.ProjectSettings, WithoutCredentials: out.SettingsWithoutCredentials}
+	}
 	encoded, err := json.Marshal(manifest)
 	if err != nil {
 		return sessionMoveResult{}, err
+	}
+	if len(encoded) > apiRequestBodyLimit {
+		return sessionMoveResult{}, MoveRefusedError{Reason: fmt.Sprintf("session %s cannot move: its declaration, with its relays and project settings, is %d KiB and a host reads at most %d KiB", session.ID, (len(encoded)+1023)/1024, apiRequestBodyLimit/1024)}
 	}
 	release, _ := claimMove(manifest.ID)
 	defer release()
@@ -191,6 +209,9 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
 	}
 	result := sessionMoveResult{Host: host.ref(), Stopped: out.Stopped, Alias: alias}
+	if manifest.ClaudeProject != nil {
+		result.MCPServersWithoutCredentials = manifest.ClaudeProject.WithoutCredentials
+	}
 	if err := d.prepareMoveOnHost(ctx, host, manifest); err != nil {
 		_ = d.Registry.SetMoveState(manifest.ID, registry.MoveFailed, err.Error(), registry.MovePreparing)
 		result.Move, _ = d.Registry.SessionMove(manifest.ID)
@@ -238,6 +259,9 @@ func (d *Daemon) prepareMoveOnHost(ctx context.Context, host *pairedHost, manife
 	}
 	if len(manifest.Relays) > 0 && (!decoded || !slices.Contains(prepared.Carries, moveCarryRelays)) {
 		return fmt.Errorf("update Agenthail on %s; it cannot take over the relays from a moved session", host.record.Name)
+	}
+	if manifest.ClaudeProject != nil && (!decoded || !slices.Contains(prepared.Carries, moveCarryClaudeProject)) {
+		return fmt.Errorf("update Agenthail on %s; it cannot take the project's Claude settings", host.record.Name)
 	}
 	return nil
 }
@@ -627,7 +651,7 @@ func (d *Daemon) apiMovePrepareHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, moveStatus{State: move.State, Cwd: target.cwd, Root: manifest.Root, Carries: []string{moveCarryRelays}})
+	writeDashboardJSON(w, http.StatusOK, moveStatus{State: move.State, Cwd: target.cwd, Root: manifest.Root, Carries: []string{moveCarryRelays, moveCarryClaudeProject}})
 }
 
 // seedMovedRelays reads the moved session's completions so far, so the
@@ -650,7 +674,11 @@ func (d *Daemon) seedMovedRelays(ctx context.Context, session *surface.Session, 
 }
 
 func moveInOf(manifest moveManifest, cwd string) surface.MoveIn {
-	return surface.MoveIn{MoveID: manifest.ID, Conversation: manifest.Conversation, Cwd: cwd, Title: manifest.Title, Model: manifest.Model, PermissionMode: manifest.PermissionMode, Size: manifest.Size, SHA256: manifest.SHA256, PartsSize: manifest.PartsSize, State: manifest.State, Root: manifest.Root}
+	in := surface.MoveIn{MoveID: manifest.ID, Conversation: manifest.Conversation, Cwd: cwd, Title: manifest.Title, Model: manifest.Model, PermissionMode: manifest.PermissionMode, Size: manifest.Size, SHA256: manifest.SHA256, PartsSize: manifest.PartsSize, State: manifest.State, Root: manifest.Root}
+	if manifest.ClaudeProject != nil {
+		in.ProjectSettings = manifest.ClaudeProject.Settings
+	}
+	return in
 }
 
 // moveNotResumed refuses, under the conversation's hold, to set aside the
@@ -740,7 +768,29 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		return nil
 	}
-	session, err := mover.ReceiveMove(ctx, moveInOf(manifest, target.cwd), r.Body, admit)
+	in := moveInOf(manifest, target.cwd)
+	undoSettings := func() error { return nil }
+	if len(in.ProjectSettings) > 0 {
+		carrier, ok := mover.(surface.ProjectSettingsCarrier)
+		if !ok {
+			writeAPIError(w, http.StatusConflict, "move_refused", fmt.Sprintf("This host cannot take the project settings of %s sessions.", manifest.Surface))
+			return
+		}
+		if undoSettings, err = carrier.CarryProjectSettings(in); err != nil {
+			writeAPIError(w, http.StatusConflict, "move_refused", fmt.Sprintf("carry the project's Claude settings: %s", err))
+			return
+		}
+	}
+	taken := false
+	defer func() {
+		if taken {
+			return
+		}
+		if err := undoSettings(); err != nil {
+			d.log.Printf("move %s: remove the project settings it carried: %s", move.ID, err)
+		}
+	}()
+	session, err := mover.ReceiveMove(ctx, in, r.Body, admit)
 	if err != nil {
 		if errors.Is(err, surface.ErrMoveInRunning) || errors.Is(err, surface.ErrMoveInPlaced) || surface.IsDeliveryOutcomeUnknown(err) {
 			writeAPIError(w, http.StatusBadGateway, "move_unknown", err.Error())
@@ -787,6 +837,7 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusInternalServerError, "move_unrecorded", fmt.Sprintf("Session %s resumed here, but its move was not recorded: %s", session.ID, err))
 		return
 	}
+	taken = true
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: "moved here from " + requestingHostName(r.Context())})
 	if d.dashboard != nil {
 		d.dashboard.invalidate()
