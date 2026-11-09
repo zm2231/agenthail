@@ -48,6 +48,7 @@ SOURCES=(
   ObservationWait.swift
   ObservedScope.swift
   SessionCells.swift
+  MinuteClock.swift
   MenuSessions.swift
   ConnectionGrace.swift
   CatalogBatch.swift
@@ -124,6 +125,7 @@ SOURCES=(
   VoiceCallDiagnostics.swift
   VoiceOperatorModel.swift
   macOS/AccentContrast.swift
+  macOS/RelativeAge.swift
   macOS/DesktopStyle.swift
   macOS/AppearanceDraft.swift
   macOS/AgenthailLink.swift

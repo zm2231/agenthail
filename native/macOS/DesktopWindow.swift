@@ -520,9 +520,7 @@ struct SessionRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 titleLine(kind: kind)
                 if kind == .working {
-                    TimelineView(.everyMinute) { context in
-                        if let note = SessionRowNote.text(session, now: context.date) { noteText(note, kind: kind) }
-                    }
+                    WorkingRowNote(session: session)
                 } else if !(saysWaiting && kind == .waiting), let note = SessionRowNote.text(session) {
                     noteText(note, kind: kind)
                 }
@@ -597,20 +595,12 @@ struct SessionRowView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFacts.holdersLabel(session.sharedHolders.count))
             }
-            TimelineView(.everyMinute) { _ in
-                Text(SessionDisplayKind.of(session) == .working ? session.activity?.busySince.map { relativeAge($0) } ?? "now" : relativeAge(session.lastActive))
-                    .font(.system(size: DesktopType.caption))
-                    .foregroundStyle(DesktopPalette.text2)
-            }
+            RowAge(session: session)
         }
     }
 
     private func noteText(_ note: String, kind: SessionDisplayKind) -> some View {
-        Text(note)
-            .font(.system(size: DesktopType.meta))
-            .foregroundStyle(kind == .waiting ? DesktopPalette.attention : DesktopPalette.text2)
-            .lineLimit(1)
-            .truncationMode(.tail)
+        SessionRowNoteText(note: note, kind: kind)
     }
 }
 
@@ -2257,16 +2247,5 @@ struct DeliveryTab: View {
         .padding(.vertical, 9)
         .background(problem ? DesktopPalette.attentionBackground : DesktopPalette.window, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
         .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).strokeBorder(problem ? DesktopPalette.attentionLine : DesktopPalette.line2))
-    }
-}
-
-func relativeAge(_ timestamp: String?) -> String {
-    guard let timestamp, let date = SessionTree.parseTimestamp(timestamp) else { return "" }
-    let seconds = max(0, Date().timeIntervalSince(date))
-    switch seconds {
-    case ..<60: return "now"
-    case ..<3600: return "\(Int(seconds / 60))m"
-    case ..<86400: return "\(Int(seconds / 3600))h"
-    default: return "\(Int(seconds / 86400))d"
     }
 }
