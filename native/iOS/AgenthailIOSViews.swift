@@ -1949,7 +1949,10 @@ struct SettingsView: View {
                 TurnNoticeSettingsSection()
                 Section("Notifications") {
                     LabeledContent("Status", value: model.notificationStatus)
-                    if model.notificationStatus == "Enabled" {
+                    if model.notificationStatus == "Enabling" {
+                        Label { Text("Setting up notifications…") } icon: { ProgressView() }
+                            .accessibilityIdentifier("notifications-setting-up")
+                    } else if model.notificationStatus == "Enabled" {
                         Button("Turn off notifications", role: .destructive) { model.turnOffNotifications() }
                     } else if model.notificationStatus == "Not allowed" {
                         Button("Open iOS Settings") { model.openNotificationSettings() }
@@ -1957,6 +1960,10 @@ struct SettingsView: View {
                         Button("Retry notification setup") { model.requestNotifications() }
                     } else {
                         Button("Enable notifications") { model.requestNotifications() }
+                    }
+                    ForEach(model.notificationProblems, id: \.self) { problem in
+                        Text(problem).font(.footnote).foregroundStyle(PhonePalette.failed)
+                            .accessibilityIdentifier("notifications-problem")
                     }
                     Text("Your computers send an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(PhonePalette.muted)
                 }

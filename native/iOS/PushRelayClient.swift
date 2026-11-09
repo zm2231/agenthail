@@ -65,6 +65,9 @@ final class PushRelayClient: Sendable {
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
         guard (200..<300).contains(response.statusCode) else {
+            if response.statusCode == 429 || (500..<600).contains(response.statusCode) {
+                throw PushRelayBusy(status: response.statusCode, retryAfterHeader: response.value(forHTTPHeaderField: "Retry-After"))
+            }
             let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "Push registration failed."
             throw AgenthailAPIError.request(response.statusCode, detail)
         }

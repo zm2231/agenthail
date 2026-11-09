@@ -51,6 +51,7 @@
 		21F8BB0EB86443CB17F794BF /* PreviewFollowStuck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8913FC82ACE372CFB8B85AE6 /* PreviewFollowStuck.swift */; };
 		22A02EFF109AE82C6E6D5609 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 6B5A93EB2293BEFB3BF96AB5 /* Textual */; };
 		24501A7DE219BC540701ADF9 /* AskCardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4723140E73A7A29B4FAE91 /* AskCardTests.swift */; };
+		247EB124C2701578903D2E5A /* LivePushSetupUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5832D937A1AD45679E045CD /* LivePushSetupUITests.swift */; };
 		26187DAFBE78F4F2B238459F /* PushReceipts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8859AC5C7A953646383D1D8A /* PushReceipts.swift */; };
 		2629483568B911EE7DEC7944 /* TranscriptQueueTailUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54633D94A2BE074F38B9C618 /* TranscriptQueueTailUITests.swift */; };
 		26D24C93105FDAE09D6C4643 /* UsagePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7434EA1A39BCF717A5712C36 /* UsagePreview.swift */; };
@@ -197,8 +198,10 @@
 		86F099C5EF95C2E17F173758 /* CompactSettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3008805202D0F277905C7AD0 /* CompactSettingsUITests.swift */; };
 		86F5B49D521B59DF76780DCB /* SessionCellsObservationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02AAD394D56569BD5DDB23FB /* SessionCellsObservationTests.swift */; };
 		876544A1AF372869E285B5C1 /* ProjectListing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40F19D03F50DCBFDCB5198EB /* ProjectListing.swift */; };
+		8907FE65788230C085A0FF1A /* PushSetupFailure.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57A8376DDEC446E64CE47DE4 /* PushSetupFailure.swift */; };
 		892BF804B3CCDACA9204314E /* LoadOlderUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11020CFD9564E496189456D7 /* LoadOlderUITests.swift */; };
 		89D474B8B62640AE3C083434 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95E0C3350224ACA1936067A2 /* NotificationService.swift */; };
+		8A4C3DE8533E2B3F404E8363 /* PushSetupFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50DDC3560B9D5838877AEF4C /* PushSetupFailureTests.swift */; };
 		8A9EB86DE2BE6A64EC6BAC5E /* InboxSessionLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 733B75BC332AD6D99809519F /* InboxSessionLink.swift */; };
 		8B6804836C0F77C19FF386D0 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 69AC673BBC26A79668444D61 /* WebRTC */; };
 		8B999ACFC41909D9FC369506 /* ComposerSendStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A014F4DC10EF98778FECAAE4 /* ComposerSendStatus.swift */; };
@@ -484,6 +487,7 @@
 		4F7A9AA7E564B9BE9256DC60 /* TimelineEventLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineEventLabel.swift; sourceTree = "<group>"; };
 		4FEC0DAF60CF9A093D0DA4D2 /* MinuteClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinuteClock.swift; sourceTree = "<group>"; };
 		508E34C35C83775314D08D60 /* ProjectTiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTiles.swift; sourceTree = "<group>"; };
+		50DDC3560B9D5838877AEF4C /* PushSetupFailureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushSetupFailureTests.swift; sourceTree = "<group>"; };
 		51091AC251684C8A511D1B66 /* SurfaceMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceMode.swift; sourceTree = "<group>"; };
 		518B0A4AD3561D274206BDB8 /* ProxyPrefer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyPrefer.swift; sourceTree = "<group>"; };
 		54633D94A2BE074F38B9C618 /* TranscriptQueueTailUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptQueueTailUITests.swift; sourceTree = "<group>"; };
@@ -495,6 +499,7 @@
 		56B1E565D324737E5EAEA2D6 /* ObservedScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservedScope.swift; sourceTree = "<group>"; };
 		572FE64C9C40502C461F71D3 /* ProjectContents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectContents.swift; sourceTree = "<group>"; };
 		5754FCCBE0D9C3A064B3D17E /* SessionSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSelection.swift; sourceTree = "<group>"; };
+		57A8376DDEC446E64CE47DE4 /* PushSetupFailure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushSetupFailure.swift; sourceTree = "<group>"; };
 		57BABF4D52336F4B67989152 /* AgenthailIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailIOSApp.swift; sourceTree = "<group>"; };
 		5823A988D3C400FB16E2EB6A /* NeedsYouUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeedsYouUITests.swift; sourceTree = "<group>"; };
 		5838DAA61BC9B810269D8D3E /* BackdropLayers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackdropLayers.swift; sourceTree = "<group>"; };
@@ -615,6 +620,7 @@
 		B43A2C79DADDAD6014637210 /* KeptDelivery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeptDelivery.swift; sourceTree = "<group>"; };
 		B53189F2F3F442A260900B88 /* TranscriptScrimMask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptScrimMask.swift; sourceTree = "<group>"; };
 		B56AB204E144A4876D2BC089 /* TranscriptLandscapeLayoutUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptLandscapeLayoutUITests.swift; sourceTree = "<group>"; };
+		B5832D937A1AD45679E045CD /* LivePushSetupUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePushSetupUITests.swift; sourceTree = "<group>"; };
 		B76B455BCDD0569784FF79E1 /* EventStreamReopenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStreamReopenTests.swift; sourceTree = "<group>"; };
 		B8516330BAD617EC489F9B21 /* TurnNoticePreference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnNoticePreference.swift; sourceTree = "<group>"; };
 		B90BFC09972C560C1C9AA777 /* GoalControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalControls.swift; sourceTree = "<group>"; };
@@ -819,6 +825,7 @@
 				0B0FBFB6ED95516A6E6776FA /* ProjectScreen.swift */,
 				0F615A5BED830A2197727378 /* ProjectSheets.swift */,
 				E6106D394E6CAEE8B12827D6 /* PushRelayClient.swift */,
+				57A8376DDEC446E64CE47DE4 /* PushSetupFailure.swift */,
 				BDAB7D6CA7902276BFF459B0 /* QRCodeScanner.swift */,
 				06DA4C47252C27761904F3F0 /* QualifiedProjects.swift */,
 				49C9DBDB0225CD4EBD719FBC /* QueuedMessageSheet.swift */,
@@ -894,6 +901,7 @@
 				E41EE59EAF583C15761AE1B5 /* LiveHostsUITests.swift */,
 				CE16BFE1429D479AFAA4AC8E /* LiveHostUITests.swift */,
 				60BCBB830ED65C630D385665 /* LivePairing.swift */,
+				B5832D937A1AD45679E045CD /* LivePushSetupUITests.swift */,
 				93ED03BA37686A894CAB072E /* LiveSoakUITests.swift */,
 				11020CFD9564E496189456D7 /* LoadOlderUITests.swift */,
 				5823A988D3C400FB16E2EB6A /* NeedsYouUITests.swift */,
@@ -1113,6 +1121,7 @@
 				9422C6A1CF4E70B73E5811EE /* ProjectListingTests.swift */,
 				67C4136704D89DB197B89151 /* ProjectTilesTests.swift */,
 				33572B48BE8988015453DBEC /* PushReceiptsTests.swift */,
+				50DDC3560B9D5838877AEF4C /* PushSetupFailureTests.swift */,
 				61EF5AF75B83D2A771F28631 /* QueueTailTests.swift */,
 				022DA5D908F9C64FB1A92CEB /* RefusedSendTests.swift */,
 				EC174E2541B3A0480CFC6920 /* RoleInlineStyleTests.swift */,
@@ -1435,6 +1444,7 @@
 				773581DA6EFEBB061620F848 /* ProxyPreferSheet.swift in Sources */,
 				5110B07D58FC4200FE430A49 /* PushReceipts.swift in Sources */,
 				B44C624C75C0ECD2F23A9F6B /* PushRelayClient.swift in Sources */,
+				8907FE65788230C085A0FF1A /* PushSetupFailure.swift in Sources */,
 				393C0A7758CA9D4C05A55E0A /* QRCodeScanner.swift in Sources */,
 				2D8CD9D8A0A8104FE2B91C0B /* QualifiedProjects.swift in Sources */,
 				CB7E151CC73022B124CEB449 /* QuestionPager.swift in Sources */,
@@ -1562,6 +1572,7 @@
 				6F4AA6B1F6C13C62A3DC0B18 /* LiveHostUITests.swift in Sources */,
 				05F4FFACC1654CC28C97D034 /* LiveHostsUITests.swift in Sources */,
 				8E440866781CCD7394E67146 /* LivePairing.swift in Sources */,
+				247EB124C2701578903D2E5A /* LivePushSetupUITests.swift in Sources */,
 				4C9E7C3ACEED28A1C73703B8 /* LiveSoakUITests.swift in Sources */,
 				892BF804B3CCDACA9204314E /* LoadOlderUITests.swift in Sources */,
 				65BD86F3827C034C03B23A9A /* NeedsYouUITests.swift in Sources */,
@@ -1626,6 +1637,7 @@
 				39247EC0DD1471719DBE397C /* ProjectListingTests.swift in Sources */,
 				629DC60FF22C2C84FA63B4D3 /* ProjectTilesTests.swift in Sources */,
 				6497D4FF26517B58DBE7B4F3 /* PushReceiptsTests.swift in Sources */,
+				8A4C3DE8533E2B3F404E8363 /* PushSetupFailureTests.swift in Sources */,
 				D28B3111307296CA089620EC /* QueueTailTests.swift in Sources */,
 				2B93126402F4B7253FAF744F /* RefusedSendTests.swift in Sources */,
 				404158D70059632283DE1F2B /* RoleInlineStyleTests.swift in Sources */,
