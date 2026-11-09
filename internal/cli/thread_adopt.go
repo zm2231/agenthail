@@ -50,6 +50,9 @@ func (a *App) cmdThreadAdopt(args []string) (adoptErr error) {
 	if remote != nil {
 		return fmt.Errorf("adopting a session that runs on another host is not supported; run it on that host")
 	}
+	if err := a.controlScope(ctx, session, nil); err != nil {
+		return err
+	}
 	adopter, ok := adapter.(surface.SessionAdopter)
 	if !ok {
 		return fmt.Errorf("%s sessions cannot be opened in Agenthail", session.Surface)

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -18,6 +19,9 @@ func (a *App) cmdLimitResume(args []string) error {
 	}
 	switch {
 	case (positional[0] == "on" || positional[0] == "off") && len(positional) == 1:
+		if err := a.operatorScope(context.Background(), "Resuming every session a usage limit stopped"); err != nil {
+			return err
+		}
 		config, err := daemon.LoadDashboardConfig()
 		if err != nil {
 			return err
@@ -41,6 +45,9 @@ func (a *App) cmdLimitResume(args []string) error {
 		defer cancel()
 		sess, _, remote, err := a.resolveAnyTarget(ctx, positional[1])
 		if err != nil {
+			return err
+		}
+		if err := a.controlScope(ctx, sess, remote); err != nil {
 			return err
 		}
 		action, label := "limit-resume", positional[1]

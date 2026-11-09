@@ -79,20 +79,29 @@ func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 			writeMCPAuthError(w, err)
 			return
 		}
-		capabilities, err := d.capabilitiesOf(session.ID)
+		caller, err := d.agentCaller(*session)
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "Reading this session's permissions failed; retry.")
 			return
 		}
-		ceiling, err := d.Registry.SessionCeiling(session.ID)
-		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", "Reading this session's permissions failed; retry.")
-			return
-		}
-		caller := &mcpCaller{credential: credential, session: *session, capabilities: capabilities, ceiling: ceiling}
-		caller.project, _ = d.sessionProject(*session)
+		caller.credential = credential
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpCallerKey{}, caller)))
 	})
+}
+
+// The CLI in a session's shell gets this same caller, so the two cannot disagree.
+func (d *Daemon) agentCaller(session surface.Session) (*mcpCaller, error) {
+	capabilities, err := d.capabilitiesOf(session.ID)
+	if err != nil {
+		return nil, err
+	}
+	ceiling, err := d.Registry.SessionCeiling(session.ID)
+	if err != nil {
+		return nil, err
+	}
+	caller := &mcpCaller{session: session, capabilities: capabilities, ceiling: ceiling}
+	caller.project, _ = d.sessionProject(session)
+	return caller, nil
 }
 
 func writeMCPAuthError(w http.ResponseWriter, err error) {

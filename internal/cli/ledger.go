@@ -67,6 +67,18 @@ func (a *App) cmdLedger(args []string) error {
 	if len(positional) == 0 {
 		return a.ledgerBoard(store, args)
 	}
+	if !ledgerRead(positional) && agentEnvironment() {
+		key := strings.TrimSpace(flagVal(args, "--project"))
+		if key == "" {
+			var err error
+			if key, err = ledgerProjectKey(a); err != nil {
+				return err
+			}
+		}
+		if _, err := a.agentScope(context.Background(), daemon.ScopeRequest{Action: "ledger", Project: key}); err != nil {
+			return err
+		}
+	}
 	if ledgerWorkShortForms[positional[0]] {
 		return a.ledgerWork(store, workArgs(args, at[0]))
 	}
@@ -75,6 +87,16 @@ func (a *App) cmdLedger(args []string) error {
 		return fmt.Errorf("unknown ledger command %q\n\n%s", positional[0], ledgerHelp)
 	}
 	return run(a, ledgerCall{store: store, args: args, positional: positional})
+}
+
+var ledgerReads = map[string]bool{"asks": true, "ask": true, "show": true, "goals": true, "questions": true, "digest": true,
+	"list": true, "ready": true, "next": true, "critical-path": true, "search": true}
+
+func ledgerRead(positional []string) bool {
+	if positional[0] == "work" {
+		return len(positional) < 2 || ledgerReads[positional[1]]
+	}
+	return ledgerReads[positional[0]]
 }
 
 func ledgerProjectKey(a *App) (string, error) {

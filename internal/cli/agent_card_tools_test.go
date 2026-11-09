@@ -68,9 +68,8 @@ func TestANewCodexThreadsFirstPromptGetsItsToolCard(t *testing.T) {
 		hook := `{"session_id":"thread-new","hook_event_name":"UserPromptSubmit","prompt":"Build it"}`
 		firstPrompt = app.sessionContext(strings.NewReader(hook), "codex", 0, time.Now())
 	}
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "planner-conversation")
 	if _, err := captureStdout(t, func() error {
-		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--alias", "builder", "--json"})
+		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--alias", "builder", "--from", "@planner", "--json"})
 	}); err != nil {
 		t.Fatal(err)
 	}

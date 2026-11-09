@@ -35,6 +35,9 @@ func (a *App) cmdPR(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := a.controlScopeOf(ctx, id); err != nil {
+		return err
+	}
 	client, err := a.daemonAPI()
 	if err != nil {
 		return err

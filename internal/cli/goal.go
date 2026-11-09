@@ -21,6 +21,11 @@ func (a *App) cmdGoal(args []string) error {
 	if err != nil {
 		return err
 	}
+	if len(positional) > 1 {
+		if err := a.controlScope(ctx, sess, remote); err != nil {
+			return err
+		}
+	}
 	if remote != nil {
 		return a.goalRemote(ctx, remote, positional, hasFlag(args, "--json"))
 	}

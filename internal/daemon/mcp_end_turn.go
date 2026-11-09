@@ -50,7 +50,7 @@ func (d *Daemon) mcpEndTurn(_ context.Context, caller *mcpCaller, input mcpEndTu
 		return nil, err
 	}
 	if routed {
-		if _, err := d.sendNotice(hearer, endTurnNotice(d.resolveDisplay(session.ID), d.answerTarget(session.ID), stored), endTurnNoticeKey(stored)); err != nil {
+		if _, err := d.sendNotice(hearer, endTurnNotice(d.resolveDisplay(session.ID), d.answerTarget(session.ID), stored, d.usesMCP(hearer.sessionID)), endTurnNoticeKey(stored)); err != nil {
 			d.log.Printf("tell %s that %s needs it: %s", hearer.role, d.resolveDisplay(session.ID), err)
 			routed = false
 			if err := d.Registry.RouteTurnEnd(session.ID, stored.StartedAt, ""); err != nil {
@@ -80,7 +80,7 @@ func endTurnNoticeKey(end registry.TurnEnd) string {
 	return fmt.Sprintf("notice-end-turn-%s-%d", end.SessionID, end.StartedAt.UnixMilli())
 }
 
-func endTurnNotice(name, target string, end registry.TurnEnd) string {
+func endTurnNotice(name, target string, end registry.TurnEnd, mcp bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[agenthail] %s needs you: %s", name, end.Headline)
 	for i, ask := range end.Asks {
@@ -96,7 +96,11 @@ func endTurnNotice(name, target string, end registry.TurnEnd) string {
 		}
 		fmt.Fprintf(&b, "\n%d. %s %s", i+1, ask.Question, strings.Join(labels, " | "))
 	}
-	fmt.Fprintf(&b, "\nAnswer it: agenthail send %s \"<answer>\"", target)
+	if mcp {
+		fmt.Fprintf(&b, "\nAnswer it: agenthail_send {\"target\":%q,\"message\":\"<answer>\"}", target)
+	} else {
+		fmt.Fprintf(&b, "\nAnswer it: agenthail send %s \"<answer>\"", target)
+	}
 	return b.String()
 }
 

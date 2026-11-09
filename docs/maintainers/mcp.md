@@ -160,7 +160,7 @@ A wait that times out sets `wake` on the running tasks the caller started. Each 
 - `mode: now` and every other write refuse it (`detail.rule: not_queued`);
 - a target the paired host matched only by a name fragment is `invalid`.
 
-`agenthail_channel_send` to a project (`#<project>`) reaches that project's workers, so it takes the same reach: a caller posts only to its own project's channel unless it holds `control.all`, and is otherwise refused with `out_of_scope`, `detail.rule: different_project`, before anything is sent. Another project's coordinator stays reachable by `agenthail_send` with `project`. A stored channel keeps its members, and the person's posts are not limited. The CLI's `agenthail channel send` posts as the CLI, like `agenthail send`, and is not limited either. A paired host applies the same rule to a project post that reaches it (see hosts.md).
+`agenthail_channel_send` to a project (`#<project>`) reaches that project's workers, so it takes the same reach: a caller posts only to its own project's channel unless it holds `control.all`, and is otherwise refused with `out_of_scope`, `detail.rule: different_project`, before anything is sent. Another project's coordinator stays reachable by a queued `agenthail_send` with `project`. A stored channel keeps its members, and the person's posts are not limited. The CLI's `agenthail channel send` takes the same rule when run from an agent's shell (see below) and is not limited in the person's terminal. A paired host applies the same rule to a project post that reaches it (see hosts.md).
 
 The project and the coordinator role come from the paired host's own answer to `/api/v1/resolve` (its `project` and `lead` fields), never from this host's mirror, which can lag a move or a handover. When the host cannot answer, the target is matched against the mirror only to name it, and the send is refused as retryable `unavailable` (`detail.rule: project_unconfirmed`).
 
@@ -172,7 +172,26 @@ A local target is then decided in this order:
 4. `control.descendants` reaches the sessions the caller spawned, transitively, and `control.project` reaches its project's live sessions, each only when the target's ceiling is within the caller's (`exceeds_ceiling` otherwise).
 5. The caller's project coordinator on this host is reachable only by a queued `agenthail_send`.
 
-`agenthail_send` with `project` is allowed for the caller's own project, or any project with `control.all`; `mode: now` to the caller's own coordinator is refused without `control.all`.
+`agenthail_send` with `project` reaches any project's coordinator as a queued message, so a project's coordinator is reachable by project from every session. `mode: now` needs `control.all`: to the caller's own coordinator it is refused as control flowing up, and to another project's with `out_of_scope`, `detail.rule: different_project`.
+
+### The CLI from an agent's shell
+
+The CLI run in a session's shell (`AGENTHAIL_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` set) takes the same decisions before every write, from `POST /api/v1/scope` (`api_scope.go`), which builds the session's caller with `agentCaller`, the same function `mcpAuth` uses, and answers with the MCP functions:
+
+| `action` | CLI commands | Decided by |
+|---|---|---|
+| `send` | `send`, `queue <target>`; `mode: now` with `--no-queue`, which delivers at once or fails | `mcpControlTarget`, upward allowed when queued |
+| `lead-send` | `send` or `queue` to a coordinator by name, `@lead` or a coordinator session; `mode: now` with `--no-queue` | `mcpLeadScope` |
+| `control` | `steer`, `interrupt`, `compact`, `model <name>`, `control effort\|rename`, `goal <op>`, `answer` (before its requests are read), `permission-mode <mode>`, `thread stop\|resume\|fork\|archive\|pin\|snooze\|wake\|adopt\|clean`, `identify`, `pr --session`, `limit-resume resume\|cancel`, `move` | `mcpControlTarget`; the session itself is allowed |
+| `ledger` | every `ledger` write (all but its reads: the board, `asks`, `ask`, `show`, `goals`, `questions`, `digest`, and `work list\|show\|ready\|next\|critical-path\|search`), for `--project` or the folder's project | `ledger.write` and the caller's own project, as `agenthail_ledger_write`; `out_of_scope`, `detail.rule: different_project` otherwise |
+| `channel-send` | `channel send` | `mcpProjectPostScope` |
+| `create` | `thread create` | `mcpCreateScope`, then `mcpChildrenRefusal` and the start under the spawner's lock, as `agenthail_create`: the daemon starts the child (`session-create`, sourced from the caller, with its mode or approval and ceiling) and returns that action's reply. Only the fields `agenthail_create` and `thread create` share pass through (surface, cwd, message, model, alias, name, agent, mode or approval, worktree isolation, effort, mode, service tier, output schema). A `configRoot` (`--root`) must name a configured root, and is allowed when it is the root of the caller's own Claude transcript, or when the caller is its project's coordinator or holds `control.all`; any other root is refused (`out_of_scope`, `detail.rule: config_root`). Without one, the child is placed as for any session, on its creator's root first |
+| `operator` | `queue retry\|rm\|clear`, `relay add\|rm`, `channel create\|add\|rm\|rename` | `control.all`, or the project's coordinator when every session the item or relay touches (`sessions`: a queue item's target and sender, a relay's two ends) is in its project, or the channel (`channel`) is its project's |
+| `operator` | `coordinator set\|new\|clear`, `limit-resume on\|off`, `relay rm host::id`, `project add\|remove\|rename\|archive\|unarchive` | `control.all` |
+
+A refusal is the MCP shape (`error.code`, `detail.rule`), printed as `refused (<code>, rule <rule>): <message>`. An agent's `thread create --host` on another host is refused: the ceiling cannot be carried there, as `agenthail_create` has no host either. The endpoint answers only loopback callers with the dashboard token. With the daemon stopped these writes refuse. `--from` never changes the caller; the person's terminal, with none of the variables set, is not checked. Machine setup commands (`daemon`, `hosts`, `devices`, `signin`, `permissions`, `person`, `roots`, `proxies`, `claude settings`, `triggers`, `hooks`, `launch`, `registry`, `ui`, `update`, `debug`) are not checked.
+
+This is a guardrail against an agent reaching too far by following instructions, not a security boundary: every session runs as the person's OS user and can read the dashboard token, unset its identity variables, or reach the Codex and Claude sockets directly. A boundary needs OS separation.
 
 ### Ceiling
 

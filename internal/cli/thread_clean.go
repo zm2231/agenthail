@@ -37,6 +37,9 @@ func (a *App) cmdThreadClean(args []string) error {
 	} else {
 		id = session.ID
 	}
+	if err := a.controlScopeOf(ctx, id); err != nil {
+		return err
+	}
 	client, err := a.daemonAPI()
 	if err != nil {
 		return err

@@ -30,5 +30,5 @@ func mcpProjectPostScope(caller *mcpCaller, target broadcast.Target) *mcpRefusal
 	if caller.has("control.all") || caller.project != nil && caller.project.ID == target.ProjectID {
 		return nil
 	}
-	return &mcpRefusal{Code: "out_of_scope", Message: fmt.Sprintf("#%s is project %s, not yours; you may post only to your own project's channel. Reach its coordinator with agenthail_send and project instead.", target.Name, target.Label()), Detail: map[string]any{"rule": "different_project"}}
+	return &mcpRefusal{Code: "out_of_scope", Message: fmt.Sprintf("#%s is project %s, not yours; you may post only to your own project's channel. Reach its coordinator with a queued agenthail_send and project instead.", target.Name, target.Label()), Detail: map[string]any{"rule": "different_project"}}
 }

@@ -51,6 +51,11 @@ func (a *App) cmdIdentify(args []string) error {
 			return fmt.Errorf("usage: agenthail identify rm <name>")
 		}
 		name := strings.TrimPrefix(args[1], "@")
+		if owner, err := a.registry().ResolveTarget("@" + name); err == nil {
+			if err := a.controlScopeOf(context.Background(), owner); err != nil {
+				return err
+			}
+		}
 		if err := a.registry().RemoveAlias(name); err != nil {
 			return err
 		}
@@ -65,6 +70,9 @@ func (a *App) cmdIdentify(args []string) error {
 	ctx := context.Background()
 	sess, _, remote, err := a.resolveAnyTarget(ctx, target)
 	if err != nil {
+		return err
+	}
+	if err := a.controlScope(ctx, sess, remote); err != nil {
 		return err
 	}
 	if remote != nil {
@@ -100,6 +108,11 @@ func (a *App) cmdChannel(args []string) error {
 		return fmt.Errorf("usage: agenthail channel <create|add|rm|rename|list|send> ...")
 	}
 	ctx := context.Background()
+	if args[0] != "list" && args[0] != "send" && args[0] != "broadcast" && len(args) > 1 {
+		if err := a.projectOperatorScope(ctx, "Managing a channel beyond your own project's", args[1]); err != nil {
+			return err
+		}
+	}
 	switch args[0] {
 	case "create":
 		if len(args) != 2 {
@@ -208,6 +221,7 @@ func (a *App) cmdRelay(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: agenthail relay <add|list|rm> ...")
 	}
+	const relayOperation = "Routing replies between sessions beyond your own project"
 	switch args[0] {
 	case "add":
 		positional := stripFlags(args)
@@ -231,6 +245,9 @@ func (a *App) cmdRelay(args []string) error {
 		toSess, toAdapter, toRemote, err := a.resolveDeliveryTarget(ctx, positional[2])
 		if err != nil {
 			return fmt.Errorf("to-target: %w", err)
+		}
+		if err := a.projectOperatorScope(ctx, relayOperation, "", relayEnd(fromSess, fromRemote), relayEnd(toSess, toRemote)); err != nil {
+			return err
 		}
 		if fromRemote != nil || toRemote != nil {
 			return a.addHostRelay(ctx, fromSess, fromRemote, toSess, toRemote, pattern, once, handoff)
@@ -314,11 +331,17 @@ func (a *App) cmdRelay(args []string) error {
 			return fmt.Errorf("usage: agenthail relay rm <id|host::id>")
 		}
 		if hostRef, relay, qualified := hosts.Split(args[1]); qualified {
+			if err := a.operatorScope(context.Background(), "Removing another host's relay"); err != nil {
+				return err
+			}
 			return a.removeHostRelay(hostRef, relay)
 		}
 		id, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil || id <= 0 {
 			return fmt.Errorf("invalid relay id %q", args[1])
+		}
+		if err := a.relayRemoveScope(id, relayOperation); err != nil {
+			return err
 		}
 		if err := a.registry().RemoveRoute(id); err != nil {
 			return err

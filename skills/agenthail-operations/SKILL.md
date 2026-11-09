@@ -127,6 +127,33 @@ are changed on that host or through its daemon.
 One unhealthy surface does not block the others. `doctor --json` reports each
 surface's health; report an unavailable surface from there when it matters.
 
+## From Inside An Agent Session
+
+A session Agenthail gave tools to (`agenthail_send`, `agenthail_answer`, ...)
+uses them; its card (`agenthail whoami`) shows the form to use. Run from an
+agent's shell (`AGENTHAIL_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or
+`CODEX_THREAD_ID` set), every CLI write has the same reach as that session's
+tools: it controls only the sessions it started or, as coordinator, leads; it
+sends its spawner and its project's coordinator queued messages; it reaches
+another project's coordinator with a queued send to its name or `project`;
+it posts only to, and writes only the ledger of, its own project; and `thread create` starts a
+session no wider than itself, on its own host, with `--root` only its own Claude
+root unless it is its project's coordinator. Managing queue items, relays
+and channels is for the person, except that a project's coordinator may manage
+those whose sessions, or whose channel, are all its own project's; choosing
+coordinators and `limit-resume on|off` stay the person's. A write outside that reach is
+refused before anything is sent, with the rule and how to get it done:
+
+```text
+refused (out_of_scope, rule different_project): Another project's coordinator takes only a queued message from you.
+```
+
+The daemon checks the reach, so these writes refuse while it is stopped.
+`--from` does not change it. In the person's own terminal, with none of those
+variables set, nothing is limited. This keeps agents from reaching too far by
+mistake; it is not a security boundary, since every session runs as the
+person's user.
+
 ## Surface Contract
 
 | Operation | Claude | Codex | Notion |

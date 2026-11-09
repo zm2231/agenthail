@@ -41,6 +41,46 @@ func spawnRefusal(caller *mcpCaller, kind surface.SurfaceKind) *mcpRefusal {
 	return nil
 }
 
+func (d *Daemon) mcpCreateScope(caller *mcpCaller, kind surface.SurfaceKind, mode, rawCwd string) (childStart, string, error) {
+	if refusal := spawnRefusal(caller, kind); refusal != nil {
+		return childStart{}, "", refusal
+	}
+	if !filepath.IsAbs(strings.TrimSpace(rawCwd)) {
+		return childStart{}, "", refuse("invalid", "cwd must be an absolute folder.")
+	}
+	cwd, err := canonicalCatalogPath(strings.TrimSpace(rawCwd))
+	if err != nil {
+		return childStart{}, "", refuse("invalid", fmt.Sprintf("cwd: %s", err))
+	}
+	ceiling, err := parseCeiling(caller.ceiling)
+	if err != nil {
+		return childStart{}, "", err
+	}
+	start, err := childCeiling(ceiling, kind, strings.TrimSpace(mode), cwd)
+	if err != nil {
+		return childStart{}, "", err
+	}
+	ancestors, err := d.Registry.SessionAncestors(caller.session.ID)
+	if err != nil {
+		return childStart{}, "", err
+	}
+	if len(ancestors)+1 > mcpDepthLimit {
+		return childStart{}, "", &mcpRefusal{Code: "depth_limit", Message: fmt.Sprintf("Sessions nest at most %d deep below the one a person started; hand this work back to your spawner instead.", mcpDepthLimit), Detail: map[string]any{"limit": mcpDepthLimit}}
+	}
+	return start, cwd, nil
+}
+
+func (d *Daemon) mcpChildrenRefusal(caller *mcpCaller) error {
+	running, err := d.Registry.RunningChildren(caller.session.ID)
+	if err != nil {
+		return err
+	}
+	if running >= mcpChildrenLimit {
+		return &mcpRefusal{Code: "children_limit", Message: fmt.Sprintf("You already have %d sessions running; wait for one to finish.", running), Retryable: true, Detail: map[string]any{"limit": mcpChildrenLimit}}
+	}
+	return nil
+}
+
 func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCreateInput) (any, error) {
 	kind := surface.SurfaceKind(strings.TrimSpace(input.Surface))
 	if !caller.has("spawn") {
@@ -65,36 +105,14 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 	if isolation == "" && (strings.TrimSpace(input.Branch) != "" || strings.TrimSpace(input.Base) != "") {
 		return nil, refuse("invalid", "branch and base need isolation worktree.")
 	}
-	if !filepath.IsAbs(strings.TrimSpace(input.Cwd)) {
-		return nil, refuse("invalid", "cwd must be an absolute folder.")
-	}
-	cwd, err := canonicalCatalogPath(strings.TrimSpace(input.Cwd))
-	if err != nil {
-		return nil, refuse("invalid", fmt.Sprintf("cwd: %s", err))
-	}
-	ceiling, err := parseCeiling(caller.ceiling)
+	start, cwd, err := d.mcpCreateScope(caller, kind, input.PermissionMode, input.Cwd)
 	if err != nil {
 		return nil, err
-	}
-	start, err := childCeiling(ceiling, kind, strings.TrimSpace(input.PermissionMode), cwd)
-	if err != nil {
-		return nil, err
-	}
-	ancestors, err := d.Registry.SessionAncestors(caller.session.ID)
-	if err != nil {
-		return nil, err
-	}
-	if len(ancestors)+1 > mcpDepthLimit {
-		return nil, &mcpRefusal{Code: "depth_limit", Message: fmt.Sprintf("Sessions nest at most %d deep below the one a person started; hand this work back to your spawner instead.", mcpDepthLimit), Detail: map[string]any{"limit": mcpDepthLimit}}
 	}
 	release, _ := d.spawnLocks.acquire(caller.session.ID, true)
 	defer release()
-	running, err := d.Registry.RunningChildren(caller.session.ID)
-	if err != nil {
+	if err := d.mcpChildrenRefusal(caller); err != nil {
 		return nil, err
-	}
-	if running >= mcpChildrenLimit {
-		return nil, &mcpRefusal{Code: "children_limit", Message: fmt.Sprintf("You already have %d sessions running; wait for one to finish.", running), Retryable: true, Detail: map[string]any{"limit": mcpChildrenLimit}}
 	}
 	return d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{
 		Action: "session-create", Surface: string(kind), Cwd: cwd, Message: input.Message, Model: strings.TrimSpace(input.Model),

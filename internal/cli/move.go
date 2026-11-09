@@ -59,6 +59,9 @@ func (a *App) cmdMove(args []string) (moveErr error) {
 	if remote != nil {
 		return fmt.Errorf("%s runs on another host; run agenthail move there", positional[0])
 	}
+	if err := a.controlScope(ctx, session, nil); err != nil {
+		return err
+	}
 	api, err := a.daemonAPI()
 	if err != nil {
 		return err

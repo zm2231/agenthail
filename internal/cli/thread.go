@@ -112,13 +112,19 @@ func (a *App) cmdThread(args []string) error {
 		if err != nil {
 			return err
 		}
+		if !local && agentEnvironment() {
+			return &agentScopeRefusal{Code: "out_of_scope", Message: "An agent session starts sessions only on its own host; ask your coordinator or the person to start one on " + hostText + "."}
+		}
 		if !local {
-			return a.createRemoteThread(hostText, request, creator, args)
+			return a.createThreadThroughDaemon(hostText, request, creator, args)
 		}
 		if request.cwd, err = resolveThreadCwd(request.cwd); err != nil {
 			return err
 		}
 		request.options.Cwd = request.cwd
+	}
+	if agentEnvironment() {
+		return a.createThreadThroughDaemon("", request, creator, args)
 	}
 	adapter := a.adapters().ForSurface(request.surface)
 	if adapter == nil {

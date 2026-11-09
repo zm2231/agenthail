@@ -95,6 +95,9 @@ func (a *App) cmdCompact(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := a.controlScope(ctx, sess, remote); err != nil {
+		return err
+	}
 	if remote != nil {
 		return a.compactRemote(ctx, remote)
 	}
@@ -129,6 +132,11 @@ func (a *App) cmdModel(args []string) error {
 	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
+	}
+	if len(positional) > 1 {
+		if err := a.controlScope(ctx, sess, remote); err != nil {
+			return err
+		}
 	}
 	if remote != nil {
 		name := ""
@@ -207,6 +215,11 @@ func (a *App) cmdControl(args []string) error {
 	if err != nil {
 		return err
 	}
+	if (action == "effort" || action == "rename") && value != "" {
+		if err := a.controlScope(ctx, sess, remote); err != nil {
+			return err
+		}
+	}
 	if remote != nil {
 		return a.controlRemote(ctx, remote, action, value, args)
 	}
@@ -264,6 +277,9 @@ func (a *App) cmdInterrupt(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := a.controlScope(ctx, sess, remote); err != nil {
+		return err
+	}
 	if remote != nil {
 		return a.interruptRemote(ctx, remote, args)
 	}
@@ -292,6 +308,9 @@ func (a *App) cmdSteer(args []string) error {
 	defer cancel()
 	sess, surf, remote, err := a.resolveDeliveryTarget(ctx, positional[0])
 	if err != nil {
+		return err
+	}
+	if err := a.controlScope(ctx, sess, remote); err != nil {
 		return err
 	}
 	sourceID, err := a.sourceSessionID(ctx, "")
