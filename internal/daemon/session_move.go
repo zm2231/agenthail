@@ -26,22 +26,22 @@ import (
 // any of its files leave. The target keeps it and holds the files it then
 // receives to it.
 type moveManifest struct {
-	ID             string                `json:"id"`
-	Conversation   string                `json:"conversation"`
-	SourceHost     string                `json:"sourceHost"`
-	Surface        surface.SurfaceKind   `json:"surface"`
-	Checkout       moveCheckout          `json:"checkout"`
-	Alias          string                `json:"alias,omitempty"`
-	PinnedAt       time.Time             `json:"pinnedAt,omitzero"`
-	Title          string                `json:"title,omitempty"`
-	Model          string                `json:"model,omitempty"`
-	PermissionMode string                `json:"permissionMode,omitempty"`
-	Size           int64                 `json:"size"`
-	SHA256         string                `json:"sha256"`
-	PartsSize      int64                 `json:"partsSize"`
-	State          json.RawMessage       `json:"state,omitempty"`
-	Root           string                `json:"root,omitempty"`
-	Origin         *moveOrigin           `json:"origin,omitempty"`
+	ID             string              `json:"id"`
+	Conversation   string              `json:"conversation"`
+	SourceHost     string              `json:"sourceHost"`
+	Surface        surface.SurfaceKind `json:"surface"`
+	Checkout       moveCheckout        `json:"checkout"`
+	Alias          string              `json:"alias,omitempty"`
+	PinnedAt       time.Time           `json:"pinnedAt,omitzero"`
+	Title          string              `json:"title,omitempty"`
+	Model          string              `json:"model,omitempty"`
+	PermissionMode string              `json:"permissionMode,omitempty"`
+	Size           int64               `json:"size"`
+	SHA256         string              `json:"sha256"`
+	PartsSize      int64               `json:"partsSize"`
+	State          json.RawMessage     `json:"state,omitempty"`
+	Root           string              `json:"root,omitempty"`
+	Origin         *moveOrigin         `json:"origin,omitempty"`
 	registry.MoveCarry
 	ClaudeProject *moveClaudeProject `json:"claudeProject,omitempty"`
 }
