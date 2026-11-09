@@ -53,9 +53,11 @@ final class QuestionPagerUITests: XCTestCase {
         let other = app.textFields["Other answer"]
         XCTAssertTrue(other.waitForExistence(timeout: 10))
         other.tap()
-        other.typeText("Use 2 runners")
-        other.typeText(XCUIKeyboardKey.leftArrow.rawValue)
-        other.typeText("1")
+        other.typeText("Use ")
+        other.typeKey("2", modifierFlags: [])
+        other.typeText(" runners")
+        other.typeKey(.leftArrow, modifierFlags: [])
+        other.typeKey("1", modifierFlags: [])
         XCTAssertEqual(other.value as? String, "Use 2 runner1s", "digits and arrows typed into the answer stayed in it")
         XCTAssertFalse(app.staticTexts["Where should the regression check run?"].exists, "a digit typed into the answer picked an option and moved on")
     }

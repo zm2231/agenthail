@@ -51,13 +51,14 @@ struct DecisionInboxTypingTest {
         window.contentView = NSHostingView(rootView: DecisionInboxPane(model: model, pane: pane))
         window.layoutIfNeeded()
         await settle(0.5)
-        let first = pane.selectedDecisionID
+        let shown = { model.inboxStops.selected(pane.selectedDecisionID)?.paneID }
+        let first = shown()
         type(window, "j")
         await settle(0.3)
-        check(pane.selectedDecisionID != first, "j moves to the next decision when no text field has focus")
+        check(first != nil && shown() != first, "j moves to the next decision when no text field has focus")
         type(window, "k")
         await settle(0.5)
-        check(pane.selectedDecisionID == first, "k moves back")
+        check(shown() == first, "k moves back")
 
         guard let note = field(in: window.contentView, placeholder: "Add a note (optional)") else { return check(false, "the ask shows its note field") }
         check(window.makeFirstResponder(note), "the note field takes focus")
@@ -65,7 +66,7 @@ struct DecisionInboxTypingTest {
         type(window, "jk 2")
         await settle(0.3)
         check(note.stringValue == "jk 2", "j, k and a digit typed into the answer field stay in it: \(note.stringValue.debugDescription)")
-        check(pane.selectedDecisionID == first, "typing in the answer field does not move to another decision")
+        check(shown() == first, "typing in the answer field does not move to another decision")
         press(window, "\r", keyCode: 36, shift: true)
         await settle(0.3)
         check(TypingDaemon.posts.isEmpty, "Shift-Return while typing a note does not send the recommended answer without it: \(TypingDaemon.posts)")
