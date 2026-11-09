@@ -102,6 +102,8 @@ targets:
       - path: SessionCells.swift
       - path: SessionHandle.swift
       - path: ProjectBroadcast.swift
+      - path: RelativeAge.swift
+      - path: RelayFacts.swift
       - path: MinuteClock.swift
       - path: ConnectionGrace.swift
       - path: SnapshotRefreshPolicy.swift

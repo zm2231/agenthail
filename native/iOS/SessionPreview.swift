@@ -237,6 +237,10 @@ struct SessionPreview: View {
             asking[0]["capabilities"] = askingCapabilities
             snapshot["sessions"] = asking
         }
+        if ProcessInfo.processInfo.arguments.contains("--preview-groups") {
+            snapshot["channels"] = [["name": "release", "members": ["demo", "codex-demo"], "memberDetails": [["id": "demo", "display": "@demo"], ["id": "codex-demo", "display": "@codex-demo"]]]]
+            snapshot["relays"] = [["id": 7, "from": "demo", "to": "codex-demo", "pattern": "ready for review", "once": false, "active": true, "handoff": "turn_finished", "pendingCount": 0, "fireCount": 3, "lastFiredAt": "2026-09-12T03:58:00Z"]]
+        }
         if ProcessInfo.processInfo.arguments.contains("--preview-terminal-question") {
             var terminal = snapshot["sessions"] as! [[String: Any]]
             var terminalCapabilities: [String: Any] = capabilities
@@ -485,6 +489,8 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-project-message"):
             body = #"{"recipients":[{"sessionId":"demo","outcome":"delivered"}]}"#
+        case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-groups"):
+            body = Self.actionBody(request)["action"] as? String == "channel-send" ? #"{"recipients":[{"sessionId":"demo","outcome":"delivered"},{"sessionId":"codex-demo","outcome":"queued"}]}"# : "{}"
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-tail"):
             let action = Self.actionBody(request)
             if action["action"] as? String == "queue-cancel" { Self.tailCleared = !ProcessInfo.processInfo.arguments.contains("--preview-tail-keeps") }
