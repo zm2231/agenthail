@@ -19,6 +19,7 @@ type requestWatch struct {
 
 type requestSubscription struct {
 	threadID   string
+	subscribe  bool
 	subscribed bool
 }
 
@@ -82,7 +83,7 @@ func (w *requestWatch) reconcile(ctx context.Context, threadID string) {
 	w.busy[threadID] = true
 	subscribe := w.want[threadID]
 	go func() {
-		result := requestSubscription{threadID: threadID}
+		result := requestSubscription{threadID: threadID, subscribe: subscribe}
 		if subscribe {
 			result.subscribed = w.codex.subscribeManagedThread(ctx, w.client, threadID)
 		} else {
@@ -101,21 +102,24 @@ func (w *requestWatch) reconcile(ctx context.Context, threadID string) {
 
 // finish reports a new subscription, since requests may have opened or
 // resolved before it took. A thread no longer loaded is not subscribed; its
-// next status change tries again.
+// next status change tries again. A thread that waits again while the watch
+// was leaving it is subscribed again.
 func (w *requestWatch) finish(ctx context.Context, result requestSubscription) bool {
-	delete(w.busy, result.threadID)
-	subscribed := result.subscribed && !w.have[result.threadID]
-	if result.subscribed {
-		w.have[result.threadID] = true
-	} else {
-		delete(w.have, result.threadID)
-		if w.want[result.threadID] {
-			delete(w.want, result.threadID)
-			return false
-		}
+	id := result.threadID
+	delete(w.busy, id)
+	gained := result.subscribed && !w.have[id]
+	switch {
+	case result.subscribed:
+		w.have[id] = true
+	case result.subscribe:
+		delete(w.have, id)
+		delete(w.want, id)
+		return false
+	default:
+		delete(w.have, id)
 	}
-	w.reconcile(ctx, result.threadID)
-	return subscribed
+	w.reconcile(ctx, id)
+	return gained
 }
 
 // A thread being subscribed counts too: the resume's replies can arrive before its result.

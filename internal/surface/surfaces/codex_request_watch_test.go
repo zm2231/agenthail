@@ -133,6 +133,40 @@ func TestAReloadDoesNotKeepTheWatchOnAThreadThatStoppedWaitingMeanwhile(t *testi
 	})
 }
 
+func TestAThreadThatWaitsAgainWhileTheWatchLeavesItIsWatchedAgain(t *testing.T) {
+	fastTerminalPolls(t)
+	leaving, proceed := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	daemon := startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
+		if method == "thread/unsubscribe" {
+			once.Do(func() { close(leaving); <-proceed })
+		}
+		return nil
+	})
+	daemon.AddThread(runningThread(managedThreadID))
+	daemon.Load(managedThreadID)
+	daemon.HoldElsewhere(managedThreadID, true)
+	var changes atomic.Int32
+	watchedCodexWaking(t, managedThreadID, func() { changes.Add(1) })
+	daemon.OpenRequest(1, codexCommandApproval, approvalOn(managedThreadID, "call_a"))
+	daemon.Notify("thread/status/changed", map[string]any{"threadId": managedThreadID, "status": waitingStatus("waitingOnApproval")})
+	testkit.Eventually(t, "the watch to subscribe", 5*time.Second, func() bool { return resumesOf(daemon, managedThreadID) == 1 })
+
+	daemon.Answer(1)
+	daemon.Notify("thread/status/changed", map[string]any{"threadId": managedThreadID, "status": waitingStatus()})
+	<-leaving
+	daemon.OpenRequest(2, codexCommandApproval, approvalOn(managedThreadID, "call_b"))
+	daemon.Notify("thread/status/changed", map[string]any{"threadId": managedThreadID, "status": waitingStatus("waitingOnApproval")})
+	time.Sleep(100 * time.Millisecond)
+	close(proceed)
+	testkit.Eventually(t, "the watch to subscribe again", 5*time.Second, func() bool {
+		return resumesOf(daemon, managedThreadID) == 2 && daemon.Subscribers(managedThreadID) == 1
+	})
+	before := changes.Load()
+	daemon.OpenRequest(3, codexCommandApproval, approvalOn(managedThreadID, "call_c"))
+	testkit.Eventually(t, "a later request to wake the catalog", 5*time.Second, func() bool { return changes.Load() > before })
+}
+
 func TestTheStatusWatchNeverLoadsAThreadItsAppServerDoesNotHave(t *testing.T) {
 	fastTerminalPolls(t)
 	daemon := startManagedCodex(t, nil)
