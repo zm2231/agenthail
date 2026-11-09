@@ -56,6 +56,7 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
     }
 
     private func assertFirstRowRestsBelowTheHeader(_ app: XCUIApplication, _ context: String) throws {
+        let before = try firstRow(app).map { "\($0.label)@\(Int($0.frame.minY))" }
         var last: String?
         var settled = false
         for _ in 0..<15 {
@@ -66,6 +67,7 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
             last = key
         }
         XCTAssertTrue(settled, "the transcript never came to rest at its top \(context)")
+        XCTAssertNotEqual(last, before, "the drags never moved the transcript \(context)")
         let header = headerBottom(app)
         let top = try XCTUnwrap(try firstRow(app), "no row on screen at the top \(context)")
         XCTAssertGreaterThanOrEqual(top.frame.minY, header - 0.5, "at the top the first row '\(top.label.prefix(40))' starts behind the header \(context)")
