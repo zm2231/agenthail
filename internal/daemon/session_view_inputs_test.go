@@ -32,7 +32,7 @@ var notSessionViewInputs = map[string]string{
 	"browser_push_subscriptions": deviceTables, "device_connection_drops": deviceTables, "device_pairings": deviceTables, "device_push_targets": deviceTables,
 	"paired_devices": deviceTables, "push_outcomes": deviceTables, "push_sends": deviceTables, "signin_bindings": deviceTables, "signin_off": deviceTables,
 	"signin_profiles": deviceTables, "session_credentials": deviceTables,
-	"channel_members": routingTables, "channels": routingTables, "routes": routingTables, "relay_deliveries": routingTables, "relay_events": routingTables,
+	"channel_members": routingTables, "channels": routingTables, "remote_channels": routingTables, "routes": routingTables, "relay_deliveries": routingTables, "relay_events": routingTables,
 	"relay_provenance": routingTables, "relay_sources": routingTables, "action_receipts": routingTables,
 	"ledger_events": ledgerTables, "ledger_grants": ledgerTables, "ledger_state": ledgerTables, "project_links": ledgerTables, "project_move_refusals": ledgerTables,
 	"project_moves": ledgerTables, "removed_project_ledgers": ledgerTables, "repository_keys": ledgerTables,
