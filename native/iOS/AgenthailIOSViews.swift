@@ -411,6 +411,8 @@ struct ConversationListView: View {
         .holdsOrder(model)
         .phoneBackdrop(.list)
         .navigationTitle("Sessions")
+        // A title that collapses with scroll loops the pop's layout when the list overflows.
+        .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: "Search sessions")
         .task(id: search) { await model.searchSessions(search) }
         .task(id: "\(scope.rawValue)\u{0}\(search)") {
@@ -1963,6 +1965,7 @@ struct SettingsView: View {
         }
         .phoneBackdrop(.pane)
         .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func connectionLabel(_ host: PairedHostStatus) -> String {
