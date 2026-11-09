@@ -5,7 +5,7 @@ A session's inbox is every message sent to it, whether it was delivered at once 
 | Table | One row per | Read by |
 | --- | --- | --- |
 | `delivery_intents` | message, sender to target, with its delivery status | `GET /api/v1/inbox` |
-| `message_queue` | message or command still waiting or finished, with its retry state | `GET /api/v1/queue` (rows that can still be acted on), Settings > Delivery, retry and cancel |
+| `message_queue` | message or command still waiting or finished, with its retry state | `GET /api/v1/queue` (rows that can still be acted on; `projectId`, or `cwd` for the project that holds an absolute folder, keeps one project's targets), Settings > Delivery, retry and cancel |
 | `delivery_history` | delivery attempt or outcome, capped at 2000 rows | `GET /api/v1/history`, Audit |
 
 ## Recording

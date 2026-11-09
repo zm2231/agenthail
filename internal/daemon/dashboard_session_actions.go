@@ -325,8 +325,11 @@ func (d *Daemon) doSessionFocus(ctx context.Context, session *surface.Session) (
 
 func (d *Daemon) doSessionAlias(session *surface.Session, requested string) (actionResult, error) {
 	alias := strings.TrimPrefix(strings.TrimSpace(requested), "@")
-	if alias == "" || strings.ContainsAny(alias, " \t\r\n/#") || len(alias) > 80 {
-		return actionResult{}, invalidRequest("name must be 1 to 80 characters without spaces, /, or #")
+	if alias == "" {
+		return d.clearSessionAlias(session)
+	}
+	if strings.ContainsAny(alias, " \t\r\n/#") || len(alias) > 80 {
+		return actionResult{}, invalidRequest("name must be at most 80 characters without spaces, /, or #")
 	}
 	if err := d.Registry.SetAlias(alias, session.ID); err != nil {
 		var taken registry.AliasTakenError
@@ -341,4 +344,19 @@ func (d *Daemon) doSessionAlias(session *surface.Session, requested string) (act
 	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "identified", SessionID: session.ID, Result: "@" + alias})
 	return actionOK(map[string]any{"ok": true, "alias": alias}), nil
+}
+
+func (d *Daemon) clearSessionAlias(session *surface.Session) (actionResult, error) {
+	alias, err := d.Registry.RemoveSessionAlias(session.ID)
+	if err != nil {
+		var coordinator registry.CoordinatorAliasError
+		if errors.As(err, &coordinator) {
+			return actionResult{}, conflict(coordinator.Error())
+		}
+		return actionResult{}, err
+	}
+	if alias != "" {
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unidentified", SessionID: session.ID, Result: "@" + alias})
+	}
+	return actionOK(map[string]any{"ok": true, "alias": ""}), nil
 }

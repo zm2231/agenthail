@@ -33,7 +33,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be 1 to 80 characters without spaces, /, or #\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be at most 80 characters without spaces, /, or #\"}}\n"
   },
   "api/action alias of the lead": {
     "status": 400,
@@ -2601,7 +2601,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be 1 to 80 characters without spaces, /, or #\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be at most 80 characters without spaces, /, or #\"}}\n"
   },
   "api/v1/actions alias of the lead": {
     "status": 400,

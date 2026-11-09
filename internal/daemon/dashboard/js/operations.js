@@ -83,7 +83,7 @@ export function renderOperations() {
     channels
       .map(
         (channel) =>
-          `<article class="operation-item"><div class="operation-main"><div class="operation-title">#${escape(channel.name)}</div><div class="operation-detail">${escape(channel.members.join(" · ") || "No members yet")}</div></div><button class="button quiet" data-network-action="channel-delete" data-channel="${escape(channel.name)}" type="button">Remove</button></article>`,
+          `<article class="operation-item"><div class="operation-main"><div class="operation-title">#${escape(channel.name)}</div><div class="operation-detail">${(channel.memberDetails || []).map((member) => `<span class="channel-member">${escape(member.display)} <button class="button quiet" data-network-action="channel-remove" data-channel="${escape(channel.name)}" data-target-id="${escape(member.id)}" type="button" aria-label="Remove ${escape(member.display)} from #${escape(channel.name)}">Remove</button></span>`).join(" · ") || "No members yet"}</div></div><button class="button quiet" data-network-action="channel-delete" data-channel="${escape(channel.name)}" type="button">Remove</button></article>`,
       )
       .join("") || '<div class="empty-card">No shared channels yet.</div>';
   $("#channel-actions").hidden = channels.length === 0;
@@ -146,6 +146,7 @@ export function bindOperationEvents() {
     try {
       await action(button.dataset.networkAction, {
         channel: button.dataset.channel,
+        targetId: button.dataset.targetId,
         relayId: Number(button.dataset.relayId || 0),
       });
       toast("Network updated.");

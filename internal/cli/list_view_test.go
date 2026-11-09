@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
-	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/workspace"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -136,17 +136,18 @@ func TestListResolvesProjectFromCanonicalAll(t *testing.T) {
 	}
 }
 
-func TestListCwdSendsResolvedProject(t *testing.T) {
+func TestListCwdAsksTheDaemonForTheFolder(t *testing.T) {
 	root := t.TempDir()
+	folder, err := workspace.NormalizeCWD(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	app := snapshotFixture(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("projectId") != "project-folder" {
+		if q := r.URL.Query(); q.Get("cwd") != folder || q.Has("projectId") {
 			t.Error(r.URL)
 		}
 		fmt.Fprint(w, `{"view":{"revision":"r","scope":"all","counts":{"all":{"families":0,"sessions":0}},"families":[]},"sessions":[]}`)
 	})
-	if err := app.Registry.AddProject(registry.ProjectRecord{ID: "project-folder", WorkspaceRoot: root, Title: "Folder"}); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--cwd", root, "--json"}) }); err != nil {
 		t.Fatal(err)
 	}
