@@ -13,6 +13,7 @@
   {"event": "device.push.updated", "cache": false, "reread": false, "why": "devices are not in the snapshot; the Mac reloads them with Operations"},
   {"event": "task.settled", "cache": false, "reread": false, "why": "wakes task waiters; task records are not in the snapshot"},
   {"event": "task.request", "cache": false, "reread": false, "why": "wakes task waiters; task records are not in the snapshot"},
+  {"event": "trigger.finished", "cache": false, "reread": false, "why": "trigger runs are not in the snapshot; the CLI reads them from /api/v1/triggers"},
   {"event": "task.goal_stopped", "cache": false, "reread": false, "why": "wakes task waiters; task records are not in the snapshot"},
   {"event": "ledger.", "family": true, "cache": false, "reread": false, "why": "intent ledger activity; the ledger is not in the snapshot"},
   {"event": "ui.changed", "cache": false, "reread": false, "why": "appearance, reloaded through its own handler"},
