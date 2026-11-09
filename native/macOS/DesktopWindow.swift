@@ -225,6 +225,7 @@ struct SessionSidebar: View {
                             .contextMenu {
                                 Button("Archive Project") { model.setProjectArchived(project.id, true) }
                                 Divider()
+                                Button("Message…") { pane.messagingProject = project }
                                 ProjectMenuButtons(model: model, pane: pane, project: project)
                             }
                     }

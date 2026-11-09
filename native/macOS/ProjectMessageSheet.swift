@@ -40,6 +40,7 @@ struct ProjectMessageSheet: View {
             .frame(minHeight: 100)
             .overlay(RoundedRectangle(cornerRadius: DesktopRadius.control).stroke(DesktopPalette.line))
             .accessibilityLabel("Message")
+            .disabled(sending)
         if let problem {
             Text(problem)
                 .font(.system(size: DesktopType.secondary))
