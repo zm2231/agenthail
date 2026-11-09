@@ -2,11 +2,12 @@ import SwiftUI
 
 struct UsageMetersRow: View {
     @ObservedObject var feed: UsageFeed
-    let sessions: [SessionState]
+    var model: AgenthailIOSModel
     let open: (String) -> Void
     @State private var showing = false
 
     var body: some View {
+        let sessions = model.usageSessions
         if !feed.accounts.isEmpty {
             Button { showing = true } label: {
                 UsageMetersLine(accounts: feed.accounts, sessions: sessions, now: feed.now)

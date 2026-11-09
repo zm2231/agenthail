@@ -17,6 +17,7 @@ struct PairedHostStatus: Identifiable, Equatable {
     let notifications: String
     var person: PersonState? = nil
     var build: AgenthailBuild? = nil
+    var busyDelivery: String? = nil
 }
 
 struct ListedProject: Equatable {
@@ -177,15 +178,25 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     @ObservationIgnored private var subagentServers: [String: HostConnection?] = [:]
     @ObservationIgnored private var subagentFailedUnreachable: Set<String> = []
 
-    // HostConnection is not observable; rebuild() runs after every change to one, so reads go through hostRevision.
-    @ObservationIgnored private var hostTable: [String: HostConnection] = [:]
-    private var hostRevision: UInt64 = 0
-    private var connections: [String: HostConnection] {
-        _ = hostRevision
-        return hostTable
-    }
+    // HostConnection and the catalog are not observed; views read the parts rebuild() derives from them.
+    @ObservationIgnored private var connections: [String: HostConnection] = [:]
     private var hostOrder: [String] = []
-    private var catalog = HostCatalog()
+    @ObservationIgnored private var catalog = HostCatalog()
+    private var routing = HostCatalog.Routing()
+    private(set) var isPaired = false
+    private(set) var showsHostNames = false
+    private(set) var usageReaders: [AgenthailAPI] = []
+    private(set) var listing = ListingState()
+    private(set) var decisionsKey = ""
+    private(set) var queue: [QueueState] = []
+    private(set) var attention: [AttentionState] = []
+    private(set) var deliveryProblems: [DeliveryProblem] = []
+    private(set) var leadReplacements: [LeadReplacement] = []
+    private(set) var waitingSessions: [String] = []
+    private(set) var sessionCount = 0
+    private(set) var usageSessions: [SessionState] = []
+    private(set) var sessionProjects: [String: String] = [:]
+    private var projectSessionIDs: [String: [String]] = [:]
     @ObservationIgnored private var sessionStreamTask: Task<Void, Never>?
     static let streamPublishInterval: Duration = .milliseconds(100)
     @ObservationIgnored private var sessionMetadataTask: Task<Void, Never>?
@@ -221,20 +232,14 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private let automaticallyConnect: Bool
     private let previewPaired: Bool
 
-    var isPaired: Bool { !hostOrder.isEmpty && (previewPaired || connections.values.contains { !$0.isPreview }) }
     func session(_ id: String?) -> SessionState? { cells.session(id) }
     func pairedHost(owning sessionID: String) -> SessionHost? { daemon?.pairedHost(owning: sessionID) }
-    var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
-    var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
-    var leadReplacements: [LeadReplacement] { snapshot?.leadReplacements ?? [] }
 
     /// Names the lead that replaced a request's session; the computer serving the request gives the id unqualified.
     func leadName(_ id: String, requestFrom sessionID: String) -> String {
-        let qualified = HostCatalog.qualify(catalog.route(for: sessionID)?.hostID ?? HostCatalog.owner(of: sessionID) ?? "", id)
+        let qualified = HostCatalog.qualify(routing.route(for: sessionID)?.hostID ?? HostCatalog.owner(of: sessionID) ?? "", id)
         return session(qualified)?.displayName ?? id
     }
-    var showsHostNames: Bool { Set((snapshot?.sessions ?? []).compactMap(\.host?.id)).count > 1 || hostOrder.count > 1 }
-    var usageReaders: [AgenthailAPI] { hostOrder.compactMap { connections[$0] }.filter(\.reachable).map(\.api) }
 
     init(autoConnect: Bool = true, session: URLSession = .shared, drops: ConnectionDrops? = .shared, composerStore: ComposerStore? = nil) {
         networkSession = session
@@ -275,7 +280,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     private func add(_ connection: HostConnection) {
         connection.delegate = self
-        hostTable[connection.id] = connection
+        connections[connection.id] = connection
         if !hostOrder.contains(connection.id) { hostOrder.append(connection.id) }
     }
 
@@ -287,7 +292,6 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     func connection(_ hostID: String) -> HostConnection? { connections[hostID] }
 
     private func rebuild() {
-        hostRevision &+= 1
         let ordered = hostOrder.compactMap { connections[$0] }
         let views = ordered.map(\.view)
         catalog = HostCatalog(hosts: views)
@@ -320,7 +324,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                              reachable: connection.reachable, reconnecting: connection.reconnecting, error: connection.connectionError,
                              surfaces: (connection.snapshot?.surfaces ?? []).filter(\.needsAttention), signin: connection.snapshot?.signin ?? [],
                              peers: connection.snapshot?.daemon.hosts ?? [], notifications: pushStatus[connection.id] ?? "Not enabled",
-                             person: connection.snapshot?.person, build: connection.build)
+                             person: connection.snapshot?.person, build: connection.build, busyDelivery: connection.snapshot?.busyDelivery)
         }
         var listed: [String: ListedProject] = [:]
         var listedOrder: [String] = []
@@ -343,9 +347,33 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         else if ordered.count == 1 { connectionError = failing[0].connectionError }
         else { connectionError = failing.map { "\($0.name): \($0.connectionError ?? "")" }.joined(separator: "\n") }
         reconnecting = ordered.contains(where: \.reconnecting)
+        deriveParts(ordered)
         if let voice = voiceHostID, connections[voice] == nil { voiceHostID = nil }
         rebindSelectedSession()
         refetchMovedSubagents()
+    }
+
+    private func deriveParts(_ ordered: [HostConnection]) {
+        let sessions = snapshot?.sessions ?? []
+        routing = catalog.routing
+        isPaired = !hostOrder.isEmpty && (previewPaired || connections.values.contains { !$0.isPreview })
+        showsHostNames = Set(sessions.compactMap(\.host?.id)).count > 1 || hostOrder.count > 1
+        let readers = ordered.filter(\.reachable).map(\.api)
+        if !usageReaders.elementsEqual(readers, by: ===) { usageReaders = readers }
+        listing = ListingState.read(listedHosts, projects: projects, earlier: earlierTargets)
+        let reached = catalog.hosts.map { host in "\(host.id):\(host.state):\(catalog.target(forHost: host.id).map { "\($0.hostID)>\($0.remote ?? "")" } ?? "none")" }
+        decisionsKey = (ordered.map { "\($0.id):\($0.shownReachable):\($0.snapshot?.decisionsRev ?? "older")" } + reached).joined(separator: ",")
+        queue = snapshot?.queue ?? []
+        attention = snapshot?.attention ?? []
+        deliveryProblems = snapshot?.deliveryProblems ?? []
+        leadReplacements = snapshot?.leadReplacements ?? []
+        waitingSessions = sessions.filter { $0.waitingOn != nil || $0.pendingAskID != nil }.map { "\($0.id):\($0.waitingOn?.id ?? $0.pendingAskID ?? "")" }
+        sessionCount = sessions.count
+        usageSessions = sessions.filter { $0.archived != true && ($0.isWorking || $0.current) }
+        sessionProjects = Dictionary(sessions.compactMap { row in row.project.map { (row.id, $0.id) } }, uniquingKeysWith: { first, _ in first })
+        projectSessionIDs = inDaemonOrder(sessions).reduce(into: [:]) { ids, row in
+            if let project = row.project?.id { ids[project, default: []].append(row.id) }
+        }
     }
 
     private func refetchMovedSubagents() {
@@ -427,7 +455,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func routedSession(_ session: SessionState) -> SessionState? {
-        guard let route = catalog.route(for: session.id) else { return nil }
+        guard let route = routing.route(for: session.id) else { return nil }
         var routed = session
         routed.id = route.sessionID
         return routed
@@ -436,7 +464,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     func routedAPI(for sessionID: String) -> AgenthailAPI? { (try? resolve(sessionID))?.api }
 
     func busyDelivery(for sessionID: String) -> String? {
-        catalog.route(for: sessionID).flatMap { connections[$0.hostID]?.snapshot?.busyDelivery }
+        routing.route(for: sessionID).flatMap { route in hosts.first { $0.id == route.hostID }?.busyDelivery }
     }
 
     var voiceHost: PairedHostStatus? {
@@ -445,18 +473,18 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     func canCallByVoice(_ session: SessionState) -> Bool {
         guard let voice = voiceHost, voice.reachable, session.host?.id == voice.id,
-              let route = catalog.route(for: session.id) else { return false }
+              let route = routing.route(for: session.id) else { return false }
         return route.hostID == voice.id
     }
 
     func connectionState(for sessionID: String) -> (error: String?, reconnecting: Bool) {
-        let hostID = catalog.route(for: sessionID)?.hostID ?? catalog.server(of: sessionID) ?? HostCatalog.owner(of: sessionID)
-        guard let connection = hostID.flatMap({ connections[$0] }) else { return (nil, false) }
-        return (connection.connectionError, connection.reconnecting)
+        let hostID = routing.route(for: sessionID)?.hostID ?? routing.server(of: sessionID) ?? HostCatalog.owner(of: sessionID)
+        guard let host = hosts.first(where: { $0.id == hostID }) else { return (nil, false) }
+        return (host.error, host.reconnecting)
     }
 
     func voiceTargetID(for session: SessionState) -> String {
-        catalog.route(for: session.id)?.sessionID ?? ""
+        routing.route(for: session.id)?.sessionID ?? ""
     }
 
     func voiceSessionID(_ id: String) -> String {
@@ -547,12 +575,6 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         try await InboxPage.load(from: inboxHosts(), before: cursors, partial: partial)
     }
 
-    var decisionsKey: String {
-        let direct = hostOrder.compactMap { connections[$0] }.map { "\($0.id):\($0.shownReachable):\($0.snapshot?.decisionsRev ?? "older")" }
-        let reached = catalog.hosts.map { host in "\(host.id):\(host.state):\(catalog.target(forHost: host.id).map { "\($0.hostID)>\($0.remote ?? "")" } ?? "none")" }
-        return (direct + reached).joined(separator: ",")
-    }
-
     func loadDecisions() async -> DecisionInbox {
         guard let hosts = try? inboxHosts() else { return DecisionInbox() }
         var inbox = await DecisionInbox.load(from: hosts)
@@ -638,7 +660,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     func queueSteer(_ item: QueueState) -> (capabilities: Capabilities, refusal: String?)? {
         guard !item.isHistorical, !QueueSteer.waiting([item]).isEmpty else { return nil }
         let id = item.sessionId
-        let known = snapshot?.sessions.first { $0.id == id }
+        let known = session(id)
             ?? selectedDetail.flatMap { $0.session.id == id ? $0.sessionState(open: false, host: pairedHost(owning: id)) : nil }
         guard let session = known, session.status == "busy", session.waitingOn == nil, session.capabilities.steer, !session.isReadOnly else { return nil }
         return (session.capabilities, QueueSteer.refusal(item, capabilities: session.capabilities))
@@ -829,11 +851,11 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func canAddFolder(_ session: SessionState) -> Bool {
-        ProjectMenu.canAddFolder(session) && catalog.route(for: session.id) != nil
+        ProjectMenu.canAddFolder(session) && routing.route(for: session.id) != nil
     }
 
     func canMakeLead(_ session: SessionState) -> Bool {
-        guard ProjectMenu.canMakeLead(session, projects: []), catalog.route(for: session.id) != nil else { return false }
+        guard ProjectMenu.canMakeLead(session, projects: []), routing.route(for: session.id) != nil else { return false }
         return !projects.values.contains { listed in
             listed.state.leads.contains { lead in
                 guard let sessionID = lead.sessionId else { return false }
@@ -1137,7 +1159,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         await SessionScopes.readMore(SessionScopes.targets(filter, on: listedHosts))
     }
 
-    func canListMore(_ filter: SessionFilter) -> Bool { SessionScopes.hasMore(SessionScopes.targets(filter, on: listedHosts)) }
+    func canListMore(_ filter: SessionFilter) -> Bool { listing.more.contains(filter) }
 
     private func earlierTargets(_ project: ListedProject) -> [ScopeTarget] {
         let request = ScopeRequest(scope: "all", projectID: project.state.id)
@@ -1152,9 +1174,15 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     func listEarlier(_ project: ListedProject) async { await SessionScopes.readMore(earlierTargets(project)) }
 
-    func hasEarlier(_ project: ListedProject) -> Bool { SessionScopes.hasMore(earlierTargets(project)) }
+    func hasEarlier(_ project: ListedProject) -> Bool { listing.earlier.contains(ProjectContents.key(of: project)) }
 
-    var listingError: String? { SessionScopes.error(on: listedHosts) }
+    var listingError: String? { listing.error }
+
+    func projectSessions(_ project: ListedProject) -> [SessionState] {
+        let ids = projectSessionIDs[ProjectContents.key(of: project)] ?? []
+        let lead = project.state.leads.first.flatMap { ProjectContents.leadSessionID($0, of: project) }
+        return (lead.map { ids.contains($0) ? ids : ids + [$0] } ?? ids).compactMap(session)
+    }
 
     func searchScope(_ query: String, filter: SessionFilter) async {
         await SessionScopes.search(query.trimmingCharacters(in: .whitespacesAndNewlines), filter: filter, on: listedHosts)
@@ -1219,7 +1247,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     var currentOrder: ScopePage.View? { joinedOrder(\.currentView) }
 
     /// Sessions in the daemon's order: Current first, then each loaded listing; others keep their place after.
-    func inDaemonOrder(_ sessions: [SessionState]) -> [SessionState] {
+    private func inDaemonOrder(_ sessions: [SessionState]) -> [SessionState] {
         var order: [String: Int] = [:]
         let listings = listedHosts.flatMap { host in host.reader.requests.sorted().compactMap { host.view($0)?.renamed { HostCatalog.qualify(host.id, $0) } } }
         for member in ([currentOrder].compactMap { $0 } + listings).flatMap({ $0.families.flatMap(\.members) }) where order[member.id] == nil {
@@ -1235,10 +1263,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         listedHosts.flatMap { host in [host.currentView, host.reader.foundView] + host.reader.requests.sorted().map(host.view) }
     }
 
-    func searchPending(_ search: String) -> Bool {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return listedHosts.contains { $0.shownReachable && $0.reader.searchPending(query) }
-    }
+    func searchPending(_ search: String) -> Bool { listing.searchPending(search) }
 
     func listOrder(scope: SessionFilter, search: String) -> ScopePage.View? {
         if !search.isEmpty { return joinedOrder { $0.reader.foundView } }
@@ -2103,8 +2128,8 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     private func clearHost(_ hostID: String) {
-        hostTable[hostID]?.stop()
-        hostTable.removeValue(forKey: hostID)
+        connections[hostID]?.stop()
+        connections.removeValue(forKey: hostID)
         let wasAppearanceHost = hostOrder.first == hostID
         hostOrder.removeAll { $0 == hostID }
         if wasAppearanceHost, let next = hostOrder.first.flatMap({ connections[$0] }), next.reachable { appearance.load(from: next.api) }

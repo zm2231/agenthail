@@ -41,9 +41,27 @@ struct HostCatalog {
     private(set) var deliveryProblems: [DeliveryProblem] = []
     private(set) var leadReplacements: [LeadReplacement] = []
     private(set) var hosts: [HostHealth] = []
-    private var routesByID: [String: [SessionRoute]] = [:]
-    private var servers: [String: String] = [:]
-    private var targets: [String: HostTarget] = [:]
+    private(set) var routing = Routing()
+
+    struct Routing: Equatable {
+        fileprivate var routesByID: [String: [SessionRoute]] = [:]
+        fileprivate var servers: [String: String] = [:]
+        fileprivate var targets: [String: HostTarget] = [:]
+
+        func routes(for sessionID: String) -> [SessionRoute] { routesByID[sessionID] ?? [] }
+
+        /// The best route to a session. A session no paired computer lists, such
+        /// as one a notification opened, goes to its owner by its id.
+        func route(for sessionID: String) -> SessionRoute? {
+            if let listed = routes(for: sessionID).first { return listed }
+            guard let owner = HostCatalog.owner(of: sessionID), let target = target(forHost: owner) else { return nil }
+            return target.remote == nil ? SessionRoute(hostID: owner, sessionID: String(sessionID.dropFirst(owner.count + HostCatalog.separator.count))) : SessionRoute(hostID: target.hostID, sessionID: sessionID)
+        }
+
+        func target(forHost hostID: String) -> HostTarget? { targets[hostID] }
+
+        func server(of sessionID: String) -> String? { servers[sessionID] }
+    }
 
     /// Names the same project on every computer, so it is never qualified.
     static let repositoryPrefix = "repo:"
@@ -111,20 +129,20 @@ struct HostCatalog {
                 }
             }
             sessions.append(chosen.row)
-            routesByID[id] = ranked.filter { $0.reachable || $0.holding }.map(\.route)
-            servers[id] = chosen.route.hostID
+            routing.routesByID[id] = ranked.filter { $0.reachable || $0.holding }.map(\.route)
+            routing.servers[id] = chosen.route.hostID
         }
         for host in paired {
             hosts.append(HostHealth(id: host.id, name: host.name, state: host.shownReachable ? "connected" : "unreachable"))
-            if host.reachable { targets[host.id] = HostTarget(hostID: host.id, remote: nil) }
+            if host.reachable { routing.targets[host.id] = HostTarget(hostID: host.id, remote: nil) }
         }
         for host in paired where host.reachable {
-            for peer in host.snapshot?.daemon.hosts ?? [] where peer.state == "connected" && targets[peer.id] == nil {
-                targets[peer.id] = HostTarget(hostID: host.id, remote: peer.id)
+            for peer in host.snapshot?.daemon.hosts ?? [] where peer.state == "connected" && routing.targets[peer.id] == nil {
+                routing.targets[peer.id] = HostTarget(hostID: host.id, remote: peer.id)
             }
         }
-        for host in paired where host.holding && targets[host.id] == nil {
-            targets[host.id] = HostTarget(hostID: host.id, remote: nil)
+        for host in paired where host.holding && routing.targets[host.id] == nil {
+            routing.targets[host.id] = HostTarget(hostID: host.id, remote: nil)
         }
         for host in paired where host.shownReachable {
             for peer in host.snapshot?.daemon.hosts ?? [] where names[peer.id] == nil {
@@ -134,25 +152,19 @@ struct HostCatalog {
                     hosts.append(HostHealth(id: peer.id, name: peer.name, state: peer.state))
                 }
             }
-            for peer in host.snapshot?.daemon.hosts ?? [] where peer.state == "connected" && targets[peer.id] == nil {
-                targets[peer.id] = HostTarget(hostID: host.id, remote: peer.id)
+            for peer in host.snapshot?.daemon.hosts ?? [] where peer.state == "connected" && routing.targets[peer.id] == nil {
+                routing.targets[peer.id] = HostTarget(hostID: host.id, remote: peer.id)
             }
         }
     }
 
-    func routes(for sessionID: String) -> [SessionRoute] { routesByID[sessionID] ?? [] }
+    func routes(for sessionID: String) -> [SessionRoute] { routing.routes(for: sessionID) }
 
-    /// The best route to a session. A session no paired computer lists, such
-    /// as one a notification opened, goes to its owner by its id.
-    func route(for sessionID: String) -> SessionRoute? {
-        if let listed = routes(for: sessionID).first { return listed }
-        guard let owner = Self.owner(of: sessionID), let target = target(forHost: owner) else { return nil }
-        return target.remote == nil ? SessionRoute(hostID: owner, sessionID: String(sessionID.dropFirst(owner.count + Self.separator.count))) : SessionRoute(hostID: target.hostID, sessionID: sessionID)
-    }
+    func route(for sessionID: String) -> SessionRoute? { routing.route(for: sessionID) }
 
-    func target(forHost hostID: String) -> HostTarget? { targets[hostID] }
+    func target(forHost hostID: String) -> HostTarget? { routing.target(forHost: hostID) }
 
-    func server(of sessionID: String) -> String? { servers[sessionID] }
+    func server(of sessionID: String) -> String? { routing.server(of: sessionID) }
 
     private static func qualifyFamily(_ row: SessionState, host: String) -> SessionState {
         var row = row
