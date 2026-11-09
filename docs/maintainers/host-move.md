@@ -153,11 +153,16 @@ of them idempotent by move id. Both sides keep the move in `session_moves`.
    A message queued for the session after the flip becomes a send held for
    the target as well, in the transaction that queues it, whichever path
    queues it: a send, a relay, or a notice. A goal, a compaction or a send
-   with attached files is refused instead, as the flip fails those already
-   queued. A paired host that has not yet heard of the move may
-   still send to the source; the source does not pass that on, but refuses it
-   with code `moved` and `movedToHost`, and the sending host sends it once
-   more, straight to the target.
+   with attached files cannot be held that way, as the flip fails those
+   already queued; an action that resolved the session here before the flip
+   and reaches it after is refused with `409` code `moved` and
+   `movedToHost`. The same action made again routes to the target, which now
+   owns the session.
+
+   A paired host that has not yet heard of the move may still send any action
+   to the source; the source does not pass it on, but answers `moved` the
+   same way, and the sending host sends it once more, straight to the target.
+   An MCP tool reports `moved` as a retryable refusal.
 
 On the target, every request must come from a paired host's token, which has
 the `control` and `host` scopes. The token names the source; the request body

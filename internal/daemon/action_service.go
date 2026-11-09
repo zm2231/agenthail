@@ -90,7 +90,7 @@ func actionKey(ctx context.Context) string {
 func (d *Daemon) doAction(ctx context.Context, p principal, request dashboardActionRequest) actionReply {
 	recorder := newActionRecorder()
 	result, err := d.dispatchAction(p.context(ctx), p, request)
-	writeActionResult(recorder, result, err)
+	writeActionResult(recorder, result, d.movedAnswer(err))
 	reply := recorder.reply()
 	if reply.Status >= http.StatusOK && reply.Status < http.StatusMultipleChoices {
 		d.publishEvent("state.changed", "", map[string]string{"source": "action"})

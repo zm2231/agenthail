@@ -348,8 +348,9 @@ func TestWhatCannotFollowASessionThatMovedIsRefusedWhenQueued(t *testing.T) {
 	for _, test := range refused {
 		t.Run(test.name, func(t *testing.T) {
 			r := movedAway(t)
-			if err := test.queue(r); !errors.Is(err, ErrQueuedAfterMove) {
-				t.Fatalf("queueing it answered %v, want it refused because the session moved", err)
+			var moved MovedError
+			if err := test.queue(r); !errors.As(err, &moved) || moved.HostID != moveTarget {
+				t.Fatalf("queueing it answered %v, want it refused naming the session's new host", err)
 			}
 			if count := r.QueueCount(moveConversation); count != 0 {
 				t.Fatalf("%d items stayed queued here for a session that left", count)

@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -145,5 +147,50 @@ func TestASendFromAThirdHostThatHasNotSeenTheMoveReachesTheSessionOnItsNewHost(t
 	})
 	if got := onTarget.Containing("to where it was"); got != 1 {
 		t.Fatalf("the send reached the moved session %d times", got)
+	}
+}
+
+func TestAGoalSetAsItsSessionMovesIsAnsweredMovedAndQueuedOnItsNewHostWhenSentAgain(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	claudetest.New(t)
+	source, target := newMoveNode(t), newMoveNode(t)
+	pairMoveNodes(t, source, target)
+	session := startMovable(t, source)
+	claudetest.ListenPeerManager(t, source.host.Home)
+	claudetest.ListenPeerManager(t, target.host.Home)
+	if _, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"}); err != nil {
+		t.Fatal(err)
+	}
+	targetID := mustHostID(t, target.federationNode)
+
+	person := principal{ID: localDashboardPrincipal, Kind: principalPerson}
+	stale := source.daemon.decodeAction(context.Background(), person, []byte(fmt.Sprintf(`{"action":"goal-set","sessionId":%q,"message":"ship the move"}`, session.ID)), "")
+	var refusal struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+		MovedToHost string `json:"movedToHost"`
+	}
+	if stale.Status != http.StatusConflict || json.Unmarshal(stale.Body, &refusal) != nil || refusal.Error.Code != movedCode || refusal.MovedToHost != targetID {
+		t.Fatalf("a goal that reached the session's old host after it moved answered %d: %s, want moved to %s", stale.Status, stale.Body, targetID)
+	}
+
+	reply := sendAsPerson(source.daemon, fmt.Sprintf(`{"action":"goal-set","sessionId":%q,"message":"ship the move"}`, session.ID))
+	var answer struct {
+		Result struct {
+			Evidence  string `json:"evidence"`
+			SessionID string `json:"sessionId"`
+		} `json:"result"`
+	}
+	if reply.Status != http.StatusOK || json.Unmarshal(reply.Body, &answer) != nil || answer.Result.Evidence != "queued" || answer.Result.SessionID != hosts.Qualify(targetID, session.ID) {
+		t.Fatalf("the goal sent again answered %d: %s, want it queued on the session's new host", reply.Status, reply.Body)
+	}
+	goal, err := target.reg.ClaimNextMessage(session.ID, time.Now())
+	if err != nil || goal == nil || goal.Operation != registry.QueueOperationGoal || !strings.Contains(goal.Message, "ship the move") {
+		t.Fatalf("the new host holds %+v (err=%v), want the goal to run when the session is idle", goal, err)
+	}
+	if left := source.reg.QueueCount(session.ID); left != 0 {
+		t.Fatalf("%d items stayed queued on the session's old host", left)
 	}
 }

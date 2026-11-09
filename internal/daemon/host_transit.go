@@ -3,8 +3,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 // An action crosses at most one host boundary: back to its sender, never on.
@@ -29,7 +32,23 @@ func (d *Daemon) movedFromHere(ctx context.Context, target *pairedHost, request 
 	if err != nil || to != target.record.ID {
 		return err
 	}
-	return &actionError{Status: http.StatusConflict, Code: movedCode, Message: fmt.Sprintf("session %s moved to host %s; send it there", sessionID, target.record.Name), Extra: map[string]any{movedToHostField: target.record.ID}}
+	return movedRefusal(sessionID, target.record.ID, target.record.Name)
+}
+
+func movedRefusal(sessionID, hostID, hostName string) error {
+	return &actionError{Status: http.StatusConflict, Code: movedCode, Message: fmt.Sprintf("session %s moved to host %s; send it there", sessionID, hostName), Extra: map[string]any{movedToHostField: hostID}}
+}
+
+func (d *Daemon) movedAnswer(err error) error {
+	var moved registry.MovedError
+	if !errors.As(err, &moved) {
+		return err
+	}
+	name := moved.HostID
+	if host, found := d.pairedHost(moved.HostID); found {
+		name = host.record.Name
+	}
+	return movedRefusal(moved.SessionID, moved.HostID, name)
 }
 
 const (

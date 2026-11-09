@@ -229,6 +229,7 @@ A tool that refuses returns an MCP tool error (`isError: true`) whose structured
 - `ledger_owner_unreachable` → `owner_unreachable`, retryable;
 - any `400` → `invalid`; any `404` → `not_found`;
 - `409 stale` → `not_found` with `detail.stale`;
+- `409 moved` → `moved`, retryable, with `detail.movedToHost`: the session moved to that host, and the same call made again reaches it there;
 - `409 move_busy` and `session_adopt_busy` → `busy`, retryable;
 - other `409`s → `refused`;
 - `502 control_failed` → `busy`, retryable;

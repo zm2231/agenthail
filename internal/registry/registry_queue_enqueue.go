@@ -224,10 +224,18 @@ func (r *Registry) QueueCounts() (map[string]int, error) {
 	return counts, rows.Err()
 }
 
-// ErrQueuedAfterMove refuses a queued item a paired host now owns the session
-// for and cannot take as a held send: an operation, or a message with files,
-// as the move fails the ones already queued.
-var ErrQueuedAfterMove = errors.New("the session moved to another host before this was queued, and only a text message follows it there; send it again there")
+// MovedError refuses an item queued for a session a paired host now owns
+// that cannot follow it as a held send: an operation, or a message with
+// files, as the move fails the ones already queued. The caller sends it to
+// HostID instead.
+type MovedError struct {
+	SessionID string
+	HostID    string
+}
+
+func (e MovedError) Error() string {
+	return fmt.Sprintf("session %s moved to host %s before this was queued; send it there", e.SessionID, e.HostID)
+}
 
 // holdForOwnerTx makes a message queued for a session another host owns,
 // one that moved while the send waited for it, a send held for that host, as
@@ -238,7 +246,7 @@ func holdForOwnerTx(tx *sql.Tx, id int64, sessionID, message, deliveryKey string
 		return false, err
 	}
 	if operation != QueueOperationMessage || len(options.Uploads) > 0 {
-		return false, ErrQueuedAfterMove
+		return false, MovedError{SessionID: sessionID, HostID: owner}
 	}
 	key := deliveryKey
 	if key == "" {
@@ -264,7 +272,7 @@ func sessionOwnerTx(tx *sql.Tx, sessionID string) (string, error) {
 func refuseAfterMoveTx(tx *sql.Tx, sessionID string) error {
 	owner, err := sessionOwnerTx(tx, sessionID)
 	if err == nil && owner != "" {
-		return ErrQueuedAfterMove
+		return MovedError{SessionID: sessionID, HostID: owner}
 	}
 	return err
 }
