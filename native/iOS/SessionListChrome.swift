@@ -88,7 +88,7 @@ struct SessionAvatar: View {
 
 struct SessionScopeChips: View {
     @Binding var scope: SessionFilter
-    let runningCount: Int
+    let counts: [SessionFilter: Int]
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -106,14 +106,14 @@ struct SessionScopeChips: View {
 
     private func chip(_ filter: SessionFilter) -> some View {
         let selected = scope == filter
+        let count = counts[filter] ?? 0
+        let tint = filter == .running && count > 0 ? PhonePalette.working : PhonePalette.muted
         return Button { scope = filter } label: {
             HStack(spacing: 6) {
                 Text(filter.rawValue)
-                if filter == .running, runningCount > 0 {
-                    Text("\(runningCount)")
-                        .monospacedDigit()
-                        .foregroundStyle(selected ? AnyShapeStyle(Color.white) : AnyShapeStyle(PhonePalette.working))
-                }
+                Text("\(count)")
+                    .monospacedDigit()
+                    .foregroundStyle(selected ? AnyShapeStyle(Color.white) : AnyShapeStyle(tint))
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(selected ? Color.white : Color.primary)
@@ -122,11 +122,11 @@ struct SessionScopeChips: View {
             .background {
                 if selected { Capsule().fill(PhonePalette.accent) }
             }
-            .floatingGlass(in: Capsule(), interactive: true)
+            .floatingGlass(in: Capsule(), interactive: true, lifted: false)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(filter == .running && runningCount > 0 ? "Running, \(runningCount)" : filter.rawValue)
+        .accessibilityLabel("\(filter.rawValue), \(count)")
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("scope-" + filter.rawValue.lowercased())
     }

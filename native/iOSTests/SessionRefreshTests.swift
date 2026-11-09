@@ -223,8 +223,9 @@ final class SessionRefreshTests: XCTestCase {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
         await model.refresh()
-        await model.listMore(.running)
-        func running() -> [String] { model.sessionTree(scope: .running, search: "").projects.flatMap { $0.checkouts.flatMap { $0.families.map(\.root.id) } } }
+        model.scope = .running
+        await model.listMore()
+        func running() -> [String] { model.sessionTree(search: "").projects.flatMap { $0.checkouts.flatMap { $0.families.map(\.root.id) } } }
         XCTAssertTrue(running().contains("computer::demo"), "Running lists the daemon's running rows")
 
         SessionRefreshProtocol.state.set(snapshotStatus: "idle")

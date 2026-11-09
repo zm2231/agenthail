@@ -54,7 +54,13 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private var subagentIDs: [String: [String]] = [:]
     private var daemon: DaemonState?
     private(set) var sessionAttention: [String: SessionAttention] = [:]
-    @ObservationIgnored private var listedTree: (key: ListKey, tree: SessionTree)?
+    @ObservationIgnored private var listedTree: (key: ListKey, list: SessionList)?
+    var scope = SessionFilter.recent {
+        didSet { readListing() }
+    }
+    var refinement = SessionRefinement() {
+        didSet { readListing() }
+    }
     private(set) var listRevision: UInt64 = 0
     @ObservationIgnored private var orderHold = OrderHold()
     @ObservationIgnored private var heldList: ScopePage.View?
@@ -380,7 +386,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         showsHostNames = Set(sessions.compactMap(\.host?.id)).count > 1 || hostOrder.count > 1
         let readers = ordered.filter(\.reachable).map(\.api)
         if !usageReaders.elementsEqual(readers, by: ===) { usageReaders = readers }
-        listing = ListingState.read(listedHosts, projects: projects, earlier: earlierTargets)
+        readListing()
         let reached = catalog.hosts.map { host in "\(host.id):\(host.state):\(catalog.target(forHost: host.id).map { "\($0.hostID)>\($0.remote ?? "")" } ?? "none")" }
         decisionsKey = (ordered.map { "\($0.id):\($0.shownReachable):\($0.snapshot?.decisionsRev ?? "older")" } + reached).joined(separator: ",")
         queue = snapshot?.queue ?? []
@@ -1212,11 +1218,22 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     private var listedHosts: [HostConnection] { hostOrder.compactMap { connections[$0] } }
 
-    func listMore(_ filter: SessionFilter) async {
-        await SessionScopes.readMore(SessionScopes.targets(filter, on: listedHosts))
+    nonisolated static func listRequest(_ scope: SessionFilter, _ refinement: SessionRefinement) -> ScopeRequest? {
+        guard refinement.isActive || scope != .recent else { return nil }
+        return ScopeRequest(scope: scope.viewScope, surface: refinement.surface, status: refinement.status?.rawValue)
     }
 
-    func canListMore(_ filter: SessionFilter) -> Bool { listing.more.contains(filter) }
+    var listRequest: ScopeRequest? { Self.listRequest(scope, refinement) }
+
+    private func readListing() {
+        listing = ListingState.read(listedHosts, request: listRequest, projects: projects, earlier: earlierTargets)
+    }
+
+    func listMore() async {
+        await SessionScopes.readMore(SessionScopes.targets(listRequest, on: listedHosts))
+    }
+
+    var canListMore: Bool { listing.more }
 
     private func earlierTargets(_ project: ListedProject) -> [ScopeTarget] {
         let request = ScopeRequest(scope: "all", projectID: project.state.id)
@@ -1241,8 +1258,9 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         return (lead.map { ids.contains($0) ? ids : ids + [$0] } ?? ids).compactMap(session)
     }
 
-    func searchScope(_ query: String, filter: SessionFilter) async {
-        await SessionScopes.search(query.trimmingCharacters(in: .whitespacesAndNewlines), filter: filter, on: listedHosts)
+    func searchScope(_ query: String) async {
+        let request = ScopeRequest(scope: scope.viewScope, surface: refinement.surface, status: refinement.status?.rawValue)
+        await SessionScopes.search(query.trimmingCharacters(in: .whitespacesAndNewlines), in: request, on: listedHosts)
     }
 
     func mentionSessions(for sessionID: String, query: String) async -> [SessionState]? {
@@ -1252,33 +1270,50 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     struct ListKey: Equatable {
         let scope: SessionFilter
+        let refinement: SessionRefinement
         let search: String
+
+        var request: ScopeRequest? { AgenthailIOSModel.listRequest(scope, refinement) }
+    }
+
+    struct SessionList: Equatable {
+        var tree: SessionTree
+        var counts: [SessionFilter: Int]
+        var surfaces: [String]
     }
 
     // Families hold session cells, so a change inside one session leaves the tree equal.
-    func sessionTree(scope: SessionFilter, search: String) -> SessionTree {
+    func sessionTree(search: String) -> SessionTree { sessionList(search: search).tree }
+
+    func sessionList(search: String) -> SessionList {
         _ = listRevision
-        let key = ListKey(scope: scope, search: search)
-        if let listed = listedTree, listed.key == key { return listed.tree }
-        let tree = buildTree(key)
-        listedTree = (key, tree)
-        return tree
+        let key = ListKey(scope: scope, refinement: refinement, search: search)
+        if let listed = listedTree, listed.key == key { return listed.list }
+        let list = buildList(key)
+        listedTree = (key, list)
+        return list
     }
 
     private func rederiveTree() {
-        let key = listedTree?.key ?? ListKey(scope: .recent, search: "")
-        let tree = buildTree(key)
-        if let listed = listedTree, listed.tree == tree { return }
-        listedTree = (key, tree)
+        let key = listedTree?.key ?? ListKey(scope: scope, refinement: refinement, search: "")
+        let list = buildList(key)
+        if let listed = listedTree, listed.list == list { return }
+        listedTree = (key, list)
         listRevision &+= 1
     }
 
-    private func buildTree(_ key: ListKey) -> SessionTree {
+    private func buildList(_ key: ListKey) -> SessionList {
         if orderHold.held, heldKey != key { orderHold.release() }
         let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let shown = orderHold.shown(list: listOrder(scope: key.scope, search: key.search), current: currentOrder, rows: rows)
+        let shown = orderHold.shown(list: listOrder(key), current: currentOrder, rows: rows)
         heldList = shown.list
-        return SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: treeCells(shown.rows))
+        let tree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: treeCells(shown.rows))
+        let counted = key.refinement.isActive ? key.request.flatMap { request in joinedOrder { $0.view(request) } } : currentOrder
+        let counts = Dictionary(uniqueKeysWithValues: SessionFilter.allCases.map { ($0, counted?.counts[$0.viewScope]?.families ?? 0) })
+        let listed = (counted ?? currentOrder)?.surfaces.map(\.surface) ?? []
+        let configured = listedHosts.flatMap { $0.snapshot?.surfaces.map(\.name) ?? [] }
+        let surfaces = Set(listed + configured + [key.refinement.surface].compactMap { $0 }).sorted()
+        return SessionList(tree: tree, counts: counts, surfaces: surfaces)
     }
 
     private func treeCells(_ rows: [String: SessionState]) -> [String: SessionCell] {
@@ -1322,10 +1357,10 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     func searchPending(_ search: String) -> Bool { listing.searchPending(search) }
 
-    func listOrder(scope: SessionFilter, search: String) -> ScopePage.View? {
-        if !search.isEmpty { return joinedOrder { $0.reader.foundView } }
-        if scope == .recent { return currentOrder }
-        return joinedOrder { $0.view(ScopeRequest(scope: scope.viewScope)) }
+    func listOrder(_ key: ListKey) -> ScopePage.View? {
+        if !key.search.isEmpty { return joinedOrder { $0.reader.foundView } }
+        guard let request = key.request else { return currentOrder }
+        return joinedOrder { $0.view(request) }
     }
 
     /// Keeps the list's order while a finger is on it; rows still update in place.

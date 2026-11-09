@@ -468,7 +468,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             switch request.url?.path {
             case "/api/v1/snapshot":
                 if let parentID = query.first(where: { $0.name == "parentId" })?.value { captured = query.contains { $0.name == "cursor" } ? nil : capture.subagentPageJSON[parentID] }
-                else if let scope = query.first(where: { $0.name == "scope" })?.value { captured = PreviewOrder.scoped(capture.snapshotJSON, scope) }
+                else if let scope = query.first(where: { $0.name == "scope" })?.value { captured = PreviewOrder.scoped(capture.snapshotJSON, scope, status: query.first { $0.name == "status" }?.value, surface: query.first { $0.name == "surface" }?.value) }
                 else { captured = capture.snapshotJSON }
             case "/api/v1/queue": captured = capture.queueJSON
             case "/api/v1/inbox": captured = #"{"items":[]}"#
@@ -500,7 +500,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
                 .filter { query.isEmpty || $0.0.localizedCaseInsensitiveContains(query) }
                 .map { #"{"path":"\#($0.0)","dir":\#($0.1)}"# }
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
-        case "/api/v1/snapshot": body = requestQuery.first(where: { $0.name == "scope" }).map { PreviewOrder.scoped(SessionPreview.snapshotJSON, $0.value) } ?? SessionPreview.snapshotJSON
+        case "/api/v1/snapshot": body = requestQuery.first(where: { $0.name == "scope" }).map { PreviewOrder.scoped(SessionPreview.snapshotJSON, $0.value, status: requestQuery.first { $0.name == "status" }?.value, surface: requestQuery.first { $0.name == "surface" }?.value) } ?? SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-project-message"):
             body = #"{"recipients":[{"sessionId":"demo","outcome":"delivered"}]}"#

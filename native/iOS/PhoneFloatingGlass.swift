@@ -27,14 +27,15 @@ extension PhoneAppearance {
 struct FloatingGlass<S: Shape>: ViewModifier {
     let shape: S
     let interactive: Bool
+    let lifted: Bool
     @Environment(\.phoneAppearance) private var appearance
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
         if let appearance {
-            FloatingGlassBody(content: content, shape: shape, interactive: interactive, appearance: appearance)
+            FloatingGlassBody(content: content, shape: shape, interactive: interactive, lifted: lifted, appearance: appearance)
         } else {
-            FloatingGlassLayers(content: content, shape: shape, interactive: interactive, solid: reduceTransparency, opacity: UIConfig.defaults.composerOpacity)
+            FloatingGlassLayers(content: content, shape: shape, interactive: interactive, lifted: lifted, solid: reduceTransparency, opacity: UIConfig.defaults.composerOpacity)
         }
     }
 }
@@ -43,6 +44,7 @@ private struct FloatingGlassBody<Content: View, S: Shape>: View {
     let content: Content
     let shape: S
     let interactive: Bool
+    let lifted: Bool
     @ObservedObject var appearance: PhoneAppearance
     @Environment(\.backdropKey) private var backdropKey
     @Environment(\.colorScheme) private var colorScheme
@@ -57,7 +59,7 @@ private struct FloatingGlassBody<Content: View, S: Shape>: View {
 
     var body: some View {
         let solid = appearance.config.solidSurfaces(dark: colorScheme == .dark, reduceTransparency: reduceTransparency)
-        FloatingGlassLayers(content: content, shape: shape, interactive: interactive, solid: solid, opacity: solid ? 1 : appearance.floatingOpacity(key))
+        FloatingGlassLayers(content: content, shape: shape, interactive: interactive, lifted: lifted, solid: solid, opacity: solid ? 1 : appearance.floatingOpacity(key))
     }
 }
 
@@ -65,14 +67,16 @@ private struct FloatingGlassLayers<Content: View, S: Shape>: View {
     let content: Content
     let shape: S
     let interactive: Bool
+    let lifted: Bool
     let solid: Bool
     let opacity: Double
 
     var body: some View {
+        let shadowed = solid && lifted
         let tint = content
             .background(PhonePalette.ground.opacity(solid ? 1 : opacity), in: shape)
             .overlay { if solid { shape.stroke(PhonePalette.hairline) } }
-            .shadow(color: .black.opacity(solid ? 0.12 : 0), radius: solid ? 12 : 0, y: solid ? 4 : 0)
+            .shadow(color: .black.opacity(shadowed ? 0.12 : 0), radius: shadowed ? 12 : 0, y: shadowed ? 4 : 0)
         if #available(iOS 26, *) {
             tint.glassEffect(solid ? .identity : interactive ? .regular.interactive() : .regular, in: shape)
         } else {

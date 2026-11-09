@@ -25,7 +25,7 @@ final class SessionCellsObservationTests: XCTestCase {
 
     @MainActor
     private func familyIDs(_ model: AgenthailIOSModel) -> [String] {
-        model.sessionTree(scope: .recent, search: "").projects.flatMap { $0.checkouts.flatMap(\.families) }.map(\.id)
+        model.sessionTree(search: "").projects.flatMap { $0.checkouts.flatMap(\.families) }.map(\.id)
     }
 
     @MainActor
@@ -34,7 +34,7 @@ final class SessionCellsObservationTests: XCTestCase {
         XCTAssertEqual(familyIDs(model), ["computer::a", "computer::b"])
         let changed = ObservationProbe { _ = model.session("computer::a") }
         let other = ObservationProbe { _ = model.session("computer::b") }
-        let list = ObservationProbe { _ = model.sessionTree(scope: .recent, search: "") }
+        let list = ObservationProbe { _ = model.sessionTree(search: "") }
         let parts = ObservationProbe {
             _ = model.queue
             _ = model.listing
@@ -66,7 +66,7 @@ final class SessionCellsObservationTests: XCTestCase {
     @MainActor
     func testAStructuralChangeRederivesTheTreeOnce() {
         let model = makeModel(["a", "b"])
-        let list = ObservationProbe { _ = model.sessionTree(scope: .recent, search: "") }
+        let list = ObservationProbe { _ = model.sessionTree(search: "") }
         let revision = model.listRevision
 
         model.setHostSnapshot(HostCatalogTests.snapshot(["a", "b", "c"].map(Self.row)), view: Self.view(["a", "b", "c"]))
