@@ -2249,4 +2249,3 @@ struct DeliveryTab: View {
         .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).strokeBorder(problem ? DesktopPalette.attentionLine : DesktopPalette.line2))
     }
 }
-
