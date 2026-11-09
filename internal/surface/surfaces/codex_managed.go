@@ -48,6 +48,7 @@ type managedCodexClient struct {
 	err           error
 	closed        chan struct{}
 	notified      chan struct{}
+	server        os.FileInfo
 }
 
 const managedNotificationLimit = 1000
@@ -64,13 +65,22 @@ func newManagedCodexClient(ws *websocket.Conn) *managedCodexClient {
 	return client
 }
 
+// codexServerRestarted reports whether the managed app-server whose control
+// socket was server no longer listens there. A restarted server binds a new
+// socket file, and every turn the old one ran is gone.
+func codexServerRestarted(server os.FileInfo) bool {
+	current, err := os.Stat(managedCodexSocketPath())
+	return err != nil || !os.SameFile(current, server) || !current.ModTime().Equal(server.ModTime())
+}
+
 func managedCodexSocketPath() string {
 	return filepath.Join(codexHome(), "app-server-control", "app-server-control.sock")
 }
 
 func dialManagedCodex(ctx context.Context) (*managedCodexClient, error) {
 	socketPath := managedCodexSocketPath()
-	if _, err := os.Stat(socketPath); err != nil {
+	server, err := os.Stat(socketPath)
+	if err != nil {
 		return nil, fmt.Errorf("managed Codex app-server is unavailable: %w", err)
 	}
 	dialer := websocket.Dialer{
@@ -87,6 +97,7 @@ func dialManagedCodex(ctx context.Context) (*managedCodexClient, error) {
 		return nil, fmt.Errorf("connect managed Codex app-server: %w", err)
 	}
 	client := newManagedCodexClient(ws)
+	client.server = server
 	if _, err := client.Request(ctx, "initialize", map[string]any{
 		"clientInfo":   map[string]any{"name": "agenthail", "version": "1"},
 		"capabilities": map[string]any{"experimentalApi": true},

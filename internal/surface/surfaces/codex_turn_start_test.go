@@ -27,7 +27,7 @@ func listedTurn(id, status string) map[string]any {
 
 func TestAStartCodexNeverShowedUnderWayHoldsReloadsOnlyUntilItsTurnIsListedDone(t *testing.T) {
 	c := &Codex{}
-	c.turnStarts.begin("t")
+	c.turnStarts.begin("t", nil)
 	c.turnStarts.identify("t", "turn-2")
 	older := listedTurnClient{turns: []any{listedTurn("turn-1", "completed")}}
 	if busy, err := c.turnInFlight(context.Background(), older, "t"); err != nil || !busy {
@@ -44,7 +44,7 @@ func TestAStartCodexNeverShowedUnderWayHoldsReloadsOnlyUntilItsTurnIsListedDone(
 
 func TestAStartWhoseTurnEndedBeforeANewerOneNoLongerHoldsReloads(t *testing.T) {
 	c := &Codex{}
-	c.turnStarts.begin("t")
+	c.turnStarts.begin("t", nil)
 	c.turnStarts.identify("t", "turn-1")
 	later := listedTurnClient{turns: []any{listedTurn("turn-2", "completed"), listedTurn("turn-1", "completed")}}
 	if busy, err := c.turnInFlight(context.Background(), later, "t"); err != nil || busy {
@@ -54,7 +54,7 @@ func TestAStartWhoseTurnEndedBeforeANewerOneNoLongerHoldsReloads(t *testing.T) {
 
 func TestAStartListedInterruptedBeforeTheThreadTurnsActiveStillHoldsReloads(t *testing.T) {
 	c := &Codex{}
-	c.turnStarts.begin("t")
+	c.turnStarts.begin("t", nil)
 	c.turnStarts.identify("t", "turn-2")
 	starting := listedTurnClient{turns: []any{map[string]any{"id": "turn-2", "status": "interrupted", "completedAt": nil}, listedTurn("turn-1", "completed")}}
 	if busy, err := c.turnInFlight(context.Background(), starting, "t"); err != nil || !busy {
@@ -64,7 +64,7 @@ func TestAStartListedInterruptedBeforeTheThreadTurnsActiveStillHoldsReloads(t *t
 
 func TestAStartWhoseTurnFellPastTheScannedTurnsNoLongerHoldsReloads(t *testing.T) {
 	c := &Codex{}
-	c.turnStarts.begin("t")
+	c.turnStarts.begin("t", nil)
 	c.turnStarts.identify("t", "turn-0")
 	newer := listedTurnClient{}
 	for i := codexTurnStartScan; i > 0; i-- {
@@ -103,7 +103,7 @@ func TestATurnThisProcessStartedIsRunningWhileCodexListsItUnsettled(t *testing.T
 	if id, err := c.activeTurnID(context.Background(), starting, "t"); err != nil || id != "" {
 		t.Fatalf("a turn another client started was taken as running without being listed running: %q %v", id, err)
 	}
-	c.turnStarts.begin("t")
+	c.turnStarts.begin("t", nil)
 	c.turnStarts.identify("t", "turn-2")
 	if id, err := c.activeTurnID(context.Background(), starting, "t"); err != nil || id != "turn-2" {
 		t.Fatalf("a turn this process started read as not running: %q %v", id, err)

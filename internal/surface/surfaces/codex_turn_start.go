@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -26,15 +27,30 @@ type codexTurnStarts struct {
 type codexTurnStart struct {
 	at     time.Time
 	turnID string
+	server os.FileInfo
 }
 
-func (s *codexTurnStarts) begin(threadID string) {
+func (s *codexTurnStarts) begin(threadID string, server os.FileInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.started == nil {
 		s.started = map[string]codexTurnStart{}
 	}
-	s.started[threadID] = codexTurnStart{at: time.Now()}
+	s.started[threadID] = codexTurnStart{at: time.Now(), server: server}
+}
+
+// live returns threadID's start if it is still within codexTurnStartLimit
+// and the app-server that ran it has not restarted, and forgets it otherwise.
+func (s *codexTurnStarts) live(threadID string) (codexTurnStart, bool) {
+	start, ok := s.started[threadID]
+	if !ok {
+		return start, false
+	}
+	if time.Since(start.at) >= codexTurnStartLimit || start.server != nil && codexServerRestarted(start.server) {
+		delete(s.started, threadID)
+		return start, false
+	}
+	return start, true
 }
 
 func (s *codexTurnStarts) identify(threadID, turnID string) {
@@ -54,8 +70,7 @@ func (s *codexTurnStarts) end(threadID string) {
 
 // settle ends a start once turns, the newest first and none running, show its
 // turn ended: listed with completedAt or behind a newer turn, or gone from a
-// full page. A start whose response named no turn, a compaction, cannot be told
-// from another client's turn in the listing, so it holds until
+// full page. A compaction whose turn its connection did not see holds until
 // codexTurnStartLimit.
 func (s *codexTurnStarts) settle(threadID string, turns []map[string]any, full bool) {
 	s.mu.Lock()
@@ -83,15 +98,15 @@ func (s *codexTurnStarts) settle(threadID string, turns []map[string]any, full b
 func (s *codexTurnStarts) running(threadID, turnID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	start, ok := s.started[threadID]
-	return ok && turnID != "" && start.turnID == turnID && time.Since(start.at) < codexTurnStartLimit
+	start, ok := s.live(threadID)
+	return ok && turnID != "" && start.turnID == turnID
 }
 
 func (s *codexTurnStarts) pending(threadID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	start, ok := s.started[threadID]
-	return ok && time.Since(start.at) < codexTurnStartLimit
+	_, ok := s.live(threadID)
+	return ok
 }
 
 // startTurn sends a request that starts a turn on threadID, then keeps client
@@ -99,9 +114,18 @@ func (s *codexTurnStarts) pending(threadID string) bool {
 // completed, for at most codexTurnStartWait. Until then Codex counts the
 // thread idle, and a resume whose overrides differ reloads an idle thread no
 // connection subscribes to, aborting the turn. The start stays recorded until
-// its turn is listed ended.
+// its turn is listed ended. thread/compact/start names no turn and answers
+// before Codex creates one, so its turn is the one this connection then sees
+// start and run a contextCompaction item.
 func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
-	c.turnStarts.begin(threadID)
+	var server os.FileInfo
+	if managed, ok := client.(*managedCodexClient); ok {
+		server = managed.server
+	}
+	if notifier, ok := client.(codexNotifier); ok {
+		notifier.DrainNotifications()
+	}
+	c.turnStarts.begin(threadID, server)
 	response, err := client.Request(ctx, method, params, wait)
 	var refused *codexRPCError
 	if errors.As(err, &refused) {
@@ -112,10 +136,13 @@ func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, met
 	}
 	result, _ := response["result"].(map[string]any)
 	turn, _ := result["turn"].(map[string]any)
-	if id := str(turn, "id"); id != "" {
+	id := str(turn, "id")
+	if id != "" {
 		c.turnStarts.identify(threadID, id)
 	}
-	awaitTurnUnderway(ctx, client, threadID)
+	if found := awaitTurnUnderway(ctx, client, threadID, id == ""); found != "" {
+		c.turnStarts.identify(threadID, found)
+	}
 	return response, nil
 }
 
@@ -135,28 +162,43 @@ func codexRecentTurns(ctx context.Context, client codexClient, threadID string, 
 	return turns, nil
 }
 
-func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string) {
+// awaitTurnUnderway waits for threadID to turn active or its turn to
+// complete. With findTurn it waits instead for the turn a compaction started
+// and returns its id.
+func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string, findTurn bool) string {
 	notifier, ok := client.(codexNotifier)
 	if !ok {
-		return
+		return ""
 	}
 	timer := time.NewTimer(codexTurnStartWait)
 	defer timer.Stop()
+	started := map[string]bool{}
 	for {
 		for _, event := range notifier.DrainNotifications() {
 			if str(event.Params, "threadId") != threadID {
 				continue
 			}
-			if event.Method == "turn/completed" || event.Method == "thread/status/changed" && codexStatusType(event.Params["status"]) == "active" {
-				return
+			turn, _ := event.Params["turn"].(map[string]any)
+			item, _ := event.Params["item"].(map[string]any)
+			switch {
+			case !findTurn:
+				if event.Method == "turn/completed" || event.Method == "thread/status/changed" && codexStatusType(event.Params["status"]) == "active" {
+					return ""
+				}
+			case event.Method == "turn/started":
+				started[str(turn, "id")] = true
+			case event.Method == "item/started" && str(item, "type") == "contextCompaction" && started[str(event.Params, "turnId")]:
+				return str(event.Params, "turnId")
+			case event.Method == "turn/completed" && started[str(turn, "id")]:
+				return str(turn, "id")
 			}
 		}
 		select {
 		case <-notifier.Notified():
 		case <-timer.C:
-			return
+			return ""
 		case <-ctx.Done():
-			return
+			return ""
 		}
 	}
 }
