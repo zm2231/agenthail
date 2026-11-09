@@ -24,6 +24,7 @@ struct ProjectScreen: View {
     @State private var sheet: ProjectSheet?
     @State private var confirmation: ProjectConfirmation?
     @State private var place: NewSessionPlace?
+    @State private var messaging: ListedProject?
     @State private var showingEarlier = false
 
     private var project: ListedProject? { model.projects[projectID] }
@@ -39,6 +40,7 @@ struct ProjectScreen: View {
         .phoneBackdrop(.list)
         .sheet(item: $place) { place in NewSessionSheet(model: model, place: place) }
         .sheet(item: $sheet) { sheet in IOSProjectSheetView(model: model, sheet: sheet) }
+        .sheet(item: $messaging) { project in IOSProjectMessageSheet(model: model, project: project) }
         .alert(confirmation?.message ?? "", isPresented: Binding(get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }), presenting: confirmation) { confirmation in
             Button(confirmation.action, role: .destructive) { Task { model.settle(await confirmation.run()) } }
             Button("Cancel", role: .cancel) {}
@@ -89,6 +91,10 @@ struct ProjectScreen: View {
                 HStack(spacing: 10) {
                     Button("New session") { newSession(project) }.buttonStyle(.borderedProminent)
                     Button(contents.lead == nil ? "New lead" : "Change lead") { sheet = .lead(project.state) }.buttonStyle(.bordered)
+                    if project.state.archived != true {
+                        Button("Message…") { messaging = project }.buttonStyle(.bordered)
+                            .accessibilityIdentifier("project-message")
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .listRowBackground(Color.clear)
@@ -106,7 +112,7 @@ struct ProjectScreen: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    IOSProjectMenuItems(model: model, project: project, sheet: $sheet, confirmation: $confirmation, place: $place)
+                    IOSProjectMenuItems(model: model, project: project, sheet: $sheet, confirmation: $confirmation, place: $place, messaging: $messaging)
                 } label: {
                     Label("Project settings", systemImage: "ellipsis.circle")
                 }

@@ -160,7 +160,7 @@ SOURCES=(
   macOS/SessionFacts.swift
   macOS/SessionRowNote.swift
   macOS/BackgroundTaskLines.swift
-  macOS/SessionHandle.swift
+  SessionHandle.swift
   macOS/SessionLaunch.swift
   macOS/OutputSchemaInput.swift
   macOS/TurnOptionsChip.swift
@@ -175,6 +175,7 @@ SOURCES=(
   macOS/ClaudeCompactStore.swift
   macOS/PairingProgress.swift
   macOS/ProjectHeaderFacts.swift
+  ProjectBroadcast.swift
   macOS/SessionPane.swift
   macOS/KeptTranscripts.swift
   macOS/MacDecisions.swift

@@ -17,13 +17,13 @@ struct ProjectHeaderTest {
         check(ProjectHeaderFacts.leadChip([local, remote]) == .conflict(label: "2 leads", help: "Several hosts each have a coordinator: @lead, server::@lead. Change the lead to keep one."), "several leads warn and name each")
 
         let result = try JSONDecoder().decode(ChannelSendResult.self, from: Data(##"{"ok":true,"target":"#p1","recipients":[{"coordinator":"@lead","outcome":"sent"},{"sessionId":"s2","outcome":"queued"},{"sessionId":"s3","coordinator":"","outcome":"submitted"}],"sent":1,"queued":1,"submitted":1,"failed":0}"##.utf8))
-        check(ProjectHeaderFacts.sent(result) { $0 == "s2" ? "tests" : $0 } == "Sent to 3: @lead, tests, s3.", "the notice names each recipient: \(ProjectHeaderFacts.sent(result) { $0 })")
+        check(ProjectBroadcast.sent(result) { $0 == "s2" ? "tests" : $0 } == "Sent to 3: @lead, tests, s3.", "the notice names each recipient: \(ProjectBroadcast.sent(result) { $0 })")
 
         let none = try JSONDecoder().decode(ChannelSendResult.self, from: Data(#"{"recipients":[{"sessionId":"s4","outcome":"failed"}]}"#.utf8))
-        check(ProjectHeaderFacts.sent(none) { $0 } == "Sent to 0. Not delivered to s4.", "a broadcast that reached no one says so: \(ProjectHeaderFacts.sent(none) { $0 })")
+        check(ProjectBroadcast.sent(none) { $0 } == "Sent to 0. Not delivered to s4.", "a broadcast that reached no one says so: \(ProjectBroadcast.sent(none) { $0 })")
 
         let hosts = try JSONDecoder().decode(ChannelSendResult.self, from: Data(#"{"recipients":[{"coordinator":"@lead","outcome":"sent"}],"hosts":[{"id":"h1","name":"studio","state":"held","recipients":0},{"id":"h2","name":"vps","state":"refused","recipients":0,"detail":"the sender is in project gadget, not widget","rule":"different_project"}],"unreachable":["studio"]}"#.utf8))
-        check(ProjectHeaderFacts.sent(hosts) { $0 } == "Sent to 1: @lead. Held for studio until it answers. Refused by vps: the sender is in project gadget, not widget.", "the notice names unreachable and refusing hosts: \(ProjectHeaderFacts.sent(hosts) { $0 })")
+        check(ProjectBroadcast.sent(hosts) { $0 } == "Sent to 1: @lead. Held for studio until it answers. Refused by vps: the sender is in project gadget, not widget.", "the notice names unreachable and refusing hosts: \(ProjectBroadcast.sent(hosts) { $0 })")
 
         try await broadcasts()
         print("ok")
