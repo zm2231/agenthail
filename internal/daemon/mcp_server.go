@@ -21,12 +21,23 @@ type mcpRefusal struct {
 	Message   string         `json:"message"`
 	Retryable bool           `json:"retryable"`
 	Detail    map[string]any `json:"detail,omitempty"`
+	target    string
+	audited   bool
 }
 
 func (r *mcpRefusal) Error() string { return r.Code + ": " + r.Message }
 
+func (r *mcpRefusal) about(target string) *mcpRefusal {
+	r.target = target
+	return r
+}
+
 func refuse(code, message string) *mcpRefusal {
 	return &mcpRefusal{Code: code, Message: message}
+}
+
+func scopeRefusal(target, rule, message string) *mcpRefusal {
+	return &mcpRefusal{Code: "out_of_scope", Message: message, Detail: map[string]any{"rule": rule}, target: target}
 }
 
 func (d *Daemon) mcpHandler() http.Handler {
@@ -112,7 +123,11 @@ func addMCPTool[In any](d *Daemon, server *mcp.Server, tool *mcp.Tool, run func(
 			value, err = run(ctx, caller, input)
 		}
 		if err != nil {
-			return mcpRefused(mcpRefusalFor(err)), nil, nil
+			refusal := mcpRefusalFor(err)
+			if !replay.done {
+				d.recordMCPScopeRefusal(caller, tool.Name, refusal)
+			}
+			return mcpRefused(refusal), nil, nil
 		}
 		encoded, err := apitime.Marshal(value)
 		if err != nil {

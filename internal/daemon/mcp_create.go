@@ -43,7 +43,7 @@ func spawnRefusal(caller *mcpCaller, kind surface.SurfaceKind) *mcpRefusal {
 
 func (d *Daemon) mcpCreateScope(caller *mcpCaller, kind surface.SurfaceKind, mode, rawCwd string) (childStart, string, error) {
 	if refusal := spawnRefusal(caller, kind); refusal != nil {
-		return childStart{}, "", refusal
+		return childStart{}, "", refusal.about("new:" + string(kind))
 	}
 	if !filepath.IsAbs(strings.TrimSpace(rawCwd)) {
 		return childStart{}, "", refuse("invalid", "cwd must be an absolute folder.")
@@ -57,6 +57,9 @@ func (d *Daemon) mcpCreateScope(caller *mcpCaller, kind surface.SurfaceKind, mod
 		return childStart{}, "", err
 	}
 	start, err := childCeiling(ceiling, kind, strings.TrimSpace(mode), cwd)
+	if refusal, ok := err.(*mcpRefusal); ok {
+		return childStart{}, "", refusal.about("new:" + string(kind) + ":" + cwd)
+	}
 	if err != nil {
 		return childStart{}, "", err
 	}
@@ -93,7 +96,7 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 		return nil, refuse("invalid", "A Notion thread cannot be a task.")
 	}
 	if refusal := spawnRefusal(caller, kind); refusal != nil {
-		return nil, refusal
+		return nil, refusal.about("new:" + string(kind))
 	}
 	if kind == surface.KindNotion {
 		return d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{Action: "notion-create", Message: input.Message, Model: strings.TrimSpace(input.Model), Alias: strings.TrimSpace(input.Alias)})

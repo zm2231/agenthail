@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -64,6 +65,15 @@ func TestAChildStartsBoundedByItsSpawnerFromItsFirstCall(t *testing.T) {
 	}
 	if out, _ := f.create(t, childToken, map[string]any{"surface": "codex", "cwd": root, "message": "more", "clientRequestId": "g2"}); out["code"] != "exceeds_ceiling" {
 		t.Fatalf("a grandchild outside the child's folder: %v", out)
+	}
+	ceilingAudits := map[string]string{}
+	for _, entry := range mcpAudits(t, f.registry) {
+		if entry.Result == "exceeds_ceiling" {
+			ceilingAudits[entry.Message] = entry.SessionID
+		}
+	}
+	if !strings.HasPrefix(ceilingAudits["agenthail_create rule=ceiling_permission"], "new:codex:") || ceilingAudits["agenthail_create rule=ceiling_roots"] != "new:codex:"+root {
+		t.Fatalf("ceiling refusal audits=%v, want each with its new-session target and rule", ceilingAudits)
 	}
 	if out, refused := f.create(t, parentToken, args); refused {
 		t.Fatalf("replay: %v", out)

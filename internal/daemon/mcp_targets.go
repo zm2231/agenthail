@@ -78,7 +78,7 @@ func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.R
 		return nil, refuse("invalid", fmt.Sprintf("%s does not name one session exactly; it matched %s. Address it by @alias or session id.", ref, remote.Label()))
 	}
 	if !upward {
-		return nil, &mcpRefusal{Code: "out_of_scope", Message: fmt.Sprintf("%s runs on host %s; across hosts you may only send a queued message.", remote.Label(), remote.Host.Name), Detail: map[string]any{"rule": "not_queued"}}
+		return nil, scopeRefusal(remote.ID, "not_queued", fmt.Sprintf("%s runs on host %s; across hosts you may only send a queued message.", remote.Label(), remote.Host.Name))
 	}
 	if caller.has("control.all") {
 		return remote.Session(), nil
@@ -87,10 +87,10 @@ func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.R
 		return nil, &mcpRefusal{Code: "unavailable", Retryable: true, Message: fmt.Sprintf("Host %s did not confirm which project %s is in; it may be unreachable or run an older Agenthail. Try again once it answers.", remote.Host.Name, remote.Label()), Detail: map[string]any{"rule": "project_unconfirmed"}}
 	}
 	if caller.project == nil || remote.Project != caller.project.ID {
-		return nil, &mcpRefusal{Code: "out_of_scope", Message: fmt.Sprintf("%s runs on host %s and is not in your project; across hosts you may message only sessions in your own project.", remote.Label(), remote.Host.Name), Detail: map[string]any{"rule": "different_project"}}
+		return nil, scopeRefusal(remote.ID, "different_project", fmt.Sprintf("%s runs on host %s and is not in your project; across hosts you may message only sessions in your own project.", remote.Label(), remote.Host.Name))
 	}
 	if !caller.has("control.project") && !(remote.Lead && d.isCallerLead(caller, remote.ID)) {
-		return nil, &mcpRefusal{Code: "out_of_scope", Message: fmt.Sprintf("%s runs on host %s; in your project you may message its coordinator, and other sessions only with control.project.", remote.Label(), remote.Host.Name), Detail: map[string]any{"rule": "not_your_lead"}}
+		return nil, scopeRefusal(remote.ID, "not_your_lead", fmt.Sprintf("%s runs on host %s; in your project you may message its coordinator, and other sessions only with control.project.", remote.Label(), remote.Host.Name))
 	}
 	return remote.Session(), nil
 }

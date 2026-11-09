@@ -40,7 +40,7 @@ func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref st
 		return nil, refuse("invalid", "That is your own session.")
 	}
 	if host, err := d.Registry.SessionHost(session.ID); err != nil || host != "" {
-		return nil, refuse("out_of_scope", "That session runs on another host; reach a project's coordinator there by sending with project instead.")
+		return nil, scopeRefusal(session.ID, "other_host", "That session runs on another host; reach a project's coordinator there by sending with project instead.")
 	}
 	ancestors, err := d.Registry.SessionAncestors(caller.session.ID)
 	if err != nil {
@@ -50,7 +50,7 @@ func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref st
 		if upward {
 			return session, nil
 		}
-		return nil, refuse("out_of_scope", mcpDownOnly)
+		return nil, scopeRefusal(session.ID, "down_only", mcpDownOnly)
 	}
 	if caller.has("control.all") {
 		return session, nil
@@ -71,9 +71,9 @@ func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref st
 		if upward {
 			return session, nil
 		}
-		return nil, refuse("out_of_scope", mcpDownOnly)
+		return nil, scopeRefusal(session.ID, "down_only", mcpDownOnly)
 	}
-	return nil, refuse("out_of_scope", "That session is not one you spawned or, as its project's coordinator, lead; ask your project's coordinator to reach it.")
+	return nil, scopeRefusal(session.ID, "not_spawned_or_led", "That session is not one you spawned or, as its project's coordinator, lead; ask your project's coordinator to reach it.")
 }
 
 const mcpDownOnly = "Control flows down only: you may send a queued message to your spawner or your project's coordinator, but not steer, interrupt, answer, change its goal or settings, or send now."
@@ -104,7 +104,7 @@ func (d *Daemon) mcpCeilingCovers(caller *mcpCaller, targetID string) error {
 		return err
 	}
 	if !target.within(limit) {
-		return &mcpRefusal{Code: "exceeds_ceiling", Message: "That session may do more than you may, so you cannot control it.", Detail: map[string]any{"axis": "target", "limit": limit}}
+		return (&mcpRefusal{Code: "exceeds_ceiling", Message: "That session may do more than you may, so you cannot control it.", Detail: map[string]any{"axis": "target", "limit": limit}}).about(targetID)
 	}
 	return nil
 }

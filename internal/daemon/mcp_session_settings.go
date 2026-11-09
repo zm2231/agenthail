@@ -77,7 +77,7 @@ func (d *Daemon) mcpPermissionWithinCeiling(caller *mcpCaller, target *surface.S
 		return err
 	}
 	if ceiling.Permission != "" && rankOf(rank) > rankOf(ceiling.Permission) {
-		return &mcpRefusal{Code: "exceeds_ceiling", Message: fmt.Sprintf("%s is above that session's ceiling of %s.", mode, ceiling.Permission), Detail: map[string]any{"axis": "permission", "limit": ceiling.Permission}}
+		return (&mcpRefusal{Code: "exceeds_ceiling", Message: fmt.Sprintf("%s is above that session's ceiling of %s.", mode, ceiling.Permission), Detail: map[string]any{"axis": "permission", "limit": ceiling.Permission}}).about(target.ID)
 	}
 	return nil
 }

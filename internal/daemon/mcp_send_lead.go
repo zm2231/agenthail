@@ -22,9 +22,9 @@ func (d *Daemon) mcpLeadScope(caller *mcpCaller, name, mode string) (broadcast.P
 	own := caller.project != nil && caller.project.ID == project.ID
 	if !caller.has("control.all") && mode == "now" {
 		if !own {
-			return broadcast.Project{}, &mcpRefusal{Code: "out_of_scope", Message: "Another project's coordinator takes only a queued message from you.", Detail: map[string]any{"rule": "different_project"}}
+			return broadcast.Project{}, scopeRefusal("project:"+project.ID, "different_project", "Another project's coordinator takes only a queued message from you.")
 		}
-		return broadcast.Project{}, refuse("out_of_scope", "Control flows down only: send your coordinator a queued message.")
+		return broadcast.Project{}, scopeRefusal("project:"+project.ID, "down_only", "Control flows down only: send your coordinator a queued message.")
 	}
 	return project, nil
 }
