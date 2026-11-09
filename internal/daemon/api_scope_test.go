@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,11 +100,26 @@ func TestTheScopeEndpointDecidesAsTheSessionsMCPToolsDo(t *testing.T) {
 		{"an unknown session", ScopeRequest{SessionID: "ghost", Action: "control", Target: worker.ID}, http.StatusNotFound, "not_found", ""},
 		{"an unknown action", ScopeRequest{SessionID: worker.ID, Action: "fly"}, http.StatusBadRequest, "invalid", ""},
 	}
+	refusedOutOfScope := map[string]int{}
 	for _, c := range cases {
 		answer := askScope(t, d, c.request, local)
 		if answer.status != c.status || answer.code != c.code || (c.rule != "" && answer.rule != c.rule) {
 			t.Errorf("%s: %+v, want %d %s %s", c.name, answer, c.status, c.code, c.rule)
 		}
+		if c.code == "out_of_scope" {
+			refusedOutOfScope[c.request.SessionID+" cli "+c.request.Action]++
+		}
+	}
+	audited := map[string]int{}
+	for _, entry := range mcpAudits(t, r) {
+		command, rule, _ := strings.Cut(entry.Message, " rule=")
+		if entry.Result != "out_of_scope" || !strings.HasPrefix(command, "cli ") || rule == "" || entry.SessionID == "" || entry.Error == "" {
+			t.Fatalf("audit %+v, want an out_of_scope refusal naming the command, rule, target and reason", entry)
+		}
+		audited[entry.SourceSessionID+" "+command]++
+	}
+	if !reflect.DeepEqual(audited, refusedOutOfScope) {
+		t.Fatalf("audited %v, want one entry per scope refusal %v and none for other refusals", audited, refusedOutOfScope)
 	}
 
 	for _, payload := range []string{`{"surface":"notion","message":"m"}`, `{"surface":"codex","cwd":"relative","message":"m"}`} {
