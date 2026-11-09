@@ -296,18 +296,19 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 		if response := apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, map[string]any{"action": "send", "sessionId": id, "message": message, "author": "person"}); response.Code != http.StatusOK {
 			t.Fatalf("send status=%d body=%s", response.Code, response.Body.String())
 		}
-		var last *surface.TurnObservation
+		// A message sent as the last turn ends waits in the queue until an
+		// observation finds the session idle, as the daemon's scan would.
+		var observed surface.Session
 		for deadline := time.Now().Add(15 * time.Second); pushes.count("session.waiting") <= before; time.Sleep(10 * time.Millisecond) {
 			if time.Now().After(deadline) {
-				t.Fatalf("timed out waiting for the waiting push for %q; %s", message, waitingDiagnosis(t, r, fixture, id, last))
+				t.Fatalf("timed out waiting for the waiting push for %q; %s", message, waitingDiagnosis(t, r, fixture, observed))
 			}
 			stored, err := r.Session(id)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if last, err = d.observeTurn(context.Background(), claude, stored); err != nil {
-				t.Fatal(err)
-			}
+			d.observeSession(context.Background(), claude, stored)
+			observed = *stored
 		}
 		return pushes.all("session.waiting")[before]
 	}
@@ -444,14 +445,10 @@ func TestElsewhereWaitingMessageSaysWhereAnUnheldPromptIsAnswered(t *testing.T) 
 	}
 }
 
-func waitingDiagnosis(t *testing.T, r *registry.Registry, fixture *claudehosttest.Fixture, id string, last *surface.TurnObservation) string {
+func waitingDiagnosis(t *testing.T, r *registry.Registry, fixture *claudehosttest.Fixture, session surface.Session) string {
 	t.Helper()
-	var observed string
-	if last == nil {
-		observed = "no observation"
-	} else {
-		observed = fmt.Sprintf("last observation status=%s waitingOn=%+v waitingUnknown=%v", last.Status, last.WaitingOn, last.WaitingUnknown)
-	}
+	id := session.ID
+	observed := fmt.Sprintf("last observed status=%s waitingOn=%+v queued=%d", session.Status, session.WaitingOn, r.QueueCount(id))
 	recorded, announced, err := r.WaitingState(id)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
