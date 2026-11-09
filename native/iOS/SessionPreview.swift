@@ -476,6 +476,8 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
         case "/api/v1/snapshot": body = requestQuery.first(where: { $0.name == "scope" }).map { PreviewOrder.scoped(SessionPreview.snapshotJSON, $0.value) } ?? SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
+        case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-project-message"):
+            body = #"{"recipients":[{"sessionId":"demo","outcome":"delivered"}]}"#
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-tail"):
             let action = Self.actionBody(request)
             if action["action"] as? String == "queue-cancel" { Self.tailCleared = !ProcessInfo.processInfo.arguments.contains("--preview-tail-keeps") }

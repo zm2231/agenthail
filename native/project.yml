@@ -101,6 +101,7 @@ targets:
       - path: ObservedScope.swift
       - path: SessionCells.swift
       - path: SessionHandle.swift
+      - path: ProjectBroadcast.swift
       - path: MinuteClock.swift
       - path: ConnectionGrace.swift
       - path: SnapshotRefreshPolicy.swift

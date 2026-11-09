@@ -12,8 +12,13 @@ struct IOSProjectMenuItems: View {
     @Binding var sheet: ProjectSheet?
     @Binding var confirmation: ProjectConfirmation?
     @Binding var place: NewSessionPlace?
+    @Binding var messaging: ListedProject?
 
     var body: some View {
+        if project.state.archived != true {
+            Button("Message…", systemImage: "paperplane") { messaging = project }
+                .accessibilityIdentifier("message-project-" + project.id)
+        }
         ForEach(ProjectMenu.items(for: project.state), id: \.self) { item in
             switch item {
             case .rename:

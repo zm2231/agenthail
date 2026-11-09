@@ -13,7 +13,7 @@ struct ProjectMessageSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(ProjectHeaderFacts.broadcastPrompt(project)).font(.headline)
+            Text(ProjectBroadcast.prompt(project)).font(.headline)
             if let sent {
                 Text(sent)
                     .font(.system(size: DesktopType.secondary))

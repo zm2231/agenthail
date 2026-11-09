@@ -175,6 +175,7 @@ SOURCES=(
   macOS/ClaudeCompactStore.swift
   macOS/PairingProgress.swift
   macOS/ProjectHeaderFacts.swift
+  ProjectBroadcast.swift
   macOS/SessionPane.swift
   macOS/KeptTranscripts.swift
   macOS/MacDecisions.swift

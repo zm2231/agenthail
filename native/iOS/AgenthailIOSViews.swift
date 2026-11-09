@@ -236,6 +236,7 @@ struct ConversationListView: View {
     @State private var projectSheet: ProjectSheet?
     @State private var projectConfirmation: ProjectConfirmation?
     @State private var newSessionPlace: NewSessionPlace?
+    @State private var messagingProject: ListedProject?
     @StateObject private var usage = UsageFeed()
     @ScaledMetric(relativeTo: .body) private var titleInset: CGFloat = 53
 
@@ -332,7 +333,7 @@ struct ConversationListView: View {
                                     Task { await model.setProjectArchived(identity.id, !project.archived) }
                                 }
                                 if let listed = model.projects[identity.id] {
-                                    IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace)
+                                    IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace, messaging: $messagingProject)
                                 }
                             }
                         }
@@ -350,7 +351,7 @@ struct ConversationListView: View {
                 Section("Projects without sessions") {
                     ForEach(empty, id: \.state.id) { listed in
                         Menu {
-                            IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace)
+                            IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace, messaging: $messagingProject)
                         } label: {
                             Label(listed.state.displayName, systemImage: "folder").foregroundStyle(.primary)
                         }
@@ -431,6 +432,7 @@ struct ConversationListView: View {
         .sheet(isPresented: $showingNewSession) { NewSessionSheet(model: model) }
         .sheet(item: $newSessionPlace) { place in NewSessionSheet(model: model, place: place) }
         .sheet(item: $projectSheet) { sheet in IOSProjectSheetView(model: model, sheet: sheet) }
+        .sheet(item: $messagingProject) { project in IOSProjectMessageSheet(model: model, project: project) }
         .alert(projectConfirmation?.message ?? "", isPresented: Binding(get: { projectConfirmation != nil }, set: { if !$0 { projectConfirmation = nil } }), presenting: projectConfirmation) { confirmation in
             Button(confirmation.action, role: .destructive) { Task { model.settle(await confirmation.run()) } }
             Button("Cancel", role: .cancel) {}
