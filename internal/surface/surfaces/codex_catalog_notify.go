@@ -40,8 +40,10 @@ func (c *Codex) forwardCodexStatusChanges(ctx context.Context, client *managedCo
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	watch := newTerminalWatch(client, &c.terminals)
+	requests := newRequestWatch(c, client)
 	if ids, err := c.loadedThreadIDs(ctx, client, 0); err == nil {
 		watch.seed(ids, time.Now())
+		requests.seed(ctx, ids)
 	}
 	ticker := time.NewTicker(codexTerminalsTick)
 	defer ticker.Stop()
@@ -59,15 +61,24 @@ func (c *Codex) forwardCodexStatusChanges(ctx context.Context, client *managedCo
 				changed()
 			}
 			watch.start(ctx, time.Now())
+		case result := <-requests.results:
+			requests.finish(ctx, result)
+		case seeded := <-requests.seeded:
+			requests.applySeed(ctx, seeded)
 		case <-client.Notified():
 			report := false
 			for _, event := range client.DrainNotifications() {
+				if requests.heard(event) {
+					report = true
+					continue
+				}
 				if event.Method != "thread/status/changed" {
 					continue
 				}
 				report = true
 				threadID, _ := event.Params["threadId"].(string)
 				watch.status(threadID, codexStatusType(event.Params["status"]), time.Now())
+				requests.status(ctx, threadID, event.Params["status"])
 			}
 			if report {
 				changed()

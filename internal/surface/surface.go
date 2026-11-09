@@ -43,12 +43,13 @@ const (
 // Waiting marks a busy turn that cannot continue until its user answers. ID
 // is stable for one question, so a new ID means a new question. Answerable is
 // a question Agenthail holds and can answer; any other is answered where the
-// session runs, or not at all if nothing there shows it.
+// session runs, or not at all if nothing there shows it. Open lists every open request id, oldest (ID) first.
 type Waiting struct {
 	Kind       WaitingKind `json:"kind"`
 	ID         string      `json:"id"`
 	Since      time.Time   `json:"since,omitzero"`
 	Answerable bool        `json:"answerable"`
+	Open       []string    `json:"open,omitempty"`
 }
 
 // BackgroundTasks is work a session started that runs on after its turn ends:

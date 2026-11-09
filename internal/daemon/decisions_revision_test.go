@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -70,6 +71,45 @@ func TestTheDecisionsRevisionMovesOnlyWhenADecisionCan(t *testing.T) {
 	}
 	if holding := ownRevision(t, f.d); holding == waiting {
 		t.Fatal("a worker held up behind the lead left the revision alone")
+	}
+}
+
+func (f *mcpAnswerFixture) openRequests(t *testing.T, id string, since time.Time, open ...string) {
+	t.Helper()
+	waiting := &surface.Waiting{Kind: surface.WaitingApproval, ID: open[0], Answerable: true, Since: since, Open: open}
+	session := f.surface.sessions[id]
+	session.Status, session.WaitingOn = surface.StatusBusy, waiting
+	f.surface.sessions[id] = session
+	f.surface.observations[id] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "t-" + id, WaitingOn: waiting}
+	testkit.Eventually(t, "the open requests in the session view", 5*time.Second, func() bool {
+		f.d.scanAndRelay(t.Context())
+		f.d.discoverCatalog(t.Context())
+		rows, _, err := f.d.decisionRows(t.Context())
+		if err != nil {
+			return false
+		}
+		for _, row := range rows {
+			if row.ID == id {
+				return row.WaitingOn != nil && slices.Equal(row.WaitingOn.Open, open)
+			}
+		}
+		return false
+	})
+}
+
+func TestASecondOpenRequestMovesTheDecisionsRevision(t *testing.T) {
+	f := newMCPAnswerFixture(t)
+	since := time.Now().Add(-time.Minute).UTC().Truncate(time.Millisecond)
+	f.openRequests(t, "lead", since, "a")
+	one := ownRevision(t, f.d)
+	f.openRequests(t, "lead", since, "a", "b")
+	two := ownRevision(t, f.d)
+	if two == one {
+		t.Fatal("a second open request left the decisions revision alone")
+	}
+	f.openRequests(t, "lead", since, "a")
+	if back := ownRevision(t, f.d); back == two {
+		t.Fatal("the second request closing left the decisions revision alone")
 	}
 }
 

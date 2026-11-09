@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -82,7 +83,7 @@ func TestClaudeObserveReadsWaitingFromTheProcessRecord(t *testing.T) {
 				}
 				return
 			}
-			if observation.Status != surface.StatusBusy || observation.WaitingOn == nil || *observation.WaitingOn != *test.want {
+			if observation.Status != surface.StatusBusy || observation.WaitingOn == nil || !reflect.DeepEqual(*observation.WaitingOn, *test.want) {
 				t.Fatalf("observation=%+v waiting=%+v", observation, observation.WaitingOn)
 			}
 		})

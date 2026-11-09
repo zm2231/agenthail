@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -36,11 +37,11 @@ func TestClaudeWaitingBeforeTheFirstTranscript(t *testing.T) {
 			if listed.HasLocal || listed.Transcript != "" {
 				t.Fatalf("fresh session has a transcript: %+v", listed)
 			}
-			if listed.Status != surface.StatusBusy || listed.WaitingOn == nil || *listed.WaitingOn != want {
+			if listed.Status != surface.StatusBusy || listed.WaitingOn == nil || !reflect.DeepEqual(*listed.WaitingOn, want) {
 				t.Errorf("listed status=%s waiting=%+v; want busy, %+v", listed.Status, listed.WaitingOn, want)
 			}
 			updated, err := claude.LocalStatus(ctx, listed)
-			if err != nil || updated.Status != surface.StatusBusy || updated.WaitingOn == nil || *updated.WaitingOn != want {
+			if err != nil || updated.Status != surface.StatusBusy || updated.WaitingOn == nil || !reflect.DeepEqual(*updated.WaitingOn, want) {
 				t.Errorf("local status=%s waiting=%+v err=%v; want busy, %+v", updated.Status, updated.WaitingOn, err, want)
 			}
 			fixture.RecordStatus("conversation", cwd, "", "idle", "", asked.Add(time.Second))

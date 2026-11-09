@@ -109,7 +109,7 @@ func (d *Daemon) refreshDecisionsRevision(ctx context.Context) {
 	}
 }
 
-// Asking sessions stand in their waiting id for the surface read, which is what made each fetch costly.
+// Asking sessions stand in their waiting id and open request ids for the surface read, which is what made each fetch costly.
 func (d *Daemon) ownDecisionsRevision(ctx context.Context) (string, error) {
 	rows, _, err := d.decisionRows(ctx)
 	if err != nil {
@@ -119,20 +119,20 @@ func (d *Daemon) ownDecisionsRevision(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	waiting := map[string]string{}
+	waiting := map[string][]string{}
 	page := buildDecisions(decisionSources{rows: rows, hearer: d.decisionHearer, queued: queued, requests: func(asking []dashboardSession) map[string]decisionRequests {
 		read := make(map[string]decisionRequests, len(asking))
 		for _, row := range asking {
 			read[row.ID] = decisionRequests{requests: []openRequestView{{}}}
 			if row.WaitingOn != nil {
-				waiting[row.ID] = row.WaitingOn.ID
+				waiting[row.ID] = append([]string{row.WaitingOn.ID}, row.WaitingOn.Open...)
 			}
 		}
 		return read
 	}})
 	return revisionOf(struct {
-		Page    decisionsPage     `json:"page"`
-		Waiting map[string]string `json:"waiting"`
+		Page    decisionsPage       `json:"page"`
+		Waiting map[string][]string `json:"waiting"`
 	}{page, waiting})
 }
 

@@ -242,6 +242,11 @@ func (d *Daemon) serve(ws *websocket.Conn) {
 				conn.subscribed[threadID] = true
 			}
 		}
+		if !failed && method == "thread/unsubscribe" {
+			threadID, _ := params["threadId"].(string)
+			delete(conn.subscribed, threadID)
+			d.unloadUnwatchedLocked(threadID)
+		}
 		notifications := d.takeLocked(conn)
 		d.mu.Unlock()
 		for _, notification := range notifications {
@@ -319,6 +324,19 @@ func (d *Daemon) resolveLocked(id any) map[string]any {
 		return map[string]any{"threadId": threadID, "requestId": message["id"]}
 	}
 	return nil
+}
+
+// A thread another connection still follows stays loaded, as in the app-server.
+func (d *Daemon) unloadUnwatchedLocked(threadID string) {
+	if d.heldBy[threadID] {
+		return
+	}
+	for conn := range d.conns {
+		if conn.subscribed[threadID] {
+			return
+		}
+	}
+	d.loaded[threadID] = false
 }
 
 func (d *Daemon) flagLocked(threadID string) {
@@ -636,9 +654,6 @@ func (d *Daemon) lifecycle(method string, params map[string]any, result map[stri
 		d.loaded[threadID] = true
 		return map[string]any{"thread": d.threadJSON(thread, false), "model": thread.Model}
 	case "thread/unsubscribe":
-		if !d.heldBy[threadID] {
-			d.loaded[threadID] = false
-		}
 		return map[string]any{"status": "unsubscribed"}
 	case "thread/name/set":
 		thread := d.threads[threadID]

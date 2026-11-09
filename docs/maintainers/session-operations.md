@@ -161,13 +161,25 @@ oldest open request, under Claude's own request id. Claude 2.1.303 writes a pend
 call to the transcript only once it resolves, so the transcript cannot show an
 open question. Codex reads it from the thread status, `active` with
 `waitingOnApproval` or `waitingOnUserInput` in `activeFlags`, and names it
-`<thread>:<kind>` in both listings and observations. The registry keeps the
+`<thread>:<kind>` in listings; an observation on a connection that carries the
+thread's requests names its oldest open request instead. The registry keeps the
 current question in `session_runtime`. Each read of a turn and the write of what
 it waits on happen as one step per session, so a slower read never overwrites a
 newer one. A catalog row is published inside that same step, so an answer
 recorded while a row is being written waits for it and then asks for a fresh
 discovery pass. A catalog listing that disagrees with the record is confirmed by
-observing the turn before anything changes. Each new question is announced on
+observing the turn before anything changes. Where the provider lists its open
+requests (the Claude host, the permission hook, and Codex requests read as
+above), the wait also carries `open`, every open request id, oldest first. The
+registry keeps only the oldest; the daemon keeps the set from its last
+observation, publishes the row when the set changes, and folds the ids into the
+decisions revision, so a second request, or one of several answered elsewhere,
+moves the row and clients fetch decisions again. A second Codex request, or one
+of several resolving, changes neither the thread's status nor its rollout, so
+the Codex status watch subscribes (`thread/resume`) to each thread its own
+app-server has loaded and reports waiting, asks for a catalog pass on every
+request and `serverRequest/resolved` it hears for it, never answers them, and
+unsubscribes once the thread stops waiting. Each new question is announced on
 the desktop and to paired devices (`session.waiting`) and marked announced once
 both were attempted; a question recorded but not yet announced when the daemon
 stops is announced after it restarts. Both notifications carry a key derived
