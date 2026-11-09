@@ -39,11 +39,14 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 	if conversation == "" || strings.ContainsAny(conversation, `/\`) || strings.HasPrefix(conversation, ".") {
 		return false, surface.DeliveryTerminal(fmt.Errorf("Claude session %q is not a conversation id", sess.ID), surface.DeliveryTargetMissing)
 	}
-	unlock, err := c.lockConversation(ctx, conversation)
+	unlock, err := c.lockToDeliver(ctx, conversation)
 	if err != nil {
-		return false, surface.DeliveryUnavailable(err)
+		return false, deliveryError(err)
 	}
 	defer unlock()
+	if c.movedAway(conversation) {
+		return false, surface.DeliveryUnavailable(fmt.Errorf("%w: Claude conversation %s moved to another host", surface.ErrDeliveryHeld, conversation))
+	}
 	state, err := c.conversation(ctx, conversation, sessionPin(sess))
 	if err != nil {
 		return false, deliveryError(err)
@@ -344,7 +347,67 @@ func adoptClaudeProcess(sess, process *surface.Session) {
 // processes, so two senders cannot both find it without a process and start
 // two.
 func (c *Claude) lockConversation(ctx context.Context, conversation string) (func(), error) {
-	dir := filepath.Join(c.home, ".agenthail", "claude-resume")
+	return c.lockConversationUnless(ctx, conversation, func() error { return nil })
+}
+
+func (c *Claude) conversationLockDir() string {
+	return filepath.Join(c.home, ".agenthail", "claude-resume")
+}
+
+func (c *Claude) moveHoldMarker(conversation string) string {
+	return filepath.Join(c.conversationLockDir(), conversation+".moving")
+}
+
+// lockToDeliver is lockConversation for a send, which does not wait out a
+// move: the move holds the lock until the conversation has left this host.
+func (c *Claude) lockToDeliver(ctx context.Context, conversation string) (func(), error) {
+	return c.lockConversationUnless(ctx, conversation, func() error {
+		if _, err := os.Stat(c.moveHoldMarker(conversation)); err == nil {
+			return surface.DeliveryUnavailable(fmt.Errorf("%w: Claude conversation %s is moving to another host", surface.ErrDeliveryHeld, conversation))
+		}
+		return nil
+	})
+}
+
+// holdForMove takes the conversation lock for a move and marks it as held
+// for one, so a send gives up instead of waiting for the lock.
+func (c *Claude) holdForMove(ctx context.Context, conversation string) (func(), error) {
+	unlock, err := c.lockConversation(ctx, conversation)
+	if err != nil {
+		return nil, err
+	}
+	marker := c.moveHoldMarker(conversation)
+	if err := os.WriteFile(marker, nil, 0600); err != nil {
+		unlock()
+		return nil, err
+	}
+	return func() {
+		_ = os.Remove(marker)
+		unlock()
+	}, nil
+}
+
+// movedAway reports whether a move took the conversation's transcript to
+// another host: it is archived here and no root holds it.
+func (c *Claude) movedAway(conversation string) bool {
+	roots, err := surface.ClaudeConfigRoots(c.home)
+	if err != nil {
+		return false
+	}
+	archived := false
+	for _, root := range roots {
+		if claudeTranscriptExists(root, conversation) {
+			return false
+		}
+		if info, err := os.Stat(filepath.Join(root, claudeMovedDir, conversation)); err == nil && info.IsDir() {
+			archived = true
+		}
+	}
+	return archived
+}
+
+func (c *Claude) lockConversationUnless(ctx context.Context, conversation string, busy func() error) (func(), error) {
+	dir := c.conversationLockDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
@@ -358,6 +421,10 @@ func (c *Claude) lockConversation(ctx context.Context, conversation string) (fun
 				_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 				_ = file.Close()
 			}, nil
+		}
+		if err := busy(); err != nil {
+			_ = file.Close()
+			return nil, err
 		}
 		select {
 		case <-ctx.Done():

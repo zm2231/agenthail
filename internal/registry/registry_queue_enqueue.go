@@ -2,6 +2,8 @@ package registry
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -107,8 +109,15 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 	if err != nil {
 		return 0, 0, err
 	}
+	held, err := r.holdForOwnerTx(tx, id, sessionID, message, deliveryKey, options, relayHops, operation)
+	if err != nil {
+		return 0, 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, 0, err
+	}
+	if held {
+		r.signalChange(ChangeHostDeliveries)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, SourceSessionID: options.SourceSessionID, QueueID: id, Message: message, Result: options.Model})
 	return id, deliveryID, nil
@@ -187,4 +196,31 @@ func (r *Registry) QueueCounts() (map[string]int, error) {
 		counts[sessionID] = count
 	}
 	return counts, rows.Err()
+}
+
+// holdForOwnerTx makes a message queued for a session another host now owns,
+// one that moved while the send waited for it, a send held for that host, as
+// the move made the messages already queued for it.
+func (r *Registry) holdForOwnerTx(tx *sql.Tx, id int64, sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation) (bool, error) {
+	if operation != QueueOperationMessage || len(options.Uploads) > 0 {
+		return false, nil
+	}
+	var owner string
+	err := tx.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, sessionID).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && owner == "" {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	key := deliveryKey
+	if key == "" {
+		key = fmt.Sprintf("held-%s-%d", sessionID, id)
+	}
+	request, err := r.hostSendRequest(HostSend{SessionID: sessionID, Message: message, Key: key, SourceSessionID: options.SourceSessionID, BusyDelivery: options.BusyDelivery, RelayHops: relayHops})
+	if err != nil {
+		return false, err
+	}
+	_, err = tx.Exec(`UPDATE message_queue SET host_request=?,delivery_key=?,evidence=?,updated_at=datetime('now') WHERE id=?`, request, key, surface.EvidenceQueued, id)
+	return err == nil, err
 }

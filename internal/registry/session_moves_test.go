@@ -264,3 +264,26 @@ func TestAMoveInTakesASessionAThirdHostNoLongerServes(t *testing.T) {
 		t.Fatalf("owner=%q", owner)
 	}
 }
+
+func TestAMessageQueuedForASessionAfterItMovedIsHeldForItsNewHost(t *testing.T) {
+	r := moveRegistry(t)
+	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetMoveState("move-1", MoveSent, "", MovePreparing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.CompleteMoveOut("move-1", testPlaceholder); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.QueueDeliveryWithIntent(moveConversation, "waited for the move", "", surface.SendOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if item, err := r.ClaimNextMessage(moveConversation, time.Now()); err != nil || item != nil {
+		t.Fatalf("a message for a session that left was claimed here: %+v err=%v", item, err)
+	}
+	held, err := r.HostDeliveries(moveTarget)
+	if err != nil || len(held) != 1 || held[0].SessionID != moveConversation || !strings.Contains(string(held[0].Request), "waited for the move") {
+		t.Fatalf("held=%+v err=%v, want the message held for the session's new host", held, err)
+	}
+}
