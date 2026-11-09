@@ -12,7 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const leftToAttach = "[intent ledger] The person's words to you in repo:github.com/acme/widget that are not attached yet"
+var leftToAttach = ledger.ProvisionalNote("repo:github.com/acme/widget", 2)
 
 func TestLedgerAttachTakesSeveralFragmentsInOneCall(t *testing.T) {
 	app, calls := ledgerWriteFixture(t, func(string, map[string]any) (int, any) {
@@ -48,7 +48,7 @@ func TestLedgerAttachTakesSeveralFragmentsInOneCall(t *testing.T) {
 	}
 }
 
-func TestWorkWritesThatAreCheckpointsShowTheWordsLeftToAttach(t *testing.T) {
+func TestWorkWritesThatAreCheckpointsShowTheProvisionalCount(t *testing.T) {
 	app, _ := ledgerWriteFixture(t, func(path string, _ map[string]any) (int, any) {
 		if path == "/api/v1/ledger/checkpoint" {
 			return http.StatusOK, map[string]string{"instruction": leftToAttach}

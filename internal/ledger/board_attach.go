@@ -35,6 +35,9 @@ func (b *Board) applyAttach(data []byte) error {
 	if p.GoalID != "" && !slices.Contains(u.GoalIDs, p.GoalID) {
 		u.GoalIDs = append(u.GoalIDs, p.GoalID)
 	}
+	if p.Note != "" {
+		u.Notes = append(u.Notes, p.Note)
+	}
 	return nil
 }
 

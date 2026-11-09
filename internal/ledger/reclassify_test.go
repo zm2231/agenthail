@@ -36,7 +36,7 @@ func TestAReclassifiedHookCaptureLeavesThePersonsWords(t *testing.T) {
 		t.Fatalf("a delivery capture is the person's by construction: %v %v", done, err)
 	}
 
-	unattached, err := s.UnattachedFor("p", "s1")
+	unattached, err := s.ProvisionalFor("p", "s1")
 	if err != nil {
 		t.Fatal(err)
 	}

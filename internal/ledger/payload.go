@@ -61,6 +61,7 @@ type AttachPayload struct {
 	To          string   `json:"to,omitempty"`
 	GoalID      string   `json:"goalId,omitempty"`
 	Effects     []string `json:"effects,omitempty"`
+	Note        string   `json:"note,omitempty"`
 }
 
 type QuestionPayload struct {

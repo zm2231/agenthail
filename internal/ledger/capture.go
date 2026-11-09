@@ -46,7 +46,7 @@ type CapturePayload struct {
 	At     time.Time    `json:"at"`
 }
 
-// Scope is the project's capture state. Unset captures only the project's lead, which is asked to attach but not held; Since is when the current enabled run began.
+// Scope is the project's capture state. Unset captures only the project's lead, whose turn is never held; Since is when the current enabled run began.
 type Scope struct {
 	State  int
 	Since  time.Time

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -44,7 +45,7 @@ func ledgerHookFixture(t *testing.T, captured, attach bool) (*App, func() []capt
 		mu.Lock()
 		calls = append(calls, call)
 		mu.Unlock()
-		json.NewEncoder(w).Encode(map[string]any{"captured": captured, "attach": attach, "projectKey": "test-key", "ref": "claude-prompt:" + call.PromptID, "unattached": []string{"claude-prompt:earlier"}})
+		json.NewEncoder(w).Encode(map[string]any{"captured": captured, "attach": attach, "projectKey": "test-key", "ref": "claude-prompt:" + call.PromptID, "provisional": 3})
 	}))
 	t.Cleanup(server.Close)
 	app.daemonAPIOverride = func() (*daemonAPIClient, error) {
@@ -73,16 +74,8 @@ func TestTerminalPromptSendsClaudesPromptIDToTheDaemon(t *testing.T) {
 		t.Fatal("expected hook output naming the capture")
 	}
 	text := output["hookSpecificOutput"].(map[string]any)["additionalContext"].(string)
-	for _, want := range []string{
-		"utterance claude-prompt:bb6af0fd in test-key",
-		"agenthail ledger attach claude-prompt:bb6af0fd --to",
-		"Left out, --as is read from --to and the other flags",
-		"Put each readback line attach prints in your reply",
-		"Still unattached from earlier: claude-prompt:earlier",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("hook context %q lacks %q", text, want)
-		}
+	if want := ledger.ProvisionalNote("test-key", 3); !strings.Contains(text, want) || strings.Contains(text, "ledger attach") {
+		t.Fatalf("hook context %q should carry only the count %q", text, want)
 	}
 }
 

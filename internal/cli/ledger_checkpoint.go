@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-// ledgerCheckpoint asks the local daemon what the session still has to attach. A checkpoint never stands in the way of the command that reached it, so any failure is empty.
+// ledgerCheckpoint asks the local daemon how many of the session's words are provisional. A checkpoint never stands in the way of the command that reached it, so any failure is empty.
 func (a *App) ledgerCheckpoint(ctx context.Context, sessionID string) string {
 	var client *daemonAPIClient
 	var err error

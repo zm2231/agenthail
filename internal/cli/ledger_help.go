@@ -45,7 +45,8 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
   ledger critical-path           Longest chain of unfinished items
 
  The person's intent:
-  ledger [--all]                 Show goals, open asks, decisions and unattached words for the current project
+  ledger [--all|--provisional]   Show goals, open asks, decisions and the person's provisional words for the current project;
+                                 --provisional lists only the provisional words
   ledger goals                   List goals with the clauses gathered under each
   ledger goal <name>             Create a goal, or show the one with that name
   ledger asks | ledger ask <ask_id>
@@ -82,13 +83,12 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
 
  Setup:
   ledger enable [@session] [--attach prompt|checkpoints]
-                                 Capture the person's words to every session in this project and ask
-                                 each to attach them, or only for one session and its later forks;
-                                 without it, only the lead's words are captured and the lead is asked
-                                 to attach them; only enable holds a turn for unattached words.
-                                 --attach checkpoints asks at points a session already reaches (work
-                                 add, claim or submit, a start or compaction, and ledger) instead of
-                                 with each message, and the turn gate stops holding for unattached words
+                                 Capture the person's words to every session in this project, or only for
+                                 one session and its later forks; without it, only the lead's words are
+                                 captured. Words stay provisional until attached and nothing waits on them;
+                                 each message tells the session how many are provisional, or with
+                                 --attach checkpoints only at points it already reaches (work add, claim
+                                 or submit, a start or compaction, and ledger)
   ledger disable [@session]      Capture nothing in this project, or take back a session's grant
   ledger owner [<host>]          Keep this project's ledger on a paired host, which then plans every write and
                                  syncs its log back; without a host, show the owner, sync cursor and replay backlog

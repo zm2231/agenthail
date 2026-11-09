@@ -32,11 +32,11 @@ func (d *Daemon) ledgerCheckpoint(session surface.Session) (string, error) {
 		if !scope.checkpoints {
 			continue
 		}
-		words, err := store.UnattachedFor(target.key, session.ID)
+		words, err := store.ProvisionalFor(target.key, session.ID)
 		if err != nil {
 			return "", err
 		}
-		if text := ledger.CheckpointInstruction(target.key, words); text != "" {
+		if text := ledger.ProvisionalNote(target.key, len(words)); text != "" {
 			parts = append(parts, text)
 		}
 	}
@@ -61,7 +61,7 @@ func (d *Daemon) apiLedgerCheckpointHandler(w http.ResponseWriter, r *http.Reque
 	text, err := d.ledgerCheckpoint(*session)
 	if err != nil {
 		d.log.Printf("ledger checkpoint for %s: %s", req.SessionID, err)
-		writeAPIError(w, http.StatusInternalServerError, "checkpoint_failed", "The words still to attach could not be read.")
+		writeAPIError(w, http.StatusInternalServerError, "checkpoint_failed", "The provisional words could not be counted.")
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, ledgerCheckpointResponse{Instruction: text})

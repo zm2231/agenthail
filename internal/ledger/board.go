@@ -51,6 +51,7 @@ type UtteranceView struct {
 	At         string      `json:"ts"`
 	GoalIDs    []string    `json:"goalIds,omitempty"`
 	Attached   bool        `json:"attached"`
+	Notes      []string    `json:"notes,omitempty"`
 	Truncated  *Truncation `json:"truncated,omitempty"`
 }
 

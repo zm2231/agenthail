@@ -14,7 +14,7 @@ const (
 	readDefaultLimit = 25
 	readMaxLimit     = 100
 	readMaxReady     = 50
-	readUnattached   = 5
+	readProvisional  = 5
 	readTextClip     = 240
 )
 
@@ -136,12 +136,12 @@ func (s *Store) readBoard(projectKey string, board *Board, req ReadRequest, resu
 	if scope.State == LedgerEnabled {
 		capture["since"], capture["attach"] = scope.Since, scope.Attach
 	}
-	unattached := attachment.Unattached
-	newest := unattached[max(0, len(unattached)-readUnattached):]
+	provisional := attachment.Provisional
+	newest := provisional[max(0, len(provisional)-readProvisional):]
 	goals, next := pageEntries(entriesOf(board.Goals()), "", readDefaultLimit, req.Budget)
 	result["appliedSeq"] = board.AppliedSeq()
 	result["capture"], result["sync"], result["counts"] = capture, syncView, counts
-	result["unattached"] = map[string]any{"total": len(unattached), "newest": readJSON(newest)}
+	result["provisional"] = map[string]any{"total": len(provisional), "newest": readJSON(newest)}
 	result["goals"], result["truncated"] = goals, next != ""
 	if next != "" {
 		result["nextCursor"], result["nextView"] = next, "goals"

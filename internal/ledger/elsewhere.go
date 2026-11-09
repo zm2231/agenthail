@@ -58,8 +58,8 @@ func attachedElsewhereAll(q querier, projectKey string) (map[string]Elsewhere, e
 }
 
 type Attachment struct {
-	Unattached []UtteranceView       `json:"unattached"`
-	Elsewhere  map[string]Elsewhere `json:"attachedElsewhere,omitempty"`
+	Provisional []UtteranceView      `json:"provisional"`
+	Elsewhere   map[string]Elsewhere `json:"attachedElsewhere,omitempty"`
 }
 
 func attachment(q querier, projectKey string, board *Board, targetID string) (Attachment, error) {
@@ -76,7 +76,7 @@ func attachment(q querier, projectKey string, board *Board, targetID string) (At
 			out.Elsewhere[u.ID] = e
 			continue
 		}
-		out.Unattached = append(out.Unattached, u)
+		out.Provisional = append(out.Provisional, u)
 	}
 	return out, nil
 }
@@ -91,16 +91,16 @@ func (p *attachPlan) readback(q querier, board *Board) (string, error) {
 		return "", err
 	}
 	line := "intent ledger: " + p.summary
-	if n := len(state.Unattached); n > 0 {
+	if n := len(state.Provisional); n > 0 {
 		var ids []string
-		for _, u := range state.Unattached[:min(n, 3)] {
+		for _, u := range state.Provisional[:min(n, 3)] {
 			ids = append(ids, u.ID)
 		}
 		more := ""
 		if n > 3 {
 			more = ", ..."
 		}
-		line += fmt.Sprintf("; %d unattached: %s%s", n, strings.Join(ids, ", "), more)
+		line += fmt.Sprintf("; %d provisional: %s%s", n, strings.Join(ids, ", "), more)
 	}
 	if open := openQuestionsOn(board, p.goalID); len(open) > 0 {
 		line += "; open questions: " + strings.Join(open, ", ")

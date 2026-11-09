@@ -124,14 +124,13 @@ func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Ses
 		return ""
 	}
 	var result struct {
-		Captured   bool     `json:"captured"`
-		Attach     bool     `json:"attach"`
-		ProjectKey string   `json:"projectKey"`
-		Ref        string   `json:"ref"`
-		Unattached []string `json:"unattached"`
+		Captured    bool   `json:"captured"`
+		Attach      bool   `json:"attach"`
+		ProjectKey  string `json:"projectKey"`
+		Provisional int    `json:"provisional"`
 	}
 	if json.Unmarshal(body, &result) != nil || !result.Captured || !result.Attach {
 		return ""
 	}
-	return ledger.ReadbackInstruction(result.Ref, result.ProjectKey, result.Unattached)
+	return ledger.ProvisionalNote(result.ProjectKey, result.Provisional)
 }

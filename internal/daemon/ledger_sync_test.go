@@ -268,7 +268,7 @@ func TestARefusedOwnerAssignmentLeavesNeitherHostOwning(t *testing.T) {
 	}
 }
 
-func TestAReplicaShowsTheWordsLeftToAttachAfterItsWritesGoToTheOwner(t *testing.T) {
+func TestAReplicaCountsTheProvisionalWordsAfterItsWritesGoToTheOwner(t *testing.T) {
 	mac, owner, _ := ledgerOnTwoHosts(t)
 	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
 	if err := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Enable(widgetKey, ledger.AttachAtCheckpoints); err != nil {
@@ -286,7 +286,7 @@ func TestAReplicaShowsTheWordsLeftToAttachAfterItsWritesGoToTheOwner(t *testing.
 	if added.Item.ID != "widget-W1" || countEvents(t, owner.reg, ledger.EventWorkItem, "") != 1 {
 		t.Fatalf("the add did not go through the owner: %+v", added)
 	}
-	if text := checkpoint(); !strings.Contains(text, words+": build search for the docs") {
+	if text := checkpoint(); text != ledger.ProvisionalNote(widgetKey, 1) {
 		t.Fatalf("the replica's checkpoint after a proxied add = %q", text)
 	}
 	mustLedger(t, mac, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: widgetKey, SessionID: "local-a", Name: "Search"}, nil)
