@@ -11,7 +11,9 @@ struct SessionEditingControls: View {
     @State private var error: String?
     var body: some View {
         Section("Organize conversation") {
+            // The sheet sits on one row: on the Section it is copied to every row and none presents.
             Button("Name conversation", systemImage: "pencil") { text = detail.alias ?? ""; editingName = true }
+                .sheet(isPresented: Binding(get: { editingGoal || editingName || editingBudget }, set: { if !$0 { editingGoal = false; editingName = false; editingBudget = false } })) { editor }
             let goal = GoalControls(detail)
             if goal.offers(.setGoal) || goal.offers(.editGoal) {
                 Button(goal.offers(.editGoal) ? "Edit goal" : "Set goal", systemImage: "target") { text = detail.goal?.objective ?? ""; editingGoal = true }
@@ -29,31 +31,32 @@ struct SessionEditingControls: View {
             if let error { Text(error).font(.footnote).foregroundStyle(PhonePalette.failed) }
         }
         .disabled(model.pendingControls.contains(detail.session.id))
-        .sheet(isPresented: Binding(get: { editingGoal || editingName || editingBudget }, set: { if !$0 { editingGoal = false; editingName = false; editingBudget = false } })) {
-            NavigationStack {
-                Form {
-                    if editingBudget {
-                        TextField("Token budget", text: $budgetText).keyboardType(.numberPad)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        Text("Use Clear token budget to remove the current limit.").font(.footnote)
-                    } else {
-                        TextField(editingName ? "Name" : "Objective", text: $text, axis: .vertical).lineLimit(2...8)
-                            .textInputAutocapitalization(editingName ? .never : .sentences).autocorrectionDisabled(editingName)
-                    }
-                    if editingName {
-                        Text((detail.alias ?? "").isEmpty ? "Use 1–80 characters without spaces, /, or #." : "Use 1–80 characters without spaces, /, or #. Leave it empty to clear the name.").font(.footnote)
-                    }
-                    if let message = error ?? (editingName && !text.isEmpty ? nameProblem : nil) { Text(message).foregroundStyle(PhonePalette.failed) }
+    }
+
+    private var editor: some View {
+        NavigationStack {
+            Form {
+                if editingBudget {
+                    TextField("Token budget", text: $budgetText).keyboardType(.numberPad)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Text("Use Clear token budget to remove the current limit.").font(.footnote)
+                } else {
+                    TextField(editingName ? "Name" : "Objective", text: $text, axis: .vertical).lineLimit(2...8)
+                        .textInputAutocapitalization(editingName ? .never : .sentences).autocorrectionDisabled(editingName)
                 }
-                .navigationTitle(editingBudget ? "Token budget" : editingName ? "Name conversation" : "Edit goal")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingName = false; editingGoal = false; editingBudget = false }.disabled(model.pendingControls.contains(detail.session.id)) }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(clearingName ? "Clear Name" : "Save") { Task { await save(sheetAction, text: sheetText) } }
-                            .disabled(!canSave || model.pendingControls.contains(detail.session.id))
-                    }
-                }.interactiveDismissDisabled(model.pendingControls.contains(detail.session.id))
+                if editingName {
+                    Text((detail.alias ?? "").isEmpty ? "Use 1–80 characters without spaces, /, or #." : "Use 1–80 characters without spaces, /, or #. Leave it empty to clear the name.").font(.footnote)
+                }
+                if let message = error ?? (editingName && !text.isEmpty ? nameProblem : nil) { Text(message).foregroundStyle(PhonePalette.failed) }
             }
+            .navigationTitle(editingBudget ? "Token budget" : editingName ? "Name conversation" : "Edit goal")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingName = false; editingGoal = false; editingBudget = false }.disabled(model.pendingControls.contains(detail.session.id)) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(clearingName ? "Clear Name" : "Save") { Task { await save(sheetAction, text: sheetText) } }
+                        .disabled(!canSave || model.pendingControls.contains(detail.session.id))
+                }
+            }.interactiveDismissDisabled(model.pendingControls.contains(detail.session.id))
         }
     }
     private var nameProblem: String? { SessionHandle.renameProblem(text, current: detail.alias) }

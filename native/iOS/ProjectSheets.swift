@@ -29,10 +29,10 @@ struct IOSProjectMenuItems: View {
                     place = NewSessionPlace(host: model.creationHost(for: checkout, of: project), folder: checkout.rootPath)
                 }
             case .lead(let change):
-                Button(change ? "Change lead…" : "Set lead…", systemImage: "person.badge.key") { sheet = .lead(project.state) }
+                Button(change ? "Change Lead…" : "Set Lead…", systemImage: "person.badge.key") { sheet = .lead(project.state) }
             case .clearLead:
-                Button("Clear lead", systemImage: "person.badge.minus") {
-                    confirmation = ProjectConfirmation(message: "Clear the lead of \(project.state.displayName)? Its conversation and name stay.", action: "Clear lead") {
+                Button("Clear Lead", systemImage: "person.badge.minus") {
+                    confirmation = ProjectConfirmation(message: "Clear the lead of \(project.state.displayName)? Its conversation and name stay.", action: "Clear Lead") {
                         await model.clearLead(of: project)
                     }
                 }

@@ -29,6 +29,7 @@ struct SessionPreview: View {
         )
         model.setHostSnapshot(snapshot, view: view)
         detail.session.id = HostCatalog.qualify("computer", detail.session.id)
+        if ProcessInfo.processInfo.arguments.contains("--preview-named") { detail.alias = "builder" }
         self.detail = detail
         session = model.snapshot?.sessions.first(where: { $0.id == detail.session.id }) ?? detail.sessionState(open: false)
         model.selectedSessionID = session.id
@@ -402,6 +403,12 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         if request.url?.path == "/api/v1/actions" {
+            if ProcessInfo.processInfo.arguments.contains("--preview-lead-name") {
+                client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 409, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: Data(#"{"error":{"code":"conflict","message":"lead"}}"#.utf8))
+                client?.urlProtocolDidFinishLoading(self)
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("--preview-send-refused") {
                 client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 409, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
                 client?.urlProtocol(self, didLoad: Data(#"{"error":{"message":"This session has ended."}}"#.utf8))
