@@ -21,7 +21,10 @@ Each row retains the existing session summary fields and adds
 `key` and `repository` when it has a key), `checkout`
 (`id`, `path`, `branch` or `detachedHead`, `isMain`, and `dirty`), and
 `freshness` (`generation`, `observedAt`, and `stale`). A Claude branch adds
-`forkedFrom`, the session it was branched from.
+`forkedFrom`, the session it was branched from. A session another agent
+started adds `startedBy`, that agent's host-qualified session id. A session
+the person started, a project's coordinator itself and a session the daemon
+runs have none.
 
 A request with no query parameters is answered from the daemon's cached
 snapshot while that snapshot is current, and carries an `ETag` naming it. A

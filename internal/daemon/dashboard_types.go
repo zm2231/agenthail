@@ -68,6 +68,7 @@ type dashboardSession struct {
 	Runtime           *surface.Runtime           `json:"runtime,omitempty"`
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
 	Subagent          *surface.Subagent          `json:"subagent,omitempty"`
+	StartedBy         string                     `json:"startedBy,omitempty"`
 	Delegated         bool                       `json:"delegated,omitempty"`
 	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
 	Holders           []surface.Holder           `json:"holders,omitempty"`
