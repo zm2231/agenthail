@@ -111,10 +111,10 @@ struct AgenthailIOSApp: App {
                 if let token = notification.object as? String { model.registerPushToken(token) }
             }
             .onReceive(NotificationCenter.default.publisher(for: .agenthailPushRegistrationFailed)) { notification in
-                model.notificationStatus = "Setup failed"
-                model.operationError = notification.object as? String ?? "This device could not register for notifications."
+                model.pushRegistrationFailed(notification.object as? String ?? "This device could not register for notifications.")
             }
             .onChange(of: scenePhase) { _, phase in
+                model.setAppActive(phase == .active)
                 if phase == .active {
                     ConnectionDrops.shared.foregrounded()
                     Task.detached { await PushReceipts.flush() }
