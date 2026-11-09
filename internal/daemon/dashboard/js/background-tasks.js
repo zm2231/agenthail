@@ -3,7 +3,7 @@ import { escape } from "./format.js";
 
 export const backgroundKinds = { shell: "Shell", agent: "Agent", monitor: "Monitor" };
 
-export const backgroundSources = { host: "", transcript: "Read from the transcript.", status: "Claude reports a background shell but not which one." };
+export const backgroundSources = { host: "", transcript: "", status: "Claude reports a background shell but not which one." };
 
 export function renderBackgroundTasks(session) {
   const panel = $("#background-panel");

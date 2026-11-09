@@ -347,7 +347,8 @@ assert.equal(context.presenceLabel({ ...stoppedSession, status: "busy" }), "Work
 context.renderBackgroundTasks(backgroundSession);
 const backgroundPanel = elements["#background-panel"].innerHTML;
 assert(!elements["#background-panel"].hidden, "background work shows its panel");
-for (const expected of ["1 background task running", "go test ./...", "file watcher", "ambient", "Read from the transcript."]) assert(backgroundPanel.includes(expected), `background panel omitted ${expected}`);
+for (const expected of ["1 background task running", "go test ./...", "file watcher", "ambient"]) assert(backgroundPanel.includes(expected), `background panel omitted ${expected}`);
+assert(!backgroundPanel.includes("<p>"), "a list read from the transcript needs no note");
 context.renderBackgroundTasks({ ...backgroundSession, backgroundTasks: { running: true, source: "status" } });
 assert(elements["#background-panel"].innerHTML.includes("Background work running") && elements["#background-panel"].innerHTML.includes("not which one"), "a shell reported without a list says what is known");
 const notice = context.renderTimeline([{ id: "limit-1", kind: "notice", title: "Usage limit reached", text: "You've hit your session limit <b>", status: "usage_limit" }], session);

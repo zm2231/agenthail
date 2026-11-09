@@ -28,7 +28,7 @@ struct SessionFactsTest {
         expect(background.isWaitingOnBackground && SessionFacts.presenceLabel(background) == "Waiting on background work", "a session between turns with background work says so")
         expect(background.backgroundTasks?.summary == "1 background task running", "ambient tasks are not counted")
         expect(background.backgroundTasks?.tasks?.last?.line == "Monitor: file watcher (ambient)", "ambient tasks are listed and marked")
-        expect(background.backgroundTasks?.sourceNote == "Read from the transcript.", "the list says where it came from")
+        expect(background.backgroundTasks?.sourceNote == nil, "a list read from the transcript needs no note")
         let backgroundTurn = SessionState(id: "s1", surface: "claude", name: "builder", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: "working", capabilities: caps, readOnly: nil, readOnlyReason: nil, backgroundTasks: background.backgroundTasks)
         expect(!backgroundTurn.isWaitingOnBackground && SessionFacts.presenceLabel(backgroundTurn) == "Working", "a turn in progress reads as working")
         var ambientOnly = session(reason: "open")
