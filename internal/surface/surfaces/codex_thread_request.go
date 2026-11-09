@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -75,7 +76,11 @@ func (c *Codex) resumeFollower(ctx context.Context, client codexClient, session 
 // it with no overrides; only a cold load carries them.
 func (c *Codex) joinOrResumeThread(ctx context.Context, client codexClient, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
 	threadID, _ := params["threadId"].(string)
-	if notLoaded, err := codexThreadReadsNotLoaded(ctx, client, threadID); err != nil || notLoaded {
+	loaded, err := c.loadedThreadIDs(ctx, client, 0)
+	if err != nil {
+		return nil, fmt.Errorf("thread/loaded/list: %w", err)
+	}
+	if !slices.Contains(loaded, threadID) {
 		return c.resumeThread(ctx, client, session, params, wait)
 	}
 	join := map[string]any{"threadId": threadID}

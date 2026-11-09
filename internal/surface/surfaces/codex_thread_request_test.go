@@ -26,6 +26,11 @@ func (c *scriptedThreadClient) Request(_ context.Context, method string, params 
 	switch method {
 	case codexThreadStart, codexThreadFork:
 		return map[string]any{"result": map[string]any{"thread": map[string]any{"id": "new-thread"}}}, nil
+	case "thread/loaded/list":
+		if c.loaded {
+			return map[string]any{"result": map[string]any{"data": []any{"t"}}}, nil
+		}
+		return map[string]any{"result": map[string]any{"data": []any{}}}, nil
 	case "thread/read":
 		status := "notLoaded"
 		if c.active {
@@ -142,7 +147,7 @@ func TestALoadedThreadIsJoinedWithoutItsOverrides(t *testing.T) {
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t", "excludeTurns": true, "cwd": "/w", "model": "m"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"thread/read", codexThreadResume, "mcpServerStatus/list"}
+	want := []string{"thread/loaded/list", codexThreadResume, "mcpServerStatus/list"}
 	if got := client.methods(); !slices.Equal(got, want) {
 		t.Fatalf("calls=%v", got)
 	}
@@ -172,7 +177,7 @@ func TestAThreadThatUnloadedBeforeResumeIsReattachedWithARotatedToken(t *testing
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"thread/read", codexThreadResume, "mcpServerStatus/list", "thread/read", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
+	want := []string{"thread/loaded/list", codexThreadResume, "mcpServerStatus/list", "thread/read", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
 	got := client.methods()
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v", got)
@@ -195,7 +200,7 @@ func TestALoadedThreadWhoseCredentialPassedItsLimitIsReloadedWithANewToken(t *te
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"thread/read", codexThreadResume, "thread/read", "thread/turns/list", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
+	want := []string{"thread/loaded/list", codexThreadResume, "thread/read", "thread/turns/list", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
 	if got := client.methods(); !slices.Equal(got, want) {
 		t.Fatalf("calls=%v", got)
 	}
@@ -212,7 +217,7 @@ func TestAThreadWithATurnRunningIsNotReloadedForItsCredential(t *testing.T) {
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"thread/read", codexThreadResume, "thread/read"}
+	want := []string{"thread/loaded/list", codexThreadResume, "thread/read"}
 	if got := client.methods(); !slices.Equal(got, want) {
 		t.Fatalf("calls=%v", got)
 	}
