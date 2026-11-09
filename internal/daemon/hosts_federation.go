@@ -1014,13 +1014,19 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 	if !claimed {
 		return
 	}
+	answer := d.postHostDelivery(ctx, host, item)
+	var moved hosts.StatusError
+	if errors.As(answer.readErr, &moved) && moved.Code == movedCode {
+		if next, found := d.pairedHost(moved.MovedToHost); found && next != host {
+			host, answer = next, d.postHostDelivery(ctx, next, item)
+		}
+	}
 	unconfirmed := func() {
 		if time.Since(inflightAt) > d.federation.patience {
 			_ = d.Registry.DeadLetterUnknown(item.ID, fmt.Errorf("host %s has not confirmed the message", host.record.Name))
 		}
 	}
-	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, item.Request, http.Header{actionIdempotencyHeader: []string{item.Key}})
-	if err != nil {
+	if err := answer.err; err != nil {
 		var notSent hosts.NotSentError
 		if errors.As(err, &notSent) && item.Status == "pending" {
 			if releaseErr := d.Registry.ReleaseHostDelivery(item.ID); releaseErr != nil {
@@ -1031,8 +1037,7 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 		unconfirmed()
 		return
 	}
-	submitted := response.StatusCode == http.StatusAccepted
-	body, readErr := hosts.ReadResponse(response)
+	submitted, body, readErr := answer.submitted, answer.body, answer.readErr
 	var status hosts.StatusError
 	switch {
 	case errors.As(readErr, &status) && status.Code == "action_idempotency_mismatch":
@@ -1062,6 +1067,22 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 	if d.dashboard != nil {
 		d.dashboard.invalidate()
 	}
+}
+
+type hostDeliveryAnswer struct {
+	err       error
+	submitted bool
+	body      []byte
+	readErr   error
+}
+
+func (d *Daemon) postHostDelivery(ctx context.Context, host *pairedHost, item registry.HostDelivery) hostDeliveryAnswer {
+	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, item.Request, http.Header{actionIdempotencyHeader: []string{item.Key}})
+	if err != nil {
+		return hostDeliveryAnswer{err: err}
+	}
+	body, readErr := hosts.ReadResponse(response)
+	return hostDeliveryAnswer{submitted: response.StatusCode == http.StatusAccepted, body: body, readErr: readErr}
 }
 
 // publicSessionID renders a stored session id for this daemon's clients.

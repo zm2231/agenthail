@@ -94,6 +94,9 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 			return nil, false, fmt.Errorf("%s is not available for sessions on another host yet", action)
 		}
 	}
+	if err := d.movedFromHere(ctx, host, request); err != nil {
+		return nil, false, err
+	}
 	sourceRewritten, err := d.routeSource(ctx, request, host)
 	if err != nil {
 		return nil, false, err

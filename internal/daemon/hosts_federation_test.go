@@ -211,6 +211,8 @@ type actionGate struct {
 	// which is then answered as a cursor the host no longer retains.
 	beforeGap atomic.Pointer[func()]
 	gaps      atomic.Int32
+	// movedTo, when set, answers every action as moved to that host.
+	movedTo atomic.Pointer[string]
 }
 
 // unreadableUpserts rewrites the catalog stream's upsert of a session named
@@ -320,6 +322,12 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 		if hold := n.gate.versions.Load(); hold != nil && r.URL.Path == "/api/v1/version" {
 			hold.waiting.Add(1)
 			<-hold.release
+		}
+		if to := n.gate.movedTo.Load(); to != nil && r.URL.Path == "/api/v1/actions" {
+			identity, _ := n.reg.HostIdentity()
+			w.Header().Set(hosts.ResponseHeader, identity.ID)
+			writeActionResult(w, actionResult{}, movedRefusal("moved-away", *to, *to))
+			return
 		}
 		if hold := n.gate.actions.Load(); hold != nil && r.URL.Path == "/api/v1/actions" {
 			hold.waiting.Add(1)
