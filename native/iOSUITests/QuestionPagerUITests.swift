@@ -45,6 +45,21 @@ final class QuestionPagerUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Landing order for the reconnect fix, Write the test first"].waitForExistence(timeout: 5), "a typed answer replaces the pick in the review")
     }
 
+    func testDigitsAndArrowsTypedIntoTheAnswerStayInItOnIPad() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "only an iPad takes keys from a hardware keyboard")
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-questions", "--preview-theme", "dark"]
+        app.launch()
+        let other = app.textFields["Other answer"]
+        XCTAssertTrue(other.waitForExistence(timeout: 10))
+        other.tap()
+        other.typeText("Use 2 runners")
+        other.typeText(XCUIKeyboardKey.leftArrow.rawValue)
+        other.typeText("1")
+        XCTAssertEqual(other.value as? String, "Use 2 runner1s", "digits and arrows typed into the answer stayed in it")
+        XCTAssertFalse(app.staticTexts["Where should the regression check run?"].exists, "a digit typed into the answer picked an option and moved on")
+    }
+
     private func attach(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name

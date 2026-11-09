@@ -9,6 +9,7 @@ struct QuestionPagerView: View {
     let focusOnAppear: Bool
     @State private var pager: QuestionPager
     @FocusState private var focused: Bool
+    @FocusState private var typing: PagerTextField?
 
     init(request: SessionRequest, answering: Bool, accent: AnyShapeStyle, actionTint: AnyShapeStyle? = nil, focusOnAppear: Bool = false, respond: @escaping (RequestDecision) -> Void) {
         self.request = request
@@ -102,15 +103,16 @@ struct QuestionPagerView: View {
             }
             if pager.ask {
                 PagerOtherRow(picked: pager.isOtherPicked(at: pager.step), text: typedBinding, disabled: answering,
-                              choose: { pager.chooseOther() }, submit: advance)
+                              typing: $typing, choose: { pager.chooseOther() }, submit: advance)
             } else {
                 TextField("Other answer", text: typedBinding)
                     .textFieldStyle(.roundedBorder)
+                    .focused($typing, equals: .other)
                     .onSubmit { advance() }
                     .disabled(answering)
             }
             if pager.ask, pager.isSingle {
-                PagerNoteField(note: $pager.note, disabled: answering)
+                PagerNoteField(note: $pager.note, disabled: answering, typing: $typing)
             }
         }
     }
@@ -181,7 +183,7 @@ struct QuestionPagerView: View {
                 Text("Answer every question to submit.").font(.caption).foregroundStyle(RoleStyle(.muted))
             }
             if pager.ask {
-                PagerNoteField(note: $pager.note, disabled: answering)
+                PagerNoteField(note: $pager.note, disabled: answering, typing: $typing)
             }
         }
     }
@@ -229,9 +231,9 @@ struct QuestionPagerView: View {
 
     private func handle(_ press: KeyPress) -> KeyPress.Result {
         switch press.key {
-        case .leftArrow where !pager.isSingle:
+        case .leftArrow where !pager.isSingle && typing == nil:
             pager.move(by: -1)
-        case .rightArrow where !pager.isSingle:
+        case .rightArrow where !pager.isSingle && typing == nil:
             pager.move(by: 1)
         case .tab where !pager.isSingle:
             pager.move(by: press.modifiers.contains(.shift) ? -1 : 1)
@@ -244,7 +246,7 @@ struct QuestionPagerView: View {
     }
 
     private func pickNumber(_ characters: String) -> KeyPress.Result {
-        guard !answering, let number = Int(characters), let question = pager.current,
+        guard !answering, typing == nil, let number = Int(characters), let question = pager.current,
               question.options.indices.contains(number - 1) else { return .ignored }
         choose(number - 1)
         return .handled
