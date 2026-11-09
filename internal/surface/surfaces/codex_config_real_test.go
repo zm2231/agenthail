@@ -103,7 +103,18 @@ func realManagedCodexWith(t *testing.T, model http.Handler) (restart func()) {
 		}
 		// codex is a launcher whose app-server runs as its child, so only killing
 		// the whole group stops the server.
-		stop := func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); _ = cmd.Wait(); cancel() }
+		stop := func() {
+			group := cmd.Process.Pid
+			_ = syscall.Kill(-group, syscall.SIGKILL)
+			_ = cmd.Wait()
+			cancel()
+			for deadline := time.Now().Add(5 * time.Second); syscall.Kill(-group, 0) != syscall.ESRCH; time.Sleep(50 * time.Millisecond) {
+				if time.Now().After(deadline) {
+					t.Errorf("the real app-server's process group %d outlived its stop", group)
+					return
+				}
+			}
+		}
 		deadline := time.Now().Add(20 * time.Second)
 		for {
 			if client, err := dialManagedCodex(context.Background()); err == nil {
