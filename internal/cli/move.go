@@ -95,9 +95,10 @@ func (a *App) cmdMove(args []string) (moveErr error) {
 			Host struct {
 				Name string `json:"name"`
 			} `json:"host"`
-			Stopped string `json:"stopped"`
-			Alias   string `json:"alias"`
-			Root    string `json:"root"`
+			Stopped                      string   `json:"stopped"`
+			Alias                        string   `json:"alias"`
+			Root                         string   `json:"root"`
+			MCPServersWithoutCredentials []string `json:"mcpServersWithoutCredentials"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(data, &answer); err != nil {
@@ -119,6 +120,9 @@ func (a *App) cmdMove(args []string) (moveErr error) {
 			fmt.Printf("moved %s to account %s on %s; it now runs there as %s::%s\n", label, answer.Result.Root, answer.Result.Host.Name, answer.Result.Host.Name, session.ID)
 		default:
 			fmt.Printf("moved %s to %s; it now runs there as %s::%s\n", label, answer.Result.Host.Name, answer.Result.Host.Name, session.ID)
+		}
+		if servers := answer.Result.MCPServersWithoutCredentials; len(servers) > 0 {
+			fmt.Printf("MCP servers carried without their env and headers, to add again on %s: %s\n", answer.Result.Host.Name, strings.Join(servers, ", "))
 		}
 		return nil
 	case answer.Unknown:

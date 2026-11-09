@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -23,14 +24,25 @@ func CarryClaudeProject(home, from, to, cwd string) (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
-	entryPath := "projects." + escapeSettingsPath(cwd)
-	entry := gjson.GetBytes(source, entryPath)
+	entry := gjson.GetBytes(source, claudeProjectPath(cwd))
 	if !entry.IsObject() {
 		return func() error { return nil }, nil
 	}
-	path := ClaudeGlobalConfigPath(home, to)
+	return mergeClaudeProjectInto(ClaudeGlobalConfigPath(home, to), cwd, entry)
+}
+
+// Claude keys a project by its physical path, e.g. /private/tmp for macOS /tmp.
+func claudeProjectPath(cwd string) string {
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
+	return "projects." + escapeSettingsPath(cwd)
+}
+
+func mergeClaudeProjectInto(path, cwd string, entry gjson.Result) (func() error, error) {
+	entryPath := claudeProjectPath(cwd)
 	var added []claudeCarryAdd
-	err = updateClaudeGlobalConfig(path, func(data []byte) ([]byte, error) {
+	err := updateClaudeGlobalConfig(path, func(data []byte) ([]byte, error) {
 		merged, adds, mergeErr := mergeClaudeProject(data, entryPath, entry)
 		added = adds
 		return merged, mergeErr

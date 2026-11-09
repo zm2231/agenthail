@@ -111,6 +111,9 @@ func (c *Claude) PrepareMove(ctx context.Context, sess *surface.Session, request
 		return nil, fmt.Errorf("Claude conversation %s has no known working directory", conversation)
 	}
 	out.Title = c.conversationTitle(ctx, conversation, root)
+	if out.ProjectSettings, out.SettingsWithoutCredentials, err = surface.ClaudeProjectForMove(c.home, root, out.Cwd); err != nil {
+		return nil, fmt.Errorf("read the project's Claude settings: %w", err)
+	}
 	if out.Size, out.SHA256, err = hashFile(transcripts[0]); err != nil {
 		return nil, err
 	}
@@ -398,6 +401,11 @@ func (c *Claude) CheckMoveIn(in surface.MoveIn) error {
 	if err != nil {
 		return err
 	}
+	if len(in.ProjectSettings) > 0 {
+		if err := surface.CheckClaudeProjectTarget(c.home, root); err != nil {
+			return err
+		}
+	}
 	dest := filepath.Join(root, "projects", claudeProjectDirName(in.Cwd), in.Conversation+".jsonl")
 	for _, existing := range c.transcripts.pass(roots)(in.Conversation) {
 		if existing != dest {
@@ -412,6 +420,17 @@ func (c *Claude) CheckMoveIn(in surface.MoveIn) error {
 		}
 	}
 	return nil
+}
+
+func (c *Claude) CarryProjectSettings(in surface.MoveIn) (func() error, error) {
+	if len(in.ProjectSettings) == 0 {
+		return func() error { return nil }, nil
+	}
+	root, _, err := c.moveInRoot(in.Root)
+	if err != nil {
+		return nil, err
+	}
+	return surface.MergeMovedClaudeProject(c.home, root, in.Cwd, in.ProjectSettings)
 }
 
 // checkMoveInPlace refuses a conversation id or working directory Claude
