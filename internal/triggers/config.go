@@ -121,8 +121,8 @@ func Parse(data []byte) (Config, error) {
 	if err := decoder.Decode(&file); err != nil {
 		return Config{}, fmt.Errorf("parse triggers: %w", err)
 	}
-	if decoder.More() {
-		return Config{}, errors.New("parse triggers: more than one JSON document")
+	if err := decoder.Decode(&json.RawMessage{}); err != io.EOF {
+		return Config{}, errors.New("parse triggers: the file must hold exactly one JSON document")
 	}
 	if file.Version != 1 {
 		return Config{}, fmt.Errorf("triggers version %d is not supported; use 1", file.Version)

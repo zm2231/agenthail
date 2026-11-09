@@ -212,9 +212,10 @@ Other:
   triggers [status] [--json]    Completion triggers from triggers.json and their last runs
   triggers runs [--trigger <name>] [--session <id>] [--limit <n>] [--json]
                                 Recent trigger runs, newest first
-  triggers test <name>          Run a trigger once with a test completion
-  triggers retry <run-id>       Run a finished run again
-  triggers reload               Read triggers.json again
+  triggers test <name> [--json] Run a trigger once with a test completion
+  triggers retry <run-id> [--json]
+                                Run a finished run again
+  triggers reload [--json]      Read triggers.json again
   permissions [--json]          The daemon's macOS privacy grants and where to change them
   permissions request           Have macOS ask for the grants the daemon lacks
   person name [<name>|--reset]  The name sessions see on your messages

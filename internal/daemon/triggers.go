@@ -30,6 +30,7 @@ type triggerService struct {
 	loadedAt time.Time
 	active   map[string]bool
 	again    map[string]bool
+	drained  func(name string)
 }
 
 func newTriggerService() *triggerService {
@@ -173,15 +174,11 @@ func (d *Daemon) dispatchTriggers() {
 
 // drainTrigger runs one trigger's pending runs in order, holding one of the
 // host's slots for each. A dispatch that finds it draining marks it to look
-// again, so a run queued as it finishes is not left waiting.
+// again; the drain checks that mark and gives up the trigger under one lock,
+// so a run queued as it finishes is never left waiting.
 func (d *Daemon) drainTrigger(ctx context.Context, trigger triggers.Trigger) {
 	t := d.triggers
-	defer func() {
-		t.mu.Lock()
-		delete(t.active, trigger.Name)
-		delete(t.again, trigger.Name)
-		t.mu.Unlock()
-	}()
+	defer t.release(trigger.Name)
 	for ctx.Err() == nil {
 		select {
 		case t.slots <- struct{}{}:
@@ -190,17 +187,31 @@ func (d *Daemon) drainTrigger(ctx context.Context, trigger triggers.Trigger) {
 		}
 		ran := d.runNextTrigger(ctx, trigger)
 		<-t.slots
-		if ran {
-			continue
-		}
-		t.mu.Lock()
-		again := t.again[trigger.Name]
-		delete(t.again, trigger.Name)
-		t.mu.Unlock()
-		if !again {
+		if !ran && !t.lookAgain(trigger.Name) {
 			return
 		}
 	}
+}
+
+func (t *triggerService) lookAgain(name string) bool {
+	if t.drained != nil {
+		t.drained(name)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.again[name] {
+		delete(t.again, name)
+		return true
+	}
+	delete(t.active, name)
+	return false
+}
+
+func (t *triggerService) release(name string) {
+	t.mu.Lock()
+	delete(t.active, name)
+	delete(t.again, name)
+	t.mu.Unlock()
 }
 
 func (d *Daemon) runNextTrigger(ctx context.Context, trigger triggers.Trigger) bool {

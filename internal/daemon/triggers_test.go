@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -315,5 +316,29 @@ func TestOnlyTheLocalCLICanTestRetryOrReloadTriggers(t *testing.T) {
 	}
 	if _, err := os.Stat(flag); err != nil {
 		t.Fatalf("the retry did not touch the file: %v", err)
+	}
+}
+
+func TestARunQueuedAsItsTriggerFinishesDrainingStillRuns(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d, r, _, _, _ := daemonFixture(t)
+	flag := filepath.Join(t.TempDir(), "flag")
+	if err := configureTriggers(t, d, fmt.Sprintf(`{"version":1,"triggers":[{"name":"flag","touch":%q}]}`, flag)); err != nil {
+		t.Fatal(err)
+	}
+	queue := func(turn string) {
+		if err := r.RecordCompletion("from", nil, []registry.TriggerRun{{Trigger: "flag", DedupeKey: "h:from:" + turn, SessionID: "from", TurnID: turn}}); err != nil {
+			t.Error(err)
+		}
+		d.dispatchTriggers()
+	}
+	var once sync.Once
+	d.triggers.drained = func(string) { once.Do(func() { queue("t2") }) }
+	queue("t1")
+	runs := waitForTriggerRuns(t, r, "flag", 2)
+	for _, run := range runs {
+		if run.State != registry.TriggerSucceeded {
+			t.Fatalf("runs=%+v", runs)
+		}
 	}
 }

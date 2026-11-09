@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 )
@@ -179,5 +180,12 @@ func (t *tail) Write(p []byte) (int, error) {
 func (t *tail) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return string(bytes.ToValidUTF8(t.data, []byte("�")))
+	valid := bytes.ToValidUTF8(t.data, []byte("\uFFFD"))
+	if extra := len(valid) - t.limit; extra > 0 {
+		valid = valid[extra:]
+		for len(valid) > 0 && !utf8.RuneStart(valid[0]) {
+			valid = valid[1:]
+		}
+	}
+	return string(valid)
 }

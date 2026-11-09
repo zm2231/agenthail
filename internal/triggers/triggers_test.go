@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func script(t *testing.T, body string) string {
@@ -90,6 +91,14 @@ func TestAFailingTriggerKeepsItsExitCodeAndOutputTail(t *testing.T) {
 	}
 }
 
+func TestOutputTailsStayWithinTheirCapAfterInvalidUTF8IsReplaced(t *testing.T) {
+	run := script(t, `i=0; while [ $i -lt 6000 ]; do printf '\377a'; printf '\377a' >&2; i=$((i+1)); done`)
+	result := Runner{WorkDir: t.TempDir()}.Execute(context.Background(), Trigger{Name: "noisy", Run: []string{run}, Timeout: 20 * time.Second}, completion(), false)
+	if result.State != StateSucceeded || len(result.Stdout) > OutputTailBytes || len(result.Stderr) > OutputTailBytes || !utf8.ValidString(result.Stdout) || !strings.HasSuffix(result.Stdout, "a") {
+		t.Fatalf("state=%s stdout=%d stderr=%d", result.State, len(result.Stdout), len(result.Stderr))
+	}
+}
+
 func TestTouchCreatesAPrivateFileAndRefusesASymlink(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "done")
@@ -140,6 +149,8 @@ func TestAMalformedTriggerFileLoadsNothing(t *testing.T) {
 		"reserved env":        `{"version":1,"triggers":[{"name":"a","touch":"/tmp/x","env":{"AGENTHAIL_TRIGGER":"x"}}]}`,
 		"unsupported version": `{"version":2,"triggers":[]}`,
 		"bad name":            `{"version":1,"triggers":[{"name":"A B","touch":"/tmp/x"}]}`,
+		"second document":     `{"version":1,"triggers":[{"name":"a","touch":"/tmp/x"}]} {"version":1}`,
+		"trailing bytes":      `{"version":1,"triggers":[{"name":"a","touch":"/tmp/x"}]} x`,
 	} {
 		path := filepath.Join(t.TempDir(), "triggers.json")
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {

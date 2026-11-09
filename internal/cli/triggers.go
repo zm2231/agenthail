@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const triggersUsage = "usage: agenthail triggers [status] | runs [--trigger <name>] [--session <id>] [--limit <n>] | test <name> | retry <run-id> | reload [--json]"
+const triggersUsage = "usage: agenthail triggers [status] | runs [--trigger <name>] [--session <id>] [--limit <n>] | test <name> | retry <run-id> | reload, each with [--json]"
 
 type triggerRunView struct {
 	ID         int64      `json:"id"`
