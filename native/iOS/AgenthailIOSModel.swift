@@ -226,6 +226,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     @ObservationIgnored private var pushFailures: [String: String] = [:]
     @ObservationIgnored private var deviceRegistrationFailure: String?
     @ObservationIgnored private var appActive = true
+    @ObservationIgnored private var repairingPush: Set<String> = []
     var notificationProblems: [String] = []
     private let networkSession: URLSession
     private let connectionDrops: ConnectionDrops?
@@ -1108,6 +1109,8 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                     throw AgenthailAPIError.unavailable("This pairing code is for a different computer than it names. Show a new code on the computer and try again.")
                 }
                 let previous = connections[hostID]
+                repairingPush.insert(hostID)
+                cancelPushSetup(hostID)
                 if let previous {
                     if let relayURL = previous.pushRelayURL, let stored = storedPush(hostID),
                        let failure = await revokeBeforeRepair(PushRelayClient(baseURL: relayURL, session: networkSession), stored.registration) {
@@ -1119,13 +1122,13 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                         try? await previous.api.revokeCurrentDevice()
                     }
                     previous.stop()
-                    cancelPushSetup(hostID)
                     clearStoredPush(hostID)
                     store.prune { $0.hasPrefix(hostID + HostCatalog.separator) }
                 }
                 let credential = PairedHostCredential(hostID: hostID, hostName: response.host.name, endpoint: pendingPairing.endpoint, token: response.token, pairedAt: previous == nil ? Date() : PairedCredential.all().first { $0.hostID == hostID }?.pairedAt ?? Date())
                 try PairedCredential.save(credential)
                 add(HostConnection(credential: credential, session: networkSession, drops: connectionDrops))
+                repairingPush.remove(hostID)
                 attachmentCache.removeAll()
                 attachmentCacheBytes = 0
                 pairing = false
@@ -1140,6 +1143,10 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                 if let newAPI { try? await newAPI.revokeCurrentDevice() }
                 pairing = false
                 operationError = error.localizedDescription
+                if repairingPush.remove(pendingPairing.hostID) != nil, let pushDeviceToken,
+                   let previous = connections[pendingPairing.hostID], previous.reachable {
+                    registerPush(previous, deviceToken: pushDeviceToken)
+                }
             }
         }
     }
@@ -2314,7 +2321,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     private func registerPush(_ connection: HostConnection, deviceToken: String) {
         let hostID = connection.id
-        guard !connection.isPreview, appActive else { return }
+        guard !connection.isPreview, appActive, !repairingPush.contains(hostID) else { return }
         if let running = pushRetries[hostID] {
             if running.connection == ObjectIdentifier(connection) { return }
             cancelPushSetup(hostID)
@@ -2375,10 +2382,10 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         let registration = try await relay.register(deviceToken: deviceToken, tag: hostID)
         let stored = StoredPush(registration: registration, deviceToken: deviceToken, environment: PushRelayClient.environment, endpoint: endpoint)
         try KeychainStore.set(String(decoding: try JSONEncoder().encode(stored), as: UTF8.self), account: Self.pushAccount(hostID))
-        guard connections[hostID] === connection else {
+        guard !Task.isCancelled, connections[hostID] === connection else {
             try? await relay.revoke(registration)
             clearStoredPush(hostID)
-            return
+            throw CancellationError()
         }
         try await connection.api.configurePush(installationID: registration.installationId, credential: registration.credential)
         pushStatus[hostID] = "Enabled"
