@@ -89,7 +89,7 @@ case "${1:-}" in
     : "${ASC_ISSUER_ID:?missing APPLE_NOTARY_ISSUER_ID}"
     archive="$2" version="$3" build="$4"
     test "$(xcrun --sdk iphoneos --show-sdk-version | cut -d. -f1)" -ge 26
-    xcodebuild archive \
+    "$(dirname "$0")/ios-swiftpm.sh" xcodebuild archive \
       -project native/Agenthail.xcodeproj \
       -scheme AgenthailIOS \
       -configuration Release \
