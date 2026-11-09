@@ -120,7 +120,7 @@ func presentationRow(record registry.CatalogPresentationRow, source presentation
 		row.Alias = ""
 	}
 	if record.HostID == "" {
-		row.Archived, row.StartedBy = record.Archived, record.StartedBy
+		row.Archived, row.StartedBy, row.Task = record.Archived, record.StartedBy, record.Task
 		row.PinnedAt, row.KeepAlive = record.PinnedAt, keepAliveRow(record.KeepAlive)
 		row.Snooze = snoozeRow(record.Snooze)
 		row.EndTurn = endTurnRow(record.TurnEnd)

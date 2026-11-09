@@ -189,19 +189,14 @@ func (p *sessionViewPlan) families(scope string, filters SessionViewFilters) []S
 			member := p.rows[at]
 			pinned := matched[at] && presentationPinned(member)
 			worker := depth > 0 && p.worker[at]
-			family.Members = append(family.Members, SessionViewMember{ID: at, Depth: depth, ContextOnly: !matched[at], Pinned: pinned, Worker: worker})
+			task := worker && member.Task
+			family.Members = append(family.Members, SessionViewMember{ID: at, Depth: depth, ContextOnly: !matched[at], Pinned: pinned, Worker: worker && !task, Task: task})
 			family.Pinned = family.Pinned || pinned
-			if worker && matched[at] {
-				if family.Workers == nil {
-					family.Workers = &SessionViewWorkers{}
-				}
-				family.Workers.Count++
-				if presentationWorking(member) {
-					family.Workers.Working++
-				}
-				if presentationNeedsYou(member) {
-					family.Workers.NeedsYou++
-				}
+			switch {
+			case task && matched[at]:
+				family.Tasks = rollUp(family.Tasks, member)
+			case worker && matched[at]:
+				family.Workers = rollUp(family.Workers, member)
 			}
 			if matched[at] && presentationNeedsYou(member) {
 				needsYou = true

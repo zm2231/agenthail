@@ -91,6 +91,20 @@ func (p *sessionViewPlan) workingSubagents(matched map[string]bool) map[string]i
 	return working
 }
 
+func rollUp(rollup *SessionViewWorkers, member *dashboardSession) *SessionViewWorkers {
+	if rollup == nil {
+		rollup = &SessionViewWorkers{}
+	}
+	rollup.Count++
+	if presentationWorking(member) {
+		rollup.Working++
+	}
+	if presentationNeedsYou(member) {
+		rollup.NeedsYou++
+	}
+	return rollup
+}
+
 func sameFamilyPlace(a, b *dashboardSession) bool {
 	if a.Checkout == nil || b.Checkout == nil || a.Checkout.ID == "" || a.Checkout.ID != b.Checkout.ID {
 		return false
