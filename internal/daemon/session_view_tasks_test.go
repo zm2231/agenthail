@@ -49,8 +49,13 @@ func TestATaskWithoutAPlaceUnderItsStarterIsAPlainSession(t *testing.T) {
 	f.add("elsewhere", "lead", "topic", task)
 	f.add("of-missing", "ghost", "main", task)
 	f.add("archived", "lead", "main", task, func(r *dashboardSession) { r.Archived = true })
+	f.add("archived-lead", "", "main", func(r *dashboardSession) { r.Archived = true })
+	f.add("of-archived", "archived-lead", "main", task)
+	f.add("archived-of-archived", "archived-lead", "main", task, func(r *dashboardSession) { r.Archived = true })
+	f.add("claude-lead", "", "main", func(r *dashboardSession) { r.Surface = surface.KindClaude })
+	f.add("of-filtered", "claude-lead", "main", task)
 	plan := f.plan(SessionViewFilters{})
-	for _, id := range []string{"elsewhere", "of-missing"} {
+	for _, id := range []string{"elsewhere", "of-missing", "of-archived"} {
 		if family, member := familyOf(t, plan, id); family.RootID != id || member.Task || family.Tasks != nil {
 			t.Fatalf("%s is %+v in %+v, want its own root without a task group", id, member, family)
 		}
@@ -58,9 +63,15 @@ func TestATaskWithoutAPlaceUnderItsStarterIsAPlainSession(t *testing.T) {
 	if lead, _ := familyOf(t, plan, "lead"); lead.Tasks != nil || len(lead.Members) != 1 {
 		t.Fatalf("the starter's family is %+v, want no task group", lead)
 	}
+	filtered := f.plan(SessionViewFilters{Surface: string(surface.KindCodex)})
+	if family, member := familyOf(t, filtered, "of-filtered"); family.RootID != "of-filtered" || member.Task || family.Tasks != nil {
+		t.Fatalf("filtered to codex, a task of a claude starter is %+v in %+v, want its own root", member, family)
+	}
 	archived := newSessionViewPlan(f.rows, "archived", SessionViewFilters{}, f.now)
-	if family, member := familyOf(t, archived, "archived"); family.RootID != "archived" || member.Task || family.Tasks != nil {
-		t.Fatalf("in Archived, an archived task of a live starter is %+v in %+v, want its own root", member, family)
+	for _, id := range []string{"archived", "archived-of-archived"} {
+		if family, member := familyOf(t, archived, id); family.RootID != id || member.Task || family.Tasks != nil {
+			t.Fatalf("in Archived, the archived task %s is %+v in %+v, want its own root", id, member, family)
+		}
 	}
 }
 
