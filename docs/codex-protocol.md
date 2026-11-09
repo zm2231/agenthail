@@ -30,6 +30,8 @@ against those actual message envelopes.
 
 Codex enforces one writer per thread: the app-server process that has a thread loaded holds a per-thread lock in `$CODEX_HOME/thread-writer-locks/`, and a second process that tries to load it gets `thread <id> already has an active writer`. Codex returns that as the generic invalid-request code, so Agenthail matches the message. A process unloads a thread, releasing the lock, after it has had no subscribers and no active turn for `thread_unload_delay_secs` (default 1800).
 
+A `thread/resume` whose overrides (`config`, `cwd`, `model` and the other settings) differ from a loaded thread's rebuilds the thread when no connection subscribes to it and Codex counts it idle; the rebuild aborts a turn that is just starting. Two rules keep Agenthail from doing that. A resume of a thread the app-server already has loaded joins it with only `threadId` and `excludeTurns`; the session's overrides and MCP token go only on a load. A connection that starts a turn (`turn/start` on create and send, `thread/compact/start`) stays open, and so subscribed, until Codex reports the thread `active` or the turn completed, at most 10 seconds. Deliberate reloads (a new compact window, a replaced MCP token) therefore never land inside a starting turn of Agenthail's own. Codex refuses to join a new thread until its first turn ends (`list_turns is not supported yet`), so a stream follows that turn by reads and subscribes on its next status change. `codex_resume_real_test.go` checks all of this against a real app-server (Codex 0.163).
+
 Agenthail reaches two app-servers and has one route to each:
 
 - `desktop`: Codex Desktop's private app-server, through the renderer bridge.

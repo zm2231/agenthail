@@ -17,6 +17,7 @@ type scriptedCall struct {
 type scriptedThreadClient struct {
 	calls     []scriptedCall
 	connected []bool
+	loaded    bool
 }
 
 func (c *scriptedThreadClient) Request(_ context.Context, method string, params map[string]any, _ time.Duration) (map[string]any, error) {
@@ -24,6 +25,12 @@ func (c *scriptedThreadClient) Request(_ context.Context, method string, params 
 	switch method {
 	case codexThreadStart, codexThreadFork:
 		return map[string]any{"result": map[string]any{"thread": map[string]any{"id": "new-thread"}}}, nil
+	case "thread/read":
+		status := "notLoaded"
+		if c.loaded {
+			status = "idle"
+		}
+		return map[string]any{"result": map[string]any{"thread": map[string]any{"status": map[string]any{"type": status}}}}, nil
 	case "mcpServerStatus/list":
 		connected := len(c.connected) > 0 && c.connected[0]
 		if len(c.connected) > 0 {
@@ -114,8 +121,30 @@ func TestResumeCarriesTheLiveTokenTheDaemonHolds(t *testing.T) {
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if got := client.methods(); len(got) != 1 || bearerOf(client.calls[0].params) != "Bearer ahs_live" {
+	if got := client.methods(); len(got) != 2 || bearerOf(client.calls[1].params) != "Bearer ahs_live" {
 		t.Fatalf("calls=%v", got)
+	}
+}
+
+func TestALoadedThreadIsJoinedWithoutItsOverrides(t *testing.T) {
+	credentials := &fakeCredentials{live: map[string]string{"t": "ahs_live"}}
+	c := &Codex{}
+	c.SetMCPCredentials(credentials)
+	store := newMemoryCodexConfig()
+	if _, err := store.SetCodexConfigOverride("t", codexCompactLimit, 100000); err != nil {
+		t.Fatal(err)
+	}
+	c.SetCodexConfigStore(store)
+	client := &scriptedThreadClient{connected: []bool{true}, loaded: true}
+	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t", "excludeTurns": true, "cwd": "/w", "model": "m"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"thread/read", codexThreadResume, "mcpServerStatus/list"}
+	if got := client.methods(); !slices.Equal(got, want) {
+		t.Fatalf("calls=%v", got)
+	}
+	if params := client.calls[1].params; len(params) != 2 || params["threadId"] != "t" || params["excludeTurns"] != true {
+		t.Fatalf("a loaded thread was resumed with %v", params)
 	}
 }
 
@@ -127,7 +156,7 @@ func TestResumeWithoutATokenLeavesAConnectedThreadAlone(t *testing.T) {
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if credentials.rotations != 0 || bearerOf(client.calls[0].params) != "" {
+	if credentials.rotations != 0 || bearerOf(client.calls[1].params) != "" {
 		t.Fatalf("rotations=%d calls=%v", credentials.rotations, client.methods())
 	}
 }
@@ -140,7 +169,7 @@ func TestAThreadThatUnloadedBeforeResumeIsReattachedWithARotatedToken(t *testing
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{codexThreadResume, "mcpServerStatus/list", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
+	want := []string{"thread/read", codexThreadResume, "mcpServerStatus/list", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
 	got := client.methods()
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v", got)
@@ -150,7 +179,7 @@ func TestAThreadThatUnloadedBeforeResumeIsReattachedWithARotatedToken(t *testing
 			t.Fatalf("calls=%v", got)
 		}
 	}
-	if credentials.rotations != 1 || bearerOf(client.calls[3].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
+	if credentials.rotations != 1 || bearerOf(client.calls[4].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
 		t.Fatalf("rotations=%d unattached=%v, the re-attach did not carry the rotated bearer", credentials.rotations, credentials.unattached)
 	}
 }
@@ -159,15 +188,15 @@ func TestALoadedThreadWhoseCredentialPassedItsLimitIsReloadedWithANewToken(t *te
 	credentials := &fakeCredentials{expired: true}
 	c := &Codex{}
 	c.SetMCPCredentials(credentials)
-	client := &scriptedThreadClient{connected: []bool{true}}
+	client := &scriptedThreadClient{connected: []bool{true}, loaded: true}
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{codexThreadResume, "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
+	want := []string{"thread/read", codexThreadResume, "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
 	if got := client.methods(); !slices.Equal(got, want) {
 		t.Fatalf("calls=%v", got)
 	}
-	if credentials.rotations != 1 || bearerOf(client.calls[2].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
+	if credentials.rotations != 1 || bearerOf(client.calls[3].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
 		t.Fatalf("rotations=%d unattached=%v, the expired token stayed attached", credentials.rotations, credentials.unattached)
 	}
 }

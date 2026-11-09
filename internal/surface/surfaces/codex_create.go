@@ -143,6 +143,7 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	if err != nil {
 		return session, nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/start: %w", err))
 	}
+	awaitTurnUnderway(ctx, client, threadID)
 	turnID := threadID
 	if turnResult, _ := turnResponse["result"].(map[string]any); turnResult != nil {
 		if turn, _ := turnResult["turn"].(map[string]any); str(turn, "id") != "" {

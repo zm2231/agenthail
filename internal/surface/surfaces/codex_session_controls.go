@@ -16,9 +16,13 @@ func (c *Codex) GoalClear(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Codex) Compact(ctx context.Context, sess *surface.Session) error {
-	_, err := c.requestSession(ctx, sess, true, "thread/compact/start", map[string]any{
-		"threadId": sess.ID,
-	}, 10*time.Second)
+	_, err := c.requestSessionWith(ctx, sess, true, func(client codexClient) (map[string]any, error) {
+		response, err := client.Request(ctx, "thread/compact/start", map[string]any{"threadId": sess.ID}, 10*time.Second)
+		if err == nil {
+			awaitTurnUnderway(ctx, client, sess.ID)
+		}
+		return response, err
+	})
 	return err
 }
 
