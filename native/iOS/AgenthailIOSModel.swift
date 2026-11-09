@@ -32,9 +32,13 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     private(set) var snapshot: DashboardSnapshot? {
         didSet {
-            sessionFamilies = SessionFamilies.build(snapshot?.sessions ?? [])
+            cells.adopt(snapshot?.sessions ?? [])
+            daemon = snapshot?.daemon
+            subagentIDs = (snapshot?.sessions ?? []).reduce(into: [:]) { ids, row in
+                if let parent = row.subagent?.parentId { ids[parent, default: []].append(row.id) }
+            }
             sessionAttention = SessionAttention.build(sessions: snapshot?.sessions ?? [], attention: snapshot?.attention ?? [], deliveryProblems: snapshot?.deliveryProblems ?? [])
-            listedTree = nil
+            rederiveTree()
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
                 let picks = HolderPins.shared.all
@@ -50,13 +54,16 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private(set) var projectOrder: [String] = []
     private(set) var holderPicks: [String: HolderPin] = [:]
     @ObservationIgnored lazy var decisionFeed = DecisionFeed(key: { [unowned self] in decisionsKey }, load: { [unowned self] in await loadDecisions() })
-    private(set) var sessionFamilies: [SessionFamily] = []
+    let cells = SessionCells()
+    private var subagentIDs: [String: [String]] = [:]
+    private var daemon: DaemonState?
     private(set) var sessionAttention: [String: SessionAttention] = [:]
-    @ObservationIgnored private var listedTree: (scope: SessionFilter, search: String, tree: SessionTree)?
-    private var listRevision: UInt64 = 0
+    @ObservationIgnored private var listedTree: (key: ListKey, tree: SessionTree)?
+    private(set) var listRevision: UInt64 = 0
     @ObservationIgnored private var orderHold = OrderHold()
     @ObservationIgnored private var heldList: ScopePage.View?
-    @ObservationIgnored private var heldKey: (scope: SessionFilter, search: String)?
+    @ObservationIgnored private var heldKey: ListKey?
+    @ObservationIgnored private var heldCells: [String: SessionCell] = [:]
     @ObservationIgnored private var shownOrder: [ScopePage.View?] = []
     var selectedDetail: SessionDetail? {
         didSet { paintOpeningSession() }
@@ -215,6 +222,8 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private let previewPaired: Bool
 
     var isPaired: Bool { !hostOrder.isEmpty && (previewPaired || connections.values.contains { !$0.isPreview }) }
+    func session(_ id: String?) -> SessionState? { cells.session(id) }
+    func pairedHost(owning sessionID: String) -> SessionHost? { daemon?.pairedHost(owning: sessionID) }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
     var leadReplacements: [LeadReplacement] { snapshot?.leadReplacements ?? [] }
@@ -222,7 +231,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     /// Names the lead that replaced a request's session; the computer serving the request gives the id unqualified.
     func leadName(_ id: String, requestFrom sessionID: String) -> String {
         let qualified = HostCatalog.qualify(catalog.route(for: sessionID)?.hostID ?? HostCatalog.owner(of: sessionID) ?? "", id)
-        return snapshot?.sessions.first { $0.id == qualified }?.displayName ?? id
+        return session(qualified)?.displayName ?? id
     }
     var showsHostNames: Bool { Set((snapshot?.sessions ?? []).compactMap(\.host?.id)).count > 1 || hostOrder.count > 1 }
     var usageReaders: [AgenthailAPI] { hostOrder.compactMap { connections[$0] }.filter(\.reachable).map(\.api) }
@@ -303,8 +312,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         let order = orderSignature
         if order != shownOrder {
             shownOrder = order
-            listedTree = nil
-            listRevision &+= 1
+            rederiveTree()
         }
         store.carry(rekeys)
         hosts = ordered.map { connection in
@@ -521,7 +529,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func subagents(of sessionID: String) -> [SessionState] {
-        SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents.children(of: sessionID))
+        SessionFamilies.children(of: sessionID, listed: (subagentIDs[sessionID] ?? []).compactMap(session), fetched: fetchedSubagents.children(of: sessionID))
     }
 
     private func inboxHosts() throws -> [InboxPage.Host] {
@@ -631,7 +639,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         guard !item.isHistorical, !QueueSteer.waiting([item]).isEmpty else { return nil }
         let id = item.sessionId
         let known = snapshot?.sessions.first { $0.id == id }
-            ?? selectedDetail.flatMap { $0.session.id == id ? $0.sessionState(open: false, host: snapshot?.daemon.pairedHost(owning: id)) : nil }
+            ?? selectedDetail.flatMap { $0.session.id == id ? $0.sessionState(open: false, host: pairedHost(owning: id)) : nil }
         guard let session = known, session.status == "busy", session.waitingOn == nil, session.capabilities.steer, !session.isReadOnly else { return nil }
         return (session.capabilities, QueueSteer.refusal(item, capabilities: session.capabilities))
     }
@@ -1157,18 +1165,49 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         return rows.map { HostCatalog.merge($0, servedBy: host.id, ownerName: { id in self.catalog.hosts.first { $0.id == id }?.name }, reachable: true).row }
     }
 
-    /// The session list for a scope and search, built once per catalog change
-    /// rather than on every view update.
+    struct ListKey: Equatable {
+        let scope: SessionFilter
+        let search: String
+    }
+
+    // Families hold session cells, so a change inside one session leaves the tree equal.
     func sessionTree(scope: SessionFilter, search: String) -> SessionTree {
         _ = listRevision
-        if let listed = listedTree, listed.scope == scope, listed.search == search { return listed.tree }
-        if orderHold.held, heldKey?.scope != scope || heldKey?.search != search { orderHold.release() }
-        let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let shown = orderHold.shown(list: listOrder(scope: scope, search: search), current: currentOrder, rows: rows)
-        let tree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention)
-        heldList = shown.list
-        listedTree = (scope, search, tree)
+        let key = ListKey(scope: scope, search: search)
+        if let listed = listedTree, listed.key == key { return listed.tree }
+        let tree = buildTree(key)
+        listedTree = (key, tree)
         return tree
+    }
+
+    private func rederiveTree() {
+        let key = listedTree?.key ?? ListKey(scope: .recent, search: "")
+        let tree = buildTree(key)
+        if let listed = listedTree, listed.tree == tree { return }
+        listedTree = (key, tree)
+        listRevision &+= 1
+    }
+
+    private func buildTree(_ key: ListKey) -> SessionTree {
+        if orderHold.held, heldKey != key { orderHold.release() }
+        let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let shown = orderHold.shown(list: listOrder(scope: key.scope, search: key.search), current: currentOrder, rows: rows)
+        heldList = shown.list
+        return SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: treeCells(shown.rows))
+    }
+
+    private func treeCells(_ rows: [String: SessionState]) -> [String: SessionCell] {
+        var all = cells.byID
+        guard orderHold.held else {
+            heldCells = [:]
+            return all
+        }
+        for (id, row) in rows where all[id] == nil {
+            let cell = heldCells[id] ?? SessionCell(row)
+            heldCells[id] = cell
+            all[id] = cell
+        }
+        return all
     }
 
     private var orderHosts: [HostConnection] { listedHosts.filter(\.shownReachable) + listedHosts.filter { !$0.shownReachable } }
@@ -1213,11 +1252,10 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         if holding {
             let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             orderHold.hold(list: heldList, current: currentOrder, rows: rows)
-            heldKey = listedTree.map { ($0.scope, $0.search) }
+            heldKey = listedTree?.key
         } else {
             orderHold.release()
-            listedTree = nil
-            listRevision &+= 1
+            rederiveTree()
         }
     }
 

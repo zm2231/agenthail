@@ -13,7 +13,7 @@ extension AgenthailIOSModel {
     }
 
     func sessionName(_ sessionID: String) -> String {
-        snapshot?.sessions.first { $0.id == sessionID }?.displayName ?? sessionID
+        session(sessionID)?.displayName ?? sessionID
     }
 
     func projectOfSession() -> (String) -> String? {

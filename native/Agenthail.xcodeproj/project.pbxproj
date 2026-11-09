@@ -99,6 +99,7 @@
 		45458525DDB83B2A0563C14E /* UsageAccounts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66C823A3E6D08A4782876813 /* UsageAccounts.swift */; };
 		45AE919C61DDAD0233EB4D60 /* RequestNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = D31C90794BE0EC19254B01F4 /* RequestNotifications.swift */; };
 		4745ED34D458BE5684C88ABF /* TranscriptReadingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */; };
+		4798E2D17E6B930C15C32F57 /* SessionListRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8CB58E4596119C3F2DD95AA /* SessionListRow.swift */; };
 		47F4661F55A577BE2203BCA3 /* TranscriptLiveEdgeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91B0815C156FA841DACA9408 /* TranscriptLiveEdgeUITests.swift */; };
 		48A7563938A35E60A7D681BD /* DecisionInboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A17CB355B1ED24DBC265D0A7 /* DecisionInboxTests.swift */; };
 		48BA7C313A4D114D16DA93BC /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDE64B86C2BC64932A6DAD35 /* KeychainStore.swift */; };
@@ -556,6 +557,7 @@
 		A57533554A70CCA7EB8A7D1F /* TranscriptScrimView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptScrimView.swift; sourceTree = "<group>"; };
 		A6042C2F46355EA034B11D0D /* TerminalQuestionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalQuestionUITests.swift; sourceTree = "<group>"; };
 		A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReadingUITests.swift; sourceTree = "<group>"; };
+		A8CB58E4596119C3F2DD95AA /* SessionListRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListRow.swift; sourceTree = "<group>"; };
 		A91AA65329AF94FEF3F821E2 /* VoiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTests.swift; sourceTree = "<group>"; };
 		AB597912B0447C43772021FB /* ScrimField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrimField.swift; sourceTree = "<group>"; };
 		ABDC93B36DEF126A790DD2F3 /* tile-order-vectors.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "tile-order-vectors.json"; sourceTree = "<group>"; };
@@ -763,6 +765,7 @@
 				0F97182BB6B3E031BAE4D18C /* SessionControls.swift */,
 				836598CAF0AF568C68FD23C5 /* SessionCreation.swift */,
 				71ABFF321D6A090191C0C9C1 /* SessionListChrome.swift */,
+				A8CB58E4596119C3F2DD95AA /* SessionListRow.swift */,
 				4297F79B0E285D005AC6D64C /* SessionPreview.swift */,
 				07C319F74B4B7941915EC517 /* SessionScopes.swift */,
 				C91F7F5037F207D650700C99 /* SessionStatusLabel.swift */,
@@ -1368,6 +1371,7 @@
 				301ACB310F833ACD38519EBD /* SessionDisplayKind.swift in Sources */,
 				1B3B458D8C65A1F4B5F3CA6C /* SessionEndTurn.swift in Sources */,
 				D4B4B613E7DC1D43939370FC /* SessionListChrome.swift in Sources */,
+				4798E2D17E6B930C15C32F57 /* SessionListRow.swift in Sources */,
 				08E5F0CAB166A694C27B6448 /* SessionNames.swift in Sources */,
 				2F869372B2CD32797E8B80B3 /* SessionPreview.swift in Sources */,
 				A0B266E76934221148661ED6 /* SessionRowTime.swift in Sources */,

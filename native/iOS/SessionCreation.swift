@@ -19,7 +19,7 @@ struct NewSessionSheet: View {
 
     init(model: AgenthailIOSModel, place: NewSessionPlace? = nil) {
         self.model = model
-        let selected = model.snapshot?.sessions.first { $0.id == model.selectedSessionID }
+        let selected = model.session(model.selectedSessionID)
         var hosts = CreationHostPicker(hosts: model.creationHosts, selectedSession: selected)
         if let place { _ = hosts.select(place.host) }
         _hosts = State(initialValue: hosts)
