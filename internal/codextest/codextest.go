@@ -855,7 +855,11 @@ func turnJSON(turn Turn) map[string]any {
 	if turn.Assistant != "" {
 		items = append(items, map[string]any{"id": turn.ID + "-reply", "type": "agentMessage", "phase": "final_answer", "text": turn.Assistant})
 	}
-	return map[string]any{"id": turn.ID, "status": turn.Status, "items": items}
+	value := map[string]any{"id": turn.ID, "status": turn.Status, "items": items, "completedAt": nil}
+	if turn.Status != "inProgress" {
+		value["completedAt"] = 1
+	}
+	return value
 }
 
 func (d *Daemon) LoadedIDs() []string {
