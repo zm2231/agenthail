@@ -143,6 +143,10 @@ func (a *App) cmdQueue(args []string) error {
 	if _, err := a.agentScope(ctx, scope); err != nil {
 		return err
 	}
+	source, err := a.sourceSessionID(ctx, "")
+	if err != nil {
+		return err
+	}
 	if remote != nil {
 		message, err := messageText(strings.Join(positional[1:], " "))
 		if err != nil {
@@ -151,7 +155,7 @@ func (a *App) cmdQueue(args []string) error {
 		if message == "" {
 			return fmt.Errorf("message is empty")
 		}
-		return a.queueRemote(ctx, remote, message)
+		return a.queueRemote(ctx, remote, message, source)
 	}
 	if a.registry() == nil {
 		return fmt.Errorf("queue requires the registry")
@@ -173,7 +177,7 @@ func (a *App) cmdQueue(args []string) error {
 		return fmt.Errorf("message is empty")
 	}
 	warnQueuedWithoutDaemon(os.Stderr)
-	if _, err := a.registry().QueueMessageWithOptions(sess.ID, message, "", surface.SendOptions{BusyDelivery: string(deliverypolicy.Queue)}); err != nil {
+	if _, _, err := a.registry().QueueDeliveryWithIntent(sess.ID, message, "", surface.SendOptions{BusyDelivery: string(deliverypolicy.Queue), SourceSessionID: source}); err != nil {
 		return err
 	}
 	if waiting, err := a.registry().SessionWaiting(sess.ID); err == nil && waiting != nil {
