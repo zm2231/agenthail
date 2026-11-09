@@ -111,6 +111,12 @@ jobs:
           rm -rf "$RUNNER_TEMP/ios-tests.xcresult"
           read -r -a tiers <<< "$TIERS"
           only=(-only-testing:AgenthailIOSUITests/BodyRunsUITests)
+          for i in $(seq 1 40); do
+            load=$(sysctl -n vm.loadavg | awk '{print $2}')
+            awk -v x="$load" 'BEGIN{exit !(x<15)}' && break
+            echo "waiting for load under 15: $load"
+            sleep 15
+          done
           echo "load before tests: $(sysctl -n vm.loadavg)"
           scripts/ios-test-stall-guard.sh xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" "${only[@]}" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
           plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
