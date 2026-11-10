@@ -2,6 +2,20 @@
 
 These notes cover Agenthail's implementation, packaging, release automation, and service integrations. Normal installation and use do not require them.
 
+## Running the whole Go suite
+
+`go test ./...` runs the real Claude host, browser host and cookie bridge, so a checkout needs the shipped Node and each bundle's packages first, as CI stages them:
+
+```bash
+scripts/fetch-node.sh
+npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
+npm ci --prefix sidecar --ignore-scripts
+go test ./...
+```
+
+A test that runs a host whose packages are missing fails at once and names the `npm ci` command, rather than timing out waiting for the host. The browser tests fetch Chromium on first use; set `AGENTHAIL_BROWSER_TEST_BROWSERS` to a directory to fetch it once and share it across tests and runs.
+
 - [Packaging and releases](../packaging.md)
 - [Self-hosted CI runners](self-hosted-ci.md)
 - [iPhone live harness: real daemons for connection tests](ios-live-harness.md)

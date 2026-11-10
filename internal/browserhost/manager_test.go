@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -17,9 +16,7 @@ import (
 
 func repoLaunch(t *testing.T) Launch {
 	t.Helper()
-	_, file, _, _ := runtime.Caller(0)
-	script := filepath.Join(filepath.Dir(file), "..", "..", "browser-host", "host.mjs")
-	return Launch{Node: testnode.Path(t), Script: script, Version: "test", Env: os.Environ()}
+	return Launch{Node: testnode.Path(t), Script: filepath.Join(testnode.BrowserHost(t), "host.mjs"), Version: "test", Env: os.Environ()}
 }
 
 func shortHome(t *testing.T) string {
