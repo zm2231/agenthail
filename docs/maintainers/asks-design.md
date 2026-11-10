@@ -1,6 +1,6 @@
 # Asks: one object for everything that needs the person (design)
 
-Status: design, not built. Code references are to `origin/main` at `fe198bfd` (schema 89).
+Status: layer 1 built (schema 90); layers 2 to 5 are design. "Why" and the table below describe the code before layer 1, at `fe198bfd` (schema 89).
 
 ## Why
 
@@ -56,7 +56,7 @@ The clients already have one inbox: `GET /api/v1/decisions` (`internal/daemon/de
 }
 ```
 
-Limits stay as `agenthail_end_turn` has them (`internal/daemon/mcp_end_turn.go:107`): 1–4 questions, question ≤160 characters, 1–6 options, label ≤40, does ≤90, ≤3 links. Short labels are also what makes an ask speakable later.
+Limits are the ones `agenthail_end_turn` had (`validAsk`, `internal/daemon/asks.go`): 1–4 questions, question ≤160 characters, 1–6 options, label ≤40, does ≤90, ≤3 links. Short labels are also what makes an ask speakable later.
 
 Every origin maps onto this shape:
 
@@ -67,11 +67,11 @@ Every origin maps onto this shape:
 
 ### Answering
 
-One action, `ask-answer {askId, answer, idempotencyKey}`, on `/api/v1/actions` (devices, dashboard), MCP `agenthail_answer` and `agenthail ask answer` (agents). The daemon claims the ask (open to answered, at most once), then an **applier** per origin delivers the answer:
+One action, the existing `respond {sessionId, requestId: <ask id>, decision}` with an `Idempotency-Key`, on `/api/v1/actions` (devices, dashboard), MCP `agenthail_answer {requestId: <ask id>}` and `agenthail ask answer` (agents); clients answer an ask as they answer a question. The daemon claims the ask (open to answered, at most once), then an **applier** per origin delivers the answer:
 
 | origin | applier |
 |---|---|
-| agent | composes one numbered message, as `composeTurnAnswer` does today (`internal/daemon/end_turn_answer.go:55-69`), and delivers it to the session as the person, or as the answering lead |
+| agent | composes one numbered message (`composeAskAnswer`, `internal/daemon/asks.go`) and delivers it to the session as the person, or as the answering lead |
 | permission | `Responder.Respond` with the chosen action mapped to the provider's `Decision` (`internal/daemon/requests.go:93-131`) |
 | delivery | retry / delete / dismiss / cancel, as the four actions do now |
 | ledger | records the person's words as an utterance and attaches it `As=answers` to the question (`internal/ledger/attach_answer.go:8-37`) |
@@ -86,34 +86,30 @@ An apply failure keeps the answer and records `applyError`. The ask shows in the
 
 ## Schema 90
 
-One table in the registry, held by the host that holds the session (asks are not federated rows; paired hosts read them through the existing `?host=` fan-out):
+One table in the registry, held by the host that holds the session (asks are not federated rows; a paired viewer sees `row.ask` and reads the questions through the existing `?host=` fan-out of `/api/v1/requests`). Layer 1 creates what agent asks use; the columns the other origins need (`project_id`, `ref` with `UNIQUE (origin, ref)`, `deadline_ms`, `on_deadline`, `expired`) come with the layer that needs them.
 
 ```sql
 CREATE TABLE IF NOT EXISTS asks (
   id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  project_id TEXT NOT NULL DEFAULT '',
-  origin TEXT NOT NULL CHECK (origin IN ('agent','permission','delivery','ledger')),
-  ref TEXT NOT NULL,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  origin TEXT NOT NULL,                    -- 'agent' in layer 1
   title TEXT NOT NULL,
   questions_json TEXT NOT NULL,
   routed_to TEXT NOT NULL,                 -- 'person' or a session id
-  route_json TEXT NOT NULL DEFAULT '[]',
-  deadline_ms INTEGER NOT NULL DEFAULT 0,
-  on_deadline TEXT NOT NULL DEFAULT '',
-  state TEXT NOT NULL CHECK (state IN ('open','answered','withdrawn','expired')),
+  routed_at_ms INTEGER NOT NULL,           -- when it reached routed_to, for escalation
+  route_json TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('open','answered','withdrawn')),
   answer_json TEXT NOT NULL DEFAULT '',
   answered_by TEXT NOT NULL DEFAULT '',
   answered_via TEXT NOT NULL DEFAULT '',
   answered_at_ms INTEGER NOT NULL DEFAULT 0,
   applied_at_ms INTEGER NOT NULL DEFAULT 0,
-  apply_error TEXT NOT NULL DEFAULT '',
-  turn_started_at_ms INTEGER NOT NULL DEFAULT 0,  -- the turn that raised it, for the Stop reminder
-  created_at_ms INTEGER NOT NULL,
-  UNIQUE (origin, ref)
+  apply_status TEXT NOT NULL DEFAULT '',
+  apply_id TEXT NOT NULL DEFAULT '',
+  created_at_ms INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS asks_open ON asks(state, routed_to) WHERE state = 'open';
-CREATE INDEX IF NOT EXISTS asks_session ON asks(session_id, state);
+CREATE INDEX IF NOT EXISTS asks_open ON asks(routed_to) WHERE state = 'open';
+CREATE INDEX IF NOT EXISTS asks_session ON asks(session_id, created_at_ms);
 ```
 
 - `asks` joins `presentationInputs` (`internal/registry/catalog_presentation_version.go:20-40`), so row attention and the decisions revision (`internal/daemon/decisions_revision.go`) move when an ask does.
@@ -141,20 +137,21 @@ Each source is migrated in its own layer, and its old path goes in the same chan
 
 ## Raising an ask
 
-- MCP `agenthail_ask {title, questions, routeTo?}` returns the ask id. `routeTo` is `auto` (default) or `person`, which a worker may not use when it has a lead.
-- `agenthail ask "Deploy it now?" --option Deploy --option "Wait:hold until Monday" --recommend 0 [--link …] [--to person] [--json]`. The caller is resolved the way `agenthail send` resolves it (`AGENTHAIL_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`; `internal/cli/help.go:229-230`), so terminal Claude and Codex leads can raise asks without an MCP credential. It posts to `POST /api/v1/asks` on the local daemon.
-- `agenthail ask list|show|answer|withdraw` and MCP `agenthail_asks` / `agenthail_answer` cover the rest. A session may withdraw only its own asks.
+- MCP `agenthail_ask {title, questions}` returns the ask id and where it went, or `{withdraw: <ask id>}` withdraws one. Routing is the daemon's; an agent does not choose it.
+- `agenthail ask "Deploy it now?" --option Deploy --option "Wait: hold until Monday" --recommend 1 [--link <title>=<url>] [--question …] [--json]`. The caller is resolved the way `agenthail send` resolves it (`AGENTHAIL_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`; `internal/cli/help.go:229-230`), so terminal Claude and Codex leads can raise asks without an MCP credential. It posts to `POST /api/v1/asks` on the local daemon.
+- `agenthail ask list|show|answer|escalate|withdraw` and MCP `agenthail_answer` cover the rest. A session may withdraw only its own asks.
 - An agent's ask does not stop its turn. It ends its turn normally, and the open ask is what puts it in Needs you.
 
 ### Stop reminder for leads
 
 - A Stop hook for terminal Claude joins the settings.json set (`internal/claudehooks/hooks.go`). The Codex Stop hook (`internal/surface/surfaces/codex_hooks_install.go:26`) and the claude-host hook keep calling `agenthail hook stop`.
-- `turnStop` (`internal/cli/turn_stop.go`) stops requiring an MCP credential, and stops nudging toward `end_turn` for sessions without one.
-- It blocks once per turn (`MarkTurnNudged`) when all of these hold:
-  - the session is a lead: a project coordinator, or the hearer of a live session;
-  - the turn's last assistant text, read from the session journal through the daemon, has a line outside code that ends in `?`;
-  - no ask was raised since the turn opened (`asks.turn_started_at_ms`).
-- The reason it gives: "Your reply asks the person something. Raise it with agenthail ask so it reaches Needs you, then stop."
+- `turnStop` (`internal/cli/turn_stop.go`) no longer requires an MCP credential. It still names `agenthail_end_turn` to a session holding one whose turn has not ended, in the same hold.
+- It holds the stop once per turn (`stop_hook_active` lets the next stop through) when all of these hold:
+  - the session is a lead: a project coordinator, or the spawner of a running session;
+  - the hook input's `last_assistant_message` (Claude Code and Codex both send it) has a line outside fenced code that ends in `?`;
+  - no ask was raised since the turn opened (`AskRaisedSince` the latest `turn_ends.started_at_ms`).
+- The reason it gives: "Your reply asks the person something. Raise it with agenthail ask (or agenthail_ask) so it reaches Needs you, then stop."
+- The settings.json hook runs `hook stop --surface claude --terminal`, which does nothing unless `CLAUDE_CODE_ENTRYPOINT` is `cli`: Claude host sessions load the person's settings too, and only the host's own hook knows which background tasks are ambient.
 - This is a fixed text rule, not inference. A reply that only asks rhetorically costs one extra stop.
 
 ## Routing: worker → lead → person
@@ -178,15 +175,16 @@ Each source is migrated in its own layer, and its old path goes in the same chan
   - **Holding up work**: open asks routed to the person whose session has queued messages behind it (`queuedBehind`).
   - **Handled by a lead**: open asks routed to an agent.
   - **Stopped on you**: the remaining non-ask attention kinds (usage limit, stopped turn, keep-alive failed) and asks whose answer failed to apply.
-- `GET /api/v1/asks?state=open&for=person` and `GET /api/v1/asks/<id>` serve the notification service extension and the voice path. Session rows carry `attention.kind = "ask"` with the ask id.
+- Session rows carry `ask {id, title, routedTo, askedAt, answeredAt}` (the oldest open ask, else the newest answered one until the next turn) and `attention.kind = "ask"` while a person ask is open; `endTurn` no longer carries asks. The client contract is [asks.md](asks.md).
+- In layer 1 `/api/v1/asks` serves only the `agenthail` command on the same machine. A device-facing `GET /api/v1/asks` for the notification extension and the voice path comes with the client cleanup layer.
 - **Mac, iPhone and dashboard:**
-  - Every answer posts `ask-answer`.
+  - Every answer posts `respond` with the ask id.
   - "Accept recommended" works for every origin, and iPhone gets it too (it lacks it today).
   - The Mac menu bar's Needs you and Swift `SessionAttention.build` read the decisions inbox instead of building attention in the app. This finishes the plan in `docs/maintainers/session-presentation-design.md`.
 - **Pushes:**
-  - One event type, `ask.opened`, with `askId` and the ask id as collapse id. The extension fetches the ask and builds the category from its options: up to four option buttons, plus reply when `freeText`.
+  - One event type, `ask.opened`, with the ask id as `requestId` and a collapse id derived from it. The extension fetches the ask and builds the category from its options: up to four option buttons, plus reply when `freeText`.
   - Every terminal state sends `withdraw`.
-  - The paired-host dedupe key (`internal/daemon/turn_notice.go:34`) becomes the ask id.
+  - The paired-host dedupe key is a hash of the holding host and the ask id, so a phone paired to the host and a viewer shows it once.
 - **Browser notifications** get the same option actions.
 
 ## Room for calling the person (not built)
@@ -195,7 +193,7 @@ Nothing in the ask is screen-specific: a title, short questions, short option la
 
 - start a call: a PushKit VoIP push to CallKit, or the voice operator (`internal/voice`), or a voice-mode MCP tool on the Mac;
 - read the open ask aloud from `GET /api/v1/asks/<id>`;
-- send `ask-answer` with `answeredVia: "voice"`.
+- answer with `respond` and `answeredVia: "voice"`.
 
 What this design fixes now so that path needs no new model:
 
@@ -206,7 +204,7 @@ What this design fixes now so that path needs no new model:
 
 Each layer works end to end on its own and removes the path it replaces.
 
-1. Schema 90, ask store, `agenthail ask` / `agenthail_ask`, end-turn asks moved over, Stop reminder for leads in terminal Claude and Codex, decisions inbox items carry asks, `ask-answer`. This is the layer that fixes "Needs you is empty".
+1. Schema 90, ask store, `agenthail ask` / `agenthail_ask`, end-turn asks moved over, Stop reminder for leads in terminal Claude and Codex, decisions inbox items carry asks, answers through `respond`. This is the layer that fixes "Needs you is empty".
 2. Permission requests as asks; one routing path with escalation.
 3. Delivery problems as asks.
 4. Ledger questions as asks.

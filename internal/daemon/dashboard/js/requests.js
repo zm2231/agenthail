@@ -16,7 +16,7 @@ export async function syncRequests() {
   const panel = $("#request-panel");
   const capabilities = session?.capabilities || app.history?.capabilities || {};
   const readOnly = session?.readOnly ?? app.history?.readOnly;
-  const ask = session?.endTurn?.requestId && !session.endTurn.answeredAt ? session.endTurn.requestId : "";
+  const ask = session?.ask?.routedTo === "person" && !session.ask.answeredAt ? session.ask.id : "";
   if (!session || !(capabilities.respond || ask) || readOnly || (session.waitingOn && !session.waitingOn.answerable)) {
     app.requests = null;
     app.requestsKey = "";
