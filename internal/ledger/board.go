@@ -324,6 +324,15 @@ func (u *UtteranceView) clone() UtteranceView {
 	return out
 }
 
+func (b *Board) Utterance(id string) (UtteranceView, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if u := b.utterances[id]; u != nil {
+		return u.clone(), true
+	}
+	return UtteranceView{}, false
+}
+
 func (b *Board) Utterances() []UtteranceView {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

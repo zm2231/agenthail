@@ -13,6 +13,10 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
   ledger show <item_id|td_id|ask_id>
                                  Everything about one item in one read: fields, the clause with the person's
                                  words, where it was found, dependencies both ways, handoff and timeline
+  ledger words <utterance_id> [--context N] [--json]
+                                 One captured message: what the person typed, what they quoted, and the reply
+                                 it answered; --context N adds the N turns before and after it, read from the
+                                 session's journal on the host that captured it (other hosts refuse)
   ledger add "<text>" [--clause <clause_id> | --found-in <item|clause>] [--type task|bug|feature]
              [--priority P0-P3] [--description "..."] [--acceptance "..."] [--label <l>]...
                                  Add asked work under a clause, or found work with none (create, new)

@@ -83,7 +83,7 @@ func (b *Board) clauseRef(id string) *ClauseRef {
 	}
 	for _, src := range c.Sources {
 		if u := b.utterances[src]; u != nil {
-			ref.Words = append(ref.Words, WordsRef{ID: u.ID, Text: u.Text, At: u.At, Context: clipReply(u.Context)})
+			ref.Words = append(ref.Words, WordsRef{ID: u.ID, Text: u.Text, At: u.At, Context: ClipReply(u.Context)})
 		}
 	}
 	return ref
