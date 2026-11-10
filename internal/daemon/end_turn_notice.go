@@ -11,56 +11,61 @@ import (
 const AttentionAsk = "ask"
 
 type dashboardEndTurn struct {
-	Headline     string             `json:"headline"`
-	Needs        string             `json:"needs"`
-	Asks         []registry.TurnAsk `json:"asks,omitempty"`
-	Next         []string           `json:"next,omitempty"`
-	EndedAt      time.Time          `json:"endedAt"`
-	AskedSession string             `json:"askedSession,omitempty"`
-	RequestID    string             `json:"requestId,omitempty"`
-	AnsweredAt   time.Time          `json:"answeredAt,omitzero"`
+	Headline string    `json:"headline"`
+	Next     []string  `json:"next,omitempty"`
+	EndedAt  time.Time `json:"endedAt"`
 }
 
 func endTurnRow(end *registry.TurnEnd) *dashboardEndTurn {
 	if end == nil {
 		return nil
 	}
-	row := &dashboardEndTurn{Headline: end.Headline, Needs: end.Needs, Asks: end.Asks, Next: end.Next, EndedAt: end.EndedAt, AskedSession: end.RoutedTo, AnsweredAt: end.AnsweredAt}
-	if endAsksPerson(*end) || !end.AnsweredAt.IsZero() {
-		row.RequestID = turnEndRequestID(end.StartedAt)
-	}
-	return row
+	return &dashboardEndTurn{Headline: end.Headline, Next: end.Next, EndedAt: end.EndedAt}
 }
 
-func (end *dashboardEndTurn) asksPerson() bool {
-	return end != nil && end.Needs == endTurnNeedsYou && end.AskedSession == "" && end.AnsweredAt.IsZero()
+type dashboardAsk struct {
+	ID         string    `json:"id"`
+	Title      string    `json:"title"`
+	RoutedTo   string    `json:"routedTo"`
+	AskedAt    time.Time `json:"askedAt"`
+	AnsweredAt time.Time `json:"answeredAt,omitzero"`
+}
+
+func askRow(ask *registry.Ask) *dashboardAsk {
+	if ask == nil {
+		return nil
+	}
+	return &dashboardAsk{ID: ask.ID, Title: ask.Title, RoutedTo: ask.RoutedTo, AskedAt: ask.CreatedAt, AnsweredAt: ask.AnsweredAt}
+}
+
+func (ask *dashboardAsk) asksPerson() bool {
+	return ask != nil && ask.RoutedTo == registry.AskToPerson && ask.AnsweredAt.IsZero()
 }
 
 type turnCompletedNotice struct {
 	desktop, mobile, requestID, outcome string
 	actions                             []surface.RequestAction
+	quiet                               bool
 }
 
-// A needs-you an agent was told of keeps the plain finished text for the
-// person; one for the person carries its ask, so the push can answer it.
+// A turn that leaves an ask open for the person needs them; the ask was announced when it reached them, so the completion stays quiet.
 func (d *Daemon) endTurnNotifications(session *surface.Session, completedTurnID, desktop, mobile string) turnCompletedNotice {
 	notice := turnCompletedNotice{desktop: desktop, mobile: mobile, outcome: turnOutcomeFinished}
+	ask, asked, err := d.Registry.RowAsk(session.ID)
+	if err != nil {
+		d.log.Printf("read the ask of %s: %s", d.resolveDisplay(session.ID), err)
+	}
+	if asked && ask.State == registry.AskOpen && ask.RoutedTo == registry.AskToPerson {
+		notice.outcome, notice.requestID, notice.quiet = turnOutcomeNeedsYou, ask.ID, true
+		return notice
+	}
 	end, found, err := d.Registry.CompletedTurnEnd(session.ID, completedTurnID)
 	if err != nil {
 		d.log.Printf("read turn end %s: %s", d.resolveDisplay(session.ID), err)
 	}
-	if !found || end.RoutedTo != "" {
-		return notice
-	}
-	state := "done"
-	if end.Needs == endTurnNeedsYou {
-		state = "needs you"
-	}
-	notice.desktop = fmt.Sprintf("%s %s: %s", d.resolveDisplay(session.ID), state, end.Headline)
-	notice.mobile = fmt.Sprintf("%s %s%s: %s", notificationSurfaceName(session.Surface), state, d.onHost(), end.Headline)
-	if endAsksPerson(end) {
-		request := turnEndRequest(end)
-		notice.requestID, notice.actions, notice.outcome = request.ID, request.Actions(), turnOutcomeNeedsYou
+	if found {
+		notice.desktop = fmt.Sprintf("%s done: %s", d.resolveDisplay(session.ID), end.Headline)
+		notice.mobile = fmt.Sprintf("%s done%s: %s", notificationSurfaceName(session.Surface), d.onHost(), end.Headline)
 	}
 	return notice
 }

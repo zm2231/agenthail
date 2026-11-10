@@ -680,17 +680,32 @@ CREATE TABLE IF NOT EXISTS turn_ends (
 	ended_at_ms INTEGER NOT NULL DEFAULT 0,
 	turn_id TEXT NOT NULL DEFAULT '',
 	completed_turn_id TEXT NOT NULL DEFAULT '',
-	needs TEXT NOT NULL DEFAULT '',
 	headline TEXT NOT NULL DEFAULT '',
-	asks_json TEXT NOT NULL DEFAULT 'null',
 	next_json TEXT NOT NULL DEFAULT 'null',
 	source TEXT NOT NULL DEFAULT '',
-	routed_to TEXT NOT NULL DEFAULT '',
-	answered_at_ms INTEGER NOT NULL DEFAULT 0,
-	answer_status TEXT NOT NULL DEFAULT '',
-	answer_message_id TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, started_at_ms)
 );
+CREATE TABLE IF NOT EXISTS asks (
+	id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	origin TEXT NOT NULL,
+	title TEXT NOT NULL,
+	questions_json TEXT NOT NULL,
+	routed_to TEXT NOT NULL,
+	routed_at_ms INTEGER NOT NULL,
+	route_json TEXT NOT NULL,
+	state TEXT NOT NULL CHECK (state IN ('open','answered','withdrawn')),
+	answer_json TEXT NOT NULL DEFAULT '',
+	answered_by TEXT NOT NULL DEFAULT '',
+	answered_via TEXT NOT NULL DEFAULT '',
+	answered_at_ms INTEGER NOT NULL DEFAULT 0,
+	applied_at_ms INTEGER NOT NULL DEFAULT 0,
+	apply_status TEXT NOT NULL DEFAULT '',
+	apply_id TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS asks_open ON asks(routed_to) WHERE state='open';
+CREATE INDEX IF NOT EXISTS asks_session ON asks(session_id, created_at_ms);
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL,

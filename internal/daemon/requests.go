@@ -39,10 +39,17 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]
 	if err != nil {
 		return nil, "", actionFailed(http.StatusConflict, "conflict", "surface is not configured")
 	}
-	_, ask, asking, err := d.openTurnEndRequest(session.ID)
+	asks, err := d.Registry.SessionAsks(session.ID)
 	if err != nil {
 		return nil, "", actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
+	var open []surface.Request
+	for _, ask := range asks {
+		if ask.State == registry.AskOpen && ask.RoutedTo == registry.AskToPerson {
+			open = append(open, askRequest(ask))
+		}
+	}
+	asking := len(open) > 0
 	var state surface.RequestState
 	if responder, ok := sessionResponder(adapter, session); ok {
 		ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
@@ -54,11 +61,11 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]
 		return nil, "", actionFailed(http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
 	}
 	replacedBy, _ := d.coordinator().ReplacedBy(session.ID)
-	requests := make([]openRequestView, 0, len(state.Requests)+1)
+	requests := make([]openRequestView, 0, len(state.Requests)+len(open))
 	for _, request := range state.Requests {
 		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Actions: request.Actions(), ReplacedBy: d.publicSessionID(replacedBy)})
 	}
-	if asking {
+	for _, ask := range open {
 		requests = append(requests, openRequestView{Request: ask, Prompt: ask.Prompt(), Actions: ask.Actions()})
 	}
 	return requests, state.PermissionMode, nil

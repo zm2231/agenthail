@@ -42,6 +42,7 @@ type CatalogPresentationRow struct {
 	KeepAlive                              KeepAlive
 	Snooze                                 Snooze
 	TurnEnd                                *TurnEnd
+	Ask                                    *Ask
 	Work                                   *WorkRecord
 	PRs                                    []SessionPR
 	Move                                   *MoveShown
@@ -89,6 +90,10 @@ func (r *Registry) readCatalogPresentation(ctx context.Context, history bool, st
 	if err != nil {
 		return CatalogPresentation{}, err
 	}
+	asks, err := rowAsks(ctx, tx)
+	if err != nil {
+		return CatalogPresentation{}, err
+	}
 	works, err := presentationWork(ctx, tx)
 	if err != nil {
 		return CatalogPresentation{}, err
@@ -107,6 +112,9 @@ func (r *Registry) readCatalogPresentation(ctx context.Context, history bool, st
 		}
 		if end, ok := ends[read.Rows[i].ID]; ok {
 			read.Rows[i].TurnEnd = &end
+		}
+		if ask, ok := asks[read.Rows[i].ID]; ok {
+			read.Rows[i].Ask = &ask
 		}
 		if work, ok := works[read.Rows[i].ID]; ok {
 			read.Rows[i].Work = &work

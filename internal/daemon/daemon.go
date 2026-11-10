@@ -368,6 +368,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runPRSweeps(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
+	go d.runAskSweeps(ctx)
 	d.startMessageContexts(ctx)
 	d.startLedgerSorter(ctx)
 	go d.runDecisionsRevision(ctx)

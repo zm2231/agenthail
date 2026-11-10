@@ -19,11 +19,14 @@ type mcpAnswerInput struct {
 }
 
 func (d *Daemon) mcpAnswer(ctx context.Context, caller *mcpCaller, input mcpAnswerInput) (any, error) {
-	if !caller.has("requests.answer") {
-		return nil, refuse("capability_missing", "This session may not answer requests.")
-	}
 	if strings.TrimSpace(input.RequestID) == "" {
 		return nil, refuse("invalid", "requestId is required.")
+	}
+	if requestID := strings.TrimSpace(input.RequestID); isAskID(requestID) {
+		return d.mcpAnswerAsk(ctx, caller, requestID, input)
+	}
+	if !caller.has("requests.answer") {
+		return nil, refuse("capability_missing", "This session may not answer requests.")
 	}
 	decision := surface.Decision{Message: strings.TrimSpace(input.Message), Answers: input.Answers, Content: input.Content}
 	switch strings.TrimSpace(input.Decision) {
@@ -48,4 +51,24 @@ func (d *Daemon) mcpAnswer(ctx context.Context, caller *mcpCaller, input mcpAnsw
 		return nil, err
 	}
 	return d.mcpAction(ctx, caller, "agenthail_answer", input.mcpWrite, dashboardActionRequest{Action: "respond", SessionID: target.ID, RequestID: strings.TrimSpace(input.RequestID), Decision: decision})
+}
+
+// An ask routed to a session is that session's to answer; the routing, not a capability, grants it.
+func (d *Daemon) mcpAnswerAsk(ctx context.Context, caller *mcpCaller, askID string, input mcpAnswerInput) (any, error) {
+	ask, found, err := d.Registry.Ask(askID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, refuse("not_found", "No ask "+askID+".")
+	}
+	decision := surface.Decision{Message: strings.TrimSpace(input.Message), Answers: input.Answers}
+	switch strings.TrimSpace(input.Decision) {
+	case askEscalate:
+		decision = surface.Decision{Behavior: askEscalate}
+	case "", "allow":
+	default:
+		return nil, refuse("invalid", "An ask takes answers or a message, or decision escalate.")
+	}
+	return d.mcpAction(ctx, caller, "agenthail_answer", input.mcpWrite, dashboardActionRequest{Action: "respond", SessionID: ask.SessionID, RequestID: askID, Decision: decision})
 }

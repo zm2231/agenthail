@@ -27,6 +27,7 @@ type catalogViewState struct {
 	attention map[string]bool
 	marks     map[string]registry.SessionMark
 	turnEnds  map[string]registry.TurnEnd
+	asks      map[string]registry.Ask
 	notices   map[string]registry.TurnNotice
 }
 
@@ -51,11 +52,15 @@ func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
 	if err != nil {
 		return catalogViewState{}, fmt.Errorf("read turn ends: %w", err)
 	}
+	asks, err := d.Registry.RowAsks()
+	if err != nil {
+		return catalogViewState{}, fmt.Errorf("read asks: %w", err)
+	}
 	notices, err := d.Registry.TurnNotices()
 	if err != nil {
 		return catalogViewState{}, fmt.Errorf("read turn notices: %w", err)
 	}
-	return catalogViewState{archive: archive, attention: attention, marks: marks, turnEnds: turnEnds, notices: notices}, nil
+	return catalogViewState{archive: archive, attention: attention, marks: marks, turnEnds: turnEnds, asks: asks, notices: notices}, nil
 }
 
 // settleArchiveActivity unarchives each archived session that shows activity
@@ -111,6 +116,9 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 	row.Snooze = snoozeRow(mark.Snooze)
 	if end, ok := view.turnEnds[row.ID]; ok {
 		row.EndTurn = endTurnRow(&end)
+	}
+	if ask, ok := view.asks[row.ID]; ok {
+		row.Ask = askRow(&ask)
 	}
 	if notice, ok := view.notices[row.ID]; ok {
 		row.TurnCompletion = turnCompletionRow(notice)

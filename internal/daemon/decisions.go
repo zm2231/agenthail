@@ -133,8 +133,8 @@ func decisionSince(row dashboardSession) time.Time {
 	if row.WaitingOn != nil && !row.WaitingOn.Since.IsZero() {
 		return row.WaitingOn.Since
 	}
-	if row.EndTurn != nil && !row.EndTurn.EndedAt.IsZero() {
-		return row.EndTurn.EndedAt
+	if row.Ask != nil && !row.Ask.AskedAt.IsZero() {
+		return row.Ask.AskedAt
 	}
 	return row.LastActive
 }

@@ -32,6 +32,8 @@ type DashboardConfig struct {
 	// when it is false; unset leaves it on.
 	ResumeAfterLimit *bool           `json:"resumeAfterLimit,omitempty"`
 	Claude           *ClaudeSettings `json:"claude,omitempty"`
+	// AskEscalateMinutes is how long an agent holds an ask before it passes up; unset is 10.
+	AskEscalateMinutes int `json:"askEscalateMinutes,omitempty"`
 }
 
 // ResumesAfterLimit reports whether sessions a usage limit stopped resume

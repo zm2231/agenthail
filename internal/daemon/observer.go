@@ -289,7 +289,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 		}
 		d.recordCompletion(session, observation.CompletedTurnID, observation.Reply.Error != "", noticed)
 	}
-	if notice.desktop != "" {
+	if notice.desktop != "" && !notice.quiet {
 		d.notifyTurnCompleted(notice, session.ID, observation.CompletedTurnID)
 	}
 	if terminalCompletion {

@@ -56,7 +56,7 @@ func (d *Daemon) releaseUnobservedHold(ctx context.Context, adapter surface.Surf
 			noticed = &notice
 		}
 		d.recordCompletion(session, turnID, false, noticed)
-		if noticed != nil {
+		if noticed != nil && !noticed.quiet {
 			d.notifyTurnCompleted(*noticed, session.ID, turnID)
 		}
 	}

@@ -51,6 +51,7 @@ type dashboardSession struct {
 	Snooze            *dashboardSnooze           `json:"snooze,omitempty"`
 	InboxSection      string                     `json:"inboxSection,omitempty"`
 	EndTurn           *dashboardEndTurn          `json:"endTurn,omitempty"`
+	Ask               *dashboardAsk              `json:"ask,omitempty"`
 	TurnCompletion    *dashboardTurnCompletion   `json:"turnCompletion,omitempty"`
 	CurrentReason     string                     `json:"currentReason,omitempty"`
 	Capabilities      surface.Capabilities       `json:"capabilities"`
