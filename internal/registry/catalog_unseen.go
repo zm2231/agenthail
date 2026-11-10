@@ -37,9 +37,9 @@ func (r *Registry) RecordUnseenSessions(sessions []surface.Session) (int, error)
 		if !s.LastActive.IsZero() {
 			lastActive = s.LastActive.UnixMilli()
 		}
-		result, err := tx.Exec(`INSERT INTO sessions (id,surface,name,cwd,status,transcript,has_local,runtime_kind,last_active_ms,ended,updated_at)
-			VALUES (?,?,?,?,?,?,?,?,?,1,datetime('now')) ON CONFLICT(id) DO NOTHING`,
-			s.ID, string(s.Surface), s.Name, s.Cwd, string(surface.StatusOffline), s.Transcript, b2i(s.HasLocal), string(s.RuntimeKind), lastActive)
+		result, err := tx.Exec(`INSERT INTO sessions (id,surface,name,cwd,status,transcript,has_local,runtime_kind,last_active_ms,ended,entrypoint,updated_at)
+			VALUES (?,?,?,?,?,?,?,?,?,1,?,datetime('now')) ON CONFLICT(id) DO NOTHING`,
+			s.ID, string(s.Surface), s.Name, s.Cwd, string(surface.StatusOffline), s.Transcript, b2i(s.HasLocal), string(s.RuntimeKind), lastActive, s.Entrypoint)
 		if err != nil {
 			return 0, err
 		}

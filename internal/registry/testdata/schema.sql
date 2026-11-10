@@ -1,4 +1,4 @@
--- schemaVersion 86
+-- schemaVersion 87
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -888,7 +888,8 @@ CREATE TABLE sessions (
 	host_id TEXT NOT NULL DEFAULT '',
 	pinned_at_ms INTEGER NOT NULL DEFAULT 0, stopped_at_ms INTEGER NOT NULL DEFAULT 0,
 	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT '',
-	ended INTEGER NOT NULL DEFAULT 0
+	ended INTEGER NOT NULL DEFAULT 0,
+	entrypoint TEXT NOT NULL DEFAULT ''
 );
 
 -- table signin_bindings

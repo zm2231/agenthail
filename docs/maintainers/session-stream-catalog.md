@@ -244,6 +244,15 @@ Codex holds, so an omission there still removes the row.
   more than one place is skipped, as discovery skips it. A transcript's
   entrypoint is read once; one without an entrypoint yet is read again only when
   it changes.
+- A scripted run Agenthail didn't start (`sessions.entrypoint` is `sdk-cli` or
+  `sdk-py`, with no `session_origins` row) is kept as a session but never listed
+  or found by search. One SQL predicate decides this for the catalog, the
+  restore and search. A live process takes its entrypoint from its session
+  record and is registered but not published. The hourly check records the
+  entrypoint of every row that lacks one from its transcript, within the restore
+  budget, and queues the hidden rows that still have a catalog row; each pass
+  removes up to 500 of them in one transaction. A run Agenthail started, and any
+  `sdk-ts` run, stays listed. A hidden run is still reached by its id.
 
 A session has ended when its runtime no longer holds it: a Claude process
 that exited, or a Codex thread no runtime has loaded (`sessions.ended`). A send

@@ -15,8 +15,13 @@ type endedSurface struct {
 	missing map[string]bool
 	changed time.Time
 	checks  atomic.Int32
-	unseen  []surface.Session
-	asked   []string
+	unseen      []surface.Session
+	asked       []string
+	entrypoints map[string]string
+}
+
+func (s *endedSurface) ConversationEntrypoint(transcript string) string {
+	return s.entrypoints[transcript]
 }
 
 func (s *endedSurface) UnseenConversations(known func(string) bool) []surface.Session {

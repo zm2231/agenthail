@@ -28,6 +28,28 @@ type catalogEnded struct {
 	mu        sync.Mutex
 	rechecked map[surface.SurfaceKind]time.Time
 	backlog   map[surface.SurfaceKind][]catalogRestore
+	hidden    map[surface.SurfaceKind][]string
+}
+
+func (e *catalogEnded) setHidden(kind surface.SurfaceKind, ids []string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.hidden == nil {
+		e.hidden = map[surface.SurfaceKind][]string{}
+	}
+	e.hidden[kind] = ids
+}
+
+func (e *catalogEnded) takeHidden(kind surface.SurfaceKind, limit int) []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	ids := e.hidden[kind]
+	if len(ids) == 0 {
+		return nil
+	}
+	limit = min(limit, len(ids))
+	e.hidden[kind] = ids[limit:]
+	return ids[:limit]
 }
 
 func (e *catalogEnded) recheckDue(kind surface.SurfaceKind, now time.Time) bool {
@@ -62,7 +84,14 @@ func (e *catalogEnded) takeBacklog(kind surface.SurfaceKind, limit int) []catalo
 }
 
 // Kept rows are statted only on a recheck, so a pass costs the same however many there are.
-func (d *Daemon) recordEndedDiscovery(kind surface.SurfaceKind, keeper surface.EndedConversations, seen map[string]struct{}, observedAt time.Time) error {
+func (d *Daemon) recordEndedDiscovery(kind surface.SurfaceKind, keeper surface.EndedConversations, seen, hidden map[string]struct{}, observedAt time.Time) error {
+	remove := d.catalogEnded.takeHidden(kind, catalogHideBatch)
+	for id := range hidden {
+		remove = append(remove, id)
+	}
+	if err := d.catalog.removeHidden(remove); err != nil {
+		return err
+	}
 	recheck := d.catalogEnded.recheckDue(kind, observedAt)
 	candidates, err := d.Registry.CatalogOmissionCandidates(string(kind), catalogOmissionThreshold, recheck)
 	if err != nil {
@@ -84,6 +113,14 @@ func (d *Daemon) recordEndedDiscovery(kind surface.SurfaceKind, keeper surface.E
 		return nil
 	}
 	if err := d.recordUnseenConversations(kind, keeper); err != nil {
+		return err
+	}
+	if reader, reads := keeper.(surface.UnseenConversations); reads {
+		if err := d.recordConversationEntrypoints(kind, reader, time.Now().Add(catalogRestoreBudget)); err != nil {
+			return err
+		}
+	}
+	if err := d.queueHiddenRemovals(kind); err != nil {
 		return err
 	}
 	missing, err := d.Registry.EndedSessionsWithoutCatalogRow(string(kind))
@@ -166,8 +203,8 @@ func (d *Daemon) restoreEndedSession(item catalogRestore, publish func(surface.S
 	publish(ended)
 }
 
-func (d *Daemon) discoverEndedSessions(ctx context.Context, adapter surface.Surface, keeper surface.EndedConversations, seen map[string]struct{}, observedAt time.Time, publish func(surface.Session, catalogIdentity)) error {
-	if err := d.recordEndedDiscovery(adapter.Name(), keeper, seen, observedAt); err != nil {
+func (d *Daemon) discoverEndedSessions(ctx context.Context, adapter surface.Surface, keeper surface.EndedConversations, seen, hidden map[string]struct{}, observedAt time.Time, publish func(surface.Session, catalogIdentity)) error {
+	if err := d.recordEndedDiscovery(adapter.Name(), keeper, seen, hidden, observedAt); err != nil {
 		return err
 	}
 	d.restoreEndedSessions(adapter.Name(), keeper, seen, func(session surface.Session) {

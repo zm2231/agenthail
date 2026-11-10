@@ -259,6 +259,7 @@ type Session struct {
 	ConfiguredModel       string            `json:"configuredModel,omitempty"`
 	Bridge                string            `json:"bridge,omitempty"`
 	ForkedFrom            string            `json:"forkedFrom,omitempty"`
+	Entrypoint            string            `json:"entrypoint,omitempty"`
 	LastActive            time.Time         `json:"lastActive"`
 	StartedAt             time.Time         `json:"startedAt,omitzero"`
 	Runtime               *Runtime          `json:"runtime,omitempty"`
@@ -849,6 +850,7 @@ type EndedConversations interface {
 
 type UnseenConversations interface {
 	UnseenConversations(known func(id string) bool) []Session
+	ConversationEntrypoint(transcript string) string
 }
 
 // Gone needs positive evidence; anything short of it is Unknown.
