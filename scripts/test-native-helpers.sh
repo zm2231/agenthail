@@ -33,6 +33,7 @@ SOURCES=(
   TaggedResponses.swift
   AgenthailModel.swift
   AgenthailModelPaging.swift
+  AgenthailModelMoves.swift
   AgenthailModelPairing.swift
   AgenthailModelBroadcast.swift
   ScopeTreeCache.swift
@@ -171,6 +172,7 @@ SOURCES=(
   macOS/ClaudeRunFacts.swift
   SessionOperationControllers.swift
   SessionOperations.swift
+  SessionMoves.swift
   macOS/NewSessionDraft.swift
   macOS/NewSessionLabels.swift
   macOS/ClaudeCompact.swift

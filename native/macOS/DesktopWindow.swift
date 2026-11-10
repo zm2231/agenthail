@@ -30,6 +30,8 @@ struct DesktopWindow: View {
         .environment(model)
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.adoptingSession) { AdoptSessionSheet(model: model, session: $0) }
+        .sheet(item: $pane.movingSession) { MoveSessionSheet(model: model, session: $0) }
+        .moveNoticeAlert(model)
         .sheet(item: $pane.projectSheet) { ProjectSheetView(model: model, pane: pane, sheet: $0) }
         .sheet(item: $pane.messagingProject) { project in
             ProjectMessageSheet(project: project) { message, key in try await model.broadcast(to: project, message: message, idempotencyKey: key) }
@@ -519,7 +521,7 @@ struct SessionRowView: View {
             StatusIndicator(session: session, needsYou: needsYou, finishedUnseen: finishedUnseen)
             VStack(alignment: .leading, spacing: 2) {
                 titleLine(kind: kind)
-                if kind == .working {
+                if kind == .working, session.move == nil {
                     WorkingRowNote(session: session)
                 } else if !(saysWaiting && kind == .waiting), let note = SessionRowNote.text(session) {
                     noteText(note, kind: kind)
@@ -1402,6 +1404,7 @@ struct ComposerView: View {
     private var canSteer: Bool { session.capabilities.steer && !session.isWaitingOnYou && steerRefusal == nil }
     private var statusLine: String {
         if takesTurnOptions, let problem = draft.turnOptionsProblem { return problem }
+        if session.move != nil { return SessionMove.composerNote }
         return ComposerStatusLine.text(.init(waitingOnYou: session.isWaitingOnYou, turnNotice: PersonMessageNote.statusLine(session.capabilities), working: session.isWorking, hasMessage: hasText, isCommand: draftIsCommand, steerRefusal: session.capabilities.steer ? steerRefusal : nil, followUpHint: hint, stopShortcut: shortcuts.label(.stop)))
     }
     private var pasteAttachments: ((PastedAttachments) -> Void)? {

@@ -2,6 +2,7 @@ import Foundation
 
 enum SessionRowNote {
     static func text(_ session: SessionState, now: Date = Date()) -> String? {
+        if let move = session.move { return move.label }
         switch SessionDisplayKind.of(session, now: now) {
         case .unavailable:
             return session.unavailableReason.flatMap { $0.isEmpty ? nil : $0 }

@@ -24,6 +24,7 @@ struct SidebarRowActions {
     func keepTab() { pane.keepTab(shown.id) }
     func rename() { pane.renamingSession = current }
     func adopt() { pane.adoptingSession = current }
+    func move() { pane.movingSession = current }
     func toggleArchived() { model.setArchived(sessionID: shown.id, current.archived != true) }
 
     func addFolder() {

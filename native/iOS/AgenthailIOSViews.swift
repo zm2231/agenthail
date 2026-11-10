@@ -18,6 +18,7 @@ struct AgenthailIOSRoot: View {
         } message: {
             Text(model.operationError ?? "")
         }
+        .moveNoticeAlert(model)
         .confirmationDialog("\(model.forgetCandidate?.name ?? "This computer") could not be reached", isPresented: Binding(get: { model.forgetCandidate != nil }, set: { if !$0 { model.forgetCandidate = nil } }), titleVisibility: .visible) {
             Button("Forget it on this iPhone", role: .destructive) { if let host = model.forgetCandidate { model.forgetHost(host.id) } }
             Button("Keep connection", role: .cancel) { model.forgetCandidate = nil }
@@ -778,6 +779,12 @@ struct SessionScreen: View {
                             .padding()
                     } else {
                         TurnNoticeCard(sessionID: liveSession.id, notice: liveSession.composerTurnNotice)
+                        if let move = liveSession.move {
+                            Label("\(move.label). \(SessionMove.composerNote).", systemImage: "arrow.right.circle")
+                                .font(.footnote).foregroundStyle(PhonePalette.muted)
+                                .padding(.horizontal, 14)
+                                .accessibilityIdentifier("session-move-note")
+                        }
                         IOSComposer(model: model, draft: model.draft, store: model.store, session: session, detail: detail, showQueuedRow: showQueuedRow)
                     }
                 }
@@ -1435,6 +1442,7 @@ struct SessionInspector: View {
     @State private var showingModels = false
     @State private var renamingClaude = false
     @State private var movingTo: LimitResumeState.MoveOffer?
+    @State private var movingHost = false
     @State private var claudeName = ""
     @State private var adopting = false
     private var detail: SessionDetail {
@@ -1616,6 +1624,10 @@ struct SessionInspector: View {
                             if let offer = stop.moveTo { Button("Move to \(offer.name)", systemImage: "person.crop.circle.badge.checkmark") { movingTo = offer } }
                         }
                         IOSForkSessionButton(model: model, session: liveSession, dismiss: dismiss)
+                        if model.canMove(liveSession) {
+                            Button("Move to another computer", systemImage: "arrow.right.circle") { movingHost = true }
+                                .accessibilityIdentifier("session-move")
+                        }
                         if detail.capabilities.compact { Button("Compact context", systemImage: "arrow.down.right.and.arrow.up.left") { model.action("compact", session: session); dismiss() } }
                         if detail.capabilities.interrupt && detail.session.status == "busy" { Button("Stop current turn", systemImage: "stop.fill", role: .destructive) { model.action("interrupt", session: session); dismiss() } }
                         LabeledContent("Send messages", value: detail.capabilities.send ? "Available" : "Unavailable")
@@ -1640,6 +1652,7 @@ struct SessionInspector: View {
                 Text(["It stops here and continues under that account.", offer.reason.map { "Chosen for \($0)." }].compactMap { $0 }.joined(separator: " "))
             }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .sheet(isPresented: $movingHost) { IOSMoveSessionSheet(model: model, session: liveSession) { dismiss() } }
             .sheet(isPresented: $adopting) { IOSAdoptSessionSheet(model: model, session: model.routedSession(liveSession) ?? liveSession, sessionID: liveSession.id) }
             .task(id: SubagentFetchKey(liveSession, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: liveSession) }
             .sheet(isPresented: $showingModels) {
@@ -1683,7 +1696,15 @@ struct IOSSessionRow: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("On \(host)")
         }
-        if kind == .waiting {
+        if let move = session.move {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.right.circle")
+                Text(move.label)
+            }
+            .font(.caption)
+            .foregroundStyle(PhonePalette.muted)
+            .lineLimit(1)
+        } else if kind == .waiting {
             HStack(spacing: 4) {
                 Image(systemName: "questionmark.bubble")
                 Text(session.waitingPlace?.label ?? "Waiting on you")
