@@ -44,7 +44,11 @@ func (a *App) bindWritesLocked() error {
 }
 
 func (a *App) deadlineContext(timeout time.Duration) (context.Context, context.CancelFunc, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	now := time.Now
+	if a.deadlineClock != nil {
+		now = a.deadlineClock
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), now().Add(timeout))
 	release, err := a.writesWithin(ctx)
 	if err != nil {
 		cancel()

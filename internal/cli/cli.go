@@ -41,6 +41,7 @@ type App struct {
 	daemonSessionStreamReader func() (sessionStreamReader, error)
 	daemonAPIOverride         func() (*daemonAPIClient, error)
 	scopeOverride             func(daemon.ScopeRequest) (*daemon.ScopeReply, error)
+	deadlineClock             func() time.Time
 }
 
 type registryUnavailable struct{ err error }

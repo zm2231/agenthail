@@ -298,12 +298,13 @@ func TestThreadCreateCodexHonorsTimeout(t *testing.T) {
 	base := &cliSurface{kind: surface.KindCodex, bounded: make(chan boundedCall, 1)}
 	starter := &starterCLISurface{cliSurface: base, wait: true}
 	app := threadFixture(t, starter)
-	started := time.Now()
+	built := probeDeadlines(app)
 	err := app.Run([]string{"thread", "create", "codex", "hello", "--timeout", "10ms"})
+	returned := time.Now()
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v", err)
 	}
-	requireFlagDeadline(t, base.bounded, started, 10*time.Millisecond)
+	requireFlagDeadline(t, built, base.bounded, returned, 10*time.Millisecond)
 }
 
 func TestThreadCreateHoldsItsNameFromBeforeTheStart(t *testing.T) {
