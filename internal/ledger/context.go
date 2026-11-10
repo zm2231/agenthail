@@ -84,6 +84,42 @@ func (s *Store) RecordContext(projectKey string, p ContextPayload, now time.Time
 	return e.Seq != 0, s.catchUp(board, projectKey)
 }
 
+func (c *ContextPayload) clone() *ContextPayload {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	if c.Reply != nil {
+		reply := *c.Reply
+		out.Reply = &reply
+	}
+	return &out
+}
+
+func clipReply(context *ContextPayload) *ContextPayload {
+	out := context.clone()
+	if out == nil || out.Reply == nil || len(out.Reply.Text) <= readReplyClip {
+		return out
+	}
+	start := len(out.Reply.Text) - readReplyClip
+	for start < len(out.Reply.Text) && !isRuneStart(out.Reply.Text[start]) {
+		start++
+	}
+	out.Reply.Text = out.Reply.Text[start:]
+	return out
+}
+
+func (b *Board) applyContext(data []byte) error {
+	var p ContextPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	if u := b.utterances[p.UtteranceID]; u != nil && u.Context == nil {
+		u.Context = &p
+	}
+	return nil
+}
+
 func (s *Store) ContextFor(projectKey, utteranceID string) (ContextPayload, bool, error) {
 	var data []byte
 	err := s.read.QueryRow(`SELECT payload FROM ledger_events WHERE project_key=? AND ref=?`, projectKey, contextRef(utteranceID)).Scan(&data)

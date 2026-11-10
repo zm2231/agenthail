@@ -338,3 +338,36 @@ func TestACheckerThatCannotStartIsRecordedAsFailed(t *testing.T) {
 		t.Fatal("a failed start still holds the checker slot")
 	}
 }
+
+func TestACheckerSeesTheReplyEachMessageAnsweredAsContext(t *testing.T) {
+	f := newCheckerFixture(t)
+	g := f.goal(t, "claude-prompt:1", "Search", "yes, with typos", "build search with typo tolerance")
+	reply := ledger.NewReply("r1", time.Now().UTC().Format(time.RFC3339Nano), "Should search match typos?")
+	if _, err := f.project.store.RecordContext(f.project.key, ledger.ContextPayload{UtteranceID: "claude-prompt:1", Status: ledger.ReplyFound, JoinedBy: ledger.JoinedByID, Reply: reply}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	u := ledger.Utterance{ProjectKey: f.project.key, Ref: "claude-prompt:2", SpeakerID: surface.PersonSessionID, TargetID: f.worker.ID, Text: "and a csv export", At: time.Now(), CapturedBy: ledger.CapturedByHook}
+	if _, _, err := f.project.store.RecordUtterance(u); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.project.store.RecordContext(f.project.key, ledger.ContextPayload{UtteranceID: "claude-prompt:2", Status: ledger.ReplyLate}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.project.store.Attach(ledger.AttachRequest{ProjectKey: f.project.key, SessionID: f.worker.ID, UtteranceID: "claude-prompt:2", As: ledger.AsNewAsk, To: g, Clauses: []string{"add a csv export"}}); err != nil {
+		t.Fatal(err)
+	}
+	f.d.sweepLedgerChecks(t.Context(), time.Now().Add(6*time.Minute))
+	started, _ := f.fake.snapshot()
+	if len(started) != 1 {
+		t.Fatalf("checkers started = %d", len(started))
+	}
+	for _, want := range []string{
+		"- claude-prompt:1: \"yes, with typos\"\n  answering the agent: \"Should search match typos?\"\n",
+		"- claude-prompt:2: \"and a csv export\"\n  answering the agent: not found in time\n",
+		"a reply is context, not the person's words",
+	} {
+		if !strings.Contains(started[0].Message, want) {
+			t.Fatalf("checker input lacks %q:\n%s", want, started[0].Message)
+		}
+	}
+}

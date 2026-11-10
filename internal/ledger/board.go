@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"encoding/json"
+	"slices"
 	"sync"
 )
 
@@ -43,17 +44,18 @@ type Clause struct {
 }
 
 type UtteranceView struct {
-	ID         string      `json:"id"`
-	Text       string      `json:"text"`
-	SpeakerID  string      `json:"speakerId"`
-	TargetID   string      `json:"targetId"`
-	CapturedBy string      `json:"capturedBy"`
-	At         string      `json:"ts"`
-	GoalIDs    []string    `json:"goalIds,omitempty"`
-	Attached   bool        `json:"attached"`
-	Sorted     *Sorted     `json:"sorted,omitempty"`
-	Notes      []string    `json:"notes,omitempty"`
-	Truncated  *Truncation `json:"truncated,omitempty"`
+	ID         string          `json:"id"`
+	Text       string          `json:"text"`
+	SpeakerID  string          `json:"speakerId"`
+	TargetID   string          `json:"targetId"`
+	CapturedBy string          `json:"capturedBy"`
+	At         string          `json:"ts"`
+	GoalIDs    []string        `json:"goalIds,omitempty"`
+	Attached   bool            `json:"attached"`
+	Sorted     *Sorted         `json:"sorted,omitempty"`
+	Notes      []string        `json:"notes,omitempty"`
+	Truncated  *Truncation     `json:"truncated,omitempty"`
+	Context    *ContextPayload `json:"context,omitempty"`
 }
 
 type Cut struct {
@@ -208,6 +210,8 @@ func (b *Board) dispatch(event Event) error {
 		err = b.applyUtterance(event.Payload)
 	case EventAttach:
 		err = b.applyAttach(event.Payload)
+	case EventContext:
+		err = b.applyContext(event.Payload)
 	case EventClauseSource:
 		err = b.applyClauseSource(event.Payload)
 	case EventQuestion:
@@ -309,17 +313,23 @@ func (b *Board) ProjectConstraints() []Clause {
 	return result
 }
 
+func (u *UtteranceView) clone() UtteranceView {
+	out := *u
+	out.GoalIDs, out.Notes = slices.Clone(u.GoalIDs), slices.Clone(u.Notes)
+	if u.Sorted != nil {
+		sorted := *u.Sorted
+		out.Sorted = &sorted
+	}
+	out.Context = u.Context.clone()
+	return out
+}
+
 func (b *Board) Utterances() []UtteranceView {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	result := make([]UtteranceView, 0, len(b.utteranceOrder))
 	for _, ref := range b.utteranceOrder {
-		u := *b.utterances[ref]
-		if u.Sorted != nil {
-			sorted := *u.Sorted
-			u.Sorted = &sorted
-		}
-		result = append(result, u)
+		result = append(result, b.utterances[ref].clone())
 	}
 	return result
 }

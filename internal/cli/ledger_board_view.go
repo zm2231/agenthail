@@ -183,6 +183,9 @@ func printAttachment(attachment ledger.Attachment, shown int) {
 		}
 		for _, u := range words {
 			fmt.Printf("  %s to %s: %s\n", u.ID, u.TargetID, oneLine(u.Text))
+			if line := answering(u.Context); line != "" {
+				fmt.Println("    " + line)
+			}
 		}
 	}
 	refs := make([]string, 0, len(attachment.Elsewhere))
@@ -193,6 +196,28 @@ func printAttachment(attachment ledger.Attachment, shown int) {
 	for _, ref := range refs {
 		fmt.Printf("%s attached elsewhere: %s\n", ref, attachment.Elsewhere[ref])
 	}
+}
+
+func answering(context *ledger.ContextPayload) string {
+	switch {
+	case context == nil:
+		return ""
+	case context.Reply != nil && context.JoinedBy == ledger.JoinedByTime:
+		return "answering, by time: " + lineEnd(context.Reply.Text)
+	case context.Reply != nil:
+		return "answering: " + lineEnd(context.Reply.Text)
+	case context.Status == ledger.ReplyLate:
+		return "answering: not found in time"
+	}
+	return ""
+}
+
+func lineEnd(text string) string {
+	runes := []rune(strings.Join(strings.Fields(text), " "))
+	if len(runes) > 80 {
+		return "..." + string(runes[len(runes)-77:])
+	}
+	return string(runes)
 }
 
 func oneLine(text string) string {
