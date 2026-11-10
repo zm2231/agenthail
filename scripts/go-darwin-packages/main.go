@@ -49,7 +49,25 @@ type listedPackage struct {
 	CgoFiles     []string
 	TestGoFiles  []string
 	XTestGoFiles []string
+	Incomplete   bool
 	Error        *struct{ Err string }
+	DepsErrors   []struct{ Err string }
+}
+
+func (p listedPackage) loadError() string {
+	if len(p.DepsErrors) > 0 {
+		return p.DepsErrors[0].Err
+	}
+	if p.Error != nil {
+		if strings.HasPrefix(p.Error.Err, "build constraints exclude all Go files in ") {
+			return ""
+		}
+		return p.Error.Err
+	}
+	if p.Incomplete {
+		return "incomplete package"
+	}
+	return ""
 }
 
 func (p listedPackage) files() []string {
@@ -94,7 +112,7 @@ func darwinPackages(patterns []string) ([]darwinPackage, error) {
 
 // cgo stays on for both systems so only the system decides which files build.
 func listPackages(goos string, patterns []string) (map[string]listedPackage, error) {
-	cmd := exec.Command("go", append([]string{"list", "-e", "-json=ImportPath,Dir,GoFiles,CgoFiles,TestGoFiles,XTestGoFiles,Error"}, patterns...)...)
+	cmd := exec.Command("go", append([]string{"list", "-e", "-json=ImportPath,Dir,GoFiles,CgoFiles,TestGoFiles,XTestGoFiles,Incomplete,Error,DepsErrors"}, patterns...)...)
 	cmd.Env = append(os.Environ(), "GOOS="+goos, "CGO_ENABLED=1")
 	out, err := cmd.Output()
 	if err != nil {
@@ -113,8 +131,8 @@ func listPackages(goos string, patterns []string) (map[string]listedPackage, err
 		} else if err != nil {
 			return nil, err
 		}
-		if pkg.Error != nil && len(pkg.files()) > 0 {
-			return nil, fmt.Errorf("go list %s for %s: %s", pkg.ImportPath, goos, pkg.Error.Err)
+		if msg := pkg.loadError(); msg != "" {
+			return nil, fmt.Errorf("go list %s for %s: %s", pkg.ImportPath, goos, msg)
 		}
 		packages[pkg.ImportPath] = pkg
 	}

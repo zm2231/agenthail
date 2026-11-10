@@ -32,3 +32,11 @@ func TestItListsEveryPackageWithAMacOSFileOrARuntimeGOOSRead(t *testing.T) {
 		t.Fatalf("packages = %v, want %v", got, want)
 	}
 }
+
+func TestItFailsWhenAPackageDoesNotLoad(t *testing.T) {
+	for _, name := range []string{"brokendep", "brokensyntax", "importsbroken"} {
+		if found, err := darwinPackages([]string{"./testdata/plain", "./testdata/goos", "./testdata/" + name}); err == nil {
+			t.Errorf("%s: listed %v, want an error", name, found)
+		}
+	}
+}
