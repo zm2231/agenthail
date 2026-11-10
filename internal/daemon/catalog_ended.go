@@ -15,7 +15,6 @@ import (
 const (
 	catalogOmissionThreshold = 2
 	catalogEndedRecheck      = time.Hour
-	catalogRestoreWindow     = 30 * 24 * time.Hour
 	catalogRestoreBatch      = 25
 	catalogRestoreBudget     = 5 * time.Second
 )
@@ -84,6 +83,9 @@ func (d *Daemon) recordEndedDiscovery(kind surface.SurfaceKind, keeper surface.E
 	if !recheck {
 		return nil
 	}
+	if err := d.recordUnseenConversations(kind, keeper); err != nil {
+		return err
+	}
 	missing, err := d.Registry.EndedSessionsWithoutCatalogRow(string(kind))
 	if err != nil {
 		return err
@@ -91,12 +93,33 @@ func (d *Daemon) recordEndedDiscovery(kind surface.SurfaceKind, keeper surface.E
 	backlog := []catalogRestore{}
 	for _, row := range missing {
 		resumable, changed := keeper.EndedConversation(row.Transcript)
-		if resumable && !changed.IsZero() && observedAt.Sub(changed) <= catalogRestoreWindow {
+		if resumable && !changed.IsZero() {
 			backlog = append(backlog, catalogRestore{id: row.ID, changed: changed})
 		}
 	}
 	d.catalogEnded.setBacklog(kind, backlog)
 	return nil
+}
+
+// Live sessions were registered earlier in the pass, so known covers them.
+func (d *Daemon) recordUnseenConversations(kind surface.SurfaceKind, keeper surface.EndedConversations) error {
+	lister, lists := keeper.(surface.UnseenConversations)
+	if !lists {
+		return nil
+	}
+	known, err := d.Registry.LocalSessionIDs(string(kind))
+	if err != nil {
+		return err
+	}
+	unseen := lister.UnseenConversations(func(id string) bool { return known[id] })
+	if len(unseen) == 0 {
+		return nil
+	}
+	added, err := d.Registry.RecordUnseenSessions(unseen)
+	if err == nil && added > 0 {
+		d.log.Printf("catalog: recorded %d %s conversations from their transcripts", added, kind)
+	}
+	return err
 }
 
 func (d *Daemon) restoreEndedSessions(kind surface.SurfaceKind, keeper surface.EndedConversations, seen map[string]struct{}, publish func(surface.Session)) {

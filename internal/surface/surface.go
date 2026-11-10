@@ -847,6 +847,10 @@ type EndedConversations interface {
 	EndedConversation(transcript string) (resumable bool, changed time.Time)
 }
 
+type UnseenConversations interface {
+	UnseenConversations(known func(id string) bool) []Session
+}
+
 // Gone needs positive evidence; anything short of it is Unknown.
 type ConversationState int
 

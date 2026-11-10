@@ -29,6 +29,7 @@ type Claude struct {
 	modelsFlight *claudeModelsFlight
 	subagents    *claudeSubagentObserver
 	transcripts  *claudeTranscriptIndex
+	entrypoints  *claudeEntrypoints
 	host         *claudeHost
 	prompts      *claudePrompts
 	promptHooks  promptHooks
@@ -50,7 +51,7 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), host: newClaudeHost(home), prompts: newClaudePrompts(), webAccounts: claudeWebAccounts{byProfile: map[string]claudeWebAccountEntry{}}}
+	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), entrypoints: newClaudeEntrypoints(), host: newClaudeHost(home), prompts: newClaudePrompts(), webAccounts: claudeWebAccounts{byProfile: map[string]claudeWebAccountEntry{}}}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }

@@ -230,8 +230,20 @@ Codex holds, so an omission there still removes the row.
   checked once an hour.
 - A local lead with a resumable conversation always has a row, and that row is
   current with the reason `lead`.
-- The hourly check also restores sessions with no row whose transcript changed in
-  the last 30 days, 25 per pass at most, newest first.
+- The hourly check also restores sessions with no row whose transcript is still
+  there, however old, 25 per pass at most, newest first. An old one retires
+  straight to history.
+- Before restoring, the hourly check records the conversations in every config
+  root that no session row names, so All lists every Claude conversation the way
+  it lists every Codex thread. A transcript's first `entrypoint` record says what
+  started it. A transcript is recorded unless that record is missing, is a
+  sidechain, or names a scripted run (`sdk-cli`, `sdk-ts`, `sdk-py`, any `sdk-*`).
+  A conversation Agenthail started is already a session row, so this rule never
+  decides it. Each new row is ended, takes its working directory from that
+  record, and is never written over a row that exists. An id with transcripts in
+  more than one place is skipped, as discovery skips it. A transcript's
+  entrypoint is read once; one without an entrypoint yet is read again only when
+  it changes.
 
 A session has ended when its runtime no longer holds it: a Claude process
 that exited, or a Codex thread no runtime has loaded (`sessions.ended`). A send
