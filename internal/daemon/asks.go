@@ -247,6 +247,11 @@ func (d *Daemon) escalateAsk(ask registry.Ask, to string) registry.Ask {
 	if !moved {
 		return ask
 	}
+	if ask.RoutedTo != registry.AskToPerson {
+		if _, err := d.Registry.CancelPendingByKey(askNoticeKey(ask.ID, ask.RoutedTo)); err != nil {
+			d.log.Printf("withdraw the notice of %s: %s", ask.ID, err)
+		}
+	}
 	current, _, err := d.Registry.Ask(ask.ID)
 	if err != nil {
 		d.log.Printf("read %s: %s", ask.ID, err)
@@ -327,14 +332,16 @@ func (d *Daemon) announceAsk(ask registry.Ask) {
 }
 
 func (d *Daemon) sendAskNotifications(desktop string, mobile mobileNotification, actions []surface.RequestAction) {
-	d.background.start(func(ctx context.Context) {
-		if err := d.notifyDesktop("Agenthail", desktop, mobile.SessionID, "agenthail-"+mobile.CollapseID, mobile.RequestID, actions); err != nil {
-			d.log.Printf("desktop notification: %s", err)
-		}
-		notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		d.notifyPairedDevices(notificationCtx, mobile)
-	})
+	d.background.start(func(ctx context.Context) { d.deliverAskNotifications(ctx, desktop, mobile, actions) })
+}
+
+func (d *Daemon) deliverAskNotifications(ctx context.Context, desktop string, mobile mobileNotification, actions []surface.RequestAction) {
+	if err := d.notifyDesktop("Agenthail", desktop, mobile.SessionID, "agenthail-"+mobile.CollapseID, mobile.RequestID, actions); err != nil {
+		d.log.Printf("desktop notification: %s", err)
+	}
+	notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	d.notifyPairedDevices(notificationCtx, mobile)
 }
 
 func (d *Daemon) withdrawAsk(askID string) {

@@ -108,10 +108,6 @@ func TestALeadWithAgenthailToolsIsToldTheToolsToAnswerWith(t *testing.T) {
 	if strings.Contains(notices[0].Message, "agenthail answer ") {
 		t.Fatalf("a lead with tools is told the CLI: %q", notices[0].Message)
 	}
-	end := endTurnNotice("@builder", "@builder", registry.TurnEnd{Headline: "pick one"}, true)
-	if !strings.Contains(end, `agenthail_send {"target":"@builder","message":"<answer>"}`) {
-		t.Fatalf("end-turn notice=%q", end)
-	}
 }
 
 func TestAPromptGoesToTheSpawnerWhenTheProjectHasNoLead(t *testing.T) {

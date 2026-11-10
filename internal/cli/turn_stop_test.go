@@ -35,7 +35,7 @@ func TestATurnThatStopsWithoutAnEndIsAskedOnceToEndIt(t *testing.T) {
 		}
 	}
 
-	end, err := app.Registry.EndTurn(registry.TurnEnd{SessionID: id, Needs: "nothing", Headline: "Done", Source: registry.TurnSourceTool}, "turn-1", time.Now())
+	end, err := app.Registry.EndTurn(registry.TurnEnd{SessionID: id, Headline: "Done", Source: registry.TurnSourceTool}, "turn-1", time.Now())
 	if err != nil || end.Source != registry.TurnSourceNudged {
 		t.Fatalf("end %+v err=%v", end, err)
 	}
