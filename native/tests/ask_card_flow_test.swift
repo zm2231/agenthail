@@ -7,7 +7,7 @@ final class AskDaemon: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var posts: [(body: [String: Any], key: String?)] = []
 
     static func ask(_ id: String) -> String {
-        #"{"permissionMode":"","requests":[{"id":"\#(id)","kind":"ask","tool":"","title":"Ready to ship","prompt":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"label":"Deploy","description":""},{"label":"Wait","description":"hold until Monday"}],"suggested":0,"links":[{"title":"Runbook","url":"https://example.com/run"}]}],"actions":[{"id":"o0","title":"Deploy"},{"id":"o1","title":"Wait"},{"id":"reply","title":"Reply…"}],"alwaysAllow":false,"createdAt":"2026-11-06T04:52:30Z"}]}"#
+        #"{"permissionMode":"","requests":[{"id":"\#(id)","kind":"ask","tool":"","title":"Ready to ship","prompt":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"id":"o0","label":"Deploy","description":""},{"id":"o1","label":"Wait","description":"hold until Monday"}],"suggested":0,"links":[{"title":"Runbook","url":"https://example.com/run"}]}],"actions":[{"id":"o0","title":"Deploy"},{"id":"o1","title":"Wait"},{"id":"reply","title":"Reply…"}],"alwaysAllow":false,"createdAt":"2026-11-06T04:52:30Z"}]}"#
     }
     nonisolated(unsafe) static var listed = "ask-000000000001"
     nonisolated(unsafe) static var staleReread = false
@@ -80,7 +80,7 @@ struct AskCardFlowTest {
         let post = AskDaemon.posts[0]
         check(post.body["action"] as? String == "respond" && post.body["sessionId"] as? String == "S" && post.body["requestId"] as? String == "ask-000000000001", "the answer goes through respond: \(post.body)")
         let sent = post.body["decision"] as? [String: Any] ?? [:]
-        check(sent["behavior"] as? String == "allow" && (sent["answers"] as? [String: String]) == ["Deploy it now?": "Wait"] && sent["message"] as? String == "After lunch." && sent.count == 3, "the payload is the contract's: \(sent)")
+        check(sent["choices"] as? [String] == ["o1"] && sent["message"] as? String == "After lunch." && sent.count == 2, "the payload is the contract's: \(sent)")
         check(!(post.key ?? "").isEmpty, "the answer carries an Idempotency-Key")
         check(pane.requestError == nil, "a sent answer shows no error: \(String(describing: pane.requestError))")
         check(pane.requests?.offered(pendingAsk: session.pendingAskID).isEmpty == true, "the answered ask is gone after the reread")

@@ -10,10 +10,7 @@ import (
 type actionOperation func(*Daemon, context.Context, principal, dashboardActionRequest) (actionResult, error)
 
 var typedActions = map[string]actionOperation{
-	"delivery-dismiss":     (*Daemon).doDeliveryDismiss,
-	"delivery-delete":      (*Daemon).doDeliveryDelete,
 	"lead-replacement-ack": (*Daemon).doLeadReplacementAck,
-	"queue-retry":          (*Daemon).doQueueRetry,
 	"queue-cancel":         (*Daemon).doQueueCancel,
 	"queue-clear":          (*Daemon).doQueueClear,
 	"channel-create":       (*Daemon).doChannelCreate,

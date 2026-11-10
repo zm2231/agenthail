@@ -202,7 +202,7 @@ func answerHeld(t *testing.T, h *runningDaemon, id string, n int, root string) s
 	}
 	var status int
 	var payload []byte
-	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": id, "requestId": session.WaitingOn.ID, "decision": map[string]any{"behavior": "allow", "answers": map[string]string{question(n): "next"}}})
+	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": id, "requestId": session.WaitingOn.ID, "decision": map[string]any{"answers": map[string]string{question(n): "next"}}})
 	if status != http.StatusOK {
 		t.Fatalf("respond status=%d body=%s", status, payload)
 	}

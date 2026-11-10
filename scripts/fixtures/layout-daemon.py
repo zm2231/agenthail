@@ -36,7 +36,7 @@ RESPONSES = {
         "daemon": {"pid": 1, "running": True},
         "surfaces": [{"name": "claude", "connected": True, "health": "healthy", "capabilities": CAPABILITIES}],
         "sessions": [SESSION], "totalSessions": 1,
-        "queue": [], "channels": [], "relays": [], "history": [], "attention": [], "deliveryProblems": [],
+        "queue": [], "channels": [], "relays": [], "history": [],
         "codexRecentHours": 24, "busyDelivery": "queue",
     },
 }
@@ -140,9 +140,6 @@ if __name__ == "__main__":
         RESPONSES["/api/v1/snapshot"]["queue"] = [
             {"id": n, "sessionId": SESSION["id"], "target": "@fixture", "message": message, "status": "pending", "attempts": 0, "queuedAt": NOW, "evidence": "queued", "operation": "message"}
             for n in range(1, 9)
-        ]
-        RESPONSES["/api/v1/snapshot"]["deliveryProblems"] = [
-            {"deliveryId": 1, "sessionId": SESSION["id"], "message": message, "reason": "session_waiting_on_you", "status": "failed", "at": NOW}
         ]
     if sys.argv[1:2] == ["questions"]:
         SESSION["waitingOn"] = {"kind": "question", "id": "fixture-questions", "since": NOW, "answerable": True}

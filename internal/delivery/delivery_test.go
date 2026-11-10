@@ -171,8 +171,8 @@ func TestDispatcherReturnsSubmittedForAmbiguousDeliveryWithoutClaimingAcceptance
 			}
 		})
 	}
-	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
-		t.Fatalf("ambiguous delivery became a failure: problems=%+v err=%v", problems, err)
+	if asks := deliveryAsks(t, r); len(asks) != 0 {
+		t.Fatalf("ambiguous delivery became a failure: asks=%+v", asks)
 	}
 }
 
@@ -273,8 +273,8 @@ func TestDispatcherRejectsBusyTargetWhenQueueDisabled(t *testing.T) {
 
 func assertSynchronousRefusalLeavesNoProblem(t *testing.T, r *registry.Registry, sessionID, historyKind string) {
 	t.Helper()
-	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
-		t.Fatalf("synchronous refusal became a durable problem: problems=%+v err=%v", problems, err)
+	if asks := deliveryAsks(t, r); len(asks) != 0 {
+		t.Fatalf("synchronous refusal became a durable problem: asks=%+v", asks)
 	}
 	if got := r.QueueCount(surface.CLISessionID); got != 0 {
 		t.Fatalf("synchronous refusal injected %d failure notices", got)
@@ -319,8 +319,8 @@ func TestDispatcherSteerRefusesUnwritableSessionWithoutDurableIntent(t *testing.
 	if len(adapter.steered) != 0 {
 		t.Fatalf("read-only session was steered: %v", adapter.steered)
 	}
-	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
-		t.Fatalf("problems=%+v err=%v", problems, err)
+	if asks := deliveryAsks(t, r); len(asks) != 0 {
+		t.Fatalf("asks=%+v", asks)
 	}
 	if got := r.QueueCount(surface.CLISessionID); got != 0 {
 		t.Fatalf("read-only refusal injected %d failure notices", got)
@@ -417,9 +417,8 @@ func TestDispatcherDefiniteSendFailureFailsPreEffectIntent(t *testing.T) {
 	if _, err := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, "bad input", ""); err == nil {
 		t.Fatal("expected provider rejection")
 	}
-	problems, err := r.ListDeliveryProblems()
-	if err != nil || len(problems) != 1 || problems[0].SessionID != session.ID || problems[0].Status != registry.DeliveryIntentFailed {
-		t.Fatalf("problems=%+v err=%v", problems, err)
+	if asks := deliveryAsks(t, r); len(asks) != 1 || asks[0].SessionID != session.ID || !strings.HasSuffix(asks[0].Ref, ":failed") {
+		t.Fatalf("asks=%+v", asks)
 	}
 	if got := r.QueueCount(surface.CLISessionID); got != 0 {
 		t.Fatalf("%d failure notices queued for the operator, which no session reads", got)
@@ -457,8 +456,8 @@ func TestDispatcherDeliveryUnavailableLeavesNoProblemOrNotice(t *testing.T) {
 			if receipt, err := tc.run(Dispatcher{Registry: r}, tc.fake, session); !surface.IsDeliveryUnavailable(err) {
 				t.Fatalf("receipt=%+v err=%v", receipt, err)
 			}
-			if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
-				t.Fatalf("problems=%+v err=%v", problems, err)
+			if asks := deliveryAsks(t, r); len(asks) != 0 {
+				t.Fatalf("asks=%+v", asks)
 			}
 			if got := r.QueueCount(surface.CLISessionID); got != 0 {
 				t.Fatalf("did-not-start refusal injected %d failure notices", got)
@@ -814,4 +813,19 @@ func TestPeerMessageToABusyOrWaitingClaudeSessionGoesOverTheSocket(t *testing.T)
 		}
 		r.Close()
 	}
+}
+
+func deliveryAsks(t *testing.T, r *registry.Registry) []registry.Ask {
+	t.Helper()
+	open, err := r.OpenAsks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asks []registry.Ask
+	for _, ask := range open {
+		if ask.Origin == registry.AskOriginDelivery {
+			asks = append(asks, ask)
+		}
+	}
+	return asks
 }

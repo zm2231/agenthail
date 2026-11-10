@@ -17,8 +17,6 @@ struct DashboardSnapshotTest {
             channels: [],
             relays: [],
             history: [],
-            attention: [],
-            deliveryProblems: nil,
             codexRecentHours: 5,
             busyDelivery: "queue"
         )
@@ -30,9 +28,6 @@ struct DashboardSnapshotTest {
         let visibleChange = snapshot(updatedAt: "2026-07-24T00:00:30Z", eventCursor: 13, hostEpoch: "host-a", catalogSeq: 13, totalSessions: 5)
         precondition(current.hasSamePresentation(as: transportOnlyChange))
         precondition(!current.hasSamePresentation(as: visibleChange))
-        var problemChange = transportOnlyChange
-        problemChange.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", attentionSessionId: "s2", message: "Run the tests", reason: "target_not_writable", status: nil, at: "2026-10-04 12:00:00")]
-        precondition(!current.hasSamePresentation(as: problemChange))
         let replacementJSON = #"{"id":7,"projectId":"p","name":"release-lead","sessionId":"new","previousSessionId":"old","changedBy":"the daemon","reason":"conversation old no longer exists","at":"2026-11-03T12:00:00.123456789Z"}"#
         let replacement = try! JSONDecoder().decode(LeadReplacement.self, from: Data(replacementJSON.utf8))
         precondition(replacement.id == 7 && replacement.sessionId == "new" && replacement.hostID == nil && replacement.listID == "/7")

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -83,7 +84,7 @@ func TestMobileQueueIncludesFailedRowAndRetriesThroughActionAPI(t *testing.T) {
 	if _, err := registry.ClaimNextMessage("from", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.DeadLetterMessage(id, errors.New("delivery rejected [invalid request]: bad")); err != nil {
+	if err := registry.DeadLetterMessage(id, errors.New("delivery rejected [invalid request]: bad")); err != nil {
 		t.Fatal(err)
 	}
 	handler := dashboardRouter(d)
@@ -109,7 +110,12 @@ func TestMobileQueueIncludesFailedRowAndRetriesThroughActionAPI(t *testing.T) {
 	if !found {
 		t.Fatal(response.Body.String())
 	}
-	body, _ := json.Marshal(map[string]any{"action": "queue-retry", "queueId": id})
+	asks := openDeliveryAsks(t, registry)
+	if len(asks) != 1 || !slices.Contains(optionIDs(asks[0]), "retry") {
+		t.Fatalf("asks=%+v, want one ask that offers retry", asks)
+	}
+	ask := asks[0]
+	body := []byte(answerBody(ask, "retry"))
 	request = httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()

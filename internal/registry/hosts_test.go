@@ -357,9 +357,6 @@ func TestHeldHostDeliveryStaysPendingUntilTheHostTakesIt(t *testing.T) {
 	if _, err := r.RecoverInflight(r.now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.ReconcileAttentionItems(r.now()); err != nil {
-		t.Fatal(err)
-	}
 	if item, err := r.QueueItem(held, nil); err != nil || item.Status != "pending" || item.HeldBy != QueueHeldHostUnreachable {
 		t.Fatalf("held item after three days=%+v err=%v", item, err)
 	}

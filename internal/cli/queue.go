@@ -58,41 +58,10 @@ func (a *App) cmdQueue(args []string) error {
 		}
 		return nil
 	}
-	if len(args) == 2 && (args[0] == "retry" || args[0] == "rm" || args[0] == "cancel" || args[0] == "clear") {
+	if len(args) == 2 && (args[0] == "rm" || args[0] == "cancel" || args[0] == "clear") {
 		if err := a.queueManageScope(context.Background(), args[0], args[1]); err != nil {
 			return err
 		}
-	}
-	if len(args) > 0 && args[0] == "retry" {
-		if len(args) != 2 {
-			return fmt.Errorf("usage: agenthail queue retry <id>")
-		}
-		id, err := strconv.ParseInt(args[1], 10, 64)
-		if err != nil || id <= 0 {
-			return fmt.Errorf("invalid queue id %q", args[1])
-		}
-		item, err := a.registry().QueueItem(id, a.adapters())
-		if err != nil {
-			return err
-		}
-		session, err := a.registry().Session(item.SessionID)
-		if err != nil {
-			return err
-		}
-		if owner, ownerErr := a.registry().SessionHost(session.ID); ownerErr != nil || owner == "" {
-			adapter, adapterErr := a.adapters().For(session)
-			if adapterErr != nil {
-				return adapterErr
-			}
-			if err := a.ensureWritableTarget(context.Background(), session, adapter); err != nil {
-				return err
-			}
-		}
-		if err := a.registry().RetryMessage(id); err != nil {
-			return err
-		}
-		fmt.Printf("queue item #%d scheduled for retry\n", id)
-		return nil
 	}
 	if len(args) > 0 && (args[0] == "rm" || args[0] == "cancel") {
 		if len(args) != 2 {
@@ -101,6 +70,9 @@ func (a *App) cmdQueue(args []string) error {
 		id, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil || id <= 0 {
 			return fmt.Errorf("invalid queue id %q", args[1])
+		}
+		if item, err := a.registry().QueueItem(id, a.adapters()); err == nil && item.Status == "dead" {
+			return fmt.Errorf("queue item #%d failed; answer its ask instead: agenthail ask list", id)
 		}
 		if _, err := a.registry().CancelMessage(id); err != nil {
 			return err

@@ -43,8 +43,6 @@ export async function action(action, extra = {}, idempotencyKey = crypto.randomU
     action.startsWith("relay-") ||
     action === "notion-create" ||
     action === "session-create" ||
-    action === "queue-retry" ||
-    action === "delivery-dismiss" ||
     action === "lead-replacement-ack" ||
     action === "queue-cancel" ||
     action.startsWith("project-") ||

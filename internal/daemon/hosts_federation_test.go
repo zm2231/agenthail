@@ -1032,7 +1032,8 @@ func TestFederationUnconfirmedSendRetriesByReplayingItsKey(t *testing.T) {
 	if err := local.reg.DeadLetterUnknown(id, errors.New("host vps has not confirmed the message")); err != nil {
 		t.Fatal(err)
 	}
-	retry := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "queue-retry", "queueId": id})
+	ask := deliveryAskByRef(t, local.reg, fmt.Sprintf("queue:%d:dead", id))
+	retry := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": ask.SessionID, "requestId": ask.ID, "decision": map[string]any{"choices": []string{"retry"}}})
 	if retry.Code != http.StatusOK {
 		t.Fatalf("retry status=%d body=%s", retry.Code, retry.Body.String())
 	}

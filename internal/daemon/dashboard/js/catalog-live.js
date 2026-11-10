@@ -50,7 +50,7 @@ export function patch(envelope) {
     app.state.decisionsRev = data.rev;
     return { changed: true, news: false };
   }
-  return { changed: false, news: type.startsWith("delivery.") || type.startsWith("coordinator.") };
+  return { changed: false, news: type.startsWith("coordinator.") };
 }
 
 export function catalogEvent(event, { render, reread, controls: renderControls }) {

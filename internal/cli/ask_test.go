@@ -59,4 +59,23 @@ func TestASessionRaisesAnAskWithTheCommandAndThePersonAnswersIt(t *testing.T) {
 	if answered, _, err := r.Ask(ask.ID); err != nil || answered.State != registry.AskAnswered || answered.AnsweredBy != registry.AskToPerson {
 		t.Fatalf("ask after the answer %+v err %v", answered, err)
 	}
+
+	t.Setenv("AGENTHAIL_SESSION_ID", id)
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"ask", "Roll back?", "--option", "Roll back", "--option", "Keep it"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	open, err = r.OpenAsks()
+	if err != nil || len(open) != 1 {
+		t.Fatalf("open asks %+v err %v", open, err)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "")
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"ask", "answer", open[0].ID, "o1"}) }); err != nil {
+		t.Fatalf("answer by option id: %v", err)
+	}
+	testkit.Eventually(t, "the picked option delivered to the session", 15*time.Second, func() bool {
+		turns := host.Turns(t, id)
+		return len(turns) == 2 && strings.Contains(turns[1].Text, "Roll back? Keep it")
+	})
 }

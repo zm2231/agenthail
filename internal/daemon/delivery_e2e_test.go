@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
@@ -424,63 +423,6 @@ func (h *runningDaemon) makeQueueItemAvailable(id int64) {
 	h.execStore(`UPDATE message_queue SET available_at_ms=0 WHERE id=? AND status='pending'`, id)
 }
 
-func (h *runningDaemon) openCatalogEvents() *bufio.Reader {
-	h.t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, h.server.URL+"/api/v1/catalog-events?after=0", nil)
-	if err != nil {
-		cancel()
-		h.t.Fatal(err)
-	}
-	request.Header.Set("Authorization", "Bearer "+e2eToken)
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		cancel()
-		h.t.Fatal(err)
-	}
-	if response.StatusCode != http.StatusOK {
-		response.Body.Close()
-		cancel()
-		h.t.Fatalf("catalog-events status=%d", response.StatusCode)
-	}
-	h.t.Cleanup(func() {
-		cancel()
-		response.Body.Close()
-	})
-	return bufio.NewReader(response.Body)
-}
-
-func waitForCatalogEvent(t *testing.T, reader *bufio.Reader, eventType string) map[string]any {
-	t.Helper()
-	found := make(chan map[string]any, 1)
-	go func() {
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				return
-			}
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			var event map[string]any
-			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) != nil {
-				return
-			}
-			if event["type"] == eventType {
-				found <- event
-				return
-			}
-		}
-	}()
-	select {
-	case event := <-found:
-		return event
-	case <-time.After(5 * time.Second):
-		t.Fatalf("no %s event on /api/v1/catalog-events", eventType)
-		return nil
-	}
-}
-
 func settle() { time.Sleep(150 * time.Millisecond) }
 
 func queueID(t *testing.T, receipt map[string]any) int64 {
@@ -617,18 +559,17 @@ func TestUnknownQueuedOutcomeIsDeadLetteredAndNeverResent(t *testing.T) {
 
 var errEmptyResult = errors.New("empty result")
 
-func TestTerminalQueuedFailureNotifiesSenderOnceAndPublishesProblem(t *testing.T) {
+func TestTerminalQueuedFailureAsksTheSenderOnce(t *testing.T) {
 	agent := newScriptedAgent("sender", "target")
 	agent.setStatus("target", surface.StatusBusy)
 	h := startRunningDaemon(t, agent)
-	events := h.openCatalogEvents()
 	id := queueID(t, h.receipt(map[string]any{"action": "send", "sessionId": "target", "sourceSessionId": "sender", "message": "rejected later"}))
 	agent.failSends("target", surface.DeliveryTerminal(errors.New("target rejected input"), surface.DeliveryInvalidRequest))
 	agent.setStatus("target", surface.StatusIdle)
-	problem := waitForCatalogEvent(t, events, "delivery.problem")
-	if problem == nil {
-		t.Fatal("missing delivery.problem")
-	}
+	testkit.Eventually(t, "the sender's ask", 5*time.Second, func() bool {
+		asks := openDeliveryAsks(t, h.store)
+		return len(asks) == 1 && asks[0].RoutedTo == "sender"
+	})
 	testkit.Eventually(t, "sender notice", 5*time.Second, func() bool { return len(agent.deliveredTo("sender")) > 0 })
 	h.awaitQueueItem(id, "the dead letter", func(item dashboardQueue) bool {
 		return item.Status == "dead" && item.Evidence == surface.EvidenceFailed

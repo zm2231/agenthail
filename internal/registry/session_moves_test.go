@@ -301,14 +301,6 @@ func TestEveryMessageQueuedForASessionAfterItMovedIsHeldForItsNewHost(t *testing
 			_, _, err = r.QueueDeliveryUsingIntent(intent.ID, m, "", surface.SendOptions{})
 			return err
 		}},
-		{"a notice that its own send failed", "delivery failure", func(r *Registry, m string) error {
-			intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: moveConversation, TargetSessionID: "peer", Message: "to the peer", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
-			if err != nil {
-				return err
-			}
-			_, err = r.FailDeliveryIntentWithNotice(intent.ID, "the peer refused it")
-			return err
-		}},
 	}
 	for _, test := range queue {
 		t.Run(test.name, func(t *testing.T) {

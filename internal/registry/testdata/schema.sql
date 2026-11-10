@@ -1,4 +1,4 @@
--- schemaVersion 91
+-- schemaVersion 92
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -11,9 +11,6 @@ CREATE UNIQUE INDEX asks_ref ON asks(session_id, origin, ref) WHERE ref<>'' AND 
 
 -- index asks_session
 CREATE INDEX asks_session ON asks(session_id, created_at_ms);
-
--- index attention_items_open
-CREATE INDEX attention_items_open ON attention_items(resolved_at, created_at DESC, id DESC);
 
 -- index catalog_events_created
 CREATE INDEX catalog_events_created ON catalog_events(created_at DESC, seq DESC);
@@ -37,6 +34,10 @@ CREATE UNIQUE INDEX delivery_intents_provider_key
 -- index delivery_intents_sender_status
 CREATE INDEX delivery_intents_sender_status
 	ON delivery_intents(sender_session_id, status, id DESC);
+
+-- index delivery_intents_status_updated
+CREATE INDEX delivery_intents_status_updated
+	ON delivery_intents(status, updated_at);
 
 -- index delivery_intents_target
 CREATE INDEX delivery_intents_target
@@ -181,18 +182,6 @@ CREATE TABLE asks (
 	wait_kind TEXT NOT NULL DEFAULT '',
 	answerable INTEGER NOT NULL DEFAULT 1,
 	announced_at_ms INTEGER NOT NULL DEFAULT 0
-);
-
--- table attention_items
-CREATE TABLE attention_items (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-	queue_id INTEGER NOT NULL UNIQUE REFERENCES message_queue(id) ON DELETE CASCADE,
-	reason TEXT NOT NULL,
-	requested_action TEXT NOT NULL,
-	created_at TEXT NOT NULL DEFAULT (datetime('now')),
-	resolved_at TEXT NOT NULL DEFAULT '',
-	resolution TEXT NOT NULL DEFAULT ''
 );
 
 -- table browser_push_subscriptions
@@ -360,8 +349,6 @@ CREATE TABLE delivery_intents (
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',
 	failed_from TEXT NOT NULL DEFAULT '',
-	dismissed_at TEXT,
-	notification_queue_id INTEGER REFERENCES message_queue(id) ON DELETE SET NULL,
 	retries INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -544,7 +531,6 @@ CREATE TABLE message_queue (
 	uploads TEXT NOT NULL DEFAULT '[]',
 	refused INTEGER NOT NULL DEFAULT 0,
 	refusal INTEGER NOT NULL DEFAULT 0,
-	refusal_announced INTEGER NOT NULL DEFAULT 0,
 	person_name TEXT NOT NULL DEFAULT ''
 );
 
@@ -1053,24 +1039,6 @@ BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
 
--- trigger catalog_presentation_version_attention_items_delete
-CREATE TRIGGER catalog_presentation_version_attention_items_delete AFTER DELETE ON attention_items
-BEGIN
-	UPDATE catalog_presentation_version SET version=version+1;
-END;
-
--- trigger catalog_presentation_version_attention_items_insert
-CREATE TRIGGER catalog_presentation_version_attention_items_insert AFTER INSERT ON attention_items
-BEGIN
-	UPDATE catalog_presentation_version SET version=version+1;
-END;
-
--- trigger catalog_presentation_version_attention_items_update
-CREATE TRIGGER catalog_presentation_version_attention_items_update AFTER UPDATE OF created_at,id,queue_id,reason,requested_action,resolution,resolved_at,session_id ON attention_items WHEN (NEW.created_at IS NOT OLD.created_at OR NEW.id IS NOT OLD.id OR NEW.queue_id IS NOT OLD.queue_id OR NEW.reason IS NOT OLD.reason OR NEW.requested_action IS NOT OLD.requested_action OR NEW.resolution IS NOT OLD.resolution OR NEW.resolved_at IS NOT OLD.resolved_at OR NEW.session_id IS NOT OLD.session_id)
-BEGIN
-	UPDATE catalog_presentation_version SET version=version+1;
-END;
-
 -- trigger catalog_presentation_version_catalog_retired_version_delete
 CREATE TRIGGER catalog_presentation_version_catalog_retired_version_delete AFTER DELETE ON catalog_retired_version
 BEGIN
@@ -1161,28 +1129,6 @@ BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
 
--- trigger catalog_presentation_version_delivery_intents_delete
-CREATE TRIGGER catalog_presentation_version_delivery_intents_delete AFTER DELETE ON delivery_intents WHEN (OLD.status IN ('failed','held') OR (OLD.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
-	WHERE f.sender_session_id=OLD.sender_session_id AND f.target_session_id=OLD.target_session_id AND f.status='failed' AND f.id<OLD.id)))
-BEGIN
-	UPDATE catalog_presentation_version SET version=version+1;
-END;
-
--- trigger catalog_presentation_version_delivery_intents_insert
-CREATE TRIGGER catalog_presentation_version_delivery_intents_insert AFTER INSERT ON delivery_intents WHEN (NEW.status IN ('failed','held') OR (NEW.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
-	WHERE f.sender_session_id=NEW.sender_session_id AND f.target_session_id=NEW.target_session_id AND f.status='failed' AND f.id<NEW.id)))
-BEGIN
-	UPDATE catalog_presentation_version SET version=version+1;
-END;
-
--- trigger catalog_presentation_version_delivery_intents_update
-CREATE TRIGGER catalog_presentation_version_delivery_intents_update AFTER UPDATE OF created_at,dismissed_at,evidence,failed_from,failure,id,message,notification_queue_id,provider_key,queue_id,relayed,retries,sender_session_id,status,target_session_id,updated_at,uuid ON delivery_intents WHEN ((NEW.status IN ('failed','held') OR (NEW.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
-	WHERE f.sender_session_id=NEW.sender_session_id AND f.target_session_id=NEW.target_session_id AND f.status='failed' AND f.id<NEW.id))) OR (OLD.status IN ('failed','held') OR (OLD.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
-	WHERE f.sender_session_id=OLD.sender_session_id AND f.target_session_id=OLD.target_session_id AND f.status='failed' AND f.id<OLD.id)))) AND (NEW.created_at IS NOT OLD.created_at OR NEW.dismissed_at IS NOT OLD.dismissed_at OR NEW.evidence IS NOT OLD.evidence OR NEW.failed_from IS NOT OLD.failed_from OR NEW.failure IS NOT OLD.failure OR NEW.id IS NOT OLD.id OR NEW.message IS NOT OLD.message OR NEW.notification_queue_id IS NOT OLD.notification_queue_id OR NEW.provider_key IS NOT OLD.provider_key OR NEW.queue_id IS NOT OLD.queue_id OR NEW.relayed IS NOT OLD.relayed OR NEW.retries IS NOT OLD.retries OR NEW.sender_session_id IS NOT OLD.sender_session_id OR NEW.status IS NOT OLD.status OR NEW.target_session_id IS NOT OLD.target_session_id OR NEW.updated_at IS NOT OLD.updated_at OR NEW.uuid IS NOT OLD.uuid)
-BEGIN
-	UPDATE catalog_presentation_version SET version=version+1;
-END;
-
 -- trigger catalog_presentation_version_limit_resumes_delete
 CREATE TRIGGER catalog_presentation_version_limit_resumes_delete AFTER DELETE ON limit_resumes
 BEGIN
@@ -1214,7 +1160,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_message_queue_update
-CREATE TRIGGER catalog_presentation_version_message_queue_update AFTER UPDATE OF attempts,author,available_at_ms,busy_delivery,dead_at_ms,deferrals,delivered,delivery_key,evidence,host_request,id,inflight_at_ms,last_error,message,model,operation,person_name,queued_at,refusal,refusal_announced,refused,relay_hops,session_id,source_session_id,status,turn_options,updated_at,uploads ON message_queue WHEN (NEW.attempts IS NOT OLD.attempts OR NEW.author IS NOT OLD.author OR NEW.available_at_ms IS NOT OLD.available_at_ms OR NEW.busy_delivery IS NOT OLD.busy_delivery OR NEW.dead_at_ms IS NOT OLD.dead_at_ms OR NEW.deferrals IS NOT OLD.deferrals OR NEW.delivered IS NOT OLD.delivered OR NEW.delivery_key IS NOT OLD.delivery_key OR NEW.evidence IS NOT OLD.evidence OR NEW.host_request IS NOT OLD.host_request OR NEW.id IS NOT OLD.id OR NEW.inflight_at_ms IS NOT OLD.inflight_at_ms OR NEW.last_error IS NOT OLD.last_error OR NEW.message IS NOT OLD.message OR NEW.model IS NOT OLD.model OR NEW.operation IS NOT OLD.operation OR NEW.person_name IS NOT OLD.person_name OR NEW.queued_at IS NOT OLD.queued_at OR NEW.refusal IS NOT OLD.refusal OR NEW.refusal_announced IS NOT OLD.refusal_announced OR NEW.refused IS NOT OLD.refused OR NEW.relay_hops IS NOT OLD.relay_hops OR NEW.session_id IS NOT OLD.session_id OR NEW.source_session_id IS NOT OLD.source_session_id OR NEW.status IS NOT OLD.status OR NEW.turn_options IS NOT OLD.turn_options OR NEW.updated_at IS NOT OLD.updated_at OR NEW.uploads IS NOT OLD.uploads)
+CREATE TRIGGER catalog_presentation_version_message_queue_update AFTER UPDATE OF attempts,author,available_at_ms,busy_delivery,dead_at_ms,deferrals,delivered,delivery_key,evidence,host_request,id,inflight_at_ms,last_error,message,model,operation,person_name,queued_at,refusal,refused,relay_hops,session_id,source_session_id,status,turn_options,updated_at,uploads ON message_queue WHEN (NEW.attempts IS NOT OLD.attempts OR NEW.author IS NOT OLD.author OR NEW.available_at_ms IS NOT OLD.available_at_ms OR NEW.busy_delivery IS NOT OLD.busy_delivery OR NEW.dead_at_ms IS NOT OLD.dead_at_ms OR NEW.deferrals IS NOT OLD.deferrals OR NEW.delivered IS NOT OLD.delivered OR NEW.delivery_key IS NOT OLD.delivery_key OR NEW.evidence IS NOT OLD.evidence OR NEW.host_request IS NOT OLD.host_request OR NEW.id IS NOT OLD.id OR NEW.inflight_at_ms IS NOT OLD.inflight_at_ms OR NEW.last_error IS NOT OLD.last_error OR NEW.message IS NOT OLD.message OR NEW.model IS NOT OLD.model OR NEW.operation IS NOT OLD.operation OR NEW.person_name IS NOT OLD.person_name OR NEW.queued_at IS NOT OLD.queued_at OR NEW.refusal IS NOT OLD.refusal OR NEW.refused IS NOT OLD.refused OR NEW.relay_hops IS NOT OLD.relay_hops OR NEW.session_id IS NOT OLD.session_id OR NEW.source_session_id IS NOT OLD.source_session_id OR NEW.status IS NOT OLD.status OR NEW.turn_options IS NOT OLD.turn_options OR NEW.updated_at IS NOT OLD.updated_at OR NEW.uploads IS NOT OLD.uploads)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

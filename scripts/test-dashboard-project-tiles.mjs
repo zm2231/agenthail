@@ -96,7 +96,7 @@ const stopVectors = JSON.parse(readFileSync(new URL("./fixtures/inbox-stop-vecto
 const inboxStops = vm.runInContext("inboxStops", context);
 const stopsByProject = vm.runInContext("stopsByProject", context);
 for (const vector of stopVectors.cases) {
-  const stops = inboxStops({ attention: vector.attention, deliveries: vector.deliveries, replacements: vector.replacements, decisions: vector.decisions, localHosts: vector.localHosts });
+  const stops = inboxStops({ replacements: vector.replacements, decisions: vector.decisions });
   assert.equal(JSON.stringify(stops.stopped.map((stop) => stop.id)), JSON.stringify(vector.stopped), `${vector.name}: stopped`);
   assert.equal(JSON.stringify(stops.decisions.map((item) => item.sessionId)), JSON.stringify(vector.decisionsShown), `${vector.name}: decisions`);
   assert.equal(JSON.stringify(stopsByProject(stops, vector.projects, (id) => vector.sessions[id])), JSON.stringify(vector.counts), `${vector.name}: counts`);

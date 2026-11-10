@@ -374,7 +374,6 @@ Agenthail keeps a local record of messages it moved, work still waiting, retries
 agenthail queue list
 agenthail queue list --mine
 agenthail queue list --cwd /workspace/agenthail
-agenthail queue retry 12
 agenthail queue rm 12
 agenthail history --json
 ```

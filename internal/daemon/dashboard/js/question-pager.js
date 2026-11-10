@@ -5,15 +5,15 @@ const drafts = new Map();
 
 // An agent's ask is answered by one message after its turn has ended, so it
 // is never sent on one tap, can carry a note, and has nothing to decline.
-export function createPager(questions, ask = false) {
-  return { questions, ask, note: "", step: 0, picks: questions.map(() => []), typed: questions.map(() => "") };
+export function createPager(questions, ask = false, optionsOnly = false) {
+  return { questions, ask, optionsOnly, note: "", step: 0, picks: questions.map(() => []), typed: questions.map(() => "") };
 }
 
 export function pagerFor(request) {
   const questions = request.questions || [];
   const saved = drafts.get(request.id);
   if (saved && JSON.stringify(saved.questions) === JSON.stringify(questions)) return saved;
-  const pager = createPager(questions, request.kind === "ask");
+  const pager = createPager(questions, request.kind === "ask", request.optionsOnly === true);
   savePager(request.id, pager);
   return pager;
 }
@@ -39,19 +39,31 @@ export function answerAt(pager, index) {
 }
 
 export const isAnswered = (pager, index) => answerAt(pager, index) !== null;
-export const canSubmit = (pager) => pager.questions.every((_, index) => isAnswered(pager, index));
+export const canSubmit = (pager) => pager.ask
+  ? pager.questions.some((_, index) => isAnswered(pager, index)) || pager.note.trim() !== ""
+  : pager.questions.every((_, index) => isAnswered(pager, index));
 
 export function answers(pager) {
   if (!canSubmit(pager)) return null;
-  return Object.fromEntries(pager.questions.map((question, index) => [question.question, answerAt(pager, index)]));
+  return Object.fromEntries(pager.questions.flatMap((question, index) => (isAnswered(pager, index) ? [[question.question, answerAt(pager, index)]] : [])));
 }
 
-export function decision(pager, answered) {
+export function decision(pager) {
+  const choices = [];
+  const typed = {};
+  pager.questions.forEach((question, index) => {
+    const other = (pager.typed[index] || "").trim();
+    if (other) typed[question.question] = other;
+    else (question.options || []).forEach((option, at) => { if (pager.picks[index].includes(at)) choices.push(option.id); });
+  });
+  const response = { choices };
+  if (Object.keys(typed).length) response.answers = typed;
   const note = pager.note.trim();
-  return pager.ask && note ? { behavior: "allow", answers: answered, message: note } : { behavior: "allow", answers: answered };
+  if (pager.ask && !pager.optionsOnly && note) response.message = note;
+  return response;
 }
 
-const noteField = (pager) => (pager.ask ? `<label><span>Note</span><textarea data-pager-note rows="2" placeholder="Anything else, optional">${escape(pager.note)}</textarea></label>` : "");
+const noteField = (pager) => (pager.ask && !pager.optionsOnly ? `<label><span>Note</span><textarea data-pager-note rows="2" placeholder="Anything else, optional">${escape(pager.note)}</textarea></label>` : "");
 
 const links = (question) => (question.links?.length ? `<p class="pager-links">${question.links.map((link) => `<a href="${escape(link.url)}" target="_blank" rel="noopener noreferrer">${escape(link.title)}</a>`).join(" · ")}</p>` : "");
 
@@ -59,7 +71,11 @@ export function choose(pager, option) {
   const question = pager.questions[pager.step];
   const chosen = question?.options?.[option];
   if (!chosen) return null;
-  if (isOneTap(pager)) return { [question.question]: chosen.label };
+  if (isOneTap(pager)) {
+    pager.picks[pager.step] = [option];
+    pager.typed[pager.step] = "";
+    return answers(pager);
+  }
   const picked = pager.picks[pager.step];
   if (question.multiSelect) {
     pager.picks[pager.step] = picked.includes(option) ? picked.filter((value) => value !== option) : [...picked, option];
@@ -105,7 +121,7 @@ export function renderPage(pager) {
       const answer = answerAt(pager, index);
       return `<button type="button" class="pager-review-row${answer === null ? " unanswered" : ""}" data-pager-step="${index}"><small>${escape(question.header || question.question)}</small><span>${answer === null ? "Not answered" : escape(answer)}</span></button>`;
     }).join("");
-    return `<p class="pager-question">Review your answers</p>${rows}${canSubmit(pager) ? "" : "<p>Answer every question to submit.</p>"}${noteField(pager)}`;
+    return `<p class="pager-question">Review your answers</p>${rows}${canSubmit(pager) ? "" : `<p>${pager.ask ? "Answer a question or write a note to submit." : "Answer every question to submit."}</p>`}${noteField(pager)}`;
   }
   const question = pager.questions[pager.step];
   if (!question) return "";
@@ -115,7 +131,7 @@ export function renderPage(pager) {
     const suggested = question.suggested === index ? ' <small class="pager-suggested">Recommended</small>' : "";
     return `<button type="button" class="pager-option" data-pager-pick="${index}" role="${question.multiSelect ? "checkbox" : "radio"}" aria-checked="${picked}"><kbd aria-hidden="true">${index < 9 ? index + 1 : ""}</kbd><span aria-hidden="true">${question.multiSelect ? (picked ? "☑" : "☐") : (picked ? "◉" : "○")}</span><span><span>${escape(option.label)}${suggested}</span>${option.description ? `<small>${escape(option.description)}</small>` : ""}</span></button>`;
   }).join("");
-  return `${header}<p class="pager-question">${escape(question.question)}</p>${links(question)}${options}<label><span>Other</span><input type="text" data-pager-other placeholder="Your own answer" value="${escape(pager.typed[pager.step] || "")}"></label>${isSingle(pager) ? noteField(pager) : ""}`;
+  return `${header}<p class="pager-question">${escape(question.question)}</p>${links(question)}${options}${pager.optionsOnly ? "" : `<label><span>Other</span><input type="text" data-pager-other placeholder="Your own answer" value="${escape(pager.typed[pager.step] || "")}"></label>`}${isSingle(pager) ? noteField(pager) : ""}`;
 }
 
 export function renderActions(pager, requestId, respondAttribute = "request-respond") {

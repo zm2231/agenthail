@@ -10,8 +10,6 @@ struct SnapshotBase: Decodable {
     let queue: [QueueState]
     let channels: [ChannelState]
     let relays: [RelayState]
-    let attention: [AttentionState]
-    var deliveryProblems: [DeliveryProblem]? = nil
     let codexRecentHours: Int
     var busyDelivery: String? = nil
     var rekeyed: [String: String]? = nil
@@ -140,7 +138,7 @@ extension DashboardSnapshot {
         let catalogSeq = [base.catalogSeq, current.catalogSeq].compactMap { $0 }.min()
         self.init(updatedAt: base.updatedAt, eventCursor: base.eventCursor, hostEpoch: base.hostEpoch, catalogSeq: catalogSeq, daemon: base.daemon, surfaces: base.surfaces,
                   sessions: current.sessions, totalSessions: current.sessions.count, queue: base.queue, channels: base.channels, relays: base.relays, history: history,
-                  attention: base.attention, deliveryProblems: base.deliveryProblems, codexRecentHours: base.codexRecentHours, busyDelivery: base.busyDelivery,
+                  codexRecentHours: base.codexRecentHours, busyDelivery: base.busyDelivery,
                   rekeyed: base.rekeyed, signin: base.signin, person: base.person,
                   projects: base.projects?.map { project in
                       var project = project

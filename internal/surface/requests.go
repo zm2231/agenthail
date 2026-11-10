@@ -1,6 +1,7 @@
 package surface
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,11 +32,13 @@ type Request struct {
 	AlwaysAllow bool            `json:"alwaysAllow"`
 	// AlwaysDeny offers a rule that denies the request from now on, Stoppable
 	// a denial that also ends the turn, and NoReason says a denial carries no
-	// message to the agent.
-	AlwaysDeny bool      `json:"alwaysDeny,omitempty"`
-	Stoppable  bool      `json:"stoppable,omitempty"`
-	NoReason   bool      `json:"noReason,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
+	// message to the agent. OptionsOnly takes only its options' ids, never
+	// typed text.
+	AlwaysDeny  bool      `json:"alwaysDeny,omitempty"`
+	Stoppable   bool      `json:"stoppable,omitempty"`
+	NoReason    bool      `json:"noReason,omitempty"`
+	OptionsOnly bool      `json:"optionsOnly,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 type Question struct {
@@ -53,6 +56,7 @@ type QuestionLink struct {
 }
 
 type QuestionOption struct {
+	ID          string `json:"id"`
 	Label       string `json:"label"`
 	Description string `json:"description"`
 }
@@ -92,16 +96,32 @@ type ElicitationOption struct {
 // question is allowed with Answers, one per question keyed by its text; a
 // multi-select answer joins its labels with ", ". An input request is allowed
 // with Content, an object of its form's field values, or none for a link.
-// Choice is instead a notification button's id, which the daemon resolves
-// with Request.Choose against the open request.
 type Decision struct {
-	Choice   string            `json:"choice,omitempty"`
 	Behavior string            `json:"behavior"`
 	Always   bool              `json:"always,omitempty"`
 	Stop     bool              `json:"stop,omitempty"`
 	Message  string            `json:"message,omitempty"`
 	Answers  map[string]string `json:"answers,omitempty"`
 	Content  json.RawMessage   `json:"content,omitempty"`
+}
+
+// Response is how a client answers any request. Choices are ids the
+// request lists: its actions, and its questions' options, at most one per
+// single-choice question. Answers hold typed answers keyed by question text,
+// Message a note or a denial's reason, and Content an input form's field
+// values.
+type Response struct {
+	Choices []string          `json:"choices,omitempty"`
+	Answers map[string]string `json:"answers,omitempty"`
+	Message string            `json:"message,omitempty"`
+	Content json.RawMessage   `json:"content,omitempty"`
+}
+
+func (r *Response) UnmarshalJSON(data []byte) error {
+	type fields Response
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode((*fields)(r))
 }
 
 // RequestState is a session's open requests, oldest first, and the

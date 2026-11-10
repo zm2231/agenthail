@@ -122,7 +122,6 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	uploads TEXT NOT NULL DEFAULT '[]',
 	refused INTEGER NOT NULL DEFAULT 0,
 	refusal INTEGER NOT NULL DEFAULT 0,
-	refusal_announced INTEGER NOT NULL DEFAULT 0,
 	person_name TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
@@ -274,17 +273,6 @@ CREATE TABLE IF NOT EXISTS trigger_runs (
 	UNIQUE (trigger_name, dedupe_key)
 );
 CREATE INDEX IF NOT EXISTS trigger_runs_state ON trigger_runs(state, trigger_name, id);
-CREATE TABLE IF NOT EXISTS attention_items (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-	queue_id INTEGER NOT NULL UNIQUE REFERENCES message_queue(id) ON DELETE CASCADE,
-	reason TEXT NOT NULL,
-	requested_action TEXT NOT NULL,
-	created_at TEXT NOT NULL DEFAULT (datetime('now')),
-	resolved_at TEXT NOT NULL DEFAULT '',
-	resolution TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS attention_items_open ON attention_items(resolved_at, created_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS device_pairings (
 	id TEXT PRIMARY KEY,
 	secret_hash TEXT NOT NULL UNIQUE,
@@ -456,8 +444,6 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',
 	failed_from TEXT NOT NULL DEFAULT '',
-	dismissed_at TEXT,
-	notification_queue_id INTEGER REFERENCES message_queue(id) ON DELETE SET NULL,
 	retries INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -468,6 +454,8 @@ CREATE INDEX IF NOT EXISTS delivery_intents_sender_status
 	ON delivery_intents(sender_session_id, status, id DESC);
 CREATE INDEX IF NOT EXISTS delivery_intents_target
 	ON delivery_intents(target_session_id, id DESC);
+CREATE INDEX IF NOT EXISTS delivery_intents_status_updated
+	ON delivery_intents(status, updated_at);
 CREATE TABLE IF NOT EXISTS catalog_events (
 	seq INTEGER PRIMARY KEY AUTOINCREMENT,
 	dedupe_key TEXT NOT NULL UNIQUE,

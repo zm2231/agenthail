@@ -177,7 +177,7 @@ func TestDeferMessageNeverDeadLettersPreDeliveryFailures(t *testing.T) {
 		if err != nil || item == nil {
 			t.Fatalf("attempt=%d item=%+v err=%v", attempt, item, err)
 		}
-		if _, err := r.DeferMessage(item.ID, errors.New("delivery did not start"), now); err != nil {
+		if err := r.DeferMessage(item.ID, errors.New("delivery did not start"), now); err != nil {
 			t.Fatal(err)
 		}
 		now = now.Add(6 * time.Minute)
@@ -590,9 +590,10 @@ func TestDeadDeliveryMovesToHistoryAfterReviewWindow(t *testing.T) {
 	if err != nil || len(rows) != 1 || rows[0].Historical {
 		t.Fatalf("fresh dead rows=%+v err=%v", rows, err)
 	}
+	ask := onlyDeliveryAsk(t, r)
 	afterTTL := time.Now().Add(2 * deadReviewWindow)
 	r.now = func() time.Time { return afterTTL }
-	if err := r.ReconcileAttentionItems(afterTTL); err != nil {
+	if err := r.SyncDeliveryAsks(afterTTL); err != nil {
 		t.Fatal(err)
 	}
 	rows, err = r.ListQueue(false, nil)
@@ -603,13 +604,8 @@ func TestDeadDeliveryMovesToHistoryAfterReviewWindow(t *testing.T) {
 	if err != nil || len(rows) != 1 || !rows[0].Historical || rows[0].Evidence != surface.EvidenceUnknown {
 		t.Fatalf("history rows=%+v err=%v", rows, err)
 	}
-	attention, err := r.ListAttentionItems(false)
-	if err != nil || len(attention) != 0 {
-		t.Fatalf("open attention=%+v err=%v", attention, err)
-	}
-	allAttention, err := r.ListAttentionItems(true)
-	if err != nil || len(allAttention) != 1 || allAttention[0].Resolution != "history" || allAttention[0].ResolvedAt == "" {
-		t.Fatalf("historical attention=%+v err=%v", allAttention, err)
+	if state := askState(t, r, ask.ID); state != AskWithdrawn {
+		t.Fatalf("a dead row in history left its ask %s", state)
 	}
 }
 
@@ -820,14 +816,14 @@ func TestQueueDeadLetterAndExplicitRetry(t *testing.T) {
 	}
 }
 
-func TestAttentionItemsTrackDeadLetterResolutionWithoutStatusInference(t *testing.T) {
+func TestADeadLetterAsksUntilItIsRetried(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
 	if err := r.QueueMessage("s", "needs a decision"); err != nil {
 		t.Fatal(err)
 	}
-	if items, err := r.ListAttentionItems(false); err != nil || len(items) != 0 {
-		t.Fatalf("pending attention=%+v err=%v", items, err)
+	if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+		t.Fatalf("pending message asks=%+v", asks)
 	}
 	now := time.Now()
 	item, err := r.ClaimNextMessage("s", now)
@@ -837,8 +833,8 @@ func TestAttentionItemsTrackDeadLetterResolutionWithoutStatusInference(t *testin
 	if err := r.NackMessage(item.ID, sql.ErrConnDone, now, 2); err != nil {
 		t.Fatal(err)
 	}
-	if items, err := r.ListAttentionItems(false); err != nil || len(items) != 0 {
-		t.Fatalf("retryable attention=%+v err=%v", items, err)
+	if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+		t.Fatalf("retryable message asks=%+v", asks)
 	}
 	item, err = r.ClaimNextMessage("s", now.Add(time.Minute))
 	if err != nil || item == nil {
@@ -847,23 +843,19 @@ func TestAttentionItemsTrackDeadLetterResolutionWithoutStatusInference(t *testin
 	if err := r.NackMessage(item.ID, sql.ErrConnDone, now.Add(time.Minute), 2); err != nil {
 		t.Fatal(err)
 	}
-	items, err := r.ListAttentionItems(false)
-	if err != nil || len(items) != 1 || items[0].SessionID != "s" || items[0].QueueID != item.ID || items[0].ResolvedAt != "" {
-		t.Fatalf("dead attention=%+v err=%v", items, err)
+	ask := onlyDeliveryAsk(t, r)
+	if ask.SessionID != "s" || ask.RoutedTo != AskToPerson || deliveryRef(t, ask).QueueID != item.ID {
+		t.Fatalf("dead letter ask=%+v", ask)
 	}
 	if err := r.RetryMessage(item.ID); err != nil {
 		t.Fatal(err)
 	}
-	if open, err := r.ListAttentionItems(false); err != nil || len(open) != 0 {
-		t.Fatalf("open attention=%+v err=%v", open, err)
-	}
-	all, err := r.ListAttentionItems(true)
-	if err != nil || len(all) != 1 || all[0].Resolution != "retrying" || all[0].ResolvedAt == "" {
-		t.Fatalf("resolved attention=%+v err=%v", all, err)
+	if state := askState(t, r, ask.ID); state != AskWithdrawn {
+		t.Fatalf("a retried dead letter left its ask %s", state)
 	}
 }
 
-func TestAttentionItemResolvesWhenDeadLetterIsCanceled(t *testing.T) {
+func TestCancelingADeadLetterWithdrawsItsAsk(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
 	if err := r.QueueMessage("s", "cancel this"); err != nil {
@@ -876,24 +868,20 @@ func TestAttentionItemResolvesWhenDeadLetterIsCanceled(t *testing.T) {
 	if err := r.DeadLetterUnknown(item.ID, errors.New("uncertain")); err != nil {
 		t.Fatal(err)
 	}
-	items, err := r.ListAttentionItems(false)
-	if err != nil || len(items) != 1 || items[0].Reason == "" || items[0].RequestedAction == "" {
-		t.Fatalf("items=%+v err=%v", items, err)
-	}
+	ask := onlyDeliveryAsk(t, r)
 	if _, err := r.CancelMessage(item.ID); err != nil {
 		t.Fatal(err)
 	}
-	all, err := r.ListAttentionItems(true)
-	if err != nil || len(all) != 1 || all[0].Resolution != "canceled" || all[0].ResolvedAt == "" {
-		t.Fatalf("all=%+v err=%v", all, err)
+	if state := askState(t, r, ask.ID); state != AskWithdrawn {
+		t.Fatalf("a canceled dead letter left its ask %s", state)
 	}
 	if row, err := r.QueueItem(item.ID, nil); err != nil || row.Status != "canceled" {
 		t.Fatalf("canceled row=%+v err=%v", row, err)
 	}
 }
 
-func TestAttentionItemsExplainTerminalDeliveryRecovery(t *testing.T) {
-	attention := func(t *testing.T, cause string) AttentionItem {
+func TestAnUnconfirmedDeliveryAskExplainsEachHTTPRejection(t *testing.T) {
+	question := func(t *testing.T, cause string) string {
 		t.Helper()
 		r := openTestRegistry(t)
 		register(t, r, "s")
@@ -904,31 +892,22 @@ func TestAttentionItemsExplainTerminalDeliveryRecovery(t *testing.T) {
 		if err != nil || item == nil {
 			t.Fatalf("item=%+v err=%v", item, err)
 		}
-		if _, err := r.DeadLetterMessage(item.ID, errors.New(cause)); err != nil {
+		if err := r.DeadLetterUnknown(item.ID, errors.New(cause)); err != nil {
 			t.Fatal(err)
 		}
-		items, err := r.ListAttentionItems(false)
-		if err != nil || len(items) != 1 || items[0].Reason == "" || items[0].RequestedAction == "" {
-			t.Fatalf("items=%+v err=%v", items, err)
-		}
-		return items[0]
+		return onlyDeliveryAsk(t, r).Questions[0].Question
 	}
-	generic := attention(t, "transport closed")
+	generic := question(t, "transport closed")
 	reasons := map[string]string{}
-	for _, cause := range []string{
-		"delivery rejected [target missing]: HTTP 404",
-		"delivery rejected [authentication needed]: HTTP 401",
-		"delivery rejected [access denied]: HTTP 403",
-		"delivery rejected [invalid request]: HTTP 400",
-	} {
-		item := attention(t, cause)
-		if item.Reason == generic.Reason || item.RequestedAction == generic.RequestedAction {
-			t.Fatalf("%q fell back to the generic explanation %+v", cause, item)
+	for _, cause := range []string{"HTTP 404", "HTTP 401", "HTTP 403", "HTTP 400"} {
+		asked := question(t, cause)
+		if asked == generic || strings.Contains(asked, cause) {
+			t.Fatalf("%q was not explained: %q", cause, asked)
 		}
-		if other, seen := reasons[item.Reason]; seen {
-			t.Fatalf("%q and %q share reason %q", cause, other, item.Reason)
+		if other, seen := reasons[asked]; seen {
+			t.Fatalf("%q and %q share the question %q", cause, other, asked)
 		}
-		reasons[item.Reason] = cause
+		reasons[asked] = cause
 	}
 }
 
@@ -956,22 +935,22 @@ func TestQueueSnapshotsAndBackgroundScanKeepOldPendingDelivery(t *testing.T) {
 	if rows, err := r.ListQueue(false, nil); err != nil || len(rows) != 1 || rows[0].Status != "pending" {
 		t.Fatalf("old current snapshot=%+v err=%v", rows, err)
 	}
-	if items, err := r.ListAttentionItems(false); err != nil || len(items) != 0 {
-		t.Fatalf("attention snapshot=%+v err=%v", items, err)
+	if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+		t.Fatalf("asks for a pending message=%+v", asks)
 	}
 	afterRow, err := r.QueueItem(id, nil)
 	if err != nil || afterRow.Status != "pending" {
 		t.Fatalf("after row=%+v err=%v", afterRow, err)
 	}
 	afterDelivery, err := r.DeliveryIntent(deliveryID)
-	if err != nil || afterDelivery.Status != beforeDelivery.Status || afterDelivery.Failure != beforeDelivery.Failure || afterDelivery.NotificationQueueID != beforeDelivery.NotificationQueueID {
+	if err != nil || afterDelivery.Status != beforeDelivery.Status || afterDelivery.Failure != beforeDelivery.Failure {
 		t.Fatalf("delivery intent changed before=%+v after=%+v err=%v", beforeDelivery, afterDelivery, err)
 	}
 	afterHistory, err := r.ListHistory(20, "")
 	if err != nil || len(afterHistory) != len(beforeHistory) {
 		t.Fatalf("history changed before=%+v after=%+v err=%v", beforeHistory, afterHistory, err)
 	}
-	if err := r.ReconcileAttentionItems(afterTTL); err != nil {
+	if err := r.SyncDeliveryAsks(afterTTL); err != nil {
 		t.Fatal(err)
 	}
 	scanned, err := r.QueueItem(id, nil)
@@ -1396,7 +1375,7 @@ func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	claimable(r.ClaimNextSteerMessage, steer)
-	if _, err := r.DeferMessage(steer, errors.New("target refused the steer"), time.Now()); err != nil {
+	if err := r.DeferMessage(steer, errors.New("target refused the steer"), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if held(steer, steers) != QueueHeldRetrying || held(nextSteer, steers) != QueueHeldBehind {
@@ -1412,7 +1391,7 @@ func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 		t.Fatalf("idle: queued=%q steer=%q next=%q, want nothing then behind", held(queued, steers), held(steer, steers), held(nextSteer, steers))
 	}
 	claimable(r.ClaimNextMessage, queued)
-	if _, err := r.DeferMessage(queued, errors.New("target refused the message"), time.Now()); err != nil {
+	if err := r.DeferMessage(queued, errors.New("target refused the message"), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if held(queued, steers) != QueueHeldRetrying || held(steer, steers) != QueueHeldBehind {
@@ -1467,7 +1446,7 @@ func TestQueueHoldReadsADepartedTargetOffline(t *testing.T) {
 	}
 }
 
-func TestRefusedDeferralHoldsTheMessageAndAnnouncesOncePerRefusal(t *testing.T) {
+func TestARefusedDeferralHoldsTheMessageAndAsksOncePerRefusal(t *testing.T) {
 	r := openTestRegistry(t)
 	for _, id := range []string{"sender", "target"} {
 		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 4242}); err != nil {
@@ -1483,88 +1462,44 @@ func TestRefusedDeferralHoldsTheMessageAndAnnouncesOncePerRefusal(t *testing.T) 
 	}
 	now := time.Now()
 	refusal := surface.DeliveryRefused(errors.New("Claude refused to resume target: Workspace not trusted"))
-	attempt := func(cause error) int64 {
+	attempt := func(cause error) {
 		t.Helper()
 		now = now.Add(time.Hour)
-		item, err := r.ClaimNextMessage("target", now)
-		if err != nil || item == nil || item.ID != id {
-			t.Fatalf("claim=%+v err=%v, want %d", item, err, id)
-		}
-		refusal, err := r.DeferMessage(id, cause, now)
-		if err != nil {
+		claim(t, r, id, now)
+		if err := r.DeferMessage(id, cause, now); err != nil {
 			t.Fatal(err)
 		}
-		return refusal
 	}
-	notices := func() int {
+	refusalAsk := func(n int) Ask {
 		t.Helper()
-		rows, err := r.ListQueue(false, nil)
-		if err != nil {
-			t.Fatal(err)
+		ask := onlyDeliveryAsk(t, r)
+		if want := fmt.Sprintf("queue:%d:refused:%d", id, n); ask.Ref != want || ask.RoutedTo != "sender" || !strings.Contains(ask.Questions[0].Question, "Workspace not trusted") {
+			t.Fatalf("ask=%+v, want %s routed to the sender", ask, want)
 		}
-		count := 0
-		for _, row := range rows {
-			if row.SessionID == "sender" && strings.Contains(row.Message, "[agenthail delivery held") && strings.Contains(row.Message, "Workspace not trusted") {
-				count++
-			}
-		}
-		return count
+		return ask
 	}
-	attention := func() bool {
-		t.Helper()
-		items, err := r.ListAttentionItems(false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, item := range items {
-			if item.QueueID == id {
-				return true
-			}
-		}
-		return false
+	attempt(refusal)
+	if row, err := r.QueueItem(id, nil); err != nil || row.HeldBy != QueueHeldRefused || !strings.Contains(row.LastError, "Workspace not trusted") || row.Status != "pending" {
+		t.Fatalf("refused row=%+v err=%v", row, err)
 	}
-	held := func() *QueueRow {
-		t.Helper()
-		item, err := r.QueueItem(id, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return item
+	first := refusalAsk(1)
+	attempt(refusal)
+	if again := refusalAsk(1); again.ID != first.ID {
+		t.Fatalf("a repeated refusal raised %s, want %s", again.ID, first.ID)
 	}
-	first := attempt(refusal)
-	if first == 0 {
-		t.Fatal("first refusal was not announced")
+	attempt(surface.DeliveryUnavailable(errors.New("target offline")))
+	if row, err := r.QueueItem(id, nil); err != nil || row.HeldBy != QueueHeldRetrying {
+		t.Fatalf("after an ordinary deferral row=%+v err=%v", row, err)
 	}
-	if row := held(); row.HeldBy != QueueHeldRefused || !strings.Contains(row.LastError, "Workspace not trusted") || row.Status != "pending" {
-		t.Fatalf("refused row=%+v", row)
+	if state := askState(t, r, first.ID); state != AskWithdrawn {
+		t.Fatalf("an ordinary deferral left the refusal ask %s", state)
 	}
-	if notices() != 1 || !attention() {
-		t.Fatalf("notices=%d attention=%v after the first refusal", notices(), attention())
+	attempt(refusal)
+	if second := refusalAsk(2); second.ID == first.ID {
+		t.Fatal("a new refusal reused the first refusal's ask")
 	}
-	if again := attempt(refusal); again != first || notices() != 1 {
-		t.Fatalf("a refusal whose announcement never completed: refusal=%d want %d, notices=%d", again, first, notices())
-	}
-	if err := r.MarkRefusalAnnounced(id, first); err != nil {
-		t.Fatal(err)
-	}
-	if attempt(refusal) != 0 || notices() != 1 || !attention() {
-		t.Fatalf("a repeated refusal announced again: notices=%d attention=%v", notices(), attention())
-	}
-	if attempt(surface.DeliveryUnavailable(errors.New("target offline"))) != 0 {
-		t.Fatal("an ordinary deferral was announced")
-	}
-	if row := held(); row.HeldBy != QueueHeldRetrying || attention() {
-		t.Fatalf("after an ordinary deferral heldBy=%q attention=%v", row.HeldBy, attention())
-	}
-	second := attempt(refusal)
-	if second == 0 || second == first || notices() != 2 || !attention() {
-		t.Fatalf("a new refusal was not announced as itself: refusal=%d first=%d notices=%d attention=%v", second, first, notices(), attention())
-	}
-	if err := r.MarkRefusalAnnounced(id, first); err != nil {
-		t.Fatal(err)
-	}
-	if again := attempt(refusal); again != second {
-		t.Fatalf("a late mark for the first refusal counted for the second: refusal=%d want %d", again, second)
+	if got := r.QueueCount("sender"); got != 0 {
+		t.Fatalf("sender notices=%d, want the ask alone", got)
 	}
 }
 
@@ -1588,7 +1523,7 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		now := time.Now()
 		tick := func() time.Time { now = now.Add(time.Hour); return now }
 		claim(t, r, id, tick())
-		if _, err := r.DeferMessage(id, refusal, now); err != nil {
+		if err := r.DeferMessage(id, refusal, now); err != nil {
 			t.Fatal(err)
 		}
 		claim(t, r, id, tick())
@@ -1600,8 +1535,8 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		if err != nil || item.HeldBy == QueueHeldRefused {
 			t.Fatalf("item=%+v err=%v still reads as refused", item, err)
 		}
-		if refusalAttentionOpen(t, r, id) {
-			t.Fatal("refusal attention stayed open")
+		if refusalAskOpen(t, r, id) {
+			t.Fatal("the refusal ask stayed open")
 		}
 	}
 	t.Run("a later delivery error", func(t *testing.T) {
@@ -1623,7 +1558,7 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 	})
 	t.Run("dead letter then retry", func(t *testing.T) {
 		r, id, tick := setup(t, surface.SendOptions{SourceSessionID: "sender"})
-		if _, err := r.DeadLetterMessage(id, errors.New("delivery rejected")); err != nil {
+		if err := r.DeadLetterMessage(id, errors.New("delivery rejected")); err != nil {
 			t.Fatal(err)
 		}
 		if err := r.RetryMessage(id); err != nil {
@@ -1631,16 +1566,16 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		}
 		cleared(t, r, id)
 		claim(t, r, id, tick())
-		if announce, err := r.DeferMessage(id, refusal, time.Now()); err != nil || announce != 2 {
-			t.Fatalf("a refusal after a retry announce=%d err=%v, want the message's second refusal", announce, err)
+		if err := r.DeferMessage(id, refusal, time.Now()); err != nil {
+			t.Fatal(err)
 		}
-		if got := senderNotices(t, r); got != 2 {
-			t.Fatalf("sender notices=%d, want one per refusal", got)
+		if ask := onlyDeliveryAsk(t, r); ask.Ref != fmt.Sprintf("queue:%d:refused:2", id) {
+			t.Fatalf("a refusal after a retry asked %q, want the message's second refusal", ask.Ref)
 		}
 	})
 	t.Run("cancel", func(t *testing.T) {
 		r, id, tick := setup(t, surface.SendOptions{SourceSessionID: "sender"})
-		if _, err := r.DeferMessage(id, refusal, tick()); err != nil {
+		if err := r.DeferMessage(id, refusal, tick()); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := r.CancelMessage(id); err != nil {
@@ -1648,7 +1583,7 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		}
 		cleared(t, r, id)
 	})
-	t.Run("a relayed message gets no notice", func(t *testing.T) {
+	t.Run("a relayed refusal asks the person", func(t *testing.T) {
 		r := openTestRegistry(t)
 		for _, id := range []string{"sender", "target"} {
 			if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
@@ -1666,16 +1601,22 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 			t.Fatal(err)
 		}
 		claim(t, r, id, time.Now())
-		if announce, err := r.DeferMessage(id, refusal, time.Now()); err != nil || announce == 0 {
-			t.Fatalf("announce=%d err=%v, want the user told", announce, err)
+		if err := r.DeferMessage(id, refusal, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if ask := onlyDeliveryAsk(t, r); ask.SessionID != "target" || ask.RoutedTo != AskToPerson {
+			t.Fatalf("ask=%+v, want the person asked about the target", ask)
 		}
 		rows, err := r.ListQueue(false, nil)
 		if err != nil || len(rows) != 1 || rows[0].ID != id {
 			t.Fatalf("a relayed refusal queued a notice: rows=%+v err=%v", rows, err)
 		}
 	})
-	t.Run("no sender gets no notice", func(t *testing.T) {
+	t.Run("a refusal without a sender asks the person", func(t *testing.T) {
 		r, id, _ := setup(t, surface.SendOptions{})
+		if ask := onlyDeliveryAsk(t, r); ask.SessionID != "target" || ask.RoutedTo != AskToPerson {
+			t.Fatalf("ask=%+v, want the person asked about the target", ask)
+		}
 		rows, err := r.ListQueue(false, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -1688,21 +1629,6 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 	})
 }
 
-func senderNotices(t *testing.T, r *Registry) int {
-	t.Helper()
-	rows, err := r.ListQueue(false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	count := 0
-	for _, row := range rows {
-		if row.SessionID == "sender" && strings.Contains(row.Message, "[agenthail delivery held") {
-			count++
-		}
-	}
-	return count
-}
-
 func claim(t *testing.T, r *Registry, id int64, now time.Time) {
 	t.Helper()
 	item, err := r.ClaimNextMessage("target", now)
@@ -1711,14 +1637,10 @@ func claim(t *testing.T, r *Registry, id int64, now time.Time) {
 	}
 }
 
-func refusalAttentionOpen(t *testing.T, r *Registry, id int64) bool {
+func refusalAskOpen(t *testing.T, r *Registry, id int64) bool {
 	t.Helper()
-	items, err := r.ListAttentionItems(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, item := range items {
-		if item.QueueID == id && item.Reason == "The target refused to start" {
+	for _, ask := range openDeliveryAsks(t, r) {
+		if ref, _ := ParseDeliveryRef(ask.Ref); ref.QueueID == id && ref.Kind == "refused" {
 			return true
 		}
 	}

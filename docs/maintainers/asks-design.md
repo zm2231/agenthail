@@ -1,6 +1,6 @@
 # Asks: one object for everything that needs the person (design)
 
-Status: layer 1 built (schema 90); layers 2 to 5 are design. "Why" and the table below describe the code before layer 1, at `fe198bfd` (schema 89).
+Status: layers 1 to 3 built (schemas 90 to 92); layers 4 and 5 are design. "Why" and the table below describe the code before layer 1, at `fe198bfd` (schema 89).
 
 ## Why
 
@@ -130,7 +130,7 @@ Each source is migrated in its own layer, and its old path goes in the same chan
    - `catalog_sessions.waiting_on` and the delivery hold while waiting (`internal/delivery/delivery.go:366-379`) read open permission asks instead.
 3. **Delivery problems.**
    - Failed or held intents and dead incoming queue rows each raise an ask, `ref` = the intent or queue id.
-   - Dropped: `attention_items`, `delivery_intents.dismissed_at`, the snapshot's `attention` and `deliveryProblems` arrays, the four delivery actions, and the client banners (`AttentionBanner`, `DeliveryProblemBanner`). `docs/maintainers/delivery-problems.md` is folded into the asks contract.
+   - Dropped: `attention_items`, `delivery_intents.dismissed_at`, the snapshot's `attention` and `deliveryProblems` arrays, `delivery-dismiss`, `delivery-delete`, `queue-retry`, `queue-cancel` for a dead row, and the client banners (`AttentionBanner`, `DeliveryProblemBanner`). `docs/maintainers/delivery-problems.md` is folded into the asks contract.
 4. **Ledger questions.**
    - Asking a question raises an ask on the ledger's planning host (`ProjectsPlannedHere`, `internal/ledger/sync.go:55`), where the expiry sweep already runs.
    - Dropped: the `ledger.question.escalated` notification and the expiry notice text. Ledger events stay the ledger's synced record.
@@ -206,7 +206,7 @@ Each layer works end to end on its own and removes the path it replaces.
 
 1. Schema 90, ask store, `agenthail ask` / `agenthail_ask`, end-turn asks moved over, Stop reminder for leads in terminal Claude and Codex, decisions inbox items carry asks, answers through `respond`. This is the layer that fixes "Needs you is empty".
 2. Permission requests as asks; one routing path with escalation. Built: [asks.md](asks.md#permission-requests).
-3. Delivery problems as asks.
+3. Delivery problems as asks, the sender asked first. Built: [asks.md](asks.md#delivery-problems).
 4. Ledger questions as asks.
 5. Client cleanup: iPhone "Accept recommended", browser notification actions, Swift attention builder removed.
 

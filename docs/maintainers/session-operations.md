@@ -203,9 +203,10 @@ adds only the request ID; the phone fetches the prompt and buttons from
 `actions`. It answers for every session whose provider takes answers through
 Agenthail, with an empty list when none is open, as for a terminal session
 right after its question was answered. A button answers with `respond` and
-`decision.choice`, plus
+`decision.choices` holding its id, plus
 `decision.message` for `reply`, which answers a question with that text or
-denies an approval with it as the reason. A choice is resolved against the
+denies an approval with it as the reason. Every client answers this way; see
+[asks.md](asks.md#answering). A choice is resolved against the
 request as it is then: one it no longer offers is refused, and an answered
 request is `stale`. `respond` returns once the session's catalog row no longer
 shows the request it answered. While a target waits, nothing is
@@ -221,9 +222,9 @@ when an earlier message to the same session is still open. `offline` covers a
 target discovery no longer reports; a closed Claude session is the exception,
 since the daemon resumes it to deliver its queue. `refused` means the
 target refused to start, such as Claude failing to resume the conversation in
-the Claude host. The row's last error carries Claude's message, the row raises
-an attention item, and the refusal is announced once on the desktop and paired
-devices; an agent sender gets a notice with the reason. The message stays
+the Claude host. The row's last error carries Claude's message, and each refusal
+raises one delivery ask: an agent sender is asked first, otherwise the person
+(see `asks.md#delivery-problems`). The message stays
 queued and is delivered on the first attempt after the cause is fixed. Empty means
 the next scan claims that message: a drain takes only a session's earliest open
 message, or its earliest steer while a turn runs and the target can steer.

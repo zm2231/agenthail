@@ -7,8 +7,8 @@ struct QueueTailRows: View {
     var generation = 0
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var retrying: QueueTail.Row?
     @State private var reading: QueueTail.Row?
+    @State private var answering: (row: String, decision: DecisionItem)?
 
     var body: some View {
         if tail.hiddenCount > 0 {
@@ -35,14 +35,14 @@ struct QueueTailRows: View {
                 .rebuilt(row.id, generation: generation)
                 .id(row.id)
                 .accessibilityIdentifier("queue-\(row.item.listID)")
-                .confirmationDialog("Send this message again?", isPresented: Binding(get: { retrying?.id == row.id }, set: { if !$0 { retrying = nil } }), titleVisibility: .visible) {
-                    Button("Send again") { run(row, leaves: false) { try await model.updateQueue(row.item, retry: true) } }
-                    Button("Cancel", role: .cancel) { retrying = nil }
-                } message: {
-                    Text("It may already have reached the agent. Check the session first.")
-                }
                 .sheet(isPresented: Binding(get: { reading?.id == row.id }, set: { if !$0 { reading = nil } })) {
                     QueuedMessageSheet(item: row.item, reason: row.reason)
+                }
+                .sheet(isPresented: Binding(get: { answering?.row == row.id }, set: { if !$0 { answering = nil } })) {
+                    if let decision = answering?.decision {
+                        DecisionSheet(model: model, item: decision, title: model.session(decision.sessionId)?.displayName ?? decision.sessionId,
+                                      open: { answering = nil; model.openSession(decision.sessionId) }) { answering = nil }
+                    }
                 }
         }
     }
@@ -90,10 +90,9 @@ struct QueueTailRows: View {
         let item = row.item
         let idle = !model.pendingControls.contains("queue:\(item.listID)")
         switch row.controls {
-        case .review:
-            control("Send again", id: "queue-tail-retry-\(item.id)", enabled: idle) { retrying = row }
-            control("Dismiss", id: "queue-tail-dismiss-\(item.id)", enabled: idle) {
-                run(row, leaves: true) { try await model.updateQueue(item, retry: false) }
+        case .answer:
+            if let decision = model.shownDecisions.decision(answering: item.askId) {
+                control("Answer", id: "queue-tail-answer-\(item.id)", enabled: true) { answering = (row.id, decision) }
             }
         case .waiting:
             let steering = model.queueSteer(item)
@@ -114,7 +113,7 @@ struct QueueTailRows: View {
                     Button("Edit", systemImage: "pencil") { run(row, leaves: true) { try await model.takeBack(item) } }
                 }
                 Button("Cancel delivery", systemImage: "xmark", role: .destructive) {
-                    run(row, leaves: true) { try await model.updateQueue(item, retry: false) }
+                    run(row, leaves: true) { try await model.cancelQueue(item) }
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -143,7 +142,6 @@ struct QueueTailRows: View {
     }
 
     private func run(_ row: QueueTail.Row, leaves: Bool, _ perform: @escaping () async throws -> Bool) {
-        retrying = nil
         let generation = tail.generation
         tail.report(nil, from: generation)
         Task {

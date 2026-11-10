@@ -45,10 +45,8 @@ struct InboxStopActionsTest {
     static let snapshot = #"""
     {"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,
      "queue":[{"id":7,"sessionId":"s-web","target":"fix the build","message":"Run the migration after the backup","status":"dead","evidence":"unknown","attempts":1,"queuedAt":"2026-11-08T09:59:00Z"}],"channels":[],"relays":[],"history":[],"codexRecentHours":24,
-     "attention":[{"id":1,"sessionId":"s-web","target":"fix the build","queueId":7,"reason":"Delivery failed","requestedAction":"Retry or cancel this message","createdAt":"2026-11-08T10:00:00Z"},
-                  {"id":2,"sessionId":"s-web","target":"fix the build","queueId":8,"reason":"Delivery failed","requestedAction":"Retry or cancel this message","createdAt":"2026-11-08T10:01:00Z"}],
-     "deliveryProblems":[{"deliveryId":3,"sessionId":"s-api","message":"check the schema","reason":"target_gone","status":"failed","at":"2026-11-08T10:05:00Z"}],
-     "leadReplacements":[{"id":5,"projectId":"api","name":"lead","sessionId":"s-api-2","previousSessionId":"s-api","changedBy":"you","reason":"context full","at":"2026-11-08T10:10:00Z"}]}
+     "leadReplacements":[{"id":5,"projectId":"api","name":"lead","sessionId":"s-api-2","previousSessionId":"s-api","changedBy":"you","reason":"context full","at":"2026-11-08T10:10:00Z"},
+                         {"id":6,"projectId":"web","name":"lead","sessionId":"s-web-2","previousSessionId":"s-web","changedBy":"you","reason":"context full","at":"2026-11-08T10:11:00Z"}]}
     """#
 
     @MainActor
@@ -60,27 +58,21 @@ struct InboxStopActionsTest {
         model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(snapshot.utf8))
 
         let stops = model.inboxStops
-        check(stops.stopped.map(\.id) == ["queue:/7", "queue:/8", "delivery:/3", "replacement:/5"], "the Mac Inbox lists every stop: \(stops.stopped.map(\.id))")
-        check(stops.count == 4, "the Inbox tile counts every stop")
-        check(model.needsYouCount == 4, "the window chrome and status bar give the Inbox's answer, not the sessions': \(model.needsYouCount)")
-        check(model.queuedText(stops.stopped[0]) == "Run the migration after the backup", "a stuck message's card shows the message")
+        check(stops.stopped.map(\.id) == ["replacement:/5", "replacement:/6"], "a dead queue row is not a stop of its own; its ask is a decision: \(stops.stopped.map(\.id))")
+        check(stops.count == 2 && model.needsYouCount == 2, "the window chrome and status bar give the Inbox's answer: \(model.needsYouCount)")
         check(stops.entries.map(\.paneID) == stops.stopped.map(\.id), "the pane walks the same rows")
-        check(stops.following(stops.entries[1]) == "delivery:/3", "after a row, the next one is picked")
+        check(stops.following(stops.entries[0]) == "replacement:/6", "after a row, the next one is picked")
 
-        guard case .queued(let first) = stops.stopped[0], case .queued(let second) = stops.stopped[1],
-              case .delivery(let delivery) = stops.stopped[2], case .replacement(let replacement) = stops.stopped[3] else {
+        guard case .replacement(let first) = stops.stopped[0], case .replacement(let second) = stops.stopped[1] else {
             check(false, "the rows come in their kinds")
             return
         }
-        model.retryQueued(first)
-        check(!model.inboxStops.stopped.contains { $0.id == "queue:/7" }, "a retried message leaves the Inbox at once")
-        model.cancelQueued(second)
-        model.dismissDeliveryProblem(delivery)
-        model.acknowledgeLeadReplacement(replacement)
+        model.acknowledgeLeadReplacement(first)
+        model.acknowledgeLeadReplacement(second)
         check(model.inboxStops.count == 0, "every handled stop leaves the Inbox")
-        await until { StopDaemon.posts.count >= 4 }
-        let sent = StopDaemon.posts.map { post in "\(post["action"] ?? "")#\(post["queueId"] ?? post["deliveryId"] ?? post["replacementId"] ?? "")" }.sorted()
-        check(sent == ["delivery-dismiss#3", "lead-replacement-ack#5", "queue-cancel#8", "queue-retry#7"], "each card button asks the daemon: \(sent)")
+        await until { StopDaemon.posts.count >= 2 }
+        let sent = StopDaemon.posts.map { post in "\(post["action"] ?? "")#\(post["replacementId"] ?? "")" }.sorted()
+        check(sent == ["lead-replacement-ack#5", "lead-replacement-ack#6"], "each card button asks the daemon: \(sent)")
         print("inbox stop actions ok")
     }
 

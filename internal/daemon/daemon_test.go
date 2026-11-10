@@ -587,7 +587,7 @@ func TestQueuedDeliveryBindsProviderTurnForReconciliation(t *testing.T) {
 	}
 }
 
-func TestQueuedRelayTerminalFailureRecordsOneProblemWithoutNotifyingSource(t *testing.T) {
+func TestQueuedRelayTerminalFailureAsksThePersonOnceWithoutNotifyingSource(t *testing.T) {
 	daemon, r, fake, from, to := daemonFixture(t)
 	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
 		t.Fatal(err)
@@ -599,9 +599,8 @@ func TestQueuedRelayTerminalFailureRecordsOneProblemWithoutNotifyingSource(t *te
 	if count := r.QueueCount(from.ID); count != 0 {
 		t.Fatalf("source notices=%d", count)
 	}
-	window, err := r.CatalogEventsAfter(0, 10)
-	if events := withoutQueueCatalogEvents(window.Events); err != nil || len(events) != 1 || events[0].Type != "delivery.problem" {
-		t.Fatalf("events=%+v err=%v", window, err)
+	if asks := openDeliveryAsks(t, r); len(asks) != 1 || asks[0].SessionID != to.ID || asks[0].RoutedTo != registry.AskToPerson {
+		t.Fatalf("asks=%+v", asks)
 	}
 }
 
@@ -1168,7 +1167,6 @@ func TestRelayToUnavailableSurfaceRemainsQueuedWithoutNotifyingSource(t *testing
 		t.Fatal("relay must queue once without notifying source")
 	}
 }
-
 
 func TestQueuedSendRecordsTheModelNoticeItsTurnReported(t *testing.T) {
 	d, r, fake, _, to := daemonFixture(t)

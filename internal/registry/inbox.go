@@ -46,6 +46,7 @@ type InboxItem struct {
 	Attempts        int
 	LastError       string
 	Relayed         bool
+	AskID           string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -100,6 +101,16 @@ func (r *Registry) InboxPage(request InboxRequest) (InboxPage, error) {
 	items, err := appendRows(make([]InboxItem, 0, limit+1), rows, scanInboxItem)
 	if err != nil {
 		return InboxPage{}, err
+	}
+	links, err := r.deliveryAskLinks()
+	if err != nil {
+		return InboxPage{}, err
+	}
+	for i := range items {
+		items[i].AskID = links.intent[items[i].ID]
+		if items[i].AskID == "" && items[i].QueueID > 0 {
+			items[i].AskID = links.queue[items[i].QueueID]
+		}
 	}
 	page := InboxPage{Items: items}
 	if len(items) > limit {

@@ -34,7 +34,7 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 	coord := d.coordinator()
 	route, err := coord.RouteOf(ctx, session.ID, coordinator.FromAgent(item.Author, item.SourceSessionID))
 	if err != nil {
-		if _, err := d.Registry.DeferMessage(item.ID, err, now); err != nil {
+		if err := d.Registry.DeferMessage(item.ID, err, now); err != nil {
 			d.log.Printf("defer queue item %d: %s", item.ID, err)
 		}
 		return true
@@ -45,7 +45,7 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 	if route.Moved {
 		if err := d.Registry.MoveClaimedMessage(item.ID, route.Current); err != nil {
 			d.log.Printf("move queue item %d to coordinator %s: %s", item.ID, route.Current, err)
-			if _, err := d.Registry.DeferMessage(item.ID, err, now); err != nil {
+			if err := d.Registry.DeferMessage(item.ID, err, now); err != nil {
 				d.log.Printf("defer queue item %d: %s", item.ID, err)
 			}
 		}

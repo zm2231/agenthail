@@ -216,7 +216,7 @@ func (a *App) cmdThread(args []string) error {
 				recordThreadCreateHistory(a.registry(), "submitted", session, request.message, "", startErr.Error())
 				return emitSubmittedThreadOutput(request, output)
 			}
-			_, _ = a.registry().FailDeliveryIntentWithNotice(intent.ID, startErr.Error())
+			_, _ = a.registry().RecordDeliveryFailure(intent.ID, startErr.Error())
 			recordThreadCreateHistory(a.registry(), "failed", session, request.message, "", startErr.Error())
 			output.OK = false
 			output.Status = "failed"

@@ -266,6 +266,9 @@ func (r *Registry) RemoveHost(hostID string) ([]CatalogEvent, error) {
 			return nil, err
 		}
 	}
+	if err := syncDeliveryAsksTx(tx, time.Now()); err != nil {
+		return nil, err
+	}
 	return events, tx.Commit()
 }
 
@@ -555,12 +558,14 @@ func releaseUnservedHostRowTx(tx *sql.Tx, sessionID, hostID string) error {
 			}
 			continue
 		}
-		if _, err := finishQueuedDeliveryIntent(tx, item.id, failure); err != nil {
+		if err := finishQueuedDeliveryIntent(tx, item.id, failure); err != nil {
 			return err
 		}
 	}
-	_, err = tx.Exec(`UPDATE sessions SET host_id='',updated_at=datetime('now') WHERE id=? AND host_id=?`, sessionID, hostID)
-	return err
+	if _, err := tx.Exec(`UPDATE sessions SET host_id='',updated_at=datetime('now') WHERE id=? AND host_id=?`, sessionID, hostID); err != nil {
+		return err
+	}
+	return syncDeliveryAsksTx(tx, time.Now())
 }
 
 func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error) {

@@ -30,8 +30,8 @@ func TestAReleasedMessageIsNeverSentAgain(t *testing.T) {
 			if changed, err := r.HoldPeerMessage(peer, "waiting for approval"); err != nil || !changed {
 				t.Fatalf("hold changed=%v err=%v", changed, err)
 			}
-			if r.QueueCount(sender.ID) == 0 {
-				t.Fatal("the sender was not told the message is held")
+			if ask, found, err := r.DeliveryAskOf(intentID); err != nil || !found || ask.RoutedTo != sender.ID {
+				t.Fatalf("ask=%+v found=%v err=%v, want the sender asked about its held message", ask, found, err)
 			}
 			if claimed {
 				item, err := r.ClaimNextMessage(target.ID, time.Now())
@@ -48,8 +48,8 @@ func TestAReleasedMessageIsNeverSentAgain(t *testing.T) {
 					"nack":        r.NackMessage(queueID, errors.New("send failed"), time.Now(), 3),
 					"dead-letter": r.DeadLetterUnknown(queueID, errors.New("timed out")),
 				}
-				_, late["defer"] = r.DeferMessage(queueID, errors.New("busy"), time.Now())
-				_, late["reject"] = r.DeadLetterMessage(queueID, errors.New("rejected"))
+				late["defer"] = r.DeferMessage(queueID, errors.New("busy"), time.Now())
+				late["reject"] = r.DeadLetterMessage(queueID, errors.New("rejected"))
 				for step, err := range late {
 					if !errors.Is(err, registry.ErrQueueItemNotInflight) {
 						t.Errorf("late %s: err=%v, want it refused as already settled", step, err)
@@ -90,8 +90,8 @@ func TestAReleasedMessageIsNeverSentAgain(t *testing.T) {
 			if released.Status != registry.DeliveryIntentDelivered {
 				t.Fatalf("intent=%+v, want delivered", released)
 			}
-			if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
-				t.Fatalf("problems=%+v err=%v", problems, err)
+			if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+				t.Fatalf("asks=%+v", asks)
 			}
 		})
 	}

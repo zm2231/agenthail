@@ -108,8 +108,6 @@ type dashboardState struct {
 	Channels           []dashboardChannel          `json:"channels"`
 	Relays             []dashboardRelay            `json:"relays"`
 	History            []dashboardHistory          `json:"history"`
-	Attention          []dashboardAttention        `json:"attention"`
-	DeliveryProblems   []registry.DeliveryProblem  `json:"deliveryProblems"`
 	CodexRecentHours   int                         `json:"codexRecentHours"`
 	BusyDelivery       string                      `json:"busyDelivery"`
 	Signin             []signin.Status             `json:"signin"`
@@ -127,16 +125,6 @@ type dashboardState struct {
 	catalogPageOffset  int
 	catalogPageLimit   int
 	catalogPageHasMore bool
-}
-
-type dashboardAttention struct {
-	ID              int64  `json:"id"`
-	SessionID       string `json:"sessionId"`
-	Target          string `json:"target"`
-	QueueID         int64  `json:"queueId"`
-	Reason          string `json:"reason"`
-	RequestedAction string `json:"requestedAction"`
-	CreatedAt       string `json:"createdAt"`
 }
 
 type dashboardQueue struct {
@@ -158,6 +146,7 @@ type dashboardQueue struct {
 	BusyDelivery    string                   `json:"busyDelivery,omitempty"`
 	Attachments     []map[string]any         `json:"attachments,omitempty"`
 	Author          surface.Author           `json:"author"`
+	AskID           string                   `json:"askId,omitempty"`
 }
 
 type dashboardChannel struct {

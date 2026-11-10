@@ -372,6 +372,5 @@ func printSteerReceipt(receipt delivery.Receipt, target string) {
 
 const queueUsage = `usage: agenthail queue <target> "message"
        agenthail queue list [--json] [--all] [--target <target>] [--mine] [--project <name|id>] [--cwd <path>]
-       agenthail queue retry <id>
        agenthail queue rm <id>
        agenthail queue clear <target>`

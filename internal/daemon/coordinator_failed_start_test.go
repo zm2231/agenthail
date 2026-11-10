@@ -39,24 +39,6 @@ func (u uuidCapturingSurface) StartSession(ctx context.Context, options surface.
 	return u.daemonSurface.StartSession(ctx, options)
 }
 
-func catalogEventsOfType(t *testing.T, events <-chan registry.CatalogEvent, kind string) int {
-	t.Helper()
-	count := 0
-	for {
-		select {
-		case event, open := <-events:
-			if !open {
-				t.Fatal("catalog subscriber closed")
-			}
-			if event.Type == kind {
-				count++
-			}
-		case <-time.After(300 * time.Millisecond):
-			return count
-		}
-	}
-}
-
 func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -103,46 +85,25 @@ func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) 
 					t.Fatalf("drop changed=%v err=%v", changed, err)
 				}
 				if tc.before == "dismissed" {
-					if changed, err := r.DismissDeliveryProblem(intentID); err != nil || !changed {
-						t.Fatalf("dismiss changed=%v err=%v", changed, err)
+					ask, found, err := r.DeliveryAskOf(intentID)
+					if err != nil || !found {
+						t.Fatalf("ask=%+v found=%v err=%v", ask, found, err)
+					}
+					if response := runDashboardAction(t, d, `{"action":"respond","sessionId":"`+ask.SessionID+`","requestId":"`+ask.ID+`","decision":{"choices":["dismiss"]}}`); response.Code != http.StatusOK {
+						t.Fatalf("dismiss: %d %s", response.Code, response.Body)
 					}
 				}
 			}
-			if tc.before != "" && r.QueueCount("to") == 0 {
-				t.Fatalf("%s left the sender no notice to retire", tc.before)
+			if _, open, err := r.DeliveryAskOf(intentID); err != nil || open != (tc.before == "held" || tc.before == "failed") {
+				t.Fatalf("%s: open ask=%v err=%v", tc.before, open, err)
 			}
-			if err := d.catalog.flushCommitted(); err != nil {
-				t.Fatal(err)
-			}
-			_, latest, err := r.CatalogState()
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, follower, err := d.catalog.subscribe(latest)
-			if err != nil {
-				t.Fatal(err)
-			}
-			events := followCatalog(t, follower)
-			defer follower.Cancel()
 			previous, err := r.Session("from")
 			if err != nil {
 				t.Fatal(err)
 			}
 			d.drainMessageQueue(context.Background(), d.Surfaces[0], previous)
-			window, err := r.CatalogEventsAfter(latest, 1000)
-			if err != nil {
-				t.Fatal(err)
-			}
-			d.catalog.mu.Lock()
-			published := d.catalog.publishedSeq
-			d.catalog.mu.Unlock()
-			for _, event := range window.Events {
-				if event.Type == "delivery.dismissed" && event.Seq > published {
-					t.Fatalf("dismissal %d committed but not published (published through %d)", event.Seq, published)
-				}
-			}
-			if dismissals := catalogEventsOfType(t, events, "delivery.dismissed"); (tc.before == "held" || tc.before == "failed") != (dismissals == 1) || dismissals > 1 {
-				t.Fatalf("live subscriber saw %d dismissals, want one only for an open problem", dismissals)
+			if _, open, err := r.DeliveryAskOf(intentID); err != nil || open {
+				t.Fatalf("the delivered message kept its ask open: %v err=%v", open, err)
 			}
 			if len(uuids) != 1 || uuids[0] != queued.UUID {
 				t.Fatalf("start uuids=%v, want the queued message's %s", uuids, queued.UUID)
@@ -154,8 +115,8 @@ func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) 
 			if intent.TargetSessionID != "started" || intent.Status != tc.status || intent.ProviderKey != tc.turn {
 				t.Fatalf("intent=%+v, want it on the new conversation as %s", intent, tc.status)
 			}
-			if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
-				t.Fatalf("problems=%+v err=%v", problems, err)
+			if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+				t.Fatalf("asks=%+v", asks)
 			}
 			rows, err := r.ListQueue(false, nil)
 			if err != nil {
@@ -223,16 +184,13 @@ func TestACoordinatorStartThatFailsKeepsThePreviousLead(t *testing.T) {
 	if got, queued := lead(), r.QueueCount("from"); got != "from" || queued != 0 {
 		t.Fatalf("lead=%q queued=%d, want the previous lead kept and the message settled, not retried", got, queued)
 	}
-	problems, err := r.ListDeliveryProblems()
-	if err != nil {
-		t.Fatal(err)
-	}
+	asks := openDeliveryAsks(t, r)
 	perSession := map[string]int{}
-	for _, problem := range problems {
-		perSession[problem.SessionID]++
+	for _, ask := range asks {
+		perSession[ask.SessionID]++
 	}
-	if perSession["started"] != 1 || perSession["from"] != 1 || len(problems) != 2 {
-		t.Fatalf("problems=%+v, want one per failed message", problems)
+	if perSession["started"] != 1 || perSession["to"] != 1 || len(asks) != 2 {
+		t.Fatalf("asks=%+v, want one per failed message, the agent's asked of its sender", asks)
 	}
 
 	fake.startErr = surface.DeliveryOutcomeUnknown(errors.New("turn/start timed out"))

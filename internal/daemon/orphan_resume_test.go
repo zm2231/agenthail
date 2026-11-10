@@ -283,9 +283,8 @@ func TestQueuedMessageToAResumeClaudeRefusesIsHeldWithItsReasonAndAnnouncedOnce(
 	if err != nil || item.Status != "pending" || item.HeldBy != registry.QueueHeldRefused || !strings.Contains(item.LastError, "Settings file not found") || len(f.turns(t)) != 0 {
 		t.Fatalf("item=%+v err=%v turns=%q", item, err, f.turns(t))
 	}
-	attention, err := f.r.ListAttentionItems(false)
-	if err != nil || len(attention) != 1 || attention[0].QueueID != id {
-		t.Fatalf("attention=%+v err=%v", attention, err)
+	if asks := openDeliveryAsks(t, f.r); len(asks) != 1 || asks[0].Ref != fmt.Sprintf("queue:%d:refused:1", id) || asks[0].RoutedTo != sender.ID {
+		t.Fatalf("asks=%+v, want the sender asked about the refusal", asks)
 	}
 	rows, err := f.r.ListQueue(false, nil)
 	if err != nil {

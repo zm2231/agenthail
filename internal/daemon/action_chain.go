@@ -67,7 +67,7 @@ func (d *Daemon) decodeAction(ctx context.Context, p principal, raw []byte, key 
 	var request dashboardActionRequest
 	if err := json.NewDecoder(io.LimitReader(bytes.NewReader(raw), actionRequestBodyLimit)).Decode(&request); err != nil {
 		return replyWith(func(w http.ResponseWriter) {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid dashboard request")
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid dashboard request: "+err.Error())
 		})
 	}
 	return d.doAction(withActionKey(ctx, key), p, request)

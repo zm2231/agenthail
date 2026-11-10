@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -130,4 +131,73 @@ func addAskRefs(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+func moveDeliveryProblemsToAsks(tx *sql.Tx) error {
+	var found [4]bool
+	for i, column := range []struct{ table, name string }{
+		{"attention_items", "id"},
+		{"delivery_intents", "dismissed_at"},
+		{"delivery_intents", "notification_queue_id"},
+		{"message_queue", "refusal_announced"},
+	} {
+		exists, err := columnExists(tx, column.table, column.name)
+		if err != nil {
+			return err
+		}
+		found[i] = exists
+	}
+	attention, dismissable, notified, announced := found[0], found[1], found[2], found[3]
+	if !attention && !dismissable && !notified && !announced {
+		return nil
+	}
+	now := time.Now()
+	if err := syncDeliveryAsksTx(tx, now); err != nil {
+		return err
+	}
+	at := time.UnixMilli(now.UnixMilli()).UTC()
+	if dismissable {
+		if _, err := tx.Exec(`UPDATE asks SET state=?,answered_by=?,answered_at_ms=?,applied_at_ms=?,apply_status='applied',
+			answer_json=json_object('answers',json_object(json_extract(questions_json,'$[0].question'),'Dismiss'))
+			WHERE origin=? AND state=? AND EXISTS (SELECT 1 FROM delivery_intents di WHERE COALESCE(di.dismissed_at,'')!='' AND asks.ref LIKE 'intent:' || di.id || ':%')`,
+			AskAnswered, AskToPerson, at.UnixMilli(), at.UnixMilli(), AskOriginDelivery, AskOpen); err != nil {
+			return err
+		}
+	}
+	open, err := queryAsks(context.Background(), tx, `WHERE origin=? AND state=? AND routed_to<>?`, AskOriginDelivery, AskOpen, AskToPerson)
+	if err != nil {
+		return err
+	}
+	route, err := json.Marshal([]AskHop{{To: AskToPerson, At: at, Why: AskRaised}})
+	if err != nil {
+		return err
+	}
+	for _, ask := range open {
+		if _, err := tx.Exec(`UPDATE asks SET routed_to=?,route_json=? WHERE id=?`, AskToPerson, string(route), ask.ID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`DROP TABLE IF EXISTS attention_items`); err != nil {
+		return err
+	}
+	if dismissable || notified {
+		const columns = `id,sender_session_id,target_session_id,provider_key,message,queue_id,relayed,uuid,status,evidence,failure,failed_from,retries,created_at,updated_at`
+		for _, step := range []string{
+			`ALTER TABLE delivery_intents RENAME TO delivery_intents_dismissable`,
+			schema,
+			`INSERT INTO delivery_intents (` + columns + `) SELECT ` + columns + ` FROM delivery_intents_dismissable`,
+			`DROP TABLE delivery_intents_dismissable`,
+			schema,
+			`CREATE UNIQUE INDEX IF NOT EXISTS delivery_intents_uuid ON delivery_intents(uuid)`,
+		} {
+			if _, err := tx.Exec(step); err != nil {
+				return err
+			}
+		}
+	}
+	if !announced {
+		return nil
+	}
+	_, err = tx.Exec(`ALTER TABLE message_queue DROP COLUMN refusal_announced`)
+	return err
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/zm2231/agenthail/internal/uploads"
 )
 
-const pastDeadUploadRetention = 31 * 24 * time.Hour
 
 type queuedUploadView struct {
 	ID        string `json:"id"`
@@ -84,30 +83,6 @@ func TestAQueuedImageOutlivesTheUploadRetention(t *testing.T) {
 	}
 	if _, err := os.Stat(q.adapter.images[0][0].Path); err != nil {
 		t.Fatalf("the runtime was handed a swept file: %v", err)
-	}
-}
-
-func TestRetryingAnOldDeadImageMessageFailsVisiblyWhenItsFileIsGone(t *testing.T) {
-	q := queueImageWhileBusy(t)
-	longAgo := time.Now().Add(-pastDeadUploadRetention).UnixMilli()
-	if _, err := q.daemon.Registry.WriteDB().Exec(`UPDATE message_queue SET status='dead',last_error='synthetic failure',dead_at_ms=? WHERE id=?`, longAgo, q.queueID); err != nil {
-		t.Fatal(err)
-	}
-	q.ageUploadAndSweep(t)
-	if response := postAction(t, q.handler, map[string]any{"action": "queue-retry", "queueId": q.queueID}); response.Code != http.StatusOK {
-		t.Fatalf("retry status=%d body=%s", response.Code, response.Body.String())
-	}
-	sent := len(q.adapter.sent)
-	q.drain(t)
-	if len(q.adapter.images) != 0 || len(q.adapter.sent) != sent {
-		t.Fatalf("a message whose file is gone reached the runtime: images=%+v sent=%q", q.adapter.images, q.adapter.sent)
-	}
-	var status, lastError string
-	if err := q.daemon.Registry.ReadDB().QueryRow(`SELECT status,last_error FROM message_queue WHERE id=?`, q.queueID).Scan(&status, &lastError); err != nil {
-		t.Fatal(err)
-	}
-	if status != "dead" || !strings.Contains(lastError, "shot.png") || !strings.Contains(lastError, "attach it again") {
-		t.Fatalf("status=%q last_error=%q", status, lastError)
 	}
 }
 

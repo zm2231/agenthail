@@ -1,8 +1,8 @@
 package daemon
 
 // rowAttention is why a displayed session row needs the person, nil when it
-// does not; an open request outranks a failed message, which outranks the rest.
-func rowAttention(row dashboardSession, outgoing int, incoming string) *SessionAttention {
+// does not; an open request outranks an ask, which outranks the rest.
+func rowAttention(row dashboardSession) *SessionAttention {
 	if row.Archived || row.Display == nil || row.Display.Kind == "unavailable" {
 		return nil
 	}
@@ -14,12 +14,6 @@ func rowAttention(row dashboardSession, outgoing int, incoming string) *SessionA
 	}
 	if row.Ask.asksPerson() {
 		return &SessionAttention{Kind: AttentionAsk, Reason: row.Ask.Title}
-	}
-	if incoming != "" {
-		return &SessionAttention{Kind: "incoming", Reason: incoming}
-	}
-	if outgoing > 0 {
-		return &SessionAttention{Kind: "outgoing", Reason: CountText(outgoing, "message") + " not delivered"}
 	}
 	switch row.Display.Kind {
 	case "limited":

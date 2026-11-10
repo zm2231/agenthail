@@ -68,6 +68,11 @@ struct DecisionInbox: Equatable {
         decisions.filter { $0.group == group }
     }
 
+    func decision(answering askID: String?) -> DecisionItem? {
+        guard let askID, !askID.isEmpty else { return nil }
+        return decisions.first { $0.answerable && $0.openRequests.contains { $0.id == askID } }
+    }
+
     mutating func add(_ page: DecisionsPage, host hostID: String, qualify: (String) -> String) {
         decisions = Self.ordered(decisions + page.decisions.map { Self.qualified($0, host: hostID, qualify) })
         leadHandling += page.leadHandling.map { Self.qualified($0, qualify) }
@@ -135,11 +140,11 @@ struct DecisionInbox: Equatable {
     // Offered only when every question names a suggestion, so accepting never guesses.
     static func recommended(_ request: SessionRequest) -> RequestDecision? {
         guard request.usesPager, let questions = request.questions, !questions.isEmpty else { return nil }
-        var answers: [String: String] = [:]
+        var choices: [String] = []
         for question in questions {
             guard let suggested = question.suggested, question.options.indices.contains(suggested) else { return nil }
-            answers[question.question] = question.options[suggested].label
+            choices.append(question.options[suggested].id)
         }
-        return .answers(answers)
+        return RequestDecision(choices: choices)
     }
 }

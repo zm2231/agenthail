@@ -88,41 +88,16 @@ func TestAHeldNoticeCanceledByAPeerReleaseIsNotPendingInTheInbox(t *testing.T) {
 	register(t, r, "sender", "target")
 	_, intent := queueClaimed(t, r, "parked by peer policy")
 	peer := PeerMessage{MsgID: intent.UUID, TargetSessionID: "target"}
-	if held, err := r.HoldPeerMessage(peer, "inbound policy"); err != nil || !held {
+	if held, err := r.HoldPeerMessage(peer, "Claude held it."+peerHoldExpires); err != nil || !held {
 		t.Fatalf("held=%v err=%v", held, err)
+	}
+	if notice := inboxItemContaining(t, r, "target", "held a message to you"); !notice.Pending() {
+		t.Fatalf("the held notice to the target is not pending: %+v", notice)
 	}
 	if released, err := r.ReleasePeerMessage(peer); err != nil || !released {
 		t.Fatalf("released=%v err=%v", released, err)
 	}
-	assertSettledInInbox(t, inboxItemContaining(t, r, "sender", "delivery held"), "canceled", surface.EvidenceCanceled)
-}
-
-func TestNoticesCanceledWhenARestartedSessionTakesTheMessageAreNotPending(t *testing.T) {
-	for name, raise := range map[string]func(*testing.T, *Registry, *DeliveryIntent) string{
-		"failure notice": func(t *testing.T, r *Registry, intent *DeliveryIntent) string {
-			if _, err := r.FailDeliveryIntentWithNotice(intent.ID, "old conversation exited"); err != nil {
-				t.Fatal(err)
-			}
-			return "delivery failure"
-		},
-		"held notice": func(t *testing.T, r *Registry, intent *DeliveryIntent) string {
-			if held, err := r.HoldPeerMessage(PeerMessage{MsgID: intent.UUID, TargetSessionID: "target"}, "inbound policy"); err != nil || !held {
-				t.Fatalf("held=%v err=%v", held, err)
-			}
-			return "delivery held"
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			r := openTestRegistry(t)
-			register(t, r, "sender", "target", "restarted")
-			queueID, intent := queueClaimed(t, r, "survives the restart")
-			notice := raise(t, r, intent)
-			if err := r.AckRestartedMessage(queueID, "target", "restarted", 0, surface.EvidenceDelivered, ""); err != nil {
-				t.Fatal(err)
-			}
-			assertSettledInInbox(t, inboxItemContaining(t, r, "sender", notice), "canceled", surface.EvidenceCanceled)
-		})
-	}
+	assertSettledInInbox(t, inboxItemContaining(t, r, "target", "held a message to you"), "canceled", surface.EvidenceCanceled)
 }
 
 func TestAQueuedMessageWhoseQueueRowIsGoneIsNotPending(t *testing.T) {

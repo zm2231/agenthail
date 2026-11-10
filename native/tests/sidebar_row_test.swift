@@ -52,7 +52,7 @@ struct SidebarRowTest {
     }
 
     static func listing(_ sessions: [SessionState]) -> DashboardSnapshot {
-        DashboardSnapshot(updatedAt: "2026-11-06T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        DashboardSnapshot(updatedAt: "2026-11-06T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
     }
 
     @MainActor

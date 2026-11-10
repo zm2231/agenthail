@@ -427,7 +427,8 @@ Every session command reaches paired hosts through the local daemon:
 queues while busy), `thread fork`, `thread queue`, `thread status`, `stop`,
 `resume` and `logs`, and `thread create --host <host>`. A send this daemon
 holds for an unreachable host is local queue data: `queue list`, `queue
-clear`, `queue cancel` and `queue retry` act on it. `channel add`, `rm` and
+clear` and `queue cancel` act on it, and a send it could not relay asks on
+this host. `channel add`, `rm` and
 `send` accept a remote member, `relay add` accepts remote ends and creates the
 relay on its source's host, `relay rm <host>::<id>` removes one there, and
 `relay list` adds each paired host's relays under `<host>::#<id>`.

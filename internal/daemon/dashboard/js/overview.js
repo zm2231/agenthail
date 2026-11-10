@@ -6,7 +6,7 @@ import { backgroundWaiting, presenceLabel, presenceTone } from "./presence.js";
 import { displayName } from "./session-labels.js";
 import { refreshDecisions, renderInbox } from "./inbox.js";
 
-export { renderDeliveryProblems, renderLeadReplacements } from "./inbox.js";
+export { renderLeadReplacements } from "./inbox.js";
 
 export function renderOverview() {
   const { surfaces, sessions } = app.state;

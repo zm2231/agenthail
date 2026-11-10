@@ -11,7 +11,7 @@ import { openVoice } from "./voice.js";
 import { cancelCodexSearch } from "./session-search.js";
 import { action } from "./actions.js";
 import { takeBackQueued } from "./queue-take-back.js";
-import { renderDeliveryProblems, renderLeadReplacements } from "./overview.js";
+import { renderLeadReplacements } from "./overview.js";
 import { ensureSessionOrder, load } from "./dashboard-state.js";
 import { displayName } from "./session-labels.js";
 import { changeLead, openProjectDialog, projectChange } from "./project-dialog.js";
@@ -164,7 +164,6 @@ export function bindConversationEvents() {
     }
     if (event.target.closest("[data-open-operations]"))
       return showView("operations");
-    const retry = event.target.closest("[data-retry]");
     const leadAck = event.target.closest("[data-lead-replacement-ack]");
     if (leadAck) {
       leadAck.disabled = true;
@@ -176,32 +175,6 @@ export function bindConversationEvents() {
       } catch (error) {
         leadAck.disabled = false;
         toast(friendlyError(error));
-      }
-      return;
-    }
-    const deliveryButton = event.target.closest("[data-delivery-dismiss], [data-delivery-delete]");
-    if (deliveryButton) {
-      deliveryButton.disabled = true;
-      try {
-        const deleting = "deliveryDelete" in deliveryButton.dataset;
-        const deliveryId = Number(deleting ? deliveryButton.dataset.deliveryDelete : deliveryButton.dataset.deliveryDismiss);
-        await action(deleting ? "delivery-delete" : "delivery-dismiss", { deliveryId });
-        app.state.deliveryProblems = app.state.deliveryProblems.filter(item => item.deliveryId !== deliveryId);
-        renderDeliveryProblems();
-      } catch (error) {
-        deliveryButton.disabled = false;
-        toast(friendlyError(error));
-      }
-      return;
-    }
-    if (retry) {
-      retry.disabled = true;
-      try {
-        await action("queue-retry", { queueId: Number(retry.dataset.retry) });
-        toast("Queued message scheduled for retry.");
-        await load();
-      } catch (error) {
-        toast(error.message);
       }
       return;
     }

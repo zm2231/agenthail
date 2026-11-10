@@ -743,13 +743,6 @@ func TestDashboardReturnsCreatedSessionWhenInitialDeliveryIsUnknown(t *testing.T
 func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	fake.startErr = errors.New("initial message rejected")
-	_, liveEventsFollower, err := d.catalog.subscribe(0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	liveEvents := followCatalog(t, liveEventsFollower)
-	cancel := liveEventsFollower.Cancel
-	defer cancel()
 	handler := dashboardRouter(d)
 	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "codex", "message": "Build this", "cwd": t.TempDir()})
 	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
@@ -768,45 +761,12 @@ func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
 	if response.Code != http.StatusBadGateway || json.Unmarshal(response.Body.Bytes(), &reply) != nil || reply.Error.Code != "initial_turn_failed" || reply.DeliveryID <= 0 || reply.Session == nil || strings.Contains(response.Body.String(), `"accepted":true`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	problems, err := registry.ListDeliveryProblems()
-	if err != nil || len(problems) != 1 || problems[0].Status != "failed" || problems[0].SessionID != "started" {
-		t.Fatalf("problems=%+v err=%v", problems, err)
+	asks := openDeliveryAsks(t, registry)
+	if len(asks) != 1 || asks[0].SessionID != "started" || asks[0].RoutedTo != "person" || asks[0].Ref != fmt.Sprintf("intent:%d:0:failed", reply.DeliveryID) || !strings.Contains(asks[0].Questions[0].Question, "Build this") {
+		t.Fatalf("asks=%+v, want the person asked about the rejected first message", asks)
 	}
 	if got := registry.QueueCount(surface.PersonSessionID); got != 0 {
 		t.Fatalf("%d failure notices queued for the person, who reads the session itself", got)
-	}
-	events, err := registry.CatalogEventsAfter(0, 20)
-	if err != nil || len(events.Events) == 0 {
-		t.Fatalf("catalog events=%+v err=%v", events, err)
-	}
-	type problemPayload struct {
-		DeliveryID      int64  `json:"deliveryId"`
-		SessionID       string `json:"sessionId"`
-		SourceSessionID string `json:"sourceSessionId"`
-		Reason          string `json:"reason"`
-	}
-	var problem problemPayload
-	for _, event := range events.Events {
-		if event.Type == "delivery.problem" {
-			if err := json.Unmarshal(event.Payload, &problem); err != nil {
-				t.Fatal(err)
-			}
-			break
-		}
-	}
-	if problem.DeliveryID <= 0 || problem.SessionID != "started" || problem.SourceSessionID != surface.PersonSessionID || problem.Reason != "initial message rejected" {
-		t.Fatalf("problem payload=%+v", problem)
-	}
-	live := receiveCatalogEvent(t, liveEvents)
-	if live.Type != "delivery.problem" {
-		t.Fatalf("live event=%+v", live)
-	}
-	var liveProblem problemPayload
-	if err := json.Unmarshal(live.Payload, &liveProblem); err != nil {
-		t.Fatal(err)
-	}
-	if liveProblem.DeliveryID != problem.DeliveryID || liveProblem.SessionID != problem.SessionID || liveProblem.SourceSessionID != problem.SourceSessionID || liveProblem.Reason != problem.Reason {
-		t.Fatalf("live problem=%+v persisted=%+v", liveProblem, problem)
 	}
 }
 
@@ -1024,14 +984,14 @@ func TestEffectiveCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
 	}
 }
 
-func TestDashboardOnlyShowsProvenAttentionItems(t *testing.T) {
+func TestOnlyAMessageWhoseOutcomeIsUnknownBecomesADeliveryAsk(t *testing.T) {
 	d, registry, _, _, target := daemonFixture(t)
-	handler := dashboardRouter(d)
 	if err := registry.QueueMessage(target.ID, "requires a decision"); err != nil {
 		t.Fatal(err)
 	}
-	if state := readDashboardState(t, handler); len(state.Attention) != 0 {
-		t.Fatalf("pending attention=%+v", state.Attention)
+	d.syncDeliveryAsks()
+	if asks := openDeliveryAsks(t, registry); len(asks) != 0 {
+		t.Fatalf("pending message asks=%+v", asks)
 	}
 	item, err := registry.ClaimNextMessage(target.ID, time.Now())
 	if err != nil || item == nil {
@@ -1040,14 +1000,15 @@ func TestDashboardOnlyShowsProvenAttentionItems(t *testing.T) {
 	if err := registry.DeadLetterUnknown(item.ID, errors.New("connection closed")); err != nil {
 		t.Fatal(err)
 	}
-	if state := readDashboardState(t, handler); len(state.Attention) != 1 || state.Attention[0].QueueID != item.ID || state.Attention[0].RequestedAction == "" {
-		t.Fatalf("dead attention=%+v", state.Attention)
+	asks := openDeliveryAsks(t, registry)
+	if len(asks) != 1 || asks[0].SessionID != target.ID || asks[0].Ref != fmt.Sprintf("queue:%d:dead", item.ID) {
+		t.Fatalf("dead message asks=%+v", asks)
 	}
 	if _, err := registry.CancelMessage(item.ID); err != nil {
 		t.Fatal(err)
 	}
-	if state := readDashboardState(t, handler); len(state.Attention) != 0 {
-		t.Fatalf("resolved attention=%+v", state.Attention)
+	if asks := openDeliveryAsks(t, registry); len(asks) != 0 {
+		t.Fatalf("canceled message asks=%+v", asks)
 	}
 }
 
@@ -1072,10 +1033,11 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 	if err := registry.NackMessage(queueID, fmt.Errorf("read only"), time.Now(), 1); err != nil {
 		t.Fatal(err)
 	}
+	retry := deliveryAskByRef(t, registry, fmt.Sprintf("queue:%d:dead", queueID))
 	for _, body := range []string{
 		`{"action":"channel-add","channel":"reviewers","targetId":"to"}`,
 		`{"action":"relay-add","fromId":"from","toId":"to","pattern":".*"}`,
-		fmt.Sprintf(`{"action":"queue-retry","queueId":%d}`, queueID),
+		answerBody(retry, "retry"),
 	} {
 		response := serveDashboardRequest(handler, http.MethodPost, "/api/action", body)
 		if response.Code != http.StatusConflict {
@@ -1085,6 +1047,9 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 	item, err := registry.QueueItem(queueID, nil)
 	if err != nil || item.Status != "dead" {
 		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if reopened := deliveryAskByRef(t, registry, retry.Ref); reopened.ID != retry.ID {
+		t.Fatalf("ask=%+v, want the refused retry left open", reopened)
 	}
 	members, err := registry.ChannelMembers("reviewers")
 	if err != nil || len(members) != 0 {

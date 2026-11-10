@@ -66,7 +66,7 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]
 		case ask.State != registry.AskOpen:
 		case ask.Origin == registry.AskOriginPermission && ask.Answerable:
 			permission[ask.Ref] = ask.ID
-		case ask.Origin == registry.AskOriginAgent && ask.RoutedTo == registry.AskToPerson:
+		case (ask.Origin == registry.AskOriginAgent || ask.Origin == registry.AskOriginDelivery) && ask.RoutedTo == registry.AskToPerson:
 			asking = append(asking, askRequest(ask))
 		}
 	}
@@ -81,6 +81,7 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]
 			continue
 		}
 		request.ID = id
+		request = request.WithOptionIDs()
 		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Actions: request.Actions(), ReplacedBy: d.publicSessionID(replacedBy)})
 	}
 	for _, ask := range asking {

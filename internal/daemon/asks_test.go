@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -169,7 +170,7 @@ func TestAPersonsSessionThatAsksIsInNeedsYouUntilAnsweredAndItsTurnEndsQuietly(t
 		t.Fatalf("a turn that left an ask also announced itself done: %+v", done)
 	}
 
-	if response := f.respond(f.from.ID, id, "answer", map[string]any{"choice": "o0"}); response.Code != http.StatusOK {
+	if response := f.respond(f.from.ID, id, "answer", map[string]any{"choices": []string{"o0"}}); response.Code != http.StatusOK {
 		t.Fatalf("answer: %d %s", response.Code, response.Body)
 	}
 	row = viewRow(t, f.d, f.from.ID)
@@ -398,7 +399,7 @@ func TestOneReplyAnswersEveryQuestionOfAnAskOnce(t *testing.T) {
 		t.Fatalf("the row does not name its ask: %+v", row.Ask)
 	}
 
-	decision := map[string]any{"behavior": "allow", "answers": map[string]any{"Deploy it now?": "Deploy", "Which region first?": "eu, then us"}, "message": "Ship after lunch."}
+	decision := map[string]any{"answers": map[string]any{"Deploy it now?": "Deploy", "Which region first?": "eu, then us"}, "message": "Ship after lunch."}
 	first := f.respond(f.from.ID, ask.ID, "answer-1", decision)
 	if first.Code != http.StatusOK {
 		t.Fatalf("answer: %d %s", first.Code, first.Body)
@@ -463,7 +464,7 @@ func TestANotificationButtonAnswersASingleQuestionAsk(t *testing.T) {
 	if push := pushed[0]; push.requestID != id || len(push.actions) != 3 || push.actions[1].ID != "o1" || push.actions[2].ID != "reply" || !strings.HasSuffix(push.message, "needs you: Deploy the fix?") {
 		t.Fatalf("push %+v, ask %s", push, id)
 	}
-	if response := f.respond(f.from.ID, id, "button", map[string]any{"choice": "o1"}); response.Code != http.StatusOK {
+	if response := f.respond(f.from.ID, id, "button", map[string]any{"choices": []string{"o1"}}); response.Code != http.StatusOK {
 		t.Fatalf("button: %d %s", response.Code, response.Body)
 	}
 	if len(f.fake.sent) != 1 || f.fake.sent[0] != "1. Deploy it now? Wait" {
@@ -475,19 +476,19 @@ func TestAnAnswerThatProvablyFailedCanBeGivenAgainAndOneThatMayHaveArrivedCannot
 	f := newAskFixture(t)
 	id, _ := f.raise(t, f.person, deployAsk)["askId"].(string)
 	f.fake.sendErr = surface.DeliveryTerminal(errors.New("the session is gone"), surface.DeliveryTargetMissing)
-	if response := f.respond(f.from.ID, id, "first", map[string]any{"choice": "o0"}); response.Code != http.StatusBadGateway {
+	if response := f.respond(f.from.ID, id, "first", map[string]any{"choices": []string{"o0"}}); response.Code != http.StatusBadGateway {
 		t.Fatalf("a rejected delivery: %d %s", response.Code, response.Body)
 	}
-	if still := f.requests(t, f.from.ID); len(still) != 1 || still[0].ID != id {
+	if still := f.requests(t, f.from.ID); !slices.ContainsFunc(still, func(request openRequestView) bool { return request.ID == id }) {
 		t.Fatalf("the ask was not released: %+v", still)
 	}
 
 	f.fake.sendErr = errors.New("connection reset after the write")
-	if response := f.respond(f.from.ID, id, "second", map[string]any{"choice": "o0"}); response.Code != http.StatusBadGateway {
+	if response := f.respond(f.from.ID, id, "second", map[string]any{"choices": []string{"o0"}}); response.Code != http.StatusBadGateway {
 		t.Fatalf("a delivery of unknown outcome: %d %s", response.Code, response.Body)
 	}
 	f.fake.sendErr = nil
-	if response := f.respond(f.from.ID, id, "third", map[string]any{"choice": "o0"}); response.Code != http.StatusConflict {
+	if response := f.respond(f.from.ID, id, "third", map[string]any{"choices": []string{"o0"}}); response.Code != http.StatusConflict {
 		t.Fatalf("an answer that may have arrived was given again: %d %s", response.Code, response.Body)
 	}
 }
@@ -554,5 +555,22 @@ func TestAnAskOnAPairedHostsSessionShowsAndListsHere(t *testing.T) {
 	}
 	if len(body.Requests) != 1 || body.Requests[0].Kind != surface.WaitingAsk || len(body.Requests[0].Questions) != 1 {
 		t.Fatalf("requests through the host = %+v", body.Requests)
+	}
+}
+
+func TestAnAgentAskIsAnsweredByTheIDsOfItsOptions(t *testing.T) {
+	f := newAskFixture(t)
+	f.raise(t, f.person, twoQuestions)
+	requests := f.requests(t, f.from.ID)
+	if len(requests) != 1 || requests[0].Questions[0].Options[1].ID != "q0o1" || requests[0].Questions[1].Options[0].ID != "q1o0" {
+		t.Fatalf("requests %+v, want every option named by an id unique in the request", requests)
+	}
+	decision := map[string]any{"choices": []string{"q0o1"}, "answers": map[string]any{"Which region first?": "eu and us"}}
+	if response := f.respond(f.from.ID, requests[0].ID, "by-id", decision); response.Code != http.StatusOK {
+		t.Fatalf("answer: %d %s", response.Code, response.Body)
+	}
+	want := "1. Deploy it now? Wait\n2. Which region first? eu and us"
+	if len(f.fake.sent) != 1 || f.fake.sent[0] != want {
+		t.Fatalf("sent %q, want %q", f.fake.sent, want)
 	}
 }

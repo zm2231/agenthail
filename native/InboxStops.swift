@@ -1,15 +1,11 @@
 import Foundation
 
 enum InboxStop: Identifiable, Equatable {
-    case queued(AttentionState)
-    case delivery(DeliveryProblem)
     case replacement(LeadReplacement)
     case decision(DecisionItem)
 
     var id: String {
         switch self {
-        case .queued(let item): "queue:\(item.hostID ?? "")/\(item.queueId)"
-        case .delivery(let item): "delivery:\(item.hostID ?? "")/\(item.deliveryId)"
         case .replacement(let item): "replacement:\(item.hostID ?? "")/\(item.id)"
         case .decision(let item): "decision:" + item.sessionId
         }
@@ -17,8 +13,6 @@ enum InboxStop: Identifiable, Equatable {
 
     var sessionID: String {
         switch self {
-        case .queued(let item): item.sessionId
-        case .delivery(let item): item.sessionId
         case .replacement(let item): item.sessionId
         case .decision(let item): item.sessionId
         }
@@ -27,14 +21,12 @@ enum InboxStop: Identifiable, Equatable {
     func title(name: (String) -> String) -> String {
         switch self {
         case .replacement(let item): "@\(item.name) now runs in a new conversation"
-        case .queued, .delivery, .decision: name(sessionID)
+        case .decision: name(sessionID)
         }
     }
 
     var summary: String {
         switch self {
-        case .queued(let item): item.reason
-        case .delivery(let item): item.reasonText
         case .replacement(let item): item.reason
         case .decision(let item): item.reason
         }
@@ -42,8 +34,6 @@ enum InboxStop: Identifiable, Equatable {
 
     var lines: [String] {
         switch self {
-        case .queued(let item): [item.reason, item.requestedAction]
-        case .delivery(let item): [item.reasonText, item.message]
         case .replacement(let item): ["Replaced by \(item.changedBy) because \(item.reason)"]
         case .decision(let item): [item.reason]
         }
@@ -51,8 +41,6 @@ enum InboxStop: Identifiable, Equatable {
 
     var at: String? {
         switch self {
-        case .queued(let item): item.createdAt
-        case .delivery(let item): item.at
         case .replacement(let item): item.at
         case .decision(let item): item.since
         }
@@ -65,14 +53,9 @@ struct InboxStops: Equatable {
 
     var count: Int { stopped.count + decisions.filter { $0.group != .stopped }.count }
 
-    // Where a computer's own delivery rows are listed, they stand in for its incoming/outgoing decisions.
-    static func build(attention: [AttentionState], deliveries: [DeliveryProblem], replacements: [LeadReplacement], inbox: DecisionInbox, localHosts: Set<String>) -> InboxStops {
-        let decisions = inbox.decisions.filter { item in
-            !(item.group == .stopped && (item.kind == "incoming" || item.kind == "outgoing") && localHosts.contains(item.hostID ?? ""))
-        }
-        let stopped = attention.map(InboxStop.queued) + deliveries.map(InboxStop.delivery) + replacements.map(InboxStop.replacement)
-            + decisions.filter { $0.group == .stopped }.map(InboxStop.decision)
-        return InboxStops(stopped: stopped, decisions: decisions)
+    static func build(replacements: [LeadReplacement], inbox: DecisionInbox) -> InboxStops {
+        let stopped = replacements.map(InboxStop.replacement) + inbox.decisions.filter { $0.group == .stopped }.map(InboxStop.decision)
+        return InboxStops(stopped: stopped, decisions: inbox.decisions)
     }
 
     var rows: [InboxStop] {
@@ -80,18 +63,14 @@ struct InboxStops: Equatable {
     }
 
     static func projectID(of stop: InboxStop, in projects: [ProjectState], projectOf session: (String) -> String?) -> String? {
-        func placed(_ sessionID: String, project: String?, host: String?) -> DecisionItem {
-            var item = DecisionItem(group: .stopped, sessionId: sessionID, projectId: project ?? session(sessionID), kind: "", reason: "", answerable: false)
-            item.hostID = host
-            return item
+        switch stop {
+        case .replacement(let row):
+            var item = DecisionItem(group: .stopped, sessionId: row.sessionId, projectId: row.projectId ?? session(row.sessionId), kind: "", reason: "", answerable: false)
+            item.hostID = row.hostID
+            return DecisionInbox.projectID(of: item, in: projects)
+        case .decision(let row):
+            return DecisionInbox.projectID(of: row, in: projects)
         }
-        let item: DecisionItem = switch stop {
-        case .queued(let row): placed(row.sessionId, project: nil, host: row.hostID)
-        case .delivery(let row): placed(row.sessionId, project: nil, host: row.hostID)
-        case .replacement(let row): placed(row.sessionId, project: row.projectId, host: row.hostID)
-        case .decision(let row): row
-        }
-        return DecisionInbox.projectID(of: item, in: projects)
     }
 
     func needsYou(in projects: [ProjectState], projectOf session: (String) -> String?) -> [String: Int] {

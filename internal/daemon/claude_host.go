@@ -250,8 +250,9 @@ func (d *Daemon) recordPeerHold(event claudehost.Event) {
 	if !changed {
 		return
 	}
+	d.tellDeliveryAsks()
 	if err := d.catalog.flushCommitted(); err != nil {
-		d.log.Printf("publish delivery problem: %s", err)
+		d.log.Printf("publish delivery ask: %s", err)
 	}
-	d.publishEvent("state.changed", event.SessionID, map[string]string{"source": "delivery-problem"})
+	d.publishEvent("state.changed", event.SessionID, map[string]string{"source": "delivery-ask"})
 }

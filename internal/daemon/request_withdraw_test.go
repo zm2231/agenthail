@@ -160,10 +160,10 @@ func TestAReplacedLeadsRequestIsShownApartAndDoesNotNeedThePerson(t *testing.T) 
 	display := &SessionDisplay{Kind: "waiting", Detail: "Answer in Agenthail"}
 	lead := dashboardSession{ID: "lead", Display: display, WaitingOn: waiting}
 	replaced := dashboardSession{ID: "old", Display: display, WaitingOn: waiting, ReplacedLead: []registry.CoordinatorTenure{{Name: "work-lead"}}}
-	if attention := rowAttention(lead, 0, ""); attention == nil || attention.Kind != "request" {
+	if attention := rowAttention(lead); attention == nil || attention.Kind != "request" {
 		t.Fatalf("lead attention=%+v", attention)
 	}
-	replaced.Attention = rowAttention(replaced, 2, "a failed message")
+	replaced.Attention = rowAttention(replaced)
 	if replaced.Attention == nil || replaced.Attention.Kind != AttentionReplacedRequest {
 		t.Fatalf("replaced lead attention=%+v", replaced.Attention)
 	}

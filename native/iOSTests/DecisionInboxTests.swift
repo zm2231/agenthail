@@ -38,7 +38,7 @@ private final class DecisionHostProtocol: URLProtocol, @unchecked Sendable {
               {"group":"waiting","sessionId":"late","projectId":"web-app","kind":"request","reason":"Needs your approval","since":"2026-03-01T09:09:00Z","answerable":true,
                "requests":[{"id":"r-late","kind":"approval","tool":"Bash","alwaysAllow":true,"prompt":"Bash: make","actions":[{"id":"allow","title":"Allow"}]}]},
               {"group":"holding","sessionId":"lead","projectId":"web-app","kind":"ask","reason":"Asks: which layout","since":"2026-03-01T09:05:00Z","answerable":true,"holdsUp":["worker"],
-               "requests":[{"id":"r-ask","kind":"ask","tool":"","title":"Which layout?","alwaysAllow":false,"questions":[{"question":"Which layout?","header":"Layout","multiSelect":false,"options":[{"label":"A","description":""},{"label":"B","description":""}],"suggested":0}]}]}
+               "requests":[{"id":"r-ask","kind":"ask","tool":"","title":"Which layout?","alwaysAllow":false,"questions":[{"question":"Which layout?","header":"Layout","multiSelect":false,"options":[{"id":"o0","label":"A","description":""},{"id":"o1","label":"B","description":""}],"suggested":0}]}]}
             ],
             "leadHandling":[{"sessionId":"worker","projectId":"web-app","heldBy":"lead","role":"lead","reason":"Needs your approval","since":"2026-03-01T09:06:00Z"}]}
             """)

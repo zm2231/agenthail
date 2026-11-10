@@ -1,15 +1,13 @@
 # Queue snapshots and reconciliation
 
-`Registry.ListQueue`, `QueueItem`, and `ListAttentionItems` are read-only
-snapshots. They query the current persisted state and do not create or resolve
-attention rows as a side effect of a GET.
+`Registry.ListQueue` and `QueueItem` are read-only snapshots. They query the
+current persisted state and do not raise or withdraw delivery asks as a side
+effect of a GET.
 
-Attention reconciliation belongs to writers: the daemon background scan runs
-`ReconcileAttentionItems`, which also moves failed rows to history an hour after
-they failed, while queue
-state producers reconcile after delivery failure, retry, cancel, claim timeout,
-acknowledgement, and related transitions. This keeps dashboard and mobile GETs
-repeatable while preserving immediate attention after a queue write.
+Delivery asks belong to writers: every queue and delivery mutation syncs them in
+its own transaction, and the daemon's 10-second pass withdraws the ones that
+aged out, such as a dead row past the review window. This keeps dashboard and
+mobile GETs repeatable while a queue write shows its ask at once.
 
 Catalog session projections carry the queue count captured by their producer.
 The registry validates that count inside the same SQLite transaction that

@@ -107,19 +107,22 @@ func TestPresentationHTTPPagingHydrationAndReadOnly(t *testing.T) {
 }
 
 func TestPresentationAttentionETagAndQueueChanges(t *testing.T) {
-	d, store, fake, from, to := daemonFixture(t)
+	d, store, fake, _, to := daemonFixture(t)
 	d.discoverCatalog(context.Background())
-	intent, err := store.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: from.ID, TargetSessionID: to.ID, Status: registry.DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
+	if err := store.EnsureSender(surface.PersonSessionID); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := store.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: surface.PersonSessionID, TargetSessionID: to.ID, Status: registry.DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.FailDeliveryIntent(intent.ID, "not delivered"); err != nil {
+	if _, err := store.RecordDeliveryFailure(intent.ID, "not delivered"); err != nil {
 		t.Fatal(err)
 	}
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	first := getSnapshot(t, handler, "/api/v1/snapshot?scope=current&attention=1&limit=1", "")
 	var state SessionViewSnapshot
-	if first.Code != 200 || json.Unmarshal(first.Body.Bytes(), &state) != nil || state.View.Summary.AttentionFamilies != 1 || len(state.Sessions) != 1 || state.Sessions[0].ID != from.ID || state.Sessions[0].Attention.Kind != "outgoing" {
+	if first.Code != 200 || json.Unmarshal(first.Body.Bytes(), &state) != nil || state.View.Summary.AttentionFamilies != 1 || len(state.Sessions) != 1 || state.Sessions[0].ID != to.ID || state.Sessions[0].Attention.Kind != "ask" {
 		t.Fatal(first.Body.String())
 	}
 	tag := first.Header().Get("ETag")

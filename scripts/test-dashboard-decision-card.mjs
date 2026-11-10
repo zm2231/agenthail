@@ -7,7 +7,7 @@ const listeners = {};
 const elements = {};
 const element = (id) => (elements[id] ||= { innerHTML: "", hidden: false });
 const posts = [];
-const ask = { id: "ask-0b5e1c2d3a4f", kind: "ask", tool: "", title: "Ready to ship", questions: [{ question: "Deploy it now?", header: "", multiSelect: false, options: [{ label: "Deploy" }, { label: "Wait" }], suggested: 0 }] };
+const ask = { id: "ask-0b5e1c2d3a4f", kind: "ask", tool: "", title: "Ready to ship", questions: [{ question: "Deploy it now?", header: "", multiSelect: false, options: [{ id: "o0", label: "Deploy" }, { id: "o1", label: "Wait" }], suggested: 0 }] };
 const app = {
   state: { sessions: [{ id: "S", name: "builder" }, { id: "T", name: "writer" }], projects: [] },
   decisions: {
@@ -36,7 +36,7 @@ await dashboardModules(["decision-card", "pane-scope"], context);
 const run = (name) => vm.runInContext(name, context);
 
 const recommended = run("recommended");
-assert.deepEqual(JSON.parse(JSON.stringify(recommended(ask))), { behavior: "allow", answers: { "Deploy it now?": "Deploy" } }, "every question's suggestion is the recommended answer");
+assert.deepEqual(JSON.parse(JSON.stringify(recommended(ask))), { choices: ["o0"] }, "every question's suggestion is the recommended answer");
 assert.equal(recommended({ ...ask, questions: [{ ...ask.questions[0], suggested: undefined }] }), null, "a question without a suggestion offers none");
 assert.equal(recommended({ ...ask, questions: [{ ...ask.questions[0], suggested: 7 }] }), null, "a suggestion naming no option offers none");
 assert.equal(recommended({ id: "p", kind: "approval", tool: "Bash" }), null, "an approval has no recommended answer");
@@ -54,7 +54,7 @@ await key({ key: "Enter", shiftKey: false });
 assert.equal(posts.length, 0, "a bare Enter with nothing picked sends nothing");
 await key({ key: "Enter", shiftKey: true });
 assert.equal(posts.length, 1, "Shift+Enter sends exactly one answer");
-assert.equal(JSON.stringify(posts[0]), JSON.stringify({ action: "respond", sessionId: "S", requestId: "ask-0b5e1c2d3a4f", decision: { behavior: "allow", answers: { "Deploy it now?": "Deploy" } } }), "it answers the selected session's request with the recommendation");
+assert.equal(JSON.stringify(posts[0]), JSON.stringify({ action: "respond", sessionId: "S", requestId: "ask-0b5e1c2d3a4f", decision: { choices: ["o0"] } }), "it answers the selected session's request with the recommendation");
 assert.equal(reloads, 1, "answering asks for the decisions again");
 const shown = run("shownDecisions")().map((item) => item.sessionId);
 assert.deepEqual(shown, ["T"], "the answered ask leaves the Inbox while the same request id on another session stays");

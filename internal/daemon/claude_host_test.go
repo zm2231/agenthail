@@ -426,9 +426,9 @@ func updateFromAProtocol1Host(t *testing.T, prompt string) {
 		t.Fatal("the stranded Claude was stopped by the install")
 	}
 	answer := httptest.NewRecorder()
-	decision := surface.Decision{Behavior: "allow"}
+	decision := surface.Response{Choices: []string{"allow"}}
 	if prompt == "QUESTION" {
-		decision.Answers = map[string]string{"Which color?": "Blue"}
+		decision = surface.Response{Answers: map[string]string{"Which color?": "Blue"}}
 	}
 	result, err := answerRequest(ctx, d, claude, &session, request, decision)
 	writeActionResult(answer, result, err)
@@ -531,10 +531,10 @@ func TestTheRequestWatcherFollowsTheNewHostWhileTheOldOneRetires(t *testing.T) {
 func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testing.T) {
 	for _, test := range []struct {
 		name, prompt, reply string
-		decision            surface.Decision
+		decision            surface.Response
 	}{
-		{name: "approval", prompt: "TOOL", decision: surface.Decision{Behavior: "allow"}, reply: "tool:allow:"},
-		{name: "question", prompt: "QUESTION", decision: surface.Decision{Behavior: "allow", Answers: map[string]string{"Which color?": "Blue"}}, reply: `question:allow:{"Which color?":"Blue"}`},
+		{name: "approval", prompt: "TOOL", decision: surface.Response{Choices: []string{"allow"}}, reply: "tool:allow:"},
+		{name: "question", prompt: "QUESTION", decision: surface.Response{Answers: map[string]string{"Which color?": "Blue"}}, reply: `question:allow:{"Which color?":"Blue"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fixture := claudehosttest.New(t, "")
@@ -634,21 +634,19 @@ func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	problem := func(status registry.DeliveryIntentStatus) *registry.DeliveryProblem {
-		problems, err := r.ListDeliveryProblems()
+	problem := func(kind string) *registry.Ask {
+		ask, found, err := r.DeliveryAskOf(receipt.DeliveryID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, problem := range problems {
-			if problem.DeliveryID == receipt.DeliveryID && problem.Status == status {
-				return &problem
-			}
+		if !found || !strings.HasSuffix(ask.Ref, ":"+kind) {
+			return nil
 		}
-		return nil
+		return &ask
 	}
-	testkit.Eventually(t, "the held message to be a delivery problem", 15*time.Second, func() bool { return problem(registry.DeliveryIntentHeld) != nil })
-	if held := problem(registry.DeliveryIntentHeld); held.SessionID != target || !strings.Contains(held.Reason, "permission") {
-		t.Fatalf("problem = %+v, want the target's held message with its cause", held)
+	testkit.Eventually(t, "the held message to be a delivery ask", 15*time.Second, func() bool { return problem("held") != nil })
+	if held := problem("held"); held.SessionID != sender || held.RoutedTo != sender || !strings.Contains(held.Questions[0].Question, "permission") {
+		t.Fatalf("ask = %+v, want the sender asked about its held message with its cause", held)
 	}
 	told := func(word string) bool {
 		rows, err := r.ListQueue(false, d.adapters())
@@ -668,8 +666,8 @@ func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	testkit.Eventually(t, "the hold to expire", 15*time.Second, func() bool { return problem(registry.DeliveryIntentFailed) != nil })
-	if !told("failure") {
+	testkit.Eventually(t, "the hold to expire", 15*time.Second, func() bool { return problem("failed") != nil })
+	if !told("not delivered") {
 		t.Fatal("the sender was not told its message was dropped")
 	}
 	if turns := fixture.Turns(t, target); len(turns) != 0 {
@@ -882,7 +880,7 @@ func TestAnOpenRequestStaysAnswerableThroughHostUpdates(t *testing.T) {
 				t.Fatalf("requests after the updates = %+v, %v; want %s", state, err, request.ID)
 			}
 			answer := httptest.NewRecorder()
-			result, err := answerRequest(ctx, d, claude, &session, request.ID, surface.Decision{Behavior: "allow"})
+			result, err := answerRequest(ctx, d, claude, &session, request.ID, surface.Response{Choices: []string{"allow"}})
 			writeActionResult(answer, result, err)
 			if answer.Code != http.StatusOK {
 				t.Fatalf("answer after the updates = %d %s", answer.Code, answer.Body)
@@ -1050,7 +1048,7 @@ func TestARetiringHostThatDoesNotAnswerHidesNoOtherHostsRequest(t *testing.T) {
 	answerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	answer := httptest.NewRecorder()
-	result, err := answerRequest(answerCtx, d, claude, &session, request.ID, surface.Decision{Behavior: "allow"})
+	result, err := answerRequest(answerCtx, d, claude, &session, request.ID, surface.Response{Choices: []string{"allow"}})
 	writeActionResult(answer, result, err)
 	if answer.Code != http.StatusOK {
 		t.Fatalf("answer beside a silent host = %d %s", answer.Code, answer.Body)

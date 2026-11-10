@@ -873,12 +873,18 @@ func catalogSurfaces(q rowQuerier) ([]CatalogSurfaceState, error) {
 // read or resume, so nothing can reach it. A row a person named, a coordinator
 // runs as, or a message still waits for stays offline.
 func deleteUnheldClaudeSessionTx(tx *sql.Tx, sessionID string) error {
-	_, err := tx.Exec(`DELETE FROM sessions WHERE id=?1 AND surface=?2 AND host_id='' AND transcript='' AND has_local=0
+	res, err := tx.Exec(`DELETE FROM sessions WHERE id=?1 AND surface=?2 AND host_id='' AND transcript='' AND has_local=0
 		AND NOT EXISTS (SELECT 1 FROM aliases WHERE session_id=?1)
 		AND NOT EXISTS (SELECT 1 FROM coordinators WHERE session_id=?1)
 		AND NOT EXISTS (SELECT 1 FROM tasks WHERE child_session_id=?1)
 		AND NOT EXISTS (SELECT 1 FROM message_queue WHERE session_id=?1 AND status IN ('pending','inflight'))`, sessionID, string(surface.KindClaude))
-	return err
+	if err != nil {
+		return err
+	}
+	if deleted, _ := res.RowsAffected(); deleted == 0 {
+		return nil
+	}
+	return syncDeliveryAsksTx(tx, time.Now())
 }
 
 func (r *Registry) CatalogProjection(sessionID string) (string, bool, error) {

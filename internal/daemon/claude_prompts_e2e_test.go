@@ -98,7 +98,7 @@ func TestATerminalQuestionHeldByTheHookIsAnsweredFromAgenthailAndItsNoticesAreWi
 	if err := json.Unmarshal(payload, &state); status != http.StatusOK || err != nil || len(state.Requests) != 1 || state.Requests[0].Questions[0].Question != "Which branch?" {
 		t.Fatalf("requests status=%d body=%s", status, payload)
 	}
-	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": q.session.ID, "requestId": waiting.ID, "decision": map[string]any{"behavior": "allow", "answers": map[string]string{"Which branch?": "next"}}})
+	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": q.session.ID, "requestId": waiting.ID, "decision": map[string]any{"answers": map[string]string{"Which branch?": "next"}}})
 	if status != http.StatusOK {
 		t.Fatalf("respond status=%d body=%s", status, payload)
 	}
@@ -184,7 +184,7 @@ func TestRightAfterAnAnswerTheSessionStopsShowingTheQuestionAndItsRequestsReadEm
 		waiting = h.sessionWaiting(q.session.ID)
 		return waiting != nil && strings.Contains(askRef(q.store, waiting.ID), ":held:")
 	})
-	answer := map[string]any{"action": "respond", "sessionId": q.session.ID, "requestId": waiting.ID, "decision": map[string]any{"behavior": "allow", "answers": map[string]string{"Which branch?": "next"}}}
+	answer := map[string]any{"action": "respond", "sessionId": q.session.ID, "requestId": waiting.ID, "decision": map[string]any{"answers": map[string]string{"Which branch?": "next"}}}
 	if status, payload := h.request(http.MethodPost, "/api/v1/actions", answer); status != http.StatusOK {
 		t.Fatalf("respond status=%d body=%s", status, payload)
 	}

@@ -7,8 +7,8 @@ import (
 
 type mcpQueueInput struct {
 	mcpWrite
-	Action  string `json:"action" jsonschema:"retry or cancel one queued instruction, or clear every pending one for a session."`
-	QueueID int64  `json:"queueId,omitempty" jsonschema:"For retry and cancel: the entry's id, as agenthail_history lists it: its queue view for active entries, its history view for older ones."`
+	Action  string `json:"action" jsonschema:"cancel one pending instruction, or clear every pending one for a session. A failed one is an ask: answer it with agenthail_answer."`
+	QueueID int64  `json:"queueId,omitempty" jsonschema:"For cancel: the pending entry's id, as agenthail_history lists it in its queue view."`
 	Target  string `json:"target,omitempty" jsonschema:"For clear: the session id or @alias."`
 }
 
@@ -18,11 +18,11 @@ func (d *Daemon) mcpQueue(ctx context.Context, caller *mcpCaller, input mcpQueue
 	}
 	request := dashboardActionRequest{QueueID: input.QueueID}
 	switch strings.TrimSpace(input.Action) {
-	case "retry", "cancel":
+	case "cancel":
 		if input.QueueID <= 0 {
-			return nil, refuse("invalid", "queueId is required to "+input.Action+".")
+			return nil, refuse("invalid", "queueId is required to cancel.")
 		}
-		request.Action = "queue-" + strings.TrimSpace(input.Action)
+		request.Action = "queue-cancel"
 	case "clear":
 		target, err := d.mcpResolveSession(input.Target)
 		if err != nil {
@@ -30,7 +30,7 @@ func (d *Daemon) mcpQueue(ctx context.Context, caller *mcpCaller, input mcpQueue
 		}
 		request.Action, request.SessionID = "queue-clear", target.ID
 	default:
-		return nil, refuse("invalid", "action is retry, cancel or clear.")
+		return nil, refuse("invalid", "action is cancel or clear.")
 	}
 	return d.mcpAction(ctx, caller, "agenthail_queue", input.mcpWrite, request)
 }

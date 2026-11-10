@@ -46,21 +46,9 @@ function projectOf(id) {
   return id ? (app.state.projects || []).find((project) => project.id === id)?.displayName || "" : "";
 }
 
-function attentionItem(item) {
-  const message = (app.state.queue || []).find((queued) => queued.id === item.queueId)?.message;
-  const text = message ? `<p class="queue-message" data-queued-text>${escape(message)}</p>` : "";
-  return `<article class="attention-item"><div><div class="attention-target"><i></i>${escape(item.target)}</div><strong>${escape(item.reason)}</strong>${text}<p>${escape(item.requestedAction)} · ${timeAgo(item.createdAt)}</p></div><div class="operation-actions"><button class="soft-button" data-retry="${item.queueId}" type="button">Retry</button><button class="soft-button" data-cancel="${item.queueId}" type="button">Cancel</button></div></article>`;
-}
-
 function leadReplacementItem(item) {
   const by = item.changedBy ? ` by ${item.changedBy}` : "";
   return `<article class="attention-item"><div><div class="attention-target">@${escape(item.name)}</div><strong>Now runs in a new conversation</strong><p>${escape(item.reason)}</p><p>Replaced${escape(by)} · ${timeAgo(item.at)}</p></div><div class="operation-actions"><button class="soft-button" data-session="${escape(item.sessionId)}" type="button">Open</button><button class="soft-button" data-lead-replacement-ack="${escape(item.id)}" type="button">Acknowledge</button></div></article>`;
-}
-
-function deliveryProblemItem(item) {
-  return `<article class="attention-item"><div><div class="attention-target">${escape(nameOf(item.sessionId))}</div><strong>${escape(item.reason)}</strong><p>${escape(item.message)}</p><p>${escape(item.status)} · ${timeAgo(item.at)}</p></div><div class="operation-actions">${item.deletable
-    ? `<button class="soft-button" data-delivery-delete="${escape(item.deliveryId)}" type="button">Delete</button>`
-    : `<button class="soft-button" data-delivery-dismiss="${escape(item.deliveryId)}" type="button">Dismiss</button>`}</div></article>`;
 }
 
 function decisionItem(item) {
@@ -76,7 +64,7 @@ function decisionItem(item) {
   return `<article class="attention-item" data-decision="${escape(item.sessionId)}"><div><div class="attention-target">${escape(place)}</div><strong>${escape(headline || item.reason)}</strong><p>${holds}${escape(item.reason)}${escape(more)}${escape(since)}</p></div><div class="operation-actions">${open}</div></article>`;
 }
 
-const stopRow = { queue: attentionItem, delivery: deliveryProblemItem, replacement: leadReplacementItem, decision: decisionItem };
+const stopRow = { replacement: leadReplacementItem, decision: decisionItem };
 
 function group(title, rows) {
   return rows.length ? `<section class="decision-group"><h3>${escape(title)} · ${rows.length}</h3>${rows.join("")}</section>` : "";
@@ -99,9 +87,5 @@ export function renderInbox() {
 }
 
 export function renderLeadReplacements() {
-  renderInbox();
-}
-
-export function renderDeliveryProblems() {
   renderInbox();
 }

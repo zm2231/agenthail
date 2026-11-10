@@ -15,9 +15,7 @@ const (
 
 func (d *Daemon) scanAndRelay(ctx context.Context) {
 	defer d.publishCatalogPresence()
-	if err := d.Registry.ReconcileAttentionItems(time.Now()); err != nil {
-		d.log.Printf("reconcile queue attention: %s", err)
-	}
+	d.syncDeliveryAsks()
 	if err := d.catalog.flushCommitted(); err != nil {
 		d.log.Printf("publish committed catalog events: %s", err)
 	}

@@ -48,12 +48,9 @@ surface discoverer performs provider `List` calls in the background and emits
 full-row `session.upserted`, `session.removed`, `session.unavailable`, and
 `surface.health` catalog deltas. A status pass publishes a session's busy or
 idle transition from its local status files within about a second, between
-discovery passes (see `catalog-bounded-freshness.md`). A proven delivery problem is one idempotent
-`delivery.problem` catalog event with `deliveryId`, target and source session
-IDs, bounded message or body reference, reason and timestamp; it is committed
-with the delivery failure/notice state. A direct send's failure also queues
-one notice to its sender; a relay's failure does not, since the relay source
-never sent the message and its reply would be relayed again. Every queue mutation that changes a
+discovery passes (see `catalog-bounded-freshness.md`). A proven delivery problem is an ask of origin
+`delivery`, raised in the same transaction as the delivery failure and shown as
+the row's `ask` (see `asks.md#delivery-problems`). Every queue mutation that changes a
 session's pending or in-flight count (enqueue, drain, cancel, retry, dead
 letter) commits a `session.queue` event with `sessionId` and the
 new `queueCount` in the same transaction, so `catalogSeq` moves with the paging
@@ -95,17 +92,6 @@ host and have no focusable location.
 available,detail}`. Explicit `session-create` launcher requests return the
 terminal result `{ok,launcher,location,sessionId?}` only after discovery
 correlation. An omitted launcher preserves the existing creation path.
-
-## Durable delivery problems
-
-Snapshot responses include `deliveryProblems`, the newest 50 undismissed
-durable problems that are still unresolved and recent (see
-`delivery-problems.md`). Each problem carries its numeric `deliveryId`, an RFC3339
-timestamp, and the persisted status/evidence fields. `POST /api/action` with
-`{"action":"delivery-dismiss","deliveryId":123}` atomically marks that
-problem dismissed; the operation is idempotent and never resends the message. A
-problem marked `deletable` takes `delivery-delete` instead, which also
-cancels its dead queue row.
 
 `GET /api/v1/session?id=<id>` returns a bounded page from the session journal.
 When `id` is not a session ID, an exact, case-sensitive handle (with or
@@ -168,7 +154,6 @@ reconnect then receives `stream_gap`. The following shapes are canonical:
 
 ```json
 {"stream":"catalog","seq":41,"type":"session.upserted","data":{"session":{"id":"s1","surface":"codex","name":"Build","status":"busy","lastActive":"2026-10-03T12:00:00Z","project":{"id":"project-1","displayName":"agenthail","rootPath":"/repo","kind":"git"},"checkout":{"id":"checkout-1","path":"/repo/.worktrees/api","branch":"feat/api","isMain":false,"dirty":true},"freshness":{"generation":7,"observedAt":"2026-10-03T12:00:00Z","stale":false}}}}
-{"stream":"catalog","seq":42,"type":"delivery.problem","data":{"deliveryId":1,"sessionId":"s1","sourceSessionId":"s2","message":"Run the tests","reason":"delivery rejected [target missing]: session closed","at":"2026-10-03T12:00:01Z"}}
 {"stream":"session","sessionId":"s1","seq":9,"type":"item","data":{"itemId":"m1","providerKey":"m1","version":6,"op":"append","kind":"text","turnId":"u1","ts":"2026-10-03T12:00:02Z","body":"answer","truncated":false}}
 ```
 

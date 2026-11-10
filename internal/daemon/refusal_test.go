@@ -9,10 +9,9 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-func TestARefusalThatReturnsWhileTheFirstIsStillAnnouncedIsAnnouncedAgain(t *testing.T) {
+func TestARefusalThatReturnsAfterItClearedAsksTheSenderAgain(t *testing.T) {
 	refused := surface.DeliveryRefused(errors.New("Claude refused to resume target: Workspace not trusted"))
 	for _, tc := range []struct {
 		name    string
@@ -35,19 +34,6 @@ func TestARefusalThatReturnsWhileTheFirstIsStillAnnouncedIsAnnouncedAgain(t *tes
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { store.Close() })
-			pushes := newPushRecorder(t, store)
-			stall := make(chan struct{})
-			pushes.mu.Lock()
-			pushes.stall = stall
-			pushes.mu.Unlock()
-			released := false
-			release := func() {
-				if !released {
-					released = true
-					close(stall)
-				}
-			}
-			t.Cleanup(release)
 			target := surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}
 			sender := surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
 			for _, session := range []surface.Session{target, sender} {
@@ -87,26 +73,21 @@ func TestARefusalThatReturnsWhileTheFirstIsStillAnnouncedIsAnnouncedAgain(t *tes
 				}
 				return count
 			}
-			settled := func() bool {
-				d.announceMu.Lock()
-				defer d.announceMu.Unlock()
-				return len(d.announcingRefusal) == 0
-			}
-
 			attempt(refused)
-			testkit.Eventually(t, "the first refusal's announcement", 5*time.Second, func() bool { return pushes.count("delivery.refused") == 1 })
+			if got := notices(); got != 1 {
+				t.Fatalf("sender notices=%d after the first refusal, want 1", got)
+			}
 			tc.between(t, store, id, attempt)
 			attempt(refused)
-			testkit.Eventually(t, "the second refusal's announcement", 5*time.Second, func() bool { return pushes.count("delivery.refused") == 2 })
-			release()
-			testkit.Eventually(t, "both announcements to finish", 5*time.Second, settled)
-			attempt(refused)
-			testkit.Eventually(t, "any further announcement to finish", 5*time.Second, settled)
-			if got := pushes.count("delivery.refused"); got != 2 {
-				t.Fatalf("refusal announcements=%d, want one per refusal", got)
-			}
 			if got := notices(); got != 2 {
-				t.Fatalf("sender notices=%d, want one per refusal", got)
+				t.Fatalf("sender notices=%d after the refusal returned, want 2", got)
+			}
+			attempt(refused)
+			if got := notices(); got != 2 {
+				t.Fatalf("sender notices=%d after the same refusal again, want still 2", got)
+			}
+			if asks := openDeliveryAsks(t, store); len(asks) != 1 || asks[0].SessionID != sender.ID || asks[0].RoutedTo != sender.ID {
+				t.Fatalf("asks=%+v, want one open ask for the sender", asks)
 			}
 		})
 	}

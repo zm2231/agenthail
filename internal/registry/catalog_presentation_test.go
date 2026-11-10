@@ -22,13 +22,6 @@ func TestCatalogPresentationReadsFingerprintsOnlyForStaleRows(t *testing.T) {
 	for _, id := range []string{"a", "b"} {
 		recordPresentationSession(t, r, id, `{"id":"`+id+`","plan":{"large":"`+strings.Repeat("x", 10000)+`"}}`)
 	}
-	intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "a", TargetSessionID: "b", Status: DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.FailDeliveryIntent(intent.ID, "synthetic failure"); err != nil {
-		t.Fatal(err)
-	}
 	if err := r.ArchiveSession("b", time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +34,7 @@ func TestCatalogPresentationReadsFingerprintsOnlyForStaleRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(read.Rows) != 2 || read.CatalogSeq != seq || read.Outgoing["a"] != 1 || read.RefreshAt.IsZero() {
+	if len(read.Rows) != 2 || read.CatalogSeq != seq {
 		t.Fatalf("read=%+v", read)
 	}
 	if len(read.Fingerprints) != 1 || !strings.Contains(string(read.Fingerprints["a"]), "large") {

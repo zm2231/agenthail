@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -126,17 +127,19 @@ func TestAnOldStylePairingIsNamedAndPairingAgainRepairsItInPlace(t *testing.T) {
 			}
 
 			refused := relayLeg(t, vps, "laptop-a", "vps-a", "before")
-			var card registry.AttentionItem
+			var card registry.Ask
 			testkit.Eventually(t, "the refused relay asks for a pairing", 10*time.Second, func() bool {
-				items, _ := vps.reg.ListAttentionItems(false)
-				index := slices.IndexFunc(items, func(item registry.AttentionItem) bool { return item.QueueID == refused })
+				asks, _ := vps.reg.OpenAsks()
+				index := slices.IndexFunc(asks, func(ask registry.Ask) bool {
+					return ask.Ref == fmt.Sprintf("queue:%d:dead", refused)
+				})
 				if index >= 0 {
-					card = items[index]
+					card = asks[index]
 				}
 				return index >= 0
 			})
-			if card.Reason != "Host laptop doesn't know this host as a paired host" || card.RequestedAction != "On laptop run 'agenthail hosts invite', then here run 'agenthail hosts add <pairing-link>', then retry this message" {
-				t.Fatalf("attention card=%+v", card)
+			if !strings.HasPrefix(card.Questions[0].Question, "Host laptop doesn't know this host as a paired host. On laptop run 'agenthail hosts invite', then here run 'agenthail hosts add <pairing-link>'") {
+				t.Fatalf("ask=%+v", card)
 			}
 			relayLeg(t, laptop, "vps-a", "laptop-a", "outbound")
 			awaitRelayLeg(t, vps, "vps-a", "outbound")
@@ -187,7 +190,7 @@ func TestAnOldStylePairingIsNamedAndPairingAgainRepairsItInPlace(t *testing.T) {
 				t.Fatalf("ledger owner after pairing again=%q", owner)
 			}
 
-			retry := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "queue-retry", "queueId": refused})
+			retry := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": card.SessionID, "requestId": card.ID, "decision": map[string]any{"choices": []string{"retry"}}})
 			if retry.Code != http.StatusOK {
 				t.Fatalf("retry status=%d body=%s", retry.Code, retry.Body.String())
 			}

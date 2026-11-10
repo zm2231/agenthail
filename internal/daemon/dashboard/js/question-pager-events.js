@@ -20,13 +20,13 @@ export function bindQuestionPager(respond, { card = sessionCard, lookup = sessio
     if (page) form.focus({ preventScroll: true });
   };
 
-  const send = async (form, pager, answers) => {
+  const send = async (form, pager) => {
     const requestId = form.dataset[key];
     if (sending.has(requestId)) return;
     sending.add(requestId);
     form.querySelectorAll("button").forEach((button) => { button.disabled = true; });
     try {
-      await respond(requestId, decision(pager, answers));
+      await respond(requestId, decision(pager));
     } finally {
       sending.delete(requestId);
     }
@@ -46,7 +46,7 @@ export function bindQuestionPager(respond, { card = sessionCard, lookup = sessio
     const pick = event.target.closest("[data-pager-pick]");
     if (!pick) return;
     const answers = choose(pager, Number(pick.dataset.pagerPick));
-    if (answers) await send(form, pager, answers);
+    if (answers) await send(form, pager);
     else refresh(form, pager);
   });
   document.addEventListener("input", (event) => {
@@ -58,6 +58,7 @@ export function bindQuestionPager(respond, { card = sessionCard, lookup = sessio
     const pager = pagerFor(request);
     if (note) {
       pager.note = event.target.value;
+      refresh(form, pager, { page: false });
       return;
     }
     type(pager, event.target.value);
@@ -71,7 +72,7 @@ export function bindQuestionPager(respond, { card = sessionCard, lookup = sessio
     if (!request) return;
     const pager = pagerFor(request);
     const answers = next(pager);
-    if (answers) await send(form, pager, answers);
+    if (answers) await send(form, pager);
     else refresh(form, pager);
   });
   document.addEventListener("keydown", (event) => {

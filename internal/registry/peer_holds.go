@@ -2,10 +2,8 @@ package registry
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -21,7 +19,7 @@ type PeerMessage struct {
 
 // HoldPeerMessage records that the target's Claude parked the message under
 // its inbound policy. The message stays a problem until Claude releases or
-// drops it, and the agent that sent it is told why.
+// drops it.
 func (r *Registry) HoldPeerMessage(m PeerMessage, reason string) (bool, error) {
 	if strings.TrimSpace(reason) == "" {
 		return false, fmt.Errorf("a held message needs its reason")
@@ -30,11 +28,7 @@ func (r *Registry) HoldPeerMessage(m PeerMessage, reason string) (bool, error) {
 		if !heldFrom(intent.Status) {
 			return false, nil
 		}
-		if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,failure=?,dismissed_at=NULL,updated_at=datetime('now') WHERE id=?`, DeliveryIntentHeld, reason, intent.ID); err != nil {
-			return false, err
-		}
-		intent.Status, intent.Failure = DeliveryIntentHeld, reason
-		if _, err := appendDeliveryProblemEvent(tx, intent); err != nil {
+		if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,failure=?,updated_at=datetime('now') WHERE id=?`, DeliveryIntentHeld, reason, intent.ID); err != nil {
 			return false, err
 		}
 		if m.TargetSessionID != "" && strings.HasSuffix(reason, peerHoldExpires) {
@@ -44,13 +38,7 @@ func (r *Registry) HoldPeerMessage(m PeerMessage, reason string) (bool, error) {
 				return false, err
 			}
 		}
-		if intent.Relayed || !readsNotices(intent.SenderSessionID) {
-			return true, nil
-		}
-		notice := fmt.Sprintf("[agenthail delivery held id=%d target=%s] The message you sent to %s has not reached its model. %s", intent.ID, intent.TargetSessionID, intent.TargetSessionID, reason)
-		key := fmt.Sprintf("delivery-intent-held:%d:%d", intent.ID, intent.Retries)
-		_, err := queueNoticeTx(tx, intent.SenderSessionID, notice, key)
-		return true, err
+		return true, nil
 	})
 }
 
@@ -69,20 +57,10 @@ func (r *Registry) ReleasePeerMessage(m PeerMessage) (bool, error) {
 		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=(SELECT queue_id FROM delivery_intents WHERE id=?) AND status IN ('pending','inflight')`, surface.EvidenceDelivered, intent.ID); err != nil {
 			return false, err
 		}
-		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE delivery_key IN (?,?) AND status='pending'`, fmt.Sprintf("delivery-intent-held:%d:%d", intent.ID, intent.Retries), fmt.Sprintf("delivery-intent-held-target:%d:%d", intent.ID, intent.Retries)); err != nil {
-			return false, err
-		}
-		payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID})
-		if err != nil {
-			return false, err
-		}
-		_, _, err = appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("delivery.released:%d:%d", intent.ID, intent.Retries), Type: "delivery.dismissed", EntityID: intent.TargetSessionID, Payload: payload, CreatedAt: time.Now().UTC()})
+		_, err := tx.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE delivery_key=? AND status='pending'`, fmt.Sprintf("delivery-intent-held-target:%d:%d", intent.ID, intent.Retries))
 		return true, err
 	})
-	if err != nil || !changed {
-		return changed, err
-	}
-	return true, r.ReconcileAttentionItems(r.now())
+	return changed, err
 }
 
 // DropPeerMessage records that Claude will never pass the message to its
@@ -92,14 +70,10 @@ func (r *Registry) DropPeerMessage(m PeerMessage, reason string) (bool, error) {
 		if !heldFrom(intent.Status) && intent.Status != DeliveryIntentHeld {
 			return false, nil
 		}
-		if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,dismissed_at=NULL WHERE id=?`, DeliveryIntentHeld, intent.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE delivery_intents SET status=? WHERE id=?`, DeliveryIntentHeld, intent.ID); err != nil {
 			return false, err
 		}
-		if changed, err := failDeliveryIntent(tx, intent.ID, reason); err != nil || !changed {
-			return false, err
-		}
-		_, _, err := queueDeliveryFailureNotice(tx, intent.ID)
-		return true, err
+		return failDeliveryIntent(tx, intent.ID, reason)
 	})
 }
 
@@ -136,6 +110,9 @@ func (r *Registry) peerTransition(m PeerMessage, apply func(*sql.Tx, *DeliveryIn
 	}
 	changed, err := apply(tx, intent)
 	if err != nil || !changed {
+		return false, err
+	}
+	if err := syncDeliveryAsksTx(tx, r.now()); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()

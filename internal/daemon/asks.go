@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -124,7 +125,7 @@ func askRequest(ask registry.Ask) surface.Request {
 	for _, in := range ask.Questions {
 		question := surface.Question{Question: in.Question, Options: make([]surface.QuestionOption, 0, len(in.Options))}
 		for i, option := range in.Options {
-			question.Options = append(question.Options, surface.QuestionOption{Label: option.Label, Description: option.Does})
+			question.Options = append(question.Options, surface.QuestionOption{ID: option.ID, Label: option.Label, Description: option.Does})
 			if option.ID == in.Recommended {
 				suggested := i
 				question.Suggested = &suggested
@@ -135,7 +136,7 @@ func askRequest(ask registry.Ask) surface.Request {
 		}
 		questions = append(questions, question)
 	}
-	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, CreatedAt: ask.CreatedAt}
+	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery, CreatedAt: ask.CreatedAt}.WithOptionIDs()
 }
 
 // askHearer is who an ask goes to first: a session an agent or coordinator started reports to its lead or spawner while that one runs.
@@ -193,8 +194,7 @@ func (d *Daemon) raiseAsk(session surface.Session, input askInput) (registry.Ask
 }
 
 func (d *Daemon) tellHearer(ask registry.Ask, hearer noticeRecipient) registry.Ask {
-	message := askNotice(d.resolveDisplay(ask.SessionID), ask, d.usesMCP(hearer.sessionID))
-	if _, err := d.sendNotice(hearer, message, askNoticeKey(ask.ID, hearer.sessionID)); err != nil {
+	if _, err := d.sendNotice(hearer, d.askNoticeFor(ask, hearer.sessionID), askNoticeKey(ask.ID, hearer.sessionID)); err != nil {
 		d.log.Printf("tell %s that %s asks: %s", hearer.role, d.resolveDisplay(ask.SessionID), err)
 		return d.escalateAsk(ask, registry.AskToPerson)
 	}
@@ -205,9 +205,20 @@ func askNoticeKey(askID, hearerID string) string {
 	return "notice-" + askID + "-" + hearerID
 }
 
-func askNotice(name string, ask registry.Ask, mcp bool) string {
+func (d *Daemon) askNoticeFor(ask registry.Ask, hearerID string) string {
+	header := fmt.Sprintf("%s asks: %s", d.resolveDisplay(ask.SessionID), ask.Title)
+	if ask.Origin == registry.AskOriginDelivery {
+		header = fmt.Sprintf("A message from %s: %s", d.resolveDisplay(ask.SessionID), ask.Title)
+		if hearerID == ask.SessionID {
+			header = "Your message: " + ask.Title
+		}
+	}
+	return askNotice(header, ask, d.usesMCP(hearerID))
+}
+
+func askNotice(header string, ask registry.Ask, mcp bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[agenthail] %s asks: %s", name, ask.Title)
+	b.WriteString("[agenthail] " + header)
 	for i, question := range ask.Questions {
 		labels := make([]string, len(question.Options))
 		for j, option := range question.Options {
@@ -221,9 +232,14 @@ func askNotice(name string, ask registry.Ask, mcp bool) string {
 		}
 		fmt.Fprintf(&b, "\n%d. %s %s", i+1, question.Question, strings.Join(labels, " | "))
 	}
-	if mcp {
+	switch {
+	case ask.Origin == registry.AskOriginDelivery && mcp:
+		fmt.Fprintf(&b, "\nAnswer it: agenthail_answer {\"requestId\":%q,\"decision\":\"<%s>\"}, or pass it on: agenthail_answer {\"requestId\":%q,\"decision\":\"escalate\"}", ask.ID, strings.ReplaceAll(deliveryOptionIDs(ask), ", ", "|"), ask.ID)
+	case ask.Origin == registry.AskOriginDelivery:
+		fmt.Fprintf(&b, "\nAnswer it: agenthail ask answer %s <%s>, or pass it on: agenthail ask escalate %s", ask.ID, strings.ReplaceAll(deliveryOptionIDs(ask), ", ", "|"), ask.ID)
+	case mcp:
 		fmt.Fprintf(&b, "\nAnswer it: agenthail_answer {\"requestId\":%q,\"answers\":{\"<question>\":\"<answer>\"}}, or pass it to the person: agenthail_answer {\"requestId\":%q,\"decision\":\"escalate\"}", ask.ID, ask.ID)
-	} else {
+	default:
 		fmt.Fprintf(&b, "\nAnswer it: agenthail ask answer %s \"<answer>\", or pass it to the person: agenthail ask escalate %s", ask.ID, ask.ID)
 	}
 	return b.String()
@@ -407,7 +423,7 @@ func composeAskAnswer(questions []surface.Question, decision surface.Decision) s
 // answerAsk sends the answer to the asking session as one message, exactly
 // once: the ask is claimed before delivery and released only when delivery
 // provably did not happen.
-func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session *surface.Session, askID string, decision surface.Decision, p principal, personName string) (actionResult, error) {
+func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session *surface.Session, askID string, response surface.Response, p principal, personName string) (actionResult, error) {
 	ask, found, err := d.Registry.Ask(askID)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
@@ -419,21 +435,23 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 	if err != nil {
 		return actionResult{}, err
 	}
-	if decision.Behavior == askEscalate {
+	if slices.Equal(response.Choices, []string{askEscalate}) {
 		if by == registry.AskToPerson {
 			return actionResult{}, invalidRequest("the person answers an ask; only an agent passes it on")
 		}
 		current := d.escalateAsk(ask, "")
 		return actionOK(map[string]any{"ok": true, "result": map[string]any{"requestId": askID, "outcome": "escalated", "routedTo": d.publicSessionID(current.RoutedTo)}}), nil
 	}
-	if ask.Origin == registry.AskOriginPermission {
-		return d.answerPermission(ctx, adapter, session, ask, decision, by, p.actor())
+	switch ask.Origin {
+	case registry.AskOriginPermission:
+		return d.answerPermission(ctx, adapter, session, ask, response, by, p.actor())
+	case registry.AskOriginDelivery:
+		return d.answerDelivery(ctx, ask, response, by, p.actor())
 	}
 	request := askRequest(ask)
-	if decision.Choice != "" {
-		if decision, err = request.Choose(decision.Choice, decision.Message); err != nil {
-			return actionResult{}, invalidRequest(err.Error())
-		}
+	decision, err := request.Resolve(response)
+	if err != nil {
+		return actionResult{}, invalidRequest(err.Error())
 	}
 	message := composeAskAnswer(request.Questions, decision)
 	if message == "" {

@@ -16,7 +16,7 @@ struct CatalogBatchTest {
     }
 
     static func listing(_ sessions: [String]) -> DashboardSnapshot {
-        try! JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"2026-10-23T21:00:00Z","hostEpoch":"h","catalogSeq":10,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[{"name":"claude","connected":true,"health":"healthy","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":true,"steer":true}}],"sessions":[\#(sessions.joined(separator: ","))],"totalSessions":\#(sessions.count),"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5,"busyDelivery":"queue"}"#.utf8))
+        try! JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"2026-10-23T21:00:00Z","hostEpoch":"h","catalogSeq":10,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[{"name":"claude","connected":true,"health":"healthy","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":true,"steer":true}}],"sessions":[\#(sessions.joined(separator: ","))],"totalSessions":\#(sessions.count),"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5,"busyDelivery":"queue"}"#.utf8))
     }
 
     static func main() {
@@ -48,12 +48,6 @@ struct CatalogBatchTest {
         let removed = base.applyingCatalog([event(11, "session.removed", #"{"sessionId":"a","reason":"rekeyed","rekeyedTo":"a2"}"#), event(12, "session.removed", #"{"sessionId":"b","reason":"unlisted"}"#)], after: 10)
         check(removed.snapshot.sessions.isEmpty && removed.snapshot.totalSessions == 0, "removed sessions leave the snapshot")
         check(removed.removals == [CatalogRemoval(id: "a", unlisted: false, rekeyedTo: "a2"), CatalogRemoval(id: "b", unlisted: true, rekeyedTo: nil)], "removals are reported in order for their side effects: \(removed.removals)")
-
-        let problems = (1...51).map { event(UInt64(10 + $0), "delivery.problem", #"{"deliveryId":\#($0),"sessionId":"a","message":"m","reason":"closed","at":"2026-10-23T21:00:00Z"}"#) }
-        let capped = base.applyingCatalog(problems, after: 10)
-        check(capped.snapshot.deliveryProblems?.count == 50 && capped.snapshot.deliveryProblems?.first?.deliveryId == 51, "delivery problems are newest first and capped like the snapshot's")
-        let dismissed = capped.snapshot.applyingCatalog([event(62, "delivery.dismissed", #"{"deliveryId":51}"#)], after: 61)
-        check(dismissed.snapshot.deliveryProblems?.first?.deliveryId == 50 && !dismissed.sessionsChanged, "a dismissed problem leaves")
 
         check(base.decisionsRev == nil, "a snapshot without a decisions revision is from an older host")
         let decided = base.applyingCatalog([event(11, "decisions.changed", #"{"rev":"r1","own":"o1"}"#)], after: 10)

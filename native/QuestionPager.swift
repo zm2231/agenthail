@@ -4,16 +4,21 @@ struct QuestionPager: Hashable {
     let questions: [SessionRequest.Question]
     // An ended turn's ask is answered by one message, so it never sends on a tap, takes a note, and has nothing to decline.
     let ask: Bool
+    let optionsOnly: Bool
     var note = ""
     private(set) var step = 0
     private(set) var picks: [Int: Set<Int>] = [:]
     private(set) var typed: [Int: String] = [:]
     private(set) var other: Set<Int> = []
 
-    init(questions: [SessionRequest.Question], ask: Bool = false) {
+    init(questions: [SessionRequest.Question], ask: Bool = false, optionsOnly: Bool = false) {
         self.questions = questions
         self.ask = ask
+        self.optionsOnly = optionsOnly
     }
+
+    var takesText: Bool { !optionsOnly }
+    var takesNote: Bool { ask && !optionsOnly }
 
     var isOneTap: Bool { !ask && questions.count == 1 && !questions[0].multiSelect }
     var isSingle: Bool { questions.count == 1 }
@@ -42,61 +47,64 @@ struct QuestionPager: Hashable {
 
     var canSubmit: Bool { questions.indices.allSatisfy(isAnswered) }
 
-    var answers: [String: String]? {
-        var answers: [String: String] = [:]
-        for index in questions.indices {
-            guard let answer = answer(at: index) else { return nil }
-            answers[questions[index].question] = answer
+    var decision: RequestDecision? {
+        var choices: [String] = []
+        var typedAnswers: [String: String] = [:]
+        for (index, question) in questions.enumerated() {
+            let text = takesText ? typedAnswer(at: index).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            if !text.isEmpty {
+                typedAnswers[question.question] = text
+                continue
+            }
+            let picked = question.options.indices.filter { isPicked($0, at: index) }.map { question.options[$0].id }
+            guard !picked.isEmpty else { return nil }
+            choices += picked
         }
-        return answers
+        let note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        return RequestDecision(choices: choices, answers: typedAnswers.isEmpty ? nil : typedAnswers, message: takesNote && !note.isEmpty ? note : nil)
     }
 
-    mutating func choose(_ option: Int) -> [String: String]? {
-        guard let question = current, question.options.indices.contains(option) else { return nil }
-        if isOneTap { return [question.question: question.options[option].label] }
+    mutating func choose(_ option: Int) -> Bool {
+        guard let question = current, question.options.indices.contains(option) else { return false }
         var picked = picks[step] ?? []
         if question.multiSelect {
             if picked.contains(option) { picked.remove(option) } else { picked.insert(option) }
             picks[step] = picked
-            return nil
+            return false
         }
         picks[step] = [option]
         typed[step] = nil
         other.remove(step)
+        if isOneTap { return true }
         if !isSingle { step += 1 }
-        return nil
+        return false
     }
 
     func isOtherPicked(at index: Int) -> Bool { other.contains(index) }
 
     mutating func chooseOther() {
-        guard questions.indices.contains(step) else { return }
+        guard takesText, questions.indices.contains(step) else { return }
         picks[step] = []
         other.insert(step)
     }
 
     mutating func pick(_ option: Int) -> RequestDecision? {
-        choose(option).map(decision)
+        choose(option) ? decision : nil
     }
 
     mutating func submit() -> RequestDecision? {
-        next().map(decision)
-    }
-
-    func decision(_ answers: [String: String]) -> RequestDecision {
-        let note = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        return RequestDecision(behavior: "allow", message: ask && !note.isEmpty ? note : nil, answers: answers)
+        next() ? decision : nil
     }
 
     mutating func type(_ text: String) {
-        guard questions.indices.contains(step) else { return }
+        guard takesText, questions.indices.contains(step) else { return }
         typed[step] = text.isEmpty ? nil : text
     }
 
-    mutating func next() -> [String: String]? {
-        if isSingle || onReview { return answers }
+    mutating func next() -> Bool {
+        if isSingle || onReview { return decision != nil }
         step = min(step + 1, reviewStep)
-        return nil
+        return false
     }
 
     mutating func go(to step: Int) {
