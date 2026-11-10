@@ -66,6 +66,7 @@ let package = Package(
                 "ScopeReader.swift",
                 "Coalescer.swift",
                 "SessionOperations.swift",
+                "SessionOperationControllers.swift",
                 "SessionDisplayKind.swift",
                 "SessionNames.swift",
                 "SessionDetailState.swift",

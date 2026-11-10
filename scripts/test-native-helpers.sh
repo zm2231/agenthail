@@ -169,7 +169,7 @@ SOURCES=(
   macOS/TurnOptionsChip.swift
   macOS/GoalFacts.swift
   macOS/ClaudeRunFacts.swift
-  macOS/SessionOperationControllers.swift
+  SessionOperationControllers.swift
   SessionOperations.swift
   macOS/NewSessionDraft.swift
   macOS/NewSessionLabels.swift
