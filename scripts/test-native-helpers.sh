@@ -226,6 +226,7 @@ SOURCES=(
   macOS/BackdropSurface.swift
   macOS/FloatingGlass.swift
   macOS/GlassPane.swift
+  macOS/SolidContentPane.swift
   macOS/PaneFrame.swift
   macOS/GlassColumnMask.swift
   macOS/ScrimAnchor.swift
