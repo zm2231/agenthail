@@ -601,6 +601,8 @@ struct SessionState: Codable, Identifiable, Hashable {
     var endTurn: SessionEndTurn? = nil
     var ask: SessionAsk? = nil
     var move: SessionMove? = nil
+    var pinnedAt: String? = nil
+    var isPinned: Bool { pinnedAt != nil }
     var composerTurnNotice: String { PersonMessageNote.text(capabilities, canAdopt: canAdopt) }
     /// A session its daemon can open in Agenthail's host.
     var canAdopt: Bool { capabilities.lifecycle.adopt && !isReadOnly }

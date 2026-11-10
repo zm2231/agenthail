@@ -36,6 +36,7 @@ struct SidebarSessionRow: View, @MainActor Equatable {
                 Button("Move to Another Computer…") { actions.move() }
             }
             Divider()
+            Button(session.isPinned ? "Unpin" : "Pin") { actions.togglePinned() }
             Button(session.archived == true ? "Unarchive" : "Archive") { actions.toggleArchived() }
             if ProjectMenu.canAddFolder(session), session.cwd != nil {
                 Button("Add Folder as Project") { actions.addFolder() }

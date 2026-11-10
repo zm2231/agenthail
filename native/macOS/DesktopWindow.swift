@@ -539,6 +539,12 @@ struct SessionRowView: View {
             Text(title ?? session.title)
                 .lineLimit(1)
                 .foregroundStyle(kind != .unavailable && (session.open || kind == .working) ? DesktopPalette.text : DesktopPalette.text2)
+            if session.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: DesktopType.caption))
+                    .foregroundStyle(DesktopPalette.text2)
+                    .accessibilityLabel("Pinned")
+            }
             if saysWaiting && kind == .waiting {
                 Text(SessionDisplayKind.label(session))
                     .font(.system(size: DesktopType.caption, weight: .medium))

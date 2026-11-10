@@ -1007,6 +1007,10 @@ final class AgenthailModel {
         perform(action: archived ? "session-archive" : "session-unarchive", sessionID: sessionID)
     }
 
+    func setPinned(sessionID: String, _ pinned: Bool) {
+        perform(action: pinned ? "session-pin" : "session-unpin", sessionID: sessionID)
+    }
+
     func setProjectArchived(_ projectID: String, _ archived: Bool) {
         projectAction(archived ? "project-archive" : "project-unarchive", projectID: projectID)
     }
