@@ -1272,45 +1272,56 @@ func TestReadsDoNotWaitForAWriterBlockedOnAnotherProcess(t *testing.T) {
 	}
 }
 
-func TestRecordWaitingAnnouncesEachQuestionUntilMarked(t *testing.T) {
+func TestSyncWaitsKeepsOneAskPerOpenWait(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "asking")
-	question := &surface.Waiting{Kind: surface.WaitingQuestion, ID: "conversation:question:1"}
 	first := time.Date(2026, 10, 18, 8, 14, 41, 0, time.UTC)
-	record := func(waiting *surface.Waiting, now time.Time) WaitingRecord {
+	sync := func(routedTo string, waits ...Wait) WaitSync {
 		t.Helper()
-		result, err := r.RecordWaiting("asking", waiting, now)
+		result, err := r.SyncWaits("asking", waits, routedTo, first.Add(time.Minute))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return result
 	}
-	if got := record(question, first); !got.Announce || !got.Changed || got.Waiting == nil || !got.Waiting.Since.Equal(first) {
-		t.Fatalf("new question=%+v", got)
+	edit := Wait{Ref: "req-edit", Kind: surface.WaitingApproval, Since: first, Answerable: true}
+	bash := Wait{Ref: "req-bash", Kind: surface.WaitingApproval, Since: first.Add(time.Second), Answerable: true}
+	got := sync("lead", edit, bash)
+	if len(got.Opened) != 2 || got.Opened[0].RoutedTo != "lead" || got.Opened[0].Ref != "req-edit" || !got.Opened[0].CreatedAt.Equal(first) {
+		t.Fatalf("new waits=%+v", got)
 	}
-	if got := record(question, first.Add(time.Hour)); !got.Announce || got.Changed || !got.Waiting.Since.Equal(first) {
-		t.Fatalf("an unannounced question must stay due with its first-seen time and unchanged: %+v", got)
+	if again := sync("someone-else", edit, bash); again.Changed() {
+		t.Fatalf("the same waits again changed the asks: %+v", again)
 	}
-	if err := r.MarkWaitingAnnounced("asking", "conversation:question:2"); err != nil {
-		t.Fatal(err)
+	waiting, err := r.SessionWaiting("asking")
+	if err != nil || waiting == nil || waiting.ID != got.Opened[0].ID || !waiting.Answerable || len(waiting.Open) != 2 || waiting.Open[1] != got.Opened[1].ID {
+		t.Fatalf("waiting=%+v err=%v, want the oldest ask with both open", waiting, err)
 	}
-	if !record(question, first).Announce {
-		t.Fatal("marking another question announced this one")
+	if claimed, err := r.ClaimAsk(got.Opened[0].ID, AskAnswer{}, AskToPerson, "test", first); err != nil || !claimed {
+		t.Fatalf("claim=%v err=%v", claimed, err)
 	}
-	if err := r.MarkWaitingAnnounced("asking", question.ID); err != nil {
-		t.Fatal(err)
+	if again := sync("lead", edit, bash); again.Changed() {
+		t.Fatalf("an answered wait the provider still lists was opened again: %+v", again)
 	}
-	if record(question, first).Announce {
-		t.Fatal("an announced question is due again")
+	closed := sync("lead", edit)
+	if len(closed.Closed) != 1 || closed.Closed[0].Ref != "req-bash" || len(closed.Opened) != 0 {
+		t.Fatalf("closing a wait=%+v", closed)
 	}
-	if got := record(nil, first); got.Waiting != nil || got.Announce || !got.Changed {
-		t.Fatalf("clear=%+v", got)
+	dialog := sync("lead", Wait{Ref: "conversation:dialog", Kind: surface.WaitingDialog})
+	if len(dialog.Opened) != 1 || dialog.Opened[0].RoutedTo != AskToPerson || dialog.Opened[0].Answerable {
+		t.Fatalf("an unanswerable wait=%+v, want it routed to the person", dialog)
 	}
-	if got := record(nil, first); got.Changed {
-		t.Fatalf("clearing nothing changed the record: %+v", got)
+	if waiting, err := r.SessionWaiting("asking"); err != nil || waiting == nil || waiting.Kind != surface.WaitingDialog || waiting.Answerable || waiting.Open != nil {
+		t.Fatalf("waiting=%+v err=%v", waiting, err)
 	}
-	if !record(question, first).Announce {
-		t.Fatal("the same question asked again after it cleared is not due")
+	if cleared := sync("lead"); len(cleared.Closed) != 1 {
+		t.Fatalf("no waits=%+v", cleared)
+	}
+	if waiting, err := r.SessionWaiting("asking"); err != nil || waiting != nil {
+		t.Fatalf("waiting=%+v err=%v, want none", waiting, err)
+	}
+	if row, found, err := r.RowAsk("asking"); err != nil || found {
+		t.Fatalf("a permission ask became the row's ask: %+v", row)
 	}
 }
 
@@ -1372,13 +1383,13 @@ func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 	if held(steer, nil) != QueueHeldBusy || held(steer, surface.Adapters{holdAdapter{kind: surface.RuntimeCodexAppServer}}) != QueueHeldBusy || held(steer, surface.Adapters{holdAdapter{kind: surface.RuntimeClaudeCLI, steer: true}}) != QueueHeldBusy {
 		t.Fatalf("a target that cannot steer reported steer=%q", held(steer, nil))
 	}
-	if _, err := r.RecordWaiting("target", &surface.Waiting{Kind: surface.WaitingApproval, ID: "thread:approval"}, time.Now()); err != nil {
+	if _, err := r.SyncWaits("target", []Wait{{Ref: "thread:approval", Kind: surface.WaitingApproval}}, "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if held(queued, steers) != QueueHeldWaiting || held(steer, steers) != QueueHeldWaiting {
 		t.Fatalf("waiting turn: queued=%q steer=%q", held(queued, steers), held(steer, steers))
 	}
-	if _, err := r.RecordWaiting("target", nil, time.Now()); err != nil {
+	if _, err := r.SyncWaits("target", nil, "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	claimable(r.ClaimNextSteerMessage, steer)

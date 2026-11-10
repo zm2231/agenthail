@@ -221,6 +221,9 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
+	if err := addAskRefs(tx); err != nil {
+		return err
+	}
 	if err := moveTurnEndAsks(tx); err != nil {
 		return err
 	}
@@ -236,11 +239,6 @@ func migrateTx(tx *sql.Tx) error {
 		{"runtime_launcher", `TEXT NOT NULL DEFAULT ''`},
 		{"runtime_location", `BLOB NOT NULL DEFAULT '{}'`},
 		{"runtime_focusable", `INTEGER NOT NULL DEFAULT 0`},
-		{"waiting_kind", `TEXT NOT NULL DEFAULT ''`},
-		{"waiting_id", `TEXT NOT NULL DEFAULT ''`},
-		{"waiting_since_ms", `INTEGER NOT NULL DEFAULT 0`},
-		{"waiting_announced", `INTEGER NOT NULL DEFAULT 0`},
-		{"waiting_answerable", `INTEGER NOT NULL DEFAULT 0`},
 		{"held_completion_turn_id", `TEXT NOT NULL DEFAULT ''`},
 		{"notice_turn_id", `TEXT NOT NULL DEFAULT ''`},
 		{"notice_outcome", `TEXT NOT NULL DEFAULT ''`},

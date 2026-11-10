@@ -102,3 +102,32 @@ func moveTurnEndAsks(tx *sql.Tx) error {
 	}
 	return nil
 }
+
+func addAskRefs(tx *sql.Tx) error {
+	for _, column := range []struct{ name, decl string }{
+		{"ref", `TEXT NOT NULL DEFAULT ''`},
+		{"wait_kind", `TEXT NOT NULL DEFAULT ''`},
+		{"answerable", `INTEGER NOT NULL DEFAULT 1`},
+		{"announced_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+	} {
+		if err := ensureColumn(tx, "asks", column.name, column.decl); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS asks_ref ON asks(session_id, origin, ref) WHERE ref<>''`); err != nil {
+		return err
+	}
+	for _, column := range []string{"waiting_kind", "waiting_id", "waiting_since_ms", "waiting_announced", "waiting_answerable"} {
+		exists, err := columnExists(tx, "session_runtime", column)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		if _, err := tx.Exec(`ALTER TABLE session_runtime DROP COLUMN ` + column); err != nil {
+			return err
+		}
+	}
+	return nil
+}
