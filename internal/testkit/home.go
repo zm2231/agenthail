@@ -7,9 +7,12 @@ import (
 )
 
 // RunInOwnHome runs a test binary in a new HOME it removes afterwards, so no
-// test touches the person's own Agenthail, Claude or Codex state. Go's caches
-// stay where they were, or a test that runs the go command downloads every
-// module again.
+// test touches the person's own Agenthail, Claude or Codex state. It also
+// drops the Claude configuration directory and every variable an agent session
+// sets for its children: with them, a fixture writes into the real
+// configuration directory and takes the enclosing session as its caller. Go's
+// caches stay where they were, or a test that runs the go command downloads
+// every module again.
 func RunInOwnHome(run func() int) int {
 	if err := keepGoEnv(); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: keep the go command's caches: %v\n", err)
@@ -27,6 +30,7 @@ func RunInOwnHome(run func() int) int {
 	for _, name := range []string{"CODEX_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
 		os.Unsetenv(name)
 	}
+	clearAgentEnv()
 	return run()
 }
 

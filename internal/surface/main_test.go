@@ -8,6 +8,5 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	testkit.ClearAgentEnv()
 	os.Exit(testkit.RunInOwnHome(m.Run))
 }

@@ -27,7 +27,6 @@ func timelineFixture(t *testing.T, data string) string {
 }
 
 func TestMain(m *testing.M) {
-	testkit.ClearAgentEnv()
 	transcriptPollInterval = 20 * time.Millisecond
 	os.Exit(testkit.RunInOwnHome(m.Run))
 }

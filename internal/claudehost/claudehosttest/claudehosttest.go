@@ -44,13 +44,11 @@ type Turn struct {
 	PID      int             `json:"pid"`
 }
 
-// New makes a home short enough for unix socket paths, in an environment
-// cleared of the Claude session the test runs in. When home is non-empty it is
-// used instead, with the environment the fixture that made it set up.
+// New makes a home short enough for unix socket paths. When home is non-empty
+// it is used instead.
 func New(t testing.TB, home string) *Fixture {
 	t.Helper()
 	if home == "" {
-		testkit.IsolateAgentEnv(t)
 		dir, err := os.MkdirTemp("", "ch")
 		if err != nil {
 			t.Fatal(err)
