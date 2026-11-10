@@ -37,9 +37,9 @@ extension SessionTree {
         }
         guard let root = cell(view.rootId) else { return nil }
         let members = view.members.filter { $0.id != view.rootId }.compactMap { member in
-            cell(member.id).map { SessionFamily.Member(cell: $0, depth: member.depth, isWorker: member.worker == true) }
+            cell(member.id).map { SessionFamily.Member(cell: $0, depth: member.depth, isWorker: member.worker == true, isTask: member.task == true) }
         }
-        return SessionFamily(root: root, members: members, workingSubagents: view.workingSubagents, workers: view.workers)
+        return SessionFamily(root: root, members: members, workingSubagents: view.workingSubagents, workers: view.workers, tasks: view.tasks)
     }
 
     static func needsYou(in view: ScopePage.View?, rows: [String: SessionState], attention: [String: SessionAttention]) -> [SessionState] {

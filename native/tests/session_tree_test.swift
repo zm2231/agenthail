@@ -179,6 +179,27 @@ struct SessionTreeTest {
         expect(SessionFamilies.workerSummary(WorkerRollup(count: 1, working: 0, needsYou: 0)) == "1 worker", "one idle worker")
         expect(SessionFamilies.membersCount(SessionFamily(root: crew[0], members: [team.members[0]], workingSubagents: 0)) == "1 worker", "one worker member")
 
+        let withTasks = try! JSONDecoder().decode(ViewFamily.self, from: Data(#"{"id":"lead","rootId":"lead","projectId":"agenthail","checkoutId":"main","members":[{"id":"lead","depth":0,"contextOnly":false,"pinned":false},{"id":"w1","depth":1,"contextOnly":false,"pinned":false,"worker":true},{"id":"t1","depth":1,"contextOnly":false,"pinned":false,"task":true},{"id":"t1-sub","depth":2,"contextOnly":false,"pinned":false},{"id":"t2","depth":1,"contextOnly":false,"pinned":false,"task":true},{"id":"ada","depth":1,"contextOnly":false,"pinned":false}],"pinned":false,"workingSubagents":0,"workers":{"count":1,"working":0,"needsYou":0},"tasks":{"count":2,"working":1,"needsYou":1}}"#.utf8))
+        expect(withTasks.members.map { $0.task == true } == [false, false, true, false, true, false] && withTasks.tasks == WorkerRollup(count: 2, working: 1, needsYou: 1), "task members and the tasks rollup decode")
+        let runs = [session("lead"), session("w1"), session("t1", status: "busy"), member("t1-sub", parent: "t1", root: "t1", depth: 1, nickname: "Sub", status: "idle"), session("t2"), member("ada", parent: "lead", root: "lead", depth: 1, nickname: "Ada", status: "idle")]
+        let asking = ["t2": SessionAttention(kind: .request, reason: "x")]
+        let runTree = SessionTree.ordered(list: view([withTasks], projects: [("agenthail", [])]), current: nil, rows: rows(runs), attention: asking)
+        let runFamily = runTree.projects[0].checkouts[0].families[0]
+        expect(runFamily.crew.map(\.id) == ["w1", "ada"] && runFamily.taskRuns.map(\.id) == ["t1", "t1-sub", "t2"], "task runs and what is nested under them split from the rest: \(runFamily.crew.map(\.id)) \(runFamily.taskRuns.map(\.id))")
+        expect(runFamily.tasks == withTasks.tasks, "the family keeps the tasks rollup")
+        expect(!runFamily.startsExpanded, "a running or waiting task does not open its family by itself")
+        let open = ["lead": true]
+        expect(!runFamily.tasksExpanded(chosen: open, selectedID: nil) && runFamily.shownMembers(chosen: open, selectedID: nil).map(\.id) == ["w1", "ada"], "an open family keeps its task runs collapsed")
+        expect(runFamily.shownMembers(chosen: open.merging([runFamily.tasksID: true]) { $1 }, selectedID: nil).map(\.id) == ["w1", "ada", "t1", "t1-sub", "t2"], "opening the task runs shows them after the rest")
+        expect(runFamily.shownMembers(chosen: [runFamily.tasksID: true], selectedID: nil).isEmpty, "a closed family shows no task runs even when they were opened")
+        expect(runFamily.shownMembers(chosen: [:], selectedID: "t1-sub").map(\.id) == ["w1", "ada", "t1", "t1-sub", "t2"], "selecting a session inside a task run opens the family and its task runs")
+        expect(!runFamily.tasksExpanded(chosen: [runFamily.tasksID: false], selectedID: "w1"), "selecting another member leaves the task runs as the person left them")
+        expect(runTree.needsYou.map(\.id) == ["t2"], "a task run that needs you is listed in Needs you while collapsed")
+        expect(SessionFamilies.tasksToggle(runFamily, expanded: false) == "Show 2 one-off runs, 1 running, 1 needs you" && SessionFamilies.tasksToggle(runFamily, expanded: true) == "Hide one-off runs", "the task runs toggle says what it hides")
+        expect(SessionFamilies.membersNoun(runFamily) == "workers, one-off runs and subagents" && SessionFamilies.membersCount(runFamily) == "5 workers, one-off runs and subagents", "a family names every kind of member")
+        expect(SessionFamilies.taskSummary(WorkerRollup(count: 1, working: 0, needsYou: 0)) == "1 one-off run", "one settled task run")
+        expect(SessionFamily(root: runs[0], members: [runFamily.crew[0]], workingSubagents: 0).taskRuns.isEmpty && !SessionFamily(root: runs[0], members: [runFamily.crew[0]], workingSubagents: 0).tasksExpanded(chosen: ["lead#tasks": true], selectedID: nil), "a family without task runs has nothing to open")
+
         func waiting(_ id: String, kind: String) -> SessionState {
             var state = session(id)
             state.waitingOn = WaitingState(kind: kind, id: "req-\(id)")

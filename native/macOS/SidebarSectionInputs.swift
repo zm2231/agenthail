@@ -27,6 +27,7 @@ struct SidebarSectionKey: Equatable {
         return SidebarFamilyKey(
             family: family,
             expanded: family.isExpanded(chosen: familyChoices, selectedID: selected),
+            tasksExpanded: family.tasksExpanded(chosen: familyChoices, selectedID: selected),
             selectedID: selected,
             attention: Dictionary(ids.compactMap { id in attention[id].map { (id, $0) } }, uniquingKeysWith: { first, _ in first })
         )
@@ -36,6 +37,7 @@ struct SidebarSectionKey: Equatable {
 struct SidebarFamilyKey: Equatable {
     let family: SessionFamily
     let expanded: Bool
+    let tasksExpanded: Bool
     let selectedID: String?
     let attention: [String: SessionAttention]
 }

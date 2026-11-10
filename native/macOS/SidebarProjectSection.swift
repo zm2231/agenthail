@@ -36,7 +36,7 @@ struct SidebarProjectSection: View, @MainActor Equatable {
                 }
                 ForEach(checkout.families) { family in
                     let familyKey = key.family(family)
-                    SidebarFamilyRows(key: familyKey, model: model, pane: pane, toggle: { toggleFamily(family.id, familyKey.expanded) })
+                    SidebarFamilyRows(key: familyKey, model: model, pane: pane, toggle: toggleFamily)
                         .equatable()
                 }
             }
@@ -56,7 +56,7 @@ struct SidebarFamilyRows: View, @MainActor Equatable {
     let key: SidebarFamilyKey
     let model: AgenthailModel
     let pane: SessionPane
-    let toggle: () -> Void
+    let toggle: (String, Bool) -> Void
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.key == rhs.key && lhs.model === rhs.model && lhs.pane === rhs.pane
@@ -67,7 +67,7 @@ struct SidebarFamilyRows: View, @MainActor Equatable {
         HStack(spacing: 0) {
             SidebarRowButton(session: family.root, title: family.root.title, family: family, attention: key.attention[family.root.id], selectedID: key.selectedID, model: model, pane: pane)
             if !family.members.isEmpty {
-                Button(action: toggle) {
+                Button { toggle(family.id, key.expanded) } label: {
                     Image(systemName: key.expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: DesktopType.caption, weight: .semibold))
                         .frame(width: 18, height: 22)
@@ -79,10 +79,29 @@ struct SidebarFamilyRows: View, @MainActor Equatable {
             }
         }
         if key.expanded {
-            ForEach(family.members) { member in
-                SidebarRowButton(session: member.session, title: SessionFamilies.label(member.session), attention: key.attention[member.id], selectedID: key.selectedID, model: model, pane: pane)
-                    .padding(.leading, CGFloat(member.depth) * 16)
+            memberRows(family.crew)
+            if !family.taskRuns.isEmpty {
+                Button { toggle(family.tasksID, key.tasksExpanded) } label: {
+                    Label(SessionFamilies.tasksToggle(family, expanded: key.tasksExpanded), systemImage: key.tasksExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: DesktopType.secondary))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(DesktopPalette.text2)
+                .padding(.leading, 35)
+                .padding(.vertical, DesktopSpace.xs)
             }
+            if key.tasksExpanded {
+                memberRows(family.taskRuns)
+            }
+        }
+    }
+
+    private func memberRows(_ members: [SessionFamily.Member]) -> some View {
+        ForEach(members) { member in
+            SidebarRowButton(session: member.session, title: SessionFamilies.label(member.session), attention: key.attention[member.id], selectedID: key.selectedID, model: model, pane: pane)
+                .padding(.leading, CGFloat(member.depth) * 16)
         }
     }
 }

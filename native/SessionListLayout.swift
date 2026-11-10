@@ -16,10 +16,10 @@ enum SessionListLayout {
         return tree.projects.flatMap { $0.shown(expanded: projectExpanded($0.id), keeping: selectedID).checkouts.flatMap(\.families) }
     }
 
-    static func order(_ families: [SessionFamily], expanded: (SessionFamily) -> Bool) -> [String] {
+    static func order(_ families: [SessionFamily], shown: (SessionFamily) -> [SessionFamily.Member]) -> [String] {
         var ids: [String] = []
         for family in families {
-            let rows = [family.id] + (expanded(family) ? family.members.map(\.id) : [])
+            let rows = [family.id] + shown(family).map(\.id)
             ids += rows.filter { !ids.contains($0) }
         }
         return ids

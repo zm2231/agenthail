@@ -23,9 +23,16 @@ struct SessionListLayoutTest {
         check(tree.flat.first { $0.id == "b" }?.members.map(\.id) == ["b1"], "a flat family keeps its subagents")
         check(SessionTree.empty.flat.isEmpty, "an empty tree has no flat families")
 
-        check(SessionListLayout.order(tree.flat, expanded: { _ in false }) == ["a", "b", "c"], "keyboard order follows the flat list")
-        check(SessionListLayout.order(tree.flat, expanded: { $0.id == "b" }) == ["a", "b", "b1", "c"], "an expanded family adds its subagents after it")
-        check(SessionListLayout.order(tree.flat + tree.flat, expanded: { _ in false }) == ["a", "b", "c"], "a session listed twice is stepped through once")
+        check(SessionListLayout.order(tree.flat, shown: { _ in [] }) == ["a", "b", "c"], "keyboard order follows the flat list")
+        check(SessionListLayout.order(tree.flat, shown: { $0.id == "b" ? $0.members : [] }) == ["a", "b", "b1", "c"], "an expanded family adds its subagents after it")
+        check(SessionListLayout.order(tree.flat + tree.flat, shown: { _ in [] }) == ["a", "b", "c"], "a session listed twice is stepped through once")
+
+        let lead = ViewFamily(id: "lead", rootId: "lead", projectId: "p1", checkoutId: "", members: [ViewMember(id: "lead", depth: 0, contextOnly: false, pinned: false), ViewMember(id: "run", depth: 1, contextOnly: false, pinned: false, task: true), ViewMember(id: "helper", depth: 1, contextOnly: false, pinned: false, worker: true)], pinned: false, workingSubagents: 0)
+        let leadView = ScopePage.View(counts: [:], surfaces: [], projects: [ViewProject(id: "p1", name: "p1", counts: ScopePage.Count(families: 1, sessions: 3), collapsedFamilyIds: [])], families: [lead])
+        let leadTree = SessionTree.ordered(list: leadView, current: nil, rows: Dictionary(uniqueKeysWithValues: ["lead", "run", "helper"].map { ($0, session($0, project: "p1")) }), attention: [:])
+        let open = ["lead": true]
+        check(SessionListLayout.order(leadTree.flat) { $0.shownMembers(chosen: open, selectedID: nil) } == ["lead", "helper"], "keyboard order skips collapsed task runs")
+        check(SessionListLayout.order(leadTree.flat) { $0.shownMembers(chosen: open.merging(["lead#tasks": true]) { $1 }, selectedID: nil) } == ["lead", "helper", "run"], "keyboard order steps into task runs once they are open, after the rest")
 
         check(SessionListLayout.shownFamilies(tree, grouped: false, projectExpanded: { _ in false }, keeping: nil).map(\.id) == ["a", "b", "c"], "without grouping the archived section is the flat list")
         check(SessionListLayout.shownFamilies(tree, grouped: true, projectExpanded: { _ in true }, keeping: nil).map(\.id) == ["a", "c", "b"], "with grouping the archived section follows its projects")
