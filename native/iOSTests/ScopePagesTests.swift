@@ -18,9 +18,7 @@ final class ScopePagesTests: XCTestCase {
 
     private func connect(_ hosts: [String]) async throws -> AgenthailIOSModel {
         for host in hosts { try AgenthailIOSTests.pair(host, "https://\(host).tailnet.ts.net") }
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ScopeServer.self]
-        model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration), drops: .isolated())
+        model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([ScopeServer.self]), drops: .isolated())
         _ = await model.refresh(fresh: true)
         return model
     }
@@ -312,7 +310,9 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         let url = request.url!
         let name = String(url.host!.split(separator: ".")[0])
         guard let host = Self.state.record(name, url.path + (url.query.map { "?" + $0 } ?? "")) else { return respond(503, "{}") }
@@ -337,7 +337,7 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             let delay = search.delay.components
             let seconds = Double(delay.seconds) + Double(delay.attoseconds) / 1e18
             if seconds == 0 { return respond(200, body) }
-            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { self.respond(200, body) }
+            later(seconds) { self.respond(200, body) }
         case "/api/v1/snapshot" where query["scope"] != nil:
             let pages = host.scopes[query["scope"]!] ?? [[]]
             let index = query["cursor"].flatMap(Int.init) ?? 0
@@ -346,7 +346,7 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             var page: [String: Any] = ["sessions": rows.filter { project == nil || ($0["project"] as? [String: Any])?["id"] as? String == project }]
             if index + 1 < pages.count { page["nextCursor"] = String(index + 1) }
             if host.pageDelay == 0 { return respond(200, PreviewOrder.withView(Self.json(page))) }
-            DispatchQueue.global().asyncAfter(deadline: .now() + host.pageDelay) { self.respond(200, PreviewOrder.withView(Self.json(page))) }
+            later(host.pageDelay) { self.respond(200, PreviewOrder.withView(Self.json(page))) }
         default:
             respond(200, "{}")
         }

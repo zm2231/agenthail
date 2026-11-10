@@ -9,7 +9,9 @@ private final class DecisionHostProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
 
-    override func startLoading() {
+    override func startLoading() { served(reply) }
+
+    private func reply() {
         let url = request.url!
         let host = url.host!
         Self.lock.withLock { Self.requests.append(host + url.path + "?" + (url.query ?? "")) }
@@ -52,9 +54,7 @@ final class DecisionInboxTests: XCTestCase {
     }
 
     private func host(_ name: String, remote: String? = nil, id: String? = nil) -> InboxPage.Host {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [DecisionHostProtocol.self]
-        return InboxPage.Host(id: id ?? name, name: name, api: AgenthailAPI(baseURL: URL(string: "https://\(name).invalid")!, token: "t", session: URLSession(configuration: configuration)), remote: remote)
+        InboxPage.Host(id: id ?? name, name: name, api: AgenthailAPI(baseURL: URL(string: "https://\(name).invalid")!, token: "t", session: FixtureScope.open(self).session([DecisionHostProtocol.self])), remote: remote)
     }
 
     func testDecisionsFromEveryComputerAreMergedQualifiedAndOrderedByGroupThenAge() async {

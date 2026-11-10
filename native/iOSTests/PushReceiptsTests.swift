@@ -40,9 +40,7 @@ final class PushReceiptsTests: XCTestCase {
         let now = Date()
         PushReceipts.enqueue(PushReceipt(host: "h1", pushId: "waiting01", receivedAt: now, alerts: "on"))
         PushReceipts.enqueue(PushReceipt(host: "gone", pushId: "orphan001", receivedAt: now.addingTimeInterval(-PushReceipts.maxAge - 60), alerts: "on"))
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ReceiptStub.self]
-        let session = URLSession(configuration: configuration)
+        let session = FixtureScope.open(self).session([ReceiptStub.self])
         ReceiptStub.reset(status: 200)
         await PushReceipts.flush(credential: { _ in nil }, session: session, now: now)
         XCTAssertEqual(PushReceipts.pending().map(\.pushId), ["waiting01"], "a credential read that misses, as while it is rewritten, keeps the receipt; only age retires one")
@@ -65,13 +63,12 @@ final class PushReceiptsTests: XCTestCase {
         XCTAssertEqual(Set(PushReceipts.pending().map(\.pushId)), ["first0001", "second001"], "two writers each keep their own receipt")
 
         let late = PushReceipt(host: "h1", pushId: "late00001", receivedAt: at, alerts: "on")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ReceiptStub.self]
+        let session = FixtureScope.open(self).session([ReceiptStub.self])
         ReceiptStub.reset(status: 200)
         ReceiptStub.during = { PushReceipts.enqueue(late) }
         defer { ReceiptStub.during = nil }
         let paired = PairedHostCredential(hostID: "h1", hostName: "Mac", endpoint: URL(string: "https://mac.example.ts.net:7412")!, token: "device-token", pairedAt: at)
-        await PushReceipts.flush(credential: { $0 == "h1" ? paired : nil }, session: URLSession(configuration: configuration))
+        await PushReceipts.flush(credential: { $0 == "h1" ? paired : nil }, session: session)
         XCTAssertEqual(PushReceipts.pending().map(\.pushId), ["late00001"], "a flush removes only what it sent")
     }
 
@@ -83,9 +80,7 @@ final class PushReceiptsTests: XCTestCase {
     }
 
     func testAReceiptGoesToTheComputerThatSentThePush() async {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ReceiptStub.self]
-        let session = URLSession(configuration: configuration)
+        let session = FixtureScope.open(self).session([ReceiptStub.self])
         let receipt = PushReceipt(host: "h1", pushId: "abcdefgh2345", receivedAt: Date(), alerts: "on")
         ReceiptStub.reset(status: 200)
         let sent = await PushReceipts.post([receipt], endpoint: URL(string: "https://mac.example.ts.net:7412/api/v1/snapshot?x=1")!, token: "device-token", session: session)
@@ -113,7 +108,9 @@ private final class ReceiptStub: URLProtocol, @unchecked Sendable {
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         Self.requests.append(request)
         Self.during?()
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: Self.status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)

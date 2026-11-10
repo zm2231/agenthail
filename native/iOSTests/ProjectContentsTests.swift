@@ -89,9 +89,7 @@ final class ProjectContentsTests: XCTestCase {
         ScopeServer.state.set("one", current: [Self.row("lead-session", current: true)], scopes: ["all": [[Self.row("old")], [Self.row("older", lastActive: "2026-09-01T00:00:00Z")]]])
         ScopeServer.state.list("one", projects: [Self.project()])
         try AgenthailIOSTests.pair("one", "https://one.tailnet.ts.net")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ScopeServer.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([ScopeServer.self]))
         defer { model.forgetHost("one") }
         _ = await model.refresh(fresh: true)
         let listed = try XCTUnwrap(model.projects[Self.projectID])
@@ -125,9 +123,7 @@ final class ProjectContentsTests: XCTestCase {
         ScopeServer.state.set("two", current: [], scopes: ["all": [[Self.row("near")]]])
         try AgenthailIOSTests.pair("one", "https://one.tailnet.ts.net")
         try AgenthailIOSTests.pair("two", "https://two.tailnet.ts.net")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ScopeServer.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([ScopeServer.self]))
         defer { model.forgetHost("one"); model.forgetHost("two") }
         _ = await model.refresh(fresh: true)
         let listed = try XCTUnwrap(model.projects[Self.projectID])
