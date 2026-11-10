@@ -10,9 +10,9 @@ import (
 
 type mcpAnswerInput struct {
 	mcpWrite
-	Target    string            `json:"target" jsonschema:"A session id or @alias you spawned or, as coordinator, lead."`
+	Target    string            `json:"target,omitempty" jsonschema:"A session id or @alias you spawned or, as coordinator, lead. Not needed for an ask."`
 	RequestID string            `json:"requestId" jsonschema:"The open request's id, as agenthail_requests lists it."`
-	Decision  string            `json:"decision" jsonschema:"allow, always (keep allowing with the rule the request offers; for the person's voice operator only), deny, never (keep denying) or stop (deny and end the turn)."`
+	Decision  string            `json:"decision,omitempty" jsonschema:"allow, always (keep allowing with the rule the request offers; for the person's voice operator only), deny, never (keep denying) or stop (deny and end the turn). For an ask routed to you: omit it and give answers or a message, or escalate to pass it on."`
 	Message   string            `json:"message,omitempty" jsonschema:"With deny: why, which the session reads."`
 	Answers   map[string]string `json:"answers,omitempty" jsonschema:"With allow on a question: one answer per question, keyed by its text."`
 	Content   json.RawMessage   `json:"content,omitempty" jsonschema:"With allow on an MCP server's input request: its form's field values."`
@@ -27,6 +27,9 @@ func (d *Daemon) mcpAnswer(ctx context.Context, caller *mcpCaller, input mcpAnsw
 	}
 	if !caller.has("requests.answer") {
 		return nil, refuse("capability_missing", "This session may not answer requests.")
+	}
+	if strings.TrimSpace(input.Target) == "" {
+		return nil, refuse("invalid", "target is required.")
 	}
 	decision := surface.Decision{Message: strings.TrimSpace(input.Message), Answers: input.Answers, Content: input.Content}
 	switch strings.TrimSpace(input.Decision) {

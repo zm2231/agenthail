@@ -890,7 +890,7 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession, live bo
 	}
 	if priorFound {
 		d.notifyMirroredCompletion(host, rawID, row, prior.TurnCompletion)
-		d.notifyMirroredAsk(host, row, prior.Ask)
+		d.notifyMirroredAsk(host, rawID, row, prior.Ask)
 	}
 	return nil
 }

@@ -17,6 +17,7 @@ type placementInputs struct {
 	Queued        bool
 	Waiting       bool
 	WaitingSince  time.Time
+	AsksPerson    bool
 	HostDown      bool
 	LimitResume   string
 	UsageLimit    bool
@@ -52,6 +53,7 @@ func placementOf(row dashboardSession) placementInputs {
 		Working:       presentationWorking(&row),
 		Queued:        row.QueueCount > 0,
 		Waiting:       row.WaitingOn != nil,
+		AsksPerson:    row.Ask.asksPerson(),
 		HostDown:      mirroredHostDown(row),
 		UsageLimit:    row.UsageLimit != nil,
 		KeptDown:      row.KeepAlive != nil,
