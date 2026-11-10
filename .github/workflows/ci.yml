@@ -81,7 +81,7 @@ jobs:
         shell: bash
         run: |
           npm install --prefix "$RUNNER_TEMP/codex" --no-audit --no-fund @openai/codex@0.163.0
-          PATH="$RUNNER_TEMP/codex/node_modules/.bin:$PATH" go test ./internal/surface/surfaces/ -run '^(TestACodexCompactionHoldsReloadsOnlyUntilItsTurnEnds|TestATurnStartedBeforeTheCodexAppServerRestartedIsNotRunning|TestARealCodexThreadMovesToAnotherCodexHomeAndBack)$' -count=1 -v | tee "$RUNNER_TEMP/codex-real.log"
+          PATH="$RUNNER_TEMP/codex/node_modules/.bin:$PATH" go test ./internal/surface/surfaces/ -run '^(TestACodexCompactionHoldsReloadsOnlyUntilItsTurnEnds|TestATurnStartedBeforeTheCodexAppServerRestartedIsNotRunning|TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack)$' -count=1 -v | tee "$RUNNER_TEMP/codex-real.log"
           test "$(grep -c -- '^--- PASS: ' "$RUNNER_TEMP/codex-real.log")" -eq 3
       - name: Build
         run: go build ./...
