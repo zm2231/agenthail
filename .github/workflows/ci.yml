@@ -259,7 +259,7 @@ jobs:
         if: matrix.shard == 0
         run: go vet ./...
       - name: Node host modules
-        if: matrix.shard == 0
+        if: matrix.shard != 1
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
