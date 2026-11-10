@@ -28,6 +28,42 @@ A provider request the session waits on (a permission prompt, a question, MCP in
 - `waitingOn` is derived from the open permission asks: the oldest, with every open answerable one in `open`. It is not the row's `ask`, which stays an agent's ask.
 - The decisions inbox shows a request routed to a running lead under "Handled by a lead"; the person can still answer it.
 
+## Delivery problems
+
+A message that did not reach its session, or whose arrival the daemon cannot confirm, is an ask of origin `delivery`. The daemon raises and withdraws these itself, in the same transaction as the delivery change, so there is nothing to dismiss elsewhere.
+
+| Problem | Title | Options |
+|---|---|---|
+| The provider rejected a send, or queued work failed | Message not delivered | `retry` (only while its queue row is dead), `delete` (only when it never reached the session), `dismiss` |
+| The target's Claude holds the message | Message held by its target | `dismiss` |
+| A queued message whose delivery could not be confirmed | Message not confirmed | `retry`, `dismiss` |
+| The target refused to start (an untrusted workspace, a missing settings file) | Target refused to start | `cancel`, `dismiss` |
+
+- The single question reads `<reason>: "<message>"`, the message clipped to 120 characters. The recommended option is the first.
+- A failure is deletable only when it failed while still `submitted` (the provider refused it) or `queued` (its queue row died before an attempt left it unconfirmed). A failure from `sent`, `unknown` or `held` may have reached the session and is never deletable.
+- Routing follows the rule above, starting at the sender: an agent that sent the message is asked first, then its hearer, then the person. A message from the person, the CLI or a relay asks the person on the target's row. A relay source is never asked: its answer would start a turn the same relay forwards again.
+- A failure stops asking after a day, or once a later message from the same sender reached the same target. A held message asks until its target releases or drops it. A dead queue row asks for the dead-letter review window. A refusal asks until an attempt is not refused; a later refusal raises a new ask.
+- A message a host failed to relay to a paired host's session asks on the sending host. `respond` for it is answered there, not forwarded.
+
+Answer with `respond`, `decision.choice` the option id (`{"choice": "retry"}`); a label or `behavior` naming it also works. An agent answers with `agenthail_answer {"requestId", "decision": "<option id>"}`.
+
+| Choice | Effect |
+|---|---|
+| `retry` | the dead queue row is pending again |
+| `delete` | the dead queue row is canceled and kept in history; it cannot be retried |
+| `cancel` | the refused queue row is canceled |
+| `dismiss` | nothing changes; the ask closes |
+
+A choice the ask does not offer is `400 invalid_request`. A choice that can no longer apply (the row was already retried or canceled) is `409 conflict` and records the failure as the ask's apply status. `queue-cancel` refuses a dead row with `409 conflict`; answer its ask. There is no queue retry action.
+
+A `send` or `steer` that fails after the daemon recorded its delivery answers with the error body plus the ask to answer:
+
+```json
+{"error":{"code":"bad_gateway","message":"the desktop app closed"},"askId":"ask-0fca204fdeb3"}
+```
+
+The status is `502 bad_gateway`, or `400 invalid_request` for a refusal of kind invalid request. A failure without `askId` left nothing on the daemon, so a client removes it locally.
+
 ## The Stop reminder
 
 `agenthail hook stop` (Claude host, Codex, and terminal Claude through `agenthail hooks install`) holds a stop once when the session is a lead (a project coordinator or the spawner of a running session), the turn's `last_assistant_message` has a line outside fenced code that ends in `?`, and the session raised no ask since its turn opened. The reason tells it to raise the question as an ask. A session holding Agenthail's tools is also asked, in the same hold, to call `agenthail_end_turn` when it has not. Terminal Claude's settings hook carries `--terminal` and does nothing under the Claude host, which runs its own.
