@@ -64,3 +64,9 @@ func (r *Registry) SessionAncestors(sessionID string) ([]string, error) {
 		UNION ALL SELECT o.creator_session_id, spawners.depth+1 FROM session_origins o JOIN spawners ON o.session_id=spawners.id WHERE o.creator_session_id<>'' AND spawners.depth<?)
 		SELECT id FROM spawners ORDER BY depth`, sessionID, maxSpawnerChain)
 }
+
+func (r *Registry) SessionArchived(sessionID string) (bool, error) {
+	var archived bool
+	err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM session_archive WHERE session_id=?)`, sessionID).Scan(&archived)
+	return archived, err
+}

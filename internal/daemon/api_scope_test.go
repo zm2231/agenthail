@@ -54,7 +54,10 @@ func TestTheScopeEndpointDecidesAsTheSessionsMCPToolsDo(t *testing.T) {
 	gadget := widgetRepo(t, "https://github.com/example/gadget.git")
 	outsider := surface.Session{ID: "outsider", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: gadget}
 	worker.Cwd, lead.Cwd = widget, widget
-	for _, session := range []surface.Session{worker, lead, outsider} {
+	peer := surface.Session{ID: "peer", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: widget}
+	shelved := peer
+	shelved.ID = "shelved"
+	for _, session := range []surface.Session{worker, lead, outsider, peer, shelved} {
 		session.LastActive = time.Now()
 		fake.sessions[session.ID] = session
 		if err := r.RegisterSession(session); err != nil {
@@ -69,6 +72,9 @@ func TestTheScopeEndpointDecidesAsTheSessionsMCPToolsDo(t *testing.T) {
 	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: project.ID, ProjectRoot: widget, Name: "widget-lead", Surface: string(surface.KindClaude), Cwd: widget}, registry.CoordinatorChange{SessionID: lead.ID, ChangedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := r.ArchiveSession(shelved.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	const local = "127.0.0.1:50000"
 
 	cases := []struct {
@@ -81,6 +87,11 @@ func TestTheScopeEndpointDecidesAsTheSessionsMCPToolsDo(t *testing.T) {
 		{"a worker's queued send to its lead", ScopeRequest{SessionID: worker.ID, Action: "send", Mode: "queue", Target: lead.ID}, http.StatusOK, "", ""},
 		{"a worker steering its lead", ScopeRequest{SessionID: worker.ID, Action: "control", Target: lead.ID}, http.StatusForbidden, "out_of_scope", ""},
 		{"a worker sending its lead now", ScopeRequest{SessionID: worker.ID, Action: "send", Mode: "now", Target: lead.ID}, http.StatusForbidden, "out_of_scope", ""},
+		{"a worker's queued send to a peer in its project", ScopeRequest{SessionID: worker.ID, Action: "send", Mode: "queue", Target: peer.ID}, http.StatusOK, "", ""},
+		{"a worker sending a peer now", ScopeRequest{SessionID: worker.ID, Action: "send", Mode: "now", Target: peer.ID}, http.StatusForbidden, "out_of_scope", "not_spawned_or_led"},
+		{"a worker steering a peer", ScopeRequest{SessionID: worker.ID, Action: "control", Target: peer.ID}, http.StatusForbidden, "out_of_scope", "not_spawned_or_led"},
+		{"a worker's queued send to an archived peer", ScopeRequest{SessionID: worker.ID, Action: "send", Mode: "queue", Target: shelved.ID}, http.StatusForbidden, "out_of_scope", "archived"},
+		{"another project's agent queueing to a worker", ScopeRequest{SessionID: outsider.ID, Action: "send", Mode: "queue", Target: worker.ID}, http.StatusForbidden, "out_of_scope", "not_spawned_or_led"},
 		{"the lead controlling its worker", ScopeRequest{SessionID: lead.ID, Action: "control", Target: worker.ID}, http.StatusOK, "", ""},
 		{"a session acting on itself", ScopeRequest{SessionID: worker.ID, Action: "control", Target: worker.ID}, http.StatusOK, "", ""},
 		{"another project's agent controlling a worker", ScopeRequest{SessionID: outsider.ID, Action: "control", Target: worker.ID}, http.StatusForbidden, "out_of_scope", ""},

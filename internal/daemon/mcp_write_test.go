@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -83,7 +85,7 @@ func TestAChildsQueuedSendReachesItsSpawnerAsTheChild(t *testing.T) {
 	}
 }
 
-func TestASessionCannotMessageOneItNeitherSpawnedNorReportsTo(t *testing.T) {
+func TestASessionCannotMessageOneOutsideItsProject(t *testing.T) {
 	f := newMCPWriteFixture(t)
 	stranger := surface.Session{ID: "stranger", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	if err := f.r.RegisterSession(stranger); err != nil {
@@ -92,6 +94,42 @@ func TestASessionCannotMessageOneItNeitherSpawnedNorReportsTo(t *testing.T) {
 	f.fake.sessions[stranger.ID] = stranger
 	if code := refusalCode(t, f.child, "agenthail_send", map[string]any{"target": "stranger", "message": "hi", "clientRequestId": "x1"}); code != "out_of_scope" {
 		t.Fatalf("code=%q, want out_of_scope", code)
+	}
+}
+
+func TestAQueuedSendReachesAPeerInTheSameProjectButCannotControlIt(t *testing.T) {
+	d, r, fake, worker, peer := daemonFixture(t)
+	fake.caps = surface.Capabilities{Send: true, Steer: true, Interrupt: true, Goal: true}
+	widget := widgetRepo(t, "https://github.com/example/widget.git")
+	for _, session := range []surface.Session{worker, peer} {
+		session.Cwd, session.LastActive = widget, time.Now()
+		fake.sessions[session.ID] = session
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.discoverCatalog(context.Background())
+	caller := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, worker))
+	if out, refused := callMCP(t, caller, "agenthail_send", map[string]any{"target": peer.ID, "message": "peer: rebased on main", "clientRequestId": "p1"}); refused {
+		t.Fatalf("queued send to a peer: %v", out)
+	}
+	if !slices.ContainsFunc(fake.sent, func(m string) bool { return strings.Contains(m, "peer: rebased on main") }) {
+		t.Fatalf("sent=%q, want the peer's message delivered", fake.sent)
+	}
+	for _, call := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"agenthail_send", map[string]any{"target": peer.ID, "message": "peer now", "mode": "now", "clientRequestId": "p2"}},
+		{"agenthail_steer", map[string]any{"target": peer.ID, "message": "peer steer", "clientRequestId": "p3"}},
+		{"agenthail_interrupt", map[string]any{"target": peer.ID, "clientRequestId": "p4"}},
+	} {
+		if code := refusalCode(t, caller, call.tool, call.args); code != "out_of_scope" {
+			t.Fatalf("%s to a peer: code=%q, want out_of_scope", call.tool, code)
+		}
+	}
+	if slices.Contains(fake.steered, "peer steer") || slices.ContainsFunc(fake.sent, func(m string) bool { return strings.Contains(m, "peer now") }) {
+		t.Fatal("a control write reached a peer")
 	}
 }
 

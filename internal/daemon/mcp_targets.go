@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/targets"
@@ -46,7 +45,7 @@ func (d *Daemon) mcpTargets(caller *mcpCaller) targets.Resolver[*surface.Session
 			}
 			matches := make([]targets.Remote, 0, len(answer.Matches))
 			for _, match := range answer.Matches {
-				matches = append(matches, targets.Remote{ID: match.ID, Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: targets.Host(match.Host), Exact: match.Exact, Project: match.Project, Lead: match.Lead})
+				matches = append(matches, targets.Remote{ID: match.ID, Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: targets.Host(match.Host), Exact: match.Exact, Project: match.Project, Archived: match.Archived})
 			}
 			return matches, nil
 		},
@@ -69,10 +68,9 @@ func mcpTargetRefusal(err error) error {
 }
 
 // mcpRemoteTarget admits a session on a paired host for a queued send only:
-// any with control.all, else one in the caller's project that is its
-// coordinator or, with control.project, any of them. The project and the
-// coordinator role come from the owning host's own answer, never from this
-// host's mirror alone, which can be stale.
+// any with control.all, else a non-archived one in the caller's project. The
+// project and the archive come from the owning host's own answer, never from
+// this host's mirror alone, which can be stale.
 func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.Remote, upward bool) (*surface.Session, error) {
 	if !remote.Exact {
 		return nil, refuse("invalid", fmt.Sprintf("%s does not name one session exactly; it matched %s. Address it by @alias or session id.", ref, remote.Label()))
@@ -89,15 +87,10 @@ func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.R
 	if caller.project == nil || remote.Project != caller.project.ID {
 		return nil, scopeRefusal(remote.ID, "different_project", fmt.Sprintf("%s runs on host %s and is not in your project; across hosts you may message only sessions in your own project.", remote.Label(), remote.Host.Name))
 	}
-	if !caller.has("control.project") && !(remote.Lead && d.isCallerLead(caller, remote.ID)) {
-		return nil, scopeRefusal(remote.ID, "not_your_lead", fmt.Sprintf("%s runs on host %s; in your project you may message its coordinator, and other sessions only with control.project.", remote.Label(), remote.Host.Name))
+	if remote.Archived {
+		return nil, scopeRefusal(remote.ID, "archived", fmt.Sprintf("%s on host %s is archived.", remote.Label(), remote.Host.Name))
 	}
 	return remote.Session(), nil
-}
-
-func (d *Daemon) isCallerLead(caller *mcpCaller, hostSessionID string) bool {
-	spec, err := d.coordinator().ProjectLead(caller.project.ID, caller.project.RootPath)
-	return err == nil && spec.HostID != "" && spec.SessionID != "" && hosts.Qualify(spec.HostID, spec.SessionID) == hostSessionID
 }
 
 func hostProjectID(raw json.RawMessage) string {
