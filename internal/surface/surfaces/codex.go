@@ -64,6 +64,8 @@ func NewCodexIn(home CodexHome, remoteURL string) *Codex {
 	return &Codex{desktopURL: remoteURL, managed: managed, home: home}
 }
 
+func (c *Codex) Home() CodexHome { return c.home }
+
 func (c *Codex) Name() surface.SurfaceKind { return surface.KindCodex }
 
 func (c *Codex) RuntimeKinds() []surface.RuntimeKind {

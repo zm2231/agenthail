@@ -52,7 +52,7 @@ func TestTwoCodexAdaptersInOneProcessKeepToTheirOwnHomes(t *testing.T) {
 		t.Fatal("an adapter took its own write lock twice")
 	}
 
-	env := homes[70].childEnv([]string{"CODEX_HOME=" + elsewhere, "PATH=/usr/bin"})
+	env := homes[70].ChildEnv([]string{"CODEX_HOME=" + elsewhere, "PATH=/usr/bin"})
 	if !slices.Equal(env, []string{"PATH=/usr/bin", "CODEX_HOME=" + homes[70].Codex}) {
 		t.Fatalf("a Codex child of the adapter on %s gets %v", homes[70].Codex, env)
 	}

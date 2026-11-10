@@ -49,7 +49,7 @@ func (h CodexHome) daemonPackageBinaries() []string {
 	}
 }
 
-func (h CodexHome) childEnv(env []string) []string {
+func (h CodexHome) ChildEnv(env []string) []string {
 	out := make([]string, 0, len(env)+1)
 	for _, entry := range env {
 		if !strings.HasPrefix(entry, "CODEX_HOME=") {

@@ -60,7 +60,7 @@ func runCodexDaemon(ctx context.Context, home CodexHome, action string) ([]byte,
 		return nil, err
 	}
 	command := exec.CommandContext(commandCtx, binary, "app-server", "daemon", action)
-	command.Env = home.childEnv(surface.AgentEnv(os.Environ()))
+	command.Env = home.ChildEnv(surface.AgentEnv(os.Environ()))
 	output, err := command.Output()
 	if err != nil {
 		detail := strings.TrimSpace(string(output))

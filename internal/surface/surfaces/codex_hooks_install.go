@@ -106,7 +106,7 @@ func openCodexConfig(ctx context.Context, home CodexHome) (*codexStdioClient, er
 	if err != nil {
 		return nil, err
 	}
-	return startCodexStdio(ctx, binary, home.childEnv(os.Environ()))
+	return startCodexStdio(ctx, binary, home.ChildEnv(os.Environ()))
 }
 
 func listCodexHooks(ctx context.Context, home CodexHome, client *codexStdioClient) ([]codexListedHook, error) {

@@ -20,6 +20,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
@@ -1022,9 +1023,12 @@ func TestManagedCodexLaunchWritesProviderReceiptBeforeExec(t *testing.T) {
 	var executed struct {
 		path string
 		argv []string
+		env  []string
 	}
 	var receiptAtExec surface.ManagedCodexLaunchReceipt
 	errExec := errors.New("provider process exited after dispatch")
+	t.Setenv("CODEX_HOME", t.TempDir())
+	home := surfaces.CodexHome{Codex: t.TempDir()}
 	err := runManagedCodexLaunch(
 		context.Background(),
 		[]string{"--model", "o4-mini", "--", "hello"},
@@ -1034,8 +1038,8 @@ func TestManagedCodexLaunchWritesProviderReceiptBeforeExec(t *testing.T) {
 			prepared.cwd, prepared.model = cwd, model
 			return &surface.Session{ID: "provider-thread"}, nil
 		},
-		func(path string, argv, _ []string) error {
-			executed.path, executed.argv = path, append([]string(nil), argv...)
+		func(path string, argv, env []string) error {
+			executed.path, executed.argv, executed.env = path, append([]string(nil), argv...), env
 			var readErr error
 			receiptAtExec, readErr = surface.ReadManagedCodexLaunchReceipt(receiptPath)
 			if readErr != nil {
@@ -1044,7 +1048,17 @@ func TestManagedCodexLaunchWritesProviderReceiptBeforeExec(t *testing.T) {
 			return errExec
 		},
 		"/usr/local/bin/codex",
+		home,
 	)
+	var homes []string
+	for _, entry := range executed.env {
+		if value, ok := strings.CutPrefix(entry, "CODEX_HOME="); ok {
+			homes = append(homes, value)
+		}
+	}
+	if !reflect.DeepEqual(homes, []string{home.Codex}) {
+		t.Fatalf("the resumed Codex runs on CODEX_HOME %q, want only %q", homes, home.Codex)
+	}
 	if !errors.Is(err, errExec) {
 		t.Fatalf("err=%v, want provider exec error", err)
 	}
