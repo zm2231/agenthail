@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -182,5 +183,34 @@ func TestTextThePersonQuotedFromEarlierRepliesIsRecordedAndMarkedForTheSorter(t 
 	want := "> The index is in. Anything else?\nyes,\n> the export writes one CSV per project, streamed so large projects never load\n-- make it a zip"
 	if asked := stub.asks()[0]; asked.Message != want || asked.Reply != "The index is in. Anything else?" {
 		t.Fatalf("asked %q with reply %q, want the quotes marked", asked.Message, asked.Reply)
+	}
+}
+
+func TestAQuoteOfAReplyFarBackInALongSessionIsStillFound(t *testing.T) {
+	stub := &sorterStub{}
+	d, r, handler, p, search := sorterFixture(t, stub)
+	stub.setAnswer(fileTo(search))
+	d.contexts.wait = 10 * time.Second
+	s := p.session(t, r, "claude-long-session")
+	add := func(key string, entry map[string]any) {
+		entry["itemId"], entry["version"], entry["op"] = key, 1, "upsert"
+		data, _ := json.Marshal(entry)
+		if _, _, err := r.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.ID, Kind: "message", ProviderKey: key, Payload: data, ObservedAt: time.Now()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("r-old", map[string]any{"kind": "message", "role": "assistant", "body": "The cache keeps one entry per user and evicts the least recently used after an hour.", "ts": at(-time.Hour)})
+	for i := range 900 {
+		add(fmt.Sprintf("t%d", i), map[string]any{"kind": "tool", "role": "tool", "body": "ok", "ts": at(-30 * time.Minute)})
+	}
+	add("r-new", map[string]any{"kind": "message", "role": "assistant", "body": "Done. Anything else?", "ts": at(-time.Minute)})
+	message := "earlier you said: one entry per user and evicts the least recently used after an hour. make it a day"
+	add("u1", map[string]any{"kind": "message", "role": "user", "promptId": "p-1", "body": message, "ts": at(0)})
+	runSorter(t, d)
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p-1", Prompt: message})
+	eventually(t, "the message to be asked about", func() bool { return len(stub.asks()) == 1 })
+	c, _ := recordedContext(t, p, ledger.PromptRef("p-1"))
+	if len(c.Quotes) != 1 || c.Quotes[0].ReplyItemID != "r-old" || c.Reply == nil || c.Reply.ItemID != "r-new" {
+		t.Fatalf("context = %+v", c)
 	}
 }

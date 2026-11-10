@@ -2,6 +2,7 @@ package ledger_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -81,5 +82,31 @@ func TestQuotesInMultibyteTextKeepWholeCharacters(t *testing.T) {
 	}
 	if typed := ledger.Typed(text, []ledger.Quote{{Start: 1, End: 4}}); typed != text {
 		t.Fatalf("a quote that splits a character was applied: %q", typed)
+	}
+}
+
+func TestAStretchPastedAcrossTwoRepliesIsNeverOneQuote(t *testing.T) {
+	first := ledger.QuoteSource{ItemID: "r2", Text: "Step one is to migrate the orders table and then backfill the totals column"}
+	second := ledger.QuoteSource{ItemID: "r1", Text: "migrate the orders table and then backfill the totals column before the deploy window opens"}
+	text := "Step one is to migrate the orders table and then backfill the totals column before the deploy window opens, fine"
+	quotes := ledger.FindQuotes(text, []ledger.QuoteSource{first, second})
+	if len(quotes) == 0 {
+		t.Fatal("no quotes found")
+	}
+	byID := map[string]string{"r1": second.Text, "r2": first.Text}
+	for i, quoted := range ledger.QuotedText(text, quotes) {
+		if !strings.Contains(byID[quotes[i].ReplyItemID], quoted) {
+			t.Fatalf("quote %q is not part of %s, the reply it names", quoted, quotes[i].ReplyItemID)
+		}
+	}
+}
+
+func TestAQuotedBlockWithABlankQuotedLineKeepsItsReply(t *testing.T) {
+	reply := ledger.QuoteSource{ItemID: "r1", Text: "Shall I ship it?\n\nThe tests pass."}
+	for _, newline := range []string{"\n", "\r\n"} {
+		text := strings.Join([]string{"> Shall I ship it?", ">", "> The tests pass.", "yes"}, newline)
+		if quotes := ledger.FindQuotes(text, []ledger.QuoteSource{reply}); len(quotes) != 1 || quotes[0].ReplyItemID != "r1" {
+			t.Fatalf("quotes %+v in %q", quotes, text)
+		}
 	}
 }

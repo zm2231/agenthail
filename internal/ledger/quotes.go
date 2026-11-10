@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	QuoteMinRunes  = 40
-	QuoteReplies   = 5
-	quoteSourceMax = 64 << 10
+	QuoteMinRunes = 40
+	QuoteReplies  = 5
+	QuoteReplyMax = 64 << 10
+	quoteTextMax  = 256 << 10
 )
 
 // Start and End are byte offsets into the message text as the ledger stores it.
@@ -28,17 +29,17 @@ type QuoteSource struct {
 
 type normalized struct {
 	text       string
-	starts     []int
-	ends       []int
-	runeOffset []int
+	original   int
+	starts     []int32
+	runeOffset []int32
 }
 
 func normalize(text string) normalized {
 	var b strings.Builder
-	var n normalized
+	n := normalized{original: len(text)}
 	for i := 0; i < len(text); {
 		r, size := utf8.DecodeRuneInString(text[i:])
-		start := i
+		n.starts = append(n.starts, int32(i))
 		i += size
 		if unicode.IsSpace(r) {
 			for i < len(text) {
@@ -50,69 +51,84 @@ func normalize(text string) normalized {
 			}
 			r = ' '
 		}
-		n.runeOffset = append(n.runeOffset, b.Len())
-		n.starts, n.ends = append(n.starts, start), append(n.ends, i)
+		n.runeOffset = append(n.runeOffset, int32(b.Len()))
 		b.WriteRune(r)
 	}
-	n.runeOffset = append(n.runeOffset, b.Len())
+	n.runeOffset = append(n.runeOffset, int32(b.Len()))
 	n.text = b.String()
 	return n
 }
 
-func (n normalized) window(i int) string { return n.text[n.runeOffset[i]:n.runeOffset[i+QuoteMinRunes]] }
+func (n normalized) runes() int { return len(n.starts) }
+
+func (n normalized) rune(i int) string { return n.text[n.runeOffset[i]:n.runeOffset[i+1]] }
+
+func (n normalized) window(i int) string {
+	return n.text[n.runeOffset[i]:n.runeOffset[i+QuoteMinRunes]]
+}
+
+func (n normalized) end(i int) int {
+	if i+1 < len(n.starts) {
+		return int(n.starts[i+1])
+	}
+	return n.original
+}
+
+func head(text string, max int) string {
+	if len(text) <= max {
+		return text
+	}
+	for max > 0 && !utf8.RuneStart(text[max]) {
+		max--
+	}
+	return text[:max]
+}
+
+type windowAt struct {
+	source int32
+	rune   int32
+}
 
 // FindQuotes returns the spans of text that are quoted rather than typed: runs of lines starting with "> ",
-// and stretches of at least QuoteMinRunes runes that equal, whitespace aside, a stretch of one of the replies.
-// Replies come newest first; a span names the first reply it matches.
+// and stretches of at least QuoteMinRunes runes that equal, whitespace aside, a stretch of one reply.
+// Replies come newest first and a stretch names the reply it is part of. Only the first QuoteReplyMax
+// bytes of a reply and quoteTextMax bytes of the text are compared.
 func FindQuotes(text string, replies []QuoteSource) []Quote {
 	sources := make([]normalized, len(replies))
-	windows := map[string]string{}
+	windows := map[string]windowAt{}
 	for i, reply := range replies {
-		body := reply.Text
-		if len(body) > quoteSourceMax {
-			body = body[len(body)-quoteSourceMax:]
-			for len(body) > 0 && !utf8.RuneStart(body[0]) {
-				body = body[1:]
-			}
-		}
-		sources[i] = normalize(body)
-		for w := 0; w+QuoteMinRunes <= len(sources[i].starts); w++ {
-			if key := sources[i].window(w); windows[key] == "" {
-				windows[key] = reply.ItemID
+		sources[i] = normalize(head(reply.Text, QuoteReplyMax))
+		for w := 0; w+QuoteMinRunes <= sources[i].runes(); w++ {
+			if _, seen := windows[sources[i].window(w)]; !seen {
+				windows[sources[i].window(w)] = windowAt{source: int32(i), rune: int32(w)}
 			}
 		}
 	}
 	quotes := quotedLines(text, replies, sources)
-	message := normalize(text)
-	var run *Quote
-	runEnd := 0
-	flush := func() {
-		if run != nil && !overlaps(quotes, *run) {
-			quotes = append(quotes, *run)
-		}
-		run = nil
-	}
-	for i := 0; i+QuoteMinRunes <= len(message.starts); i++ {
-		id, ok := windows[message.window(i)]
+	message := normalize(head(text, quoteTextMax))
+	for i := 0; i+QuoteMinRunes <= message.runes(); {
+		at, ok := windows[message.window(i)]
 		if !ok {
+			i++
 			continue
 		}
-		first, last := i, i+QuoteMinRunes-1
-		for first < last && message.text[message.runeOffset[first]] == ' ' {
+		source := sources[at.source]
+		end, from := i+QuoteMinRunes, int(at.rune)+QuoteMinRunes
+		for end < message.runes() && from < source.runes() && message.rune(end) == source.rune(from) {
+			end, from = end+1, from+1
+		}
+		first, last := i, end-1
+		for first < last && message.rune(first) == " " {
 			first++
 		}
-		for last > first && message.text[message.runeOffset[last]] == ' ' {
+		for last > first && message.rune(last) == " " {
 			last--
 		}
-		if run != nil && i <= runEnd {
-			run.End = message.ends[last]
-		} else {
-			flush()
-			run = &Quote{Start: message.starts[first], End: message.ends[last], ReplyItemID: id}
+		if q := (Quote{Start: int(message.starts[first]), End: message.end(last), ReplyItemID: replies[at.source].ItemID}); !overlaps(quotes, q) {
+			quotes = append(quotes, q)
 		}
-		runEnd = i + QuoteMinRunes
+		i = end
 	}
-	flush()
 	slices.SortFunc(quotes, func(a, b Quote) int { return a.Start - b.Start })
 	return quotes
 }
@@ -145,7 +161,11 @@ func quotedLines(text string, replies []QuoteSource, sources []normalized) []Quo
 			next = end + 1
 		}
 		line := strings.TrimSuffix(text[start:end], "\r")
-		if rest, ok := strings.CutPrefix(line, "> "); ok || line == ">" {
+		rest, ok := strings.CutPrefix(line, "> ")
+		if !ok && line == ">" {
+			rest, ok = "", true
+		}
+		if ok {
 			if block == nil {
 				block = &Quote{Start: start}
 			}

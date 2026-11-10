@@ -209,14 +209,14 @@ func (d *Daemon) answeredReplies(sessionID string, match func(sessionJournalPayl
 				found = p.Role == "user" && p.Kind == "message" && match(p)
 				continue
 			}
-			if reply, ok := d.journalReply(sessionID, p); ok {
+			if reply, ok := d.journalReply(sessionID, p, len(replies) == 0); ok {
 				if replies = append(replies, reply); len(replies) == ledger.QuoteReplies {
 					return replies, true
 				}
 			}
 		}
 		rows += len(page.Entries)
-		if page.NextBefore == 0 || len(page.Entries) == 0 || (!found && rows >= contextRows) || (len(replies) > 0 && rows >= 2*contextRows) {
+		if page.NextBefore == 0 || len(page.Entries) == 0 || (!found && rows >= contextRows) || rows >= sessionJournalRetentionCount {
 			return replies, found
 		}
 		cursor = page.NextBefore
@@ -226,7 +226,7 @@ func (d *Daemon) answeredReplies(sessionID string, match func(sessionJournalPayl
 func (d *Daemon) repliesBefore(sessionID string, before time.Time) []ledger.QuoteSource {
 	var replies []ledger.QuoteSource
 	var cursor uint64
-	for rows := 0; rows < contextRows; {
+	for rows := 0; rows < sessionJournalRetentionCount; {
 		page, err := d.Registry.ReadSessionJournalPage(sessionID, cursor, contextPage)
 		if err != nil {
 			return replies
@@ -239,7 +239,7 @@ func (d *Daemon) repliesBefore(sessionID string, before time.Time) []ledger.Quot
 			if ts, err := time.Parse(time.RFC3339Nano, p.TS); err != nil || !ts.Before(before) {
 				continue
 			}
-			if reply, ok := d.journalReply(sessionID, p); ok {
+			if reply, ok := d.journalReply(sessionID, p, len(replies) == 0); ok {
 				if replies = append(replies, reply); len(replies) == ledger.QuoteReplies {
 					return replies
 				}
@@ -254,13 +254,17 @@ func (d *Daemon) repliesBefore(sessionID string, before time.Time) []ledger.Quot
 	return replies
 }
 
-func (d *Daemon) journalReply(sessionID string, p sessionJournalPayload) (ledger.QuoteSource, bool) {
+func (d *Daemon) journalReply(sessionID string, p sessionJournalPayload, whole bool) (ledger.QuoteSource, bool) {
 	if p.Role != "assistant" || p.Body == "" || (p.Kind != "message" && p.Kind != "text") {
 		return ledger.QuoteSource{}, false
 	}
 	body := p.Body
 	if p.Truncated && p.BodyRef != "" {
-		if full, _, err := d.Registry.SessionJournalBody(sessionID, p.BodyRef, 0, 1<<40); err == nil {
+		end := 1 << 40
+		if !whole {
+			end = ledger.QuoteReplyMax
+		}
+		if full, _, err := d.Registry.SessionJournalBody(sessionID, p.BodyRef, 0, end); err == nil {
 			body = string(full)
 		}
 	}
