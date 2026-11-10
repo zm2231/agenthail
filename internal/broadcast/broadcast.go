@@ -302,7 +302,7 @@ func (b Broadcaster) members(target Target, now time.Time) ([]string, []registry
 	var members []string
 	for _, record := range snapshot.Sessions {
 		item, ok := sessionProject(record)
-		if !ok || item.ID != target.ProjectID || record.HostID != "" || record.Freshness.Stale || coordinated[record.Session.ID] {
+		if !ok || item.ID != target.ProjectID || record.HostID != "" || coordinated[record.Session.ID] {
 			continue
 		}
 		if marks[record.Session.ID].PinnedAt.IsZero() && !surface.RecentlyUsed(record.Session, now) {

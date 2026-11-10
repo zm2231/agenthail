@@ -277,20 +277,13 @@ func TestThePersonsChannelPostReachesAnotherHostAsThePersonWithTheirName(t *test
 func TestAProjectChannelReachesPinnedAndRecentlyUsedConversationsWhoseProcessEnded(t *testing.T) {
 	local, _, _ := widgetOnTwoHosts(t)
 	repo := local.fake.sessions["local-a"].Cwd
-	ended := func(id string, lastActive time.Time) {
-		t.Helper()
-		moveSession(t, local, id, repo, lastActive)
-		session := local.fake.sessions[id]
-		session.Status = surface.StatusOffline
-		local.fake.sessions[id] = session
-		if err := local.reg.RegisterSession(session); err != nil {
-			t.Fatal(err)
+	for _, id := range []string{"ended-recent", "ended-pinned", "ended-old", "ended-archived"} {
+		lastActive := time.Now().Add(-time.Hour)
+		if id == "ended-pinned" || id == "ended-old" {
+			lastActive = time.Now().Add(-72 * time.Hour)
 		}
+		moveSession(t, local, id, repo, lastActive)
 	}
-	ended("ended-recent", time.Now().Add(-time.Hour))
-	ended("ended-pinned", time.Now().Add(-72*time.Hour))
-	ended("ended-old", time.Now().Add(-72*time.Hour))
-	ended("ended-archived", time.Now().Add(-time.Hour))
 	if _, err := local.reg.PinSession("ended-pinned", time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -298,6 +291,30 @@ func TestAProjectChannelReachesPinnedAndRecentlyUsedConversationsWhoseProcessEnd
 		t.Fatal(err)
 	}
 	local.daemon.discoverCatalog(context.Background())
+	for _, id := range []string{"ended-recent", "ended-pinned", "ended-old", "ended-archived"} {
+		delete(local.fake.sessions, id)
+	}
+	ended := func() bool {
+		snapshot, err := local.reg.CatalogSnapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, record := range snapshot.Sessions {
+			if record.Session.ID == "ended-recent" {
+				return record.Freshness.Stale && record.Session.Status == surface.StatusOffline
+			}
+		}
+		return false
+	}
+	for range 3 {
+		if ended() {
+			break
+		}
+		local.daemon.discoverCatalog(context.Background())
+	}
+	if !ended() {
+		t.Fatal("a conversation discovery no longer lists did not read as ended: offline and stale")
+	}
 	before := len(local.fake.delivered())
 	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "release notes", "sourceSessionId": "local-a"})
 	var answer struct {
