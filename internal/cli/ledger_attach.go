@@ -19,7 +19,7 @@ type ledgerWriteArgs struct {
 var ledgerWriteValueFlags = map[string]bool{"--as": true, "--to": true, "--clause": true, "--type": true, "--source": true, "--session": true, "--project": true, "--from": true,
 	"--recommendation": true, "--default": true, "--deadline": true, "--kind": true, "--reason": true, "--ref": true, "--condition": true,
 	"--on": true, "--utterance": true, "--done": true, "--remaining": true, "--decisions": true, "--uncertain": true,
-	"--covers": true, "--missing": true, "--in": true, "--through": true,
+	"--covers": true, "--missing": true, "--in": true, "--through": true, "--context": true,
 	"--priority": true, "--description": true, "--acceptance": true, "--label": true, "--unlabel": true, "--text": true, "--found-in": true, "--state": true, "--assignee": true, "--sort": true, "--limit": true, "--attach": true}
 
 var ledgerRepeatableFlags = map[string]bool{"--clause": true, "--done": true, "--remaining": true, "--decisions": true, "--uncertain": true,

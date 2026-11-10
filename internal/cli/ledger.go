@@ -33,6 +33,12 @@ var ledgerCommands = map[string]func(a *App, c ledgerCall) error{
 		}
 		return a.ledgerShow(c.store, c.args, c.positional[1])
 	},
+	"words": func(a *App, c ledgerCall) error {
+		if len(c.positional) != 2 {
+			return fmt.Errorf("usage: agenthail ledger words <utterance_id> [--context N] [--json]")
+		}
+		return a.ledgerWords(c.store, c.args, c.positional[1])
+	},
 	"enable":       func(a *App, c ledgerCall) error { return a.ledgerEnable(c.args) },
 	"disable":      func(a *App, c ledgerCall) error { return a.ledgerDisable(c.args) },
 	"goal":         func(a *App, c ledgerCall) error { return a.ledgerGoal(c.args) },
@@ -89,7 +95,7 @@ func (a *App) cmdLedger(args []string) error {
 	return run(a, ledgerCall{store: store, args: args, positional: positional})
 }
 
-var ledgerReads = map[string]bool{"asks": true, "ask": true, "show": true, "goals": true, "questions": true, "digest": true,
+var ledgerReads = map[string]bool{"asks": true, "ask": true, "show": true, "words": true, "goals": true, "questions": true, "digest": true,
 	"list": true, "ready": true, "next": true, "critical-path": true, "search": true}
 
 func ledgerRead(positional []string) bool {

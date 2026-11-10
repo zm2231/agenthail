@@ -28,6 +28,7 @@ type ContextPayload struct {
 	UtteranceID string  `json:"utteranceId"`
 	Status      string  `json:"status"`
 	JoinedBy    string  `json:"joinedBy,omitempty"`
+	EntryItemID string  `json:"entryItemId,omitempty"`
 	Reply       *Reply  `json:"reply,omitempty"`
 	Quotes      []Quote `json:"quotes,omitempty"`
 }
@@ -99,7 +100,7 @@ func (c *ContextPayload) clone() *ContextPayload {
 	return &out
 }
 
-func clipReply(context *ContextPayload) *ContextPayload {
+func ClipReply(context *ContextPayload) *ContextPayload {
 	out := context.clone()
 	if out == nil || out.Reply == nil || len(out.Reply.Text) <= readReplyClip {
 		return out
@@ -121,6 +122,28 @@ func (b *Board) applyContext(data []byte) error {
 		u.Context = &p
 	}
 	return nil
+}
+
+type CapturedWords struct {
+	UtteranceView
+	HostID string `json:"hostId"`
+}
+
+func (s *Store) CapturedWords(projectKey, utteranceID string) (CapturedWords, bool, error) {
+	board, err := s.Board(projectKey)
+	if err != nil {
+		return CapturedWords{}, false, err
+	}
+	view, ok := board.Utterance(utteranceID)
+	if !ok {
+		return CapturedWords{}, false, nil
+	}
+	words := CapturedWords{UtteranceView: view}
+	err = s.read.QueryRow(`SELECT actor_host_id FROM ledger_events WHERE project_key=? AND type=? AND ref=?`, projectKey, string(EventUtterance), utteranceID).Scan(&words.HostID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CapturedWords{}, false, nil
+	}
+	return words, err == nil, err
 }
 
 func (s *Store) UtteranceText(projectKey, utteranceID string) (string, bool, error) {

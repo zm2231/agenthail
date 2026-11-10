@@ -137,12 +137,12 @@ func (d *Daemon) messageContext(ctx context.Context, job contextJob) (ledger.Con
 	deadline := job.at.Add(d.contexts.wait)
 	match := d.userEntryMatcher(job)
 	for {
-		if replies, found := d.answeredReplies(job.targetID, match); found {
+		if replies, entry, found := d.answeredReplies(job.targetID, match); found {
 			status := ledger.ReplyNone
 			if len(replies) > 0 {
 				status = ledger.ReplyFound
 			}
-			return d.withReplies(job, ledger.ContextPayload{UtteranceID: job.utteranceID, Status: status, JoinedBy: ledger.JoinedByID}, replies), true
+			return d.withReplies(job, ledger.ContextPayload{UtteranceID: job.utteranceID, Status: status, JoinedBy: ledger.JoinedByID, EntryItemID: entry}, replies), true
 		}
 		if !time.Now().Before(deadline) {
 			late := ledger.ContextPayload{UtteranceID: job.utteranceID, Status: ledger.ReplyLate}
@@ -193,12 +193,12 @@ func (d *Daemon) userEntryMatcher(job contextJob) func(sessionJournalPayload) bo
 
 // answeredReplies finds the session's entry for the message among its newest entries and returns up to
 // QuoteReplies replies before it, newest first; found is false while that entry is not there.
-func (d *Daemon) answeredReplies(sessionID string, match func(sessionJournalPayload) bool) (replies []ledger.QuoteSource, found bool) {
+func (d *Daemon) answeredReplies(sessionID string, match func(sessionJournalPayload) bool) (replies []ledger.QuoteSource, entry string, found bool) {
 	var cursor uint64
 	for rows := 0; ; {
 		page, err := d.Registry.ReadSessionJournalPage(sessionID, cursor, contextPage)
 		if err != nil {
-			return replies, found
+			return replies, entry, found
 		}
 		for i := len(page.Entries) - 1; i >= 0; i-- {
 			var p sessionJournalPayload
@@ -206,18 +206,20 @@ func (d *Daemon) answeredReplies(sessionID string, match func(sessionJournalPayl
 				continue
 			}
 			if !found {
-				found = p.Role == "user" && p.Kind == "message" && match(p)
+				if found = p.Role == "user" && p.Kind == "message" && match(p); found {
+					entry = p.ItemID
+				}
 				continue
 			}
 			if reply, ok := d.journalReply(sessionID, p, len(replies) == 0); ok {
 				if replies = append(replies, reply); len(replies) == ledger.QuoteReplies {
-					return replies, true
+					return replies, entry, true
 				}
 			}
 		}
 		rows += len(page.Entries)
 		if page.NextBefore == 0 || len(page.Entries) == 0 || (!found && rows >= contextRows) || rows >= sessionJournalRetentionCount {
-			return replies, found
+			return replies, entry, found
 		}
 		cursor = page.NextBefore
 	}

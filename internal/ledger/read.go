@@ -150,7 +150,7 @@ func (s *Store) readBoard(projectKey string, board *Board, req ReadRequest, resu
 	provisional := attachment.Provisional
 	newest := slices.Clone(provisional[max(0, len(provisional)-readProvisional):])
 	for i := range newest {
-		newest[i].Context = clipReply(newest[i].Context)
+		newest[i].Context = ClipReply(newest[i].Context)
 	}
 	goals, next := pageEntries(entriesOf(board.Goals()), "", readDefaultLimit, req.Budget)
 	result["appliedSeq"] = board.AppliedSeq()
