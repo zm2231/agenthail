@@ -30,7 +30,6 @@ var binary string
 // inside a test's deadline; under a cold cache and a parallel race suite it
 // takes longer than those deadlines allow.
 func TestMain(m *testing.M) {
-	testkit.ClearAgentEnv()
 	os.Exit(testkit.RunInOwnHome(func() int {
 		buildDir, err := os.MkdirTemp("", "ah-bin-")
 		if err != nil {
