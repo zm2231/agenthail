@@ -50,6 +50,10 @@ Session commands:
   requests <target> [--json]     List the tool approvals and questions a session waits on you for
   answer <target> <allow|always|deny|never|stop|"answer"> [--request id] [--reason text] [--answers json]
                                  Answer the oldest open request, or the one --request names
+  ask <title> --option <label>[: does]... [--question text] [--recommend n] [--link title=url]
+                                 Raise an ask for this session; it goes to your lead, else the person
+  ask list|show <id>|answer <id> <answer>|escalate <id>|withdraw <id>
+                                 Read, answer, pass on or withdraw asks
   interrupt <target> [--json] [--timeout 30s]
                                  Stop current turn; Claude waits for the turn to end
   steer <target> "message" [--json] [--timeout 30s]

@@ -27,7 +27,8 @@ var (
 	Prompt       = Hook{Event: "PermissionRequest", Args: "hook permission-request", Matcher: "*", Timeout: 86400}
 	Start        = Hook{Event: "SessionStart", Args: "hook session-context", Timeout: 10}
 	PromptSubmit = Hook{Event: "UserPromptSubmit", Args: "hook session-context", Timeout: 10}
-	All          = []Hook{Prompt, Start, PromptSubmit}
+	Stop         = Hook{Event: "Stop", Args: "hook stop --surface claude --terminal", Timeout: 10}
+	All          = []Hook{Prompt, Start, PromptSubmit, Stop}
 )
 
 // The states of Agenthail's hooks in a settings file. An outdated hook is
