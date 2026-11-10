@@ -179,7 +179,7 @@ func (c *Codex) resolveRoute(ctx context.Context, runtimes *codexRuntimes, sess 
 		}
 	}
 	if originator == "" {
-		originator = codexRolloutOriginator(codexTranscriptPath(sess))
+		originator = codexRolloutOriginator(c.home.transcriptPath(sess))
 	}
 	setCodexTransport(sess, runtimes.route(sess.ID, originator))
 }

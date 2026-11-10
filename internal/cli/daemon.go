@@ -251,7 +251,7 @@ func humanSize(n int64) string {
 }
 
 func printCodexSetupNote() {
-	if _, err := surfaces.CodexDaemonCLI(); err != nil {
+	if _, err := surfaces.CodexDaemonCLI(surfaces.CodexHomeFromEnv()); err != nil {
 		fmt.Printf("Codex: %s\n", err)
 	}
 }

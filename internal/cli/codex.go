@@ -27,13 +27,14 @@ func (a *App) cmdCodex(args []string) error {
 			return fmt.Errorf("agenthail codex manages the remote transport; remove %s", arg)
 		}
 	}
-	path, err := surfaces.CodexDaemonCLI()
+	home := surfaces.CodexHomeFromEnv()
+	path, err := surfaces.CodexDaemonCLI(home)
 	if err != nil {
 		return fmt.Errorf("find codex: %w", err)
 	}
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancelStart()
-	if err := surfaces.NewCodex("").EnsureRuntime(startCtx); err != nil {
+	if err := surfaces.NewCodexIn(home, "").EnsureRuntime(startCtx); err != nil {
 		return err
 	}
 	cwd, err := os.Getwd()
@@ -160,7 +161,7 @@ func managedCodexLaunchArgs(args []string) (string, string, error) {
 }
 
 func repairManagedCodexRuntime(ctx context.Context) error {
-	if err := surfaces.RestartManagedCodexRuntime(ctx); err != nil {
+	if err := surfaces.RestartManagedCodexRuntime(ctx, surfaces.CodexHomeFromEnv()); err != nil {
 		return fmt.Errorf("restart managed Codex runtime: %w", err)
 	}
 	fmt.Println("Codex's app-server daemon restarted; retry the affected conversation")

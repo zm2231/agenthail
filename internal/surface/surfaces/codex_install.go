@@ -31,24 +31,6 @@ type CodexInstallation struct {
 	Desktop string `json:"desktop,omitempty"`
 }
 
-func codexHome() string {
-	if home := strings.TrimSpace(os.Getenv("CODEX_HOME")); home != "" {
-		return home
-	}
-	userHome, _ := os.UserHomeDir()
-	return filepath.Join(userHome, ".codex")
-}
-
-// codexDaemonPackageBinaries are the binaries Codex's daemon installs for
-// itself, current layout first; they match the daemon that is running.
-func codexDaemonPackageBinaries() []string {
-	packages := filepath.Join(codexHome(), "packages")
-	return []string{
-		filepath.Join(packages, "app-server-daemon", "current", "bin", "codex"),
-		filepath.Join(packages, "standalone", "current", "codex"),
-	}
-}
-
 func isExecutableFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir() && info.Mode()&0111 != 0
@@ -62,7 +44,7 @@ func isCodexDesktopBundle(path string) bool {
 	return strings.Contains(resolved, ".app/Contents/")
 }
 
-func DetectCodexInstallation() CodexInstallation {
+func DetectCodexInstallation(home CodexHome) CodexInstallation {
 	var install CodexInstallation
 	for _, path := range CodexDesktopExecutables {
 		if isExecutableFile(path) {
@@ -70,7 +52,7 @@ func DetectCodexInstallation() CodexInstallation {
 			break
 		}
 	}
-	candidates := codexDaemonPackageBinaries()
+	candidates := home.daemonPackageBinaries()
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		if dir != "" {
 			candidates = append(candidates, filepath.Join(dir, "codex"))

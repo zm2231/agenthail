@@ -91,26 +91,26 @@ func ownsCodexContextHook(command string) bool {
 	return filepath.IsAbs(path) && filepath.Base(path) == "agenthail"
 }
 
-func codexBinary() (string, error) {
+func codexBinary(home CodexHome) (string, error) {
 	if path, err := exec.LookPath("codex"); err == nil {
 		return path, nil
 	}
-	if daemon := DetectCodexInstallation().Daemon; daemon != "" {
+	if daemon := DetectCodexInstallation(home).Daemon; daemon != "" {
 		return daemon, nil
 	}
 	return "", errors.New("codex is not installed")
 }
 
-func openCodexConfig(ctx context.Context) (*codexStdioClient, error) {
-	binary, err := codexBinary()
+func openCodexConfig(ctx context.Context, home CodexHome) (*codexStdioClient, error) {
+	binary, err := codexBinary(home)
 	if err != nil {
 		return nil, err
 	}
-	return startCodexStdio(ctx, binary, os.Environ())
+	return startCodexStdio(ctx, binary, home.childEnv(os.Environ()))
 }
 
-func listCodexHooks(ctx context.Context, client *codexStdioClient) ([]codexListedHook, error) {
-	response, err := client.Request(ctx, "hooks/list", map[string]any{"cwds": []string{codexHome()}}, 30*time.Second)
+func listCodexHooks(ctx context.Context, home CodexHome, client *codexStdioClient) ([]codexListedHook, error) {
+	response, err := client.Request(ctx, "hooks/list", map[string]any{"cwds": []string{home.Codex}}, 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -136,27 +136,28 @@ func listCodexHooks(ctx context.Context, client *codexStdioClient) ([]codexListe
 
 // InstallCodexContext has the person's own Codex sessions told who they are:
 // the session-context hooks in the hooks file the person already uses
-// (hooks.json when CODEX_HOME has one, else config.toml, written by Codex),
-// trusted with the hash Codex reports for them, and Agenthail's standing
-// instructions in a marked block of CODEX_HOME/AGENTS.md. The Stop hook that
-// asks a turn to end goes in only for a Codex that continues a blocked turn.
-func InstallCodexContext(ctx context.Context, executable string) (bool, error) {
-	client, err := openCodexConfig(ctx)
+// (hooks.json when the Codex home has one, else config.toml, written by
+// Codex), trusted with the hash Codex reports for them, and Agenthail's
+// standing instructions in a marked block of the home's AGENTS.md. The Stop
+// hook that asks a turn to end goes in only for a Codex that continues a
+// blocked turn.
+func InstallCodexContext(ctx context.Context, home CodexHome, executable string) (bool, error) {
+	client, err := openCodexConfig(ctx, home)
 	if err != nil {
 		return false, err
 	}
 	defer client.Close()
-	changed, err := writeCodexMemory(true)
+	changed, err := writeCodexMemory(home, true)
 	if err != nil {
 		return false, err
 	}
-	edited, err := editCodexHooks(ctx, client, codexWantedHooks(executable, client.version))
+	edited, err := editCodexHooks(ctx, home, client, codexWantedHooks(executable, client.version))
 	if err != nil {
 		return false, err
 	}
 	changed = changed || edited
 	trusted, err := writeCodexUserConfig(ctx, client, func(map[string]any) ([]map[string]any, error) {
-		owned, err := listCodexHooks(ctx, client)
+		owned, err := listCodexHooks(ctx, home, client)
 		if err != nil {
 			return nil, err
 		}
@@ -171,21 +172,21 @@ func InstallCodexContext(ctx context.Context, executable string) (bool, error) {
 	return changed || trusted, err
 }
 
-func UninstallCodexContext(ctx context.Context) (bool, error) {
-	client, err := openCodexConfig(ctx)
+func UninstallCodexContext(ctx context.Context, home CodexHome) (bool, error) {
+	client, err := openCodexConfig(ctx, home)
 	if err != nil {
 		return false, err
 	}
 	defer client.Close()
-	changed, err := writeCodexMemory(false)
+	changed, err := writeCodexMemory(home, false)
 	if err != nil {
 		return false, err
 	}
-	owned, err := listCodexHooks(ctx, client)
+	owned, err := listCodexHooks(ctx, home, client)
 	if err != nil {
 		return false, err
 	}
-	edited, err := editCodexHooks(ctx, client, nil)
+	edited, err := editCodexHooks(ctx, home, client, nil)
 	if err != nil {
 		return false, err
 	}
@@ -205,20 +206,20 @@ func UninstallCodexContext(ctx context.Context) (bool, error) {
 // when the Codex is too old for the Stop hook; untrusted when only Codex's
 // trust is missing; missing when none of it is there; outdated otherwise;
 // and empty when this user has no Codex.
-func CodexContextState(ctx context.Context, executable string) (string, error) {
-	if _, err := os.Stat(codexHome()); os.IsNotExist(err) {
+func CodexContextState(ctx context.Context, home CodexHome, executable string) (string, error) {
+	if _, err := os.Stat(home.Codex); os.IsNotExist(err) {
 		return "", nil
 	}
-	memory, err := os.ReadFile(filepath.Join(codexHome(), "AGENTS.md"))
+	memory, err := os.ReadFile(filepath.Join(home.Codex, "AGENTS.md"))
 	if err != nil && !os.IsNotExist(err) {
 		return "", err
 	}
-	client, err := openCodexConfig(ctx)
+	client, err := openCodexConfig(ctx, home)
 	if err != nil {
 		return "", err
 	}
 	defer client.Close()
-	owned, err := listCodexHooks(ctx, client)
+	owned, err := listCodexHooks(ctx, home, client)
 	if err != nil {
 		return "", err
 	}
@@ -288,8 +289,8 @@ func withoutCodexContextHook(groups []any) []any {
 // person uses running the command commands gives that event, and in no event
 // commands leaves out: hooks.json edited by path so every other byte stays,
 // config.toml through Codex, which keeps the rest of it as written.
-func editCodexHooks(ctx context.Context, client *codexStdioClient, commands map[string]string) (bool, error) {
-	path := filepath.Join(codexHome(), "hooks.json")
+func editCodexHooks(ctx context.Context, home CodexHome, client *codexStdioClient, commands map[string]string) (bool, error) {
+	path := filepath.Join(home.Codex, "hooks.json")
 	if data, err := os.ReadFile(path); err == nil {
 		updated, err := editCodexHooksFile(data, commands)
 		if err != nil {
@@ -408,8 +409,8 @@ func editCodexHooksFile(data []byte, commands map[string]string) ([]byte, error)
 	return data, nil
 }
 
-func writeCodexMemory(install bool) (bool, error) {
-	path := filepath.Join(codexHome(), "AGENTS.md")
+func writeCodexMemory(home CodexHome, install bool) (bool, error) {
+	path := filepath.Join(home.Codex, "AGENTS.md")
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return false, err

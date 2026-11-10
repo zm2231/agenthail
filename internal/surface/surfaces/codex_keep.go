@@ -29,7 +29,7 @@ func (c *Codex) Wake(ctx context.Context, sess *surface.Session) error {
 	if sess.RuntimeKind != surface.RuntimeCodexAppServer {
 		return fmt.Errorf("%w: only a thread the Codex app-server runs is brought back", surface.ErrUnsupported)
 	}
-	release, err := acquireCodexThreadWrite(ctx, sess.ID)
+	release, err := c.home.acquireThreadWrite(ctx, sess.ID)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
 	}

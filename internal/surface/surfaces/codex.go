@@ -38,6 +38,7 @@ type Codex struct {
 	subscriptions codexSubscriptions
 	turnStarts    codexTurnStarts
 	moves         codexMovesHeld
+	home          CodexHome
 }
 
 // codexDesktopRunsHere is whether Codex Desktop can run on this machine;
@@ -46,17 +47,21 @@ type Codex struct {
 var codexDesktopRunsHere = runtime.GOOS == "darwin"
 
 func NewCodex(remoteURL string) *Codex {
+	return NewCodexIn(CodexHomeFromEnv(), remoteURL)
+}
+
+func NewCodexIn(home CodexHome, remoteURL string) *Codex {
 	managed := remoteURL == "" || !strings.Contains(remoteURL, "://")
 	if remoteURL == "" {
-		if !codexDesktopRunsHere || !codexHomeIsAccountDefault() {
-			return &Codex{managed: managed}
+		if !codexDesktopRunsHere || !codexHomeIsAccountDefault(home.Codex) {
+			return &Codex{managed: managed, home: home}
 		}
 		remoteURL = "9231"
 	}
 	if !strings.Contains(remoteURL, "://") {
 		remoteURL = "ws://127.0.0.1:" + remoteURL
 	}
-	return &Codex{desktopURL: remoteURL, managed: managed}
+	return &Codex{desktopURL: remoteURL, managed: managed, home: home}
 }
 
 func (c *Codex) Name() surface.SurfaceKind { return surface.KindCodex }

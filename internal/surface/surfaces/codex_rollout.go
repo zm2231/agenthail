@@ -59,7 +59,7 @@ func readCodexRolloutHeader(path string) (codexRolloutHeader, int64, error) {
 	return header, end, nil
 }
 
-func codexRolloutLineage(current, threadID string) ([]codexRolloutSegment, error) {
+func (h CodexHome) rolloutLineage(current, threadID string) ([]codexRolloutSegment, error) {
 	var segments []codexRolloutSegment
 	source, end := current, int64(-1)
 	for {
@@ -95,7 +95,7 @@ func codexRolloutLineage(current, threadID string) ([]codexRolloutSegment, error
 		if base == nil {
 			break
 		}
-		previous, err := findCodexRollout(base.RolloutID, threadID)
+		previous, err := h.findRollout(base.RolloutID, threadID)
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +108,7 @@ func codexRolloutLineage(current, threadID string) ([]codexRolloutSegment, error
 }
 
 // Rollout ids are UUIDv7, so a rollout's id dates its folder.
-func findCodexRollout(rolloutID, threadID string) (string, error) {
+func (h CodexHome) findRollout(rolloutID, threadID string) (string, error) {
 	name := threadID
 	if rolloutID != threadID {
 		name = threadID + "_" + rolloutID
@@ -116,7 +116,7 @@ func findCodexRollout(rolloutID, threadID string) (string, error) {
 	var matches []string
 	for _, day := range codexRolloutDays(uuidV7Time(rolloutID)) {
 		for _, suffix := range []string{".jsonl", ".jsonl.zst"} {
-			found, _ := filepath.Glob(filepath.Join(codexHome(), "sessions", day, "rollout-*-"+name+suffix))
+			found, _ := filepath.Glob(filepath.Join(h.sessionsDir(), day, "rollout-*-"+name+suffix))
 			matches = append(matches, found...)
 		}
 	}
@@ -206,7 +206,7 @@ func pruneCodexRolloutCache(dir string) {
 // Cursors address the rollouts' retained bytes laid end to end, so a thread
 // that never continued pages by its own file's offsets. Identity and offset
 // are always the current rollout's: a stream follows only that one.
-func readCodexTranscriptPage(ctx context.Context, path, threadID string, before int64, limit int) (*surface.SessionReadResult, error) {
+func readCodexTranscriptPage(ctx context.Context, home CodexHome, path, threadID string, before int64, limit int) (*surface.SessionReadResult, error) {
 	if path == "" {
 		return readTranscriptPage(ctx, path, "codex", before, limit, nil)
 	}
@@ -214,7 +214,7 @@ func readCodexTranscriptPage(ctx context.Context, path, threadID string, before 
 	if err != nil || header.Payload.HistoryBase == nil {
 		return readTranscriptPage(ctx, path, "codex", before, limit, nil)
 	}
-	segments, err := codexRolloutLineage(path, threadID)
+	segments, err := home.rolloutLineage(path, threadID)
 	if err != nil {
 		page, pageErr := readTranscriptPage(ctx, path, "codex", before, limit, nil)
 		if pageErr != nil {
@@ -307,11 +307,11 @@ func readCodexTranscriptPage(ctx context.Context, path, threadID string, before 
 
 // A trusted rollout Codex compressed or rewrote since is matched by path.
 func (c *Codex) TranscriptContinuation(ctx context.Context, session *surface.Session, trustedPath, trustedIdentity string) ([]surface.TimelineItem, bool, error) {
-	current := codexTranscriptPath(session)
+	current := c.home.transcriptPath(session)
 	if current == "" || current == trustedPath {
 		return nil, false, nil
 	}
-	segments, err := codexRolloutLineage(current, session.ID)
+	segments, err := c.home.rolloutLineage(current, session.ID)
 	if err != nil {
 		return nil, false, nil
 	}

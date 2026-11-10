@@ -27,7 +27,7 @@ func (v *CodexVoice) Create(ctx context.Context, cwd, instructions string) (*sur
 	if v.Codex.managed {
 		return v.createManaged(ctx, cwd, instructions)
 	}
-	lock, err := acquireCodexWriteLock(ctx)
+	lock, err := v.Codex.home.acquireWriteLock(ctx)
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}

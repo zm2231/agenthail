@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 )
@@ -27,10 +26,10 @@ type codexTurnStarts struct {
 type codexTurnStart struct {
 	at     time.Time
 	turnID string
-	server os.FileInfo
+	server *codexServer
 }
 
-func (s *codexTurnStarts) begin(threadID string, server os.FileInfo) {
+func (s *codexTurnStarts) begin(threadID string, server *codexServer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.started == nil {
@@ -46,7 +45,7 @@ func (s *codexTurnStarts) live(threadID string) (codexTurnStart, bool) {
 	if !ok {
 		return start, false
 	}
-	if time.Since(start.at) >= codexTurnStartLimit || start.server != nil && codexServerRestarted(start.server) {
+	if time.Since(start.at) >= codexTurnStartLimit || start.server != nil && start.server.restarted() {
 		delete(s.started, threadID)
 		return start, false
 	}
@@ -118,7 +117,7 @@ func (s *codexTurnStarts) pending(threadID string) bool {
 // before Codex creates one, so its turn is the one this connection receives
 // after the answer and sees run a contextCompaction item.
 func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
-	var server os.FileInfo
+	var server *codexServer
 	if managed, ok := client.(*managedCodexClient); ok {
 		server = managed.server
 	}

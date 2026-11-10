@@ -80,7 +80,7 @@ func (c *Codex) SetTurnSetting(ctx context.Context, sess *surface.Session, key, 
 			return err
 		}
 	}
-	release, err := acquireCodexThreadWrite(ctx, sess.ID)
+	release, err := c.home.acquireThreadWrite(ctx, sess.ID)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
 	}

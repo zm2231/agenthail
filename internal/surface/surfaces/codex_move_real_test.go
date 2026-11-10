@@ -15,8 +15,8 @@ import (
 )
 
 type codexMachine struct {
-	home, codexHome, cwd string
-	codex                *Codex
+	cwd   string
+	codex *Codex
 }
 
 func realCodexMachine(t *testing.T) *codexMachine {
@@ -26,18 +26,14 @@ func realCodexMachine(t *testing.T) *codexMachine {
 	if err != nil {
 		t.Fatal(err)
 	}
-	machine := &codexMachine{home: os.Getenv("HOME"), codexHome: os.Getenv("CODEX_HOME"), cwd: cwd, codex: isolatedManagedRuntime(t)}
+	machine := &codexMachine{cwd: cwd, codex: isolatedManagedRuntime(t)}
 	machine.codex.SetCodexConfigStore(newMemoryCodexConfig())
 	return machine
 }
 
-// use makes this machine's homes the ones the adapter reads, as if the test
-// ran on it.
-func (m *codexMachine) use(t *testing.T) codexClient {
+func (m *codexMachine) client(t *testing.T) codexClient {
 	t.Helper()
-	t.Setenv("HOME", m.home)
-	t.Setenv("CODEX_HOME", m.codexHome)
-	client, err := dialManagedCodex(context.Background())
+	client, err := m.codex.home.dialManaged(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +43,6 @@ func (m *codexMachine) use(t *testing.T) codexClient {
 
 func (m *codexMachine) moveOut(t *testing.T, threadID string) (*surface.MoveOut, string, *bytes.Buffer) {
 	t.Helper()
-	m.use(t)
 	ctx := context.Background()
 	session, err := m.codex.Resolve(ctx, threadID)
 	if err != nil {
@@ -71,7 +66,6 @@ func (m *codexMachine) moveOut(t *testing.T, threadID string) (*surface.MoveOut,
 
 func (m *codexMachine) moveIn(t *testing.T, out *surface.MoveOut, moveID string, archive *bytes.Buffer) *surface.Session {
 	t.Helper()
-	m.use(t)
 	in := surface.MoveIn{MoveID: moveID, Conversation: out.Conversation, Cwd: m.cwd, Title: out.Title, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, State: out.State}
 	if err := m.codex.CheckMoveIn(in); err != nil {
 		t.Fatal(err)
@@ -92,11 +86,17 @@ func threadTurns(t *testing.T, client codexClient, threadID string) int {
 	return len(gjson.Get(codexJSON(response), "result.data").Array())
 }
 
-func TestARealCodexThreadMovesToAnotherCodexHomeAndBack(t *testing.T) {
+func TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack(t *testing.T) {
 	source, target := realCodexMachine(t), realCodexMachine(t)
+	if source.codex.home == target.codex.home {
+		t.Fatalf("both adapters hold %+v", source.codex.home)
+	}
+	elsewhere := t.TempDir()
+	t.Setenv("HOME", elsewhere)
+	t.Setenv("CODEX_HOME", filepath.Join(elsewhere, ".codex"))
 	ctx := context.Background()
 
-	owner := source.use(t)
+	owner := source.client(t)
 	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": source.cwd}, 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestARealCodexThreadMovesToAnotherCodexHomeAndBack(t *testing.T) {
 	realTurn(t, owner, threadID, "after the restored move")
 
 	out, moveID, archive := source.moveOut(t, threadID)
-	archived, err := codexThreadRollouts(filepath.Join(source.codexHome, "archived_sessions"), threadID, false)
+	archived, err := codexThreadRollouts(source.codex.home.archivedDir(), threadID, false)
 	if err != nil || len(archived) != 1 {
 		t.Fatalf("archived rollouts=%v err=%v", archived, err)
 	}
@@ -148,7 +148,7 @@ func TestARealCodexThreadMovesToAnotherCodexHomeAndBack(t *testing.T) {
 	}
 
 	moved := target.moveIn(t, out, moveID, archive)
-	client := target.use(t)
+	client := target.client(t)
 	if moved.ID != threadID || moved.Cwd != target.cwd {
 		t.Fatalf("the target runs %s in %s, want %s in %s", moved.ID, moved.Cwd, threadID, target.cwd)
 	}
@@ -168,7 +168,10 @@ func TestARealCodexThreadMovesToAnotherCodexHomeAndBack(t *testing.T) {
 	if returned.Cwd != source.cwd {
 		t.Fatalf("the source runs the returned thread in %s, want %s", returned.Cwd, source.cwd)
 	}
-	client = source.use(t)
+	client = source.client(t)
+	if entries, err := os.ReadDir(elsewhere); err != nil || len(entries) != 0 {
+		t.Fatalf("an adapter wrote into the process's current home: %v %v", entries, err)
+	}
 	if turns := threadTurns(t, client, threadID); turns != before+1 {
 		t.Fatalf("the returned thread lists %d turns, want %d", turns, before+1)
 	}

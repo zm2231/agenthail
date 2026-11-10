@@ -25,7 +25,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		return nil, err
 	}
 	message = surface.LabelSender(ctx, message)
-	release, err := acquireCodexThreadWrite(ctx, sess.ID)
+	release, err := c.home.acquireThreadWrite(ctx, sess.ID)
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}

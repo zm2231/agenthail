@@ -63,13 +63,9 @@ type codexMoveRecord struct {
 	Files []string `json:"files"`
 }
 
-func codexMoveDir(threadID, moveID string) string {
-	return filepath.Join(codexHome(), claudeMovedDir, threadID, moveID)
-}
-
-func readCodexMoveRecord(threadID, moveID, kind string) (codexMoveRecord, bool, error) {
+func (h CodexHome) readMoveRecord(threadID, moveID, kind string) (codexMoveRecord, bool, error) {
 	var record codexMoveRecord
-	data, err := os.ReadFile(filepath.Join(codexMoveDir(threadID, moveID), kind+".json"))
+	data, err := os.ReadFile(filepath.Join(h.moveDir(threadID, moveID), kind+".json"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return record, false, nil
 	}
@@ -87,8 +83,8 @@ func readCodexMoveRecord(threadID, moveID, kind string) (codexMoveRecord, bool, 
 	return record, true, nil
 }
 
-func writeCodexMoveRecord(threadID, moveID, kind string, record codexMoveRecord) error {
-	dir := codexMoveDir(threadID, moveID)
+func (h CodexHome) writeMoveRecord(threadID, moveID, kind string, record codexMoveRecord) error {
+	dir := h.moveDir(threadID, moveID)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
@@ -152,10 +148,6 @@ func (h *codexMovesHeld) of(threadID string) (codexDeclaredRollout, bool) {
 	return declared, ok
 }
 
-func codexSessionsDir() string { return filepath.Join(codexHome(), "sessions") }
-
-func codexArchivedDir() string { return filepath.Join(codexHome(), "archived_sessions") }
-
 // PrepareMove holds an idle thread for a move: Agenthail's writes to it wait
 // until Release, and the thread is refused unless it is idle with nothing
 // asked of the person or queued, owns no subagent threads, is no subagent itself and
@@ -164,7 +156,7 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 	if !validCodexMoveThread(sess.ID) {
 		return nil, fmt.Errorf("Codex session %q is not a thread id", sess.ID)
 	}
-	release, err := holdCodexThread(ctx, sess.ID)
+	release, err := c.home.holdThread(ctx, sess.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +165,7 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 			release()
 		}
 	}()
-	lock, err := acquireCodexWriteLock(ctx)
+	lock, err := c.home.acquireWriteLock(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -193,17 +185,17 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 	}
 	current := str(thread, "path")
 	if current == "" {
-		current = codexTranscriptPath(sess)
+		current = c.home.transcriptPath(sess)
 	}
-	owned, err := codexThreadRollouts(codexSessionsDir(), sess.ID, true)
+	owned, err := codexThreadRollouts(c.home.sessionsDir(), sess.ID, true)
 	if err != nil {
 		return nil, err
 	}
 	current, found := ownedRollout(owned, current)
 	if !found {
-		return nil, fmt.Errorf("Codex thread %s has no rollout under %s", sess.ID, codexSessionsDir())
+		return nil, fmt.Errorf("Codex thread %s has no rollout under %s", sess.ID, c.home.sessionsDir())
 	}
-	lineage, err := codexRolloutLineage(current, sess.ID)
+	lineage, err := c.home.rolloutLineage(current, sess.ID)
 	if err != nil {
 		return nil, surface.MoveRefusal{Reason: fmt.Sprintf("its history continues a rollout it cannot carry (%v); a forked thread cannot move yet", err)}
 	}
@@ -342,24 +334,24 @@ func (c *Codex) ArchiveMove(conversation, moveID string) error {
 	if !held {
 		return fmt.Errorf("Codex thread %s is not held for a move here", conversation)
 	}
-	if record, found, err := readCodexMoveRecord(conversation, moveID, "archived"); err != nil {
+	if record, found, err := c.home.readMoveRecord(conversation, moveID, "archived"); err != nil {
 		return err
-	} else if found && codexAllArchived(record) {
-		return checkArchivedRollout(conversation, declared)
+	} else if found && c.home.allArchived(record) {
+		return c.home.checkArchivedRollout(conversation, declared)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*codexMoveWait)
 	defer cancel()
-	lock, err := acquireCodexWriteLock(ctx)
+	lock, err := c.home.acquireWriteLock(ctx)
 	if err != nil {
 		return err
 	}
 	defer releaseCodexWriteLock(lock)
-	owned, err := codexThreadRollouts(codexSessionsDir(), conversation, true)
+	owned, err := codexThreadRollouts(c.home.sessionsDir(), conversation, true)
 	if err != nil {
 		return err
 	}
 	if len(owned) == 0 {
-		return fmt.Errorf("Codex thread %s has no rollout under %s", conversation, codexSessionsDir())
+		return fmt.Errorf("Codex thread %s has no rollout under %s", conversation, c.home.sessionsDir())
 	}
 	record := codexMoveRecord{}
 	for _, path := range owned {
@@ -378,22 +370,22 @@ func (c *Codex) ArchiveMove(conversation, moveID string) error {
 	if active != "" {
 		return fmt.Errorf("turn %s started in Codex thread %s before it was archived", active, conversation)
 	}
-	if err := writeCodexMoveRecord(conversation, moveID, "archived", record); err != nil {
+	if err := c.home.writeMoveRecord(conversation, moveID, "archived", record); err != nil {
 		return err
 	}
 	if _, err := client.Request(ctx, "thread/archive", map[string]any{"threadId": conversation}, codexMoveWait); err != nil {
 		return fmt.Errorf("thread/archive: %w", err)
 	}
-	if !codexAllArchived(record) {
+	if !c.home.allArchived(record) {
 		return fmt.Errorf("Codex archived thread %s but not all of %s", conversation, strings.Join(record.Files, ", "))
 	}
-	return checkArchivedRollout(conversation, declared)
+	return c.home.checkArchivedRollout(conversation, declared)
 }
 
 // checkArchivedRollout refuses a move whose rollout Codex wrote to while
 // archiving it, since the target holds the files to what was declared.
-func checkArchivedRollout(conversation string, declared codexDeclaredRollout) error {
-	_, digest, err := hashFile(filepath.Join(codexArchivedDir(), declared.name))
+func (h CodexHome) checkArchivedRollout(conversation string, declared codexDeclaredRollout) error {
+	_, digest, err := hashFile(filepath.Join(h.archivedDir(), declared.name))
 	if err != nil {
 		return err
 	}
@@ -403,9 +395,9 @@ func checkArchivedRollout(conversation string, declared codexDeclaredRollout) er
 	return nil
 }
 
-func codexAllArchived(record codexMoveRecord) bool {
+func (h CodexHome) allArchived(record codexMoveRecord) bool {
 	for _, name := range record.Files {
-		if _, err := os.Lstat(filepath.Join(codexArchivedDir(), name)); err != nil {
+		if _, err := os.Lstat(filepath.Join(h.archivedDir(), name)); err != nil {
 			return false
 		}
 	}
@@ -418,13 +410,13 @@ func (c *Codex) RestoreMove(conversation, moveID string) error {
 	if !validCodexMoveThread(conversation) || !claudeConversationID(moveID) {
 		return fmt.Errorf("Codex session %q or move %q is not a valid id", conversation, moveID)
 	}
-	record, archived, err := readCodexMoveRecord(conversation, moveID, "archived")
+	record, archived, err := c.home.readMoveRecord(conversation, moveID, "archived")
 	if err != nil || !archived {
 		return err
 	}
 	stillArchived := false
 	for _, name := range record.Files {
-		if _, err := os.Lstat(filepath.Join(codexArchivedDir(), name)); err == nil {
+		if _, err := os.Lstat(filepath.Join(c.home.archivedDir(), name)); err == nil {
 			stillArchived = true
 		}
 	}
@@ -440,13 +432,13 @@ func (c *Codex) RestoreMove(conversation, moveID string) error {
 			return fmt.Errorf("thread/unarchive: %w", err)
 		}
 	}
-	return os.RemoveAll(codexMoveDir(conversation, moveID))
+	return os.RemoveAll(c.home.moveDir(conversation, moveID))
 }
 
 // WriteMoveArchive streams the rollout files this move archived as a flat
 // tar of regular files.
 func (c *Codex) WriteMoveArchive(w io.Writer, conversation, moveID string) error {
-	record, archived, err := readCodexMoveRecord(conversation, moveID, "archived")
+	record, archived, err := c.home.readMoveRecord(conversation, moveID, "archived")
 	if err != nil {
 		return err
 	}
@@ -455,7 +447,7 @@ func (c *Codex) WriteMoveArchive(w io.Writer, conversation, moveID string) error
 	}
 	archive := tar.NewWriter(w)
 	for _, name := range record.Files {
-		if err := writeMoveFile(archive, filepath.Join(codexArchivedDir(), name), name); err != nil {
+		if err := writeMoveFile(archive, filepath.Join(c.home.archivedDir(), name), name); err != nil {
 			return err
 		}
 	}
@@ -528,8 +520,8 @@ func (c *Codex) CheckMoveIn(in surface.MoveIn) error {
 }
 
 func (c *Codex) rolloutsHere(threadID string) []string {
-	placed, _ := codexThreadRollouts(codexSessionsDir(), threadID, true)
-	archived, _ := codexThreadRollouts(codexArchivedDir(), threadID, false)
+	placed, _ := codexThreadRollouts(c.home.sessionsDir(), threadID, true)
+	archived, _ := codexThreadRollouts(c.home.archivedDir(), threadID, false)
 	return append(placed, archived...)
 }
 
@@ -548,7 +540,7 @@ func (c *Codex) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.R
 		return nil, fmt.Errorf("move id %q is not valid", in.MoveID)
 	}
 	state, _ := decodeCodexMoveState(in)
-	release, err := holdCodexThread(ctx, in.Conversation)
+	release, err := c.home.holdThread(ctx, in.Conversation)
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +548,7 @@ func (c *Codex) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.R
 	if err := admit(); err != nil {
 		return nil, err
 	}
-	staging := filepath.Join(codexHome(), ".agenthail-move-"+in.MoveID)
+	staging := filepath.Join(c.home.Codex, ".agenthail-move-"+in.MoveID)
 	if err := os.RemoveAll(staging); err != nil {
 		return nil, err
 	}
@@ -578,7 +570,7 @@ func (c *Codex) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.R
 		return nil, fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
 	}
 	if containsString(loaded, in.Conversation) {
-		placed := filepath.Join(codexSessionsDir(), codexRolloutDay(state.Rollout), state.Rollout)
+		placed := filepath.Join(c.home.sessionsDir(), codexRolloutDay(state.Rollout), state.Rollout)
 		if err := checkPrefix(filepath.Join(staging, state.Rollout), placed); err != nil {
 			return nil, fmt.Errorf("%w with a different rollout: Codex thread %s", surface.ErrMoveInRunning, in.Conversation)
 		}
@@ -643,7 +635,7 @@ func (c *Codex) settleMoveIn(ctx context.Context, client codexClient, in surface
 // archived when it last moved away, so Codex's record of the thread is no
 // longer archived; the arriving rollouts then replace it.
 func (c *Codex) unarchiveEarlierCopy(ctx context.Context, client codexClient, in surface.MoveIn, staging string, files []string) error {
-	archived, err := codexThreadRollouts(codexArchivedDir(), in.Conversation, false)
+	archived, err := codexThreadRollouts(c.home.archivedDir(), in.Conversation, false)
 	if err != nil || len(archived) == 0 {
 		return err
 	}
@@ -666,11 +658,11 @@ func (c *Codex) unarchiveEarlierCopy(ctx context.Context, client codexClient, in
 // shorter copy of one under the move's folder, after recording what it
 // places so an abort sets exactly those files aside.
 func (c *Codex) placeMoveIn(in surface.MoveIn, staging string, files []string) error {
-	if err := writeCodexMoveRecord(in.Conversation, in.MoveID, "placed", codexMoveRecord{Files: files}); err != nil {
+	if err := c.home.writeMoveRecord(in.Conversation, in.MoveID, "placed", codexMoveRecord{Files: files}); err != nil {
 		return err
 	}
 	for _, name := range files {
-		dest := filepath.Join(codexSessionsDir(), codexRolloutDay(name), name)
+		dest := filepath.Join(c.home.sessionsDir(), codexRolloutDay(name), name)
 		if err := checkPrefix(dest, filepath.Join(staging, name)); err != nil {
 			return fmt.Errorf("Codex rollout %s: %w", name, err)
 		}
@@ -678,7 +670,7 @@ func (c *Codex) placeMoveIn(in surface.MoveIn, staging string, files []string) e
 			return err
 		}
 		if _, err := os.Lstat(dest); err == nil {
-			kept := filepath.Join(codexMoveDir(in.Conversation, in.MoveID), "previous", name)
+			kept := filepath.Join(c.home.moveDir(in.Conversation, in.MoveID), "previous", name)
 			if err := os.MkdirAll(filepath.Dir(kept), 0700); err != nil {
 				return err
 			}
@@ -699,7 +691,7 @@ func (c *Codex) DropMoveIn(ctx context.Context, conversation, moveID string, adm
 	if !validCodexMoveThread(conversation) || !claudeConversationID(moveID) {
 		return fmt.Errorf("Codex session %q or move %q is not a valid id", conversation, moveID)
 	}
-	release, err := holdCodexThread(ctx, conversation)
+	release, err := c.home.holdThread(ctx, conversation)
 	if err != nil {
 		return err
 	}
@@ -727,19 +719,19 @@ func (c *Codex) dropPlaced(ctx context.Context, client codexClient, conversation
 	if containsString(loaded, conversation) {
 		return surface.ErrMoveInRunning
 	}
-	record, placed, err := readCodexMoveRecord(conversation, moveID, "placed")
+	record, placed, err := c.home.readMoveRecord(conversation, moveID, "placed")
 	if err != nil {
 		return fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
 	}
 	if !placed {
 		return nil
 	}
-	aside := filepath.Join(codexMoveDir(conversation, moveID), "dropped")
+	aside := filepath.Join(c.home.moveDir(conversation, moveID), "dropped")
 	if err := os.MkdirAll(aside, 0700); err != nil {
 		return fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
 	}
 	for _, name := range record.Files {
-		if err := renameIfPresent(filepath.Join(codexSessionsDir(), codexRolloutDay(name), name), filepath.Join(aside, name)); err != nil {
+		if err := renameIfPresent(filepath.Join(c.home.sessionsDir(), codexRolloutDay(name), name), filepath.Join(aside, name)); err != nil {
 			return fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
 		}
 	}
