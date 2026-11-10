@@ -110,3 +110,22 @@ func TestAQuotedBlockWithABlankQuotedLineKeepsItsReply(t *testing.T) {
 		}
 	}
 }
+
+func TestAQuoteIsTheLongestStretchAnyReplyHolds(t *testing.T) {
+	newer := ledger.QuoteSource{ItemID: "r2", Text: "The migration renames the orders table to purchases, then stops for a review."}
+	older := ledger.QuoteSource{ItemID: "r1", Text: "The migration renames the orders table to purchases, then copies every row into the archive in batches of a thousand."}
+	text := "re: The migration renames the orders table to purchases, then copies every row into the archive in batches of a thousand. too slow"
+	quotes := ledger.FindQuotes(text, []ledger.QuoteSource{newer, older})
+	if got := ledger.QuotedText(text, quotes); len(got) != 1 || got[0] != older.Text || quotes[0].ReplyItemID != "r1" {
+		t.Fatalf("quotes %q from %+v, want the whole older reply", got, quotes)
+	}
+}
+
+func TestAQuoteDeepInALongMessageIsFound(t *testing.T) {
+	reply := ledger.QuoteSource{ItemID: "r1", Text: "Rotate the signing key every ninety days and keep the previous one for verification."}
+	text := strings.Repeat("typed notes ", 300<<10/12) + "\n" + reply.Text + "\nok"
+	quotes := ledger.FindQuotes(text, []ledger.QuoteSource{reply})
+	if got := ledger.QuotedText(text, quotes); len(got) != 1 || got[0] != reply.Text {
+		t.Fatalf("quotes %q", got)
+	}
+}

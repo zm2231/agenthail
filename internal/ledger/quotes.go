@@ -11,7 +11,6 @@ const (
 	QuoteMinRunes = 40
 	QuoteReplies  = 5
 	QuoteReplyMax = 64 << 10
-	quoteTextMax  = 256 << 10
 )
 
 // Start and End are byte offsets into the message text as the ledger stores it.
@@ -61,11 +60,9 @@ func normalize(text string) normalized {
 
 func (n normalized) runes() int { return len(n.starts) }
 
-func (n normalized) rune(i int) string { return n.text[n.runeOffset[i]:n.runeOffset[i+1]] }
+func (n normalized) span(from, to int) string { return n.text[n.runeOffset[from]:n.runeOffset[to]] }
 
-func (n normalized) window(i int) string {
-	return n.text[n.runeOffset[i]:n.runeOffset[i+QuoteMinRunes]]
-}
+func (n normalized) window(i int) string { return n.span(i, i+QuoteMinRunes) }
 
 func (n normalized) end(i int) int {
 	if i+1 < len(n.starts) {
@@ -84,53 +81,68 @@ func head(text string, max int) string {
 	return text[:max]
 }
 
-type windowAt struct {
-	source int32
-	rune   int32
-}
-
 // FindQuotes returns the spans of text that are quoted rather than typed: runs of lines starting with "> ",
 // and stretches of at least QuoteMinRunes runes that equal, whitespace aside, a stretch of one reply.
-// Replies come newest first and a stretch names the reply it is part of. Only the first QuoteReplyMax
-// bytes of a reply and quoteTextMax bytes of the text are compared.
+// Replies come newest first; each stretch is the longest any one reply holds from where it starts, and
+// names that reply, the newest on a tie. Only the first QuoteReplyMax bytes of a reply are compared.
 func FindQuotes(text string, replies []QuoteSource) []Quote {
-	sources := make([]normalized, len(replies))
-	windows := map[string]windowAt{}
-	for i, reply := range replies {
-		sources[i] = normalize(head(reply.Text, QuoteReplyMax))
+	sources := make([]normalized, min(len(replies), QuoteReplies))
+	windows := map[string]uint8{}
+	for i := range sources {
+		sources[i] = normalize(head(replies[i].Text, QuoteReplyMax))
 		for w := 0; w+QuoteMinRunes <= sources[i].runes(); w++ {
-			if _, seen := windows[sources[i].window(w)]; !seen {
-				windows[sources[i].window(w)] = windowAt{source: int32(i), rune: int32(w)}
-			}
+			windows[sources[i].window(w)] |= 1 << i
 		}
 	}
 	quotes := quotedLines(text, replies, sources)
-	message := normalize(head(text, quoteTextMax))
+	message := normalize(text)
 	for i := 0; i+QuoteMinRunes <= message.runes(); {
-		at, ok := windows[message.window(i)]
-		if !ok {
+		in := windows[message.window(i)]
+		if in == 0 {
 			i++
 			continue
 		}
-		source := sources[at.source]
-		end, from := i+QuoteMinRunes, int(at.rune)+QuoteMinRunes
-		for end < message.runes() && from < source.runes() && message.rune(end) == source.rune(from) {
-			end, from = end+1, from+1
+		best, from := 0, -1
+		for s := range sources {
+			if in&(1<<s) == 0 {
+				continue
+			}
+			if end := longestIn(sources[s].text, message, i); end > best {
+				best, from = end, s
+			}
 		}
-		first, last := i, end-1
-		for first < last && message.rune(first) == " " {
+		first, last := i, best-1
+		for first < last && message.span(first, first+1) == " " {
 			first++
 		}
-		for last > first && message.rune(last) == " " {
+		for last > first && message.span(last, last+1) == " " {
 			last--
 		}
-		if q := (Quote{Start: int(message.starts[first]), End: message.end(last), ReplyItemID: replies[at.source].ItemID}); !overlaps(quotes, q) {
+		if q := (Quote{Start: int(message.starts[first]), End: message.end(last), ReplyItemID: replies[from].ItemID}); !overlaps(quotes, q) {
 			quotes = append(quotes, q)
 		}
-		i = end
+		i = best
 	}
 	slices.SortFunc(quotes, func(a, b Quote) int { return a.Start - b.Start })
 	return quotes
+}
+
+// longestIn returns the furthest end such that message runes [start, end) occur in source; the first
+// QuoteMinRunes are known to, and a shorter prefix of an occurring stretch always occurs too.
+func longestIn(source string, message normalized, start int) int {
+	held, step := start+QuoteMinRunes, 1
+	for held+step <= message.runes() && strings.Contains(source, message.span(start, held+step)) {
+		held, step = held+step, step*2
+	}
+	for lo, hi := held, min(held+step, message.runes()+1); hi-lo > 1; {
+		mid := (lo + hi) / 2
+		if strings.Contains(source, message.span(start, mid)) {
+			lo, held = mid, mid
+		} else {
+			hi = mid
+		}
+	}
+	return held
 }
 
 func quotedLines(text string, replies []QuoteSource, sources []normalized) []Quote {
