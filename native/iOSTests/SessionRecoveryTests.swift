@@ -170,8 +170,7 @@ final class SessionRecoveryTests: XCTestCase {
     }
 
     private func makeModel() -> AgenthailIOSModel {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [RecoveryProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([RecoveryProtocol.self])
         return AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
     }
 }
@@ -254,7 +253,9 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
     static let state = State()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         if answeredProjectActivity() { return }
         Self.state.recordAction(request)
         let olderPage = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "timelineBefore" } == true

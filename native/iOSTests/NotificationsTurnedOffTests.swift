@@ -19,7 +19,7 @@ final class NotificationsTurnedOffTests: XCTestCase {
     func testTurningNotificationsOffSurvivesARelaunchAndAReconnect() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         try pairMac()
-        let first = AgenthailIOSModel(autoConnect: false, session: Self.session(), drops: nil, notificationDefaults: defaults)
+        let first = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults)
         first.turnOffNotifications()
         for _ in 0..<200 where !PushRecordingProtocol.log.contains("DELETE /api/v1/device/push") {
             try await Task.sleep(for: .milliseconds(10))
@@ -27,7 +27,7 @@ final class NotificationsTurnedOffTests: XCTestCase {
         XCTAssertTrue(PushRecordingProtocol.log.contains("DELETE /api/v1/device/push"), "turning off removes the computer's push target")
         PushRecordingProtocol.log.reset()
 
-        let relaunched = AgenthailIOSModel(autoConnect: false, session: Self.session(), drops: nil, notificationDefaults: defaults)
+        let relaunched = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults)
         defer { relaunched.forgetHost("hmac") }
         try await connect(relaunched)
         relaunched.registerPushToken("a1b2c3")
@@ -45,7 +45,7 @@ final class NotificationsTurnedOffTests: XCTestCase {
     func testWithoutTurningOffAConnectedComputerStartsSetup() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         try pairMac()
-        let model = AgenthailIOSModel(autoConnect: false, session: Self.session(), drops: nil, notificationDefaults: defaults)
+        let model = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults)
         defer { model.forgetHost("hmac") }
         try await connect(model)
         model.registerPushToken("a1b2c3")
@@ -68,10 +68,8 @@ final class NotificationsTurnedOffTests: XCTestCase {
         XCTAssertEqual(model.hosts.first?.reachable, true, "the computer connects")
     }
 
-    private static func session() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [PushRecordingProtocol.self]
-        return URLSession(configuration: configuration)
+    private func session() -> URLSession {
+        FixtureScope.open(self).session([PushRecordingProtocol.self])
     }
 }
 
@@ -89,7 +87,9 @@ private final class PushRecordingProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         let path = request.url?.path ?? ""
         Self.log.add("\(request.httpMethod ?? "GET") \(path)")
         if answeredProjectActivity() { return }

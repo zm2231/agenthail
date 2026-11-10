@@ -5,8 +5,7 @@ import XCTest
 final class HostGroupsTests: XCTestCase {
     private func makeModel() throws -> AgenthailIOSModel {
         GroupActionProtocol.state.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [GroupActionProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([GroupActionProtocol.self])
         let api = AgenthailAPI(baseURL: URL(string: "https://studio.invalid")!, token: "test", session: URLSession(configuration: configuration))
         let model = AgenthailIOSModel(api: api, paired: true, hostID: "hstudio", hostName: "studio")
         let json = #"""
@@ -75,7 +74,9 @@ private final class GroupActionProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         guard request.url?.path == "/api/v1/actions", let data = Self.body(request),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return respond(404, #"{"error":"not found"}"#)
