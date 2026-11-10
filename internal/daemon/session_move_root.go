@@ -58,8 +58,7 @@ func (d *Daemon) moveSessionToRoot(ctx context.Context, request sessionMoveReque
 		result.Move, _ = d.Registry.SessionMove(manifest.ID)
 		return result, fmt.Errorf("move %s of %s is unsettled; it settles when the daemon next starts: %w", manifest.ID, session.ID, err)
 	case err != nil && !errors.Is(err, surface.ErrMoveInPlaced):
-		_ = d.Registry.SetMoveState(manifest.ID, registry.MoveFailed, err.Error(), registry.MovePreparing)
-		d.publishMove(session.ID)
+		_ = d.setMoveOutState(manifest.ID, session.ID, registry.MoveFailed, err.Error(), registry.MovePreparing)
 		result.Move, _ = d.Registry.SessionMove(manifest.ID)
 		return result, MoveRefusedError{Reason: fmt.Sprintf("session %s did not move to %s: %s", session.ID, request.Root, err)}
 	}
@@ -67,7 +66,7 @@ func (d *Daemon) moveSessionToRoot(ctx context.Context, request sessionMoveReque
 	if err != nil {
 		detail = "its resume under the new account is unconfirmed: " + err.Error()
 	}
-	if err := d.Registry.SetMoveState(manifest.ID, registry.MoveDone, detail, registry.MovePreparing); err != nil {
+	if err := d.setMoveOutState(manifest.ID, session.ID, registry.MoveDone, detail, registry.MovePreparing); err != nil {
 		return result, err
 	}
 	if resumed != nil {
@@ -93,7 +92,7 @@ func localRootMove(move registry.SessionMove) (moveManifest, bool) {
 func (d *Daemon) recoverRootMove(move registry.SessionMove, manifest moveManifest) {
 	mover, ok := d.adapters().ForSurface(manifest.Surface).(surface.RootMover)
 	if !ok {
-		_ = d.Registry.SetMoveState(move.ID, registry.MoveFailed, "no adapter can settle the move", registry.MovePreparing)
+		_ = d.setMoveOutState(move.ID, move.Conversation, registry.MoveFailed, "no adapter can settle the move", registry.MovePreparing)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), rootMoveRecoverTimeout)
@@ -107,7 +106,7 @@ func (d *Daemon) recoverRootMove(move registry.SessionMove, manifest moveManifes
 	if moved {
 		state, detail = registry.MoveDone, "the daemon stopped during the move; it finished when the daemon started"
 	}
-	if err := d.Registry.SetMoveState(move.ID, state, detail, registry.MovePreparing); err != nil {
+	if err := d.setMoveOutState(move.ID, move.Conversation, state, detail, registry.MovePreparing); err != nil {
 		d.log.Printf("move %s: %s", move.ID, err)
 	}
 	d.settledRootMove()

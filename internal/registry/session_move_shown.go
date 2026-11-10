@@ -62,8 +62,7 @@ func (r *Registry) UnfinishedMoveOut(conversation string) (*MoveShown, error) {
 	return nil, nil
 }
 
-// MarkMoveOutcomeUnknown keeps the first time a sent move's target could not
-// be asked; setMoveStateTx clears it on any change of state.
+// setMoveStateTx clears outcome_unknown_at on any change of state.
 func (r *Registry) MarkMoveOutcomeUnknown(id, detail string) error {
 	_, err := r.db.Exec(`UPDATE session_moves SET outcome_unknown_at=CASE WHEN outcome_unknown_at='' THEN ? ELSE outcome_unknown_at END,detail=? WHERE id=? AND role='out' AND state=?`, formatTimestamp(r.now()), detail, id, MoveSent)
 	return err
