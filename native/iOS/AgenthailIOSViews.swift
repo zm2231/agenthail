@@ -2066,13 +2066,13 @@ struct RecentPromptsSheet: View {
                         }
                     }
                     .swipeActions(edge: .trailing) {
-                        if !allSessions, model.canFork(session), prompt.turnId != nil {
+                        if !allSessions, SessionOperationAvailability.fork(session), prompt.turnId != nil {
                             Button("Fork from here") { fork(prompt) }.tint(PhonePalette.accentText)
                         }
                     }
                     .contextMenu {
                         Button { use(prompt.text); dismiss() } label: { Label("Use This Prompt", systemImage: "text.insert") }
-                        if !allSessions, model.canFork(session), prompt.turnId != nil {
+                        if !allSessions, SessionOperationAvailability.fork(session), prompt.turnId != nil {
                             Button { fork(prompt) } label: { Label("Fork from Here", systemImage: "arrow.triangle.branch") }
                         }
                     }

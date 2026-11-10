@@ -19,6 +19,7 @@ final class HostConnection {
     let id: String
     private(set) var credential: PairedHostCredential
     let api: AgenthailAPI
+    let actionKeys = ActionRetryKeys()
     let isPreview: Bool
     private(set) var snapshot: DashboardSnapshot?
     private(set) var currentView: ScopePage.View?

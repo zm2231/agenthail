@@ -170,7 +170,7 @@ SOURCES=(
   macOS/GoalFacts.swift
   macOS/ClaudeRunFacts.swift
   macOS/SessionOperationControllers.swift
-  macOS/SessionOperations.swift
+  SessionOperations.swift
   macOS/NewSessionDraft.swift
   macOS/NewSessionLabels.swift
   macOS/ClaudeCompact.swift
