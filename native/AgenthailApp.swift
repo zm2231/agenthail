@@ -356,7 +356,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let userInfo = response.notification.request.content.userInfo
         let sessionID = userInfo["sessionId"] as? String
-        if let choice = RequestNotifications.choice(forAction: response.actionIdentifier), let sessionID, let requestID = userInfo["requestId"] as? String {
+        if let choice = RequestNotifications.choice(forAction: response.actionIdentifier, category: response.notification.request.content.categoryIdentifier), let sessionID, let requestID = userInfo["requestId"] as? String {
             await RequestAnswer.send(choice: choice, text: (response as? UNTextInputNotificationResponse)?.userText, sessionID: sessionID, requestID: requestID, api: { try AgenthailAPI() })
             return
         }

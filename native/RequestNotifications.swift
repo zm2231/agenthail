@@ -27,7 +27,6 @@ private struct OpenRequests: Decodable {
 enum RequestNotifications {
     static let categoryPrefix = "AGENTHAIL_REQ_"
     static let replyChoice = "reply"
-    static let choices: Set<String> = ["allow", "always", "deny", "never", "stop", "o0", "o1", "o2", "o3", "retry", "delete", "cancel", "dismiss", replyChoice]
     static let destructiveChoices: Set<String> = ["deny", "never", "stop", "delete", "cancel"]
     static let maxActions = 5
     static let retainedRequests = 32
@@ -45,7 +44,7 @@ enum RequestNotifications {
         guard let state = try? JSONDecoder().decode(OpenRequests.self, from: data),
               let open = state.requests.first(where: { $0.id == requestID }),
               case let actions = (open.actions ?? []).filter({ open.optionsOnly != true || $0.id != replyChoice }), actions.count <= maxActions,
-              actions.allSatisfy({ choices.contains($0.id) && !$0.title.isEmpty }),
+              actions.allSatisfy({ !$0.id.isEmpty && !$0.id.hasPrefix(systemActionPrefix) && !$0.title.isEmpty }),
               Set(actions.map(\.id)).count == actions.count,
               let prompt = open.prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty else { return nil }
         return RequestNotice(prompt: prompt, actions: actions)
@@ -77,8 +76,11 @@ enum RequestNotifications {
         return URLSession(configuration: configuration)
     }()
 
-    static func choice(forAction identifier: String) -> String? {
-        choices.contains(identifier) ? identifier : nil
+    static let systemActionPrefix = "com.apple."
+
+    static func choice(forAction identifier: String, category: String) -> String? {
+        guard requestID(ofCategory: category) != nil, !identifier.isEmpty, !identifier.hasPrefix(systemActionPrefix) else { return nil }
+        return identifier
     }
 
     static func category(requestID: String, actions: [RequestNotificationAction]) -> UNNotificationCategory {
