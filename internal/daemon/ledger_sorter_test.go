@@ -108,11 +108,7 @@ func sorterFixture(t *testing.T, stub *sorterStub) (*Daemon, *registry.Registry,
 func runSorter(t *testing.T, d *Daemon) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		d.runLedgerSorter(ctx)
-	}()
+	done := d.startLedgerSorter(ctx)
 	stop = func() {
 		cancel()
 		<-done

@@ -66,12 +66,22 @@ func (d *Daemon) queueSort(key, utteranceID string, seq int64, at time.Time) {
 	}
 }
 
-func (d *Daemon) runLedgerSorter(ctx context.Context) {
-	s := d.sorter
-	if s == nil {
-		return
+func (d *Daemon) startLedgerSorter(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	if d.sorter == nil {
+		close(done)
+		return done
 	}
 	d.oweRecentCaptures()
+	go func() {
+		defer close(done)
+		d.runLedgerSorter(ctx)
+	}()
+	return done
+}
+
+func (d *Daemon) runLedgerSorter(ctx context.Context) {
+	s := d.sorter
 	retry := time.NewTicker(s.retry)
 	defer retry.Stop()
 	d.sortOwed(ctx)
