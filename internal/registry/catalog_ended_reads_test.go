@@ -174,7 +174,7 @@ func TestEverySessionColumnTheUpsertWritesIsReadAndCompared(t *testing.T) {
 	for _, column := range sessionWriteColumns {
 		written[column.name] = true
 	}
-	notRegistered := map[string]bool{"id": true, "host_id": true, "updated_at": true, "registered_at": true, "pinned_at_ms": true, "stopped_at_ms": true, "snoozed_at_ms": true, "snoozed_until_ms": true, "snooze_wake": true, "entrypoint": true}
+	notRegistered := map[string]bool{"id": true, "host_id": true, "updated_at": true, "registered_at": true, "pinned_at_ms": true, "snoozed_at_ms": true, "snoozed_until_ms": true, "snooze_wake": true, "entrypoint": true}
 	for rows.Next() {
 		var column string
 		if err := rows.Scan(&column); err != nil {

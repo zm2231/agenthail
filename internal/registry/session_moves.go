@@ -340,10 +340,7 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 	if err := registerSessionTx(tx, session); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(`UPDATE sessions SET pinned_at_ms=?,stopped_at_ms=0 WHERE id=?`, milliOrZero(pinnedAt), session.ID); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(`DELETE FROM session_keep_alive WHERE session_id=?`, session.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE sessions SET pinned_at_ms=? WHERE id=?`, milliOrZero(pinnedAt), session.ID); err != nil {
 		return nil, err
 	}
 	if alias != "" {
@@ -526,10 +523,7 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 	if err := dropMovedRelaysTx(tx, move.Conversation); err != nil {
 		return nil, false, err
 	}
-	if _, err := tx.Exec(`UPDATE sessions SET host_id=?,pid=0,transcript='',has_local=0,bridge='',pinned_at_ms=0,stopped_at_ms=0,updated_at=datetime('now') WHERE id=? AND host_id=''`, move.PeerHost, move.Conversation); err != nil {
-		return nil, false, err
-	}
-	if _, err := tx.Exec(`DELETE FROM session_keep_alive WHERE session_id=?`, move.Conversation); err != nil {
+	if _, err := tx.Exec(`UPDATE sessions SET host_id=?,pid=0,transcript='',has_local=0,bridge='',pinned_at_ms=0,updated_at=datetime('now') WHERE id=? AND host_id=''`, move.PeerHost, move.Conversation); err != nil {
 		return nil, false, err
 	}
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id=?`, move.Conversation); err != nil {

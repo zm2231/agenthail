@@ -180,7 +180,6 @@ func seedVersion13(t *testing.T, r *Registry) {
 	}
 	exec(`INSERT INTO session_runtime(session_id) VALUES(?),(?),('conversation-native')`, rekeyedBridge, collidedBridge)
 	exec(`INSERT INTO session_archive(session_id,archived_at_ms) VALUES(?,1)`, rekeyedBridge)
-	exec(`INSERT INTO session_keep_alive(session_id,attempts) VALUES(?,1)`, rekeyedBridge)
 	exec(`INSERT INTO idle_compactions(session_id,window_ms) VALUES(?,1)`, rekeyedBridge)
 	exec(`INSERT INTO turn_ends(session_id,started_at_ms) VALUES(?,1)`, rekeyedBridge)
 	exec(`INSERT INTO asks(id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,created_at_ms) VALUES('ask-1',?,'agent','Ship?','[]',?,1,'[]','open',1)`, rekeyedBridge, rekeyedBridge)

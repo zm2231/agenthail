@@ -164,7 +164,7 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		if _, err := tx.Exec(`INSERT INTO sessions(`+strings.Join(columns, ",")+`) SELECT `+strings.Join(selected, ",")+` FROM sessions WHERE id=?`, newID, oldID); err != nil {
 			return err
 		}
-	} else if _, err := tx.Exec(`UPDATE sessions SET transcript=CASE WHEN transcript='' THEN (SELECT transcript FROM sessions WHERE id=?1) ELSE transcript END,cwd=CASE WHEN cwd='' THEN (SELECT cwd FROM sessions WHERE id=?1) ELSE cwd END,has_local=MAX(has_local,(SELECT has_local FROM sessions WHERE id=?1)),pinned_at_ms=CASE WHEN pinned_at_ms=0 THEN (SELECT pinned_at_ms FROM sessions WHERE id=?1) ELSE pinned_at_ms END,stopped_at_ms=MAX(stopped_at_ms,(SELECT stopped_at_ms FROM sessions WHERE id=?1)) WHERE id=?2`, oldID, newID); err != nil {
+	} else if _, err := tx.Exec(`UPDATE sessions SET transcript=CASE WHEN transcript='' THEN (SELECT transcript FROM sessions WHERE id=?1) ELSE transcript END,cwd=CASE WHEN cwd='' THEN (SELECT cwd FROM sessions WHERE id=?1) ELSE cwd END,has_local=MAX(has_local,(SELECT has_local FROM sessions WHERE id=?1)),pinned_at_ms=CASE WHEN pinned_at_ms=0 THEN (SELECT pinned_at_ms FROM sessions WHERE id=?1) ELSE pinned_at_ms END WHERE id=?2`, oldID, newID); err != nil {
 		return err
 	}
 	var hasAlias, hasRuntime, hasJournal, hasCatalog bool
@@ -200,7 +200,6 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"delivery_intents", `UPDATE delivery_intents SET sender_session_id=?2 WHERE sender_session_id=?1`, false},
 		{"delivery_intents", `UPDATE OR IGNORE delivery_intents SET target_session_id=?2 WHERE target_session_id=?1`, false},
 		{"session_archive", `UPDATE OR IGNORE session_archive SET session_id=?2 WHERE session_id=?1`, false},
-		{"session_keep_alive", `UPDATE OR IGNORE session_keep_alive SET session_id=?2 WHERE session_id=?1`, false},
 		{"idle_compactions", `UPDATE OR IGNORE idle_compactions SET session_id=?2 WHERE session_id=?1`, false},
 		{"turn_ends", `UPDATE OR IGNORE turn_ends SET session_id=?2 WHERE session_id=?1`, false},
 		{"asks", `UPDATE asks SET session_id=?2 WHERE session_id=?1`, false},

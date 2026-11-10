@@ -38,7 +38,6 @@ type CatalogPresentationRow struct {
 	Freshness                              CatalogPresentationFreshness
 	Retired                                bool
 	PinnedAt                               time.Time
-	KeepAlive                              KeepAlive
 	Snooze                                 Snooze
 	TurnEnd                                *TurnEnd
 	Ask                                    *Ask
@@ -156,16 +155,16 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 		var registered string
 		var subagent CatalogPresentationSubagent
 		var waiting, background, limit, stop string
-		var pinnedAt, keepAliveFailedAt, snoozedAt, snoozedUntil int64
+		var pinnedAt, snoozedAt, snoozedUntil int64
 		var snoozeWake, starterHost string
 		if err := rows.Scan(&row.ID, &row.HostID, &row.Name, &row.Surface, &row.Status, &row.Ended, &row.Cwd, &lastActive, &row.RuntimeKind, &row.Source, &row.Transport,
 			&row.UnavailableReason, &subagent.ParentID, &subagent.RootID, &subagent.Depth, &subagent.Nickname, &subagent.Role, &waiting, &background, &limit, &stop,
 			&row.Alias, &row.QueueCount, &row.Archived, &row.Freshness.Generation, &row.Freshness.Stale, &row.Retired, &registered,
-			&pinnedAt, &keepAliveFailedAt, &row.KeepAlive.Error, &snoozedAt, &snoozedUntil, &snoozeWake, &row.StartedBy, &starterHost, &row.Task); err != nil {
+			&pinnedAt, &snoozedAt, &snoozedUntil, &snoozeWake, &row.StartedBy, &starterHost, &row.Task); err != nil {
 			return nil, err
 		}
 		row.StartedBy = hosts.Qualify(starterHost, row.StartedBy)
-		row.PinnedAt, row.KeepAlive.FailedAt = unixMilliOrZero(pinnedAt), unixMilliOrZero(keepAliveFailedAt)
+		row.PinnedAt = unixMilliOrZero(pinnedAt)
 		row.Snooze = scanSnooze(snoozedAt, snoozedUntil, snoozeWake)
 		if row.RegisteredAt, err = parseRegisteredAt(registered); err != nil {
 			return nil, err
@@ -246,7 +245,7 @@ const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.stat
  a.name,cs.host_queue_count+COALESCE(q.n,0),
  sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,
  cs.projection_generation,(cs.misses>0 OR cs.discovery_failures>0 OR (s.host_id!='' AND cs.unavailable_reason!='')),
- cs.retired,s.registered_at,s.pinned_at_ms,COALESCE(ka.failed_at_ms,0),COALESCE(ka.error,''),
+ cs.retired,s.registered_at,s.pinned_at_ms,
  s.snoozed_at_ms,s.snoozed_until_ms,s.snooze_wake,COALESCE(o.creator_session_id,''),COALESCE(sc.host_id,''),
  EXISTS (SELECT 1 FROM tasks t WHERE t.child_session_id=s.id)
  `
@@ -257,6 +256,5 @@ const catalogPresentationJoins = ` JOIN sessions s ON s.id=cs.session_id
  LEFT JOIN sessions sc ON sc.id=o.creator_session_id
  LEFT JOIN (SELECT session_id,COUNT(*) n FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id) q ON q.session_id=s.id
  LEFT JOIN session_archive sa ON sa.session_id=s.id
- LEFT JOIN session_keep_alive ka ON ka.session_id=s.id AND s.pinned_at_ms>0
  LEFT JOIN projects p ON p.id=json_extract(cs.host_project,'$.localId')
  ORDER BY cs.session_id`
