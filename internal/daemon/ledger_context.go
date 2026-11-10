@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
 const (
@@ -132,14 +131,10 @@ func (d *Daemon) recordContext(ctx context.Context, job contextJob) {
 	}
 }
 
-// messageContext waits until the capture time plus the bound for the session's own entry for the message.
+// messageContext only reads the journal, which the observer fills once the message starts a turn; it never opens
+// the session, so no thread is loaded and no host is woken. It waits until the capture time plus the bound.
 func (d *Daemon) messageContext(ctx context.Context, job contextJob) (ledger.ContextPayload, bool) {
 	deadline := job.at.Add(d.contexts.wait)
-	if time.Now().Before(deadline) {
-		if release := d.holdContextSource(ctx, job.targetID); release != nil {
-			defer release()
-		}
-	}
 	match := d.userEntryMatcher(job)
 	for {
 		if reply, found := d.answeredReply(job.targetID, match); found {
@@ -162,22 +157,6 @@ func (d *Daemon) messageContext(ctx context.Context, job contextJob) (ledger.Con
 		case <-time.After(min(d.contexts.poll, time.Until(deadline))):
 		}
 	}
-}
-
-func (d *Daemon) holdContextSource(ctx context.Context, sessionID string) func() {
-	session, err := d.Registry.Session(sessionID)
-	if err != nil || session == nil {
-		return nil
-	}
-	adapter, err := d.adapters().For(session)
-	if err != nil || !surface.EffectiveCapabilities(adapter, session).Stream {
-		return nil
-	}
-	_, release, err := d.sources.holdSource(ctx, session, adapter, "ledger-context")
-	if err != nil {
-		return nil
-	}
-	return release
 }
 
 func (d *Daemon) userEntryMatcher(job contextJob) func(sessionJournalPayload) bool {
