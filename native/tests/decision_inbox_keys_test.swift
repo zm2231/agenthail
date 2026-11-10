@@ -4,7 +4,7 @@ import SwiftUI
 
 final class InboxDaemon: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var posts: [[String: Any]] = []
-    static let decisions = #"{"decisions":[{"group":"waiting","sessionId":"S","kind":"ask","reason":"Ready to ship","answerable":true,"requests":[{"id":"turn-end-1","kind":"ask","tool":"","title":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"label":"Deploy","description":""},{"label":"Wait","description":""}],"suggested":0}],"alwaysAllow":false}]}],"leadHandling":[]}"#
+    static let decisions = #"{"decisions":[{"group":"waiting","sessionId":"S","kind":"ask","reason":"Ready to ship","answerable":true,"requests":[{"id":"ask-000000000001","kind":"ask","tool":"","title":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"label":"Deploy","description":""},{"label":"Wait","description":""}],"suggested":0}],"alwaysAllow":false}]}],"leadHandling":[]}"#
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -17,7 +17,7 @@ final class InboxDaemon: URLProtocol, @unchecked Sendable {
         case "/api/v1/actions":
             let data = request.httpBody ?? request.httpBodyStream.map(AskStream.read) ?? Data()
             Self.posts.append((try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:])
-            (status, body) = (200, #"{"ok":true,"result":{"requestId":"turn-end-1","outcome":"answered","receipt":{}}}"#)
+            (status, body) = (200, #"{"ok":true,"result":{"requestId":"ask-000000000001","outcome":"answered","receipt":{}}}"#)
         default:
             (status, body) = (404, #"{"error":{"code":"unknown_route","message":"not in this test"}}"#)
         }

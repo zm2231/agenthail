@@ -2,17 +2,23 @@ import Foundation
 
 struct SessionEndTurn: Codable, Hashable {
     var headline: String? = nil
-    var needs: String? = nil
     var endedAt: String? = nil
-    var askedSession: String? = nil
-    var requestId: String? = nil
+}
+
+struct SessionAsk: Codable, Hashable {
+    var id: String
+    var title: String
+    var routedTo: String
+    var askedAt: String? = nil
     var answeredAt: String? = nil
+
+    var waitsOnPerson: Bool { !id.isEmpty && routedTo == "person" && (answeredAt ?? "").isEmpty }
 }
 
 extension SessionState {
     var pendingAskID: String? {
-        guard let end = endTurn, let id = end.requestId, !id.isEmpty, (end.answeredAt ?? "").isEmpty else { return nil }
-        return id
+        guard let ask, ask.waitsOnPerson else { return nil }
+        return ask.id
     }
 }
 
@@ -47,7 +53,7 @@ struct RetiredAsks: Hashable {
     func retired(in sessionID: String) -> String? { bySession[sessionID]?.requestID }
 
     func receipt(for session: SessionState) -> AnswerReceipt? {
-        guard let entry = bySession[session.id], entry.requestID == session.endTurn?.requestId else { return nil }
+        guard let entry = bySession[session.id], entry.requestID == session.ask?.id else { return nil }
         return entry.receipt
     }
 
@@ -56,7 +62,7 @@ struct RetiredAsks: Hashable {
     }
 
     func settles(_ session: SessionState) -> Bool {
-        bySession[session.id].map { $0.requestID != session.endTurn?.requestId } ?? false
+        bySession[session.id].map { $0.requestID != session.ask?.id } ?? false
     }
 
     mutating func settle(_ session: SessionState) {

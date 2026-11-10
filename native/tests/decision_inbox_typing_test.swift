@@ -5,7 +5,7 @@ import SwiftUI
 final class TypingDaemon: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var posts: [[String: Any]] = []
     static func ask(_ session: String) -> String {
-        #"{"group":"waiting","sessionId":"\#(session)","kind":"ask","reason":"Ready to ship","answerable":true,"requests":[{"id":"turn-end-\#(session)","kind":"ask","tool":"","title":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"label":"Deploy","description":""},{"label":"Wait","description":""}],"suggested":0}],"alwaysAllow":false}]}"#
+        #"{"group":"waiting","sessionId":"\#(session)","kind":"ask","reason":"Ready to ship","answerable":true,"requests":[{"id":"ask-\#(session)","kind":"ask","tool":"","title":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"label":"Deploy","description":""},{"label":"Wait","description":""}],"suggested":0}],"alwaysAllow":false}]}"#
     }
     static let decisions = #"{"decisions":["# + ask("S1") + "," + ask("S2") + #"],"leadHandling":[]}"#
 

@@ -86,14 +86,15 @@ struct SessionAttentionTest {
         expect(places["unknown-reset"]?.reason == "Usage limit reached", "a limit with no reset time says it was reached")
 
         var asking = session("asking", status: "idle", lastActive: "2026-10-04T11:40:00Z")
-        asking.endTurn = SessionEndTurn(headline: "Ready to ship", needs: "you", requestId: "turn-end-1")
+        asking.ask = SessionAsk(id: "ask-000000000001", title: "Ready to ship", routedTo: "person")
+        asking.endTurn = SessionEndTurn(headline: "Waiting on the deploy call")
         var answered = session("answered", status: "idle", lastActive: "2026-10-04T11:41:00Z")
-        answered.endTurn = SessionEndTurn(headline: "Ready to ship", needs: "you", requestId: "turn-end-2", answeredAt: "2026-10-04T11:42:00Z")
+        answered.ask = SessionAsk(id: "ask-000000000002", title: "Ready to ship", routedTo: "person", answeredAt: "2026-10-04T11:42:00Z")
         var told = session("told", status: "idle", lastActive: "2026-10-04T11:43:00Z")
-        told.endTurn = SessionEndTurn(headline: "Ready", needs: "you", askedSession: "lead")
+        told.ask = SessionAsk(id: "ask-000000000003", title: "Ready", routedTo: "lead")
         let asks = SessionAttention.build(sessions: [asking, answered, told], attention: [], deliveryProblems: [])
-        expect(asks["asking"] == SessionAttention(kind: .request, reason: "Asks: Ready to ship"), "an ended turn's ask needs the person: \(String(describing: asks["asking"]))")
-        expect(asks["answered"] == nil && asks["told"] == nil, "an answered ask, or one told to an agent, does not")
+        expect(asks["asking"] == SessionAttention(kind: .request, reason: "Asks: Ready to ship"), "an ask for the person needs the person, named by its title: \(String(describing: asks["asking"]))")
+        expect(asks["answered"] == nil && asks["told"] == nil, "an answered ask, or one routed to another session, does not")
         print("session attention tests passed")
     }
 

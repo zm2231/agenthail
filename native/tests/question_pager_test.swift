@@ -80,7 +80,7 @@ struct QuestionPagerTest {
         let changed = SessionRequest(id: "r3", kind: "question", tool: "AskUserQuestion", questions: [targets])
         check(drafts.pager(for: changed).questions == [targets], "a draft for different questions is not reused")
 
-        var ask = drafts.pager(for: SessionRequest(id: "turn-end-1", kind: "ask", tool: "", questions: [scope]))
+        var ask = drafts.pager(for: SessionRequest(id: "ask-000000000001", kind: "ask", tool: "", questions: [scope]))
         check(ask.ask && !ask.isOneTap && ask.isSingle, "an ask is never answered on one tap")
         check(ask.choose(1) == nil && ask.step == 0 && ask.answer(at: 0) == "No", "picking an ask's option waits for submit")
         check(ask.decision(ask.next()!) == RequestDecision(behavior: "allow", answers: ["Which scope?": "No"]), "an empty note is left out")
