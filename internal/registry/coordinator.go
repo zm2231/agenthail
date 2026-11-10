@@ -718,6 +718,9 @@ func (r *Registry) HandOverCoordinator(spec CoordinatorSpec, previous, next stri
 	if _, err := publishCoordinatorTx(tx, spec.ProjectID); err != nil && !errors.Is(err, ErrNoCoordinator) {
 		return 0, err
 	}
+	if err := syncDeliveryAsksTx(tx, now); err != nil {
+		return 0, err
+	}
 	return id, tx.Commit()
 }
 
@@ -738,6 +741,9 @@ func (r *Registry) MoveClaimedMessage(id int64, sessionID string) error {
 		return queueItemNotInflight(id)
 	}
 	if _, err := tx.Exec(`UPDATE delivery_intents SET target_session_id=?,updated_at=datetime('now') WHERE queue_id=?`, sessionID, id); err != nil {
+		return err
+	}
+	if err := syncDeliveryAsksTx(tx, r.now()); err != nil {
 		return err
 	}
 	return tx.Commit()

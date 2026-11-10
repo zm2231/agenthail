@@ -21,9 +21,7 @@ var presentationInputs = []presentationInput{
 	{table: "aliases"},
 	{table: "session_origins"},
 	{table: "tasks", columns: "child_session_id"},
-	{table: "attention_items"},
 	{table: "limit_resumes"},
-	{table: "delivery_intents", when: outgoingIntentRow},
 	{table: "message_queue"},
 	{table: "session_archive"},
 	{table: "projects"},
@@ -41,10 +39,6 @@ var presentationInputs = []presentationInput{
 	{table: "sessions", columns: "id,name,surface,status,ended,cwd,last_active_ms,runtime_kind,source,transport,host_id,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,pinned_at_ms,snoozed_at_ms,snoozed_until_ms,snooze_wake"},
 	{table: "catalog_sessions", columns: "session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project"},
 }
-
-// Must cover every row catalogPresentationOutgoing and settledDeliveryFailure read.
-const outgoingIntentRow = `(%[1]s.status IN ('failed','held') OR (%[1]s.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
-	WHERE f.sender_session_id=%[1]s.sender_session_id AND f.target_session_id=%[1]s.target_session_id AND f.status='failed' AND f.id<%[1]s.id)))`
 
 func (input presentationInput) triggerWhen(event string, columns []string) string {
 	if event == "update" {

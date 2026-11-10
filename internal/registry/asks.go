@@ -198,7 +198,7 @@ func (r *Registry) RouteAsk(id, to, why string, at time.Time) (bool, error) {
 }
 
 // A session's row shows its oldest open ask, else its newest answered one until the session starts another turn.
-const rowAsk = `SELECT a.id FROM asks a WHERE a.session_id=s.session_id AND a.origin='agent' AND (a.state='open'
+const rowAsk = `SELECT a.id FROM asks a WHERE a.session_id=s.session_id AND a.origin IN ('agent','delivery') AND (a.state='open'
  OR a.state='answered' AND a.answered_at_ms>=COALESCE((SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=a.session_id),0))
  ORDER BY a.state='open' DESC, CASE WHEN a.state='open' THEN a.created_at_ms ELSE -a.answered_at_ms END, a.id LIMIT 1`
 

@@ -292,22 +292,25 @@ func assertMigratedRegistryAcceptsCurrentWrites(t *testing.T, r *Registry) {
 		t.Fatal(err)
 	}
 	failQueued(t, r, relayID)
-	problems, err := r.ListDeliveryProblems()
-	if err != nil {
-		t.Fatal(err)
-	}
 	var relayed *DeliveryIntent
-	for _, problem := range problems {
-		intent, err := r.DeliveryIntent(problem.DeliveryID)
+	for _, ask := range openDeliveryAsks(t, r) {
+		ref, ok := ParseDeliveryRef(ask.Ref)
+		if !ok || ref.IntentID == 0 {
+			continue
+		}
+		intent, err := r.DeliveryIntent(ref.IntentID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if intent.QueueID == relayID {
 			relayed = intent
+			if ask.RoutedTo != AskToPerson {
+				t.Fatalf("relayed failure ask=%+v, want it routed to the person", ask)
+			}
 		}
 	}
-	if relayed == nil || !relayed.Relayed || relayed.NotificationQueueID != 0 {
-		t.Fatalf("relayed intent=%+v problems=%+v", relayed, problems)
+	if relayed == nil || !relayed.Relayed {
+		t.Fatalf("relayed intent=%+v", relayed)
 	}
 	assertMigratedRouteRelaysDurably(t, r)
 }
@@ -369,20 +372,24 @@ func assertV8JournalAndProblemsMigrated(t *testing.T, r *Registry) {
 	if _, _, err := r.SessionJournalBody("target", "body-ref", 0, 1); err == nil {
 		t.Fatal("old body remained after retention counted its bytes")
 	}
-	// The fixture's failure is dated when it was recorded; date it now so it
-	// is within the window the problem list shows.
 	if _, err := r.db.Exec(`UPDATE delivery_intents SET updated_at=datetime('now') WHERE id=1`); err != nil {
 		t.Fatal(err)
 	}
-	problems, err := r.ListDeliveryProblems()
-	if err != nil || len(problems) != 1 || problems[0].Reason != "transport failed" {
-		t.Fatalf("problems=%+v err=%v", problems, err)
+	if err := r.SyncDeliveryAsks(time.Now()); err != nil {
+		t.Fatal(err)
 	}
-	if changed, err := r.DismissDeliveryProblem(problems[0].DeliveryID); err != nil || !changed {
-		t.Fatalf("dismiss changed=%v err=%v", changed, err)
+	ask, found, err := r.DeliveryAskOf(1)
+	if err != nil || !found || !strings.Contains(ask.Questions[0].Question, "transport failed") {
+		t.Fatalf("ask=%+v found=%v err=%v", ask, found, err)
 	}
-	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
-		t.Fatalf("dismissed problems=%+v err=%v", problems, err)
+	if claimed, err := r.ClaimAsk(ask.ID, AskAnswer{Answers: map[string]string{ask.Questions[0].Question: "Dismiss"}}, AskToPerson, "test", time.Now()); err != nil || !claimed {
+		t.Fatalf("claimed=%v err=%v", claimed, err)
+	}
+	if err := r.SyncDeliveryAsks(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := r.DeliveryAskOf(1); err != nil || found {
+		t.Fatalf("a dismissed failure was asked again: found=%v err=%v", found, err)
 	}
 }
 

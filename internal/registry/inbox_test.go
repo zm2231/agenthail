@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,7 +10,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -88,27 +86,6 @@ func TestEveryQueuedMessageIsInItsTargetsInbox(t *testing.T) {
 	if got := inbox["person"].SenderSessionID; got != surface.PersonSessionID {
 		t.Errorf("the person's message is from %q", got)
 	}
-}
-
-func TestAFailureNoticeIsInTheSendersInbox(t *testing.T) {
-	r := openTestRegistry(t)
-	register(t, r, "sender", "target")
-	if _, _, err := r.QueueDeliveryWithIntent("target", "wait", "", surface.SendOptions{SourceSessionID: "sender"}); err != nil {
-		t.Fatal(err)
-	}
-	item, err := r.ClaimNextMessage("target", time.Now())
-	if err != nil || item == nil {
-		t.Fatalf("item=%+v err=%v", item, err)
-	}
-	if notified, err := r.DeadLetterMessage(item.ID, errors.New("target rejected input")); err != nil || !notified {
-		t.Fatalf("notified=%v err=%v", notified, err)
-	}
-	for message, inboxItem := range inboxMessages(t, r, "sender") {
-		if strings.Contains(message, "target rejected input") && inboxItem.SenderSessionID == surface.SystemSessionID {
-			return
-		}
-	}
-	t.Fatal("the failure notice is not in the sender's inbox")
 }
 
 var messageQueueInsert = regexp.MustCompile(`(?is)\binsert\s+(or\s+\w+\s+)?into\s+message_queue\b`)

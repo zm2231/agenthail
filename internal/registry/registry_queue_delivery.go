@@ -51,7 +51,7 @@ func claimNeedsWrite(status string, operation QueueOperation, availableAt, infli
 }
 
 func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDelivery string) (*QueuedMessage, error) {
-	if err := r.ReconcileAttentionItems(now); err != nil {
+	if err := r.SyncDeliveryAsks(now); err != nil {
 		return nil, err
 	}
 	filter, args := claimCandidateFilter(sessionID, busyDelivery, r.busyMode())
@@ -91,10 +91,10 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), uncertainDeliveryError, item.ID); err != nil {
 			return nil, err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := syncDeliveryAsksTx(tx, now); err != nil {
 			return nil, err
 		}
-		return nil, r.ReconcileAttentionItems(now)
+		return nil, tx.Commit()
 	}
 	if status != "pending" || availableAt > now.UnixMilli() {
 		return nil, nil
@@ -114,14 +114,16 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 }
 
 func (r *Registry) AckMessage(id int64) error {
-	res, err := r.db.Exec(`UPDATE message_queue SET refused=0,status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, surface.EvidenceDelivered, id)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		return queueItemNotInflight(id)
-	}
-	return r.ReconcileAttentionItems(r.now())
+	return r.deliveryWrite(func(tx *sql.Tx) error {
+		res, err := tx.Exec(`UPDATE message_queue SET refused=0,status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, surface.EvidenceDelivered, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return queueItemNotInflight(id)
+		}
+		return nil
+	})
 }
 
 func (r *Registry) AckMessageWithRelayHops(id int64, sessionID string, relayHops int) error {
@@ -150,10 +152,10 @@ func (r *Registry) AckMessageWithEvidence(id int64, sessionID string, relayHops 
 	if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,relay_hops,turn_observed,updated_at) VALUES(?,?,1,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET relay_hops=excluded.relay_hops,turn_observed=1,updated_at=datetime('now')`, sessionID, relayHops); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := syncDeliveryAsksTx(tx, r.now()); err != nil {
 		return err
 	}
-	return r.ReconcileAttentionItems(r.now())
+	return tx.Commit()
 }
 
 func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts int) error {
@@ -200,22 +202,22 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 			return err
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := syncDeliveryAsksTx(tx, now); err != nil {
 		return err
 	}
-	return r.ReconcileAttentionItems(now)
+	return tx.Commit()
 }
 
-func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (int64, error) {
+func (r *Registry) DeferMessage(id int64, cause error, now time.Time) error {
 	tx, err := r.db.Begin()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer tx.Rollback()
-	var deferrals, refusal, announced int64
+	var deferrals, refusal int64
 	var wasRefused bool
-	if err := tx.QueryRow(`SELECT deferrals,refused,refusal,refusal_announced FROM message_queue WHERE id=?`, id).Scan(&deferrals, &wasRefused, &refusal, &announced); err != nil {
-		return 0, err
+	if err := tx.QueryRow(`SELECT deferrals,refused,refusal FROM message_queue WHERE id=?`, id).Scan(&deferrals, &wasRefused, &refusal); err != nil {
+		return err
 	}
 	shift := min(deferrals, 6)
 	message := "delivery did not start"
@@ -223,34 +225,20 @@ func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (int64, er
 		message = cause.Error()
 	}
 	refused := surface.IsDeliveryRefused(cause)
-	began := refused && !wasRefused
-	if began {
+	if refused && !wasRefused {
 		refusal++
 	}
 	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,refused=?,refusal=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(r.retryBackoff*time.Duration(1<<shift)).UnixMilli(), refused, refusal, id)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return 0, queueItemNotInflight(id)
+		return queueItemNotInflight(id)
 	}
-	if began {
-		if err := queueDeliveryRefusalNotice(tx, id, refusal, message); err != nil {
-			return 0, err
-		}
+	if err := syncDeliveryAsksTx(tx, now); err != nil {
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	if !refused || announced == refusal {
-		refusal = 0
-	}
-	return refusal, r.ReconcileAttentionItems(now)
-}
-
-func (r *Registry) MarkRefusalAnnounced(id, refusal int64) error {
-	_, err := r.db.Exec(`UPDATE message_queue SET refusal_announced=? WHERE id=? AND refusal=?`, refusal, id, refusal)
-	return err
+	return tx.Commit()
 }
 
 func (r *Registry) DeadLetterUnknown(id int64, cause error) error {
@@ -269,36 +257,32 @@ func (r *Registry) DeadLetterUnknown(id int64, cause error) error {
 	if err := markQueuedDeliveryIntent(tx, id, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := syncDeliveryAsksTx(tx, r.now()); err != nil {
 		return err
 	}
-	return r.ReconcileAttentionItems(r.now())
+	return tx.Commit()
 }
 
-func (r *Registry) DeadLetterMessage(id int64, cause error) (bool, error) {
+func (r *Registry) DeadLetterMessage(id int64, cause error) error {
 	message := "delivery failed"
 	if cause != nil {
 		message = cause.Error()
 	}
 	tx, err := r.db.Begin()
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer tx.Rollback()
 	if err := deadLetterInflight(tx, id, message, r.now()); err != nil {
-		return false, err
+		return err
 	}
-	notified, err := finishQueuedDeliveryIntent(tx, id, message)
-	if err != nil {
-		return false, err
+	if err := finishQueuedDeliveryIntent(tx, id, message); err != nil {
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return false, err
+	if err := syncDeliveryAsksTx(tx, r.now()); err != nil {
+		return err
 	}
-	if err := r.ReconcileAttentionItems(r.now()); err != nil {
-		return notified, err
-	}
-	return notified, nil
+	return tx.Commit()
 }
 
 func deadLetterInflight(tx *sql.Tx, id int64, message string, now time.Time) error {
@@ -329,13 +313,8 @@ func (r *Registry) RecoverInflight(before time.Time) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := syncDeliveryAsksTx(tx, r.now()); err != nil {
 		return 0, err
 	}
-	if n > 0 {
-		if err := r.ReconcileAttentionItems(before); err != nil {
-			return n, err
-		}
-	}
-	return n, nil
+	return n, tx.Commit()
 }

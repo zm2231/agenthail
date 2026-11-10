@@ -33,17 +33,6 @@ type QueueRow struct {
 	Author          surface.Author           `json:"-"`
 }
 
-type AttentionItem struct {
-	ID              int64  `json:"id"`
-	SessionID       string `json:"sessionId"`
-	QueueID         int64  `json:"queueId"`
-	Reason          string `json:"reason"`
-	RequestedAction string `json:"requestedAction"`
-	CreatedAt       string `json:"createdAt"`
-	ResolvedAt      string `json:"resolvedAt,omitempty"`
-	Resolution      string `json:"resolution,omitempty"`
-}
-
 const QueueRetryBackoff = 5 * time.Second
 
 const uncertainDeliveryError = "delivery outcome is unknown after daemon interruption; retry explicitly if the target did not receive it"
@@ -187,23 +176,6 @@ func QueueStatusEvidence(status string) surface.DeliveryEvidence {
 	}
 }
 
-func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, error) {
-	query := `SELECT id,session_id,queue_id,reason,requested_action,created_at,resolved_at,resolution FROM attention_items`
-	if !includeResolved {
-		query += ` WHERE resolved_at=''`
-	}
-	query += ` ORDER BY created_at DESC,id DESC`
-	rows, err := r.read.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	return appendRows(make([]AttentionItem, 0), rows, func(row rowScanner) (AttentionItem, error) {
-		var item AttentionItem
-		err := row.Scan(&item.ID, &item.SessionID, &item.QueueID, &item.Reason, &item.RequestedAction, &item.CreatedAt, &item.ResolvedAt, &item.Resolution)
-		return item, err
-	})
-}
-
 const queueRefusedRow = `refused=1 AND status IN ('pending','inflight')`
 
 // A host's refusal of an unproven token reads "<prefix>Host X doesn't know
@@ -213,75 +185,6 @@ const (
 	hostUnprovenBreak  = `. `
 	hostUnprovenRow    = `last_error LIKE '` + hostUnprovenPrefix + `%' AND instr(last_error, '` + hostUnprovenBreak + `') > 0`
 )
-
-func (r *Registry) ReconcileAttentionItems(now time.Time) error {
-	if open, err := r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE status='dead' OR ` + queueRefusedRow + `) OR EXISTS(SELECT 1 FROM attention_items WHERE resolved_at='')`); err != nil || !open {
-		return err
-	}
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	_, err = tx.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action)
-		SELECT session_id,id,
-			CASE
-				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 404%' THEN 'Delivery target is unavailable'
-				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 401%' THEN 'Claude needs to reconnect'
-				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 403%' THEN 'Claude denied this delivery'
-				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 400%' THEN 'Delivery request needs correction'
-				WHEN last_error LIKE 'delivery outcome is unknown%' THEN 'Delivery outcome could not be confirmed'
-				WHEN last_error LIKE 'delivery rejected [target missing]:%' THEN 'Delivery target is unavailable'
-				WHEN last_error LIKE 'delivery rejected [authentication needed]:%' THEN 'Claude needs to reconnect'
-				WHEN last_error LIKE 'delivery rejected [access denied]:%' THEN 'Claude denied this delivery'
-				WHEN last_error LIKE 'delivery rejected [invalid request]:%' THEN 'Delivery request needs correction'
-				WHEN `+hostUnprovenRow+` THEN substr(last_error, length('`+hostUnprovenPrefix+`') + 1, instr(last_error, '`+hostUnprovenBreak+`') - length('`+hostUnprovenPrefix+`') - 1)
-				ELSE 'Delivery failed and needs a decision'
-			END,
-			CASE
-				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 404%' THEN 'Cancel and send this message to an available session'
-				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 401%' THEN 'Reconnect Claude, then retry or cancel this message'
-				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 403%' THEN 'Check Claude access, then retry or cancel this message'
-				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 400%' THEN 'Correct this message, then retry or cancel it'
-				WHEN last_error LIKE 'delivery rejected [target missing]:%' THEN 'Cancel and send this message to an available session'
-				WHEN last_error LIKE 'delivery rejected [authentication needed]:%' THEN 'Reconnect Claude, then retry or cancel this message'
-				WHEN last_error LIKE 'delivery rejected [access denied]:%' THEN 'Check Claude access, then retry or cancel this message'
-				WHEN last_error LIKE 'delivery rejected [invalid request]:%' THEN 'Correct this message, then retry or cancel it'
-				WHEN `+hostUnprovenRow+` THEN substr(last_error, instr(last_error, '`+hostUnprovenBreak+`') + length('`+hostUnprovenBreak+`')) || ', then retry this message'
-				ELSE 'Retry or cancel this message'
-			END
-		FROM message_queue WHERE status='dead' AND dead_at_ms>?
-		ON CONFLICT(queue_id) DO UPDATE SET
-			reason=excluded.reason,
-			requested_action=excluded.requested_action
-		WHERE attention_items.resolved_at=''`, now.Add(-deadReviewWindow).UnixMilli())
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action)
-		SELECT session_id,id,'The target refused to start','Fix what the target reported; the message is delivered on its next attempt, or cancel it'
-		FROM message_queue WHERE ` + queueRefusedRow + `
-		ON CONFLICT(queue_id) DO UPDATE SET
-			reason=excluded.reason,
-			requested_action=excluded.requested_action,
-			created_at=CASE WHEN attention_items.resolved_at!='' THEN datetime('now') ELSE attention_items.created_at END,
-			resolved_at='',
-			resolution=''`)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(`UPDATE attention_items SET
-		resolved_at=datetime('now'),
-		resolution=COALESCE((SELECT CASE WHEN status='dead' AND dead_at_ms<=? THEN 'history' WHEN status='pending' THEN 'retrying' WHEN status='delivered' THEN 'delivered' WHEN status='canceled' THEN 'canceled' ELSE status END FROM message_queue WHERE id=attention_items.queue_id),'removed')
-		WHERE resolved_at='' AND NOT EXISTS (SELECT 1 FROM message_queue WHERE id=attention_items.queue_id AND (status='dead' AND dead_at_ms>? OR `+queueRefusedRow+`))`, now.Add(-deadReviewWindow).UnixMilli(), now.Add(-deadReviewWindow).UnixMilli())
-	if err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return nil
-}
 
 func (r *Registry) RetryMessage(id int64) error {
 	var sessionID, message, hostRequest string
@@ -301,6 +204,9 @@ func (r *Registry) RetryMessage(id int64) error {
 	if err := retryQueuedDeliveryIntent(tx, id); err != nil {
 		return err
 	}
+	if err := syncDeliveryAsksTx(tx, r.now()); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -308,7 +214,7 @@ func (r *Registry) RetryMessage(id int64) error {
 		r.signalChange(ChangeHostDeliveries)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "retry", SessionID: sessionID, QueueID: id, Message: message, Result: "scheduled"})
-	return r.ReconcileAttentionItems(r.now())
+	return nil
 }
 
 type CanceledMessage struct {
@@ -319,15 +225,18 @@ type CanceledMessage struct {
 
 func (r *Registry) CancelMessage(id int64) (CanceledMessage, error) {
 	var canceled CanceledMessage
-	err := r.db.QueryRow(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE id=? AND status IN ('pending','dead') RETURNING session_id,message,uploads`, id).Scan(&canceled.SessionID, &canceled.Message, &canceled.Uploads)
-	if errors.Is(err, sql.ErrNoRows) {
-		return CanceledMessage{}, fmt.Errorf("queue item %d is not pending or dead-lettered", id)
-	}
+	err := r.deliveryWrite(func(tx *sql.Tx) error {
+		err := tx.QueryRow(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE id=? AND status IN ('pending','dead') RETURNING session_id,message,uploads`, id).Scan(&canceled.SessionID, &canceled.Message, &canceled.Uploads)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("queue item %d is not pending or dead-lettered", id)
+		}
+		return err
+	})
 	if err != nil {
 		return CanceledMessage{}, err
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "canceled", SessionID: canceled.SessionID, QueueID: id, Message: canceled.Message, Result: "removed from delivery queue"})
-	return canceled, r.ReconcileAttentionItems(r.now())
+	return canceled, nil
 }
 
 func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
@@ -353,18 +262,18 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := syncDeliveryAsksTx(tx, r.now()); err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	for _, entry := range pending {
 		_ = r.RecordHistory(entry)
-	}
-	count, err := res.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	if err := r.ReconcileAttentionItems(r.now()); err != nil {
-		return count, err
 	}
 	return count, nil
 }

@@ -22,13 +22,19 @@ func (r *Registry) CancelPendingByKey(deliveryKey string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	res, err := r.db.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE id=? AND status='pending'`, id)
-	if err != nil {
+	canceled := false
+	err = r.deliveryWrite(func(tx *sql.Tx) error {
+		res, err := tx.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE id=? AND status='pending'`, id)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		canceled = n == 1
+		return nil
+	})
+	if err != nil || !canceled {
 		return false, err
 	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		return false, nil
-	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "canceled", SessionID: sessionID, QueueID: id, Message: message, Result: "no longer needed"})
-	return true, r.ReconcileAttentionItems(r.now())
+	return true, nil
 }

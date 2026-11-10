@@ -581,9 +581,12 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 		if _, err := tx.Exec(`UPDATE message_queue SET status='dead',refused=0,dead_at_ms=?,last_error=?,available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=?`, now.UnixMilli(), failure, id); err != nil {
 			return nil, false, err
 		}
-		if _, err := finishQueuedDeliveryIntent(tx, id, failure); err != nil {
+		if err := finishQueuedDeliveryIntent(tx, id, failure); err != nil {
 			return nil, false, err
 		}
+	}
+	if err := syncDeliveryAsksTx(tx, now); err != nil {
+		return nil, false, err
 	}
 	return events, false, tx.Commit()
 }

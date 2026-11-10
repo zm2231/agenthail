@@ -70,7 +70,7 @@ func TestIdleQueueScansTakeNoWriteLock(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		now := time.Now()
-		if err := first.ReconcileAttentionItems(now); err != nil {
+		if err := first.SyncDeliveryAsks(now); err != nil {
 			done <- err
 			return
 		}

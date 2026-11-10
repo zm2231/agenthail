@@ -107,9 +107,8 @@ const catalogRetiredRecency = 24 * time.Hour
 
 const catalogNeededSessions = `SELECT session_id FROM message_queue WHERE status IN ('pending','inflight')
 	UNION SELECT a.session_id FROM coordinators c JOIN aliases a ON a.name=c.name WHERE c.host_id=''
-	UNION SELECT session_id FROM attention_items WHERE resolved_at=''
 	UNION SELECT session_id FROM limit_resumes WHERE state!='released'
-	UNION SELECT sender_session_id FROM delivery_intents WHERE status IN ('failed','held') AND COALESCE(dismissed_at,'')=''`
+	UNION SELECT session_id FROM asks WHERE origin='delivery' AND state='open'`
 
 const catalogUnretiredSessions = `SELECT session_id FROM catalog_sessions INDEXED BY catalog_sessions_unretired WHERE retired=0
 	UNION ALL SELECT session_id FROM catalog_sessions WHERE +retired=1 AND session_id IN (` + catalogNeededSessions + `)`

@@ -186,7 +186,6 @@ func migrateTx(tx *sql.Tx) error {
 		{"uploads", `TEXT NOT NULL DEFAULT '[]'`},
 		{"refused", `INTEGER NOT NULL DEFAULT 0`},
 		{"refusal", `INTEGER NOT NULL DEFAULT 0`},
-		{"refusal_announced", `INTEGER NOT NULL DEFAULT 0`},
 		{"person_name", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := ensureColumn(tx, "message_queue", column.name, column.decl); err != nil {
@@ -321,9 +320,6 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if err := ensureColumn(tx, "delivery_intents", "queue_id", `INTEGER NOT NULL DEFAULT 0`); err != nil {
-		return err
-	}
-	if err := ensureColumn(tx, "delivery_intents", "dismissed_at", `TEXT`); err != nil {
 		return err
 	}
 	if err := ensureColumn(tx, "delivery_intents", "retries", `INTEGER NOT NULL DEFAULT 0`); err != nil {
@@ -470,6 +466,9 @@ func migrateTx(tx *sql.Tx) error {
 		if _, err := tx.Exec(`UPDATE sessions SET ended=1 WHERE status='offline'`); err != nil {
 			return err
 		}
+	}
+	if err := moveDeliveryProblemsToAsks(tx); err != nil {
+		return err
 	}
 	if err := createPresentationTriggers(tx); err != nil {
 		return err

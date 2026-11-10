@@ -36,7 +36,6 @@ type CatalogPresentationRow struct {
 	QueueCount                             int
 	Archived                               bool
 	Freshness                              CatalogPresentationFreshness
-	Attention                              string
 	Retired                                bool
 	PinnedAt                               time.Time
 	KeepAlive                              KeepAlive
@@ -49,8 +48,6 @@ type CatalogPresentationRow struct {
 }
 
 type CatalogPresentation struct {
-	Outgoing     map[string]int
-	RefreshAt    time.Time
 	HostEpoch    string
 	CatalogSeq   uint64
 	Rows         []CatalogPresentationRow
@@ -130,10 +127,6 @@ func (r *Registry) readCatalogPresentation(ctx context.Context, history bool, st
 	if read.Limits, err = catalogPresentationLimits(ctx, tx); err != nil {
 		return CatalogPresentation{}, err
 	}
-	read.Outgoing, read.RefreshAt, err = catalogPresentationOutgoing(ctx, tx)
-	if err != nil {
-		return CatalogPresentation{}, err
-	}
 	var needed []string
 	for _, row := range read.Rows {
 		if stale(row.ID, row.Freshness.Generation) {
@@ -167,7 +160,7 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 		var snoozeWake, starterHost string
 		if err := rows.Scan(&row.ID, &row.HostID, &row.Name, &row.Surface, &row.Status, &row.Ended, &row.Cwd, &lastActive, &row.RuntimeKind, &row.Source, &row.Transport,
 			&row.UnavailableReason, &subagent.ParentID, &subagent.RootID, &subagent.Depth, &subagent.Nickname, &subagent.Role, &waiting, &background, &limit, &stop,
-			&row.Alias, &row.QueueCount, &row.Archived, &row.Freshness.Generation, &row.Freshness.Stale, &row.Attention, &row.Retired, &registered,
+			&row.Alias, &row.QueueCount, &row.Archived, &row.Freshness.Generation, &row.Freshness.Stale, &row.Retired, &registered,
 			&pinnedAt, &keepAliveFailedAt, &row.KeepAlive.Error, &snoozedAt, &snoozedUntil, &snoozeWake, &row.StartedBy, &starterHost, &row.Task); err != nil {
 			return nil, err
 		}
@@ -253,7 +246,7 @@ const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.stat
  a.name,cs.host_queue_count+COALESCE(q.n,0),
  sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,
  cs.projection_generation,(cs.misses>0 OR cs.discovery_failures>0 OR (s.host_id!='' AND cs.unavailable_reason!='')),
- COALESCE(at.reason,''),cs.retired,s.registered_at,s.pinned_at_ms,COALESCE(ka.failed_at_ms,0),COALESCE(ka.error,''),
+ cs.retired,s.registered_at,s.pinned_at_ms,COALESCE(ka.failed_at_ms,0),COALESCE(ka.error,''),
  s.snoozed_at_ms,s.snoozed_until_ms,s.snooze_wake,COALESCE(o.creator_session_id,''),COALESCE(sc.host_id,''),
  EXISTS (SELECT 1 FROM tasks t WHERE t.child_session_id=s.id)
  `
@@ -266,5 +259,4 @@ const catalogPresentationJoins = ` JOIN sessions s ON s.id=cs.session_id
  LEFT JOIN session_archive sa ON sa.session_id=s.id
  LEFT JOIN session_keep_alive ka ON ka.session_id=s.id AND s.pinned_at_ms>0
  LEFT JOIN projects p ON p.id=json_extract(cs.host_project,'$.localId')
- LEFT JOIN (SELECT session_id,group_concat(reason,'; ') reason FROM attention_items WHERE resolved_at='' GROUP BY session_id) at ON at.session_id=s.id
  ORDER BY cs.session_id`
