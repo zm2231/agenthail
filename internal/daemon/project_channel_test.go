@@ -273,3 +273,49 @@ func TestThePersonsChannelPostReachesAnotherHostAsThePersonWithTheirName(t *test
 		}
 	}
 }
+
+func TestAProjectChannelReachesPinnedAndRecentlyUsedConversationsWhoseProcessEnded(t *testing.T) {
+	local, _, _ := widgetOnTwoHosts(t)
+	repo := local.fake.sessions["local-a"].Cwd
+	ended := func(id string, lastActive time.Time) {
+		t.Helper()
+		moveSession(t, local, id, repo, lastActive)
+		session := local.fake.sessions[id]
+		session.Status = surface.StatusOffline
+		local.fake.sessions[id] = session
+		if err := local.reg.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ended("ended-recent", time.Now().Add(-time.Hour))
+	ended("ended-pinned", time.Now().Add(-72*time.Hour))
+	ended("ended-old", time.Now().Add(-72*time.Hour))
+	ended("ended-archived", time.Now().Add(-time.Hour))
+	if _, err := local.reg.PinSession("ended-pinned", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := local.reg.ArchiveSession("ended-archived", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	local.daemon.discoverCatalog(context.Background())
+	before := len(local.fake.delivered())
+	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "release notes", "sourceSessionId": "local-a"})
+	var answer struct {
+		Recipients []broadcast.Recipient `json:"recipients"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &answer) != nil {
+		t.Fatalf("send status=%d body=%s", response.Code, response.Body)
+	}
+	reached := map[string]string{}
+	for _, recipient := range answer.Recipients {
+		if recipient.HostID == "" && recipient.Coordinator == "" {
+			reached[recipient.SessionID] = recipient.Outcome
+		}
+	}
+	if len(reached) != 2 || reached["ended-recent"] != broadcast.OutcomeSent || reached["ended-pinned"] != broadcast.OutcomeSent {
+		t.Fatalf("this host's members reached %v, want the recently used and the pinned conversation once each: %+v", reached, answer.Recipients)
+	}
+	if delivered := len(local.fake.delivered()) - before; delivered != 3 {
+		t.Fatalf("this host delivered %d messages, want its coordinator and two members", delivered)
+	}
+}

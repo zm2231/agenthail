@@ -268,8 +268,9 @@ func (b Broadcaster) Send(ctx context.Context, target Target, message, label, so
 }
 
 // A project's members are this host's own: each paired host that holds the
-// project resolves and delivers to its own. Coordinators are reached even when
-// idle past the active window, since a send starts or resumes one anyway.
+// project resolves and delivers to its own. A member is pinned or used within
+// the active window, whether or not its process is still up, since a send
+// resumes it. Coordinators are reached even when idle past the window.
 func (b Broadcaster) members(target Target, now time.Time) ([]string, []registry.CoordinatorSpec, error) {
 	if target.ProjectID == "" {
 		members, err := b.Registry.ChannelMembers(target.Channel)
@@ -294,13 +295,17 @@ func (b Broadcaster) members(target Target, now time.Time) ([]string, []registry
 	if err != nil {
 		return nil, nil, err
 	}
+	marks, err := b.Registry.SessionMarks()
+	if err != nil {
+		return nil, nil, err
+	}
 	var members []string
 	for _, record := range snapshot.Sessions {
 		item, ok := sessionProject(record)
 		if !ok || item.ID != target.ProjectID || record.HostID != "" || record.Freshness.Stale || coordinated[record.Session.ID] {
 			continue
 		}
-		if !surface.RecentlyActive(record.Session, now) {
+		if marks[record.Session.ID].PinnedAt.IsZero() && !surface.RecentlyUsed(record.Session, now) {
 			continue
 		}
 		if archived(record, item, archive) {

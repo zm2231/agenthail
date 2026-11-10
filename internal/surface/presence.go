@@ -87,7 +87,13 @@ const ActiveWindow = 24 * time.Hour
 // RecentlyActive reports a session that is working, or idle and active
 // within ActiveWindow. An offline session never is.
 func RecentlyActive(session Session, now time.Time) bool {
-	if session.ID == "" || session.Status == StatusOffline {
+	return session.Status != StatusOffline && RecentlyUsed(session, now)
+}
+
+// RecentlyUsed reports a session that is working or was active within
+// ActiveWindow, whether or not its process is still up.
+func RecentlyUsed(session Session, now time.Time) bool {
+	if session.ID == "" {
 		return false
 	}
 	if session.Status == StatusBusy {
