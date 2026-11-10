@@ -137,11 +137,6 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	runtime_launcher TEXT NOT NULL DEFAULT '',
 	runtime_location BLOB NOT NULL DEFAULT '{}',
 	runtime_focusable INTEGER NOT NULL DEFAULT 0,
-	waiting_kind TEXT NOT NULL DEFAULT '',
-	waiting_id TEXT NOT NULL DEFAULT '',
-	waiting_since_ms INTEGER NOT NULL DEFAULT 0,
-	waiting_announced INTEGER NOT NULL DEFAULT 0,
-	waiting_answerable INTEGER NOT NULL DEFAULT 0,
 	held_completion_turn_id TEXT NOT NULL DEFAULT '',
 	notice_turn_id TEXT NOT NULL DEFAULT '',
 	notice_outcome TEXT NOT NULL DEFAULT '',
@@ -702,7 +697,11 @@ CREATE TABLE IF NOT EXISTS asks (
 	applied_at_ms INTEGER NOT NULL DEFAULT 0,
 	apply_status TEXT NOT NULL DEFAULT '',
 	apply_id TEXT NOT NULL DEFAULT '',
-	created_at_ms INTEGER NOT NULL
+	created_at_ms INTEGER NOT NULL,
+	ref TEXT NOT NULL DEFAULT '',
+	wait_kind TEXT NOT NULL DEFAULT '',
+	answerable INTEGER NOT NULL DEFAULT 1,
+	announced_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS asks_open ON asks(routed_to) WHERE state='open';
 CREATE INDEX IF NOT EXISTS asks_session ON asks(session_id, created_at_ms);
