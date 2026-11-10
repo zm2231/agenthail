@@ -154,12 +154,27 @@ func TestASortReplaysAndAReclassifiedMessageDropsItQuietly(t *testing.T) {
 	search := goal(t, s, "search")
 	capture(t, s, project, "claude-prompt:1", "rank exact matches")
 	capture(t, s, project, "claude-prompt:2", "scheduled words")
+	capture(t, s, project, "claude-prompt:3", "scheduled thanks")
+	capture(t, s, project, "claude-prompt:4", "thanks")
 	sortTo(t, s, "claude-prompt:1", search, 0.92)
 	sortTo(t, s, "claude-prompt:2", search, 0.92)
-	if _, err := s.ReclassifyUtterance(project, "claude-prompt:2", "scheduled", time.Now()); err != nil {
-		t.Fatal(err)
+	for _, ref := range []string{"claude-prompt:3", "claude-prompt:4"} {
+		if _, err := s.RecordUnfiled(project, ledger.UnfiledPayload{UtteranceID: ref, Choice: "none", Confidence: 0.99, Model: "d1-3b"}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, ref := range []string{"claude-prompt:2", "claude-prompt:3"} {
+		if _, err := s.ReclassifyUtterance(project, ref, "scheduled", time.Now()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	fresh := ledger.NewCachedStore(db, db)
+	if input, ok, err := fresh.SortInputFor(project, "claude-prompt:4"); ok || err != nil {
+		t.Fatalf("a message with a kept answer was offered again after a rebuild: %+v %v", input, err)
+	}
+	if !slices.Contains(provisionalIDs(t, fresh), "claude-prompt:4") || slices.Contains(provisionalIDs(t, fresh), "claude-prompt:3") {
+		t.Fatalf("provisional after replay = %v, want the kept-answer message and not the reclassified one", provisionalIDs(t, fresh))
+	}
 	board, err := fresh.Board(project)
 	if err != nil {
 		t.Fatal(err)
