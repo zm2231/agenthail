@@ -32,6 +32,9 @@ struct SidebarSessionRow: View, @MainActor Equatable {
             if session.canAdopt {
                 Button("Open in Agenthail") { actions.adopt() }
             }
+            if actions.model.canMove(session) {
+                Button("Move to Another Computer…") { actions.move() }
+            }
             Divider()
             Button(session.archived == true ? "Unarchive" : "Archive") { actions.toggleArchived() }
             if ProjectMenu.canAddFolder(session), session.cwd != nil {

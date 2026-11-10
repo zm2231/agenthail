@@ -52,6 +52,7 @@ final class SessionPane: Identifiable {
     private(set) var sidebarOverlay = false
     @ObservationIgnored private var fitted = false
     var renamingSession: SessionState?
+    var movingSession: SessionState?
     var adoptingSession: SessionState?
     var projectSheet: ProjectSheet?
     var messagingProject: ProjectState?

@@ -102,6 +102,8 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private(set) var connectionError: String?
     private(set) var reconnecting = false
     var operationError: String?
+    var movesSent: Set<String> = []
+    var moveNotices = SessionMoveNotices()
     var pairing = false
     private(set) var completedPairings = 0
     let draft = ComposerDraft()
@@ -450,6 +452,11 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private func resolve(_ sessionID: String) throws -> (api: AgenthailAPI, route: SessionRoute) {
         let (connection, route) = try resolveServer(sessionID)
         return (connection.api, route)
+    }
+
+    func runningServer(_ sessionID: String) -> (connection: HostConnection, route: SessionRoute)? {
+        guard let (connection, route) = try? resolveServer(sessionID), HostCatalog.owner(of: sessionID) == route.hostID else { return nil }
+        return (connection, route)
     }
 
     private func resolveServer(_ sessionID: String) throws -> (connection: HostConnection, route: SessionRoute) {

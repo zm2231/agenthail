@@ -64,6 +64,8 @@ final class AgenthailModel {
     private static let connectionLog = Logger(subsystem: "com.agenthail.app", category: "connection")
     var operationError: String?
     var pendingForks: Set<String> = []
+    var movesSent: Set<String> = []
+    var moveNotices = SessionMoveNotices()
     var loading = false
     var operationsVisible = false
     var sessionFilter: SessionFilter = .recent {

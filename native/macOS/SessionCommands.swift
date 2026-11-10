@@ -57,6 +57,8 @@ struct SessionCommands: Commands {
             .disabled(session == nil)
             Button("Open in Agenthail") { if let session { pane?.adoptingSession = session } }
                 .disabled(session?.canAdopt != true || pane?.removedSession != nil)
+            Button("Move to Another Computer…") { if let session { pane?.movingSession = session } }
+                .disabled(session.map(model.canMove) != true || pane?.removedSession != nil)
             Button("Fork") { if let session { pane?.fork(session) } }
                 .disabled(session.map(SessionOperationAvailability.fork) != true || pane?.removedSession != nil || pane?.forking == true)
             if tabs, let pane {

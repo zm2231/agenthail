@@ -392,6 +392,54 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testMovingASessionAsksTheComputerThatRunsItAndResendsWithConsent() async throws {
+        ParityProtocol.state.reset()
+        ParityProtocol.state.answerMoves([
+            (409, #"{"error":{"code":"move_needs_consent","message":"a terminal holds it"}}"#),
+            (200, #"{"ok":true,"result":{"move":{"id":"m1"},"host":{"id":"hpeer","name":"peer","state":"connected"},"stopped":"terminal process 41","mcpServersWithoutCredentials":["linear"]}}"#),
+        ])
+        let model = makeModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data("""
+        {"updatedAt":"now","daemon":{"running":true,"host":{"id":"hself","name":"laptop","state":"local"},"hosts":[{"id":"hpeer","name":"peer","state":"connected"},{"id":"hdown","name":"spare","state":"unreachable"}]},"surfaces":[],"sessions":[
+          {"id":"old","surface":"claude","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}},
+          {"id":"m2","surface":"claude","name":"remote","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"host":{"id":"hpeer","name":"peer","state":"connected"}},
+          {"id":"m3","surface":"claude","name":"moving","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"move":{"state":"copying","host":"hpeer","hostName":"peer"}}],
+         "totalSessions":3,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}
+        """.utf8)))
+        let sessions = try XCTUnwrap(model.snapshot?.sessions)
+        let local = try XCTUnwrap(sessions.first { $0.name == "task" })
+        let remote = try XCTUnwrap(sessions.first { $0.name == "remote" })
+        let moving = try XCTUnwrap(sessions.first { $0.name == "moving" })
+        XCTAssertTrue(model.canMove(local))
+        XCTAssertFalse(model.canMove(remote), "a paired host's session moves from that host")
+        XCTAssertFalse(model.canMove(moving), "a session already moving cannot move again")
+        XCTAssertEqual(moving.move?.label, "Moving to peer: copying")
+        let targets = model.moveTargets(local)
+        XCTAssertEqual(targets.map(\.name), ["peer", "spare"])
+        XCTAssertEqual(targets.map(\.isAvailable), [true, false])
+
+        model.move(local, to: targets[0])
+        XCTAssertFalse(model.canMove(local), "a move in flight cannot be sent twice")
+        for _ in 0..<300 where model.moveNotices.current == nil { try await Task.sleep(for: .milliseconds(10)) }
+        let consent = try XCTUnwrap(model.moveNotices.current)
+        XCTAssertEqual(consent.title, "Stop the terminal and move?")
+        XCTAssertEqual(ParityProtocol.state.moves.first?["sessionId"] as? String, "old")
+        XCTAssertEqual(ParityProtocol.state.moves.first?["host"] as? String, "hpeer")
+        XCTAssertEqual(ParityProtocol.state.moves.first?["stopTerminal"] as? Bool, false)
+
+        model.moveNotices.dismiss(consent)
+        model.retryMove(consent)
+        for _ in 0..<300 where model.moveNotices.current == nil { try await Task.sleep(for: .milliseconds(10)) }
+        let moved = try XCTUnwrap(model.moveNotices.current)
+        XCTAssertEqual(ParityProtocol.state.moves.count, 2)
+        XCTAssertEqual(ParityProtocol.state.moves.last?["stopTerminal"] as? Bool, true)
+        XCTAssertEqual(moved.title, "Moved to peer")
+        XCTAssertTrue(moved.message.contains("Stopped the terminal process 41 that held it."))
+        XCTAssertTrue(moved.message.contains("Add their credentials again on peer:\nlinear"))
+        XCTAssertNil(moved.retry)
+    }
+
+    @MainActor
     func testLifecycleActionsGoThroughTheComputerThatListsTheSessionWithRetryKeys() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
@@ -581,6 +629,14 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
         private var create: (Int, String)?
         private var actionKeys: [String?] = []
         private var queries: [String] = []
+        private var moveBodies: [[String:Any]] = []
+        private var moveReplies: [(Int, String)] = []
+        var moves: [[String:Any]] { lock.withLock { moveBodies } }
+        func answerMoves(_ replies: [(Int, String)]) { lock.withLock { moveBodies = []; moveReplies = replies } }
+        func move(_ body: [String:Any]) -> (Int, String) { lock.withLock {
+            moveBodies.append(body)
+            return moveReplies.isEmpty ? (500, #"{"error":{"message":"no move reply"}}"#) : moveReplies.removeFirst()
+        } }
         var promptQueries: [String] { lock.withLock { queries } }
         func recordQuery(_ query: String) { lock.withLock { queries.append(query) } }
         var actions: [[String:Any]] { lock.withLock { records } }
@@ -631,6 +687,10 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
             if let stream = request.httpBodyStream { stream.open(); defer { stream.close() }; var buffer = [UInt8](repeating:0,count:4096); while stream.hasBytesAvailable { let n = stream.read(&buffer,maxLength:buffer.count); if n <= 0 { break }; data.append(contentsOf:buffer.prefix(n)) } }
             let body = (try? JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:]
             (status,text) = Self.state.respond(body, idempotencyKey: request.value(forHTTPHeaderField: "Idempotency-Key"))
+        } else if request.url?.path == "/api/v1/session-moves" {
+            var data = request.httpBody ?? Data()
+            if let stream = request.httpBodyStream { stream.open(); defer { stream.close() }; var buffer = [UInt8](repeating:0,count:4096); while stream.hasBytesAvailable { let n = stream.read(&buffer,maxLength:buffer.count); if n <= 0 { break }; data.append(contentsOf:buffer.prefix(n)) } }
+            (status,text) = Self.state.move((try? JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:])
         } else if request.url?.path == "/api/v1/prompts" {
             Self.state.recordQuery(request.url?.query ?? "")
             text = #"{"prompts":[{"sessionId":"old","itemId":"i2","turnId":"t2","ts":"2026-10-20T10:00:02Z","text":"second"},{"sessionId":"old","itemId":"i1","turnId":"t1","ts":"2026-10-20T10:00:01Z","text":"first"}],"nextBefore":""}"#
