@@ -46,6 +46,11 @@ type SortInput struct {
 	Goals       []SortGoal
 }
 
+type OwedSort struct {
+	Ref string
+	Seq int64
+}
+
 func sortedRef(utteranceID string) string { return "sorted:" + utteranceID }
 
 func (s *Store) RecordSort(projectKey string, p SortedPayload, now time.Time) (bool, error) {
@@ -110,20 +115,20 @@ func (s *Store) SortInputFor(projectKey, utteranceID string) (SortInput, bool, e
 }
 
 // Only this host's captures: two hosts sorting one message would collide on its ref when they sync.
-func (s *Store) LocalProvisionalSince(projectKey string, since time.Time) ([]string, error) {
-	rows, err := s.read.Query(`SELECT ref FROM ledger_events WHERE project_key=? AND type=? AND actor_host_id=COALESCE((SELECT host_id FROM host_identity WHERE id=1),'')
-		AND json_extract(payload,'$.ts')>=? ORDER BY seq`, projectKey, string(EventUtterance), since.UTC().Format(time.RFC3339))
+func (s *Store) LocalProvisionalFrom(projectKey string, fromSeq int64, notBefore time.Time) ([]OwedSort, error) {
+	rows, err := s.read.Query(`SELECT ref, seq FROM ledger_events WHERE project_key=? AND type=? AND seq>=? AND actor_host_id=COALESCE((SELECT host_id FROM host_identity WHERE id=1),'')
+		AND json_extract(payload,'$.ts')>=? ORDER BY seq`, projectKey, string(EventUtterance), fromSeq, notBefore.UTC().Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
-	var refs []string
+	var owed []OwedSort
 	for rows.Next() {
-		var ref string
-		if err := rows.Scan(&ref); err != nil {
+		var o OwedSort
+		if err := rows.Scan(&o.Ref, &o.Seq); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		refs = append(refs, ref)
+		owed = append(owed, o)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -132,7 +137,7 @@ func (s *Store) LocalProvisionalSince(projectKey string, since time.Time) ([]str
 	if err != nil {
 		return nil, err
 	}
-	return slices.DeleteFunc(refs, func(ref string) bool { return !board.provisional(ref) }), rows.Err()
+	return slices.DeleteFunc(owed, func(o OwedSort) bool { return !board.provisional(o.Ref) }), rows.Err()
 }
 
 func (b *Board) provisional(utteranceID string) bool {

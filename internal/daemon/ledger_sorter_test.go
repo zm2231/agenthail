@@ -195,7 +195,6 @@ func TestAnUnavailableSorterRecoversOnlyWhatWasCapturedWhileItFailed(t *testing.
 	runSorter(t, d)
 	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "before", Prompt: "an unrelated topic"})
 	eventually(t, "the first answer", func() bool { return len(stub.asks()) == 1 })
-	time.Sleep(1100 * time.Millisecond)
 	stub.setAnswer(func(string) (int, string) { return http.StatusServiceUnavailable, "down" })
 	for _, id := range []string{"down-1", "down-2"} {
 		ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: id, Prompt: "search words " + id})
@@ -239,13 +238,12 @@ func TestAnUnavailableSorterRecoversOnlyWhatWasCapturedWhileItFailed(t *testing.
 
 func TestAFullQueueLeavesTheMessageProvisionalAndOwesItASort(t *testing.T) {
 	d, _, _ := ledgerDaemon(t)
-	at := time.Now()
 	for i := range sorterQueue + 2 {
-		d.queueSort("k", fmt.Sprintf("claude-prompt:%d", i), at.Add(time.Duration(i)*time.Second))
+		d.queueSort("k", fmt.Sprintf("claude-prompt:%d", i), int64(100+i), time.Now())
 	}
 	d.sorter.mu.Lock()
 	defer d.sorter.mu.Unlock()
-	if d.sorter.dropped != 2 || !d.sorter.backlog["k"].Equal(at.Add(sorterQueue*time.Second)) {
+	if d.sorter.dropped != 2 || d.sorter.backlog["k"] != 100+sorterQueue {
 		t.Fatalf("dropped %d, owed from %v", d.sorter.dropped, d.sorter.backlog["k"])
 	}
 }

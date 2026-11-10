@@ -175,24 +175,31 @@ func TestASortReplaysAndAReclassifiedMessageDropsItQuietly(t *testing.T) {
 	}
 }
 
-func TestOnlyThisHostsProvisionalMessagesSinceAStartAreOwedASort(t *testing.T) {
+func TestOwedSortsStartAtAMessageNotASecondAndGoBackADayAtMost(t *testing.T) {
 	s := newStore(t)
 	search := goal(t, s, "search")
-	start := time.Now().Add(-time.Hour).Truncate(time.Second)
-	for i, offset := range []time.Duration{-time.Minute, 0, time.Minute, 2 * time.Minute} {
+	now := time.Now()
+	var seqs []int64
+	for i, at := range []time.Time{now.Add(-25 * time.Hour), now, now, now, now} {
 		u := said(fmt.Sprintf("claude-prompt:%d", i), fmt.Sprintf("message %d", i))
-		u.ProjectKey, u.At = project, start.Add(offset)
-		if _, _, err := s.RecordUtterance(u); err != nil {
+		u.ProjectKey, u.At = project, at
+		e, _, err := s.RecordUtterance(u)
+		if err != nil {
 			t.Fatal(err)
 		}
+		seqs = append(seqs, e.Seq)
 	}
-	sortTo(t, s, "claude-prompt:2", search, 0.95)
-	got, err := s.LocalProvisionalSince(project, start)
+	sortTo(t, s, "claude-prompt:3", search, 0.95)
+	got, err := s.LocalProvisionalFrom(project, seqs[2], now.Add(-24*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(got, []string{"claude-prompt:1", "claude-prompt:3"}) {
-		t.Fatalf("owed = %v, want the provisional messages from the start on, oldest first", got)
+	want := []ledger.OwedSort{{Ref: "claude-prompt:2", Seq: seqs[2]}, {Ref: "claude-prompt:4", Seq: seqs[4]}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("owed = %v, want %v: from the first owed message on, not the one before it in the same second, and not the sorted one", got, want)
+	}
+	if got, err := s.LocalProvisionalFrom(project, 0, now.Add(-24*time.Hour)); err != nil || len(got) == 0 || got[0].Ref != "claude-prompt:1" {
+		t.Fatalf("a message older than a day was owed: %v (%v)", got, err)
 	}
 }
 

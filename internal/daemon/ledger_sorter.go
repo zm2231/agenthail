@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ const (
 type sortJob struct {
 	key         string
 	utteranceID string
+	seq         int64
 	at          time.Time
 }
 
@@ -39,24 +41,24 @@ type ledgerSorter struct {
 	failures  int
 	dropped   int
 	configErr string
-	backlog   map[string]time.Time
+	backlog   map[string]int64
 }
 
 func newLedgerSorter() *ledgerSorter {
-	return &ledgerSorter{jobs: make(chan sortJob, sorterQueue), now: time.Now, backlog: map[string]time.Time{}}
+	return &ledgerSorter{jobs: make(chan sortJob, sorterQueue), now: time.Now, backlog: map[string]int64{}}
 }
 
-func (d *Daemon) queueSort(key, utteranceID string, at time.Time) {
+func (d *Daemon) queueSort(key, utteranceID string, seq int64, at time.Time) {
 	s := d.sorter
 	if s == nil {
 		return
 	}
 	select {
-	case s.jobs <- sortJob{key: key, utteranceID: utteranceID, at: at}:
+	case s.jobs <- sortJob{key: key, utteranceID: utteranceID, seq: seq, at: at}:
 	default:
 		s.mu.Lock()
 		s.dropped++
-		s.owe(key, at)
+		s.owe(key, seq)
 		s.mu.Unlock()
 	}
 }
@@ -90,7 +92,7 @@ func (d *Daemon) sortQueued(ctx context.Context, job sortJob) {
 		if ctx.Err() != nil || !d.resort(ctx, config, project) {
 			d.sorter.mu.Lock()
 			for _, left := range owed[i:] {
-				d.sorter.owe(left.key, left.since)
+				d.sorter.owe(left.key, left.fromSeq)
 			}
 			d.sorter.mu.Unlock()
 			return
@@ -119,29 +121,26 @@ func (d *Daemon) sorterConfig() (goalsort.Config, bool) {
 }
 
 type owedSorts struct {
-	key   string
-	since time.Time
+	key     string
+	fromSeq int64
 }
 
 func (d *Daemon) resort(ctx context.Context, config goalsort.Config, owed owedSorts) bool {
-	since := owed.since
-	if floor := d.sorter.now().Add(-sorterRecovery); since.Before(floor) {
-		since = floor
-	}
-	refs, err := d.ledgerStore().LocalProvisionalSince(owed.key, since.Truncate(time.Second))
+	refs, err := d.ledgerStore().LocalProvisionalFrom(owed.key, owed.fromSeq, d.sorter.now().Add(-sorterRecovery))
 	if err != nil {
 		d.log.Printf("ledger sorter: list messages to sort again in %s: %s", owed.key, err)
 		return true
 	}
 	for _, ref := range refs {
+		job := sortJob{key: owed.key, utteranceID: ref.Ref, seq: ref.Seq}
 		if ctx.Err() != nil {
 			d.sorter.mu.Lock()
-			d.sorter.owe(owed.key, since)
+			d.sorter.owe(owed.key, ref.Seq)
 			d.sorter.mu.Unlock()
 			return false
 		}
-		if err := d.sortOne(ctx, config, sortJob{key: owed.key, utteranceID: ref}); err != nil {
-			d.sorter.failed(d, sortJob{key: owed.key, utteranceID: ref, at: since}, err)
+		if err := d.sortOne(ctx, config, job); err != nil {
+			d.sorter.failed(d, job, err)
 			return false
 		}
 	}
@@ -216,9 +215,9 @@ func (d *Daemon) previousReply(sessionID string, before time.Time) string {
 	return ""
 }
 
-func (s *ledgerSorter) owe(key string, at time.Time) {
-	if since, ok := s.backlog[key]; !ok || at.Before(since) {
-		s.backlog[key] = at
+func (s *ledgerSorter) owe(key string, seq int64) {
+	if from, ok := s.backlog[key]; !ok || seq < from {
+		s.backlog[key] = seq
 	}
 }
 
@@ -231,11 +230,7 @@ func (s *ledgerSorter) failed(d *Daemon, job sortJob, err error) {
 	}
 	s.failures++
 	s.lastError = err.Error()
-	at := job.at
-	if at.IsZero() {
-		at = s.now()
-	}
-	s.owe(job.key, at)
+	s.owe(job.key, job.seq)
 }
 
 func (s *ledgerSorter) succeeded(d *Daemon) []owedSorts {
@@ -246,11 +241,11 @@ func (s *ledgerSorter) succeeded(d *Daemon) []owedSorts {
 	}
 	s.failures, s.lastError, s.since = 0, "", time.Time{}
 	owed := make([]owedSorts, 0, len(s.backlog))
-	for key, since := range s.backlog {
-		owed = append(owed, owedSorts{key: key, since: since})
+	for key, from := range s.backlog {
+		owed = append(owed, owedSorts{key: key, fromSeq: from})
 	}
 	clear(s.backlog)
-	slices.SortFunc(owed, func(a, b owedSorts) int { return a.since.Compare(b.since) })
+	slices.SortFunc(owed, func(a, b owedSorts) int { return strings.Compare(a.key, b.key) })
 	return owed
 }
 
