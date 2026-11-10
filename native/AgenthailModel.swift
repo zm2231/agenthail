@@ -466,7 +466,6 @@ final class AgenthailModel {
     }
 
     func markSeen(_ id: String) {
-        // Mutating the stored value notifies every reader even when the id is absent.
         if finishedUnseen.contains(id) { finishedUnseen.markSeen(id) }
     }
 

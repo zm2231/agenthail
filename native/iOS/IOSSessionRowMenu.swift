@@ -1,53 +1,84 @@
 import SwiftUI
 
+enum IOSRowAction: Identifiable {
+    case rename(SessionState)
+    case adopt(SessionState)
+
+    var id: String {
+        switch self {
+        case let .rename(session): "rename:" + session.id
+        case let .adopt(session): "adopt:" + session.id
+        }
+    }
+}
+
+struct IOSRowActions {
+    var present: (IOSRowAction) -> Void = { _ in }
+    var makeLead: (SessionState) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    @Entry var rowActions = IOSRowActions()
+}
+
 struct IOSSessionRowMenu: ViewModifier {
     var model: AgenthailIOSModel
     let session: SessionState
     let enabled: Bool
-    @State private var renaming = false
-    @State private var adopting = false
-    @State private var replacing: String?
+    @Environment(\.rowActions) private var actions
 
     func body(content: Content) -> some View {
         if enabled { menu(content) } else { content }
     }
 
     private func menu(_ content: Content) -> some View {
+        content.contextMenu {
+            Button("Rename…", systemImage: "pencil") { actions.present(.rename(session)) }
+            if session.canAdopt {
+                Button("Open in Agenthail", systemImage: "arrow.down.app") { actions.present(.adopt(session)) }
+            }
+            Divider()
+            Button(session.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") {
+                Task { await model.setArchived(sessionID: session.id, session.archived != true) }
+            }
+            if model.canAddFolder(session) {
+                Button("Add Folder as Project", systemImage: "folder.badge.plus") {
+                    Task { model.settle(await model.addFolder(of: session)) }
+                }
+            }
+            if model.canMakeLead(session) {
+                Button("Make Project Lead", systemImage: "person.badge.key") { actions.makeLead(session) }
+            }
+        }
+    }
+}
+
+struct IOSRowActionHost: ViewModifier {
+    var model: AgenthailIOSModel
+    @State private var action: IOSRowAction?
+    @State private var replacing: (session: SessionState, message: String)?
+
+    func body(content: Content) -> some View {
         content
-            .contextMenu {
-                Button("Rename…", systemImage: "pencil") { renaming = true }
-                if session.canAdopt {
-                    Button("Open in Agenthail", systemImage: "arrow.down.app") { adopting = true }
-                }
-                Divider()
-                Button(session.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") {
-                    Task { await model.setArchived(sessionID: session.id, session.archived != true) }
-                }
-                if model.canAddFolder(session) {
-                    Button("Add Folder as Project", systemImage: "folder.badge.plus") {
-                        Task { model.settle(await model.addFolder(of: session)) }
-                    }
-                }
-                if model.canMakeLead(session) {
-                    Button("Make Project Lead", systemImage: "person.badge.key") { makeLead(replace: false) }
+            .environment(\.rowActions, IOSRowActions(present: { action = $0 }, makeLead: { makeLead($0, replace: false) }))
+            .sheet(item: $action) { action in
+                switch action {
+                case let .rename(session):
+                    IOSNameSessionSheet(model: model, sessionID: session.id, alias: session.alias) { self.action = nil }
+                case let .adopt(session):
+                    IOSAdoptSessionSheet(model: model, session: model.routedSession(session) ?? session, sessionID: session.id)
                 }
             }
-            .sheet(isPresented: $renaming) {
-                IOSNameSessionSheet(model: model, sessionID: session.id, alias: session.alias) { renaming = false }
-            }
-            .sheet(isPresented: $adopting) {
-                IOSAdoptSessionSheet(model: model, session: model.routedSession(session) ?? session, sessionID: session.id)
-            }
-            .alert(replacing ?? "", isPresented: Binding(get: { replacing != nil }, set: { if !$0 { replacing = nil } })) {
-                Button("Replace", role: .destructive) { makeLead(replace: true) }
+            .alert(replacing?.message ?? "", isPresented: Binding(get: { replacing != nil }, set: { if !$0 { replacing = nil } }), presenting: replacing) { pending in
+                Button("Replace", role: .destructive) { makeLead(pending.session, replace: true) }
                 Button("Cancel", role: .cancel) {}
             }
     }
 
-    private func makeLead(replace: Bool) {
+    private func makeLead(_ session: SessionState, replace: Bool) {
         Task {
             let change = await model.makeLead(session.id, replace: replace)
-            if case .confirmReplace(let message) = change { replacing = message } else { model.settle(change) }
+            if case .confirmReplace(let message) = change { replacing = (session, message) } else { model.settle(change) }
         }
     }
 }

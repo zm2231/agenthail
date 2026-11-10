@@ -418,6 +418,7 @@ struct ConversationListView: View {
             Button(confirmation.action, role: .destructive) { Task { model.settle(await confirmation.run()) } }
             Button("Cancel", role: .cancel) {}
         }
+        .modifier(IOSRowActionHost(model: model))
         .refreshable { await model.refresh(fresh: true) }
     }
 
