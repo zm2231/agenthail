@@ -17,6 +17,7 @@ const (
 	readMaxReady     = 50
 	readProvisional  = 5
 	readTextClip     = 240
+	readReplyClip    = 600
 )
 
 var readViews = []string{"board", "goals", "asks", "decisions", "questions", "work", "ready", "item"}
@@ -147,7 +148,10 @@ func (s *Store) readBoard(projectKey string, board *Board, req ReadRequest, resu
 		capture["since"], capture["attach"] = scope.Since, scope.Attach
 	}
 	provisional := attachment.Provisional
-	newest := provisional[max(0, len(provisional)-readProvisional):]
+	newest := slices.Clone(provisional[max(0, len(provisional)-readProvisional):])
+	for i := range newest {
+		newest[i].Context = clipReply(newest[i].Context)
+	}
 	goals, next := pageEntries(entriesOf(board.Goals()), "", readDefaultLimit, req.Budget)
 	result["appliedSeq"] = board.AppliedSeq()
 	result["capture"], result["sync"], result["counts"] = capture, syncView, counts
@@ -219,6 +223,20 @@ func clipText(text string, limit int) string {
 		limit--
 	}
 	return text[:limit]
+}
+
+func clipReply(context *ContextPayload) *ContextPayload {
+	if context == nil || context.Reply == nil || len(context.Reply.Text) <= readReplyClip {
+		return context
+	}
+	clipped, reply := *context, *context.Reply
+	start := len(reply.Text) - readReplyClip
+	for start < len(reply.Text) && !isRuneStart(reply.Text[start]) {
+		start++
+	}
+	reply.Text = reply.Text[start:]
+	clipped.Reply = &reply
+	return &clipped
 }
 
 func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }

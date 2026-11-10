@@ -199,9 +199,15 @@ func (d *Daemon) endChecker(ctx context.Context, run string, now time.Time) {
 
 func checkerMessage(run string, in ledger.CheckInput) string {
 	var b strings.Builder
-	b.WriteString("Check run " + run + ", goal " + in.GoalID + " (" + in.GoalName + ").\n\nThe person's words:\n")
+	b.WriteString("Check run " + run + ", goal " + in.GoalID + " (" + in.GoalName + ").\n\nThe person's words, each after the agent reply it answered; a reply is context, not the person's words:\n")
 	for _, u := range in.Utterances {
 		b.WriteString("- " + u.ID + ": " + quoteBlock(u.Text) + "\n")
+		switch c := u.Context; {
+		case c != nil && c.Reply != nil:
+			b.WriteString("  answering the agent: " + quoteBlock(c.Reply.Text) + "\n")
+		case c != nil && c.Status == ledger.ReplyLate:
+			b.WriteString("  answering the agent: not found in time\n")
+		}
 	}
 	b.WriteString("\nClauses an agent wrote from them:\n")
 	for _, c := range in.Clauses {

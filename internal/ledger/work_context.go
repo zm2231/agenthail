@@ -23,9 +23,10 @@ type ClauseRef struct {
 }
 
 type WordsRef struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
-	At   string `json:"ts"`
+	ID      string          `json:"id"`
+	Text    string          `json:"text"`
+	At      string          `json:"ts"`
+	Context *ContextPayload `json:"context,omitempty"`
 }
 
 // WorkContext is everything a session picking an item up needs in one read: the item, the intent it serves in the person's own words, where it was found, and the work around it.
@@ -82,7 +83,7 @@ func (b *Board) clauseRef(id string) *ClauseRef {
 	}
 	for _, src := range c.Sources {
 		if u := b.utterances[src]; u != nil {
-			ref.Words = append(ref.Words, WordsRef{ID: u.ID, Text: u.Text, At: u.At})
+			ref.Words = append(ref.Words, WordsRef{ID: u.ID, Text: u.Text, At: u.At, Context: u.Context})
 		}
 	}
 	return ref

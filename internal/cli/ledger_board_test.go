@@ -101,6 +101,10 @@ func TestLedgerBoardShowsGoalsProvenanceAndProvisionalWords(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	reply := ledger.NewReply("r1", "2026-11-10T10:00:00Z", "Both pipeline runs stopped at the same place: the deploy fails on the migration step. Should I fix it now?")
+	if _, err := ls.RecordContext(key, ledger.ContextPayload{UtteranceID: "claude-prompt:2", Status: ledger.ReplyLate, JoinedBy: ledger.JoinedByTime, Reply: reply}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	g, _, _ := ls.EnsureGoal(key, "Checkout", "s1")
 	og, _, _ := ls.EnsureGoal(other, "Keys", "s1")
 	for _, req := range []ledger.AttachRequest{
@@ -118,7 +122,7 @@ func TestLedgerBoardShowsGoalsProvenanceAndProvisionalWords(t *testing.T) {
 	for _, want := range []string{
 		"widget-G1 Checkout  asks widget-A1",
 		"widget-C1: add a cart  [captured, stated] owner=s1 from claude-prompt:1",
-		"provisional until attached (1):\n  claude-prompt:2 to s1: and fix the deploy",
+		"provisional until attached (1):\n  claude-prompt:2 to s1: and fix the deploy\n    answering, by time: ... the same place: the deploy fails on the migration step. Should I fix it now?\n",
 		"claude-prompt:3 attached elsewhere: repo:github.com/acme/infra infra-G1",
 	} {
 		if !strings.Contains(out, want) {

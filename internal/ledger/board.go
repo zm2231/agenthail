@@ -43,17 +43,18 @@ type Clause struct {
 }
 
 type UtteranceView struct {
-	ID         string      `json:"id"`
-	Text       string      `json:"text"`
-	SpeakerID  string      `json:"speakerId"`
-	TargetID   string      `json:"targetId"`
-	CapturedBy string      `json:"capturedBy"`
-	At         string      `json:"ts"`
-	GoalIDs    []string    `json:"goalIds,omitempty"`
-	Attached   bool        `json:"attached"`
-	Sorted     *Sorted     `json:"sorted,omitempty"`
-	Notes      []string    `json:"notes,omitempty"`
-	Truncated  *Truncation `json:"truncated,omitempty"`
+	ID         string          `json:"id"`
+	Text       string          `json:"text"`
+	SpeakerID  string          `json:"speakerId"`
+	TargetID   string          `json:"targetId"`
+	CapturedBy string          `json:"capturedBy"`
+	At         string          `json:"ts"`
+	GoalIDs    []string        `json:"goalIds,omitempty"`
+	Attached   bool            `json:"attached"`
+	Sorted     *Sorted         `json:"sorted,omitempty"`
+	Notes      []string        `json:"notes,omitempty"`
+	Truncated  *Truncation     `json:"truncated,omitempty"`
+	Context    *ContextPayload `json:"context,omitempty"`
 }
 
 type Cut struct {
@@ -208,6 +209,8 @@ func (b *Board) dispatch(event Event) error {
 		err = b.applyUtterance(event.Payload)
 	case EventAttach:
 		err = b.applyAttach(event.Payload)
+	case EventContext:
+		err = b.applyContext(event.Payload)
 	case EventClauseSource:
 		err = b.applyClauseSource(event.Payload)
 	case EventQuestion:
@@ -318,6 +321,10 @@ func (b *Board) Utterances() []UtteranceView {
 		if u.Sorted != nil {
 			sorted := *u.Sorted
 			u.Sorted = &sorted
+		}
+		if u.Context != nil {
+			context := *u.Context
+			u.Context = &context
 		}
 		result = append(result, u)
 	}

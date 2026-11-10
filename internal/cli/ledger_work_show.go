@@ -70,6 +70,9 @@ func printClauseRef(label string, c *ledger.ClauseRef) {
 	fmt.Printf("%s %s [%s, %s] %s: %s\n", label, c.ID, c.State, c.Source, on, c.Text)
 	for _, words := range c.Words {
 		fmt.Printf("  the person, %s (%s): %s\n", words.At, words.ID, strings.Join(strings.Fields(words.Text), " "))
+		if line := answering(words.Context); line != "" {
+			fmt.Println("    " + line)
+		}
 	}
 }
 
