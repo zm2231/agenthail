@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -200,4 +202,32 @@ func moveDeliveryProblemsToAsks(tx *sql.Tx) error {
 	}
 	_, err = tx.Exec(`ALTER TABLE message_queue DROP COLUMN refusal_announced`)
 	return err
+}
+
+func allowExpiredAsks(tx *sql.Tx) error {
+	var definition string
+	err := tx.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='asks'`).Scan(&definition)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && strings.Contains(definition, "'expired'") {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	present, err := tableColumns(tx, "asks")
+	if err != nil {
+		return err
+	}
+	columns := strings.Join(present, ",")
+	for _, step := range []string{
+		`ALTER TABLE asks RENAME TO asks_unexpired`,
+		schema,
+		`INSERT INTO asks (` + columns + `) SELECT ` + columns + ` FROM asks_unexpired`,
+		`DROP TABLE asks_unexpired`,
+		schema,
+	} {
+		if _, err := tx.Exec(step); err != nil {
+			return err
+		}
+	}
+	return nil
 }
