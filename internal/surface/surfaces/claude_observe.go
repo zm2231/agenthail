@@ -101,7 +101,9 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 		waiting = held
 	}
 	if claudeHosted(sess) {
-		waiting = c.hostWaiting(ctx, sess)
+		var known bool
+		waiting, known = c.hostWaiting(ctx, sess)
+		observation.WaitingUnknown = !known
 	}
 	if observation.UsageLimit != nil && waiting != nil && !waiting.Answerable {
 		waiting = nil

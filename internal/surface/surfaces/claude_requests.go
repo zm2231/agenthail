@@ -14,17 +14,20 @@ var claudePermissionModes = []string{"acceptEdits", "auto", "bypassPermissions",
 
 // hostWaiting is the oldest request the host holds for the session. Its id is
 // Claude's own request id, so each request is its own question.
-func (c *Claude) hostWaiting(ctx context.Context, sess *surface.Session) *surface.Waiting {
+func (c *Claude) hostWaiting(ctx context.Context, sess *surface.Session) (*surface.Waiting, bool) {
 	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
+	if !c.host.requestsKnown(sess.ID, sess.PID) {
+		return nil, false
+	}
 	if !ok || len(listed.Requests) == 0 {
-		return nil
+		return nil, true
 	}
 	oldest := listed.Requests[0]
 	open := make([]string, 0, len(listed.Requests))
 	for _, request := range listed.Requests {
 		open = append(open, request.RequestID)
 	}
-	return &surface.Waiting{Kind: claudeRequestKind(oldest.Kind), ID: oldest.RequestID, Since: oldest.CreatedAt.UTC(), Answerable: true, Open: open}
+	return &surface.Waiting{Kind: claudeRequestKind(oldest.Kind), ID: oldest.RequestID, Since: oldest.CreatedAt.UTC(), Answerable: true, Open: open}, true
 }
 
 // Requests lists the open requests of a session the host runs, oldest first,
@@ -39,7 +42,7 @@ func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.R
 	}
 	c.host.forget()
 	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
-	if !ok && c.host.unanswered() {
+	if !c.host.requestsKnown(sess.ID, sess.PID) || !ok && c.host.unanswered() {
 		return state, fmt.Errorf("the Claude host running session %s did not answer", sess.ID)
 	}
 	if !ok {

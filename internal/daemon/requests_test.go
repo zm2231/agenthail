@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -295,16 +296,20 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 		if response := apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, map[string]any{"action": "send", "sessionId": id, "message": message, "author": "person"}); response.Code != http.StatusOK {
 			t.Fatalf("send status=%d body=%s", response.Code, response.Body.String())
 		}
-		testkit.Eventually(t, "the waiting push", 15*time.Second, func() bool {
+		// A message sent as the last turn ends waits in the queue until an
+		// observation finds the session idle, as the daemon's scan would.
+		var observed surface.Session
+		for deadline := time.Now().Add(15 * time.Second); pushes.count("session.waiting") <= before; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for the waiting push for %q; %s", message, waitingDiagnosis(t, r, fixture, observed))
+			}
 			stored, err := r.Session(id)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := d.observeTurn(context.Background(), claude, stored); err != nil {
-				t.Fatal(err)
-			}
-			return pushes.count("session.waiting") > before
-		})
+			d.observeSession(context.Background(), claude, stored)
+			observed = *stored
+		}
 		return pushes.all("session.waiting")[before]
 	}
 	fetch := func(requestID string) openRequestView {
@@ -438,4 +443,24 @@ func TestElsewhereWaitingMessageSaysWhereAnUnheldPromptIsAnswered(t *testing.T) 
 			t.Errorf("%s %s: %q, want %q", test.runtime, test.kind, got, test.want)
 		}
 	}
+}
+
+func waitingDiagnosis(t *testing.T, r *registry.Registry, fixture *claudehosttest.Fixture, session surface.Session) string {
+	t.Helper()
+	id := session.ID
+	observed := fmt.Sprintf("last observed status=%s waitingOn=%+v queued=%d", session.Status, session.WaitingOn, r.QueueCount(id))
+	recorded, announced, err := r.WaitingState(id)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	started := time.Now()
+	listing, listErr := claudehost.NewClient(fixture.Home).List(ctx)
+	var requests []string
+	for _, session := range listing.Sessions {
+		if session.SessionID == id {
+			for _, request := range session.Requests {
+				requests = append(requests, request.RequestID)
+			}
+		}
+	}
+	return fmt.Sprintf("%s; record=%+v announced=%v err=%v; host list took %s err=%v unanswered=%v requests=%v", observed, recorded, announced, err, time.Since(started).Round(time.Millisecond), listErr, listing.Unanswered, requests)
 }

@@ -126,6 +126,15 @@ func (d *Daemon) observeTurnLocked(ctx context.Context, adapter surface.Surface,
 	if err != nil || observation == nil {
 		return observation, false, err
 	}
+	if observation.WaitingUnknown {
+		recorded, _, err := d.Registry.WaitingState(session.ID)
+		if err != nil {
+			d.log.Printf("read waiting %s: %s", d.resolveDisplay(session.ID), err)
+			recorded = nil
+		}
+		observation.WaitingOn = d.openSets.attach(session.ID, recorded)
+		return observation, false, nil
+	}
 	waiting := observation.WaitingOn
 	if observation.Status != surface.StatusBusy {
 		waiting = nil

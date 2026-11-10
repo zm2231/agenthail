@@ -1116,6 +1116,64 @@ func TestASessionWhoseRetiringHostDoesNotAnswerKeepsItsRequest(t *testing.T) {
 	})
 }
 
+// A host that stops answering leaves what a session waits on unknown, not
+// settled: the request already announced stays announced, so the person's
+// notification is not withdrawn while the prompt may still be open.
+func TestAnAnnouncedRequestStaysAnnouncedWhileItsHostDoesNotAnswer(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	opened := fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	session := hostedSession(t, claude, id)
+	r := hostRegistry(t)
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDaemon(t, r, []surface.Surface{claude})
+	d.log = log.New(io.Discard, "", 0)
+	d.notifyDesktop = func(string, string, string, string, string, []surface.RequestAction) error { return nil }
+	ctx := context.Background()
+	fixture.Peer(t, opened.PID, "TOOL")
+	var asked *surface.Waiting
+	testkit.Eventually(t, "the request to be announced", 15*time.Second, func() bool {
+		if _, err := d.observeTurn(ctx, claude, &session); err != nil {
+			t.Fatal(err)
+		}
+		recorded, announced, err := r.WaitingState(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		asked = recorded
+		return recorded != nil && announced
+	})
+
+	pids := fixture.HostPIDs(t)
+	for _, pid := range pids {
+		if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() {
+		for _, pid := range pids {
+			_ = syscall.Kill(pid, syscall.SIGCONT)
+		}
+	}()
+	for deadline := time.Now().Add(7 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+		observation, err := d.observeTurn(ctx, claude, &session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if observation.WaitingOn == nil || observation.WaitingOn.ID != asked.ID {
+			t.Fatalf("while the host does not answer the session waits on %+v, want %s", observation.WaitingOn, asked.ID)
+		}
+		recorded, announced, err := r.WaitingState(id)
+		if err != nil || recorded == nil || recorded.ID != asked.ID || !announced {
+			t.Fatalf("while the host does not answer the record is %+v announced=%v err=%v, want %s announced", recorded, announced, err, asked.ID)
+		}
+	}
+}
+
 // silentHost listens on a retiring host's socket that sorts before the
 // others, accepts connections and never answers.
 func silentHost(t *testing.T, fixture *claudehosttest.Fixture) {
