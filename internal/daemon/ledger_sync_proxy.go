@@ -81,6 +81,11 @@ func (d *Daemon) proxyLedgerWrite(w http.ResponseWriter, r *http.Request, ownerI
 		return
 	}
 	if _, err := d.syncLedgerProject(r.Context(), host, key); err != nil {
+		var outdated ledgerHostOutdated
+		if errors.As(err, &outdated) {
+			writeLedgerOwnerOutdated(w, key, name, outdated.refusal)
+			return
+		}
 		writeAPIError(w, http.StatusServiceUnavailable, "ledger_owner_unreachable", unreachable+" ("+err.Error()+")")
 		return
 	}
@@ -115,7 +120,7 @@ func (d *Daemon) proxyLedgerWrite(w http.ResponseWriter, r *http.Request, ownerI
 		Error struct{ Code, Message string } `json:"error"`
 	}
 	if response.StatusCode == http.StatusBadRequest && json.Unmarshal(answer, &refusal) == nil && refusal.Error.Code == ledgerUnknownKeyCode {
-		writeAPIError(w, http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, fmt.Sprintf("The ledger for %s is kept on %s, which does not know what this host sent (%s); nothing was recorded. Update Agenthail on %s, then retry.", key, name, refusal.Error.Message, name))
+		writeLedgerOwnerOutdated(w, key, name, refusal.Error.Message)
 		return
 	}
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
@@ -127,4 +132,8 @@ func (d *Daemon) proxyLedgerWrite(w http.ResponseWriter, r *http.Request, ownerI
 	w.Header().Set("Content-Type", response.Header.Get("Content-Type"))
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(answer)
+}
+
+func writeLedgerOwnerOutdated(w http.ResponseWriter, key, owner, refusal string) {
+	writeAPIError(w, http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, fmt.Sprintf("The ledger for %s is kept on %s, which does not know what this host sent (%s); nothing was recorded. Update Agenthail on %s, then retry.", key, owner, refusal, owner))
 }

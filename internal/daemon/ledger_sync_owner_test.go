@@ -251,6 +251,24 @@ func TestAWriteAnOlderHostCannotReadNamesTheHostToUpdateAndLandsOnceItCan(t *tes
 			t.Fatalf("%s landed %d times on the owner", said, n)
 		}
 	})
+	t.Run("write behind a held confirm", func(t *testing.T) {
+		mac, owner, _ := ledgerOnTwoHosts(t)
+		newer(owner, "/api/v1/ledger/sync/confirm")
+		if code, result, body := assignOwner(t, mac); code != http.StatusOK || result.Confirmed {
+			t.Fatalf("a confirm the owner cannot read: status=%d body=%s", code, body)
+		}
+		add := ledger.WorkRequest{ProjectKey: widgetKey, SessionID: "local-a", Action: ledger.WorkAdd, Text: "fix the flag"}
+		if code, body := ledgerRequest(t, mac, "/api/v1/ledger/work", add); code != http.StatusServiceUnavailable || !strings.Contains(body, "Update Agenthail on vps") || !strings.Contains(body, ledgerOwnerOutdatedCode) {
+			t.Fatalf("a write behind a confirm the owner cannot read: status=%d body=%s", code, body)
+		}
+		owner.gate.newerSender.Store(nil)
+		var added ledger.WorkResult
+		mustLedger(t, mac, "/api/v1/ledger/work", add, &added)
+		if added.Item.Text != "fix the flag" || ownerOf(t, owner) != owner.daemon.hostIdentity().ID {
+			t.Fatalf("the write once the owner reads the confirm: %+v owner=%q", added, ownerOf(t, owner))
+		}
+		sameLedgerOnBothHosts(t, widgetKey, mac, owner)
+	})
 	t.Run("proxied write", func(t *testing.T) {
 		mac, owner, _ := ledgerOnTwoHosts(t)
 		if code, result, body := assignOwner(t, mac); code != http.StatusOK || !result.Confirmed {
