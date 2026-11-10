@@ -3,11 +3,13 @@ import SwiftUI
 enum IOSRowAction: Identifiable {
     case rename(SessionState)
     case adopt(SessionState)
+    case move(SessionState)
 
     var id: String {
         switch self {
         case let .rename(session): "rename:" + session.id
         case let .adopt(session): "adopt:" + session.id
+        case let .move(session): "move:" + session.id
         }
     }
 }
@@ -36,6 +38,9 @@ struct IOSSessionRowMenu: ViewModifier {
             Button("Rename…", systemImage: "pencil") { actions.present(.rename(session)) }
             if session.canAdopt {
                 Button("Open in Agenthail", systemImage: "arrow.down.app") { actions.present(.adopt(session)) }
+            }
+            if model.canMove(session) {
+                Button("Move to Another Computer…", systemImage: "arrow.right.circle") { actions.present(.move(session)) }
             }
             Divider()
             Button(session.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") {
@@ -67,6 +72,8 @@ struct IOSRowActionHost: ViewModifier {
                     IOSNameSessionSheet(model: model, sessionID: session.id, alias: session.alias) { self.action = nil }
                 case let .adopt(session):
                     IOSAdoptSessionSheet(model: model, session: model.routedSession(session) ?? session, sessionID: session.id)
+                case let .move(session):
+                    IOSMoveSessionSheet(model: model, session: session) {}
                 }
             }
             .alert(replacing?.message ?? "", isPresented: Binding(get: { replacing != nil }, set: { if !$0 { replacing = nil } }), presenting: replacing) { pending in

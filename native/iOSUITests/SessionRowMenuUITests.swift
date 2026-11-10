@@ -9,6 +9,7 @@ final class SessionRowMenuUITests: XCTestCase {
             XCTAssertTrue(menu.buttons[item].exists, "a working Claude session offers \(item)")
         }
         XCTAssertFalse(menu.buttons["Open in Agenthail"].exists, "a session Agenthail can't open offers no Open in Agenthail")
+        XCTAssertFalse(menu.buttons["Move to Another Computer…"].exists, "with no other computer there is nowhere to move to")
         attach(app, "session row menu")
         dismiss(app)
 
@@ -25,6 +26,15 @@ final class SessionRowMenuUITests: XCTestCase {
         menu.buttons["Rename…"].tap()
         XCTAssertTrue(app.navigationBars["Name conversation"].waitForExistence(timeout: 5), "Rename opens the same name sheet as session details")
         app.buttons["Cancel"].tap()
+    }
+
+    func testWithAnotherComputerARowOffersMoveAndOpensTheMoveSheet() {
+        let app = launch(["--preview-two-computers"])
+        let menu = open("session-computer::demo", in: app)
+        menu.buttons["Move to Another Computer…"].tap()
+        XCTAssertTrue(app.buttons["move-target-vps.example.ts.net"].waitForExistence(timeout: 5), "Move opens the same sheet as session details, listing the other computer")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(waitForGone(app.buttons["move-target-vps.example.ts.net"]))
     }
 
     private func launch(_ extra: [String]) -> XCUIApplication {
