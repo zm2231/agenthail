@@ -26,7 +26,7 @@ extension AgenthailModel {
             movesSent.remove(request.sessionId)
             var notice = SessionMoveNotice.of(outcome, request: request, session: title, hostName: hostName, here: here)
             notice.subject = request.sessionId
-            moveNotice = notice
+            moveNotices.add(notice)
             _ = await refresh(fresh: true)
         }
     }

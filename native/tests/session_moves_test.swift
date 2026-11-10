@@ -65,6 +65,7 @@ struct SessionMovesTest {
     static let snapshot = """
     {"updatedAt":"now","daemon":{"running":true,"host":{"id":"hself","name":"laptop","state":"local"},"hosts":[{"id":"hpeer","name":"peer","state":"connected"},{"id":"hdown","name":"spare","state":"unreachable"}]},"surfaces":[],"sessions":[
       {"id":"old","surface":"claude","name":"task","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}},
+      {"id":"other","surface":"codex","name":"second","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}},
       {"id":"hpeer::m2","surface":"claude","name":"remote","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"host":{"id":"hpeer","name":"peer","state":"connected"}}],
      "totalSessions":2,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}
     """
@@ -77,7 +78,7 @@ struct SessionMovesTest {
         let model = AgenthailModel(connecting: false, api: api)
         guard let decoded = try? JSONDecoder().decode(DashboardSnapshot.self, from: Data(snapshot.utf8)) else { return check(false, "the fixture snapshot decodes") }
         model.snapshot = decoded
-        guard let local = decoded.sessions.first(where: { $0.name == "task" }), let remote = decoded.sessions.first(where: { $0.name == "remote" }) else { return check(false, "fixture sessions") }
+        guard let local = decoded.sessions.first(where: { $0.name == "task" }), let second = decoded.sessions.first(where: { $0.name == "second" }), let remote = decoded.sessions.first(where: { $0.name == "remote" }) else { return check(false, "fixture sessions") }
         check(model.canMove(local), "the Mac offers a move of its own session")
         check(!model.canMove(remote), "the Mac leaves a paired host's session to that host")
         check(model.moveTargets.map(\.name) == ["peer", "spare"], "the Mac lists its paired hosts")
@@ -86,23 +87,34 @@ struct SessionMovesTest {
         MoveStub.reply = (409, #"{"error":{"code":"move_needs_consent","message":"a terminal holds it"}}"#)
         model.move(local, to: model.moveTargets[0])
         check(!model.canMove(local), "a move in flight cannot be sent twice")
-        await waitForNotice(model)
-        guard let consent = model.moveNotice else { return check(false, "consent is asked") }
+        await waitForNotices(model, 1)
+        guard let consent = model.moveNotices.current else { return check(false, "consent is asked") }
         check(MoveStub.sent["sessionId"] as? String == "old" && MoveStub.sent["host"] as? String == "hpeer" && MoveStub.sent["stopTerminal"] as? Bool == false, "the move goes to the picked host: \(MoveStub.sent)")
         check(consent.retry?.stopTerminal == true && consent.subject == "old", "consent can resend")
         check(model.canMove(local), "an answered move can be asked again")
 
         MoveStub.reply = (200, #"{"ok":true,"result":{"host":{"id":"hpeer","name":"peer","state":"connected"}}}"#)
-        model.moveNotice = nil
+        model.moveNotices.dismiss(consent)
         model.retryMove(consent)
-        await waitForNotice(model)
+        await waitForNotices(model, 1)
         check(MoveStub.count == 2 && MoveStub.sent["stopTerminal"] as? Bool == true, "the resend stops the terminal")
-        check(model.moveNotice?.title == "Moved to peer", "the Mac reports the move: \(String(describing: model.moveNotice?.title))")
+        check(model.moveNotices.current?.title == "Moved to peer", "the Mac reports the move: \(String(describing: model.moveNotices.current?.title))")
+        if let moved = model.moveNotices.current { model.moveNotices.dismiss(moved) }
+
+        model.move(local, to: model.moveTargets[0])
+        model.move(second, to: model.moveTargets[0])
+        await waitForNotices(model, 2)
+        let outcomes = model.moveNotices.pending
+        check(outcomes.count == 2 && Set(outcomes.map(\.subject)) == ["old", "other"], "two moves that end together each keep their outcome: \(outcomes.map(\.subject))")
+        model.moveNotices.dismiss(outcomes[0])
+        check(model.moveNotices.current?.id == outcomes[1].id, "dismissing one outcome shows the next")
+        model.moveNotices.dismiss(outcomes[1])
+        check(model.moveNotices.current == nil, "no outcome is left once both are read")
     }
 
     @MainActor
-    static func waitForNotice(_ model: AgenthailModel) async {
-        for _ in 0..<500 where model.moveNotice == nil { try? await Task.sleep(for: .milliseconds(10)) }
+    static func waitForNotices(_ model: AgenthailModel, _ count: Int) async {
+        for _ in 0..<500 where model.moveNotices.pending.count < count { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
     static func session(surface: String = "claude", move: SessionMove? = nil) -> SessionState {

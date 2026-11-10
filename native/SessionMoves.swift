@@ -138,6 +138,16 @@ struct SessionMoveNotice: Identifiable, Equatable {
     }
 }
 
+struct SessionMoveNotices {
+    private(set) var pending: [SessionMoveNotice] = []
+
+    var current: SessionMoveNotice? { pending.first }
+
+    mutating func add(_ notice: SessionMoveNotice) { pending.append(notice) }
+
+    mutating func dismiss(_ notice: SessionMoveNotice) { pending.removeAll { $0.id == notice.id } }
+}
+
 extension AgenthailAPI {
     @MainActor
     func moveSession(_ request: SessionMoveRequest, hostName: String) async -> SessionMoveOutcome {

@@ -34,12 +34,16 @@ struct IOSMoveSessionSheet: View {
 
 extension View {
     func moveNoticeAlert(_ model: AgenthailIOSModel) -> some View {
-        alert(model.moveNotice?.title ?? "", isPresented: Binding(get: { model.moveNotice != nil }, set: { if !$0 { model.moveNotice = nil } }), presenting: model.moveNotice) { notice in
+        let notice = model.moveNotices.current
+        return alert(notice?.title ?? "", isPresented: Binding(get: { notice != nil }, set: { _ in }), presenting: notice) { notice in
             if notice.retry != nil {
-                Button("Stop and Move", role: .destructive) { model.retryMove(notice) }
-                Button("Cancel", role: .cancel) {}
+                Button("Stop and Move", role: .destructive) {
+                    model.moveNotices.dismiss(notice)
+                    model.retryMove(notice)
+                }
+                Button("Cancel", role: .cancel) { model.moveNotices.dismiss(notice) }
             } else {
-                Button("OK") {}
+                Button("OK") { model.moveNotices.dismiss(notice) }
             }
         } message: { notice in
             Text(notice.message)

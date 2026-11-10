@@ -52,17 +52,29 @@ struct MoveSessionSheet: View {
     }
 }
 
-extension View {
-    func moveNoticeAlert(_ model: AgenthailModel) -> some View {
-        alert(model.moveNotice?.title ?? "", isPresented: Binding(get: { model.moveNotice != nil }, set: { if !$0 { model.moveNotice = nil } }), presenting: model.moveNotice) { notice in
+// Every window carries it and only the active one presents, so one outcome shows once wherever the person is.
+struct MoveNoticeAlert: ViewModifier {
+    var model: AgenthailModel
+    @Environment(\.appearsActive) private var appearsActive
+
+    func body(content: Content) -> some View {
+        let notice = appearsActive ? model.moveNotices.current : nil
+        content.alert(notice?.title ?? "", isPresented: Binding(get: { notice != nil }, set: { _ in }), presenting: notice) { notice in
             if notice.retry != nil {
-                Button("Stop and Move", role: .destructive) { model.retryMove(notice) }
-                Button("Cancel", role: .cancel) {}
+                Button("Stop and Move", role: .destructive) {
+                    model.moveNotices.dismiss(notice)
+                    model.retryMove(notice)
+                }
+                Button("Cancel", role: .cancel) { model.moveNotices.dismiss(notice) }
             } else {
-                Button("OK") {}
+                Button("OK") { model.moveNotices.dismiss(notice) }
             }
         } message: { notice in
             Text(notice.message)
         }
     }
+}
+
+extension View {
+    func moveNoticeAlert(_ model: AgenthailModel) -> some View { modifier(MoveNoticeAlert(model: model)) }
 }

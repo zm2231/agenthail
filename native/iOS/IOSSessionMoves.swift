@@ -30,7 +30,7 @@ extension AgenthailIOSModel {
             movesSent.remove(sessionID)
             var notice = SessionMoveNotice.of(outcome, request: request, session: title, hostName: hostName, here: here)
             notice.subject = sessionID
-            moveNotice = notice
+            moveNotices.add(notice)
             _ = await server.connection.refresh(fresh: true)
         }
     }

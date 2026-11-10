@@ -103,7 +103,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private(set) var reconnecting = false
     var operationError: String?
     var movesSent: Set<String> = []
-    var moveNotice: SessionMoveNotice?
+    var moveNotices = SessionMoveNotices()
     var pairing = false
     private(set) var completedPairings = 0
     let draft = ComposerDraft()

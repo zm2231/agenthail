@@ -420,17 +420,17 @@ final class WorkflowParityTests: XCTestCase {
 
         model.move(local, to: targets[0])
         XCTAssertFalse(model.canMove(local), "a move in flight cannot be sent twice")
-        for _ in 0..<300 where model.moveNotice == nil { try await Task.sleep(for: .milliseconds(10)) }
-        let consent = try XCTUnwrap(model.moveNotice)
+        for _ in 0..<300 where model.moveNotices.current == nil { try await Task.sleep(for: .milliseconds(10)) }
+        let consent = try XCTUnwrap(model.moveNotices.current)
         XCTAssertEqual(consent.title, "Stop the terminal and move?")
         XCTAssertEqual(ParityProtocol.state.moves.first?["sessionId"] as? String, "old")
         XCTAssertEqual(ParityProtocol.state.moves.first?["host"] as? String, "hpeer")
         XCTAssertEqual(ParityProtocol.state.moves.first?["stopTerminal"] as? Bool, false)
 
-        model.moveNotice = nil
+        model.moveNotices.dismiss(consent)
         model.retryMove(consent)
-        for _ in 0..<300 where model.moveNotice == nil { try await Task.sleep(for: .milliseconds(10)) }
-        let moved = try XCTUnwrap(model.moveNotice)
+        for _ in 0..<300 where model.moveNotices.current == nil { try await Task.sleep(for: .milliseconds(10)) }
+        let moved = try XCTUnwrap(model.moveNotices.current)
         XCTAssertEqual(ParityProtocol.state.moves.count, 2)
         XCTAssertEqual(ParityProtocol.state.moves.last?["stopTerminal"] as? Bool, true)
         XCTAssertEqual(moved.title, "Moved to peer")

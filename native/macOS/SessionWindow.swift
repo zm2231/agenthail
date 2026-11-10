@@ -25,6 +25,7 @@ struct SessionWindow: View {
             .windowBackdrop(model.interface)
             .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
             .sheet(item: $pane.movingSession) { MoveSessionSheet(model: model, session: $0) }
+            .moveNoticeAlert(model)
             .environment(model)
             .navigationTitle(pane.displayedSession?.title ?? "Session")
             .focusedSceneValue(pane)

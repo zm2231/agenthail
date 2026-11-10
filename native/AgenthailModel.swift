@@ -65,7 +65,7 @@ final class AgenthailModel {
     var operationError: String?
     var pendingForks: Set<String> = []
     var movesSent: Set<String> = []
-    var moveNotice: SessionMoveNotice?
+    var moveNotices = SessionMoveNotices()
     var loading = false
     var operationsVisible = false
     var sessionFilter: SessionFilter = .recent {
