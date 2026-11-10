@@ -23,6 +23,7 @@ type CatalogPresentationFreshness struct {
 type CatalogPresentationRow struct {
 	ID, HostID                             string
 	Name, Surface, Status, Cwd             string
+	Ended                                  bool
 	RuntimeKind, Source, Transport         string
 	UnavailableReason                      string
 	LastActive, RegisteredAt               time.Time
@@ -148,7 +149,7 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 		var waiting, background, limit, stop string
 		var pinnedAt, keepAliveFailedAt, snoozedAt, snoozedUntil int64
 		var snoozeWake, starterHost string
-		if err := rows.Scan(&row.ID, &row.HostID, &row.Name, &row.Surface, &row.Status, &row.Cwd, &lastActive, &row.RuntimeKind, &row.Source, &row.Transport,
+		if err := rows.Scan(&row.ID, &row.HostID, &row.Name, &row.Surface, &row.Status, &row.Ended, &row.Cwd, &lastActive, &row.RuntimeKind, &row.Source, &row.Transport,
 			&row.UnavailableReason, &subagent.ParentID, &subagent.RootID, &subagent.Depth, &subagent.Nickname, &subagent.Role, &waiting, &background, &limit, &stop,
 			&row.Alias, &row.QueueCount, &row.Archived, &row.Freshness.Generation, &row.Freshness.Stale, &row.Attention, &row.Retired, &registered,
 			&pinnedAt, &keepAliveFailedAt, &row.KeepAlive.Error, &snoozedAt, &snoozedUntil, &snoozeWake, &row.StartedBy, &starterHost, &row.Task); err != nil {
@@ -230,7 +231,7 @@ func catalogFingerprints(ctx context.Context, tx *sql.Tx, ids []string) (map[str
 	return result, rows.Err()
 }
 
-const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.status,s.cwd,s.last_active_ms,s.runtime_kind,s.source,s.transport,
+const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.status,s.ended,s.cwd,s.last_active_ms,s.runtime_kind,s.source,s.transport,
  CASE WHEN s.host_id!='' THEN cs.unavailable_reason ELSE '' END,s.parent_session_id,s.root_session_id,s.subagent_depth,s.agent_nickname,s.agent_role,
  CAST(cs.waiting_on AS TEXT),CAST(cs.background_tasks AS TEXT),CAST(cs.usage_limit AS TEXT),CAST(cs.turn_stop AS TEXT),
  a.name,cs.host_queue_count+COALESCE(q.n,0),

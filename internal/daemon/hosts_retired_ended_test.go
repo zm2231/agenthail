@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,6 +89,32 @@ func TestAHostsRetiredListRepairsAStaleCopyOnItsPeer(t *testing.T) {
 	if session, err := r.Session("stale"); err != nil || session.Ended {
 		t.Fatalf("fixture: the first copy should be unended: %+v %v", session, err)
 	}
+	shownEnded := func(when string, want bool) {
+		t.Helper()
+		page, err := d.dashboardState(context.Background(), registry.CatalogPageRequest{Scope: "all", Limit: 50, Now: time.Now()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := d.readSessionView(context.Background(), sessionViewRequest{Scope: "all", Limit: 200})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for read, rows := range map[string][]dashboardSession{"the all page": page.Sessions, "the session view": view.Sessions} {
+			found := false
+			for _, row := range rows {
+				if strings.HasSuffix(row.ID, "stale") {
+					found = true
+					if row.Ended != want {
+						t.Errorf("%s shows the host's retired row as ended=%v %s, want %v", read, row.Ended, when, want)
+					}
+				}
+			}
+			if !found {
+				t.Errorf("%s does not show the host's row %s", read, when)
+			}
+		}
+	}
+	shownEnded("before its host retired it", false)
 
 	fake.mu.Lock()
 	fake.snapshot = map[string]any{"hostEpoch": "epoch", "catalogSeq": 2, "sessions": []dashboardSession{live}, "coordinators": []any{}, "retiredClock": 9, "retiredIds": []string{"stale"}}
@@ -105,6 +132,7 @@ func TestAHostsRetiredListRepairsAStaleCopyOnItsPeer(t *testing.T) {
 			t.Fatal("a row its host retired stays on the peer's current reads")
 		}
 	}
+	shownEnded("after its host retired it", true)
 	if session, err := r.Session("live"); err != nil || session.Ended {
 		t.Fatalf("a row its host still serves was ended: %+v %v", session, err)
 	}

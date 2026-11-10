@@ -278,7 +278,11 @@ current, or the session shows newer activity; any other change keeps it retired.
 That holds for a paired host's row too: the host sending an ended row again
 keeps it retired here. A host retires only rows it holds ended and not current,
 so a row it lists in `retiredIds` on a sync is ended and retired here as well,
-which corrects a copy mirrored before the host ended it.
+which corrects a copy mirrored before the host ended it. Views that render a
+paired host's row from its stored projection (the `all` page and the session
+view) take `ended` from the session row, as they take its status, so the
+correction shows without the host sending the row again; `sessions.ended` is a
+watched presentation input, so the view's cache key moves with it.
 
 Every reader of a whole session selects one column list (`sessionColumnsSQL`),
 and the catalog's rows, its pages, the active sessions, a host's mirror snapshot
