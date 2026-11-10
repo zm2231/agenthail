@@ -132,19 +132,6 @@ final class HostCatalogTests: XCTestCase {
         XCTAssertNil(HostCatalog.owner(of: "s1"))
     }
 
-    func testDeliveryProblemsAndAttentionNameTheirComputer() {
-        var snapshot = Self.snapshot([local("s1")])
-        snapshot.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", attentionSessionId: "s2", message: "m", reason: "r", status: nil, at: "now")]
-        let other = Self.snapshot([local("s1")], problems: [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: nil, attentionSessionId: nil, message: "m", reason: "r", status: nil, at: "now")])
-        let catalog = HostCatalog(hosts: [
-            PairedHostView(id: "ha", name: "a", reachable: true, snapshot: snapshot),
-            PairedHostView(id: "hb", name: "b", reachable: true, snapshot: other),
-        ])
-        XCTAssertEqual(catalog.deliveryProblems.map(\.sessionId), ["ha::s1", "hb::s1"])
-        XCTAssertEqual(catalog.deliveryProblems.first?.sourceSessionId, "ha::s2")
-        XCTAssertEqual(Set(catalog.deliveryProblems.map(\.id)).count, 2, "the same delivery id on two computers is two problems")
-    }
-
     func testLeadReplacementsNameTheirComputer() {
         let replacement = LeadReplacement(id: 7, projectId: "repo:github.com/x/y", name: "release-lead", sessionId: "new", previousSessionId: "old", changedBy: "the daemon", reason: "gone", at: "2026-11-03T12:00:00Z")
         var first = Self.snapshot([local("new")])
@@ -272,8 +259,8 @@ final class HostCatalogTests: XCTestCase {
                      open: true, current: true, currentReason: nil, capabilities: Capabilities(send: true, steer: true), readOnly: false, readOnlyReason: nil)
     }
 
-    static func snapshot(_ sessions: [SessionState], problems: [DeliveryProblem]? = nil) -> DashboardSnapshot {
-        DashboardSnapshot(updatedAt: "2026-10-22T12:00:00Z", eventCursor: 1, hostEpoch: "e", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: problems, codexRecentHours: 8, busyDelivery: "queue")
+    static func snapshot(_ sessions: [SessionState]) -> DashboardSnapshot {
+        DashboardSnapshot(updatedAt: "2026-10-22T12:00:00Z", eventCursor: 1, hostEpoch: "e", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], codexRecentHours: 8, busyDelivery: "queue")
     }
 }
 
@@ -292,7 +279,7 @@ final class RepositoryArchiveTests: XCTestCase {
         XCTAssertTrue(RepositoryArchiveProtocol.state.actions.isEmpty)
 
         for (hostID, session) in [("hlaptop", "s1"), ("hserver", "s2")] {
-            model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"\#(session)","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"project":{"id":"repo:github.com/acme/widget","displayName":"widget","rootPath":"/w","kind":"git"}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#.utf8)), host: hostID)
+            model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"\#(session)","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"project":{"id":"repo:github.com/acme/widget","displayName":"widget","rootPath":"/w","kind":"git"}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":24}"#.utf8)), host: hostID)
         }
         await model.setProjectArchived("repo:github.com/acme/widget", true)
         let actions = RepositoryArchiveProtocol.state.actions
@@ -334,6 +321,6 @@ private final class RepositoryArchiveProtocol: URLProtocol, @unchecked Sendable 
 
 extension DashboardSnapshot {
     mutating func daemonHosts(_ hosts: [HostHealth]) {
-        self = DashboardSnapshot(updatedAt: updatedAt, eventCursor: eventCursor, hostEpoch: hostEpoch, catalogSeq: catalogSeq, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil, hosts: hosts), surfaces: surfaces, sessions: sessions, totalSessions: totalSessions, queue: queue, channels: channels, relays: relays, history: history, attention: attention, deliveryProblems: deliveryProblems, codexRecentHours: codexRecentHours, busyDelivery: busyDelivery)
+        self = DashboardSnapshot(updatedAt: updatedAt, eventCursor: eventCursor, hostEpoch: hostEpoch, catalogSeq: catalogSeq, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil, hosts: hosts), surfaces: surfaces, sessions: sessions, totalSessions: totalSessions, queue: queue, channels: channels, relays: relays, history: history, codexRecentHours: codexRecentHours, busyDelivery: busyDelivery)
     }
 }

@@ -144,10 +144,8 @@ final class AgenthailModel {
 
     private(set) var hasSnapshot = false
     private(set) var daemon: DaemonState?
-    private(set) var attention: [AttentionState] = []
     private(set) var queue: [QueueState] = []
     private(set) var history: [HistoryState] = []
-    private(set) var deliveryProblems: [DeliveryProblem] = []
     private(set) var leadReplacements: [LeadReplacement] = []
     private(set) var projects: [ProjectState] = []
     private(set) var surfaceNames: [String] = []
@@ -158,10 +156,8 @@ final class AgenthailModel {
     private func adoptParts() {
         hasSnapshot = snapshot != nil
         daemon = snapshot?.daemon
-        attention = snapshot?.attention ?? []
         queue = snapshot?.queue ?? []
         history = snapshot?.history ?? []
-        deliveryProblems = snapshot?.deliveryProblems ?? []
         leadReplacements = snapshot?.leadReplacements ?? []
         projects = snapshot?.projects ?? []
         surfaceNames = (snapshot?.surfaces ?? []).map(\.name)
@@ -201,7 +197,7 @@ final class AgenthailModel {
             if let parent = row.subagent?.parentId { ids[parent, default: []].append(row.id) }
         }
         workingCount = knownSessions.filter { $0.archived != true && SessionDisplayKind.of($0) == .working }.count
-        sessionAttention = SessionAttention.build(sessions: knownSessions, attention: snapshot?.attention ?? [], deliveryProblems: deliveryProblems)
+        sessionAttention = SessionAttention.build(sessions: knownSessions)
         let rows = Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let shown = orderHold.shown(list: listView, current: currentView, rows: rows)
         sessionTree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: treeCells(shown.rows))
@@ -1230,10 +1226,6 @@ final class AgenthailModel {
         }
     }
 
-    func deliveryProblems(for sessionID: String) -> [DeliveryProblem] {
-        deliveryProblems.filter { $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
-    }
-
     func sessionTitle(for sessionID: String) -> String {
         knownSessions.first { $0.id == sessionID }?.title ?? "Another session"
     }
@@ -1282,32 +1274,6 @@ final class AgenthailModel {
         return (prompts, results.compactMap(\.problem))
     }
 
-    func dismissDeliveryProblem(_ problem: DeliveryProblem) {
-        settleDeliveryProblem(problem, action: "delivery-dismiss")
-    }
-
-    func deleteDeliveryProblem(_ problem: DeliveryProblem) {
-        settleDeliveryProblem(problem, action: "delivery-delete")
-    }
-
-    private func settleDeliveryProblem(_ problem: DeliveryProblem, action: String) {
-        guard let api else { return }
-        let position = snapshot?.deliveryProblems?.firstIndex { $0.deliveryId == problem.deliveryId }
-        removeDeliveryProblem(problem.deliveryId)
-        Task {
-            do {
-                try await api.action(action, deliveryID: problem.deliveryId)
-                operationError = nil
-            } catch {
-                operationError = AgenthailAPIError.userMessage(error)
-                if let position, snapshot?.deliveryProblems?.contains(where: { $0.deliveryId == problem.deliveryId }) == false {
-                    snapshot?.deliveryProblems?.insert(problem, at: min(position, snapshot?.deliveryProblems?.count ?? 0))
-                }
-                _ = await refresh(fresh: true)
-            }
-        }
-    }
-
     func acknowledgeLeadReplacement(_ replacement: LeadReplacement) {
         guard let api else { return }
         let position = snapshot?.leadReplacements?.firstIndex { $0.id == replacement.id }
@@ -1324,15 +1290,6 @@ final class AgenthailModel {
                 _ = await refresh(fresh: true)
             }
         }
-    }
-
-    private func removeDeliveryProblem(_ deliveryID: Int64) {
-        snapshot?.deliveryProblems?.removeAll { $0.deliveryId == deliveryID }
-    }
-
-    func resendDeliveryProblem(_ problem: DeliveryProblem) {
-        dismissDeliveryProblem(problem)
-        restoreToComposer(problem.message, sessionID: problem.sessionId)
     }
 
     private func restoreToComposer(_ text: String, attachments: [ComposerAttachment] = [], sessionID: String) {

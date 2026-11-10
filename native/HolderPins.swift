@@ -77,7 +77,7 @@ final class HolderPins: @unchecked Sendable {
 
     /// The same exclusions as the web dashboard: these name a session without
     /// writing to one of its processes.
-    static let unpinnedActions: Set<String> = ["session-create", "notion-create", "queue-retry", "queue-cancel", "delivery-dismiss"]
+    static let unpinnedActions: Set<String> = ["session-create", "notion-create", "queue-cancel"]
     static let unpinnedPrefixes = ["channel-", "relay-", "project-"]
 
     /// The daemon keeps a receipt per key, refusals included, so the key must

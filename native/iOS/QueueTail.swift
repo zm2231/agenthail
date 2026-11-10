@@ -11,7 +11,7 @@ struct QueueTail: Equatable {
         var isOwn: Bool { (item.author ?? "person") == "person" && PeerEnvelope(item.message).sender == nil }
 
         enum Controls: Equatable {
-            case review
+            case answer
             case waiting
             case none
         }
@@ -25,12 +25,12 @@ struct QueueTail: Equatable {
 
         var reason: String? {
             guard isDead else { return nil }
-            return item.lastError.flatMap { $0.isEmpty ? nil : $0 } ?? "It may already have reached the agent. Check the session before sending again."
+            return item.lastError.flatMap { $0.isEmpty ? nil : $0 } ?? "It may already have reached the agent. Check the session before you answer what to do with it."
         }
 
         var controls: Controls {
             if leavingSince != nil { return .none }
-            if isDead { return .review }
+            if isDead { return .answer }
             return item.status == "pending" ? .waiting : .none
         }
     }

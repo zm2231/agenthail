@@ -34,7 +34,11 @@ struct AnswerReceipt: Hashable {
     let at: Date
 
     init(_ request: SessionRequest, _ decision: RequestDecision, at: Date = Date()) {
-        let answers = (request.questions ?? []).compactMap { decision.answers?[$0.question] }
+        let answers = (request.questions ?? []).compactMap { question -> String? in
+            if let typed = decision.answers?[question.question] { return typed }
+            let picked = question.options.filter { decision.choices.contains($0.id) }.map(\.label)
+            return picked.isEmpty ? nil : picked.joined(separator: ", ")
+        }
         let note = (decision.message ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         text = "You answered: " + (answers + (note.isEmpty ? [] : [note])).joined(separator: " · ")
         self.at = at

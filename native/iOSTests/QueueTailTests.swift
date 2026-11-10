@@ -193,11 +193,11 @@ final class QueueTailTests: XCTestCase {
         XCTAssertEqual(tail.hiddenCount, 2)
     }
 
-    func testAFailedRowOffersReviewAndSaysItNeedsIt() throws {
+    func testAFailedRowSaysItNeedsReviewAndLeavesTheAnswerToItsAsk() throws {
         let dead = QueueTail.Row(item: try row(1, status: "dead"))
-        XCTAssertEqual(dead.controls, .review, "a failed row offers Send again and Dismiss")
+        XCTAssertEqual(dead.controls, .answer, "a failed row offers only its ask's answer")
         XCTAssertEqual(dead.heading, "Delivery needs review")
-        XCTAssertEqual(dead.reason, "It may already have reached the agent. Check the session before sending again.")
+        XCTAssertEqual(dead.reason, "It may already have reached the agent. Check the session before you answer what to do with it.")
         let failed = try row(2, status: "dead", lastError: "delivery outcome is unknown: the connection dropped")
         XCTAssertEqual(QueueTail.Row(item: failed).reason, "delivery outcome is unknown: the connection dropped")
         XCTAssertNil(QueueTail.Row(item: try row(3)).reason, "a waiting row gives no reason")

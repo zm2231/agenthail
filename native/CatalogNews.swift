@@ -14,7 +14,7 @@ enum CatalogNews {
             case "session.queue":
                 return true
             default:
-                return event.type.hasPrefix("delivery.") || event.type.hasPrefix("coordinator.")
+                return event.type.hasPrefix("coordinator.")
             }
         }
     }

@@ -100,7 +100,7 @@ struct HolderPinsTest {
             check(sent["action"] as? String == action && sent["sessionId"] as? String == "S", "\(action) keeps its fields")
             check(pinned.key == HolderPins.key("k", pinnedTo: pin), "\(action) key follows the pick")
         }
-        for action in ["session-create", "notion-create", "queue-retry", "queue-cancel", "delivery-dismiss", "channel-join", "relay-add", "project-add"] {
+        for action in ["session-create", "notion-create", "queue-cancel", "channel-join", "relay-add", "project-add"] {
             let pinned = pins.pinned(body: body(["action": action, "sessionId": "S"]), key: "k")
             check(decode(pinned.body)["pid"] == nil && pinned.key == "k", "\(action) is never pinned")
         }
@@ -185,7 +185,7 @@ struct HolderPinsTest {
         PinStubProtocol.status = 409
         PinStubProtocol.failure = #"{"ok":false,"error":{"code":"stale","message":"request is no longer open"}}"#
         do {
-            _ = try await api.respond(sessionID: "S", requestID: "r1", decision: RequestDecision(choice: "allow"))
+            _ = try await api.respond(sessionID: "S", requestID: "r1", decision: .allow)
             check(false, "a stale answer fails")
         } catch AgenthailAPIError.requestStale {
         } catch {
@@ -193,7 +193,7 @@ struct HolderPinsTest {
         }
         PinStubProtocol.failure = "Claude process 4102 does not hold conversation S"
         do {
-            _ = try await api.respond(sessionID: "S", requestID: "r1", decision: RequestDecision(choice: "allow"))
+            _ = try await api.respond(sessionID: "S", requestID: "r1", decision: .allow)
             check(false, "an answer to a terminal that left fails")
         } catch AgenthailAPIError.request(409, let message) {
             check(message == "Claude process 4102 does not hold conversation S", "a pick that went stale keeps the daemon's reason")

@@ -5,7 +5,7 @@ final class SnapshotTagProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var sentTags: [String?] = []
     nonisolated(unsafe) static var paths: [String] = []
     nonisolated(unsafe) static var currentTag = "\"one\""
-    static let body = Data(#"{"updatedAt":"2026-10-23T00:00:00Z","eventCursor":1,"hostEpoch":"h","catalogSeq":4,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5,"busyDelivery":"queue"}"#.utf8)
+    static let body = Data(#"{"updatedAt":"2026-10-23T00:00:00Z","eventCursor":1,"hostEpoch":"h","catalogSeq":4,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5,"busyDelivery":"queue"}"#.utf8)
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }

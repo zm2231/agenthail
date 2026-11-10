@@ -1281,6 +1281,7 @@ struct QueueState: Decodable, Identifiable, Equatable {
     var hostID: String? = nil
     var attachments: [QueueAttachment]? = nil
     var author: String? = nil
+    var askId: String? = nil
 
     var listID: String { "\(hostID ?? "")/\(id)" }
     var hasAttachments: Bool { !(attachments ?? []).isEmpty }
@@ -1367,41 +1368,6 @@ indirect enum RecordedJSON: Codable, Equatable {
     }
 }
 
-struct AttentionState: Decodable, Identifiable, Equatable {
-    let id: Int64
-    let sessionId: String
-    let target: String
-    let queueId: Int64
-    let reason: String
-    let requestedAction: String
-    let createdAt: String
-    var hostID: String? = nil
-}
-
-struct DeliveryProblem: Decodable, Identifiable, Equatable {
-    let deliveryId: Int64
-    let sessionId: String
-    let sourceSessionId: String?
-    let attentionSessionId: String?
-    let message: String
-    let reason: String
-    let status: String?
-    let at: String
-    /// The paired computer the problem came from, on a phone that merges
-    /// several; delivery ids are only unique on one computer.
-    var hostID: String? = nil
-
-    var id: String { "\(hostID ?? "")/\(deliveryId)" }
-
-    var deletable: Bool? = nil
-
-    var reasonText: String {
-        let words = reason.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = words.first else { return "The message was not delivered." }
-        return first.uppercased() + words.dropFirst()
-    }
-}
-
 struct ChannelState: Decodable, Identifiable, Equatable {
     var id: String { name }
     let name: String
@@ -1475,8 +1441,6 @@ struct DashboardSnapshot: Decodable {
     let channels: [ChannelState]
     let relays: [RelayState]
     let history: [HistoryState]
-    var attention: [AttentionState]
-    var deliveryProblems: [DeliveryProblem]?
     let codexRecentHours: Int
     let busyDelivery: String?
     var rekeyed: [String: String]? = nil
@@ -1498,8 +1462,6 @@ struct DashboardSnapshot: Decodable {
             channels == other.channels &&
             relays == other.relays &&
             history == other.history &&
-            attention == other.attention &&
-            deliveryProblems == other.deliveryProblems &&
             codexRecentHours == other.codexRecentHours &&
             busyDelivery == other.busyDelivery &&
             signin == other.signin &&
@@ -1509,15 +1471,13 @@ struct DashboardSnapshot: Decodable {
             decisionsRev == other.decisionsRev
     }
 
-    /// Sessions, surfaces and delivery problems change only through catalog
-    /// events, so a snapshot older than the events applied keeps the client's.
+    // Sessions and surfaces change only through catalog events, so an older snapshot keeps the client's.
     func keepingCatalog(of current: DashboardSnapshot?, appliedThrough cursor: UInt64) -> DashboardSnapshot {
         guard let current, let catalogSeq, hostEpoch == current.hostEpoch, catalogSeq < cursor else { return self }
         var merged = self
         merged.sessions = current.sessions
         merged.totalSessions = current.totalSessions
         merged.surfaces = current.surfaces
-        merged.deliveryProblems = current.deliveryProblems
         merged.decisionsRev = current.decisionsRev
         return merged
     }
@@ -2237,14 +2197,8 @@ struct CatalogStreamData: Decodable {
     let health: String?
     let detail: String?
     let runtime: SurfaceRuntime?
-    let deliveryId: Int64?
     let queueCount: Int?
-    let sourceSessionId: String?
-    let attentionSessionId: String?
-    let message: String?
     let reason: String?
-    let status: String?
-    let at: String?
     let rekeyedTo: String?
     let rev: String?
 }
@@ -2320,6 +2274,7 @@ struct CancelledQueueItem: Decodable, Equatable {
 /// open turn waits on a person for.
 struct SessionRequest: Decodable, Hashable, Identifiable {
     struct Option: Decodable, Hashable {
+        let id: String
         let label: String
         let description: String
     }
@@ -2359,6 +2314,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var replacedBy: String? = nil
     var actions: [Action] = []
     var createdAt: String? = nil
+    var optionsOnly = false
 
     var isQuestion: Bool { kind == "question" }
     var isAsk: Bool { kind == "ask" }
@@ -2366,7 +2322,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var summary: String { [title, displayName].compactMap { $0 }.first { !$0.isEmpty } ?? tool }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation, replacedBy, actions, createdAt
+        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation, replacedBy, actions, createdAt, optionsOnly
     }
 
     init(id: String, kind: String, tool: String, title: String? = nil, questions: [Question]? = nil, alwaysAllow: Bool = false, input: String? = nil, actions: [Action] = []) {
@@ -2389,6 +2345,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
         replacedBy = try container.decodeIfPresent(String.self, forKey: .replacedBy)
         actions = try container.decodeIfPresent([Action].self, forKey: .actions) ?? []
         createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+        optionsOnly = try container.decodeIfPresent(Bool.self, forKey: .optionsOnly) ?? false
         if let raw = try container.decodeIfPresent(RequestInput.self, forKey: .input), let data = try? JSONEncoder().encode(raw) {
             input = String(data: data, encoding: .utf8)
         }
@@ -2469,23 +2426,18 @@ enum ElicitationValue: Codable, Hashable, Sendable {
     }
 }
 
-/// A person's answer to a request: a notification button's `choice`, or a
-/// `behavior` with an optional `always`, `message`, `answers`, or an MCP
-/// form's `content`.
 struct RequestDecision: Encodable, Hashable, Sendable {
-    var choice: String? = nil
-    var behavior: String? = nil
-    var always: Bool? = nil
-    var message: String? = nil
+    var choices: [String]
     var answers: [String: String]? = nil
+    var message: String? = nil
     var content: [String: ElicitationValue]? = nil
 
-    static let allow = RequestDecision(behavior: "allow")
-    static let alwaysAllow = RequestDecision(behavior: "allow", always: true)
-    static let deny = RequestDecision(behavior: "deny")
-    static func answers(_ answers: [String: String]) -> RequestDecision { RequestDecision(behavior: "allow", answers: answers) }
-    static func choice(_ choice: String) -> RequestDecision { RequestDecision(choice: choice) }
-    static func content(_ content: [String: ElicitationValue]) -> RequestDecision { RequestDecision(behavior: "allow", content: content) }
+    static let allow = choose("allow")
+    static let deny = choose("deny")
+    static func choose(_ id: String, message: String? = nil) -> RequestDecision { RequestDecision(choices: [id], message: message) }
+    static func form(_ content: [String: ElicitationValue], fields: [Elicitation.Field]) -> RequestDecision {
+        RequestDecision(choices: ["allow"], content: fields.isEmpty ? nil : content)
+    }
 }
 
 /// A session's open requests, oldest first, and the permission mode it runs

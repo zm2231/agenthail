@@ -275,9 +275,9 @@ extension ToolPresentation {
         return asked.compactMap { entry in
             guard let question = entry as? [String: Any], let text = question["question"] as? String,
                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            let options = (question["options"] as? [Any] ?? []).compactMap { entry -> SessionRequest.Option? in
+            let options = (question["options"] as? [Any] ?? []).enumerated().compactMap { index, entry -> SessionRequest.Option? in
                 guard let option = entry as? [String: Any], let label = option["label"] as? String else { return nil }
-                return SessionRequest.Option(label: label, description: option["description"] as? String ?? "")
+                return SessionRequest.Option(id: "o\(index)", label: label, description: option["description"] as? String ?? "")
             }
             let multiSelect = (question["multiSelect"] as? NSNumber).map { CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue } ?? false
             return SessionRequest.Question(question: text, header: question["header"] as? String ?? "", multiSelect: multiSelect, options: options)

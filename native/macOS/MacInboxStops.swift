@@ -30,43 +30,12 @@ extension InboxStops {
 
 extension AgenthailModel {
     var inboxStops: InboxStops {
-        InboxStops.build(attention: attention, deliveries: deliveryProblems, replacements: leadReplacements, inbox: decisionFeed.inbox, localHosts: [""])
+        InboxStops.build(replacements: leadReplacements, inbox: decisionFeed.inbox)
     }
 
     var needsYouCount: Int { inboxStops.count }
 
-    func queuedText(_ stop: InboxStop) -> String? {
-        guard case .queued(let item) = stop else { return nil }
-        return queue.first { $0.id == item.queueId }?.message
-    }
-
     func needsYou(_ stops: InboxStops) -> [String: Int] {
         stops.needsYou(in: projects) { [self] in session($0)?.project?.id }
-    }
-
-    func retryQueued(_ item: AttentionState) {
-        settleQueued(item, action: "queue-retry")
-    }
-
-    func cancelQueued(_ item: AttentionState) {
-        settleQueued(item, action: "queue-cancel")
-    }
-
-    private func settleQueued(_ item: AttentionState, action: String) {
-        guard let api else { return }
-        let position = snapshot?.attention.firstIndex { $0.id == item.id }
-        snapshot?.attention.removeAll { $0.id == item.id }
-        Task {
-            do {
-                try await api.action(action, queueID: item.queueId)
-                operationError = nil
-            } catch {
-                operationError = AgenthailAPIError.userMessage(error)
-                if let position, snapshot?.attention.contains(where: { $0.id == item.id }) == false {
-                    snapshot?.attention.insert(item, at: min(position, snapshot?.attention.count ?? 0))
-                }
-            }
-            _ = await refresh(fresh: true)
-        }
     }
 }

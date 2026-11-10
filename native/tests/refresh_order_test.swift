@@ -49,7 +49,7 @@ final class OrderDaemon: URLProtocol, @unchecked Sendable {
 
     func answer(_ reply: Reply) {
         guard let hours = reply.hours else { return send(500, #"{"error":{"message":"base failed"}}"#) }
-        send(200, #"{"updatedAt":"2026-11-09T12:00:00Z","hostEpoch":"e1","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"queue":[],"channels":[],"relays":[],"attention":[],"codexRecentHours":\#(hours)}"#)
+        send(200, #"{"updatedAt":"2026-11-09T12:00:00Z","hostEpoch":"e1","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"queue":[],"channels":[],"relays":[],"codexRecentHours":\#(hours)}"#)
     }
 
     private func send(_ status: Int, _ body: String) {

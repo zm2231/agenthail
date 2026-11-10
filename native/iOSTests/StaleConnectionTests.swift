@@ -609,7 +609,7 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         if path == "/api/v1/snapshot", request.url?.query?.contains("parentId") == true {
-            respond(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"child-\#(host)","surface":"codex","name":"child","status":"idle","queueCount":0,"open":false,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"compact":true,"model":true,"interrupt":true,"steer":true},"subagent":{"parentId":"demo","rootId":"demo","depth":1}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#)
+            respond(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"child-\#(host)","surface":"codex","name":"child","status":"idle","queueCount":0,"open":false,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"compact":true,"model":true,"interrupt":true,"steer":true},"subagent":{"parentId":"demo","rootId":"demo","depth":1}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":24}"#)
             return
         }
         switch path {

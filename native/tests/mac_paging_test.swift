@@ -51,7 +51,7 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
         case ("/api/v1/history", _, _, _): body = #"{"items":[],"hasMore":false,"nextBefore":0,"kinds":[]}"#
         case ("/api/v1/snapshot", nil, _, _):
             let epoch = Self.lock.withLock { Self.baseEpochs.isEmpty ? Self.epoch : Self.baseEpochs.removeFirst() }
-            body = #"{"updatedAt":"2026-11-03T12:00:00Z","hostEpoch":"\#(epoch)","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"projects":[{"id":"far","displayName":"far","kind":"git","checkouts":[{"host":{"id":"","name":"mac","state":"local"},"projectId":"far","rootPath":"/far","added":true}],"coordinators":[]}],"queue":[],"channels":[],"relays":[],"attention":[],"codexRecentHours":5}"#
+            body = #"{"updatedAt":"2026-11-03T12:00:00Z","hostEpoch":"\#(epoch)","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"projects":[{"id":"far","displayName":"far","kind":"git","checkouts":[{"host":{"id":"","name":"mac","state":"local"},"projectId":"far","rootPath":"/far","added":true}],"coordinators":[]}],"queue":[],"channels":[],"relays":[],"codexRecentHours":5}"#
         case ("/api/v1/snapshot", "current", _, _): body = Self.page(["live", "lead"], next: nil, current: true)
         case ("/api/v1/snapshot", "all", _, let q?) where !q.isEmpty: body = Self.page(q == "zet" || q == "gps" ? ["zeta"] : q == "ze" ? ["live", "zeta"] : [], next: nil)
         case ("/api/v1/snapshot", "all", nil, _): body = Self.page(Self.firstAll, next: "p2", refreshAt: query["status"] == nil ? nil : "2026-11-03T12:00:00Z")

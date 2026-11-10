@@ -97,7 +97,7 @@ private final class PushRecordingProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/version":
             respond(200, #"{"protocol":2,"minimumProtocol":1,"maximumProtocol":2,"pushRelayUrl":"https://relay.invalid"}"#)
         case "/api/v1/snapshot":
-            respond(200, #"{"updatedAt":"now","eventCursor":0,"daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}"#)
+            respond(200, #"{"updatedAt":"now","eventCursor":0,"daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5}"#)
         case "/api/v1/events":
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/event-stream"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

@@ -10,8 +10,8 @@ struct SidebarSectionsTest {
         return row
     }
 
-    static func listing(_ sessions: [SessionState], attention: [AttentionState] = []) -> DashboardSnapshot {
-        DashboardSnapshot(updatedAt: "2026-10-23T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: attention, deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+    static func listing(_ sessions: [SessionState]) -> DashboardSnapshot {
+        DashboardSnapshot(updatedAt: "2026-10-23T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
     }
 
     static func family(_ id: String, project: String, members: [String] = []) -> ViewFamily {
@@ -76,9 +76,12 @@ struct SidebarSectionsTest {
         check(familyKey(child["a"], "a1")?.expanded == true, "selecting a subagent opens its family")
         check(familyKey(keys(model, families: ["a1": true])["a"], "a1")?.expanded == true && familyKey(keys(model)["a"], "a1")?.expanded == false, "toggling a family opens and closes it")
 
-        let question = AttentionState(id: 1, sessionId: "a2", target: "a2", queueId: 0, reason: "Waiting on you", requestedAction: "answer", createdAt: "2026-10-23T08:00:00Z")
         let quiet = keys(model, expanded: ["a"])
-        model.snapshot = listing(model.snapshot?.sessions ?? [], attention: [question])
+        model.snapshot = listing((model.snapshot?.sessions ?? []).map { row in
+            var row = row
+            if row.id == "a2" { row.waitingOn = WaitingState(kind: "question", id: "q1") }
+            return row
+        })
         let asked = keys(model, expanded: ["a"])
         check(familyKey(asked["a"], "a2")?.attention["a2"] != nil && familyKey(quiet["a"], "a2")?.attention["a2"] == nil, "a question reaches its family")
         check(familyKey(asked["a"], "a1") == familyKey(quiet["a"], "a1"), "a question for one family leaves the others alone")

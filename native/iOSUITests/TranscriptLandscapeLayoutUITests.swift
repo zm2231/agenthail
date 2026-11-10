@@ -87,8 +87,7 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
         }
         XCTAssertFalse(above.isEmpty, "at the latest row no transcript row shows above the queued ones")
 
-        XCTAssertTrue(app.buttons["queue-tail-retry-26"].isHittable, "Send again stays on the one-line delivery row")
-        XCTAssertTrue(app.buttons["queue-tail-dismiss-26"].isHittable, "Dismiss stays on the one-line delivery row")
+        XCTAssertTrue(app.buttons["queue-tail-read-26"].isHittable, "the failed delivery row stays readable on one line")
         XCTAssertFalse(app.descendants(matching: .any)["queue-tail-reason-26"].exists, "the reason moves into the sheet")
         XCTAssertTrue(app.descendants(matching: .any)["composer-turn-settings"].exists, "one chip keeps the turn settings in view")
         XCTAssertFalse(app.descendants(matching: .any)["composer-effort"].exists, "the chip row folds into the one chip")
