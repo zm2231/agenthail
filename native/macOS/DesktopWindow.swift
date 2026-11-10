@@ -1414,15 +1414,6 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            let attention = QueueFacts.attention(model.attention, for: session.id)
-            if !attention.isEmpty {
-                BoundedDock {
-                    VStack(spacing: 0) {
-                        ForEach(attention) { AttentionBanner(model: model, attention: $0).padding(.bottom, DesktopSpace.s) }
-                    }
-                }
-                .scrimText()
-            }
             if let background = session.backgroundTasks, background.isShown {
                 BackgroundTasksDock(sessionID: session.id, background: background)
                     .id(session.id)
@@ -1443,10 +1434,6 @@ struct ComposerView: View {
                 let queued = model.queuedItems(for: session.id)
                 BoundedDock {
                     VStack(spacing: 0) {
-                        ForEach(model.deliveryProblems.filter { $0.sessionId == session.id }) { problem in
-                            DeliveryProblemBanner(problem: problem, model: model)
-                                .padding(.bottom, DesktopSpace.s)
-                        }
                         ForEach(model.leadReplacements.filter { $0.sessionId == session.id }, id: \.listID) { replacement in
                             LeadReplacementBanner(replacement: replacement) { model.acknowledgeLeadReplacement(replacement) }
                                 .padding(.bottom, DesktopSpace.s)
@@ -1827,48 +1814,6 @@ struct ComposerView: View {
     }
 }
 
-struct DeliveryProblemBanner: View {
-    let problem: DeliveryProblem
-    var model: AgenthailModel
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(DesktopPalette.attention)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Not delivered · \(problem.reasonText)")
-                    .font(.system(size: DesktopType.body, weight: .medium))
-                Text(PeerEnvelope(problem.message).body)
-                    .lineLimit(2)
-                    .foregroundStyle(DesktopPalette.text2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Button("Edit and resend") { model.resendDeliveryProblem(problem) }
-                .buttonStyle(.plain)
-                .foregroundStyle(DesktopPalette.accentText)
-            if problem.deletable == true {
-                Button("Delete") { model.deleteDeliveryProblem(problem) }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(DesktopPalette.accentText)
-            } else {
-                Button {
-                    model.dismissDeliveryProblem(problem)
-                } label: {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(DesktopPalette.text2)
-                .accessibilityLabel("Dismiss")
-            }
-        }
-        .font(.system(size: DesktopType.body))
-        .padding(.horizontal, DesktopSpace.m)
-        .padding(.vertical, 9)
-        .background(DesktopPalette.attentionBackground, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
-        .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).strokeBorder(DesktopPalette.attentionLine))
-    }
-}
-
 struct QueueDock: View {
     var model: AgenthailModel
     let items: [QueueState]
@@ -1902,7 +1847,7 @@ struct QueueDock: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
-                        Text(QueueFacts.summary(item, target: target, attention: model.attention, age: relativeAge(item.queuedAt)))
+                        Text(QueueFacts.summary(item, target: target, age: relativeAge(item.queuedAt)))
                             .font(.system(size: DesktopType.caption))
                             .foregroundStyle(DesktopPalette.text2)
                             .lineLimit(1)
@@ -2207,25 +2152,18 @@ struct DeliveryTab: View {
     var body: some View {
         let queued = QueueFacts.undelivered(model.queue, for: session.id)
         let history = model.history.filter { $0.sessionId == session.id || $0.sourceSessionId == session.id }
-        let problems = model.deliveryProblems(for: session.id)
         VStack(alignment: .leading, spacing: DesktopSpace.s) {
-            if !problems.isEmpty {
-                SidebarCaption("Not delivered").padding(.horizontal, -8)
-                ForEach(problems) { problem in
-                    deliveryCard(title: problem.sessionId == session.id ? "To this session" : "To \(model.session(problem.sessionId)?.title ?? "another session")", status: problem.reasonText, text: PeerEnvelope(problem.message).body, problem: true)
-                }
-            }
             if !queued.isEmpty {
                 SidebarCaption("Undelivered").padding(.horizontal, -8)
                 ForEach(queued) { item in
                     VStack(alignment: .leading, spacing: DesktopSpace.xs) {
-                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: QueueFacts.summary(item, target: session, attention: model.attention, age: relativeAge(item.queuedAt)), problem: item.status == "dead")
+                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: QueueFacts.summary(item, target: session, age: relativeAge(item.queuedAt)), problem: item.status == "dead")
                         HStack { QueueItemActions(model: model, item: item) }
                             .controlSize(.small)
                     }
                 }
             }
-            if history.isEmpty && queued.isEmpty && problems.isEmpty {
+            if history.isEmpty && queued.isEmpty {
                 Text("No deliveries for this session yet.")
                     .foregroundStyle(DesktopPalette.text2)
             } else if !history.isEmpty {

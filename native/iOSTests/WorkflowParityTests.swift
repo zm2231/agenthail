@@ -308,12 +308,11 @@ final class WorkflowParityTests: XCTestCase {
         model.selectedDetail = detail
         try await model.editSession(id: "computer::demo", action: "goal-set", text: "Verify release")
         try await model.editSession(id: "computer::demo", action: "alias", text: "release")
-        var queue = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":7,"sessionId":"demo","target":"demo","message":"next","status":"dead","evidence":"failed","attempts":1,"queuedAt":"now"}"#.utf8))
+        var queue = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":7,"sessionId":"demo","target":"demo","message":"next","status":"pending","evidence":"queued","attempts":0,"queuedAt":"now"}"#.utf8))
         queue.hostID = "computer"
-        try await model.updateQueue(queue, retry: true)
-        try await model.updateQueue(queue, retry: false)
+        try await model.cancelQueue(queue)
         let actions = ParityProtocol.state.actions
-        XCTAssertEqual(actions.compactMap { $0["action"] as? String }, ["goal-set","alias","queue-retry","queue-cancel"])
+        XCTAssertEqual(actions.compactMap { $0["action"] as? String }, ["goal-set","alias","queue-cancel"])
         XCTAssertEqual(actions[0]["message"] as? String, "Verify release")
         XCTAssertEqual(actions[1]["alias"] as? String, "release")
         XCTAssertEqual(actions[2]["queueId"] as? Int, 7)

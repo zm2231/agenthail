@@ -194,7 +194,7 @@ final class ComposerSendTests: XCTestCase {
         ComposerSendProtocol.state.script([])
         let steered = try await model.steerQueued(item, capabilities: takesImages)
         let edited = try await model.takeBack(item)
-        let cancelled = try await model.updateQueue(item, retry: false)
+        let cancelled = try await model.cancelQueue(item)
         XCTAssertFalse(steered)
         XCTAssertFalse(edited)
         XCTAssertFalse(cancelled)

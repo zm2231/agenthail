@@ -48,8 +48,7 @@ final class Outbox {
         pending.files = row.uploaded
         update(row.id, in: session) {
             $0.failure = nil
-            $0.deliveryID = nil
-            $0.deletable = false
+            $0.ask = nil
         }
         queue.add(pending)
     }
@@ -73,19 +72,30 @@ final class Outbox {
     func delete(_ row: LocalSend, in sessionID: String) {
         guard row.canDelete else { return }
         let session = resolve(sessionID)
-        let position = rows[session]?.firstIndex { $0.id == row.id }
-        discard(row, in: session)
-        guard let deliveryID = row.deliveryID, let api = api() else { return }
+        guard let ask = row.ask else {
+            discard(row, in: session)
+            return
+        }
+        guard let api = api() else { return }
         Task {
             do {
-                try await api.action("delivery-delete", deliveryID: deliveryID)
+                _ = try await api.respond(sessionID: session, requestID: ask.id, decision: RequestDecision(choice: FailedSendAsk.delete))
                 notice(nil)
+                discard(row, in: resolve(session))
             } catch {
                 notice(AgenthailAPIError.userMessage(error))
-                let session = resolve(session)
-                if let position, rows[session]?.contains(where: { $0.id == row.id }) != true {
-                    rows[session, default: []].insert(row, at: min(position, rows[session]?.count ?? 0))
-                }
+                readAsk(ask, of: row.id, in: resolve(session))
+            }
+        }
+    }
+
+    private func readAsk(_ ask: FailedSendAsk, of id: UUID, in sessionID: String) {
+        guard let api = api() else { return }
+        Task {
+            let requests = try? await api.requests(sessionID: sessionID)
+            update(id, in: sessionID) { row in
+                guard row.ask?.id == ask.id else { return }
+                row.ask = requests.map(ask.reading) ?? FailedSendAsk(id: ask.id)
             }
         }
     }
@@ -145,15 +155,15 @@ final class Outbox {
     }
 
     private func refuse(_ send: PendingSend, _ reason: String) {
-        let delivery = kept.removeValue(forKey: send.id)
+        let ask = kept.removeValue(forKey: send.id).map { FailedSendAsk(id: $0.askID) }
         update(send.id, in: send.sessionID) {
             $0.failure = reason
-            $0.deliveryID = delivery?.deliveryID
-            $0.deletable = delivery?.deletable ?? false
+            $0.ask = ask
             $0.unconfirmed = false
             $0.retryStopped = false
         }
         finish(send.id, delivered: false)
+        if let ask { readAsk(ask, of: send.id, in: resolve(send.sessionID)) }
     }
 
     private func follow() {

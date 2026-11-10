@@ -3,10 +3,9 @@ import Foundation
 struct RefusedSend: Equatable {
     let message: String
     let attachments: [ComposerAttachment]
-    var deliveryID: Int64? = nil
-    var deletable = false
+    var ask: FailedSendAsk? = nil
 
-    var canDelete: Bool { deliveryID == nil || deletable }
+    var canDelete: Bool { ask?.offersDelete ?? true }
 
     func removed(from text: String, attachments current: [ComposerAttachment]) -> (text: String, attachments: [ComposerAttachment]) {
         var remaining = current

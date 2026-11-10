@@ -226,14 +226,13 @@ final class InboxPageTests: XCTestCase {
         XCTAssertEqual(InboxHostProtocol.actions.first?["action"] as? String, "queue-cancel")
     }
 
-    func testRetryAndCancelGoThroughAMirrorWhileTheOwnerIsHeld() async throws {
+    func testCancelGoesThroughAMirrorWhileTheOwnerIsHeld() async throws {
         let model = try modelWithTheOwnerHeld()
-        try await model.updateQueue(id: 9, hostID: "hserver", retry: true)
-        try await model.updateQueue(InboxPage.qualified(queueRow(id: 10), host: "hserver"), retry: false)
+        try await model.cancelQueue(InboxPage.qualified(queueRow(id: 10), host: "hserver"))
         let actions = InboxHostProtocol.actions
-        XCTAssertEqual(actions.compactMap { $0["action"] as? String }, ["queue-retry", "queue-cancel"])
-        XCTAssertEqual(actions.compactMap { $0["to"] as? String }, ["fast.invalid", "fast.invalid"])
-        XCTAssertEqual(actions.compactMap { $0["host"] as? String }, ["hserver", "hserver"])
+        XCTAssertEqual(actions.compactMap { $0["action"] as? String }, ["queue-cancel"])
+        XCTAssertEqual(actions.compactMap { $0["to"] as? String }, ["fast.invalid"])
+        XCTAssertEqual(actions.compactMap { $0["host"] as? String }, ["hserver"])
     }
 
     func testSteerWorksThroughAMirrorWhileTheOwnerIsHeld() async throws {
@@ -264,14 +263,6 @@ final class InboxPageTests: XCTestCase {
         XCTAssertTrue(all.messages.contains { $0.sessionId == "hserver::s1" })
 
         InboxHostProtocol.actions = []
-        try await model.updateQueue(id: 9, hostID: "hserver", retry: true)
-        let action = try XCTUnwrap(InboxHostProtocol.actions.first)
-        XCTAssertEqual(action["to"] as? String, "fast.invalid")
-        XCTAssertEqual(action["host"] as? String, "hserver")
-        XCTAssertEqual(action["action"] as? String, "queue-retry")
-        XCTAssertEqual(action["queueId"] as? Int, 9)
-
-        InboxHostProtocol.actions = []
         try await model.takeBack(InboxPage.qualified(queueRow(id: 9), host: "hserver"))
         XCTAssertEqual(InboxHostProtocol.actions.first?["host"] as? String, "hserver", "Edit cancels the row on the computer that holds it")
         XCTAssertEqual(InboxHostProtocol.actions.first?["to"] as? String, "fast.invalid")
@@ -294,8 +285,6 @@ final class InboxPageTests: XCTestCase {
         """#.utf8))
         XCTAssertEqual(page.items.map(\.pending), [true, false])
         XCTAssertNotNil(page.items[1].createdDate)
-        XCTAssertTrue(page.items[1].canSendAgain)
-        XCTAssertFalse(page.items[0].canSendAgain)
         XCTAssertEqual(page.items[1].outcomeLabel, "Never confirmed")
         XCTAssertEqual(page.items[1].senderLabel, "Agenthail")
         XCTAssertEqual(InboxPage.qualified(page.items[1], host: "hlaptop").senderLabel, "Agenthail", "the computer's name does not change who sent it")

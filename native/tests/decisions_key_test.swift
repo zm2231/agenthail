@@ -28,7 +28,7 @@ struct DecisionsKeyTest {
     }
 
     static func snapshot(rev: String?) -> DashboardSnapshot {
-        DashboardSnapshot(updatedAt: "2026-11-08T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue", decisionsRev: rev)
+        DashboardSnapshot(updatedAt: "2026-11-08T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue", decisionsRev: rev)
     }
 
     @MainActor

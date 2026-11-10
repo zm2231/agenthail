@@ -34,7 +34,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             subagentIDs = (snapshot?.sessions ?? []).reduce(into: [:]) { ids, row in
                 if let parent = row.subagent?.parentId { ids[parent, default: []].append(row.id) }
             }
-            sessionAttention = SessionAttention.build(sessions: snapshot?.sessions ?? [], attention: snapshot?.attention ?? [], deliveryProblems: snapshot?.deliveryProblems ?? [])
+            sessionAttention = SessionAttention.build(sessions: snapshot?.sessions ?? [])
             rederiveTree()
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
@@ -213,8 +213,6 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private(set) var listing = ListingState()
     private(set) var decisionsKey = ""
     private(set) var queue: [QueueState] = []
-    private(set) var attention: [AttentionState] = []
-    private(set) var deliveryProblems: [DeliveryProblem] = []
     private(set) var leadReplacements: [LeadReplacement] = []
     private(set) var waitingSessions: [String] = []
     private(set) var sessionCount = 0
@@ -362,8 +360,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                 queue: ordered.flatMap { connection in
                     (connection.snapshot?.queue ?? []).map { item in var item = item; item.hostID = connection.id; return item }
                 },
-                channels: [], relays: [], history: [], attention: catalog.attention,
-                deliveryProblems: catalog.deliveryProblems,
+                channels: [], relays: [], history: [],
                 codexRecentHours: loaded.first?.codexRecentHours ?? 24, busyDelivery: nil,
                 leadReplacements: catalog.leadReplacements)
             if snapshot?.hasSamePresentation(as: merged) != true { snapshot = merged }
@@ -412,8 +409,6 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         let reached = catalog.hosts.map { host in "\(host.id):\(host.state):\(catalog.target(forHost: host.id).map { "\($0.hostID)>\($0.remote ?? "")" } ?? "none")" }
         decisionsKey = (ordered.map { "\($0.id):\($0.shownReachable):\($0.snapshot?.decisionsRev ?? "older")" } + reached).joined(separator: ",")
         queue = snapshot?.queue ?? []
-        attention = snapshot?.attention ?? []
-        deliveryProblems = snapshot?.deliveryProblems ?? []
         leadReplacements = snapshot?.leadReplacements ?? []
         waitingSessions = sessions.filter { $0.waitingOn != nil || $0.pendingAskID != nil }.map { "\($0.id):\($0.waitingOn?.id ?? $0.pendingAskID ?? "")" }
         sessionCount = sessions.count
@@ -546,18 +541,6 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         return HostCatalog.qualify(voice.id, id)
     }
 
-    func dismissDeliveryProblem(_ problem: DeliveryProblem) async throws {
-        guard let hostID = problem.hostID, let connection = connections[hostID], connection.shownReachable else {
-            throw AgenthailAPIError.unavailable("Connect to your computer first.")
-        }
-        let key = "delivery:\(problem.id)"
-        guard !pendingControls.contains(key) else { return }
-        pendingControls.insert(key)
-        defer { pendingControls.remove(key) }
-        try await connection.api.action("delivery-dismiss", deliveryID: problem.deliveryId)
-        connection.updateSnapshot { $0.deliveryProblems = $0.deliveryProblems?.filter { $0.deliveryId != problem.deliveryId } }
-    }
-
     func acknowledgeLeadReplacement(_ replacement: LeadReplacement) async throws {
         guard let hostID = replacement.hostID, let connection = connections[hostID], connection.shownReachable else {
             throw AgenthailAPIError.unavailable("Connect to your computer first.")
@@ -672,19 +655,14 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     @discardableResult
-    func updateQueue(_ item: QueueState, retry: Bool) async throws -> Bool {
-        try await updateQueue(id: item.id, hostID: item.hostID, retry: retry)
-    }
-
-    @discardableResult
-    func updateQueue(id: Int64, hostID: String?, retry: Bool) async throws -> Bool {
-        guard let hostID else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+    func cancelQueue(_ item: QueueState) async throws -> Bool {
+        guard let hostID = item.hostID else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         let (api, target) = try reach(hostID)
-        let key = "queue:\(hostID)/\(id)"
+        let key = "queue:\(hostID)/\(item.id)"
         guard !pendingControls.contains(key) else { return false }
         pendingControls.insert(key)
         defer { pendingControls.remove(key) }
-        try await api.action(retry ? "queue-retry" : "queue-cancel", queueID: id, host: target.remote)
+        try await api.action("queue-cancel", queueID: item.id, host: target.remote)
         await connections[target.hostID]?.refresh(fresh: true)
         return true
     }
@@ -1916,25 +1894,40 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         deliveryStatus[send.sessionID] = "Couldn’t complete request. Draft kept."
         failedSends[send.sessionID] = reason
         let kept = keptDeliveries.removeValue(forKey: send.idempotencyKey)
-        refusedSends[send.sessionID] = RefusedSend(message: send.message, attachments: send.attachments, deliveryID: kept?.deliveryID, deletable: kept?.deletable ?? false)
+        let refused = RefusedSend(message: send.message, attachments: send.attachments, ask: kept.map { FailedSendAsk(id: $0.askID) })
+        refusedSends[send.sessionID] = refused
         if selectedSessionID != send.sessionID { operationError = reason }
         returnToComposer(send)
         saveComposerState()
+        readRefusedAsk(refused, in: send.sessionID)
     }
 
     func deleteRefusedSend(in sessionID: String) {
         guard let refused = refusedSends[sessionID], refused.canDelete else { return }
-        guard let deliveryID = refused.deliveryID else {
+        guard let ask = refused.ask else {
             dropRefusedSend(refused, in: sessionID)
             return
         }
         Task {
             do {
-                try await resolve(sessionID).api.action("delivery-delete", deliveryID: deliveryID)
+                let (api, route) = try resolve(sessionID)
+                _ = try await api.respond(sessionID: route.sessionID, requestID: ask.id, decision: RequestDecision(choice: FailedSendAsk.delete))
                 dropRefusedSend(refused, in: rekeys.resolve(sessionID))
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)
+                readRefusedAsk(refused, in: rekeys.resolve(sessionID))
             }
+        }
+    }
+
+    private func readRefusedAsk(_ refused: RefusedSend, in sessionID: String) {
+        guard let ask = refused.ask else { return }
+        Task {
+            var requests: SessionRequests?
+            if let (api, route) = try? resolve(sessionID) { requests = try? await api.requests(sessionID: route.sessionID) }
+            let session = rekeys.resolve(sessionID)
+            guard let current = refusedSends[session], current.ask?.id == ask.id else { return }
+            refusedSends[session]?.ask = requests.map(ask.reading) ?? FailedSendAsk(id: ask.id)
         }
     }
 

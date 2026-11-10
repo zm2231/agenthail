@@ -145,21 +145,6 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
-    func testDeliveryProblemDismissalRemovesNoticeWithoutResending() async throws {
-        RecoveryProtocol.state.reset()
-        RecoveryProtocol.state.configure(deliveryProblem: true)
-        let model = makeModel()
-        let refreshed = await model.refresh()
-        XCTAssertTrue(refreshed)
-        let problem = try XCTUnwrap(model.deliveryProblems.first)
-        XCTAssertEqual(problem.deliveryId, 42)
-
-        try await model.dismissDeliveryProblem(problem)
-
-        XCTAssertTrue(model.deliveryProblems.isEmpty)
-        XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
-    }
-
     private func sendQueuedInstruction(_ model: AgenthailIOSModel) async throws {
         await model.loadSession("computer::demo")
         _ = await model.refresh()
@@ -184,7 +169,6 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
         private var evidence: String?
         private var queueFailure = false
         private var queueMissing = false
-        private var deliveryProblem = false
         private var historyGap = false
         private var catalogEpoch: String?
         private var catalogSequence: UInt64?
@@ -196,8 +180,8 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
         var actionCount: Int { lock.withLock { actions } }
         var actionNames: [String] { lock.withLock { actionHistory } }
         var freshSnapshotReads: Int { lock.withLock { freshSnapshots } }
-        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; queueMissing = false; deliveryProblem = false; historyGap = false; catalogEpoch = nil; catalogSequence = nil; reads = 0; actions = 0; actionHistory = []; freshSnapshots = 0 } }
-        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, evidence: String? = nil, queueFailure: Bool? = nil, queueMissing: Bool? = nil, deliveryProblem: Bool? = nil, historyGap: Bool? = nil) {
+        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; queueMissing = false; historyGap = false; catalogEpoch = nil; catalogSequence = nil; reads = 0; actions = 0; actionHistory = []; freshSnapshots = 0 } }
+        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, evidence: String? = nil, queueFailure: Bool? = nil, queueMissing: Bool? = nil, historyGap: Bool? = nil) {
             lock.withLock {
                 if let stale { self.stale = stale }
                 if let queueStatus { self.queueStatus = queueStatus }
@@ -205,7 +189,6 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                 if let evidence { self.evidence = evidence }
                 if let queueFailure { self.queueFailure = queueFailure }
                 if let queueMissing { self.queueMissing = queueMissing }
-                if let deliveryProblem { self.deliveryProblem = deliveryProblem }
                 if let historyGap { self.historyGap = historyGap }
             }
         }
@@ -231,9 +214,6 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                     snapshot["daemon"] = ["running": true, "stale": stale, "refreshError": "Agent catalog refresh failed"]
                     if let catalogEpoch { snapshot["hostEpoch"] = catalogEpoch }
                     if let catalogSequence { snapshot["catalogSeq"] = catalogSequence }
-                    if deliveryProblem {
-                        snapshot["deliveryProblems"] = [["deliveryId": 42, "sessionId": "demo", "sourceSessionId": "source", "message": "Keep the regression test", "reason": "source unavailable", "status": "failed", "at": "2026-10-04T03:00:00Z"]]
-                    }
                     return (200, String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!)
                 case "/api/v1/actions":
                     actions += 1

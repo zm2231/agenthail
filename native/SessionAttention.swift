@@ -7,10 +7,6 @@ struct SessionAttention: Equatable {
     enum Kind: CaseIterable {
         /// The agent waits on an answer, an approval, or input.
         case request
-        /// A message to this session failed and needs a decision.
-        case incoming
-        /// Messages this session sent were not delivered.
-        case outgoing
         /// A usage limit refused the session's last turn.
         case usageLimit
         /// A refusal or an API error ended the session's last turn.
@@ -22,29 +18,9 @@ struct SessionAttention: Equatable {
     let kind: Kind
     let reason: String
 
-    static func build(sessions: [SessionState], attention: [AttentionState], deliveryProblems: [DeliveryProblem]) -> [String: SessionAttention] {
-        let all = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let live = all.filter { canAct($0.value) }
+    static func build(sessions: [SessionState]) -> [String: SessionAttention] {
+        let live = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }).filter { canAct($0.value) }
         var result: [String: SessionAttention] = [:]
-        let outgoing = Dictionary(grouping: deliveryProblems.filter { $0.attentionSessionId.map { live[$0] != nil } ?? false }, by: { $0.attentionSessionId! })
-        for (id, problems) in outgoing {
-            let targets = Set(problems.map(\.sessionId))
-            let count = problems.count == 1 ? "1 message" : "\(problems.count) messages"
-            let target = targets.count == 1 ? all[targets.first!].map { " to \($0.displayName)" } ?? "" : ""
-            result[id] = SessionAttention(kind: .outgoing, reason: "\(count)\(target) not delivered")
-        }
-        for (id, items) in Dictionary(grouping: attention.filter { live[$0.sessionId] != nil }, by: \.sessionId) {
-            let reasons = Set(items.map(\.reason))
-            let reason: String
-            if items.count == 1 {
-                reason = items[0].reason
-            } else if reasons.count == 1 {
-                reason = "\(items.count) messages: \(reasons.first!)"
-            } else {
-                reason = "\(items.count) messages need a decision"
-            }
-            result[id] = SessionAttention(kind: .incoming, reason: reason)
-        }
         for session in live.values {
             if let waiting = session.waitingOn, session.replacedLead?.isEmpty == false {
                 result[session.id] = SessionAttention(kind: .replacedRequest, reason: "From a replaced lead. " + requestReason(waiting.kind, place: session.waitingPlace ?? .elsewhere))
@@ -53,9 +29,9 @@ struct SessionAttention: Equatable {
             } else if session.pendingAskID != nil {
                 let title = session.ask?.title ?? ""
                 result[session.id] = SessionAttention(kind: .request, reason: title.isEmpty ? requestReason("question") : "Asks: \(title)")
-            } else if let limit = session.limitLabel, result[session.id] == nil {
+            } else if let limit = session.limitLabel {
                 result[session.id] = SessionAttention(kind: .usageLimit, reason: limit)
-            } else if let stop = session.turnStop, result[session.id] == nil, SessionDisplayKind.of(session) == .stopped {
+            } else if let stop = session.turnStop, SessionDisplayKind.of(session) == .stopped {
                 result[session.id] = SessionAttention(kind: .stopped, reason: stop.detail)
             }
         }

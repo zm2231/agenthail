@@ -49,12 +49,6 @@ struct CatalogBatchTest {
         check(removed.snapshot.sessions.isEmpty && removed.snapshot.totalSessions == 0, "removed sessions leave the snapshot")
         check(removed.removals == [CatalogRemoval(id: "a", unlisted: false, rekeyedTo: "a2"), CatalogRemoval(id: "b", unlisted: true, rekeyedTo: nil)], "removals are reported in order for their side effects: \(removed.removals)")
 
-        let problems = (1...51).map { event(UInt64(10 + $0), "delivery.problem", #"{"deliveryId":\#($0),"sessionId":"a","message":"m","reason":"closed","at":"2026-10-23T21:00:00Z"}"#) }
-        let capped = base.applyingCatalog(problems, after: 10)
-        check(capped.snapshot.deliveryProblems?.count == 50 && capped.snapshot.deliveryProblems?.first?.deliveryId == 51, "delivery problems are newest first and capped like the snapshot's")
-        let dismissed = capped.snapshot.applyingCatalog([event(62, "delivery.dismissed", #"{"deliveryId":51}"#)], after: 61)
-        check(dismissed.snapshot.deliveryProblems?.first?.deliveryId == 50 && !dismissed.sessionsChanged, "a dismissed problem leaves")
-
         check(base.decisionsRev == nil, "a snapshot without a decisions revision is from an older host")
         let decided = base.applyingCatalog([event(11, "decisions.changed", #"{"rev":"r1","own":"o1"}"#)], after: 10)
         check(decided.snapshot.decisionsRev == "r1" && !decided.sessionsChanged && decided.changed, "a decisions change names the revision without touching sessions")

@@ -51,19 +51,9 @@ private extension CatalogBatch {
             snapshot.sessions.removeAll { $0.id == id }
             removals.append(CatalogRemoval(id: id, unlisted: data.reason == "unlisted", rekeyedTo: data.rekeyedTo))
             sessionsChanged = true
-        case "delivery.problem":
-            guard let deliveryID = data.deliveryId, let sessionID = data.sessionId else { return }
-            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: data.sourceSessionId, attentionSessionId: data.attentionSessionId, message: data.message ?? "", reason: data.reason ?? "", status: data.status, at: data.at ?? "")
-            var problems = snapshot.deliveryProblems ?? []
-            problems.removeAll { $0.deliveryId == deliveryID }
-            problems.insert(problem, at: 0)
-            snapshot.deliveryProblems = Array(problems.prefix(50))
         case "decisions.changed":
             guard let rev = data.rev else { return }
             snapshot.decisionsRev = rev
-        case "delivery.dismissed":
-            guard let deliveryID = data.deliveryId else { return }
-            snapshot.deliveryProblems?.removeAll { $0.deliveryId == deliveryID }
         case "surface.health":
             guard let name = data.surface, let health = data.health,
                   let index = snapshot.surfaces.firstIndex(where: { $0.name == name }) else { needsSnapshot = true; return }

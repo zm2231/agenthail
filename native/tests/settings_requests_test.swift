@@ -10,7 +10,7 @@ struct SettingsRequestsTest {
         let api = AgenthailAPI(baseURL: URL(string: "http://agenthail.test")!, token: "t", session: URLSession(configuration: configuration))
         let model = AgenthailModel(connecting: false, api: api)
         let repairable = try! JSONDecoder().decode(SurfaceState.self, from: Data(#"{"name":"codex","connected":false,"health":"degraded","repairAction":"runtime-ensure","repairLabel":"Start managed runtime","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"runtime":{"name":"Codex app server","reachable":false,"durable":false,"problem":"runtime-stopped"}}"#.utf8))
-        model.snapshot = DashboardSnapshot(updatedAt: "2026-10-05T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [repairable], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "steer")
+        model.snapshot = DashboardSnapshot(updatedAt: "2026-10-05T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [repairable], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "steer")
 
         await model.repairSurface(repairable)
         let repair = RecordingProtocol.requests.first { $0.path == "/api/v1/actions" }

@@ -41,7 +41,6 @@ final class SessionCellsObservationTests: XCTestCase {
             _ = model.sessionCount
             _ = model.usageSessions
             _ = model.waitingSessions
-            _ = model.attention
             _ = model.sessionAttention
             _ = model.isPaired
             _ = model.showsHostNames

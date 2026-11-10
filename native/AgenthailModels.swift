@@ -1367,41 +1367,6 @@ indirect enum RecordedJSON: Codable, Equatable {
     }
 }
 
-struct AttentionState: Decodable, Identifiable, Equatable {
-    let id: Int64
-    let sessionId: String
-    let target: String
-    let queueId: Int64
-    let reason: String
-    let requestedAction: String
-    let createdAt: String
-    var hostID: String? = nil
-}
-
-struct DeliveryProblem: Decodable, Identifiable, Equatable {
-    let deliveryId: Int64
-    let sessionId: String
-    let sourceSessionId: String?
-    let attentionSessionId: String?
-    let message: String
-    let reason: String
-    let status: String?
-    let at: String
-    /// The paired computer the problem came from, on a phone that merges
-    /// several; delivery ids are only unique on one computer.
-    var hostID: String? = nil
-
-    var id: String { "\(hostID ?? "")/\(deliveryId)" }
-
-    var deletable: Bool? = nil
-
-    var reasonText: String {
-        let words = reason.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = words.first else { return "The message was not delivered." }
-        return first.uppercased() + words.dropFirst()
-    }
-}
-
 struct ChannelState: Decodable, Identifiable, Equatable {
     var id: String { name }
     let name: String
@@ -1475,8 +1440,6 @@ struct DashboardSnapshot: Decodable {
     let channels: [ChannelState]
     let relays: [RelayState]
     let history: [HistoryState]
-    var attention: [AttentionState]
-    var deliveryProblems: [DeliveryProblem]?
     let codexRecentHours: Int
     let busyDelivery: String?
     var rekeyed: [String: String]? = nil
@@ -1498,8 +1461,6 @@ struct DashboardSnapshot: Decodable {
             channels == other.channels &&
             relays == other.relays &&
             history == other.history &&
-            attention == other.attention &&
-            deliveryProblems == other.deliveryProblems &&
             codexRecentHours == other.codexRecentHours &&
             busyDelivery == other.busyDelivery &&
             signin == other.signin &&
@@ -1509,15 +1470,13 @@ struct DashboardSnapshot: Decodable {
             decisionsRev == other.decisionsRev
     }
 
-    /// Sessions, surfaces and delivery problems change only through catalog
-    /// events, so a snapshot older than the events applied keeps the client's.
+    // Sessions and surfaces change only through catalog events, so an older snapshot keeps the client's.
     func keepingCatalog(of current: DashboardSnapshot?, appliedThrough cursor: UInt64) -> DashboardSnapshot {
         guard let current, let catalogSeq, hostEpoch == current.hostEpoch, catalogSeq < cursor else { return self }
         var merged = self
         merged.sessions = current.sessions
         merged.totalSessions = current.totalSessions
         merged.surfaces = current.surfaces
-        merged.deliveryProblems = current.deliveryProblems
         merged.decisionsRev = current.decisionsRev
         return merged
     }
@@ -2237,14 +2196,8 @@ struct CatalogStreamData: Decodable {
     let health: String?
     let detail: String?
     let runtime: SurfaceRuntime?
-    let deliveryId: Int64?
     let queueCount: Int?
-    let sourceSessionId: String?
-    let attentionSessionId: String?
-    let message: String?
     let reason: String?
-    let status: String?
-    let at: String?
     let rekeyedTo: String?
     let rev: String?
 }
@@ -2320,6 +2273,7 @@ struct CancelledQueueItem: Decodable, Equatable {
 /// open turn waits on a person for.
 struct SessionRequest: Decodable, Hashable, Identifiable {
     struct Option: Decodable, Hashable {
+        var id: String? = nil
         let label: String
         let description: String
     }

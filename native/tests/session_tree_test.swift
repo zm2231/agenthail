@@ -129,7 +129,7 @@ struct SessionTreeTest {
         expect(CatalogNews.moves([event("session.removed", #"{"sessionId":"a","reason":"unlisted"}"#)], held: holding), "removing a held row is news")
         expect(!CatalogNews.moves([event("session.removed", #"{"sessionId":"elsewhere"}"#)], held: holding), "removing a row the list never held is not")
         expect(CatalogNews.moves([event("session.queue", #"{"sessionId":"a","queueCount":1}"#)], held: holding), "a queue change is news")
-        expect(CatalogNews.moves([event("delivery.problem", #"{"deliveryId":1,"sessionId":"a"}"#)], held: holding) && CatalogNews.moves([event("coordinator.changed", #"{}"#)], held: holding), "attention and lead changes are news")
+        expect(CatalogNews.moves([event("coordinator.changed", #"{}"#)], held: holding), "a lead change is news")
         expect(!CatalogNews.moves([event("surface.health", #"{"surface":"claude","health":"healthy"}"#)], held: holding), "a surface's health does not move rows")
     }
 
@@ -209,7 +209,7 @@ struct SessionTreeTest {
         let approver = waiting("approver", kind: "approval")
         var oldLead = waiting("old-lead", kind: "question")
         oldLead.replacedLead = [CoordinatorTenure(name: "release-lead", from: "2026-10-04T09:00:00Z", until: "2026-10-04T11:00:00Z")]
-        let reasons = SessionAttention.build(sessions: [asker, approver, oldLead], attention: [], deliveryProblems: [])
+        let reasons = SessionAttention.build(sessions: [asker, approver, oldLead])
         expect(reasons["asker"] == SessionAttention(kind: .request, reason: "Asks you a question") && reasons["approver"]?.reason == "Needs your approval", "requests read as what they ask")
         expect(reasons["old-lead"] == SessionAttention(kind: .replacedRequest, reason: "From a replaced lead. Asks you a question"), "a replaced lead's request says so")
         let current = view([Self.family("asker", project: "agenthail"), Self.family("old-lead", project: "agenthail"), Self.family("missing", project: "agenthail"), Self.family("approver", project: "agenthail")], projects: [("agenthail", [])])
@@ -220,7 +220,7 @@ struct SessionTreeTest {
         terminal.runtimeKind = "claude-cli"
         var limited = session("limited")
         limited.usageLimit = UsageLimitState(resetsAt: "2026-10-04T18:20:00Z")
-        let places = SessionAttention.build(sessions: [terminal, limited], attention: [], deliveryProblems: [])
+        let places = SessionAttention.build(sessions: [terminal, limited])
         expect(places["terminal"]?.reason == "Waiting in its terminal", "a terminal prompt Agenthail does not hold is answered in its terminal")
         let resets = TimestampParser.date("2026-10-04T18:20:00Z")!.formatted(date: .omitted, time: .shortened)
         expect(places["limited"] == SessionAttention(kind: .usageLimit, reason: "Usage limit, resets \(resets)"), "a usage limit names when it resets")

@@ -100,7 +100,7 @@ struct HolderPinsTest {
             check(sent["action"] as? String == action && sent["sessionId"] as? String == "S", "\(action) keeps its fields")
             check(pinned.key == HolderPins.key("k", pinnedTo: pin), "\(action) key follows the pick")
         }
-        for action in ["session-create", "notion-create", "queue-retry", "queue-cancel", "delivery-dismiss", "channel-join", "relay-add", "project-add"] {
+        for action in ["session-create", "notion-create", "queue-cancel", "channel-join", "relay-add", "project-add"] {
             let pinned = pins.pinned(body: body(["action": action, "sessionId": "S"]), key: "k")
             check(decode(pinned.body)["pid"] == nil && pinned.key == "k", "\(action) is never pinned")
         }

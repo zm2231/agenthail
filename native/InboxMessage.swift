@@ -30,7 +30,6 @@ struct InboxMessage: Decodable, Identifiable, Equatable {
 
     var listID: String { "\(hostID ?? "")/\(id)" }
     var createdDate: Date? { TimestampParser.date(createdAt) }
-    var canSendAgain: Bool { queueId != nil && queueStatus == "dead" }
     var reason: String? { [lastError, failure].compactMap { $0 }.first { !$0.isEmpty } }
 
     var senderLabel: String? {
