@@ -175,12 +175,12 @@ func TestASortReplaysAndAReclassifiedMessageDropsItQuietly(t *testing.T) {
 	}
 }
 
-func TestOwedSortsStartAtAMessageNotASecondAndGoBackADayAtMost(t *testing.T) {
+func TestTheProvisionalMessagesOfTheLastDayAreListedOldestFirst(t *testing.T) {
 	s := newStore(t)
 	search := goal(t, s, "search")
 	now := time.Now()
 	var seqs []int64
-	for i, at := range []time.Time{now.Add(-24*time.Hour - 500*time.Millisecond), now, now, now, now} {
+	for i, at := range []time.Time{now.Add(-24*time.Hour - 500*time.Millisecond), now, now, now} {
 		u := said(fmt.Sprintf("claude-prompt:%d", i), fmt.Sprintf("message %d", i))
 		u.ProjectKey, u.At = project, at
 		e, _, err := s.RecordUtterance(u)
@@ -189,17 +189,19 @@ func TestOwedSortsStartAtAMessageNotASecondAndGoBackADayAtMost(t *testing.T) {
 		}
 		seqs = append(seqs, e.Seq)
 	}
-	sortTo(t, s, "claude-prompt:3", search, 0.95)
-	got, err := s.LocalProvisionalFrom(project, seqs[2], now.Add(-24*time.Hour))
+	sortTo(t, s, "claude-prompt:2", search, 0.95)
+	got, err := s.LocalProvisionalSince(project, now.Add(-24*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []ledger.OwedSort{{Ref: "claude-prompt:2", Seq: seqs[2]}, {Ref: "claude-prompt:4", Seq: seqs[4]}}
-	if !slices.Equal(got, want) {
-		t.Fatalf("owed = %v, want %v: from the first owed message on, not the one before it in the same second, and not the sorted one", got, want)
+	spoken := now.UTC().Truncate(time.Second)
+	want := []ledger.OwedSort{{Ref: "claude-prompt:1", Seq: seqs[1], At: spoken}, {Ref: "claude-prompt:3", Seq: seqs[3], At: spoken}}
+	if !slices.EqualFunc(got, want, func(a, b ledger.OwedSort) bool { return a.Ref == b.Ref && a.Seq == b.Seq && a.At.Equal(b.At) }) {
+		t.Fatalf("owed = %v, want %v: the day's provisional messages, not the older one or the sorted one", got, want)
 	}
-	if got, err := s.LocalProvisionalFrom(project, 0, now.Add(-24*time.Hour)); err != nil || len(got) == 0 || got[0].Ref != "claude-prompt:1" {
-		t.Fatalf("a message older than a day was owed: %v (%v)", got, err)
+	keys, err := s.LocalCaptureProjects(now.Add(-24 * time.Hour))
+	if err != nil || !slices.Equal(keys, []string{project}) {
+		t.Fatalf("projects with captures today = %v (%v)", keys, err)
 	}
 }
 

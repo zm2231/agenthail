@@ -49,6 +49,7 @@ type SortInput struct {
 type OwedSort struct {
 	Ref string
 	Seq int64
+	At  time.Time
 }
 
 func sortedRef(utteranceID string) string { return "sorted:" + utteranceID }
@@ -115,22 +116,24 @@ func (s *Store) SortInputFor(projectKey, utteranceID string) (SortInput, bool, e
 }
 
 // Only this host's captures: two hosts sorting one message would collide on its ref when they sync.
-func (s *Store) LocalProvisionalFrom(projectKey string, fromSeq int64, notBefore time.Time) ([]OwedSort, error) {
+func (s *Store) LocalProvisionalSince(projectKey string, notBefore time.Time) ([]OwedSort, error) {
 	if whole := notBefore.Truncate(time.Second); whole.Before(notBefore) {
 		notBefore = whole.Add(time.Second)
 	}
-	rows, err := s.read.Query(`SELECT ref, seq FROM ledger_events WHERE project_key=? AND type=? AND seq>=? AND actor_host_id=COALESCE((SELECT host_id FROM host_identity WHERE id=1),'')
-		AND json_extract(payload,'$.ts')>=? ORDER BY seq`, projectKey, string(EventUtterance), fromSeq, notBefore.UTC().Format(time.RFC3339))
+	rows, err := s.read.Query(`SELECT ref, seq, json_extract(payload,'$.ts') FROM ledger_events WHERE project_key=? AND type=? AND actor_host_id=COALESCE((SELECT host_id FROM host_identity WHERE id=1),'')
+		AND json_extract(payload,'$.ts')>=? ORDER BY seq`, projectKey, string(EventUtterance), notBefore.UTC().Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
 	var owed []OwedSort
 	for rows.Next() {
 		var o OwedSort
-		if err := rows.Scan(&o.Ref, &o.Seq); err != nil {
+		var ts string
+		if err := rows.Scan(&o.Ref, &o.Seq, &ts); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		o.At, _ = time.Parse(time.RFC3339, ts)
 		owed = append(owed, o)
 	}
 	if err := rows.Close(); err != nil {

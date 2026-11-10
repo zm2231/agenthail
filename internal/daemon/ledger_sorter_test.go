@@ -349,10 +349,119 @@ func TestAFullQueueLeavesTheMessageProvisionalAndOwesItASort(t *testing.T) {
 	for i := range sorterQueue + 2 {
 		d.queueSort("k", fmt.Sprintf("claude-prompt:%d", i), int64(100+i), time.Now())
 	}
-	d.sorter.mu.Lock()
-	defer d.sorter.mu.Unlock()
-	if d.sorter.dropped != 2 || d.sorter.backlog["k"] != 100+sorterQueue {
-		t.Fatalf("dropped %d, owed from %v", d.sorter.dropped, d.sorter.backlog["k"])
+	owed := d.sorter.owedJobs()
+	if d.sorter.dropped != 2 || len(owed) != 2 || owed[0].utteranceID != fmt.Sprintf("claude-prompt:%d", sorterQueue) || owed[1].seq != 101+sorterQueue {
+		t.Fatalf("dropped %d, owed %+v, want exactly the two that did not fit", d.sorter.dropped, owed)
+	}
+}
+
+func recordIn(t *testing.T, p ledgerProject, ref, text string) int64 {
+	t.Helper()
+	e, _, err := p.store.RecordUtterance(ledger.Utterance{ProjectKey: p.key, Ref: ref, SpeakerID: "person", TargetID: "s1", Text: text, CapturedBy: ledger.CapturedByHook, At: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e.Seq
+}
+
+func TestOneMessageInTwoProjectsIsOwedSeparatelyInEach(t *testing.T) {
+	d, r, _, p, search := sorterFixture(t, &sorterStub{})
+	other := addLedgerProject(t, r, "proj-other", "other-sorter-key")
+	billing, _, err := other.store.EnsureGoal(other.key, "billing", "lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	otherAsks := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		data, _ := io.ReadAll(req.Body)
+		if strings.Contains(string(data), billing.ID) {
+			mu.Lock()
+			otherAsks++
+			first := otherAsks == 1
+			mu.Unlock()
+			if first {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			io.WriteString(w, fmt.Sprintf(`{"answers":{"goal":{"choice":%q,"confidence":0.95}}}`, billing.ID))
+			return
+		}
+		io.WriteString(w, fmt.Sprintf(`{"answers":{"goal":{"choice":%q,"confidence":0.95}}}`, search))
+	}))
+	defer server.Close()
+	config := fmt.Sprintf(`{"ledgerSorter": {"url": %q, "model": "d1-3b"}}`, server.URL)
+	home, _ := os.UserHomeDir()
+	if err := os.WriteFile(filepath.Join(home, ".agenthail", "config.json"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d.sorter.http, d.sorter.retry = server.Client(), 50*time.Millisecond
+	ref := ledger.PromptRef("both")
+	d.queueSort(p.key, ref, recordIn(t, p, ref, "one message, two projects"), time.Now())
+	d.queueSort(other.key, ref, recordIn(t, other, ref, "one message, two projects"), time.Now())
+	runSorter(t, d)
+	eventually(t, "the message to be filed in both projects", func() bool {
+		return sortedGoal(t, p, ref) == search && sortedGoal(t, other, ref) == billing.ID
+	})
+}
+
+func TestAMessageRecordedFirstButQueuedSecondIsNotAskedTwice(t *testing.T) {
+	stub := &sorterStub{}
+	d, _, _, p, _ := sorterFixture(t, stub)
+	var mu sync.Mutex
+	down := true
+	stub.setAnswer(func(message string) (int, string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if message == "recorded first" && down {
+			down = false
+			return http.StatusServiceUnavailable, "down"
+		}
+		return http.StatusOK, `{"answers":{"goal":{"choice":"new","confidence":0.99}}}`
+	})
+	d.sorter.retry = 50 * time.Millisecond
+	runSorter(t, d)
+	first, second := ledger.PromptRef("first"), ledger.PromptRef("second")
+	firstSeq := recordIn(t, p, first, "recorded first")
+	secondSeq := recordIn(t, p, second, "recorded second")
+	d.queueSort(p.key, second, secondSeq, time.Now())
+	d.queueSort(p.key, first, firstSeq, time.Now())
+	eventually(t, "the failed message to be asked again", func() bool {
+		counts := map[string]int{}
+		for _, a := range stub.asks() {
+			counts[a.Message]++
+		}
+		return counts["recorded first"] == 2
+	})
+	eventually(t, "nothing left owed", func() bool { return len(d.sorter.owedJobs()) == 0 })
+	counts := map[string]int{}
+	for _, a := range stub.asks() {
+		counts[a.Message]++
+	}
+	if counts["recorded second"] != 1 {
+		t.Fatalf("asks per message = %v, want the message answered while healthy asked once", counts)
+	}
+}
+
+func TestWhatIsOwedIsOnlyWhatFailed(t *testing.T) {
+	stub := &sorterStub{}
+	d, r, handler, p, _ := sorterFixture(t, stub)
+	stub.setAnswer(func(message string) (int, string) {
+		if message == "always failing" {
+			return http.StatusServiceUnavailable, "down"
+		}
+		return http.StatusOK, `{"answers":{"goal":{"choice":"new","confidence":0.99}}}`
+	})
+	s := p.session(t, r, "claude-bounded")
+	runSorter(t, d)
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "failing", Prompt: "always failing"})
+	for i := range 20 {
+		ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: fmt.Sprintf("ok-%d", i), Prompt: fmt.Sprintf("answered %d", i)})
+	}
+	eventually(t, "every message to be asked", func() bool { return len(stub.asks()) >= 21 })
+	eventually(t, "the worker to settle", func() bool { return len(d.sorter.jobs) == 0 })
+	if owed := d.sorter.owedJobs(); len(owed) != 1 || owed[0].utteranceID != ledger.PromptRef("failing") {
+		t.Fatalf("owed = %+v, want only the message that failed", owed)
 	}
 }
 
