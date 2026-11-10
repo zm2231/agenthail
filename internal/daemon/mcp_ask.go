@@ -18,7 +18,7 @@ func (d *Daemon) mcpAsk(_ context.Context, caller *mcpCaller, input mcpAskInput)
 		case errors.Is(err, errAskNotFound):
 			return nil, refuse("not_found", err.Error()+".")
 		case errors.Is(err, errAskSettled):
-			return nil, refuse("stale_request", err.Error()+".")
+			return nil, &mcpRefusal{Code: "not_found", Message: err.Error() + ".", Detail: map[string]any{"stale": true}}
 		case err != nil:
 			return nil, err
 		}

@@ -110,10 +110,10 @@ class Handler(BaseHTTPRequestHandler):
         action = json.loads(body or b"{}")
         if GROUP_REPLIES and action.get("action") in GROUP_REPLIES:
             status, reply = GROUP_REPLIES[action["action"]](action)
-        if SESSION.get("endTurn") and json.loads(body or b"{}").get("requestId") == SESSION["endTurn"].get("requestId"):
+        if SESSION.get("ask") and json.loads(body or b"{}").get("requestId") == SESSION["ask"].get("id"):
             status, reply = ANSWER_REPLIES.get(os.environ.get("AGENTHAIL_FIXTURE_ANSWER", ""), (status, reply))
             if status != 502 or "may have reached" in reply["error"]["message"]:
-                SESSION["endTurn"]["answeredAt"] = NOW
+                SESSION["ask"]["answeredAt"] = NOW
                 RESPONSES["/api/v1/requests"] = {"permissionMode": "", "requests": []}
                 if "/api/v1/decisions" in RESPONSES:
                     RESPONSES["/api/v1/decisions"]["decisions"] = [item for item in RESPONSES["/api/v1/decisions"]["decisions"] if item["sessionId"] != SESSION["id"]]
@@ -158,13 +158,13 @@ if __name__ == "__main__":
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.add("/api/v1/events")
     if sys.argv[1:2] in (["ask"], ["ask-several"], ["inbox"], ["tiles"]):
-        # An idle session whose ended turn asks the person, from a provider that answers nothing through Agenthail.
+        # An idle session with an ask open to the person, from a provider that answers nothing through Agenthail.
         SESSION["status"] = "idle"
         SESSION["capabilities"] = {**CAPABILITIES, "respond": False}
         with open(os.path.join(os.path.dirname(__file__), ("ask" if sys.argv[1] in ("inbox", "tiles") else sys.argv[1]) + "-requests.json")) as requests:
             RESPONSES["/api/v1/requests"] = json.load(requests)
         ask = RESPONSES["/api/v1/requests"]["requests"][0]
-        SESSION["endTurn"] = {"headline": ask["title"], "needs": "you", "endedAt": NOW, "requestId": ask["id"]}
+        SESSION["ask"] = {"id": ask["id"], "title": ask["title"], "routedTo": "person", "askedAt": NOW}
         SESSION["attention"] = {"kind": "ask", "reason": ask["title"]}
         one = {"families": 1, "sessions": 1}
         RESPONSES["/api/v1/snapshot"]["view"] = {

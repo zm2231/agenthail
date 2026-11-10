@@ -7,13 +7,13 @@ const listeners = {};
 const elements = {};
 const element = (id) => (elements[id] ||= { innerHTML: "", hidden: false });
 const posts = [];
-const ask = { id: "turn-end-1", kind: "ask", tool: "", title: "Ready to ship", questions: [{ question: "Deploy it now?", header: "", multiSelect: false, options: [{ label: "Deploy" }, { label: "Wait" }], suggested: 0 }] };
+const ask = { id: "ask-0b5e1c2d3a4f", kind: "ask", tool: "", title: "Ready to ship", questions: [{ question: "Deploy it now?", header: "", multiSelect: false, options: [{ label: "Deploy" }, { label: "Wait" }], suggested: 0 }] };
 const app = {
   state: { sessions: [{ id: "S", name: "builder" }, { id: "T", name: "writer" }], projects: [] },
   decisions: {
     decisions: [
       { group: "waiting", sessionId: "S", kind: "ask", reason: "Ready to ship", answerable: true, requests: [ask] },
-      { group: "waiting", sessionId: "T", kind: "request", reason: "Needs approval", answerable: true, requests: [{ id: "turn-end-1", kind: "approval", tool: "Bash" }] },
+      { group: "waiting", sessionId: "T", kind: "request", reason: "Needs approval", answerable: true, requests: [{ id: "ask-0b5e1c2d3a4f", kind: "approval", tool: "Bash" }] },
     ],
     leadHandling: [], unreachable: [], outdated: [],
   },
@@ -54,7 +54,7 @@ await key({ key: "Enter", shiftKey: false });
 assert.equal(posts.length, 0, "a bare Enter with nothing picked sends nothing");
 await key({ key: "Enter", shiftKey: true });
 assert.equal(posts.length, 1, "Shift+Enter sends exactly one answer");
-assert.equal(JSON.stringify(posts[0]), JSON.stringify({ action: "respond", sessionId: "S", requestId: "turn-end-1", decision: { behavior: "allow", answers: { "Deploy it now?": "Deploy" } } }), "it answers the selected session's request with the recommendation");
+assert.equal(JSON.stringify(posts[0]), JSON.stringify({ action: "respond", sessionId: "S", requestId: "ask-0b5e1c2d3a4f", decision: { behavior: "allow", answers: { "Deploy it now?": "Deploy" } } }), "it answers the selected session's request with the recommendation");
 assert.equal(reloads, 1, "answering asks for the decisions again");
 const shown = run("shownDecisions")().map((item) => item.sessionId);
 assert.deepEqual(shown, ["T"], "the answered ask leaves the Inbox while the same request id on another session stays");

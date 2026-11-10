@@ -122,7 +122,7 @@ func (d *Daemon) changeAsk(ctx context.Context, w http.ResponseWriter, request a
 		case errors.Is(err, errAskNotFound):
 			writeAPIError(w, http.StatusNotFound, "not_found", err.Error()+".")
 		case errors.Is(err, errAskSettled):
-			writeAPIError(w, http.StatusConflict, "stale_request", err.Error()+".")
+			writeAPIError(w, http.StatusConflict, "stale", err.Error()+".")
 		case err != nil:
 			writeAPIError(w, http.StatusInternalServerError, "registry_error", err.Error())
 		default:

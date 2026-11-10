@@ -375,7 +375,7 @@ func TestAWithdrawnAskLeavesThePersonsList(t *testing.T) {
 	if row := viewRow(t, f.d, f.from.ID); row.Attention != nil || presentationNeedsYou(&row) {
 		t.Fatalf("a withdrawn ask still needs the person: %+v", row.Attention)
 	}
-	if code := refusalCode(t, f.person, "agenthail_ask", map[string]any{"withdraw": id}); code != "stale_request" {
+	if code := refusalCode(t, f.person, "agenthail_ask", map[string]any{"withdraw": id}); code != "not_found" {
 		t.Fatalf("a second withdrawal: %q", code)
 	}
 	if code := refusalCode(t, f.worker, "agenthail_ask", map[string]any{"withdraw": id}); code != "not_found" {

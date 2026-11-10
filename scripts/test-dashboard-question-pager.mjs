@@ -90,7 +90,7 @@ assert.match(card, /<kbd aria-hidden="true">1<\/kbd><span aria-hidden="true">☐
 assert.match(card, /data-pager-pick="2"/, "options are picked by position");
 
 const deploy = { question: "Deploy it now?", header: "", multiSelect: false, options: [{ label: "Deploy", description: "" }, { label: "Wait", description: "until Monday" }], suggested: 0, links: [{ title: "Runbook", url: "https://example.com/run?a=1&b=2" }] };
-const askRequest = { id: "turn-end-1", kind: "ask", title: "Ready to ship", questions: [deploy] };
+const askRequest = { id: "ask-0b5e1c2d3a4f", kind: "ask", title: "Ready to ship", questions: [deploy] };
 const asking = pagers.pagerFor(askRequest);
 assert.ok(asking.ask && !pagers.isOneTap(asking), "an ask is never answered on one tap");
 assert.equal(pagers.choose(asking, 1), null, "picking an ask's option waits for submit");
