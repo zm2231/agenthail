@@ -129,3 +129,19 @@ func TestAQuoteDeepInALongMessageIsFound(t *testing.T) {
 		t.Fatalf("quotes %q", got)
 	}
 }
+
+func TestAQuoteThatRunsOnPastItsQuotedLineIsOneQuote(t *testing.T) {
+	reply := ledger.QuoteSource{ItemID: "r1", Text: "I can either shard the queue by tenant or add a second worker pool for the large imports."}
+	text := "> I can either shard the queue by tenant\nor add a second worker pool for the large imports.\nshard it"
+	quotes := ledger.FindQuotes(text, []ledger.QuoteSource{reply})
+	if typed := ledger.Typed(text, quotes); typed != "shard it" {
+		t.Fatalf("typed %q from quotes %+v", typed, quotes)
+	}
+	if len(quotes) != 1 || quotes[0].ReplyItemID != "r1" {
+		t.Fatalf("quotes %+v", quotes)
+	}
+	want := "> I can either shard the queue by tenant\n> or add a second worker pool for the large imports.\nshard it"
+	if marked := ledger.Marked(text, quotes); marked != want {
+		t.Fatalf("marked %q", marked)
+	}
+}

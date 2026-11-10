@@ -118,13 +118,27 @@ func FindQuotes(text string, replies []QuoteSource) []Quote {
 		for last > first && message.span(last, last+1) == " " {
 			last--
 		}
-		if q := (Quote{Start: int(message.starts[first]), End: message.end(last), ReplyItemID: replies[from].ItemID}); !overlaps(quotes, q) {
-			quotes = append(quotes, q)
-		}
+		quotes = append(quotes, Quote{Start: int(message.starts[first]), End: message.end(last), ReplyItemID: replies[from].ItemID})
 		i = best
 	}
+	return union(quotes)
+}
+
+func union(quotes []Quote) []Quote {
 	slices.SortFunc(quotes, func(a, b Quote) int { return a.Start - b.Start })
-	return quotes
+	var merged []Quote
+	for _, q := range quotes {
+		if n := len(merged); n > 0 && q.Start <= merged[n-1].End {
+			last := &merged[n-1]
+			last.End = max(last.End, q.End)
+			if last.ReplyItemID == "" {
+				last.ReplyItemID = q.ReplyItemID
+			}
+			continue
+		}
+		merged = append(merged, q)
+	}
+	return merged
 }
 
 // longestIn returns the furthest end such that message runes [start, end) occur in source; the first
@@ -192,25 +206,20 @@ func quotedLines(text string, replies []QuoteSource, sources []normalized) []Quo
 	return quotes
 }
 
-func overlaps(quotes []Quote, q Quote) bool {
-	for _, other := range quotes {
-		if q.Start < other.End && other.Start < q.End {
-			return true
-		}
-	}
-	return false
-}
-
 func Typed(text string, quotes []Quote) string {
 	return render(text, quotes, func(string) string { return "" })
 }
 
 func Marked(text string, quotes []Quote) string {
 	return render(text, quotes, func(quoted string) string {
-		if strings.HasPrefix(quoted, ">") {
-			return quoted
+		lines := strings.Split(strings.TrimSpace(quoted), "\n")
+		for i, line := range lines {
+			if line = strings.TrimSpace(line); !strings.HasPrefix(line, ">") {
+				line = "> " + line
+			}
+			lines[i] = line
 		}
-		return "> " + strings.ReplaceAll(strings.TrimSpace(quoted), "\n", "\n> ")
+		return strings.Join(lines, "\n")
 	})
 }
 
