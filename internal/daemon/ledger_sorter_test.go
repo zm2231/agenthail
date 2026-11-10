@@ -142,6 +142,40 @@ func TestAfterARestartOwedMessagesAreSortedOldestFirstAcrossProjects(t *testing.
 	}
 }
 
+func TestARecoveryThatFailsPartwayOwesOnlyWhatItHadNotAsked(t *testing.T) {
+	stub := &sorterStub{}
+	d, r, handler, p, search := sorterFixture(t, stub)
+	var mu sync.Mutex
+	second := 0
+	stub.setAnswer(func(message string) (int, string) {
+		if message != "owed second" {
+			return fileTo(search)(message)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if second++; second == 1 {
+			return http.StatusServiceUnavailable, "down"
+		}
+		return fileTo(search)(message)
+	})
+	s := p.session(t, r, "claude-partway")
+	for _, words := range []string{"owed first", "owed second", "owed third"} {
+		ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: words, Prompt: words})
+	}
+	d.sorter.retry = 50 * time.Millisecond
+	runSorter(t, d)
+	for _, id := range []string{"owed first", "owed second", "owed third"} {
+		eventually(t, id+" to be filed", func() bool { return sortedGoal(t, p, ledger.PromptRef(id)) == search })
+	}
+	counts := map[string]int{}
+	for _, a := range stub.asks() {
+		counts[a.Message]++
+	}
+	if counts["owed first"] != 1 || counts["owed second"] != 2 || counts["owed third"] != 1 {
+		t.Fatalf("asks per message = %v, want the first and third once and the failed one twice", counts)
+	}
+}
+
 func TestARestartDuringAnOutageSortsWhatWasOwedOnceTheSorterIsBack(t *testing.T) {
 	stub := &sorterStub{answer: func(string) (int, string) { return http.StatusServiceUnavailable, "down" }}
 	d, r, handler, p, search := sorterFixture(t, stub)
