@@ -116,7 +116,7 @@ struct SessionOperationsTest {
         check(background.map(SessionLifecycleCopy.title) == "Background session", "a background job keeps its label")
         let hosted = lifecycleSession("claude-host", lifecycle: #"{"status":true,"logs":false,"stop":true,"resume":true}"#)
         check(hosted.map(SessionOperationAvailability.lifecycle) == SessionLifecycle(status: true, stop: true, resume: true), "an operation whose flag is off is not offered")
-        check(hosted.map(SessionLifecycleCopy.title) == "Session", "a host session is not labelled a background session")
+        check(hosted.map(SessionLifecycleCopy.title) == "Process", "a host session is not labelled a background session")
         let interactive = lifecycleSession("claude-cli", lifecycle: #"{"status":false,"logs":false,"stop":false,"resume":false,"adopt":true}"#)
         check(interactive.map { SessionOperationAvailability.lifecycle($0).any } == false, "an interactive session offers no process operation, so its operations section stays hidden")
         let older = lifecycleSession(nil, lifecycle: nil)

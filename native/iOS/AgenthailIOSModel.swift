@@ -782,16 +782,25 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         return prompt
     }
 
-    /// Forks a Codex session from just before a prompt and opens the fork with
-    /// that prompt in its composer.
-    func fork(_ session: SessionState, before prompt: PromptItem) async throws {
-        guard SessionOperationAvailability.fork(session), let turnID = prompt.turnId else { return }
+    func fork(_ session: SessionState, before prompt: PromptItem? = nil) async throws {
+        guard SessionOperationAvailability.fork(session) else { return }
+        let turnID = prompt?.turnId
+        if prompt != nil && turnID == nil { return }
         let (connection, route) = try resolveServer(session.id)
         let forked = try await connection.api.forkSession(id: route.sessionID, before: turnID, keys: connection.actionKeys)
         let id = HostCatalog.qualify(HostCatalog.owner(of: route.sessionID) ?? route.hostID, forked.id)
-        drafts[id] = prompt.text
+        if let prompt { drafts[id] = prompt.text }
         await refresh(host: route.hostID)
         openSession(id)
+    }
+
+    func operationTarget(_ sessionID: String) -> SessionOperationTarget {
+        do {
+            let (connection, route) = try resolveServer(sessionID)
+            return SessionOperationTarget(hostID: route.hostID, sessionID: route.sessionID, api: connection.api, keys: connection.actionKeys, unavailable: nil)
+        } catch {
+            return SessionOperationTarget(hostID: nil, sessionID: sessionID, api: nil, keys: ActionRetryKeys(), unavailable: AgenthailAPIError.userMessage(error))
+        }
     }
 
     private func draftKey(for item: QueueState) -> String {

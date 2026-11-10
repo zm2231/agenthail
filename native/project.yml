@@ -76,6 +76,7 @@ targets:
       - path: ScopeReader.swift
       - path: Coalescer.swift
       - path: SessionOperations.swift
+      - path: SessionOperationControllers.swift
       - path: SessionDisplayKind.swift
       - path: SessionNames.swift
       - path: SessionDetailState.swift

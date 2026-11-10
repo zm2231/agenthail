@@ -1469,6 +1469,7 @@ struct SessionInspector: View {
                         if let note = background.sourceNote { Text(note).font(.footnote).foregroundStyle(PhonePalette.muted) }
                     }
                 }
+                IOSSessionOperations(model: model, session: liveSession, readOnlyReason: detail.readOnlyReason)
                 Section("Context") {
                     if let context = detail.context {
                         LabeledContent("Used tokens", value: context.usedTokens.formatted())
@@ -1614,6 +1615,7 @@ struct SessionInspector: View {
                             if stop.isWaiting { Button("Don't resume", systemImage: "pause.circle") { model.action("limit-resume-cancel", session: session) } }
                             if let offer = stop.moveTo { Button("Move to \(offer.name)", systemImage: "person.crop.circle.badge.checkmark") { movingTo = offer } }
                         }
+                        IOSForkSessionButton(model: model, session: liveSession, dismiss: dismiss)
                         if detail.capabilities.compact { Button("Compact context", systemImage: "arrow.down.right.and.arrow.up.left") { model.action("compact", session: session); dismiss() } }
                         if detail.capabilities.interrupt && detail.session.status == "busy" { Button("Stop current turn", systemImage: "stop.fill", role: .destructive) { model.action("interrupt", session: session); dismiss() } }
                         LabeledContent("Send messages", value: detail.capabilities.send ? "Available" : "Unavailable")
