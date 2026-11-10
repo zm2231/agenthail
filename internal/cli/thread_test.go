@@ -36,6 +36,7 @@ func (f *starterCLISurface) StartSession(ctx context.Context, options surface.Se
 		f.during()
 	}
 	if f.wait {
+		noteBound(f.bounded, ctx)
 		<-ctx.Done()
 		return nil, nil, ctx.Err()
 	}
@@ -294,7 +295,7 @@ func TestThreadCreateCodexValidatesInputs(t *testing.T) {
 }
 
 func TestThreadCreateCodexHonorsTimeout(t *testing.T) {
-	base := &cliSurface{kind: surface.KindCodex}
+	base := &cliSurface{kind: surface.KindCodex, bounded: make(chan boundedCall, 1)}
 	starter := &starterCLISurface{cliSurface: base, wait: true}
 	app := threadFixture(t, starter)
 	started := time.Now()
@@ -302,9 +303,7 @@ func TestThreadCreateCodexHonorsTimeout(t *testing.T) {
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v", err)
 	}
-	if time.Since(started) > time.Second {
-		t.Fatalf("timeout took %s", time.Since(started))
-	}
+	requireFlagDeadline(t, base.bounded, started, 10*time.Millisecond)
 }
 
 func TestThreadCreateHoldsItsNameFromBeforeTheStart(t *testing.T) {
