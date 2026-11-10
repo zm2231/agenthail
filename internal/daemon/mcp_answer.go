@@ -38,7 +38,7 @@ func (d *Daemon) mcpAnswer(ctx context.Context, caller *mcpCaller, input mcpAnsw
 	if choice == askEscalate {
 		decision = surface.Decision{Behavior: askEscalate}
 	} else if ask.Origin == registry.AskOriginPermission {
-		if !caller.has("requests.answer") && !caller.has("control.all") {
+		if !caller.has("requests.answer") {
 			return nil, refuse("capability_missing", "This session may not answer requests.")
 		}
 		switch choice {
