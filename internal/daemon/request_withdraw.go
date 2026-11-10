@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -20,7 +21,14 @@ func (d *Daemon) withdrawReplacedRequest(ctx context.Context, adapter surface.Su
 	if !replaced {
 		return actionResult{}, actionFailed(http.StatusConflict, "not_replaced", "only a request from a lead that was replaced can be withdrawn; answer it instead")
 	}
+	ask, found, err := d.Registry.Ask(requestID)
+	if err != nil {
+		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
+	}
+	if !found || ask.SessionID != session.ID || ask.Origin != registry.AskOriginPermission || ask.State != registry.AskOpen {
+		return actionResult{}, staleRequest()
+	}
 	spec, _ := coord.Of(session.ID)
 	note := fmt.Sprintf("Withdrawn: you are no longer coordinator @%s; conversation %s took over. The person did not answer this request.", spec.Name, current)
-	return d.respond(ctx, adapter, session, requestID, surface.Decision{Behavior: "deny", Message: note}, actor)
+	return d.answerPermission(ctx, adapter, session, ask, surface.Decision{Behavior: "deny", Message: note}, registry.AskToPerson, actor)
 }

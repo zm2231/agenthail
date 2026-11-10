@@ -64,9 +64,9 @@ type Daemon struct {
 	notificationMu       sync.Mutex
 	notificationArmed    map[string]bool
 	waitingLocks         sync.Map
-	openSets             openRequestSets
 	announceMu           sync.Mutex
-	announcing           map[string]string
+	permissionMu         sync.Mutex
+	permissionTold       map[string]string
 	announcingRefusal    map[int64]int64
 	announcingKeepAlive  map[string]bool
 	catalogNudge         chan struct{}

@@ -29,6 +29,8 @@ type principal struct {
 	HostName        string
 	Claimed         string
 	DashboardBearer bool
+	// ForPerson is a session that answers for the person: their voice operator.
+	ForPerson bool
 }
 
 func principalFromRequest(r *http.Request) principal {

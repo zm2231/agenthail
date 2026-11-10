@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -14,8 +13,8 @@ import (
 )
 
 // requestsHandler reads a session's open requests and permission mode from
-// its provider now, and the ask of an ended turn waiting on the person, none
-// when nothing is open. Answers go through the respond action.
+// its provider now, each under the id of its ask, with the agent asks routed
+// to the person. Answers go through the respond action.
 func (d *Daemon) requestsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -39,36 +38,72 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]
 	if err != nil {
 		return nil, "", actionFailed(http.StatusConflict, "conflict", "surface is not configured")
 	}
-	asks, err := d.Registry.SessionAsks(session.ID)
-	if err != nil {
-		return nil, "", actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
-	}
-	var open []surface.Request
-	for _, ask := range asks {
-		if ask.State == registry.AskOpen && ask.RoutedTo == registry.AskToPerson {
-			open = append(open, askRequest(ask))
-		}
-	}
-	asking := len(open) > 0
+	responder, answers := sessionResponder(adapter, session)
 	var state surface.RequestState
-	if responder, ok := sessionResponder(adapter, session); ok {
+	if answers {
 		ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 		defer cancel()
 		if state, err = responder.Requests(ctx, session); err != nil {
 			return nil, "", actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
 		}
-	} else if !asking {
+	}
+	asks, err := d.Registry.SessionAsks(session.ID)
+	if err != nil {
+		return nil, "", actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
+	}
+	if answers && !asksCover(asks, state.Requests) {
+		if _, err := d.observeTurn(ctx, adapter, session); err != nil {
+			d.log.Printf("observe %s for its requests: %s", d.resolveDisplay(session.ID), err)
+		}
+		if asks, err = d.Registry.SessionAsks(session.ID); err != nil {
+			return nil, "", actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
+		}
+	}
+	permission := map[string]string{}
+	var asking []surface.Request
+	for _, ask := range asks {
+		switch {
+		case ask.State != registry.AskOpen:
+		case ask.Origin == registry.AskOriginPermission && ask.Answerable:
+			permission[ask.Ref] = ask.ID
+		case ask.Origin == registry.AskOriginAgent && ask.RoutedTo == registry.AskToPerson:
+			asking = append(asking, askRequest(ask))
+		}
+	}
+	if !answers && len(asking) == 0 {
 		return nil, "", actionFailed(http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
 	}
 	replacedBy, _ := d.coordinator().ReplacedBy(session.ID)
-	requests := make([]openRequestView, 0, len(state.Requests)+len(open))
+	requests := make([]openRequestView, 0, len(state.Requests)+len(asking))
 	for _, request := range state.Requests {
+		id, asked := permission[request.ID]
+		if !asked {
+			continue
+		}
+		request.ID = id
 		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Actions: request.Actions(), ReplacedBy: d.publicSessionID(replacedBy)})
 	}
-	for _, ask := range open {
+	for _, ask := range asking {
 		requests = append(requests, openRequestView{Request: ask, Prompt: ask.Prompt(), Actions: ask.Actions()})
 	}
 	return requests, state.PermissionMode, nil
+}
+
+// asksCover reports whether every request the provider lists has its ask; one
+// it opened since the last observation has none until it is observed.
+func asksCover(asks []registry.Ask, requests []surface.Request) bool {
+	refs := map[string]bool{}
+	for _, ask := range asks {
+		if ask.Origin == registry.AskOriginPermission && ask.State != registry.AskWithdrawn {
+			refs[ask.Ref] = true
+		}
+	}
+	for _, request := range requests {
+		if !refs[request.ID] {
+			return false
+		}
+	}
+	return true
 }
 
 // openRequestView is a request with the line and buttons a notification shows
@@ -88,53 +123,6 @@ type openRequestView struct {
 func sessionResponder(adapter surface.Surface, session *surface.Session) (surface.Responder, bool) {
 	responder, ok := adapter.(surface.Responder)
 	return responder, ok && !surface.IsReadOnlySession(session)
-}
-
-// respond answers one open request and records who answered it. The history
-// entry is written in the background, since the registry may be busy and the
-// answer has already been delivered. A request that was already answered or
-// has expired is a conflict, never a retry.
-// Either way the turn is observed again and the session's catalog row
-// published before the reply, so a client reading right after sees it no
-// longer waiting on the request.
-func (d *Daemon) respond(ctx context.Context, adapter surface.Surface, session *surface.Session, requestID string, decision surface.Decision, actor string) (actionResult, error) {
-	responder, ok := sessionResponder(adapter, session)
-	if !ok {
-		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
-	}
-	if decision.Choice != "" {
-		state, err := responder.Requests(ctx, session)
-		if err != nil {
-			return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
-		}
-		request, open := openRequest(state, requestID)
-		if !open {
-			d.observeAfterAnswer(adapter, session)
-			return actionResult{}, staleRequest()
-		}
-		if decision, err = request.Choose(decision.Choice, decision.Message); err != nil {
-			return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
-		}
-	}
-	outcome, err := responder.Respond(ctx, session, requestID, decision)
-	if errors.Is(err, surface.ErrRequestStale) {
-		d.observeAfterAnswer(adapter, session)
-		return actionResult{}, staleRequest()
-	}
-	if err != nil {
-		return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
-	}
-	entry := registry.HistoryEntry{Kind: "request-" + outcome, SessionID: session.ID, Message: requestID, Result: "answered by " + actor}
-	record := func(context.Context) {
-		if err := d.Registry.RecordHistory(entry); err != nil {
-			d.log.Printf("record the answer to %s: %s", d.resolveDisplay(session.ID), err)
-		}
-	}
-	if !d.background.start(record) {
-		record(ctx)
-	}
-	d.observeAfterAnswer(adapter, session)
-	return actionOK(map[string]any{"ok": true, "result": map[string]string{"requestId": requestID, "outcome": outcome}}), nil
 }
 
 // observeAfterAnswer records what the session waits on now and publishes its
