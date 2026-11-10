@@ -520,6 +520,8 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
                 .filter { query.isEmpty || $0.0.localizedCaseInsensitiveContains(query) }
                 .map { #"{"path":"\#($0.0)","dir":\#($0.1)}"# }
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
+        case "/api/v1/snapshot" where PinPreview.enabled: body = PinPreview.apply(requestQuery.first(where: { $0.name == "scope" }).map { PreviewOrder.scoped(SessionPreview.snapshotJSON, $0.value, status: requestQuery.first { $0.name == "status" }?.value, surface: requestQuery.first { $0.name == "surface" }?.value) } ?? SessionPreview.snapshotJSON)
+        case "/api/v1/actions" where PinPreview.enabled: body = PinPreview.respond(Self.actionBody(request))
         case "/api/v1/snapshot": body = requestQuery.first(where: { $0.name == "scope" }).map { PreviewOrder.scoped(SessionPreview.snapshotJSON, $0.value, status: requestQuery.first { $0.name == "status" }?.value, surface: requestQuery.first { $0.name == "surface" }?.value) } ?? SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
         case "/api/v1/actions" where SessionOperationsPreview.enabled:

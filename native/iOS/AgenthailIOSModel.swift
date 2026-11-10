@@ -2166,6 +2166,17 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         }
     }
 
+    func setPinned(sessionID: String, _ pinned: Bool) async {
+        do {
+            let (api, route) = try resolve(sessionID)
+            try await api.action(pinned ? "session-pin" : "session-unpin", sessionID: route.sessionID)
+            operationError = nil
+            await refresh(host: route.hostID)
+        } catch {
+            operationError = error.localizedDescription
+        }
+    }
+
     func setProjectArchived(_ projectID: String, _ archived: Bool) async {
         let action = archived ? "project-archive" : "project-unarchive"
         do {

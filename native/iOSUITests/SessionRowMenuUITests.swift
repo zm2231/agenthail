@@ -37,6 +37,33 @@ final class SessionRowMenuUITests: XCTestCase {
         XCTAssertTrue(waitForGone(app.buttons["move-target-vps.example.ts.net"]))
     }
 
+    func testPinningARowMarksItAndTheSessionMenuUnpinsIt() {
+        let app = launch(["--preview-pins"])
+        let row = app.buttons["session-computer::demo"]
+        let mark = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "session-computer::demo", "Pinned")).firstMatch
+        XCTAssertFalse(mark.exists, "an unpinned row shows no pin")
+        open("session-computer::demo", in: app).buttons["Pin"].tap()
+        XCTAssertTrue(mark.waitForExistence(timeout: 10), "a pinned row shows the pin mark")
+        attach(app, "pinned row")
+
+        row.tap()
+        let sessionMenu = app.buttons["Session menu"]
+        XCTAssertTrue(sessionMenu.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForEnabled(sessionMenu))
+        sessionMenu.tap()
+        let unpin = app.buttons["Unpin"]
+        XCTAssertTrue(unpin.waitForExistence(timeout: 5), "the session menu of a pinned session offers Unpin")
+        unpin.tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForGone(mark), "unpinning removes the mark")
+    }
+
+    private func waitForEnabled(_ element: XCUIElement) -> Bool {
+        let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: element)
+        return XCTWaiter().wait(for: [enabled], timeout: 10) == .completed
+    }
+
     private func launch(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-app"] + extra

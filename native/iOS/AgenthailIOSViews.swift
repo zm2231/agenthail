@@ -825,6 +825,7 @@ struct SessionScreen: View {
                         Text("All events").tag(true)
                     }
                     Toggle("Expand agent messages", systemImage: "text.bubble", isOn: $expandAgents)
+                    IOSPinButton(model: model, session: liveSession)
                     if model.canCallByVoice(session) {
                         Button("Call this session", systemImage: "phone.fill") {
                             voiceCalls.open(targetID: model.voiceTargetID(for: session))
@@ -1813,6 +1814,11 @@ struct IOSSessionRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(displayTitle).font(.body.weight(.semibold)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                if session.isPinned {
+                    Image(systemName: "pin.fill").font(.caption).foregroundStyle(PhonePalette.muted)
+                        .accessibilityLabel("Pinned")
+                        .accessibilityIdentifier("session-pinned-" + session.id)
+                }
                 if !showsTime {
                     EmptyView()
                 } else if kind == .working {

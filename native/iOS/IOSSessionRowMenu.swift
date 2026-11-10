@@ -43,6 +43,7 @@ struct IOSSessionRowMenu: ViewModifier {
                 Button("Move to Another Computer…", systemImage: "arrow.right.circle") { actions.present(.move(session)) }
             }
             Divider()
+            IOSPinButton(model: model, session: session)
             Button(session.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") {
                 Task { await model.setArchived(sessionID: session.id, session.archived != true) }
             }
@@ -86,6 +87,17 @@ struct IOSRowActionHost: ViewModifier {
         Task {
             let change = await model.makeLead(session.id, replace: replace)
             if case .confirmReplace(let message) = change { replacing = (session, message) } else { model.settle(change) }
+        }
+    }
+}
+
+struct IOSPinButton: View {
+    var model: AgenthailIOSModel
+    let session: SessionState
+
+    var body: some View {
+        Button(session.isPinned ? "Unpin" : "Pin", systemImage: session.isPinned ? "pin.slash" : "pin") {
+            Task { await model.setPinned(sessionID: session.id, !session.isPinned) }
         }
     }
 }
