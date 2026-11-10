@@ -90,6 +90,7 @@ func (d *Daemon) mcpHandlers() map[string]mcpRegistrar {
 		"agenthail_ledger_write":     bindMCP(d, d.mcpLedgerWrite),
 		"agenthail_create":           bindMCP(d, d.mcpCreate),
 		agenttools.EndTurn:           bindMCP(d, d.mcpEndTurn),
+		agenttools.Ask:               bindMCP(d, d.mcpAsk),
 		"agenthail_report":           bindMCP(d, d.mcpReport),
 		"agenthail_result":           bindMCP(d, d.mcpResult),
 		"agenthail_wait":             bindMCP(d, d.mcpWait),

@@ -91,7 +91,7 @@ func (r *phoneRelay) sent() []map[string]string {
 
 type mirroredNotices struct {
 	mu      sync.Mutex
-	notices []RequestPush
+	notices []requestPush
 }
 
 func recordDesktop(d *Daemon) *mirroredNotices {
@@ -99,16 +99,16 @@ func recordDesktop(d *Daemon) *mirroredNotices {
 	d.notifyDesktop = func(_, message, _, _, requestID string, actions []surface.RequestAction) error {
 		recorded.mu.Lock()
 		defer recorded.mu.Unlock()
-		recorded.notices = append(recorded.notices, RequestPush{message, requestID, actions})
+		recorded.notices = append(recorded.notices, requestPush{message, requestID, actions})
 		return nil
 	}
 	return recorded
 }
 
-func (n *mirroredNotices) list() []RequestPush {
+func (n *mirroredNotices) list() []requestPush {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return append([]RequestPush(nil), n.notices...)
+	return append([]requestPush(nil), n.notices...)
 }
 
 // withoutDesktop is a Linux host: it has no desktop notifications to raise.
@@ -162,7 +162,7 @@ func awaitMirroredCompletion(t *testing.T, viewer *federationNode, sessionID, tu
 	t.Helper()
 	testkit.Eventually(t, "the completion mirrored to the viewer", 10*time.Second, func() bool {
 		stored, _, err := viewer.reg.CatalogProjection(sessionID)
-		completion := mirroredTurnCompletion(stored)
+		completion := mirroredState(stored).TurnCompletion
 		return err == nil && completion != nil && completion.TurnID == turnID
 	})
 }
@@ -364,14 +364,12 @@ func TestAnAskOnAPairedHostNotifiesWithItsButtonsAndIsAnsweredThroughTheViewer(t
 	relay.pairPhone(t, host.reg, "phone", "via-host")
 	relay.pairPhone(t, viewer.reg, "phone", "via-viewer")
 	qualified := hosts.Qualify(record.ID, "remote-a")
-	ask := registry.TurnEnd{SessionID: "remote-a", Needs: "you", Headline: "Ready to ship", Source: registry.TurnSourceTool,
-		Asks: []registry.TurnAsk{{Question: "Deploy it now?", Options: []registry.TurnOption{{Label: "Deploy"}, {Label: "Wait"}}}}}
-
-	hostTurn(t, host, "remote-a", "turn-1", "", func() {
-		if _, err := host.reg.EndTurn(ask, "turn-1", time.Now()); err != nil {
-			t.Fatal(err)
-		}
-	})
+	raised := host.request(t, http.MethodPost, "/api/v1/asks", map[string]any{"op": "raise", "sessionId": "remote-a", "title": "Ready to ship",
+		"questions": []any{map[string]any{"question": "Deploy it now?", "options": []any{map[string]any{"label": "Deploy"}, map[string]any{"label": "Wait"}}}}})
+	if raised.Code != http.StatusOK {
+		t.Fatalf("raise: %d %s", raised.Code, raised.Body)
+	}
+	host.daemon.discoverCatalog(context.Background())
 	testkit.Eventually(t, "both computers to send the ask", 10*time.Second, func() bool { return len(relay.sent()) == 2 })
 	settleNotices(t, host, record.ID, viewer)
 	sends := relay.sent()
@@ -393,9 +391,8 @@ func TestAnAskOnAPairedHostNotifiesWithItsButtonsAndIsAnsweredThroughTheViewer(t
 	if delivered := host.fake.delivered(); len(delivered) != 1 || delivered[0] != "1. Deploy it now? Wait" {
 		t.Fatalf("the host's session got %q", delivered)
 	}
-	end, found, err := host.reg.CurrentTurnEnd("remote-a")
-	if err != nil || !found || end.AnsweredAt.IsZero() {
-		t.Fatalf("the host's ask is not answered: %+v found=%v err=%v", end, found, err)
+	if ask, found, err := host.reg.Ask(sends[0]["requestId"]); err != nil || !found || ask.State != registry.AskAnswered {
+		t.Fatalf("the host's ask is not answered: %+v found=%v err=%v", ask, found, err)
 	}
 }
 

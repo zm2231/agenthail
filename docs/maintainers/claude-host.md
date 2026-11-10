@@ -197,8 +197,8 @@ whose process exited, one not open in any host, and one whose Claude runs on
 without a host. Answering it is `stale`.
 
 The daemon derives what a session waits on from the hosts' listings. A
-`stale` answer makes it observe the turn again, which clears
-`session_runtime.waiting_id` and the catalog row's `waiting_on`. The Mac, iOS
+`stale` answer makes it observe the turn again, which withdraws the request's
+permission ask and clears the catalog row's `waiting_on`. The Mac, iOS
 and web clients drop the card on a `409` before reading the requests again.
 
 The host passes `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`, so Claude reports
@@ -212,11 +212,11 @@ result without state events is logged once. For it, idle is read from turn
 results, and its sessions retire only as a turn ends.
 
 The daemon follows the host's events and asks for a catalog pass when a request
-opens or resolves. For a session the host runs, the oldest open request is what
-the session waits on: its `Waiting` id is the `requestId`, so each request is
-announced once.
+opens or resolves. Each open request is a permission ask whose `ref` is the
+host's `requestId` ([asks.md](asks.md#permission-requests)); the oldest is what
+the session waits on, and each is announced once.
 
-A wait carries `answerable`, kept in `session_runtime.waiting_answerable`. It is
+A wait carries `answerable`, kept on its ask. It is
 true only for a request a host holds or a prompt the permission hook holds,
 which `agenthail answer` and the clients' request cards reach. A wait read only
 from Claude's process record (`status: waiting` with its `waitingFor`) is not
@@ -415,11 +415,12 @@ with no hook installed ([agent card](agent-card.md#telling-a-claude-session-its-
 The callback returns only the command's `additionalContext`, and nothing on any
 failure or after 8s. The claim is keyed by the Claude pid, the same key the
 installed hook uses as Claude's child, so a session that has both is told once.
-A session opened with its MCP credential also gets a `Stop` callback that runs
+Every session also gets a `Stop` callback that runs
 `agenthail hook stop --surface claude` and passes on only its block, so a turn
-that ends without `agenthail_end_turn` is asked once to call it; it skips the
-command for the stop after a block, a subagent's stop, and while a background
-task that is not ambient runs ([work record](work-record.md)).
+that ends without `agenthail_end_turn`, or a lead's reply that asks the person
+without an ask, is held once; it skips the command for the stop after a block,
+a subagent's stop, and while a background task that is not ambient runs
+([work record](work-record.md), [asks](asks.md)).
 Where Claude records a conversation's system prompt (the SDK's `snapshot`,
 which the SDK notes is still rolling out and does not apply to every
 provider), it resends the prompt it recorded on every later request and resume

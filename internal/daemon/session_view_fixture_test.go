@@ -320,7 +320,37 @@ func newViewFixture(t *testing.T) *viewFixture {
 				}
 				return
 			}
-			if _, err := reg.EndTurn(registry.TurnEnd{SessionID: id, Headline: fmt.Sprint("done ", rng.Intn(3)), Needs: []string{"", "a decision"}[rng.Intn(2)], Source: registry.TurnSourceTool}, "", f.clock); err != nil && !errors.Is(err, registry.ErrTurnAlreadyEnded) {
+			if _, err := reg.EndTurn(registry.TurnEnd{SessionID: id, Headline: fmt.Sprint("done ", rng.Intn(3)), Source: registry.TurnSourceTool}, "", f.clock); err != nil && !errors.Is(err, registry.ErrTurnAlreadyEnded) {
+				t.Fatal(err)
+			}
+		}},
+		{"an ask raised, answered or withdrawn", func(rng *rand.Rand) {
+			id := session(rng)
+			open, err := reg.SessionAsks(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var pending []registry.Ask
+			for _, ask := range open {
+				if ask.State == registry.AskOpen {
+					pending = append(pending, ask)
+				}
+			}
+			if len(pending) == 0 || rng.Intn(3) == 0 {
+				question := registry.AskQuestion{Question: "Ship?", Options: []registry.AskOption{{ID: "o0", Label: "Yes"}}}
+				if _, err := reg.RaiseAsk(registry.Ask{SessionID: id, Origin: registry.AskOriginAgent, Title: fmt.Sprint("ask ", rng.Intn(3)), Questions: []registry.AskQuestion{question}, RoutedTo: []string{registry.AskToPerson, "s0"}[rng.Intn(2)]}, f.clock); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			ask := pending[rng.Intn(len(pending))]
+			if rng.Intn(2) == 0 {
+				if _, err := reg.WithdrawAsk(ask.ID, f.clock); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if _, err := reg.ClaimAsk(ask.ID, registry.AskAnswer{Note: "yes"}, registry.AskToPerson, "mac", f.clock); err != nil {
 				t.Fatal(err)
 			}
 		}},

@@ -56,7 +56,7 @@ func TestEveryCodexRequestOpeningOrClosingMovesTheRowAndTheDecisionsRevision(t *
 	opens := func(want ...string) func() bool {
 		return func() bool {
 			waiting := h.sessionWaiting(id)
-			return waiting != nil && waiting.ID == want[0] && slices.Equal(waiting.Open, want)
+			return waiting != nil && askRef(store, waiting.ID) == want[0] && slices.Equal(askRefs(store, waiting.Open), want)
 		}
 	}
 	// The revision settles one pass after the row changes.

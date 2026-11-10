@@ -5,7 +5,7 @@ enum AskPreview {
     nonisolated static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--preview-ask") }
     nonisolated(unsafe) static var answered = false
 
-    static let requestID = "turn-end-1793940750123"
+    static let requestID = "ask-447a922cae82"
 
     nonisolated static var requestsJSON: String {
         answered ? #"{"permissionMode":"","requests":[]}"# : #"{"permissionMode":"","requests":[{"id":"\#(requestID)","kind":"ask","tool":"","title":"Ready to ship","prompt":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"label":"Deploy","description":"Ship the build that passed review"},{"label":"Wait","description":"hold until Monday"}],"suggested":0,"links":[{"title":"Runbook","url":"https://example.com/runbook"}]}],"actions":[{"id":"o0","title":"Deploy"},{"id":"o1","title":"Wait"},{"id":"reply","title":"Reply…"}],"alwaysAllow":false,"createdAt":"2026-09-12T04:03:00Z"}]}"#
@@ -13,9 +13,10 @@ enum AskPreview {
 
     nonisolated static func apply(_ snapshot: inout [String: Any]) {
         var sessions = snapshot["sessions"] as! [[String: Any]]
-        var end: [String: Any] = ["headline": "Ready to ship", "needs": "you", "endedAt": "2026-09-12T04:03:00Z", "requestId": requestID]
-        if answered { end["answeredAt"] = "2026-09-12T04:05:00Z" }
-        sessions[0]["endTurn"] = end
+        var ask: [String: Any] = ["id": requestID, "title": "Ready to ship", "routedTo": "person", "askedAt": "2026-09-12T04:03:00Z"]
+        if answered { ask["answeredAt"] = "2026-09-12T04:05:00Z" }
+        sessions[0]["ask"] = ask
+        sessions[0]["endTurn"] = ["headline": "Ready to ship", "endedAt": "2026-09-12T04:03:00Z"]
         sessions[0]["status"] = "idle"
         sessions[0]["alias"] = "builder"
         snapshot["sessions"] = sessions

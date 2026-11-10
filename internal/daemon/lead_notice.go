@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
@@ -54,50 +52,7 @@ func (d *Daemon) answerTarget(sessionID string) string {
 	return sessionID
 }
 
-func waitingNoticeKey(sessionID, questionID string) string {
-	return "notice-" + waitingNotificationKey(sessionID, questionID)
-}
-
-func waitingNotice(name, target string, waiting surface.Waiting, runtime surface.RuntimeKind, restartable bool, request surface.Request, open, mcp bool) string {
-	if !open {
-		return fmt.Sprintf("[agenthail] %s. The person was notified too.", elsewhereWaitingMessage(name, waiting, runtime, restartable))
-	}
-	asks := request.Prompt()
-	if detail := strings.TrimSpace(request.Description); detail != "" && detail != asks {
-		asks += ": " + detail
-	}
-	read := fmt.Sprintf("agenthail requests %s --json", target)
-	answer := fmt.Sprintf("agenthail answer %s <allow|deny|\"answer\"> --request %s", target, request.ID)
-	if mcp {
-		read = fmt.Sprintf(`agenthail_requests {"sessionId":%q,"requestId":%q}`, target, request.ID)
-		answer = fmt.Sprintf(`agenthail_answer {"target":%q,"requestId":%q,"decision":"allow|deny"}`, target, request.ID)
-	}
-	return fmt.Sprintf("[agenthail] %s is blocked on a prompt: %s\nRead the request first: %s\nAnswer it: %s\nAnswer it yourself now. The person was notified too, but don't wait for them: the first answer settles it.", name, asks, read, answer)
-}
-
 func (d *Daemon) usesMCP(sessionID string) bool {
 	_, live, err := d.Registry.LiveCredentialHash(sessionID, time.Now())
 	return err == nil && live
-}
-
-func (d *Daemon) noticeWaiting(session surface.Session, waiting surface.Waiting, request surface.Request, open bool) {
-	to, ok := d.noticeRecipient(session)
-	if !ok {
-		return
-	}
-	message := waitingNotice(d.resolveDisplay(session.ID), d.answerTarget(session.ID), waiting, session.RuntimeKind, d.restartable(session), request, open, d.usesMCP(to.sessionID))
-	d.taskNoticeMu.Lock()
-	defer d.taskNoticeMu.Unlock()
-	if d.taskRequestsRead[session.ID] == (taskRequestRead{waitingID: waiting.ID, reader: to.sessionID}) {
-		return
-	}
-	if _, err := d.sendNotice(to, message, waitingNoticeKey(session.ID, waiting.ID)); err != nil {
-		d.log.Printf("tell the %s that %s is waiting: %s", to.role, d.resolveDisplay(session.ID), err)
-	}
-}
-
-func (d *Daemon) withdrawWaitingNotice(sessionID string, waiting surface.Waiting) {
-	if _, err := d.Registry.CancelPendingByKey(waitingNoticeKey(sessionID, waiting.ID)); err != nil {
-		d.log.Printf("withdraw the notice that %s is waiting: %s", d.resolveDisplay(sessionID), err)
-	}
 }

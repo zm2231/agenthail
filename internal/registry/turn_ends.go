@@ -8,38 +8,15 @@ import (
 	"time"
 )
 
-type TurnOption struct {
-	Label string `json:"label"`
-	Does  string `json:"does,omitempty"`
-}
-
-type TurnLink struct {
-	Title string `json:"title"`
-	URL   string `json:"url"`
-}
-
-type TurnAsk struct {
-	Question  string       `json:"question"`
-	Options   []TurnOption `json:"options"`
-	Suggested *int         `json:"suggested,omitempty"`
-	Links     []TurnLink   `json:"links,omitempty"`
-}
-
 type TurnEnd struct {
 	SessionID       string
 	StartedAt       time.Time
 	EndedAt         time.Time
 	TurnID          string
 	CompletedTurnID string
-	Needs           string
 	Headline        string
-	Asks            []TurnAsk
 	Next            []string
 	Source          string
-	RoutedTo        string
-	AnsweredAt      time.Time
-	AnswerStatus    string
-	AnswerMessageID string
 }
 
 var ErrTurnAlreadyEnded = errors.New("this turn has already ended")
@@ -67,10 +44,6 @@ func (r *Registry) OpenTurn(sessionID string, at time.Time) error {
 
 // A turn has started since the last end when one was opened, the last one completed, or the runtime names another active turn.
 func (r *Registry) EndTurn(end TurnEnd, activeTurnID string, at time.Time) (TurnEnd, error) {
-	asks, err := json.Marshal(end.Asks)
-	if err != nil {
-		return TurnEnd{}, err
-	}
 	next, err := json.Marshal(end.Next)
 	if err != nil {
 		return TurnEnd{}, err
@@ -95,8 +68,8 @@ func (r *Registry) EndTurn(end TurnEnd, activeTurnID string, at time.Time) (Turn
 	case ended > 0:
 		return TurnEnd{}, ErrTurnAlreadyEnded
 	}
-	if _, err := tx.Exec(`UPDATE turn_ends SET ended_at_ms=?,turn_id=?,needs=?,headline=?,asks_json=?,next_json=?,source=CASE WHEN source=? THEN source ELSE ? END,routed_to=? WHERE session_id=? AND started_at_ms=?`,
-		at.UnixMilli(), activeTurnID, end.Needs, end.Headline, string(asks), string(next), TurnSourceNudged, end.Source, end.RoutedTo, end.SessionID, started); err != nil {
+	if _, err := tx.Exec(`UPDATE turn_ends SET ended_at_ms=?,turn_id=?,headline=?,next_json=?,source=CASE WHEN source=? THEN source ELSE ? END WHERE session_id=? AND started_at_ms=?`,
+		at.UnixMilli(), activeTurnID, end.Headline, string(next), TurnSourceNudged, end.Source, end.SessionID, started); err != nil {
 		return TurnEnd{}, err
 	}
 	if err := tx.QueryRow(`SELECT source FROM turn_ends WHERE session_id=? AND started_at_ms=?`, end.SessionID, started).Scan(&end.Source); err != nil {
@@ -122,6 +95,14 @@ func (r *Registry) TurnEnded(sessionID, turnID string) (bool, error) {
 	return ended > 0 && completed == "" && (turnID == "" || rowTurn == "" || rowTurn == turnID), nil
 }
 
+func (r *Registry) TurnStartedAt(sessionID string) (time.Time, bool, error) {
+	var started sql.NullInt64
+	if err := r.read.QueryRow(`SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=?`, sessionID).Scan(&started); err != nil || !started.Valid {
+		return time.Time{}, false, err
+	}
+	return time.UnixMilli(started.Int64).UTC(), true, nil
+}
+
 func (r *Registry) MarkTurnNudged(sessionID string, at time.Time) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -140,34 +121,6 @@ func (r *Registry) MarkTurnNudged(sessionID string, at time.Time) error {
 		}
 	}
 	return tx.Commit()
-}
-
-func (r *Registry) RouteTurnEnd(sessionID string, startedAt time.Time, to string) error {
-	_, err := r.db.Exec(`UPDATE turn_ends SET routed_to=? WHERE session_id=? AND started_at_ms=?`, to, sessionID, startedAt.UnixMilli())
-	return err
-}
-
-// ClaimTurnAnswer takes the right to answer a standing end that asks the
-// person, at most once; false means it was answered, superseded or never asked.
-func (r *Registry) ClaimTurnAnswer(sessionID string, startedAt, at time.Time) (bool, error) {
-	result, err := r.db.Exec(`UPDATE turn_ends SET answered_at_ms=?,answer_status='',answer_message_id='' WHERE session_id=? AND started_at_ms=? AND answered_at_ms=0 AND needs='you' AND routed_to=''
-	 AND EXISTS (SELECT 1 FROM turn_ends te WHERE te.session_id=? AND te.started_at_ms=? AND `+currentTurnEnd+`)`,
-		at.UnixMilli(), sessionID, startedAt.UnixMilli(), sessionID, startedAt.UnixMilli())
-	if err != nil {
-		return false, err
-	}
-	claimed, err := result.RowsAffected()
-	return claimed == 1, err
-}
-
-func (r *Registry) ReleaseTurnAnswer(sessionID string, startedAt time.Time) error {
-	_, err := r.db.Exec(`UPDATE turn_ends SET answered_at_ms=0,answer_status='',answer_message_id='' WHERE session_id=? AND started_at_ms=?`, sessionID, startedAt.UnixMilli())
-	return err
-}
-
-func (r *Registry) RecordTurnAnswer(sessionID string, startedAt time.Time, status, messageID string) error {
-	_, err := r.db.Exec(`UPDATE turn_ends SET answer_status=?,answer_message_id=? WHERE session_id=? AND started_at_ms=? AND answered_at_ms>0`, status, messageID, sessionID, startedAt.UnixMilli())
-	return err
 }
 
 func (r *Registry) BindTurnCompletion(sessionID, completedTurnID string) error {
@@ -226,25 +179,19 @@ const currentTurnEnd = `te.ended_at_ms>0
  AND te.started_at_ms=(SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=te.session_id)
  AND (te.completed_turn_id='' OR te.completed_turn_id=COALESCE((SELECT completed_turn_id FROM session_runtime WHERE session_id=te.session_id),''))`
 
-const turnEndColumns = `te.session_id,te.started_at_ms,te.ended_at_ms,te.turn_id,te.completed_turn_id,te.needs,te.headline,te.asks_json,te.next_json,te.source,te.routed_to,te.answered_at_ms,te.answer_status,te.answer_message_id`
+const turnEndColumns = `te.session_id,te.started_at_ms,te.ended_at_ms,te.turn_id,te.completed_turn_id,te.headline,te.next_json,te.source`
 
 func scanTurnEnds(rows *sql.Rows) ([]TurnEnd, error) {
 	defer rows.Close()
 	var out []TurnEnd
 	for rows.Next() {
 		var end TurnEnd
-		var started, ended, answered int64
-		var asks, next string
-		if err := rows.Scan(&end.SessionID, &started, &ended, &end.TurnID, &end.CompletedTurnID, &end.Needs, &end.Headline, &asks, &next, &end.Source, &end.RoutedTo, &answered, &end.AnswerStatus, &end.AnswerMessageID); err != nil {
+		var started, ended int64
+		var next string
+		if err := rows.Scan(&end.SessionID, &started, &ended, &end.TurnID, &end.CompletedTurnID, &end.Headline, &next, &end.Source); err != nil {
 			return nil, err
 		}
 		end.StartedAt, end.EndedAt = time.UnixMilli(started).UTC(), time.UnixMilli(ended).UTC()
-		if answered > 0 {
-			end.AnsweredAt = time.UnixMilli(answered).UTC()
-		}
-		if err := json.Unmarshal([]byte(asks), &end.Asks); err != nil {
-			return nil, err
-		}
 		if err := json.Unmarshal([]byte(next), &end.Next); err != nil {
 			return nil, err
 		}

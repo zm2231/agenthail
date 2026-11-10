@@ -170,6 +170,11 @@ func TestMCPRequestsReturnEveryOpenRequestInOneCall(t *testing.T) {
 		responder.open = append(responder.open, surface.Request{ID: fmt.Sprintf("req-%d", index), Kind: surface.WaitingApproval, Tool: "Bash", Title: strings.Repeat("x", 3800), CreatedAt: created.Add(time.Duration(index%3) * time.Second)})
 	}
 	responder.open = append(responder.open, surface.Request{ID: "req-same-ms", Kind: surface.WaitingApproval, Tool: "Bash", CreatedAt: created})
+	refs := make([]string, 0, len(responder.open))
+	for _, request := range responder.open {
+		refs = append(refs, request.ID)
+	}
+	d.syncWaits(worker, &surface.Waiting{Kind: surface.WaitingApproval, ID: refs[0], Answerable: true, Open: refs})
 	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, worker))
 	result, refused := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": worker.ID})
 	requests, _ := result["requests"].([]any)
@@ -180,14 +185,14 @@ func TestMCPRequestsReturnEveryOpenRequestInOneCall(t *testing.T) {
 	for _, request := range requests {
 		row := request.(map[string]any)
 		seen[row["id"].(string)] = true
-		if row["id"] != "req-same-ms" && row["clipped"] != true {
+		if row["id"] != askIDOfRequest(t, r, worker.ID, "req-same-ms") && row["clipped"] != true {
 			t.Fatalf("a long prompt was not clipped to fit: %v", row["id"])
 		}
 	}
 	if len(seen) != 10 {
 		t.Fatalf("ids=%v", seen)
 	}
-	one, refused := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": worker.ID, "requestId": "req-4"})
+	one, refused := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": worker.ID, "requestId": askIDOfRequest(t, r, worker.ID, "req-4")})
 	full, _ := one["request"].(map[string]any)
 	if refused || len(full["prompt"].(string)) != 3800 || full["clipped"] == true {
 		t.Fatalf("one request=%v", one)

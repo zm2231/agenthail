@@ -64,9 +64,9 @@ type Daemon struct {
 	notificationMu       sync.Mutex
 	notificationArmed    map[string]bool
 	waitingLocks         sync.Map
-	openSets             openRequestSets
 	announceMu           sync.Mutex
-	announcing           map[string]string
+	permissionMu         sync.Mutex
+	permissionTold       map[string]string
 	announcingRefusal    map[int64]int64
 	announcingKeepAlive  map[string]bool
 	catalogNudge         chan struct{}
@@ -368,6 +368,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runPRSweeps(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
+	go d.runAskSweeps(ctx)
 	d.startMessageContexts(ctx)
 	d.startLedgerSorter(ctx)
 	go d.runDecisionsRevision(ctx)

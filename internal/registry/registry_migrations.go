@@ -221,14 +221,11 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
-	for _, column := range []struct{ name, decl string }{
-		{"answered_at_ms", `INTEGER NOT NULL DEFAULT 0`},
-		{"answer_status", `TEXT NOT NULL DEFAULT ''`},
-		{"answer_message_id", `TEXT NOT NULL DEFAULT ''`},
-	} {
-		if err := ensureColumn(tx, "turn_ends", column.name, column.decl); err != nil {
-			return err
-		}
+	if err := addAskRefs(tx); err != nil {
+		return err
+	}
+	if err := moveTurnEndAsks(tx); err != nil {
+		return err
 	}
 	if err := ensureJournalPromptIndexes(tx, version > 0 && version < 57); err != nil {
 		return err
@@ -242,11 +239,6 @@ func migrateTx(tx *sql.Tx) error {
 		{"runtime_launcher", `TEXT NOT NULL DEFAULT ''`},
 		{"runtime_location", `BLOB NOT NULL DEFAULT '{}'`},
 		{"runtime_focusable", `INTEGER NOT NULL DEFAULT 0`},
-		{"waiting_kind", `TEXT NOT NULL DEFAULT ''`},
-		{"waiting_id", `TEXT NOT NULL DEFAULT ''`},
-		{"waiting_since_ms", `INTEGER NOT NULL DEFAULT 0`},
-		{"waiting_announced", `INTEGER NOT NULL DEFAULT 0`},
-		{"waiting_answerable", `INTEGER NOT NULL DEFAULT 0`},
 		{"held_completion_turn_id", `TEXT NOT NULL DEFAULT ''`},
 		{"notice_turn_id", `TEXT NOT NULL DEFAULT ''`},
 		{"notice_outcome", `TEXT NOT NULL DEFAULT ''`},

@@ -30,17 +30,26 @@ func TestAPromptReachesAPairedHostsLeadOnceAcrossARestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := local.reg.RecordSessionOrigin(registry.OriginOf("local-a", "remote-a")); err != nil {
+		t.Fatal(err)
+	}
 	waiting := surface.Waiting{Kind: surface.WaitingApproval, ID: "approve-remote", Answerable: true}
-	request := surface.Request{ID: "approve-remote", Kind: surface.WaitingApproval, Tool: "Bash", Description: "make deploy"}
-	local.daemon.noticeWaiting(*worker, waiting, request, true)
+	local.daemon.syncWaits(*worker, &waiting)
+	local.daemon.background.wait()
+	open, err := local.reg.OpenPermissionAsks("local-a")
+	if err != nil || len(open) != 1 || open[0].RoutedTo == registry.AskToPerson {
+		t.Fatalf("open=%+v err=%v, want the ask routed to the paired host's lead", open, err)
+	}
 	restarted := newTestDaemon(t, local.reg, local.daemon.Surfaces)
-	restarted.noticeWaiting(*worker, waiting, request, true)
+	restarted.tellPermissionAsks(open)
+	restarted.background.wait()
+	askID := open[0].ID
 	notices := func() int {
 		remote.fake.mu.Lock()
 		defer remote.fake.mu.Unlock()
 		count := 0
 		for _, message := range remote.fake.messages {
-			if strings.Contains(message, "Bash: make deploy") && strings.Contains(message, "--request approve-remote") {
+			if strings.Contains(message, "--request "+askID) {
 				count++
 			}
 		}
@@ -53,7 +62,7 @@ func TestAPromptReachesAPairedHostsLeadOnceAcrossARestart(t *testing.T) {
 		}
 		var mine []registry.QueueRow
 		for _, row := range rows {
-			if strings.Contains(row.Message, "--request approve-remote") {
+			if strings.Contains(row.Message, "--request "+askID) {
 				mine = append(mine, row)
 			}
 		}

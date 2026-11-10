@@ -110,10 +110,10 @@ class Handler(BaseHTTPRequestHandler):
         action = json.loads(body or b"{}")
         if GROUP_REPLIES and action.get("action") in GROUP_REPLIES:
             status, reply = GROUP_REPLIES[action["action"]](action)
-        if SESSION.get("endTurn") and json.loads(body or b"{}").get("requestId") == SESSION["endTurn"].get("requestId"):
+        if SESSION.get("ask") and json.loads(body or b"{}").get("requestId") == SESSION["ask"].get("id"):
             status, reply = ANSWER_REPLIES.get(os.environ.get("AGENTHAIL_FIXTURE_ANSWER", ""), (status, reply))
             if status != 502 or "may have reached" in reply["error"]["message"]:
-                SESSION["endTurn"]["answeredAt"] = NOW
+                SESSION["ask"]["answeredAt"] = NOW
                 RESPONSES["/api/v1/requests"] = {"permissionMode": "", "requests": []}
                 if "/api/v1/decisions" in RESPONSES:
                     RESPONSES["/api/v1/decisions"]["decisions"] = [item for item in RESPONSES["/api/v1/decisions"]["decisions"] if item["sessionId"] != SESSION["id"]]
@@ -158,13 +158,13 @@ if __name__ == "__main__":
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.add("/api/v1/events")
     if sys.argv[1:2] in (["ask"], ["ask-several"], ["inbox"], ["tiles"]):
-        # An idle session whose ended turn asks the person, from a provider that answers nothing through Agenthail.
+        # An idle session with an ask open to the person, from a provider that answers nothing through Agenthail.
         SESSION["status"] = "idle"
         SESSION["capabilities"] = {**CAPABILITIES, "respond": False}
         with open(os.path.join(os.path.dirname(__file__), ("ask" if sys.argv[1] in ("inbox", "tiles") else sys.argv[1]) + "-requests.json")) as requests:
             RESPONSES["/api/v1/requests"] = json.load(requests)
         ask = RESPONSES["/api/v1/requests"]["requests"][0]
-        SESSION["endTurn"] = {"headline": ask["title"], "needs": "you", "endedAt": NOW, "requestId": ask["id"]}
+        SESSION["ask"] = {"id": ask["id"], "title": ask["title"], "routedTo": "person", "askedAt": NOW}
         SESSION["attention"] = {"kind": "ask", "reason": ask["title"]}
         one = {"families": 1, "sessions": 1}
         RESPONSES["/api/v1/snapshot"]["view"] = {
@@ -239,13 +239,13 @@ if __name__ == "__main__":
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.add("/api/v1/events")
     if sys.argv[1:2] == ["list"]:
-        def listed(id, name, project, surface, status, minutes):
+        def listed_session(id, name, project, surface, status, minutes):
             return {**SESSION, "id": id, "name": name, "alias": None, "surface": surface, "status": status, "cwd": "/srv/" + project,
                     "lastActive": f"2026-01-01T{11 - minutes // 60:02d}:{59 - minutes % 60:02d}:00Z",
                     "project": {"id": project, "displayName": project, "rootPath": "/srv/" + project, "kind": "git"},
                     "checkout": {"id": project + "-main", "path": "/srv/" + project, "branch": "main", "dirty": False, "isMain": True}}
 
-        def page(sessions):
+        def scope_page(sessions):
             projects = list(dict.fromkeys(s["project"]["id"] for s in sessions))
             return {**RESPONSES["/api/v1/snapshot"], "sessions": sessions, "totalSessions": len(sessions), "view": {
                 "counts": {scope: {"families": len(listing), "sessions": len(listing)} for scope, listing in scopes.items()}, "surfaces": [],
@@ -255,9 +255,9 @@ if __name__ == "__main__":
                               "members": [{"id": s["id"], "depth": 0, "contextOnly": False, "pinned": False}], "pinned": False, "workingSubagents": 0}
                              for s in sessions]}}
 
-        active = [listed("web-1", "Fix the login redirect", "web-app", "claude", "busy", 2), listed("docs-1", "Write the install guide", "docs-site", "codex", "idle", 9),
-                  listed("web-2", "Add dark mode tokens", "web-app", "codex", "idle", 25), listed("docs-2", "Check broken links", "docs-site", "claude", "idle", 70)]
-        archived = [listed("web-0", "Spike the old migration", "web-app", "codex", "idle", 300), listed("docs-0", "Draft the changelog", "docs-site", "claude", "idle", 400)]
+        active = [listed_session("web-1", "Fix the login redirect", "web-app", "claude", "busy", 2), listed_session("docs-1", "Write the install guide", "docs-site", "codex", "idle", 9),
+                  listed_session("web-2", "Add dark mode tokens", "web-app", "codex", "idle", 25), listed_session("docs-2", "Check broken links", "docs-site", "claude", "idle", 70)]
+        archived = [listed_session("web-0", "Spike the old migration", "web-app", "codex", "idle", 300), listed_session("docs-0", "Draft the changelog", "docs-site", "claude", "idle", 400)]
         scopes = {"running": [s for s in active if s["status"] == "busy"], "current": active, "recent": active, "all": active, "archived": archived}
         local = {"id": "", "name": "this Mac", "state": "local"}
         RESPONSES["/api/v1/snapshot"]["sessions"] = active
@@ -265,7 +265,7 @@ if __name__ == "__main__":
         RESPONSES["/api/v1/snapshot"]["projects"] = [
             {"id": p, "displayName": p, "kind": "git", "checkouts": [{"host": local, "projectId": p, "rootPath": "/srv/" + p}]} for p in ("web-app", "docs-site")
         ]
-        SCOPED.update({scope: page(listing) for scope, listing in scopes.items()})
+        SCOPED.update({scope: scope_page(listing) for scope, listing in scopes.items()})
         RESPONSES["/api/v1/projects/activity"] = {"projects": [
             {"id": p, "lastActive": max(s["lastActive"] for s in active if s["project"]["id"] == p), "sessionCount": 2, "checkouts": [{"projectId": p, "sessionCount": 2}]}
             for p in ("web-app", "docs-site")

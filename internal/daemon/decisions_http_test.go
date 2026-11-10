@@ -84,10 +84,10 @@ func TestAWorkersPromptIsHandledByItsLeadUntilTheLeadIsWaitingOnThePersonToo(t *
 	if lead.SessionID != "lead" || lead.Group != decisionHolding || len(lead.HoldsUp) != 1 || lead.HoldsUp[0] != "worker" {
 		t.Fatalf("lead=%+v", lead)
 	}
-	if !lead.Answerable || len(lead.Requests) != 1 || lead.Requests[0].ID != "lead-prompt" || len(lead.Requests[0].Actions) == 0 {
+	if !lead.Answerable || len(lead.Requests) != 1 || lead.Requests[0].ID != askIDOfRequest(t, f.r, "lead", "lead-prompt") || len(lead.Requests[0].Actions) == 0 {
 		t.Fatalf("the lead's request is not inline with its buttons: %+v", lead.Requests)
 	}
-	if worker.SessionID != "worker" || worker.Group != decisionWaiting || len(worker.Requests) != 1 || worker.Requests[0].ID != "worker-prompt" {
+	if worker.SessionID != "worker" || worker.Group != decisionWaiting || len(worker.Requests) != 1 || worker.Requests[0].ID != askIDOfRequest(t, f.r, "worker", "worker-prompt") {
 		t.Fatalf("worker=%+v", worker)
 	}
 }

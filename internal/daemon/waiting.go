@@ -2,8 +2,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"sync"
 	"time"
@@ -127,146 +125,44 @@ func (d *Daemon) observeTurnLocked(ctx context.Context, adapter surface.Surface,
 		return observation, false, err
 	}
 	if observation.WaitingUnknown {
-		recorded, _, err := d.Registry.WaitingState(session.ID)
-		if err != nil {
-			d.log.Printf("read waiting %s: %s", d.resolveDisplay(session.ID), err)
-			recorded = nil
-		}
-		observation.WaitingOn = d.openSets.attach(session.ID, recorded)
+		observation.WaitingOn = d.recordedWaiting(*session)
 		return observation, false, nil
 	}
 	waiting := observation.WaitingOn
 	if observation.Status != surface.StatusBusy {
 		waiting = nil
 	}
-	record, err := d.Registry.RecordWaiting(session.ID, waiting, time.Now())
-	if err != nil {
-		d.log.Printf("record waiting %s: %s", d.resolveDisplay(session.ID), err)
-		return observation, false, nil
-	}
-	if record.Replaced != nil && record.ReplacedAnnounced {
-		d.withdrawWaiting(session.ID, *record.Replaced)
-	}
-	if record.Announce {
-		d.announceWaiting(*session, *record.Waiting)
-	}
-	openChanged := d.openSets.keep(session.ID, waiting, record.Waiting)
-	observation.WaitingOn = d.openSets.attach(session.ID, record.Waiting)
-	return observation, record.Changed || openChanged, nil
+	changed := d.syncWaits(*session, waiting)
+	observation.WaitingOn = d.recordedWaiting(*session)
+	return observation, changed, nil
 }
 
 // catalogWaiting returns what a listed session is waiting on. A listing that
-// agrees with the record is taken as it is; one that disagrees is confirmed
-// by observing the turn, since a listing may be older than the record. The
-// caller holds the session's waiting lock until its catalog row commits.
+// agrees with the open asks is taken as it is; one that disagrees is
+// confirmed by observing the turn, since a listing may be older than the
+// asks. The caller holds the session's waiting lock until its catalog row
+// commits.
 func (d *Daemon) catalogWaiting(ctx context.Context, adapter surface.Surface, session surface.Session) *surface.Waiting {
 	listed := session.WaitingOn
 	if session.Status != surface.StatusBusy {
 		listed = nil
 	}
-	recorded, announced, err := d.Registry.WaitingState(session.ID)
+	open, err := d.Registry.OpenPermissionAsks(session.ID)
 	if err != nil {
 		d.log.Printf("read waiting %s: %s", d.resolveDisplay(session.ID), err)
-		return listed
+		return nil
 	}
-	if surface.SameWaiting(recorded, listed) && d.openSets.agrees(session.ID, listed) {
-		if recorded != nil && !announced {
-			d.announceWaiting(session, *recorded)
-		}
-		return d.openSets.attach(session.ID, recorded)
+	if waitsAgree(open, listed) {
+		d.tellPermissionAsks(open)
+		return d.recordedWaiting(session)
 	}
 	observeCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
 	observation, _, err := d.observeTurnLocked(observeCtx, adapter, &session)
 	if err != nil || observation == nil {
-		return recorded
+		return d.recordedWaiting(session)
 	}
 	return observation.WaitingOn
-}
-
-// announceWaiting tells the user, on the desktop and on paired devices, that
-// a session is waiting on them, and opens the conversation they know it by.
-// The record is marked announced only after both were attempted, so a daemon
-// stopped in between announces the question again after it restarts rather
-// than never. Both notifications carry a key derived from the question, so a
-// repeat replaces the one already shown instead of adding a second.
-func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waiting) {
-	d.announceMu.Lock()
-	if d.announcing == nil {
-		d.announcing = map[string]string{}
-	}
-	if d.announcing[session.ID] == waiting.ID {
-		d.announceMu.Unlock()
-		return
-	}
-	// A caller may have read the question as unannounced just before an
-	// announcement finished. That announcement marks the record before it
-	// leaves announcing, so the record read here already shows it.
-	if recorded, announced, err := d.Registry.WaitingState(session.ID); err == nil && announced && recorded != nil && recorded.ID == waiting.ID {
-		d.announceMu.Unlock()
-		return
-	}
-	d.announcing[session.ID] = waiting.ID
-	d.announceMu.Unlock()
-	conversationID := session.ConversationID()
-	restartable := d.restartable(session)
-	desktopMessage := elsewhereWaitingMessage(d.resolveDisplay(conversationID), waiting, session.RuntimeKind, restartable)
-	mobileMessage := elsewhereWaitingMessage(notificationSurfaceName(session.Surface), waiting, session.RuntimeKind, restartable)
-	key := waitingNotificationKey(session.ID, waiting.ID)
-	sessionID, questionID := session.ID, waiting.ID
-	finished := func() {
-		d.announceMu.Lock()
-		if d.announcing[sessionID] == questionID {
-			delete(d.announcing, sessionID)
-		}
-		d.announceMu.Unlock()
-	}
-	started := d.background.start(func(ctx context.Context) {
-		defer finished()
-		notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		mobile := mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: conversationID, TurnID: questionID, EventType: "session.waiting", CollapseID: key}
-		var actions []surface.RequestAction
-		request, open := d.waitingRequest(notificationCtx, session, waiting)
-		d.noticeWaiting(session, waiting, request, open)
-		if open {
-			// A notification's buttons answer the session it names, so one
-			// that carries a request names the session that holds it.
-			mobile.SessionID = sessionID
-			desktopMessage = fmt.Sprintf("%s: %s", d.resolveDisplay(sessionID), request.Prompt())
-			mobile.RequestID = request.ID
-			actions = request.Actions()
-			d.log.Printf("announce %s waiting on request %s", d.resolveDisplay(sessionID), request.ID)
-		} else {
-			d.log.Printf("announce %s waiting on %s with no request to answer here", d.resolveDisplay(sessionID), questionID)
-		}
-		// The desktop notification goes through a helper app that can take
-		// seconds to start, so the phone is told alongside it.
-		var desktop sync.WaitGroup
-		desktop.Add(1)
-		go func() {
-			defer desktop.Done()
-			if err := d.notifyDesktop("Agenthail", desktopMessage, mobile.SessionID, "agenthail-"+key, mobile.RequestID, actions); err != nil {
-				d.log.Printf("desktop notification: %s", err)
-			}
-		}()
-		d.notifyPairedDevices(notificationCtx, mobile)
-		desktop.Wait()
-		if ctx.Err() != nil {
-			return
-		}
-		if err := d.Registry.MarkWaitingAnnounced(sessionID, questionID); err != nil {
-			d.log.Printf("mark waiting announced %s: %s", sessionID, err)
-		}
-		// A question settled while it was being announced was not withdrawn
-		// with the record, which had not been marked announced yet.
-		if recorded, _, err := d.Registry.WaitingState(sessionID); err == nil && (recorded == nil || recorded.ID != questionID) {
-			d.withdrawWaitingNow(ctx, sessionID, waiting)
-		}
-	})
-	if !started {
-		finished()
-	}
 }
 
 func (d *Daemon) restartable(session surface.Session) bool {
@@ -276,48 +172,6 @@ func (d *Daemon) restartable(session surface.Session) bool {
 	}
 	lifecycle := surface.EffectiveCapabilities(adapter, &session).Lifecycle
 	return lifecycle.Stop && lifecycle.Resume
-}
-
-// withdrawWaiting removes the notifications that told the user about a
-// question that is no longer waiting, on the desktop and on paired devices,
-// so a question answered anywhere stops asking everywhere.
-func (d *Daemon) withdrawWaiting(sessionID string, waiting surface.Waiting) {
-	d.background.start(func(ctx context.Context) {
-		d.withdrawWaitingNow(ctx, sessionID, waiting)
-	})
-}
-
-func (d *Daemon) withdrawWaitingNow(ctx context.Context, sessionID string, waiting surface.Waiting) {
-	d.withdrawWaitingNotice(sessionID, waiting)
-	key := waitingNotificationKey(sessionID, waiting.ID)
-	if err := d.withdrawDesktop("agenthail-" + key); err != nil {
-		d.log.Printf("withdraw desktop notification: %s", err)
-	}
-	withdrawCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	d.withdrawFromPairedDevices(withdrawCtx, key)
-}
-
-// waitingRequest is the open request a session waits on, when its provider
-// takes answers through Agenthail, read now so the notification shows what is
-// actually asked.
-func (d *Daemon) waitingRequest(ctx context.Context, session surface.Session, waiting surface.Waiting) (surface.Request, bool) {
-	adapter, err := d.adapters().For(&session)
-	if err != nil {
-		return surface.Request{}, false
-	}
-	responder, ok := sessionResponder(adapter, &session)
-	if !ok {
-		return surface.Request{}, false
-	}
-	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	state, err := responder.Requests(requestCtx, &session)
-	if err != nil {
-		d.log.Printf("read the request %s waits on: %s", d.resolveDisplay(session.ID), err)
-		return surface.Request{}, false
-	}
-	return openRequest(state, waiting.ID)
 }
 
 // elsewhereWaitingMessage says what a session waits on when Agenthail
@@ -344,11 +198,4 @@ func elsewhereWaitingMessage(name string, waiting surface.Waiting, runtime surfa
 		}
 	}
 	return fmt.Sprintf("%s %s", name, asks)
-}
-
-// waitingNotificationKey names one question's notifications within the 64
-// bytes APNs allows for a collapse id.
-func waitingNotificationKey(sessionID, questionID string) string {
-	sum := sha256.Sum256([]byte(sessionID + "\x00" + questionID))
-	return "waiting-" + hex.EncodeToString(sum[:16])
 }

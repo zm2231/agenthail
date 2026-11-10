@@ -1,7 +1,16 @@
--- schemaVersion 89
+-- schemaVersion 91
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
+
+-- index asks_open
+CREATE INDEX asks_open ON asks(routed_to) WHERE state='open';
+
+-- index asks_ref
+CREATE UNIQUE INDEX asks_ref ON asks(session_id, origin, ref) WHERE ref<>'' AND state<>'withdrawn';
+
+-- index asks_session
+CREATE INDEX asks_session ON asks(session_id, created_at_ms);
 
 -- index attention_items_open
 CREATE INDEX attention_items_open ON attention_items(resolved_at, created_at DESC, id DESC);
@@ -147,6 +156,31 @@ CREATE TABLE alias_reservations (
 CREATE TABLE aliases (
 	name TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table asks
+CREATE TABLE asks (
+	id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	origin TEXT NOT NULL,
+	title TEXT NOT NULL,
+	questions_json TEXT NOT NULL,
+	routed_to TEXT NOT NULL,
+	routed_at_ms INTEGER NOT NULL,
+	route_json TEXT NOT NULL,
+	state TEXT NOT NULL CHECK (state IN ('open','answered','withdrawn')),
+	answer_json TEXT NOT NULL DEFAULT '',
+	answered_by TEXT NOT NULL DEFAULT '',
+	answered_via TEXT NOT NULL DEFAULT '',
+	answered_at_ms INTEGER NOT NULL DEFAULT 0,
+	applied_at_ms INTEGER NOT NULL DEFAULT 0,
+	apply_status TEXT NOT NULL DEFAULT '',
+	apply_id TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL,
+	ref TEXT NOT NULL DEFAULT '',
+	wait_kind TEXT NOT NULL DEFAULT '',
+	answerable INTEGER NOT NULL DEFAULT 1,
+	announced_at_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- table attention_items
@@ -858,11 +892,6 @@ CREATE TABLE session_runtime (
 	runtime_launcher TEXT NOT NULL DEFAULT '',
 	runtime_location BLOB NOT NULL DEFAULT '{}',
 	runtime_focusable INTEGER NOT NULL DEFAULT 0,
-	waiting_kind TEXT NOT NULL DEFAULT '',
-	waiting_id TEXT NOT NULL DEFAULT '',
-	waiting_since_ms INTEGER NOT NULL DEFAULT 0,
-	waiting_announced INTEGER NOT NULL DEFAULT 0,
-	waiting_answerable INTEGER NOT NULL DEFAULT 0,
 	held_completion_turn_id TEXT NOT NULL DEFAULT '',
 	notice_turn_id TEXT NOT NULL DEFAULT '',
 	notice_outcome TEXT NOT NULL DEFAULT '',
@@ -965,15 +994,9 @@ CREATE TABLE turn_ends (
 	ended_at_ms INTEGER NOT NULL DEFAULT 0,
 	turn_id TEXT NOT NULL DEFAULT '',
 	completed_turn_id TEXT NOT NULL DEFAULT '',
-	needs TEXT NOT NULL DEFAULT '',
 	headline TEXT NOT NULL DEFAULT '',
-	asks_json TEXT NOT NULL DEFAULT 'null',
 	next_json TEXT NOT NULL DEFAULT 'null',
 	source TEXT NOT NULL DEFAULT '',
-	routed_to TEXT NOT NULL DEFAULT '',
-	answered_at_ms INTEGER NOT NULL DEFAULT 0,
-	answer_status TEXT NOT NULL DEFAULT '',
-	answer_message_id TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, started_at_ms)
 );
 
@@ -1008,6 +1031,24 @@ END;
 
 -- trigger catalog_presentation_version_aliases_update
 CREATE TRIGGER catalog_presentation_version_aliases_update AFTER UPDATE OF created_at,name,session_id ON aliases WHEN (NEW.created_at IS NOT OLD.created_at OR NEW.name IS NOT OLD.name OR NEW.session_id IS NOT OLD.session_id)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_asks_delete
+CREATE TRIGGER catalog_presentation_version_asks_delete AFTER DELETE ON asks
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_asks_insert
+CREATE TRIGGER catalog_presentation_version_asks_insert AFTER INSERT ON asks
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_asks_update
+CREATE TRIGGER catalog_presentation_version_asks_update AFTER UPDATE OF announced_at_ms,answer_json,answerable,answered_at_ms,answered_by,answered_via,applied_at_ms,apply_id,apply_status,created_at_ms,id,origin,questions_json,ref,route_json,routed_at_ms,routed_to,session_id,state,title,wait_kind ON asks WHEN (NEW.announced_at_ms IS NOT OLD.announced_at_ms OR NEW.answer_json IS NOT OLD.answer_json OR NEW.answerable IS NOT OLD.answerable OR NEW.answered_at_ms IS NOT OLD.answered_at_ms OR NEW.answered_by IS NOT OLD.answered_by OR NEW.answered_via IS NOT OLD.answered_via OR NEW.applied_at_ms IS NOT OLD.applied_at_ms OR NEW.apply_id IS NOT OLD.apply_id OR NEW.apply_status IS NOT OLD.apply_status OR NEW.created_at_ms IS NOT OLD.created_at_ms OR NEW.id IS NOT OLD.id OR NEW.origin IS NOT OLD.origin OR NEW.questions_json IS NOT OLD.questions_json OR NEW.ref IS NOT OLD.ref OR NEW.route_json IS NOT OLD.route_json OR NEW.routed_at_ms IS NOT OLD.routed_at_ms OR NEW.routed_to IS NOT OLD.routed_to OR NEW.session_id IS NOT OLD.session_id OR NEW.state IS NOT OLD.state OR NEW.title IS NOT OLD.title OR NEW.wait_kind IS NOT OLD.wait_kind)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
@@ -1353,7 +1394,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_turn_ends_update
-CREATE TRIGGER catalog_presentation_version_turn_ends_update AFTER UPDATE OF answer_message_id,answer_status,answered_at_ms,asks_json,completed_turn_id,ended_at_ms,headline,needs,next_json,routed_to,session_id,source,started_at_ms,turn_id ON turn_ends WHEN (NEW.answer_message_id IS NOT OLD.answer_message_id OR NEW.answer_status IS NOT OLD.answer_status OR NEW.answered_at_ms IS NOT OLD.answered_at_ms OR NEW.asks_json IS NOT OLD.asks_json OR NEW.completed_turn_id IS NOT OLD.completed_turn_id OR NEW.ended_at_ms IS NOT OLD.ended_at_ms OR NEW.headline IS NOT OLD.headline OR NEW.needs IS NOT OLD.needs OR NEW.next_json IS NOT OLD.next_json OR NEW.routed_to IS NOT OLD.routed_to OR NEW.session_id IS NOT OLD.session_id OR NEW.source IS NOT OLD.source OR NEW.started_at_ms IS NOT OLD.started_at_ms OR NEW.turn_id IS NOT OLD.turn_id)
+CREATE TRIGGER catalog_presentation_version_turn_ends_update AFTER UPDATE OF completed_turn_id,ended_at_ms,headline,next_json,session_id,source,started_at_ms,turn_id ON turn_ends WHEN (NEW.completed_turn_id IS NOT OLD.completed_turn_id OR NEW.ended_at_ms IS NOT OLD.ended_at_ms OR NEW.headline IS NOT OLD.headline OR NEW.next_json IS NOT OLD.next_json OR NEW.session_id IS NOT OLD.session_id OR NEW.source IS NOT OLD.source OR NEW.started_at_ms IS NOT OLD.started_at_ms OR NEW.turn_id IS NOT OLD.turn_id)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

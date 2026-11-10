@@ -876,20 +876,21 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession, live bo
 	}
 	ref := host.ref()
 	row.Host = &ref
-	var prior *dashboardTurnCompletion
+	var prior mirroredRow
 	priorFound := false
-	if live && row.TurnCompletion != nil {
+	if live {
 		stored, found, err := d.Registry.CatalogProjection(rawID)
 		if err != nil {
 			return err
 		}
-		prior, priorFound = mirroredTurnCompletion(stored), found
+		prior, priorFound = mirroredState(stored), found
 	}
 	if err := d.applyMirroredProjection(host.record.ID, session, row, project, checkout); err != nil {
 		return err
 	}
 	if priorFound {
-		d.notifyMirroredCompletion(host, rawID, row, prior)
+		d.notifyMirroredCompletion(host, rawID, row, prior.TurnCompletion)
+		d.notifyMirroredAsk(host, rawID, row, prior.Ask)
 	}
 	return nil
 }

@@ -1,0 +1,130 @@
+# Asks: agent and client contract
+
+An ask is a decision an agent puts to the person, or to the agent it reports to. It is one object, stored in the `asks` table (`internal/registry/asks.go`), whichever way it was raised. The design and the later layers are in [asks-design.md](asks-design.md).
+
+## Raising one
+
+An agent raises an ask and then ends its turn; the answer arrives as its next message. Raising does not end the turn.
+
+- MCP: `agenthail_ask {"title": "...", "questions": [...]}`, or `{"withdraw": "<ask id>"}`. It returns `{"ok": true, "askId", "routedTo"}`, where `routedTo` is `person` or the hearer's `@alias` or id.
+- CLI: `agenthail ask "<title>" --option <label>[: <what it does>]... [--recommend <n>] [--link <title>=<url>] [--question <text> ...]`. The title is the first question unless `--question` follows it; options, a recommendation and links belong to the question before them. The CLI raises for the session it runs in (`AGENTHAIL_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`).
+
+Limits, refused as `invalid` with a message the agent can act on: a one-line title of at most 80 characters; 1 to 4 distinct questions of at most 160; 1 to 6 options per question, label at most 40, `does` at most 90; `recommended` an option index; at most 3 `http(s)` links per question.
+
+## Routing
+
+- A session an agent or coordinator started asks its hearer (`coordinator.PromptHearer`: the project lead, else its spawner) while that hearer runs. Any other session, a lead's own included, asks the person.
+- The hearer gets one `[agenthail]` message naming the ask id and how to answer: `agenthail_answer {"requestId": "<ask id>", "answers": {...}}` or `agenthail ask answer <id> "<answer>"`, and how to pass it on: `decision: "escalate"` or `agenthail ask escalate <id>`.
+- An ask moves one hop up (to its holder's own hearer, else the person) when the holder escalates it, when the holder stops running, or when it has sat with the holder for `askEscalateMinutes` (dashboard config, default 10). The daemon checks every 30 seconds. The holder's undelivered notice is withdrawn when the ask moves.
+- Only the person or the session the ask is routed to may answer it. An answer is delivered once; a second is refused as stale.
+
+## Permission requests
+
+A provider request the session waits on (a permission prompt, a question, MCP input) is an ask of origin `permission`; the request it holds is its `ref`, which stays internal. The daemon opens one when it observes the request and withdraws it when the provider closes it, so a restart keeps every open request.
+
+- Its id is the request id everywhere: `waitingOn.id` and `waitingOn.open`, the ids `/api/v1/requests` and `agenthail_requests` list, a notification's `requestId`, and `respond`. A provider's own request id is never accepted.
+- An answerable request follows the routing above, with the window `askPermissionEscalateMinutes` (default 3): it holds a tool call. The hearer's notice names the ask id, the command to read it and the decisions to answer it with. The person is notified only once it reaches them.
+- A wait Agenthail cannot answer (a dialog in the terminal, a prompt it cannot reach) goes straight to the person, with no buttons anywhere; the notification says where to answer it. It is withdrawn when the wait ends.
+- `waitingOn` is derived from the open permission asks: the oldest, with every open answerable one in `open`. It is not the row's `ask`, which stays an agent's ask.
+- The decisions inbox shows a request routed to a running lead under "Handled by a lead"; the person can still answer it.
+
+## The Stop reminder
+
+`agenthail hook stop` (Claude host, Codex, and terminal Claude through `agenthail hooks install`) holds a stop once when the session is a lead (a project coordinator or the spawner of a running session), the turn's `last_assistant_message` has a line outside fenced code that ends in `?`, and the session raised no ask since its turn opened. The reason tells it to raise the question as an ask. A session holding Agenthail's tools is also asked, in the same hold, to call `agenthail_end_turn` when it has not. Terminal Claude's settings hook carries `--terminal` and does nothing under the Claude host, which runs its own.
+
+## Seeing an ask
+
+Session rows (session view, snapshot, catalog stream, mirrored hosts) carry `ask`:
+
+```json
+"ask": {"id": "ask-447a922cae82", "title": "Ready to ship", "routedTo": "person", "askedAt": "2026-11-10T06:26:27.31Z"}
+```
+
+```json
+"ask": {"id": "ask-447a922cae82", "title": "Ready to ship", "routedTo": "person", "askedAt": "2026-11-10T06:26:27.31Z", "answeredAt": "2026-11-10T06:30:02.5Z"}
+```
+
+- The row shows its oldest open ask; with none open, its newest answered ask until the session's next turn opens; otherwise no `ask` key.
+- `routedTo` is `person` or a session id. Only `person` asks are the person's to answer: they set `attention {"kind": "ask", "reason": <title>}` and put the row in Needs you.
+- `answeredAt` is absent while the ask is open. An answered ask must not be offered again.
+- `endTurn` no longer carries asks: it is `{headline, next, endedAt}`.
+
+Fetch the card when `ask.routedTo` is `person`, `answeredAt` is absent and the session is not read-only, whatever `capabilities.respond` says. Key any cache on the session id, `waitingOn.id` and `ask.id`.
+
+## The request
+
+`GET /api/v1/requests?sessionId=<id>` lists each open person ask after any provider requests:
+
+```json
+{
+  "id": "ask-447a922cae82",
+  "kind": "ask",
+  "tool": "",
+  "title": "Ready to ship",
+  "prompt": "Ready to ship",
+  "questions": [
+    {"question": "Deploy it now?", "header": "", "multiSelect": false,
+     "options": [{"label": "Deploy", "description": ""}, {"label": "Wait", "description": "hold until Monday"}],
+     "suggested": 0,
+     "links": [{"title": "Runbook", "url": "https://example.com/runbook"}]}
+  ],
+  "actions": [{"id": "o0", "title": "Deploy"}, {"id": "o1", "title": "Wait"}, {"id": "reply", "title": "Reply…"}],
+  "alwaysAllow": false,
+  "createdAt": "2026-11-10T06:26:27.31Z"
+}
+```
+
+- `suggested` is the index of the recommended option; mark it. `description` is the option's `does`.
+- `links` open outside the app.
+- `actions` exist only for a single-question ask: an option button each when it has 4 or fewer options, plus `reply`.
+- The decisions inbox (`/api/v1/decisions`) lists the same request under the session's `ask` item.
+
+## The card
+
+Render it with the question pager, as for `kind: "question"`, except:
+
+- Heading: the session's display name, "asks:", then `title`.
+- Never send on one tap; a pick waits for Submit.
+- An optional note: on the page for a single question, on the review step for several.
+- No Decline. The person can leave the ask open.
+
+## Answering
+
+Post `respond` with an `Idempotency-Key`:
+
+```json
+{"action": "respond", "sessionId": "<id>", "requestId": "ask-447a922cae82",
+ "decision": {"behavior": "allow", "answers": {"Deploy it now?": "Wait"}, "message": "After lunch."}}
+```
+
+- `answers` maps each question text to the picked label or typed text. Omit `message` when the note is empty.
+- A notification button posts `{"choice": "o1"}` or `{"choice": "reply", "message": "<text>"}`.
+
+The session receives one message, from the person (or from the answering agent):
+
+```
+1. Deploy it now? Wait
+
+After lunch.
+```
+
+| Status | Body | Meaning |
+|---|---|---|
+| 200 | `{"ok": true, "result": {"requestId", "outcome": "answered", "receipt": {...}}}` | sent; the row's `ask.answeredAt` is set |
+| 200 | the same body again | a retry with the same `Idempotency-Key` and body |
+| 409 | code `stale` | already answered or withdrawn; drop the card |
+| 400 | code `invalid_request` | nothing answered and no note, or a button the ask does not offer |
+| 403 | code `forbidden` | an agent the ask is not routed to |
+| 502 | code `bad_gateway` | delivery failed. If the message says it "may have reached the session", the ask stays answered and must not be retried; otherwise it is open again |
+
+Refetch the row and requests after any response.
+
+## Notifications
+
+- A person ask is announced when it is raised or escalated to the person: "<session> needs you: <title>", event `ask.opened`, `requestId` the ask id, collapse key `ask-<hash>`, and buttons from the request's `actions`. A paired viewer announces a mirrored host's ask under the same dedupe key, so a phone paired to both shows it once.
+- It is withdrawn from the desktop and phones when answered or withdrawn.
+- The turn that leaves an open person ask completes with outcome `needs_you` and `requestId` the ask id, and sends no completion push of its own.
+
+## Command endpoint
+
+`/api/v1/asks` serves the `agenthail` command on this machine only (the local dashboard token): `GET` lists open asks, `?id=` one ask, `?routedTo=<session>` those routed to or raised by a session; `POST {"op": "raise"|"withdraw"|"answer"|"escalate", "sessionId", "askId", "title", "questions", "note"}`, where `sessionId` is the caller.

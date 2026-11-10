@@ -24,6 +24,9 @@ var placementInputMutations = []placementMutation{
 	{"WaitingOn", func(r *dashboardSession, now time.Time) {
 		r.WaitingOn = &surface.Waiting{Kind: surface.WaitingQuestion, ID: "q", Since: now.Add(-time.Minute)}
 	}},
+	{"Ask", func(r *dashboardSession, now time.Time) {
+		r.Ask = &dashboardAsk{ID: "ask-1", Title: "Deploy?", RoutedTo: registry.AskToPerson, AskedAt: now}
+	}},
 	{"BackgroundTasks", func(r *dashboardSession, _ time.Time) { r.BackgroundTasks = &surface.BackgroundTasks{Running: true} }},
 	{"UsageLimit", func(r *dashboardSession, now time.Time) {
 		r.UsageLimit = &surface.UsageLimit{ResetsAt: now.Add(time.Hour)}
@@ -119,7 +122,7 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	},
 	"Listed": func(r *dashboardSession, _ time.Time) { r.Listed = !r.Listed },
 	"EndTurn": func(r *dashboardSession, now time.Time) {
-		r.EndTurn = &dashboardEndTurn{Headline: "Deployed", Needs: endTurnNeedsNothing, EndedAt: now}
+		r.EndTurn = &dashboardEndTurn{Headline: "Deployed", EndedAt: now}
 	},
 	"TurnCompletion": func(r *dashboardSession, now time.Time) {
 		r.TurnCompletion = &dashboardTurnCompletion{TurnID: "t9", Outcome: turnOutcomeFailed, At: now}

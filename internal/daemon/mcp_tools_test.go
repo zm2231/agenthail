@@ -76,15 +76,13 @@ func TestMCPRequestsListsOnlyVisibleWaitingSessions(t *testing.T) {
 	stranger := other.session(t, r, "stranger")
 	now := time.Now()
 	for _, id := range []string{mate.ID, stranger.ID} {
-		if _, err := r.RecordWaiting(id, &surface.Waiting{Kind: surface.WaitingApproval, ID: "req-" + id, Since: now, Answerable: true}, now); err != nil {
-			t.Fatal(err)
-		}
+		recordWait(t, r, id, &surface.Waiting{Kind: surface.WaitingApproval, ID: "req-" + id, Since: now, Answerable: true})
 	}
 	worker, _ := d.Registry.Session("s1")
 	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, *worker))
 	listing, refused := callMCP(t, session, "agenthail_requests", nil)
 	waiting, _ := listing["waiting"].([]any)
-	if refused || len(waiting) != 1 || waiting[0].(map[string]any)["sessionId"] != mate.ID || waiting[0].(map[string]any)["requestId"] != "req-mate" {
+	if refused || len(waiting) != 1 || waiting[0].(map[string]any)["sessionId"] != mate.ID || waiting[0].(map[string]any)["requestId"] != askIDOfRequest(t, r, mate.ID, "req-mate") {
 		t.Fatalf("waiting=%v", listing)
 	}
 	if refusal, refused := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": stranger.ID}); !refused || refusal["code"] != "out_of_scope" {

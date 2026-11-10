@@ -78,8 +78,13 @@ func (a *App) cmdHook(args []string) error {
 		return nil
 	}
 	if len(args) > 0 && args[0] == "stop" {
-		if len(args) != 3 || args[1] != "--surface" || (args[2] != string(surface.KindClaude) && args[2] != string(surface.KindCodex)) {
-			return errors.New("usage: agenthail hook stop --surface claude|codex")
+		terminal := len(args) == 4 && args[3] == "--terminal" && args[2] == string(surface.KindClaude)
+		if len(args) != 3 && !terminal || args[1] != "--surface" || (args[2] != string(surface.KindClaude) && args[2] != string(surface.KindCodex)) {
+			return errors.New("usage: agenthail hook stop --surface claude|codex [--terminal]")
+		}
+		// The Claude host runs its own Stop hook, which knows its background work; the settings copy speaks only for terminal Claude.
+		if terminal && os.Getenv("CLAUDE_CODE_ENTRYPOINT") != "cli" {
+			return nil
 		}
 		done := make(chan map[string]any, 1)
 		input := os.Stdin

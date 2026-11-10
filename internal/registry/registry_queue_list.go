@@ -92,7 +92,7 @@ func queueHoldCase(canSteer bool, mode deliverypolicy.Mode) string {
 		WHEN q.host_request!='' THEN 'hostUnreachable'
 		WHEN ` + fmt.Sprintf(limitHeldFilter, "q.session_id") + ` THEN 'limited'
 		WHEN ` + fmt.Sprintf(queueToPeerSocket, "q") + ` AND ` + fmt.Sprintf(queuePeerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END
-		WHEN COALESCE(sr.waiting_id,'')!='' THEN 'waiting'` + steer + `
+		WHEN EXISTS(SELECT 1 FROM asks a WHERE a.session_id=q.session_id AND a.origin='permission' AND a.state='open') THEN 'waiting'` + steer + `
 		WHEN ` + queueTargetStatus + `='busy' THEN 'busy'
 		WHEN ` + queueTargetStatus + `='offline' THEN 'offline'
 		WHEN ` + queueTargetStatus + ` NOT IN ('idle','notLoaded') THEN 'unknown'
