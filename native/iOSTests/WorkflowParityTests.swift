@@ -415,6 +415,81 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionOperationsReachTheComputerThatListsTheSession() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        let capabilities = #""capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true,"lifecycle":{"status":true,"logs":true,"stop":true,"resume":true}}"#
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data("""
+        {"updatedAt":"now","daemon":{"running":true,"hosts":[{"id":"hpeer","name":"peer","state":"connected"}]},"surfaces":[],"sessions":[
+          {"id":"hpeer::m1","surface":"codex","name":"remote","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"host":{"id":"hpeer","name":"peer","state":"connected"}}],
+         "totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}
+        """.utf8)))
+        let session = try XCTUnwrap(model.session("hpeer::m1"))
+        XCTAssertTrue(SessionOperationAvailability.nativeQueueWritable(session))
+        XCTAssertEqual(SessionOperationAvailability.lifecycle(session), SessionLifecycle(status: true, logs: true, stop: true, resume: true))
+
+        let target = model.operationTarget(session.id)
+        XCTAssertNil(target.unavailable)
+        XCTAssertEqual(target.sessionID, "hpeer::m1")
+        let api = try XCTUnwrap(target.api)
+
+        let queue = NativeQueueController(keys: target.keys)
+        queue.reset(sessionID: target.sessionID)
+        await queue.reload(api)
+        XCTAssertEqual(queue.items.map(\.id), ["q1", "q2"])
+        let first = try XCTUnwrap(queue.items.first)
+        let added = await queue.add("three", api: api)
+        let updated = await queue.update(first, text: "uno", api: api)
+        await queue.move(first, by: 1, api: api)
+        let startedNext = await queue.start(nil, api: api)
+        let startedNow = await queue.start(first, api: api)
+        await queue.delete(first, api: api)
+        XCTAssertTrue(added && updated && startedNext && startedNow)
+        XCTAssertNil(queue.error)
+
+        let lifecycle = BackgroundSessionController(keys: target.keys)
+        lifecycle.reset(sessionID: target.sessionID)
+        for action in ["status", "logs", "stop", "resume"] {
+            let ran = await lifecycle.run(action, api: api)
+            XCTAssertTrue(ran, action)
+        }
+        XCTAssertNil(lifecycle.error)
+
+        try await model.fork(session)
+
+        let sent = ParityProtocol.state.actions.map { body in
+            let op = (body["nativeQueue"] as? [String: Any]).map { " " + ($0["queueAction"] as? String ?? "") + ($0["queuedSubmissionId"].map { " \($0)" } ?? "") } ?? ""
+            return "\(body["action"] as? String ?? "") \(body["sessionId"] as? String ?? "")" + op
+        }
+        XCTAssertEqual(sent, [
+            "native-queue hpeer::m1 list",
+            "native-queue hpeer::m1 add", "native-queue hpeer::m1 list",
+            "native-queue hpeer::m1 update q1", "native-queue hpeer::m1 list",
+            "native-queue hpeer::m1 reorder", "native-queue hpeer::m1 list",
+            "native-queue hpeer::m1 start", "native-queue hpeer::m1 list",
+            "native-queue hpeer::m1 start q1", "native-queue hpeer::m1 list",
+            "native-queue hpeer::m1 delete q1", "native-queue hpeer::m1 list",
+            "session-lifecycle-status hpeer::m1", "session-lifecycle-logs hpeer::m1",
+            "session-lifecycle-stop hpeer::m1", "session-lifecycle-status hpeer::m1",
+            "session-lifecycle-resume hpeer::m1", "session-lifecycle-status hpeer::m1",
+            "session-fork hpeer::m1",
+        ])
+        let reorder = ParityProtocol.state.actions[5]["nativeQueue"] as? [String: Any]
+        XCTAssertEqual(reorder?["queuedSubmissionIds"] as? [String], ["q2", "q1"])
+        XCTAssertNil(ParityProtocol.state.actions.last?["fork"], "a whole-session fork names no turn")
+        for (body, key) in zip(ParityProtocol.state.actions, ParityProtocol.state.actionIdempotencyKeys) {
+            let list = (body["nativeQueue"] as? [String: Any])?["queueAction"] as? String == "list"
+            let reads = ["session-lifecycle-status", "session-lifecycle-logs"].contains(body["action"] as? String ?? "")
+            if !list && !reads { XCTAssertNotNil(key, "\(body["action"] ?? "") carries a retry key") }
+        }
+        XCTAssertEqual(model.requestedSessionID, "hpeer::forked")
+
+        let missing = model.operationTarget("gone::s9")
+        XCTAssertNil(missing.api)
+        XCTAssertEqual(missing.unavailable, "The computer running this session can't be reached.")
+    }
+
+    @MainActor
     func testProjectsAreManagedThroughTheComputerThatListsThem() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
@@ -525,6 +600,12 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
             }
             if body["action"] as? String == "session-fork" {
                 return (200, #"{"ok":true,"result":{"session":{"id":"forked"}}}"#)
+            }
+            if body["action"] as? String == "native-queue" {
+                if (body["nativeQueue"] as? [String: Any])?["queueAction"] as? String == "list" {
+                    return (200, #"{"ok":true,"result":{"data":[{"id":"q1","clientUserMessageId":"c1","input":[{"type":"text","text":"one"}]},{"id":"q2","clientUserMessageId":"c2","input":[{"type":"text","text":"two"}]}],"nextCursor":null}}"#)
+                }
+                return (200, #"{"ok":true,"result":{}}"#)
             }
             if (body["action"] as? String)?.contains("create") == true {
                 if let create { return create }

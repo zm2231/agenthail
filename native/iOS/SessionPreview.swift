@@ -137,8 +137,9 @@ struct SessionPreview: View {
 
     nonisolated static var previewDetailJSON: String {
         let arguments = ProcessInfo.processInfo.arguments
-        guard arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") || arguments.contains("--preview-limit-move") || arguments.contains("--preview-terminal-question") else { return basePreviewDetailJSON }
+        guard arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") || arguments.contains("--preview-limit-move") || arguments.contains("--preview-terminal-question") || SessionOperationsPreview.enabled else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
+        if SessionOperationsPreview.enabled { SessionOperationsPreview.apply(detail: &detail) }
         if arguments.contains("--preview-terminal-question") {
             var session = detail["session"] as! [String: Any]
             var capabilities = detail["capabilities"] as! [String: Any]
@@ -255,6 +256,13 @@ struct SessionPreview: View {
         if ProcessInfo.processInfo.arguments.contains("--preview-groups") {
             snapshot["channels"] = [["name": "release", "members": ["demo", "codex-demo"], "memberDetails": [["id": "demo", "display": "@demo"], ["id": "codex-demo", "display": "@codex-demo"]]]]
             snapshot["relays"] = [["id": 7, "from": "demo", "to": "codex-demo", "pattern": "ready for review", "once": false, "active": true, "handoff": "turn_finished", "pendingCount": 0, "fireCount": 3, "lastFiredAt": "2026-09-12T03:58:00Z"]]
+        }
+        if SessionOperationsPreview.enabled {
+            var operated = snapshot["sessions"] as! [[String: Any]]
+            var operatedCapabilities: [String: Any] = capabilities
+            SessionOperationsPreview.apply(session: &operated[0], capabilities: &operatedCapabilities)
+            operated[0]["capabilities"] = operatedCapabilities
+            snapshot["sessions"] = operated
         }
         if ProcessInfo.processInfo.arguments.contains("--preview-terminal-question") {
             var terminal = snapshot["sessions"] as! [[String: Any]]
@@ -502,6 +510,8 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
         case "/api/v1/snapshot": body = requestQuery.first(where: { $0.name == "scope" }).map { PreviewOrder.scoped(SessionPreview.snapshotJSON, $0.value, status: requestQuery.first { $0.name == "status" }?.value, surface: requestQuery.first { $0.name == "surface" }?.value) } ?? SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
+        case "/api/v1/actions" where SessionOperationsPreview.enabled:
+            body = SessionOperationsPreview.respond(Self.actionBody(request))
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-project-message"):
             body = #"{"recipients":[{"sessionId":"demo","outcome":"delivered"}]}"#
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-groups"):
