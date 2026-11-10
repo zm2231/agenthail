@@ -29,6 +29,7 @@
 		0FAECDD6138BD5C0909D10AC /* ActivityCollapseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F09A07A373E592786676A4E6 /* ActivityCollapseTests.swift */; };
 		0FD65105E3BB3A00644313C5 /* project-colour-vectors.json in Resources */ = {isa = PBXBuildFile; fileRef = 81738883B2A44D4FCEACC17E /* project-colour-vectors.json */; };
 		100B4CB409614B5814F31A16 /* PhoneProjectTiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9935CC4F24C80AD8F13FBE84 /* PhoneProjectTiles.swift */; };
+		1049C7BEDF97CB6157AA7D97 /* ComposerContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702B56E00478B4C6B6AA056E /* ComposerContext.swift */; };
 		1173F957401A01ED3BC23E60 /* CompactActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6FA2A30098E1DF73419A954 /* CompactActivity.swift */; };
 		11918A9914F039C35680AB1B /* ComposerSendTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D28CE0B823700F4409C5132 /* ComposerSendTests.swift */; };
 		124FBA2EE553AE1315E10390 /* UsageProxies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 743359F716127981C139936B /* UsageProxies.swift */; };
@@ -577,6 +578,7 @@
 		6F301A00F39E08F9F4FF199E /* IOSNameSessionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSNameSessionSheet.swift; sourceTree = "<group>"; };
 		6F749A45E7CDF8234F81641F /* PersonMessageNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonMessageNote.swift; sourceTree = "<group>"; };
 		6F9E8EEA4308F31CE2AA49E2 /* ComposerSendUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerSendUITests.swift; sourceTree = "<group>"; };
+		702B56E00478B4C6B6AA056E /* ComposerContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerContext.swift; sourceTree = "<group>"; };
 		7039428BDACFBDD5CA67BBBB /* AgenthailIOSTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailIOSTests.swift; sourceTree = "<group>"; };
 		70A65FCF8C98B4758A6D2E28 /* OlderPlaceHold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OlderPlaceHold.swift; sourceTree = "<group>"; };
 		70F31C89F20967C2A9D6B5BC /* VoiceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAPI.swift; sourceTree = "<group>"; };
@@ -814,6 +816,7 @@
 				C6FA2A30098E1DF73419A954 /* CompactActivity.swift */,
 				1ECB33D989B1CDCB7BE3673C /* CompletionRow.swift */,
 				9BD2FB96608E03FFA524E352 /* ComposerAttachmentViews.swift */,
+				702B56E00478B4C6B6AA056E /* ComposerContext.swift */,
 				A160D34C998AF53E561672D0 /* ComposerPaste.swift */,
 				C5A0DF92FE8E539E0D8972A9 /* ComposerReceipt.swift */,
 				A014F4DC10EF98778FECAAE4 /* ComposerSendStatus.swift */,
@@ -1430,6 +1433,7 @@
 				7F351AE442DA4780791BA41D /* ComposerAttachment.swift in Sources */,
 				57604F04AAC9A479B06C5A83 /* ComposerAttachmentViews.swift in Sources */,
 				CF518C9991F1EF44061DB2F4 /* ComposerCompletion.swift in Sources */,
+				1049C7BEDF97CB6157AA7D97 /* ComposerContext.swift in Sources */,
 				00F92DB59444246FA2964047 /* ComposerPaste.swift in Sources */,
 				658EBD5ADC340BBAC7CD8154 /* ComposerReceipt.swift in Sources */,
 				8B999ACFC41909D9FC369506 /* ComposerSendStatus.swift in Sources */,

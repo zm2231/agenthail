@@ -1543,7 +1543,7 @@ struct ExchangeState: Decodable, Identifiable {
     }
 }
 
-struct ContextState: Decodable {
+struct ContextState: Decodable, Equatable {
     let usedTokens: Int64
     let contextWindow: Int64
     let cumulativeTokens: Int64?
@@ -1585,7 +1585,7 @@ extension ContextState {
     }
 }
 
-struct ModelOption: Decodable, Identifiable {
+struct ModelOption: Decodable, Identifiable, Equatable {
     let id: String
     let displayName: String
     let description: String?
