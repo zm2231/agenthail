@@ -12,8 +12,14 @@ struct SessionEditingControls: View {
     var body: some View {
         Section("Organize conversation") {
             // The sheet sits on one row: on the Section it is copied to every row and none presents.
-            Button("Name conversation", systemImage: "pencil") { text = detail.alias ?? ""; editingName = true }
-                .sheet(isPresented: Binding(get: { editingGoal || editingName || editingBudget }, set: { if !$0 { editingGoal = false; editingName = false; editingBudget = false } })) { editor }
+            Button("Name conversation", systemImage: "pencil") { editingName = true }
+                .sheet(isPresented: Binding(get: { editingGoal || editingName || editingBudget }, set: { if !$0 { editingGoal = false; editingName = false; editingBudget = false } })) {
+                    if editingName {
+                        IOSNameSessionSheet(model: model, sessionID: detail.session.id, alias: detail.alias) { editingName = false }
+                    } else {
+                        editor
+                    }
+                }
             let goal = GoalControls(detail)
             if goal.offers(.setGoal) || goal.offers(.editGoal) {
                 Button(goal.offers(.editGoal) ? "Edit goal" : "Set goal", systemImage: "target") { text = detail.goal?.objective ?? ""; editingGoal = true }
@@ -41,44 +47,33 @@ struct SessionEditingControls: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     Text("Use Clear token budget to remove the current limit.").font(.footnote)
                 } else {
-                    TextField(editingName ? "Name" : "Objective", text: $text, axis: .vertical).lineLimit(2...8)
-                        .textInputAutocapitalization(editingName ? .never : .sentences).autocorrectionDisabled(editingName)
+                    TextField("Objective", text: $text, axis: .vertical).lineLimit(2...8)
+                        .textInputAutocapitalization(.sentences)
                 }
-                if editingName {
-                    Text((detail.alias ?? "").isEmpty ? "Use 1–80 characters without spaces, /, or #." : "Use 1–80 characters without spaces, /, or #. Leave it empty to clear the name.").font(.footnote)
-                }
-                if let message = error ?? (editingName && !text.isEmpty ? nameProblem : nil) { Text(message).foregroundStyle(PhonePalette.failed) }
+                if let error { Text(error).foregroundStyle(PhonePalette.failed) }
             }
-            .navigationTitle(editingBudget ? "Token budget" : editingName ? "Name conversation" : "Edit goal")
+            .navigationTitle(editingBudget ? "Token budget" : "Edit goal")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingName = false; editingGoal = false; editingBudget = false }.disabled(model.pendingControls.contains(detail.session.id)) }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingGoal = false; editingBudget = false }.disabled(model.pendingControls.contains(detail.session.id)) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(clearingName ? "Clear Name" : "Save") { Task { await save(sheetAction, text: sheetText) } }
+                    Button("Save") { Task { await save(sheetAction, text: sheetText) } }
                         .disabled(!canSave || model.pendingControls.contains(detail.session.id))
                 }
             }.interactiveDismissDisabled(model.pendingControls.contains(detail.session.id))
         }
     }
-    private var nameProblem: String? { SessionHandle.renameProblem(text, current: detail.alias) }
-    private var clearingName: Bool { editingName && SessionHandle.clears(text, current: detail.alias) }
     private var sheetAction: String {
         if editingBudget { return "goal-budget" }
-        if editingName { return "alias" }
         return detail.goal?.objective.isEmpty == false ? "goal-edit" : "goal-set"
     }
-    private var sheetText: String {
-        if editingBudget { return budgetText }
-        return editingName ? SessionHandle.normalized(text) : text
-    }
+    private var sheetText: String { editingBudget ? budgetText : text }
     private var canSave: Bool {
-        if editingName { return nameProblem == nil && SessionHandle.normalized(text) != (detail.alias ?? "") }
-        return !(editingBudget ? budgetText : text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !(editingBudget ? budgetText : text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func save(_ action: String, text: String? = nil) async {
         error = nil
-        do { try await model.editSession(id: detail.session.id, action: action, text: text ?? self.text); editingName = false; editingGoal = false; editingBudget = false }
-        catch is LeadNameRefused { self.error = SessionHandle.leadRefusal(detail.alias) }
+        do { try await model.editSession(id: detail.session.id, action: action, text: text ?? self.text); editingGoal = false; editingBudget = false }
         catch { self.error = error.localizedDescription }
     }
 }

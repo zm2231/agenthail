@@ -86,6 +86,7 @@ var statusColours = map[string]statusColour{
 		files: map[string]colourUse{
 			"iOS/CompactActivity.swift":      {1, "added lines"},
 			"iOS/DiffView.swift":             {1, "added lines"},
+			"iOS/SessionListChrome.swift":    {1, "the ring of a session that finished while you were away"},
 			"macOS/ConnectionControls.swift": {1, "connected"},
 			"macOS/DesktopSettings.swift":    {2, "connected, healthy hosts"},
 			"macOS/DiffView.swift":           {1, "added lines"},

@@ -864,7 +864,15 @@ struct SessionScreen: View {
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { scrollToLatest() }
         }
-        .onDisappear { olderPlace.release() }
+        .onAppear { model.sessionAppeared(session.id) }
+        .onChange(of: session.id) { old, new in
+            model.sessionDisappeared(old)
+            model.sessionAppeared(new)
+        }
+        .onDisappear {
+            olderPlace.release()
+            model.sessionDisappeared(session.id)
+        }
         .modifier(QueueTailTracking(model: model, tail: $queueTail, session: session, timeline: items))
         .onChange(of: queueTail.shownIDs) { _, _ in
             if landed, followingLatest { scrollToLatest() }

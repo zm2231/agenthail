@@ -175,7 +175,7 @@ struct ProjectScreen: View {
                 if let session = contents.leadSession {
                     Button { openSession(session.id) } label: {
                         HStack(alignment: .top, spacing: 12) {
-                            SessionAvatar(surface: session.surface, ring: SessionRing.kind(session, needsYou: model.sessionAttention[session.id] != nil))
+                            SessionAvatar(surface: session.surface, ring: SessionRing.kind(session, needsYou: model.sessionAttention[session.id] != nil, finished: model.finishedUnseen.contains(session.id)))
                             IOSSessionRow(session: session, title: "@" + lead.name, showsHost: true, showsTime: false)
                         }
                     }
@@ -231,7 +231,7 @@ struct ProjectScreen: View {
     private func row(_ session: SessionState) -> some View {
         Button { openSession(session.id) } label: {
             HStack(alignment: .top, spacing: 12) {
-                SessionAvatar(surface: session.surface, ring: SessionRing.kind(session, needsYou: model.sessionAttention[session.id] != nil))
+                SessionAvatar(surface: session.surface, ring: SessionRing.kind(session, needsYou: model.sessionAttention[session.id] != nil, finished: model.finishedUnseen.contains(session.id)))
                 IOSSessionRow(session: session, showsHost: model.showsHostNames)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
