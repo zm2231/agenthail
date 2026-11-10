@@ -342,27 +342,13 @@ func catalogRowStaysRetiredTx(tx *sql.Tx, s surface.Session) (bool, error) {
 // stored session and runtime rows unchanged, so an unchanged catalog
 // observation needs no write.
 func sessionRowMatchesTx(tx catalogQuerier, s surface.Session) (bool, error) {
-	var kind, name, cwd, status, transcript, model, bridge, forkedFrom string
-	var pid, hasLocal int
-	var routeKept bool
-	var lastActiveMS int64
-	err := tx.QueryRow(`SELECT surface,name,cwd,pid,status,transcript,has_local,
-		sessions.source=`+sessionRouteSourceSQL+` AND sessions.transport=`+sessionRouteTransportSQL+` AND sessions.runtime_kind=`+sessionRouteRuntimeSQL+`,
-		configured_model,bridge,forked_from,last_active_ms
-		FROM sessions, (SELECT ? AS source, ? AS transport, ? AS runtime_kind) AS excluded WHERE id=?`,
-		s.Source, s.Transport, string(s.RuntimeKind), s.ID).Scan(&kind, &name, &cwd, &pid, &status, &transcript, &hasLocal, &routeKept, &model, &bridge, &forkedFrom, &lastActiveMS)
+	var unchanged bool
+	err := tx.QueryRow(sessionUnchangedSQL, sessionWriteValues(s)...).Scan(&unchanged)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
-	if err != nil {
+	if err != nil || !unchanged {
 		return false, err
-	}
-	wantLastActive := int64(0)
-	if !s.LastActive.IsZero() {
-		wantLastActive = s.LastActive.UnixMilli()
-	}
-	if kind != string(s.Surface) || name != s.Name || cwd != s.Cwd || pid != s.PID || status != string(s.Status) || transcript != s.Transcript || hasLocal != b2i(s.HasLocal) || !routeKept || (s.ConfiguredModel != "" && model != s.ConfiguredModel) || bridge != s.Bridge || (forkedFrom == "" && s.ForkedFrom != "") || lastActiveMS != wantLastActive {
-		return false, nil
 	}
 	if s.Runtime != nil {
 		location, err := json.Marshal(s.Runtime.Location)
@@ -764,14 +750,16 @@ func (r *Registry) CatalogProjectionFingerprint(sessionID string) (string, bool,
 	return fingerprint, true, nil
 }
 
-const catalogSessionSelect = `SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
-		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,cs.background_tasks,cs.usage_limit,cs.turn_stop,cs.settings,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `,s.registered_at
-		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id`
+var catalogSessionColumns = `s.host_id,` + sessionColumnsSQL(`s.status`) + `,cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,s.registered_at`
+
+const catalogSessionFrom = ` FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id`
+
+var catalogSessionSelect = `SELECT ` + catalogSessionColumns + catalogSessionFrom
 
 const catalogSnapshotOrder = `
 		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`
 
-const catalogSnapshotQuery = catalogSessionSelect + ` WHERE +s.id IN (SELECT session_id FROM catalog_sessions INDEXED BY catalog_sessions_unretired WHERE retired=0)` + catalogSnapshotOrder
+var catalogSnapshotQuery = catalogSessionSelect + ` WHERE +s.id IN (SELECT session_id FROM catalog_sessions INDEXED BY catalog_sessions_unretired WHERE retired=0)` + catalogSnapshotOrder
 
 func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 	return r.catalogSnapshot(catalogSnapshotQuery, nil, catalogCurrentListingTx, nil)

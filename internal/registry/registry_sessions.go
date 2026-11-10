@@ -48,32 +48,7 @@ func registerSessionRowTx(tx *sql.Tx, s surface.Session) error {
 			s.ID, string(s.Surface), s.Name, s.Cwd, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, string(s.RuntimeKind))
 		return err
 	}
-	lastActiveMS := int64(0)
-	if !s.LastActive.IsZero() {
-		lastActiveMS = s.LastActive.UnixMilli()
-	}
-	parentID, rootID, depth, nickname, role := subagentValues(s)
-	_, err := tx.Exec(
-		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,runtime_kind,configured_model,bridge,forked_from,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,ended,updated_at)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
-		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
-		   pid=excluded.pid,status=excluded.status,ended=excluded.ended,transcript=excluded.transcript,
-		   has_local=excluded.has_local,
-		   source=`+sessionRouteSourceSQL+`,
-		   transport=`+sessionRouteTransportSQL+`,
-		   runtime_kind=`+sessionRouteRuntimeSQL+`,
-			   configured_model=CASE WHEN excluded.configured_model<>'' THEN excluded.configured_model ELSE sessions.configured_model END,
-			   bridge=excluded.bridge,
-			   forked_from=CASE WHEN sessions.forked_from<>'' THEN sessions.forked_from ELSE excluded.forked_from END,
-			   last_active_ms=excluded.last_active_ms,
-		   parent_session_id=CASE WHEN excluded.parent_session_id<>'' THEN excluded.parent_session_id ELSE sessions.parent_session_id END,
-		   root_session_id=CASE WHEN excluded.root_session_id<>'' THEN excluded.root_session_id ELSE sessions.root_session_id END,
-		   subagent_depth=CASE WHEN excluded.parent_session_id<>'' THEN excluded.subagent_depth ELSE sessions.subagent_depth END,
-		   agent_nickname=CASE WHEN excluded.agent_nickname<>'' THEN excluded.agent_nickname ELSE sessions.agent_nickname END,
-		   agent_role=CASE WHEN excluded.agent_role<>'' THEN excluded.agent_role ELSE sessions.agent_role END,
-		   updated_at=datetime('now')`,
-		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, string(s.RuntimeKind), s.ConfiguredModel, s.Bridge, s.ForkedFrom, lastActiveMS, parentID, rootID, depth, nickname, role, b2i(sessionEnded(s)))
-	if err != nil {
+	if _, err := tx.Exec(sessionUpsertSQL, sessionWriteValues(s)...); err != nil {
 		return err
 	}
 	if s.Runtime != nil {

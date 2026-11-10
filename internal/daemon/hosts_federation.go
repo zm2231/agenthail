@@ -581,17 +581,22 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 	}
 	retired := heldRetired(snapshot)
 	present := make(map[string]struct{}, len(existing))
+	held := []string{}
 	for _, id := range existing {
 		present[id] = struct{}{}
 		if _, found := keep[id]; found {
 			continue
 		}
 		if _, found := retired[id]; found {
+			held = append(held, id)
 			continue
 		}
 		if err := d.removeHostRow(host.record.ID, id, "omitted_by_host"); err != nil {
 			return 0, localMirror(err)
 		}
+	}
+	if err := d.Registry.RetireHostRows(host.record.ID, held); err != nil {
+		return 0, localMirror(err)
 	}
 	for id := range retired {
 		if _, found := present[id]; !found {

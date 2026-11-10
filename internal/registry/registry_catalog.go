@@ -16,51 +16,17 @@ func (r *Registry) GetSession(id string) (surface, name, cwd string, err error) 
 }
 
 func sessionSelect(status string) string {
-	return `SELECT s.id,s.surface,s.name,s.cwd,s.pid,` + status + `,s.ended,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),COALESCE(cs.background_tasks,X''),COALESCE(cs.usage_limit,X''),COALESCE(cs.turn_stop,X''),COALESCE(cs.settings,X''),` + sessionSubagentSelect
+	return `SELECT ` + sessionColumnsSQL(status)
 }
 
 const sessionJoins = ` LEFT JOIN session_runtime sr ON sr.session_id=s.id LEFT JOIN catalog_sessions cs ON cs.session_id=s.id`
 
 func scanSession(scanner rowScanner) (surface.Session, error) {
-	var session surface.Session
-	var kind, status string
-	var hasLocal int
-	var lastActiveMS int64
-	var launcher string
-	var location, waitingOn, background, usageLimit, turnStop, settings []byte
-	var focusable int
-	var subagent subagentColumns
-	if err := scanner.Scan(append([]any{&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Ended, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable, &waitingOn, &background, &usageLimit, &turnStop, &settings}, subagent.targets()...)...); err != nil {
+	var columns sessionScan
+	if err := scanner.Scan(columns.targets()...); err != nil {
 		return surface.Session{}, err
 	}
-	session.Surface = surface.SurfaceKind(kind)
-	session.Status = surface.SessionStatus(status)
-	session.HasLocal = hasLocal != 0
-	if lastActiveMS > 0 {
-		session.LastActive = time.UnixMilli(lastActiveMS)
-	}
-	subagent.apply(&session)
-	runtime, err := runtimeFromColumns(launcher, location, focusable)
-	if err != nil {
-		return surface.Session{}, err
-	}
-	session.Runtime = runtime
-	if session.WaitingOn, err = decodeCatalogWaiting(waitingOn); err != nil {
-		return surface.Session{}, err
-	}
-	if session.BackgroundTasks, err = decodeCatalogBackground(background); err != nil {
-		return surface.Session{}, err
-	}
-	if session.UsageLimit, err = decodeCatalogUsageLimit(usageLimit); err != nil {
-		return surface.Session{}, err
-	}
-	if session.TurnStop, err = decodeCatalogTurnStop(turnStop); err != nil {
-		return surface.Session{}, err
-	}
-	if session.Settings, err = decodeCatalogSettings(settings); err != nil {
-		return surface.Session{}, err
-	}
-	return session, nil
+	return columns.result()
 }
 
 func decodeCatalogWaiting(raw []byte) (*surface.Waiting, error) {

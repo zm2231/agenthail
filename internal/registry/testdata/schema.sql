@@ -1,4 +1,4 @@
--- schemaVersion 87
+-- schemaVersion 88
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -1298,7 +1298,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_sessions_update
-CREATE TRIGGER catalog_presentation_version_sessions_update AFTER UPDATE OF id,name,surface,status,cwd,last_active_ms,runtime_kind,source,transport,host_id,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,pinned_at_ms,snoozed_at_ms,snoozed_until_ms,snooze_wake ON sessions WHEN (NEW.id IS NOT OLD.id OR NEW.name IS NOT OLD.name OR NEW.surface IS NOT OLD.surface OR NEW.status IS NOT OLD.status OR NEW.cwd IS NOT OLD.cwd OR NEW.last_active_ms IS NOT OLD.last_active_ms OR NEW.runtime_kind IS NOT OLD.runtime_kind OR NEW.source IS NOT OLD.source OR NEW.transport IS NOT OLD.transport OR NEW.host_id IS NOT OLD.host_id OR NEW.parent_session_id IS NOT OLD.parent_session_id OR NEW.root_session_id IS NOT OLD.root_session_id OR NEW.subagent_depth IS NOT OLD.subagent_depth OR NEW.agent_nickname IS NOT OLD.agent_nickname OR NEW.agent_role IS NOT OLD.agent_role OR NEW.registered_at IS NOT OLD.registered_at OR NEW.pinned_at_ms IS NOT OLD.pinned_at_ms OR NEW.snoozed_at_ms IS NOT OLD.snoozed_at_ms OR NEW.snoozed_until_ms IS NOT OLD.snoozed_until_ms OR NEW.snooze_wake IS NOT OLD.snooze_wake)
+CREATE TRIGGER catalog_presentation_version_sessions_update AFTER UPDATE OF id,name,surface,status,ended,cwd,last_active_ms,runtime_kind,source,transport,host_id,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,pinned_at_ms,snoozed_at_ms,snoozed_until_ms,snooze_wake ON sessions WHEN (NEW.id IS NOT OLD.id OR NEW.name IS NOT OLD.name OR NEW.surface IS NOT OLD.surface OR NEW.status IS NOT OLD.status OR NEW.ended IS NOT OLD.ended OR NEW.cwd IS NOT OLD.cwd OR NEW.last_active_ms IS NOT OLD.last_active_ms OR NEW.runtime_kind IS NOT OLD.runtime_kind OR NEW.source IS NOT OLD.source OR NEW.transport IS NOT OLD.transport OR NEW.host_id IS NOT OLD.host_id OR NEW.parent_session_id IS NOT OLD.parent_session_id OR NEW.root_session_id IS NOT OLD.root_session_id OR NEW.subagent_depth IS NOT OLD.subagent_depth OR NEW.agent_nickname IS NOT OLD.agent_nickname OR NEW.agent_role IS NOT OLD.agent_role OR NEW.registered_at IS NOT OLD.registered_at OR NEW.pinned_at_ms IS NOT OLD.pinned_at_ms OR NEW.snoozed_at_ms IS NOT OLD.snoozed_at_ms OR NEW.snoozed_until_ms IS NOT OLD.snoozed_until_ms OR NEW.snooze_wake IS NOT OLD.snooze_wake)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

@@ -234,7 +234,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &mirrored) != nil {
 				continue
 			}
-			mirrored.ObservedAt, mirrored.RegisteredAt = record.ObservedAt, record.RegisteredAt
+			mirrored.Ended, mirrored.ObservedAt, mirrored.RegisteredAt = record.Session.Ended, record.ObservedAt, record.RegisteredAt
 			mirrored.Freshness = &record.Freshness
 			mirrored.HiddenSubagents, mirrored.LiveHiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID), catalogSnapshot.Listing.LiveHiddenSubagents(session.ID)
 			mirrored.Subagents = addSubagentRollups(mirrored.ObservedSubagents, mirrored.LiveHiddenSubagents)
