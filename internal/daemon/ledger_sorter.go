@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -126,16 +127,29 @@ func (d *Daemon) sortOwed(ctx context.Context) {
 }
 
 func (d *Daemon) sortOwedWith(ctx context.Context, config goalsort.Config) {
-	owed := d.sorter.takeOwed()
-	for i, project := range owed {
-		if ctx.Err() != nil || !d.resort(ctx, config, project) {
-			d.sorter.mu.Lock()
-			for _, left := range owed[i:] {
-				d.sorter.owe(left.key, left.fromSeq)
-			}
-			d.sorter.mu.Unlock()
+	var jobs []sortJob
+	for _, project := range d.sorter.takeOwed() {
+		refs, err := d.ledgerStore().LocalProvisionalFrom(project.key, project.fromSeq, d.sorter.now().Add(-sorterRecovery))
+		if err != nil {
+			d.log.Printf("ledger sorter: list messages to sort again in %s: %s", project.key, err)
+			continue
+		}
+		for _, ref := range refs {
+			jobs = append(jobs, sortJob{key: project.key, utteranceID: ref.Ref, seq: ref.Seq})
+		}
+	}
+	slices.SortFunc(jobs, func(a, b sortJob) int { return cmp.Compare(a.seq, b.seq) })
+	for i, job := range jobs {
+		if ctx.Err() != nil {
+			d.sorter.oweAll(jobs[i:])
 			return
 		}
+		if err := d.sortOne(ctx, config, job); err != nil {
+			d.sorter.failed(d, job, err)
+			d.sorter.oweAll(jobs[i+1:])
+			return
+		}
+		d.sorter.answered(d)
 	}
 }
 
@@ -164,27 +178,12 @@ type owedSorts struct {
 	fromSeq int64
 }
 
-func (d *Daemon) resort(ctx context.Context, config goalsort.Config, owed owedSorts) bool {
-	refs, err := d.ledgerStore().LocalProvisionalFrom(owed.key, owed.fromSeq, d.sorter.now().Add(-sorterRecovery))
-	if err != nil {
-		d.log.Printf("ledger sorter: list messages to sort again in %s: %s", owed.key, err)
-		return true
+func (s *ledgerSorter) oweAll(jobs []sortJob) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, job := range jobs {
+		s.owe(job.key, job.seq)
 	}
-	for _, ref := range refs {
-		job := sortJob{key: owed.key, utteranceID: ref.Ref, seq: ref.Seq}
-		if ctx.Err() != nil {
-			d.sorter.mu.Lock()
-			d.sorter.owe(owed.key, ref.Seq)
-			d.sorter.mu.Unlock()
-			return false
-		}
-		if err := d.sortOne(ctx, config, job); err != nil {
-			d.sorter.failed(d, job, err)
-			return false
-		}
-		d.sorter.answered(d)
-	}
-	return true
 }
 
 func (d *Daemon) sortOne(ctx context.Context, config goalsort.Config, job sortJob) error {

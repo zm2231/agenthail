@@ -121,6 +121,27 @@ func runSorter(t *testing.T, d *Daemon) (stop func()) {
 	return stop
 }
 
+func TestAfterARestartOwedMessagesAreSortedOldestFirstAcrossProjects(t *testing.T) {
+	stub := &sorterStub{answer: fileTo("new")}
+	d, r, handler, p, _ := sorterFixture(t, stub)
+	early := addLedgerProject(t, r, "proj-a", "a-sorter-key")
+	if err := early.store.Enable(early.key, ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := early.store.EnsureGoal(early.key, "billing", "lead"); err != nil {
+		t.Fatal(err)
+	}
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: p.session(t, r, "claude-later-key").ID, PromptID: "older", Prompt: "the older message"})
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: early.session(t, r, "claude-earlier-key").ID, PromptID: "newer", Prompt: "the newer message"})
+	restarted := newTestDaemon(t, r, []surface.Surface{&daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}})
+	restarted.sorter.http = d.sorter.http
+	runSorter(t, restarted)
+	eventually(t, "both owed messages to be asked about", func() bool { return len(stub.asks()) == 2 })
+	if asked := stub.asks(); asked[0].Message != "the older message" || asked[1].Message != "the newer message" {
+		t.Fatalf("asked %q then %q, want the older message first whatever its project", asked[0].Message, asked[1].Message)
+	}
+}
+
 func TestARestartDuringAnOutageSortsWhatWasOwedOnceTheSorterIsBack(t *testing.T) {
 	stub := &sorterStub{answer: func(string) (int, string) { return http.StatusServiceUnavailable, "down" }}
 	d, r, handler, p, search := sorterFixture(t, stub)
