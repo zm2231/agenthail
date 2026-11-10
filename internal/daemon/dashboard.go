@@ -32,6 +32,12 @@ func (d *dashboardServer) invalidate() {
 	d.stateVersion.Add(1)
 }
 
+func (d *Daemon) invalidateDashboard() {
+	if dashboard := d.dashboard.Load(); dashboard != nil {
+		dashboard.invalidate()
+	}
+}
+
 func (d *Daemon) startDashboard() (*dashboardServer, error) {
 	config, err := LoadDashboardConfig()
 	if err != nil || !config.Enabled {
@@ -83,7 +89,7 @@ func (d *dashboardServer) shutdown() error {
 }
 
 func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
-	d.dashboard = dashboard
+	d.dashboard.Store(dashboard)
 	dashboard.devices = d.Registry
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", dashboard.page)

@@ -171,8 +171,8 @@ func (h *eventHub) cursor() uint64 {
 }
 
 func (d *Daemon) publishEvent(eventType, entityID string, value any) {
-	if d.dashboard != nil && changesSnapshot(eventType) {
-		d.dashboard.invalidate()
+	if changesSnapshot(eventType) {
+		d.invalidateDashboard()
 	}
 	if d.events != nil {
 		if _, err := d.events.publish(eventType, entityID, value); err != nil {

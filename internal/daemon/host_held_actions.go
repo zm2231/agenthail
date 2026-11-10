@@ -89,7 +89,5 @@ func (d *Daemon) settleHostHeldAction(host *pairedHost, item registry.HostHeldAc
 	if err := d.Registry.RecordHistory(entry); err != nil {
 		d.logRuntimeError("host "+host.record.Name+" held action", err)
 	}
-	if d.dashboard != nil {
-		d.dashboard.invalidate()
-	}
+	d.invalidateDashboard()
 }

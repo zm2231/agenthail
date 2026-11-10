@@ -20,8 +20,6 @@ func (d *Daemon) syncLeads() {
 	if !changed {
 		return
 	}
-	if d.dashboard != nil {
-		d.dashboard.invalidate()
-	}
+	d.invalidateDashboard()
 	d.publishCatalogPresence()
 }

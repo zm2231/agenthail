@@ -422,9 +422,7 @@ func (d *Daemon) completeMoveOut(ctx context.Context, host *pairedHost, moveID s
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: move.Conversation, Result: "moved to " + host.record.Name})
 	}
-	if d.dashboard != nil {
-		d.dashboard.invalidate()
-	}
+	d.invalidateDashboard()
 	d.requestCatalogDiscovery()
 	go d.drainHostDeliveries(context.WithoutCancel(ctx), host)
 	return nil
@@ -927,9 +925,7 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	taken = true
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: "moved here from " + requestingHostName(r.Context())})
-	if d.dashboard != nil {
-		d.dashboard.invalidate()
-	}
+	d.invalidateDashboard()
 	d.requestCatalogDiscovery()
 	writeDashboardJSON(w, http.StatusOK, d.resumedMove(move, session))
 }

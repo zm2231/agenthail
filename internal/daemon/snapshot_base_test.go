@@ -139,7 +139,7 @@ func TestProjectActivityMatchesTheSnapshotsProjectsAfterAnArchive(t *testing.T) 
 		t.Fatal(err)
 	}
 	d.discoverCatalog(context.Background())
-	d.dashboard.invalidate()
+	d.dashboard.Load().invalidate()
 	response := getSnapshot(t, handler, "/api/v1/projects/activity", "")
 	var page projectActivityPage
 	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {

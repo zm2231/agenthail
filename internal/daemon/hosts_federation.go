@@ -118,8 +118,8 @@ func (d *Daemon) checkHostToken(ctx context.Context, host *pairedHost) {
 	if changed && problem != "" {
 		d.log.Printf("host %s: %s", host.record.Name, problem)
 	}
-	if changed && d.dashboard != nil {
-		d.dashboard.invalidate()
+	if changed {
+		d.invalidateDashboard()
 	}
 }
 
@@ -1087,9 +1087,7 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 			d.logRuntimeError("host "+host.record.Name+" delivery ack", err)
 		}
 	}
-	if d.dashboard != nil {
-		d.dashboard.invalidate()
-	}
+	d.invalidateDashboard()
 }
 
 type hostDeliveryAnswer struct {

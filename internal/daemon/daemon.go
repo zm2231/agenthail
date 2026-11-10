@@ -119,7 +119,7 @@ type Daemon struct {
 	surfaceHealthMu          sync.Mutex
 	surfaceHealth            map[surface.SurfaceKind]dashboardSurface
 	sourceHolds              map[string]map[string]func()
-	dashboard                *dashboardServer
+	dashboard                atomic.Pointer[dashboardServer]
 	transportResolver        *SessionTransportResolver
 	claudeHost               *claudehost.Manager
 	browserHost              *browserhost.Manager
