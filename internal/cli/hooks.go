@@ -324,21 +324,22 @@ func cmdCodexHooks(action string) error {
 	if executable == "" {
 		return errors.New("run this from the installed agenthail binary; Codex hooks name the binary that wrote them")
 	}
+	home := surfaces.CodexHomeFromEnv()
 	switch action {
 	case "install":
-		changed, err := surfaces.InstallCodexContext(ctx, executable)
+		changed, err := surfaces.InstallCodexContext(ctx, home, executable)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("codex: %s\n", map[bool]string{true: "installed", false: "already installed"}[changed])
 	case "uninstall":
-		changed, err := surfaces.UninstallCodexContext(ctx)
+		changed, err := surfaces.UninstallCodexContext(ctx, home)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("codex: %s\n", map[bool]string{true: "removed", false: "not installed"}[changed])
 	case "status":
-		state, err := surfaces.CodexContextState(ctx, executable)
+		state, err := surfaces.CodexContextState(ctx, home, executable)
 		if err != nil {
 			return err
 		}

@@ -48,7 +48,11 @@ func launchCodex(codex surface.Surface) error {
 			return err
 		}
 	}
-	install := surfaces.DetectCodexInstallation()
+	home := surfaces.CodexHomeFromEnv()
+	if adapter, ok := codex.(*surfaces.Codex); ok {
+		home = adapter.Home()
+	}
+	install := surfaces.DetectCodexInstallation(home)
 	exe := install.Desktop
 	if exe == "" {
 		message := fmt.Sprintf("Codex Desktop is not installed (tried %s)", strings.Join(surfaces.CodexDesktopExecutables, ", "))
@@ -68,7 +72,7 @@ func launchCodex(codex surface.Surface) error {
 	}
 
 	cmd := exec.Command(exe, codexLaunchArgs()...)
-	cmd.Env = surface.AgentEnv(os.Environ())
+	cmd.Env = home.ChildEnv(surface.AgentEnv(os.Environ()))
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil

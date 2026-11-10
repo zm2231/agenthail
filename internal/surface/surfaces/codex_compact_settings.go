@@ -42,7 +42,7 @@ func (c *Codex) SetCompactSetting(ctx context.Context, sess *surface.Session, ke
 	if value != surface.CompactAuto {
 		limit, _ = strconv.ParseInt(value, 10, 64)
 	}
-	release, err := acquireCodexThreadWrite(ctx, sess.ID)
+	release, err := c.home.acquireThreadWrite(ctx, sess.ID)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
 	}

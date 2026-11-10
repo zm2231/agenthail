@@ -40,9 +40,9 @@ func isolateCodexInstalls(t *testing.T, desktop bool) {
 
 func TestCodexDaemonCLIPrefersTheDaemonPackageThenPath(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("CODEX_HOME", home)
+	codexHome := CodexHome{Codex: home}
 	isolateCodexInstalls(t, true)
-	if _, err := CodexDaemonCLI(); !errors.Is(err, ErrCodexMissing) || !strings.Contains(err.Error(), CodexInstallCommand) {
+	if _, err := CodexDaemonCLI(codexHome); !errors.Is(err, ErrCodexMissing) || !strings.Contains(err.Error(), CodexInstallCommand) {
 		t.Fatalf("err=%v, want the missing CLI with the install command", err)
 	}
 	bundleDir := filepath.Join(t.TempDir(), "ChatGPT.app", "Contents", "Resources")
@@ -51,15 +51,15 @@ func TestCodexDaemonCLIPrefersTheDaemonPackageThenPath(t *testing.T) {
 	npm := filepath.Join(npmDir, "codex")
 	testkit.WriteExecutable(t, npm, "#!/bin/sh\n")
 	t.Setenv("PATH", bundleDir+string(os.PathListSeparator)+npmDir)
-	if path, err := CodexDaemonCLI(); err != nil || path != npm {
+	if path, err := CodexDaemonCLI(codexHome); err != nil || path != npm {
 		t.Fatalf("path=%q err=%v, want the PATH CLI and never the Desktop bundle", path, err)
 	}
 	standalone := installStandaloneCodex(t, home, "#!/bin/sh\n")
-	if path, _ := CodexDaemonCLI(); path != standalone {
+	if path, _ := CodexDaemonCLI(codexHome); path != standalone {
 		t.Fatalf("path=%q, want the legacy daemon package", path)
 	}
 	packaged := installDaemonPackageCodex(t, home, "#!/bin/sh\n")
-	install := DetectCodexInstallation()
+	install := DetectCodexInstallation(codexHome)
 	if install.Daemon != packaged || install.Desktop != CodexDesktopExecutables[0] {
 		t.Fatalf("install=%+v", install)
 	}
@@ -121,7 +121,6 @@ func TestCodexRuntimeStatusNamesWhatEachInstallStateIsMissing(t *testing.T) {
 func TestDetectCodexInstallationFindsPerUserDesktop(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("CODEX_HOME", t.TempDir())
 	isolateCodexInstalls(t, false)
 	perUser := []string{}
 	for _, path := range codexDesktopExecutables() {
@@ -132,7 +131,7 @@ func TestDetectCodexInstallationFindsPerUserDesktop(t *testing.T) {
 	CodexDesktopExecutables = perUser
 	desktop := filepath.Join(home, "Applications", "Codex.app", "Contents", "MacOS", "Codex")
 	testkit.WriteExecutable(t, desktop, "#!/bin/sh\n")
-	if got := DetectCodexInstallation().Desktop; got != desktop {
+	if got := DetectCodexInstallation(CodexHome{Codex: t.TempDir()}).Desktop; got != desktop {
 		t.Fatalf("desktop=%q, want the ~/Applications install", got)
 	}
 }

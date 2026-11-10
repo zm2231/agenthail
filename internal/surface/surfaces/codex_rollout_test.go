@@ -32,10 +32,10 @@ func continuedTurnRecords(turn, user, assistant string, ordinal *int) string {
 	return out
 }
 
-func writeContinuedRollout(t *testing.T) (original, continued string) {
+func writeContinuedRollout(t *testing.T) (codexHome CodexHome, original, continued string) {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("CODEX_HOME", home)
+	codexHome = CodexHome{Codex: home, State: t.TempDir()}
 	ordinal := 0
 	meta := fmt.Sprintf(`{"type":"session_meta","ordinal":0,"payload":{"id":%q,"history_mode":"paginated"}}`, continuedThread) + "\n"
 	first := continuedTurnRecords("turn-1", "first question", "first answer", &ordinal)
@@ -58,7 +58,7 @@ func writeContinuedRollout(t *testing.T) (original, continued string) {
 	if err := os.WriteFile(continued, []byte(revertMeta+third), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return original, continued
+	return codexHome, original, continued
 }
 
 func messageTexts(items []surface.TimelineItem) []string {
@@ -72,8 +72,8 @@ func messageTexts(items []surface.TimelineItem) []string {
 }
 
 func TestAContinuedRolloutReadsItsRetainedHistoryWithoutTheRevertedTurn(t *testing.T) {
-	_, continued := writeContinuedRollout(t)
-	page, err := readCodexTranscriptPage(context.Background(), continued, continuedThread, 0, 0)
+	home, _, continued := writeContinuedRollout(t)
+	page, err := readCodexTranscriptPage(context.Background(), home, continued, continuedThread, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,8 +90,8 @@ func TestAContinuedRolloutReadsItsRetainedHistoryWithoutTheRevertedTurn(t *testi
 }
 
 func TestOlderPagesOfAContinuedRolloutCrossIntoTheFileItContinues(t *testing.T) {
-	_, continued := writeContinuedRollout(t)
-	newest, err := readCodexTranscriptPage(context.Background(), continued, continuedThread, 0, 1)
+	home, _, continued := writeContinuedRollout(t)
+	newest, err := readCodexTranscriptPage(context.Background(), home, continued, continuedThread, 0, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestOlderPagesOfAContinuedRolloutCrossIntoTheFileItContinues(t *testing.T) 
 	if newest.NextBefore <= 0 {
 		t.Fatalf("next before=%d, want a cursor into the earlier rollout", newest.NextBefore)
 	}
-	older, err := readCodexTranscriptPage(context.Background(), continued, continuedThread, newest.NextBefore, 1)
+	older, err := readCodexTranscriptPage(context.Background(), home, continued, continuedThread, newest.NextBefore, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,12 +117,12 @@ func TestOlderPagesOfAContinuedRolloutCrossIntoTheFileItContinues(t *testing.T) 
 }
 
 func TestAContinuationReportsTheItemsItRevertedFromTheTrustedRollout(t *testing.T) {
-	original, continued := writeContinuedRollout(t)
+	home, original, continued := writeContinuedRollout(t)
 	info, err := os.Stat(original)
 	if err != nil {
 		t.Fatal(err)
 	}
-	codex := NewCodex("http://127.0.0.1:1")
+	codex := NewCodexIn(home, "http://127.0.0.1:1")
 	session := surface.Session{ID: continuedThread, Surface: surface.KindCodex, Transcript: continued}
 	dropped, continues, err := codex.TranscriptContinuation(context.Background(), &session, "", transcriptFileIdentity(info))
 	if err != nil || !continues {
@@ -134,7 +134,7 @@ func TestAContinuationReportsTheItemsItRevertedFromTheTrustedRollout(t *testing.
 }
 
 func TestACompressedTrustedRolloutIsMatchedByItsPath(t *testing.T) {
-	original, continued := writeContinuedRollout(t)
+	home, original, continued := writeContinuedRollout(t)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	plain, err := os.ReadFile(original)
@@ -151,7 +151,7 @@ func TestACompressedTrustedRolloutIsMatchedByItsPath(t *testing.T) {
 	if err := os.Remove(original); err != nil {
 		t.Fatal(err)
 	}
-	codex := NewCodex("http://127.0.0.1:1")
+	codex := NewCodexIn(home, "http://127.0.0.1:1")
 	session := surface.Session{ID: continuedThread, Surface: surface.KindCodex, Transcript: continued}
 	dropped, continues, err := codex.TranscriptContinuation(context.Background(), &session, original, "0:0")
 	if err != nil || !continues {
@@ -160,7 +160,7 @@ func TestACompressedTrustedRolloutIsMatchedByItsPath(t *testing.T) {
 	if got, want := messageTexts(dropped), []string{"reverted question", "reverted answer"}; !slices.Equal(got, want) {
 		t.Fatalf("dropped=%q, want %q", got, want)
 	}
-	page, err := readCodexTranscriptPage(context.Background(), continued, continuedThread, 0, 0)
+	page, err := readCodexTranscriptPage(context.Background(), home, continued, continuedThread, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestACompressedTrustedRolloutIsMatchedByItsPath(t *testing.T) {
 }
 
 func TestARolloutThatDoesNotContinueTheTrustedOneIsNotAContinuation(t *testing.T) {
-	original, continued := writeContinuedRollout(t)
+	home, original, continued := writeContinuedRollout(t)
 	info, err := os.Stat(original)
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +179,7 @@ func TestARolloutThatDoesNotContinueTheTrustedOneIsNotAContinuation(t *testing.T
 	if err := os.WriteFile(unrelated, []byte(fmt.Sprintf(`{"type":"session_meta","payload":{"id":%q,"history_mode":"paginated"}}`, continuedThread)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	codex := NewCodex("http://127.0.0.1:1")
+	codex := NewCodexIn(home, "http://127.0.0.1:1")
 	session := surface.Session{ID: continuedThread, Surface: surface.KindCodex, Transcript: unrelated}
 	if _, continues, err := codex.TranscriptContinuation(context.Background(), &session, original, transcriptFileIdentity(info)); err != nil || continues {
 		t.Fatalf("continues=%v err=%v, want a rollout without history_base rejected", continues, err)
@@ -195,7 +195,7 @@ func TestARolloutThatDoesNotContinueTheTrustedOneIsNotAContinuation(t *testing.T
 }
 
 func TestTwoRevertsReadAsOneHistoryAndReportOnlyTheTrustedRolloutsRevertedTurn(t *testing.T) {
-	original, continued := writeContinuedRollout(t)
+	home, original, continued := writeContinuedRollout(t)
 	plain, err := os.ReadFile(continued)
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +208,7 @@ func TestTwoRevertsReadAsOneHistoryAndReportOnlyTheTrustedRolloutsRevertedTurn(t
 	if err := os.WriteFile(latest, []byte(meta+continuedTurnRecords("turn-4", "latest question", "latest answer", &ordinal)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	page, err := readCodexTranscriptPage(context.Background(), latest, continuedThread, 0, 0)
+	page, err := readCodexTranscriptPage(context.Background(), home, latest, continuedThread, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestTwoRevertsReadAsOneHistoryAndReportOnlyTheTrustedRolloutsRevertedTurn(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	codex := NewCodex("http://127.0.0.1:1")
+	codex := NewCodexIn(home, "http://127.0.0.1:1")
 	session := surface.Session{ID: continuedThread, Surface: surface.KindCodex, Transcript: latest}
 	dropped, continues, err := codex.TranscriptContinuation(context.Background(), &session, "", transcriptFileIdentity(info))
 	if err != nil || !continues {

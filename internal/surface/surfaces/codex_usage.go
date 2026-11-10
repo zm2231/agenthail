@@ -49,7 +49,7 @@ type codexRateWindow struct {
 // Usage is as fresh as the last Codex turn on this computer; FetchedAt says
 // when that was.
 func (c *Codex) Usage(ctx context.Context) (*surface.Usage, error) {
-	for _, path := range newestCodexRollouts(filepath.Join(codexHome(), "sessions"), codexUsageRollouts) {
+	for _, path := range newestCodexRollouts(c.home.sessionsDir(), codexUsageRollouts) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

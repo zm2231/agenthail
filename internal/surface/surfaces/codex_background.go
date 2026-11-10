@@ -17,7 +17,7 @@ type codexBackgroundState struct {
 }
 
 func (c *Codex) Background(ctx context.Context, session surface.Session) *surface.BackgroundTasks {
-	path := codexTranscriptPath(&session)
+	path := c.home.transcriptPath(&session)
 	if path == "" {
 		return nil
 	}

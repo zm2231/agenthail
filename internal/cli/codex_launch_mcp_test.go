@@ -13,6 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 func TestATerminalLaunchStartsItsThreadWithTheLaunchCredentialAndClaimsIt(t *testing.T) {
@@ -50,7 +51,7 @@ func TestATerminalLaunchStartsItsThreadWithTheLaunchCredentialAndClaimsIt(t *tes
 	app.daemonAPIOverride = func() (*daemonAPIClient, error) {
 		return &daemonAPIClient{baseURL: server.URL, token: "dashboard-synthetic", httpClient: server.Client()}, nil
 	}
-	codex, err := app.managedCodexForLaunch(launchID)
+	codex, err := app.managedCodexForLaunch(surfaces.CodexHomeFromEnv(), launchID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +102,7 @@ func TestALaunchThatFailsBeforeCodexStartsLeavesNoCredentialFile(t *testing.T) {
 func TestATerminalLaunchWithoutACredentialStartsPlain(t *testing.T) {
 	codextest.Home(t)
 	app, _ := cliFixture(t, &cliSurface{kind: surface.KindCodex})
-	if _, err := app.managedCodexForLaunch("agenthail-plain"); err != nil {
+	if _, err := app.managedCodexForLaunch(surfaces.CodexHomeFromEnv(), "agenthail-plain"); err != nil {
 		t.Fatal(err)
 	}
 }

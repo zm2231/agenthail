@@ -15,7 +15,7 @@ const (
 )
 
 func (c *Codex) reconcileLocalStatus(ctx context.Context, session *surface.Session) {
-	path := codexTranscriptPath(session)
+	path := c.home.transcriptPath(session)
 	if path == "" {
 		return
 	}

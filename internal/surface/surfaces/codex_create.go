@@ -13,7 +13,7 @@ import (
 // StartSession creates the thread on Codex Desktop when its bridge is
 // reachable and on Codex's app-server daemon otherwise.
 func (c *Codex) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
-	lock, err := acquireCodexWriteLock(ctx)
+	lock, err := c.home.acquireWriteLock(ctx)
 	if err != nil {
 		return nil, nil, surface.DeliveryUnavailable(err)
 	}

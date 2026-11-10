@@ -162,7 +162,7 @@ func (a *App) cmdDoctor(args []string) error {
 	codexHooks := ""
 	if executable, err := os.Executable(); err == nil {
 		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		codexHooks, _ = surfaces.CodexContextState(callCtx, executable)
+		codexHooks, _ = surfaces.CodexContextState(callCtx, surfaces.CodexHomeFromEnv(), executable)
 		cancel()
 	}
 	claudeConfigRoots, _ := a.claudeConfigRoots(ctx)

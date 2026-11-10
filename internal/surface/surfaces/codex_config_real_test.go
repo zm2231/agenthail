@@ -94,9 +94,10 @@ func realManagedCodexWith(t *testing.T, model http.Handler) (restart func()) {
 	}
 	t.Setenv("CODEX_HOME", codexHome)
 	t.Setenv("HOME", home)
+	appServer := CodexHomeFromEnv()
 	start := func() func() {
 		ctx, cancel := context.WithCancel(context.Background())
-		cmd := processGroupCommand(ctx, "codex", "app-server", "--disable", "plugins", "--listen", "unix://"+managedCodexSocketPath())
+		cmd := processGroupCommand(ctx, "codex", "app-server", "--disable", "plugins", "--listen", "unix://"+appServer.socketPath())
 		cmd.Env = []string{"HOME=" + home, "CODEX_HOME=" + codexHome, "PATH=" + os.Getenv("PATH"), "MOCK_KEY=x", "TMPDIR=" + filepath.Join(home, "tmp")}
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
@@ -117,7 +118,7 @@ func realManagedCodexWith(t *testing.T, model http.Handler) (restart func()) {
 		}
 		deadline := time.Now().Add(20 * time.Second)
 		for {
-			if client, err := dialManagedCodex(context.Background()); err == nil {
+			if client, err := appServer.dialManaged(context.Background()); err == nil {
 				_ = client.Close()
 				return stop
 			}
@@ -132,7 +133,7 @@ func realManagedCodexWith(t *testing.T, model http.Handler) (restart func()) {
 	t.Cleanup(func() { stop() })
 	return func() {
 		stop()
-		_ = os.Remove(managedCodexSocketPath())
+		_ = os.Remove(appServer.socketPath())
 		stop = start()
 	}
 }

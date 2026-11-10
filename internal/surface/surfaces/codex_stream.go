@@ -34,7 +34,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 		}()
 	}
 	if !sess.TranscriptOffsetSet && sess.TranscriptFromStart {
-		if err := awaitCodexRollout(ctx, sess, timeout); err != nil {
+		if err := c.home.awaitRollout(ctx, sess, timeout); err != nil {
 			return err
 		}
 		sess.TranscriptOffset = 0
@@ -57,12 +57,12 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 	return c.streamTranscript(ctx, sess, uuid, onEvent, timeout)
 }
 
-// awaitCodexRollout waits for a thread's rollout, which Codex writes only
-// once the thread's first turn starts.
-func awaitCodexRollout(ctx context.Context, sess *surface.Session, timeout time.Duration) error {
+// awaitRollout waits for a thread's rollout, which Codex writes only once the
+// thread's first turn starts.
+func (h CodexHome) awaitRollout(ctx context.Context, sess *surface.Session, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		if path := codexTranscriptPath(sess); path != "" && fileExists(path) {
+		if path := h.transcriptPath(sess); path != "" && fileExists(path) {
 			return nil
 		}
 		if !time.Now().Before(deadline) {

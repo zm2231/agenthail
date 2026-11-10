@@ -34,7 +34,7 @@ func (c *Claude) ReadAttachment(ctx context.Context, s *surface.Session, id stri
 	return readTranscriptAttachment(ctx, s, id, "claude", c.transcriptPath)
 }
 func (c *Codex) ReadAttachment(ctx context.Context, s *surface.Session, id string) (*surface.Attachment, []byte, error) {
-	return readTranscriptAttachment(ctx, s, id, "codex", codexTranscriptPath)
+	return readTranscriptAttachment(ctx, s, id, "codex", c.home.transcriptPath)
 }
 
 func readTranscriptAttachment(ctx context.Context, s *surface.Session, id, source string, transcriptPath func(*surface.Session) string) (*surface.Attachment, []byte, error) {

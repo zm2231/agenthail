@@ -38,8 +38,8 @@ func (c launchMCPCredentials) Unattached(threadID string, err error) {
 	fmt.Fprintf(os.Stderr, "agenthail: %s starts without the agenthail MCP server: %s\n", threadID, err)
 }
 
-func (a *App) managedCodexForLaunch(launchID string) (*surfaces.Codex, error) {
-	codex := surfaces.NewCodex("")
+func (a *App) managedCodexForLaunch(home surfaces.CodexHome, launchID string) (*surfaces.Codex, error) {
+	codex := surfaces.NewCodexIn(home, "")
 	if launchID == "" {
 		return codex, nil
 	}

@@ -22,7 +22,7 @@ func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, requ
 // ReadSession uses the local transcript for Desktop content and the managed app-server for
 // managed exchanges; timeline items always come from the local transcript.
 func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	page, err := readCodexTranscriptPage(ctx, codexTranscriptPath(session), session.ID, request.Before, request.Limit)
+	page, err := readCodexTranscriptPage(ctx, c.home, c.home.transcriptPath(session), session.ID, request.Before, request.Limit)
 	if err != nil {
 		return nil, err
 	}

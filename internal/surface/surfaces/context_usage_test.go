@@ -284,9 +284,10 @@ func newLiveContext(t *testing.T, records ...string) *liveContext {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "codex.jsonl")
 	writeTestTranscript(t, path, records...)
+	fake := startManagedCodex(t, nil)
 	live := &liveContext{
 		codex:   isolatedManagedRuntime(t),
-		fake:    startManagedCodex(t, nil),
+		fake:    fake,
 		session: &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: codexTransportManaged, Transcript: path, TranscriptOffsetSet: true},
 	}
 	live.fake.AddThread(codextest.Thread{ID: live.session.ID})
@@ -357,19 +358,19 @@ func TestCodexReadSessionFindsTranscriptByLocalSessionDate(t *testing.T) {
 	time.Local = time.FixedZone("EDT", -4*60*60)
 	t.Cleanup(func() { time.Local = originalLocal })
 	home := t.TempDir()
-	t.Setenv("CODEX_HOME", home)
+	codex := &Codex{home: CodexHome{Codex: home}}
 	id := uuidV7ForTest(time.Date(2026, 6, 23, 1, 30, 0, 0, time.UTC))
 	path := filepath.Join(home, "sessions", "2026", "06", "22", "rollout-"+id+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
 	writeTestTranscript(t, path, `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"found"}]}}`)
-	read, err := (&Codex{}).ReadSession(context.Background(), &surface.Session{ID: id}, surface.SessionReadRequest{Limit: 5})
+	read, err := codex.ReadSession(context.Background(), &surface.Session{ID: id}, surface.SessionReadRequest{Limit: 5})
 	if err != nil || len(read.Items) != 1 || read.Items[0].Text != "found" {
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
 	notV7 := "1845b4c6-eb75-4e59-b439-b95c3698ac31"
-	read, err = (&Codex{}).ReadSession(context.Background(), &surface.Session{ID: notV7}, surface.SessionReadRequest{Limit: 5})
+	read, err = codex.ReadSession(context.Background(), &surface.Session{ID: notV7}, surface.SessionReadRequest{Limit: 5})
 	if err != nil || len(read.Items) != 0 || read.UnavailableReason == "" {
 		t.Fatalf("UUIDv4 was treated as a transcript timestamp: read=%+v err=%v", read, err)
 	}

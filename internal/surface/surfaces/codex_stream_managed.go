@@ -125,7 +125,7 @@ func (c *Codex) followManagedTurnClient(ctx context.Context, client codexClient,
 				if hasAssistant {
 					version = uint64(len(assistant.Text))
 				}
-				onEvent(surface.StreamEvent{ID: key + ":done", ProviderKey: key + ":done", Version: version, Operation: "phase", TurnID: turn.ID, Kind: "done", Turn: codexRolloutTurnMetadata(ctx, codexTranscriptPath(sess), turn.ID)})
+				onEvent(surface.StreamEvent{ID: key + ":done", ProviderKey: key + ":done", Version: version, Operation: "phase", TurnID: turn.ID, Kind: "done", Turn: codexRolloutTurnMetadata(ctx, c.home.transcriptPath(sess), turn.ID)})
 				return nil
 			}
 		}

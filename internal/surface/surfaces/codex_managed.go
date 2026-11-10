@@ -49,7 +49,7 @@ type managedCodexClient struct {
 	err           error
 	closed        chan struct{}
 	notified      chan struct{}
-	server        os.FileInfo
+	server        *codexServer
 }
 
 const managedNotificationLimit = 1000
@@ -73,21 +73,22 @@ func newManagedCodexClient(ws *websocket.Conn) *managedCodexClient {
 	return client
 }
 
-// codexServerRestarted reports whether the managed app-server whose control
-// socket was server no longer listens there. A restarted server binds a new
-// socket file, and every turn the old one ran is gone.
-func codexServerRestarted(server os.FileInfo) bool {
-	current, err := os.Stat(managedCodexSocketPath())
-	return err != nil || !os.SameFile(current, server) || !current.ModTime().Equal(server.ModTime())
+type codexServer struct {
+	path string
+	info os.FileInfo
 }
 
-func managedCodexSocketPath() string {
-	return filepath.Join(codexHome(), "app-server-control", "app-server-control.sock")
+// restarted reports whether the managed app-server that was listening on s no
+// longer listens there. A restarted server binds a new socket file, and every
+// turn the old one ran is gone.
+func (s *codexServer) restarted() bool {
+	current, err := os.Stat(s.path)
+	return err != nil || !os.SameFile(current, s.info) || !current.ModTime().Equal(s.info.ModTime())
 }
 
-func dialManagedCodex(ctx context.Context) (*managedCodexClient, error) {
-	socketPath := managedCodexSocketPath()
-	server, err := os.Stat(socketPath)
+func (h CodexHome) dialManaged(ctx context.Context) (*managedCodexClient, error) {
+	socketPath := h.socketPath()
+	info, err := os.Stat(socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("managed Codex app-server is unavailable: %w", err)
 	}
@@ -105,7 +106,7 @@ func dialManagedCodex(ctx context.Context) (*managedCodexClient, error) {
 		return nil, fmt.Errorf("connect managed Codex app-server: %w", err)
 	}
 	client := newManagedCodexClient(ws)
-	client.server = server
+	client.server = &codexServer{path: socketPath, info: info}
 	if _, err := client.Request(ctx, "initialize", map[string]any{
 		"clientInfo":   map[string]any{"name": "agenthail", "version": "1"},
 		"capabilities": map[string]any{"experimentalApi": true},
@@ -397,16 +398,11 @@ func codexResumeParams(sess *surface.Session) map[string]any {
 	return params
 }
 
-func codexWriteLockPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agenthail", "codex-write.lock")
-}
-
-func acquireCodexWriteLock(ctx context.Context) (*os.File, error) {
-	if err := os.MkdirAll(filepath.Dir(codexWriteLockPath()), 0700); err != nil {
+func (h CodexHome) acquireWriteLock(ctx context.Context) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(h.writeLockPath()), 0700); err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(codexWriteLockPath(), os.O_CREATE|os.O_RDWR, 0600)
+	file, err := os.OpenFile(h.writeLockPath(), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -434,11 +430,6 @@ func releaseCodexWriteLock(file *os.File) {
 // errCodexThreadMoving refuses a write to a thread a move holds; the write
 // is retried and, once the move is done, goes to the host the thread moved to.
 var errCodexThreadMoving = errors.New("the Codex thread is moving to another host")
-
-func codexThreadLockPath(threadID string) string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agenthail", "codex-threads", threadID+".lock")
-}
 
 // lockedCodexThread takes the thread's lock file, creating it, and returns it
 // once the file it locked is still the one at the path; a release unlinks the
@@ -482,11 +473,11 @@ func sameFile(file *os.File, path string) bool {
 // move holds the thread: after taking it, the hold passes through the write
 // lock once, so a write that started before the file existed has ended and
 // every later write finds the file.
-func holdCodexThread(ctx context.Context, threadID string) (release func(), err error) {
+func (h CodexHome) holdThread(ctx context.Context, threadID string) (release func(), err error) {
 	if !validCodexMoveThread(threadID) {
 		return nil, fmt.Errorf("Codex thread id %q is not valid", threadID)
 	}
-	path := codexThreadLockPath(threadID)
+	path := h.threadLockPath(threadID)
 	file, err := lockedCodexThread(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("wait for writes to Codex thread %s: %w", threadID, err)
@@ -495,7 +486,7 @@ func holdCodexThread(ctx context.Context, threadID string) (release func(), err 
 		_ = os.Remove(path)
 		releaseCodexWriteLock(file)
 	}
-	fence, err := acquireCodexWriteLock(ctx)
+	fence, err := h.acquireWriteLock(ctx)
 	if err != nil {
 		release()
 		return nil, fmt.Errorf("wait for writes to Codex thread %s: %w", threadID, err)
@@ -507,15 +498,15 @@ func holdCodexThread(ctx context.Context, threadID string) (release func(), err 
 // acquireCodexThreadWrite takes the Codex write lock for a write to one
 // thread, refusing while a move holds the thread. A lock file no move holds
 // was left by a move that did not finish, and is removed.
-func acquireCodexThreadWrite(ctx context.Context, threadID string) (release func(), err error) {
-	lock, err := acquireCodexWriteLock(ctx)
+func (h CodexHome) acquireThreadWrite(ctx context.Context, threadID string) (release func(), err error) {
+	lock, err := h.acquireWriteLock(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !validCodexMoveThread(threadID) {
 		return func() { releaseCodexWriteLock(lock) }, nil
 	}
-	path := codexThreadLockPath(threadID)
+	path := h.threadLockPath(threadID)
 	thread, err := os.OpenFile(path, os.O_RDWR, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return func() { releaseCodexWriteLock(lock) }, nil
@@ -544,7 +535,7 @@ func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writa
 
 func (c *Codex) requestSessionWith(ctx context.Context, sess *surface.Session, writable bool, run func(codexClient) (map[string]any, error)) (map[string]any, error) {
 	if writable {
-		release, err := acquireCodexThreadWrite(ctx, sess.ID)
+		release, err := c.home.acquireThreadWrite(ctx, sess.ID)
 		if err != nil {
 			return nil, surface.DeliveryUnavailable(err)
 		}

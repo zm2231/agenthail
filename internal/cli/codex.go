@@ -18,7 +18,8 @@ func (a *App) cmdCodex(args []string) error {
 	if len(args) == 1 && args[0] == "--repair-managed-runtime" {
 		return repairManagedCodexRuntime(context.Background())
 	}
-	codex, err := a.managedCodexForLaunch(strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_ID")))
+	home := surfaces.CodexHomeFromEnv()
+	codex, err := a.managedCodexForLaunch(home, strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_ID")))
 	if err != nil {
 		return err
 	}
@@ -27,13 +28,13 @@ func (a *App) cmdCodex(args []string) error {
 			return fmt.Errorf("agenthail codex manages the remote transport; remove %s", arg)
 		}
 	}
-	path, err := surfaces.CodexDaemonCLI()
+	path, err := surfaces.CodexDaemonCLI(home)
 	if err != nil {
 		return fmt.Errorf("find codex: %w", err)
 	}
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancelStart()
-	if err := surfaces.NewCodex("").EnsureRuntime(startCtx); err != nil {
+	if err := codex.EnsureRuntime(startCtx); err != nil {
 		return err
 	}
 	cwd, err := os.Getwd()
@@ -57,10 +58,10 @@ func (a *App) cmdCodex(args []string) error {
 		defer cancel()
 		return runManagedCodexLaunch(prepareCtx, args, cwd, launchID, receiptPath, binding, codex.PrepareManagedTerminalSession, func(path string, argv, env []string) error {
 			return syscall.Exec(path, argv, env)
-		}, path)
+		}, path, home)
 	}
 	argv := append([]string{"codex", "--remote", "unix://"}, codexRemoteArgs(args, cwd)...)
-	return syscall.Exec(path, argv, surface.AgentEnv(os.Environ()))
+	return syscall.Exec(path, argv, home.ChildEnv(surface.AgentEnv(os.Environ())))
 }
 
 type managedCodexPreparer func(context.Context, string, string) (*surface.Session, error)
@@ -96,7 +97,7 @@ func managedCodexLaunchBindingFromEnv() (managedCodexLaunchBinding, error) {
 	return binding, nil
 }
 
-func runManagedCodexLaunch(ctx context.Context, args []string, cwd, launchID, receiptPath string, binding managedCodexLaunchBinding, prepare managedCodexPreparer, execute managedCodexExec, path string) error {
+func runManagedCodexLaunch(ctx context.Context, args []string, cwd, launchID, receiptPath string, binding managedCodexLaunchBinding, prepare managedCodexPreparer, execute managedCodexExec, path string, home surfaces.CodexHome) error {
 	model, message, err := managedCodexLaunchArgs(args)
 	if err != nil {
 		return err
@@ -119,7 +120,7 @@ func runManagedCodexLaunch(ctx context.Context, args []string, cwd, launchID, re
 	if message != "" {
 		argv = append(argv, "--", message)
 	}
-	return execute(path, argv, surface.AgentEnv(os.Environ()))
+	return execute(path, argv, home.ChildEnv(surface.AgentEnv(os.Environ())))
 }
 
 func managedCodexLaunchArgs(args []string) (string, string, error) {
@@ -160,7 +161,7 @@ func managedCodexLaunchArgs(args []string) (string, string, error) {
 }
 
 func repairManagedCodexRuntime(ctx context.Context) error {
-	if err := surfaces.RestartManagedCodexRuntime(ctx); err != nil {
+	if err := surfaces.RestartManagedCodexRuntime(ctx, surfaces.CodexHomeFromEnv()); err != nil {
 		return fmt.Errorf("restart managed Codex runtime: %w", err)
 	}
 	fmt.Println("Codex's app-server daemon restarted; retry the affected conversation")

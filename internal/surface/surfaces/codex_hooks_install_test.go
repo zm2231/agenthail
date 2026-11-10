@@ -23,8 +23,7 @@ func isolatedCodexHome(t *testing.T) string {
 		t.Skipf("codex %q is older than %s, which these tests install for", out, CodexStopHookVersion)
 	}
 	home := t.TempDir()
-	t.Setenv("CODEX_HOME", home)
-	t.Setenv("HOME", home)
+	t.Setenv("HOME", t.TempDir())
 	return home
 }
 
@@ -35,9 +34,9 @@ func codexContext(t *testing.T) context.Context {
 	return ctx
 }
 
-func requireCodexState(t *testing.T, want string) {
+func requireCodexState(t *testing.T, home, want string) {
 	t.Helper()
-	got, err := CodexContextState(codexContext(t), testAgenthail)
+	got, err := CodexContextState(codexContext(t), CodexHome{Codex: home}, testAgenthail)
 	if err != nil || got != want {
 		t.Fatalf("state=%q err=%v, want %q", got, err, want)
 	}
@@ -54,14 +53,14 @@ func TestHooksInstallCodexKeepsThePersonsConfigAndIsUndoneByUninstall(t *testing
 			t.Fatal(err)
 		}
 	}
-	requireCodexState(t, CodexHooksMissing)
+	requireCodexState(t, home, CodexHooksMissing)
 
 	for range 2 {
-		if _, err := InstallCodexContext(codexContext(t), testAgenthail); err != nil {
+		if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
 			t.Fatal(err)
 		}
 	}
-	requireCodexState(t, CodexHooksInstalled)
+	requireCodexState(t, home, CodexHooksInstalled)
 	written, _ := os.ReadFile(config)
 	if !strings.Contains(string(written), "# my settings") || !strings.Contains(string(written), `command = "notify"`) || strings.Count(string(written), "hook session-context --surface codex") != 2 || strings.Count(string(written), "hook stop --surface codex") != 1 || strings.Count(string(written), "trusted_hash") != 3 {
 		t.Fatalf("config after install:\n%s", written)
@@ -74,10 +73,10 @@ func TestHooksInstallCodexKeepsThePersonsConfigAndIsUndoneByUninstall(t *testing
 		t.Fatalf("AGENTS.md after install:\n%s", instructions)
 	}
 
-	if _, err := UninstallCodexContext(codexContext(t)); err != nil {
+	if _, err := UninstallCodexContext(codexContext(t), CodexHome{Codex: home}); err != nil {
 		t.Fatal(err)
 	}
-	requireCodexState(t, CodexHooksMissing)
+	requireCodexState(t, home, CodexHooksMissing)
 	written, _ = os.ReadFile(config)
 	if strings.Contains(string(written), "agenthail") || strings.Contains(string(written), "trusted_hash") || !strings.Contains(string(written), "# my settings") || !strings.Contains(string(written), `command = "notify"`) || !strings.Contains(string(written), `prompt = "Stay on task"`) {
 		t.Fatalf("config after uninstall:\n%s", written)
@@ -98,10 +97,10 @@ func TestHooksInstallCodexWritesIntoAHooksFileThePersonAlreadyUses(t *testing.T)
 	if err := os.WriteFile(hooks, []byte(`{"hooks":{"SessionStart":`+mine+`}}`), 0640); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := InstallCodexContext(codexContext(t), testAgenthail); err != nil {
+	if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
 		t.Fatal(err)
 	}
-	requireCodexState(t, CodexHooksInstalled)
+	requireCodexState(t, home, CodexHooksInstalled)
 	data, _ := os.ReadFile(hooks)
 	if start := gjson.GetBytes(data, "hooks.SessionStart").Array(); len(start) != 2 || start[0].Raw != gjson.Get(mine, "0").Raw || !ownsCodexContextHook(start[1].Get("hooks.0.command").String()) {
 		t.Fatalf("hooks.json after install: %s", data)
@@ -118,20 +117,20 @@ func TestHooksInstallCodexWritesIntoAHooksFileThePersonAlreadyUses(t *testing.T)
 	if err := os.Remove(filepath.Join(home, "config.toml")); err != nil {
 		t.Fatal(err)
 	}
-	requireCodexState(t, CodexHooksUntrusted)
-	if _, err := InstallCodexContext(codexContext(t), testAgenthail); err != nil {
+	requireCodexState(t, home, CodexHooksUntrusted)
+	if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
 		t.Fatal(err)
 	}
-	requireCodexState(t, CodexHooksInstalled)
+	requireCodexState(t, home, CodexHooksInstalled)
 
-	if _, err := UninstallCodexContext(codexContext(t)); err != nil {
+	if _, err := UninstallCodexContext(codexContext(t), CodexHome{Codex: home}); err != nil {
 		t.Fatal(err)
 	}
 	data, _ = os.ReadFile(hooks)
 	if string(data) != `{"hooks":{"SessionStart":`+mine+`}}` {
 		t.Fatalf("hooks.json after uninstall: %s", data)
 	}
-	requireCodexState(t, CodexHooksMissing)
+	requireCodexState(t, home, CodexHooksMissing)
 }
 
 func TestACodexTooOldToContinueABlockedTurnGetsNoStopHookUntilItIsUpdated(t *testing.T) {
@@ -144,28 +143,28 @@ func TestACodexTooOldToContinueABlockedTurnGetsNoStopHookUntilItIsUpdated(t *tes
 	}
 	path := os.Getenv("PATH")
 	t.Setenv("PATH", bin+":"+path)
-	if _, err := InstallCodexContext(codexContext(t), testAgenthail); err != nil {
+	if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
 		t.Fatal(err)
 	}
-	requireCodexState(t, CodexHooksNoNudge)
+	requireCodexState(t, home, CodexHooksNoNudge)
 	config, _ := os.ReadFile(filepath.Join(home, "config.toml"))
 	if strings.Contains(string(config), "hook stop") || strings.Count(string(config), "hook session-context --surface codex") != 2 {
 		t.Fatalf("config after install on an older Codex:\n%s", config)
 	}
 
 	t.Setenv("PATH", path)
-	requireCodexState(t, CodexHooksOutdated)
-	if _, err := InstallCodexContext(codexContext(t), testAgenthail); err != nil {
+	requireCodexState(t, home, CodexHooksOutdated)
+	if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
 		t.Fatal(err)
 	}
-	requireCodexState(t, CodexHooksInstalled)
+	requireCodexState(t, home, CodexHooksInstalled)
 
 	t.Setenv("PATH", bin+":"+path)
-	requireCodexState(t, CodexHooksOutdated)
-	if _, err := InstallCodexContext(codexContext(t), testAgenthail); err != nil {
+	requireCodexState(t, home, CodexHooksOutdated)
+	if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
 		t.Fatal(err)
 	}
-	requireCodexState(t, CodexHooksNoNudge)
+	requireCodexState(t, home, CodexHooksNoNudge)
 	if config, _ := os.ReadFile(filepath.Join(home, "config.toml")); strings.Contains(string(config), "hook stop") {
 		t.Fatalf("install on a downgraded Codex left the Stop hook:\n%s", config)
 	}
@@ -175,15 +174,14 @@ func TestHooksInstallCodexWithoutCodexWritesNothing(t *testing.T) {
 	home := t.TempDir()
 	codexHome := filepath.Join(home, ".codex")
 	t.Setenv("HOME", home)
-	t.Setenv("CODEX_HOME", codexHome)
 	t.Setenv("PATH", t.TempDir())
-	if _, err := InstallCodexContext(codexContext(t), testAgenthail); err == nil {
+	if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: codexHome}, testAgenthail); err == nil {
 		t.Fatal("install succeeded without a Codex to write its config")
 	}
 	if _, err := os.Stat(codexHome); !os.IsNotExist(err) {
 		t.Fatalf("install left %s behind: %v", codexHome, err)
 	}
-	if state, err := CodexContextState(codexContext(t), testAgenthail); err != nil || state != "" {
+	if state, err := CodexContextState(codexContext(t), CodexHome{Codex: codexHome}, testAgenthail); err != nil || state != "" {
 		t.Fatalf("state=%q err=%v, want nothing to report", state, err)
 	}
 }
@@ -198,14 +196,14 @@ func TestHooksInstallCodexLeavesThePersonsAgentsFileByteForByte(t *testing.T) {
 			}
 		}
 		for range 2 {
-			if _, err := InstallCodexContext(codexContext(t), testAgenthail); err != nil {
+			if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
 				t.Fatal(err)
 			}
 		}
 		if installed, _ := os.ReadFile(memory); !strings.HasPrefix(string(installed), notes) || strings.Count(string(installed), codexMemoryBegin) != 1 {
 			t.Fatalf("AGENTS.md after install over %q:\n%q", notes, installed)
 		}
-		if _, err := UninstallCodexContext(codexContext(t)); err != nil {
+		if _, err := UninstallCodexContext(codexContext(t), CodexHome{Codex: home}); err != nil {
 			t.Fatal(err)
 		}
 		after, err := os.ReadFile(memory)
@@ -221,7 +219,6 @@ func TestHooksInstallCodexLeavesThePersonsAgentsFileByteForByte(t *testing.T) {
 func TestCodexHooksStateReturnsByItsDeadlineWhenCodexWillNotExit(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("CODEX_HOME", home)
 	bin := t.TempDir()
 	stubborn := "#!/bin/sh\nwhile read line; do\n  id=$(printf '%s' \"$line\" | sed -n 's/.*\"id\":\\([0-9]*\\).*/\\1/p')\n  [ -n \"$id\" ] && printf '{\"id\":%s,\"result\":{\"data\":[]}}\\n' \"$id\"\ndone\nexec sleep 60\n"
 	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte(stubborn), 0700); err != nil {
@@ -231,7 +228,7 @@ func TestCodexHooksStateReturnsByItsDeadlineWhenCodexWillNotExit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	started := time.Now()
-	if state, err := CodexContextState(ctx, testAgenthail); err != nil || state != CodexHooksMissing {
+	if state, err := CodexContextState(ctx, CodexHome{Codex: home}, testAgenthail); err != nil || state != CodexHooksMissing {
 		t.Fatalf("state=%q err=%v", state, err)
 	}
 	if elapsed := time.Since(started); elapsed > 3*time.Second {

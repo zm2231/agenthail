@@ -31,20 +31,20 @@ var ErrCodexMissing = errors.New("no Codex CLI found to run Codex's app-server d
 
 // CodexDaemonCLI returns the Codex CLI that runs `codex app-server daemon`
 // lifecycle commands.
-func CodexDaemonCLI() (string, error) {
-	install := DetectCodexInstallation()
+func CodexDaemonCLI(home CodexHome) (string, error) {
+	install := DetectCodexInstallation(home)
 	if install.Daemon == "" {
-		return "", fmt.Errorf("%w (looked in %s and PATH); %s", ErrCodexMissing, strings.Join(codexDaemonPackageBinaries(), ", "), codexInstallRemediation)
+		return "", fmt.Errorf("%w (looked in %s and PATH); %s", ErrCodexMissing, strings.Join(home.daemonPackageBinaries(), ", "), codexInstallRemediation)
 	}
 	return install.Daemon, nil
 }
 
-func RestartManagedCodexRuntime(ctx context.Context) error {
-	_, err := runCodexDaemon(ctx, "restart")
+func RestartManagedCodexRuntime(ctx context.Context, home CodexHome) error {
+	_, err := runCodexDaemon(ctx, home, "restart")
 	return err
 }
 
-func runCodexDaemon(ctx context.Context, action string) ([]byte, error) {
+func runCodexDaemon(ctx context.Context, home CodexHome, action string) ([]byte, error) {
 	commandCtx := ctx
 	cancel := func() {}
 	timeout := 10 * time.Second
@@ -55,12 +55,12 @@ func runCodexDaemon(ctx context.Context, action string) ([]byte, error) {
 		commandCtx, cancel = context.WithTimeout(ctx, timeout)
 	}
 	defer cancel()
-	binary, err := CodexDaemonCLI()
+	binary, err := CodexDaemonCLI(home)
 	if err != nil {
 		return nil, err
 	}
 	command := exec.CommandContext(commandCtx, binary, "app-server", "daemon", action)
-	command.Env = surface.AgentEnv(os.Environ())
+	command.Env = home.ChildEnv(surface.AgentEnv(os.Environ()))
 	output, err := command.Output()
 	if err != nil {
 		detail := strings.TrimSpace(string(output))
@@ -77,7 +77,7 @@ func runCodexDaemon(ctx context.Context, action string) ([]byte, error) {
 }
 
 func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
-	install := DetectCodexInstallation()
+	install := DetectCodexInstallation(c.home)
 	desktopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	desktopErr := c.DesktopReady(desktopCtx)
 	cancel()
@@ -113,7 +113,7 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 		}
 	}
 	daemon := surface.RuntimeStatus{Name: "Codex app-server daemon", Problem: surface.RuntimeStopped, Remediation: codexDaemonRemediation}
-	output, err := runCodexDaemon(ctx, "version")
+	output, err := runCodexDaemon(ctx, c.home, "version")
 	var version codexDaemonVersion
 	switch {
 	case err != nil:
@@ -176,18 +176,18 @@ func (c *Codex) openManaged(ctx context.Context) (codexClient, error) {
 	if !c.managed {
 		return nil, errors.New("Codex's app-server daemon is disabled for a remote Codex Desktop endpoint")
 	}
-	if client, err := dialManagedCodex(ctx); err == nil {
+	if client, err := c.home.dialManaged(ctx); err == nil {
 		return client, nil
 	}
 	c.runtimeMu.Lock()
 	defer c.runtimeMu.Unlock()
-	if client, err := dialManagedCodex(ctx); err == nil {
+	if client, err := c.home.dialManaged(ctx); err == nil {
 		return client, nil
 	}
-	if _, err := runCodexDaemon(ctx, "start"); err != nil {
+	if _, err := runCodexDaemon(ctx, c.home, "start"); err != nil {
 		return nil, fmt.Errorf("start Codex's app-server daemon: %w", err)
 	}
-	client, err := dialManagedCodex(ctx)
+	client, err := c.home.dialManaged(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("Codex's app-server daemon started but is unreachable: %w", err)
 	}
@@ -199,7 +199,7 @@ func (c *Codex) dialManaged(ctx context.Context) (codexClient, error) {
 	if !c.managed {
 		return nil, errors.New("Codex's app-server daemon is disabled for a remote Codex Desktop endpoint")
 	}
-	client, err := dialManagedCodex(ctx)
+	client, err := c.home.dialManaged(ctx)
 	if err != nil {
 		return nil, err
 	}

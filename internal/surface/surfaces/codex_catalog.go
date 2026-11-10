@@ -32,7 +32,7 @@ func (c *Codex) CatalogList(ctx context.Context) ([]surface.Session, bool, error
 // folders. Watching each level means the folder for a new day is watched as
 // soon as Codex creates it, before its first rollout lands.
 func (c *Codex) CatalogWatchDirs() []string {
-	dir := filepath.Join(codexHome(), "sessions")
+	dir := c.home.sessionsDir()
 	dirs := []string{dir}
 	for range 3 {
 		entries, err := os.ReadDir(dir)

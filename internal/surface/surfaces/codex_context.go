@@ -47,7 +47,7 @@ type codexContextRecord struct {
 }
 
 func (c *Codex) ContextUsage(ctx context.Context, sess *surface.Session) (*surface.ContextUsage, error) {
-	path := codexTranscriptPath(sess)
+	path := c.home.transcriptPath(sess)
 	if path == "" {
 		return nil, nil
 	}
@@ -127,13 +127,13 @@ func (c *Codex) ContextUsage(ctx context.Context, sess *surface.Session) (*surfa
 	return &usage, nil
 }
 
-func codexTranscriptPath(sess *surface.Session) string {
+func (h CodexHome) transcriptPath(sess *surface.Session) string {
 	if sess.Transcript != "" {
 		return sess.Transcript
 	}
 	var matches []string
 	for _, day := range codexRolloutDays(uuidV7Time(sess.ID)) {
-		found, _ := filepath.Glob(filepath.Join(codexHome(), "sessions", day, "*"+sess.ID+"*.jsonl"))
+		found, _ := filepath.Glob(filepath.Join(h.sessionsDir(), day, "*"+sess.ID+"*.jsonl"))
 		matches = append(matches, found...)
 	}
 	sort.Strings(matches)
@@ -200,7 +200,7 @@ func (c *Codex) applyContextEvent(sess *surface.Session, event codexEvent, curre
 	if !ok {
 		return nil, false
 	}
-	path := codexTranscriptPath(sess)
+	path := c.home.transcriptPath(sess)
 	if path == "" {
 		return usage, true
 	}

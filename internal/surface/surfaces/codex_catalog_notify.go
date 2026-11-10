@@ -20,7 +20,7 @@ func (c *Codex) NotifyCatalog(ctx context.Context, changed func()) {
 		return
 	}
 	for {
-		if client, err := dialManagedCodex(ctx); err == nil {
+		if client, err := c.home.dialManaged(ctx); err == nil {
 			changed()
 			c.forwardCodexStatusChanges(ctx, client, changed)
 			_ = client.Close()

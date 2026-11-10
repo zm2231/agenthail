@@ -12,7 +12,7 @@ import (
 )
 
 func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
-	path := codexTranscriptPath(session)
+	path := c.home.transcriptPath(session)
 	if path == "" {
 		return fmt.Errorf("Codex local transcript is unavailable")
 	}
