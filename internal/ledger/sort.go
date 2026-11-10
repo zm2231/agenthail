@@ -116,6 +116,9 @@ func (s *Store) SortInputFor(projectKey, utteranceID string) (SortInput, bool, e
 
 // Only this host's captures: two hosts sorting one message would collide on its ref when they sync.
 func (s *Store) LocalProvisionalFrom(projectKey string, fromSeq int64, notBefore time.Time) ([]OwedSort, error) {
+	if whole := notBefore.Truncate(time.Second); whole.Before(notBefore) {
+		notBefore = whole.Add(time.Second)
+	}
 	rows, err := s.read.Query(`SELECT ref, seq FROM ledger_events WHERE project_key=? AND type=? AND seq>=? AND actor_host_id=COALESCE((SELECT host_id FROM host_identity WHERE id=1),'')
 		AND json_extract(payload,'$.ts')>=? ORDER BY seq`, projectKey, string(EventUtterance), fromSeq, notBefore.UTC().Format(time.RFC3339))
 	if err != nil {

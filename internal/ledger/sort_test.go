@@ -180,7 +180,7 @@ func TestOwedSortsStartAtAMessageNotASecondAndGoBackADayAtMost(t *testing.T) {
 	search := goal(t, s, "search")
 	now := time.Now()
 	var seqs []int64
-	for i, at := range []time.Time{now.Add(-25 * time.Hour), now, now, now, now} {
+	for i, at := range []time.Time{now.Add(-24*time.Hour - 500*time.Millisecond), now, now, now, now} {
 		u := said(fmt.Sprintf("claude-prompt:%d", i), fmt.Sprintf("message %d", i))
 		u.ProjectKey, u.At = project, at
 		e, _, err := s.RecordUtterance(u)
