@@ -370,6 +370,9 @@ func recordIn(t *testing.T, p ledgerProject, ref, text string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := p.store.RecordContext(p.key, ledger.ContextPayload{UtteranceID: ref, Status: ledger.ReplyLate}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	return e.Seq
 }
 

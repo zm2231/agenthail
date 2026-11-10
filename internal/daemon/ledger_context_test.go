@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,6 +121,26 @@ func TestADeliveredMessageIsJoinedToItsEntryInTheSession(t *testing.T) {
 	eventually(t, "the delivered message to be asked about", func() bool { return len(stub.asks()) == 1 })
 	c, _ := recordedContext(t, p, ledger.DeliveryRef("intent-1"))
 	if c.Status != ledger.ReplyFound || c.JoinedBy != ledger.JoinedByID || c.Reply.Text != "The fix is ready; ship it?" {
+		t.Fatalf("context = %+v", c)
+	}
+}
+
+func TestALongReplyKeptOutsideTheJournalRowIsReadWhole(t *testing.T) {
+	stub := &sorterStub{}
+	d, r, handler, p, search := sorterFixture(t, stub)
+	stub.setAnswer(fileTo(search))
+	s := p.session(t, r, "claude-long")
+	full := strings.Repeat("detail ", 1000) + "Which option do you want?"
+	payload, _ := json.Marshal(map[string]any{"itemId": "r1", "version": 1, "op": "upsert", "kind": "message", "role": "assistant", "body": full[:100], "truncated": true, "bodyRef": "body-r1", "ts": at(-time.Minute)})
+	if _, _, err := r.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.ID, Kind: "message", ProviderKey: "r1", Payload: payload, BodyRef: "body-r1", FullBody: []byte(full), ObservedAt: time.Now()}, registry.SessionJournalRetention{Count: 64, Bytes: 1 << 20}); err != nil {
+		t.Fatal(err)
+	}
+	journal(t, r, s.ID, "u1", map[string]any{"kind": "message", "role": "user", "promptId": "p-1", "body": "the second", "ts": at(0)})
+	runSorter(t, d)
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p-1", Prompt: "the second"})
+	eventually(t, "the message to be asked about", func() bool { return len(stub.asks()) == 1 })
+	c, _ := recordedContext(t, p, ledger.PromptRef("p-1"))
+	if c.Reply == nil || c.Reply.Runes != len(full) || !strings.HasSuffix(c.Reply.Text, "Which option do you want?") || !strings.HasSuffix(stub.asks()[0].Reply, "Which option do you want?") {
 		t.Fatalf("context = %+v", c)
 	}
 }
