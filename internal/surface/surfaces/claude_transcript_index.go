@@ -132,6 +132,17 @@ func (x *claudeTranscriptIndex) list(dir string, modified time.Time) {
 	x.dirs[dir] = listing
 }
 
+func (x *claudeTranscriptIndex) ids() []string {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	ids := make([]string, 0, len(x.byID))
+	for id := range x.byID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 func (x *claudeTranscriptIndex) forget(dir string) {
 	for _, id := range x.dirs[dir].ids {
 		delete(x.byID[id], dir)

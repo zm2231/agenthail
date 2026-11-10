@@ -15,6 +15,19 @@ type endedSurface struct {
 	missing map[string]bool
 	changed time.Time
 	checks  atomic.Int32
+	unseen  []surface.Session
+	asked   []string
+}
+
+func (s *endedSurface) UnseenConversations(known func(string) bool) []surface.Session {
+	var out []surface.Session
+	for _, session := range s.unseen {
+		s.asked = append(s.asked, session.ID)
+		if !known(session.ID) {
+			out = append(out, session)
+		}
+	}
+	return out
 }
 
 func (s *endedSurface) EndedConversation(transcript string) (bool, time.Time) {
@@ -104,7 +117,7 @@ func TestALeadThatLostItsRowGetsItBackAsCurrent(t *testing.T) {
 	}
 }
 
-func TestASessionThatLostItsRowComesBackOnlyIfItsTranscriptChangedInTheWindow(t *testing.T) {
+func TestASessionThatLostItsRowComesBackWhileItsTranscriptIsThereHoweverOld(t *testing.T) {
 	d, r, adapter := endedFixture(t)
 	for _, id := range []string{"gone", "stale-status"} {
 		session := claudeRow(id)
@@ -128,15 +141,34 @@ func TestASessionThatLostItsRowComesBackOnlyIfItsTranscriptChangedInTheWindow(t 
 		t.Fatalf("a restored session must be offline: %+v err=%v", stored, err)
 	}
 	old := claudeRow("old")
+	old.LastActive = time.Now().Add(-40 * 24 * time.Hour)
 	if err := r.RegisterSession(old); err != nil {
 		t.Fatal(err)
 	}
-	adapter.changed = time.Now().Add(-catalogRestoreWindow - time.Hour)
+	adapter.changed = old.LastActive
 	d.catalogEnded.rechecked[surface.KindClaude] = time.Now().Add(-catalogEndedRecheck)
 	d.discoverCatalog(context.Background())
-	if catalogHasRow(t, r, "old") {
-		t.Fatal("a session outside the window came back")
+	d.discoverCatalog(context.Background())
+	if !catalogHasRow(t, r, "old") {
+		t.Fatal("a session whose transcript last changed 40 days ago did not come back")
 	}
+	if !viewHas(t, d, "all", "old") || viewHas(t, d, "recent", "old") {
+		t.Fatal("a 40-day-old restored session must be history: listed in All, not in Recent")
+	}
+}
+
+func viewHas(t *testing.T, d *Daemon, scope, id string) bool {
+	t.Helper()
+	view, err := d.readSessionView(context.Background(), sessionViewRequest{Scope: scope, Limit: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range view.Sessions {
+		if row.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRestoringSessionsIsBoundedPerPass(t *testing.T) {
