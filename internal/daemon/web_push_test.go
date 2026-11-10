@@ -16,12 +16,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 // testPushBrowser is a browser's side of Web Push: it holds the keys a
@@ -171,10 +173,10 @@ func TestBrowsersGetEncryptedNotificationsAndWithdrawals(t *testing.T) {
 		t.Fatalf("pushes=%+v", pushes)
 	}
 	shown, withdrawn := pushes[0], pushes[1]
-	if want := (webPushMessage{Type: "notify", Title: "Agenthail", Message: "Claude asks you a question", SessionID: "session", TurnID: "question", EventType: "session.waiting", CollapseID: key, RequestID: "request"}); shown.message != want {
+	if want := (webPushMessage{Type: "notify", Title: "Agenthail", Message: "Claude asks you a question", SessionID: "session", TurnID: "question", EventType: "session.waiting", CollapseID: key, RequestID: "request"}); !reflect.DeepEqual(shown.message, want) {
 		t.Fatalf("shown=%+v", shown.message)
 	}
-	if want := (webPushMessage{Type: "withdraw", CollapseID: key}); withdrawn.message != want {
+	if want := (webPushMessage{Type: "withdraw", CollapseID: key}); !reflect.DeepEqual(withdrawn.message, want) {
 		t.Fatalf("withdrawn=%+v", withdrawn.message)
 	}
 	topic := shown.header.Get("Topic")
@@ -286,5 +288,33 @@ func TestAnUnreachablePushServiceIsLoggedWithoutItsEndpoint(t *testing.T) {
 	}
 	if found, err := reg.HasBrowserPushSubscription(device.ID); err != nil || !found {
 		t.Fatalf("an unreachable push service removed the subscription: %v %v", found, err)
+	}
+}
+
+func TestABrowserIsOfferedAnAsksOptionsButNotItsReply(t *testing.T) {
+	browser := newTestPushBrowser(t)
+	service := newTestPushService(t, browser)
+	reg, _ := subscribedTestBrowser(t, service.server.URL+"/push/secret-capability", browser)
+	d := newTestDaemon(t, reg, nil)
+	if err := reg.RegisterSession(surface.Session{ID: "asker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	ask, err := reg.RaiseAsk(registry.Ask{SessionID: "asker", Origin: registry.AskOriginAgent, Title: "Ship it?", RoutedTo: registry.AskToPerson, Questions: []registry.AskQuestion{{Question: "Ship it?", Options: []registry.AskOption{{ID: "o0", Label: "Ship"}, {ID: "o1", Label: "Wait"}}}}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.announceAsk(ask)
+	d.background.wait()
+	pushes := service.received()
+	if len(pushes) != 1 {
+		t.Fatalf("pushes=%+v", pushes)
+	}
+	shown := pushes[0]
+	want := []surface.RequestAction{{ID: "o0", Title: "Ship"}, {ID: "o1", Title: "Wait"}}
+	if shown.message.EventType != "ask.opened" || shown.message.SessionID != "asker" || shown.message.RequestID != ask.ID || !reflect.DeepEqual(shown.message.Actions, want) {
+		t.Fatalf("shown=%+v, want the ask's id, its session and its option buttons without reply", shown.message)
+	}
+	if shown.header.Get("Urgency") != "high" {
+		t.Fatalf("urgency=%q, an ask waits on the person", shown.header.Get("Urgency"))
 	}
 }

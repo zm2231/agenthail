@@ -140,7 +140,7 @@ func TestOnlyThePersonAnswersALedgerQuestionThatItsRequestsList(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/requests?sessionId=s1", nil)
 	request.Header.Set("Authorization", "Bearer test-token")
 	handler.ServeHTTP(listed, request)
-	if body := listed.Body.String(); listed.Code != http.StatusOK || !strings.Contains(body, asked.ID) || !strings.Contains(body, `"id":"recommended"`) || !strings.Contains(body, `"id":"default"`) || !strings.Contains(body, `"deadline":`) || strings.Contains(body, `"optionsOnly":true`) {
+	if body := listed.Body.String(); listed.Code != http.StatusOK || !strings.Contains(body, asked.ID) || !strings.Contains(body, `"id":"recommended"`) || !strings.Contains(body, `"id":"default"`) || !strings.Contains(body, `"deadline":`) || !strings.Contains(body, `"suggested":0`) || strings.Contains(body, `"optionsOnly":true`) {
 		t.Fatalf("requests status=%d body=%s, want the ledger ask with its option ids, its deadline, and free text allowed", listed.Code, body)
 	}
 	row, found, err := r.RowAsk("s1")

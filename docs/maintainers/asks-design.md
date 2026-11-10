@@ -1,6 +1,6 @@
 # Asks: one object for everything that needs the person (design)
 
-Status: layers 1 to 3 built (schemas 90 to 92); layers 4 and 5 are design. "Why" and the table below describe the code before layer 1, at `fe198bfd` (schema 89).
+Status: layers 1 to 4 built (schemas 90 to 93); in layer 5 the browser notification actions are built and the app changes are still to do. "Why" and the table below describe the code before layer 1, at `fe198bfd` (schema 89).
 
 ## Why
 
@@ -132,7 +132,7 @@ Each source is migrated in its own layer, and its old path goes in the same chan
    - Failed or held intents and dead incoming queue rows each raise an ask, `ref` = the intent or queue id.
    - Dropped: `attention_items`, `delivery_intents.dismissed_at`, the snapshot's `attention` and `deliveryProblems` arrays, `delivery-dismiss`, `delivery-delete`, `queue-retry`, `queue-cancel` for a dead row, and the client banners (`AttentionBanner`, `DeliveryProblemBanner`). `docs/maintainers/delivery-problems.md` is folded into the asks contract.
 4. **Ledger questions.**
-   - Asking a question raises an ask on the ledger's planning host (`ProjectsPlannedHere`, `internal/ledger/sync.go:55`), where the expiry sweep already runs.
+   - Asking a question raises an ask on the host that runs the asking session, which reconciles it from its copy of the ledger. Expiry stays with the planning host's sweep (`ProjectsPlannedHere`, `internal/ledger/sync.go:55`).
    - Dropped: the `ledger.question.escalated` notification and the expiry notice text. Ledger events stay the ledger's synced record.
 
 ## Raising an ask
@@ -207,8 +207,8 @@ Each layer works end to end on its own and removes the path it replaces.
 1. Schema 90, ask store, `agenthail ask` / `agenthail_ask`, end-turn asks moved over, Stop reminder for leads in terminal Claude and Codex, decisions inbox items carry asks, answers through `respond`. This is the layer that fixes "Needs you is empty".
 2. Permission requests as asks; one routing path with escalation. Built: [asks.md](asks.md#permission-requests).
 3. Delivery problems as asks, the sender asked first. Built: [asks.md](asks.md#delivery-problems).
-4. Ledger questions as asks.
-5. Client cleanup: iPhone "Accept recommended", browser notification actions, Swift attention builder removed.
+4. Ledger questions as asks. Built: [asks.md](asks.md#ledger-questions).
+5. Client cleanup: browser notification actions (built: [asks.md](asks.md#notifications)); still to do in the apps: iPhone "Accept recommended", and removing the Swift attention builder (`SessionAttention.build`).
 
 ## Settled
 

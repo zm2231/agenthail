@@ -74,6 +74,7 @@ A question in the intent ledger (`agenthail ledger question`) is an ask of origi
 - The title is `<question id>: <question>`. The single question offers `recommended` (the recommendation, and the recommended option) and `default` (the default answer, left out when it is the recommendation). It takes typed answers and a note, as an agent's ask does. The ask carries the question's `deadline`.
 - Answering records the person's words in the ledger as an utterance captured by `ask` and attaches them to the question as its answer, through the project's owner when another host keeps its ledger. A picked option is recorded as its full text, a note after the answer. The asking session gets one message: `[intent ledger] The person answered <id> ("<question>"): <words>`. An answer the ledger refuses, or whose owner cannot be reached, reopens the ask and returns the error: `409 conflict`, or the owner's `503` (unreachable) or `504` (unconfirmed).
 - A question answered another way (`agenthail ledger attach --as answers`) withdraws its ask.
+- A voice answer is the person's transcribed speech, so when the voice path answers ledger asks it must reach the ledger as a person capture, not as a session's words. The 403 is for agent sessions only.
 - At the deadline, a default that applies itself expires the ask (`state` `expired`), and the asking session gets one message naming the default. A default that would narrow the work, and an `outward` question, leave the ask open with the person; nothing is announced again.
 
 ## The Stop reminder
@@ -190,6 +191,8 @@ Refetch the row and requests after any response.
 
 - A person ask is announced when it is raised or escalated to the person: "<session> needs you: <title>", event `ask.opened`, `requestId` the ask id, collapse key `ask-<hash>`, and buttons from the request's `actions`. A paired viewer announces a mirrored host's ask under the same dedupe key, so a phone paired to both shows it once.
 - It is withdrawn from the desktop and phones when answered or withdrawn.
+- Every ask push carries `requestId`, the ask id, and `sessionId` as the pushing host routes it: `<host>::<id>` for an ask a paired host holds. A notification extension reads the ask from `/api/v1/requests?sessionId=` on that host and picks the request by id; it lists the options' ids, `actions`, `optionsOnly` and `deadline`.
+- A browser notification for an ask shows the request's `actions` as buttons, except `reply`, up to the browser's limit (`Notification.maxActions`, often 2). A button posts `respond` with `{"choices": ["<id>"]}` from the dashboard's service worker; when that is refused or cannot be sent, it opens the session instead. Ask pushes go to browsers with high urgency.
 - The turn that leaves an open person ask completes with outcome `needs_you` and `requestId` the ask id, and sends no completion push of its own.
 
 ## Command endpoint

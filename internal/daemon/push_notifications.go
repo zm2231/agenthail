@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 var bundledPushRelayURL string
@@ -50,7 +51,8 @@ type mobileNotification struct {
 	// send, so the relay delivers it once.
 	DedupeKey string
 	// PushID names one send to one device, which its receipt quotes back.
-	PushID string
+	PushID  string
+	Actions []surface.RequestAction
 }
 
 // notifyPairedDevices sends one notification to every paired phone, through

@@ -19,6 +19,7 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 // webPushSubscriber is the contact push services see in the VAPID token;
@@ -94,14 +95,15 @@ func webPushKey() (webPushKeys, error) {
 // webPushMessage is what the dashboard's service worker receives. A withdraw
 // names the notification to close; every other message is one to show.
 type webPushMessage struct {
-	Type       string `json:"type"`
-	Title      string `json:"title,omitempty"`
-	Message    string `json:"message,omitempty"`
-	SessionID  string `json:"sessionId,omitempty"`
-	TurnID     string `json:"turnId,omitempty"`
-	EventType  string `json:"eventType,omitempty"`
-	CollapseID string `json:"collapseId,omitempty"`
-	RequestID  string `json:"requestId,omitempty"`
+	Type       string                  `json:"type"`
+	Title      string                  `json:"title,omitempty"`
+	Message    string                  `json:"message,omitempty"`
+	SessionID  string                  `json:"sessionId,omitempty"`
+	TurnID     string                  `json:"turnId,omitempty"`
+	EventType  string                  `json:"eventType,omitempty"`
+	CollapseID string                  `json:"collapseId,omitempty"`
+	RequestID  string                  `json:"requestId,omitempty"`
+	Actions    []surface.RequestAction `json:"actions,omitempty"`
 }
 
 type webPushError struct{ status int }
@@ -127,12 +129,25 @@ func (d *Daemon) notifyBrowsers(ctx context.Context, notification mobileNotifica
 		EventType:  boundedNotificationText(notification.EventType, 80),
 		CollapseID: boundedNotificationText(notification.CollapseID, 64),
 		RequestID:  boundedNotificationText(notification.RequestID, 240),
+		Actions:    browserActions(notification.Actions),
 	}
 	urgency := webpush.UrgencyNormal
-	if notification.EventType == "session.waiting" {
+	if notification.EventType == "session.waiting" || notification.EventType == "ask.opened" {
 		urgency = webpush.UrgencyHigh
 	}
 	d.sendToBrowsers(ctx, message, urgency, "browser notification")
+}
+
+// browserActions are the buttons a browser shows on an ask's notification:
+// every action but reply, which needs text a notification cannot take.
+func browserActions(actions []surface.RequestAction) []surface.RequestAction {
+	var out []surface.RequestAction
+	for _, action := range actions {
+		if action.ID != "reply" {
+			out = append(out, surface.RequestAction{ID: boundedNotificationText(action.ID, 40), Title: boundedNotificationText(action.Title, 40)})
+		}
+	}
+	return out
 }
 
 // withdrawFromBrowsers closes the notification each browser shows under
