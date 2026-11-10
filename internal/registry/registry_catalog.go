@@ -165,7 +165,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 	pattern := "%" + escapeLike(query) + "%"
 	rows, err := r.read.Query(sessionSelect(`s.status`)+`
 		FROM sessions s`+sessionJoins+`
-		WHERE s.surface=? AND s.host_id='' AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR EXISTS (SELECT 1 FROM aliases a WHERE a.session_id=s.id AND a.name LIKE ? ESCAPE '\'))
+		WHERE s.surface=? AND s.host_id='' AND NOT `+hiddenSessionRow("s")+` AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR EXISTS (SELECT 1 FROM aliases a WHERE a.session_id=s.id AND a.name LIKE ? ESCAPE '\'))
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
 	if err != nil {
 		return nil, err

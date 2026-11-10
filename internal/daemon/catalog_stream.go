@@ -132,6 +132,18 @@ func (h *catalogHub) recordEndedDiscovery(kind surface.SurfaceKind, seen map[str
 	return h.flushCommittedLocked()
 }
 
+func (h *catalogHub) removeHidden(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, err := h.registry.RemoveHiddenCatalogRows(ids); err != nil {
+		return err
+	}
+	return h.flushCommittedLocked()
+}
+
 func (h *catalogHub) markDiscoveryFailure(kind surface.SurfaceKind, reason string, observedAt time.Time) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -435,6 +447,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 			}
 		}
 		seen := make(map[string]struct{}, len(sessions))
+		sessions, hidden := d.splitHiddenScripted(sessions)
 		locateCtx, locateCancel := context.WithTimeout(ctx, 12*time.Second)
 		d.correlatePendingLaunches(locateCtx, sessions)
 		d.correlateObservedTerminalLaunches(locateCtx, sessions)
@@ -476,7 +489,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		d.followLiveSessions(adapter.Name(), sessions, openSessions, complete)
 		var recordErr error
 		if keeper, keeps := adapter.(surface.EndedConversations); keeps && complete {
-			recordErr = d.discoverEndedSessions(ctx, adapter, keeper, seen, observedAt, func(session surface.Session, identity catalogIdentity) {
+			recordErr = d.discoverEndedSessions(ctx, adapter, keeper, seen, hidden, observedAt, func(session surface.Session, identity catalogIdentity) {
 				d.publishCatalogSession(ctx, adapter, session, identity, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, config, view, observedAt, nil, nil)
 			})
 		} else {

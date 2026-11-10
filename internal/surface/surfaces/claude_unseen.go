@@ -116,8 +116,16 @@ func (c *Claude) UnseenConversations(known func(id string) bool) []surface.Sessi
 		out = append(out, surface.Session{
 			ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI,
 			Name: c.firstUserMessage(path), Cwd: entry.cwd, Status: surface.StatusOffline, Ended: true,
-			Transcript: path, HasLocal: true, LastActive: info.ModTime(),
+			Transcript: path, HasLocal: true, LastActive: info.ModTime(), Entrypoint: entry.kind,
 		})
 	}
 	return out
+}
+
+func (c *Claude) ConversationEntrypoint(transcript string) string {
+	info, err := os.Stat(transcript)
+	if transcript == "" || err != nil {
+		return ""
+	}
+	return c.entrypoints.of(transcript, info).kind
 }

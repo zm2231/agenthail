@@ -127,6 +127,7 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 		RuntimeKind: surface.RuntimeClaudeCLI,
 		Cwd:         str(m, "cwd"),
 		Status:      surface.SessionStatus(str(m, "status")),
+		Entrypoint:  str(m, "entrypoint"),
 	}
 	sess.PID = int(pid)
 	if socket != "" {

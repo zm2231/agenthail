@@ -167,7 +167,7 @@ func (r *Registry) CatalogOmissionCandidates(kind string, threshold int, recheck
 
 func (r *Registry) EndedSessionsWithoutCatalogRow(kind string) ([]CatalogEndedRow, error) {
 	return r.endedRows(`SELECT s.id,s.transcript FROM sessions s WHERE s.surface=? AND s.host_id='' AND s.transcript<>'' AND s.parent_session_id=''
-		AND NOT EXISTS (SELECT 1 FROM catalog_sessions cs WHERE cs.session_id=s.id) ORDER BY s.last_active_ms DESC,s.id`, kind)
+		AND NOT EXISTS (SELECT 1 FROM catalog_sessions cs WHERE cs.session_id=s.id) AND NOT `+hiddenSessionRow("s")+` ORDER BY s.last_active_ms DESC,s.id`, kind)
 }
 
 func (r *Registry) LeadSessionsWithoutCatalogRow(kind string) ([]CatalogEndedRow, error) {
