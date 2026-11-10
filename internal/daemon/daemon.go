@@ -104,6 +104,7 @@ type Daemon struct {
 	ledgerSync        ledgerSyncHealth
 	ledgerClaims      ledgerClaims
 	sorter            *ledgerSorter
+	contexts          *messageContexts
 	checks            checkerRunner
 	g2                *g2Counter
 	delivered         deliveredWords
@@ -211,6 +212,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		github:            github.GH{},
 		g2:                newG2Counter(time.Now()),
 		sorter:            newLedgerSorter(),
+		contexts:          newMessageContexts(),
 	}
 	if reg != nil {
 		reg.SetBusyPolicy(d.busyPolicy)
@@ -366,6 +368,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runPRSweeps(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
+	d.startMessageContexts(ctx)
 	d.startLedgerSorter(ctx)
 	go d.runDecisionsRevision(ctx)
 	d.background.start(d.runJournalSweeps)

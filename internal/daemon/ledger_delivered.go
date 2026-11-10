@@ -93,6 +93,17 @@ func (w *deliveredWords) claim(sessionID, promptID, uuid, text string, now time.
 	return "", "", false
 }
 
+func (w *deliveredWords) promptFor(sessionID, uuid string) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, entry := range w.bySession[sessionID] {
+		if entry.uuid == uuid {
+			return entry.promptID
+		}
+	}
+	return ""
+}
+
 // An empty text matches by uuid only: a first turn not yet settled on its
 // session must not be taken by another session's prompt with the same words.
 func claimEntry(entries []deliveredEntry, promptID, uuid, text string, now time.Time) (deliveredEntry, bool) {

@@ -3,7 +3,6 @@ package daemon
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"maps"
 	"net/http"
 	"os"
@@ -16,13 +15,10 @@ import (
 )
 
 const (
-	sorterQueue      = 64
-	sorterDeadline   = 10 * time.Second
-	sorterRecovery   = 24 * time.Hour
-	sorterReplyRows  = 400
-	sorterReplyPage  = 200
-	sorterReplyBytes = 64 * 1024
-	sorterRetry      = 5 * time.Minute
+	sorterQueue    = 64
+	sorterDeadline = 10 * time.Second
+	sorterRecovery = 24 * time.Hour
+	sorterRetry    = 5 * time.Minute
 )
 
 type sortJob struct {
@@ -202,11 +198,10 @@ func (d *Daemon) sortOne(ctx context.Context, config goalsort.Config, job sortJo
 	if !ok {
 		return nil
 	}
-	spoken := job.at
-	if spoken.IsZero() {
-		spoken = input.At
+	question := goalsort.Question{Message: input.Text}
+	if input.Context.Reply != nil {
+		question.PreviousReply = input.Context.Reply.Text
 	}
-	question := goalsort.Question{Message: input.Text, PreviousReply: d.previousReply(input.TargetID, spoken)}
 	for _, g := range input.Goals {
 		question.Goals = append(question.Goals, goalsort.Goal{ID: g.ID, Name: g.Name, Requests: g.Requests})
 	}
@@ -230,38 +225,6 @@ func (d *Daemon) sortOne(ctx context.Context, config goalsort.Config, job sortJo
 		d.log.Printf("ledger sorter: file %s in %s: %s", job.utteranceID, job.key, err)
 	}
 	return nil
-}
-
-func (d *Daemon) previousReply(sessionID string, before time.Time) string {
-	var cursor uint64
-	for rows := 0; rows < sorterReplyRows; {
-		page, err := d.Registry.ReadSessionJournalPage(sessionID, cursor, sorterReplyPage)
-		if err != nil {
-			return ""
-		}
-		for i := len(page.Entries) - 1; i >= 0; i-- {
-			var p sessionJournalPayload
-			if json.Unmarshal(page.Entries[i].Payload, &p) != nil || p.Role != "assistant" || p.Body == "" || (p.Kind != "message" && p.Kind != "text") {
-				continue
-			}
-			ts, err := time.Parse(time.RFC3339Nano, p.TS)
-			if err != nil || !ts.Before(before) {
-				continue
-			}
-			if p.Truncated && p.BodyRef != "" {
-				if full, _, err := d.Registry.SessionJournalBody(sessionID, p.BodyRef, 0, sorterReplyBytes); err == nil {
-					return string(full)
-				}
-			}
-			return p.Body
-		}
-		rows += len(page.Entries)
-		if page.NextBefore == 0 || len(page.Entries) == 0 {
-			return ""
-		}
-		cursor = page.NextBefore
-	}
-	return ""
 }
 
 func (s *ledgerSorter) owe(job sortJob) {

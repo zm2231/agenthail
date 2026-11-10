@@ -109,9 +109,10 @@ func sorterFixture(t *testing.T, stub *sorterStub) (*Daemon, *registry.Registry,
 func runSorter(t *testing.T, d *Daemon) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	done := d.startLedgerSorter(ctx)
+	contexts, done := d.startMessageContexts(ctx), d.startLedgerSorter(ctx)
 	stop = func() {
 		cancel()
+		<-contexts
 		<-done
 	}
 	t.Cleanup(stop)
@@ -367,6 +368,9 @@ func recordIn(t *testing.T, p ledgerProject, ref, text string) int64 {
 	t.Helper()
 	e, _, err := p.store.RecordUtterance(ledger.Utterance{ProjectKey: p.key, Ref: ref, SpeakerID: "person", TargetID: "s1", Text: text, CapturedBy: ledger.CapturedByHook, At: time.Now()})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.store.RecordContext(p.key, ledger.ContextPayload{UtteranceID: ref, Status: ledger.ReplyLate}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	return e.Seq

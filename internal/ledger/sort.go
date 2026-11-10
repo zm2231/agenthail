@@ -44,12 +44,14 @@ type SortInput struct {
 	Text        string
 	At          time.Time
 	Goals       []SortGoal
+	Context     ContextPayload
 }
 
 type OwedSort struct {
-	Ref string
-	Seq int64
-	At  time.Time
+	Ref      string
+	Seq      int64
+	At       time.Time
+	TargetID string
 }
 
 type UnfiledPayload struct {
@@ -135,6 +137,10 @@ func (s *Store) SortInputFor(projectKey, utteranceID string) (SortInput, bool, e
 	if answered, err := s.HasRef(projectKey, unfiledRef(utteranceID)); err != nil || answered {
 		return SortInput{}, false, err
 	}
+	context, ready, err := s.ContextFor(projectKey, utteranceID)
+	if err != nil || !ready {
+		return SortInput{}, false, err
+	}
 	events, err := loadEvents(s.read, projectKey)
 	if err != nil {
 		return SortInput{}, false, err
@@ -154,7 +160,7 @@ func (s *Store) SortInputFor(projectKey, utteranceID string) (SortInput, bool, e
 		return SortInput{}, false, nil
 	}
 	spoken, _ := time.Parse(time.RFC3339, u.At)
-	return SortInput{UtteranceID: utteranceID, TargetID: u.TargetID, Text: u.Text, At: spoken, Goals: then.sortGoals(events[:at], utteranceID)}, true, nil
+	return SortInput{UtteranceID: utteranceID, TargetID: u.TargetID, Text: u.Text, At: spoken, Goals: then.sortGoals(events[:at], utteranceID), Context: context}, true, nil
 }
 
 // Only this host's captures: two hosts sorting one message would collide on its ref when they sync.

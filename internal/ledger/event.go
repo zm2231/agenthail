@@ -37,6 +37,7 @@ const (
 	EventReclassified  EventType = "utterance.reclassified"
 	EventSorted        EventType = "utterance.sorted"
 	EventUnfiled       EventType = "utterance.unfiled"
+	EventContext       EventType = "utterance.context"
 	EventCapture       EventType = "capture"
 	EventWorkEdit      EventType = "work_item.edit"
 	EventWorkLink      EventType = "work_item.link"

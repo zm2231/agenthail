@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -14,6 +15,7 @@ import (
 // write to and before a later test changes the timers a source reads.
 func newTestDaemon(t testing.TB, r *registry.Registry, surfaces []surface.Surface) *Daemon {
 	d := New(r, surfaces)
+	d.contexts.wait, d.contexts.poll = 300*time.Millisecond, 10*time.Millisecond
 	t.Cleanup(d.sources.shutdown)
 	t.Cleanup(d.background.stop)
 	return d

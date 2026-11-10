@@ -115,6 +115,13 @@ func TestTheSorterSeesTheGoalsAndRequestsAsTheyStoodWhenTheMessageWasRecorded(t 
 	billing := goal(t, s, "billing")
 	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:1", As: ledger.AsConversation})
 	capture(t, s, project, "claude-prompt:2", "and the invoices")
+	if _, ok, err := s.SortInputFor(project, "claude-prompt:2"); ok || err != nil {
+		t.Fatalf("a message was offered to the sorter before its context was recorded: ok=%v err=%v", ok, err)
+	}
+	answered := ledger.ContextPayload{UtteranceID: "claude-prompt:2", Status: ledger.ReplyFound, JoinedBy: ledger.JoinedByID, Reply: ledger.NewReply("r1", "2026-11-10T00:00:00Z", "Anything else?")}
+	if _, err := s.RecordContext(project, answered, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	input, ok, err := s.SortInputFor(project, "claude-prompt:2")
 	if err != nil || !ok {
 		t.Fatalf("input for a provisional message: ok=%v err=%v", ok, err)
@@ -125,7 +132,7 @@ func TestTheSorterSeesTheGoalsAndRequestsAsTheyStoodWhenTheMessageWasRecorded(t 
 	if got := input.Goals[0].Requests; len(got) != 12 || got[0] != "search request 3" || got[11] != "search request 14" {
 		t.Fatalf("search requests = %v, want the newest 12", got)
 	}
-	if input.Text != "and the invoices" || input.TargetID != "s1" || input.At.IsZero() {
+	if input.Text != "and the invoices" || input.TargetID != "s1" || input.At.IsZero() || input.Context.Reply == nil || input.Context.Reply.Text != "Anything else?" {
 		t.Fatalf("input = %+v", input)
 	}
 	if _, ok, err := s.SortInputFor(project, "claude-prompt:1"); ok || err != nil {
@@ -133,6 +140,9 @@ func TestTheSorterSeesTheGoalsAndRequestsAsTheyStoodWhenTheMessageWasRecorded(t 
 	}
 	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsNewAsk, To: billing, Clauses: []string{"itemise invoices"}})
 	capture(t, s, project, "claude-prompt:3", "a later thought")
+	if _, err := s.RecordContext(project, ledger.ContextPayload{UtteranceID: "claude-prompt:3", Status: ledger.ReplyLate}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	later, ok, err := s.SortInputFor(project, "claude-prompt:3")
 	if err != nil || !ok || !slices.Equal(later.Goals[1].Requests, []string{"itemise invoices"}) {
 		t.Fatalf("a later message does not see the requests filed before it: %+v ok=%v err=%v", later, ok, err)
