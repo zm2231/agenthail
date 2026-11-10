@@ -109,9 +109,10 @@ func sorterFixture(t *testing.T, stub *sorterStub) (*Daemon, *registry.Registry,
 func runSorter(t *testing.T, d *Daemon) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	done := d.startLedgerSorter(ctx)
+	contexts, done := d.startMessageContexts(ctx), d.startLedgerSorter(ctx)
 	stop = func() {
 		cancel()
+		<-contexts
 		<-done
 	}
 	t.Cleanup(stop)

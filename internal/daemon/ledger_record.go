@@ -58,7 +58,7 @@ func (d *Daemon) recordPersonWordsOnce(session surface.Session, u ledger.Utteran
 			return personWordsRecord{key: target.key}, err
 		}
 		if inserted {
-			d.queueSort(target.key, u.Ref, recorded.Seq, u.At)
+			d.queueContext(contextJob{key: target.key, utteranceID: u.Ref, targetID: session.ID, seq: recorded.Seq, at: u.At})
 		}
 		if u.HookMissed(inserted) {
 			d.publishEvent(ledger.EventCaptureMissed, session.ID, map[string]string{"projectKey": target.key, "ref": u.Ref, "sessionId": session.ID, "reason": "unknown"})

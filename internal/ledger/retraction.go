@@ -221,7 +221,7 @@ func (b *Board) resource(t EventType, src eventSource, ref string) {
 func (b *Board) retraction(event Event, src eventSource, ref, reason string) Retraction {
 	r := Retraction{UtteranceID: ref, Reason: reason}
 	switch event.Type {
-	case EventUtterance, EventSorted, EventUnfiled:
+	case EventUtterance, EventSorted, EventUnfiled, EventContext:
 		return Retraction{}
 	case EventAttach:
 		if !slices.Contains(b.attachedBy[ref], src.SessionID) {
