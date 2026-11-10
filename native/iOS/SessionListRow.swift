@@ -36,7 +36,7 @@ struct SessionListRow: View {
 
     var body: some View {
         let session = source.session
-        let ring = SessionRing.kind(session, needsYou: needsYou)
+        let ring = SessionRing.kind(session, needsYou: needsYou, finished: model.finishedUnseen.contains(session.id))
         Button { open(session.id) } label: {
             HStack(alignment: .top, spacing: 12) {
                 SessionAvatar(surface: session.surface, ring: ring)
@@ -62,6 +62,7 @@ struct SessionListRow: View {
                 }
             }
         }
+        .modifier(IOSSessionRowMenu(model: model, session: session, enabled: snippet == nil))
         .accessibilityIdentifier(identifierPrefix + session.id)
     }
 }

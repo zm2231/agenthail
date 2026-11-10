@@ -68,6 +68,7 @@ let package = Package(
                 "SessionOperations.swift",
                 "SessionOperationControllers.swift",
                 "SessionMoves.swift",
+                "FinishedSessions.swift",
                 "SessionDisplayKind.swift",
                 "SessionNames.swift",
                 "SessionDetailState.swift",

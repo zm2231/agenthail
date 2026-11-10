@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,5 +44,16 @@ func TestRevisionRowsFollowStalenessAndGeneration(t *testing.T) {
 	d, _ := json.Marshal(newRevisionRow(moved, dashboardSession{}))
 	if string(a) == string(d) {
 		t.Fatal("a new projection generation must change the revision input")
+	}
+}
+
+func TestSearchFindsASessionByItsBranch(t *testing.T) {
+	row := dashboardSession{ID: "s1", Name: "task", Cwd: "/w/app", Checkout: &catalogCheckout{ID: "c1", Path: "/w/app/.worktrees/login", Branch: "Fix-Login"}}
+	if !strings.Contains(presentationSearch(row), "fix-login") {
+		t.Fatalf("search text %q does not hold the branch", presentationSearch(row))
+	}
+	row.Checkout = nil
+	if strings.Contains(presentationSearch(row), "fix-login") {
+		t.Fatal("a session without that checkout matched its branch")
 	}
 }

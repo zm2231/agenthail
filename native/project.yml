@@ -78,6 +78,7 @@ targets:
       - path: SessionOperations.swift
       - path: SessionOperationControllers.swift
       - path: SessionMoves.swift
+      - path: FinishedSessions.swift
       - path: SessionDisplayKind.swift
       - path: SessionNames.swift
       - path: SessionDetailState.swift

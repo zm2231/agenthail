@@ -173,6 +173,7 @@ SOURCES=(
   SessionOperationControllers.swift
   SessionOperations.swift
   SessionMoves.swift
+  FinishedSessions.swift
   macOS/NewSessionDraft.swift
   macOS/NewSessionLabels.swift
   macOS/ClaudeCompact.swift

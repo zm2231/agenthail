@@ -3,16 +3,16 @@ import SwiftUI
 /// What the ring around a session's agent says at a glance. The row says the
 /// same thing in words, in its status line and to VoiceOver.
 enum SessionRing: Equatable {
-    case needsYou, unavailable, working, background, idle
+    case needsYou, unavailable, working, background, finished, idle
 
-    static func kind(_ session: SessionState, needsYou: Bool) -> SessionRing {
+    static func kind(_ session: SessionState, needsYou: Bool, finished: Bool = false) -> SessionRing {
         if needsYou { return .needsYou }
         switch SessionDisplayKind.of(session) {
         case .unavailable: return .unavailable
         case .waiting: return .needsYou
         case .working: return .working
         case .finishing: return .background
-        default: return .idle
+        default: return finished ? .finished : .idle
         }
     }
 
@@ -22,6 +22,7 @@ enum SessionRing: Equatable {
         case .unavailable: "Unavailable"
         case .working: "Working"
         case .background: "Waiting on background work"
+        case .finished: "Finished"
         case .idle: nil
         }
     }
@@ -80,6 +81,8 @@ struct SessionAvatar: View {
                         .rotationEffect(Self.turn(at: context.date))
                 }
             }
+        case .finished:
+            Circle().stroke(PhonePalette.done, lineWidth: 2.5)
         case .idle:
             EmptyView()
         }

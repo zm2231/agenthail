@@ -28,6 +28,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     private(set) var snapshot: DashboardSnapshot? {
         didSet {
+            trackFinishedSessions(from: oldValue)
             cells.adopt(snapshot?.sessions ?? [])
             daemon = snapshot?.daemon
             subagentIDs = (snapshot?.sessions ?? []).reduce(into: [:]) { ids, row in
@@ -42,6 +43,8 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             }
         }
     }
+    private(set) var finishedUnseen = FinishedSessions()
+    @ObservationIgnored private var sessionsOnScreen: [String: Int] = [:]
     private(set) var hosts: [PairedHostStatus] = []
     /// Which transcript rows were opened in each session, kept while the app runs.
     let rowMemory = TranscriptRowMemory()
@@ -317,6 +320,23 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         connection.delegate = self
         connections[connection.id] = connection
         if !hostOrder.contains(connection.id) { hostOrder.append(connection.id) }
+    }
+
+    func sessionAppeared(_ id: String) {
+        sessionsOnScreen[id, default: 0] += 1
+        if finishedUnseen.contains(id) { finishedUnseen.markSeen(id) }
+    }
+
+    func sessionDisappeared(_ id: String) {
+        guard let count = sessionsOnScreen[id] else { return }
+        sessionsOnScreen[id] = count > 1 ? count - 1 : nil
+    }
+
+    private func trackFinishedSessions(from previous: DashboardSnapshot?) {
+        guard let previous, let current = snapshot else { return }
+        var next = finishedUnseen
+        next.track(previous: previous.sessions, current: current.sessions) { sessionsOnScreen[$0] != nil }
+        if next != finishedUnseen { finishedUnseen = next }
     }
 
     func setHostSnapshot(_ value: DashboardSnapshot?, view: ScopePage.View? = nil, host hostID: String? = nil) {

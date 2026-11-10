@@ -24,7 +24,7 @@ final class AgenthailModel {
             }
         }
     }
-    private(set) var finishedUnseen: Set<String> = []
+    private(set) var finishedUnseen = FinishedSessions()
     private(set) var holderPicks: [String: HolderPin] = [:]
     private(set) var snapshotLoadedAt: Date?
     var paletteVisible = false
@@ -466,8 +466,7 @@ final class AgenthailModel {
     }
 
     func markSeen(_ id: String) {
-        // Removing in place notifies every reader even when the id is absent.
-        if finishedUnseen.contains(id) { finishedUnseen.remove(id) }
+        if finishedUnseen.contains(id) { finishedUnseen.markSeen(id) }
     }
 
     private func pruneStore() {
@@ -478,16 +477,8 @@ final class AgenthailModel {
 
     private func trackFinishedSessions(from previous: DashboardSnapshot?) {
         guard let previous, let current = snapshot else { return }
-        let wasWorking = Set(previous.sessions.filter { $0.isWorking || $0.isWaitingOnBackground }.map(\.id))
         var next = finishedUnseen
-        for session in current.sessions {
-            if session.isWorking || session.isWaitingOnBackground {
-                next.remove(session.id)
-            } else if wasWorking.contains(session.id), !panes.contains(where: { $0.selectedSessionID == session.id }) {
-                next.insert(session.id)
-            }
-        }
-        next.formIntersection(current.sessions.map(\.id))
+        next.track(previous: previous.sessions, current: current.sessions) { id in panes.contains { $0.selectedSessionID == id } }
         if next != finishedUnseen { finishedUnseen = next }
     }
 
