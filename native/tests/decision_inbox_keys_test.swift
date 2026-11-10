@@ -4,7 +4,7 @@ import SwiftUI
 
 final class InboxDaemon: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var posts: [[String: Any]] = []
-    static let decisions = #"{"decisions":[{"group":"waiting","sessionId":"S","kind":"ask","reason":"Ready to ship","answerable":true,"requests":[{"id":"ask-000000000001","kind":"ask","tool":"","title":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"label":"Deploy","description":""},{"label":"Wait","description":""}],"suggested":0}],"alwaysAllow":false}]}],"leadHandling":[]}"#
+    static let decisions = #"{"decisions":[{"group":"waiting","sessionId":"S","kind":"ask","reason":"Ready to ship","answerable":true,"requests":[{"id":"ask-000000000001","kind":"ask","tool":"","title":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"id":"o0","label":"Deploy","description":""},{"id":"o1","label":"Wait","description":""}],"suggested":0}],"alwaysAllow":false}]}],"leadHandling":[]}"#
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -74,7 +74,7 @@ struct DecisionInboxKeysTest {
         await settle(0.3)
         check(InboxDaemon.posts.count == 1, "Shift-Return sends exactly one answer: \(InboxDaemon.posts.count)")
         let decision = InboxDaemon.posts.first?["decision"] as? [String: Any] ?? [:]
-        check(InboxDaemon.posts.first?["action"] as? String == "respond" && (decision["answers"] as? [String: String]) == ["Deploy it now?": "Deploy"], "it sends the recommended answer through respond: \(InboxDaemon.posts)")
+        check(InboxDaemon.posts.first?["action"] as? String == "respond" && decision["choices"] as? [String] == ["o0"], "it sends the recommended answer through respond: \(InboxDaemon.posts)")
 
         press(window, shift: true)
         await settle(0.5)

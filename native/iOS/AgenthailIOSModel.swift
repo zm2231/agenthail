@@ -1911,7 +1911,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         Task {
             do {
                 let (api, route) = try resolve(sessionID)
-                _ = try await api.respond(sessionID: route.sessionID, requestID: ask.id, decision: RequestDecision(choice: FailedSendAsk.delete))
+                _ = try await api.respond(sessionID: route.sessionID, requestID: ask.id, decision: .choose(FailedSendAsk.delete))
                 dropRefusedSend(refused, in: rekeys.resolve(sessionID))
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)

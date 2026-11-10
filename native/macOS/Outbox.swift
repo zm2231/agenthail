@@ -79,7 +79,7 @@ final class Outbox {
         guard let api = api() else { return }
         Task {
             do {
-                _ = try await api.respond(sessionID: session, requestID: ask.id, decision: RequestDecision(choice: FailedSendAsk.delete))
+                _ = try await api.respond(sessionID: session, requestID: ask.id, decision: .choose(FailedSendAsk.delete))
                 notice(nil)
                 discard(row, in: resolve(session))
             } catch {

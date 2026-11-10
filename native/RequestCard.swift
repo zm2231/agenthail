@@ -103,9 +103,9 @@ struct RequestCard: View {
             HStack {
                 ForEach(buttons.allowing, id: \.id) { action in
                     if action.id == "allow" {
-                        Button(action.title) { send(.choice(action.id)) }.buttonStyle(.borderedProminent)
+                        Button(action.title) { send(.choose(action.id)) }.buttonStyle(.borderedProminent)
                     } else {
-                        Button(action.title) { send(.choice(action.id)) }.buttonStyle(.bordered)
+                        Button(action.title) { send(.choose(action.id)) }.buttonStyle(.bordered)
                     }
                 }
                 Spacer()
@@ -116,13 +116,13 @@ struct RequestCard: View {
                     Button(action.title) { replying = true }.buttonStyle(.bordered)
                 }
                 ForEach(buttons.denying, id: \.id) { action in
-                    Button(action.title, role: .destructive) { send(.choice(action.id)) }.buttonStyle(.bordered)
+                    Button(action.title, role: .destructive) { send(.choose(action.id)) }.buttonStyle(.bordered)
                 }
             }
             if replying, buttons.reply != nil {
                 HStack {
                     TextField("Message", text: $reply).textFieldStyle(.roundedBorder)
-                    Button("Send", role: .destructive) { send(RequestDecision(choice: RequestNotifications.replyChoice, message: reply)) }
+                    Button("Send", role: .destructive) { send(.choose(RequestNotifications.replyChoice, message: reply)) }
                         .buttonStyle(.bordered)
                         .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }

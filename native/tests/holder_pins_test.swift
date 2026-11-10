@@ -185,7 +185,7 @@ struct HolderPinsTest {
         PinStubProtocol.status = 409
         PinStubProtocol.failure = #"{"ok":false,"error":{"code":"stale","message":"request is no longer open"}}"#
         do {
-            _ = try await api.respond(sessionID: "S", requestID: "r1", decision: RequestDecision(choice: "allow"))
+            _ = try await api.respond(sessionID: "S", requestID: "r1", decision: .allow)
             check(false, "a stale answer fails")
         } catch AgenthailAPIError.requestStale {
         } catch {
@@ -193,7 +193,7 @@ struct HolderPinsTest {
         }
         PinStubProtocol.failure = "Claude process 4102 does not hold conversation S"
         do {
-            _ = try await api.respond(sessionID: "S", requestID: "r1", decision: RequestDecision(choice: "allow"))
+            _ = try await api.respond(sessionID: "S", requestID: "r1", decision: .allow)
             check(false, "an answer to a terminal that left fails")
         } catch AgenthailAPIError.request(409, let message) {
             check(message == "Claude process 4102 does not hold conversation S", "a pick that went stale keeps the daemon's reason")

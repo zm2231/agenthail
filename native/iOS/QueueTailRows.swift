@@ -8,6 +8,7 @@ struct QueueTailRows: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var reading: QueueTail.Row?
+    @State private var answering: (row: String, decision: DecisionItem)?
 
     var body: some View {
         if tail.hiddenCount > 0 {
@@ -36,6 +37,12 @@ struct QueueTailRows: View {
                 .accessibilityIdentifier("queue-\(row.item.listID)")
                 .sheet(isPresented: Binding(get: { reading?.id == row.id }, set: { if !$0 { reading = nil } })) {
                     QueuedMessageSheet(item: row.item, reason: row.reason)
+                }
+                .sheet(isPresented: Binding(get: { answering?.row == row.id }, set: { if !$0 { answering = nil } })) {
+                    if let decision = answering?.decision {
+                        DecisionSheet(model: model, item: decision, title: model.session(decision.sessionId)?.displayName ?? decision.sessionId,
+                                      open: { answering = nil; model.openSession(decision.sessionId) }) { answering = nil }
+                    }
                 }
         }
     }
@@ -83,6 +90,10 @@ struct QueueTailRows: View {
         let item = row.item
         let idle = !model.pendingControls.contains("queue:\(item.listID)")
         switch row.controls {
+        case .answer:
+            if let decision = model.shownDecisions.decision(answering: item.askId) {
+                control("Answer", id: "queue-tail-answer-\(item.id)", enabled: true) { answering = (row.id, decision) }
+            }
         case .waiting:
             let steering = model.queueSteer(item)
             if let steering, steering.refusal == nil {

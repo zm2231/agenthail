@@ -23,6 +23,6 @@ struct FailedSendAsk: Equatable {
 
     func reading(_ requests: SessionRequests) -> FailedSendAsk {
         let options = requests.requests.first { $0.id == id }?.questions?.first?.options ?? []
-        return FailedSendAsk(id: id, choices: options.compactMap(\.id))
+        return FailedSendAsk(id: id, choices: options.map(\.id))
     }
 }

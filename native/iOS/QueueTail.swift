@@ -11,6 +11,7 @@ struct QueueTail: Equatable {
         var isOwn: Bool { (item.author ?? "person") == "person" && PeerEnvelope(item.message).sender == nil }
 
         enum Controls: Equatable {
+            case answer
             case waiting
             case none
         }
@@ -28,7 +29,9 @@ struct QueueTail: Equatable {
         }
 
         var controls: Controls {
-            leavingSince == nil && item.status == "pending" ? .waiting : .none
+            if leavingSince != nil { return .none }
+            if isDead { return .answer }
+            return item.status == "pending" ? .waiting : .none
         }
     }
 

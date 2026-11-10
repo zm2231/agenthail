@@ -3,6 +3,7 @@ import SwiftUI
 struct InboxHistoryRow: View {
     let message: InboxMessage
     let openSession: () -> Void
+    var answer: (() -> Void)? = nil
 
     private var envelope: PeerEnvelope { PeerEnvelope(message.message) }
     private var sender: String? { envelope.sender ?? message.senderLabel }
@@ -28,6 +29,11 @@ struct InboxHistoryRow: View {
                 if let attempts = message.attempts { LabeledContent("Attempts", value: attempts.formatted()).font(.footnote) }
                 if let value = message.sourceSessionId, !value.isEmpty, message.source == message.senderLabel { LabeledContent("From session", value: value).font(.footnote).textSelection(.enabled) }
             }.font(.footnote)
+            if let answer {
+                Button("Answer", action: answer).buttonStyle(.borderedProminent).controlSize(.large)
+                    .accessibilityHint("Opens what to do with this message")
+                    .accessibilityIdentifier("inbox-message-answer-\(message.id)")
+            }
         }.padding(.vertical, 6)
     }
 }

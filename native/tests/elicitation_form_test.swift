@@ -37,7 +37,9 @@ struct ElicitationFormTest {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let encoded = String(data: try encoder.encode(RequestDecision.content(content ?? [:])), encoding: .utf8)
-        check(encoded == #"{"behavior":"allow","content":{"env":"prod","note":"release","notify":false,"regions":["eu"],"replicas":3}}"#, "encoded \(encoded ?? "")")
+        check(encoded == #"{"choices":["allow"],"content":{"env":"prod","note":"release","notify":false,"regions":["eu"],"replicas":3}}"#, "encoded \(encoded ?? "")")
+        let empty = String(data: try encoder.encode(RequestDecision.content([:])), encoding: .utf8)
+        check(empty == #"{"choices":["allow"]}"#, "an empty form sends allow alone: \(empty ?? "")")
         print("elicitation form ok")
     }
 

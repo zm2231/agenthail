@@ -88,6 +88,7 @@ struct QueueListView: View {
     @State private var loadingOlder = false
     @State private var showHistory = false
     @State private var reloadID = UUID()
+    @State private var answering: DecisionItem?
 
     private var current: [QueueState] { page.active }
     private var history: [InboxMessage] { page.history }
@@ -147,7 +148,8 @@ struct QueueListView: View {
                             .listRowSeparator(.hidden)
                     }
                     ForEach(history, id: \.listID) { message in
-                        InboxHistoryRow(message: message, openSession: { open(message.sessionId) })
+                        InboxHistoryRow(message: message, openSession: { open(message.sessionId) },
+                                        answer: model.shownDecisions.decision(answering: message.askId).map { decision in { answering = decision } })
                     }
                     if page.hasOlder {
                         Button { Task { await loadOlder() } } label: {
@@ -176,6 +178,12 @@ struct QueueListView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: InboxPage.historyPollInterval)
                 if !Task.isCancelled { await reload() }
+            }
+        }
+        .sheet(item: $answering) { item in
+            DecisionSheet(model: model, item: item, title: model.session(item.sessionId)?.displayName ?? item.sessionId, open: { answering = nil; open(item.sessionId) }) {
+                answering = nil
+                Task { await reload() }
             }
         }
     }
@@ -226,6 +234,11 @@ struct QueueListView: View {
                     .accessibilityIdentifier("queue-steer-refusal-\(item.id)")
             }
             HStack {
+                if let decision = model.shownDecisions.decision(answering: item.askId) {
+                    Button("Answer") { answering = decision }.buttonStyle(.borderedProminent)
+                        .accessibilityHint("Opens what to do with this message")
+                        .accessibilityIdentifier("queue-answer-\(item.id)")
+                }
                 if let steering, steering.refusal == nil {
                     Button("Steer") { steer(item, capabilities: steering.capabilities) }.buttonStyle(.bordered)
                         .accessibilityHint("Sends this message into the running turn")

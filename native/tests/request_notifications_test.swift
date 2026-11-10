@@ -122,12 +122,12 @@ struct RequestNotificationsTest {
         configuration.protocolClasses = [RespondStub.self]
         let api = AgenthailAPI(baseURL: URL(string: "https://mac.test")!, token: "token", session: URLSession(configuration: configuration))
         RespondStub.replies = [(200, #"{"ok":true,"result":{"requestId":"req-1","outcome":"answered"}}"#), (409, #"{"ok":false,"error":{"code":"stale","message":"this request was already answered or has expired"}}"#)]
-        let outcome = try? await api.respond(sessionID: "s1", requestID: "req-1", decision: .choice("o1"))
+        let outcome = try? await api.respond(sessionID: "s1", requestID: "req-1", decision: .choose("o1"))
         check(outcome == "answered", "outcome \(String(describing: outcome))")
         let sent = RespondStub.bodies.last ?? [:]
-        check(sent["action"] as? String == "respond" && sent["sessionId"] as? String == "s1" && sent["requestId"] as? String == "req-1" && (sent["decision"] as? [String: String]) == ["choice": "o1"], "respond body \(sent)")
+        check(sent["action"] as? String == "respond" && sent["sessionId"] as? String == "s1" && sent["requestId"] as? String == "req-1" && (sent["decision"] as? [String: [String]]) == ["choices": ["o1"]], "respond body \(sent)")
         do {
-            _ = try await api.respond(sessionID: "s1", requestID: "req-1", decision: .choice("o1"))
+            _ = try await api.respond(sessionID: "s1", requestID: "req-1", decision: .choose("o1"))
             check(false, "a stale answer succeeded")
         } catch AgenthailAPIError.requestStale(let message) {
             check(message.contains("already answered"), "stale message \(message)")
@@ -135,8 +135,9 @@ struct RequestNotificationsTest {
             check(false, "stale error \(error)")
         }
         RespondStub.replies = [(200, #"{"ok":true,"result":{"requestId":"req-2","outcome":"denied"}}"#)]
-        _ = try? await api.respond(sessionID: "s1", requestID: "req-2", decision: RequestDecision(choice: "reply", message: "use staging"))
-        check((RespondStub.bodies.last?["decision"] as? [String: String]) == ["choice": "reply", "message": "use staging"], "reply body \(RespondStub.bodies.last ?? [:])")
+        _ = try? await api.respond(sessionID: "s1", requestID: "req-2", decision: .choose("reply", message: "use staging"))
+        let reply = RespondStub.bodies.last?["decision"] as? [String: Any] ?? [:]
+        check(reply["choices"] as? [String] == ["reply"] && reply["message"] as? String == "use staging" && reply.count == 2, "reply body \(reply)")
         RespondStub.replies = [(200, "{}")]
         try? await api.setTurnSetting(sessionID: "s1", key: "mode", value: "plan")
         let mode = RespondStub.bodies.last ?? [:]
@@ -144,7 +145,7 @@ struct RequestNotificationsTest {
     }
 
     static func checkDecoding() {
-        let json = #"{"permissionMode":"","requests":[{"id":"r1","kind":"approval","tool":"Bash","title":"Claude wants to run true","input":{"command":"true","n":1},"alwaysAllow":true,"createdAt":"2026-10-19T00:00:00Z"},{"id":"r2","kind":"question","tool":"AskUserQuestion","questions":[{"question":"Which color?","header":"Color","multiSelect":false,"options":[{"label":"Red","description":"Warm"}]}],"alwaysAllow":false,"createdAt":"2026-10-19T00:00:00Z"}]}"#
+        let json = #"{"permissionMode":"","requests":[{"id":"r1","kind":"approval","tool":"Bash","title":"Claude wants to run true","input":{"command":"true","n":1},"alwaysAllow":true,"createdAt":"2026-10-19T00:00:00Z"},{"id":"r2","kind":"question","tool":"AskUserQuestion","questions":[{"question":"Which color?","header":"Color","multiSelect":false,"options":[{"id":"o0","label":"Red","description":"Warm"}]}],"alwaysAllow":false,"createdAt":"2026-10-19T00:00:00Z"}]}"#
         guard let state = try? JSONDecoder().decode(SessionRequests.self, from: Data(json.utf8)) else { return check(false, "requests did not decode") }
         check(state.requests.count == 2 && state.requests[0].summary == "Claude wants to run true" && state.requests[0].alwaysAllow, "approval \(state.requests[0])")
         check(state.requests[0].input?.contains(#""command":"true""#) == true, "input \(String(describing: state.requests[0].input))")

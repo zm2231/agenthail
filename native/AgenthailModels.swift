@@ -1281,6 +1281,7 @@ struct QueueState: Decodable, Identifiable, Equatable {
     var hostID: String? = nil
     var attachments: [QueueAttachment]? = nil
     var author: String? = nil
+    var askId: String? = nil
 
     var listID: String { "\(hostID ?? "")/\(id)" }
     var hasAttachments: Bool { !(attachments ?? []).isEmpty }
@@ -2273,7 +2274,7 @@ struct CancelledQueueItem: Decodable, Equatable {
 /// open turn waits on a person for.
 struct SessionRequest: Decodable, Hashable, Identifiable {
     struct Option: Decodable, Hashable {
-        var id: String? = nil
+        let id: String
         let label: String
         let description: String
     }
@@ -2423,23 +2424,16 @@ enum ElicitationValue: Codable, Hashable, Sendable {
     }
 }
 
-/// A person's answer to a request: a notification button's `choice`, or a
-/// `behavior` with an optional `always`, `message`, `answers`, or an MCP
-/// form's `content`.
 struct RequestDecision: Encodable, Hashable, Sendable {
-    var choice: String? = nil
-    var behavior: String? = nil
-    var always: Bool? = nil
-    var message: String? = nil
+    var choices: [String]
     var answers: [String: String]? = nil
+    var message: String? = nil
     var content: [String: ElicitationValue]? = nil
 
-    static let allow = RequestDecision(behavior: "allow")
-    static let alwaysAllow = RequestDecision(behavior: "allow", always: true)
-    static let deny = RequestDecision(behavior: "deny")
-    static func answers(_ answers: [String: String]) -> RequestDecision { RequestDecision(behavior: "allow", answers: answers) }
-    static func choice(_ choice: String) -> RequestDecision { RequestDecision(choice: choice) }
-    static func content(_ content: [String: ElicitationValue]) -> RequestDecision { RequestDecision(behavior: "allow", content: content) }
+    static let allow = choose("allow")
+    static let deny = choose("deny")
+    static func choose(_ id: String, message: String? = nil) -> RequestDecision { RequestDecision(choices: [id], message: message) }
+    static func content(_ content: [String: ElicitationValue]) -> RequestDecision { RequestDecision(choices: ["allow"], content: content.isEmpty ? nil : content) }
 }
 
 /// A session's open requests, oldest first, and the permission mode it runs

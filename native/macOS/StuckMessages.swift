@@ -3,10 +3,19 @@ import SwiftUI
 struct QueueItemActions: View {
     var model: AgenthailModel
     let item: QueueState
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         if QueueFacts.canCancel(item) {
             Button("Cancel") { model.perform(action: "queue-cancel", queueID: item.id) }
+        }
+        if let decision = model.decisionFeed.inbox.decision(answering: item.askId) {
+            Button("Answer") {
+                model.mainPane.showInbox()
+                model.mainPane.selectedDecisionID = decision.id
+                MainWindowShow.show(model.mainWindow) { openWindow(id: "main") }
+            }
+            .help("Open the decision this message is waiting on")
         }
     }
 }
