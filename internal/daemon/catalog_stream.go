@@ -304,6 +304,13 @@ func (d *Daemon) listedCatalogEvents(batch []registry.CatalogEvent) ([]registry.
 		d.log.Printf("catalog listing: %s", err)
 		return nil, err
 	}
+	var presenter rowPresenter
+	if len(entities) > 0 {
+		if presenter, err = d.rowPresenter(time.Now()); err != nil {
+			d.log.Printf("catalog presentation: %s", err)
+			return nil, err
+		}
+	}
 	listed := make([]registry.CatalogEvent, 0, len(batch))
 	for _, event := range batch {
 		if event.Type == "session.upserted" && !listing.CurrentEntity(event.EntityID) {
@@ -313,7 +320,7 @@ func (d *Daemon) listedCatalogEvents(batch []registry.CatalogEvent) ([]registry.
 			}
 			event.Type, event.Payload = "session.removed", payload
 		} else if event.Type == "session.upserted" {
-			payload, err := withPlacement(event.Payload)
+			payload, err := presentedUpsert(event.Payload, presenter)
 			if err != nil {
 				d.log.Printf("catalog placement %s: %s", event.EntityID, err)
 				return nil, err

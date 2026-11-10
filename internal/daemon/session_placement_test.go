@@ -237,7 +237,7 @@ func TestSessionPlacementOnTheStreamMatchesTheRow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		served, err := withPlacement(payload)
+		served, err := presentedUpsert(payload, rowPresenter{now: time.Now()})
 		if err != nil {
 			t.Fatal(err)
 		}

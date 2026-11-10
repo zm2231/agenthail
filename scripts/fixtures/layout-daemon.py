@@ -132,6 +132,7 @@ if __name__ == "__main__":
     if sys.argv[1:] in (["waiting"], ["waiting-queued"]):
         # A terminal session waiting on a question Agenthail can't answer.
         SESSION["waitingOn"] = {"kind": "question", "id": "fixture-session:question:1", "since": NOW}
+        SESSION["attention"] = {"kind": "request", "reason": "Answer in its terminal"}
         SESSION["runtime"] = {"focusable": True, "launcher": "cmux", "hostName": "cmux"}
     if sys.argv[1:] == ["waiting-queued"]:
         # Messages sent to a waiting session hold until it is answered, and
@@ -143,12 +144,13 @@ if __name__ == "__main__":
         ]
     if sys.argv[1:2] == ["questions"]:
         SESSION["waitingOn"] = {"kind": "question", "id": "fixture-questions", "since": NOW, "answerable": True}
+        SESSION["attention"] = {"kind": "request", "reason": "Answer in Agenthail"}
         SESSION["capabilities"] = {**CAPABILITIES, "respond": True}
         with open(os.path.join(os.path.dirname(__file__), "question-pager-requests.json")) as requests:
             RESPONSES["/api/v1/requests"] = json.load(requests)
         RESPONSES["/api/v1/session"] = {
             "session": {k: SESSION[k] for k in ("id", "surface", "name", "status", "lastActive", "cwd", "waitingOn")},
-            "exchanges": [], "capabilities": SESSION["capabilities"], "readOnly": False, "readOnlyReason": "",
+            "attention": SESSION["attention"], "exchanges": [], "capabilities": SESSION["capabilities"], "readOnly": False, "readOnlyReason": "",
             "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": []},
         }
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
@@ -182,7 +184,7 @@ if __name__ == "__main__":
         HELD_STREAMS.update({"/api/v1/catalog-events", "/api/v1/session-stream"})
         RESPONSES["/api/v1/session"] = {
             "session": {k: SESSION[k] for k in ("id", "surface", "name", "status", "lastActive", "cwd")},
-            "exchanges": [], "capabilities": SESSION["capabilities"], "readOnly": False, "readOnlyReason": "",
+            "attention": SESSION["attention"], "exchanges": [], "capabilities": SESSION["capabilities"], "readOnly": False, "readOnlyReason": "",
             "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": []},
         }
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
@@ -340,9 +342,11 @@ if __name__ == "__main__":
             labelled("link", "https://github.com/acme/widgets/pull/12 review the change",
                      claudeConfigRoot={"name": "team", "root": "/srv/home/.team/.claude", "signedInAs": "dev@example.com"},
                      capabilities={**CAPABILITIES, "personMessage": "note", "remoteControl": True}),
-            labelled("terminal", "Ship the release notes", status="busy", runtimeKind="claude-cli", waitingOn={"kind": "question", "id": "q1", "since": NOW}),
-            labelled("limit", "Migrate the database", limitResume={"state": "waiting"}),
-            labelled("stopped", "Fix the flaky test", turnStop={"turnId": "t1", "reason": "the model returned an error"}),
+            labelled("terminal", "Ship the release notes", status="busy", runtimeKind="claude-cli", waitingOn={"kind": "question", "id": "q1", "since": NOW},
+                     attention={"kind": "request", "reason": "Answer in its terminal"}),
+            labelled("limit", "Migrate the database", limitResume={"state": "waiting"}, attention={"kind": "usageLimit", "reason": "Resumes when the limit lifts"}),
+            labelled("stopped", "Fix the flaky test", turnStop={"turnId": "t1", "reason": "the model returned an error"},
+                     attention={"kind": "stopped", "reason": "the model returned an error"}),
             labelled("background", "Watch the build", backgroundTasks={"running": True, "tasks": [{"id": "b1", "kind": "shell", "description": "npm run build"}], "source": "host"}),
             labelled("offline-host", "Sync the mirror", host={"id": "h0123456789ab", "name": "server", "state": "unreachable"}, unavailableReason="server is unreachable"),
             labelled("archived", "Spike the old migration", archived=True),

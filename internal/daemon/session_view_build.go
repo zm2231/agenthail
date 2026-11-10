@@ -73,14 +73,11 @@ func (d *Daemon) cachedSessionView(ctx context.Context, request sessionViewReque
 }
 
 func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewRequest, config DashboardConfig, key sessionViewCacheKey, now time.Time) (*sessionViewBuild, error) {
-	leads, err := d.Registry.LocalLeadSessions()
+	presenter, err := d.rowPresenter(now)
 	if err != nil {
 		return nil, err
 	}
-	replacedLeads, err := d.Registry.ReplacedLeadTenures()
-	if err != nil {
-		return nil, err
-	}
+	leads := presenter.leads
 	if d.presentation.building != nil {
 		d.presentation.building()
 	}
@@ -116,9 +113,6 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 			if adapterErr == nil {
 				row.Current, row.CurrentReason = surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: row.QueueCount, Open: row.Open, Now: now, CodexRecentHours: config.CodexRecentHours, Lead: leads[record.ID]})
 			}
-			if tenures, replaced := replacedLeads[record.ID]; replaced && !leads[record.ID] {
-				row.ReplacedLead = tenures
-			}
 		}
 		if limit, ok := read.Limits[record.ID]; ok {
 			row.LimitResume = &dashboardLimitResume{State: limit.State, RefusedAt: limit.RefusedAt, ResetsAt: limit.ResetsAt, MoveTo: d.limitMoveOffer(record.ID, now)}
@@ -128,9 +122,11 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 		} else if record.HostID == "" {
 			row.LimitResume = nil
 		}
-		display := sessionDisplay(row, now)
-		row.Display = &display
-		row.Attention = rowAttention(row)
+		localID := ""
+		if record.HostID == "" {
+			localID = record.ID
+		}
+		presenter.present(&row, localID)
 		row.InboxSection = sessionInbox(row, now)
 		row.Placement = sessionPlacement(row)
 		rows = append(rows, row)

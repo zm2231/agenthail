@@ -10,6 +10,24 @@ final class AskCardUITests: XCTestCase {
         answer(theme: "light")
     }
 
+    func testAcceptsTheRecommendedAnswerFromTheInbox() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-ask", "--preview-theme", "dark"]
+        app.launch()
+        app.tab("Inbox").tapWhenReady(timeout: 15)
+        let decision = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "demo")).matching(NSPredicate(format: "identifier BEGINSWITH 'decision-'")).firstMatch
+        XCTAssertTrue(decision.waitForExistence(timeout: 10), "the open ask is listed in the inbox")
+        decision.tap()
+        let accept = app.buttons["decision-accept-recommended"]
+        XCTAssertTrue(accept.waitForExistence(timeout: 5), "an ask that names a recommendation offers to accept it")
+        attach(app, "dark accept recommended")
+        accept.tap()
+        XCTAssertTrue(accept.waitForNonExistence(timeout: 10), "accepting answers the ask and closes it")
+        XCTAssertFalse(app.descendants(matching: .any)["decision-failure"].exists, "the daemon got the recommended option alone")
+        XCTAssertTrue(decision.waitForNonExistence(timeout: 10), "the answered ask leaves the inbox")
+        attach(app, "dark after accept")
+    }
+
     private func answer(theme: String) {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-ask", "--preview-theme", theme]

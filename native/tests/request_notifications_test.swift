@@ -56,7 +56,9 @@ struct RequestNotificationsTest {
             check(RequestNotifications.notice(from: Data(appOnly.utf8), requestID: "r") == RequestNotice(prompt: "Which color?", actions: []), "a request answered in the app still shows its prompt: \(appOnly)")
         }
         for bad in [
-            #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o9","title":"Nine"}]}]}"#,
+            #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"","title":"Nameless"}]}]}"#,
+            #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"com.apple.UNNotificationDefaultActionIdentifier","title":"Open"}]}]}"#,
+            #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o0","title":""}]}]}"#,
             #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o0","title":"A"},{"id":"o0","title":"B"}]}]}"#,
             #"{"requests":[{"id":"r","prompt":"Ask","actions":[{"id":"o0","title":"A"},{"id":"o1","title":"B"},{"id":"o2","title":"C"},{"id":"o3","title":"D"},{"id":"reply","title":"Reply…"},{"id":"deny","title":"Deny"}]}]}"#,
             #"{"requests":[{"id":"r","prompt":" ","actions":[{"id":"allow","title":"Allow"}]}]}"#,
@@ -64,10 +66,15 @@ struct RequestNotificationsTest {
         ] {
             check(RequestNotifications.notice(from: Data(bad.utf8), requestID: "r") == nil, "no notice from \(bad)")
         }
-        check(RequestNotifications.choice(forAction: "always") == "always", "always is a choice")
+        let asked = RequestNotifications.categoryIdentifier(requestID: "c")
+        check(RequestNotifications.choice(forAction: "always", category: asked) == "always", "always is a choice")
+        let ledgerBody = #"{"requests":[{"id":"ask-1d2e","prompt":"W12: Ship on Friday?","actions":[{"id":"recommended","title":"Ship Friday"},{"id":"default","title":"Hold"},{"id":"reply","title":"Reply…"}]}]}"#
+        check(RequestNotifications.notice(from: Data(ledgerBody.utf8), requestID: "ask-1d2e")?.actions.map(\.id) == ["recommended", "default", "reply"], "a ledger question's buttons are the ids its request lists")
+        check(RequestNotifications.choice(forAction: "recommended", category: asked) == "recommended" && RequestNotifications.choice(forAction: "o7", category: asked) == "o7", "any button of a request's category answers with its id")
+        check(RequestNotifications.choice(forAction: "reply", category: "AGENTHAIL_SESSION") == nil && RequestNotifications.choice(forAction: "allow", category: "") == nil, "a button outside a request's category never answers a request")
         let codexBody = #"{"requests":[{"id":"c","prompt":"Run make","actions":[{"id":"allow","title":"Allow"},{"id":"always","title":"Always allow"},{"id":"deny","title":"Deny"},{"id":"never","title":"Always deny"},{"id":"stop","title":"Deny and stop"}]}]}"#
         check(RequestNotifications.notice(from: Data(codexBody.utf8), requestID: "c")?.actions.map(\.id) == ["allow", "always", "deny", "never", "stop"], "a Codex approval's always deny and deny and stop reach the notification")
-        check(RequestNotifications.choice(forAction: "never") == "never" && RequestNotifications.choice(forAction: "stop") == "stop", "never and stop are choices")
+        check(RequestNotifications.choice(forAction: "never", category: asked) == "never" && RequestNotifications.choice(forAction: "stop", category: asked) == "stop", "never and stop are choices")
         let deliveryBody = #"{"requests":[{"id":"ask-0fca204fdeb3","prompt":"Message not delivered","optionsOnly":true,"actions":[{"id":"retry","title":"Retry"},{"id":"delete","title":"Delete"},{"id":"dismiss","title":"Dismiss"},{"id":"reply","title":"Reply…"}]}]}"#
         let delivery = RequestNotifications.notice(from: Data(deliveryBody.utf8), requestID: "ask-0fca204fdeb3")
         check(delivery?.actions.map(\.id) == ["retry", "delete", "dismiss"], "a delivery ask answers with its options only, never a typed reply: \(String(describing: delivery?.actions))")
@@ -75,7 +82,7 @@ struct RequestNotificationsTest {
         check(deliveryCategory.actions.map { $0.options.contains(.destructive) } == [false, true, false], "only Delete is destructive among a delivery ask's options")
         let denials = RequestNotifications.category(requestID: "c", actions: [RequestNotificationAction(id: "allow", title: "Allow"), RequestNotificationAction(id: "never", title: "Always deny"), RequestNotificationAction(id: "stop", title: "Deny and stop")])
         check(denials.actions.map { $0.options.contains(.destructive) } == [false, true, true] && denials.actions.allSatisfy { $0.options.contains(.authenticationRequired) }, "every denial is destructive and every answer needs the device unlocked")
-        check(RequestNotifications.choice(forAction: UNNotificationDefaultActionIdentifier) == nil, "opening is not a choice")
+        check(RequestNotifications.choice(forAction: UNNotificationDefaultActionIdentifier, category: asked) == nil && RequestNotifications.choice(forAction: UNNotificationDismissActionIdentifier, category: asked) == nil, "opening or dismissing is not a choice")
         let category = RequestNotifications.category(requestID: "req-1", actions: [RequestNotificationAction(id: "allow", title: "Allow"), RequestNotificationAction(id: "deny", title: "Deny")])
         check(category.identifier == "AGENTHAIL_REQ_req-1" && category.actions.map(\.identifier) == ["allow", "deny"], "category \(category.identifier)")
         check(category.actions.allSatisfy { $0.options.contains(.authenticationRequired) }, "every answer needs the device unlocked")
@@ -83,7 +90,7 @@ struct RequestNotificationsTest {
         let replying = RequestNotifications.category(requestID: "req-2", actions: [RequestNotificationAction(id: "o0", title: "Red"), RequestNotificationAction(id: "reply", title: "Reply…")])
         check(!(replying.actions[0] is UNTextInputNotificationAction) && (replying.actions[1] as? UNTextInputNotificationAction)?.textInputButtonTitle == "Send", "reply takes text")
         check(replying.actions[1].options.contains(.authenticationRequired), "a reply needs the device unlocked")
-        check(RequestNotifications.choice(forAction: "reply") == "reply", "reply is a choice")
+        check(RequestNotifications.choice(forAction: "reply", category: asked) == "reply", "reply is a choice")
     }
 
     static func checkMerge() {

@@ -19,12 +19,15 @@ self.addEventListener("push", (event) => {
 
 async function show(message) {
   const tag = message.collapseId || undefined;
+  const limit = self.Notification?.maxActions ?? 2;
+  const actions = message.requestId ? (message.actions || []).slice(0, limit).map((action) => ({ action: action.id, title: action.title })) : [];
   await self.registration.showNotification(message.title || "Agenthail", {
     body: message.message || "",
     icon,
     badge: icon,
     tag,
     renotify: false,
+    actions,
     data: { sessionId: message.sessionId || "", requestId: message.requestId || "" },
   });
 }
@@ -48,8 +51,25 @@ async function withdraw(message) {
 // one is opened at the session.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  event.waitUntil(openSession(event.notification.data?.sessionId || ""));
+  const { sessionId = "", requestId = "" } = event.notification.data || {};
+  event.waitUntil(event.action && requestId ? answer(sessionId, requestId, event.action) : openSession(sessionId));
 });
+
+async function answer(sessionId, requestId, choice) {
+  let answered = false;
+  try {
+    const response = await fetch("/api/v1/actions", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": `notification-${requestId}-${choice}` },
+      body: JSON.stringify({ action: "respond", sessionId, requestId, decision: { choices: [choice] } }),
+    });
+    answered = response.ok;
+  } catch {
+    answered = false;
+  }
+  if (!answered) await openSession(sessionId);
+}
 
 async function openSession(sessionId) {
   const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });

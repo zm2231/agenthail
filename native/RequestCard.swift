@@ -30,6 +30,12 @@ struct RequestCard: View {
         return request.isQuestion ? "\(agent) asks" : "\(agent) wants your approval"
     }
 
+    static func deadline(_ request: SessionRequest, now: Date = Date(), calendar: Calendar = .current) -> String? {
+        guard let date = request.deadline.flatMap(TimestampParser.date) else { return nil }
+        let time = calendar.isDate(date, inSameDayAs: now) ? date.formatted(date: .omitted, time: .shortened) : date.formatted(date: .abbreviated, time: .shortened)
+        return "Answer by \(time)"
+    }
+
     static let denyingChoices: Set<String> = ["deny", "never", "stop"]
 
     static func approvalButtons(_ actions: [SessionRequest.Action]) -> (allowing: [SessionRequest.Action], denying: [SessionRequest.Action], reply: SessionRequest.Action?) {
@@ -53,6 +59,10 @@ struct RequestCard: View {
                 Label(heading, systemImage: request.usesPager ? "questionmark.bubble" : "hand.raised")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(request.isAsk ? attention : accent)
+                if let deadline = Self.deadline(request) {
+                    Text(deadline).font(.footnote).foregroundStyle(RoleStyle(.muted))
+                        .accessibilityIdentifier("request-deadline")
+                }
                 if request.usesPager {
                     QuestionPagerView(request: request, answering: answering, accent: accent, actionTint: actionTint, focusOnAppear: focusesPager, respond: respond)
                 } else {

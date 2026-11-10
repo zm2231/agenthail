@@ -197,12 +197,12 @@ final class AgenthailModel {
             if let parent = row.subagent?.parentId { ids[parent, default: []].append(row.id) }
         }
         workingCount = knownSessions.filter { $0.archived != true && SessionDisplayKind.of($0) == .working }.count
-        sessionAttention = SessionAttention.build(sessions: knownSessions)
+        sessionAttention = SessionAttention.of(knownSessions)
         let rows = Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let shown = orderHold.shown(list: listView, current: currentView, rows: rows)
         sessionTree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: treeCells(shown.rows))
         scopedTrees = buildScopedTrees()
-        menuSessions = MenuSessions.build(needsYou: sessionTree.needsYou, current: currentView, rows: rows, attention: sessionAttention)
+        menuSessions = MenuSessions.build(current: currentView, rows: rows)
     }
 
     private func treeCells(_ rows: [String: SessionState]) -> [String: SessionCell] {

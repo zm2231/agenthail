@@ -593,6 +593,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var plan: SessionPlan? = nil
     var holders: [SessionHolder]? = nil
     var replacedLead: [CoordinatorTenure]? = nil
+    var attention: RowAttention? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
     var placement: String? = nil
@@ -1600,6 +1601,7 @@ struct SessionDetail: Decodable {
     let journalSeq: UInt64?
     var alias: String?
     var limitResume: LimitResumeState?
+    var attention: RowAttention?
     /// Present only when the timeline cannot be shown; otherwise the
     /// conversation is the timeline's items and exchangeCount counts it.
     let exchanges: [ExchangeState]?
@@ -2315,6 +2317,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var actions: [Action] = []
     var createdAt: String? = nil
     var optionsOnly = false
+    var deadline: String? = nil
 
     var isQuestion: Bool { kind == "question" }
     var isAsk: Bool { kind == "ask" }
@@ -2322,7 +2325,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var summary: String { [title, displayName].compactMap { $0 }.first { !$0.isEmpty } ?? tool }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation, replacedBy, actions, createdAt, optionsOnly
+        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation, replacedBy, actions, createdAt, optionsOnly, deadline
     }
 
     init(id: String, kind: String, tool: String, title: String? = nil, questions: [Question]? = nil, alwaysAllow: Bool = false, input: String? = nil, actions: [Action] = []) {
@@ -2346,6 +2349,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
         actions = try container.decodeIfPresent([Action].self, forKey: .actions) ?? []
         createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
         optionsOnly = try container.decodeIfPresent(Bool.self, forKey: .optionsOnly) ?? false
+        deadline = try container.decodeIfPresent(String.self, forKey: .deadline)
         if let raw = try container.decodeIfPresent(RequestInput.self, forKey: .input), let data = try? JSONEncoder().encode(raw) {
             input = String(data: data, encoding: .utf8)
         }

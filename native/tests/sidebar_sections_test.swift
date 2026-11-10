@@ -79,7 +79,10 @@ struct SidebarSectionsTest {
         let quiet = keys(model, expanded: ["a"])
         model.snapshot = listing((model.snapshot?.sessions ?? []).map { row in
             var row = row
-            if row.id == "a2" { row.waitingOn = WaitingState(kind: "question", id: "q1") }
+            if row.id == "a2" {
+                row.waitingOn = WaitingState(kind: "question", id: "q1")
+                row.attention = RowAttention(kind: "request", reason: "Answer in Agenthail")
+            }
             return row
         })
         let asked = keys(model, expanded: ["a"])

@@ -26,6 +26,7 @@ struct ProjectScreen: View {
     @State private var place: NewSessionPlace?
     @State private var messaging: ListedProject?
     @State private var showingEarlier = false
+    @State private var answering: DecisionItem?
 
     private var project: ListedProject? { model.projects[projectID] }
 
@@ -41,6 +42,12 @@ struct ProjectScreen: View {
         .sheet(item: $place) { place in NewSessionSheet(model: model, place: place) }
         .sheet(item: $sheet) { sheet in IOSProjectSheetView(model: model, sheet: sheet) }
         .sheet(item: $messaging) { project in IOSProjectMessageSheet(model: model, project: project) }
+        .sheet(item: $answering) { item in
+            DecisionSheet(model: model, item: item, title: model.session(item.sessionId)?.displayName ?? item.sessionId, open: { answering = nil; openSession(item.sessionId) }) {
+                answering = nil
+                model.decisionFeed.refresh()
+            }
+        }
         .alert(confirmation?.message ?? "", isPresented: Binding(get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }), presenting: confirmation) { confirmation in
             Button(confirmation.action, role: .destructive) { Task { model.settle(await confirmation.run()) } }
             Button("Cancel", role: .cancel) {}
@@ -71,7 +78,7 @@ struct ProjectScreen: View {
                 }
             }
             if !waiting.isEmpty {
-                DecisionSections(model: model, inbox: waiting, open: openSession) { model.decisionFeed.refresh() }
+                DecisionSections(model: model, inbox: waiting, open: openSession) { answering = $0 }
             }
             if contents.now.count > 0 { nowSection(contents.now) }
             Section("Lead") {

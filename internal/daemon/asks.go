@@ -362,6 +362,7 @@ func (d *Daemon) sendAskNotifications(desktop string, mobile mobileNotification,
 // The desktop notification goes through a helper app that can take seconds
 // to start, so the phone is told alongside it.
 func (d *Daemon) deliverAskNotifications(ctx context.Context, desktop string, mobile mobileNotification, actions []surface.RequestAction) {
+	mobile.Actions = actions
 	var posted sync.WaitGroup
 	posted.Go(func() {
 		if err := d.notifyDesktop("Agenthail", desktop, mobile.SessionID, "agenthail-"+mobile.CollapseID, mobile.RequestID, actions); err != nil {

@@ -130,7 +130,6 @@ struct DesktopWindow: View {
         .onChange(of: pane.selectedSessionID) { pane.closeSidebarOverlay() }
         .onChange(of: pane.newSession != nil) { pane.closeSidebarOverlay() }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pane.fitWindow(width: $0) }
-        .background { DecisionsRefresh(model: model) }
     }
 }
 
