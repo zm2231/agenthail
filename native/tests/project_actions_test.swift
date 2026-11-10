@@ -5,7 +5,7 @@ import Foundation
 struct ProjectActionsTest {
     static func main() async {
         let snapshot = try! JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"""
-        {"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24,
+        {"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":24,
          "projects":[
           {"id":"repo:web","displayName":"web","kind":"git","sessionCount":3,"archived":false,
            "checkouts":[

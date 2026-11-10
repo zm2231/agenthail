@@ -103,7 +103,7 @@ struct SessionPaneTest {
         func row(_ id: String) -> SessionState {
             SessionState(id: id, surface: "codex", name: id, alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
         }
-        let listed = DashboardSnapshot(updatedAt: "1", eventCursor: nil, hostEpoch: nil, catalogSeq: nil, daemon: DaemonState(running: true, pid: nil, stale: nil, refreshError: nil, host: nil, hosts: nil), surfaces: [], sessions: [row("A"), row("S")], totalSessions: 2, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: [], codexRecentHours: 24, busyDelivery: nil)
+        let listed = DashboardSnapshot(updatedAt: "1", eventCursor: nil, hostEpoch: nil, catalogSeq: nil, daemon: DaemonState(running: true, pid: nil, stale: nil, refreshError: nil, host: nil, hosts: nil), surfaces: [], sessions: [row("A"), row("S")], totalSessions: 2, queue: [], channels: [], relays: [], history: [], codexRecentHours: 24, busyDelivery: nil)
         tabbed.activateTab("A")
         tabbed.showProject("P")
         tabbedModel.adopt(listed)
@@ -178,7 +178,7 @@ struct SessionPaneTest {
         }
         let laptop = SessionHost(id: "", name: "laptop", state: "local")
         func catalog(_ projects: [ProjectState]) -> DashboardSnapshot {
-            DashboardSnapshot(updatedAt: "2", eventCursor: nil, hostEpoch: nil, catalogSeq: nil, daemon: DaemonState(running: true, pid: nil, stale: nil, refreshError: nil, host: nil, hosts: nil), surfaces: [], sessions: [inProject("PA", "P"), inProject("QA", "Q")], totalSessions: 2, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: [], codexRecentHours: 24, busyDelivery: nil, projects: projects)
+            DashboardSnapshot(updatedAt: "2", eventCursor: nil, hostEpoch: nil, catalogSeq: nil, daemon: DaemonState(running: true, pid: nil, stale: nil, refreshError: nil, host: nil, hosts: nil), surfaces: [], sessions: [inProject("PA", "P"), inProject("QA", "Q")], totalSessions: 2, queue: [], channels: [], relays: [], history: [], codexRecentHours: 24, busyDelivery: nil, projects: projects)
         }
         let projectP = ProjectState(id: "P", displayName: "P", checkouts: [ProjectState.Checkout(host: laptop, projectId: "P", rootPath: "/work/P")])
         let projectQ = ProjectState(id: "Q", displayName: "Q", checkouts: [ProjectState.Checkout(host: laptop, projectId: "Q", rootPath: "/work/Q")])
@@ -322,7 +322,7 @@ struct SessionPaneTest {
             capabilities.stream = stream
             return SessionState(id: "R", surface: "claude", name: "new", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: capabilities, readOnly: nil, readOnlyReason: nil)
         }
-        lateStreamModel.snapshot = DashboardSnapshot(updatedAt: "2026-10-22T08:28:26Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [newSession(stream: false)], totalSessions: 1, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        lateStreamModel.snapshot = DashboardSnapshot(updatedAt: "2026-10-22T08:28:26Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [newSession(stream: false)], totalSessions: 1, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
         let lateStreamPane = lateStreamModel.mainPane!
         lateStreamPane.select("R")
         for _ in 0..<60 where lateStreamRequests.isEmpty { try? await Task.sleep(for: .milliseconds(50)) }
@@ -374,13 +374,13 @@ struct SessionPaneTest {
         if let unanswered { offline.discardSend(unanswered, in: "X") }
         let catalog = AgenthailModel(connecting: false)
         let codexSurface = try! JSONDecoder().decode(SurfaceState.self, from: Data(#"{"name":"codex","connected":true,"health":"healthy","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}"#.utf8))
-        catalog.snapshot = DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [codexSurface], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        catalog.snapshot = DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [codexSurface], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
         let healthEvent = try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":2,"type":"surface.health","data":{"surface":"codex","health":"degraded","detail":"bridge closed","runtime":{"name":"Codex Desktop bridge","reachable":false,"durable":false,"problem":"bridge-unavailable","detail":"bridge closed","remediation":"run the launch command"}}}"#.utf8))
         catalog.applyCatalogEvents([healthEvent])
         check(catalog.snapshot?.surfaces.first?.runtime?.advice.isEmpty == false && catalog.snapshot?.surfaces.first?.health == "degraded", "a streamed surface health change keeps its runtime advice")
         let rekeyed = AgenthailModel(connecting: false)
         let retired = SessionState(id: "session_old", surface: "claude", name: "worker", alias: "worker", status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
-        rekeyed.snapshot = DashboardSnapshot(updatedAt: "2026-10-18T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [retired], totalSessions: 1, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        rekeyed.snapshot = DashboardSnapshot(updatedAt: "2026-10-18T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [retired], totalSessions: 1, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
         let following = rekeyed.openPane()
         following.select("session_old")
         rekeyed.draft(for: "session_old").text = "unsent"
@@ -397,7 +397,7 @@ struct SessionPaneTest {
         let coldReply = Task { await cold.reply("cold answer", to: "session_old", connectionTimeout: .seconds(5)) }
         try? await Task.sleep(for: .milliseconds(50))
         let conversation = SessionState(id: "conversation-a", surface: "claude", name: "worker", alias: "worker", status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
-        var hydrated = DashboardSnapshot(updatedAt: "2026-10-18T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [conversation], totalSessions: 1, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        var hydrated = DashboardSnapshot(updatedAt: "2026-10-18T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [conversation], totalSessions: 1, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
         hydrated.rekeyed = ["session_old": "conversation-a"]
         cold.adopt(hydrated)
         check(cold.mainPane.selectedSessionID == "conversation-a", "a notification opened before the first snapshot opens the rekeyed conversation")
@@ -568,7 +568,7 @@ struct SessionPaneTest {
         }
         let launchPort = await launch.ready()
         let launchModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(launchPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
-        launchModel.snapshot = DashboardSnapshot(updatedAt: "2026-10-22T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        launchModel.snapshot = DashboardSnapshot(updatedAt: "2026-10-22T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
         launchModel.openNewSession()
         let launching = launchModel.mainPane.newSession!
         launching.hosts.receive(options: try! JSONDecoder().decode(SessionCreationOptions.self, from: Data(#"{"surfaces":[{"id":"claude","workspace":true}],"projects":[]}"#.utf8)), for: launching.hosts.generation)
@@ -696,7 +696,7 @@ struct SessionPaneTest {
 
         let streamedSession = SessionState(id: "D", surface: "claude", name: "d", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: false, readOnlyReason: nil)
         func listing(_ sessions: [SessionState]) -> DashboardSnapshot {
-            DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+            DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
         }
         streamingModel.snapshot = listing([streamedSession])
         streamingPane.reconcile()

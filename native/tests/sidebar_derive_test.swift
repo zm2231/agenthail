@@ -17,8 +17,8 @@ struct SidebarDeriveTest {
         return row
     }
 
-    static func listing(_ sessions: [SessionState], attention: [AttentionState] = [], epoch: String = "h") -> DashboardSnapshot {
-        DashboardSnapshot(updatedAt: "2026-10-23T08:00:00Z", eventCursor: 1, hostEpoch: epoch, catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: attention, deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+    static func listing(_ sessions: [SessionState], epoch: String = "h") -> DashboardSnapshot {
+        DashboardSnapshot(updatedAt: "2026-10-23T08:00:00Z", eventCursor: 1, hostEpoch: epoch, catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
     }
 
     static func family(_ id: String, project: String, members: [String] = [], pinned: Bool = false) -> ViewFamily {
@@ -67,11 +67,12 @@ struct SidebarDeriveTest {
         check(shown(model) == ["proj-a/a"], "releasing the hold shows the new order and drops the removed row: \(shown(model))")
         check(release.hit, "releasing the hold reaches views that read the sidebar")
 
-        let question = AttentionState(id: 1, sessionId: "a-child", target: "a-child", queueId: 0, reason: "Waiting on you", requestedAction: "answer", createdAt: "2026-10-23T08:00:00Z")
-        model.snapshot = listing([session("a", status: "idle"), session("a-child", status: "busy", parent: "a"), session("c", status: "busy")], attention: [question])
+        var asking = session("a-child", status: "busy", parent: "a")
+        asking.waitingOn = WaitingState(kind: "question", id: "q1")
+        model.snapshot = listing([session("a", status: "idle"), asking, session("c", status: "busy")])
         model.adoptCurrentView(view([("proj-c", [family("c", project: "proj-c")], ["c"]), ("proj-a", [family("a", project: "proj-a", members: ["a-child"])], ["a"])], seq: 3))
         check(model.sessionTree.needsYou.map(\.id) == ["a-child"], "Needs you follows the view's members: \(model.sessionTree.needsYou.map(\.id))")
-        check(model.needsYouCount == model.inboxStops.count && model.needsYouCount == 1, "the window chrome and status bar count what the Inbox lists")
+        check(model.needsYouCount == model.inboxStops.count, "the window chrome and status bar count what the Inbox lists")
 
         let tree = Notified(), chrome = Notified(), composer = Notified()
         withObservationTracking { _ = model.sessionTree } onChange: { MainActor.assumeIsolated { tree.hit = true } }

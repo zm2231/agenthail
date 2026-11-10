@@ -13,43 +13,33 @@ struct SessionAttentionTest {
             state.waitingOn = WaitingState(kind: kind, id: "req-\(id)")
             return state
         }
-        func item(_ id: Int64, _ sessionID: String, _ reason: String) -> AttentionState {
-            AttentionState(id: id, sessionId: sessionID, target: sessionID, queueId: id, reason: reason, requestedAction: "Retry or cancel this message", createdAt: "2026-10-04 11:00:00")
-        }
-        func problem(_ id: Int64, to target: String, from sender: String?) -> DeliveryProblem {
-            DeliveryProblem(deliveryId: id, sessionId: target, sourceSessionId: sender, attentionSessionId: sender, message: "Run the tests", reason: "expired", status: "failed", at: "2026-10-04 11:00:00")
+        func delivery(_ id: String, routedTo: String) -> SessionState {
+            var state = session(id, status: "idle", lastActive: "2026-10-04T11:30:00Z")
+            state.ask = SessionAsk(id: "ask-\(id)", title: "Message not delivered", routedTo: routedTo)
+            return state
         }
         let asker = waiting("asker", kind: "question", lastActive: "2026-10-01T00:00:00Z")
         let approver = waiting("approver", kind: "approval")
-        let reviewer = session("reviewer", status: "idle", lastActive: "2026-10-04T11:30:00Z", alias: "reviewer")
-        let sender = session("sender", status: "idle", lastActive: "2026-10-04T11:59:00Z")
-        let fanout = session("fanout", status: "idle", lastActive: "2026-10-04T11:58:00Z")
-        let target = session("target", status: "idle", lastActive: "2026-10-04T11:57:00Z")
-        let mixedTarget = session("mixed", status: "idle", lastActive: "2026-10-04T11:56:00Z")
+        let idle = session("idle", status: "idle", lastActive: "2026-10-04T11:59:00Z")
+        let target = delivery("target", routedTo: "person")
+        let sender = delivery("sender", routedTo: "sender")
         var archivedAsker = waiting("archived-asker", kind: "question")
         archivedAsker.archived = true
-        var coldTarget = session("cold-target", status: "notLoaded", lastActive: "2026-09-12T00:00:00Z")
-        coldTarget.waitingOn = WaitingState(kind: "question", id: "stale")
+        var coldTarget = delivery("cold-target", routedTo: "person")
+        coldTarget.status = "notLoaded"
         var lostRemote = waiting("h1::lost", kind: "question")
         lostRemote.host = SessionHost(id: "h1", name: "vps.example.ts.net", state: "disconnected")
         lostRemote.unavailableReason = "The host is offline"
-        let both = waiting("both", kind: "input")
-        let pool = [asker, approver, reviewer, sender, fanout, target, mixedTarget, archivedAsker, coldTarget, lostRemote, both]
-        let reasons = SessionAttention.build(
-            sessions: pool,
-            attention: [item(1, "target", "Delivery outcome could not be confirmed"), item(2, "target", "Delivery outcome could not be confirmed"), item(3, "mixed", "Claude needs to reconnect"), item(4, "mixed", "The target refused to start"), item(5, "cold-target", "Delivery target is unavailable"), item(6, "gone", "Delivery target is unavailable")],
-            deliveryProblems: [problem(1, to: "reviewer", from: "sender"), problem(2, to: "reviewer", from: "sender"), problem(3, to: "reviewer", from: "fanout"), problem(4, to: "target", from: "fanout"), problem(5, to: "reviewer", from: nil), problem(6, to: "reviewer", from: "both")]
-        )
-        expect(reasons["asker"] == SessionAttention(kind: .request, reason: "Asks you a question"), "a session waiting on a question needs you even with no queue attention")
+        var both = waiting("both", kind: "input")
+        both.ask = SessionAsk(id: "ask-both", title: "Message not delivered", routedTo: "person")
+        let reasons = SessionAttention.build(sessions: [asker, approver, idle, target, sender, archivedAsker, coldTarget, lostRemote, both])
+        expect(reasons["asker"] == SessionAttention(kind: .request, reason: "Asks you a question"), "a session waiting on a question needs you")
         expect(reasons["approver"]?.reason == "Needs your approval", "an approval reads as one")
-        expect(reasons["target"] == SessionAttention(kind: .incoming, reason: "2 messages: Delivery outcome could not be confirmed"), "failed messages to a session share their reason")
-        expect(reasons["mixed"]?.reason == "2 messages need a decision", "different reasons are counted, not listed")
-        expect(reasons["sender"] == SessionAttention(kind: .outgoing, reason: "2 messages to @reviewer not delivered"), "an agent's undelivered messages name their target")
-        expect(reasons["fanout"]?.reason == "2 messages not delivered", "messages to several targets are counted")
-        expect(reasons["both"]?.kind == .request && reasons["both"]?.reason == "Needs your input", "a request outranks a delivery problem")
-        expect(reasons["archived-asker"] == nil && reasons["cold-target"] == nil && reasons["h1::lost"] == nil && reasons["gone"] == nil, "archived, unavailable, unreachable and missing sessions never need you")
-        expect(reasons["reviewer"] == nil, "the target of an agent's failed message is not flagged; a person's own failed send flags no one")
-        expect(Set(reasons.keys) == ["asker", "approver", "target", "mixed", "sender", "fanout", "both"], "only sessions that can act are flagged: \(reasons.keys.sorted())")
+        expect(reasons["target"] == SessionAttention(kind: .request, reason: "Asks: Message not delivered"), "a delivery problem the person answers reads as its ask")
+        expect(reasons["sender"] == nil, "a delivery problem routed to the agent that sent it is the agent's, not the person's")
+        expect(reasons["both"]?.reason == "Needs your input", "the provider's own request outranks an ask")
+        expect(reasons["archived-asker"] == nil && reasons["cold-target"] == nil && reasons["h1::lost"] == nil, "archived, unavailable and unreachable sessions never need you")
+        expect(Set(reasons.keys) == ["asker", "approver", "target", "both"], "only sessions that can act are flagged: \(reasons.keys.sorted())")
 
         func hostedSession(_ id: String, waiting: WaitingState) -> SessionState {
             var state = SessionState(id: id, surface: "claude", name: id, alias: nil, status: "busy", lastActive: "2026-10-04T11:00:00Z", queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(respond: true, lifecycle: SessionLifecycle(stop: true, resume: true)), readOnly: nil, readOnlyReason: nil)
@@ -74,7 +64,7 @@ struct SessionAttentionTest {
         errored.turnStop = TurnStopState(turnId: "t1", reason: "Codex error: exceeded retry limit")
         var retrying = session("retrying", status: "busy", lastActive: "2026-10-04T11:33:00Z")
         retrying.turnStop = errored.turnStop
-        let places = SessionAttention.build(sessions: [hostedWait, held, unknownReset, resuming, probing, kept, refused, errored, retrying], attention: [], deliveryProblems: [])
+        let places = SessionAttention.build(sessions: [hostedWait, held, unknownReset, resuming, probing, kept, refused, errored, retrying])
         expect(places["refused"] == SessionAttention(kind: .stopped, reason: "Safeguards refused this conversation; start a new one"), "a refused conversation says to start a new one")
         expect(places["errored"] == SessionAttention(kind: .stopped, reason: "Codex error: exceeded retry limit"), "a turn an API error ended names the error")
         expect(places["retrying"] == nil, "a new turn clears the stop")
@@ -92,7 +82,7 @@ struct SessionAttentionTest {
         answered.ask = SessionAsk(id: "ask-000000000002", title: "Ready to ship", routedTo: "person", answeredAt: "2026-10-04T11:42:00Z")
         var told = session("told", status: "idle", lastActive: "2026-10-04T11:43:00Z")
         told.ask = SessionAsk(id: "ask-000000000003", title: "Ready", routedTo: "lead")
-        let asks = SessionAttention.build(sessions: [asking, answered, told], attention: [], deliveryProblems: [])
+        let asks = SessionAttention.build(sessions: [asking, answered, told])
         expect(asks["asking"] == SessionAttention(kind: .request, reason: "Asks: Ready to ship"), "an ask for the person needs the person, named by its title: \(String(describing: asks["asking"]))")
         expect(asks["answered"] == nil && asks["told"] == nil, "an answered ask, or one routed to another session, does not")
         print("session attention tests passed")

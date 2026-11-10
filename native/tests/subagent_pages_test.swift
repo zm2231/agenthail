@@ -102,6 +102,6 @@ final class PageProtocol: URLProtocol {
     static func page(_ ids: [String], next: String?) -> String {
         let sessions = ids.map { #"{"id":"\#($0)","surface":"codex","name":"\#($0)","status":"idle","queueCount":0,"open":false,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"compact":true,"model":true,"interrupt":true,"steer":true},"subagent":{"parentId":"root","rootId":"root","depth":1}}"# }
         let cursor = next.map { #","nextCursor":"\#($0)""# } ?? ""
-        return #"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[\#(sessions.joined(separator: ","))],"totalSessions":3\#(cursor),"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#
+        return #"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[\#(sessions.joined(separator: ","))],"totalSessions":3\#(cursor),"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":24}"#
     }
 }

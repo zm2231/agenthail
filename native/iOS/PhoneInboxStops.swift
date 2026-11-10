@@ -2,8 +2,7 @@ import Foundation
 
 extension AgenthailIOSModel {
     var inboxStops: InboxStops {
-        InboxStops.build(attention: attention, deliveries: deliveryProblems, replacements: leadReplacements,
-                         inbox: decisionFeed.inbox, localHosts: Set(hosts.map(\.id)))
+        InboxStops.build(replacements: leadReplacements, inbox: decisionFeed.inbox)
     }
 
     var shownDecisions: DecisionInbox {

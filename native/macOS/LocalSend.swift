@@ -11,13 +11,12 @@ struct LocalSend: Identifiable, Equatable {
     var status: String?
     var busyDelivery: String? = nil
     var failure: String? = nil
-    var deliveryID: Int64? = nil
-    var deletable = false
+    var ask: FailedSendAsk? = nil
     var unconfirmed = false
     var retryStopped = false
     var turnOptions: MessageTurnOptions? = nil
 
-    var canDelete: Bool { failure != nil && (deliveryID == nil || deletable) }
+    var canDelete: Bool { failure != nil && (ask?.offersDelete ?? true) }
     var unconfirmedTitle: String? {
         guard unconfirmed, failure == nil else { return nil }
         return retryStopped ? "Not confirmed. It may already have arrived." : "Not confirmed yet · retrying"

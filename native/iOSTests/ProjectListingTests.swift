@@ -89,7 +89,7 @@ final class ProjectRoutingTests: XCTestCase {
         try AgenthailIOSTests.pair("hserver", "https://server.invalid", name: "server")
         let model = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([ProjectActionProtocol.self]))
         for (hostID, root, lead) in [("hlaptop", "/Users/a/widget", "front"), ("hserver", "/srv/widget", "back")] {
-            let json = #"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24,"projects":[{"id":"\#(Self.repo)","displayName":"widget","checkouts":[{"host":{"id":"\#(hostID)","name":"\#(hostID)","state":"local"},"projectId":"\#(Self.repo)","rootPath":"\#(root)","added":true}],"coordinators":[{"host":{"id":"\#(hostID)","name":"\#(hostID)","state":"local"},"name":"\#(lead)","surface":"claude"}]}]}"#
+            let json = #"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":24,"projects":[{"id":"\#(Self.repo)","displayName":"widget","checkouts":[{"host":{"id":"\#(hostID)","name":"\#(hostID)","state":"local"},"projectId":"\#(Self.repo)","rootPath":"\#(root)","added":true}],"coordinators":[{"host":{"id":"\#(hostID)","name":"\#(hostID)","state":"local"},"name":"\#(lead)","surface":"claude"}]}]}"#
             model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(json.utf8)), host: hostID)
         }
         return model
@@ -128,7 +128,7 @@ final class ProjectRoutingTests: XCTestCase {
         defer { KeychainStore.removeAll() }
         let local = #"{"id":"hlaptop","name":"laptop","state":"local"}"#
         let peer = #"{"id":"hserver","name":"server","state":"connected"}"#
-        let json = #"{"updatedAt":"now","daemon":{"running":true,"hosts":[\#(peer)]},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24,"projects":[{"id":"\#(Self.repo)","displayName":"widget","checkouts":[{"host":\#(local),"projectId":"\#(Self.repo)","rootPath":"/w","added":true},{"host":\#(peer),"projectId":"hserver::\#(Self.repo)","rootPath":"/srv/w","added":true}],"coordinators":[{"host":\#(local),"name":"front","surface":"claude"},{"host":\#(peer),"name":"back","surface":"codex"}]}]}"#
+        let json = #"{"updatedAt":"now","daemon":{"running":true,"hosts":[\#(peer)]},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":24,"projects":[{"id":"\#(Self.repo)","displayName":"widget","checkouts":[{"host":\#(local),"projectId":"\#(Self.repo)","rootPath":"/w","added":true},{"host":\#(peer),"projectId":"hserver::\#(Self.repo)","rootPath":"/srv/w","added":true}],"coordinators":[{"host":\#(local),"name":"front","surface":"claude"},{"host":\#(peer),"name":"back","surface":"codex"}]}]}"#
         model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(json.utf8)), host: "hlaptop")
         let project = try XCTUnwrap(model.projects[Self.repo])
 

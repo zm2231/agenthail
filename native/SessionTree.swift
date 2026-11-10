@@ -114,7 +114,7 @@ struct SessionTree: Equatable {
 
     static func checkoutLabels(_ roots: [SessionState]) -> [String] {
         let paths = roots.map { root in
-            branchLabel(root) == nil ? (root.checkout?.path ?? root.cwd).map { URL(fileURLWithPath: $0).pathComponents.filter { $0 != "/" } } : nil
+            branchLabel(root) == nil ? (root.checkout?.path ?? root.cwd).map(PathNames.components) : nil
         }
         var depth = paths.map { _ in 1 }
         func label(_ index: Int) -> String {

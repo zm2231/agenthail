@@ -25,10 +25,15 @@ final class RefusedSendTests: XCTestCase {
         XCTAssertEqual(refused.removed(from: "Please run the tests", attachments: []).text, "Please run the tests")
     }
 
-    func testOnlyADeletableDeliveryOrAnAppSideFailureCanBeDeleted() {
-        XCTAssertTrue(RefusedSend(message: "a", attachments: []).canDelete, "no delivery id: the app refused it, nothing reached the daemon")
-        XCTAssertFalse(RefusedSend(message: "a", attachments: [], deliveryID: 7).canDelete, "a delivery the daemon does not call deletable may have arrived")
-        XCTAssertTrue(RefusedSend(message: "a", attachments: [], deliveryID: 7, deletable: true).canDelete)
+    func testDeleteShowsOnlyWhenNothingIsKeptOrTheAskOffersIt() {
+        func requests(_ choices: [String]) -> SessionRequests {
+            let options = choices.map { SessionRequest.Option(id: $0, label: $0.capitalized, description: "") }
+            return SessionRequests(permissionMode: "", requests: [SessionRequest(id: "ask-1", kind: "ask", tool: "", questions: [SessionRequest.Question(question: "q", header: "", multiSelect: false, options: options)])])
+        }
+        XCTAssertTrue(RefusedSend(message: "a", attachments: []).canDelete, "no ask: nothing is kept on the daemon, so the draft is removed locally")
+        XCTAssertFalse(RefusedSend(message: "a", attachments: [], ask: FailedSendAsk(id: "ask-1")).canDelete, "Delete waits until the ask is read")
+        XCTAssertTrue(RefusedSend(message: "a", attachments: [], ask: FailedSendAsk(id: "ask-1").reading(requests(["delete", "dismiss"]))).canDelete)
+        XCTAssertFalse(RefusedSend(message: "a", attachments: [], ask: FailedSendAsk(id: "ask-1").reading(requests(["dismiss"]))).canDelete, "an ask without delete means it may have arrived")
     }
 
     func testAnAttachmentMatchesByContentNotByCopy() {

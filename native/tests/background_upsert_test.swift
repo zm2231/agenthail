@@ -31,7 +31,7 @@ struct BackgroundUpsertTest {
     @MainActor
     static func main() {
         let model = AgenthailModel(connecting: false)
-        model.snapshot = DashboardSnapshot(updatedAt: "2026-10-23T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [session("streaming", status: "busy"), session("other", status: "idle")], totalSessions: 2, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        model.snapshot = DashboardSnapshot(updatedAt: "2026-10-23T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [session("streaming", status: "busy"), session("other", status: "idle")], totalSessions: 2, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
 
         let families = ["streaming", "other"].map { ViewFamily(id: $0, rootId: $0, projectId: "proj", checkoutId: "c", members: [ViewMember(id: $0, depth: 0, contextOnly: false, pinned: false)], pinned: false, workingSubagents: 0) }
         let counts = ["running", "current", "recent", "all", "archived"].reduce(into: [String: ScopePage.Count]()) { $0[$1] = ScopePage.Count(families: 2, sessions: 2) }
@@ -48,9 +48,9 @@ struct BackgroundUpsertTest {
         let window: [(String, @MainActor () -> Void)] = [
             ("sessionTree", { _ = model.sessionTree }), ("subagentIDs", { _ = model.subagentIDs }),
             ("menuSessions", { _ = model.menuSessions }), ("refinementSurfaces", { _ = model.refinementSurfaces }),
-            ("daemon", { _ = model.daemon }), ("projects", { _ = model.projects }), ("attention", { _ = model.attention }),
+            ("daemon", { _ = model.daemon }), ("projects", { _ = model.projects }),
             ("queue", { _ = model.queue }), ("workingCount", { _ = model.workingCount }), ("sessionAttention", { _ = model.sessionAttention }),
-            ("hasSnapshot", { _ = model.hasSnapshot }), ("deliveryProblems", { _ = model.deliveryProblems }),
+            ("hasSnapshot", { _ = model.hasSnapshot }),
         ]
         for (index, (name, read)) in window.enumerated() {
             let events = progress(index)
