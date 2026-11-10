@@ -51,8 +51,8 @@ JOBS='repos_owner_repo_actions_runs_7_jobs_per_page_100'
 RUN='repos_owner_repo_actions_runs_7'
 
 jobs_json() {
-	local gate="$1" native="$2"
-	printf '{"jobs":[{"name":"verify","status":"in_progress","conclusion":null},{"name":"gate","status":"%s","conclusion":%s},{"name":"native","status":"completed","conclusion":%s}]}' "${gate%/*}" "${gate#*/}" "$native"
+	local gate="$1" installer="$2"
+	printf '{"jobs":[{"name":"verify","status":"in_progress","conclusion":null},{"name":"gate","status":"%s","conclusion":%s},{"name":"installer","status":"completed","conclusion":%s}]}' "${gate%/*}" "${gate#*/}" "$installer"
 }
 
 # label <name> <expected calls> [setup...]: runs ci-full-label.sh for ci.yml.
@@ -62,7 +62,7 @@ label() {
 	mkdir -p "$WORK/answers"
 	touch "$WORK/calls"
 	env PATH="$WORK/bin:$PATH" ANSWERS="$WORK/answers" CALLS="$WORK/calls" GITHUB_REPOSITORY=owner/repo HEAD_SHA=abc \
-		POLL_SECONDS=0 POLL_LIMIT=3 SETUP="$3" bash -c 'eval "$SETUP"; exec bash "$0" ci.yml gate native installer package' "$ROOT/scripts/ci-full-label.sh" >"$WORK/out" 2>&1 || status=$?
+		POLL_SECONDS=0 POLL_LIMIT=3 SETUP="$3" bash -c 'eval "$SETUP"; exec bash "$0" ci.yml gate installer package' "$ROOT/scripts/ci-full-label.sh" >"$WORK/out" 2>&1 || status=$?
 	local calls
 	calls="$(tr '\n' ';' <"$WORK/calls")"
 	[ "$calls" = "$want" ] || fail "$name: gh run calls '$calls', want '$want': $(cat "$WORK/out")"

@@ -33,7 +33,8 @@ jobs:
         run: scripts/ci-full-gate.sh
 
   verify:
-    if: ${{ !github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size }}
+    needs: gate
+    if: ${{ !cancelled() && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
     steps:
@@ -73,11 +74,13 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Stage the shipped Node
         run: scripts/fetch-node.sh
-      - name: Race tests
-        # No workflow race-instruments sqlite's generated C; plain go test -race does.
-        run: AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+      - name: Tests of the packages with macOS code paths
+        # Linux runs every package with -race.
+        run: |
+          packages="$(go run ./scripts/go-darwin-packages ./...)"
+          AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" go test $packages -count=1 -timeout 25m
       - name: Real Codex app-server tests
-        # The race tests skip these when codex is not installed; here each must pass.
+        # The tests above skip these when codex is not installed; here each must pass.
         shell: bash
         run: |
           npm install --prefix "$RUNNER_TEMP/codex" --no-audit --no-fund @openai/codex@0.163.0
@@ -174,23 +177,12 @@ jobs:
           scripts/test-macos-app-resources-check.sh
           bash -n packaging/scripts/preinstall packaging/scripts/postinstall
           python3 -m py_compile sidecar/sidecar.py
-      - name: Clean up self-hosted job
-        if: always() && runner.environment == 'self-hosted'
-        run: scripts/ci-self-hosted.sh cleanup
-
-  native:
-    needs: gate
-    if: ${{ needs.gate.outputs.full == 'true' }}
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-      - name: Isolate self-hosted job
-        if: runner.environment == 'self-hosted'
-        run: scripts/ci-self-hosted.sh prepare >> "$GITHUB_ENV"
       - name: Native helper tests
+        # A gate that did not decide runs them.
+        if: needs.gate.outputs.full == 'true' || needs.gate.result != 'success'
         run: scripts/test-native-helpers.sh
       - name: Simulator run guard tests
+        if: needs.gate.outputs.full == 'true' || needs.gate.result != 'success'
         run: scripts/test-ios-simulator.sh
       - name: Clean up self-hosted job
         if: always() && runner.environment == 'self-hosted'
@@ -241,7 +233,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
