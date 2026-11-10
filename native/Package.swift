@@ -64,6 +64,7 @@ let package = Package(
                 "ProjectNow.swift",
                 "ScopePages.swift",
                 "ScopeReader.swift",
+                "Coalescer.swift",
                 "SessionDisplayKind.swift",
                 "SessionNames.swift",
                 "SessionDetailState.swift",

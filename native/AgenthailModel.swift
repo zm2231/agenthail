@@ -97,8 +97,7 @@ final class AgenthailModel {
         }
     }
     private(set) var currentViewPosition = CatalogPosition(epoch: nil, cursor: 0)
-    private var orderReread: Task<Void, Never>?
-    private var orderRereadDirty = false
+    @ObservationIgnored private lazy var orderRereads = makeOrderRereads()
     var listRereadTask: Task<Void, Never>?
     var findTask: Task<Void, Never>?
     var spotlightCatalog: SpotlightCatalog?
@@ -393,23 +392,15 @@ final class AgenthailModel {
         currentView = view
     }
 
-    /// Rereads the order after news: one request in flight, and one more if news arrived meanwhile.
-    func rereadOrder() {
-        guard orderReread == nil else {
-            orderRereadDirty = true
-            return
-        }
-        orderReread = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(300))
-            guard let self, !Task.isCancelled else { return }
-            reader.rereadAll()
-            if let api, let read = try? await api.scopeSessions("current") { adoptCurrentView(read, mergingRows: true) }
-            orderReread = nil
-            if orderRereadDirty {
-                orderRereadDirty = false
-                rereadOrder()
-            }
-        }
+    func rereadOrder() { orderRereads.request() }
+
+    private func makeOrderRereads() -> Coalescer {
+        Coalescer(delay: .milliseconds(300)) { [weak self] in await self?.readOrder() }
+    }
+
+    private func readOrder() async {
+        reader.rereadAll()
+        if let api, let read = try? await api.scopeSessions("current") { adoptCurrentView(read, mergingRows: true) }
     }
 
     func adoptRefreshed(_ loaded: DashboardSnapshot) {

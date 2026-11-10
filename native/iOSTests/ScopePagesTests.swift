@@ -57,6 +57,28 @@ final class ScopePagesTests: XCTestCase {
         XCTAssertEqual((all["sessions"] as? [[String: Any]])?.count, rows.count)
     }
 
+    func testABurstOfNewsReadsTheOrderAndTheListOnce() async throws {
+        ScopeServer.state.set("one", current: [ScopeServer.row("live")], scopes: ["all": [[ScopeServer.row("a")]]])
+        let model = try await connect(["one"])
+        await more(.all)
+        let host = try XCTUnwrap(model.connection("one"))
+        func reads(_ scope: String) -> Int {
+            ScopeServer.state.requests("one").filter { $0.contains("scope=\(scope)") && $0.contains("limit=200") && !$0.contains("cursor") }.count
+        }
+        let (all, current) = (reads("all"), reads("current"))
+
+        host.rereadOrder()
+        host.rereadOrder()
+        host.rereadOrder()
+        let deadline = Date().addingTimeInterval(5)
+        while reads("current") == current || reads("all") == all, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertGreaterThan(reads("all"), all, "news reread nothing")
+        try await Task.sleep(for: .seconds(1))
+
+        XCTAssertEqual(reads("current") - current, 1, "one burst of news read the order \(reads("current") - current) times")
+        XCTAssertEqual(reads("all") - all, 1, "one burst of news reread All \(reads("all") - all) times")
+    }
+
     func testAllIsReadPageByPageFromEveryComputer() async throws {
         ScopeServer.state.set("one", current: [ScopeServer.row("live", name: "fresh")], scopes: ["all": [[ScopeServer.row("live", name: "stale"), ScopeServer.row("a")], [ScopeServer.row("b")]]])
         ScopeServer.state.set("two", current: [], scopes: ["all": [[ScopeServer.row("c")]]])

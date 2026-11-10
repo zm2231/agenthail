@@ -21,16 +21,13 @@ final class ScopeReader {
     func searchPending(_ query: String) -> Bool { !query.isEmpty && foundQuery != query }
     private var reads: [ScopeRequest: Task<Void, Never>] = [:]
     private var searchGeneration: UInt64 = 0
-    private var rereadTask: Task<Void, Never>?
-    private var rereadDirty = false
+    private lazy var rereads = makeRereads()
     private let source: Source
 
     init(_ source: Source) { self.source = source }
 
     func cancel() {
-        rereadTask?.cancel()
-        rereadTask = nil
-        rereadDirty = false
+        rereads.cancel()
         reads.values.forEach { $0.cancel() }
         reads = [:]
     }
@@ -114,22 +111,14 @@ final class ScopeReader {
         pages.remove(id) || unlisted && !pages.listings.isEmpty
     }
 
-    /// One reread in flight; news that arrives meanwhile runs one more after it.
-    func rereadAll() {
-        guard rereadTask == nil else {
-            rereadDirty = true
-            return
-        }
-        rereadTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(300))
-            guard let self, !Task.isCancelled else { return }
-            for request in pages.listings.keys.sorted() { await reread(request) }
-            rereadTask = nil
-            if rereadDirty {
-                rereadDirty = false
-                rereadAll()
-            }
-        }
+    func rereadAll() { rereads.request() }
+
+    private func makeRereads() -> Coalescer {
+        Coalescer(delay: .milliseconds(300)) { [weak self] in await self?.rereadListings() }
+    }
+
+    private func rereadListings() async {
+        for request in pages.listings.keys.sorted() { await reread(request) }
     }
 
     private func reread(_ request: ScopeRequest) async {

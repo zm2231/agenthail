@@ -323,6 +323,7 @@
 		E3D0BD4EF18E822019D68096 /* OpeningRebuildTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BE31EE75AEAC0432EDD510F /* OpeningRebuildTests.swift */; };
 		E46C621C113ADF218C04A0A8 /* QuestionPagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13D1E5984938119C1E3E0EA0 /* QuestionPagerView.swift */; };
 		E5B06D75FB0032364693C118 /* ProjectNowPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06725CA6DA72781C741973D5 /* ProjectNowPreview.swift */; };
+		E5E4354EDEBB98BB418663C1 /* Coalescer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B36C4EAD442750CED473279 /* Coalescer.swift */; };
 		E81B5BC5BC9CC5AEFB85570D /* PhoneRenderCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DF5D64482C8FDC3F76743B5 /* PhoneRenderCache.swift */; };
 		E8913F7EAF22BEC3B06CEBB1 /* SessionExperienceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B89C776F58E3976CA85343C /* SessionExperienceTests.swift */; };
 		E8B2191C22212C7C32973327 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 87937A6C5398E3EADF7ED3C0 /* Assets.xcassets */; };
@@ -476,6 +477,7 @@
 		37CA9654A2A028F24A14765B /* LatestScroll.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatestScroll.swift; sourceTree = "<group>"; };
 		39165C9FB624F0AFA9B6A590 /* UIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIConfig.swift; sourceTree = "<group>"; };
 		3A68A75ACEC943E2112DF062 /* PreviewOlderPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewOlderPage.swift; sourceTree = "<group>"; };
+		3B36C4EAD442750CED473279 /* Coalescer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Coalescer.swift; sourceTree = "<group>"; };
 		3E4A81FE780AC8CD4C5CBA01 /* PreviewStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewStream.swift; sourceTree = "<group>"; };
 		3EB62CD28F03B1D9FF82AD09 /* ComposerCompletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerCompletionTests.swift; sourceTree = "<group>"; };
 		3F91185845FD3DB37E5314A7 /* MetadataOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataOverlay.swift; sourceTree = "<group>"; };
@@ -990,6 +992,7 @@
 				68D47388531D27A7AD47C846 /* ClaudeCompactModels.swift */,
 				3FB569A293EA25F2E0C39509 /* ClaudeRootLabels.swift */,
 				E12EFFAC919D5A9794A56E13 /* ClaudeSubagentList.swift */,
+				3B36C4EAD442750CED473279 /* Coalescer.swift */,
 				33AFDDC2552D1DC17F94ABC1 /* ComposerAttachment.swift */,
 				755ACDEEAE225AD8953528AF /* ComposerCompletion.swift */,
 				5EF90B599AF784E13FE2A316 /* ComposerStore.swift */,
@@ -1370,6 +1373,7 @@
 				0715C585683831BC3087A7AB /* ClaudeCompactModels.swift in Sources */,
 				625738A022690297F180759E /* ClaudeRootLabels.swift in Sources */,
 				3088041E658DFAE92C94F2EB /* ClaudeSubagentList.swift in Sources */,
+				E5E4354EDEBB98BB418663C1 /* Coalescer.swift in Sources */,
 				1173F957401A01ED3BC23E60 /* CompactActivity.swift in Sources */,
 				C1E3D5AA0B49FC262BEBBC28 /* CompletionRow.swift in Sources */,
 				7F351AE442DA4780791BA41D /* ComposerAttachment.swift in Sources */,
