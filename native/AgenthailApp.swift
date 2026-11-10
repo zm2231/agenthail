@@ -432,6 +432,7 @@ private struct MenuBarLabel: View {
             }
         }
         .onAppear(perform: handleRoute)
+        .task(id: model.decisionsKey) { await model.refreshDecisionsSoon() }
         .onChange(of: route.latest) { handleRoute() }
         .onChange(of: spotlightSessions, initial: true) { syncSpotlight() }
         .onChange(of: model.sessionAttention.count, initial: true) { _, count in
@@ -486,14 +487,14 @@ private enum MenuBarArtwork {
 private struct SessionMenuSection: Identifiable {
     let title: String
     let ids: [String]
-    var showsReason = false
+    var reasons: [String: String] = [:]
     var id: String { title }
 
     @MainActor
     static func build(_ model: AgenthailModel) -> [SessionMenuSection] {
-        let menu = model.menuSessions
+        let menu = model.menuSessions.shown(with: model.decisionFeed.inbox)
         return [
-            SessionMenuSection(title: "Needs you", ids: menu.needsYou, showsReason: true),
+            SessionMenuSection(title: "Needs you", ids: menu.needsYou, reasons: menu.reasons),
             SessionMenuSection(title: "Working", ids: menu.working),
             SessionMenuSection(title: "Recent", ids: menu.recent)
         ].filter { !$0.ids.isEmpty }
@@ -503,7 +504,7 @@ private struct SessionMenuSection: Identifiable {
     func label(_ id: String, in model: AgenthailModel) -> String? {
         guard let session = model.session(id) else { return nil }
         let title = model.title(of: session)
-        if showsReason, let reason = model.sessionAttention[id]?.reason { return "\(title)  ·  \(reason)" }
+        if let reason = reasons[id] { return "\(title)  ·  \(reason)" }
         return "\(title)  ·  \(session.surface.capitalized)\(SessionDisplayKind.of(session) == .working ? "" : "  ·  " + relativeAge(session.lastActive))"
     }
 }

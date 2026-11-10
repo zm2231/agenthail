@@ -135,8 +135,13 @@ struct SessionPreview: View {
     }
     nonisolated static let previewUsageLimit: [String: String] = ["resetsAt": "2026-09-12T18:20:00Z"]
 
-    nonisolated static var previewDetailJSON: String {
-        let arguments = ProcessInfo.processInfo.arguments
+    nonisolated static let terminalAttention = ["kind": "request", "reason": "Waiting in its terminal"]
+    nonisolated static let questionsAttention = ["kind": "request", "reason": "Answer in Agenthail"]
+    nonisolated static let unreachableAttention = ["kind": "request", "reason": "Waiting on a prompt Agenthail can't reach. Stop and resume to clear it"]
+
+    nonisolated static var previewDetailJSON: String { previewDetail(arguments: ProcessInfo.processInfo.arguments) }
+
+    nonisolated static func previewDetail(arguments: [String]) -> String {
         guard arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") || arguments.contains("--preview-limit-move") || arguments.contains("--preview-terminal-question") || SessionOperationsPreview.enabled else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
         if SessionOperationsPreview.enabled { SessionOperationsPreview.apply(detail: &detail) }
@@ -146,6 +151,7 @@ struct SessionPreview: View {
             terminalQuestion(&session, capabilities: &capabilities)
             detail["session"] = session
             detail["capabilities"] = capabilities
+            detail["attention"] = terminalAttention
             var timeline = detail["timeline"] as! [String: Any]
             var items = timeline["items"] as! [[String: Any]]
             items.append(["id": "ask-1", "kind": "toolCall", "title": "AskUserQuestion", "text": previewTerminalQuestionInput, "callId": "ask-1", "timestamp": "2026-09-12T04:03:00Z", "truncated": false])
@@ -159,6 +165,7 @@ struct SessionPreview: View {
             var session = detail["session"] as! [String: Any]
             session["waitingOn"] = previewQuestions
             detail["session"] = session
+            detail["attention"] = questionsAttention
             var capabilities = detail["capabilities"] as! [String: Any]
             capabilities["respond"] = true
             detail["capabilities"] = capabilities
@@ -168,6 +175,7 @@ struct SessionPreview: View {
             session["waitingOn"] = previewUnreachable
             session["runtimeKind"] = "claude-host"
             detail["session"] = session
+            detail["attention"] = unreachableAttention
             var capabilities = detail["capabilities"] as! [String: Any]
             capabilities["respond"] = true
             capabilities["lifecycle"] = previewHostedLifecycle
@@ -248,6 +256,7 @@ struct SessionPreview: View {
         if ProcessInfo.processInfo.arguments.contains("--preview-questions") {
             var asking = snapshot["sessions"] as! [[String: Any]]
             asking[0]["waitingOn"] = previewQuestions
+            asking[0]["attention"] = questionsAttention
             var askingCapabilities: [String: Any] = capabilities
             askingCapabilities["respond"] = true
             asking[0]["capabilities"] = askingCapabilities
@@ -268,6 +277,7 @@ struct SessionPreview: View {
             var terminal = snapshot["sessions"] as! [[String: Any]]
             var terminalCapabilities: [String: Any] = capabilities
             terminalQuestion(&terminal[0], capabilities: &terminalCapabilities)
+            terminal[0]["attention"] = terminalAttention
             terminal[0]["capabilities"] = terminalCapabilities
             snapshot["sessions"] = terminal
         }
@@ -300,7 +310,9 @@ struct SessionPreview: View {
             hostedCapabilities["respond"] = true
             hostedCapabilities["lifecycle"] = previewHostedLifecycle
             limited[0]["capabilities"] = hostedCapabilities
+            limited[0]["attention"] = unreachableAttention
             limited[4]["usageLimit"] = previewUsageLimit
+            limited[4]["attention"] = ["kind": "usageLimit", "reason": "Usage limit, resets 6:20 PM"]
             limited[4]["status"] = "idle"
             snapshot["sessions"] = limited
         }

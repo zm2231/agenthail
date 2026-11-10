@@ -25,7 +25,7 @@ enum ProjectNowPreview {
         let main = checkout("checkout-main", "/work/fieldnotes", branch: "main")
         let search = checkout("checkout-search", "/work/fieldnotes/.worktrees/search", branch: "fix/search", dirty: true)
         let export = checkout("checkout-export", "/work/fieldnotes/.worktrees/export", branch: "feat/export")
-        let waiting: [String: Any] = ["waitingOn": SessionPreview.previewWaiting]
+        let waiting: [String: Any] = ["waitingOn": SessionPreview.previewWaiting, "attention": SessionPreview.terminalAttention]
         switch scenario {
         case "empty":
             return []

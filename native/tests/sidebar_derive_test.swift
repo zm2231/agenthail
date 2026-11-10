@@ -69,6 +69,7 @@ struct SidebarDeriveTest {
 
         var asking = session("a-child", status: "busy", parent: "a")
         asking.waitingOn = WaitingState(kind: "question", id: "q1")
+        asking.attention = RowAttention(kind: "request", reason: "Answer in Agenthail")
         model.snapshot = listing([session("a", status: "idle"), asking, session("c", status: "busy")])
         model.adoptCurrentView(view([("proj-c", [family("c", project: "proj-c")], ["c"]), ("proj-a", [family("a", project: "proj-a", members: ["a-child"])], ["a"])], seq: 3))
         check(model.sessionTree.needsYou.map(\.id) == ["a-child"], "Needs you follows the view's members: \(model.sessionTree.needsYou.map(\.id))")

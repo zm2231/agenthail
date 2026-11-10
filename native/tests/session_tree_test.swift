@@ -203,27 +203,16 @@ struct SessionTreeTest {
         func waiting(_ id: String, kind: String) -> SessionState {
             var state = session(id)
             state.waitingOn = WaitingState(kind: kind, id: "req-\(id)")
+            state.attention = RowAttention(kind: kind == "replaced" ? "replacedRequest" : "request", reason: "Answer in Agenthail")
             return state
         }
         let asker = waiting("asker", kind: "question")
         let approver = waiting("approver", kind: "approval")
-        var oldLead = waiting("old-lead", kind: "question")
-        oldLead.replacedLead = [CoordinatorTenure(name: "release-lead", from: "2026-10-04T09:00:00Z", until: "2026-10-04T11:00:00Z")]
-        let reasons = SessionAttention.build(sessions: [asker, approver, oldLead])
-        expect(reasons["asker"] == SessionAttention(kind: .request, reason: "Asks you a question") && reasons["approver"]?.reason == "Needs your approval", "requests read as what they ask")
-        expect(reasons["old-lead"] == SessionAttention(kind: .replacedRequest, reason: "From a replaced lead. Asks you a question"), "a replaced lead's request says so")
+        let oldLead = waiting("old-lead", kind: "replaced")
+        let reasons = SessionAttention.of([asker, approver, oldLead])
         let current = view([Self.family("asker", project: "agenthail"), Self.family("old-lead", project: "agenthail"), Self.family("missing", project: "agenthail"), Self.family("approver", project: "agenthail")], projects: [("agenthail", [])])
         let needs = SessionTree.needsYou(in: current, rows: rows([asker, approver, oldLead]), attention: reasons.merging(["missing": SessionAttention(kind: .request, reason: "x")]) { $1 })
         expect(needs.map(\.id) == ["asker", "approver"], "Needs you follows the daemon's order, without a replaced lead's request or a row the client lacks: \(needs.map(\.id))")
-
-        var terminal = waiting("terminal", kind: "approval")
-        terminal.runtimeKind = "claude-cli"
-        var limited = session("limited")
-        limited.usageLimit = UsageLimitState(resetsAt: "2026-10-04T18:20:00Z")
-        let places = SessionAttention.build(sessions: [terminal, limited])
-        expect(places["terminal"]?.reason == "Waiting in its terminal", "a terminal prompt Agenthail does not hold is answered in its terminal")
-        let resets = TimestampParser.date("2026-10-04T18:20:00Z")!.formatted(date: .omitted, time: .shortened)
-        expect(places["limited"] == SessionAttention(kind: .usageLimit, reason: "Usage limit, resets \(resets)"), "a usage limit names when it resets")
         expect(SessionRefinement.surfaceLabel("codex") == "Codex", "surface labels are capitalized")
     }
 

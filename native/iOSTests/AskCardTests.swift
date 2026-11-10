@@ -47,4 +47,15 @@ final class AskCardTests: XCTestCase {
         XCTAssertTrue(RequestAnswerFailure(AgenthailAPIError.request(502, "the answer may have reached the session, so it is not sent again: x")).dropsCard)
         XCTAssertFalse(RequestAnswerFailure(AgenthailAPIError.request(502, "session is gone")).dropsCard)
     }
+
+    func testEveryWaitingPreviewDetailCarriesItsAttentionAtTheRoot() throws {
+        let cases: [(String, [String: String])] = [("--preview-terminal-question", SessionPreview.terminalAttention), ("--preview-questions", SessionPreview.questionsAttention), ("--preview-unreachable", SessionPreview.unreachableAttention)]
+        for (argument, attention) in cases {
+            let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.previewDetail(arguments: [argument]).utf8))
+            XCTAssertNotNil(detail.session.waitingOn, argument)
+            XCTAssertEqual(detail.sessionState(open: true).attention, RowAttention(kind: attention["kind"]!, reason: attention["reason"]!), argument)
+        }
+        let plain = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.previewDetail(arguments: []).utf8))
+        XCTAssertNil(plain.attention, "a session that waits on nothing carries no attention")
+    }
 }

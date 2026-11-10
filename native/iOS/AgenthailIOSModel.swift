@@ -34,7 +34,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             subagentIDs = (snapshot?.sessions ?? []).reduce(into: [:]) { ids, row in
                 if let parent = row.subagent?.parentId { ids[parent, default: []].append(row.id) }
             }
-            sessionAttention = SessionAttention.build(sessions: snapshot?.sessions ?? [])
+            sessionAttention = SessionAttention.of(snapshot?.sessions ?? [])
             rederiveTree()
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)

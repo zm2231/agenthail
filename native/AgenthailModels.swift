@@ -593,6 +593,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var plan: SessionPlan? = nil
     var holders: [SessionHolder]? = nil
     var replacedLead: [CoordinatorTenure]? = nil
+    var attention: RowAttention? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
     var placement: String? = nil
@@ -1600,6 +1601,7 @@ struct SessionDetail: Decodable {
     let journalSeq: UInt64?
     var alias: String?
     var limitResume: LimitResumeState?
+    var attention: RowAttention?
     /// Present only when the timeline cannot be shown; otherwise the
     /// conversation is the timeline's items and exchangeCount counts it.
     let exchanges: [ExchangeState]?
