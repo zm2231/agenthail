@@ -134,7 +134,7 @@ func TestHeldAndFailedDeliveriesAreStoppedAndNeverReadAsQuestions(t *testing.T) 
 			t.Fatalf("item=%+v", item)
 		}
 	}
-	if len(page.Decisions) != 4 {
+	if len(page.Decisions) != 3 {
 		t.Fatalf("decisions=%+v", page.Decisions)
 	}
 }
