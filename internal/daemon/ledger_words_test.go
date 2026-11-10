@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -121,6 +122,10 @@ func TestLongWordsFullOfQuotesStillFitOneMCPRead(t *testing.T) {
 	}, p, ledger.PromptRef("p-1"))
 	if len(c.Quotes) != 17 {
 		t.Fatalf("context quotes = %d, want 17", len(c.Quotes))
+	}
+
+	if code, _ := ledgerPostStatus(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: strings.Repeat("p", 20<<10), Prompt: "ok"}); code != http.StatusBadRequest {
+		t.Fatalf("capture with an id too long to read back: status %d", code)
 	}
 
 	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, s))

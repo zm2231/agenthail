@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
+
+const ledgerPromptIDMax = 256
 
 type ledgerCaptureRequest struct {
 	SessionID   string `json:"sessionId"`
@@ -46,6 +49,10 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 	}
 	if req.SessionID == "" || req.Prompt == "" || req.PromptID == "" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId, promptId and prompt are required.")
+		return
+	}
+	if len(req.PromptID) > ledgerPromptIDMax || len(req.MessageUUID) > ledgerPromptIDMax {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("promptId and messageUuid take at most %d bytes.", ledgerPromptIDMax))
 		return
 	}
 	if _, peer := surface.ParsePeerEnvelope(req.Prompt); peer || !surfaces.IsTypedHumanPrompt(req.Prompt) || d.notPerson.has(req.PromptID, time.Now()) {
