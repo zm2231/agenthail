@@ -30,6 +30,12 @@ struct RequestCard: View {
         return request.isQuestion ? "\(agent) asks" : "\(agent) wants your approval"
     }
 
+    static func deadline(_ request: SessionRequest, now: Date = Date(), calendar: Calendar = .current) -> String? {
+        guard let date = request.deadline.flatMap(TimestampParser.date) else { return nil }
+        let time = calendar.isDate(date, inSameDayAs: now) ? date.formatted(date: .omitted, time: .shortened) : date.formatted(date: .abbreviated, time: .shortened)
+        return "Answer by \(time)"
+    }
+
     static let denyingChoices: Set<String> = ["deny", "never", "stop"]
 
     static func approvalButtons(_ actions: [SessionRequest.Action]) -> (allowing: [SessionRequest.Action], denying: [SessionRequest.Action], reply: SessionRequest.Action?) {
@@ -53,6 +59,10 @@ struct RequestCard: View {
                 Label(heading, systemImage: request.usesPager ? "questionmark.bubble" : "hand.raised")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(request.isAsk ? attention : accent)
+                if let deadline = Self.deadline(request) {
+                    Text(deadline).font(.footnote).foregroundStyle(RoleStyle(.muted))
+                        .accessibilityIdentifier("request-deadline")
+                }
                 if request.usesPager {
                     QuestionPagerView(request: request, answering: answering, accent: accent, actionTint: actionTint, focusOnAppear: focusesPager, respond: respond)
                 } else {
@@ -103,9 +113,9 @@ struct RequestCard: View {
             HStack {
                 ForEach(buttons.allowing, id: \.id) { action in
                     if action.id == "allow" {
-                        Button(action.title) { send(.choice(action.id)) }.buttonStyle(.borderedProminent)
+                        Button(action.title) { send(.choose(action.id)) }.buttonStyle(.borderedProminent)
                     } else {
-                        Button(action.title) { send(.choice(action.id)) }.buttonStyle(.bordered)
+                        Button(action.title) { send(.choose(action.id)) }.buttonStyle(.bordered)
                     }
                 }
                 Spacer()
@@ -116,13 +126,13 @@ struct RequestCard: View {
                     Button(action.title) { replying = true }.buttonStyle(.bordered)
                 }
                 ForEach(buttons.denying, id: \.id) { action in
-                    Button(action.title, role: .destructive) { send(.choice(action.id)) }.buttonStyle(.bordered)
+                    Button(action.title, role: .destructive) { send(.choose(action.id)) }.buttonStyle(.bordered)
                 }
             }
             if replying, buttons.reply != nil {
                 HStack {
                     TextField("Message", text: $reply).textFieldStyle(.roundedBorder)
-                    Button("Send", role: .destructive) { send(RequestDecision(choice: RequestNotifications.replyChoice, message: reply)) }
+                    Button("Send", role: .destructive) { send(.choose(RequestNotifications.replyChoice, message: reply)) }
                         .buttonStyle(.bordered)
                         .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -157,7 +167,7 @@ struct RequestCard: View {
             }
             HStack {
                 Button("Submit") {
-                    if let content = form.content(fields) { send(.content(content)) }
+                    if let content = form.content(fields) { send(.form(content, fields: fields)) }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(answering || form.content(fields) == nil)

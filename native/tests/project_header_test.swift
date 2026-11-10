@@ -61,7 +61,7 @@ struct ProjectHeaderTest {
         var led = ProjectState(id: "p1", displayName: "Agenthail")
         led.coordinators = [ProjectState.Lead(name: "lead", surface: "claude", sessionId: "lead"),
                             ProjectState.Lead(host: SessionHost(id: "h2", name: "server", state: "connected"), name: "worker", surface: "codex", sessionId: "worker")]
-        var snapshot = DashboardSnapshot(updatedAt: "2026-11-09T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        var snapshot = DashboardSnapshot(updatedAt: "2026-11-09T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
         snapshot.projects = [led]
         model.snapshot = snapshot
         let hostRefused = await model.rename("h2::worker", to: "")

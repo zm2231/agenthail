@@ -90,7 +90,15 @@ extension Array where Element == TurnSetting {
     }
 }
 
-extension SessionDetail {
+protocol ModelChoices {
+    var turnSettings: [TurnSetting]? { get }
+    var models: [ModelOption]? { get }
+    var model: String? { get }
+}
+
+extension SessionDetail: ModelChoices {}
+
+extension ModelChoices {
     func modelOptions(catalog: [ModelOption]? = nil) -> [ModelOption] {
         let known = catalog ?? models ?? []
         return turnSettings?.modelOptions(catalog: known) ?? known

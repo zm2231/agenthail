@@ -22,7 +22,7 @@ final class AskCardTests: XCTestCase {
     }
 
     func testRequestDecodesAndIsNeverOfferedOnceAnswered() throws {
-        let json = #"{"permissionMode":"","requests":[{"id":"ask-000000000001","kind":"ask","tool":"","title":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"label":"Deploy","description":""},{"label":"Wait","description":"hold until Monday"}],"suggested":0,"links":[{"title":"Runbook","url":"https://example.com"}]}],"actions":[{"id":"o0","title":"Deploy"}],"alwaysAllow":false,"createdAt":"2026-11-06T04:52:30Z"}]}"#
+        let json = #"{"permissionMode":"","requests":[{"id":"ask-000000000001","kind":"ask","tool":"","title":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"id":"o0","label":"Deploy","description":""},{"id":"o1","label":"Wait","description":"hold until Monday"}],"suggested":0,"links":[{"title":"Runbook","url":"https://example.com"}]}],"actions":[{"id":"o0","title":"Deploy"}],"alwaysAllow":false,"createdAt":"2026-11-06T04:52:30Z"}]}"#
         let requests = try JSONDecoder().decode(SessionRequests.self, from: Data(json.utf8))
         let ask = try XCTUnwrap(requests.requests.first)
         XCTAssertTrue(ask.isAsk && ask.usesPager)
@@ -35,17 +35,27 @@ final class AskCardTests: XCTestCase {
     }
 
     func testPagerWaitsForSubmitAndSendsTheNote() throws {
-        let question = SessionRequest.Question(question: "Deploy it now?", header: "", multiSelect: false, options: [.init(label: "Deploy", description: ""), .init(label: "Wait", description: "")])
+        let question = SessionRequest.Question(question: "Deploy it now?", header: "", multiSelect: false, options: [.init(id: "o0", label: "Deploy", description: ""), .init(id: "o1", label: "Wait", description: "")])
         var pager = QuestionPager(questions: [question], ask: true)
-        XCTAssertNil(pager.choose(1), "a pick never sends an ask")
+        XCTAssertNil(pager.pick(1), "a pick never sends an ask")
         pager.note = " After lunch. "
-        let answers = try XCTUnwrap(pager.next())
-        XCTAssertEqual(pager.decision(answers), RequestDecision(behavior: "allow", message: "After lunch.", answers: ["Deploy it now?": "Wait"]))
+        XCTAssertEqual(try XCTUnwrap(pager.submit()), RequestDecision(choices: ["o1"], message: "After lunch."))
     }
 
     func testFailuresDropTheCardOnlyWhenTheAnswerMayHaveLanded() {
         XCTAssertTrue(RequestAnswerFailure(AgenthailAPIError.requestStale("x")).dropsCard)
         XCTAssertTrue(RequestAnswerFailure(AgenthailAPIError.request(502, "the answer may have reached the session, so it is not sent again: x")).dropsCard)
         XCTAssertFalse(RequestAnswerFailure(AgenthailAPIError.request(502, "session is gone")).dropsCard)
+    }
+
+    func testEveryWaitingPreviewDetailCarriesItsAttentionAtTheRoot() throws {
+        let cases: [(String, [String: String])] = [("--preview-terminal-question", SessionPreview.terminalAttention), ("--preview-questions", SessionPreview.questionsAttention), ("--preview-unreachable", SessionPreview.unreachableAttention)]
+        for (argument, attention) in cases {
+            let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.previewDetail(arguments: [argument]).utf8))
+            XCTAssertNotNil(detail.session.waitingOn, argument)
+            XCTAssertEqual(detail.sessionState(open: true).attention, RowAttention(kind: attention["kind"]!, reason: attention["reason"]!), argument)
+        }
+        let plain = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.previewDetail(arguments: []).utf8))
+        XCTAssertNil(plain.attention, "a session that waits on nothing carries no attention")
     }
 }

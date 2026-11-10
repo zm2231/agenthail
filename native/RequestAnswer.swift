@@ -5,7 +5,7 @@ enum RequestAnswer {
     static func send(choice: String, text: String? = nil, sessionID: String, requestID: String, api: () throws -> AgenthailAPI, center: UNUserNotificationCenter = .current()) async {
         var failure: String
         do {
-            _ = try await api().respond(sessionID: sessionID, requestID: requestID, decision: RequestDecision(choice: choice, message: text))
+            _ = try await api().respond(sessionID: sessionID, requestID: requestID, decision: .choose(choice, message: text))
             return
         } catch {
             let answer = RequestAnswerFailure(error)

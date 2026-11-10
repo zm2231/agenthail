@@ -14,6 +14,7 @@ extension SessionDetail {
         state.turnStop = session.turnStop
         state.limitResume = limitResume
         state.activity = session.activity
+        state.attention = attention
         state.host = host
         return state
     }

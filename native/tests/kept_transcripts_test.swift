@@ -33,7 +33,7 @@ struct KeptTranscriptsTest {
     static func main() {
         let ids = ["A", "B", "C", "D", "E", "F"]
         func listing(_ ids: [String]) -> DashboardSnapshot {
-            DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: ids.map(session), totalSessions: ids.count, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+            DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: ids.map(session), totalSessions: ids.count, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "queue")
         }
         let model = AgenthailModel(connecting: false)
         model.snapshot = listing(ids)

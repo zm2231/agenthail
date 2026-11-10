@@ -22,15 +22,15 @@ struct InboxMessage: Decodable, Identifiable, Equatable {
     var attempts: Int? = nil
     var lastError: String? = nil
     let createdAt: String
+    var askId: String? = nil
     var hostID: String? = nil
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, target, sourceSessionId, source, message, truncated, status, evidence, pending, failure, queueId, queueStatus, attempts, lastError, createdAt
+        case id, sessionId, target, sourceSessionId, source, message, truncated, status, evidence, pending, failure, queueId, queueStatus, attempts, lastError, createdAt, askId
     }
 
     var listID: String { "\(hostID ?? "")/\(id)" }
     var createdDate: Date? { TimestampParser.date(createdAt) }
-    var canSendAgain: Bool { queueId != nil && queueStatus == "dead" }
     var reason: String? { [lastError, failure].compactMap { $0 }.first { !$0.isEmpty } }
 
     var senderLabel: String? {

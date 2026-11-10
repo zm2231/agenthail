@@ -32,40 +32,24 @@ enum QueueFacts {
         return item.holdLabel
     }
 
-    static func canRetry(_ item: QueueState, target: SessionState?) -> Bool {
-        guard let target, !target.isReadOnly else { return false }
-        return item.status == "dead"
-    }
-
     static func canTakeBack(_ item: QueueState, target: SessionState?) -> Bool {
         guard let target, !target.isReadOnly else { return false }
         return item.status == "pending" && ["", "message"].contains(item.operation ?? "")
     }
 
-    static func canCancel(_ item: QueueState) -> Bool { item.status == "pending" || item.status == "dead" }
+    static func canCancel(_ item: QueueState) -> Bool { item.status == "pending" }
 
     static func lastError(_ item: QueueState) -> String? {
         guard let error = item.lastError?.trimmingCharacters(in: .whitespacesAndNewlines), !error.isEmpty else { return nil }
         return error
     }
 
-    static func attention(_ items: [AttentionState], for sessionID: String) -> [AttentionState] {
-        items.filter { $0.sessionId == sessionID }
+    static func detail(_ item: QueueState, target: SessionState?) -> [String] {
+        [reason(item, target: target)] + [lastError(item)].compactMap { $0 }
     }
 
-    static func attention(_ items: [AttentionState], forQueueItem id: Int64) -> AttentionState? {
-        items.first { $0.queueId == id }
-    }
-
-    static func detail(_ item: QueueState, target: SessionState?, attention: [AttentionState]) -> [String] {
-        let reason = QueueFacts.attention(attention, forQueueItem: item.id).map { [$0.reason, $0.requestedAction] } ?? [reason(item, target: target)]
-        return reason + [lastError(item)].compactMap { $0 }
-    }
-
-    /// One line for a queued message: why it is held, or its attention, and
-    /// how long it has been queued.
-    static func summary(_ item: QueueState, target: SessionState?, attention: [AttentionState], age: String) -> String {
-        (detail(item, target: target, attention: attention) + ["Queued \(age)"]).joined(separator: " · ")
+    static func summary(_ item: QueueState, target: SessionState?, age: String) -> String {
+        (detail(item, target: target) + ["Queued \(age)"]).joined(separator: " · ")
     }
 
     static func undelivered(_ queue: [QueueState], for sessionID: String) -> [QueueState] {

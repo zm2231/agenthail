@@ -50,12 +50,12 @@ struct OverviewTest {
         expect(headlessCard.isQuiet && unsetCard.isQuiet && !codexCard.isQuiet && claudeCard.isQuiet, "stated limits read quietly, problems do not")
         expect(!headless.needsAttention && !unset.needsAttention && codex.needsAttention, "stated limits need no attention")
 
-        var snapshot = DashboardSnapshot(updatedAt: "2026-10-05T12:00:00Z", eventCursor: nil, hostEpoch: nil, catalogSeq: nil, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [codex, claude, notion], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 8, busyDelivery: "queue")
+        var snapshot = DashboardSnapshot(updatedAt: "2026-10-05T12:00:00Z", eventCursor: nil, hostEpoch: nil, catalogSeq: nil, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [codex, claude, notion], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], codexRecentHours: 8, busyDelivery: "queue")
         expect(OverviewSummary.line(snapshot) == "1 surface connected · 1 agent working · 3 messages waiting", "summary: \(OverviewSummary.line(snapshot))")
         snapshot.surfaces = []
         snapshot.sessions = []
         expect(OverviewSummary.line(snapshot) == "No surfaces connected", "an empty daemon says nothing is connected")
-        let stale = DashboardSnapshot(updatedAt: "", eventCursor: nil, hostEpoch: nil, catalogSeq: nil, daemon: DaemonState(running: true, pid: 1, stale: true, refreshError: "Codex timed out."), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: nil)
+        let stale = DashboardSnapshot(updatedAt: "", eventCursor: nil, hostEpoch: nil, catalogSeq: nil, daemon: DaemonState(running: true, pid: 1, stale: true, refreshError: "Codex timed out."), surfaces: [], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: nil)
         expect(OverviewSummary.line(stale) == "Showing cached data. Codex timed out.", "stale data names the refresh error")
 
         let history = try! JSONDecoder().decode([HistoryState].self, from: Data(#"""

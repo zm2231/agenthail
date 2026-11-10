@@ -48,7 +48,7 @@ final class ResyncProtocol: URLProtocol, @unchecked Sendable {
                     return (500, #"{"error":{"message":"down"}}"#)
                 }
                 host.log.append("snapshot \(host.seq)")
-                return (200, #"{"updatedAt":"2026-10-23T21:00:00Z","hostEpoch":"h","catalogSeq":\#(host.seq),"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5,"busyDelivery":"queue"}"#)
+                return (200, #"{"updatedAt":"2026-10-23T21:00:00Z","hostEpoch":"h","catalogSeq":\#(host.seq),"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5,"busyDelivery":"queue"}"#)
             }
             host.log.append("stream after \(after)")
             return host.streams.isEmpty ? (200, "") : host.streams.removeFirst()
@@ -65,7 +65,7 @@ final class ResyncProtocol: URLProtocol, @unchecked Sendable {
 @main
 struct CatalogResyncTest {
     static func listing(seq: UInt64) -> DashboardSnapshot {
-        try! JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"2026-10-23T21:00:00Z","hostEpoch":"h","catalogSeq":\#(seq),"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5,"busyDelivery":"queue"}"#.utf8))
+        try! JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"2026-10-23T21:00:00Z","hostEpoch":"h","catalogSeq":\#(seq),"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5,"busyDelivery":"queue"}"#.utf8))
     }
 
     @MainActor

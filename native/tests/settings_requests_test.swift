@@ -10,7 +10,7 @@ struct SettingsRequestsTest {
         let api = AgenthailAPI(baseURL: URL(string: "http://agenthail.test")!, token: "t", session: URLSession(configuration: configuration))
         let model = AgenthailModel(connecting: false, api: api)
         let repairable = try! JSONDecoder().decode(SurfaceState.self, from: Data(#"{"name":"codex","connected":false,"health":"degraded","repairAction":"runtime-ensure","repairLabel":"Start managed runtime","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"runtime":{"name":"Codex app server","reachable":false,"durable":false,"problem":"runtime-stopped"}}"#.utf8))
-        model.snapshot = DashboardSnapshot(updatedAt: "2026-10-05T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [repairable], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "steer")
+        model.snapshot = DashboardSnapshot(updatedAt: "2026-10-05T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [repairable], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], codexRecentHours: 5, busyDelivery: "steer")
 
         await model.repairSurface(repairable)
         let repair = RecordingProtocol.requests.first { $0.path == "/api/v1/actions" }
@@ -202,7 +202,7 @@ final class RecordingProtocol: URLProtocol {
     private static func reply(for path: String) -> String {
         switch path {
         case "/api/v1/snapshot":
-            return #"{"updatedAt":"2026-10-05T12:00:01Z","daemon":{"running":true,"pid":1},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5,"busyDelivery":"steer"}"#
+            return #"{"updatedAt":"2026-10-05T12:00:01Z","daemon":{"running":true,"pid":1},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5,"busyDelivery":"steer"}"#
         case "/api/v1/signin":
             return #"{"profiles":[{"id":"sp_0123456789ab","label":"Work Chrome","browser":"chrome","profile":"Profile 2","createdAt":"2026-10-18T00:00:00Z"}],"consumers":[{"id":"notion","label":"Notion","purpose":"p","profileId":null,"mode":"automatic","browser":"safari","browserLabel":"Safari","profile":"Default","profileName":"Safari","problem":"permission denied reading Safari data at /fixture/Cookies.binarycookies (macOS needs Full Disk Access for this)"},{"id":"claude","label":"Claude Remote Control","purpose":"p","profileId":"sp_0123456789ab","mode":"profile","browser":"chrome","browserLabel":"Google Chrome","profile":"Profile 2","profileName":"Work Chrome"}],"browsers":[{"browser":"chrome","label":"Google Chrome","available":true,"profiles":[{"profile":"Default","name":"Personal"},{"profile":"Profile 2","name":"Work","profileId":"sp_0123456789ab"}]},{"browser":"edge","label":"Microsoft Edge","available":false,"detail":"reading this browser's profiles did not finish in time","profiles":[]}]}"#
         case "/api/v1/signin/bindings":

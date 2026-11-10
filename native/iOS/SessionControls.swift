@@ -87,9 +87,8 @@ struct QueueListView: View {
     @State private var settled = false
     @State private var loadingOlder = false
     @State private var showHistory = false
-    @State private var retryCandidate: QueueState?
-    @State private var retryMessage: InboxMessage?
     @State private var reloadID = UUID()
+    @State private var answering: DecisionItem?
 
     private var current: [QueueState] { page.active }
     private var history: [InboxMessage] { page.history }
@@ -125,28 +124,21 @@ struct QueueListView: View {
                         }
                     }
                 }
-                if !model.deliveryProblems.isEmpty {
-                    Section("Delivery problems") {
-                        ForEach(model.deliveryProblems) { problem in
-                            deliveryProblemRow(problem)
-                        }
-                    }
-                }
                 if loading && page.isEmpty { ProgressView("Loading deliveries") }
                 if !showHistory {
-                    DecisionSections(model: model, inbox: model.shownDecisions, open: open) { Task { await reload() } }
+                    DecisionSections(model: model, inbox: model.shownDecisions, open: open) { answering = $0 }
                     let review = current.filter { $0.status == "dead" }
                     let pending = current.filter { $0.status != "dead" }
                     if !review.isEmpty {
                         Section {
                             ForEach(review, id: \.listID) { item in queueRow(item) }
                         } header: { Text("Review delivery") }
-                        footer: { Text("Unconfirmed instructions may already have reached the agent. Check the session before sending again.") }
+                        footer: { Text("Unconfirmed instructions may already have reached the agent. Check the session before you answer what to do with one.") }
                     }
                     if !pending.isEmpty {
                         Section("Waiting to deliver") { ForEach(pending, id: \.listID) { item in queueRow(item) } }
                     }
-                    if !loading && error == nil && model.connectionError == nil && current.isEmpty && model.decisionFeed.loaded && model.shownDecisions.isEmpty && model.deliveryProblems.isEmpty && model.leadReplacements.isEmpty {
+                    if !loading && error == nil && model.connectionError == nil && current.isEmpty && model.decisionFeed.loaded && model.shownDecisions.isEmpty && model.leadReplacements.isEmpty {
                         ContentUnavailableView("Nothing needs you", systemImage: "tray", description: Text("Questions and approvals waiting on you, and instructions waiting to send, appear here. Everything else is in History."))
                             .listRowSeparator(.hidden)
                     }
@@ -156,12 +148,8 @@ struct QueueListView: View {
                             .listRowSeparator(.hidden)
                     }
                     ForEach(history, id: \.listID) { message in
-                        InboxHistoryRow(
-                            message: message,
-                            busy: model.pendingControls.contains("queue:\(message.hostID ?? "")/\(message.queueId ?? 0)"),
-                            openSession: { open(message.sessionId) },
-                            sendAgain: { retryMessage = message }
-                        )
+                        InboxHistoryRow(message: message, openSession: { open(message.sessionId) },
+                                        answer: model.shownDecisions.decision(answering: message.askId).map { decision in { answering = decision } })
                     }
                     if page.hasOlder {
                         Button { Task { await loadOlder() } } label: {
@@ -192,35 +180,16 @@ struct QueueListView: View {
                 if !Task.isCancelled { await reload() }
             }
         }
-        .confirmationDialog("Send this message again?", isPresented: Binding(get: { retryMessage != nil }, set: { if !$0 { retryMessage = nil } }), titleVisibility: .visible) {
-            if let message = retryMessage {
-                Button("Send again") { sendAgain(message); retryMessage = nil }
-                Button("Cancel", role: .cancel) { retryMessage = nil }
+        .sheet(item: $answering) { item in
+            DecisionSheet(model: model, item: item, title: model.session(item.sessionId)?.displayName ?? item.sessionId, open: { answering = nil; open(item.sessionId) }) {
+                answering = nil
+                Task { await reload() }
             }
-        } message: {
-            Text(retryMessage?.evidence == "unknown" ? "This delivery outcome was never confirmed. Check the session before sending again." : "The previous attempt may already have reached the agent. Send again only after checking the session.")
-        }
-        .confirmationDialog("Send this instruction again?", isPresented: Binding(get: { retryCandidate != nil }, set: { if !$0 { retryCandidate = nil } }), titleVisibility: .visible) {
-            if let item = retryCandidate {
-                Button("Send again") { update(item, retry: true); retryCandidate = nil }
-                Button("Cancel", role: .cancel) { retryCandidate = nil }
-            }
-        } message: {
-            Text(retryCandidate?.evidence == "unknown" && retryCandidate?.isHistorical == true ? "This delivery outcome was never confirmed. Check the session before sending again." : "The previous attempt may already have reached the agent. Send again only after checking the session.")
         }
     }
 
     private func open(_ id: String) {
         model.openSession(id)
-    }
-
-    private func sendAgain(_ message: InboxMessage) {
-        guard let queueID = message.queueId else { return }
-        error = nil
-        Task {
-            do { try await model.updateQueue(id: queueID, hostID: message.hostID, retry: true); await reload() }
-            catch { self.error = error.localizedDescription }
-        }
     }
 
     private func queueRow(_ item: QueueState) -> some View {
@@ -265,8 +234,10 @@ struct QueueListView: View {
                     .accessibilityIdentifier("queue-steer-refusal-\(item.id)")
             }
             HStack {
-                if item.status == "dead" {
-                    Button("Send again") { retryCandidate = item }.buttonStyle(.bordered)
+                if let decision = model.shownDecisions.decision(answering: item.askId) {
+                    Button("Answer") { answering = decision }.buttonStyle(.borderedProminent)
+                        .accessibilityHint("Opens what to do with this message")
+                        .accessibilityIdentifier("queue-answer-\(item.id)")
                 }
                 if let steering, steering.refusal == nil {
                     Button("Steer") { steer(item, capabilities: steering.capabilities) }.buttonStyle(.bordered)
@@ -277,8 +248,8 @@ struct QueueListView: View {
                     Button("Edit") { takeBack(item) }.buttonStyle(.bordered)
                         .accessibilityHint("Cancels this delivery and puts the message back in the composer")
                 }
-                if item.status == "pending" || (item.status == "dead" && !item.isHistorical) {
-                    Button(item.status == "dead" ? "Dismiss" : "Cancel delivery", role: .destructive) { update(item, retry: false) }.buttonStyle(.bordered)
+                if item.status == "pending" {
+                    Button("Cancel delivery", role: .destructive) { cancel(item) }.buttonStyle(.bordered)
                 }
             }
             .controlSize(.large)
@@ -329,32 +300,9 @@ struct QueueListView: View {
         .padding(.vertical, 6)
     }
 
-    private func deliveryProblemRow(_ problem: DeliveryProblem) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(problem.status?.capitalized ?? "Delivery problem")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text(problem.at).font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1).truncationMode(.middle)
-            }
-            Text(PeerEnvelope(problem.message).body).font(.body).textSelection(.enabled)
-            Text(problem.reason).font(.footnote).foregroundStyle(PhonePalette.muted).textSelection(.enabled)
-            Button("Dismiss", role: .destructive) {
-                Task {
-                    error = nil
-                    do { try await model.dismissDeliveryProblem(problem) }
-                    catch { self.error = error.localizedDescription }
-                }
-            }
-            .buttonStyle(.bordered)
-            .disabled(model.pendingControls.contains("delivery:\(problem.id)"))
-        }
-        .padding(.vertical, 6)
-    }
-
-    private func update(_ item: QueueState, retry: Bool) {
+    private func cancel(_ item: QueueState) {
         error = nil
-        Task { do { try await model.updateQueue(item, retry: retry); await reload() } catch { self.error = error.localizedDescription } }
+        Task { do { try await model.cancelQueue(item); await reload() } catch { self.error = error.localizedDescription } }
     }
     private func reload() async {
         let requestID = UUID(); reloadID = requestID

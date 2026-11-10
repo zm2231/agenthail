@@ -116,11 +116,11 @@ struct SessionPreview: View {
     /// usage limit.
     nonisolated static var previewUnreachable: [String: Any] { ["kind": "approval", "id": "preview-approval", "answerable": false] }
     nonisolated static var previewQuestions: [String: Any] { ["kind": "question", "id": "preview-questions", "answerable": true] }
-    nonisolated static let previewQuestionsJSON = #"{"permissionMode":"","requests":[{"id":"preview-questions","kind":"question","tool":"AskUserQuestion","alwaysAllow":false,"createdAt":"2026-09-12T04:03:00Z","questions":[{"question":"The reconnect fix touches the session store and the stream reader. Which part should land first so the other can build on it?","header":"Landing order for the reconnect fix","multiSelect":false,"options":[{"label":"Session store first","description":"Keeps the saved identity stable before the reader changes"},{"label":"Stream reader first","description":"Smaller change that unblocks the failing regression test today"},{"label":"Both together","description":"One pull request, one review, one risk window"},{"label":"Neither yet","description":"Write the failing test first and decide after"}]},{"question":"Where should the regression check run?","header":"Checks","multiSelect":true,"options":[{"label":"Mac","description":"Run the suite on the desktop build"},{"label":"iPhone","description":"Run it on the shared simulator"},{"label":"Dashboard","description":"Run it in the browser harness"}]}]}]}"#
+    nonisolated static let previewQuestionsJSON = #"{"permissionMode":"","requests":[{"id":"preview-questions","kind":"question","tool":"AskUserQuestion","alwaysAllow":false,"createdAt":"2026-09-12T04:03:00Z","questions":[{"question":"The reconnect fix touches the session store and the stream reader. Which part should land first so the other can build on it?","header":"Landing order for the reconnect fix","multiSelect":false,"options":[{"id":"q0o0","label":"Session store first","description":"Keeps the saved identity stable before the reader changes"},{"id":"q0o1","label":"Stream reader first","description":"Smaller change that unblocks the failing regression test today"},{"id":"q0o2","label":"Both together","description":"One pull request, one review, one risk window"},{"id":"q0o3","label":"Neither yet","description":"Write the failing test first and decide after"}]},{"question":"Where should the regression check run?","header":"Checks","multiSelect":true,"options":[{"id":"q1o0","label":"Mac","description":"Run the suite on the desktop build"},{"id":"q1o1","label":"iPhone","description":"Run it on the shared simulator"},{"id":"q1o2","label":"Dashboard","description":"Run it in the browser harness"}]}]}]}"#
     nonisolated static let previewHostedLifecycle: [String: Bool] = ["status": true, "logs": true, "stop": true, "resume": true]
 
     nonisolated static var previewTerminalQuestion: [String: Any] { ["kind": "question", "id": "demo:question:held:preview-1", "answerable": true] }
-    nonisolated static let previewTerminalQuestionInput = #"{"questions":[{"question":"Which build should the regression check run against?","header":"Build","multiSelect":false,"options":[{"label":"Debug","description":"Fast to build, matches local runs"},{"label":"Release","description":"Matches what ships"}]}]}"#
+    nonisolated static let previewTerminalQuestionInput = #"{"questions":[{"question":"Which build should the regression check run against?","header":"Build","multiSelect":false,"options":[{"id":"o0","label":"Debug","description":"Fast to build, matches local runs"},{"id":"o1","label":"Release","description":"Matches what ships"}]}]}"#
     nonisolated static var previewTerminalQuestionJSON: String {
         var request = try! JSONSerialization.jsonObject(with: Data(previewTerminalQuestionInput.utf8)) as! [String: Any]
         request.merge(["id": "demo:question:held:preview-1", "kind": "question", "tool": "AskUserQuestion", "alwaysAllow": false, "createdAt": "2026-09-12T04:03:00Z"]) { $1 }
@@ -135,8 +135,13 @@ struct SessionPreview: View {
     }
     nonisolated static let previewUsageLimit: [String: String] = ["resetsAt": "2026-09-12T18:20:00Z"]
 
-    nonisolated static var previewDetailJSON: String {
-        let arguments = ProcessInfo.processInfo.arguments
+    nonisolated static let terminalAttention = ["kind": "request", "reason": "Waiting in its terminal"]
+    nonisolated static let questionsAttention = ["kind": "request", "reason": "Answer in Agenthail"]
+    nonisolated static let unreachableAttention = ["kind": "request", "reason": "Waiting on a prompt Agenthail can't reach. Stop and resume to clear it"]
+
+    nonisolated static var previewDetailJSON: String { previewDetail(arguments: ProcessInfo.processInfo.arguments) }
+
+    nonisolated static func previewDetail(arguments: [String]) -> String {
         guard arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") || arguments.contains("--preview-limit-move") || arguments.contains("--preview-terminal-question") || SessionOperationsPreview.enabled else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
         if SessionOperationsPreview.enabled { SessionOperationsPreview.apply(detail: &detail) }
@@ -146,6 +151,7 @@ struct SessionPreview: View {
             terminalQuestion(&session, capabilities: &capabilities)
             detail["session"] = session
             detail["capabilities"] = capabilities
+            detail["attention"] = terminalAttention
             var timeline = detail["timeline"] as! [String: Any]
             var items = timeline["items"] as! [[String: Any]]
             items.append(["id": "ask-1", "kind": "toolCall", "title": "AskUserQuestion", "text": previewTerminalQuestionInput, "callId": "ask-1", "timestamp": "2026-09-12T04:03:00Z", "truncated": false])
@@ -159,6 +165,7 @@ struct SessionPreview: View {
             var session = detail["session"] as! [String: Any]
             session["waitingOn"] = previewQuestions
             detail["session"] = session
+            detail["attention"] = questionsAttention
             var capabilities = detail["capabilities"] as! [String: Any]
             capabilities["respond"] = true
             detail["capabilities"] = capabilities
@@ -168,6 +175,7 @@ struct SessionPreview: View {
             session["waitingOn"] = previewUnreachable
             session["runtimeKind"] = "claude-host"
             detail["session"] = session
+            detail["attention"] = unreachableAttention
             var capabilities = detail["capabilities"] as! [String: Any]
             capabilities["respond"] = true
             capabilities["lifecycle"] = previewHostedLifecycle
@@ -229,7 +237,7 @@ struct SessionPreview: View {
             ["id": "h0123456789ab::remote-demo-2", "project": ["id": "h0123456789ab::project-agenthail", "displayName": "agenthail", "rootPath": "/home/demo/work/agenthail", "kind": "git"], "host": ["id": "h0123456789ab", "name": "vps.example.ts.net", "state": "connected"], "name": "Tighten the release notes", "surface": "claude", "cwd": "/home/demo/work/agenthail/.worktrees/release-notes", "status": "idle", "lastActive": "2026-09-12T03:30:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities, "claudeConfigRoot": ["name": "work", "root": "/home/dev/.work/.claude"]]
         ]
         let projects: [[String: Any]] = [["id": "project-fieldnotes", "displayName": "fieldnotes", "checkouts": [["host": ["id": "computer", "name": "computer", "state": "local"], "projectId": "project-fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "added": true]], "coordinators": [["name": "release-lead", "surface": "codex", "sessionId": "codex-demo"]]]]
-        var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": previewSnapshotQueue,"channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24, "projects": projects]
+        var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": previewSnapshotQueue,"channels": [], "relays": [], "history": [], "codexRecentHours": 24, "projects": projects]
         if ProcessInfo.processInfo.arguments.contains("--preview-checkouts") {
             var checked = snapshot["sessions"] as! [[String: Any]]
             checked[0]["checkout"] = ["id": "checkout-main", "path": "/Users/demo/projects/fieldnotes", "branch": "main", "isMain": true, "dirty": false]
@@ -248,6 +256,7 @@ struct SessionPreview: View {
         if ProcessInfo.processInfo.arguments.contains("--preview-questions") {
             var asking = snapshot["sessions"] as! [[String: Any]]
             asking[0]["waitingOn"] = previewQuestions
+            asking[0]["attention"] = questionsAttention
             var askingCapabilities: [String: Any] = capabilities
             askingCapabilities["respond"] = true
             asking[0]["capabilities"] = askingCapabilities
@@ -268,6 +277,7 @@ struct SessionPreview: View {
             var terminal = snapshot["sessions"] as! [[String: Any]]
             var terminalCapabilities: [String: Any] = capabilities
             terminalQuestion(&terminal[0], capabilities: &terminalCapabilities)
+            terminal[0]["attention"] = terminalAttention
             terminal[0]["capabilities"] = terminalCapabilities
             snapshot["sessions"] = terminal
         }
@@ -300,7 +310,9 @@ struct SessionPreview: View {
             hostedCapabilities["respond"] = true
             hostedCapabilities["lifecycle"] = previewHostedLifecycle
             limited[0]["capabilities"] = hostedCapabilities
+            limited[0]["attention"] = unreachableAttention
             limited[4]["usageLimit"] = previewUsageLimit
+            limited[4]["attention"] = ["kind": "usageLimit", "reason": "Usage limit, resets 6:20 PM"]
             limited[4]["status"] = "idle"
             snapshot["sessions"] = limited
         }
@@ -545,6 +557,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-questions"): body = SessionPreview.previewQuestionsJSON
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-terminal-question"): body = SessionPreview.previewTerminalQuestionJSON
         case "/api/v1/decisions" where TilesPreview.enabled: body = TilesPreview.decisionsJSON
+        case "/api/v1/decisions" where AskPreview.enabled: body = AskPreview.decisionsJSON
         case "/api/v1/usage": body = UsagePreview.json()
         case "/api/v1/proxies/prefer" where request.httpMethod == "GET":
             body = UsagePreview.preferPlan(only: URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "set" })?.value == "only")

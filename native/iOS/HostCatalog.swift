@@ -37,8 +37,6 @@ struct HostCatalog {
     static let separator = "::"
 
     private(set) var sessions: [SessionState] = []
-    private(set) var attention: [AttentionState] = []
-    private(set) var deliveryProblems: [DeliveryProblem] = []
     private(set) var leadReplacements: [LeadReplacement] = []
     private(set) var hosts: [HostHealth] = []
     private(set) var routing = Routing()
@@ -106,12 +104,6 @@ struct HostCatalog {
                 let (merged, local) = Self.merge(row, servedBy: host.id, ownerName: { names[$0] }, reachable: host.shownReachable)
                 if candidates[merged.id] == nil { order.append(merged.id) }
                 candidates[merged.id, default: []].append(Candidate(row: merged, route: SessionRoute(hostID: host.id, sessionID: row.id), reachable: host.reachable, holding: host.holding, direct: local))
-            }
-            attention += snapshot.attention.map { item in
-                AttentionState(id: item.id, sessionId: Self.qualify(host.id, item.sessionId), target: item.target, queueId: item.queueId, reason: item.reason, requestedAction: item.requestedAction, createdAt: item.createdAt, hostID: host.id)
-            }
-            deliveryProblems += (snapshot.deliveryProblems ?? []).map { problem in
-                DeliveryProblem(deliveryId: problem.deliveryId, sessionId: Self.qualify(host.id, problem.sessionId), sourceSessionId: problem.sourceSessionId.map { Self.qualify(host.id, $0) }, attentionSessionId: problem.attentionSessionId.map { Self.qualify(host.id, $0) }, message: problem.message, reason: problem.reason, status: problem.status, at: problem.at, hostID: host.id)
             }
             leadReplacements += (snapshot.leadReplacements ?? []).map { item in
                 LeadReplacement(id: item.id, projectId: item.projectId, name: item.name, sessionId: Self.qualify(host.id, item.sessionId), previousSessionId: Self.qualify(host.id, item.previousSessionId), changedBy: item.changedBy, reason: item.reason, at: item.at, hostID: host.id)
