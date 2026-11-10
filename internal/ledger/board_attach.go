@@ -31,6 +31,9 @@ func (b *Board) applyAttach(data []byte) error {
 	if !slices.Contains(b.attachedBy[p.UtteranceID], p.SessionID) {
 		b.attachedBy[p.UtteranceID] = append(b.attachedBy[p.UtteranceID], p.SessionID)
 	}
+	if u.Sorted != nil && !u.Attached {
+		u.Sorted.Overridden = p.GoalID != u.Sorted.GoalID
+	}
 	u.Attached = true
 	if p.GoalID != "" && !slices.Contains(u.GoalIDs, p.GoalID) {
 		u.GoalIDs = append(u.GoalIDs, p.GoalID)

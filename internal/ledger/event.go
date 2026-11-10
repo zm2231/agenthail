@@ -35,6 +35,8 @@ const (
 	EventWorkLog       EventType = "work_item.log"
 	EventCutWithdrawn  EventType = "cut.withdrawn"
 	EventReclassified  EventType = "utterance.reclassified"
+	EventSorted        EventType = "utterance.sorted"
+	EventUnfiled       EventType = "utterance.unfiled"
 	EventCapture       EventType = "capture"
 	EventWorkEdit      EventType = "work_item.edit"
 	EventWorkLink      EventType = "work_item.link"

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/apitime"
 )
@@ -28,6 +29,15 @@ type ReadRequest struct {
 	Work   *WorkQuery
 	Budget int
 	Sync   *SyncHealth
+	Sorter *SorterHealth
+}
+
+type SorterHealth struct {
+	Model    string    `json:"model"`
+	Since    time.Time `json:"unavailableSince,omitzero"`
+	Error    string    `json:"error,omitempty"`
+	Failures int       `json:"failures,omitempty"`
+	Dropped  int       `json:"dropped,omitempty"`
 }
 
 // SyncHealth is what the caller's host last saw syncing a ledger kept on another host. It holds no times, so a sync that changes nothing leaves the read the same.
@@ -142,6 +152,12 @@ func (s *Store) readBoard(projectKey string, board *Board, req ReadRequest, resu
 	result["appliedSeq"] = board.AppliedSeq()
 	result["capture"], result["sync"], result["counts"] = capture, syncView, counts
 	result["provisional"] = map[string]any{"total": len(provisional), "newest": readJSON(newest)}
+	if stats := board.SortStats(); stats.Filed > 0 {
+		result["autoFiled"] = stats
+	}
+	if req.Sorter != nil {
+		result["sorter"] = readJSON(req.Sorter)
+	}
 	result["goals"], result["truncated"] = goals, next != ""
 	if next != "" {
 		result["nextCursor"], result["nextView"] = next, "goals"
