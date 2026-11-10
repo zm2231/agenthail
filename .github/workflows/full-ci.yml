@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: CI
-        run: scripts/ci-full-label.sh ci.yml gate native installer package
+        run: scripts/ci-full-label.sh ci.yml gate installer package
 
   ui-all:
     if: ${{ github.event.label.name == 'ui-all' && github.event.pull_request.head.repo.full_name == github.repository }}
