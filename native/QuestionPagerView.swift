@@ -101,17 +101,19 @@ struct QuestionPagerView: View {
             ForEach(question.options.indices, id: \.self) { index in
                 optionRow(question.options[index], index: index, multiSelect: question.multiSelect, suggested: question.suggested == index)
             }
-            if pager.ask {
-                PagerOtherRow(picked: pager.isOtherPicked(at: pager.step), text: typedBinding, disabled: answering,
-                              typing: $typing, choose: { pager.chooseOther() }, submit: advance)
-            } else {
-                TextField("Other answer", text: typedBinding)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($typing, equals: .other)
-                    .onSubmit { advance() }
-                    .disabled(answering)
+            if pager.takesText {
+                if pager.ask {
+                    PagerOtherRow(picked: pager.isOtherPicked(at: pager.step), text: typedBinding, disabled: answering,
+                                  typing: $typing, choose: { pager.chooseOther() }, submit: advance)
+                } else {
+                    TextField("Other answer", text: typedBinding)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($typing, equals: .other)
+                        .onSubmit { advance() }
+                        .disabled(answering)
+                }
             }
-            if pager.ask, pager.isSingle {
+            if pager.takesNote, pager.isSingle {
                 PagerNoteField(note: $pager.note, disabled: answering, typing: $typing)
             }
         }
@@ -182,7 +184,7 @@ struct QuestionPagerView: View {
             if !pager.canSubmit {
                 Text("Answer every question to submit.").font(.caption).foregroundStyle(RoleStyle(.muted))
             }
-            if pager.ask {
+            if pager.takesNote {
                 PagerNoteField(note: $pager.note, disabled: answering, typing: $typing)
             }
         }

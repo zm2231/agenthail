@@ -68,6 +68,11 @@ struct RequestNotificationsTest {
         let codexBody = #"{"requests":[{"id":"c","prompt":"Run make","actions":[{"id":"allow","title":"Allow"},{"id":"always","title":"Always allow"},{"id":"deny","title":"Deny"},{"id":"never","title":"Always deny"},{"id":"stop","title":"Deny and stop"}]}]}"#
         check(RequestNotifications.notice(from: Data(codexBody.utf8), requestID: "c")?.actions.map(\.id) == ["allow", "always", "deny", "never", "stop"], "a Codex approval's always deny and deny and stop reach the notification")
         check(RequestNotifications.choice(forAction: "never") == "never" && RequestNotifications.choice(forAction: "stop") == "stop", "never and stop are choices")
+        let deliveryBody = #"{"requests":[{"id":"ask-0fca204fdeb3","prompt":"Message not delivered","optionsOnly":true,"actions":[{"id":"retry","title":"Retry"},{"id":"delete","title":"Delete"},{"id":"dismiss","title":"Dismiss"},{"id":"reply","title":"Reply…"}]}]}"#
+        let delivery = RequestNotifications.notice(from: Data(deliveryBody.utf8), requestID: "ask-0fca204fdeb3")
+        check(delivery?.actions.map(\.id) == ["retry", "delete", "dismiss"], "a delivery ask answers with its options only, never a typed reply: \(String(describing: delivery?.actions))")
+        let deliveryCategory = RequestNotifications.category(requestID: "d", actions: delivery?.actions ?? [])
+        check(deliveryCategory.actions.map { $0.options.contains(.destructive) } == [false, true, false], "only Delete is destructive among a delivery ask's options")
         let denials = RequestNotifications.category(requestID: "c", actions: [RequestNotificationAction(id: "allow", title: "Allow"), RequestNotificationAction(id: "never", title: "Always deny"), RequestNotificationAction(id: "stop", title: "Deny and stop")])
         check(denials.actions.map { $0.options.contains(.destructive) } == [false, true, true] && denials.actions.allSatisfy { $0.options.contains(.authenticationRequired) }, "every denial is destructive and every answer needs the device unlocked")
         check(RequestNotifications.choice(forAction: UNNotificationDefaultActionIdentifier) == nil, "opening is not a choice")

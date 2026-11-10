@@ -4,16 +4,21 @@ struct QuestionPager: Hashable {
     let questions: [SessionRequest.Question]
     // An ended turn's ask is answered by one message, so it never sends on a tap, takes a note, and has nothing to decline.
     let ask: Bool
+    let optionsOnly: Bool
     var note = ""
     private(set) var step = 0
     private(set) var picks: [Int: Set<Int>] = [:]
     private(set) var typed: [Int: String] = [:]
     private(set) var other: Set<Int> = []
 
-    init(questions: [SessionRequest.Question], ask: Bool = false) {
+    init(questions: [SessionRequest.Question], ask: Bool = false, optionsOnly: Bool = false) {
         self.questions = questions
         self.ask = ask
+        self.optionsOnly = optionsOnly
     }
+
+    var takesText: Bool { !optionsOnly }
+    var takesNote: Bool { ask && !optionsOnly }
 
     var isOneTap: Bool { !ask && questions.count == 1 && !questions[0].multiSelect }
     var isSingle: Bool { questions.count == 1 }
@@ -56,7 +61,7 @@ struct QuestionPager: Hashable {
             choices += picked
         }
         let note = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        return RequestDecision(choices: choices, answers: typedAnswers.isEmpty ? nil : typedAnswers, message: ask && !note.isEmpty ? note : nil)
+        return RequestDecision(choices: choices, answers: typedAnswers.isEmpty ? nil : typedAnswers, message: takesNote && !note.isEmpty ? note : nil)
     }
 
     mutating func choose(_ option: Int) -> Bool {
@@ -78,7 +83,7 @@ struct QuestionPager: Hashable {
     func isOtherPicked(at index: Int) -> Bool { other.contains(index) }
 
     mutating func chooseOther() {
-        guard questions.indices.contains(step) else { return }
+        guard takesText, questions.indices.contains(step) else { return }
         picks[step] = []
         other.insert(step)
     }
@@ -92,7 +97,7 @@ struct QuestionPager: Hashable {
     }
 
     mutating func type(_ text: String) {
-        guard questions.indices.contains(step) else { return }
+        guard takesText, questions.indices.contains(step) else { return }
         typed[step] = text.isEmpty ? nil : text
     }
 

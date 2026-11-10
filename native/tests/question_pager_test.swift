@@ -100,6 +100,17 @@ struct QuestionPagerTest {
         check(typedAsk.submit() == RequestDecision(choices: [], answers: ["Which scope?": "Tomorrow"]), "Other sends the typed answer")
         _ = typedAsk.choose(1)
         check(!typedAsk.isOtherPicked(at: 0) && typedAsk.decision == RequestDecision(choices: ["no"]), "an option after Other replaces it")
+        let deliveryJSON = #"{"permissionMode":"","requests":[{"id":"ask-0fca204fdeb3","kind":"ask","tool":"","title":"Message not delivered","optionsOnly":true,"questions":[{"question":"It failed: \"Run the tests\"","header":"","multiSelect":false,"options":[{"id":"retry","label":"Retry","description":"send it again"},{"id":"dismiss","label":"Dismiss","description":"leave it as it is"}],"suggested":0}],"alwaysAllow":false}]}"#
+        let deliveryRequest = try! JSONDecoder().decode(SessionRequests.self, from: Data(deliveryJSON.utf8)).requests[0]
+        check(deliveryRequest.optionsOnly && !SessionRequest(id: "q", kind: "question", tool: "AskUserQuestion").optionsOnly, "optionsOnly decodes, and is off unless the request says so")
+        var delivery = QuestionPagerDrafts(limit: 2).pager(for: deliveryRequest)
+        check(delivery.optionsOnly && !delivery.takesText && !delivery.takesNote, "an options-only ask takes no typed answer and no note")
+        delivery.note = "please"
+        delivery.chooseOther()
+        delivery.type("something else")
+        check(!delivery.isOtherPicked(at: 0) && delivery.typedAnswer(at: 0).isEmpty, "Other and typed text are refused")
+        _ = delivery.choose(1)
+        check(delivery.submit() == RequestDecision(choices: ["dismiss"]), "it sends the picked option alone, without the note")
         var askPair = QuestionPager(questions: [scope, targets], ask: true)
         check(!askPair.choose(0) && askPair.step == 1, "a pick in a several-question ask still pages on")
         print("question pager ok")

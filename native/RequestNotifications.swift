@@ -16,6 +16,7 @@ private struct OpenRequests: Decodable {
         let id: String
         let prompt: String?
         let actions: [RequestNotificationAction]?
+        var optionsOnly: Bool?
     }
 
     let requests: [Open]
@@ -26,8 +27,8 @@ private struct OpenRequests: Decodable {
 enum RequestNotifications {
     static let categoryPrefix = "AGENTHAIL_REQ_"
     static let replyChoice = "reply"
-    static let choices: Set<String> = ["allow", "always", "deny", "never", "stop", "o0", "o1", "o2", "o3", replyChoice]
-    static let destructiveChoices: Set<String> = ["deny", "never", "stop"]
+    static let choices: Set<String> = ["allow", "always", "deny", "never", "stop", "o0", "o1", "o2", "o3", "retry", "delete", "cancel", "dismiss", replyChoice]
+    static let destructiveChoices: Set<String> = ["deny", "never", "stop", "delete", "cancel"]
     static let maxActions = 5
     static let retainedRequests = 32
 
@@ -43,7 +44,7 @@ enum RequestNotifications {
     static func notice(from data: Data, requestID: String) -> RequestNotice? {
         guard let state = try? JSONDecoder().decode(OpenRequests.self, from: data),
               let open = state.requests.first(where: { $0.id == requestID }),
-              case let actions = open.actions ?? [], actions.count <= maxActions,
+              case let actions = (open.actions ?? []).filter({ open.optionsOnly != true || $0.id != replyChoice }), actions.count <= maxActions,
               actions.allSatisfy({ choices.contains($0.id) && !$0.title.isEmpty }),
               Set(actions.map(\.id)).count == actions.count,
               let prompt = open.prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty else { return nil }
