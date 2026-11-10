@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -183,7 +184,7 @@ func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urg
 			case <-ctx.Done():
 				return
 			}
-			err := sendWebPush(ctx, keys, subscription, payload, webPushTopic(message.CollapseID), urgency)
+			err := sendWebPush(ctx, keys, subscription, slices.Clip(payload), webPushTopic(message.CollapseID), urgency)
 			if err == nil {
 				return
 			}
