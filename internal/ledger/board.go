@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"encoding/json"
+	"slices"
 	"sync"
 )
 
@@ -312,21 +313,23 @@ func (b *Board) ProjectConstraints() []Clause {
 	return result
 }
 
+func (u *UtteranceView) clone() UtteranceView {
+	out := *u
+	out.GoalIDs, out.Notes = slices.Clone(u.GoalIDs), slices.Clone(u.Notes)
+	if u.Sorted != nil {
+		sorted := *u.Sorted
+		out.Sorted = &sorted
+	}
+	out.Context = u.Context.clone()
+	return out
+}
+
 func (b *Board) Utterances() []UtteranceView {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	result := make([]UtteranceView, 0, len(b.utteranceOrder))
 	for _, ref := range b.utteranceOrder {
-		u := *b.utterances[ref]
-		if u.Sorted != nil {
-			sorted := *u.Sorted
-			u.Sorted = &sorted
-		}
-		if u.Context != nil {
-			context := *u.Context
-			u.Context = &context
-		}
-		result = append(result, u)
+		result = append(result, b.utterances[ref].clone())
 	}
 	return result
 }

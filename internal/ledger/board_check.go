@@ -198,7 +198,7 @@ func (b *Board) checkInput(goalID string) (CheckInput, bool) {
 	in := CheckInput{GoalID: g.ID, GoalName: g.Name}
 	for _, id := range b.utteranceOrder {
 		if u := b.utterances[id]; u != nil && slices.Contains(u.GoalIDs, goalID) && personCapture(u.CapturedBy) {
-			in.Utterances = append(in.Utterances, *u)
+			in.Utterances = append(in.Utterances, u.clone())
 		}
 	}
 	for _, askID := range g.Asks {

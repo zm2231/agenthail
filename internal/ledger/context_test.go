@@ -63,3 +63,41 @@ func TestTheWordsALeadReadsCarryTheReplyTheyAnswered(t *testing.T) {
 		t.Fatalf("the board view clipped the stored reply to %d runes", len([]rune(full)))
 	}
 }
+
+func TestAnItemReadFitsWhenItsWordsAnsweredLongReplies(t *testing.T) {
+	s := newStore(t)
+	searchAsk(t, s)
+	long := strings.Repeat("検索の詳細 ", 400) + "どうしますか?"
+	answered(t, s, "claude-prompt:1", ledger.ReplyFound, ledger.JoinedByID, long)
+	capture(t, s, project, "claude-prompt:2", "full-text search, I mean")
+	answered(t, s, "claude-prompt:2", ledger.ReplyFound, ledger.JoinedByID, long)
+	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsRefines, To: "widget-A1", Clauses: []string{"build full-text search"}})
+	items(t, s, "add the index")
+
+	read, err := s.Read(project, ledger.ReadRequest{View: "item", ID: "widget-W1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(read)
+	var view struct {
+		Item struct {
+			Clause struct {
+				Words []ledger.WordsRef `json:"words"`
+			} `json:"clause"`
+		} `json:"item"`
+	}
+	if err := json.Unmarshal(data, &view); err != nil || len(view.Item.Clause.Words) != 2 || len(data) > 8<<10 {
+		t.Fatalf("item read is %d bytes with %d words (%v)", len(data), len(view.Item.Clause.Words), err)
+	}
+	for _, w := range view.Item.Clause.Words {
+		if r := w.Context.Reply; !strings.HasSuffix(r.Text, "どうしますか?") || !utf8.ValidString(r.Text) || r.Runes != utf8.RuneCountInString(long) {
+			t.Fatalf("%s reply = %d bytes, %d runes", w.ID, len(r.Text), r.Runes)
+		}
+	}
+
+	words := board(t, s).Utterances()
+	words[0].Context.Reply.Text = "changed by a reader"
+	if got := board(t, s).Utterances()[0].Context.Reply.Text; got == "changed by a reader" {
+		t.Fatal("a reader's copy of the words shares the board's stored reply")
+	}
+}

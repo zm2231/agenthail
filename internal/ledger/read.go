@@ -225,20 +225,6 @@ func clipText(text string, limit int) string {
 	return text[:limit]
 }
 
-func clipReply(context *ContextPayload) *ContextPayload {
-	if context == nil || context.Reply == nil || len(context.Reply.Text) <= readReplyClip {
-		return context
-	}
-	clipped, reply := *context, *context.Reply
-	start := len(reply.Text) - readReplyClip
-	for start < len(reply.Text) && !isRuneStart(reply.Text[start]) {
-		start++
-	}
-	reply.Text = reply.Text[start:]
-	clipped.Reply = &reply
-	return &clipped
-}
-
 func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
 
 func entriesOf(list any) []ledgerEntry {
