@@ -45,10 +45,11 @@ type ledgerSorter struct {
 	dropped   int
 	configErr string
 	backlog   map[string]int64
+	asked     map[string]bool
 }
 
 func newLedgerSorter() *ledgerSorter {
-	return &ledgerSorter{jobs: make(chan sortJob, sorterQueue), now: time.Now, retry: sorterRetry, backlog: map[string]int64{}}
+	return &ledgerSorter{jobs: make(chan sortJob, sorterQueue), now: time.Now, retry: sorterRetry, backlog: map[string]int64{}, asked: map[string]bool{}}
 }
 
 func (d *Daemon) queueSort(key, utteranceID string, seq int64, at time.Time) {
@@ -121,6 +122,7 @@ func (d *Daemon) sortQueued(ctx context.Context, job sortJob) {
 		return
 	}
 	d.sorter.answered(d)
+	d.sorter.heard(job.utteranceID, false)
 	d.sortOwedWith(ctx, config)
 }
 
@@ -149,6 +151,7 @@ func (d *Daemon) sortOwedWith(ctx context.Context, config goalsort.Config) {
 		}
 	}
 	slices.SortFunc(jobs, func(a, b sortJob) int { return cmp.Compare(a.seq, b.seq) })
+	jobs = d.sorter.unasked(jobs)
 	for i, job := range jobs {
 		if ctx.Err() != nil {
 			d.sorter.oweAll(jobs[i:])
@@ -160,7 +163,9 @@ func (d *Daemon) sortOwedWith(ctx context.Context, config goalsort.Config) {
 			return
 		}
 		d.sorter.answered(d)
+		d.sorter.heard(job.utteranceID, true)
 	}
+	d.sorter.settled()
 }
 
 func (d *Daemon) sorterConfig() (goalsort.Config, bool) {
@@ -186,6 +191,29 @@ func (d *Daemon) sorterConfig() (goalsort.Config, bool) {
 type owedSorts struct {
 	key     string
 	fromSeq int64
+}
+
+// While anything is owed, a message the model already answered without filing stays provisional and would be selected again.
+func (s *ledgerSorter) heard(utteranceID string, recovering bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if recovering || len(s.backlog) > 0 {
+		s.asked[utteranceID] = true
+	}
+}
+
+func (s *ledgerSorter) unasked(jobs []sortJob) []sortJob {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.DeleteFunc(jobs, func(job sortJob) bool { return s.asked[job.utteranceID] })
+}
+
+func (s *ledgerSorter) settled() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.backlog) == 0 {
+		clear(s.asked)
+	}
 }
 
 func (s *ledgerSorter) oweAll(jobs []sortJob) {

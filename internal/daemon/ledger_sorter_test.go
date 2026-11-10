@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -169,6 +170,32 @@ func TestARecoveryThatFailsPartwayOwesOnlyWhatItHadNotAsked(t *testing.T) {
 	}
 	if counts["owed first"] != 1 || counts["owed second"] != 2 || counts["owed third"] != 1 {
 		t.Fatalf("asks per message = %v, want the first and third once and the failed one twice", counts)
+	}
+}
+
+func TestAMessageAnsweredWithoutFilingDuringRecoveryIsNotAskedAgain(t *testing.T) {
+	stub := &sorterStub{answer: func(string) (int, string) { return http.StatusServiceUnavailable, "down" }}
+	d, r, handler, p, search := sorterFixture(t, stub)
+	s := p.session(t, r, "claude-unfiled")
+	runSorter(t, d)
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "failed", Prompt: "search words"})
+	eventually(t, "the failure", func() bool { return d.sorterHealth().Failures == 1 })
+	stub.setAnswer(func(message string) (int, string) {
+		if strings.HasPrefix(message, "search words") {
+			return fileTo(search)(message)
+		}
+		return http.StatusOK, `{"answers":{"goal":{"choice":"new","confidence":0.99}}}`
+	})
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "unsure", Prompt: "something else entirely"})
+	eventually(t, "the failed message to be filed", func() bool { return sortedGoal(t, p, ledger.PromptRef("failed")) == search })
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "marker", Prompt: "search words again"})
+	eventually(t, "the marker to be filed", func() bool { return sortedGoal(t, p, ledger.PromptRef("marker")) == search })
+	counts := map[string]int{}
+	for _, a := range stub.asks() {
+		counts[a.Message]++
+	}
+	if counts["something else entirely"] != 1 || counts["search words"] != 2 {
+		t.Fatalf("asks per message = %v, want the unfiled message once and the failed one twice", counts)
 	}
 }
 
