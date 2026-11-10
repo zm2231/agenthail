@@ -282,16 +282,8 @@ func newViewFixture(t *testing.T) *viewFixture {
 				t.Fatal(err)
 			}
 		}},
-		{"a keep-alive attempt on a pinned session", func(rng *rand.Rand) {
-			id := session(rng)
-			if _, err := reg.PinSession(id, f.clock); err != nil {
-				t.Fatal(err)
-			}
-			state := registry.KeepAlive{Attempts: 1 + rng.Intn(3), FirstAttempt: f.clock, NextAttempt: f.clock.Add(time.Minute)}
-			if rng.Intn(2) == 0 {
-				state.FailedAt, state.Error = f.clock, fmt.Sprint("refused ", rng.Intn(3))
-			}
-			if err := reg.SaveKeepAlive(id, state); err != nil {
+		{"a pinned session", func(rng *rand.Rand) {
+			if _, err := reg.PinSession(session(rng), f.clock); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -441,9 +433,6 @@ func newViewFixture(t *testing.T) *viewFixture {
 			t.Fatal(err)
 		}
 		if _, err := reg.PinSession("s0", f.clock); err != nil {
-			t.Fatal(err)
-		}
-		if err := reg.SaveKeepAlive("s0", registry.KeepAlive{Attempts: 2, FirstAttempt: f.clock, FailedAt: f.clock, Error: "refused"}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := reg.EndTurn(registry.TurnEnd{SessionID: "s0", Headline: "filled", Source: registry.TurnSourceTool}, "", f.clock); err != nil && !errors.Is(err, registry.ErrTurnAlreadyEnded) {

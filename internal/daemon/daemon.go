@@ -63,14 +63,12 @@ type Daemon struct {
 	notificationMu       sync.Mutex
 	notificationArmed    map[string]bool
 	waitingLocks         sync.Map
-	announceMu           sync.Mutex
 	permissionMu         sync.Mutex
 	permissionTold       map[string]string
 	deliveryAskMu        sync.Mutex
 	ledgerAskMu          sync.Mutex
 	ledgerAskDue         map[string]bool
 	ledgerAskSync        sync.Mutex
-	announcingKeepAlive  map[string]bool
 	catalogNudge         chan struct{}
 	presence             catalogPresence
 	leads                leadWatch
@@ -144,7 +142,6 @@ type Daemon struct {
 	mcpCredentials           atomic.Pointer[daemonMCPCredentials]
 	busyPolicyProblem        atomic.Pointer[string]
 	spawnLocks               keyedLocks
-	keepLocks                keyedLocks
 	// launchCodex, when set, replaces running 'agenthail launch codex'.
 	launchCodex func(ctx context.Context, executable string) ([]byte, error)
 	// limitResumeEnabled, when set, replaces the host's resume after limit
@@ -363,7 +360,6 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}()
 	go d.sweepUploads(ctx)
 	go d.runLimitResumes(ctx)
-	go d.runKeepAlive(ctx)
 	go d.runIdleCompaction(ctx)
 	go d.runGoalSweeps(ctx)
 	go d.runWorkCleans(ctx)

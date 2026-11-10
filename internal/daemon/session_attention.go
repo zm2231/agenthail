@@ -21,8 +21,5 @@ func rowAttention(row dashboardSession) *SessionAttention {
 	case "stopped":
 		return &SessionAttention{Kind: "stopped", Reason: row.Display.Detail}
 	}
-	if row.KeepAlive != nil {
-		return &SessionAttention{Kind: AttentionKeepAliveFailed, Reason: keepAliveFailedText("This session")}
-	}
 	return nil
 }

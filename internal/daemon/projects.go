@@ -114,7 +114,7 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 	}
 	row.Archived = archived
 	mark := view.marks[row.ID]
-	row.PinnedAt, row.KeepAlive = mark.PinnedAt, keepAliveRow(mark.KeepAlive)
+	row.PinnedAt = mark.PinnedAt
 	row.Snooze = snoozeRow(mark.Snooze)
 	if end, ok := view.turnEnds[row.ID]; ok {
 		row.EndTurn = endTurnRow(&end)
@@ -699,8 +699,6 @@ func (d *Daemon) archiveSession(sessionID string, at time.Time) error {
 }
 
 func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error) {
-	unlock, _ := d.keepLocks.acquire(sessionID, true)
-	defer unlock()
 	var err error
 	if action == "session-archive" {
 		task, found, taskErr := d.Registry.TaskForChild(sessionID)

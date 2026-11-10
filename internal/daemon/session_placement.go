@@ -22,7 +22,6 @@ type placementInputs struct {
 	LimitResume   string
 	UsageLimit    bool
 	UsageResetsAt time.Time
-	KeptDown      bool
 	Pinned        bool
 	Snooze        *dashboardSnooze
 	TurnStop      string
@@ -56,7 +55,6 @@ func placementOf(row dashboardSession) placementInputs {
 		AsksPerson:    row.Ask.asksPerson(),
 		HostDown:      mirroredHostDown(row),
 		UsageLimit:    row.UsageLimit != nil,
-		KeptDown:      row.KeepAlive != nil,
 		Pinned:        !row.PinnedAt.IsZero(),
 		Snooze:        row.Snooze,
 		Current:       row.Current,
