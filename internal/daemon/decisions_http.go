@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -85,16 +86,19 @@ func (d *Daemon) queuedBehind() (map[string][]string, error) {
 	return queued, nil
 }
 
+// decisionHearer is the agent a session's oldest permission request is routed to, while one is.
 func (d *Daemon) decisionHearer(row dashboardSession) (decisionHearer, bool) {
-	session, err := d.Registry.Session(row.ID)
-	if err != nil || session == nil {
+	open, err := d.Registry.OpenPermissionAsks(row.ID)
+	if err != nil || len(open) == 0 || open[0].RoutedTo == registry.AskToPerson {
 		return decisionHearer{}, false
 	}
-	to, ok := d.noticeRecipient(*session)
-	if !ok {
-		return decisionHearer{}, false
+	to, role := open[0].RoutedTo, "lead"
+	if session, err := d.Registry.Session(row.ID); err == nil && session != nil {
+		if hearer, ok := d.noticeRecipient(*session); ok && hearer.sessionID == to {
+			role = hearer.role
+		}
 	}
-	return decisionHearer{sessionID: d.publicSessionID(to.sessionID), role: to.role}, true
+	return decisionHearer{sessionID: d.publicSessionID(to), role: role}, true
 }
 
 func (d *Daemon) readDecisionRequests(ctx context.Context, rows []dashboardSession) map[string]decisionRequests {

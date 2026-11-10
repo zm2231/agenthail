@@ -257,9 +257,12 @@ func (d *Daemon) escalateAsk(ask registry.Ask, to string) registry.Ask {
 		d.log.Printf("read %s: %s", ask.ID, err)
 		return ask
 	}
-	if routed {
+	switch {
+	case current.Origin == registry.AskOriginPermission:
+		d.tellPermission(current)
+	case routed:
 		current = d.tellHearer(current, hearer)
-	} else {
+	default:
 		d.announceAsk(current)
 	}
 	d.publishAsk(current.SessionID)
@@ -293,10 +296,14 @@ func (d *Daemon) sweepAsks(now time.Time) {
 		d.log.Printf("read open asks: %s", err)
 		return
 	}
-	window := d.askEscalateAfter()
+	agentWindow, permissionWindow := d.askEscalateAfter(), d.permissionEscalateAfter()
 	for _, ask := range open {
 		if ask.RoutedTo == registry.AskToPerson {
 			continue
+		}
+		window := agentWindow
+		if ask.Origin == registry.AskOriginPermission {
+			window = permissionWindow
 		}
 		if !d.hears(ask.RoutedTo) || now.Sub(ask.RoutedAt) >= window {
 			d.escalateAsk(ask, "")
@@ -345,15 +352,17 @@ func (d *Daemon) deliverAskNotifications(ctx context.Context, desktop string, mo
 }
 
 func (d *Daemon) withdrawAsk(askID string) {
+	d.background.start(func(ctx context.Context) { d.withdrawAskNow(ctx, askID) })
+}
+
+func (d *Daemon) withdrawAskNow(ctx context.Context, askID string) {
 	key := askNotificationKey(askID)
-	d.background.start(func(ctx context.Context) {
-		if err := d.withdrawDesktop("agenthail-" + key); err != nil {
-			d.log.Printf("withdraw desktop notification: %s", err)
-		}
-		withdrawCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		d.withdrawFromPairedDevices(withdrawCtx, key)
-	})
+	if err := d.withdrawDesktop("agenthail-" + key); err != nil {
+		d.log.Printf("withdraw desktop notification: %s", err)
+	}
+	withdrawCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	d.withdrawFromPairedDevices(withdrawCtx, key)
 }
 
 func (d *Daemon) publishAsk(sessionID string) {
@@ -363,7 +372,7 @@ func (d *Daemon) publishAsk(sessionID string) {
 
 // askAnswerer is who may answer an open ask: the person always, an agent only while the ask is routed to it.
 func askAnswerer(ask registry.Ask, p principal) (string, error) {
-	if p.Kind != principalSession {
+	if p.Kind != principalSession || p.ForPerson {
 		return registry.AskToPerson, nil
 	}
 	if ask.RoutedTo != p.Claimed {
@@ -409,6 +418,9 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 		}
 		current := d.escalateAsk(ask, "")
 		return actionOK(map[string]any{"ok": true, "result": map[string]any{"requestId": askID, "outcome": "escalated", "routedTo": d.publicSessionID(current.RoutedTo)}}), nil
+	}
+	if ask.Origin == registry.AskOriginPermission {
+		return d.answerPermission(ctx, adapter, session, ask, decision, by, p.actor())
 	}
 	request := askRequest(ask)
 	if decision.Choice != "" {

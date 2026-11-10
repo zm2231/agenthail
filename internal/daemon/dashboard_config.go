@@ -34,6 +34,8 @@ type DashboardConfig struct {
 	Claude           *ClaudeSettings `json:"claude,omitempty"`
 	// AskEscalateMinutes is how long an agent holds an ask before it passes up; unset is 10.
 	AskEscalateMinutes int `json:"askEscalateMinutes,omitempty"`
+	// AskPermissionEscalateMinutes is the same for a permission request, which holds a tool call; unset is 3.
+	AskPermissionEscalateMinutes int `json:"askPermissionEscalateMinutes,omitempty"`
 }
 
 // ResumesAfterLimit reports whether sessions a usage limit stopped resume

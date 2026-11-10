@@ -27,6 +27,10 @@ func (w mcpWrite) key(tool string) (string, error) {
 }
 
 func (d *Daemon) mcpAction(ctx context.Context, caller *mcpCaller, tool string, write mcpWrite, request dashboardActionRequest) (json.RawMessage, error) {
+	return d.mcpActionAs(ctx, caller, sessionPrincipal(caller.session.ID), tool, write, request)
+}
+
+func (d *Daemon) mcpActionAs(ctx context.Context, caller *mcpCaller, p principal, tool string, write mcpWrite, request dashboardActionRequest) (json.RawMessage, error) {
 	key, err := write.key(tool)
 	if err != nil {
 		return nil, err
@@ -36,7 +40,7 @@ func (d *Daemon) mcpAction(ctx context.Context, caller *mcpCaller, tool string, 
 	if err != nil {
 		return nil, err
 	}
-	reply := d.performAction(ctx, sessionPrincipal(caller.session.ID), actionFormatAPIv1, body, key)
+	reply := d.performAction(ctx, p, actionFormatAPIv1, body, key)
 	result, refusal := mcpActionOutcome(reply)
 	d.recordMCPWrite(caller, tool, mcpAuditTarget(request), write.ClientRequestID, refusal)
 	if refusal != nil {

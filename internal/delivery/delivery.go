@@ -376,6 +376,9 @@ func (d Dispatcher) queueForWaiting(session *surface.Session, message, target, s
 	}
 	messageID := d.QueuedMessageID(deliveryID, session.ID)
 	d.capturePerson(sourceID, session, messageID, message)
+	if recorded, err := d.Registry.SessionWaiting(session.ID); err == nil && recorded != nil {
+		waiting = recorded
+	}
 	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, QueueID: queueID, DeliveryID: deliveryID, MessageID: messageID, Detail: fmt.Sprintf("Queued for %s, which is waiting on you; sends after you answer.", target), WaitingOn: waiting}, nil
 }
 

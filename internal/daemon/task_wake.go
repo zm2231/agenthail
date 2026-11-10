@@ -74,7 +74,9 @@ func (d *Daemon) noteWaitReadRequest(child, reader string, waiting surface.Waiti
 		d.taskRequestsRead = map[string]taskRequestRead{}
 	}
 	d.taskRequestsRead[child] = taskRequestRead{waitingID: waiting.ID, reader: reader}
-	d.withdrawWaitingNotice(child, waiting)
+	if _, err := d.Registry.CancelPendingByKey(askNoticeKey(waiting.ID, reader)); err != nil {
+		d.log.Printf("withdraw the notice of %s: %s", waiting.ID, err)
+	}
 }
 
 func (d *Daemon) retainTaskRequestsRead(running map[string]bool) {
