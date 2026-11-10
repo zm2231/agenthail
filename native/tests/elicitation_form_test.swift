@@ -36,10 +36,14 @@ struct ElicitationFormTest {
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        let encoded = String(data: try encoder.encode(RequestDecision.content(content ?? [:])), encoding: .utf8)
+        let encoded = String(data: try encoder.encode(RequestDecision.form(content ?? [:], fields: fields)), encoding: .utf8)
         check(encoded == #"{"choices":["allow"],"content":{"env":"prod","note":"release","notify":false,"regions":["eu"],"replicas":3}}"#, "encoded \(encoded ?? "")")
-        let empty = String(data: try encoder.encode(RequestDecision.content([:])), encoding: .utf8)
-        check(empty == #"{"choices":["allow"]}"#, "an empty form sends allow alone: \(empty ?? "")")
+        let note = [fields[4]]
+        let blank = ElicitationForm().content(note)
+        let optional = String(data: try encoder.encode(RequestDecision.form(blank ?? ["x": .string("not ready")], fields: note)), encoding: .utf8)
+        check(optional == #"{"choices":["allow"],"content":{}}"#, "a form whose optional fields are left blank still sends its content: \(optional ?? "")")
+        let empty = String(data: try encoder.encode(RequestDecision.form([:], fields: [])), encoding: .utf8)
+        check(empty == #"{"choices":["allow"]}"#, "a form with no fields sends allow alone: \(empty ?? "")")
         print("elicitation form ok")
     }
 

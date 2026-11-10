@@ -35,7 +35,7 @@ final class RereadDaemon: URLProtocol, @unchecked Sendable {
         case ("/api/v1/projects/activity", _): body = #"{"projects":[]}"#
         case ("/api/v1/history", _): body = #"{"items":[],"hasMore":false,"nextBefore":0,"kinds":[]}"#
         case ("/api/v1/snapshot", nil):
-            body = #"{"updatedAt":"2026-11-03T12:00:00Z","hostEpoch":"e1","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"projects":[],"queue":[],"channels":[],"relays":[],"attention":[],"codexRecentHours":5}"#
+            body = #"{"updatedAt":"2026-11-03T12:00:00Z","hostEpoch":"e1","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"projects":[],"queue":[],"channels":[],"relays":[],"codexRecentHours":5}"#
         case ("/api/v1/snapshot", _): body = Self.page(["live", "older"])
         default: body = "{}"
         }

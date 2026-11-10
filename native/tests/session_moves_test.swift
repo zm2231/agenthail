@@ -67,7 +67,7 @@ struct SessionMovesTest {
       {"id":"old","surface":"claude","name":"task","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}},
       {"id":"other","surface":"codex","name":"second","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}},
       {"id":"hpeer::m2","surface":"claude","name":"remote","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"host":{"id":"hpeer","name":"peer","state":"connected"}}],
-     "totalSessions":2,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}
+     "totalSessions":2,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5}
     """
 
     @MainActor

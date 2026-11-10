@@ -801,7 +801,7 @@ private final class FlakyConnectionURLProtocol: URLProtocol, @unchecked Sendable
             return
         }
         if path == "/api/v1/snapshot" {
-            respond(status: 200, body: #"{"updatedAt":"now","eventCursor":0,"daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}"#)
+            respond(status: 200, body: #"{"updatedAt":"now","eventCursor":0,"daemon":{"running":true},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5}"#)
             return
         }
         if path == "/api/v1/events" {

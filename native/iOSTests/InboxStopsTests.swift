@@ -7,7 +7,6 @@ final class InboxStopsTests: XCTestCase {
         var snapshot = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as? [String: Any])
         let sessions = try XCTUnwrap(snapshot["sessions"] as? [[String: Any]])
         let demo = try XCTUnwrap(sessions[0]["id"] as? String)
-        snapshot["attention"] = [["id": 1, "sessionId": demo, "target": "fix the build", "queueId": 7, "reason": "Delivery failed", "requestedAction": "Retry or cancel this message", "createdAt": "2026-11-08T10:00:00Z"]]
         snapshot["leadReplacements"] = [["id": 5, "projectId": "web", "name": "lead", "sessionId": demo, "previousSessionId": "old", "changedBy": "you", "reason": "context full", "at": "2026-11-08T10:10:00Z"]]
         let model = AgenthailIOSTests.computerModel()
         model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: JSONSerialization.data(withJSONObject: snapshot)))
@@ -15,7 +14,7 @@ final class InboxStopsTests: XCTestCase {
         var ask = DecisionItem(group: .waiting, sessionId: "computer::" + demo, projectId: nil, kind: "ask", reason: "Message not delivered", answerable: true)
         ask.hostID = "computer"
         let stops = InboxStops.build(replacements: model.leadReplacements, inbox: DecisionInbox(decisions: [ask]))
-        XCTAssertEqual(stops.stopped.map(\.id), ["replacement:computer/5"], "an older computer's attention rows are ignored; a replacement carries its computer's id")
+        XCTAssertEqual(stops.stopped.map(\.id), ["replacement:computer/5"], "a replacement carries its computer's id")
         XCTAssertEqual(stops.decisions.map(\.kind), ["ask"], "a delivery problem is listed once, as its ask")
         XCTAssertEqual(stops.count, 2)
     }

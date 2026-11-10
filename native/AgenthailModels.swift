@@ -2433,7 +2433,9 @@ struct RequestDecision: Encodable, Hashable, Sendable {
     static let allow = choose("allow")
     static let deny = choose("deny")
     static func choose(_ id: String, message: String? = nil) -> RequestDecision { RequestDecision(choices: [id], message: message) }
-    static func content(_ content: [String: ElicitationValue]) -> RequestDecision { RequestDecision(choices: ["allow"], content: content.isEmpty ? nil : content) }
+    static func form(_ content: [String: ElicitationValue], fields: [Elicitation.Field]) -> RequestDecision {
+        RequestDecision(choices: ["allow"], content: fields.isEmpty ? nil : content)
+    }
 }
 
 /// A session's open requests, oldest first, and the permission mode it runs

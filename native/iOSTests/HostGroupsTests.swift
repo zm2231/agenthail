@@ -9,7 +9,7 @@ final class HostGroupsTests: XCTestCase {
         let api = AgenthailAPI(baseURL: URL(string: "https://studio.invalid")!, token: "test", session: URLSession(configuration: configuration))
         let model = AgenthailIOSModel(api: api, paired: true, hostID: "hstudio", hostName: "studio")
         let json = #"""
-        {"updatedAt":"now","daemon":{"running":true},"surfaces":[],"totalSessions":2,"queue":[],"history":[],"attention":[],"codexRecentHours":24,
+        {"updatedAt":"now","daemon":{"running":true},"surfaces":[],"totalSessions":2,"queue":[],"history":[],"codexRecentHours":24,
          "sessions":[
           {"id":"lead","surface":"claude","name":"lead","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}},
           {"id":"tests","surface":"codex","name":"tests","status":"idle","queueCount":0,"open":true,"current":true,"readOnly":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}],

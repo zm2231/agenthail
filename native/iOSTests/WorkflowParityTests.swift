@@ -323,7 +323,7 @@ final class WorkflowParityTests: XCTestCase {
     func testTakingBackAQueuedMessageFollowsItsSessionAcrossARekey() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
-        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"old","surface":"claude","name":"task","status":"working","queueCount":1,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#.utf8)))
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"old","surface":"claude","name":"task","status":"working","queueCount":1,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":24}"#.utf8)))
         model.host(try XCTUnwrap(model.connection("computer")), rekeyed: ["old": "new"])
         func queued(_ id: Int, _ message: String) throws -> QueueState {
             var item = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":\#(id),"sessionId":"old","target":"old","message":"\#(message)","status":"pending","evidence":"","attempts":0,"queuedAt":"now"}"#.utf8))
@@ -403,7 +403,7 @@ final class WorkflowParityTests: XCTestCase {
           {"id":"old","surface":"claude","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}},
           {"id":"m2","surface":"claude","name":"remote","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"host":{"id":"hpeer","name":"peer","state":"connected"}},
           {"id":"m3","surface":"claude","name":"moving","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"move":{"state":"copying","host":"hpeer","hostName":"peer"}}],
-         "totalSessions":3,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}
+         "totalSessions":3,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5}
         """.utf8)))
         let sessions = try XCTUnwrap(model.snapshot?.sessions)
         let local = try XCTUnwrap(sessions.first { $0.name == "task" })
@@ -447,7 +447,7 @@ final class WorkflowParityTests: XCTestCase {
         {"updatedAt":"now","daemon":{"running":true,"hosts":[{"id":"hpeer","name":"peer","state":"connected"}]},"surfaces":[],"sessions":[
           {"id":"old","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities)},
           {"id":"m1","surface":"codex","name":"remote","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"host":{"id":"hpeer","name":"peer","state":"connected"}}],
-         "totalSessions":2,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}
+         "totalSessions":2,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5}
         """.utf8)))
 
         await model.resume("computer::old")
@@ -469,7 +469,7 @@ final class WorkflowParityTests: XCTestCase {
         model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data("""
         {"updatedAt":"now","daemon":{"running":true,"hosts":[{"id":"hpeer","name":"peer","state":"connected"}]},"surfaces":[],"sessions":[
           {"id":"hpeer::m1","surface":"codex","name":"remote","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"host":{"id":"hpeer","name":"peer","state":"connected"}}],
-         "totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}
+         "totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5}
         """.utf8)))
         let session = try XCTUnwrap(model.session("hpeer::m1"))
         XCTAssertTrue(SessionOperationAvailability.nativeQueueWritable(session))
@@ -548,7 +548,7 @@ final class WorkflowParityTests: XCTestCase {
           {"id":"s2","surface":"claude","name":"helper","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"cwd":"/p1","project":\(project)},
           {"id":"m1","surface":"codex","name":"remote","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"cwd":"/srv/tool","host":{"id":"hpeer","name":"peer","state":"connected"}},
           {"id":"m2","surface":"claude","name":"remote lead","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"cwd":"/srv/repo","host":{"id":"hpeer","name":"peer","state":"connected"},"project":{"id":"repo:shared","displayName":"shared","rootPath":"/srv/repo","kind":"git"}}],
-         "totalSessions":4,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5,
+         "totalSessions":4,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5,
          "projects":[
           {"id":"p1","displayName":"one","checkouts":[{"host":{"id":"computer","name":"computer","state":"local"},"projectId":"p1","rootPath":"/p1","added":true},{"host":{"id":"hpeer","name":"peer","state":"connected"},"projectId":"hpeer::p1","rootPath":"/srv/p1","added":true}],"coordinators":[{"host":{"id":"computer","name":"computer","state":"local"},"name":"lead","surface":"claude","sessionId":"s-lead"}]},
           {"id":"repo:shared","displayName":"shared","checkouts":[{"host":{"id":"hpeer","name":"peer","state":"connected"},"projectId":"repo:shared","rootPath":"/srv/repo"}],"coordinators":[{"host":{"id":"hpeer","name":"peer","state":"connected"},"name":"remote","surface":"claude","sessionId":"m2"}]},
@@ -590,7 +590,7 @@ final class WorkflowParityTests: XCTestCase {
     func testArchivingARepositoryProjectUsesItsSharedID() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
-        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"s1","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"project":{"id":"repo:github.com/acme/widget","displayName":"widget","rootPath":"/w","kind":"git"}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#.utf8)))
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"s1","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"project":{"id":"repo:github.com/acme/widget","displayName":"widget","rootPath":"/w","kind":"git"}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":24}"#.utf8)))
         XCTAssertEqual(model.snapshot?.sessions.first?.project?.id, "repo:github.com/acme/widget")
         await model.setProjectArchived("repo:github.com/acme/widget", true)
         XCTAssertNil(model.operationError)
@@ -599,13 +599,13 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertEqual(archived["projectId"] as? String, "repo:github.com/acme/widget")
     }
 
-    private static let codexSessionSnapshot = #"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"old","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#
+    private static let codexSessionSnapshot = #"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"old","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":24}"#
 
     @MainActor
     func testCreatingOnAMirroredComputerKeysTheSessionByItsOwner() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
-        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true,"hosts":[{"id":"hpeer","name":"peer","state":"connected"}]},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}"#.utf8)))
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true,"hosts":[{"id":"hpeer","name":"peer","state":"connected"}]},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5}"#.utf8)))
         let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", host: "hpeer")
         XCTAssertTrue(created)
         XCTAssertEqual(ParityProtocol.state.actions.first?["host"] as? String, "hpeer")

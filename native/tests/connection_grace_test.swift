@@ -50,7 +50,7 @@ final class DaemonDropProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/history":
             respond(200, #"{"items":[],"hasMore":false,"nextBefore":0,"kinds":[]}"#)
         case "/api/v1/snapshot":
-            respond(200, #"{"updatedAt":"2026-10-23T21:00:00Z","hostEpoch":"h","catalogSeq":1,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5,"busyDelivery":"queue"}"#)
+            respond(200, #"{"updatedAt":"2026-10-23T21:00:00Z","hostEpoch":"h","catalogSeq":1,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"sessions":[],"totalSessions":0,"queue":[],"channels":[],"relays":[],"history":[],"codexRecentHours":5,"busyDelivery":"queue"}"#)
         default:
             respond(200, "{}")
         }

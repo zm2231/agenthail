@@ -157,7 +157,7 @@ struct RequestCard: View {
             }
             HStack {
                 Button("Submit") {
-                    if let content = form.content(fields) { send(.content(content)) }
+                    if let content = form.content(fields) { send(.form(content, fields: fields)) }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(answering || form.content(fields) == nil)
