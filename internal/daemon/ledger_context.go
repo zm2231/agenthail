@@ -137,19 +137,20 @@ func (d *Daemon) messageContext(ctx context.Context, job contextJob) (ledger.Con
 	deadline := job.at.Add(d.contexts.wait)
 	match := d.userEntryMatcher(job)
 	for {
-		if reply, found := d.answeredReply(job.targetID, match); found {
+		if replies, found := d.answeredReplies(job.targetID, match); found {
 			status := ledger.ReplyNone
-			if reply != nil {
+			if len(replies) > 0 {
 				status = ledger.ReplyFound
 			}
-			return ledger.ContextPayload{UtteranceID: job.utteranceID, Status: status, JoinedBy: ledger.JoinedByID, Reply: reply}, true
+			return d.withReplies(job, ledger.ContextPayload{UtteranceID: job.utteranceID, Status: status, JoinedBy: ledger.JoinedByID}, replies), true
 		}
 		if !time.Now().Before(deadline) {
 			late := ledger.ContextPayload{UtteranceID: job.utteranceID, Status: ledger.ReplyLate}
-			if reply := d.replyBefore(job.targetID, job.at); reply != nil {
-				late.JoinedBy, late.Reply = ledger.JoinedByTime, reply
+			replies := d.repliesBefore(job.targetID, job.at)
+			if len(replies) > 0 {
+				late.JoinedBy = ledger.JoinedByTime
 			}
-			return late, true
+			return d.withReplies(job, late, replies), true
 		}
 		select {
 		case <-ctx.Done():
@@ -157,6 +158,20 @@ func (d *Daemon) messageContext(ctx context.Context, job contextJob) (ledger.Con
 		case <-time.After(min(d.contexts.poll, time.Until(deadline))):
 		}
 	}
+}
+
+func (d *Daemon) withReplies(job contextJob, p ledger.ContextPayload, replies []ledger.QuoteSource) ledger.ContextPayload {
+	if len(replies) > 0 {
+		p.Reply = ledger.NewReply(replies[0].ItemID, replies[0].TS, replies[0].Text)
+	}
+	text, ok, err := d.ledgerStore().UtteranceText(job.key, job.utteranceID)
+	if err != nil {
+		d.log.Printf("ledger context: read %s in %s: %s", job.utteranceID, job.key, err)
+	}
+	if ok {
+		p.Quotes = ledger.FindQuotes(text, replies)
+	}
+	return p
 }
 
 func (d *Daemon) userEntryMatcher(job contextJob) func(sessionJournalPayload) bool {
@@ -176,14 +191,14 @@ func (d *Daemon) userEntryMatcher(job contextJob) func(sessionJournalPayload) bo
 	}
 }
 
-// answeredReply finds the session's entry for the message among its newest entries and returns
-// the last reply before it; found is false while that entry is not there.
-func (d *Daemon) answeredReply(sessionID string, match func(sessionJournalPayload) bool) (reply *ledger.Reply, found bool) {
+// answeredReplies finds the session's entry for the message among its newest entries and returns up to
+// QuoteReplies replies before it, newest first; found is false while that entry is not there.
+func (d *Daemon) answeredReplies(sessionID string, match func(sessionJournalPayload) bool) (replies []ledger.QuoteSource, found bool) {
 	var cursor uint64
 	for rows := 0; ; {
 		page, err := d.Registry.ReadSessionJournalPage(sessionID, cursor, contextPage)
 		if err != nil {
-			return nil, found
+			return replies, found
 		}
 		for i := len(page.Entries) - 1; i >= 0; i-- {
 			var p sessionJournalPayload
@@ -194,24 +209,27 @@ func (d *Daemon) answeredReply(sessionID string, match func(sessionJournalPayloa
 				found = p.Role == "user" && p.Kind == "message" && match(p)
 				continue
 			}
-			if reply := d.journalReply(sessionID, p); reply != nil {
-				return reply, true
+			if reply, ok := d.journalReply(sessionID, p, len(replies) == 0); ok {
+				if replies = append(replies, reply); len(replies) == ledger.QuoteReplies {
+					return replies, true
+				}
 			}
 		}
 		rows += len(page.Entries)
-		if page.NextBefore == 0 || len(page.Entries) == 0 || (!found && rows >= contextRows) {
-			return nil, found
+		if page.NextBefore == 0 || len(page.Entries) == 0 || (!found && rows >= contextRows) || rows >= sessionJournalRetentionCount {
+			return replies, found
 		}
 		cursor = page.NextBefore
 	}
 }
 
-func (d *Daemon) replyBefore(sessionID string, before time.Time) *ledger.Reply {
+func (d *Daemon) repliesBefore(sessionID string, before time.Time) []ledger.QuoteSource {
+	var replies []ledger.QuoteSource
 	var cursor uint64
-	for rows := 0; rows < contextRows; {
+	for rows := 0; rows < sessionJournalRetentionCount; {
 		page, err := d.Registry.ReadSessionJournalPage(sessionID, cursor, contextPage)
 		if err != nil {
-			return nil
+			return replies
 		}
 		for i := len(page.Entries) - 1; i >= 0; i-- {
 			var p sessionJournalPayload
@@ -221,28 +239,34 @@ func (d *Daemon) replyBefore(sessionID string, before time.Time) *ledger.Reply {
 			if ts, err := time.Parse(time.RFC3339Nano, p.TS); err != nil || !ts.Before(before) {
 				continue
 			}
-			if reply := d.journalReply(sessionID, p); reply != nil {
-				return reply
+			if reply, ok := d.journalReply(sessionID, p, len(replies) == 0); ok {
+				if replies = append(replies, reply); len(replies) == ledger.QuoteReplies {
+					return replies
+				}
 			}
 		}
 		rows += len(page.Entries)
 		if page.NextBefore == 0 || len(page.Entries) == 0 {
-			return nil
+			return replies
 		}
 		cursor = page.NextBefore
 	}
-	return nil
+	return replies
 }
 
-func (d *Daemon) journalReply(sessionID string, p sessionJournalPayload) *ledger.Reply {
+func (d *Daemon) journalReply(sessionID string, p sessionJournalPayload, whole bool) (ledger.QuoteSource, bool) {
 	if p.Role != "assistant" || p.Body == "" || (p.Kind != "message" && p.Kind != "text") {
-		return nil
+		return ledger.QuoteSource{}, false
 	}
 	body := p.Body
 	if p.Truncated && p.BodyRef != "" {
-		if full, _, err := d.Registry.SessionJournalBody(sessionID, p.BodyRef, 0, 1<<40); err == nil {
+		end := 1 << 40
+		if !whole {
+			end = ledger.QuoteReplyMax
+		}
+		if full, _, err := d.Registry.SessionJournalBody(sessionID, p.BodyRef, 0, end); err == nil {
 			body = string(full)
 		}
 	}
-	return ledger.NewReply(p.ItemID, p.TS, body)
+	return ledger.QuoteSource{ItemID: p.ItemID, TS: p.TS, Text: body}, true
 }

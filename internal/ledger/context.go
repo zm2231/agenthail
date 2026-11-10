@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 	"unicode/utf8"
 )
@@ -24,10 +25,11 @@ const (
 // Found and none are read before the session's own entry for the message; late means that entry
 // was not seen in time, and any reply is the last one before the capture time.
 type ContextPayload struct {
-	UtteranceID string `json:"utteranceId"`
-	Status      string `json:"status"`
-	JoinedBy    string `json:"joinedBy,omitempty"`
-	Reply       *Reply `json:"reply,omitempty"`
+	UtteranceID string  `json:"utteranceId"`
+	Status      string  `json:"status"`
+	JoinedBy    string  `json:"joinedBy,omitempty"`
+	Reply       *Reply  `json:"reply,omitempty"`
+	Quotes      []Quote `json:"quotes,omitempty"`
 }
 
 type Reply struct {
@@ -89,6 +91,7 @@ func (c *ContextPayload) clone() *ContextPayload {
 		return nil
 	}
 	out := *c
+	out.Quotes = slices.Clone(c.Quotes)
 	if c.Reply != nil {
 		reply := *c.Reply
 		out.Reply = &reply
@@ -118,6 +121,15 @@ func (b *Board) applyContext(data []byte) error {
 		u.Context = &p
 	}
 	return nil
+}
+
+func (s *Store) UtteranceText(projectKey, utteranceID string) (string, bool, error) {
+	var text sql.NullString
+	err := s.read.QueryRow(`SELECT json_extract(payload,'$.text') FROM ledger_events WHERE project_key=? AND type=? AND ref=?`, projectKey, string(EventUtterance), utteranceID).Scan(&text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return text.String, err == nil, err
 }
 
 func (s *Store) ContextFor(projectKey, utteranceID string) (ContextPayload, bool, error) {

@@ -198,7 +198,7 @@ func (d *Daemon) sortOne(ctx context.Context, config goalsort.Config, job sortJo
 	if !ok {
 		return nil
 	}
-	question := goalsort.Question{Message: input.Text}
+	question := goalsort.Question{Message: ledger.Marked(input.Text, input.Context.Quotes)}
 	if input.Context.Reply != nil {
 		question.PreviousReply = input.Context.Reply.Text
 	}

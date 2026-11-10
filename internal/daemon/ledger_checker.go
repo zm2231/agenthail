@@ -199,9 +199,21 @@ func (d *Daemon) endChecker(ctx context.Context, run string, now time.Time) {
 
 func checkerMessage(run string, in ledger.CheckInput) string {
 	var b strings.Builder
-	b.WriteString("Check run " + run + ", goal " + in.GoalID + " (" + in.GoalName + ").\n\nThe person's words, each after the agent reply it answered; a reply is context, not the person's words:\n")
+	b.WriteString("Check run " + run + ", goal " + in.GoalID + " (" + in.GoalName + ").\n\nThe person's words, each after the agent reply it answered; a reply and any text the person quoted are context, not the person's words:\n")
 	for _, u := range in.Utterances {
-		b.WriteString("- " + u.ID + ": " + quoteBlock(u.Text) + "\n")
+		var quotes []ledger.Quote
+		if u.Context != nil {
+			quotes = u.Context.Quotes
+		}
+		typed := ledger.Typed(u.Text, quotes)
+		if typed == "" {
+			b.WriteString("- " + u.ID + ": (nothing typed, only quoted)\n")
+		} else {
+			b.WriteString("- " + u.ID + ": " + quoteBlock(typed) + "\n")
+		}
+		for _, quoted := range ledger.QuotedText(u.Text, quotes) {
+			b.WriteString("  quoting: " + quoteBlock(quoted) + "\n")
+		}
 		switch c := u.Context; {
 		case c != nil && c.Reply != nil:
 			b.WriteString("  answering the agent: " + quoteBlock(c.Reply.Text) + "\n")
