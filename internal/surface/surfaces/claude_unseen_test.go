@@ -69,6 +69,44 @@ func TestUnseenConversationsListOnlyInteractiveOnesAgenthailDoesNotKnow(t *testi
 	}
 }
 
+func TestAnEntrypointPastAnOversizedRecordOrOnAnUnterminatedLastLineIsFound(t *testing.T) {
+	dir := t.TempDir()
+	oversized := filepath.Join(dir, "oversized.jsonl")
+	huge := `{"type":"user","entrypoint":"sdk-cli","content":"` + strings.Repeat("c", claudeEntrypointLineLimit) + `"}`
+	if err := os.WriteFile(oversized, []byte(huge+"\n"+turn("cli", "")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unterminated := filepath.Join(dir, "unterminated.jsonl")
+	if err := os.WriteFile(unterminated, []byte(`{"type":"queue-operation"}`+"\n"+turn("claude-desktop", "")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entrypoints := newClaudeEntrypoints()
+	for path, want := range map[string]string{oversized: "cli", unterminated: "claude-desktop"} {
+		if got := entrypoints.read(path); got.kind != want || got.cwd != "/work/app" {
+			t.Errorf("%s: got %+v, want %s", filepath.Base(path), got, want)
+		}
+	}
+}
+
+func TestUnseenConversationsCanBeAskedForConcurrently(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	root := filepath.Join(home, ".claude")
+	for _, id := range []string{"a", "b", "c", "d"} {
+		writeUnseenTranscript(t, root, "app", id, turn("cli", ""))
+	}
+	claude := NewClaude(nil, home)
+	counts := make(chan int, 8)
+	for range 8 {
+		go func() { counts <- len(claude.UnseenConversations(func(string) bool { return false })) }()
+	}
+	for range 8 {
+		if got := <-counts; got != 4 {
+			t.Fatalf("a concurrent pass listed %d, want 4", got)
+		}
+	}
+}
+
 type countingOpens struct{ count int }
 
 func (c *countingOpens) open(path string) (io.ReadCloser, error) {

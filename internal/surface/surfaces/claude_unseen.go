@@ -63,27 +63,24 @@ func (x *claudeEntrypoints) read(path string) claudeEntrypoint {
 	marker := []byte(`"entrypoint"`)
 	reader := bufio.NewReaderSize(file, 64<<10)
 	var line []byte
-	overflow := false
 	for {
 		chunk, err := reader.ReadSlice('\n')
 		if len(line)+len(chunk) > claudeEntrypointLineLimit {
-			overflow, line = true, line[:0]
-		} else if !overflow {
-			line = append(line, chunk...)
+			line = line[:0]
 		}
+		line = append(line, chunk...)
 		if errors.Is(err, bufio.ErrBufferFull) {
 			continue
 		}
-		whole, skipped := line, overflow
-		line, overflow = line[:0], false
-		if !skipped && bytes.Contains(whole, marker) {
-			line := whole
+		whole := line
+		line = line[:0]
+		if bytes.Contains(whole, marker) {
 			var record struct {
 				Entrypoint  string `json:"entrypoint"`
 				Cwd         string `json:"cwd"`
 				IsSidechain bool   `json:"isSidechain"`
 			}
-			if json.Unmarshal(line, &record) == nil && record.Entrypoint != "" {
+			if json.Unmarshal(whole, &record) == nil && record.Entrypoint != "" {
 				return claudeEntrypoint{kind: record.Entrypoint, cwd: record.Cwd, sidechain: record.IsSidechain}
 			}
 		}
