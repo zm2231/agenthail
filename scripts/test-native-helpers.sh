@@ -90,6 +90,7 @@ SOURCES=(
   HostNames.swift
   ClaudeRootLabels.swift
   SessionTree.swift
+  PathNames.swift
   SessionListLayout.swift
   MetadataOverlay.swift
   ClaudeSubagentList.swift

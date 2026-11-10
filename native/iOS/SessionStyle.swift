@@ -10,7 +10,7 @@ enum SessionStyle {
         if session.displayName != session.id { return session.displayName }
         let agent = agentName(session.surface)
         if let cwd = session.cwd, !cwd.isEmpty {
-            return "\(agent) · \(URL(fileURLWithPath: cwd).lastPathComponent)"
+            return "\(agent) · \(PathNames.last(cwd))"
         }
         return "\(agent) session"
     }

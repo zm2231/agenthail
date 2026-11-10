@@ -811,7 +811,7 @@ struct SessionScreen: View {
                     VStack(spacing: 2) {
                         Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
                         if let cwd = detail?.session.cwd, !cwd.isEmpty {
-                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.host?.name ?? "computer")).font(.caption2).foregroundStyle(PhonePalette.muted).lineLimit(1)
+                            Text(PathNames.last(cwd) + " · " + (session.host?.name ?? "computer")).font(.caption2).foregroundStyle(PhonePalette.muted).lineLimit(1)
                         }
                     }
                 }

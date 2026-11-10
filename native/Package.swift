@@ -88,6 +88,7 @@ let package = Package(
                 "ProxyPrefer.swift",
                 "ProxyPreferSheet.swift",
                 "SessionTree.swift",
+                "PathNames.swift",
                 "SessionListLayout.swift",
                 "MetadataOverlay.swift",
                 "ClaudeSubagentList.swift",

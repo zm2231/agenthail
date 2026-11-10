@@ -93,6 +93,7 @@ targets:
       - path: HostNames.swift
       - path: ClaudeRootLabels.swift
       - path: SessionTree.swift
+      - path: PathNames.swift
       - path: UsageMeterText.swift
       - path: UsageAccounts.swift
       - path: UsageProxies.swift
