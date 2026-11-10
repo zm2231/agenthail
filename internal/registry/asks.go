@@ -16,6 +16,7 @@ const (
 	AskOpen      = "open"
 	AskAnswered  = "answered"
 	AskWithdrawn = "withdrawn"
+	AskExpired   = "expired"
 
 	AskOriginAgent      = "agent"
 	AskOriginPermission = "permission"
@@ -24,6 +25,11 @@ const (
 
 	AskRaised    = "raised"
 	AskEscalated = "escalated"
+
+	MaxAskTitle    = 80
+	MaxAskQuestion = 160
+	MaxAskLabel    = 40
+	MaxAskDoes     = 90
 )
 
 type AskOption struct {
@@ -77,6 +83,7 @@ type Ask struct {
 	WaitKind    surface.WaitingKind
 	Answerable  bool
 	AnnouncedAt time.Time
+	Deadline    time.Time
 }
 
 func newAskID() (string, error) {
@@ -198,7 +205,7 @@ func (r *Registry) RouteAsk(id, to, why string, at time.Time) (bool, error) {
 }
 
 // A session's row shows its oldest open ask, else its newest answered one until the session starts another turn.
-const rowAsk = `SELECT a.id FROM asks a WHERE a.session_id=s.session_id AND a.origin IN ('agent','delivery') AND (a.state='open'
+const rowAsk = `SELECT a.id FROM asks a WHERE a.session_id=s.session_id AND a.origin IN ('agent','delivery','ledger') AND (a.state='open'
  OR a.state='answered' AND a.answered_at_ms>=COALESCE((SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=a.session_id),0))
  ORDER BY a.state='open' DESC, CASE WHEN a.state='open' THEN a.created_at_ms ELSE -a.answered_at_ms END, a.id LIMIT 1`
 
@@ -230,7 +237,7 @@ type askQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-const askColumns = `id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,answer_json,answered_by,answered_via,answered_at_ms,applied_at_ms,apply_status,apply_id,created_at_ms,ref,wait_kind,answerable,announced_at_ms`
+const askColumns = `id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,answer_json,answered_by,answered_via,answered_at_ms,applied_at_ms,apply_status,apply_id,created_at_ms,ref,wait_kind,answerable,announced_at_ms,deadline_ms`
 
 func queryAsks(ctx context.Context, q askQuerier, where string, args ...any) ([]Ask, error) {
 	rows, err := q.QueryContext(ctx, `SELECT `+askColumns+` FROM asks `+where, args...)
@@ -242,9 +249,9 @@ func queryAsks(ctx context.Context, q askQuerier, where string, args ...any) ([]
 	for rows.Next() {
 		var ask Ask
 		var questions, route, answer string
-		var routed, answered, applied, created, announced int64
+		var routed, answered, applied, created, announced, deadline int64
 		var kind string
-		if err := rows.Scan(&ask.ID, &ask.SessionID, &ask.Origin, &ask.Title, &questions, &ask.RoutedTo, &routed, &route, &ask.State, &answer, &ask.AnsweredBy, &ask.AnsweredVia, &answered, &applied, &ask.ApplyStatus, &ask.ApplyID, &created, &ask.Ref, &kind, &ask.Answerable, &announced); err != nil {
+		if err := rows.Scan(&ask.ID, &ask.SessionID, &ask.Origin, &ask.Title, &questions, &ask.RoutedTo, &routed, &route, &ask.State, &answer, &ask.AnsweredBy, &ask.AnsweredVia, &answered, &applied, &ask.ApplyStatus, &ask.ApplyID, &created, &ask.Ref, &kind, &ask.Answerable, &announced, &deadline); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(questions), &ask.Questions); err != nil {
@@ -267,6 +274,9 @@ func queryAsks(ctx context.Context, q askQuerier, where string, args ...any) ([]
 		}
 		if announced > 0 {
 			ask.AnnouncedAt = time.UnixMilli(announced).UTC()
+		}
+		if deadline > 0 {
+			ask.Deadline = time.UnixMilli(deadline).UTC()
 		}
 		ask.WaitKind = surface.WaitingKind(kind)
 		out = append(out, ask)

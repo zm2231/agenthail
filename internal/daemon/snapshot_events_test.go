@@ -18,9 +18,9 @@ func TestEventsThatChangeTheSnapshotDropItsCache(t *testing.T) {
 		if event.Family {
 			name += "example"
 		}
-		before := d.dashboard.stateVersion.Load()
+		before := d.dashboard.Load().stateVersion.Load()
 		d.publishEvent(name, "", nil)
-		if dropped := d.dashboard.stateVersion.Load() != before; dropped != event.Cache {
+		if dropped := d.dashboard.Load().stateVersion.Load() != before; dropped != event.Cache {
 			t.Fatalf("%s dropped the cached snapshot: %v, classified %v", name, dropped, event.Cache)
 		}
 	}

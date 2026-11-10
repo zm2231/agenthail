@@ -160,13 +160,13 @@ agenthail ledger question --to <goal|ask|clause|project> "Index titles only, or 
   --recommendation "titles only" --default "titles only" --deadline 4h --kind scope [--keeps-breadth]
 ```
 
-The person answers with `attach --as answers`. `agenthail ledger questions [--all]` lists open questions, and with `--all` the answered ones too.
+The question is an ask for the person on the asking session's row, with the recommendation and the default as its options and room for their own words. They are notified when it is asked. Their answer is recorded as their utterance and attached to the question as its answer, and the asking session gets one message with it. An answer recorded another way (`attach --as answers` with words the person typed) closes the ask. `agenthail ledger questions [--all]` lists open questions, and with `--all` the answered ones too.
 
 If nobody answers by the deadline:
 
-- A `scope` or `framing` question with `--keeps-breadth` applies its default and records the decision.
-- Any other `scope` or `framing` question records its default as a cut the person must acknowledge, and escalates.
-- An `outward` question never acts on its own. It only escalates: a notification on this machine and on paired devices, and a notice to the session that asked.
+- A `scope` or `framing` question with `--keeps-breadth` applies its default and records the decision. The ask expires, and the asking session gets one message naming the default.
+- Any other `scope` or `framing` question records its default as a cut the person must acknowledge. Its ask stays open.
+- An `outward` question never acts on its own. Its ask stays open.
 
 ## Work items
 

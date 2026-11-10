@@ -67,6 +67,9 @@ type Daemon struct {
 	permissionMu         sync.Mutex
 	permissionTold       map[string]string
 	deliveryAskMu        sync.Mutex
+	ledgerAskMu          sync.Mutex
+	ledgerAskDue         map[string]bool
+	ledgerAskSync        sync.Mutex
 	announcingKeepAlive  map[string]bool
 	catalogNudge         chan struct{}
 	presence             catalogPresence
@@ -116,7 +119,7 @@ type Daemon struct {
 	surfaceHealthMu          sync.Mutex
 	surfaceHealth            map[surface.SurfaceKind]dashboardSurface
 	sourceHolds              map[string]map[string]func()
-	dashboard                *dashboardServer
+	dashboard                atomic.Pointer[dashboardServer]
 	transportResolver        *SessionTransportResolver
 	claudeHost               *claudehost.Manager
 	browserHost              *browserhost.Manager

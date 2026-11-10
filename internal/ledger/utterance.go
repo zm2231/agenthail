@@ -1,7 +1,9 @@
 package ledger
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +14,7 @@ const (
 	CapturedByHook     = "hook"
 	CapturedByDelivery = "delivery"
 	CapturedByJournal  = "journal"
+	CapturedByAsk      = "ask"
 )
 
 type Utterance struct {
@@ -32,6 +35,11 @@ const promptRefPrefix = "claude-prompt:"
 func PromptRef(promptID string) string { return promptRefPrefix + promptID }
 
 func DeliveryRef(intentUUID string) string { return "delivery:" + intentUUID }
+
+func AskAnswerRef(askID, words string) string {
+	sum := sha256.Sum256([]byte(words))
+	return "ask:" + askID + ":" + hex.EncodeToString(sum[:6])
+}
 
 func IsPromptRef(ref string) bool { return strings.HasPrefix(ref, promptRefPrefix) }
 

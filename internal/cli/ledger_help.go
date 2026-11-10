@@ -70,7 +70,7 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
                                  Propose clauses; they bind once the person adopts them
   ledger question --to <id|project> "<question>" --recommendation "..." --default "..."
                   --deadline <30m|4h|2d> --kind <scope|framing|outward> [--keeps-breadth]
-                                 Track a question; the person answers with attach --as answers.
+                                 Ask the person; they answer its ask, or with attach --as answers.
                                  Unanswered, only a --keeps-breadth default applies itself;
                                  any other waits for the person's ack
   ledger questions [--all]       List open questions (--all includes answered ones)

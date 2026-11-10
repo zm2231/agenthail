@@ -66,6 +66,16 @@ A `send` or `steer` that fails after the daemon recorded its delivery answers wi
 
 The status is `502 bad_gateway`, or `400 invalid_request` for a refusal of kind invalid request. A failure without `askId` left nothing on the daemon, so a client removes it locally.
 
+## Ledger questions
+
+A question in the intent ledger (`agenthail ledger question`) is an ask of origin `ledger` on the asking session's row. Only the person may answer it: the ledger takes an answer only from the person's own words, so it goes straight to the person, never to a hearer, and any session, one acting for the person included, is refused with `403 forbidden`.
+
+- The host that runs the asking session holds the ask. It reconciles each project's questions whenever its copy of the ledger changes, and every 30 seconds. A question asked by a session on a paired host is asked there.
+- The title is `<question id>: <question>`. The single question offers `recommended` (the recommendation, and the recommended option) and `default` (the default answer, left out when it is the recommendation). It takes typed answers and a note, as an agent's ask does. The ask carries the question's `deadline`.
+- Answering records the person's words in the ledger as an utterance captured by `ask` and attaches them to the question as its answer, through the project's owner when another host keeps its ledger. A picked option is recorded as its full text, a note after the answer. The asking session gets one message: `[intent ledger] The person answered <id> ("<question>"): <words>`. An answer the ledger refuses, or whose owner cannot be reached, reopens the ask and returns the error: `409 conflict`, or the owner's `503` (unreachable) or `504` (unconfirmed).
+- A question answered another way (`agenthail ledger attach --as answers`) withdraws its ask.
+- At the deadline, a default that applies itself expires the ask (`state` `expired`), and the asking session gets one message naming the default. A default that would narrow the work, and an `outward` question, leave the ask open with the person; nothing is announced again.
+
 ## The Stop reminder
 
 `agenthail hook stop` (Claude host, Codex, and terminal Claude through `agenthail hooks install`) holds a stop once when the session is a lead (a project coordinator or the spawner of a running session), the turn's `last_assistant_message` has a line outside fenced code that ends in `?`, and the session raised no ask since its turn opened. The reason tells it to raise the question as an ask. A session holding Agenthail's tools is also asked, in the same hold, to call `agenthail_end_turn` when it has not. Terminal Claude's settings hook carries `--terminal` and does nothing under the Claude host, which runs its own.
@@ -85,6 +95,7 @@ Session rows (session view, snapshot, catalog stream, mirrored hosts) carry `ask
 - The row shows its oldest open ask; with none open, its newest answered ask until the session's next turn opens; otherwise no `ask` key.
 - `routedTo` is `person` or a session id. Only `person` asks are the person's to answer: they set `attention {"kind": "ask", "reason": <title>}` and put the row in Needs you.
 - `answeredAt` is absent while the ask is open. An answered ask must not be offered again.
+- `deadline` is present on a ledger question's ask: when its default applies or it waits on the person's ack. The request from `/api/v1/requests` carries it too.
 - `endTurn` no longer carries asks: it is `{headline, next, endedAt}`.
 
 Fetch the card when `ask.routedTo` is `person`, `answeredAt` is absent and the session is not read-only, whatever `capabilities.respond` says. Key any cache on the session id, `waitingOn.id` and `ask.id`.
@@ -150,6 +161,7 @@ By kind of request:
 | Approval | `{"choices": ["allow"]}`, or `always`, `deny`, `never`, `stop`, each where `actions` lists it; `{"choices": ["reply"], "message": "<reason>"}` denies with a reason |
 | Provider question | the option ids from `/api/v1/requests` (every option carries one), typed answers in `answers`; every question needs an answer. `{"choices": ["deny"]}` declines it |
 | Agent ask | as a provider question, but questions may be left unanswered as long as something is answered or a note written |
+| Ledger question | `{"choices": ["recommended"]}` or `["default"]`, or the person's words in `answers`, with an optional note in `message`; `deny` is refused (400) |
 | Delivery problem | one of its option ids; it has `optionsOnly: true`, so it takes no typed answer, note or content (400) and lists no `reply` action; the card shows neither Other nor Note |
 | MCP server input | `{"choices": ["allow"], "content": {<field values>}}` (the content is unchanged), `{"choices": ["allow"]}` for a link or an empty form, or `{"choices": ["deny"]}` |
 

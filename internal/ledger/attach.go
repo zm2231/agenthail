@@ -124,7 +124,7 @@ type attachPlan struct {
 }
 
 func personCapture(capturedBy string) bool {
-	return capturedBy == CapturedByHook || capturedBy == CapturedByDelivery || capturedBy == CapturedByJournal
+	return capturedBy == CapturedByHook || capturedBy == CapturedByDelivery || capturedBy == CapturedByJournal || capturedBy == CapturedByAsk
 }
 
 func (p *attachPlan) build() error {

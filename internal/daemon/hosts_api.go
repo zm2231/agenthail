@@ -50,7 +50,8 @@ func (d *Daemon) apiHostSelfHandler(w http.ResponseWriter, r *http.Request) {
 
 func (d *Daemon) requestHasScope(r *http.Request, scope string) bool {
 	token := bearerToken(r)
-	if token == "" || d.dashboard == nil || constantTokenEqual(token, d.dashboard.token) {
+	dashboard := d.dashboard.Load()
+	if token == "" || dashboard == nil || constantTokenEqual(token, dashboard.token) {
 		return true
 	}
 	_, err := d.Registry.AuthenticateDevice(token, scope)

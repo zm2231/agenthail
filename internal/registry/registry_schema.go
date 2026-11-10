@@ -677,7 +677,7 @@ CREATE TABLE IF NOT EXISTS asks (
 	routed_to TEXT NOT NULL,
 	routed_at_ms INTEGER NOT NULL,
 	route_json TEXT NOT NULL,
-	state TEXT NOT NULL CHECK (state IN ('open','answered','withdrawn')),
+	state TEXT NOT NULL CHECK (state IN ('open','answered','withdrawn','expired')),
 	answer_json TEXT NOT NULL DEFAULT '',
 	answered_by TEXT NOT NULL DEFAULT '',
 	answered_via TEXT NOT NULL DEFAULT '',
@@ -689,7 +689,8 @@ CREATE TABLE IF NOT EXISTS asks (
 	ref TEXT NOT NULL DEFAULT '',
 	wait_kind TEXT NOT NULL DEFAULT '',
 	answerable INTEGER NOT NULL DEFAULT 1,
-	announced_at_ms INTEGER NOT NULL DEFAULT 0
+	announced_at_ms INTEGER NOT NULL DEFAULT 0,
+	deadline_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS asks_open ON asks(routed_to) WHERE state='open';
 CREATE INDEX IF NOT EXISTS asks_session ON asks(session_id, created_at_ms);

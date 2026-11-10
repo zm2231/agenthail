@@ -11,9 +11,7 @@ import (
 
 func (d *Daemon) SetBrowserHost(manager *browserhost.Manager) {
 	manager.Changed = func() {
-		if d.dashboard != nil {
-			d.dashboard.invalidate()
-		}
+		d.invalidateDashboard()
 	}
 	d.browserHost = manager
 }

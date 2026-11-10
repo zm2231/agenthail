@@ -55,7 +55,7 @@ func validAsk(input askInput) error {
 	if title == "" || strings.ContainsAny(title, "\r\n") {
 		return errors.New("title is one line and required")
 	}
-	if err := tooLong("title", title, 80); err != nil {
+	if err := tooLong("title", title, registry.MaxAskTitle); err != nil {
 		return err
 	}
 	if len(input.Questions) == 0 || len(input.Questions) > 4 {
@@ -72,7 +72,7 @@ func validAsk(input askInput) error {
 			return errors.New(which + " repeats an earlier question; ask each question once")
 		}
 		asked[text] = true
-		if err := tooLong(which, text, 160); err != nil {
+		if err := tooLong(which, text, registry.MaxAskQuestion); err != nil {
 			return err
 		}
 		if len(question.Options) == 0 || len(question.Options) > 6 {
@@ -82,10 +82,10 @@ func validAsk(input askInput) error {
 			if strings.TrimSpace(option.Label) == "" {
 				return errors.New(which + " has an option with no label")
 			}
-			if err := tooLong(which+" option label", option.Label, 40); err != nil {
+			if err := tooLong(which+" option label", option.Label, registry.MaxAskLabel); err != nil {
 				return err
 			}
-			if err := tooLong(which+" option does", option.Does, 90); err != nil {
+			if err := tooLong(which+" option does", option.Does, registry.MaxAskDoes); err != nil {
 				return err
 			}
 		}
@@ -136,7 +136,7 @@ func askRequest(ask registry.Ask) surface.Request {
 		}
 		questions = append(questions, question)
 	}
-	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery, CreatedAt: ask.CreatedAt}.WithOptionIDs()
+	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery, CreatedAt: ask.CreatedAt, Deadline: ask.Deadline}.WithOptionIDs()
 }
 
 // askHearer is who an ask goes to first: a session an agent or coordinator started reports to its lead or spawner while that one runs.
@@ -447,6 +447,8 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 		return d.answerPermission(ctx, adapter, session, ask, response, by, p.actor())
 	case registry.AskOriginDelivery:
 		return d.answerDelivery(ctx, ask, response, by, p.actor())
+	case registry.AskOriginLedger:
+		return d.answerLedger(ctx, ask, response, p)
 	}
 	request := askRequest(ask)
 	decision, err := request.Resolve(response)

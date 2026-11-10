@@ -113,8 +113,6 @@ func (d *Daemon) recoverRootMove(move registry.SessionMove, manifest moveManifes
 }
 
 func (d *Daemon) settledRootMove() {
-	if d.dashboard != nil {
-		d.dashboard.invalidate()
-	}
+	d.invalidateDashboard()
 	d.requestCatalogDiscovery()
 }

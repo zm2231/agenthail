@@ -1,4 +1,4 @@
--- schemaVersion 92
+-- schemaVersion 93
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -169,7 +169,7 @@ CREATE TABLE asks (
 	routed_to TEXT NOT NULL,
 	routed_at_ms INTEGER NOT NULL,
 	route_json TEXT NOT NULL,
-	state TEXT NOT NULL CHECK (state IN ('open','answered','withdrawn')),
+	state TEXT NOT NULL CHECK (state IN ('open','answered','withdrawn','expired')),
 	answer_json TEXT NOT NULL DEFAULT '',
 	answered_by TEXT NOT NULL DEFAULT '',
 	answered_via TEXT NOT NULL DEFAULT '',
@@ -181,7 +181,8 @@ CREATE TABLE asks (
 	ref TEXT NOT NULL DEFAULT '',
 	wait_kind TEXT NOT NULL DEFAULT '',
 	answerable INTEGER NOT NULL DEFAULT 1,
-	announced_at_ms INTEGER NOT NULL DEFAULT 0
+	announced_at_ms INTEGER NOT NULL DEFAULT 0,
+	deadline_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- table browser_push_subscriptions
@@ -1034,7 +1035,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_asks_update
-CREATE TRIGGER catalog_presentation_version_asks_update AFTER UPDATE OF announced_at_ms,answer_json,answerable,answered_at_ms,answered_by,answered_via,applied_at_ms,apply_id,apply_status,created_at_ms,id,origin,questions_json,ref,route_json,routed_at_ms,routed_to,session_id,state,title,wait_kind ON asks WHEN (NEW.announced_at_ms IS NOT OLD.announced_at_ms OR NEW.answer_json IS NOT OLD.answer_json OR NEW.answerable IS NOT OLD.answerable OR NEW.answered_at_ms IS NOT OLD.answered_at_ms OR NEW.answered_by IS NOT OLD.answered_by OR NEW.answered_via IS NOT OLD.answered_via OR NEW.applied_at_ms IS NOT OLD.applied_at_ms OR NEW.apply_id IS NOT OLD.apply_id OR NEW.apply_status IS NOT OLD.apply_status OR NEW.created_at_ms IS NOT OLD.created_at_ms OR NEW.id IS NOT OLD.id OR NEW.origin IS NOT OLD.origin OR NEW.questions_json IS NOT OLD.questions_json OR NEW.ref IS NOT OLD.ref OR NEW.route_json IS NOT OLD.route_json OR NEW.routed_at_ms IS NOT OLD.routed_at_ms OR NEW.routed_to IS NOT OLD.routed_to OR NEW.session_id IS NOT OLD.session_id OR NEW.state IS NOT OLD.state OR NEW.title IS NOT OLD.title OR NEW.wait_kind IS NOT OLD.wait_kind)
+CREATE TRIGGER catalog_presentation_version_asks_update AFTER UPDATE OF announced_at_ms,answer_json,answerable,answered_at_ms,answered_by,answered_via,applied_at_ms,apply_id,apply_status,created_at_ms,deadline_ms,id,origin,questions_json,ref,route_json,routed_at_ms,routed_to,session_id,state,title,wait_kind ON asks WHEN (NEW.announced_at_ms IS NOT OLD.announced_at_ms OR NEW.answer_json IS NOT OLD.answer_json OR NEW.answerable IS NOT OLD.answerable OR NEW.answered_at_ms IS NOT OLD.answered_at_ms OR NEW.answered_by IS NOT OLD.answered_by OR NEW.answered_via IS NOT OLD.answered_via OR NEW.applied_at_ms IS NOT OLD.applied_at_ms OR NEW.apply_id IS NOT OLD.apply_id OR NEW.apply_status IS NOT OLD.apply_status OR NEW.created_at_ms IS NOT OLD.created_at_ms OR NEW.deadline_ms IS NOT OLD.deadline_ms OR NEW.id IS NOT OLD.id OR NEW.origin IS NOT OLD.origin OR NEW.questions_json IS NOT OLD.questions_json OR NEW.ref IS NOT OLD.ref OR NEW.route_json IS NOT OLD.route_json OR NEW.routed_at_ms IS NOT OLD.routed_at_ms OR NEW.routed_to IS NOT OLD.routed_to OR NEW.session_id IS NOT OLD.session_id OR NEW.state IS NOT OLD.state OR NEW.title IS NOT OLD.title OR NEW.wait_kind IS NOT OLD.wait_kind)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

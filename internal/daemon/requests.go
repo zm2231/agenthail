@@ -66,7 +66,7 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]
 		case ask.State != registry.AskOpen:
 		case ask.Origin == registry.AskOriginPermission && ask.Answerable:
 			permission[ask.Ref] = ask.ID
-		case (ask.Origin == registry.AskOriginAgent || ask.Origin == registry.AskOriginDelivery) && ask.RoutedTo == registry.AskToPerson:
+		case ask.Origin != registry.AskOriginPermission && ask.RoutedTo == registry.AskToPerson:
 			asking = append(asking, askRequest(ask))
 		}
 	}
