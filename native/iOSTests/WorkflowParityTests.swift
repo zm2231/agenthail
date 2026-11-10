@@ -380,7 +380,7 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertTrue(ParityProtocol.state.promptQueries.first?.contains("sessionId=old") == true)
         XCTAssertTrue(ParityProtocol.state.promptQueries.first?.contains("q=sec") == true)
         let session = try XCTUnwrap(model.snapshot?.sessions.first)
-        XCTAssertTrue(model.canFork(session))
+        XCTAssertTrue(SessionOperationAvailability.fork(session))
         try await model.fork(session, before: found.prompts[0])
         let fork = try XCTUnwrap(ParityProtocol.state.actions.last)
         XCTAssertEqual(fork["action"] as? String, "session-fork")
@@ -389,6 +389,29 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertEqual(model.requestedSessionID, "computer::forked")
         await model.loadSession("computer::forked")
         XCTAssertEqual(model.composer, "second")
+    }
+
+    @MainActor
+    func testLifecycleActionsGoThroughTheComputerThatListsTheSessionWithRetryKeys() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        let capabilities = #""capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}"#
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data("""
+        {"updatedAt":"now","daemon":{"running":true,"hosts":[{"id":"hpeer","name":"peer","state":"connected"}]},"surfaces":[],"sessions":[
+          {"id":"old","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities)},
+          {"id":"m1","surface":"codex","name":"remote","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"host":{"id":"hpeer","name":"peer","state":"connected"}}],
+         "totalSessions":2,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5}
+        """.utf8)))
+
+        await model.resume("computer::old")
+        XCTAssertNil(model.operationError)
+        model.stopAndResume("hpeer::m1")
+        for _ in 0..<200 where ParityProtocol.state.actions.count < 3 { try await Task.sleep(for: .milliseconds(10)) }
+
+        let sent = ParityProtocol.state.actions.map { "\($0["action"] as? String ?? "") \($0["sessionId"] as? String ?? "")" }
+        XCTAssertEqual(sent, ["session-lifecycle-resume old", "session-lifecycle-stop m1", "session-lifecycle-resume m1"])
+        XCTAssertTrue(ParityProtocol.state.actionIdempotencyKeys.allSatisfy { $0 != nil }, "every lifecycle action carries a retry key")
+        XCTAssertNil(model.operationError)
     }
 
     @MainActor
@@ -496,6 +519,9 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
             if body["action"] as? String == "coordinator-set" {
                 if body["replace"] as? Bool != true { return (409, #"{"error":{"code":"coordinator_exists","message":"/p1 already has coordinator @lead; replace it to take over"}}"#) }
                 return (200, #"{"ok":true,"coordinator":{"name":"helper","projectRoot":"/p1"}}"#)
+            }
+            if let action = body["action"] as? String, action.hasPrefix("session-lifecycle-") {
+                return (200, #"{"ok":true,"result":{"sessionId":"\#(body["sessionId"] as? String ?? "")","state":"running","action":"\#(action)"}}"#)
             }
             if body["action"] as? String == "session-fork" {
                 return (200, #"{"ok":true,"result":{"session":{"id":"forked"}}}"#)

@@ -782,34 +782,16 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         return prompt
     }
 
-    func canFork(_ session: SessionState) -> Bool { session.surface == "codex" && !session.isReadOnly }
-
     /// Forks a Codex session from just before a prompt and opens the fork with
     /// that prompt in its composer.
     func fork(_ session: SessionState, before prompt: PromptItem) async throws {
-        guard canFork(session), let turnID = prompt.turnId else { return }
+        guard SessionOperationAvailability.fork(session), let turnID = prompt.turnId else { return }
         let (connection, route) = try resolveServer(session.id)
-        let response: ForkResponse = try await connection.api.postAction(ForkRequest(sessionId: route.sessionID, fork: ForkRequest.Point(beforeTurnId: turnID)), idempotencyKey: UUID().uuidString)
-        guard let forked = response.result?.session.id else { throw AgenthailAPIError.invalidResponse }
-        let id = HostCatalog.qualify(HostCatalog.owner(of: route.sessionID) ?? route.hostID, forked)
+        let forked = try await connection.api.forkSession(id: route.sessionID, before: turnID, keys: connection.actionKeys)
+        let id = HostCatalog.qualify(HostCatalog.owner(of: route.sessionID) ?? route.hostID, forked.id)
         drafts[id] = prompt.text
         await refresh(host: route.hostID)
         openSession(id)
-    }
-
-    private struct ForkRequest: Encodable {
-        struct Point: Encodable { let beforeTurnId: String }
-        var action = "session-fork"
-        let sessionId: String
-        let fork: Point
-    }
-
-    private struct ForkResponse: Decodable {
-        struct Result: Decodable {
-            struct Session: Decodable { let id: String }
-            let session: Session
-        }
-        let result: Result?
     }
 
     private func draftKey(for item: QueueState) -> String {
@@ -1051,8 +1033,8 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     func resume(_ sessionID: String) async {
         do {
-            let (api, route) = try resolve(sessionID)
-            try await api.action("session-lifecycle-resume", sessionID: route.sessionID)
+            let (connection, route) = try resolveServer(sessionID)
+            _ = try await connection.api.sessionLifecycle(sessionID: route.sessionID, action: "resume", keys: connection.actionKeys)
             operationError = nil
         } catch {
             operationError = error.localizedDescription
@@ -1061,11 +1043,11 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     /// Stops a session and resumes it, which clears a prompt nothing shows.
     func stopAndResume(_ sessionID: String) {
-        guard case let (api, route)? = try? resolve(sessionID) else { return }
+        guard case let (connection, route)? = try? resolveServer(sessionID) else { return }
         Task {
             do {
-                try await api.action("session-lifecycle-stop", sessionID: route.sessionID)
-                try await api.action("session-lifecycle-resume", sessionID: route.sessionID)
+                _ = try await connection.api.sessionLifecycle(sessionID: route.sessionID, action: "stop", keys: connection.actionKeys)
+                _ = try await connection.api.sessionLifecycle(sessionID: route.sessionID, action: "resume", keys: connection.actionKeys)
                 operationError = nil
             } catch {
                 operationError = error.localizedDescription
