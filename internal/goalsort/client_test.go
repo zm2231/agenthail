@@ -72,10 +72,10 @@ func stub(t *testing.T, handler http.HandlerFunc) goalsort.Client {
 	return goalsort.Client{Config: goalsort.Config{URL: server.URL + "/", Model: "d1-3b"}, HTTP: server.Client()}
 }
 
-func TestAskReadsTheGoalAnswerAndSendsATokenOnlyWhenConfigured(t *testing.T) {
-	var path, auth string
+func TestAskPostsToSystemOneAndReadsTheGoalAnswer(t *testing.T) {
+	var method, path string
 	client := stub(t, func(w http.ResponseWriter, r *http.Request) {
-		path, auth = r.URL.Path, r.Header.Get("Authorization")
+		method, path = r.Method, r.URL.Path
 		io.Copy(io.Discard, r.Body)
 		io.WriteString(w, `{"answers":{"goal":{"choice":"widget-G1","confidence":0.93}}}`)
 	})
@@ -83,15 +83,8 @@ func TestAskReadsTheGoalAnswerAndSendsATokenOnlyWhenConfigured(t *testing.T) {
 	if err != nil || answer != (goalsort.Answer{Choice: "widget-G1", Confidence: 0.93}) {
 		t.Fatalf("answer = %+v err=%v", answer, err)
 	}
-	if path != "/v1/systemone" || auth != "" {
-		t.Fatalf("path %q auth %q", path, auth)
-	}
-	client.Config.Token = "secret"
-	if _, err := client.Ask(context.Background(), goalsort.Question{Message: "x"}); err != nil {
-		t.Fatal(err)
-	}
-	if auth != "Bearer secret" {
-		t.Fatalf("auth = %q", auth)
+	if method != http.MethodPost || path != "/v1/systemone" {
+		t.Fatalf("%s %s", method, path)
 	}
 }
 

@@ -33,5 +33,5 @@ func LoadConfig(home string) (Config, bool, error) {
 }
 
 func invalid(home string) error {
-	return fmt.Errorf("Agenthail config %s: %s must be {\"url\": \"http(s)://host:port\", \"model\": \"...\"} with an optional \"token\"", surface.AgenthailConfigPath(home), ConfigKey)
+	return fmt.Errorf("Agenthail config %s: %s must be {\"url\": \"http(s)://host:port\", \"model\": \"...\"}", surface.AgenthailConfigPath(home), ConfigKey)
 }

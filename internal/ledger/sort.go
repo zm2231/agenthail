@@ -143,6 +143,24 @@ func (s *Store) LocalProvisionalFrom(projectKey string, fromSeq int64, notBefore
 	return slices.DeleteFunc(owed, func(o OwedSort) bool { return !board.provisional(o.Ref) }), rows.Err()
 }
 
+func (s *Store) LocalCaptureProjects(notBefore time.Time) ([]string, error) {
+	rows, err := s.read.Query(`SELECT DISTINCT project_key FROM ledger_events WHERE type=? AND actor_host_id=COALESCE((SELECT host_id FROM host_identity WHERE id=1),'')
+		AND json_extract(payload,'$.ts')>=? ORDER BY project_key`, string(EventUtterance), notBefore.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
 func (b *Board) provisional(utteranceID string) bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

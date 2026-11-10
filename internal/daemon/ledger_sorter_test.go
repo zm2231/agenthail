@@ -15,6 +15,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type sorterStub struct {
@@ -104,7 +105,7 @@ func sorterFixture(t *testing.T, stub *sorterStub) (*Daemon, *registry.Registry,
 	return d, r, handler, p, g.ID
 }
 
-func runSorter(t *testing.T, d *Daemon) {
+func runSorter(t *testing.T, d *Daemon) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -112,10 +113,39 @@ func runSorter(t *testing.T, d *Daemon) {
 		defer close(done)
 		d.runLedgerSorter(ctx)
 	}()
-	t.Cleanup(func() {
+	stop = func() {
 		cancel()
 		<-done
-	})
+	}
+	t.Cleanup(stop)
+	return stop
+}
+
+func TestARestartDuringAnOutageSortsWhatWasOwedOnceTheSorterIsBack(t *testing.T) {
+	stub := &sorterStub{answer: func(string) (int, string) { return http.StatusServiceUnavailable, "down" }}
+	d, r, handler, p, search := sorterFixture(t, stub)
+	s := p.session(t, r, "claude-restart")
+	stop := runSorter(t, d)
+	for _, id := range []string{"down-1", "down-2"} {
+		ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: id, Prompt: "search words " + id})
+	}
+	eventually(t, "two failures", func() bool { return d.sorterHealth().Failures == 2 })
+	stop()
+	restarted := newTestDaemon(t, r, []surface.Surface{&daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}})
+	restarted.sorter.http, restarted.sorter.retry = d.sorter.http, 50*time.Millisecond
+	asked := len(stub.asks())
+	runSorter(t, restarted)
+	eventually(t, "the restarted daemon to try what it owes", func() bool { return len(stub.asks()) > asked })
+	if got := sortedGoal(t, p, ledger.PromptRef("down-1")); got != "" {
+		t.Fatalf("filed under %q while the sorter was down", got)
+	}
+	stub.setAnswer(fileTo(search))
+	for _, id := range []string{"down-1", "down-2"} {
+		eventually(t, id+" to be filed after the restart", func() bool { return sortedGoal(t, p, ledger.PromptRef(id)) == search })
+	}
+	if h := restarted.sorterHealth(); h.Failures != 0 {
+		t.Fatalf("health after recovery = %+v", h)
+	}
 }
 
 func sortedGoal(t *testing.T, p ledgerProject, ref string) string {

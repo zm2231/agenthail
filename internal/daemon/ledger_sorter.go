@@ -21,6 +21,7 @@ const (
 	sorterReplyRows  = 400
 	sorterReplyPage  = 200
 	sorterReplyBytes = 64 * 1024
+	sorterRetry      = 5 * time.Minute
 )
 
 type sortJob struct {
@@ -31,9 +32,10 @@ type sortJob struct {
 }
 
 type ledgerSorter struct {
-	jobs chan sortJob
-	http *http.Client
-	now  func() time.Time
+	jobs  chan sortJob
+	http  *http.Client
+	now   func() time.Time
+	retry time.Duration
 
 	mu        sync.Mutex
 	since     time.Time
@@ -45,7 +47,7 @@ type ledgerSorter struct {
 }
 
 func newLedgerSorter() *ledgerSorter {
-	return &ledgerSorter{jobs: make(chan sortJob, sorterQueue), now: time.Now, backlog: map[string]int64{}}
+	return &ledgerSorter{jobs: make(chan sortJob, sorterQueue), now: time.Now, retry: sorterRetry, backlog: map[string]int64{}}
 }
 
 func (d *Daemon) queueSort(key, utteranceID string, seq int64, at time.Time) {
@@ -68,13 +70,33 @@ func (d *Daemon) runLedgerSorter(ctx context.Context) {
 	if s == nil {
 		return
 	}
+	d.oweRecentCaptures()
+	retry := time.NewTicker(s.retry)
+	defer retry.Stop()
+	d.sortOwed(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case job := <-s.jobs:
 			d.sortQueued(ctx, job)
+		case <-retry.C:
+			d.sortOwed(ctx)
 		}
+	}
+}
+
+// The log, not memory, says what is owed after a restart: every provisional message this host captured in the last day.
+func (d *Daemon) oweRecentCaptures() {
+	keys, err := d.ledgerStore().LocalCaptureProjects(d.sorter.now().Add(-sorterRecovery))
+	if err != nil {
+		d.log.Printf("ledger sorter: list projects to sort at start: %s", err)
+		return
+	}
+	d.sorter.mu.Lock()
+	defer d.sorter.mu.Unlock()
+	for _, key := range keys {
+		d.sorter.owe(key, 0)
 	}
 }
 
@@ -87,7 +109,24 @@ func (d *Daemon) sortQueued(ctx context.Context, job sortJob) {
 		d.sorter.failed(d, job, err)
 		return
 	}
-	owed := d.sorter.succeeded(d)
+	d.sorter.answered(d)
+	d.sortOwedWith(ctx, config)
+}
+
+func (d *Daemon) sortOwed(ctx context.Context) {
+	d.sorter.mu.Lock()
+	empty := len(d.sorter.backlog) == 0
+	d.sorter.mu.Unlock()
+	if empty {
+		return
+	}
+	if config, ok := d.sorterConfig(); ok {
+		d.sortOwedWith(ctx, config)
+	}
+}
+
+func (d *Daemon) sortOwedWith(ctx context.Context, config goalsort.Config) {
+	owed := d.sorter.takeOwed()
 	for i, project := range owed {
 		if ctx.Err() != nil || !d.resort(ctx, config, project) {
 			d.sorter.mu.Lock()
@@ -143,11 +182,11 @@ func (d *Daemon) resort(ctx context.Context, config goalsort.Config, owed owedSo
 			d.sorter.failed(d, job, err)
 			return false
 		}
+		d.sorter.answered(d)
 	}
 	return true
 }
 
-// sortOne returns an error only when the sorter could not answer; a ledger problem is logged and leaves the message provisional.
 func (d *Daemon) sortOne(ctx context.Context, config goalsort.Config, job sortJob) error {
 	store := d.ledgerStore()
 	input, ok, err := store.SortInputFor(job.key, job.utteranceID)
@@ -233,13 +272,18 @@ func (s *ledgerSorter) failed(d *Daemon, job sortJob, err error) {
 	s.owe(job.key, job.seq)
 }
 
-func (s *ledgerSorter) succeeded(d *Daemon) []owedSorts {
+func (s *ledgerSorter) answered(d *Daemon) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.failures > 0 {
 		d.log.Printf("ledger sorter answered again after %d failures since %s", s.failures, s.since.Format(time.RFC3339))
 	}
 	s.failures, s.lastError, s.since = 0, "", time.Time{}
+}
+
+func (s *ledgerSorter) takeOwed() []owedSorts {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	owed := make([]owedSorts, 0, len(s.backlog))
 	for key, from := range s.backlog {
 		owed = append(owed, owedSorts{key: key, fromSeq: from})

@@ -26,7 +26,6 @@ const instructions = "Which project goal is the person's message (`message`) abo
 type Config struct {
 	URL   string `json:"url"`
 	Model string `json:"model"`
-	Token string `json:"token,omitempty"`
 }
 
 type Goal struct {
@@ -98,9 +97,6 @@ func (c Client) Ask(ctx context.Context, q Question) (Answer, error) {
 		return Answer{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.Config.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Config.Token)
-	}
 	client := c.HTTP
 	if client == nil {
 		client = http.DefaultClient
