@@ -14,7 +14,7 @@ final class QuestionPagerDrafts {
 
     func pager(for request: SessionRequest) -> QuestionPager {
         let questions = request.questions ?? []
-        if let saved = pagers[request.id], saved.questions == questions { return saved }
+        if let saved = pagers[request.id], saved.questions == questions, saved.ask == request.isAsk, saved.optionsOnly == request.optionsOnly { return saved }
         return QuestionPager(questions: questions, ask: request.isAsk, optionsOnly: request.optionsOnly)
     }
 

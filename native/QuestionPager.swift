@@ -51,7 +51,7 @@ struct QuestionPager: Hashable {
         var choices: [String] = []
         var typedAnswers: [String: String] = [:]
         for (index, question) in questions.enumerated() {
-            let text = typedAnswer(at: index).trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = takesText ? typedAnswer(at: index).trimmingCharacters(in: .whitespacesAndNewlines) : ""
             if !text.isEmpty {
                 typedAnswers[question.question] = text
                 continue
