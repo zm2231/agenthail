@@ -26,6 +26,9 @@ type personWordsRecord struct {
 // recordPersonWords records u in every project whose scope covers the session: its folder's project and any project it was opted into.
 // The record names the first project that shows the session its provisional count, else the first that recorded the words.
 func (d *Daemon) recordPersonWords(session surface.Session, u ledger.Utterance) (personWordsRecord, error) {
+	if len(u.Ref) > ledgerRefMax {
+		return personWordsRecord{}, fmt.Errorf("words ref is %d bytes, over the %d a ledger read can name", len(u.Ref), ledgerRefMax)
+	}
 	record, err := d.recordPersonWordsOnce(session, u)
 	var refusal *ledger.Refusal
 	if errors.As(err, &refusal) && refusal.MovedTo != "" {

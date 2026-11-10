@@ -11,7 +11,10 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
-const ledgerPromptIDMax = 256
+const (
+	ledgerPromptIDMax = 256
+	ledgerRefMax      = ledgerPromptIDMax + 64
+)
 
 type ledgerCaptureRequest struct {
 	SessionID   string `json:"sessionId"`
