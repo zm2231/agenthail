@@ -235,7 +235,7 @@ process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input
   await c.call('send', { sessionId: id, uuid: peer, text: 'hello', origin: { kind: 'peer', from: randomUUID() } });
   await c.event(turnResult(id, peer));
   const all = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  assert.ok(all.filter((r) => r.event === 'Stop').every((r) => JSON.stringify(r.output) === '{}'), 'a session without the agenthail tools is never asked to end its turn');
+  assert.ok(all.filter((r) => r.event === 'Stop').every((r) => JSON.stringify(r.output) === '{}'), 'a stop agenthail does not hold is let through');
   const recorded = all.filter((r) => r.event !== 'Stop');
   assert.deepEqual(
     recorded.map((r) => [r.event, r.output.hookSpecificOutput?.additionalContext ?? null]),
@@ -245,7 +245,7 @@ process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input
     recorded.map((r) => r.output).slice(0, 5),
     [{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'card for SessionStart' } }, { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'card for UserPromptSubmit' } }, {}, {}, {}],
   );
-  const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.args[1] === 'session-context');
   assert.deepEqual(ran[0].args, ['hook', 'session-context', '--claude-pid', String(opened.pid)]);
   assert.equal(ran[0].input.session_id, id);
   assert.equal(ran[0].input.source, 'startup');

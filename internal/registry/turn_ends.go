@@ -95,6 +95,14 @@ func (r *Registry) TurnEnded(sessionID, turnID string) (bool, error) {
 	return ended > 0 && completed == "" && (turnID == "" || rowTurn == "" || rowTurn == turnID), nil
 }
 
+func (r *Registry) TurnStartedAt(sessionID string) (time.Time, bool, error) {
+	var started sql.NullInt64
+	if err := r.read.QueryRow(`SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=?`, sessionID).Scan(&started); err != nil || !started.Valid {
+		return time.Time{}, false, err
+	}
+	return time.UnixMilli(started.Int64).UTC(), true, nil
+}
+
 func (r *Registry) MarkTurnNudged(sessionID string, at time.Time) error {
 	tx, err := r.db.Begin()
 	if err != nil {
