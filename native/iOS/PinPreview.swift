@@ -6,6 +6,10 @@ enum PinPreview {
     nonisolated(unsafe) private static var pinned: Set<String> = []
     nonisolated private static let lock = NSLock()
 
+    nonisolated static func handles(_ action: [String: Any]) -> Bool {
+        enabled && ["session-pin", "session-unpin"].contains(action["action"] as? String)
+    }
+
     nonisolated static func respond(_ action: [String: Any]) -> String {
         guard let id = action["sessionId"] as? String else { return #"{"ok":true}"# }
         lock.withLock {

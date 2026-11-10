@@ -402,6 +402,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var tailCleared = false
     nonisolated(unsafe) private static var sessionFetches = 0
     private var reopenDelayed = false
+    private lazy var sentAction = Self.actionBody(request)
     private var olderDelayed = false
 
     private static func actionBody(_ request: URLRequest) -> [String: Any] {
@@ -521,17 +522,17 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
                 .map { #"{"path":"\#($0.0)","dir":\#($0.1)}"# }
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
         case "/api/v1/snapshot" where PinPreview.enabled: body = PinPreview.apply(requestQuery.first(where: { $0.name == "scope" }).map { PreviewOrder.scoped(SessionPreview.snapshotJSON, $0.value, status: requestQuery.first { $0.name == "status" }?.value, surface: requestQuery.first { $0.name == "surface" }?.value) } ?? SessionPreview.snapshotJSON)
-        case "/api/v1/actions" where PinPreview.enabled: body = PinPreview.respond(Self.actionBody(request))
+        case "/api/v1/actions" where PinPreview.handles(sentAction): body = PinPreview.respond(sentAction)
         case "/api/v1/snapshot": body = requestQuery.first(where: { $0.name == "scope" }).map { PreviewOrder.scoped(SessionPreview.snapshotJSON, $0.value, status: requestQuery.first { $0.name == "status" }?.value, surface: requestQuery.first { $0.name == "surface" }?.value) } ?? SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
         case "/api/v1/actions" where SessionOperationsPreview.enabled:
-            body = SessionOperationsPreview.respond(Self.actionBody(request))
+            body = SessionOperationsPreview.respond(sentAction)
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-project-message"):
             body = #"{"recipients":[{"sessionId":"demo","outcome":"delivered"}]}"#
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-groups"):
-            body = Self.actionBody(request)["action"] as? String == "channel-send" ? #"{"recipients":[{"sessionId":"demo","outcome":"delivered"},{"sessionId":"codex-demo","outcome":"queued"}]}"# : "{}"
+            body = sentAction["action"] as? String == "channel-send" ? #"{"recipients":[{"sessionId":"demo","outcome":"delivered"},{"sessionId":"codex-demo","outcome":"queued"}]}"# : "{}"
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-tail"):
-            let action = Self.actionBody(request)
+            let action = sentAction
             if action["action"] as? String == "queue-cancel" { Self.tailCleared = !ProcessInfo.processInfo.arguments.contains("--preview-tail-keeps") }
             body = #"{"ok":true,"result":{"evidence":"submitted"}}"#
         case "/api/v1/queue" where ProcessInfo.processInfo.arguments.contains("--preview-tail-fails-after-action") && Self.tailCleared:
@@ -539,7 +540,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/queue" where ProcessInfo.processInfo.arguments.contains("--preview-tail"):
             body = Self.tailCleared || requestQuery.first(where: { $0.name == "sessionId" })?.value == "codex-demo" ? #"{"items":[],"nextBefore":null}"# : SessionPreview.tailRowsJSON
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-steer-rows"):
-            let action = Self.actionBody(request)
+            let action = sentAction
             if action["action"] as? String == "queue-cancel" {
                 body = #"{"ok":true,"result":{"message":"This is the failing screen, match the spacing.","attachments":[{"id":"upload:1","name":"failing-screen.png","mediaType":"image/png","bytes":2048,"width":800,"height":600}]}}"#
             } else if action["action"] as? String == "send", action["busyDelivery"] as? String == "steer" {
@@ -553,7 +554,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/inbox": body = InboxPreview.nextPage()
         case "/api/v1/requests" where AskPreview.enabled: body = AskPreview.requestsJSON
         case "/api/v1/actions" where AskPreview.enabled:
-            let answer = AskPreview.answer(Self.actionBody(request))
+            let answer = AskPreview.answer(sentAction)
             status = answer.status
             body = answer.body
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-questions"): body = SessionPreview.previewQuestionsJSON
