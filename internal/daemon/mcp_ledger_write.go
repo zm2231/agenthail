@@ -14,7 +14,7 @@ import (
 type mcpLedgerWriteInput struct {
 	mcpWrite
 	Op      string         `json:"op" jsonschema:"attach, clause, question or work: the same operations as agenthail ledger attach, clause, question and work."`
-	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you. attach also takes fragments, a list of attaches recorded in one call, each on its own."`
+	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you. An unknown key is refused. A work add nests its type, priority, description, acceptance, labels and from under fields, as in request.fields.type; a work edit nests what it changes under change, as in request.change.priority. attach also takes fragments, a list of attaches recorded in one call, each on its own."`
 }
 
 func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mcpLedgerWriteInput) (any, error) {

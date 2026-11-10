@@ -1,9 +1,17 @@
 package daemon
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"maps"
 	"net/http"
 	"reflect"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -36,11 +44,64 @@ func decodeLedgerWrite(w http.ResponseWriter, r *http.Request, into any) bool {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use POST for this endpoint.")
 		return false
 	}
-	if err := decodeAPIV1JSON(w, r, into, false); err != nil {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, apiRequestBodyLimit))
+	if err == nil {
+		err = decodeStrictJSON(body, into)
+	}
+	if key, unknown := unknownJSONKey(err); unknown {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", unknownLedgerKey(body, into, key))
+		return false
+	}
+	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error())
 		return false
 	}
 	return true
+}
+
+func decodeStrictJSON(body []byte, into any) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(into); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values are not allowed")
+		}
+		return err
+	}
+	return nil
+}
+
+func unknownJSONKey(err error) (string, bool) {
+	if err == nil {
+		return "", false
+	}
+	quoted, found := strings.CutPrefix(err.Error(), "json: unknown field ")
+	if !found {
+		return "", false
+	}
+	key, unquoteErr := strconv.Unquote(quoted)
+	return key, unquoteErr == nil
+}
+
+func unknownLedgerKey(body []byte, into any, key string) string {
+	var top map[string]json.RawMessage
+	if _, work := into.(*ledger.WorkRequest); work && json.Unmarshal(body, &top) == nil {
+		var action ledger.WorkAction
+		_ = json.Unmarshal(top["action"], &action)
+		var misplaced []string
+		for _, name := range slices.Sorted(maps.Keys(top)) {
+			if path := action.NestedKey(name); path != "" {
+				misplaced = append(misplaced, fmt.Sprintf("%q as %s", name, path))
+			}
+		}
+		if len(misplaced) > 0 {
+			return fmt.Sprintf("Unknown keys at the top of the request: a work %s takes %s.", action, strings.Join(misplaced, ", "))
+		}
+	}
+	return fmt.Sprintf("Unknown key %q.", key)
 }
 
 func (d *Daemon) knownLedgerSession(w http.ResponseWriter, r *http.Request, sessionID string) bool {

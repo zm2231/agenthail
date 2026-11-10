@@ -3,6 +3,7 @@ package ledger
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -272,4 +273,30 @@ func (b *Board) applyWorkLink(event Event) error {
 	c.WorkItems = append(c.WorkItems, item)
 	item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: "link", Text: "hangs off " + c.ID})
 	return nil
+}
+
+func (a WorkAction) NestedKey(key string) string {
+	var nested any
+	var parent string
+	switch a {
+	case WorkAdd:
+		nested, parent = WorkFields{}, "fields"
+	case WorkEdit:
+		nested, parent = WorkChange{}, "change"
+	default:
+		return ""
+	}
+	if !jsonKey(reflect.TypeOf(WorkRequest{}), key) && jsonKey(reflect.TypeOf(nested), key) {
+		return parent + "." + key
+	}
+	return ""
+}
+
+func jsonKey(typ reflect.Type, key string) bool {
+	for i := range typ.NumField() {
+		if name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ","); name == key {
+			return true
+		}
+	}
+	return false
 }
