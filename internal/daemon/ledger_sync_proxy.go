@@ -111,6 +111,13 @@ func (d *Daemon) proxyLedgerWrite(w http.ResponseWriter, r *http.Request, ownerI
 		writeAPIError(w, http.StatusGatewayTimeout, "ledger_owner_unconfirmed", fmt.Sprintf("%s's answer for %s was cut off, so the write may or may not be recorded; check agenthail ledger board before retrying.", name, key))
 		return
 	}
+	var refusal struct {
+		Error struct{ Code, Message string } `json:"error"`
+	}
+	if response.StatusCode == http.StatusBadRequest && json.Unmarshal(answer, &refusal) == nil && refusal.Error.Code == ledgerUnknownKeyCode {
+		writeAPIError(w, http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, fmt.Sprintf("The ledger for %s is kept on %s, which does not know what this host sent (%s); nothing was recorded. Update Agenthail on %s, then retry.", key, name, refusal.Error.Message, name))
+		return
+	}
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		host.ledgerMu.Lock()
 		head, err := d.pullLedger(r.Context(), host, key)

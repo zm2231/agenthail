@@ -227,6 +227,7 @@ The voice operator has no command-line path. Its developer instructions name the
 A tool that refuses returns an MCP tool error (`isError: true`) whose structured content is `{code, message, retryable, detail}`. The tools' own checks refuse with `invalid`, `not_found`, `out_of_scope`, `capability_missing`, `exceeds_ceiling` (with `detail.axis`), `depth_limit`, `children_limit`, `unsupported_surface` and `idempotency_conflict`. Errors from the shared operations map onto these codes by explicit rules in `mcpCodeFor`:
 
 - `ledger_owner_unreachable` → `owner_unreachable`, retryable;
+- `ledger_owner_outdated` → `owner_outdated`, retryable: the host that keeps the ledger does not know a key this host sent, and the message names the host to update;
 - any `400` → `invalid`; any `404` → `not_found`;
 - `409 stale` → `not_found` with `detail.stale`;
 - `409 moved` → `moved`, retryable, with `detail.movedToHost`: the session moved to that host, and the same call made again reaches it there;

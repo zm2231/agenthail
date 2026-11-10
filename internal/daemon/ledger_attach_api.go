@@ -49,7 +49,7 @@ func decodeLedgerWrite(w http.ResponseWriter, r *http.Request, into any) bool {
 		err = decodeStrictJSON(body, into)
 	}
 	if key, unknown := unknownJSONKey(err); unknown {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", unknownLedgerKey(body, into, key))
+		writeAPIError(w, http.StatusBadRequest, ledgerUnknownKeyCode, unknownLedgerKey(body, into, key))
 		return false
 	}
 	if err != nil {
@@ -58,6 +58,11 @@ func decodeLedgerWrite(w http.ResponseWriter, r *http.Request, into any) bool {
 	}
 	return true
 }
+
+const (
+	ledgerUnknownKeyCode    = "unknown_key"
+	ledgerOwnerOutdatedCode = "ledger_owner_outdated"
+)
 
 func decodeStrictJSON(body []byte, into any) error {
 	decoder := json.NewDecoder(bytes.NewReader(body))
