@@ -16,11 +16,12 @@ type Wait struct {
 }
 
 type WaitSync struct {
-	Opened []Ask
-	Closed []Ask
+	Opened   []Ask
+	Closed   []Ask
+	Retitled bool
 }
 
-func (s WaitSync) Changed() bool { return len(s.Opened)+len(s.Closed) > 0 }
+func (s WaitSync) Changed() bool { return s.Retitled || len(s.Opened)+len(s.Closed) > 0 }
 
 var waitTitles = map[surface.WaitingKind]string{
 	surface.WaitingQuestion: "Asks you a question",
@@ -46,7 +47,7 @@ func (r *Registry) NeedsRoute(sessionID string, waits []Wait) (bool, error) {
 			continue
 		}
 		var known bool
-		if err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM asks WHERE session_id=? AND origin=? AND ref=?)`, sessionID, AskOriginPermission, wait.Ref).Scan(&known); err != nil {
+		if err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM asks WHERE session_id=? AND origin=? AND ref=? AND state<>?)`, sessionID, AskOriginPermission, wait.Ref, AskWithdrawn).Scan(&known); err != nil {
 			return false, err
 		}
 		if !known {
@@ -68,13 +69,19 @@ func (r *Registry) SyncWaits(sessionID string, waits []Wait, routedTo string, no
 		return WaitSync{}, err
 	}
 	var sync WaitSync
-	wanted := make(map[string]bool, len(waits))
+	wanted := make(map[string]Wait, len(waits))
 	for _, wait := range waits {
-		wanted[wait.Ref] = true
+		wanted[wait.Ref] = wait
 	}
 	at := time.UnixMilli(now.UnixMilli()).UTC()
 	for _, ask := range open {
-		if wanted[ask.Ref] {
+		if wait, ok := wanted[ask.Ref]; ok {
+			if wait.Kind != "" && wait.Kind != ask.WaitKind {
+				if _, err := tx.Exec(`UPDATE asks SET wait_kind=?,title=? WHERE id=?`, string(wait.Kind), waitTitle(wait.Kind), ask.ID); err != nil {
+					return WaitSync{}, err
+				}
+				sync.Retitled = true
+			}
 			continue
 		}
 		if _, err := tx.Exec(`UPDATE asks SET state=?,answered_at_ms=? WHERE id=? AND state=?`, AskWithdrawn, at.UnixMilli(), ask.ID, AskOpen); err != nil {

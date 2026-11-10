@@ -1320,6 +1320,9 @@ func TestSyncWaitsKeepsOneAskPerOpenWait(t *testing.T) {
 	if waiting, err := r.SessionWaiting("asking"); err != nil || waiting != nil {
 		t.Fatalf("waiting=%+v err=%v, want none", waiting, err)
 	}
+	if again := sync("lead", Wait{Ref: "conversation:dialog", Kind: surface.WaitingDialog}); len(again.Opened) != 1 {
+		t.Fatalf("a wait whose id recurs after it closed=%+v, want a new ask", again)
+	}
 	if row, found, err := r.RowAsk("asking"); err != nil || found {
 		t.Fatalf("a permission ask became the row's ask: %+v", row)
 	}
