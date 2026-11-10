@@ -7,7 +7,7 @@ CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
 CREATE INDEX asks_open ON asks(routed_to) WHERE state='open';
 
 -- index asks_ref
-CREATE UNIQUE INDEX asks_ref ON asks(session_id, origin, ref) WHERE ref<>'';
+CREATE UNIQUE INDEX asks_ref ON asks(session_id, origin, ref) WHERE ref<>'' AND state<>'withdrawn';
 
 -- index asks_session
 CREATE INDEX asks_session ON asks(session_id, created_at_ms);
