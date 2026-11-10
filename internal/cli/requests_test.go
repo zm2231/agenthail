@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -49,8 +50,23 @@ func hostedClaudeApp(t *testing.T) (*App, *registry.Registry, *claudehosttest.Fi
 	return app, r, host, client, id
 }
 
+func TestRequestsAndAnswersNeedTheDaemon(t *testing.T) {
+	app, _, _, client, id := hostedClaudeApp(t)
+	if _, err := client.Send(context.Background(), claudehost.SendRequest{SessionID: id, UUID: uuid.NewString(), Text: "QUESTION", Origin: &claudehost.Origin{Kind: "human"}}); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := captureStdout(t, func() error { return app.Run([]string{"requests", "@worker"}) }); !errors.Is(err, errRequestsNeedDaemon) || output != "" {
+		t.Fatalf("requests without a daemon = %q, %v", output, err)
+	}
+	if err := app.Run([]string{"answer", "@worker", "2", "--request", "toolu_provider"}); !errors.Is(err, errRequestsNeedDaemon) {
+		t.Fatalf("answer without a daemon = %v", err)
+	}
+}
+
 func TestAnswerPicksAQuestionsOptionByNumberAndASecondAnswerIsStale(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	app, r, host, client, id := hostedClaudeApp(t)
+	startTestDaemon(t, app, r, host.Home)
 	if _, err := client.Send(context.Background(), claudehost.SendRequest{SessionID: id, UUID: uuid.NewString(), Text: "QUESTION", Origin: &claudehost.Origin{Kind: "human"}}); err != nil {
 		t.Fatal(err)
 	}
