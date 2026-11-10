@@ -58,6 +58,29 @@ func TestOnlyScriptedRunsAgenthailDidNotStartAreHidden(t *testing.T) {
 	}
 }
 
+func TestAHiddenRunIsNeverAFragmentMatchButItsIDStillResolves(t *testing.T) {
+	r := scriptedFixture(t)
+	matches, err := r.FragmentMatches(surface.KindClaude, "run", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(matches)
+	if !slices.Equal(matches, []string{"hosted", "ours", "terminal", "unknown"}) {
+		t.Fatalf("name fragments matched %v, want no hidden runs", matches)
+	}
+	if prefixed, err := r.FragmentMatches(surface.KindClaude, "scr", 20); err != nil || len(prefixed) != 0 {
+		t.Fatalf("an id prefix suggested %v (%v), want no hidden run", prefixed, err)
+	}
+	if _, err := r.ResolveSurfaceTarget(surface.KindClaude, "run scripted"); err == nil {
+		t.Fatal("a name fragment resolved to a hidden run")
+	}
+	for _, target := range []string{"scripted", "scri"} {
+		if sid, err := r.ResolveSurfaceTarget(surface.KindClaude, target); err != nil || sid != "scripted" {
+			t.Errorf("%q resolved to %q (%v), want the hidden run by its id", target, sid, err)
+		}
+	}
+}
+
 func TestRemovingHiddenRowsKeepsTheirSessionsAndSkipsOnesThatGainedAnOrigin(t *testing.T) {
 	r := scriptedFixture(t)
 	if err := r.RecordSessionOrigin(OriginOf("python", "")); err != nil {

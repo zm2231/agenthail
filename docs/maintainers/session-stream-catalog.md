@@ -246,13 +246,17 @@ Codex holds, so an omission there still removes the row.
   it changes.
 - A scripted run Agenthail didn't start (`sessions.entrypoint` is `sdk-cli` or
   `sdk-py`, with no `session_origins` row) is kept as a session but never listed
-  or found by search. One SQL predicate decides this for the catalog, the
-  restore and search. A live process takes its entrypoint from its session
+  or found by search, a name or working-directory target, or an id-fragment
+  suggestion. One SQL predicate decides this for the catalog, the restore,
+  search and target matching. A live process takes its entrypoint from its session
   record and is registered but not published. The hourly check records the
   entrypoint of every row that lacks one from its transcript, within the restore
   budget, and queues the hidden rows that still have a catalog row; each pass
-  removes up to 500 of them in one transaction. A run Agenthail started, and any
-  `sdk-ts` run, stays listed. A hidden run is still reached by its id.
+  removes up to 500 of them in one transaction. A session row Agenthail started,
+  and any `sdk-ts` session row, stays listed. This applies to rows that exist:
+  a transcript no row names is still recorded only when it isn't `sdk-*`, since
+  every run Agenthail starts already has a row. A hidden run is still reached by
+  its full id or a unique id prefix.
 
 A session has ended when its runtime no longer holds it: a Claude process
 that exited, or a Codex thread no runtime has loaded (`sessions.ended`). A send

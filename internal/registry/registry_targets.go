@@ -103,7 +103,7 @@ func (r *Registry) FragmentMatches(kind surface.SurfaceKind, target string, limi
 	if target == "" {
 		return nil, nil
 	}
-	prefixed, err := r.idPrefixMatches(target, string(kind), limit)
+	prefixed, err := r.idPrefixMatches(target, string(kind), limit, true)
 	if err != nil {
 		return nil, err
 	}
@@ -122,12 +122,16 @@ func (r *Registry) FragmentMatches(kind surface.SurfaceKind, target string, limi
 	return ids, nil
 }
 
-func (r *Registry) idPrefixMatches(target, kind string, limit int) ([]string, error) {
-	return r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND id LIKE ? ESCAPE '\' AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT ?`, escapeLike(target)+"%", kind, kind, limit)
+func (r *Registry) idPrefixMatches(target, kind string, limit int, listedOnly bool) ([]string, error) {
+	listed := ""
+	if listedOnly {
+		listed = ` AND NOT ` + hiddenScripted("entrypoint", "sessions.id")
+	}
+	return r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND id LIKE ? ESCAPE '\' AND (? = '' OR surface = ?)`+listed+` ORDER BY updated_at DESC, id LIMIT ?`, escapeLike(target)+"%", kind, kind, limit)
 }
 
 func (r *Registry) IDPrefixTarget(kind surface.SurfaceKind, prefix string) (string, error) {
-	ids, err := r.idPrefixMatches(prefix, string(kind), 2)
+	ids, err := r.idPrefixMatches(prefix, string(kind), 2, false)
 	switch {
 	case err != nil:
 		return "", err
@@ -141,7 +145,7 @@ func (r *Registry) IDPrefixTarget(kind surface.SurfaceKind, prefix string) (stri
 
 func (r *Registry) nameOrCwdMatches(target, kind string, limit int) ([]string, error) {
 	contains := "%" + escapeLike(target) + "%"
-	return r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT ?`, contains, contains, kind, kind, limit)
+	return r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') AND (? = '' OR surface = ?) AND NOT `+hiddenScripted("entrypoint", "sessions.id")+` ORDER BY updated_at DESC, id LIMIT ?`, contains, contains, kind, kind, limit)
 }
 
 func (r *Registry) localSessionSurface(id string) (string, bool) {
