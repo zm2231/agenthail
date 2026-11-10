@@ -114,17 +114,18 @@ func TestLongWordsFullOfQuotesStillFitOneMCPRead(t *testing.T) {
 		blocks = append(blocks, "> "+strings.Repeat("é\"\x01", 200), fmt.Sprintf("point %d", i))
 	}
 	message := strings.Join(blocks, "\n")
-	journal(t, r, s.ID, "u1", map[string]any{"kind": "message", "role": "user", "promptId": "p-1", "body": message, "ts": at(0)})
+	promptID, itemID := strings.Repeat("p", 20<<10), strings.Repeat("u", 20<<10)
+	journal(t, r, s.ID, itemID, map[string]any{"kind": "message", "role": "user", "promptId": promptID, "body": message, "ts": at(0)})
 	runSorter(t, d)
 	c := capturedWithContext(t, func() {
-		ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p-1", Prompt: message})
-	}, p, ledger.PromptRef("p-1"))
-	if len(c.Quotes) != 17 {
-		t.Fatalf("context quotes = %d, want 17", len(c.Quotes))
+		ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: promptID, Prompt: message})
+	}, p, ledger.PromptRef(promptID))
+	if len(c.Quotes) != 17 || c.EntryItemID != itemID {
+		t.Fatalf("context quotes = %d, entry %d bytes", len(c.Quotes), len(c.EntryItemID))
 	}
 
 	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, s))
-	read, refused := callMCP(t, session, "agenthail_ledger_read", map[string]any{"view": "words", "id": ledger.PromptRef("p-1"), "context": 1})
+	read, refused := callMCP(t, session, "agenthail_ledger_read", map[string]any{"view": "words", "id": ledger.PromptRef(promptID), "context": 1})
 	quoted, _ := read["quoted"].([]any)
 	if refused || len(quoted) == 0 || read["moreQuoted"] == nil || !strings.Contains(read["typed"].(string), "point 0") {
 		t.Fatalf("mcp words = %v", read)

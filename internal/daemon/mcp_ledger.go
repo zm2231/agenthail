@@ -49,6 +49,7 @@ const (
 	mcpWordsAround    = 5
 	mcpWordsTextBytes = 2000
 	mcpWordsQuotes    = 8
+	mcpWordsIDBytes   = 256
 )
 
 func (d *Daemon) mcpLedgerWords(key string, input mcpLedgerInput) (any, error) {
@@ -84,6 +85,8 @@ func fitWords(words Words) (Words, error) {
 }
 
 func clipWords(words Words, text, part int) Words {
+	id := func(s string) string { return clipHead(s, min(mcpWordsIDBytes, part)) }
+	words.ID, words.TargetID, words.At, words.Host = id(words.ID), id(words.TargetID), id(words.At), id(words.Host)
 	words.Text, words.Typed = clipHead(words.Text, text), clipHead(words.Typed, text)
 	if len(words.Quoted) > mcpWordsQuotes {
 		words.MoreQuoted = len(words.Quoted) - mcpWordsQuotes
@@ -94,13 +97,18 @@ func clipWords(words Words, text, part int) Words {
 	}
 	words.Quoted = quoted
 	if words.Context = ledger.ClipReply(words.Context); words.Context != nil {
-		words.Context.Quotes = nil
-		if words.Context.Reply != nil {
-			words.Context.Reply.Text = clipTail(words.Context.Reply.Text, part)
+		c := words.Context
+		c.Quotes = nil
+		c.UtteranceID, c.Status, c.JoinedBy, c.EntryItemID = id(c.UtteranceID), id(c.Status), id(c.JoinedBy), id(c.EntryItemID)
+		if r := c.Reply; r != nil {
+			r.Text = clipTail(r.Text, part)
+			r.ItemID, r.TS, r.SHA256 = id(r.ItemID), id(r.TS), id(r.SHA256)
 		}
 	}
 	words.Turns = slices.Clone(words.Turns)
 	for i := range words.Turns {
+		turn := &words.Turns[i]
+		turn.ItemID, turn.Role, turn.TS = id(turn.ItemID), id(turn.Role), id(turn.TS)
 		if clipped := clipHead(words.Turns[i].Text, part); clipped != words.Turns[i].Text {
 			words.Turns[i].Text, words.Turns[i].Truncated = clipped, true
 		}
