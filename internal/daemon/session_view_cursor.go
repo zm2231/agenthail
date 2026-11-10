@@ -9,6 +9,7 @@ import (
 
 const (
 	sessionBandNeedsYou = iota
+	sessionBandPinned
 	sessionBandActive
 	sessionBandIdle
 )
@@ -24,7 +25,7 @@ func (a sessionViewKey) before(b sessionViewKey) bool {
 		return a.Band < b.Band
 	}
 	if !a.At.Equal(b.At) {
-		if a.Band == sessionBandNeedsYou {
+		if a.Band == sessionBandNeedsYou || a.Band == sessionBandPinned {
 			return a.At.Before(b.At)
 		}
 		return a.At.After(b.At)

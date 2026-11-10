@@ -222,6 +222,8 @@ func (p *sessionViewPlan) families(scope string, filters SessionViewFilters) []S
 			if !waitingSince.IsZero() {
 				family.key.At = waitingSince
 			}
+		case !row.PinnedAt.IsZero():
+			family.key.Band, family.key.At = sessionBandPinned, row.PinnedAt
 		case family.Pinned || p.held(family.activity):
 			family.key.Band, family.key.At = sessionBandActive, row.RegisteredAt
 		}
