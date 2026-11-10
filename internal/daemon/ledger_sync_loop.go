@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -204,7 +205,7 @@ func (d *Daemon) ledgerHostCall(ctx context.Context, host *pairedHost, method, p
 	}
 	answer, err := hosts.ReadResponse(response)
 	if err != nil {
-		return err
+		return outdatedLedgerHost(host.record.Name, err)
 	}
 	if out == nil {
 		return nil
@@ -212,7 +213,28 @@ func (d *Daemon) ledgerHostCall(ctx context.Context, host *pairedHost, method, p
 	return json.Unmarshal(answer, out)
 }
 
+type ledgerHostOutdated struct {
+	host, refusal string
+}
+
+func (e ledgerHostOutdated) Error() string {
+	return fmt.Sprintf("update Agenthail on %s: it does not know what this host sent (%s), so nothing was recorded there", e.host, e.refusal)
+}
+
+func outdatedLedgerHost(name string, err error) error {
+	var status hosts.StatusError
+	if errors.As(err, &status) && status.Code == ledgerUnknownKeyCode {
+		return ledgerHostOutdated{host: name, refusal: status.Message}
+	}
+	return err
+}
+
 func writeLedgerHostError(w http.ResponseWriter, host *pairedHost, err error) {
+	var outdated ledgerHostOutdated
+	if errors.As(err, &outdated) {
+		writeAPIError(w, http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, fmt.Sprintf("Update Agenthail on %s, then retry: it does not know what this host sent (%s). Nothing was recorded.", outdated.host, outdated.refusal))
+		return
+	}
 	var status hosts.StatusError
 	if errors.As(err, &status) && status.Status == http.StatusConflict {
 		writeAPIError(w, http.StatusConflict, "refused", status.Message)

@@ -33,6 +33,8 @@ func mcpCodeFor(status int, code string) (mcpRefusal, bool) {
 	switch {
 	case code == "ledger_owner_unreachable":
 		return mcpRefusal{Code: "owner_unreachable", Retryable: true}, true
+	case code == ledgerOwnerOutdatedCode:
+		return mcpRefusal{Code: "owner_outdated", Retryable: true}, true
 	case status == http.StatusBadRequest:
 		return mcpRefusal{Code: "invalid"}, true
 	case status == http.StatusForbidden:

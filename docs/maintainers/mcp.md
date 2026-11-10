@@ -120,7 +120,7 @@ Archived sessions are outside every scope. `agenthail_sessions` also lists the p
 | `agenthail_relay` | Add, remove or list relays | `control.all` |
 | `agenthail_queue` | Retry or cancel one queued instruction, or clear a session's pending ones | `control.all` |
 | `agenthail_coordinator` | Set or clear a project's coordinator | `control.all` |
-| `agenthail_ledger_write` | `attach`, `clause`, `question` or `work` in the caller's project ledger, recorded as the caller; ownership cannot be set | `ledger.write` |
+| `agenthail_ledger_write` | `attach`, `clause`, `question` or `work` in the caller's project ledger, recorded as the caller; ownership cannot be set; a request key the operation does not define is refused, and a work add or edit that sends a nested key at the top is told where it goes (`fields.type`, `change.priority`) | `ledger.write` |
 | `agenthail_browser` | List this host's listening ports and the session that started each (`servers`, see [Servers](browser-host.md#servers)), and drive tabs in the host's headless browser: `open`, `navigate`, `snapshot`, `act`, `wait`, `dialog`, `resize`, `list`, `close`. Each session has its own browser context and sees only its own tabs; see [the browser host](browser-host.md#tabs) | `browser.drive` |
 
 Every write runs the same shared code as the dashboard and CLI, with the session's principal, so it is validated, refused and recorded the same way: `agenthail_ledger_write` through the ledger's own write route (`ledgerWriteRoute`, the handler behind `/api/v1/ledger/<op>`), and every other write through `performAction`. Both take the same idempotency key and record the same audit entry. Every write acts as the calling session (its principal, and the source of its audit entry) and never carries a person author. The message tools (`agenthail_send`, `agenthail_steer`, `agenthail_channel_send`) also set `sourceSessionId` to the caller, so the message is attributed to that session, as the CLI's `agenthail send` from a session is, and `agenthail_create` sets it for a Claude or Codex start so the new session's spawner is the caller. Other writes leave it empty, since on those actions it means something else (a fork's source, a coordinator start's creator).
@@ -227,6 +227,7 @@ The voice operator has no command-line path. Its developer instructions name the
 A tool that refuses returns an MCP tool error (`isError: true`) whose structured content is `{code, message, retryable, detail}`. The tools' own checks refuse with `invalid`, `not_found`, `out_of_scope`, `capability_missing`, `exceeds_ceiling` (with `detail.axis`), `depth_limit`, `children_limit`, `unsupported_surface` and `idempotency_conflict`. Errors from the shared operations map onto these codes by explicit rules in `mcpCodeFor`:
 
 - `ledger_owner_unreachable` → `owner_unreachable`, retryable;
+- `ledger_owner_outdated` → `owner_outdated`, retryable: the host that keeps the ledger does not know a key this host sent, and the message names the host to update;
 - any `400` → `invalid`; any `404` → `not_found`;
 - `409 stale` → `not_found` with `detail.stale`;
 - `409 moved` → `moved`, retryable, with `detail.movedToHost`: the session moved to that host, and the same call made again reaches it there;

@@ -192,6 +192,9 @@ type actionGate struct {
 	confirmLoss atomic.Int32
 	// confirmBlocked drops every ledger confirm unapplied while set.
 	confirmBlocked atomic.Bool
+	// newerSender, while it names a path, adds a key this host does not
+	// define to every request for that path, as a newer host would send.
+	newerSender atomic.Pointer[string]
 	// digestRequests counts the ledger digest lookups this host answers.
 	digestRequests atomic.Int32
 	// refusePullsAfterWrite refuses every ledger pull once this host is sent a ledger write.
@@ -409,6 +412,15 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 		if n.gate.pullsRefused.Load() && r.URL.Path == "/api/v1/ledger/sync/events" {
 			http.Error(w, "pulls refused", http.StatusServiceUnavailable)
 			return
+		}
+		if path := n.gate.newerSender.Load(); path != nil && *path == r.URL.Path {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			body = append([]byte(`{"addedByANewerHost":true,`), bytes.TrimPrefix(bytes.TrimSpace(body), []byte("{"))...)
+			r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(body)), int64(len(body))
 		}
 		if r.URL.Path == "/api/v1/ledger/sync/confirm" {
 			if loss := n.gate.confirmLoss.Swap(0); loss != 0 || n.gate.confirmBlocked.Load() {
