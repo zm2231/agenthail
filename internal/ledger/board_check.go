@@ -49,15 +49,6 @@ func (c checkState) goal(id string) *goalCheckState {
 	return g
 }
 
-func (c checkState) checker(sessionID string) bool {
-	for _, run := range c.runs {
-		if run.SessionID == sessionID {
-			return true
-		}
-	}
-	return false
-}
-
 func (c checkState) observe(event Event) error {
 	switch event.Type {
 	case EventGate:
