@@ -65,6 +65,9 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 		}
 	}
 	action, _ := request["action"].(string)
+	if action == "respond" && d.holdsAsk(request) {
+		return nil, rewritten, nil
+	}
 	if strings.HasPrefix(action, "channel-") || strings.HasPrefix(action, "relay-") {
 		return d.routeLinkAction(ctx, request, action, host, local, rewritten)
 	}
@@ -89,8 +92,8 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 		if action == "session-focus" {
 			return nil, false, fmt.Errorf("opening the terminal is not available for sessions on another host yet; this session runs on host %s", host.record.Name)
 		}
-		queueRowOnNamedHost := named == host && (action == "queue-retry" || action == "queue-cancel")
-		if strings.HasPrefix(action, "queue-") && !queueRowOnNamedHost || action == "delivery-dismiss" || action == "delivery-delete" {
+		queueRowOnNamedHost := named == host && action == "queue-cancel"
+		if strings.HasPrefix(action, "queue-") && !queueRowOnNamedHost {
 			return nil, false, fmt.Errorf("%s is not available for sessions on another host yet", action)
 		}
 	}
@@ -102,4 +105,15 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 		return nil, false, err
 	}
 	return host, rewritten || sourceRewritten, nil
+}
+
+// A message this host failed to relay to a paired host's session raises its ask here, not on that host.
+func (d *Daemon) holdsAsk(request map[string]any) bool {
+	id, _ := request["requestId"].(string)
+	sessionID, _ := request["sessionId"].(string)
+	if id == "" || sessionID == "" {
+		return false
+	}
+	ask, found, err := d.Registry.Ask(id)
+	return err == nil && found && ask.SessionID == sessionID
 }

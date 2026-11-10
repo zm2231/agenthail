@@ -683,7 +683,7 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 	return receipt, nil
 }
 
-// failIntent publishes a durable problem and sender notice only when the
+// failIntent records a durable problem, which raises its ask, only when the
 // provider may have seen the delivery; a refusal before anything started is
 // already returned synchronously and leaves only the history audit.
 func (d Dispatcher) failIntent(intent *registry.DeliveryIntent, sessionID string, failure error) error {
@@ -691,7 +691,7 @@ func (d Dispatcher) failIntent(intent *registry.DeliveryIntent, sessionID string
 		d.discardIntent(intent, sessionID)
 		return failure
 	}
-	recorded, err := d.Registry.FailDeliveryIntentWithNotice(intent.ID, failure.Error())
+	recorded, err := d.Registry.RecordDeliveryFailure(intent.ID, failure.Error())
 	if err != nil {
 		d.record(registry.HistoryEntry{Kind: "runtime-error", Error: fmt.Sprintf("record delivery %d failure: %s", intent.ID, err)})
 	}

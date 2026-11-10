@@ -130,7 +130,7 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 		}
 		display := sessionDisplay(row, now)
 		row.Display = &display
-		row.Attention = rowAttention(row, read.Outgoing[record.ID], record.Attention)
+		row.Attention = rowAttention(row)
 		row.InboxSection = sessionInbox(row, now)
 		row.Placement = sessionPlacement(row)
 		rows = append(rows, row)
@@ -141,7 +141,6 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 	}
 	plan := newSessionViewPlan(rows, request.Scope, request.Filters, now)
 	plan.countRetired(read.Retired, request.Filters, now)
-	plan.deadline(read.RefreshAt)
 	plan.view.CatalogHostID = host.ID
 	for _, row := range rows {
 		if row.Surface == surface.KindCodex && !row.LastActive.IsZero() {

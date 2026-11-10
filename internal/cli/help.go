@@ -63,7 +63,6 @@ Session commands:
   queue <target> "msg"|-        Hold until target is ready; start daemon to deliver queued work
   queue list [--json] [--all] [--target <target>] [--mine] [--project <name|id>|--cwd <path>]
                                  Inspect queued work scoped to a session or project
-  queue retry <id>              Retry a failed message
   queue rm <id>                 Cancel a pending queued message
   queue clear <target>          Cancel all pending messages for a target
   history [target] [count]       Show delivery history (default 50)

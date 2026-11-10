@@ -33,10 +33,10 @@ func (d *Daemon) startedSessionOutcome(session *surface.Session, creator, alias,
 			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, Message: message, Error: startErr.Error()})
 			return submittedSession(session, intent.ID, submittedSessionDetail(session, alias), extra), nil
 		}
-		_, noticeErr := d.Registry.FailDeliveryIntentWithNotice(intent.ID, startErr.Error())
-		if noticeErr != nil {
-			d.log.Printf("queue initial delivery failure notice for %s: %s", session.ID, noticeErr)
+		if _, err := d.Registry.RecordDeliveryFailure(intent.ID, startErr.Error()); err != nil {
+			d.log.Printf("record the initial delivery failure for %s: %s", session.ID, err)
 		}
+		d.tellDeliveryAsks()
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: startErr.Error()})
 		if err := d.catalog.flushCommitted(); err != nil {
 			d.log.Printf("publish initial delivery failure: %s", err)

@@ -134,7 +134,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := reg.FailDeliveryIntent(intent.ID, "not delivered"); err != nil {
+			if _, err := reg.RecordDeliveryFailure(intent.ID, "not delivered"); err != nil {
 				t.Fatal(err)
 			}
 			intents = append(intents, intent.ID)
@@ -152,9 +152,14 @@ func newViewFixture(t *testing.T) *viewFixture {
 				t.Fatal(err)
 			}
 		}},
-		{"a dismissed delivery problem", func(rng *rand.Rand) {
-			if len(intents) > 0 {
-				if _, err := reg.DismissDeliveryProblem(intents[rng.Intn(len(intents))]); err != nil {
+		{"an answered delivery ask", func(rng *rand.Rand) {
+			if len(intents) == 0 {
+				return
+			}
+			if ask, found, err := reg.DeliveryAskOf(intents[rng.Intn(len(intents))]); err != nil {
+				t.Fatal(err)
+			} else if found {
+				if _, err := reg.ClaimAsk(ask.ID, registry.AskAnswer{Answers: map[string]string{ask.Questions[0].Question: "Dismiss"}}, registry.AskToPerson, "test", f.clock); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -170,12 +175,9 @@ func newViewFixture(t *testing.T) *viewFixture {
 				t.Fatal(err)
 			}
 			if message, err := reg.ClaimNextMessage(id, f.clock); err == nil && message != nil {
-				if _, err := reg.DeadLetterMessage(message.ID, errors.New("gone")); err != nil {
+				if err := reg.DeadLetterMessage(message.ID, errors.New("gone")); err != nil {
 					t.Fatal(err)
 				}
-			}
-			if err := reg.ReconcileAttentionItems(time.Now()); err != nil {
-				t.Fatal(err)
 			}
 		}},
 		{"an archived or restored session", func(rng *rand.Rand) {
@@ -222,8 +224,8 @@ func newViewFixture(t *testing.T) *viewFixture {
 			}
 			d.discoverCatalog(f.ctx)
 		}},
-		{"attention reconciled on its own", func(*rand.Rand) {
-			if err := reg.ReconcileAttentionItems(f.clock); err != nil {
+		{"delivery asks synced on their own", func(*rand.Rand) {
+			if err := reg.SyncDeliveryAsks(f.clock); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -483,7 +485,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := reg.FailDeliveryIntent(intent.ID, "not delivered"); err != nil {
+		if _, err := reg.RecordDeliveryFailure(intent.ID, "not delivered"); err != nil {
 			t.Fatal(err)
 		}
 		for _, id := range []string{"lead-was", "lead-only"} {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -478,7 +479,7 @@ func TestAnAnswerThatProvablyFailedCanBeGivenAgainAndOneThatMayHaveArrivedCannot
 	if response := f.respond(f.from.ID, id, "first", map[string]any{"choice": "o0"}); response.Code != http.StatusBadGateway {
 		t.Fatalf("a rejected delivery: %d %s", response.Code, response.Body)
 	}
-	if still := f.requests(t, f.from.ID); len(still) != 1 || still[0].ID != id {
+	if still := f.requests(t, f.from.ID); !slices.ContainsFunc(still, func(request openRequestView) bool { return request.ID == id }) {
 		t.Fatalf("the ask was not released: %+v", still)
 	}
 

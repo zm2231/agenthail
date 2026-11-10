@@ -28,8 +28,7 @@ const (
 	defaultPollInterval      = 5 * time.Second
 	catalogDiscoveryInterval = 30 * time.Second
 	catalogStatusInterval    = time.Second
-	// deliveryProblemInterval is how often settled delivery failures leave
-	// the session rows.
+	// deliveryProblemInterval is how often settled delivery problems withdraw their asks.
 	deliveryProblemInterval = 10 * time.Second
 	// pendingLaunchLifetime holds a launched session's name while discovery
 	// looks for it, once per catalogDiscoveryInterval.
@@ -67,7 +66,7 @@ type Daemon struct {
 	announceMu           sync.Mutex
 	permissionMu         sync.Mutex
 	permissionTold       map[string]string
-	announcingRefusal    map[int64]int64
+	deliveryAskMu        sync.Mutex
 	announcingKeepAlive  map[string]bool
 	catalogNudge         chan struct{}
 	presence             catalogPresence
@@ -448,23 +447,8 @@ func (d *Daemon) runCatalogStatus(ctx context.Context) {
 			d.refreshCatalogStatus(ctx)
 			d.syncLeads()
 		case <-problemTicker.C:
-			d.settleDeliveryProblems()
+			d.syncDeliveryAsks()
 		}
-	}
-}
-
-// settleDeliveryProblems dismisses the delivery failures that no longer need
-// anyone and tells live clients.
-func (d *Daemon) settleDeliveryProblems() {
-	settled, err := d.Registry.SettleDeliveryProblems()
-	if err != nil {
-		d.log.Printf("settle delivery problems: %s", err)
-	}
-	if settled == 0 {
-		return
-	}
-	if err := d.catalog.flushCommitted(); err != nil {
-		d.log.Printf("publish settled delivery problems: %s", err)
 	}
 }
 

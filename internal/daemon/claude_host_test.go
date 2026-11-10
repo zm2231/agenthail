@@ -634,21 +634,19 @@ func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	problem := func(status registry.DeliveryIntentStatus) *registry.DeliveryProblem {
-		problems, err := r.ListDeliveryProblems()
+	problem := func(kind string) *registry.Ask {
+		ask, found, err := r.DeliveryAskOf(receipt.DeliveryID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, problem := range problems {
-			if problem.DeliveryID == receipt.DeliveryID && problem.Status == status {
-				return &problem
-			}
+		if !found || !strings.HasSuffix(ask.Ref, ":"+kind) {
+			return nil
 		}
-		return nil
+		return &ask
 	}
-	testkit.Eventually(t, "the held message to be a delivery problem", 15*time.Second, func() bool { return problem(registry.DeliveryIntentHeld) != nil })
-	if held := problem(registry.DeliveryIntentHeld); held.SessionID != target || !strings.Contains(held.Reason, "permission") {
-		t.Fatalf("problem = %+v, want the target's held message with its cause", held)
+	testkit.Eventually(t, "the held message to be a delivery ask", 15*time.Second, func() bool { return problem("held") != nil })
+	if held := problem("held"); held.SessionID != sender || held.RoutedTo != sender || !strings.Contains(held.Questions[0].Question, "permission") {
+		t.Fatalf("ask = %+v, want the sender asked about its held message with its cause", held)
 	}
 	told := func(word string) bool {
 		rows, err := r.ListQueue(false, d.adapters())
@@ -668,8 +666,8 @@ func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	testkit.Eventually(t, "the hold to expire", 15*time.Second, func() bool { return problem(registry.DeliveryIntentFailed) != nil })
-	if !told("failure") {
+	testkit.Eventually(t, "the hold to expire", 15*time.Second, func() bool { return problem("failed") != nil })
+	if !told("not delivered") {
 		t.Fatal("the sender was not told its message was dropped")
 	}
 	if turns := fixture.Turns(t, target); len(turns) != 0 {

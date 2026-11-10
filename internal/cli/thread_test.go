@@ -243,27 +243,9 @@ func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 	if got := app.Registry.QueueCount(surface.CLISessionID); got != 0 {
 		t.Fatalf("%d failure notices queued for the Agenthail CLI, which no session reads", got)
 	}
-	events, err := app.Registry.CatalogEventsAfter(0, 20)
-	if err != nil || len(events.Events) == 0 {
-		t.Fatalf("catalog events=%+v err=%v", events, err)
-	}
-	type problemPayload struct {
-		DeliveryID      int64  `json:"deliveryId"`
-		SessionID       string `json:"sessionId"`
-		SourceSessionID string `json:"sourceSessionId"`
-		Reason          string `json:"reason"`
-	}
-	var problem problemPayload
-	for _, event := range events.Events {
-		if event.Type == "delivery.problem" {
-			if err := json.Unmarshal(event.Payload, &problem); err != nil {
-				t.Fatal(err)
-			}
-			break
-		}
-	}
-	if problem.DeliveryID != result.DeliveryID || problem.SessionID != "created" || problem.SourceSessionID != surface.CLISessionID || problem.Reason != "initial message rejected" {
-		t.Fatalf("problem payload=%+v", problem)
+	ask, found, err := app.Registry.DeliveryAskOf(result.DeliveryID)
+	if err != nil || !found || ask.SessionID != "created" || ask.RoutedTo != registry.AskToPerson || !strings.HasPrefix(ask.Questions[0].Question, "initial message rejected: ") {
+		t.Fatalf("ask=%+v found=%v err=%v, want the person asked about the rejected first message", ask, found, err)
 	}
 }
 

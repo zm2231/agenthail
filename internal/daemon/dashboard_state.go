@@ -81,21 +81,6 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read delivery history: %w", err)
 	}
-	attention, err := d.Registry.ListAttentionItems(false)
-	if err != nil {
-		return dashboardState{}, fmt.Errorf("read attention items: %w", err)
-	}
-	deliveryProblems, err := d.Registry.ListDeliveryProblems()
-	if err != nil {
-		return dashboardState{}, fmt.Errorf("read delivery problems: %w", err)
-	}
-	for index := range deliveryProblems {
-		deliveryProblems[index].SessionID = d.publicSessionID(deliveryProblems[index].SessionID)
-		deliveryProblems[index].SourceSessionID = d.publicSessionID(deliveryProblems[index].SourceSessionID)
-		if deliveryProblems[index].AttentionSessionID != "" {
-			deliveryProblems[index].AttentionSessionID = d.publicSessionID(deliveryProblems[index].AttentionSessionID)
-		}
-	}
 	rekeyed, err := d.Registry.SessionRekeys()
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read session rekeys: %w", err)
@@ -116,7 +101,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read the person's name: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Signin: make([]signin.Status, 0, len(signin.Consumers)), Rekeyed: rekeyed, Person: person}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Signin: make([]signin.Status, 0, len(signin.Consumers)), Rekeyed: rekeyed, Person: person}
 	if browser := d.browserStatus(); browser != nil {
 		state.Daemon["browser"] = browser
 	}
@@ -166,9 +151,6 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	}
 	for _, entry := range history {
 		state.History = append(state.History, d.dashboardHistoryEntry(entry))
-	}
-	for _, item := range attention {
-		state.Attention = append(state.Attention, dashboardAttention{ID: item.ID, SessionID: d.publicSessionID(item.SessionID), Target: d.resolveDisplay(item.SessionID), QueueID: item.QueueID, Reason: item.Reason, RequestedAction: item.RequestedAction, CreatedAt: item.CreatedAt})
 	}
 	catalogSurface := make(map[surface.SurfaceKind]registry.CatalogSurfaceState, len(catalogSnapshot.Surfaces))
 	for _, record := range catalogSnapshot.Surfaces {

@@ -12,7 +12,7 @@ import (
 type mcpAnswerInput struct {
 	mcpWrite
 	RequestID string            `json:"requestId" jsonschema:"The open request's id, as agenthail_requests lists it."`
-	Decision  string            `json:"decision,omitempty" jsonschema:"A permission request: allow, always (keep allowing with the rule the request offers; for the person's voice operator only), deny, never (keep denying) or stop (deny and end the turn). An agent's ask: omit it and give answers or a message. Either: escalate passes it on."`
+	Decision  string            `json:"decision,omitempty" jsonschema:"A permission request: allow, always (keep allowing with the rule the request offers; for the person's voice operator only), deny, never (keep denying) or stop (deny and end the turn). An agent's ask: omit it and give answers or a message. A delivery ask: the option id it offers (retry, delete, cancel or dismiss). Any: escalate passes it on."`
 	Message   string            `json:"message,omitempty" jsonschema:"With deny: why, which the session reads. On an agent's ask: a note."`
 	Answers   map[string]string `json:"answers,omitempty" jsonschema:"One answer per question, keyed by its text."`
 	Content   json.RawMessage   `json:"content,omitempty" jsonschema:"With allow on an MCP server's input request: its form's field values."`
@@ -58,6 +58,8 @@ func (d *Daemon) mcpAnswer(ctx context.Context, caller *mcpCaller, input mcpAnsw
 		default:
 			return nil, refuse("invalid", "decision is allow, always, deny, never, stop or escalate.")
 		}
+	} else if ask.Origin == registry.AskOriginDelivery {
+		decision.Behavior = choice
 	} else if choice != "" && choice != "allow" {
 		return nil, refuse("invalid", "An ask takes answers or a message, or decision escalate.")
 	}

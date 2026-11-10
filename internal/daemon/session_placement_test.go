@@ -157,7 +157,7 @@ func viewSignature(t *testing.T, f *orderFixture) string {
 		row := *f.rows[id]
 		display := sessionDisplay(row, f.now)
 		row.Display = &display
-		row.Attention = rowAttention(row, 0, "")
+		row.Attention = rowAttention(row)
 		rows = append(rows, row)
 	}
 	filters := []SessionViewFilters{{}, {Surface: string(surface.KindClaude)}, {Surface: string(surface.KindCodex)}, {Query: "renamed"}, {Query: "nick"}, {Query: "elsewhere"}, {Query: "topic"}, {Query: "vps"}}

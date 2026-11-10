@@ -1314,12 +1314,9 @@ func TestAMessageClaudeReportsExpiredIsADeliveryFailure(t *testing.T) {
 	_ = conn.(*net.UnixConn).CloseWrite()
 	_, _ = io.ReadAll(conn)
 	conn.Close()
-	problems, err := reg.ListDeliveryProblems()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(problems) != 1 || problems[0].DeliveryID != intent.ID || problems[0].Status != registry.DeliveryIntentFailed || !strings.Contains(problems[0].Reason, "nobody approved") {
-		t.Fatalf("problems = %+v, want the expired message as a failure", problems)
+	ask, found, err := reg.DeliveryAskOf(intent.ID)
+	if err != nil || !found || !strings.HasSuffix(ask.Ref, ":failed") || !strings.Contains(ask.Questions[0].Question, "nobody approved") {
+		t.Fatalf("ask = %+v found=%v err=%v, want the expired message as a failure", ask, found, err)
 	}
 }
 

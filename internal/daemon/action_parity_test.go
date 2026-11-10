@@ -159,12 +159,8 @@ func parityCases() []parityCase {
 		{name: "session-create", action: "session-create", body: `{"action":"session-create","surface":"codex","message":"go","approvalPolicy":"sometimes"}`},
 		{name: "session-create unknown creator", action: "session-create", body: `{"action":"session-create","surface":"codex","message":"go","sourceSessionId":"ghost"}`},
 		{name: "notion-create", action: "notion-create", body: `{"action":"notion-create","message":"go","alias":"bad name"}`},
-		{name: "queue-retry", action: "queue-retry", body: `{"action":"queue-retry","queueId":1}`, setup: withQueued},
-		{name: "queue-retry missing", action: "queue-retry", body: `{"action":"queue-retry","queueId":999}`},
 		{name: "queue-cancel", action: "queue-cancel", body: `{"action":"queue-cancel","queueId":1}`, setup: withQueued},
 		{name: "queue-clear", action: "queue-clear", body: `{"action":"queue-clear","sessionId":"to"}`, setup: withQueued},
-		{name: "delivery-dismiss", action: "delivery-dismiss", body: `{"action":"delivery-dismiss","deliveryId":999}`},
-		{name: "delivery-delete", action: "delivery-delete", body: `{"action":"delivery-delete","deliveryId":999}`},
 		{name: "lead-replacement-ack missing", action: "lead-replacement-ack", body: `{"action":"lead-replacement-ack","replacementId":999}`},
 		{name: "channel-create", action: "channel-create", body: `{"action":"channel-create","channel":"team"}`},
 		{name: "channel-create taken", action: "channel-create", body: `{"action":"channel-create","channel":"team"}`, setup: withChannel},
@@ -325,6 +321,7 @@ var parityVolatile = []struct {
 	{regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?( [+-]\d{4} UTC)?`), "<time>"},
 	{regexp.MustCompile(`\b\d{2}:\d{2}:\d{2}\b`), "<clock>"},
 	{regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`), "<uuid>"},
+	{regexp.MustCompile(`\bask-[0-9a-f]{12}\b`), "<ask>"},
 }
 
 var parityTestDir = regexp.MustCompile(`<tmp>/Test[^/"\s]*/\d+`)

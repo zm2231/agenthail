@@ -415,7 +415,10 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 		if !surface.IsDeliveryOutcomeUnknown(startErr) {
 			recorded := false
 			if intent != nil {
-				recorded, _ = s.Registry.FailDeliveryIntentWithNotice(intent.ID, startErr.Error())
+				recorded, _ = s.Registry.RecordDeliveryFailure(intent.ID, startErr.Error())
+				if s.Dispatcher.ProblemCommitted != nil {
+					s.Dispatcher.ProblemCommitted()
+				}
 			}
 			_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: startErr.Error()})
 			if !surface.IsDeliveryTerminal(startErr) {

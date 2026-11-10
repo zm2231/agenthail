@@ -36,13 +36,15 @@ func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
 	if err != nil {
 		return catalogViewState{}, fmt.Errorf("read archive state: %w", err)
 	}
-	items, err := d.Registry.ListAttentionItems(false)
+	open, err := d.Registry.OpenAsks()
 	if err != nil {
-		return catalogViewState{}, fmt.Errorf("read attention items: %w", err)
+		return catalogViewState{}, fmt.Errorf("read open asks: %w", err)
 	}
-	attention := make(map[string]bool, len(items))
-	for _, item := range items {
-		attention[item.SessionID] = true
+	attention := make(map[string]bool, len(open))
+	for _, ask := range open {
+		if ask.Origin == registry.AskOriginDelivery {
+			attention[ask.SessionID] = true
+		}
 	}
 	marks, err := d.Registry.SessionMarks()
 	if err != nil {

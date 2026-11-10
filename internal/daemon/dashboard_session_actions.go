@@ -63,6 +63,11 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 	case "pr":
 		return d.doPR(ctx, p, session, request)
 	}
+	if request.Action == "respond" {
+		if ask, found, err := d.Registry.Ask(strings.TrimSpace(request.RequestID)); err == nil && found && ask.Origin == registry.AskOriginDelivery {
+			return d.answerAsk(ctx, nil, session, ask.ID, request.Decision, p, "")
+		}
+	}
 	adapter, transportErr := d.adapters().For(session)
 	if transportErr != nil {
 		return actionResult{}, conflict(transportErr.Error())

@@ -39,8 +39,6 @@ type snapshotBaseContent struct {
 	Queue            []dashboardQueue            `json:"queue"`
 	Channels         []dashboardChannel          `json:"channels"`
 	Relays           []dashboardRelay            `json:"relays"`
-	Attention        []dashboardAttention        `json:"attention"`
-	DeliveryProblems []registry.DeliveryProblem  `json:"deliveryProblems"`
 	CodexRecentHours int                         `json:"codexRecentHours"`
 	BusyDelivery     string                      `json:"busyDelivery"`
 	Signin           []signin.Status             `json:"signin"`
@@ -74,7 +72,7 @@ func newSnapshotBase(state dashboardState) snapshotBase {
 	sort.Slice(projects, func(i, j int) bool { return projects[i].ID < projects[j].ID })
 	return snapshotBase{UpdatedAt: state.UpdatedAt, EventCursor: state.EventCursor, HostEpoch: state.HostEpoch, CatalogSeq: state.CatalogSeq, snapshotBaseContent: snapshotBaseContent{
 		Daemon: state.Daemon, Surfaces: state.Surfaces, Projects: projects, Queue: state.Queue, Channels: state.Channels, Relays: state.Relays,
-		Attention: state.Attention, DeliveryProblems: state.DeliveryProblems, CodexRecentHours: state.CodexRecentHours, BusyDelivery: state.BusyDelivery,
+		CodexRecentHours: state.CodexRecentHours, BusyDelivery: state.BusyDelivery,
 		Signin: state.Signin, Rekeyed: state.Rekeyed, Coordinators: state.Coordinators, Person: state.Person, LeadReplacements: state.LeadReplacements,
 		DecisionsRev: state.DecisionsRev,
 	}}

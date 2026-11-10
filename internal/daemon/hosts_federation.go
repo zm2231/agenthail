@@ -1066,9 +1066,9 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 	case errors.As(readErr, &status) && status.Code == "action_idempotency_mismatch":
 		_ = d.Registry.DeadLetterUnknown(item.ID, readErr)
 	case errors.As(readErr, &status) && status.Code == hosts.UnprovenCode:
-		_, _ = d.Registry.DeadLetterMessage(item.ID, surface.DeliveryTerminal(errors.New(hosts.Unproven(host.record.Name)), surface.DeliveryHostUnproven))
+		_ = d.Registry.DeadLetterMessage(item.ID, surface.DeliveryTerminal(errors.New(hosts.Unproven(host.record.Name)), surface.DeliveryHostUnproven))
 	case errors.As(readErr, &status):
-		_, _ = d.Registry.DeadLetterMessage(item.ID, fmt.Errorf("host %s refused the message: %s", host.record.Name, status.Error()))
+		_ = d.Registry.DeadLetterMessage(item.ID, fmt.Errorf("host %s refused the message: %s", host.record.Name, status.Error()))
 	case readErr != nil, submitted:
 		unconfirmed()
 	default:

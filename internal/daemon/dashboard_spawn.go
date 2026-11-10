@@ -13,14 +13,9 @@ import (
 
 func (d *Daemon) dispatcher() delivery.Dispatcher {
 	return delivery.Dispatcher{
-		Registry: d.Registry,
-		ProblemCommitted: func() {
-			if err := d.catalog.flushCommitted(); err != nil {
-				d.log.Printf("publish delivery problem: %s", err)
-			}
-			d.publishEvent("state.changed", "", map[string]string{"source": "delivery-problem"})
-		},
-		PersonCapture: d.personCapture,
+		Registry:         d.Registry,
+		ProblemCommitted: d.tellDeliveryAsks,
+		PersonCapture:    d.personCapture,
 		PersonStart: func(start delivery.PersonStartContext) func(string) {
 			d.delivered.addStart(start.IntentUUID, start.Turn, start.Message, time.Now())
 			return func(sessionID string) { d.delivered.settleStart(start.IntentUUID, sessionID) }
