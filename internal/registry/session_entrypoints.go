@@ -11,13 +11,17 @@ import (
 )
 
 // A scripted run Agenthail didn't start stays registered, so its id is known, but no list shows it.
-func hiddenScripted(entrypoint, sessionID string) string {
-	return fmt.Sprintf(`(%s IN ('sdk-cli','sdk-py') AND NOT EXISTS (SELECT 1 FROM session_origins o WHERE o.session_id=%s))`, entrypoint, sessionID)
+func hiddenScripted(entrypoint, runtimeKind, sessionID string) string {
+	return fmt.Sprintf(`(%s IN ('sdk-cli','sdk-py') AND %s<>'claude-host' AND NOT EXISTS (SELECT 1 FROM session_origins o WHERE o.session_id=%s))`, entrypoint, runtimeKind, sessionID)
 }
 
-func (r *Registry) HiddenScripted(sessionID, entrypoint string) (bool, error) {
+func hiddenSessionRow(alias string) string {
+	return hiddenScripted(alias+".entrypoint", alias+".runtime_kind", alias+".id")
+}
+
+func (r *Registry) HiddenScripted(sessionID, entrypoint, runtimeKind string) (bool, error) {
 	var hidden bool
-	err := r.read.QueryRow(`SELECT `+hiddenScripted("?1", "?2"), entrypoint, sessionID).Scan(&hidden)
+	err := r.read.QueryRow(`SELECT `+hiddenScripted("?1", "?2", "?3"), entrypoint, runtimeKind, sessionID).Scan(&hidden)
 	return hidden, err
 }
 
@@ -26,7 +30,7 @@ func (r *Registry) HiddenCatalogRows(kind string) ([]string, error) {
 		var id string
 		return id, row.Scan(&id)
 	}, `SELECT cs.session_id FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id
-		WHERE s.surface=? AND s.host_id='' AND `+hiddenScripted("s.entrypoint", "s.id")+` ORDER BY cs.session_id`, kind)
+		WHERE s.surface=? AND s.host_id='' AND `+hiddenSessionRow("s")+` ORDER BY cs.session_id`, kind)
 }
 
 func (r *Registry) RemoveHiddenCatalogRows(ids []string) ([]CatalogEvent, error) {
@@ -38,7 +42,7 @@ func (r *Registry) RemoveHiddenCatalogRows(ids []string) ([]CatalogEvent, error)
 	events := []CatalogEvent{}
 	for _, id := range ids {
 		var kind, observedAt string
-		err := tx.QueryRow(`SELECT s.surface,cs.observed_at FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE cs.session_id=? AND s.host_id='' AND `+hiddenScripted("s.entrypoint", "s.id"), id).Scan(&kind, &observedAt)
+		err := tx.QueryRow(`SELECT s.surface,cs.observed_at FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE cs.session_id=? AND s.host_id='' AND `+hiddenSessionRow("s"), id).Scan(&kind, &observedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}

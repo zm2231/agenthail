@@ -11,8 +11,11 @@ import (
 func scriptedFixture(t *testing.T) *Registry {
 	t.Helper()
 	r := openTestRegistry(t)
-	for id, entrypoint := range map[string]string{"scripted": "sdk-cli", "python": "sdk-py", "ours": "sdk-cli", "hosted": "sdk-ts", "terminal": "cli", "unknown": ""} {
+	for id, entrypoint := range map[string]string{"scripted": "sdk-cli", "python": "sdk-py", "ours": "sdk-cli", "hosted": "sdk-ts", "terminal": "cli", "unknown": "", "in-our-host": "sdk-cli"} {
 		session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "run " + id, Cwd: "/work", Status: surface.StatusOffline, Transcript: "/t/" + id + ".jsonl", HasLocal: true, LastActive: time.Now()}
+		if id == "in-our-host" {
+			session.RuntimeKind = surface.RuntimeClaudeHost
+		}
 		if err := r.RegisterSession(session); err != nil {
 			t.Fatal(err)
 		}
@@ -35,8 +38,12 @@ func TestOnlyScriptedRunsAgenthailDidNotStartAreHidden(t *testing.T) {
 	if err != nil || !slices.Equal(hidden, []string{"python", "scripted"}) {
 		t.Fatalf("hidden=%v err=%v, want the sdk-cli and sdk-py runs without an origin", hidden, err)
 	}
-	for id, entrypoint := range map[string]string{"scripted": "sdk-cli", "ours": "sdk-cli", "hosted": "sdk-ts", "new-run": "sdk-py", "new-terminal": "cli"} {
-		got, err := r.HiddenScripted(id, entrypoint)
+	for id, entrypoint := range map[string]string{"scripted": "sdk-cli", "ours": "sdk-cli", "hosted": "sdk-ts", "new-run": "sdk-py", "new-terminal": "cli", "new-in-our-host": "sdk-cli"} {
+		runtime := string(surface.RuntimeClaudeCLI)
+		if id == "new-in-our-host" {
+			runtime = string(surface.RuntimeClaudeHost)
+		}
+		got, err := r.HiddenScripted(id, entrypoint, runtime)
 		if want := id == "scripted" || id == "new-run"; err != nil || got != want {
 			t.Errorf("%s (%s): hidden=%v err=%v, want %v", id, entrypoint, got, err, want)
 		}
@@ -50,7 +57,7 @@ func TestOnlyScriptedRunsAgenthailDidNotStartAreHidden(t *testing.T) {
 		ids = append(ids, session.ID)
 	}
 	slices.Sort(ids)
-	if !slices.Equal(ids, []string{"hosted", "ours", "terminal", "unknown"}) {
+	if !slices.Equal(ids, []string{"hosted", "in-our-host", "ours", "terminal", "unknown"}) {
 		t.Fatalf("search found %v, want every session but the hidden scripted runs", ids)
 	}
 	if session, err := r.Session("scripted"); err != nil || session.ID != "scripted" {
@@ -65,7 +72,7 @@ func TestAHiddenRunIsNeverAFragmentMatchButItsIDStillResolves(t *testing.T) {
 		t.Fatal(err)
 	}
 	slices.Sort(matches)
-	if !slices.Equal(matches, []string{"hosted", "ours", "terminal", "unknown"}) {
+	if !slices.Equal(matches, []string{"hosted", "in-our-host", "ours", "terminal", "unknown"}) {
 		t.Fatalf("name fragments matched %v, want no hidden runs", matches)
 	}
 	if prefixed, err := r.FragmentMatches(surface.KindClaude, "scr", 20); err != nil || len(prefixed) != 0 {

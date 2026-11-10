@@ -125,7 +125,7 @@ func (r *Registry) FragmentMatches(kind surface.SurfaceKind, target string, limi
 func (r *Registry) idPrefixMatches(target, kind string, limit int, listedOnly bool) ([]string, error) {
 	listed := ""
 	if listedOnly {
-		listed = ` AND NOT ` + hiddenScripted("entrypoint", "sessions.id")
+		listed = ` AND NOT ` + hiddenSessionRow("sessions")
 	}
 	return r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND id LIKE ? ESCAPE '\' AND (? = '' OR surface = ?)`+listed+` ORDER BY updated_at DESC, id LIMIT ?`, escapeLike(target)+"%", kind, kind, limit)
 }
@@ -145,7 +145,7 @@ func (r *Registry) IDPrefixTarget(kind surface.SurfaceKind, prefix string) (stri
 
 func (r *Registry) nameOrCwdMatches(target, kind string, limit int) ([]string, error) {
 	contains := "%" + escapeLike(target) + "%"
-	return r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') AND (? = '' OR surface = ?) AND NOT `+hiddenScripted("entrypoint", "sessions.id")+` ORDER BY updated_at DESC, id LIMIT ?`, contains, contains, kind, kind, limit)
+	return r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') AND (? = '' OR surface = ?) AND NOT `+hiddenSessionRow("sessions")+` ORDER BY updated_at DESC, id LIMIT ?`, contains, contains, kind, kind, limit)
 }
 
 func (r *Registry) localSessionSurface(id string) (string, bool) {

@@ -13,7 +13,7 @@ func (d *Daemon) splitHiddenScripted(sessions []surface.Session) ([]surface.Sess
 	hidden := map[string]struct{}{}
 	for _, session := range sessions {
 		if session.Entrypoint != "" {
-			if isHidden, err := d.Registry.HiddenScripted(session.ID, session.Entrypoint); err != nil {
+			if isHidden, err := d.Registry.HiddenScripted(session.ID, session.Entrypoint, string(session.RuntimeKind)); err != nil {
 				d.log.Printf("catalog: read whether %s is a scripted run: %s", session.ID, err)
 			} else if isHidden {
 				d.keepHiddenSession(session)
