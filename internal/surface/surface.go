@@ -837,6 +837,11 @@ type Waker interface {
 	NeedsWake(ctx context.Context, sess *Session) bool
 }
 
+// RuntimeStopper is a surface whose sends start a session's stopped runtime.
+type RuntimeStopper interface {
+	RuntimeStopped(ctx context.Context, sess *Session) bool
+}
+
 // ConversationKeeper is a surface that can tell a conversation it would
 // resume from one whose history is gone.
 type ConversationKeeper interface {

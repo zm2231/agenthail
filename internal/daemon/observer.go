@@ -75,11 +75,16 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			d.log.Printf("watched session %s: %s", d.resolveDisplay(session.ID), adapterErr)
 			continue
 		}
-		// An exited or offline Claude session stays a delivery target, since a
-		// send resumes it; it is observed only to drain its queue. An offline
-		// one may have no PID left to tell whether its process exited.
-		resumable := claudeProcessExited(session) || (session.Surface == surface.KindClaude && relayTargetInactive(session))
-		if !isTask && ((resumable && queueCounts[session.ID] == 0) || (!resumable && relayTargetInactive(session))) {
+		if stopper, ok := adapter.(surface.RuntimeStopper); ok && queueCounts[session.ID] > 0 && stopper.RuntimeStopped(ctx, session) {
+			d.drainMessageQueue(ctx, adapter, session)
+			continue
+		}
+		// An exited or offline Claude or Codex session stays a delivery target,
+		// since a send resumes it; it is observed only to drain its queue. An
+		// offline one may have no PID left to tell whether its process exited.
+		inactive := claudeProcessExited(session) || relayTargetInactive(session)
+		resumes := session.Surface == surface.KindClaude || session.Surface == surface.KindCodex
+		if !isTask && inactive && (!resumes || queueCounts[session.ID] == 0) {
 			d.syncRelaysObserved(ctx, scan, adapter, session, observeOnce(adapter, session, observeAdapter))
 			continue
 		}
@@ -293,13 +298,13 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	if terminalCompletion {
 		d.gateLedgerTurn(*session, observation.CompletedTurnID)
 	}
-	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.StatusNotLoaded
+	canLoadQueue := session.Surface == surface.KindCodex && observation.Status == surface.StatusNotLoaded
 	steerQueued, steerQueueErr := d.Registry.PendingSteer(session.ID)
 	if steerQueueErr != nil {
 		d.log.Printf("check steer queue %s: %s", d.resolveDisplay(session.ID), steerQueueErr)
 	}
 	canSteerQueued := steerQueued && surface.EffectiveCapabilities(adapter, session).Steer
-	canDrainQueue := (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue
+	canDrainQueue := (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadQueue
 	canDrainSteer := canSteerQueued && observation.Status == surface.StatusBusy && observation.WaitingOn == nil
 	canDrainPeer := observation.Status == surface.StatusBusy && surface.RouteFor(adapter, session, "") == surface.RoutePeer
 	if canDrainQueue || canDrainPeer || canDrainSteer {
