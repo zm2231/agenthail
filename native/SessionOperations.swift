@@ -176,7 +176,7 @@ enum NativeQueueOrder {
 
 enum SessionLifecycleCopy {
     static func title(_ session: SessionState) -> String {
-        session.runtimeKind == "claude-bg" ? "Background session" : "Session"
+        session.runtimeKind == "claude-bg" ? "Background session" : "Process"
     }
 
     static func detail(_ session: SessionState) -> String {
