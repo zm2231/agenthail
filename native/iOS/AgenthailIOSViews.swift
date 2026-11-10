@@ -744,7 +744,7 @@ struct SessionScreen: View {
         }#endif
         .edgeBar(.top, spacing: 0) {
             if compactHeight { Color.clear.frame(height: 0) }
-            else if let detail { SessionSummary(detail: detail, session: liveSession, openDetails: RowAction(owner: session.id) { showingInfo = true }) }
+            else if let detail { SessionSummary(detail: detail, session: liveSession, openDetails: RowAction(owner: session.id) { showingInfo = true }).equatable() }
         }
         .edgeBar(.bottom) {
             VStack(spacing: 0) {
@@ -801,7 +801,7 @@ struct SessionScreen: View {
                     Button { showingInfo = true } label: {
                         HStack(spacing: 8) {
                             Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
-                            SessionStatusLabel(detail: detail, session: liveSession).labelStyle(.titleAndIcon).lineLimit(1)
+                            SessionStatusLabel(detail: detail, session: liveSession).equatable().labelStyle(.titleAndIcon).lineLimit(1)
                             Text(detail.model ?? SessionStyle.agentName(detail.session.surface)).font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1)
                         }
                     }
