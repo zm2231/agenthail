@@ -128,7 +128,7 @@ func (d *Daemon) oweRecentCaptures() {
 
 func (d *Daemon) sortQueued(ctx context.Context, job sortJob) {
 	config, ok := d.sorterConfig()
-	if !ok {
+	if !ok || d.sorter.isOwed(job) {
 		return
 	}
 	if !d.sortAndSettle(ctx, config, job) {
@@ -217,10 +217,15 @@ func (d *Daemon) sortOne(ctx context.Context, config goalsort.Config, job sortJo
 	if err != nil {
 		return err
 	}
+	took := time.Since(asked).Milliseconds()
 	if answer.Confidence < ledger.SortConfidence || !slices.ContainsFunc(input.Goals, func(g ledger.SortGoal) bool { return g.ID == answer.Choice }) {
+		unfiled := ledger.UnfiledPayload{UtteranceID: job.utteranceID, Choice: answer.Choice, Confidence: answer.Confidence, Model: config.Model, Ms: took}
+		if _, err := store.RecordUnfiled(job.key, unfiled, time.Now()); err != nil {
+			d.log.Printf("ledger sorter: keep the answer for %s in %s: %s", job.utteranceID, job.key, err)
+		}
 		return nil
 	}
-	payload := ledger.SortedPayload{UtteranceID: job.utteranceID, GoalID: answer.Choice, Confidence: answer.Confidence, Model: config.Model, Ms: time.Since(asked).Milliseconds()}
+	payload := ledger.SortedPayload{UtteranceID: job.utteranceID, GoalID: answer.Choice, Confidence: answer.Confidence, Model: config.Model, Ms: took}
 	if _, err := store.RecordSort(job.key, payload, time.Now()); err != nil {
 		d.log.Printf("ledger sorter: file %s in %s: %s", job.utteranceID, job.key, err)
 	}
@@ -261,6 +266,13 @@ func (d *Daemon) previousReply(sessionID string, before time.Time) string {
 
 func (s *ledgerSorter) owe(job sortJob) {
 	s.owed[owedSort{key: job.key, utteranceID: job.utteranceID}] = job
+}
+
+func (s *ledgerSorter) isOwed(job sortJob) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, owed := s.owed[owedSort{key: job.key, utteranceID: job.utteranceID}]
+	return owed
 }
 
 func (s *ledgerSorter) settle(job sortJob) {

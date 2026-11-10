@@ -137,6 +137,14 @@ func TestAfterARestartOwedMessagesAreSortedOldestFirstAcrossProjects(t *testing.
 	if asked := stub.asks(); asked[0].Message != "the older message" || asked[1].Message != "the newer message" {
 		t.Fatalf("asked %q then %q, want the older message first whatever its project", asked[0].Message, asked[1].Message)
 	}
+	again := newTestDaemon(t, r, []surface.Surface{&daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}})
+	again.sorter.http = d.sorter.http
+	runSorter(t, again)
+	ledgerPost(t, again.dashboardHandler(&dashboardServer{token: "test-token"}), ledgerCaptureRequest{SessionID: p.session(t, r, "claude-after-second-restart").ID, PromptID: "marker", Prompt: "after the second restart"})
+	eventually(t, "the message after the second restart to be asked", func() bool { return len(stub.asks()) >= 3 })
+	if asked := stub.asks(); len(asked) != 3 || asked[2].Message != "after the second restart" {
+		t.Fatalf("asks = %+v, want messages answered before a restart never asked again", asked)
+	}
 }
 
 func TestARecoveryThatFailsPartwayOwesOnlyWhatItHadNotAsked(t *testing.T) {
@@ -440,6 +448,40 @@ func TestAMessageRecordedFirstButQueuedSecondIsNotAskedTwice(t *testing.T) {
 	}
 	if counts["recorded second"] != 1 {
 		t.Fatalf("asks per message = %v, want the message answered while healthy asked once", counts)
+	}
+}
+
+func TestAMessageBothOwedAtStartAndQueuedIsAskedOnce(t *testing.T) {
+	for name, answer := range map[string]func(string) (int, string){
+		"answered without a goal": func(string) (int, string) {
+			return http.StatusOK, `{"answers":{"goal":{"choice":"none","confidence":0.99}}}`
+		},
+		"failed": func(string) (int, string) { return http.StatusServiceUnavailable, "down" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			stub := &sorterStub{answer: answer}
+			d, _, _, p, _ := sorterFixture(t, stub)
+			ref := ledger.PromptRef("both")
+			d.queueSort(p.key, ref, recordIn(t, p, ref, "both owed and queued"), time.Now())
+			runSorter(t, d)
+			marker := ledger.PromptRef("marker")
+			d.queueSort(p.key, marker, recordIn(t, p, marker, "marker"), time.Now())
+			eventually(t, "the marker to be asked", func() bool {
+				for _, a := range stub.asks() {
+					if a.Message == "marker" {
+						return true
+					}
+				}
+				return false
+			})
+			counts := map[string]int{}
+			for _, a := range stub.asks() {
+				counts[a.Message]++
+			}
+			if counts["both owed and queued"] != 1 {
+				t.Fatalf("asks per message = %v, want the message both owed and queued asked once", counts)
+			}
+		})
 	}
 }
 

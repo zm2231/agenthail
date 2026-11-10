@@ -52,7 +52,46 @@ type OwedSort struct {
 	At  time.Time
 }
 
+type UnfiledPayload struct {
+	UtteranceID string  `json:"utteranceId"`
+	Choice      string  `json:"choice"`
+	Confidence  float64 `json:"confidence"`
+	Model       string  `json:"model"`
+	Ms          int64   `json:"ms"`
+}
+
 func sortedRef(utteranceID string) string { return "sorted:" + utteranceID }
+
+func unfiledRef(utteranceID string) string { return "unfiled:" + utteranceID }
+
+// The message stays provisional, but its answer is kept so no later run asks the model again.
+func (s *Store) RecordUnfiled(projectKey string, p UnfiledPayload, now time.Time) (bool, error) {
+	board, release, err := s.lockBoard(projectKey)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	if !board.provisional(p.UtteranceID) {
+		return false, nil
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return false, err
+	}
+	tx, err := s.begin(projectKey)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	e, err := insertEvent(tx, `INSERT OR IGNORE`, Event{ProjectKey: projectKey, Type: EventUnfiled, Payload: data, Ref: unfiledRef(p.UtteranceID), CreatedAt: now.UTC()})
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return e.Seq != 0, s.catchUp(board, projectKey)
+}
 
 func (s *Store) RecordSort(projectKey string, p SortedPayload, now time.Time) (bool, error) {
 	if p.Confidence < SortConfidence {
@@ -93,6 +132,9 @@ func (s *Store) SortInputFor(projectKey, utteranceID string) (SortInput, bool, e
 	if !current.provisional(utteranceID) {
 		return SortInput{}, false, nil
 	}
+	if answered, err := s.HasRef(projectKey, unfiledRef(utteranceID)); err != nil || answered {
+		return SortInput{}, false, err
+	}
 	events, err := loadEvents(s.read, projectKey)
 	if err != nil {
 		return SortInput{}, false, err
@@ -120,8 +162,9 @@ func (s *Store) LocalProvisionalSince(projectKey string, notBefore time.Time) ([
 	if whole := notBefore.Truncate(time.Second); whole.Before(notBefore) {
 		notBefore = whole.Add(time.Second)
 	}
-	rows, err := s.read.Query(`SELECT ref, seq, json_extract(payload,'$.ts') FROM ledger_events WHERE project_key=? AND type=? AND actor_host_id=COALESCE((SELECT host_id FROM host_identity WHERE id=1),'')
-		AND json_extract(payload,'$.ts')>=? ORDER BY seq`, projectKey, string(EventUtterance), notBefore.UTC().Format(time.RFC3339))
+	rows, err := s.read.Query(`SELECT u.ref, u.seq, json_extract(u.payload,'$.ts') FROM ledger_events u WHERE u.project_key=? AND u.type=? AND u.actor_host_id=COALESCE((SELECT host_id FROM host_identity WHERE id=1),'')
+		AND json_extract(u.payload,'$.ts')>=? AND NOT EXISTS (SELECT 1 FROM ledger_events a WHERE a.project_key=u.project_key AND a.ref=? || u.ref) ORDER BY u.seq`,
+		projectKey, string(EventUtterance), notBefore.UTC().Format(time.RFC3339), unfiledRef(""))
 	if err != nil {
 		return nil, err
 	}

@@ -180,7 +180,7 @@ func TestTheProvisionalMessagesOfTheLastDayAreListedOldestFirst(t *testing.T) {
 	search := goal(t, s, "search")
 	now := time.Now()
 	var seqs []int64
-	for i, at := range []time.Time{now.Add(-24*time.Hour - 500*time.Millisecond), now, now, now} {
+	for i, at := range []time.Time{now.Add(-24*time.Hour - 500*time.Millisecond), now, now, now, now} {
 		u := said(fmt.Sprintf("claude-prompt:%d", i), fmt.Sprintf("message %d", i))
 		u.ProjectKey, u.At = project, at
 		e, _, err := s.RecordUtterance(u)
@@ -190,6 +190,15 @@ func TestTheProvisionalMessagesOfTheLastDayAreListedOldestFirst(t *testing.T) {
 		seqs = append(seqs, e.Seq)
 	}
 	sortTo(t, s, "claude-prompt:2", search, 0.95)
+	if kept, err := s.RecordUnfiled(project, ledger.UnfiledPayload{UtteranceID: "claude-prompt:4", Choice: "new", Confidence: 0.99, Model: "d1-3b"}, now); err != nil || !kept {
+		t.Fatalf("an unfiled answer was not kept: %v %v", kept, err)
+	}
+	if kept, err := s.RecordUnfiled(project, ledger.UnfiledPayload{UtteranceID: "claude-prompt:2", Choice: "none", Confidence: 0.99}, now); err != nil || kept {
+		t.Fatalf("an unfiled answer was kept for a sorted message: %v %v", kept, err)
+	}
+	if u := utteranceView(t, s, "claude-prompt:4"); u.Sorted != nil || u.Attached || !slices.Contains(provisionalIDs(t, s), "claude-prompt:4") {
+		t.Fatalf("an unfiled answer changed the message: %+v", u)
+	}
 	got, err := s.LocalProvisionalSince(project, now.Add(-24*time.Hour))
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +206,7 @@ func TestTheProvisionalMessagesOfTheLastDayAreListedOldestFirst(t *testing.T) {
 	spoken := now.UTC().Truncate(time.Second)
 	want := []ledger.OwedSort{{Ref: "claude-prompt:1", Seq: seqs[1], At: spoken}, {Ref: "claude-prompt:3", Seq: seqs[3], At: spoken}}
 	if !slices.EqualFunc(got, want, func(a, b ledger.OwedSort) bool { return a.Ref == b.Ref && a.Seq == b.Seq && a.At.Equal(b.At) }) {
-		t.Fatalf("owed = %v, want %v: the day's provisional messages, not the older one or the sorted one", got, want)
+		t.Fatalf("owed = %v, want %v: the day's provisional messages, not the older one, the sorted one or the one answered without filing", got, want)
 	}
 	keys, err := s.LocalCaptureProjects(now.Add(-24 * time.Hour))
 	if err != nil || !slices.Equal(keys, []string{project}) {
