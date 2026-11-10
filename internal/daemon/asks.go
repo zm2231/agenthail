@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -124,7 +125,7 @@ func askRequest(ask registry.Ask) surface.Request {
 	for _, in := range ask.Questions {
 		question := surface.Question{Question: in.Question, Options: make([]surface.QuestionOption, 0, len(in.Options))}
 		for i, option := range in.Options {
-			question.Options = append(question.Options, surface.QuestionOption{Label: option.Label, Description: option.Does})
+			question.Options = append(question.Options, surface.QuestionOption{ID: option.ID, Label: option.Label, Description: option.Does})
 			if option.ID == in.Recommended {
 				suggested := i
 				question.Suggested = &suggested
@@ -135,7 +136,7 @@ func askRequest(ask registry.Ask) surface.Request {
 		}
 		questions = append(questions, question)
 	}
-	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, CreatedAt: ask.CreatedAt}
+	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery, CreatedAt: ask.CreatedAt}.WithOptionIDs()
 }
 
 // askHearer is who an ask goes to first: a session an agent or coordinator started reports to its lead or spawner while that one runs.
@@ -422,7 +423,7 @@ func composeAskAnswer(questions []surface.Question, decision surface.Decision) s
 // answerAsk sends the answer to the asking session as one message, exactly
 // once: the ask is claimed before delivery and released only when delivery
 // provably did not happen.
-func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session *surface.Session, askID string, decision surface.Decision, p principal, personName string) (actionResult, error) {
+func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session *surface.Session, askID string, response surface.Response, p principal, personName string) (actionResult, error) {
 	ask, found, err := d.Registry.Ask(askID)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
@@ -434,7 +435,7 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 	if err != nil {
 		return actionResult{}, err
 	}
-	if decision.Behavior == askEscalate {
+	if slices.Equal(response.Choices, []string{askEscalate}) {
 		if by == registry.AskToPerson {
 			return actionResult{}, invalidRequest("the person answers an ask; only an agent passes it on")
 		}
@@ -443,15 +444,14 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 	}
 	switch ask.Origin {
 	case registry.AskOriginPermission:
-		return d.answerPermission(ctx, adapter, session, ask, decision, by, p.actor())
+		return d.answerPermission(ctx, adapter, session, ask, response, by, p.actor())
 	case registry.AskOriginDelivery:
-		return d.answerDelivery(ctx, ask, decision, by, p.actor())
+		return d.answerDelivery(ctx, ask, response, by, p.actor())
 	}
 	request := askRequest(ask)
-	if decision.Choice != "" {
-		if decision, err = request.Choose(decision.Choice, decision.Message); err != nil {
-			return actionResult{}, invalidRequest(err.Error())
-		}
+	decision, err := request.Resolve(response)
+	if err != nil {
+		return actionResult{}, invalidRequest(err.Error())
 	}
 	message := composeAskAnswer(request.Questions, decision)
 	if message == "" {

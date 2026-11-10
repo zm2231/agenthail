@@ -163,13 +163,13 @@ func TestAHostSessionTakesAModelButNoRemoteControlCommands(t *testing.T) {
 func TestAnInputRequestIsAnsweredWithItsFieldsOrDeclined(t *testing.T) {
 	request := surface.Request{ID: "e1", Kind: surface.WaitingInput, Elicitation: &surface.Elicitation{Server: "deploy", Mode: "form"}}
 	decision, err := requestDecision(request, "", `{"env":"prod","replicas":3}`, "")
-	if err != nil || decision.Behavior != "allow" || string(decision.Content) != `{"env":"prod","replicas":3}` {
+	if err != nil || strings.Join(decision.Choices, ",") != "allow" || string(decision.Content) != `{"env":"prod","replicas":3}` {
 		t.Fatalf("answers = %+v, %v", decision, err)
 	}
-	if decision, err := requestDecision(request, "allow", "", ""); err != nil || decision.Behavior != "allow" || decision.Content != nil {
+	if decision, err := requestDecision(request, "allow", "", ""); err != nil || strings.Join(decision.Choices, ",") != "allow" || decision.Content != nil {
 		t.Fatalf("allow = %+v, %v", decision, err)
 	}
-	if decision, err := requestDecision(request, "deny", "", "no"); err != nil || decision.Behavior != "deny" {
+	if decision, err := requestDecision(request, "deny", "", "no"); err != nil || strings.Join(decision.Choices, ",") != "deny" {
 		t.Fatalf("deny = %+v, %v", decision, err)
 	}
 	for _, reply := range []string{"always", "prod", "1"} {
@@ -184,10 +184,10 @@ func TestAnInputRequestIsAnsweredWithItsFieldsOrDeclined(t *testing.T) {
 
 func TestAnApprovalTakesNeverOrStopOnlyWhereItOffersThem(t *testing.T) {
 	offered := surface.Request{ID: "t:call_1", Kind: surface.WaitingApproval, Tool: "Bash", AlwaysDeny: true, Stoppable: true}
-	if decision, err := requestDecision(offered, "never", "", ""); err != nil || decision.Behavior != "deny" || !decision.Always || decision.Stop {
+	if decision, err := requestDecision(offered, "never", "", ""); err != nil || strings.Join(decision.Choices, ",") != "never" {
 		t.Fatalf("never: %+v %v", decision, err)
 	}
-	if decision, err := requestDecision(offered, "stop", "", ""); err != nil || decision.Behavior != "deny" || !decision.Stop || decision.Always {
+	if decision, err := requestDecision(offered, "stop", "", ""); err != nil || strings.Join(decision.Choices, ",") != "stop" {
 		t.Fatalf("stop: %+v %v", decision, err)
 	}
 	plain := surface.Request{ID: "r1", Kind: surface.WaitingApproval, Tool: "Bash"}

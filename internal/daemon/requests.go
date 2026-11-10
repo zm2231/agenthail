@@ -81,6 +81,7 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]
 			continue
 		}
 		request.ID = id
+		request = request.WithOptionIDs()
 		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Actions: request.Actions(), ReplacedBy: d.publicSessionID(replacedBy)})
 	}
 	for _, ask := range asking {

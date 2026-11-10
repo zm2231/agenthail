@@ -260,34 +260,39 @@ func (d *Daemon) permissionEscalateAfter() time.Duration {
 // answerPermission answers the provider request behind an ask, at most once:
 // the ask is claimed first and released when the provider did not take the
 // answer.
-func (d *Daemon) answerPermission(ctx context.Context, adapter surface.Surface, session *surface.Session, ask registry.Ask, decision surface.Decision, by, actor string) (actionResult, error) {
+func (d *Daemon) answerPermission(ctx context.Context, adapter surface.Surface, session *surface.Session, ask registry.Ask, response surface.Response, by, actor string) (actionResult, error) {
+	responder, err := permissionResponder(adapter, session, ask)
+	if err != nil {
+		return actionResult{}, err
+	}
+	state, err := responder.Requests(ctx, session)
+	if err != nil {
+		return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
+	}
+	request, open := openRequest(state, ask.Ref)
+	if !open {
+		d.observeAfterAnswer(adapter, session)
+		return actionResult{}, staleRequest()
+	}
+	decision, err := request.Resolve(response)
+	if err != nil {
+		return actionResult{}, invalidRequest(err.Error())
+	}
+	return d.applyPermission(ctx, adapter, responder, session, ask, decision, by, actor)
+}
+
+func permissionResponder(adapter surface.Surface, session *surface.Session, ask registry.Ask) (surface.Responder, error) {
 	if !ask.Answerable {
-		return actionResult{}, invalidRequest("Agenthail can't answer this prompt; answer it where the session runs")
+		return nil, invalidRequest("Agenthail can't answer this prompt; answer it where the session runs")
 	}
 	responder, ok := sessionResponder(adapter, session)
 	if !ok {
-		return actionResult{}, invalidRequest("this session's requests are not answered through Agenthail")
+		return nil, invalidRequest("this session's requests are not answered through Agenthail")
 	}
-	if decision.Behavior == "" && decision.Choice == "" {
-		if len(decision.Answers) == 0 {
-			return actionResult{}, invalidRequest("answer a permission request with allow, deny, never or stop")
-		}
-		decision.Behavior = "allow"
-	}
-	if decision.Choice != "" {
-		state, err := responder.Requests(ctx, session)
-		if err != nil {
-			return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
-		}
-		request, open := openRequest(state, ask.Ref)
-		if !open {
-			d.observeAfterAnswer(adapter, session)
-			return actionResult{}, staleRequest()
-		}
-		if decision, err = request.Choose(decision.Choice, decision.Message); err != nil {
-			return actionResult{}, invalidRequest(err.Error())
-		}
-	}
+	return responder, nil
+}
+
+func (d *Daemon) applyPermission(ctx context.Context, adapter surface.Surface, responder surface.Responder, session *surface.Session, ask registry.Ask, decision surface.Decision, by, actor string) (actionResult, error) {
 	claimed, err := d.Registry.ClaimAsk(ask.ID, registry.AskAnswer{Answers: decision.Answers, Note: strings.TrimSpace(decision.Message)}, by, actor, time.Now())
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())

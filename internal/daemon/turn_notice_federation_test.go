@@ -384,7 +384,7 @@ func TestAnAskOnAPairedHostNotifiesWithItsButtonsAndIsAnsweredThroughTheViewer(t
 		t.Fatalf("the phone showed %+v", shown)
 	}
 
-	response := viewer.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": qualified, "requestId": sends[0]["requestId"], "decision": map[string]any{"choice": "o1"}})
+	response := viewer.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": qualified, "requestId": sends[0]["requestId"], "decision": map[string]any{"choices": []string{"o1"}}})
 	if response.Code != http.StatusOK {
 		t.Fatalf("answer through the viewer: %d %s", response.Code, response.Body.String())
 	}

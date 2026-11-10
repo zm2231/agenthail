@@ -48,24 +48,13 @@ func (d *Daemon) tellDeliveryAsks() {
 	}
 }
 
-func deliveryChoice(ask registry.Ask, decision surface.Decision) (registry.AskOption, bool) {
-	if len(ask.Questions) == 0 {
+func deliveryChoice(ask registry.Ask, response surface.Response) (registry.AskOption, bool) {
+	if len(ask.Questions) == 0 || len(response.Choices) != 1 {
 		return registry.AskOption{}, false
 	}
-	question := ask.Questions[0]
-	said := []string{decision.Behavior, decision.Choice, decision.Answers[question.Question], decision.Message}
-	for _, answer := range decision.Answers {
-		said = append(said, answer)
-	}
-	for _, word := range said {
-		word = strings.TrimSpace(word)
-		if word == "" {
-			continue
-		}
-		for _, option := range question.Options {
-			if strings.EqualFold(word, option.ID) || strings.EqualFold(word, option.Label) {
-				return option, true
-			}
+	for _, option := range ask.Questions[0].Options {
+		if option.ID == response.Choices[0] {
+			return option, true
 		}
 	}
 	return registry.AskOption{}, false
@@ -82,10 +71,13 @@ func deliveryOptionIDs(ask registry.Ask) string {
 	return strings.Join(ids, ", ")
 }
 
-func (d *Daemon) answerDelivery(ctx context.Context, ask registry.Ask, decision surface.Decision, by, via string) (actionResult, error) {
-	option, ok := deliveryChoice(ask, decision)
+func (d *Daemon) answerDelivery(ctx context.Context, ask registry.Ask, response surface.Response, by, via string) (actionResult, error) {
+	if _, err := askRequest(ask).Resolve(response); err != nil {
+		return actionResult{}, invalidRequest(err.Error())
+	}
+	option, ok := deliveryChoice(ask, response)
 	if !ok {
-		return actionResult{}, invalidRequest("answer with one of: " + deliveryOptionIDs(ask))
+		return actionResult{}, invalidRequest("answer with one choice of: " + deliveryOptionIDs(ask))
 	}
 	ref, ok := registry.ParseDeliveryRef(ask.Ref)
 	if !ok {

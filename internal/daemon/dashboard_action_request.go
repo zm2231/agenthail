@@ -10,7 +10,7 @@ import (
 type dashboardActionRequest struct {
 	surface.TurnOptions
 	surface.LaunchSettings
-	Name           string                     `json:"name"`
+	Name            string                     `json:"name"`
 	Worktree        string                     `json:"worktree"`
 	Isolation       string                     `json:"isolation"`
 	Base            string                     `json:"base"`
@@ -33,7 +33,7 @@ type dashboardActionRequest struct {
 	Model           string                     `json:"model"`
 	Setting         string                     `json:"setting"`
 	Value           string                     `json:"value"`
-	BusyDelivery   string                     `json:"busyDelivery"`
+	BusyDelivery    string                     `json:"busyDelivery"`
 	QueueID         int64                      `json:"queueId"`
 	Channel         string                     `json:"channel"`
 	NewChannel      string                     `json:"newChannel"`
@@ -64,7 +64,7 @@ type dashboardActionRequest struct {
 	Survivor        string                     `json:"survivor"`
 	Attachments     []string                   `json:"attachments"`
 	RequestID       string                     `json:"requestId"`
-	Decision        surface.Decision           `json:"decision"`
+	Decision        surface.Response           `json:"decision"`
 	Instructions    *string                    `json:"instructions"`
 	Replace         bool                       `json:"replace"`
 	ChangedAt       time.Time                  `json:"changedAt"`

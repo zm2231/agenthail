@@ -1033,7 +1033,7 @@ func TestFederationUnconfirmedSendRetriesByReplayingItsKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	ask := deliveryAskByRef(t, local.reg, fmt.Sprintf("queue:%d:dead", id))
-	retry := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": ask.SessionID, "requestId": ask.ID, "decision": map[string]any{"choice": "retry"}})
+	retry := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": ask.SessionID, "requestId": ask.ID, "decision": map[string]any{"choices": []string{"retry"}}})
 	if retry.Code != http.StatusOK {
 		t.Fatalf("retry status=%d body=%s", retry.Code, retry.Body.String())
 	}

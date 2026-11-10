@@ -146,6 +146,7 @@ type dashboardQueue struct {
 	BusyDelivery    string                   `json:"busyDelivery,omitempty"`
 	Attachments     []map[string]any         `json:"attachments,omitempty"`
 	Author          surface.Author           `json:"author"`
+	AskID           string                   `json:"askId,omitempty"`
 }
 
 type dashboardChannel struct {

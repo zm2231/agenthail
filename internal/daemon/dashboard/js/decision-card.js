@@ -14,12 +14,13 @@ const mark = (sessionId, requestId) => `${sessionId}\u0001${requestId}`;
 
 export function recommended(request) {
   if (!request || !["question", "ask"].includes(request.kind) || !request.questions?.length) return null;
-  const answers = {};
+  const choices = [];
   for (const question of request.questions) {
-    if (!Number.isInteger(question.suggested) || !question.options?.[question.suggested]) return null;
-    answers[question.question] = question.options[question.suggested].label;
+    const option = Number.isInteger(question.suggested) ? question.options?.[question.suggested] : null;
+    if (!option?.id) return null;
+    choices.push(option.id);
   }
-  return { behavior: "allow", answers };
+  return { choices };
 }
 
 export function acceptsRecommended(event) {
@@ -161,7 +162,7 @@ export function bindDecisionCard(reload) {
       if (answer) await respondDecision(request.id, answer, { reload });
     } else if (choice) {
       const value = choice.dataset.decisionRespond;
-      await respondDecision(choice.dataset.requestId, value === "deny" ? { behavior: "deny" } : { behavior: "allow", always: value === "always" }, { reload });
+      await respondDecision(choice.dataset.requestId, { choices: [value] }, { reload });
     }
   });
   document.addEventListener("keydown", async (event) => {

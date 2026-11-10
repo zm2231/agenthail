@@ -190,7 +190,7 @@ func TestAnOldStylePairingIsNamedAndPairingAgainRepairsItInPlace(t *testing.T) {
 				t.Fatalf("ledger owner after pairing again=%q", owner)
 			}
 
-			retry := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": card.SessionID, "requestId": card.ID, "decision": map[string]any{"choice": "retry"}})
+			retry := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": card.SessionID, "requestId": card.ID, "decision": map[string]any{"choices": []string{"retry"}}})
 			if retry.Code != http.StatusOK {
 				t.Fatalf("retry status=%d body=%s", retry.Code, retry.Body.String())
 			}

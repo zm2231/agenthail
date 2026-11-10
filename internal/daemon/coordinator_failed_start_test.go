@@ -89,7 +89,7 @@ func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) 
 					if err != nil || !found {
 						t.Fatalf("ask=%+v found=%v err=%v", ask, found, err)
 					}
-					if response := runDashboardAction(t, d, `{"action":"respond","sessionId":"`+ask.SessionID+`","requestId":"`+ask.ID+`","decision":{"behavior":"dismiss"}}`); response.Code != http.StatusOK {
+					if response := runDashboardAction(t, d, `{"action":"respond","sessionId":"`+ask.SessionID+`","requestId":"`+ask.ID+`","decision":{"choices":["dismiss"]}}`); response.Code != http.StatusOK {
 						t.Fatalf("dismiss: %d %s", response.Code, response.Body)
 					}
 				}

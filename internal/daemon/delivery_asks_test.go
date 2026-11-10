@@ -50,7 +50,7 @@ func postActionAs(t *testing.T, handler http.Handler, token, body string) *httpt
 }
 
 func answerBody(ask registry.Ask, choice string) string {
-	return fmt.Sprintf(`{"action":"respond","sessionId":%q,"requestId":%q,"decision":{"choice":%q}}`, ask.SessionID, ask.ID, choice)
+	return fmt.Sprintf(`{"action":"respond","sessionId":%q,"requestId":%q,"decision":{"choices":[%q]}}`, ask.SessionID, ask.ID, choice)
 }
 
 func optionIDs(ask registry.Ask) []string {
@@ -200,9 +200,23 @@ func TestRetryRequeuesAMessageWhoseOutcomeIsUnknown(t *testing.T) {
 	}
 	handler := dashboardRouter(d)
 	assertAPIV1Error(t, postActionAs(t, handler, "secret", fmt.Sprintf(`{"action":"queue-cancel","queueId":%d}`, item.ID)), http.StatusConflict, "conflict")
+	listed := httptest.NewRecorder()
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/requests?sessionId=to", nil)
+	listRequest.Header.Set("Authorization", "Bearer secret")
+	handler.ServeHTTP(listed, listRequest)
+	if body := listed.Body.String(); listed.Code != http.StatusOK || !strings.Contains(body, `"id":"retry"`) || !strings.Contains(body, `"id":"dismiss"`) || !strings.Contains(body, `"optionsOnly":true`) || strings.Contains(body, `"id":"reply"`) {
+		t.Fatalf("requests status=%d body=%s, want the options named by their ids", listed.Code, body)
+	}
 	asks := openDeliveryAsks(t, r)
 	if len(asks) != 1 || asks[0].Ref != fmt.Sprintf("queue:%d:dead", item.ID) || strings.Join(optionIDs(asks[0]), ",") != "retry,dismiss" {
 		t.Fatalf("asks=%+v", asks)
+	}
+	for _, extra := range []string{`"message":"soon"`, `"answers":{"x":"y"}`, `"content":{}`} {
+		body := fmt.Sprintf(`{"action":"respond","sessionId":%q,"requestId":%q,"decision":{"choices":["retry"],%s}}`, asks[0].SessionID, asks[0].ID, extra)
+		assertAPIV1Error(t, postActionAs(t, handler, "secret", body), http.StatusBadRequest, "invalid_request")
+	}
+	if row, err := r.QueueItem(item.ID, d.adapters()); err != nil || row.Status != "dead" || len(openDeliveryAsks(t, r)) != 1 {
+		t.Fatalf("queue row=%+v err=%v, want a refused answer to change nothing", row, err)
 	}
 	if response := postActionAs(t, handler, "secret", answerBody(asks[0], "retry")); response.Code != http.StatusOK {
 		t.Fatalf("retry status=%d body=%s", response.Code, response.Body.String())

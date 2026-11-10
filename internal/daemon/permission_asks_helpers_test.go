@@ -62,7 +62,7 @@ func askIDOfRequest(t *testing.T, r *registry.Registry, sessionID, ref string) s
 	return ask.ID
 }
 
-func answerRequest(ctx context.Context, d *Daemon, adapter surface.Surface, session *surface.Session, ref string, decision surface.Decision) (actionResult, error) {
+func answerRequest(ctx context.Context, d *Daemon, adapter surface.Surface, session *surface.Session, ref string, response surface.Response) (actionResult, error) {
 	ask, found := askOfRequest(d.Registry, session.ID, ref)
 	if !found {
 		if _, err := d.observeTurn(ctx, adapter, session); err != nil {
@@ -72,5 +72,5 @@ func answerRequest(ctx context.Context, d *Daemon, adapter surface.Surface, sess
 			return actionResult{}, staleRequest()
 		}
 	}
-	return d.answerAsk(ctx, adapter, session, ask.ID, decision, principal{ID: localDashboardPrincipal, Kind: principalPerson}, "")
+	return d.answerAsk(ctx, adapter, session, ask.ID, response, principal{ID: localDashboardPrincipal, Kind: principalPerson}, "")
 }

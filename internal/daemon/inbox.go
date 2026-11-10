@@ -33,6 +33,7 @@ type inboxItem struct {
 	Attempts        int                           `json:"attempts,omitempty"`
 	LastError       string                        `json:"lastError,omitempty"`
 	Relayed         bool                          `json:"relayed,omitempty"`
+	AskID           string                        `json:"askId,omitempty"`
 	CreatedAt       string                        `json:"createdAt"`
 	UpdatedAt       string                        `json:"updatedAt"`
 }
@@ -91,6 +92,7 @@ func (d *Daemon) inboxItem(item registry.InboxItem) inboxItem {
 		Attempts:        item.Attempts,
 		LastError:       item.LastError,
 		Relayed:         item.Relayed,
+		AskID:           item.AskID,
 		CreatedAt:       item.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:       item.UpdatedAt.UTC().Format(time.RFC3339),
 	}

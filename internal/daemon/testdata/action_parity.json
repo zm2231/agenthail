@@ -753,7 +753,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request: unexpected EOF\"}}\n"
   },
   "api/action lead-replacement-ack missing": {
     "status": 404,
@@ -3285,7 +3285,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request: unexpected EOF\"}}\n"
   },
   "api/v1/actions lead-replacement-ack missing": {
     "status": 404,

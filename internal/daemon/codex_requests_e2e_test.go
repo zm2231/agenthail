@@ -90,7 +90,7 @@ func TestACodexApprovalIsAnAnswerableDecisionAndItsAnswerReachesCodex(t *testing
 	}
 
 	askID := card.Requests[0].ID
-	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": id, "requestId": askID, "decision": map[string]any{"choice": "always"}})
+	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": id, "requestId": askID, "decision": map[string]any{"choices": []string{"always"}}})
 	if status != http.StatusOK {
 		t.Fatalf("respond status=%d body=%s", status, payload)
 	}
@@ -104,7 +104,7 @@ func TestACodexApprovalIsAnAnswerableDecisionAndItsAnswerReachesCodex(t *testing
 		t.Fatalf("Codex was answered %v", answered)
 	}
 	testkit.Eventually(t, "the decision to leave the feed", 10*time.Second, func() bool { return len(decisions()) == 0 })
-	status, _ = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": id, "requestId": askID, "decision": map[string]any{"behavior": "allow"}})
+	status, _ = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": id, "requestId": askID, "decision": map[string]any{"choices": []string{"allow"}}})
 	if status != http.StatusConflict {
 		t.Fatalf("a second answer: status %d, want a stale conflict", status)
 	}

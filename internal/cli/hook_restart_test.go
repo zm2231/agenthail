@@ -119,7 +119,7 @@ func TestAPromptHeldAcrossADaemonRestartIsAnsweredThroughTheNewDaemon(t *testing
 	h.stillHeld()
 
 	t.Cleanup(h.serve())
-	action := map[string]any{"action": "respond", "sessionId": restartConversation, "requestId": h.heldRequest(), "decision": map[string]any{"behavior": "allow", "answers": map[string]string{"Which branch?": "next"}}}
+	action := map[string]any{"action": "respond", "sessionId": restartConversation, "requestId": h.heldRequest(), "decision": map[string]any{"answers": map[string]string{"Which branch?": "next"}}}
 	if body, status, err := h.client.call(context.Background(), http.MethodPost, "/api/v1/actions", nil, action, nil); err != nil || status != http.StatusOK {
 		t.Fatalf("respond status=%d err=%v body=%s", status, err, body)
 	}

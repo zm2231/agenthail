@@ -31,6 +31,7 @@ type QueueRow struct {
 	BusyDelivery    string                   `json:"busyDelivery,omitempty"`
 	Uploads         surface.Uploads          `json:"-"`
 	Author          surface.Author           `json:"-"`
+	AskID           string                   `json:"askId,omitempty"`
 }
 
 const QueueRetryBackoff = 5 * time.Second
@@ -130,9 +131,13 @@ func (r *Registry) ListQueue(includeDelivered bool, adapters surface.Adapters) (
 	if err != nil {
 		return nil, err
 	}
-	return appendRows(make([]QueueRow, 0), rows, func(row rowScanner) (QueueRow, error) {
+	listed, err := appendRows(make([]QueueRow, 0), rows, func(row rowScanner) (QueueRow, error) {
 		return scanQueueRow(row, adapters, now)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return r.linkQueueAsks(listed)
 }
 
 func (r *Registry) QueueItem(id int64, adapters surface.Adapters) (*QueueRow, error) {
@@ -141,7 +146,11 @@ func (r *Registry) QueueItem(id int64, adapters surface.Adapters) (*QueueRow, er
 	if err != nil {
 		return nil, err
 	}
-	return &row, nil
+	linked, err := r.linkQueueAsks([]QueueRow{row})
+	if err != nil {
+		return nil, err
+	}
+	return &linked[0], nil
 }
 
 func queueRowIsHistorical(row QueueRow, now time.Time) bool {

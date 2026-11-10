@@ -14,5 +14,9 @@ func (r *Registry) ActiveQueue(sessionID string, adapters surface.Adapters) ([]Q
 	if err != nil {
 		return nil, err
 	}
-	return appendRows(make([]QueueRow, 0), rows, func(row rowScanner) (QueueRow, error) { return scanQueueRow(row, adapters, now) })
+	listed, err := appendRows(make([]QueueRow, 0), rows, func(row rowScanner) (QueueRow, error) { return scanQueueRow(row, adapters, now) })
+	if err != nil {
+		return nil, err
+	}
+	return r.linkQueueAsks(listed)
 }

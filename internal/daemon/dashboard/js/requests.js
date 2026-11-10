@@ -86,11 +86,11 @@ export function renderRequestCard(request) {
 }
 
 const respondDecisions = {
-  allow: { behavior: "allow" },
-  always: { behavior: "allow", always: true },
-  deny: { behavior: "deny" },
-  never: { behavior: "deny", always: true },
-  stop: { behavior: "deny", stop: true },
+  allow: { choices: ["allow"] },
+  always: { choices: ["always"] },
+  deny: { choices: ["deny"] },
+  never: { choices: ["never"] },
+  stop: { choices: ["stop"] },
 };
 
 export function renderInputRequest(request, created) {
@@ -198,6 +198,6 @@ export function bindRequestEvents() {
     const request = (app.requests?.requests || []).find((r) => r.id === form.dataset.requestInput);
     if (!request) return;
     form.querySelector('[type="submit"]').disabled = true;
-    await respondToRequest(request.id, { behavior: "allow", content: inputContent(form, request) });
+    await respondToRequest(request.id, { choices: ["allow"], content: inputContent(form, request) });
   });
 }

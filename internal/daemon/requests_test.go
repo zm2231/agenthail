@@ -106,7 +106,9 @@ func TestAPhoneAnswersAHostSessionsPermissionRequestOnceAndHistoryNamesIt(t *tes
 		t.Fatalf("waiting = %+v, %v, want request %s", waiting, err, request.ID)
 	}
 
-	respond := map[string]any{"action": "respond", "sessionId": id, "requestId": request.ID, "decision": map[string]any{"behavior": "allow"}}
+	behavior := map[string]any{"action": "respond", "sessionId": id, "requestId": request.ID, "decision": map[string]any{"behavior": "allow"}}
+	assertAPIV1Error(t, apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, behavior), http.StatusBadRequest, "invalid_request")
+	respond := map[string]any{"action": "respond", "sessionId": id, "requestId": request.ID, "decision": map[string]any{"choices": []string{"allow"}}}
 	assertAPIV1Error(t, apiCall(t, handler, http.MethodPost, "/api/v1/actions", reader, respond), http.StatusUnauthorized, "unauthorized")
 	response := apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, respond)
 	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"outcome":"allowed"`)) {
@@ -332,7 +334,7 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 	asked := notificationSurfaceName(surface.KindClaude) + " asks you a question"
 	approvalAsked := notificationSurfaceName(surface.KindClaude) + " needs your approval"
 	reply := func(requestID, choice, message string) *httptest.ResponseRecorder {
-		return apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, map[string]any{"action": "respond", "sessionId": id, "requestId": requestID, "decision": map[string]string{"choice": choice, "message": message}})
+		return apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, map[string]any{"action": "respond", "sessionId": id, "requestId": requestID, "decision": map[string]any{"choices": []string{choice}, "message": message}})
 	}
 	choose := func(requestID, choice string) *httptest.ResponseRecorder { return reply(requestID, choice, "") }
 
@@ -463,4 +465,51 @@ func waitingDiagnosis(t *testing.T, r *registry.Registry, fixture *claudehosttes
 		}
 	}
 	return fmt.Sprintf("%s; record=%+v announced=%v err=%v; host list took %s err=%v unanswered=%v requests=%v", observed, recorded, announced, err, time.Since(started).Round(time.Millisecond), listErr, listing.Unanswered, requests)
+}
+
+func TestAQuestionRequestIsAnsweredByTheIDsOfItsOptions(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	r := hostRegistry(t)
+	if err := r.RegisterSession(hostedSession(t, claude, id)); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDaemon(t, r, []surface.Surface{claude})
+	handler := dashboardRouter(d)
+	phone := deviceToken(t, r, "Phone", "read", "control")
+	if response := apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, map[string]any{"action": "send", "sessionId": id, "message": "QUESTIONS", "author": "person"}); response.Code != http.StatusOK {
+		t.Fatalf("send status=%d body=%s", response.Code, response.Body.String())
+	}
+	var state struct {
+		Requests []surface.Request `json:"requests"`
+	}
+	testkit.Eventually(t, "the open question", 15*time.Second, func() bool {
+		response := apiCall(t, handler, http.MethodGet, "/api/v1/requests?sessionId="+id, phone, nil)
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &state) != nil {
+			t.Fatalf("requests status=%d body=%s", response.Code, response.Body.String())
+		}
+		return len(state.Requests) == 1
+	})
+	request := state.Requests[0]
+	if len(request.Questions) != 2 || request.Questions[0].Options[1].ID != "q0o1" || request.Questions[1].Options[0].ID != "q1o0" {
+		t.Fatalf("questions %+v, want every option named by an id", request.Questions)
+	}
+	partial := map[string]any{"action": "respond", "sessionId": id, "requestId": request.ID, "decision": map[string]any{"choices": []string{"q0o1"}}}
+	if response := apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, partial); response.Code != http.StatusBadRequest {
+		t.Fatalf("partial status=%d body=%s, want a question left unanswered refused", response.Code, response.Body.String())
+	}
+	respond := map[string]any{"action": "respond", "sessionId": id, "requestId": request.ID, "decision": map[string]any{"choices": []string{"q0o1", "q1o0"}}}
+	if response := apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, respond); response.Code != http.StatusOK {
+		t.Fatalf("respond status=%d body=%s", response.Code, response.Body.String())
+	}
+	testkit.Eventually(t, "the answered question", 15*time.Second, func() bool {
+		turns := fixture.Turns(t, id)
+		return len(turns) == 1 && turns[0].Reply != ""
+	})
+	if reply := fixture.Turns(t, id)[0].Reply; reply != `question:allow:{"Which color?":"Blue","Which size?":"S"}` {
+		t.Fatalf("reply %q, want the labels the ids name", reply)
+	}
 }

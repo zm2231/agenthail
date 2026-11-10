@@ -150,7 +150,13 @@ func (a *App) cmdAsk(args []string) error {
 		if len(args) != 3 {
 			return errors.New("usage: agenthail ask answer <ask-id> <answer>")
 		}
-		return a.changeAsk(map[string]any{"op": "answer", "askId": args[1], "note": args[2]}, false, "answered "+args[1])
+		request := map[string]any{"op": "answer", "askId": args[1], "note": args[2]}
+		if offered, err := a.askOffers(args[1], args[2]); err != nil {
+			return err
+		} else if offered {
+			request = map[string]any{"op": "answer", "askId": args[1], "choices": []string{args[2]}}
+		}
+		return a.changeAsk(request, false, "answered "+args[1])
 	case "escalate", "withdraw":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: agenthail ask %s <ask-id>", args[0])
@@ -194,6 +200,29 @@ func (a *App) changeAsk(request map[string]any, asCaller bool, done string) erro
 	}
 	fmt.Println(done)
 	return nil
+}
+
+func (a *App) askOffers(id, answer string) (bool, error) {
+	body, err := a.askCall(http.MethodGet, url.Values{"id": {id}}, nil)
+	if err != nil {
+		return false, err
+	}
+	var listed struct {
+		Asks []askListed `json:"asks"`
+	}
+	if err := json.Unmarshal(body, &listed); err != nil {
+		return false, err
+	}
+	for _, ask := range listed.Asks {
+		for _, question := range ask.Questions {
+			for _, option := range question.Options {
+				if option.ID == answer {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
 }
 
 func (a *App) listAsks(jsonOut bool) error {

@@ -128,8 +128,21 @@ func TestADeadQueueRowWhoseIntentFailedRaisesOnlyTheIntentsAsk(t *testing.T) {
 	if row, err := r.QueueItem(queueID, nil); err != nil || row.Status != "dead" {
 		t.Fatalf("row=%+v err=%v", row, err)
 	}
-	if ref := deliveryRef(t, onlyDeliveryAsk(t, r)); ref.IntentID != deliveryID || ref.QueueID != 0 {
+	ask := onlyDeliveryAsk(t, r)
+	if ref := deliveryRef(t, ask); ref.IntentID != deliveryID || ref.QueueID != 0 {
 		t.Fatalf("ref=%+v, want only the intent's ask", ref)
+	}
+	assertRowsLinkTheAsk(t, r, queueID, ask.ID)
+}
+
+func assertRowsLinkTheAsk(t *testing.T, r *Registry, queueID int64, askID string) {
+	t.Helper()
+	if row, err := r.QueueItem(queueID, nil); err != nil || row.AskID != askID {
+		t.Fatalf("queue row askId=%q err=%v, want %s", row.AskID, err, askID)
+	}
+	page, err := r.InboxPage(InboxRequest{SessionID: "target"})
+	if err != nil || len(page.Items) != 1 || page.Items[0].AskID != askID {
+		t.Fatalf("inbox=%+v err=%v, want the message to link ask %s", page.Items, err, askID)
 	}
 }
 
@@ -148,6 +161,7 @@ func TestAnUnconfirmedDeadRowAndARefusedRowRaiseQueueAsks(t *testing.T) {
 		if got := askOptions(ask); !reflect.DeepEqual(got, []string{DeliveryRetry, DeliveryDismiss}) {
 			t.Fatalf("options=%v", got)
 		}
+		assertRowsLinkTheAsk(t, r, queueID, ask.ID)
 	})
 	t.Run("refused", func(t *testing.T) {
 		r := openTestRegistry(t)
@@ -166,6 +180,7 @@ func TestAnUnconfirmedDeadRowAndARefusedRowRaiseQueueAsks(t *testing.T) {
 		if ask.SessionID != "sender" || ask.RoutedTo != "sender" {
 			t.Fatalf("ask=%+v, want it routed to the sender", ask)
 		}
+		assertRowsLinkTheAsk(t, r, queueID, ask.ID)
 	})
 }
 

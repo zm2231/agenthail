@@ -2,6 +2,7 @@ package surface
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -14,9 +15,9 @@ const maxQuestionOptions = 4
 const maxRequestActionTitle = 40
 
 // RequestAction is one button a notification offers for a request. ID is a
-// choice its Choose accepts: "allow", "always", "deny", "never" (always
-// deny), "stop" (deny and end the turn), "o<n>" for a question's nth option,
-// or "reply", which takes the person's typed text.
+// choice its Resolve accepts: "allow", "always", "deny", "never" (always
+// deny), "stop" (deny and end the turn), a question's option id, or "reply",
+// which takes the person's typed text.
 // Titles are only for display; a choice is resolved against the request as it
 // is when the button is pressed.
 type RequestAction struct {
@@ -60,51 +61,131 @@ func (r Request) Actions() []RequestAction {
 		}
 		return append(actions, RequestAction{ID: "reply", Title: "Deny with message…"})
 	}
-	question, ok := r.singleChoice()
+	question, ok := r.WithOptionIDs().singleChoice()
 	if !ok {
 		return nil
 	}
 	actions := make([]RequestAction, 0, maxQuestionOptions+1)
-	if len(question.Options) <= maxQuestionOptions {
-		for index, option := range question.Options {
-			actions = append(actions, RequestAction{ID: "o" + strconv.Itoa(index), Title: actionTitle(option.Label)})
+	if len(question.Options) <= maxQuestionOptions || r.OptionsOnly {
+		for _, option := range question.Options {
+			actions = append(actions, RequestAction{ID: option.ID, Title: actionTitle(option.Label)})
 		}
+	}
+	if r.OptionsOnly {
+		return actions
 	}
 	return append(actions, RequestAction{ID: "reply", Title: "Reply…"})
 }
 
-// Choose turns a notification button's choice into a decision on this
-// request. A choice the request does not offer is refused, so a button from
-// an older notification never answers with something the person did not see.
-// text is what the person typed for a reply, and is required for one.
-func (r Request) Choose(choice, text string) (Decision, error) {
-	for _, action := range r.Actions() {
-		if action.ID != choice {
-			continue
+// Resolve reads a client's response against this request as it is now. An
+// id the request does not offer is refused, so a button from an older
+// notification never answers with something the person did not see. A
+// provider's questions must all be answered; an agent's ask may be answered
+// in part.
+func (r Request) Resolve(response Response) (Decision, error) {
+	note := strings.TrimSpace(response.Message)
+	if r.Kind == WaitingInput {
+		switch {
+		case slices.Equal(response.Choices, []string{"allow"}) && len(response.Content) == 0 && r.Elicitation != nil && len(r.Elicitation.Fields) > 0:
+			return Decision{}, fmt.Errorf("accept request %s with its form's values", r.ID)
+		case slices.Equal(response.Choices, []string{"allow"}):
+			return Decision{Behavior: "allow", Content: response.Content}, nil
+		case slices.Equal(response.Choices, []string{"deny"}):
+			return Decision{Behavior: "deny"}, nil
 		}
-		switch choice {
-		case "allow", "always":
-			return Decision{Behavior: "allow", Always: choice == "always"}, nil
-		case "deny", "never":
-			return Decision{Behavior: "deny", Always: choice == "never"}, nil
-		case "stop":
-			return Decision{Behavior: "deny", Stop: true}, nil
-		}
-		question, _ := r.singleChoice()
-		if choice == "reply" {
-			text = strings.TrimSpace(text)
-			if text == "" {
-				return Decision{}, fmt.Errorf("a reply to request %s needs text", r.ID)
-			}
-			if !r.asksQuestions() {
-				return Decision{Behavior: "deny", Message: text}, nil
-			}
-			return Decision{Behavior: "allow", Answers: map[string]string{question.Question: text}}, nil
-		}
-		index, _ := strconv.Atoi(strings.TrimPrefix(choice, "o"))
-		return Decision{Behavior: "allow", Answers: map[string]string{question.Question: question.Options[index].Label}}, nil
+		return Decision{}, fmt.Errorf("answer request %s with allow, and its form's values, or deny", r.ID)
 	}
-	return Decision{}, fmt.Errorf("request %s offers no choice %q", r.ID, choice)
+	if r.OptionsOnly && (len(response.Answers) > 0 || note != "" || len(response.Content) > 0) {
+		return Decision{}, fmt.Errorf("request %s takes only its options", r.ID)
+	}
+	if len(response.Choices) == 1 {
+		if decision, ok, err := r.action(response.Choices[0], note); ok {
+			return decision, err
+		}
+	}
+	if !r.asksQuestions() {
+		if len(response.Choices) == 1 {
+			return Decision{}, fmt.Errorf("request %s offers no choice %q", r.ID, response.Choices[0])
+		}
+		return Decision{}, fmt.Errorf("answer request %s with one of its actions", r.ID)
+	}
+	answers, err := r.picked(response.Choices)
+	if err != nil {
+		return Decision{}, err
+	}
+	for question, answer := range response.Answers {
+		if !slices.ContainsFunc(r.Questions, func(q Question) bool { return q.Question == question }) {
+			return Decision{}, fmt.Errorf("request %s asks no question %q", r.ID, question)
+		}
+		if _, picked := answers[question]; !picked && strings.TrimSpace(answer) != "" {
+			answers[question] = strings.TrimSpace(answer)
+		}
+	}
+	if r.Kind == WaitingQuestion {
+		for _, question := range r.Questions {
+			if answers[question.Question] == "" {
+				return Decision{}, fmt.Errorf("answer %q too", question.Question)
+			}
+		}
+	}
+	return Decision{Behavior: "allow", Answers: answers, Message: note}, nil
+}
+
+func (r Request) action(id, note string) (Decision, bool, error) {
+	if id == "deny" && r.Kind == WaitingQuestion {
+		return Decision{Behavior: "deny", Message: note}, true, nil
+	}
+	if _, _, option := r.WithOptionIDs().option(id); option || !slices.ContainsFunc(r.Actions(), func(action RequestAction) bool { return action.ID == id }) {
+		return Decision{}, false, nil
+	}
+	switch id {
+	case "allow", "always":
+		return Decision{Behavior: "allow", Always: id == "always"}, true, nil
+	case "deny", "never":
+		return Decision{Behavior: "deny", Always: id == "never"}, true, nil
+	case "stop":
+		return Decision{Behavior: "deny", Stop: true}, true, nil
+	}
+	if note == "" {
+		return Decision{}, true, fmt.Errorf("a reply to request %s needs text", r.ID)
+	}
+	if !r.asksQuestions() {
+		return Decision{Behavior: "deny", Message: note}, true, nil
+	}
+	question, _ := r.singleChoice()
+	return Decision{Behavior: "allow", Answers: map[string]string{question.Question: note}}, true, nil
+}
+
+func (r Request) picked(choices []string) (map[string]string, error) {
+	answers := map[string]string{}
+	named := r.WithOptionIDs()
+	for _, id := range choices {
+		question, label, found := named.option(id)
+		if !found {
+			return nil, fmt.Errorf("request %s offers no choice %q", r.ID, id)
+		}
+		picked, again := answers[question.Question]
+		switch {
+		case again && !question.MultiSelect:
+			return nil, fmt.Errorf("pick one option for %q", question.Question)
+		case again:
+			answers[question.Question] = picked + ", " + label
+		default:
+			answers[question.Question] = label
+		}
+	}
+	return answers, nil
+}
+
+func (r Request) option(id string) (Question, string, bool) {
+	for _, question := range r.Questions {
+		for _, option := range question.Options {
+			if option.ID == id {
+				return question, option.Label, true
+			}
+		}
+	}
+	return Question{}, "", false
 }
 
 // Prompt is what the request asks, in one line for a notification.
@@ -154,4 +235,27 @@ func actionTitle(label string) string {
 		cut--
 	}
 	return label[:cut] + "…"
+}
+
+// WithOptionIDs gives every option an id unique in the request: its own, or
+// o and its place, the id its single-choice action uses; each option of a
+// request with several questions is prefixed q and the question's place.
+func (r Request) WithOptionIDs() Request {
+	questions := make([]Question, len(r.Questions))
+	for i, question := range r.Questions {
+		options := make([]QuestionOption, len(question.Options))
+		for j, option := range question.Options {
+			if option.ID == "" {
+				option.ID = "o" + strconv.Itoa(j)
+			}
+			if prefix := "q" + strconv.Itoa(i); len(r.Questions) > 1 && !strings.HasPrefix(option.ID, prefix) {
+				option.ID = prefix + option.ID
+			}
+			options[j] = option
+		}
+		question.Options = options
+		questions[i] = question
+	}
+	r.Questions = questions
+	return r
 }

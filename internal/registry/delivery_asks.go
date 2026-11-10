@@ -273,6 +273,50 @@ func syncDeliveryAsksTx(tx *sql.Tx, now time.Time) error {
 	return nil
 }
 
+type deliveryAskLinks struct {
+	queue, intent map[int64]string
+}
+
+func (r *Registry) deliveryAskLinks() (deliveryAskLinks, error) {
+	links := deliveryAskLinks{queue: map[int64]string{}, intent: map[int64]string{}}
+	rows, err := r.read.Query(`SELECT a.id,a.ref,COALESCE((SELECT di.queue_id FROM delivery_intents di WHERE a.ref LIKE 'intent:%' AND di.id=CAST(substr(a.ref,8,instr(substr(a.ref,8),':')-1) AS INTEGER)),0)
+		FROM asks a WHERE a.origin=? AND a.state=? ORDER BY a.created_at_ms, a.id`, AskOriginDelivery, AskOpen)
+	if err != nil {
+		return links, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, ref string
+		var queueID int64
+		if err := rows.Scan(&id, &ref, &queueID); err != nil {
+			return links, err
+		}
+		parsed, ok := ParseDeliveryRef(ref)
+		switch {
+		case !ok:
+		case parsed.QueueID > 0:
+			links.queue[parsed.QueueID] = id
+		default:
+			links.intent[parsed.IntentID] = id
+			if queueID > 0 {
+				links.queue[queueID] = id
+			}
+		}
+	}
+	return links, rows.Err()
+}
+
+func (r *Registry) linkQueueAsks(rows []QueueRow) ([]QueueRow, error) {
+	links, err := r.deliveryAskLinks()
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		rows[i].AskID = links.queue[rows[i].ID]
+	}
+	return rows, nil
+}
+
 func (r *Registry) UntoldDeliveryAsks() ([]Ask, error) {
 	return queryAsks(context.Background(), r.read, `WHERE origin=? AND state=? AND announced_at_ms=0 ORDER BY created_at_ms, id`, AskOriginDelivery, AskOpen)
 }

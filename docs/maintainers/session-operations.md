@@ -203,9 +203,10 @@ adds only the request ID; the phone fetches the prompt and buttons from
 `actions`. It answers for every session whose provider takes answers through
 Agenthail, with an empty list when none is open, as for a terminal session
 right after its question was answered. A button answers with `respond` and
-`decision.choice`, plus
+`decision.choices` holding its id, plus
 `decision.message` for `reply`, which answers a question with that text or
-denies an approval with it as the reason. A choice is resolved against the
+denies an approval with it as the reason. Every client answers this way; see
+[asks.md](asks.md#answering). A choice is resolved against the
 request as it is then: one it no longer offers is refused, and an answered
 request is `stale`. `respond` returns once the session's catalog row no longer
 shows the request it answered. While a target waits, nothing is

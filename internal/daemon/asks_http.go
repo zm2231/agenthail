@@ -43,6 +43,7 @@ type askHTTPRequest struct {
 	Title     string             `json:"title"`
 	Questions []askQuestionInput `json:"questions"`
 	Answers   map[string]string  `json:"answers"`
+	Choices   []string           `json:"choices"`
 	Note      string             `json:"note"`
 }
 
@@ -159,11 +160,11 @@ func (d *Daemon) answerAskLocally(ctx context.Context, w http.ResponseWriter, re
 	if by := strings.TrimSpace(request.SessionID); by != "" {
 		p = sessionPrincipal(by)
 	}
-	decision := surface.Decision{Answers: request.Answers, Message: request.Note}
+	response := surface.Response{Choices: request.Choices, Answers: request.Answers, Message: request.Note}
 	if request.Op == "escalate" {
-		decision = surface.Decision{Behavior: askEscalate}
+		response = surface.Response{Choices: []string{askEscalate}}
 	}
 	personName, _ := d.Registry.PersonName()
-	result, err := d.answerAsk(ctx, adapter, session, ask.ID, decision, p, personName)
+	result, err := d.answerAsk(ctx, adapter, session, ask.ID, response, p, personName)
 	writeActionResult(w, result, err)
 }
