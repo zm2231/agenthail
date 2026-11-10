@@ -117,6 +117,9 @@ func TestAnIdleCodexThreadMovesToAPairedHostAndRunsThere(t *testing.T) {
 	if left := source.rollouts(t, session.ID); len(left) != 0 {
 		t.Fatalf("the source still reads the thread at %v", left)
 	}
+	if sent, err := source.codex.Send(ctx, session, "on the source"); err == nil && sent.Accepted {
+		t.Fatalf("the source still runs the thread it moved: %+v", sent)
+	}
 
 	moved, err := target.reg.Session(session.ID)
 	if err != nil {

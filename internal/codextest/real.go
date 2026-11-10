@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 const RealMinimumVersion = "0.151.0"
@@ -90,13 +92,43 @@ func (r *Real) start(t testing.TB) func() {
 		}
 	}
 	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(100 * time.Millisecond) {
-		if conn, err := net.Dial("unix", r.Socket()); err == nil {
-			_ = conn.Close()
+		if r.initializes() {
 			return stop
 		}
 		if time.Now().After(deadline) {
 			stop()
 			t.Fatal("the real app-server did not listen on the control socket")
+		}
+	}
+}
+
+// initializes is true once the app-server answers initialize; it can accept
+// on its socket before it answers requests.
+func (r *Real) initializes() bool {
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 2 * time.Second,
+		NetDialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", r.Socket())
+		},
+	}
+	ws, _, err := dialer.Dial("ws://localhost/rpc", nil)
+	if err != nil {
+		return false
+	}
+	defer ws.Close()
+	_ = ws.SetReadDeadline(time.Now().Add(2 * time.Second))
+	initialize := map[string]any{"id": 1, "method": "initialize", "params": map[string]any{"clientInfo": map[string]any{"name": "agenthail-test", "version": "1"}}}
+	if ws.WriteJSON(initialize) != nil {
+		return false
+	}
+	for {
+		var message map[string]any
+		if ws.ReadJSON(&message) != nil {
+			return false
+		}
+		if id, ok := message["id"].(float64); ok && id == 1 {
+			_, failed := message["error"]
+			return !failed
 		}
 	}
 }
