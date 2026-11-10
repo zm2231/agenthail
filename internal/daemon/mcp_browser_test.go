@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -38,6 +37,9 @@ func newBrowserFixture(t *testing.T) *browserFixture {
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
 	if shared := os.Getenv("AGENTHAIL_BROWSER_TEST_BROWSERS"); shared != "" {
+		if err := os.MkdirAll(shared, 0o700); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.MkdirAll(browserhost.StateDir(home), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -45,8 +47,7 @@ func newBrowserFixture(t *testing.T) *browserFixture {
 			t.Fatal(err)
 		}
 	}
-	_, file, _, _ := runtime.Caller(0)
-	launch := browserhost.Launch{Node: testnode.Path(t), Script: filepath.Join(filepath.Dir(file), "..", "..", "browser-host", "host.mjs"), Version: "test", Env: os.Environ()}
+	launch := browserhost.Launch{Node: testnode.Path(t), Script: filepath.Join(testnode.BrowserHost(t), "host.mjs"), Version: "test", Env: os.Environ()}
 	d, _, _, parent, child := daemonFixture(t)
 	manager := &browserhost.Manager{Home: home, Launch: func() (browserhost.Launch, error) { return launch, nil }}
 	d.SetBrowserHost(manager)

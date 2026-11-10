@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -20,8 +19,7 @@ func TestTheSnapshotReportsTheBrowserHostAndChangesWhenItStarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
-	_, file, _, _ := runtime.Caller(0)
-	launch := browserhost.Launch{Node: testnode.Path(t), Script: filepath.Join(filepath.Dir(file), "..", "..", "browser-host", "host.mjs"), Version: "test", Env: os.Environ()}
+	launch := browserhost.Launch{Node: testnode.Path(t), Script: filepath.Join(testnode.BrowserHost(t), "host.mjs"), Version: "test", Env: os.Environ()}
 	d.SetBrowserHost(&browserhost.Manager{Home: home, Launch: func() (browserhost.Launch, error) { return launch, nil }})
 
 	read := func() (browserhost.Status, string) {

@@ -86,11 +86,8 @@ func (f *Fixture) Manager(t testing.TB, version string) *claudehost.Manager {
 
 func (f *Fixture) launch(t testing.TB, script, version string, env ...string) claudehost.Launch {
 	t.Helper()
-	hostDir := hostDir()
 	node := testnode.Path(t)
-	if _, err := os.Stat(filepath.Join(hostDir, "node_modules", "@anthropic-ai", "claude-agent-sdk")); err != nil {
-		t.Fatalf("install the host's dependencies first (npm ci --prefix claude-host): %v", err)
-	}
+	hostDir := testnode.ClaudeHost(t)
 	// launchd starts the daemon's host without the environment of the Claude
 	// session these tests may run in, whose host sets variables that change
 	// what Claude reports.
