@@ -187,7 +187,7 @@ func answerHeld(t *testing.T, h *runningDaemon, id string, n int, root string) s
 	var state surface.RequestState
 	testkit.Eventually(t, fmt.Sprintf("question %d to be held, answerable and listed", n), 5*time.Second, func() bool {
 		session = h.catalogSession(id)
-		if session == nil || session.WaitingOn == nil || !strings.Contains(session.WaitingOn.ID, ":held:") || !session.WaitingOn.Answerable || !session.Capabilities.Respond {
+		if session == nil || session.WaitingOn == nil || !strings.Contains(askRef(h.daemon.Registry, session.WaitingOn.ID), ":held:") || !session.WaitingOn.Answerable || !session.Capabilities.Respond {
 			return false
 		}
 		status, payload := h.request(http.MethodGet, "/api/v1/requests?sessionId="+id, nil)
@@ -206,7 +206,7 @@ func answerHeld(t *testing.T, h *runningDaemon, id string, n int, root string) s
 	if status != http.StatusOK {
 		t.Fatalf("respond status=%d body=%s", status, payload)
 	}
-	return session.WaitingOn.ID
+	return askRef(h.daemon.Registry, session.WaitingOn.ID)
 }
 
 func TestATerminalSessionInAnotherConfigRootIsAnsweredQuestionAfterQuestionAcrossADaemonRestart(t *testing.T) {
@@ -244,9 +244,9 @@ func TestATerminalSessionInAnotherConfigRootIsAnsweredQuestionAfterQuestionAcros
 	hook := asker.ask(3)
 	testkit.Eventually(t, "question 3 to be held before the restart", 5*time.Second, func() bool {
 		waiting := h.sessionWaiting(id)
-		return waiting != nil && strings.Contains(waiting.ID, ":held:")
+		return waiting != nil && strings.Contains(askRef(store, waiting.ID), ":held:")
 	})
-	before := h.sessionWaiting(id).ID
+	before := askRef(store, h.sessionWaiting(id).ID)
 	// The stopping daemon process takes the hook's connection with it.
 	asker.serve(nil)
 	stop()

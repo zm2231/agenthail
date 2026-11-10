@@ -302,8 +302,8 @@ func TestArchivingClearsAWake(t *testing.T) {
 
 func TestAWaitReturningARequestWithdrawsTheWaitersOwnNotice(t *testing.T) {
 	f := newTaskFixture(t)
-	f.see(surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "t1", WaitingOn: &surface.Waiting{Kind: surface.WaitingApproval, ID: "prompt-1"}})
-	key := waitingNoticeKey(f.session.ID, "prompt-1")
+	f.see(surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "t1", WaitingOn: &surface.Waiting{Kind: surface.WaitingApproval, ID: "prompt-1", Answerable: true}})
+	key := askNoticeKey(askIDOfRequest(t, f.r, f.session.ID, "prompt-1"), f.task.Parent)
 	testkit.Eventually(t, "the waiting notice", 5*time.Second, func() bool { return f.queuedFor(t, f.task.Parent, key) == 1 })
 	readyOf(t, f.wait(t, map[string]any{"timeoutSec": 0}), "request")
 	if queued := f.queuedFor(t, f.task.Parent, key); queued != 0 {
@@ -313,15 +313,19 @@ func TestAWaitReturningARequestWithdrawsTheWaitersOwnNotice(t *testing.T) {
 
 func TestANoticeStillOnItsWayIsDroppedOnceTheWaiterReadTheRequest(t *testing.T) {
 	f := newTaskFixture(t)
-	waiting := surface.Waiting{Kind: surface.WaitingApproval, ID: "prompt-1"}
 	to, ok := f.d.noticeRecipient(f.session)
 	if !ok || to.sessionID != f.task.Parent {
 		t.Fatalf("to=%+v ok=%v", to, ok)
 	}
+	opened, err := f.r.SyncWaits(f.session.ID, []registry.Wait{{Ref: "prompt-1", Kind: surface.WaitingApproval, Answerable: true}}, f.task.Parent, time.Now())
+	if err != nil || len(opened.Opened) != 1 {
+		t.Fatalf("opened=%+v err=%v", opened, err)
+	}
+	ask := opened.Opened[0]
 	caller := &mcpCaller{session: surface.Session{ID: f.task.Parent}}
-	f.d.noteWaitItemRead(caller, mcpWaitItem{Type: "request", Child: f.session.ID, waiting: &waiting})
-	f.d.noticeWaiting(f.session, waiting, surface.Request{}, false)
-	if queued := f.queuedFor(t, f.task.Parent, waitingNoticeKey(f.session.ID, waiting.ID)); queued != 0 {
+	f.d.noteWaitItemRead(caller, mcpWaitItem{Type: "request", Child: f.session.ID, waiting: &surface.Waiting{Kind: surface.WaitingApproval, ID: ask.ID, Answerable: true}})
+	f.d.noticePermission(context.Background(), ask)
+	if queued := f.queuedFor(t, f.task.Parent, askNoticeKey(ask.ID, f.task.Parent)); queued != 0 {
 		t.Fatalf("notices=%d", queued)
 	}
 }

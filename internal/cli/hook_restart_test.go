@@ -83,7 +83,7 @@ func (h *promptRestart) heldRequest() string {
 			continue
 		}
 		for _, request := range state.Requests {
-			if strings.Contains(request.ID, ":held:") {
+			if ask, found, err := h.store.Ask(request.ID); err == nil && found && strings.Contains(ask.Ref, ":held:") {
 				return request.ID
 			}
 		}

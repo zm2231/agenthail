@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -342,13 +343,19 @@ func (d *Daemon) sendAskNotifications(desktop string, mobile mobileNotification,
 	d.background.start(func(ctx context.Context) { d.deliverAskNotifications(ctx, desktop, mobile, actions) })
 }
 
+// The desktop notification goes through a helper app that can take seconds
+// to start, so the phone is told alongside it.
 func (d *Daemon) deliverAskNotifications(ctx context.Context, desktop string, mobile mobileNotification, actions []surface.RequestAction) {
-	if err := d.notifyDesktop("Agenthail", desktop, mobile.SessionID, "agenthail-"+mobile.CollapseID, mobile.RequestID, actions); err != nil {
-		d.log.Printf("desktop notification: %s", err)
-	}
+	var posted sync.WaitGroup
+	posted.Go(func() {
+		if err := d.notifyDesktop("Agenthail", desktop, mobile.SessionID, "agenthail-"+mobile.CollapseID, mobile.RequestID, actions); err != nil {
+			d.log.Printf("desktop notification: %s", err)
+		}
+	})
 	notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	d.notifyPairedDevices(notificationCtx, mobile)
+	posted.Wait()
 }
 
 func (d *Daemon) withdrawAsk(askID string) {

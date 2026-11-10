@@ -101,7 +101,7 @@ func parityCases() []parityCase {
 		session("model empty", "model", ``),
 		session("permission-mode", "permission-mode", `,"permissionMode":"plan"`),
 		session("turn-setting", "turn-setting", `,"setting":"effort","value":"high"`),
-		session("respond", "respond", `,"requestId":"r1","decision":{"behavior":"allow"}`),
+		session("respond", "respond", `,"requestId":"ask-r1","decision":{"behavior":"allow"}`),
 		session("context", "context", ``),
 		session("usage", "usage", ``),
 		session("status", "status", ``),
@@ -131,10 +131,10 @@ func parityCases() []parityCase {
 		session("session-lifecycle-status", "session-lifecycle-status", ``),
 		session("session-lifecycle-logs", "session-lifecycle-logs", ``),
 		session("session-lifecycle-resume", "session-lifecycle-resume", ``),
-		session("respond stale", "respond", `,"requestId":"gone","decision":{"behavior":"allow"}`),
-		session("respond choice", "respond", `,"requestId":"r1","decision":{"choice":"o9"}`),
-		session("respond choice stale", "respond", `,"requestId":"gone","decision":{"choice":"o0"}`),
-		session("request-withdraw from a current session", "request-withdraw", `,"requestId":"r1"`),
+		session("respond stale", "respond", `,"requestId":"ask-gone","decision":{"behavior":"allow"}`),
+		session("respond choice", "respond", `,"requestId":"ask-r1","decision":{"choice":"o9"}`),
+		session("respond choice stale", "respond", `,"requestId":"ask-gone","decision":{"choice":"o0"}`),
+		session("request-withdraw from a current session", "request-withdraw", `,"requestId":"ask-r1"`),
 		session("session-fork conflicting points", "session-fork", `,"fork":{"lastTurnId":"a","beforeTurnId":"b"}`),
 		session("session-fork unknown creator", "session-fork", `,"sourceSessionId":"ghost"`),
 		session("session-fork unknown turn", "session-fork", `,"fork":{"beforeTurnId":"never"}`),
@@ -294,6 +294,9 @@ func parityDaemon(t *testing.T, setup func(*testing.T, *Daemon, *registry.Regist
 	fake.caps = surface.Capabilities{Send: true, Steer: true, Interrupt: true, Compact: true, Goal: true, Model: true, PermissionMode: true, Commands: true, Attach: true}
 	d.Surfaces = []surface.Surface{paritySurface{daemonSurface: fake}}
 	d.notifyDesktop = func(string, string, string, string, string, []surface.RequestAction) error { return nil }
+	if _, err := r.WriteDB().Exec(`INSERT INTO asks(id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,created_at_ms,ref,wait_kind,answerable,announced_at_ms) VALUES('ask-r1','to','permission','Needs your approval','[]','person',1,'[]','open',1,'r1','approval',1,1)`); err != nil {
+		t.Fatal(err)
+	}
 	if setup != nil {
 		setup(t, d, r)
 	}

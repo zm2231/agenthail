@@ -286,7 +286,7 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	h, stop := runDaemon(t, store, claude)
 	testkit.Eventually(t, "the session to show it is waiting on the user", 5*time.Second, func() bool {
 		waiting := h.sessionWaiting(session.ID)
-		return waiting != nil && waiting.ID == questionID && waiting.Kind == surface.WaitingQuestion
+		return waiting != nil && askRef(store, waiting.ID) == questionID && waiting.Kind == surface.WaitingQuestion
 	})
 	queued := h.receipt(map[string]any{"action": "send", "sessionId": session.ID, "message": "after you answer", "busyDelivery": "queue"})
 	steer := h.receipt(map[string]any{"action": "steer", "sessionId": session.ID, "message": "steer after the answer"})
@@ -311,13 +311,13 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	h, _ = runDaemon(t, store, claude)
 	testkit.Eventually(t, "the restarted daemon to see the question", 5*time.Second, func() bool { return h.sessionWaiting(session.ID) != nil })
 	claude.awaitObservations(t, 3)
-	if _, announced, err := store.WaitingState(session.ID); err != nil || !announced {
+	if _, announced, err := recordedWait(store, session.ID); err != nil || !announced {
 		t.Fatalf("announced=%v err=%v", announced, err)
 	}
 	if got := pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one question notified %d times", got)
 	}
-	if push := pushes.first("session.waiting"); push["sessionId"] != session.ID || push["turnId"] != questionID || push["message"] != "Claude Code agent asks you a question in its terminal" {
+	if push := pushes.first("session.waiting"); push["sessionId"] != session.ID || push["turnId"] != askIDOfRequest(t, store, session.ID, questionID) || push["message"] != "Claude Code agent asks you a question in its terminal" {
 		t.Fatalf("push=%v", push)
 	}
 
@@ -424,8 +424,8 @@ func awaitThreadReads(t *testing.T, lifecycle *codextest.Lifecycle, n int) {
 
 func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {
 	q := newClaudeQuestion(t)
-	if record, err := q.store.RecordWaiting(q.session.ID, &surface.Waiting{Kind: surface.WaitingQuestion, ID: questionID, Since: questionAsked}, questionAsked); err != nil || !record.Announce {
-		t.Fatalf("record=%+v err=%v", record, err)
+	if record := recordWait(t, q.store, q.session.ID, &surface.Waiting{Kind: surface.WaitingQuestion, ID: questionID, Since: questionAsked}); len(record.Opened) != 1 {
+		t.Fatalf("record=%+v", record)
 	}
 	if _, err := q.store.QueueMessageWithOptions(q.session.ID, "after you answer", "", surface.SendOptions{BusyDelivery: "queue"}); err != nil {
 		t.Fatal(err)
@@ -433,7 +433,7 @@ func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {
 	runDaemon(t, q.store, q.claude)
 	testkit.Eventually(t, "the pending announcement", 5*time.Second, func() bool { return q.pushes.count("session.waiting") == 1 })
 	testkit.Eventually(t, "the announcement to be recorded", 5*time.Second, func() bool {
-		_, announced, err := q.store.WaitingState(q.session.ID)
+		_, announced, err := recordedWait(q.store, q.session.ID)
 		return err == nil && announced
 	})
 	q.claude.awaitObservations(t, 3)
@@ -444,26 +444,19 @@ func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {
 
 func TestACallerThatReadTheQuestionBeforeItsAnnouncementFinishedDoesNotAnnounceItAgain(t *testing.T) {
 	q := newClaudeQuestion(t)
-	waiting := surface.Waiting{Kind: surface.WaitingQuestion, ID: questionID, Since: questionAsked}
-	if record, err := q.store.RecordWaiting(q.session.ID, &waiting, questionAsked); err != nil || !record.Announce {
-		t.Fatalf("record=%+v err=%v", record, err)
+	record := recordWait(t, q.store, q.session.ID, &surface.Waiting{Kind: surface.WaitingQuestion, ID: questionID, Since: questionAsked})
+	if len(record.Opened) != 1 {
+		t.Fatalf("record=%+v", record)
 	}
 	d := newTestDaemon(t, q.store, []surface.Surface{q.claude})
-	d.announceWaiting(q.session, waiting)
-	testkit.Eventually(t, "the announcement to finish", 5*time.Second, func() bool {
-		_, announced, err := q.store.WaitingState(q.session.ID)
-		d.announceMu.Lock()
-		inFlight := d.announcing[q.session.ID]
-		d.announceMu.Unlock()
-		return err == nil && announced && inFlight == ""
-	})
-	d.announceWaiting(q.session, waiting)
-	d.announceMu.Lock()
-	inFlight := d.announcing[q.session.ID]
-	d.announceMu.Unlock()
-	if inFlight != "" {
-		t.Fatalf("a question already announced started announcing again (%s)", inFlight)
+	read := record.Opened
+	d.tellPermissionAsks(read)
+	d.background.wait()
+	if _, announced, err := recordedWait(q.store, q.session.ID); err != nil || !announced {
+		t.Fatalf("announced=%v err=%v", announced, err)
 	}
+	d.tellPermissionAsks(read)
+	d.background.wait()
 	if got := q.pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one question notified %d times", got)
 	}
@@ -483,7 +476,7 @@ func TestQuestionAnnouncedAgainAfterAStopMidDeliveryCollapsesIntoOne(t *testing.
 	if waited := time.Since(stopping); waited > 5*time.Second {
 		t.Fatalf("stopping waited %s for a stalled delivery instead of cancelling it", waited)
 	}
-	if _, announced, err := q.store.WaitingState(q.session.ID); err != nil || announced {
+	if _, announced, err := recordedWait(q.store, q.session.ID); err != nil || announced {
 		t.Fatalf("announced=%v err=%v before the delivery finished", announced, err)
 	}
 	q.pushes.mu.Lock()
@@ -491,13 +484,14 @@ func TestQuestionAnnouncedAgainAfterAStopMidDeliveryCollapsesIntoOne(t *testing.
 	q.pushes.mu.Unlock()
 	runDaemon(t, q.store, q.claude)
 	testkit.Eventually(t, "the repeated announcement", 5*time.Second, func() bool { return q.pushes.count("session.waiting") == 2 })
-	key := waitingNotificationKey(q.session.ID, questionID)
+	askID := askIDOfRequest(t, q.store, q.session.ID, questionID)
+	key := askNotificationKey(askID)
 	for _, push := range q.pushes.all("session.waiting") {
-		if push["collapseId"] != key || push["turnId"] != questionID {
+		if push["collapseId"] != key || push["turnId"] != askID {
 			t.Fatalf("push=%v, want collapse id %s so the device shows one notification", push, key)
 		}
 	}
-	if other := waitingNotificationKey(q.session.ID, questionID+"-next"); other == key || len(key) > 64 {
+	if other := askNotificationKey(askID + "-next"); other == key || len(key) > 64 {
 		t.Fatalf("key=%q next question=%q", key, other)
 	}
 }
@@ -541,7 +535,7 @@ func TestTheDaemonStopsOnlyAfterAnAnnouncementInFlightFinishes(t *testing.T) {
 	}
 	close(release)
 	<-stopped
-	if _, announced, err := q.store.WaitingState(q.session.ID); err != nil || announced {
+	if _, announced, err := recordedWait(q.store, q.session.ID); err != nil || announced {
 		t.Fatalf("announced=%v err=%v; an announcement cut short by the stop must be made again after a restart", announced, err)
 	}
 	if got := q.pushes.count("session.waiting"); got != 1 {
@@ -579,7 +573,7 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 		}
 		d.catalogSelected = func(id string) {
 			if id == q.session.ID && armed.CompareAndSwap(true, false) {
-				waiting, _, _ := q.store.WaitingState(id)
+				waiting, _, _ := recordedWait(q.store, id)
 				selected <- waiting
 				<-release
 			}
@@ -587,14 +581,14 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 	}, q.claude)
 	testkit.Eventually(t, "the session to show it is waiting on the user", 5*time.Second, func() bool { return h.sessionWaiting(q.session.ID) != nil })
 	testkit.Eventually(t, "the question to be announced", 5*time.Second, func() bool {
-		_, announced, err := q.store.WaitingState(q.session.ID)
+		_, announced, err := recordedWait(q.store, q.session.ID)
 		return err == nil && announced
 	})
 	armed.Store(true)
 	h.daemon.catalogNudge <- struct{}{}
 	select {
 	case waiting := <-selected:
-		if waiting == nil || waiting.ID != questionID {
+		if waiting == nil || askRef(q.store, waiting.ID) != questionID {
 			close(release)
 			t.Fatalf("the paused publication selected %+v", waiting)
 		}
@@ -624,7 +618,7 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 		t.Fatal(err)
 	}
 	cleared := func() bool {
-		recorded, _, err := q.store.WaitingState(q.session.ID)
+		recorded, _, err := recordedWait(q.store, q.session.ID)
 		if err != nil || recorded != nil || h.sessionWaiting(q.session.ID) != nil {
 			return false
 		}
@@ -763,7 +757,7 @@ func TestSessionDetailShowsTheQuestionTheCatalogShows(t *testing.T) {
 	h, _ := runDaemon(t, q.store, q.claude)
 	testkit.Eventually(t, "the catalog to show the question", 5*time.Second, func() bool { return h.sessionWaiting(q.session.ID) != nil })
 	waiting := h.detailWaiting(q.session.ID)
-	if waiting == nil || waiting.ID != questionID || waiting.Kind != surface.WaitingQuestion {
+	if waiting == nil || askRef(q.store, waiting.ID) != questionID || waiting.Kind != surface.WaitingQuestion {
 		t.Fatalf("detail waiting=%+v, catalog waiting=%+v", waiting, h.sessionWaiting(q.session.ID))
 	}
 	q.answer(t)

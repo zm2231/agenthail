@@ -163,7 +163,7 @@ func TestBrowsersGetEncryptedNotificationsAndWithdrawals(t *testing.T) {
 	service := newTestPushService(t, browser)
 	reg, _ := subscribedTestBrowser(t, service.server.URL+"/push/secret-capability", browser)
 	d := newTestDaemon(t, reg, nil)
-	key := waitingNotificationKey("session", "question")
+	key := askNotificationKey("ask-question")
 	d.notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Claude asks you a question", SessionID: "session", TurnID: "question", EventType: "session.waiting", CollapseID: key, RequestID: "request"})
 	d.withdrawFromPairedDevices(context.Background(), key)
 	pushes := service.received()
@@ -230,7 +230,7 @@ func TestSafariIsNotifiedButNeverSentAWithdraw(t *testing.T) {
 	webPushHTTPClient = client
 	t.Cleanup(func() { webPushHTTPClient = previous })
 	d := newTestDaemon(t, reg, nil)
-	key := waitingNotificationKey("session", "question")
+	key := askNotificationKey("ask-question")
 	d.notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Question", EventType: "session.waiting", CollapseID: key})
 	notified := len(client.hosts)
 	d.withdrawFromPairedDevices(context.Background(), key)

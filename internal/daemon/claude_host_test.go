@@ -404,7 +404,7 @@ func updateFromAProtocol1Host(t *testing.T, prompt string) {
 		if err != nil || observation.WaitingOn == nil {
 			return false
 		}
-		request = observation.WaitingOn.ID
+		request = askRef(r, observation.WaitingOn.ID)
 		return true
 	})
 	if err := client.Drain(ctx); err != nil {
@@ -430,12 +430,12 @@ func updateFromAProtocol1Host(t *testing.T, prompt string) {
 	if prompt == "QUESTION" {
 		decision.Answers = map[string]string{"Which color?": "Blue"}
 	}
-	result, err := d.respond(ctx, claude, &session, request, decision, "the test")
+	result, err := answerRequest(ctx, d, claude, &session, request, decision)
 	writeActionResult(answer, result, err)
 	if answer.Code != http.StatusConflict {
 		t.Fatalf("answer to the dead prompt = %d %s, want 409", answer.Code, answer.Body)
 	}
-	if waiting, _, err := r.WaitingState(id); err != nil || waiting != nil {
+	if waiting, _, err := recordedWait(r, id); err != nil || waiting != nil {
 		t.Fatalf("waiting after the stale answer = %+v, %v; want none", waiting, err)
 	}
 	state, err := claude.Requests(ctx, &session)
@@ -574,7 +574,7 @@ func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testin
 				t.Fatalf("requests through the retiring protocol 2 host = %+v, %v", state, err)
 			}
 			answer := httptest.NewRecorder()
-			result, err := d.respond(ctx, claude, &session, state.Requests[0].ID, test.decision, "the test")
+			result, err := answerRequest(ctx, d, claude, &session, state.Requests[0].ID, test.decision)
 			writeActionResult(answer, result, err)
 			if answer.Code != http.StatusOK {
 				t.Fatalf("answer through the retiring protocol 2 host = %d %s", answer.Code, answer.Body)
@@ -583,7 +583,7 @@ func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testin
 				turns := fixture.Turns(t, id)
 				return len(turns) == 1 && turns[0].Reply == test.reply && !claudehosttest.Alive(old.PID) && !claudehosttest.Alive(opened.PID)
 			})
-			if waiting, _, err := r.WaitingState(id); err != nil || waiting != nil {
+			if waiting, _, err := recordedWait(r, id); err != nil || waiting != nil {
 				t.Fatalf("waiting after the answer = %+v, %v; want none", waiting, err)
 			}
 
@@ -874,7 +874,7 @@ func TestAnOpenRequestStaysAnswerableThroughHostUpdates(t *testing.T) {
 			}
 
 			observation, err := d.observeTurn(ctx, claude, &session)
-			if err != nil || observation.WaitingOn == nil || observation.WaitingOn.ID != request.ID || observation.WaitingOn.Kind != surface.WaitingApproval {
+			if err != nil || observation.WaitingOn == nil || askRef(r, observation.WaitingOn.ID) != request.ID || observation.WaitingOn.Kind != surface.WaitingApproval {
 				t.Fatalf("waiting after the updates = %+v, %v; want the open request %s", observation, err, request.ID)
 			}
 			state, err := claude.Requests(ctx, &session)
@@ -882,7 +882,7 @@ func TestAnOpenRequestStaysAnswerableThroughHostUpdates(t *testing.T) {
 				t.Fatalf("requests after the updates = %+v, %v; want %s", state, err, request.ID)
 			}
 			answer := httptest.NewRecorder()
-			result, err := d.respond(ctx, claude, &session, request.ID, surface.Decision{Behavior: "allow"}, "the test")
+			result, err := answerRequest(ctx, d, claude, &session, request.ID, surface.Decision{Behavior: "allow"})
 			writeActionResult(answer, result, err)
 			if answer.Code != http.StatusOK {
 				t.Fatalf("answer after the updates = %d %s", answer.Code, answer.Body)
@@ -1050,7 +1050,7 @@ func TestARetiringHostThatDoesNotAnswerHidesNoOtherHostsRequest(t *testing.T) {
 	answerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	answer := httptest.NewRecorder()
-	result, err := d.respond(answerCtx, claude, &session, request.ID, surface.Decision{Behavior: "allow"}, "the test")
+	result, err := answerRequest(answerCtx, d, claude, &session, request.ID, surface.Decision{Behavior: "allow"})
 	writeActionResult(answer, result, err)
 	if answer.Code != http.StatusOK {
 		t.Fatalf("answer beside a silent host = %d %s", answer.Code, answer.Body)
@@ -1140,7 +1140,7 @@ func TestAnAnnouncedRequestStaysAnnouncedWhileItsHostDoesNotAnswer(t *testing.T)
 		if _, err := d.observeTurn(ctx, claude, &session); err != nil {
 			t.Fatal(err)
 		}
-		recorded, announced, err := r.WaitingState(id)
+		recorded, announced, err := recordedWait(r, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1167,7 +1167,7 @@ func TestAnAnnouncedRequestStaysAnnouncedWhileItsHostDoesNotAnswer(t *testing.T)
 		if observation.WaitingOn == nil || observation.WaitingOn.ID != asked.ID {
 			t.Fatalf("while the host does not answer the session waits on %+v, want %s", observation.WaitingOn, asked.ID)
 		}
-		recorded, announced, err := r.WaitingState(id)
+		recorded, announced, err := recordedWait(r, id)
 		if err != nil || recorded == nil || recorded.ID != asked.ID || !announced {
 			t.Fatalf("while the host does not answer the record is %+v announced=%v err=%v, want %s announced", recorded, announced, err, asked.ID)
 		}

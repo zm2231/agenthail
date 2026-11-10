@@ -971,9 +971,7 @@ func TestAWaitPublishedOnAWorkingRowDropsItsActivity(t *testing.T) {
 	}
 
 	waiting := &surface.Waiting{Kind: surface.WaitingQuestion, ID: "q1", Answerable: true}
-	if _, err := d.Registry.RecordWaiting("from", waiting, time.Now()); err != nil {
-		t.Fatal(err)
-	}
+	recordWait(t, d.Registry, "from", waiting)
 	d.publishWaiting(context.Background(), "from", waiting)
 	if got := row(); got.WaitingOn == nil || got.Status != surface.StatusBusy {
 		t.Fatalf("the wait was not published: status=%s waiting=%+v", got.Status, got.WaitingOn)
