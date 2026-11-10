@@ -9,10 +9,7 @@ const app = {
     daemon: { host: { name: "laptop" }, hosts: [{ id: "server", name: "server", state: "connected" }, { id: "gone", name: "gone", state: "unreachable" }] },
     sessions: [{ id: "lead", name: "release-lead" }, { id: "worker", name: "builder" }, { id: "server::far", name: "far-agent" }],
     projects: [{ id: "web-app", displayName: "web app" }],
-    attention: [{ id: 1, sessionId: "lead", target: "release-lead", queueId: 31, reason: "Held for a decision", requestedAction: "retry or cancel", createdAt: "2026-03-01T09:00:00Z" }],
-    deliveryProblems: [],
     leadReplacements: [],
-    queue: [{ id: 31, sessionId: "lead", message: "Ship <it> after the backup", status: "dead" }],
   },
   selected: null,
 };
@@ -32,11 +29,11 @@ const local = {
   decisions: [
     { group: "waiting", sessionId: "worker", projectId: "web-app", kind: "request", reason: "Needs your approval", since: "2026-03-01T09:09:00Z", answerable: true, requests: [{ id: "r1", kind: "approval", tool: "Bash", prompt: "Bash: make <release>" }] },
     { group: "holding", sessionId: "lead", projectId: "web-app", kind: "ask", reason: "Asks: which layout", since: "2026-03-01T09:05:00Z", answerable: true, holdsUp: ["worker"], requests: [{ id: "a1", kind: "ask", tool: "", title: "Which layout?" }] },
-    { group: "stopped", sessionId: "lead", kind: "incoming", reason: "1 message needs a decision", since: "2026-03-01T09:00:00Z", answerable: false },
+    { group: "stopped", sessionId: "lead", kind: "usageLimit", reason: "Usage limit until 3:00", since: "2026-03-01T09:00:00Z", answerable: false },
   ],
   leadHandling: [{ sessionId: "worker2", heldBy: "lead", role: "lead", reason: "Needs your approval" }],
 };
-const remote = { decisions: [{ group: "stopped", sessionId: "far", kind: "outgoing", reason: "1 message not delivered", since: "2026-03-01T08:00:00Z", answerable: false }], leadHandling: [] };
+const remote = { decisions: [{ group: "stopped", sessionId: "far", kind: "stopped", reason: "Stopped: tool error", since: "2026-03-01T08:00:00Z", answerable: false }], leadHandling: [] };
 const asked = [];
 context.fetch = async (url) => {
   asked.push(url);
@@ -65,10 +62,8 @@ vm.runInContext("renderInbox()", context);
 const html = elements.list.innerHTML;
 assert.equal(elements.panel.hidden, false);
 assert.ok(html.indexOf("Stopped on you") < html.indexOf("Holding up work") && html.indexOf("Holding up work") < html.indexOf("Waiting on you"));
-assert.match(html, /data-retry="31"/, "a held delivery keeps its buttons in Stopped on you");
-assert.match(html, /data-queued-text>Ship &lt;it&gt; after the backup</, "a stuck message shows what it says");
-assert.ok(!html.includes("1 message needs a decision"), "a local held delivery is listed once, with its buttons, not again as a decision");
-assert.match(html, /data-decision="server::far"/, "a remote delivery problem opens its session");
+assert.match(html, /Usage limit until 3:00/, "a local stop is listed in Stopped on you");
+assert.match(html, /data-decision="server::far"/, "a remote stop opens its session");
 assert.match(html, /Holds up 1/);
 assert.match(html, /data-open-decision="worker"[^>]*>Answer</, "answering opens the Inbox card on that decision");
 assert.match(html, /data-session="server::far"[^>]*>Open</, "a decision that cannot be answered here opens its session");
@@ -78,7 +73,6 @@ assert.match(html, /Handled by a lead/);
 assert.match(html, /release-lead is answering its prompt/);
 
 app.decisions = failing;
-app.state.attention = [];
 vm.runInContext("renderInbox()", context);
 assert.match(elements.list.innerHTML, /laptop isn't answering/);
 assert.match(elements.list.innerHTML, /Update Agenthail on server/);

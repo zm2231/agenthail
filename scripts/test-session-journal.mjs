@@ -4,39 +4,23 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import * as tools from '../internal/daemon/dashboard/js/tool-activity.js';
 
-const problemElements = {panel: {}, list: {}};
-const problemApp = {state: {sessions: [{id: 'target', name: 'Worker'}], deliveryProblems: [{deliveryId: 19, sessionId: 'target', message: '<script>payload</script>', reason: 'Target gone', status: 'failed', at: '2026-10-04T00:00:00Z'}]}, selected: null};
-const problemContext = vm.createContext({app: problemApp, tools, $: selector => selector.endsWith('panel') ? problemElements.panel : problemElements.list, displayName: session => session.name, escape: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;'), timeAgo: () => 'just now'});
-
-await dashboardModules(["overview"], problemContext);
-vm.runInContext('renderDeliveryProblems()', problemContext);
-assert.equal(problemElements.panel.hidden, false);
-assert.ok(problemElements.list.innerHTML.includes('data-delivery-dismiss="19"'));
-assert.ok(problemElements.list.innerHTML.includes('&lt;script&gt;'));
-assert.ok(!problemElements.list.innerHTML.includes('data-retry'), 'delivery problems never offer automatic retry');
-assert.ok(!problemElements.list.innerHTML.includes('data-delivery-delete'), 'a failure that may have reached its session is never offered for delete');
-problemApp.state.deliveryProblems = [{deliveryId: 20, sessionId: 'target', message: 'never arrived', reason: 'Target gone', status: 'failed', deletable: true, at: '2026-10-04T00:00:00Z'}];
-vm.runInContext('renderDeliveryProblems()', problemContext);
-assert.ok(problemElements.list.innerHTML.includes('data-delivery-delete="20"'));
-assert.ok(!problemElements.list.innerHTML.includes('data-delivery-dismiss'));
-problemApp.state.deliveryProblems = [];
-vm.runInContext('renderDeliveryProblems()', problemContext);
-assert.equal(problemElements.panel.hidden, true);
+const problemApp = {state: {sessions: [{id: 'target', name: 'Worker'}]}, selected: null};
+const problemContext = vm.createContext({app: problemApp, tools, displayName: session => session.name, escape: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;'), timeAgo: () => 'just now'});
 
 let dismissedRequest;
 let actionKeySequence = 0;
 problemContext.crypto = {randomUUID: () => `action-${++actionKeySequence}`};
 problemContext.fetch = async (url, options) => { dismissedRequest = {url, headers: options.headers, body: JSON.parse(options.body)}; return {ok: true, json: async () => ({ok: true})}; };
 await dashboardModules(["actions", "delivery-labels"], problemContext);
-await vm.runInContext('action("delivery-dismiss", {deliveryId: 19})', problemContext);
-assert.equal(dismissedRequest.body.deliveryId, 19);
-assert.equal(dismissedRequest.body.action, 'delivery-dismiss');
+await vm.runInContext('action("queue-cancel", {queueId: 19})', problemContext);
+assert.equal(dismissedRequest.body.queueId, 19);
+assert.equal(dismissedRequest.body.action, 'queue-cancel');
 assert.equal(dismissedRequest.headers['Idempotency-Key'], 'action-1');
-await vm.runInContext('action("delivery-dismiss", {deliveryId: 19}, "same-logical-request")', problemContext);
+await vm.runInContext('action("queue-cancel", {queueId: 19}, "same-logical-request")', problemContext);
 assert.equal(dismissedRequest.headers['Idempotency-Key'], 'same-logical-request');
-await vm.runInContext('action("delivery-dismiss", {deliveryId: 19}, "same-logical-request")', problemContext);
+await vm.runInContext('action("queue-cancel", {queueId: 19}, "same-logical-request")', problemContext);
 assert.equal(dismissedRequest.headers['Idempotency-Key'], 'same-logical-request');
-await vm.runInContext('action("delivery-dismiss", {deliveryId: 19})', problemContext);
+await vm.runInContext('action("queue-cancel", {queueId: 19})', problemContext);
 assert.equal(dismissedRequest.headers['Idempotency-Key'], 'action-2', 'a distinct action must not reuse an earlier receipt');
 
 problemContext.handoffMessage = text => ({text, label: 'You'});

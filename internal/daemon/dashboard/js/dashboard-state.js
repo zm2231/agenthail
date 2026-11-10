@@ -73,7 +73,7 @@ export async function load(fresh = false, selectDefault = true) {
     clearTimeout(app.orderRefresh);
     if (Number.isFinite(refreshAt)) app.orderRefresh = setTimeout(() => rereadSoon(0), Math.max(0, refreshAt - Date.now()));
     const rows = listedRows();
-    const kept = [app.selected?.id, ...unconfirmedSendsOutside((id) => rows.has(id)).map((item) => item.sessionId), ...(state.deliveryProblems || []).map((item) => item.sessionId)];
+    const kept = [app.selected?.id, ...unconfirmedSendsOutside((id) => rows.has(id)).map((item) => item.sessionId)];
     const missing = [...new Set(kept)].filter((id) => id && !rows.has(id) && !state.rekeyed?.[id]);
     if (missing.length) for (const [id, row] of await findSessions(missing).catch(() => new Map())) rows.set(id, row);
     app.state = {
@@ -86,8 +86,6 @@ export async function load(fresh = false, selectDefault = true) {
       queue: state.queue || [],
       channels: state.channels || [],
       relays: state.relays || [],
-      attention: state.attention || [],
-      deliveryProblems: state.deliveryProblems || [],
       leadReplacements: state.leadReplacements || [],
     };
     catalogRead(catalogSeq);

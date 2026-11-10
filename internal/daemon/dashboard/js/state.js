@@ -8,8 +8,6 @@ export const app = {
     channels: [],
     relays: [],
     history: [],
-    attention: [],
-    deliveryProblems: [],
   },
   selected: null,
   history: null,

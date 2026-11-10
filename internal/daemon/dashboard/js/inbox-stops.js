@@ -2,16 +2,12 @@ import { needsYouByProject } from "./project-tiles.js";
 
 const hostOf = (item) => item.hostID ?? item.hostId ?? "";
 
-export function inboxStops({ attention = [], deliveries = [], replacements = [], decisions = [], localHosts = [""] }) {
-  const local = new Set(localHosts);
-  const shown = decisions.filter((item) => !(item.group === "stopped" && (item.kind === "incoming" || item.kind === "outgoing") && local.has(item.hostId ?? "")));
+export function inboxStops({ replacements = [], decisions = [] }) {
   const stopped = [
-    ...attention.map((item) => ({ kind: "queue", id: `queue:${hostOf(item)}/${item.queueId}`, item })),
-    ...deliveries.map((item) => ({ kind: "delivery", id: `delivery:${hostOf(item)}/${item.deliveryId}`, item })),
     ...replacements.map((item) => ({ kind: "replacement", id: `replacement:${hostOf(item)}/${item.id}`, item })),
-    ...shown.filter((item) => item.group === "stopped").map((item) => ({ kind: "decision", id: `decision:${item.sessionId}`, item })),
+    ...decisions.filter((item) => item.group === "stopped").map((item) => ({ kind: "decision", id: `decision:${item.sessionId}`, item })),
   ];
-  return { stopped, decisions: shown, count: stopped.length + shown.filter((item) => item.group !== "stopped").length };
+  return { stopped, decisions, count: stopped.length + decisions.filter((item) => item.group !== "stopped").length };
 }
 
 export function stopsByProject(stops, projects, projectOfSession) {

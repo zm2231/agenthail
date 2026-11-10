@@ -37,7 +37,7 @@ export function shownDecisions() {
 }
 
 export function currentStops() {
-  return inboxStops({ attention: app.state.attention || [], deliveries: app.state.deliveryProblems || [], replacements: app.state.leadReplacements || [], decisions: shownDecisions() });
+  return inboxStops({ replacements: app.state.leadReplacements || [], decisions: shownDecisions() });
 }
 
 export function selectedDecision() {
