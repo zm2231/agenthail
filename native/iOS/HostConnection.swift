@@ -23,8 +23,7 @@ final class HostConnection {
     private(set) var snapshot: DashboardSnapshot?
     private(set) var currentView: ScopePage.View?
     private var currentViewSeq: (epoch: String?, seq: UInt64) = (nil, 0)
-    private var orderReread: Task<Void, Never>?
-    private var orderRereadDirty = false
+    private lazy var orderRereads = makeOrderRereads()
     private var refreshAtTask: Task<Void, Never>?
     private(set) var reachable = false
     private(set) var holding = false
@@ -78,7 +77,6 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
-        orderReread?.cancel()
         refreshAtTask?.cancel()
     }
 
@@ -142,7 +140,7 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
-        orderReread?.cancel()
+        orderRereads.cancel()
         refreshAtTask?.cancel()
         reader.cancel()
         catalogFeed.stop()
@@ -416,29 +414,23 @@ final class HostConnection {
         }
     }
 
-    func rereadOrder() {
-        guard orderReread == nil else {
-            orderRereadDirty = true
-            return
-        }
-        orderReread = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(300))
-            guard let self, !Task.isCancelled, !stopped else { return }
-            reader.rereadAll()
-            if let read = try? await api.scopeSessions("current", timeout: refreshTimeout) {
-                adoptCurrentView(read)
-                if var merged = snapshot {
-                    let held = Set(merged.sessions.map(\.id))
-                    merged.sessions += read.sessions.filter { !held.contains($0.id) }
-                    snapshot = merged
-                }
-                delegate?.hostDidChange(self)
+    func rereadOrder() { orderRereads.request() }
+
+    private func makeOrderRereads() -> Coalescer {
+        Coalescer(delay: .milliseconds(300)) { [weak self] in await self?.readOrder() }
+    }
+
+    private func readOrder() async {
+        guard !stopped else { return }
+        reader.rereadAll()
+        if let read = try? await api.scopeSessions("current", timeout: refreshTimeout) {
+            adoptCurrentView(read)
+            if var merged = snapshot {
+                let held = Set(merged.sessions.map(\.id))
+                merged.sessions += read.sessions.filter { !held.contains($0.id) }
+                snapshot = merged
             }
-            orderReread = nil
-            if orderRereadDirty {
-                orderRereadDirty = false
-                rereadOrder()
-            }
+            delegate?.hostDidChange(self)
         }
     }
 }
