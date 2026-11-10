@@ -18,16 +18,17 @@ const (
 )
 
 type Words struct {
-	ID       string                 `json:"id"`
-	TargetID string                 `json:"targetId"`
-	At       string                 `json:"ts"`
-	Host     string                 `json:"host"`
-	Text     string                 `json:"text"`
-	Typed    string                 `json:"typed"`
-	Quoted   []string               `json:"quoted,omitempty"`
-	Context  *ledger.ContextPayload `json:"context,omitempty"`
-	Anchor   string                 `json:"anchor,omitempty"`
-	Turns    []WordsTurn            `json:"turns,omitempty"`
+	ID         string                 `json:"id"`
+	TargetID   string                 `json:"targetId"`
+	At         string                 `json:"ts"`
+	Host       string                 `json:"host"`
+	Text       string                 `json:"text"`
+	Typed      string                 `json:"typed"`
+	Quoted     []string               `json:"quoted,omitempty"`
+	MoreQuoted int                    `json:"moreQuoted,omitempty"`
+	Context    *ledger.ContextPayload `json:"context,omitempty"`
+	Anchor     string                 `json:"anchor,omitempty"`
+	Turns      []WordsTurn            `json:"turns,omitempty"`
 }
 
 type WordsTurn struct {
@@ -41,7 +42,9 @@ type WordsTurn struct {
 
 type WordsNotFound struct{ Key, Ref string }
 
-func (e WordsNotFound) Error() string { return fmt.Sprintf("%s has no captured words %s", e.Key, e.Ref) }
+func (e WordsNotFound) Error() string {
+	return fmt.Sprintf("%s has no captured words %s", e.Key, e.Ref)
+}
 
 type WordsElsewhere struct{ Host string }
 
@@ -64,6 +67,10 @@ func ReadWords(r *registry.Registry, store *ledger.Store, key, ref string, aroun
 	self, err := r.HostIdentity()
 	if err != nil {
 		return Words{}, err
+	}
+	if captured.HostID == "" {
+		// Events written before origin stamping carry no host; only this host could have written them.
+		captured.HostID = self.ID
 	}
 	words := Words{ID: captured.ID, TargetID: captured.TargetID, At: captured.At, Host: hostName(r, self, captured.HostID), Text: captured.Text, Context: captured.Context}
 	var quotes []ledger.Quote

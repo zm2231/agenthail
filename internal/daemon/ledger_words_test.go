@@ -2,9 +2,11 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 )
@@ -30,7 +32,9 @@ func TestAMessagesWordsShowWhatWasTypedQuotedAndTheTurnsAroundIt(t *testing.T) {
 	journal(t, r, s.ID, "t1", map[string]any{"kind": "tool", "role": "tool", "body": "ran tests", "ts": at(time.Second)})
 	journal(t, r, s.ID, "r2", map[string]any{"kind": "message", "role": "assistant", "body": "Added typo matching.", "ts": at(2 * time.Second)})
 	runSorter(t, d)
-	c := capturedWithContext(t, func() { ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p-1", Prompt: message}) }, p, ledger.PromptRef("p-1"))
+	c := capturedWithContext(t, func() {
+		ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p-1", Prompt: message})
+	}, p, ledger.PromptRef("p-1"))
 	if c.EntryItemID != "u1" {
 		t.Fatalf("context = %+v, want it joined to entry u1", c)
 	}
@@ -60,14 +64,16 @@ func TestAMessagesWordsShowWhatWasTypedQuotedAndTheTurnsAroundIt(t *testing.T) {
 	}
 }
 
-func TestTheTurnsAroundWordsCapturedOnAnotherHostAreNotReadHere(t *testing.T) {
+func TestTheTurnsAroundWordsAreReadOnlyOnTheHostThatCapturedThem(t *testing.T) {
 	stub := &sorterStub{}
 	d, r, handler, p, search := sorterFixture(t, stub)
 	stub.setAnswer(fileTo(search))
 	s := p.session(t, r, "claude-elsewhere")
 	journal(t, r, s.ID, "u1", map[string]any{"kind": "message", "role": "user", "promptId": "p-1", "body": "ship it", "ts": at(0)})
 	runSorter(t, d)
-	capturedWithContext(t, func() { ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p-1", Prompt: "ship it"}) }, p, ledger.PromptRef("p-1"))
+	capturedWithContext(t, func() {
+		ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p-1", Prompt: "ship it"})
+	}, p, ledger.PromptRef("p-1"))
 	if _, err := r.WriteDB().Exec(`UPDATE ledger_events SET actor_host_id='hfar' WHERE project_key=? AND ref=?`, p.key, ledger.PromptRef("p-1")); err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +90,50 @@ func TestTheTurnsAroundWordsCapturedOnAnotherHostAreNotReadHere(t *testing.T) {
 	if refusal, refused := callMCP(t, session, "agenthail_ledger_read", map[string]any{"view": "words", "id": ledger.PromptRef("p-1"), "context": 1}); !refused || refusal["code"] != "unavailable" || !strings.Contains(refusal["message"].(string), "hfar") {
 		t.Fatalf("mcp words from another host = %v", refusal)
 	}
+
+	if _, err := r.WriteDB().Exec(`UPDATE ledger_events SET actor_host_id='', origin_seq=0 WHERE project_key=? AND ref=?`, p.key, ledger.PromptRef("p-1")); err != nil {
+		t.Fatal(err)
+	}
+	self, err := r.HostIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	words, err = ReadWords(r, p.store, p.key, ledger.PromptRef("p-1"), 1)
+	if err != nil || words.Host != self.Name || len(words.Turns) != 1 || !words.Turns[0].Message {
+		t.Fatalf("words written before hosts had ids = %+v, %v", words, err)
+	}
+}
+
+func TestLongWordsFullOfQuotesStillFitOneMCPRead(t *testing.T) {
+	stub := &sorterStub{}
+	d, r, handler, p, search := sorterFixture(t, stub)
+	stub.setAnswer(fileTo(search))
+	s := p.session(t, r, "claude-long-words")
+	var blocks []string
+	for i := range 17 {
+		blocks = append(blocks, "> "+strings.Repeat("é\"\x01", 200), fmt.Sprintf("point %d", i))
+	}
+	message := strings.Join(blocks, "\n")
+	journal(t, r, s.ID, "u1", map[string]any{"kind": "message", "role": "user", "promptId": "p-1", "body": message, "ts": at(0)})
+	runSorter(t, d)
+	c := capturedWithContext(t, func() {
+		ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p-1", Prompt: message})
+	}, p, ledger.PromptRef("p-1"))
+	if len(c.Quotes) != 17 {
+		t.Fatalf("context quotes = %d, want 17", len(c.Quotes))
+	}
+
+	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, s))
+	read, refused := callMCP(t, session, "agenthail_ledger_read", map[string]any{"view": "words", "id": ledger.PromptRef("p-1"), "context": 1})
+	quoted, _ := read["quoted"].([]any)
+	if refused || len(quoted) == 0 || read["moreQuoted"] == nil || !strings.Contains(read["typed"].(string), "point 0") {
+		t.Fatalf("mcp words = %v", read)
+	}
+	for _, q := range append(quoted, read["text"], read["typed"]) {
+		if !utf8.ValidString(q.(string)) || strings.ContainsRune(q.(string), utf8.RuneError) {
+			t.Fatalf("clipped words are not whole characters: %q", q)
+		}
+	}
 }
 
 func TestWordsTheSessionNeverShowedArePlacedAmongItsTurnsByTime(t *testing.T) {
@@ -94,7 +144,9 @@ func TestWordsTheSessionNeverShowedArePlacedAmongItsTurnsByTime(t *testing.T) {
 	journal(t, r, s.ID, "r1", map[string]any{"kind": "message", "role": "assistant", "body": "Done.", "ts": at(-time.Minute)})
 	journal(t, r, s.ID, "r2", map[string]any{"kind": "message", "role": "assistant", "body": "Also tidied the tests.", "ts": at(time.Hour)})
 	runSorter(t, d)
-	c := capturedWithContext(t, func() { ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p-1", Prompt: "thanks"}) }, p, ledger.PromptRef("p-1"))
+	c := capturedWithContext(t, func() {
+		ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p-1", Prompt: "thanks"})
+	}, p, ledger.PromptRef("p-1"))
 	if c.Status != ledger.ReplyLate {
 		t.Fatalf("context = %+v", c)
 	}

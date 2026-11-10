@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"unicode/utf8"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/ledger"
 )
 
@@ -46,7 +48,7 @@ func (d *Daemon) mcpLedgerRead(_ context.Context, caller *mcpCaller, input mcpLe
 const (
 	mcpWordsAround    = 5
 	mcpWordsTextBytes = 2000
-	mcpWordsTurnBytes = 800
+	mcpWordsQuotes    = 8
 )
 
 func (d *Daemon) mcpLedgerWords(key string, input mcpLedgerInput) (any, error) {
@@ -64,18 +66,46 @@ func (d *Daemon) mcpLedgerWords(key string, input mcpLedgerInput) (any, error) {
 	case err != nil:
 		return nil, err
 	}
-	words.Text = clipHead(words.Text, mcpWordsTextBytes)
-	words.Typed = clipHead(words.Typed, mcpWordsTextBytes)
-	for i := range words.Quoted {
-		words.Quoted[i] = clipHead(words.Quoted[i], mcpWordsTurnBytes)
+	return fitWords(words)
+}
+
+func fitWords(words Words) (Words, error) {
+	for limit := mcpWordsTextBytes; limit > 0; limit /= 2 {
+		fitted := clipWords(words, limit, limit*2/5)
+		encoded, err := apitime.Marshal(fitted)
+		if err != nil {
+			return Words{}, err
+		}
+		if len(encoded) <= mcpOutputLimit {
+			return fitted, nil
+		}
 	}
-	words.Context = ledger.ClipReply(words.Context)
+	return Words{}, refuse("invalid", fmt.Sprintf("These words do not fit in %d bytes; agenthail ledger words shows them in full.", mcpOutputLimit))
+}
+
+func clipWords(words Words, text, part int) Words {
+	words.Text, words.Typed = clipHead(words.Text, text), clipHead(words.Typed, text)
+	if len(words.Quoted) > mcpWordsQuotes {
+		words.MoreQuoted = len(words.Quoted) - mcpWordsQuotes
+	}
+	quoted := make([]string, 0, min(len(words.Quoted), mcpWordsQuotes))
+	for _, q := range words.Quoted[:min(len(words.Quoted), mcpWordsQuotes)] {
+		quoted = append(quoted, clipHead(q, part))
+	}
+	words.Quoted = quoted
+	if words.Context = ledger.ClipReply(words.Context); words.Context != nil {
+		words.Context.Quotes = nil
+		if words.Context.Reply != nil {
+			words.Context.Reply.Text = clipTail(words.Context.Reply.Text, part)
+		}
+	}
+	words.Turns = slices.Clone(words.Turns)
 	for i := range words.Turns {
-		if clipped := clipHead(words.Turns[i].Text, mcpWordsTurnBytes); clipped != words.Turns[i].Text {
+		if clipped := clipHead(words.Turns[i].Text, part); clipped != words.Turns[i].Text {
 			words.Turns[i].Text, words.Turns[i].Truncated = clipped, true
 		}
 	}
-	return words, nil
+	return words
 }
 
 func clipHead(text string, limit int) string {
@@ -86,4 +116,15 @@ func clipHead(text string, limit int) string {
 		limit--
 	}
 	return text[:limit] + "…"
+}
+
+func clipTail(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	start := len(text) - limit
+	for start < len(text) && !utf8.RuneStart(text[start]) {
+		start++
+	}
+	return "…" + text[start:]
 }
