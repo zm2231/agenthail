@@ -126,7 +126,7 @@ struct QueueListView: View {
                 }
                 if loading && page.isEmpty { ProgressView("Loading deliveries") }
                 if !showHistory {
-                    DecisionSections(model: model, inbox: model.shownDecisions, open: open) { Task { await reload() } }
+                    DecisionSections(model: model, inbox: model.shownDecisions, open: open) { answering = $0 }
                     let review = current.filter { $0.status == "dead" }
                     let pending = current.filter { $0.status != "dead" }
                     if !review.isEmpty {

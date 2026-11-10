@@ -4,8 +4,7 @@ struct DecisionSections: View {
     var model: AgenthailIOSModel
     let inbox: DecisionInbox
     let open: (String) -> Void
-    let changed: () -> Void
-    @State private var answering: DecisionItem?
+    let answer: (DecisionItem) -> Void
 
     var body: some View {
         Group {
@@ -40,17 +39,11 @@ struct DecisionSections: View {
                 }
             }
         }
-        .sheet(item: $answering) { item in
-            DecisionSheet(model: model, item: item, title: name(of: item.sessionId), open: { answering = nil; open(item.sessionId) }) {
-                answering = nil
-                changed()
-            }
-        }
     }
 
     private func row(_ item: DecisionItem) -> some View {
         Button {
-            if item.answerable { answering = item } else { open(item.sessionId) }
+            if item.answerable { answer(item) } else { open(item.sessionId) }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
@@ -128,6 +121,12 @@ struct DecisionSheet: View {
                                     asker: title, attention: AnyShapeStyle(PhonePalette.attention), actionTint: AnyShapeStyle(PhonePalette.accent),
                                     agentSurface: model.session(item.sessionId)?.surface ?? "")
                             .id(request.id)
+                        if let recommended = DecisionInbox.recommended(request) {
+                            Button("Accept recommended") { Task { await answer(request, recommended) } }
+                                .buttonStyle(.bordered)
+                                .disabled(model.answeringRequest != nil)
+                                .accessibilityIdentifier("decision-accept-recommended")
+                        }
                     }
                 }
                 .padding()

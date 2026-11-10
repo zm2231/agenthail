@@ -557,6 +557,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-questions"): body = SessionPreview.previewQuestionsJSON
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-terminal-question"): body = SessionPreview.previewTerminalQuestionJSON
         case "/api/v1/decisions" where TilesPreview.enabled: body = TilesPreview.decisionsJSON
+        case "/api/v1/decisions" where AskPreview.enabled: body = AskPreview.decisionsJSON
         case "/api/v1/usage": body = UsagePreview.json()
         case "/api/v1/proxies/prefer" where request.httpMethod == "GET":
             body = UsagePreview.preferPlan(only: URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "set" })?.value == "only")

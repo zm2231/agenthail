@@ -65,6 +65,16 @@ struct AskCardTest {
         check(!open.dropsCard && open.message == "session is not running", "a 502 that surely failed keeps the card to answer again")
         let elsewhere = RequestAnswerFailure(AgenthailAPIError.request(400, "may have reached the session"))
         check(!elsewhere.dropsCard, "only a 502 means delivery may have happened")
+
+        let ledger = try! JSONDecoder().decode(SessionRequests.self, from: Data(#"{"permissionMode":"","requests":[{"id":"ask-1d2e","kind":"ask","tool":"","title":"W12: Ship on Friday?","deadline":"2026-11-10T15:40:00Z","questions":[{"question":"Ship on Friday?","header":"","multiSelect":false,"options":[{"id":"recommended","label":"Ship Friday","description":""},{"id":"default","label":"Hold","description":""}],"suggested":0}],"alwaysAllow":false}]}"#.utf8)).requests[0]
+        check(ledger.deadline == "2026-11-10T15:40:00Z", "a ledger ask's deadline decodes")
+        let due = TimestampParser.date("2026-11-10T15:40:00Z")!
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        check(RequestCard.deadline(ledger, now: due.addingTimeInterval(-3600), calendar: utc) == "Answer by \(due.formatted(date: .omitted, time: .shortened))", "a deadline today shows its time: \(String(describing: RequestCard.deadline(ledger, now: due, calendar: utc)))")
+        check(RequestCard.deadline(ledger, now: due.addingTimeInterval(-3 * 86400), calendar: utc) == "Answer by \(due.formatted(date: .abbreviated, time: .shortened))", "a later deadline shows its date too")
+        check(RequestCard.deadline(SessionRequest(id: "q", kind: "question", tool: "AskUserQuestion")) == nil, "a request without a deadline shows none")
+        check(DecisionInbox.recommended(ledger) == .choose("recommended"), "accepting a ledger ask's recommendation sends its recommended option")
         print("ask card ok")
     }
 
