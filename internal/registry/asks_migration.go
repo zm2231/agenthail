@@ -114,7 +114,7 @@ func addAskRefs(tx *sql.Tx) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS asks_ref ON asks(session_id, origin, ref) WHERE ref<>''`); err != nil {
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS asks_ref ON asks(session_id, origin, ref) WHERE ref<>'' AND state<>'withdrawn'`); err != nil {
 		return err
 	}
 	for _, column := range []string{"waiting_kind", "waiting_id", "waiting_since_ms", "waiting_announced", "waiting_answerable"} {
