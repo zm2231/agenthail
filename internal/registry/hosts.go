@@ -413,6 +413,10 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		return CatalogEvent{}, false, SessionOwnedError{SessionID: row.Session.ID, HostID: owner}
 	}
 	session := row.Session
+	staysRetired, err := catalogRowStaysRetiredTx(tx, session)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
 	lastActiveMS := int64(0)
 	if !session.LastActive.IsZero() {
 		lastActiveMS = session.LastActive.UnixMilli()
@@ -466,9 +470,9 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 	observedAt := row.ObservedAt.UTC()
 	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count,waiting_on,background_tasks,usage_limit,turn_stop,settings)
 		VALUES(?,?,?,?,?,?,?,0,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
-		unavailable_reason=excluded.unavailable_reason,observed_at=excluded.observed_at,misses=0,retired=0,projection_fingerprint=excluded.projection_fingerprint,
+		unavailable_reason=excluded.unavailable_reason,observed_at=excluded.observed_at,misses=0,retired=CASE WHEN ? THEN catalog_sessions.retired ELSE 0 END,projection_fingerprint=excluded.projection_fingerprint,
 		projection_generation=excluded.projection_generation,discovery_failures=0,host_queue_count=excluded.host_queue_count,waiting_on=excluded.waiting_on,background_tasks=excluded.background_tasks,usage_limit=excluded.usage_limit,turn_stop=excluded.turn_stop,settings=excluded.settings`,
-		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, formatTimestamp(observedAt), fingerprint, generation, row.QueueCount, waitingOn, background, usageLimit, turnStop, settings); err != nil {
+		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, formatTimestamp(observedAt), fingerprint, generation, row.QueueCount, waitingOn, background, usageLimit, turnStop, settings, staysRetired); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	event, created, err := appendHostUpsertTx(tx, row.EntityID, projection, generation, observedAt, row.UnavailableReason)
@@ -571,33 +575,40 @@ func (r *Registry) HostCatalogRowIDs(hostID string) ([]string, error) {
 	return queryRows(r.read, []string{}, scanString, `SELECT cs.session_id FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=?`, hostID)
 }
 
+// A host retires only rows it holds ended and not current, so its list wins on the mirror.
+func (r *Registry) RetireHostRows(hostID string, ids []string) error {
+	if hostID == "" || len(ids) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return err
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE sessions SET ended=1 WHERE ended=0 AND host_id=? AND id IN (SELECT value FROM json_each(?))`, hostID, string(encoded)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE catalog_sessions SET retired=1 WHERE retired=0 AND current=0
+		AND session_id IN (SELECT id FROM sessions WHERE host_id=? AND id IN (SELECT value FROM json_each(?)))`, hostID, string(encoded)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (r *Registry) hostCatalogRows(hostID, filter string) ([]CatalogSessionState, error) {
-	rows, err := r.read.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.status,s.source,s.transport,s.runtime_kind,s.configured_model,s.last_active_ms,`+sessionSubagentSelect+`,cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.host_queue_count
-		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=?`+filter+` ORDER BY s.id`, hostID)
+	rows, err := r.read.Query(`SELECT `+catalogSessionColumns+`,cs.host_queue_count`+catalogSessionFrom+` WHERE s.host_id=?`+filter+` ORDER BY s.id`, hostID)
 	if err != nil {
 		return nil, err
 	}
 	return appendRows([]CatalogSessionState{}, rows, func(row rowScanner) (CatalogSessionState, error) {
-		var state CatalogSessionState
-		var kind, status, observedAt string
-		var lastActiveMS int64
-		var subagent subagentColumns
-		targets := append([]any{&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &status, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &lastActiveMS}, subagent.targets()...)
-		targets = append(targets, &state.Project, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &state.HostQueueCount)
-		if err := row.Scan(targets...); err != nil {
-			return state, err
-		}
-		state.Session.Surface = surface.SurfaceKind(kind)
-		state.Session.Status = surface.SessionStatus(status)
-		if lastActiveMS > 0 {
-			state.Session.LastActive = time.UnixMilli(lastActiveMS)
-		}
-		subagent.apply(&state.Session)
-		state.HostID = hostID
-		if parsed, err := parseTimestamp(observedAt); err == nil {
-			state.ObservedAt = parsed
-		}
-		return state, nil
+		var queueCount int
+		state, err := scanCatalogSessionWith(row, &queueCount)
+		state.HostQueueCount = queueCount
+		return state, err
 	})
 }
 

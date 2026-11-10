@@ -85,9 +85,7 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 		return CatalogPage{}, err
 	}
 	rowArgs := append(append([]any{}, args...), request.Limit+1, request.Offset)
-	rows, err := tx.Query(`SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
-		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,cs.background_tasks,cs.usage_limit,cs.turn_stop,cs.settings,
-		COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`,s.registered_at
+	rows, err := tx.Query(`SELECT `+catalogSessionColumns+`
 		`+from+` WHERE `+where+` ORDER BY CASE WHEN s.status=? THEN 0 ELSE 1 END,s.last_active_ms DESC,s.updated_at DESC,s.id LIMIT ? OFFSET ?`, append(rowArgs[:len(rowArgs)-2], string(surface.StatusBusy), rowArgs[len(rowArgs)-2], rowArgs[len(rowArgs)-1])...)
 	if err != nil {
 		return CatalogPage{}, err
@@ -155,43 +153,24 @@ func catalogPageSQL(request CatalogPageRequest, listing CatalogListing) (string,
 }
 
 func scanCatalogSession(scanner rowScanner) (CatalogSessionState, error) {
+	return scanCatalogSessionWith(scanner)
+}
+
+func scanCatalogSessionWith(scanner rowScanner, extra ...any) (CatalogSessionState, error) {
 	var state CatalogSessionState
-	var kind, status, observedAt, registered string
-	var hasLocal, focusable, generation, misses, discoveryFailures int
-	var lastActiveMS int64
-	var launcher string
-	var location, waitingOn, background, usageLimit, turnStop, settings []byte
-	var subagent subagentColumns
-	if err := scanner.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.RuntimeKind, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.Project, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &waitingOn, &background, &usageLimit, &turnStop, &settings, &launcher, &location, &focusable}, append(subagent.targets(), &registered)...)...); err != nil {
+	var columns sessionScan
+	var observedAt, registered string
+	var generation, misses, discoveryFailures int
+	targets := append(append([]any{&state.HostID}, columns.targets()...), &state.Project, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &registered)
+	if err := scanner.Scan(append(targets, extra...)...); err != nil {
 		return CatalogSessionState{}, err
 	}
 	var err error
+	if state.Session, err = columns.result(); err != nil {
+		return CatalogSessionState{}, err
+	}
 	if state.RegisteredAt, err = parseRegisteredAt(registered); err != nil {
 		return CatalogSessionState{}, err
-	}
-	waiting, err := decodeCatalogWaiting(waitingOn)
-	if err != nil {
-		return CatalogSessionState{}, err
-	}
-	state.Session.WaitingOn = waiting
-	if state.Session.BackgroundTasks, err = decodeCatalogBackground(background); err != nil {
-		return CatalogSessionState{}, err
-	}
-	if state.Session.UsageLimit, err = decodeCatalogUsageLimit(usageLimit); err != nil {
-		return CatalogSessionState{}, err
-	}
-	if state.Session.TurnStop, err = decodeCatalogTurnStop(turnStop); err != nil {
-		return CatalogSessionState{}, err
-	}
-	if state.Session.Settings, err = decodeCatalogSettings(settings); err != nil {
-		return CatalogSessionState{}, err
-	}
-	subagent.apply(&state.Session)
-	state.Session.Surface = surface.SurfaceKind(kind)
-	state.Session.Status = surface.SessionStatus(status)
-	state.Session.HasLocal = hasLocal != 0
-	if lastActiveMS > 0 {
-		state.Session.LastActive = time.UnixMilli(lastActiveMS)
 	}
 	parsed, err := parseTimestamp(observedAt)
 	if err != nil {
@@ -199,10 +178,5 @@ func scanCatalogSession(scanner rowScanner) (CatalogSessionState, error) {
 	}
 	state.ObservedAt = parsed
 	state.Freshness = CatalogFreshness{Generation: uint64(generation), ObservedAt: parsed, Stale: misses > 0 || discoveryFailures > 0 || (state.HostID != "" && state.UnavailableReason != "")}
-	runtime, err := runtimeFromColumns(launcher, location, focusable)
-	if err != nil {
-		return CatalogSessionState{}, err
-	}
-	state.Session.Runtime = runtime
 	return state, nil
 }

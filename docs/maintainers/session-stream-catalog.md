@@ -275,10 +275,21 @@ retired row that has a queued message, a lead's name, attention, a usage-limit
 stop or a failed send, and reads them all when the archive changes. A row leaves
 history when its session is held again, its parent changes, the row becomes
 current, or the session shows newer activity; any other change keeps it retired.
-A pass writes a row only when its projection or stored session would change,
-compared through the same route rule the session upsert applies, so a managed
-Codex thread whose discovered source differs from the one it keeps is not
-rewritten on every pass.
+That holds for a paired host's row too: the host sending an ended row again
+keeps it retired here. A host retires only rows it holds ended and not current,
+so a row it lists in `retiredIds` on a sync is ended and retired here as well,
+which corrects a copy mirrored before the host ended it.
+
+Every reader of a whole session selects one column list (`sessionColumnsSQL`),
+and the catalog's rows, its pages, the active sessions, a host's mirror snapshot
+and the mirrored rows read back here all add their catalog columns to it, so a
+column such as `ended` reaches all of them or none. The session upsert and the
+check for whether a pass would change a stored session are both generated from
+one table of columns and their update rules (`sessionWriteColumns`): a pass
+writes a row only when its projection would change or the upsert would change a
+column of its session, so a managed Codex thread whose discovered source
+differs from the one it keeps is not rewritten on every pass, and a change only
+to `ended` or a subagent column is not skipped.
 
 ## Behavioral checks
 
