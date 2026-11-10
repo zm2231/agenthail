@@ -6,7 +6,6 @@ type UtterancePayload struct {
 	SessionID   string      `json:"sessionId"`
 	TargetID    string      `json:"targetId"`
 	Surface     string      `json:"surface"`
-	QuotedSpan  string      `json:"quotedSpan,omitempty"`
 	CapturedBy  string      `json:"capturedBy"`
 	TS          string      `json:"ts"`
 	Truncated   *Truncation `json:"truncated,omitempty"`

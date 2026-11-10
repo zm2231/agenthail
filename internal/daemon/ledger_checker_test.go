@@ -364,10 +364,30 @@ func TestACheckerSeesTheReplyEachMessageAnsweredAsContext(t *testing.T) {
 	for _, want := range []string{
 		"- claude-prompt:1: \"yes, with typos\"\n  answering the agent: \"Should search match typos?\"\n",
 		"- claude-prompt:2: \"and a csv export\"\n  answering the agent: not found in time\n",
-		"a reply is context, not the person's words",
+		"a reply and any text the person quoted are context, not the person's words",
 	} {
 		if !strings.Contains(started[0].Message, want) {
 			t.Fatalf("checker input lacks %q:\n%s", want, started[0].Message)
 		}
+	}
+}
+
+func TestACheckerReadsOnlyWhatThePersonTypedAsTheirWords(t *testing.T) {
+	f := newCheckerFixture(t)
+	words := "> Should search match typos like 'serach' and 'seach'?\nyes, and add a csv export"
+	f.goal(t, "claude-prompt:1", "Search", words, "build search with typo tolerance")
+	reply := ledger.NewReply("r1", time.Now().UTC().Format(time.RFC3339Nano), "Should search match typos like 'serach' and 'seach'?")
+	quotes := ledger.FindQuotes(words, []ledger.QuoteSource{{ItemID: "r1", Text: reply.Text}})
+	if _, err := f.project.store.RecordContext(f.project.key, ledger.ContextPayload{UtteranceID: "claude-prompt:1", Status: ledger.ReplyFound, JoinedBy: ledger.JoinedByID, Reply: reply, Quotes: quotes}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.d.sweepLedgerChecks(t.Context(), time.Now().Add(6*time.Minute))
+	started, _ := f.fake.snapshot()
+	if len(started) != 1 {
+		t.Fatalf("checkers started = %d", len(started))
+	}
+	want := "- claude-prompt:1: \"yes, and add a csv export\"\n  quoting: \"> Should search match typos like 'serach' and 'seach'?\"\n  answering the agent: \"Should search match typos like 'serach' and 'seach'?\"\n"
+	if !strings.Contains(started[0].Message, want) {
+		t.Fatalf("checker input lacks %q:\n%s", want, started[0].Message)
 	}
 }

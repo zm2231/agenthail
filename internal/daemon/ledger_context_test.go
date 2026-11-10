@@ -156,3 +156,31 @@ func TestAReplyLongerThanTheContextKeepsItsEnd(t *testing.T) {
 		t.Fatalf("kept %d runes of %d, ending %q", len([]rune(reply.Text)), reply.Runes, reply.Text[len(reply.Text)-20:])
 	}
 }
+
+func TestTextThePersonQuotedFromEarlierRepliesIsRecordedAndMarkedForTheSorter(t *testing.T) {
+	stub := &sorterStub{}
+	d, r, handler, p, search := sorterFixture(t, stub)
+	stub.setAnswer(fileTo(search))
+	d.contexts.wait = 10 * time.Second
+	s := p.session(t, r, "claude-quotes")
+	journal(t, r, s.ID, "r1", map[string]any{"kind": "message", "role": "assistant", "body": "Plan: the export writes one CSV per project, streamed so large projects never load into memory.", "ts": at(-2 * time.Minute)})
+	journal(t, r, s.ID, "r2", map[string]any{"kind": "message", "role": "assistant", "body": "The index is in. Anything else?", "ts": at(-time.Minute)})
+	message := "> The index is in. Anything else?\nyes, the export writes one CSV per project, streamed so large projects never load -- make it a zip"
+	journal(t, r, s.ID, "u1", map[string]any{"kind": "message", "role": "user", "promptId": "p-1", "body": message, "ts": at(0)})
+	runSorter(t, d)
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p-1", Prompt: message})
+	eventually(t, "the message to be asked about", func() bool { return len(stub.asks()) == 1 })
+
+	c, _ := recordedContext(t, p, ledger.PromptRef("p-1"))
+	var from []string
+	for _, q := range c.Quotes {
+		from = append(from, q.ReplyItemID)
+	}
+	if strings.Join(from, ",") != "r2,r1" || ledger.Typed(message, c.Quotes) != "yes,\n-- make it a zip" {
+		t.Fatalf("quotes %+v from %v, typed %q", c.Quotes, from, ledger.Typed(message, c.Quotes))
+	}
+	want := "> The index is in. Anything else?\nyes,\n> the export writes one CSV per project, streamed so large projects never load\n-- make it a zip"
+	if asked := stub.asks()[0]; asked.Message != want || asked.Reply != "The index is in. Anything else?" {
+		t.Fatalf("asked %q with reply %q, want the quotes marked", asked.Message, asked.Reply)
+	}
+}
