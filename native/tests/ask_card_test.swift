@@ -5,7 +5,7 @@ import Foundation
 struct AskCardTest {
     @MainActor
     static func main() {
-        let json = #"{"permissionMode":"","requests":[{"id":"turn-end-1793940750123","kind":"ask","tool":"","title":"Ready to ship","prompt":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"label":"Deploy","description":""},{"label":"Wait","description":"hold until Monday"}],"suggested":0,"links":[{"title":"Runbook","url":"https://example.com/run"}]}],"actions":[{"id":"o0","title":"Deploy"},{"id":"o1","title":"Wait"},{"id":"reply","title":"Reply…"}],"alwaysAllow":false,"createdAt":"2026-11-06T04:52:30Z"}]}"#
+        let json = #"{"permissionMode":"","requests":[{"id":"ask-447a922cae82","kind":"ask","tool":"","title":"Ready to ship","prompt":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"label":"Deploy","description":""},{"label":"Wait","description":"hold until Monday"}],"suggested":0,"links":[{"title":"Runbook","url":"https://example.com/run"}]}],"actions":[{"id":"o0","title":"Deploy"},{"id":"o1","title":"Wait"},{"id":"reply","title":"Reply…"}],"alwaysAllow":false,"createdAt":"2026-11-06T04:52:30Z"}]}"#
         let decoded = try! JSONDecoder().decode(SessionRequests.self, from: Data(json.utf8))
         let request = decoded.requests[0]
         check(request.isAsk && request.usesPager && !request.isQuestion, "the contract's request decodes as an ask")

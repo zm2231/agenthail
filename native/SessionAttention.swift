@@ -51,8 +51,8 @@ struct SessionAttention: Equatable {
             } else if let waiting = session.waitingOn {
                 result[session.id] = SessionAttention(kind: .request, reason: requestReason(waiting.kind, place: session.waitingPlace ?? .elsewhere))
             } else if session.pendingAskID != nil {
-                let headline = session.endTurn?.headline ?? ""
-                result[session.id] = SessionAttention(kind: .request, reason: headline.isEmpty ? requestReason("question") : "Asks: \(headline)")
+                let title = session.ask?.title ?? ""
+                result[session.id] = SessionAttention(kind: .request, reason: title.isEmpty ? requestReason("question") : "Asks: \(title)")
             } else if let limit = session.limitLabel, result[session.id] == nil {
                 result[session.id] = SessionAttention(kind: .usageLimit, reason: limit)
             } else if let stop = session.turnStop, result[session.id] == nil, SessionDisplayKind.of(session) == .stopped {

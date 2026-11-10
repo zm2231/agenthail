@@ -598,6 +598,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var placement: String? = nil
     var registeredAt: String? = nil
     var endTurn: SessionEndTurn? = nil
+    var ask: SessionAsk? = nil
     var move: SessionMove? = nil
     var composerTurnNotice: String { PersonMessageNote.text(capabilities, canAdopt: canAdopt) }
     /// A session its daemon can open in Agenthail's host.
