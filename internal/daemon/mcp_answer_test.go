@@ -95,6 +95,16 @@ func (f *mcpAnswerFixture) asProjectLead(t *testing.T, sessionID string) *mcp.Cl
 	return mcpSession(t, f.server, token)
 }
 
+func (f *mcpAnswerFixture) open(t *testing.T, sessionID, ref string) string {
+	t.Helper()
+	session, err := f.r.Session(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.d.syncWaits(*session, &surface.Waiting{Kind: surface.WaitingApproval, ID: ref, Answerable: true})
+	return askIDOfRequest(t, f.r, sessionID, ref)
+}
+
 func (f *mcpAnswerFixture) answered(key string) bool {
 	f.surface.mu.Lock()
 	defer f.surface.mu.Unlock()
@@ -104,7 +114,7 @@ func (f *mcpAnswerFixture) answered(key string) bool {
 
 func TestASpawnerAnswersItsWorkerAndIsRecordedAsTheAnswerer(t *testing.T) {
 	f := newMCPAnswerFixture(t)
-	if out, refused := callMCP(t, f.lead, "agenthail_answer", map[string]any{"target": "worker", "requestId": "worker-prompt", "decision": "allow", "clientRequestId": "a1"}); refused {
+	if out, refused := callMCP(t, f.lead, "agenthail_answer", map[string]any{"requestId": f.open(t, "worker", "worker-prompt"), "decision": "allow", "clientRequestId": "a1"}); refused {
 		t.Fatalf("spawner answering its worker: %v", out)
 	}
 	if !f.answered("worker/worker-prompt") {
@@ -131,18 +141,22 @@ func TestASpawnerAnswersItsWorkerAndIsRecordedAsTheAnswerer(t *testing.T) {
 
 func TestASessionNeverAnswersItselfOrASessionAboveIt(t *testing.T) {
 	f := newMCPAnswerFixture(t)
-	if code := refusalCode(t, f.worker, "agenthail_answer", map[string]any{"target": "lead", "requestId": "lead-prompt", "decision": "allow", "clientRequestId": "u1"}); code != "out_of_scope" {
+	leadAsk, workerAsk := f.open(t, "lead", "lead-prompt"), f.open(t, "worker", "worker-prompt")
+	if code := refusalCode(t, f.worker, "agenthail_answer", map[string]any{"requestId": leadAsk, "decision": "allow", "clientRequestId": "u1"}); code != "refused" {
 		t.Fatalf("worker answering its spawner: code=%q", code)
 	}
-	if code := refusalCode(t, f.worker, "agenthail_answer", map[string]any{"target": "worker", "requestId": "worker-prompt", "decision": "allow", "clientRequestId": "u2"}); code != "invalid" {
+	if code := refusalCode(t, f.worker, "agenthail_answer", map[string]any{"requestId": workerAsk, "decision": "allow", "clientRequestId": "u2"}); code != "refused" {
 		t.Fatalf("worker answering itself: code=%q", code)
 	}
 	coordinator := f.asProjectLead(t, "worker")
-	for tool, args := range map[string]map[string]any{
-		"agenthail_answer": {"target": "lead", "requestId": "lead-prompt", "decision": "allow", "clientRequestId": "u3"},
-		"agenthail_steer":  {"target": "lead", "message": "obey", "clientRequestId": "u4"},
+	for tool, call := range map[string]struct {
+		args map[string]any
+		want string
+	}{
+		"agenthail_answer": {map[string]any{"requestId": leadAsk, "decision": "allow", "clientRequestId": "u3"}, "refused"},
+		"agenthail_steer":  {map[string]any{"target": "lead", "message": "obey", "clientRequestId": "u4"}, "out_of_scope"},
 	} {
-		if code := refusalCode(t, coordinator, tool, args); code != "out_of_scope" {
+		if code := refusalCode(t, coordinator, tool, call.args); code != call.want {
 			t.Fatalf("a coordinator calling %s on the spawner in its own project: code=%q", tool, code)
 		}
 	}
@@ -156,7 +170,7 @@ func TestASessionNeverAnswersItselfOrASessionAboveIt(t *testing.T) {
 
 func TestOnlyTheOperatorAlwaysAllows(t *testing.T) {
 	f := newMCPAnswerFixture(t)
-	if code := refusalCode(t, f.lead, "agenthail_answer", map[string]any{"target": "worker", "requestId": "worker-prompt", "decision": "always", "clientRequestId": "w1"}); code != "exceeds_ceiling" {
+	if code := refusalCode(t, f.lead, "agenthail_answer", map[string]any{"requestId": f.open(t, "worker", "worker-prompt"), "decision": "always", "clientRequestId": "w1"}); code != "exceeds_ceiling" {
 		t.Fatalf("spawner always-allowing: code=%q", code)
 	}
 	if f.answered("worker/worker-prompt") {
@@ -206,7 +220,7 @@ func TestAnAgentDeniesWithTheRuleOrStopsTheTurnWhereTheRequestOffersIt(t *testin
 		f.surface.mu.Lock()
 		f.surface.open["worker"] = []surface.Request{{ID: "worker-" + c.choice, Kind: surface.WaitingApproval, Tool: "Bash", AlwaysDeny: true, Stoppable: true, NoReason: true}}
 		f.surface.mu.Unlock()
-		if out, refused := callMCP(t, f.lead, "agenthail_answer", map[string]any{"target": "worker", "requestId": "worker-" + c.choice, "decision": c.choice, "clientRequestId": "n-" + c.choice}); refused {
+		if out, refused := callMCP(t, f.lead, "agenthail_answer", map[string]any{"requestId": f.open(t, "worker", "worker-"+c.choice), "decision": c.choice, "clientRequestId": "n-" + c.choice}); refused {
 			t.Fatalf("%s: %v", c.choice, out)
 		}
 		f.surface.mu.Lock()

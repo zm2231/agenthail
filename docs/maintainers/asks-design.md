@@ -205,7 +205,7 @@ What this design fixes now so that path needs no new model:
 Each layer works end to end on its own and removes the path it replaces.
 
 1. Schema 90, ask store, `agenthail ask` / `agenthail_ask`, end-turn asks moved over, Stop reminder for leads in terminal Claude and Codex, decisions inbox items carry asks, answers through `respond`. This is the layer that fixes "Needs you is empty".
-2. Permission requests as asks; one routing path with escalation.
+2. Permission requests as asks; one routing path with escalation. Built: [asks.md](asks.md#permission-requests).
 3. Delivery problems as asks.
 4. Ledger questions as asks.
 5. Client cleanup: iPhone "Accept recommended", browser notification actions, Swift attention builder removed.

@@ -90,7 +90,7 @@ func (f *mcpAnswerFixture) openRequests(t *testing.T, id string, since time.Time
 		}
 		for _, row := range rows {
 			if row.ID == id {
-				return row.WaitingOn != nil && slices.Equal(row.WaitingOn.Open, open)
+				return row.WaitingOn != nil && slices.Equal(askRefs(f.r, row.WaitingOn.Open), open)
 			}
 		}
 		return false

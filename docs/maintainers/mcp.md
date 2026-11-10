@@ -106,7 +106,7 @@ Archived sessions are outside every scope. `agenthail_sessions` also lists the p
 | `agenthail_send` | A message to a session (`target`) or a project's coordinator (`project`, starting its conversation if it has none). `mode: queue` (default) or `now` | control scope; see below |
 | `agenthail_steer`, `agenthail_interrupt` | Steer or interrupt a running turn | control scope, down only |
 | `agenthail_goal` | Set, edit, clear, pause or resume a Codex session's goal, or change its token budget | control scope, down only |
-| `agenthail_answer` | Allow or deny an open request; `always` keeps allowing with the rule the request offers. An ask id answers that ask, or passes it on with `escalate` | `requests.answer`, control scope, down only; `always` needs `control.all`; an ask only by the session it is routed to |
+| `agenthail_answer` | Answer an open request by its ask id: allow or deny a permission request (`always` keeps allowing with the rule the request offers), answer an agent's ask, or pass either on with `escalate` | Only the session the request is routed to, or the voice operator (`control.all`) for the person; a permission request also needs `requests.answer`, and `always` needs `control.all` |
 | `agenthail_session_settings` | Read a session's effective model, effort, permission and config root with where each came from; or change its model, permission mode or effort, or compact it | read: any session the caller can read; change: control scope, down only, and a permission mode stays within the target's ceiling unless the caller has `control.all` |
 | `agenthail_alias` | Name a session | control scope, down only |
 | `agenthail_archive` | Archive or restore a session | control scope, down only |

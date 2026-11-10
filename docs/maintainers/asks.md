@@ -18,6 +18,16 @@ Limits, refused as `invalid` with a message the agent can act on: a one-line tit
 - An ask moves one hop up (to its holder's own hearer, else the person) when the holder escalates it, when the holder stops running, or when it has sat with the holder for `askEscalateMinutes` (dashboard config, default 10). The daemon checks every 30 seconds. The holder's undelivered notice is withdrawn when the ask moves.
 - Only the person or the session the ask is routed to may answer it. An answer is delivered once; a second is refused as stale.
 
+## Permission requests
+
+A provider request the session waits on (a permission prompt, a question, MCP input) is an ask of origin `permission`; the request it holds is its `ref`, which stays internal. The daemon opens one when it observes the request and withdraws it when the provider closes it, so a restart keeps every open request.
+
+- Its id is the request id everywhere: `waitingOn.id` and `waitingOn.open`, the ids `/api/v1/requests` and `agenthail_requests` list, a notification's `requestId`, and `respond`. A provider's own request id is never accepted.
+- An answerable request follows the routing above, with the window `askPermissionEscalateMinutes` (default 3): it holds a tool call. The hearer's notice names the ask id, the command to read it and the decisions to answer it with. The person is notified only once it reaches them.
+- A wait Agenthail cannot answer (a dialog in the terminal, a prompt it cannot reach) goes straight to the person, with no buttons anywhere; the notification says where to answer it. It is withdrawn when the wait ends.
+- `waitingOn` is derived from the open permission asks: the oldest, with every open answerable one in `open`. It is not the row's `ask`, which stays an agent's ask.
+- The decisions inbox shows a request routed to a running lead under "Handled by a lead"; the person can still answer it.
+
 ## The Stop reminder
 
 `agenthail hook stop` (Claude host, Codex, and terminal Claude through `agenthail hooks install`) holds a stop once when the session is a lead (a project coordinator or the spawner of a running session), the turn's `last_assistant_message` has a line outside fenced code that ends in `?`, and the session raised no ask since its turn opened. The reason tells it to raise the question as an ask. A session holding Agenthail's tools is also asked, in the same hold, to call `agenthail_end_turn` when it has not. Terminal Claude's settings hook carries `--terminal` and does nothing under the Claude host, which runs its own.

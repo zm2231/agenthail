@@ -82,14 +82,15 @@ func TestACodexApprovalIsAnAnswerableDecisionAndItsAnswerReachesCodex(t *testing
 	for _, action := range card.Requests[0].Actions {
 		actions = append(actions, action.ID)
 	}
-	if card.Group != decisionWaiting || card.Requests[0].ID != requestID || card.Requests[0].Prompt != "rm -rf build" || !reflect.DeepEqual(actions, []string{"allow", "always", "deny", "stop"}) {
+	if card.Group != decisionWaiting || askRef(store, card.Requests[0].ID) != requestID || card.Requests[0].Prompt != "rm -rf build" || !reflect.DeepEqual(actions, []string{"allow", "always", "deny", "stop"}) {
 		t.Fatalf("decision %+v actions %v", card, actions)
 	}
-	if waiting := h.sessionWaiting(id); waiting == nil || waiting.ID != requestID || !waiting.Answerable {
+	if waiting := h.sessionWaiting(id); waiting == nil || askRef(store, waiting.ID) != requestID || !waiting.Answerable {
 		t.Fatalf("the row waits on %+v, want the request %s", waiting, requestID)
 	}
 
-	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": id, "requestId": requestID, "decision": map[string]any{"choice": "always"}})
+	askID := card.Requests[0].ID
+	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": id, "requestId": askID, "decision": map[string]any{"choice": "always"}})
 	if status != http.StatusOK {
 		t.Fatalf("respond status=%d body=%s", status, payload)
 	}
@@ -103,7 +104,7 @@ func TestACodexApprovalIsAnAnswerableDecisionAndItsAnswerReachesCodex(t *testing
 		t.Fatalf("Codex was answered %v", answered)
 	}
 	testkit.Eventually(t, "the decision to leave the feed", 10*time.Second, func() bool { return len(decisions()) == 0 })
-	status, _ = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": id, "requestId": requestID, "decision": map[string]any{"behavior": "allow"}})
+	status, _ = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": id, "requestId": askID, "decision": map[string]any{"behavior": "allow"}})
 	if status != http.StatusConflict {
 		t.Fatalf("a second answer: status %d, want a stale conflict", status)
 	}

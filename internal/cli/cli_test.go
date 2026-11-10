@@ -1168,7 +1168,7 @@ func TestQueueShowsASessionWaitingOnTheUser(t *testing.T) {
 	if err := r.RegisterSession(asking); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.RecordWaiting(asking.ID, waiting, time.Now()); err != nil {
+	if _, err := r.SyncWaits(asking.ID, []registry.Wait{{Ref: waiting.ID, Kind: waiting.Kind}}, "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.QueueMessageWithOptions(asking.ID, "after the answer", "", surface.SendOptions{}); err != nil {

@@ -1521,7 +1521,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"outcome\":\"allow\",\"requestId\":\"r1\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"outcome\":\"allow\",\"requestId\":\"ask-r1\"}}\n"
   },
   "api/action respond choice": {
     "status": 400,
@@ -4101,7 +4101,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"outcome\":\"allow\",\"requestId\":\"r1\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"outcome\":\"allow\",\"requestId\":\"ask-r1\"}}\n"
   },
   "api/v1/actions respond choice": {
     "status": 400,

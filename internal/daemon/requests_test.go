@@ -102,7 +102,7 @@ func TestAPhoneAnswersAHostSessionsPermissionRequestOnceAndHistoryNamesIt(t *tes
 	if _, err := d.observeTurn(context.Background(), claude, stored); err != nil {
 		t.Fatal(err)
 	}
-	if waiting, _, err := r.WaitingState(id); err != nil || waiting == nil || waiting.ID != request.ID || waiting.Kind != surface.WaitingApproval {
+	if waiting, _, err := recordedWait(r, id); err != nil || waiting == nil || waiting.ID != request.ID || waiting.Kind != surface.WaitingApproval {
 		t.Fatalf("waiting = %+v, %v, want request %s", waiting, err, request.ID)
 	}
 
@@ -112,7 +112,7 @@ func TestAPhoneAnswersAHostSessionsPermissionRequestOnceAndHistoryNamesIt(t *tes
 	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"outcome":"allowed"`)) {
 		t.Fatalf("respond status=%d body=%s", response.Code, response.Body.String())
 	}
-	if waiting, _, err := r.WaitingState(id); err != nil || waiting != nil {
+	if waiting, _, err := recordedWait(r, id); err != nil || waiting != nil {
 		t.Fatalf("waiting after the answer = %+v, %v", waiting, err)
 	}
 	assertAPIV1Error(t, apiCall(t, handler, http.MethodPost, "/api/v1/actions", phone, respond), http.StatusConflict, "stale")
@@ -449,7 +449,7 @@ func waitingDiagnosis(t *testing.T, r *registry.Registry, fixture *claudehosttes
 	t.Helper()
 	id := session.ID
 	observed := fmt.Sprintf("last observed status=%s waitingOn=%+v queued=%d", session.Status, session.WaitingOn, r.QueueCount(id))
-	recorded, announced, err := r.WaitingState(id)
+	recorded, announced, err := recordedWait(r, id)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	started := time.Now()

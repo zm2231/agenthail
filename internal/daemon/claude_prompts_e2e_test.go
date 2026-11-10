@@ -67,7 +67,7 @@ func TestATerminalQuestionHeldByTheHookIsAnsweredFromAgenthailAndItsNoticesAreWi
 	desktop := &withdrawals{}
 	h, _ := runDaemonWith(t, q.store, func(d *Daemon) { d.withdrawDesktop = desktop.record }, q.claude)
 	testkit.Eventually(t, "the question the record shows to be announced", 5*time.Second, func() bool { return q.pushes.count("session.waiting") == 1 })
-	generic := waitingNotificationKey(q.session.ID, questionID)
+	generic := askNotificationKey(askIDOfRequest(t, q.store, q.session.ID, questionID))
 
 	prompt := `{"session_id":"conversation-question","tool_name":"AskUserQuestion","tool_input":` + pickABranch + `}`
 	type held struct {
@@ -83,7 +83,7 @@ func TestATerminalQuestionHeldByTheHookIsAnsweredFromAgenthailAndItsNoticesAreWi
 	var waiting *surface.Waiting
 	testkit.Eventually(t, "the session to wait on the held prompt", 5*time.Second, func() bool {
 		waiting = h.sessionWaiting(q.session.ID)
-		return waiting != nil && strings.Contains(waiting.ID, ":held:")
+		return waiting != nil && strings.Contains(askRef(q.store, waiting.ID), ":held:")
 	})
 	testkit.Eventually(t, "the notice that could not say what was asked to be withdrawn", 5*time.Second, func() bool {
 		return desktop.has("agenthail-"+generic) && slices.ContainsFunc(q.pushes.all(""), func(push map[string]string) bool { return push["collapseId"] == generic })
@@ -112,7 +112,7 @@ func TestATerminalQuestionHeldByTheHookIsAnsweredFromAgenthailAndItsNoticesAreWi
 
 	testkit.Eventually(t, "the answered question to stop waiting while Claude acts on it", 5*time.Second, func() bool { return h.sessionWaiting(q.session.ID) == nil })
 	testkit.Eventually(t, "the answered question's notices to be withdrawn", 5*time.Second, func() bool {
-		return desktop.has("agenthail-" + waitingNotificationKey(q.session.ID, waiting.ID))
+		return desktop.has("agenthail-" + askNotificationKey(waiting.ID))
 	})
 	for range 3 {
 		session := q.session
@@ -120,7 +120,7 @@ func TestATerminalQuestionHeldByTheHookIsAnsweredFromAgenthailAndItsNoticesAreWi
 			t.Fatal(err)
 		}
 	}
-	if recorded, _, err := q.store.WaitingState(q.session.ID); err != nil || recorded != nil {
+	if recorded, _, err := recordedWait(q.store, q.session.ID); err != nil || recorded != nil {
 		t.Fatalf("the record still showing the answered question was recorded as a wait: %+v err=%v", recorded, err)
 	}
 	if count := q.pushes.count("session.waiting"); count != 2 {
@@ -182,7 +182,7 @@ func TestRightAfterAnAnswerTheSessionStopsShowingTheQuestionAndItsRequestsReadEm
 	var waiting *surface.Waiting
 	testkit.Eventually(t, "the session to wait on the held prompt", 5*time.Second, func() bool {
 		waiting = h.sessionWaiting(q.session.ID)
-		return waiting != nil && strings.Contains(waiting.ID, ":held:")
+		return waiting != nil && strings.Contains(askRef(q.store, waiting.ID), ":held:")
 	})
 	answer := map[string]any{"action": "respond", "sessionId": q.session.ID, "requestId": waiting.ID, "decision": map[string]any{"behavior": "allow", "answers": map[string]string{"Which branch?": "next"}}}
 	if status, payload := h.request(http.MethodPost, "/api/v1/actions", answer); status != http.StatusOK {

@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +13,7 @@ import (
 type noticeFixture struct {
 	d       *Daemon
 	fake    *daemonSurface
+	asking  *requestingSurface
 	reg     *registry.Registry
 	repo    string
 	worker  surface.Session
@@ -44,10 +44,11 @@ func newNoticeFixture(t *testing.T) noticeFixture {
 		t.Fatal(err)
 	}
 	fake := &daemonSurface{sessions: sessions, observations: map[string]*surface.TurnObservation{}, accepted: true}
-	d := newTestDaemon(t, reg, []surface.Surface{fake})
-	waiting := surface.Waiting{Kind: surface.WaitingApproval, ID: "approve-1", Answerable: true}
 	request := surface.Request{ID: "approve-1", Kind: surface.WaitingApproval, Tool: "Bash", Description: "rm -rf build"}
-	return noticeFixture{d: d, fake: fake, reg: reg, repo: repo, worker: sessions["worker"], request: request, waiting: waiting}
+	asking := &requestingSurface{daemonSurface: fake, open: []surface.Request{request}}
+	d := newTestDaemon(t, reg, []surface.Surface{asking})
+	waiting := surface.Waiting{Kind: surface.WaitingApproval, ID: "approve-1", Answerable: true}
+	return noticeFixture{d: d, fake: fake, asking: asking, reg: reg, repo: repo, worker: sessions["worker"], request: request, waiting: waiting}
 }
 
 func (f noticeFixture) setLead(t *testing.T, sessionID string) {
@@ -73,16 +74,27 @@ func (f noticeFixture) notices(t *testing.T) []registry.QueueRow {
 	return notices
 }
 
+func (f noticeFixture) tell(t *testing.T, d *Daemon, session surface.Session, waiting surface.Waiting) registry.Ask {
+	t.Helper()
+	d.syncWaits(session, &waiting)
+	d.background.wait()
+	ask, found := askOfRequest(f.reg, session.ID, waiting.ID)
+	if !found {
+		t.Fatalf("no ask for %s", waiting.ID)
+	}
+	return ask
+}
+
 func TestAWorkersPermissionPromptGoesToItsLeadOnceWithHowToAnswer(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.setLead(t, "lead")
-	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
-	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
+	ask := f.tell(t, f.d, f.worker, f.waiting)
+	f.tell(t, f.d, f.worker, f.waiting)
 	notices := f.notices(t)
-	if len(notices) != 1 || notices[0].SessionID != "lead" || notices[0].Status != "pending" {
-		t.Fatalf("notices=%+v", notices)
+	if len(notices) != 1 || notices[0].SessionID != "lead" || notices[0].Status != "pending" || ask.RoutedTo != "lead" {
+		t.Fatalf("ask=%+v notices=%+v", ask, notices)
 	}
-	for _, want := range []string{"Bash: rm -rf build", "Read the request first: agenthail requests @builder --json", "agenthail answer @builder", "--request approve-1", "Answer it yourself now", "don't wait for them"} {
+	for _, want := range []string{"Bash: rm -rf build", "Read the request first: agenthail requests @builder --json", "agenthail answer @builder", "--request " + ask.ID, "Or pass it to the person: agenthail ask escalate " + ask.ID, "within 3 minutes"} {
 		if !strings.Contains(notices[0].Message, want) {
 			t.Fatalf("the notice %q does not say %q", notices[0].Message, want)
 		}
@@ -95,12 +107,12 @@ func TestALeadWithAgenthailToolsIsToldTheToolsToAnswerWith(t *testing.T) {
 	if _, err := f.d.Registry.IssueSessionCredential("lead", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
+	ask := f.tell(t, f.d, f.worker, f.waiting)
 	notices := f.notices(t)
 	if len(notices) != 1 {
 		t.Fatalf("notices=%+v", notices)
 	}
-	for _, want := range []string{`agenthail_requests {"sessionId":"@builder","requestId":"approve-1"}`, `agenthail_answer {"target":"@builder","requestId":"approve-1"`} {
+	for _, want := range []string{`agenthail_requests {"sessionId":"@builder","requestId":"` + ask.ID + `"}`, `agenthail_answer {"requestId":"` + ask.ID + `","decision":"allow|deny"}`, `agenthail_answer {"requestId":"` + ask.ID + `","decision":"escalate"}`} {
 		if !strings.Contains(notices[0].Message, want) {
 			t.Fatalf("the notice %q does not say %q", notices[0].Message, want)
 		}
@@ -112,7 +124,7 @@ func TestALeadWithAgenthailToolsIsToldTheToolsToAnswerWith(t *testing.T) {
 
 func TestAPromptGoesToTheSpawnerWhenTheProjectHasNoLead(t *testing.T) {
 	f := newNoticeFixture(t)
-	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
+	f.tell(t, f.d, f.worker, f.waiting)
 	if notices := f.notices(t); len(notices) != 1 || notices[0].SessionID != "spawner" {
 		t.Fatalf("notices=%+v", notices)
 	}
@@ -121,44 +133,46 @@ func TestAPromptGoesToTheSpawnerWhenTheProjectHasNoLead(t *testing.T) {
 func TestALeadsOwnPromptGoesToItsSpawner(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.setLead(t, "worker")
-	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
+	f.tell(t, f.d, f.worker, f.waiting)
 	if notices := f.notices(t); len(notices) != 1 || notices[0].SessionID != "spawner" {
 		t.Fatalf("notices=%+v", notices)
 	}
 }
 
-func TestAPromptWithNoLeadAndNoSpawnerTellsNoAgent(t *testing.T) {
+func TestAPromptWithNoLeadAndNoSpawnerGoesToThePerson(t *testing.T) {
 	f := newNoticeFixture(t)
 	orphan := f.worker
 	orphan.ID = "lead"
-	f.d.noticeWaiting(orphan, f.waiting, f.request, true)
+	ask := f.tell(t, f.d, orphan, f.waiting)
 	rows, err := f.reg.ListQueue(true, nil)
-	if err != nil || len(rows) != 0 {
-		t.Fatalf("rows=%+v err=%v", rows, err)
+	if err != nil || len(rows) != 0 || ask.RoutedTo != registry.AskToPerson {
+		t.Fatalf("ask=%+v rows=%+v err=%v", ask, rows, err)
 	}
 }
 
-func TestAnAnsweredPromptWithdrawsItsPendingNoticeAndIsNotNoticedAgain(t *testing.T) {
+func TestAClosedPromptWithdrawsItsPendingNotice(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.setLead(t, "lead")
-	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
-	f.d.withdrawWaitingNow(context.Background(), f.worker.ID, f.waiting)
+	f.tell(t, f.d, f.worker, f.waiting)
+	f.d.syncWaits(f.worker, nil)
+	f.d.background.wait()
 	notices := f.notices(t)
 	if len(notices) != 1 || notices[0].Status != "canceled" {
 		t.Fatalf("notices=%+v", notices)
-	}
-	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
-	if again := f.notices(t); len(again) != 1 || again[0].Status != "canceled" {
-		t.Fatalf("a withdrawn notice was sent again: %+v", again)
 	}
 }
 
 func TestAPromptNoticedBeforeARestartIsNotNoticedAgainAfterIt(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.setLead(t, "lead")
-	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
+	f.tell(t, f.d, f.worker, f.waiting)
 	restarted := newTestDaemon(t, f.reg, f.d.Surfaces)
-	restarted.noticeWaiting(f.worker, f.waiting, f.request, true)
+	open, err := f.reg.OpenPermissionAsks(f.worker.ID)
+	if err != nil || len(open) != 1 {
+		t.Fatalf("open=%+v err=%v", open, err)
+	}
+	restarted.tellPermissionAsks(open)
+	restarted.background.wait()
 	if notices := f.notices(t); len(notices) != 1 {
 		t.Fatalf("notices=%+v", notices)
 	}
@@ -167,7 +181,7 @@ func TestAPromptNoticedBeforeARestartIsNotNoticedAgainAfterIt(t *testing.T) {
 func TestACoordinatorThatNeverStartedLeavesThePromptToTheSpawner(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.setLead(t, "")
-	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
+	f.tell(t, f.d, f.worker, f.waiting)
 	notices := f.notices(t)
 	if len(notices) != 1 || notices[0].SessionID != "spawner" {
 		t.Fatalf("notices=%+v", notices)
@@ -180,28 +194,19 @@ func TestACoordinatorThatNeverStartedLeavesThePromptToTheSpawner(t *testing.T) {
 func TestAPromptAgenthailCannotReadStillTellsTheLeadWhatIsWaiting(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.setLead(t, "lead")
-	f.d.noticeWaiting(f.worker, f.waiting, surface.Request{}, false)
+	f.asking.open = nil
+	f.tell(t, f.d, f.worker, f.waiting)
 	notices := f.notices(t)
-	if len(notices) != 1 || !strings.Contains(notices[0].Message, "needs your approval") {
+	if len(notices) != 1 || !strings.Contains(notices[0].Message, "Needs your approval") {
 		t.Fatalf("notices=%+v", notices)
 	}
 }
 
-func TestTheLeadIsToldHowToClearAPromptOnlyARestartReaches(t *testing.T) {
-	for _, test := range []struct {
-		lifecycle surface.Lifecycle
-		want      string
-	}{
-		{surface.Lifecycle{Stop: true, Resume: true}, "Stop and resume it to clear it"},
-		{surface.Lifecycle{}, "answer it where it runs"},
-	} {
-		f := newNoticeFixture(t)
-		f.setLead(t, "lead")
-		f.fake.caps.Lifecycle = test.lifecycle
-		f.d.noticeWaiting(f.worker, surface.Waiting{Kind: surface.WaitingQuestion, ID: "unread-1"}, surface.Request{}, false)
-		notices := f.notices(t)
-		if len(notices) != 1 || !strings.Contains(notices[0].Message, test.want) {
-			t.Fatalf("lifecycle %+v: notices=%+v, want %q", test.lifecycle, notices, test.want)
-		}
+func TestAPromptAgenthailCannotAnswerGoesOnlyToThePerson(t *testing.T) {
+	f := newNoticeFixture(t)
+	f.setLead(t, "lead")
+	ask := f.tell(t, f.d, f.worker, surface.Waiting{Kind: surface.WaitingQuestion, ID: "unread-1"})
+	if notices := f.notices(t); len(notices) != 0 || ask.RoutedTo != registry.AskToPerson || ask.Answerable {
+		t.Fatalf("ask=%+v notices=%+v", ask, notices)
 	}
 }

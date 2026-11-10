@@ -175,7 +175,7 @@ func parityFailureCases() []parityCase {
 		session("session-fork outcome unknown", "session-fork", `,"alias":"forked"`, failing("fork", surface.DeliveryOutcomeUnknown(errors.New("the runtime stopped answering")))),
 		session("session-lifecycle-stop failing", "session-lifecycle-stop", ``, failing("lifecycle", broken)),
 		session("native-queue failing", "native-queue", `,"nativeQueue":{"queueAction":"list"}`, failing("native-queue", broken)),
-		session("respond choice when requests fail", "respond", `,"requestId":"r1","decision":{"choice":"o0"}`, failing("requests", broken)),
-		session("respond failing", "respond", `,"requestId":"r1","decision":{"behavior":"allow"}`, failing("respond", broken)),
+		session("respond choice when requests fail", "respond", `,"requestId":"ask-r1","decision":{"choice":"o0"}`, failing("requests", broken)),
+		session("respond failing", "respond", `,"requestId":"ask-r1","decision":{"behavior":"allow"}`, failing("respond", broken)),
 	}
 }

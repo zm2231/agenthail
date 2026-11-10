@@ -36,7 +36,7 @@ var Tools = []Tool{
 	{Name: "agenthail_steer", Description: "Steer the running turn of a session you spawned or, as coordinator, lead."},
 	{Name: "agenthail_interrupt", Description: "Interrupt the running turn of a session you spawned or, as coordinator, lead."},
 	{Name: "agenthail_goal", Description: "Set, edit, clear, pause or resume the goal of a Codex session you spawned or, as coordinator, lead, or change its token budget."},
-	{Name: "agenthail_answer", Description: "Allow or deny an open request (a permission prompt, question or MCP input) of a session you spawned or, as coordinator, lead, or answer an ask routed to you (its id starts ask-; answers or message, or decision escalate to pass it up). Recorded as answered by you. You never answer your own requests or those of a session above you."},
+	{Name: "agenthail_answer", Description: "Answer an open request routed to you, by its id: allow or deny a permission prompt, question or MCP input; give an agent's ask answers or a message; or decision escalate to pass it up. Recorded as answered by you."},
 	{Name: "agenthail_session_settings", Description: "Read a session's effective settings, or change the model, permission mode or effort of a session you spawned or, as coordinator, lead, or compact its context. A permission mode cannot exceed the session's ceiling."},
 	{Name: "agenthail_alias", Description: "Name a session you spawned or, as coordinator, lead, so it can be reached as @name."},
 	{Name: "agenthail_queue", Description: "Retry or cancel a queued instruction, or clear a session's pending ones. For the person's voice operator only."},

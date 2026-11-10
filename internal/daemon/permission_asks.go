@@ -206,11 +206,14 @@ func (d *Daemon) noticePermission(ctx context.Context, ask registry.Ask) {
 		d.log.Printf("tell the holder of %s: %s", ask.ID, err)
 		return
 	}
-	request, open := d.permissionRequest(ctx, *session, ask)
-	if !open {
-		return
+	asks := ask.Title
+	if request, open := d.permissionRequest(ctx, *session, ask); open {
+		asks = request.Prompt()
+		if detail := strings.TrimSpace(request.Description); detail != "" && detail != asks {
+			asks += ": " + detail
+		}
 	}
-	message := permissionNotice(d.resolveDisplay(session.ID), d.answerTarget(session.ID), ask.ID, request, d.usesMCP(ask.RoutedTo), d.permissionEscalateAfter())
+	message := permissionNotice(d.resolveDisplay(session.ID), d.answerTarget(session.ID), ask.ID, asks, d.usesMCP(ask.RoutedTo), d.permissionEscalateAfter())
 	hearer := noticeRecipient{sessionID: ask.RoutedTo, role: "lead"}
 	d.taskNoticeMu.Lock()
 	read := d.taskRequestsRead[ask.SessionID] == (taskRequestRead{waitingID: ask.ID, reader: ask.RoutedTo})
@@ -225,11 +228,7 @@ func (d *Daemon) noticePermission(ctx context.Context, ask registry.Ask) {
 	}
 }
 
-func permissionNotice(name, target, askID string, request surface.Request, mcp bool, window time.Duration) string {
-	asks := request.Prompt()
-	if detail := strings.TrimSpace(request.Description); detail != "" && detail != asks {
-		asks += ": " + detail
-	}
+func permissionNotice(name, target, askID, asks string, mcp bool, window time.Duration) string {
 	read := fmt.Sprintf("agenthail requests %s --json", target)
 	answer := fmt.Sprintf("agenthail answer %s <allow|deny|\"answer\"> --request %s", target, askID)
 	pass := fmt.Sprintf("agenthail ask escalate %s", askID)
@@ -268,6 +267,12 @@ func (d *Daemon) answerPermission(ctx context.Context, adapter surface.Surface, 
 	responder, ok := sessionResponder(adapter, session)
 	if !ok {
 		return actionResult{}, invalidRequest("this session's requests are not answered through Agenthail")
+	}
+	if decision.Behavior == "" && decision.Choice == "" {
+		if len(decision.Answers) == 0 {
+			return actionResult{}, invalidRequest("answer a permission request with allow, deny, never or stop")
+		}
+		decision.Behavior = "allow"
 	}
 	if decision.Choice != "" {
 		state, err := responder.Requests(ctx, session)
