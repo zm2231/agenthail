@@ -284,8 +284,7 @@ final class RepositoryArchiveTests: XCTestCase {
         RepositoryArchiveProtocol.state.reset(refusing: "laptop.tailnet.ts.net")
         try AgenthailIOSTests.pair("hlaptop", "https://laptop.tailnet.ts.net", name: "laptop")
         try AgenthailIOSTests.pair("hserver", "https://server.tailnet.ts.net", name: "server")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [RepositoryArchiveProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([RepositoryArchiveProtocol.self])
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
         defer { KeychainStore.removeAll() }
         await model.setProjectArchived("repo:github.com/acme/widget", true)
@@ -315,7 +314,9 @@ private final class RepositoryArchiveProtocol: URLProtocol, @unchecked Sendable 
     static let state = State()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         var status = 503
         var text = #"{"error":{"message":"unavailable"}}"#
         if request.url?.path == "/api/v1/actions" {

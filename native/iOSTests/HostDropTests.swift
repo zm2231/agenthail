@@ -7,8 +7,7 @@ final class HostDropTests: XCTestCase {
         KeychainStore.removeAll()
         try AgenthailIOSTests.pair("hdrop", "https://drop.tailnet.ts.net", token: "fixture")
         HostDropProtocol.state.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [HostDropProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([HostDropProtocol.self])
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration), drops: .isolated())
         model.connect()
         for _ in 0..<200 where !(HostDropProtocol.state.streaming && model.snapshot?.sessions.first?.host?.state == "connected") {
@@ -288,13 +287,15 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
         func closed(_ stream: HostDropProtocol) { lock.withLock { open.removeAll { $0 === stream } } }
         func dropStreams() {
             let dropped = lock.withLock { defer { open = [] }; return open }
-            for stream in dropped { stream.client?.urlProtocol(stream, didFailWithError: URLError(.networkConnectionLost)) }
+            for stream in dropped { stream.served { stream.client?.urlProtocol(stream, didFailWithError: URLError(.networkConnectionLost)) } }
         }
     }
     static let state = State()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         let path = request.url!.path
         if Self.state.down {
             client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
@@ -326,7 +327,7 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
             Self.state.sawProbe(timeout: request.timeoutInterval)
         }
         if path == "/api/v1/version", Self.state.takeProbeFailure() {
-            DispatchQueue.global().asyncAfter(deadline: .now() + Self.state.probeFailureDelay) { [self] in
+            later(Self.state.probeFailureDelay) { [self] in
                 client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
             }
             return

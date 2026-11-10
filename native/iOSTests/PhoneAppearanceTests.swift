@@ -28,8 +28,7 @@ final class PhoneAppearanceTests: XCTestCase {
     }
 
     private var api: AgenthailAPI {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [UIConfigURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([UIConfigURLProtocol.self])
         return AgenthailAPI(baseURL: URL(string: "https://host.invalid")!, token: "t", session: URLSession(configuration: configuration))
     }
 
@@ -320,7 +319,9 @@ private final class UIConfigURLProtocol: URLProtocol, @unchecked Sendable {
     static let state = UIConfigState()
     override class func canInit(with request: URLRequest) -> Bool { request.url?.path.hasPrefix("/api/v1/ui") == true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
         let background = components.path == "/api/v1/ui/background"
         if !background {

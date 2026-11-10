@@ -182,8 +182,7 @@ final class VoiceTests: XCTestCase {
 
     @MainActor
     func testAnActivityAttachmentLoadsOnlyForTheSessionStillShown() async throws {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [VoiceAttachmentURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([VoiceAttachmentURLProtocol.self])
         let timeline = AgenthailAPI(baseURL: URL(string: "https://attach.test")!, token: "token", session: URLSession(configuration: configuration))
         let model = VoiceOperatorModel(api: VoiceFixtureAPI(), timelineAPI: timeline, audio: VoiceFixtureAudio())
         let shown = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
@@ -651,8 +650,7 @@ final class VoiceTests: XCTestCase {
     @MainActor
     func testNativeVoiceSendsIdentityAndSDPOnlyThroughAuthenticatedAPI() async throws {
         VoiceURLProtocol.recorder.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [VoiceURLProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([VoiceURLProtocol.self])
         let api = try VoiceAPI(endpoint: URL(string: "https://mac.test")!, token: "paired-fixture", session: URLSession(configuration: configuration))
         let state = try await api.action(VoiceAction(action: "start", attemptId: "attempt", sdp: "v=0 fixture"))
         XCTAssertEqual(state.phase, "negotiating")
@@ -757,7 +755,9 @@ private final class VoiceURLProtocol: URLProtocol, @unchecked Sendable {
     static let state = #"{"protocol":1,"phase":"negotiating","attemptId":"attempt","sdp":"v=0 answer","events":[{"sequence":3,"method":"thread/realtime/transcript/delta","params":{"role":"user","delta":"Ask the builder"}},{"sequence":4,"method":"thread/realtime/transcript/done","params":{"role":"user","text":"Ask the builder to check the tests."}}],"truncated":false,"occupied":false}"#
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "mac.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         Self.recorder.append(request)
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -776,14 +776,15 @@ private final class VoiceAttachmentGate: @unchecked Sendable {
     var lastSession: String? { lock.withLock { session } }
     func hold() { lock.withLock { held = DispatchSemaphore(value: 0) } }
     func release() { lock.withLock { held }?.signal() }
-    func pass(session id: String?) {
+    func pass(_ request: URLRequest, session id: String?) -> Bool {
         let semaphore = lock.withLock { () -> DispatchSemaphore? in
             session = id
             waiting = held != nil
             return held
         }
-        semaphore?.wait()
+        while let semaphore, semaphore.wait(timeout: .now() + 0.02) == .timedOut, FixtureScope.owns(request) {}
         lock.withLock { waiting = false; held = nil }
+        return FixtureScope.owns(request)
     }
 }
 
@@ -791,9 +792,11 @@ private final class VoiceAttachmentURLProtocol: URLProtocol, @unchecked Sendable
     static let gate = VoiceAttachmentGate()
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "attach.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         let session = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "sessionId" }?.value
-        Self.gate.pass(session: session)
+        guard Self.gate.pass(request, session: session) else { return refuse() }
         let body = Data("image-bytes".utf8)
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "image/png", "Content-Length": "\(body.count)"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

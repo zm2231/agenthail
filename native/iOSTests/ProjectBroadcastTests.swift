@@ -5,8 +5,7 @@ import XCTest
 final class ProjectBroadcastTests: XCTestCase {
     func testAProjectMessageGoesToItsChannelOnItsComputerAndNamesWhoGotIt() async throws {
         ChannelSendProtocol.state.reset()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ChannelSendProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([ChannelSendProtocol.self])
         let api = AgenthailAPI(baseURL: URL(string: "https://studio.invalid")!, token: "test", session: URLSession(configuration: configuration))
         let model = AgenthailIOSModel(api: api, paired: true, hostID: "hstudio", hostName: "studio")
         model.setHostSnapshot(HostCatalogTests.snapshot([HostCatalogTests.row("s1", name: "lead"), HostCatalogTests.row("s2", name: "tests")]))
@@ -52,7 +51,9 @@ private final class ChannelSendProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         if request.url?.path == "/api/v1/actions", let body = request.bodyData,
            let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any], json["action"] as? String == "channel-send" {
             Self.state.record(Send(channel: json["channel"] as? String ?? "", message: json["message"] as? String ?? "", key: request.value(forHTTPHeaderField: "Idempotency-Key")))

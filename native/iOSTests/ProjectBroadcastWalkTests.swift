@@ -9,8 +9,7 @@ final class ProjectBroadcastWalkTests: XCTestCase {
         KeychainStore.removeAll()
         WalkProtocol.state.reset(replies)
         for (id, name) in paired { try AgenthailIOSTests.pair(id, "https://\(name).invalid", name: name) }
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [WalkProtocol.self]
+        let configuration = FixtureScope.open(self).configuration([WalkProtocol.self])
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
         for (id, _) in paired {
             var snapshot = HostCatalogTests.snapshot([])
@@ -104,7 +103,9 @@ private final class WalkProtocol: URLProtocol, @unchecked Sendable {
     static let state = State()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
+    override func startLoading() { served(answer) }
+
+    private func answer() {
         var data = request.httpBody ?? Data()
         if let stream = request.httpBodyStream {
             stream.open()
