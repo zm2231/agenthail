@@ -8,7 +8,7 @@ import (
 
 var errPlacementPayload = errors.New("session.upserted payload has no session object")
 
-func withPlacement(payload []byte) ([]byte, error) {
+func presentedUpsert(payload []byte, presenter rowPresenter) ([]byte, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &envelope); err != nil {
 		return nil, err
@@ -21,23 +21,52 @@ func withPlacement(payload []byte) ([]byte, error) {
 	if err := json.Unmarshal(raw, &row); err != nil {
 		return nil, err
 	}
-	placement, err := json.Marshal(sessionPlacement(row))
+	presenter.present(&row, localSessionID(row.ID))
+	members := []struct {
+		key   string
+		value any
+		set   bool
+	}{
+		{"placement", sessionPlacement(row), true},
+		{"display", row.Display, row.Display != nil},
+		{"attention", row.Attention, row.Attention != nil},
+		{"replacedLead", row.ReplacedLead, row.ReplacedLead != nil},
+	}
+	for _, member := range members {
+		var err error
+		if payload, err = spliceSessionMember(payload, member.key, member.value, member.set); err != nil {
+			return nil, err
+		}
+	}
+	return payload, nil
+}
+
+func spliceSessionMember(payload []byte, key string, value any, set bool) ([]byte, error) {
+	encoded, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
 	}
-	at, _, _, err := topLevelValue(payload, "session")
+	if !set {
+		encoded = []byte("null")
+	}
+	at, stop, _, err := topLevelValue(payload, "session")
 	if err != nil || at < 0 {
 		return nil, errPlacementPayload
 	}
-	start, end, members, err := topLevelValue(raw, "placement")
+	raw := payload[at:stop]
+	start, end, members, err := topLevelValue(raw, key)
 	if err != nil {
 		return nil, err
 	}
-	insert := placement
+	insert := encoded
 	if start < 0 {
+		if !set {
+			return payload, nil
+		}
 		start = bytes.LastIndexByte(raw, '}')
 		end = start
-		insert = append([]byte(`"placement":`), placement...)
+		name, _ := json.Marshal(key)
+		insert = append(append(name, ':'), encoded...)
 		if members > 0 {
 			insert = append([]byte(","), insert...)
 		}

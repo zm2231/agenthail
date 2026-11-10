@@ -113,10 +113,14 @@ func dashboardSnapshotTag(state dashboardState, version uint64, builtAt time.Tim
 
 func (d *Daemon) writeDashboardSnapshot(w http.ResponseWriter, r *http.Request, state dashboardState) {
 	if !catalogMirror(r.Context()) {
+		presenter, err := d.rowPresenter(time.Now())
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "registry_error", err.Error())
+			return
+		}
 		state.Sessions = append([]dashboardSession{}, state.Sessions...)
 		for i := range state.Sessions {
-			display := sessionDisplay(state.Sessions[i], time.Now())
-			state.Sessions[i].Display = &display
+			presenter.present(&state.Sessions[i], localSessionID(state.Sessions[i].ID))
 		}
 	}
 	if state.catalogPageApplied {
