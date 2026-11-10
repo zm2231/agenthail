@@ -155,6 +155,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := allowMovedCoordinatorHistory(tx); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "session_moves", "outcome_unknown_at", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	if err := ensureColumn(tx, "coordinators", "moved_from", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}

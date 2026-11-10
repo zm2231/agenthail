@@ -50,6 +50,7 @@ func (d *Daemon) moveSessionToRoot(ctx context.Context, request sessionMoveReque
 	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, self, encoded, registry.MoveCarry{}, self); err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
 	}
+	d.publishMove(session.ID)
 	result := sessionMoveResult{Host: d.localHost(), Stopped: out.Stopped, Alias: alias, Root: request.Root}
 	resumed, err := rootMover.MoveToRoot(ctx, out, manifest.ID, request.Root)
 	switch {
@@ -58,6 +59,7 @@ func (d *Daemon) moveSessionToRoot(ctx context.Context, request sessionMoveReque
 		return result, fmt.Errorf("move %s of %s is unsettled; it settles when the daemon next starts: %w", manifest.ID, session.ID, err)
 	case err != nil && !errors.Is(err, surface.ErrMoveInPlaced):
 		_ = d.Registry.SetMoveState(manifest.ID, registry.MoveFailed, err.Error(), registry.MovePreparing)
+		d.publishMove(session.ID)
 		result.Move, _ = d.Registry.SessionMove(manifest.ID)
 		return result, MoveRefusedError{Reason: fmt.Sprintf("session %s did not move to %s: %s", session.ID, request.Root, err)}
 	}

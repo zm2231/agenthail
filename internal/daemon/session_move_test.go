@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,6 +71,18 @@ func moveNodeOn(t *testing.T, host *claudehosttest.Fixture) *moveNode {
 // movePair is a source paired with a target, the source's checkout at a
 // pushed commit, and the target's checkout of the same repository added as
 // a project there.
+func waitForPublishedMove(t *testing.T, node *moveNode, conversation string, host registry.PairedHost, state string) {
+	t.Helper()
+	testkit.Eventually(t, "the row to show the move "+state, 10*time.Second, func() bool {
+		fingerprint, _, err := node.reg.CatalogProjectionFingerprint(conversation)
+		if err != nil {
+			return false
+		}
+		var row dashboardSession
+		return json.Unmarshal([]byte(fingerprint), &row) == nil && row.Move != nil && row.Move.State == state && row.Move.Host == host.ID && row.Move.HostName == host.Name
+	})
+}
+
 func movePair(t *testing.T) (*moveNode, *moveNode, registry.PairedHost, string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
@@ -322,6 +335,10 @@ func TestAMoveWhoseTransferIsNotAnsweredStaysUnresolvedUntilTheTargetAnswers(t *
 	target.gate.drops.Store(0)
 	hold := &snapshotHold{release: make(chan struct{})}
 	target.gate.transfers.Store(hold)
+	var released sync.Once
+	release := func() { released.Do(func() { close(hold.release) }) }
+	t.Cleanup(release)
+	source.daemon.discoverCatalog(context.Background())
 
 	done := make(chan error, 1)
 	go func() {
@@ -329,11 +346,22 @@ func TestAMoveWhoseTransferIsNotAnsweredStaysUnresolvedUntilTheTargetAnswers(t *
 		done <- err
 	}()
 	testkit.Eventually(t, "the transfer to reach the target", 10*time.Second, func() bool { return hold.waiting.Load() > 0 })
+	waitForPublishedMove(t, source, session.ID, record, registry.MoveShownCopying)
 	target.server.CloseClientConnections()
 	err := <-done
 	var unknown MoveUnknownError
 	if !errors.As(err, &unknown) {
 		t.Fatalf("err=%v", err)
+	}
+	waitForPublishedMove(t, source, session.ID, record, registry.MoveShownSettling)
+	state, err := source.daemon.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range state.Sessions {
+		if row.ID == session.ID && (row.Move == nil || row.Move.State != registry.MoveShownSettling || row.Move.Host != record.ID) {
+			t.Fatalf("the snapshot row's move=%+v", row.Move)
+		}
 	}
 	move, _ := source.reg.SessionMove(unknown.MoveID)
 	if move.State != registry.MoveSent {
@@ -352,7 +380,7 @@ func TestAMoveWhoseTransferIsNotAnsweredStaysUnresolvedUntilTheTargetAnswers(t *
 
 	peers := claudetest.ListenPeerManager(t, target.host.Home)
 	target.gate.transfers.Store(nil)
-	close(hold.release)
+	release()
 	// Dropping the connections also makes the source reconnect, and a
 	// reconnect recovers sent moves too, so either may settle this one.
 	source.daemon.resumeHostMoves(context.Background(), mustPairedHost(t, source, record.ID))

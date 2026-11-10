@@ -235,12 +235,14 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, host.record.ID, encoded, carry, d.hostIdentity().ID); err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
 	}
+	d.publishMove(session.ID)
 	result := sessionMoveResult{Host: host.ref(), Stopped: out.Stopped, Alias: alias}
 	if manifest.ClaudeProject != nil {
 		result.MCPServersWithoutCredentials = manifest.ClaudeProject.WithoutCredentials
 	}
 	if err := d.prepareMoveOnHost(ctx, host, manifest); err != nil {
 		_ = d.Registry.SetMoveState(manifest.ID, registry.MoveFailed, err.Error(), registry.MovePreparing)
+		d.publishMove(session.ID)
 		result.Move, _ = d.Registry.SessionMove(manifest.ID)
 		return result, MoveRefusedError{Reason: fmt.Sprintf("%s did not accept the move: %s", host.record.Name, err)}
 	}
@@ -258,6 +260,7 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	if err := d.Registry.SetMoveState(manifest.ID, registry.MoveSent, "", registry.MovePreparing); err != nil {
 		return result, err
 	}
+	d.publishMove(session.ID)
 	result.DroppedRelays, err = d.settleMoveOut(ctx, host, mover, manifest.ID, session.ID)
 	result.Move, _ = d.Registry.SessionMove(manifest.ID)
 	return result, err
@@ -292,8 +295,20 @@ func (d *Daemon) prepareMoveOnHost(ctx context.Context, host *pairedHost, manife
 
 // settleMoveOut drives a sent move, whose files are archived, to done or
 // failed: it asks the target what it holds and acts on the answer. A move
-// whose answer cannot be had stays sent and returns MoveUnknownError.
-func (d *Daemon) settleMoveOut(ctx context.Context, host *pairedHost, mover surface.SessionMover, moveID, conversation string) ([]registry.DroppedRelay, error) {
+// whose answer cannot be had stays sent, is marked settling and returns
+// MoveUnknownError.
+func (d *Daemon) settleMoveOut(ctx context.Context, host *pairedHost, mover surface.SessionMover, moveID, conversation string) (dropped []registry.DroppedRelay, err error) {
+	defer func() {
+		var unknown MoveUnknownError
+		if !errors.As(err, &unknown) {
+			return
+		}
+		if markErr := d.Registry.MarkMoveOutcomeUnknown(moveID, unknown.Err.Error()); markErr != nil {
+			d.logRuntimeError("move "+moveID, markErr)
+			return
+		}
+		d.publishMove(conversation)
+	}()
 	status, err := d.moveStatusOnHost(ctx, host, moveID)
 	if err != nil {
 		return nil, MoveUnknownError{MoveID: moveID, Err: err}
@@ -366,8 +381,17 @@ func (d *Daemon) restoreMoveOut(mover surface.SessionMover, moveID, conversation
 	if err := d.Registry.SetMoveState(moveID, registry.MoveFailed, detail, registry.MoveSent, registry.MovePreparing); err != nil {
 		return err
 	}
+	d.publishMove(conversation)
 	d.requestCatalogDiscovery()
 	return nil
+}
+
+// publishMove rewrites conversation's row so every client sees its move's
+// state change.
+func (d *Daemon) publishMove(conversation string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	d.publishLive(ctx, conversation, func(*surface.Session) {})
 }
 
 func (d *Daemon) completeMoveOut(ctx context.Context, host *pairedHost, moveID string) error {

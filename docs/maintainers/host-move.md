@@ -313,6 +313,24 @@ A target refuses to abort a move whose conversation already runs there
 (`move_running`), so a move whose resume outcome was unknown is finished, not
 undone.
 
+## What the session's row shows
+
+While a move out is unfinished, the source publishes the session's row with
+`move: {state, host, hostName, root?, detail?}`, so every client and paired
+host sees it, not only the one that asked for the move:
+
+| `move.state` | The move |
+|---|---|
+| `holding` | `preparing`: the session is stopped and declared to the target, and no file has left. |
+| `copying` | `sent`: the files are archived here and on their way to the target. |
+| `settling` | `sent`, and the target's answer could not be had. `detail` says why. It stays until a reconnect settles the move. |
+
+Settling is the column `outcome_unknown_at` on a `sent` move, not a state of
+its own, so every reader of `sent` still holds the session: its queue stays
+unclaimed and no second move begins. Any change of state clears it. The move
+code is the only writer of `session_moves`, and it republishes the row on each
+change. The field leaves the row when the move is `done` or `failed`.
+
 ## What the target machine needs
 
 - **A checkout of the repository**, added with `agenthail projects add` or

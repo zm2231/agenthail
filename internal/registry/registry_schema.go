@@ -720,7 +720,8 @@ CREATE TABLE IF NOT EXISTS session_moves (
 	manifest BLOB NOT NULL DEFAULT '',
 	detail TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
+	updated_at TEXT NOT NULL,
+	outcome_unknown_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS session_moves_conversation ON session_moves(conversation, role, state);
 CREATE TABLE IF NOT EXISTS ledger_events (

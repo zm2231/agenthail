@@ -13,6 +13,21 @@ type workView struct {
 	KeptPaths     []string `json:"keptPaths,omitempty"`
 }
 
+type moveView struct {
+	State    string `json:"state"`
+	Host     string `json:"host"`
+	HostName string `json:"hostName,omitempty"`
+	Root     string `json:"root,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+}
+
+func moveRow(move *registry.MoveShown) *moveView {
+	if move == nil {
+		return nil
+	}
+	return &moveView{State: move.State, Host: move.PeerHost, HostName: move.HostName, Root: move.Root, Detail: move.Detail}
+}
+
 func workRow(record *registry.WorkRecord) *workView {
 	if record == nil {
 		return nil
