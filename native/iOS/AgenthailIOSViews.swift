@@ -571,9 +571,9 @@ struct SessionScreen: View {
         Task { await settleAtLatest() }
     }
 
-    private var showQueuedRow: (() -> Void)? {
+    private var showQueuedRow: RowAction<Void, Void>? {
         guard queueTail.lastShownID != nil else { return nil }
-        return { goToLatest() }
+        return RowAction(owner: session.id) { goToLatest() }
     }
 
     @ViewBuilder private var transcriptRows: some View {
@@ -744,7 +744,7 @@ struct SessionScreen: View {
         }#endif
         .edgeBar(.top, spacing: 0) {
             if compactHeight { Color.clear.frame(height: 0) }
-            else if let detail { SessionSummary(detail: detail, session: liveSession) { showingInfo = true } }
+            else if let detail { SessionSummary(detail: detail, session: liveSession, openDetails: RowAction(owner: session.id) { showingInfo = true }).equatable() }
         }
         .edgeBar(.bottom) {
             VStack(spacing: 0) {
@@ -786,7 +786,8 @@ struct SessionScreen: View {
                                 .padding(.horizontal, 14)
                                 .accessibilityIdentifier("session-move-note")
                         }
-                        IOSComposer(model: model, draft: model.draft, store: model.store, session: session, detail: detail, showQueuedRow: showQueuedRow)
+                        IOSComposer(model: model, draft: model.draft, store: model.store, session: session, context: ComposerContext(detail), showQueuedRow: showQueuedRow)
+                            .equatable()
                     }
                 }
             }
@@ -800,7 +801,7 @@ struct SessionScreen: View {
                     Button { showingInfo = true } label: {
                         HStack(spacing: 8) {
                             Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
-                            SessionStatusLabel(detail: detail, session: liveSession).labelStyle(.titleAndIcon).lineLimit(1)
+                            SessionStatusLabel(detail: detail, session: liveSession).equatable().labelStyle(.titleAndIcon).lineLimit(1)
                             Text(detail.model ?? SessionStyle.agentName(detail.session.surface)).font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1)
                         }
                     }
@@ -884,22 +885,27 @@ struct SessionScreen: View {
     }
 }
 
-struct IOSComposer: View {
+struct IOSComposer: View, @MainActor Equatable {
     var model: AgenthailIOSModel
     @ObservedObject var draft: ComposerDraft
     @ObservedObject var store: SessionStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     let session: SessionState
-    let detail: SessionDetail
-    let showQueuedRow: (() -> Void)?
+    let context: ComposerContext
+    let showQueuedRow: RowAction<Void, Void>?
     @State private var showingModels = false
     @State private var showingPrompts = false
     @State private var loadedModels: [ModelOption]?
     @State private var completionState = CompletionState(session: "", caret: 0)
     @State private var editor = IOSComposerEditor()
 
-    private var steering: Bool { detail.session.status == "busy" && detail.session.waitingOn == nil && detail.capabilities.steer && model.busyDelivery(for: detail.session.id) == "steer" }
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.model === rhs.model && lhs.draft === rhs.draft && lhs.store === rhs.store
+            && lhs.session == rhs.session && lhs.context == rhs.context && lhs.showQueuedRow == rhs.showQueuedRow
+    }
+
+    private var steering: Bool { context.busy && !context.waiting && context.capabilities.steer && model.busyDelivery(for: context.sessionID) == "steer" }
     private var sending: Bool { model.pendingSends[session.id]?.first.map { !$0.unconfirmed } == true && draft.text.isEmpty }
     private var stashActionTitle: String {
         let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
@@ -918,11 +924,11 @@ struct IOSComposer: View {
     private var canSend: Bool {
         !sending && !model.pendingControls.contains(session.id)
             && !ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
-            && detail.capabilities.send
+            && context.capabilities.send
     }
 
     private var compactHeight: Bool { verticalSizeClass == .compact && !dynamicTypeSize.isAccessibilitySize }
-    private var attachShown: Bool { detail.capabilities.attach && detail.capabilities.send }
+    private var attachShown: Bool { context.capabilities.attach && context.capabilities.send }
 
     private func textView(lines: ClosedRange<Int>) -> some View {
         IOSComposerTextView(
@@ -945,7 +951,7 @@ struct IOSComposer: View {
 
     @ViewBuilder private var turnControls: some View {
         attachControl
-        if !detail.readOnly, let settings = detail.turnSettings, !settings.isEmpty {
+        if !context.readOnly, let settings = context.turnSettings, !settings.isEmpty {
             // The chips scroll, so they claim no width of their own when the footer decides whether one row fits.
             IOSTurnSettingChips(model: model, sessionID: session.id, settings: settings) { showingModels = true }
                 .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
@@ -954,7 +960,7 @@ struct IOSComposer: View {
     }
 
     @ViewBuilder private var sendControls: some View {
-        if detail.session.status == "busy" && detail.capabilities.interrupt {
+        if context.busy && context.capabilities.interrupt {
             Button { model.action("interrupt", session: session) } label: {
                 Image(systemName: "stop.fill").font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44)
             }
@@ -985,7 +991,7 @@ struct IOSComposer: View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
                 if let status = model.deliveryStatus[session.id], model.failedSends[session.id] == nil, model.pendingSends[session.id]?.contains(where: \.unconfirmed) != true {
-                    ComposerReceipt(status: status, showQueuedRow: showQueuedRow)
+                    ComposerReceipt(status: status, showQueuedRow: showQueuedRow.map { action in { action(()) } })
                 }
                 ComposerSendStatus(model: model, session: session)
                 if !model.composerAttachments.isEmpty {
@@ -1018,7 +1024,7 @@ struct IOSComposer: View {
                     HStack(spacing: 8) {
                         attachControl
                         textView(lines: 1 ... 2).padding(.leading, attachShown ? 0 : 8)
-                        if !detail.readOnly, let settings = detail.turnSettings, !settings.isEmpty {
+                        if !context.readOnly, let settings = context.turnSettings, !settings.isEmpty {
                             IOSTurnSettingsMenu(model: model, sessionID: session.id, settings: settings) { showingModels = true }
                         }
                         sendControls
@@ -1055,9 +1061,9 @@ struct IOSComposer: View {
             }
         }
         .sheet(isPresented: $showingModels) {
-            SearchableModelSelectionSheet(initialOptions: detail.modelOptions(catalog: loadedModels), currentSelectedID: detail.selectedModelID, allowsDefault: false, onSelect: { value in
+            SearchableModelSelectionSheet(initialOptions: context.modelOptions(catalog: loadedModels), currentSelectedID: context.selectedModelID, allowsDefault: false, onSelect: { value in
                 if let value { Task { await model.setTurnSetting(TurnSetting.model, to: value, sessionID: session.id) } }
-            }, reload: { detail.modelOptions(catalog: try await loadModels()) })
+            }, reload: { context.modelOptions(catalog: try await loadModels()) })
         }
         .onChange(of: session.id) { _, _ in loadedModels = nil }
         .task(id: mentionRequest) { await loadMentionFiles(mentionRequest) }
@@ -1395,24 +1401,32 @@ struct AttachmentRow: View {
     }
 }
 
-struct SessionSummary: View {
-    let detail: SessionDetail
-    let session: SessionState
-    let openDetails: () -> Void
+struct SessionSummary: View, @MainActor Equatable {
+    let status: SessionStatusLabel
+    let modelName: String
+    let usage: ContextState?
+    let openDetails: RowAction<Void, Void>
+
+    init(detail: SessionDetail, session: SessionState, openDetails: RowAction<Void, Void>) {
+        status = SessionStatusLabel(detail: detail, session: session)
+        modelName = detail.model ?? SessionStyle.agentName(detail.session.surface)
+        usage = detail.context
+        self.openDetails = openDetails
+    }
 
     var body: some View {
-        Button(action: openDetails) {
+        Button { openDetails(()) } label: {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
                     status
-                    Text(detail.model ?? SessionStyle.agentName(detail.session.surface)).lineLimit(1)
+                    Text(modelName).lineLimit(1)
                     Spacer(minLength: 4)
                     context
                     Image(systemName: "chevron.down").font(.caption2)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack { status; Spacer(); context }
-                    Text(detail.model ?? SessionStyle.agentName(detail.session.surface))
+                    Text(modelName)
                 }
             }
             .font(.footnote)
@@ -1427,9 +1441,8 @@ struct SessionSummary: View {
         .accessibilityHint("Open session details, context, model and controls")
         .accessibilityIdentifier("session-summary")
     }
-    private var status: some View { SessionStatusLabel(detail: detail, session: session) }
 	@ViewBuilder private var context: some View {
-		if let context = detail.context {
+		if let context = usage {
 			Group {
 				if let fraction = context.fraction {
 					Text("\(context.windowEstimated == true ? "~" : "")\(Int(fraction * 100))% context").monospacedDigit()
