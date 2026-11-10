@@ -33,7 +33,10 @@ func (d *Daemon) ledgerStore() *ledger.Store {
 	d.ledgerOnce.Do(func() {
 		d.ledger = ledger.NewCachedStore(d.Registry.WriteDB(), d.Registry.ReadDB())
 		d.ledgerHub = newLedgerChangeHub(ledgerChangeWait, d.ledgerVersion, d.log.Printf)
-		d.ledger.OnChange(d.ledgerHub.changed)
+		d.ledger.OnChange(func(key string) {
+			d.ledgerHub.changed(key)
+			d.wakeLedgerAsks(key)
+		})
 		d.ledger.OnRecord(d.wakeLedgerOwner)
 	})
 	return d.ledger

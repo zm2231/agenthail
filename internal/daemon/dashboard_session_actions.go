@@ -64,7 +64,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		return d.doPR(ctx, p, session, request)
 	}
 	if request.Action == "respond" {
-		if ask, found, err := d.Registry.Ask(strings.TrimSpace(request.RequestID)); err == nil && found && ask.Origin == registry.AskOriginDelivery {
+		if ask, found, err := d.Registry.Ask(strings.TrimSpace(request.RequestID)); err == nil && found && (ask.Origin == registry.AskOriginDelivery || ask.Origin == registry.AskOriginLedger) {
 			return d.answerAsk(ctx, nil, session, ask.ID, request.Decision, p, "")
 		}
 	}

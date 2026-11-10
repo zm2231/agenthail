@@ -67,6 +67,9 @@ type Daemon struct {
 	permissionMu         sync.Mutex
 	permissionTold       map[string]string
 	deliveryAskMu        sync.Mutex
+	ledgerAskMu          sync.Mutex
+	ledgerAskDue         map[string]bool
+	ledgerAskSync        sync.Mutex
 	announcingKeepAlive  map[string]bool
 	catalogNudge         chan struct{}
 	presence             catalogPresence

@@ -39,6 +39,7 @@ type Request struct {
 	NoReason    bool      `json:"noReason,omitempty"`
 	OptionsOnly bool      `json:"optionsOnly,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
+	Deadline    time.Time `json:"deadline,omitzero"`
 }
 
 type Question struct {

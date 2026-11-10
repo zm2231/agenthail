@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -66,22 +67,24 @@ func TestAQuestionAnsweredElsewhereWithdrawsItsAskAndADefaultedOneExpires(t *tes
 		t.Fatal(err)
 	}
 	questions[0].Answered, questions[1].Defaulted = true, true
-	expired, err := r.SyncLedgerAsks("p", questions, time.Now())
+	closed, err := r.SyncLedgerAsks("p", questions, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(expired) != 1 || expired[0].Ref != "ledger:p:Q2" || expired[0].State != AskExpired {
-		t.Fatalf("expired=%+v, want the defaulted question's ask", expired)
+	reported := map[string]string{}
+	for _, ask := range closed {
+		reported[ask.Ref] = ask.State
 	}
 	states := map[string]string{}
 	for _, ask := range ledgerAsks(t, r) {
 		states[ask.Ref] = ask.State
 	}
-	if states["ledger:p:Q1"] != AskWithdrawn || states["ledger:p:Q2"] != AskExpired {
-		t.Fatalf("states=%v", states)
+	want := map[string]string{"ledger:p:Q1": AskWithdrawn, "ledger:p:Q2": AskExpired}
+	if !maps.Equal(reported, want) || !maps.Equal(states, want) {
+		t.Fatalf("reported=%v states=%v, want %v", reported, states, want)
 	}
 	if again, err := r.SyncLedgerAsks("p", questions, time.Now()); err != nil || len(again) != 0 {
-		t.Fatalf("again=%+v err=%v, want an expiry reported once", again, err)
+		t.Fatalf("again=%+v err=%v, want each close reported once", again, err)
 	}
 	if asks := ledgerAsks(t, r); len(asks) != 2 {
 		t.Fatalf("asks=%+v, a closed question must not ask again", asks)
@@ -160,9 +163,9 @@ func TestARegistryAtSchema92KeepsItsAsksAndCanExpireOne(t *testing.T) {
 	if _, err := r.SyncLedgerAsks("p", []LedgerQuestion{{ID: "Q1", OwnerSessionID: "asker", Text: "Which?", Recommendation: "A", DefaultAnswer: "B", Deadline: time.Now().Add(time.Hour)}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	expired, err := r.SyncLedgerAsks("p", []LedgerQuestion{{ID: "Q1", OwnerSessionID: "asker", Defaulted: true}}, time.Now())
-	if err != nil || len(expired) != 1 {
-		t.Fatalf("expired=%+v err=%v, want the migrated table to take an expired ask", expired, err)
+	closed, err := r.SyncLedgerAsks("p", []LedgerQuestion{{ID: "Q1", OwnerSessionID: "asker", Defaulted: true}}, time.Now())
+	if err != nil || len(closed) != 1 || closed[0].State != AskExpired {
+		t.Fatalf("closed=%+v err=%v, want the migrated table to take an expired ask", closed, err)
 	}
 	indexes, err := queryRows(r.read, nil, scanString, `SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='asks'`)
 	if err != nil || !slices.Contains(indexes, "asks_ref") || !slices.Contains(indexes, "asks_open") {

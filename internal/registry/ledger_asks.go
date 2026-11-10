@@ -71,28 +71,31 @@ func (r *Registry) SyncLedgerAsks(projectKey string, questions []LedgerQuestion,
 		openByRef[ask.Ref] = ask
 	}
 	at := time.UnixMilli(now.UnixMilli()).UTC()
-	var expired []Ask
+	var closed []Ask
 	for _, q := range questions {
 		ref := LedgerAskRef(projectKey, q.ID)
 		ask, asked := openByRef[ref]
+		state := ""
 		switch {
-		case q.Defaulted && asked:
-			if _, err := tx.Exec(`UPDATE asks SET state=?,answered_at_ms=? WHERE id=? AND state=?`, AskExpired, at.UnixMilli(), ask.ID, AskOpen); err != nil {
-				return nil, err
-			}
-			ask.State, ask.AnsweredAt = AskExpired, at
-			expired = append(expired, ask)
-		case q.Answered && asked:
-			if _, err := tx.Exec(`UPDATE asks SET state=?,answered_at_ms=? WHERE id=? AND state=?`, AskWithdrawn, at.UnixMilli(), ask.ID, AskOpen); err != nil {
-				return nil, err
-			}
-		case !q.Answered && !q.Defaulted && !asked:
+		case !asked && !q.Answered && !q.Defaulted:
 			if err := raiseLedgerAsk(tx, ref, q, at); err != nil {
 				return nil, err
 			}
+		case asked && q.Defaulted:
+			state = AskExpired
+		case asked && q.Answered:
+			state = AskWithdrawn
 		}
+		if state == "" {
+			continue
+		}
+		if _, err := tx.Exec(`UPDATE asks SET state=?,answered_at_ms=? WHERE id=? AND state=?`, state, at.UnixMilli(), ask.ID, AskOpen); err != nil {
+			return nil, err
+		}
+		ask.State, ask.AnsweredAt = state, at
+		closed = append(closed, ask)
 	}
-	return expired, tx.Commit()
+	return closed, tx.Commit()
 }
 
 func raiseLedgerAsk(tx *sql.Tx, ref string, q LedgerQuestion, at time.Time) error {

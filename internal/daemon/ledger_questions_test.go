@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -71,39 +70,54 @@ func TestLedgerAPIAsksAndRefusesQuestions(t *testing.T) {
 	}
 }
 
-func TestExpiredQuestionsDefaultCutOrEscalateAndTellTheOwner(t *testing.T) {
-	d, r, handler, fake, desktop, p := questionDaemon(t)
+func TestAQuestionAsksThePersonOnceAndOnlyItsAppliedDefaultTellsTheOwner(t *testing.T) {
+	d, r, handler, _, desktop, p := questionDaemon(t)
 	ledgerWrite(t, handler, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: p.key, SessionID: "s1", Name: "Search"}, nil)
 	ask(t, handler, p, ledger.QuestionRequest{To: "widget-G1", Text: "which index?", DefaultAnswer: "full-text and fuzzy", KeepsBreadth: true, Kind: ledger.QuestionScope})
 	ask(t, handler, p, ledger.QuestionRequest{To: "widget-G1", Text: "how broad?", DefaultAnswer: "a smaller first version", Kind: ledger.QuestionScope})
 	ask(t, handler, p, ledger.QuestionRequest{To: ledger.ProjectTarget, Text: "publish the beta?", Kind: ledger.QuestionOutward})
+	d.background.wait()
+	asks := openLedgerAsks(t, r)
+	if len(asks) != 3 {
+		t.Fatalf("asks=%+v, want one per question", asks)
+	}
+	for _, ask := range asks {
+		if ask.RoutedTo != registry.AskToPerson || ask.SessionID != "s1" || ask.Deadline.IsZero() {
+			t.Fatalf("ask=%+v, want it with the person, on the asking session, with its deadline", ask)
+		}
+	}
+	if alerts := desktop.matching(""); len(alerts) != 3 {
+		t.Fatalf("the person was alerted %d times, want once per question: %+v", len(alerts), alerts)
+	}
 
-	d.sweepLedgerQuestions(context.Background(), time.Now())
-	if len(daemonEvents(t, r, "ledger.question.")) != 0 || len(fake.sent) != 0 {
+	d.sweepLedgerQuestions(time.Now())
+	d.syncAllLedgerAsks()
+	d.background.wait()
+	if len(openLedgerAsks(t, r)) != 3 {
 		t.Fatal("questions expired before their deadline")
 	}
 	later := time.Now().Add(2 * time.Hour)
-	d.sweepLedgerQuestions(context.Background(), later)
-	d.sweepLedgerQuestions(context.Background(), later.Add(time.Minute))
+	d.sweepLedgerQuestions(later)
+	d.sweepLedgerQuestions(later.Add(time.Minute))
+	d.background.wait()
+	d.syncAllLedgerAsks()
+	d.background.wait()
 
-	var outcomes []string
-	for _, e := range daemonEvents(t, r, "ledger.question.") {
-		outcomes = append(outcomes, e.Type)
+	open := openLedgerAsks(t, r)
+	if len(open) != 2 {
+		t.Fatalf("open=%+v, want the cut and the outward question still with the person", open)
 	}
-	if len(outcomes) != 3 || !strings.Contains(strings.Join(outcomes, " "), "ledger.question.defaulted") || !strings.Contains(strings.Join(outcomes, " "), "ledger.question.cut") || !strings.Contains(strings.Join(outcomes, " "), "ledger.question.escalated") {
-		t.Fatalf("want one defaulted, one cut, one escalated event, got %v", outcomes)
+	if got := noticesTo(t, r, "s1", "its default applied: full-text and fuzzy"); got != 1 {
+		t.Fatalf("owner told of the applied default %d times, want once", got)
 	}
-	if len(fake.sent) != 3 {
-		t.Fatalf("owner told %d times, want 3: %q", len(fake.sent), fake.sent)
+	if got := noticesTo(t, r, "s1", "[intent ledger]"); got != 1 {
+		t.Fatalf("owner got %d ledger notices, want only the applied default", got)
 	}
-	all := strings.Join(fake.sent, "\n")
-	for _, want := range []string{"default applied as widget-D1", "widget-X1 is a pending cut", "outward act, so nothing was done"} {
-		if !strings.Contains(all, want) {
-			t.Fatalf("owner notices lack %q:\n%s", want, all)
-		}
+	if events := daemonEvents(t, r, "ledger.question."); len(events) != 0 {
+		t.Fatalf("events=%+v, a question's expiry is its ask's state", events)
 	}
-	if alerts := desktop.matching(""); len(alerts) != 2 {
-		t.Fatalf("the person was alerted %d times, want 2 (cut and outward): %+v", len(alerts), alerts)
+	if alerts := desktop.matching(""); len(alerts) != 3 {
+		t.Fatalf("the person was alerted %d times, want no new alert at the deadline: %+v", len(alerts), alerts)
 	}
 	board, err := p.store.Board(p.key)
 	if err != nil {
