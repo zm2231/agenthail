@@ -193,6 +193,17 @@ final class ScopePagesTests: XCTestCase {
         XCTAssertEqual(model.connection("one")?.pages.found.count, 0)
     }
 
+    func testABranchSearchListsTheSessionTheComputerFindsOnThatBranch() async throws {
+        var onBranch = ScopeServer.row("b", name: "tidy")
+        onBranch["checkout"] = ["id": "c-login", "path": "/w/app/.worktrees/login", "branch": "fix-login", "isMain": false, "dirty": false]
+        ScopeServer.state.set("one", current: [], scopes: [:], searches: ["fix-login": ([onBranch], .zero)])
+        let model = try await connect(["one"])
+        model.scope = .all
+        await model.searchScope("fix-login")
+        XCTAssertEqual(listed(.all, search: "fix-login"), ["one::b"], "a session named for something else is found by its branch")
+        XCTAssertTrue(ScopeServer.state.requests("one").contains { $0.contains("scope=all") && $0.contains("q=fix-login") })
+    }
+
     func testAnUnreachableComputerKeepsItsRowsAndResumesItsCursor() async throws {
         ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("a")], [ScopeServer.row("b")]]])
         let model = try await connect(["one"])
