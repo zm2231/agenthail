@@ -37,6 +37,7 @@ type cliSurface struct {
 	sendErr       error
 	sendWait      bool
 	tailBlock     <-chan struct{}
+	bounded       chan boundedCall
 	sent          []string
 	steerSource   string
 	steered       []string
@@ -126,6 +127,7 @@ func (f *cliSurface) Send(ctx context.Context, _ *surface.Session, message strin
 		return nil, f.sendErr
 	}
 	if f.sendWait {
+		noteBound(f.bounded, ctx)
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
@@ -138,11 +140,57 @@ func (*cliSurface) Reply(context.Context, *surface.Session, int) (*surface.Reply
 	return &surface.ReplyResult{Done: true}, nil
 }
 
-func (f *cliSurface) Tail(_ context.Context, _ *surface.Session, _ int) ([]surface.Exchange, error) {
+func (f *cliSurface) Tail(ctx context.Context, _ *surface.Session, _ int) ([]surface.Exchange, error) {
 	if f.tailBlock != nil {
+		noteBound(f.bounded, ctx)
 		<-f.tailBlock
 	}
 	return f.tail, nil
+}
+
+type boundedCall struct {
+	entered  time.Time
+	deadline time.Time
+	ok       bool
+}
+
+func noteBound(calls chan<- boundedCall, ctx context.Context) {
+	if calls == nil {
+		return
+	}
+	deadline, ok := ctx.Deadline()
+	select {
+	case calls <- boundedCall{entered: time.Now(), deadline: deadline, ok: ok}:
+	default:
+	}
+}
+
+const cancelledWithin = 10 * time.Second
+
+func probeDeadlines(app *App) <-chan time.Time {
+	built := make(chan time.Time, 1)
+	app.deadlineClock = func() time.Time {
+		now := time.Now()
+		select {
+		case built <- now:
+		default:
+		}
+		return now
+	}
+	return built
+}
+
+// The deadline must be exactly the flag past the instant the command built it, so scheduling cannot hide a wrong timeout; the return bound only catches a command that keeps waiting once that deadline has passed.
+func requireFlagDeadline(t *testing.T, built <-chan time.Time, calls <-chan boundedCall, returned time.Time, flag time.Duration) {
+	t.Helper()
+	at := <-built
+	call := <-calls
+	if !call.ok || !call.deadline.Equal(at.Add(flag)) {
+		t.Fatalf("the call's deadline is %s after the command built it (set=%v), want the %s from --timeout", call.deadline.Sub(at), call.ok, flag)
+	}
+	if lag := returned.Sub(call.deadline); lag > cancelledWithin {
+		t.Fatalf("the command returned %s after its deadline, want it to stop waiting once the deadline passed", lag)
+	}
 }
 func (f *cliSurface) Stream(_ context.Context, _ *surface.Session, _ string, callback func(surface.StreamEvent), _ time.Duration) error {
 	for _, event := range f.streamEvents {
@@ -799,13 +847,15 @@ func TestSendDirectStreamPreservesAppendThenAuthoritativeFinal(t *testing.T) {
 
 func TestSendTimeoutBoundsDelivery(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
-	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true}, sendWait: true}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true}, sendWait: true, bounded: make(chan boundedCall, 1)}
 	app, r := cliFixture(t, fake)
-	started := time.Now()
+	built := probeDeadlines(app)
 	err := app.Run([]string{"send", "codex:s", "hello", "--timeout", "50ms"})
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 500*time.Millisecond {
-		t.Fatalf("elapsed=%s err=%v", time.Since(started), err)
+	returned := time.Now()
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v", err)
 	}
+	requireFlagDeadline(t, built, fake.bounded, returned, 50*time.Millisecond)
 	var failed delivery.FailedDeliveryError
 	if !errors.As(err, &failed) {
 		t.Fatalf("a send that ran out of time did not say its delivery failed: %v", err)
@@ -944,13 +994,15 @@ func TestReplyLabelsSourceAndBoundsDeadline(t *testing.T) {
 	}
 	blockedTail := make(chan struct{})
 	defer close(blockedTail)
-	blocked := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, tailBlock: blockedTail}
+	blocked := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, tailBlock: blockedTail, bounded: make(chan boundedCall, 1)}
 	app, _ = cliFixture(t, blocked)
-	started := time.Now()
+	built := probeDeadlines(app)
 	err = app.Run([]string{"reply", "codex:s", "--timeout", "50ms"})
-	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 500*time.Millisecond {
-		t.Fatalf("elapsed=%s err=%v", time.Since(started), err)
+	returned := time.Now()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v", err)
 	}
+	requireFlagDeadline(t, built, blocked.bounded, returned, 50*time.Millisecond)
 }
 
 func TestCodexLaunchEnablesLoopbackRendererDebugging(t *testing.T) {
