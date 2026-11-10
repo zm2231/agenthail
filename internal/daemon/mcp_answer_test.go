@@ -231,3 +231,30 @@ func TestAnAgentDeniesWithTheRuleOrStopsTheTurnWhereTheRequestOffersIt(t *testin
 		}
 	}
 }
+
+func TestTheVoiceOperatorAnswersAPermissionRequestForThePerson(t *testing.T) {
+	f := newMCPAnswerFixture(t)
+	lead, err := f.r.Session("lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator := surface.Session{ID: "operator", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle, Cwd: lead.Cwd}
+	if err := f.r.RegisterSession(operator); err != nil {
+		t.Fatal(err)
+	}
+	f.surface.sessions["operator"] = operator
+	voice := asOperator(t, f.d, f.server, "operator")
+	askID := f.open(t, "lead", "lead-prompt")
+	if ask, _, _ := f.r.Ask(askID); ask.RoutedTo != registry.AskToPerson {
+		t.Fatalf("the lead's own prompt is routed to %q, want the person", ask.RoutedTo)
+	}
+	if result, refused := callMCP(t, voice, "agenthail_answer", map[string]any{"requestId": askID, "decision": "allow", "clientRequestId": "v1"}); refused {
+		t.Fatalf("the operator was refused: %v", result)
+	}
+	if !f.answered("lead/lead-prompt") {
+		t.Fatal("the operator's answer did not reach the provider")
+	}
+	if ask, _, _ := f.r.Ask(askID); ask.State != registry.AskAnswered || ask.AnsweredBy != registry.AskToPerson {
+		t.Fatalf("ask=%+v, want answered for the person", ask)
+	}
+}
