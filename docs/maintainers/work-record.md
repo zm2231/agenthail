@@ -32,13 +32,11 @@ Whether Codex defers MCP tools is not yet verified; if it does not, the two new 
 
 Tables beside the catalog, keyed by session id, one migration per slice. Each takes the next free schema number when it lands, after rechecking main and every open PR.
 
-**`sessions.pinned_at`, `sessions.stopped_by_person_at`, `keep_alive`** (pinned sessions)
+**`sessions.pinned_at`** (pinned sessions)
 
 | Column | Meaning |
 |---|---|
 | `sessions.pinned_at` | unix ms, null when unpinned; set by `session-pin`, cleared by `session-unpin` |
-| `sessions.stopped_by_person_at` | the person stopped it; cleared by their next send or resume |
-| `keep_alive(session_id, failures, next_at, failed_at)` | backoff state; `failed_at` set after the fifth failure in 30 minutes |
 
 **`turn_ends`**, primary key `(session_id, started_at)`
 
@@ -154,7 +152,7 @@ Each slice is one PR, builds on a working product, and lands with the budget tes
 | # | Slice | Acceptance tests |
 |---|---|---|
 | 0 | Tool spec table and budget test | `tools/list` is generated from the spec; the test pins card, always-loaded and list bytes and fails on growth |
-| 1 | Pinned sessions stay up: `pinned_at`, `session-pin`/`session-unpin` (CLI `agenthail pin`/`unpin`), keeper | a pinned session that exits is resumed once, and after a daemon restart; the resume sends no input (no host turn, no `turn/start`); archived or person-stopped sessions are never resumed; a mirrored row from a paired host is skipped; a failing resume follows 30s, 1m, 2m, 4m, 8m, then `keepAliveFailed` attention exactly once; a project's first lead starts pinned, a replacement lead inherits the old one's pin, and unpin always works |
+| 1 | Pinned sessions stay listed: `pinned_at`, `session-pin`/`session-unpin` (CLI `agenthail pin`/`unpin`) | a pinned session stays current and is never retired, process up or not; nothing starts it on its own, and a message resumes it; a project's first lead starts pinned, a replacement lead inherits the old one's pin, and unpin always works |
 | 2 | `agenthail_end_turn`, `turn_ends`, `ask` attention, push text | MCP call stores the row; each refusal case; a needs-you turn puts the row in the Needs you band and the push says "needs you: headline"; a worker's needs-you reaches its spawner or lead, not the person |
 | 3 | Nudge and fallback | claude-host test with the fake Claude: a turn without the call is blocked once, not twice, not while background tasks run, never without the credential; the stop command lets an ended turn, a subagent and the second stop through; Codex install against a real `codex app-server` in its own `CODEX_HOME` adds the Stop hook on 0.163.0 and none on a Codex reporting an older version |
 | 4 | One reply and the card | `respond` to an ask delivers exactly one numbered message, replays on a same-key retry, refuses a second answer and two concurrent answers with one `409`, keeps a possibly delivered answer claimed, and clears the attention, including for a session with no live provider requests; notification buttons answer an ask; the card in web `question-pager.js` (Mac and iOS follow against [asks.md](asks.md)) |

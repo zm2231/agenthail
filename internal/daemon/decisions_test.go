@@ -124,7 +124,7 @@ func TestATerminalOnlyPromptIsStoppedWithItsReasonAndNoAnswer(t *testing.T) {
 }
 
 func TestHeldAndFailedDeliveriesAreStoppedAndNeverReadAsQuestions(t *testing.T) {
-	w := &decisionWorld{rows: []dashboardSession{decisionRow("held", "incoming", 1), decisionRow("undelivered", "outgoing", 2), decisionRow("refused", "stopped", 3), decisionRow("kept", AttentionKeepAliveFailed, 4)}}
+	w := &decisionWorld{rows: []dashboardSession{decisionRow("held", "incoming", 1), decisionRow("undelivered", "outgoing", 2), decisionRow("refused", "stopped", 3)}}
 	page := w.page()
 	if len(w.asked) != 0 {
 		t.Fatalf("delivery and stop items asked a provider for requests: %v", w.asked)
@@ -134,7 +134,7 @@ func TestHeldAndFailedDeliveriesAreStoppedAndNeverReadAsQuestions(t *testing.T) 
 			t.Fatalf("item=%+v", item)
 		}
 	}
-	if len(page.Decisions) != 4 {
+	if len(page.Decisions) != 3 {
 		t.Fatalf("decisions=%+v", page.Decisions)
 	}
 }

@@ -112,7 +112,7 @@ func TestSnoozeAndWakeHandBackThePreviousSnoozeForUndo(t *testing.T) {
 	if code != http.StatusOK || string(answer["previous"]) != "null" {
 		t.Fatalf("first snooze: %d %s", code, answer)
 	}
-	row := keptRow(t, d, "to")
+	row := viewRow(t, d, "to")
 	if row.InboxSection != InboxSnoozed || row.Snooze == nil || !row.Snooze.Until.Equal(until) || row.Snooze.Wake != registry.SnoozeWakeTime {
 		t.Fatalf("snoozed row: section %q snooze %+v", row.InboxSection, row.Snooze)
 	}
@@ -121,7 +121,7 @@ func TestSnoozeAndWakeHandBackThePreviousSnoozeForUndo(t *testing.T) {
 	if code != http.StatusOK || json.Unmarshal(answer["previous"], &previous) != nil || !previous.Until.Equal(until) {
 		t.Fatalf("wake: %d %s", code, answer)
 	}
-	if row := keptRow(t, d, "to"); row.InboxSection == InboxSnoozed || row.Snooze != nil {
+	if row := viewRow(t, d, "to"); row.InboxSection == InboxSnoozed || row.Snooze != nil {
 		t.Fatalf("woken row: section %q snooze %+v", row.InboxSection, row.Snooze)
 	}
 }

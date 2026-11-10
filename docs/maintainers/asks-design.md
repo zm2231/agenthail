@@ -174,7 +174,7 @@ Each source is migrated in its own layer, and its old path goes in the same chan
   - **Waiting on you**: open asks routed to the person.
   - **Holding up work**: open asks routed to the person whose session has queued messages behind it (`queuedBehind`).
   - **Handled by a lead**: open asks routed to an agent.
-  - **Stopped on you**: the remaining non-ask attention kinds (usage limit, stopped turn, keep-alive failed) and asks whose answer failed to apply.
+  - **Stopped on you**: the remaining non-ask attention kinds (usage limit, stopped turn) and asks whose answer failed to apply.
 - Session rows carry `ask {id, title, routedTo, askedAt, answeredAt}` (the oldest open ask, else the newest answered one until the next turn) and `attention.kind = "ask"` while a person ask is open; `endTurn` no longer carries asks. The client contract is [asks.md](asks.md).
 - In layer 1 `/api/v1/asks` serves only the `agenthail` command on the same machine. A device-facing `GET /api/v1/asks` for the notification extension and the voice path comes with the client cleanup layer.
 - **Mac, iPhone and dashboard:**

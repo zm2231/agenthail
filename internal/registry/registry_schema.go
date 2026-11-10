@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	subagent_depth INTEGER NOT NULL DEFAULT 0,
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
 	host_id TEXT NOT NULL DEFAULT '',
-	pinned_at_ms INTEGER NOT NULL DEFAULT 0, stopped_at_ms INTEGER NOT NULL DEFAULT 0,
+	pinned_at_ms INTEGER NOT NULL DEFAULT 0,
 	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT '',
 	ended INTEGER NOT NULL DEFAULT 0,
 	entrypoint TEXT NOT NULL DEFAULT ''
@@ -638,16 +638,6 @@ CREATE TABLE IF NOT EXISTS project_links (
 CREATE TABLE IF NOT EXISTS session_archive (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	archived_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS session_keep_alive (
-	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-	attempts INTEGER NOT NULL DEFAULT 0,
-	first_attempt_ms INTEGER NOT NULL DEFAULT 0,
-	next_attempt_ms INTEGER NOT NULL DEFAULT 0,
-	healthy_since_ms INTEGER NOT NULL DEFAULT 0,
-	failed_at_ms INTEGER NOT NULL DEFAULT 0,
-	announced INTEGER NOT NULL DEFAULT 0,
-	error TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS idle_compactions (
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

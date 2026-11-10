@@ -24,7 +24,7 @@ struct SessionAttentionTest {
         let detail = try! JSONDecoder().decode(SessionDetail.self, from: JSONSerialization.data(withJSONObject: detailJSON))
         expect(detail.sessionState(open: true).attention == RowAttention(kind: "request", reason: "Answer in Agenthail"), "a row opened from its detail keeps the daemon's attention")
 
-        let kinds: [(String, SessionAttention.Kind)] = [("request", .request), ("ask", .request), ("usageLimit", .usageLimit), ("stopped", .stopped), ("keepAliveFailed", .stopped), ("replacedRequest", .replacedRequest), ("later", .stopped)]
+        let kinds: [(String, SessionAttention.Kind)] = [("request", .request), ("ask", .request), ("usageLimit", .usageLimit), ("stopped", .stopped), ("replacedRequest", .replacedRequest), ("later", .stopped)]
         for (kind, mapped) in kinds {
             let attention = SessionAttention(RowAttention(kind: kind, reason: "why"))
             expect(attention.kind == mapped && attention.reason == "why", "\(kind) maps to \(mapped) and keeps the daemon's reason")

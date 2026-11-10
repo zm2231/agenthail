@@ -209,7 +209,6 @@ func migrateTx(tx *sql.Tx) error {
 		{"agent_role", `TEXT NOT NULL DEFAULT ''`},
 		{"host_id", `TEXT NOT NULL DEFAULT ''`},
 		{"pinned_at_ms", `INTEGER NOT NULL DEFAULT 0`},
-		{"stopped_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"snoozed_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"snoozed_until_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"snooze_wake", `TEXT NOT NULL DEFAULT ''`},
@@ -473,6 +472,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := moveDeliveryProblemsToAsks(tx); err != nil {
 		return err
 	}
+	if err := dropSessionKeeper(tx); err != nil {
+		return err
+	}
 	if err := createPresentationTriggers(tx); err != nil {
 		return err
 	}
@@ -659,4 +661,16 @@ func moveLedgerCaptureIntoTheLog(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+func dropSessionKeeper(tx *sql.Tx) error {
+	if _, err := tx.Exec(`DROP TABLE IF EXISTS session_keep_alive`); err != nil {
+		return err
+	}
+	exists, err := columnExists(tx, "sessions", "stopped_at_ms")
+	if err != nil || !exists {
+		return err
+	}
+	_, err = tx.Exec(`ALTER TABLE sessions DROP COLUMN stopped_at_ms`)
+	return err
 }

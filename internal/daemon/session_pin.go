@@ -8,8 +8,6 @@ import (
 )
 
 func (d *Daemon) doSessionPin(pin bool, sessionID string) (actionResult, error) {
-	unlock, _ := d.keepLocks.acquire(sessionID, true)
-	defer unlock()
 	var pinnedAt time.Time
 	var err error
 	if pin {
@@ -29,16 +27,4 @@ func (d *Daemon) doSessionPin(pin bool, sessionID string) (actionResult, error) 
 		body["pinnedAt"] = pinnedAt
 	}
 	return actionOK(body), nil
-}
-
-// recordLifecycleIntent remembers a stop so the keeper leaves the session
-// down, and a resume so it starts over.
-func (d *Daemon) recordLifecycleIntent(sessionID, action string) error {
-	switch action {
-	case "session-lifecycle-stop":
-		return d.Registry.RecordSessionStop(sessionID, time.Now().UTC())
-	case "session-lifecycle-resume":
-		return d.Registry.ClearSessionStop(sessionID)
-	}
-	return nil
 }

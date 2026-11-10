@@ -24,8 +24,8 @@ END;
 CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_session_id) WHERE parent_session_id<>'';
 CREATE INDEX IF NOT EXISTS sessions_root ON sessions(root_session_id) WHERE root_session_id<>'';
 DROP TRIGGER IF EXISTS sessions_unretire;
-CREATE TRIGGER sessions_unretire AFTER UPDATE OF ended,parent_session_id ON sessions
-WHEN (OLD.ended=1 AND NEW.ended=0) OR NEW.parent_session_id IS NOT OLD.parent_session_id
+CREATE TRIGGER sessions_unretire AFTER UPDATE OF ended,parent_session_id,pinned_at_ms ON sessions
+WHEN (OLD.ended=1 AND NEW.ended=0) OR NEW.parent_session_id IS NOT OLD.parent_session_id OR (OLD.pinned_at_ms=0 AND NEW.pinned_at_ms>0)
 BEGIN
 	UPDATE catalog_sessions SET retired=0 WHERE session_id=NEW.id AND retired=1;
 END;
@@ -127,7 +127,7 @@ func sessionEnded(session surface.Session) bool {
 // holds the plan to that: a session subquery that is not keyed by the row's
 // id runs once per row and scans every session each time.
 const catalogRetireQuery = `UPDATE catalog_sessions INDEXED BY catalog_sessions_unretired SET retired=1 WHERE retired=0 AND current=0
-	AND EXISTS (SELECT 1 FROM sessions s WHERE s.id=catalog_sessions.session_id AND s.ended=1 AND s.last_active_ms<?
+	AND EXISTS (SELECT 1 FROM sessions s WHERE s.id=catalog_sessions.session_id AND s.ended=1 AND s.pinned_at_ms=0 AND s.last_active_ms<?
 		AND (s.host_id<>'' OR (s.surface=? AND (catalog_sessions.misses=0 OR catalog_sessions.misses>=?)))
 		AND CASE WHEN s.parent_session_id='' THEN s.source NOT IN ('subAgent','exec')
 			ELSE NOT EXISTS (SELECT 1 FROM catalog_sessions p WHERE p.session_id=s.parent_session_id AND p.retired=0) END)

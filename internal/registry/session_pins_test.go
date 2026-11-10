@@ -1,19 +1,25 @@
 package registry
 
 import (
+	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func pinnedIDs(t *testing.T, r *Registry) map[string]bool {
 	t.Helper()
-	pinned, err := r.PinnedSessions()
+	marks, err := r.SessionMarks()
 	if err != nil {
 		t.Fatal(err)
 	}
 	ids := map[string]bool{}
-	for _, p := range pinned {
-		ids[p.Session.ID] = true
+	for id, mark := range marks {
+		if !mark.PinnedAt.IsZero() {
+			ids[id] = true
+		}
 	}
 	return ids
 }
@@ -50,30 +56,50 @@ func TestAProjectsFirstLeadIsPinnedAndEachReplacementTakesTheLastOnesPin(t *test
 	}
 }
 
-func TestOnlyThisHostsLiveUnstoppedPinnedSessionsAreKept(t *testing.T) {
-	r := coordinatorRegistry(t, "kept", "archived", "stopped", "active-again", "mirrored")
-	now := time.Now()
-	for _, id := range []string{"kept", "archived", "stopped", "active-again", "mirrored"} {
-		if _, err := r.PinSession(id, now); err != nil {
+func TestUpgradeKeepsPinsAndDropsTheKeepersState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	old, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := old.RegisterSession(surface.Session{ID: "pinned", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}); err != nil {
+		t.Fatal(err)
+	}
+	pinnedAt := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	if _, err := old.PinSession("pinned", pinnedAt); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`CREATE TABLE session_keep_alive (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, attempts INTEGER NOT NULL DEFAULT 0, failed_at_ms INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '')`,
+		`INSERT INTO session_keep_alive(session_id,attempts,failed_at_ms,error) VALUES('pinned',5,1,'gave up')`,
+		`ALTER TABLE sessions ADD COLUMN stopped_at_ms INTEGER NOT NULL DEFAULT 0`,
+		`UPDATE sessions SET stopped_at_ms=1 WHERE id='pinned'`,
+		fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion-1),
+	} {
+		if _, err := old.db.Exec(statement); err != nil {
+			old.Close()
 			t.Fatal(err)
 		}
 	}
-	if err := r.ArchiveSession("archived", now); err != nil {
+	if err := old.Close(); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"stopped", "active-again"} {
-		if err := r.RecordSessionStop(id, now); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := r.db.Exec(`UPDATE sessions SET last_active_ms=? WHERE id='active-again'`, now.Add(time.Second).UnixMilli()); err != nil {
+	upgraded, err := Open(path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`UPDATE sessions SET host_id='paired' WHERE id='mirrored'`); err != nil {
+	defer upgraded.Close()
+	if got, err := upgraded.SessionPinnedAt("pinned"); err != nil || !got.Equal(pinnedAt) {
+		t.Fatalf("pin after upgrade = %v (%v), want %v", got, err, pinnedAt)
+	}
+	var tables, columns int
+	if err := upgraded.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='session_keep_alive'`).Scan(&tables); err != nil {
 		t.Fatal(err)
 	}
-	got := pinnedIDs(t, r)
-	if !got["kept"] || !got["active-again"] || got["archived"] || got["stopped"] || got["mirrored"] || len(got) != 2 {
-		t.Fatalf("kept %v", got)
+	if err := upgraded.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='stopped_at_ms'`).Scan(&columns); err != nil {
+		t.Fatal(err)
+	}
+	if tables != 0 || columns != 0 {
+		t.Fatalf("keeper state survived the upgrade: table=%d stopped_at_ms=%d", tables, columns)
 	}
 }

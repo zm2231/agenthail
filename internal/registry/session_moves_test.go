@@ -203,12 +203,6 @@ func TestAMovedInSessionTakesTheSourcesPinAndNotOneLeftHere(t *testing.T) {
 		if _, err := r.PinSession(moveConversation, time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)); err != nil {
 			t.Fatal(err)
 		}
-		if err := r.SaveKeepAlive(moveConversation, KeepAlive{Attempts: 5, FailedAt: time.Now(), Error: "gave up"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := r.RecordSessionStop(moveConversation, time.Now().Add(time.Hour)); err != nil {
-			t.Fatal(err)
-		}
 		move := fmt.Sprint("move-", i)
 		if _, err := r.PrepareMoveIn(move, moveConversation, source, []byte(`{"a":1}`)); err != nil {
 			t.Fatal(err)
@@ -221,13 +215,6 @@ func TestAMovedInSessionTakesTheSourcesPinAndNotOneLeftHere(t *testing.T) {
 		}
 		if got, err := r.SessionPinnedAt(moveConversation); err != nil || !got.Equal(pinnedAt) {
 			t.Fatalf("source pin %v: the moved session is pinned at %v (%v)", pinnedAt, got, err)
-		}
-		kept, err := r.PinnedSessions()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if pinnedAt.IsZero() && len(kept) != 0 || !pinnedAt.IsZero() && (len(kept) != 1 || kept[0].KeepAlive != (KeepAlive{})) {
-			t.Fatalf("source pin %v: kept %+v, want the source's pin with a fresh keeper count and no stop", pinnedAt, kept)
 		}
 	}
 }

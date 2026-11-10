@@ -172,6 +172,28 @@ func TestARetiredRowComesBackWhenItRunsOrBecomesCurrent(t *testing.T) {
 	}
 }
 
+func TestAPinnedConversationThatEndedStaysListedAndAPinBringsARetiredOneBack(t *testing.T) {
+	r := openTestRegistry(t)
+	recordEndedRow(t, r, surface.Session{ID: "pinned"}, `{"id":"pinned","current":false}`)
+	recordEndedRow(t, r, surface.Session{ID: "later"}, `{"id":"later","current":false}`)
+	if _, err := r.PinSession("pinned", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	endedPasses(t, r, 2)
+	if isRetired(t, r, "pinned") {
+		t.Fatal("a pinned conversation that ended left the current reads")
+	}
+	if !isRetired(t, r, "later") {
+		t.Fatal("an unpinned conversation that ended stayed in the current reads")
+	}
+	if _, err := r.PinSession("later", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if isRetired(t, r, "later") {
+		t.Fatal("pinning a retired conversation did not bring it back")
+	}
+}
+
 func TestPresenceReadsARetiredRowOnceSomethingAsksAboutIt(t *testing.T) {
 	r := openTestRegistry(t)
 	recordEndedRow(t, r, surface.Session{ID: "asked"}, `{"id":"asked","current":false}`)

@@ -1,4 +1,4 @@
--- schemaVersion 93
+-- schemaVersion 94
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -798,18 +798,6 @@ CREATE TABLE session_journal_state (
 	swept_seq INTEGER NOT NULL DEFAULT 0
 );
 
--- table session_keep_alive
-CREATE TABLE session_keep_alive (
-	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-	attempts INTEGER NOT NULL DEFAULT 0,
-	first_attempt_ms INTEGER NOT NULL DEFAULT 0,
-	next_attempt_ms INTEGER NOT NULL DEFAULT 0,
-	healthy_since_ms INTEGER NOT NULL DEFAULT 0,
-	failed_at_ms INTEGER NOT NULL DEFAULT 0,
-	announced INTEGER NOT NULL DEFAULT 0,
-	error TEXT NOT NULL DEFAULT ''
-);
-
 -- table session_moves
 CREATE TABLE session_moves (
 	id TEXT PRIMARY KEY,
@@ -903,7 +891,7 @@ CREATE TABLE sessions (
 	subagent_depth INTEGER NOT NULL DEFAULT 0,
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
 	host_id TEXT NOT NULL DEFAULT '',
-	pinned_at_ms INTEGER NOT NULL DEFAULT 0, stopped_at_ms INTEGER NOT NULL DEFAULT 0,
+	pinned_at_ms INTEGER NOT NULL DEFAULT 0,
 	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT '',
 	ended INTEGER NOT NULL DEFAULT 0,
 	entrypoint TEXT NOT NULL DEFAULT ''
@@ -1198,24 +1186,6 @@ END;
 
 -- trigger catalog_presentation_version_session_archive_update
 CREATE TRIGGER catalog_presentation_version_session_archive_update AFTER UPDATE OF archived_at_ms,session_id ON session_archive WHEN (NEW.archived_at_ms IS NOT OLD.archived_at_ms OR NEW.session_id IS NOT OLD.session_id)
-BEGIN
-	UPDATE catalog_presentation_version SET version=version+1;
-END;
-
--- trigger catalog_presentation_version_session_keep_alive_delete
-CREATE TRIGGER catalog_presentation_version_session_keep_alive_delete AFTER DELETE ON session_keep_alive
-BEGIN
-	UPDATE catalog_presentation_version SET version=version+1;
-END;
-
--- trigger catalog_presentation_version_session_keep_alive_insert
-CREATE TRIGGER catalog_presentation_version_session_keep_alive_insert AFTER INSERT ON session_keep_alive
-BEGIN
-	UPDATE catalog_presentation_version SET version=version+1;
-END;
-
--- trigger catalog_presentation_version_session_keep_alive_update
-CREATE TRIGGER catalog_presentation_version_session_keep_alive_update AFTER UPDATE OF session_id,failed_at_ms,error ON session_keep_alive WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.failed_at_ms IS NOT OLD.failed_at_ms OR NEW.error IS NOT OLD.error)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
@@ -1537,8 +1507,8 @@ BEGIN
 END;
 
 -- trigger sessions_unretire
-CREATE TRIGGER sessions_unretire AFTER UPDATE OF ended,parent_session_id ON sessions
-WHEN (OLD.ended=1 AND NEW.ended=0) OR NEW.parent_session_id IS NOT OLD.parent_session_id
+CREATE TRIGGER sessions_unretire AFTER UPDATE OF ended,parent_session_id,pinned_at_ms ON sessions
+WHEN (OLD.ended=1 AND NEW.ended=0) OR NEW.parent_session_id IS NOT OLD.parent_session_id OR (OLD.pinned_at_ms=0 AND NEW.pinned_at_ms>0)
 BEGIN
 	UPDATE catalog_sessions SET retired=0 WHERE session_id=NEW.id AND retired=1;
 END;

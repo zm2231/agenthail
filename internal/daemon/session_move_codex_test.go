@@ -135,8 +135,8 @@ func TestAnIdleCodexThreadMovesToAPairedHostAndRunsThere(t *testing.T) {
 	if alias, _ := target.reg.LookupAlias("builder"); alias != session.ID {
 		t.Fatalf("target alias=%q", alias)
 	}
-	if kept, err := target.reg.PinnedSessions(); err != nil || len(kept) != 1 || kept[0].Session.ID != session.ID || !kept[0].PinnedAt.Equal(pinnedAt) {
-		t.Fatalf("the target does not keep the pinned session: %+v %v", kept, err)
+	if kept, err := target.reg.SessionPinnedAt(session.ID); err != nil || !kept.Equal(pinnedAt) {
+		t.Fatalf("the target does not keep the session's pin: %v %v", kept, err)
 	}
 	placed := target.rollouts(t, session.ID)
 	if len(placed) != 1 {
