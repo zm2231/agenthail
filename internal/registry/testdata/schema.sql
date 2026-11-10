@@ -1507,8 +1507,8 @@ BEGIN
 END;
 
 -- trigger sessions_unretire
-CREATE TRIGGER sessions_unretire AFTER UPDATE OF ended,parent_session_id ON sessions
-WHEN (OLD.ended=1 AND NEW.ended=0) OR NEW.parent_session_id IS NOT OLD.parent_session_id
+CREATE TRIGGER sessions_unretire AFTER UPDATE OF ended,parent_session_id,pinned_at_ms ON sessions
+WHEN (OLD.ended=1 AND NEW.ended=0) OR NEW.parent_session_id IS NOT OLD.parent_session_id OR (OLD.pinned_at_ms=0 AND NEW.pinned_at_ms>0)
 BEGIN
 	UPDATE catalog_sessions SET retired=0 WHERE session_id=NEW.id AND retired=1;
 END;
