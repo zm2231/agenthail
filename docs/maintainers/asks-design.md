@@ -165,7 +165,7 @@ Each source is migrated in its own layer, and its old path goes in the same chan
 - The ask escalates by itself when its hearer:
   - stops running;
   - is archived;
-  - or has not answered within the escalation window (proposed 10 minutes; permission asks hold a tool call, so their window may want to be shorter).
+  - or has not answered within the escalation window: 10 minutes for agent and delivery asks, 3 minutes for permission asks, which hold a tool call. Both are config values.
 - The person can always answer any open ask. Asks routed to an agent show under "Handled by a lead" (`internal/daemon/decisions.go:73-77`), as they do now.
 - Notifications go only to the current `routedTo`: a push for the person, a notice for an agent. Escalating to the person is what pings them.
 - This makes permission requests follow the same single route as everything else. Today they go to the lead and the person at once.
@@ -212,8 +212,8 @@ Each layer works end to end on its own and removes the path it replaces.
 4. Ledger questions as asks.
 5. Client cleanup: iPhone "Accept recommended", browser notification actions, Swift attention builder removed.
 
-## Open points
+## Settled
 
-1. **Escalation window.** The 10 minute default, and whether permission asks get a shorter one. A permission request today reaches the person at once even when a lead exists.
-2. **First hop for delivery problems.** Should they go to the sending agent first, as its notice does today, or straight to the person?
-3. **Ledger questions without a recommendation.** The ledger requires a recommendation (`internal/ledger/questions.go:26-56`), so every ledger ask has a recommended option. Confirm that free text is always offered alongside it.
+1. **Escalation window.** 10 minutes for agent asks, and for delivery asks, which escalate on the same window. 3 minutes for permission asks. Both are config values.
+2. **First hop for delivery problems.** Delivery problems go to the sending agent first, then escalate.
+3. **Free text on ledger asks.** Free text is always offered next to the recommended option.

@@ -7,7 +7,10 @@ type Tool struct {
 	AlwaysLoad bool
 }
 
-const EndTurn = "agenthail_end_turn"
+const (
+	EndTurn = "agenthail_end_turn"
+	Ask     = "agenthail_ask"
+)
 
 var Tools = []Tool{
 	{Name: "agenthail_whoami", Description: "Your session, alias, project, host, coordinator role, capabilities, ceiling and credential expiry."},
@@ -23,7 +26,8 @@ var Tools = []Tool{
 	{Name: "agenthail_history", Description: "Delivery history, or the queue of instructions waiting to be delivered, newest first and paged. For the person's voice operator only."},
 	{Name: "agenthail_ledger_write", Description: "Record in your project's intent ledger: attach, clause, question or work, with the fields the CLI's ledger commands take. Recorded as your session."},
 	{Name: "agenthail_create", AlwaysLoad: true, Description: "Start a Claude or Codex session with a first message. It is bounded by your own ceiling: no higher permission mode and no folder outside yours. Sessions nest at most 3 deep, with at most 8 running at once per spawner."},
-	{Name: EndTurn, AlwaysLoad: true, Description: "Call this last in every turn, after your reply: it ends the turn and decides whether the person is pinged. needs you when they must decide or act before you go on, with the questions in asks; needs nothing when done. headline is the line shown in their list and notification. If an agent started you, needs you goes to it. A refused call does not end the turn; fix it and call again."},
+	{Name: EndTurn, AlwaysLoad: true, Description: "Call this last in every turn, after your reply. headline is the line shown in the person's list and notification. A refused call does not end the turn; fix it and call again."},
+	{Name: Ask, AlwaysLoad: true, Description: "Put a decision to the person, or to your lead or spawner when an agent started you: they see it in Needs you and answer from any device, and the answer arrives as your next message. Raise it before you end your turn; don't also ask in your reply."},
 	{Name: "agenthail_report", Description: "If your spawner started you as a task, tell it you are done or failed, and the result it should read. The first report settles the task; you can keep working."},
 	{Name: "agenthail_result", AlwaysLoad: true, Description: "A task's state and result, by taskId or child target, for its parent or anyone who can read the child. Long text is clipped to fit."},
 	{Name: "agenthail_wait", AlwaysLoad: true, Description: "Wait until a task settles, its child asks for something, or its goal stops, and say which. Default 600 seconds, at most 3600; a Claude session Agenthail doesn't host waits at most 45, so call again with the cursor. If it times out, the tasks you started are still running, and you get one notice when each settles, so you can end your turn instead of waiting again."},
@@ -32,7 +36,7 @@ var Tools = []Tool{
 	{Name: "agenthail_steer", Description: "Steer the running turn of a session you spawned or, as coordinator, lead."},
 	{Name: "agenthail_interrupt", Description: "Interrupt the running turn of a session you spawned or, as coordinator, lead."},
 	{Name: "agenthail_goal", Description: "Set, edit, clear, pause or resume the goal of a Codex session you spawned or, as coordinator, lead, or change its token budget."},
-	{Name: "agenthail_answer", Description: "Allow or deny an open request (a permission prompt, question or MCP input) of a session you spawned or, as coordinator, lead. Recorded as answered by you. You never answer your own requests or those of a session above you."},
+	{Name: "agenthail_answer", Description: "Allow or deny an open request (a permission prompt, question or MCP input) of a session you spawned or, as coordinator, lead, or answer an ask routed to you (its id starts ask-; answers or message, or decision escalate to pass it up). Recorded as answered by you. You never answer your own requests or those of a session above you."},
 	{Name: "agenthail_session_settings", Description: "Read a session's effective settings, or change the model, permission mode or effort of a session you spawned or, as coordinator, lead, or compact its context. A permission mode cannot exceed the session's ceiling."},
 	{Name: "agenthail_alias", Description: "Name a session you spawned or, as coordinator, lead, so it can be reached as @name."},
 	{Name: "agenthail_queue", Description: "Retry or cancel a queued instruction, or clear a session's pending ones. For the person's voice operator only."},

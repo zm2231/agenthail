@@ -26,7 +26,7 @@ func TestATurnEndsOnceAndStandsUntilTheNextTurn(t *testing.T) {
 	if err := r.OpenTurn("worker", now); err != nil {
 		t.Fatal("a second copy of the start hook failed:", err)
 	}
-	end := TurnEnd{SessionID: "worker", Needs: "you", Headline: "Deploy?", Asks: []TurnAsk{{Question: "Deploy?", Options: []TurnOption{{Label: "Yes"}}}}, Source: "tool"}
+	end := TurnEnd{SessionID: "worker", Headline: "Deploy?", Source: "tool"}
 	if _, err := r.EndTurn(end, "", now.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestATurnEndsOnceAndStandsUntilTheNextTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	bound, found, err := r.CompletedTurnEnd("worker", "reply-1")
-	if err != nil || !found || bound.Headline != "Deploy?" || len(bound.Asks) != 1 {
+	if err != nil || !found || bound.Headline != "Deploy?" {
 		t.Fatalf("completion bound %+v found=%v err=%v", bound, found, err)
 	}
 	if err := r.SaveRuntimeState("worker", surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "reply-1"}); err != nil {
@@ -56,7 +56,7 @@ func TestATurnEndsOnceAndStandsUntilTheNextTurn(t *testing.T) {
 	if got := currentHeadline(t, r, "worker"); got != "" {
 		t.Fatalf("the next turn started and the old end still stands: %q", got)
 	}
-	if _, err := r.EndTurn(TurnEnd{SessionID: "worker", Needs: "nothing", Headline: "Deployed", Source: "tool"}, "", now.Add(2*time.Minute)); err != nil {
+	if _, err := r.EndTurn(TurnEnd{SessionID: "worker", Headline: "Deployed", Source: "tool"}, "", now.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if got := currentHeadline(t, r, "worker"); got != "Deployed" {
@@ -67,7 +67,7 @@ func TestATurnEndsOnceAndStandsUntilTheNextTurn(t *testing.T) {
 func TestWithoutAStartHookANewTurnIsToldByItsCompletionOrItsRuntimeTurn(t *testing.T) {
 	r := coordinatorRegistry(t, "thread")
 	now := time.Now()
-	end := TurnEnd{SessionID: "thread", Needs: "nothing", Headline: "one", Source: "tool"}
+	end := TurnEnd{SessionID: "thread", Headline: "one", Source: "tool"}
 	if _, err := r.EndTurn(end, "turn-1", now); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestAnEndGivenAfterTheNudgeIsRecordedAsNudged(t *testing.T) {
 		if err := r.MarkTurnNudged("worker", now.Add(time.Second)); err != nil {
 			t.Fatal(err)
 		}
-		end, err := r.EndTurn(TurnEnd{SessionID: "worker", Needs: "nothing", Headline: "Done", Source: TurnSourceTool}, "turn-1", now.Add(2*time.Second))
+		end, err := r.EndTurn(TurnEnd{SessionID: "worker", Headline: "Done", Source: TurnSourceTool}, "turn-1", now.Add(2*time.Second))
 		if err != nil || end.Source != TurnSourceNudged {
 			t.Fatalf("opened=%v: end %+v err=%v", opened, end, err)
 		}

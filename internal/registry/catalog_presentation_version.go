@@ -31,6 +31,7 @@ var presentationInputs = []presentationInput{
 	{table: "coordinator_history"},
 	{table: "coordinator_replaced"},
 	{table: "turn_ends"},
+	{table: "asks"},
 	{table: "work_records", columns: presentationWorkColumns, when: `%[1]s.session_id<>''`},
 	{table: "session_prs", columns: presentationPRColumns, when: `%[1]s.unlinked=0`, shown: map[string]string{"read_failures": fmt.Sprintf("(%%[1]s.read_failures>=%d)", PRReadFailureLimit)}},
 	{table: "catalog_retired_version"},

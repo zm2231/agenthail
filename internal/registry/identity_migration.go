@@ -204,6 +204,8 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"session_keep_alive", `UPDATE OR IGNORE session_keep_alive SET session_id=?2 WHERE session_id=?1`, false},
 		{"idle_compactions", `UPDATE OR IGNORE idle_compactions SET session_id=?2 WHERE session_id=?1`, false},
 		{"turn_ends", `UPDATE OR IGNORE turn_ends SET session_id=?2 WHERE session_id=?1`, false},
+		{"asks", `UPDATE asks SET session_id=?2 WHERE session_id=?1`, false},
+		{"asks", `UPDATE asks SET routed_to=?2 WHERE routed_to=?1`, false},
 		{"session_credentials", `UPDATE OR IGNORE session_credentials SET session_id=?2 WHERE session_id=?1`, false},
 		{"session_credentials", `UPDATE OR IGNORE session_credentials SET claimed_session_id=?2 WHERE claimed_session_id=?1`, false},
 		{"session_runtime", `UPDATE session_runtime SET session_id=?2 WHERE session_id=?1`, hasRuntime},

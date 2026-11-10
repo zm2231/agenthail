@@ -217,15 +217,12 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		}
 	case "respond":
 		requestID := strings.TrimSpace(request.RequestID)
-		if isTurnEndRequest(requestID) {
-			if p.Kind == principalSession {
-				return actionResult{}, actionFailed(http.StatusForbidden, "forbidden", "an ended turn's questions are answered by the person")
-			}
+		if isAskID(requestID) {
 			personName := request.PersonName
 			if personName == "" {
 				personName, _ = d.Registry.PersonName()
 			}
-			return d.answerTurnEnd(ctx, adapter, session, requestID, request.Decision, personName, p.actor())
+			return d.answerAsk(ctx, adapter, session, requestID, request.Decision, p, personName)
 		}
 		return d.respond(ctx, adapter, session, requestID, request.Decision, p.actor())
 	case "request-withdraw":
