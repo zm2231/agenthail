@@ -227,6 +227,10 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read session pull requests: %w", err)
 	}
+	moves, err := d.Registry.UnfinishedMovesOut()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read unfinished moves: %w", err)
+	}
 	local := make([]int, 0, len(sessions))
 	for _, session := range sessions {
 		if record, found := catalogSessions[session.ID]; found && record.HostID != "" {
@@ -262,6 +266,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		}
 		if prs := sessionPRs[session.ID]; len(prs) > 0 {
 			entry.PRs = d.prViews(prs)
+		}
+		if move, found := moves[session.ID]; found {
+			entry.Move = moveRow(&move)
 		}
 		if record, found := catalogSessions[session.ID]; found {
 			entry.Freshness, entry.RegisteredAt = &record.Freshness, record.RegisteredAt

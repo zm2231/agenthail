@@ -102,6 +102,9 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"PRs": func(r *dashboardSession, _ time.Time) {
 		r.PRs = []prView{{Repo: "github.com/acme/app", Number: 1}}
 	},
+	"Move": func(r *dashboardSession, _ time.Time) {
+		r.Move = &moveView{State: "copying", Host: "h0123456789ab"}
+	},
 	"Runtime": func(r *dashboardSession, _ time.Time) {
 		r.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: true}
 	},

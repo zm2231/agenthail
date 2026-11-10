@@ -202,7 +202,7 @@ func setMoveStateTx(tx *sql.Tx, now time.Time, id, state, detail string, from ..
 	if !allowed {
 		return MoveConflictError{ID: id, State: current, Want: fmt.Sprint(from)}
 	}
-	_, err = tx.Exec(`UPDATE session_moves SET state=?,detail=?,updated_at=? WHERE id=?`, state, detail, formatTimestamp(now), id)
+	_, err = tx.Exec(`UPDATE session_moves SET state=?,detail=?,updated_at=?,outcome_unknown_at='' WHERE id=?`, state, detail, formatTimestamp(now), id)
 	return err
 }
 

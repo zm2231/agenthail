@@ -63,6 +63,7 @@ type dashboardSession struct {
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
 	Worktree          *workView                  `json:"worktree,omitempty"`
 	PRs               []prView                   `json:"prs,omitempty"`
+	Move              *moveView                  `json:"move,omitempty"`
 	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
 	Runtime           *surface.Runtime           `json:"runtime,omitempty"`

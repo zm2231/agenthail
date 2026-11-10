@@ -235,12 +235,13 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	if err := d.Registry.BeginMoveOut(manifest.ID, session.ID, host.record.ID, encoded, carry, d.hostIdentity().ID); err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: err.Error()}
 	}
+	d.publishMove(session.ID)
 	result := sessionMoveResult{Host: host.ref(), Stopped: out.Stopped, Alias: alias}
 	if manifest.ClaudeProject != nil {
 		result.MCPServersWithoutCredentials = manifest.ClaudeProject.WithoutCredentials
 	}
 	if err := d.prepareMoveOnHost(ctx, host, manifest); err != nil {
-		_ = d.Registry.SetMoveState(manifest.ID, registry.MoveFailed, err.Error(), registry.MovePreparing)
+		_ = d.setMoveOutState(manifest.ID, session.ID, registry.MoveFailed, err.Error(), registry.MovePreparing)
 		result.Move, _ = d.Registry.SessionMove(manifest.ID)
 		return result, MoveRefusedError{Reason: fmt.Sprintf("%s did not accept the move: %s", host.record.Name, err)}
 	}
@@ -255,7 +256,7 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 		result.Move, _ = d.Registry.SessionMove(manifest.ID)
 		return result, MoveRefusedError{Reason: cause.Error()}
 	}
-	if err := d.Registry.SetMoveState(manifest.ID, registry.MoveSent, "", registry.MovePreparing); err != nil {
+	if err := d.setMoveOutState(manifest.ID, session.ID, registry.MoveSent, "", registry.MovePreparing); err != nil {
 		return result, err
 	}
 	result.DroppedRelays, err = d.settleMoveOut(ctx, host, mover, manifest.ID, session.ID)
@@ -292,8 +293,20 @@ func (d *Daemon) prepareMoveOnHost(ctx context.Context, host *pairedHost, manife
 
 // settleMoveOut drives a sent move, whose files are archived, to done or
 // failed: it asks the target what it holds and acts on the answer. A move
-// whose answer cannot be had stays sent and returns MoveUnknownError.
-func (d *Daemon) settleMoveOut(ctx context.Context, host *pairedHost, mover surface.SessionMover, moveID, conversation string) ([]registry.DroppedRelay, error) {
+// whose answer cannot be had stays sent, is marked settling and returns
+// MoveUnknownError.
+func (d *Daemon) settleMoveOut(ctx context.Context, host *pairedHost, mover surface.SessionMover, moveID, conversation string) (dropped []registry.DroppedRelay, err error) {
+	defer func() {
+		var unknown MoveUnknownError
+		if !errors.As(err, &unknown) {
+			return
+		}
+		if markErr := d.Registry.MarkMoveOutcomeUnknown(moveID, unknown.Err.Error()); markErr != nil {
+			d.logRuntimeError("move "+moveID, markErr)
+			return
+		}
+		d.publishMove(conversation)
+	}()
 	status, err := d.moveStatusOnHost(ctx, host, moveID)
 	if err != nil {
 		return nil, MoveUnknownError{MoveID: moveID, Err: err}
@@ -363,11 +376,26 @@ func (d *Daemon) restoreMoveOut(mover surface.SessionMover, moveID, conversation
 	if err := mover.RestoreMove(conversation, moveID); err != nil {
 		return fmt.Errorf("move %s: put the conversation back: %w", moveID, err)
 	}
-	if err := d.Registry.SetMoveState(moveID, registry.MoveFailed, detail, registry.MoveSent, registry.MovePreparing); err != nil {
+	if err := d.setMoveOutState(moveID, conversation, registry.MoveFailed, detail, registry.MoveSent, registry.MovePreparing); err != nil {
 		return err
 	}
 	d.requestCatalogDiscovery()
 	return nil
+}
+
+// Every change to a move out goes through here, so no row keeps a move that ended.
+func (d *Daemon) setMoveOutState(id, conversation, state, detail string, from ...string) error {
+	if err := d.Registry.SetMoveState(id, state, detail, from...); err != nil {
+		return err
+	}
+	d.publishMove(conversation)
+	return nil
+}
+
+func (d *Daemon) publishMove(conversation string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	d.publishLive(ctx, conversation, func(*surface.Session) {})
 }
 
 func (d *Daemon) completeMoveOut(ctx context.Context, host *pairedHost, moveID string) error {
@@ -470,7 +498,7 @@ func (d *Daemon) failInterruptedMoves() {
 		}
 		mover := d.moverOf(move)
 		if mover == nil {
-			_ = d.Registry.SetMoveState(move.ID, registry.MoveFailed, "the daemon stopped before the move was sent", registry.MovePreparing)
+			_ = d.setMoveOutState(move.ID, move.Conversation, registry.MoveFailed, "the daemon stopped before the move was sent", registry.MovePreparing)
 			continue
 		}
 		if err := d.restoreMoveOut(mover, move.ID, move.Conversation, "the daemon stopped before the move was sent"); err != nil {

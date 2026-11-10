@@ -1,4 +1,4 @@
--- schemaVersion 88
+-- schemaVersion 89
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -799,7 +799,8 @@ CREATE TABLE session_moves (
 	manifest BLOB NOT NULL DEFAULT '',
 	detail TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
+	updated_at TEXT NOT NULL,
+	outcome_unknown_at TEXT NOT NULL DEFAULT ''
 );
 
 -- table session_origins
@@ -1227,6 +1228,24 @@ END;
 
 -- trigger catalog_presentation_version_session_keep_alive_update
 CREATE TRIGGER catalog_presentation_version_session_keep_alive_update AFTER UPDATE OF session_id,failed_at_ms,error ON session_keep_alive WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.failed_at_ms IS NOT OLD.failed_at_ms OR NEW.error IS NOT OLD.error)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_moves_delete
+CREATE TRIGGER catalog_presentation_version_session_moves_delete AFTER DELETE ON session_moves WHEN OLD.role='out'
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_moves_insert
+CREATE TRIGGER catalog_presentation_version_session_moves_insert AFTER INSERT ON session_moves WHEN NEW.role='out'
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_moves_update
+CREATE TRIGGER catalog_presentation_version_session_moves_update AFTER UPDATE OF conversation,peer_host,state,detail,outcome_unknown_at ON session_moves WHEN (NEW.role='out' OR OLD.role='out') AND (NEW.conversation IS NOT OLD.conversation OR NEW.peer_host IS NOT OLD.peer_host OR NEW.state IS NOT OLD.state OR NEW.detail IS NOT OLD.detail OR NEW.outcome_unknown_at IS NOT OLD.outcome_unknown_at)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

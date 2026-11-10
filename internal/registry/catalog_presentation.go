@@ -44,6 +44,7 @@ type CatalogPresentationRow struct {
 	TurnEnd                                *TurnEnd
 	Work                                   *WorkRecord
 	PRs                                    []SessionPR
+	Move                                   *MoveShown
 }
 
 type CatalogPresentation struct {
@@ -96,7 +97,14 @@ func (r *Registry) readCatalogPresentation(ctx context.Context, history bool, st
 	if err != nil {
 		return CatalogPresentation{}, err
 	}
+	moves, err := unfinishedMovesOut(tx, "")
+	if err != nil {
+		return CatalogPresentation{}, err
+	}
 	for i := range read.Rows {
+		if move, ok := moves[read.Rows[i].ID]; ok {
+			read.Rows[i].Move = &move
+		}
 		if end, ok := ends[read.Rows[i].ID]; ok {
 			read.Rows[i].TurnEnd = &end
 		}

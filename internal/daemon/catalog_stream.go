@@ -698,9 +698,13 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	if err != nil {
 		return false
 	}
+	move, err := d.Registry.UnfinishedMoveOut(session.ID)
+	if err != nil {
+		return false
+	}
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, limitResume, open, leads[session.ID], config)
-		row.RegisteredAt, row.StartedBy, row.Task = registered, starter, task
+		row.RegisteredAt, row.StartedBy, row.Task, row.Move = registered, starter, task, moveRow(move)
 		if hasWork {
 			row.Worktree = newWorkView(work)
 		}
