@@ -107,7 +107,13 @@ func pairMoveNodes(t *testing.T, source, target *moveNode) (*moveNode, *moveNode
 // source's at a pushed commit, and adds the target's as a project there.
 func checkoutsForMove(t *testing.T, source, target *moveNode) string {
 	t.Helper()
-	repo := source.host.Cwd
+	return checkoutsIn(t, source.host.Cwd, target.host.Home, target.federationNode)
+}
+
+// checkoutsIn makes repo a checkout at a pushed commit and clones it under
+// targetRoot as a project of target.
+func checkoutsIn(t *testing.T, repo, targetRoot string, target *federationNode) string {
+	t.Helper()
 	runGit(t, repo, "init", "--quiet", "--initial-branch=main")
 	runGit(t, repo, "remote", "add", "origin", moveRemote)
 	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("widget\n"), 0600); err != nil {
@@ -117,8 +123,8 @@ func checkoutsForMove(t *testing.T, source, target *moveNode) string {
 	runGit(t, repo, "commit", "--quiet", "-m", "start")
 	runGit(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
 	commit := runGit(t, repo, "rev-parse", "HEAD")
-	checkout := filepath.Join(target.host.Home, "checkouts", "widget")
-	runGit(t, target.host.Home, "clone", "--quiet", repo, checkout)
+	checkout := filepath.Join(targetRoot, "checkouts", "widget")
+	runGit(t, targetRoot, "clone", "--quiet", repo, checkout)
 	runGit(t, checkout, "remote", "set-url", "origin", moveRemote)
 	if err := target.reg.AddProject(registry.ProjectRecord{ID: "project-widget", WorkspaceRoot: checkout, Title: "widget", Added: true}); err != nil {
 		t.Fatal(err)
