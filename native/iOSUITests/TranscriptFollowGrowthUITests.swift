@@ -22,7 +22,7 @@ final class TranscriptFollowGrowthUITests: XCTestCase {
         sleep(2)
         timeline.swipeDown(velocity: .slow)
         XCTAssertTrue(app.buttons["Jump to latest"].waitForExistence(timeout: 3))
-        let anchor = timeline.staticTexts.allElementsBoundByIndex.first { timeline.frame.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) && !$0.label.isEmpty }
+        let anchor = Self.anchor(in: timeline)
         guard let anchor else { return XCTFail("no text on screen after scrolling up") }
         let (label, before) = (anchor.label, anchor.frame.minY)
         sleep(5)
@@ -42,10 +42,7 @@ final class TranscriptFollowGrowthUITests: XCTestCase {
         let end = Date().addingTimeInterval(5)
         while Date() < end {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            let texts = timeline.staticTexts
-            let count = texts.count
-            guard count > 0 else { continue }
-            let bottom = texts.element(boundBy: count - 1).frame.maxY
+            guard let bottom = Self.texts(in: timeline).last?.frame.maxY else { continue }
             samples += 1
             XCTAssertLessThanOrEqual(bottom, composer.frame.minY + 2, "the newest line went \(Int(bottom - composer.frame.minY)) pt under the composer while following")
             XCTAssertFalse(app.buttons["Jump to latest"].exists, "following a fast text stream stopped reaching the end")
@@ -64,7 +61,7 @@ final class TranscriptFollowGrowthUITests: XCTestCase {
         let end = Date().addingTimeInterval(8)
         while Date() < end {
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
-            let labels = timeline.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Turn'")).allElementsBoundByIndex.map(\.label)
+            let labels = Self.texts(in: timeline).map(\.label).filter { $0.hasPrefix("Turn") }
             guard let newest = labels.last else { continue }
             let turn = newest.split(separator: " ").prefix(2).joined(separator: " ") + " "
             let length = labels.filter { $0.hasPrefix(turn) }.map(\.count).reduce(0, +)
@@ -74,13 +71,28 @@ final class TranscriptFollowGrowthUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(grew, 3, "All events did not show the streamed reply growing")
     }
 
+    private static func texts(in element: XCUIElement) -> [(label: String, frame: CGRect)] {
+        guard let snapshot = try? element.snapshot() else { return [] }
+        return texts(snapshot)
+    }
+
+    private static func texts(_ node: XCUIElementSnapshot) -> [(label: String, frame: CGRect)] {
+        let own = node.elementType == .staticText ? [(label: node.label, frame: node.frame)] : []
+        return own + node.children.flatMap(texts)
+    }
+
+    private static func anchor(in timeline: XCUIElement) -> (label: String, frame: CGRect)? {
+        let shown = timeline.frame
+        return texts(in: timeline).first { shown.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) && !$0.label.isEmpty }
+    }
+
     func testAFastTextStreamDoesNotPullBackAReaderWhoScrolledUp() {
         let app = launch(Self.fastText)
         let timeline = app.scrollViews["session-timeline"]
         sleep(3)
         timeline.swipeDown(velocity: .slow)
         XCTAssertTrue(app.buttons["Jump to latest"].waitForExistence(timeout: 3))
-        let anchor = timeline.staticTexts.allElementsBoundByIndex.first { timeline.frame.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) && !$0.label.isEmpty }
+        let anchor = Self.anchor(in: timeline)
         guard let anchor else { return XCTFail("no text on screen after scrolling up") }
         let (start, before) = (String(anchor.label.prefix(30)), anchor.frame.minY)
         sleep(3)
@@ -137,7 +149,7 @@ final class TranscriptFollowGrowthUITests: XCTestCase {
             start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 20)), withVelocity: 60, thenHoldForDuration: 0.2)
         }
         XCTAssertTrue(app.buttons["Jump to latest"].waitForExistence(timeout: 2), "the nudges up never stopped following")
-        let anchor = timeline.staticTexts.allElementsBoundByIndex.first { timeline.frame.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) && !$0.label.isEmpty }
+        let anchor = Self.anchor(in: timeline)
         guard let anchor else { return XCTFail("no text on screen after the nudges") }
         let (label, before) = (anchor.label, anchor.frame.minY)
         sleep(3)
