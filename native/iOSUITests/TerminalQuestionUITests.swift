@@ -20,4 +20,28 @@ final class TerminalQuestionUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+
+    func testAHeldQuestionOpenedFromTheListAfterAnotherSessionShowsItsCard() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-terminal-question", "--preview-theme", "dark"]
+        app.launch()
+
+        let other = app.buttons["session-computer::codex-demo"]
+        XCTAssertTrue(other.waitForExistence(timeout: 10))
+        other.tap()
+        let back = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        back.tap()
+
+        let asking = app.buttons["needs-you-computer::demo"]
+        XCTAssertTrue(asking.waitForExistence(timeout: 10))
+        asking.tap()
+        XCTAssertTrue(app.buttons["Release, Matches what ships"].waitForExistence(timeout: 10), "a question opened from the list after another session shows its card")
+        XCTAssertTrue(app.buttons["Decline"].isHittable)
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "held question opened from the list"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
 }

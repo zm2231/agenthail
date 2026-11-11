@@ -170,6 +170,11 @@ final class SessionRefreshTests: XCTestCase {
         await model.syncRequests(for: session)
         XCTAssertFalse(probe.changed(), "rereading the same requests sets nothing")
 
+        let left = SessionState(id: "computer::other", surface: "claude", name: "other", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: false, readOnlyReason: nil)
+        await model.syncRequests(for: left)
+        XCTAssertFalse(probe.changed(), "a late sync for a session no longer shown leaves the shown session's requests")
+        XCTAssertEqual(model.sessionRequests?.permissionMode, "default")
+
         await model.loadSession("computer::other")
         XCTAssertTrue(probe.changed())
         XCTAssertNil(model.sessionRequests)
