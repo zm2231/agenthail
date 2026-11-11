@@ -231,12 +231,12 @@ delivers to local members directly.
 A project channel has no stored members, and each host decides its own.
 `channel-send` to `#<project>` delivers to this host's members, read from its
 catalog: every local row whose project `id` is the project's, that is not
-stale or archived and is pinned, working or was used within
-`surface.ActiveWindow`, whether or not its process is still up (delivery
-resumes one that ended), plus the project's coordinators on this
-host, which `internal/coordinator` starts or resumes. `internal/broadcast`
-holds that resolution and delivery; only the daemon runs it, and the CLI posts
-the action.
+archived and is pinned, working or was used within `surface.ActiveWindow`,
+whether or not its process is still up (delivery resumes one that ended; the
+catalog marks such a row stale, which does not exclude it), plus the
+project's coordinators on this host, which `internal/coordinator` starts or
+resumes. `internal/broadcast` holds that resolution and delivery; only the
+daemon runs it, and the CLI posts the action.
 
 Every paired host that holds the project (`CatalogProjectHosts`, stale rows
 included, plus the hosts of the project's coordinators) gets one
