@@ -116,6 +116,6 @@ struct QueueTail: Equatable {
             return text.isEmpty && attachments.contains { $0.mediaType.hasPrefix("image/") }
         }
         guard !text.isEmpty else { return false }
-        return PeerEnvelope(item.text).body.trimmingCharacters(in: .whitespacesAndNewlines) == text
+        return item.carries(text)
     }
 }

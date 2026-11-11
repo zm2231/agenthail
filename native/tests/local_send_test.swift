@@ -52,6 +52,24 @@ struct LocalSendTest {
         expect(LocalSend.reconcile([first], with: [image]) == [first], "an image never absorbs a text send")
         let textAndImage = LocalSend(text: "What is this?", attachments: [shotDraft], sentAt: sentAt, status: "Sent")
         expect(LocalSend.reconcile([textAndImage], with: [message("l", "What is this?"), image]).isEmpty, "a text and image send is absorbed by its text")
+        let long = String(repeating: "Café ", count: 3000) + "final line"
+        let longSend = LocalSend(text: long, sentAt: sentAt, status: "Sent")
+        func cut(_ text: String) -> String {
+            let bytes = Array(text.utf8)
+            var end = 16 * 1024
+            while end > 0 && bytes[end] & 0xC0 == 0x80 { end -= 1 }
+            return String(decoding: bytes[..<end], as: UTF8.self)
+        }
+        expect(Array(long.utf8)[16 * 1024] & 0xC0 == 0x80, "the limit falls inside a character")
+        func truncated(_ id: String, _ text: String) -> TimelineItem {
+            TimelineItem(id: id, kind: "message", role: "user", title: "user", text: cut(text), timestamp: "2026-10-04T12:00:02Z", callId: nil, status: nil, truncated: true, truncationReason: "timeline text limit", bodyRef: nil)
+        }
+        expect(long.utf8.count > 16 * 1024, "the long send is over the timeline limit")
+        expect(LocalSend.reconcile([longSend], with: [truncated("m", long)]).isEmpty, "a send whose timeline row was cut is absorbed by that row")
+        expect(LocalSend.reconcile([longSend], with: [truncated("n", "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1.sock\" from-session=\"s\" from-name=\"agenthail/agenthail: operator\">\n" + long + "\n</cross-session-message>")]).isEmpty, "a cut send inside a peer envelope is absorbed")
+        expect(LocalSend.reconcile([longSend], with: [truncated("o", "Different text. " + long)]) == [longSend], "a cut row that is not the start of the send does not absorb it")
+        expect(LocalSend.reconcile([longSend], with: [user("p", cut(long), "2026-10-04T12:00:02Z")]) == [longSend], "an uncut row still needs the whole text")
+        expect(LocalSend.reconcile([first], with: [TimelineItem(id: "q", kind: "message", role: "user", title: "user", text: "", timestamp: "2026-10-04T12:00:02Z", callId: nil, status: nil, truncated: true, truncationReason: "timeline text limit", bodyRef: nil)]) == [first], "an empty cut row absorbs nothing")
         expect(withFile.files == [AttachedFile(name: "notes.txt", bytes: 16)], "the local copy shows its attachments as files")
 
         expect(LocalSend.label(for: "queued") == "Queued" && LocalSend.label(for: "submitted") == "Submitted" && LocalSend.label(for: "sent") == "Sent", "receipt labels use the public vocabulary")

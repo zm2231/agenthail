@@ -28,14 +28,14 @@ struct PeerEnvelope: Equatable {
         self.body = body
     }
 
-    init(_ text: String) {
+    init(_ text: String, truncated: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let close = trimmed.range(of: Self.closeTag, options: .backwards).flatMap { Self.isKnownTrailer(trimmed[$0.upperBound...], cut: truncated) ? $0 : nil }
         guard let open = trimmed.range(of: Self.openTag),
-              let close = trimmed.range(of: Self.closeTag, options: .backwards),
-              open.upperBound <= close.lowerBound,
-              let tagEnd = trimmed[open.lowerBound..<close.lowerBound].firstIndex(of: ">"),
-              Self.isKnownPreamble(trimmed[..<open.lowerBound]),
-              Self.isKnownTrailer(trimmed[close.upperBound...])
+              let end = close?.lowerBound ?? (truncated ? trimmed.endIndex : nil),
+              open.upperBound <= end,
+              let tagEnd = trimmed[open.lowerBound..<end].firstIndex(of: ">"),
+              Self.isKnownPreamble(trimmed[..<open.lowerBound])
         else {
             self.sender = nil
             self.body = text
@@ -48,7 +48,7 @@ struct PeerEnvelope: Equatable {
             return
         }
         self.sender = sender
-        self.body = trimmed[trimmed.index(after: tagEnd)..<close.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        self.body = trimmed[trimmed.index(after: tagEnd)..<end].trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func isKnownPreamble(_ text: Substring) -> Bool {
@@ -57,9 +57,9 @@ struct PeerEnvelope: Equatable {
         return value.hasPrefix("[Claude peer message from ") && value.hasSuffix("]") && !value.contains("\n")
     }
 
-    private static func isKnownTrailer(_ text: Substring) -> Bool {
+    private static func isKnownTrailer(_ text: Substring, cut: Bool) -> Bool {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty || trailers.contains(value)
+        return value.isEmpty || trailers.contains { cut ? $0.unicodeScalars.starts(with: value.unicodeScalars) : $0 == value }
     }
 
     private static func attribute(_ name: String, in tag: String) -> String? {
@@ -68,5 +68,12 @@ struct PeerEnvelope: Equatable {
         guard let end = rest.firstIndex(of: "\"") else { return nil }
         let value = String(rest[..<end])
         return value.isEmpty ? nil : value
+    }
+}
+
+extension TimelineItem {
+    func carries(_ sent: String) -> Bool {
+        let body = PeerEnvelope(text, truncated: truncated).body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return truncated ? !body.isEmpty && sent.unicodeScalars.starts(with: body.unicodeScalars) : body == sent
     }
 }
