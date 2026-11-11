@@ -24,14 +24,14 @@ type Host struct {
 
 // Remote is a session on a paired host, by its host-qualified ID.
 type Remote struct {
-	ID      string              `json:"id"`
-	Surface surface.SurfaceKind `json:"surface"`
-	Name    string              `json:"name"`
-	Alias   string              `json:"alias,omitempty"`
-	Host    Host                `json:"host"`
-	Exact   bool                `json:"exact"`
-	Project string              `json:"project,omitempty"`
-	Lead    bool                `json:"lead,omitempty"`
+	ID       string              `json:"id"`
+	Surface  surface.SurfaceKind `json:"surface"`
+	Name     string              `json:"name"`
+	Alias    string              `json:"alias,omitempty"`
+	Host     Host                `json:"host"`
+	Exact    bool                `json:"exact"`
+	Project  string              `json:"project,omitempty"`
+	Archived bool                `json:"archived,omitempty"`
 }
 
 func (t Remote) Label() string {

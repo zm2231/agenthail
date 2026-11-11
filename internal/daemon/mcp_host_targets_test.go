@@ -99,11 +99,28 @@ func TestAWorkersQueuedSendReachesItsLeadOnAPairedHost(t *testing.T) {
 	}
 }
 
+func TestAWorkersQueuedSendReachesAPeerInItsProjectOnAPairedHost(t *testing.T) {
+	h := newHostTargets(t, false)
+	if out, refused := h.send(t, "vps::@builder", "to a peer", nil); refused || !h.reached("to a peer") {
+		t.Fatalf("a queued send to a peer: refused=%v out=%v delivered=%q", refused, out, h.remote.fake.delivered())
+	}
+	out, refused := h.send(t, "vps::@builder", "to a peer now", map[string]any{"mode": "now"})
+	refusedFor(t, out, refused, "out_of_scope", "not_queued")
+	if err := h.remote.reg.ArchiveSession("remote-c", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	out, refused = h.send(t, "vps::@builder", "to an archived peer", nil)
+	refusedFor(t, out, refused, "out_of_scope", "archived")
+	for _, message := range []string{"to a peer now", "to an archived peer"} {
+		if h.reached(message) {
+			t.Fatalf("a refused send reached the paired host: %q", message)
+		}
+	}
+}
+
 func TestACrossHostSendRefusalNamesTheRuleItFailed(t *testing.T) {
 	h := newHostTargets(t, false)
-	out, refused := h.send(t, "vps::@builder", "to a peer", nil)
-	refusedFor(t, out, refused, "out_of_scope", "not_your_lead")
-	out, refused = h.send(t, "vps::remote-b", "to another project", nil)
+	out, refused := h.send(t, "vps::remote-b", "to another project", nil)
 	refusedFor(t, out, refused, "out_of_scope", "different_project")
 	out, refused = h.send(t, "@lead", "right now", map[string]any{"mode": "now"})
 	refusedFor(t, out, refused, "out_of_scope", "not_queued")
@@ -111,7 +128,7 @@ func TestACrossHostSendRefusalNamesTheRuleItFailed(t *testing.T) {
 	refusedFor(t, out, refused, "out_of_scope", "not_queued")
 	out, refused = h.send(t, "nowhere::@builder", "to no host", nil)
 	refusedFor(t, out, refused, "not_found", "")
-	for _, message := range []string{"to a peer", "to another project", "right now", "turn left"} {
+	for _, message := range []string{"to another project", "right now", "turn left"} {
 		if h.reached(message) {
 			t.Fatalf("a refused send reached the paired host: %q", message)
 		}
@@ -147,22 +164,6 @@ func TestACrossHostSendIsJudgedByTheProjectThePairedHostReportsNow(t *testing.T)
 		if h.reached(message) {
 			t.Fatalf("a refused send reached the paired host: %q", message)
 		}
-	}
-}
-
-func TestAWorkerCannotReachAFormerLeadTheMirrorStillNames(t *testing.T) {
-	h := newHostTargets(t, false)
-	project, err := h.remote.reg.Coordinator(widgetProject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.remote.reg.SetCoordinator(project, registry.CoordinatorChange{SessionID: "remote-c", Replace: true, ChangedBy: "fixture"}); err != nil {
-		t.Fatal(err)
-	}
-	out, refused := h.send(t, "vps::remote-a", "to the former lead", nil)
-	refusedFor(t, out, refused, "out_of_scope", "not_your_lead")
-	if h.reached("to the former lead") {
-		t.Fatal("a send to the former lead reached the paired host")
 	}
 }
 

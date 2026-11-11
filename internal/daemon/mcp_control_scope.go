@@ -24,7 +24,7 @@ func (d *Daemon) mcpResolveSession(ref string) (*surface.Session, error) {
 	return session, nil
 }
 
-// mcpControlTarget resolves a target the caller may act on; upward admits the caller's spawner chain and project coordinator, which only queued sends use.
+// mcpControlTarget resolves a target the caller may act on; upward admits the caller's spawner chain and any session in its project, which only queued sends use.
 func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref string, upward bool) (*surface.Session, error) {
 	if strings.TrimSpace(ref) == "" {
 		return nil, refuse("invalid", "target is required: a session id or @alias.")
@@ -73,7 +73,20 @@ func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref st
 		}
 		return nil, scopeRefusal(session.ID, "down_only", mcpDownOnly)
 	}
-	return nil, scopeRefusal(session.ID, "not_spawned_or_led", "That session is not one you spawned or, as its project's coordinator, lead; ask your project's coordinator to reach it.")
+	if d.sameProject(caller, *session) {
+		if !upward {
+			return nil, scopeRefusal(session.ID, "not_spawned_or_led", "That session is in your project but is not one you spawned or, as its project's coordinator, lead; you may send it a queued message, nothing more.")
+		}
+		archived, err := d.Registry.SessionArchived(session.ID)
+		if err != nil {
+			return nil, err
+		}
+		if archived {
+			return nil, scopeRefusal(session.ID, "archived", "That session is archived.")
+		}
+		return session, nil
+	}
+	return nil, scopeRefusal(session.ID, "not_spawned_or_led", "That session is not in your project; reach another project through its coordinator, by sending with project.")
 }
 
 const mcpDownOnly = "Control flows down only: you may send a queued message to your spawner or your project's coordinator, but not steer, interrupt, answer, change its goal or settings, or send now."

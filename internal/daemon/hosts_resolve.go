@@ -16,14 +16,14 @@ import (
 )
 
 type resolveMatch struct {
-	ID      string              `json:"id"`
-	Surface surface.SurfaceKind `json:"surface"`
-	Name    string              `json:"name,omitempty"`
-	Alias   string              `json:"alias,omitempty"`
-	Host    dashboardHost       `json:"host"`
-	Exact   bool                `json:"exact"`
-	Project string              `json:"project,omitempty"`
-	Lead    bool                `json:"lead,omitempty"`
+	ID       string              `json:"id"`
+	Surface  surface.SurfaceKind `json:"surface"`
+	Name     string              `json:"name,omitempty"`
+	Alias    string              `json:"alias,omitempty"`
+	Host     dashboardHost       `json:"host"`
+	Exact    bool                `json:"exact"`
+	Project  string              `json:"project,omitempty"`
+	Archived bool                `json:"archived,omitempty"`
 }
 
 type resolveResponse struct {
@@ -86,8 +86,12 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 			return nil, lookupErr
 		}
 		alias, _ := d.Registry.ReverseAlias(sid)
-		project, lead := d.resolveScope(*session)
-		return []resolveMatch{{ID: sid, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: named || d.Registry.NamesSession(*session, target), Project: project, Lead: lead}}, nil
+		project := d.resolveProject(*session)
+		archived, err := d.Registry.SessionArchived(sid)
+		if err != nil {
+			return nil, err
+		}
+		return []resolveMatch{{ID: sid, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: named || d.Registry.NamesSession(*session, target), Project: project, Archived: archived}}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
@@ -102,23 +106,22 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 			continue
 		}
 		alias, _ := d.Registry.ReverseAlias(session.ID)
-		project, lead := d.resolveScope(*session)
-		matches = append(matches, resolveMatch{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: d.Registry.NamesSession(*session, lookup), Project: project, Lead: lead})
+		project := d.resolveProject(*session)
+		archived, err := d.Registry.SessionArchived(session.ID)
+		if err != nil {
+			return nil, err
+		}
+		matches = append(matches, resolveMatch{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: d.Registry.NamesSession(*session, lookup), Project: project, Archived: archived})
 	}
 	return matches, nil
 }
 
-func (d *Daemon) resolveScope(session surface.Session) (string, bool) {
+func (d *Daemon) resolveProject(session surface.Session) string {
 	project, err := d.sessionProject(session)
 	if err != nil || project == nil {
-		return "", false
+		return ""
 	}
-	spec, err := d.Registry.Coordinator(project.ID)
-	if err != nil {
-		return project.ID, false
-	}
-	lead, err := d.Registry.CoordinatorSessionID(spec)
-	return project.ID, err == nil && lead == session.ID
+	return project.ID
 }
 
 func (d *Daemon) resolveRemote(ctx context.Context, candidates []*pairedHost, target string) resolveResponse {

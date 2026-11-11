@@ -64,12 +64,12 @@ func scopedFixture(t *testing.T, server *scopeServer) (*App, *cliSurface) {
 }
 
 func TestAnAgentsWriteOutsideItsReachIsRefusedWithTheRuleBeforeAnythingIsSent(t *testing.T) {
-	server := &scopeServer{refusal: `{"scope":true,"error":{"code":"out_of_scope","message":"That session is not one you spawned or, as its project's coordinator, lead; ask your project's coordinator to reach it."},"retryable":false,"detail":{"rule":"not_your_lead"}}`}
+	server := &scopeServer{refusal: `{"scope":true,"error":{"code":"out_of_scope","message":"That session is in your project but is not one you spawned or, as its project's coordinator, lead; you may send it a queued message, nothing more."},"retryable":false,"detail":{"rule":"not_spawned_or_led"}}`}
 	app, fake := scopedFixture(t, server)
 	t.Setenv("AGENTHAIL_SESSION_ID", "worker")
 	for _, command := range [][]string{{"steer", "codex:target", "change course"}, {"interrupt", "codex:target"}, {"send", "codex:target", "hello"}} {
 		_, err := captureStdout(t, func() error { return app.Run(command) })
-		if err == nil || !strings.Contains(err.Error(), "refused (out_of_scope, rule not_your_lead): That session is not one you spawned") {
+		if err == nil || !strings.Contains(err.Error(), "refused (out_of_scope, rule not_spawned_or_led): That session is in your project but is not one you spawned") {
 			t.Fatalf("%s: err=%v", command[0], err)
 		}
 	}

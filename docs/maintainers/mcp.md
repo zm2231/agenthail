@@ -157,13 +157,13 @@ A wait that times out sets `wake` on the running tasks the caller started. Each 
 `mcpControlTarget` resolves the target with the CLI's resolver (`internal/targets`): `@lead`, a coordinator's `@name`, `host::@alias`, `host::id`, and an unqualified target looked up on this host and every paired host, where a match on more than one is refused as `invalid`, never picked. A host or target that matches nothing is `not_found`. A session on a paired host is reached only by a queued `agenthail_send`, under the same rules as a local one, so crossing a host never widens a caller's reach:
 
 - `control.all` reaches any of them;
-- otherwise the session must be in the caller's project (`out_of_scope`, `detail.rule: different_project`), and be that project's coordinator or, with `control.project`, any of its sessions (`detail.rule: not_your_lead`);
+- otherwise the session must be in the caller's project (`out_of_scope`, `detail.rule: different_project`) and not archived there (`detail.rule: archived`);
 - `mode: now` and every other write refuse it (`detail.rule: not_queued`);
 - a target the paired host matched only by a name fragment is `invalid`.
 
 `agenthail_channel_send` to a project (`#<project>`) reaches that project's workers, so it takes the same reach: a caller posts only to its own project's channel unless it holds `control.all`, and is otherwise refused with `out_of_scope`, `detail.rule: different_project`, before anything is sent. Another project's coordinator stays reachable by a queued `agenthail_send` with `project`. A stored channel keeps its members, and the person's posts are not limited. The CLI's `agenthail channel send` takes the same rule when run from an agent's shell (see below) and is not limited in the person's terminal. A paired host applies the same rule to a project post that reaches it (see hosts.md).
 
-The project and the coordinator role come from the paired host's own answer to `/api/v1/resolve` (its `project` and `lead` fields), never from this host's mirror, which can lag a move or a handover. When the host cannot answer, the target is matched against the mirror only to name it, and the send is refused as retryable `unavailable` (`detail.rule: project_unconfirmed`).
+The project and the archive come from the paired host's own answer to `/api/v1/resolve` (its `project` and `archived` fields), never from this host's mirror, which can lag a move or an archive. When the host cannot answer, the target is matched against the mirror only to name it, and the send is refused as retryable `unavailable` (`detail.rule: project_unconfirmed`).
 
 A local target is then decided in this order:
 
@@ -172,6 +172,7 @@ A local target is then decided in this order:
 3. `control.all` reaches every other local session.
 4. `control.descendants` reaches the sessions the caller spawned, transitively, and `control.project` reaches its project's live sessions, each only when the target's ceiling is within the caller's (`exceeds_ceiling` otherwise).
 5. The caller's project coordinator on this host is reachable only by a queued `agenthail_send`.
+6. Any other non-archived session in the caller's project is reachable only by a queued `agenthail_send`, so sessions in a project can message each other; an archived one is refused with `detail.rule: archived`, and every other write with `detail.rule: not_spawned_or_led`. A session in another project is refused with `not_spawned_or_led` and is reached through its coordinator, with `project`.
 
 `agenthail_send` with `project` reaches any project's coordinator as a queued message, so a project's coordinator is reachable by project from every session. `mode: now` needs `control.all`: to the caller's own coordinator it is refused as control flowing up, and to another project's with `out_of_scope`, `detail.rule: different_project`.
 
@@ -181,7 +182,7 @@ The CLI run in a session's shell (`AGENTHAIL_SESSION_ID`, `CLAUDE_CODE_SESSION_I
 
 | `action` | CLI commands | Decided by |
 |---|---|---|
-| `send` | `send`, `queue <target>`; `mode: now` with `--no-queue`, which delivers at once or fails | `mcpControlTarget`, upward allowed when queued |
+| `send` | `send`, `queue <target>`; `mode: now` with `--no-queue`, which delivers at once or fails | `mcpControlTarget`; when queued, the caller's spawner chain and any session in its project are allowed |
 | `lead-send` | `send` or `queue` to a coordinator by name, `@lead` or a coordinator session; `mode: now` with `--no-queue` | `mcpLeadScope` |
 | `control` | `steer`, `interrupt`, `compact`, `model <name>`, `control effort\|rename`, `goal <op>`, `answer` (before its requests are read), `permission-mode <mode>`, `thread stop\|resume\|fork\|archive\|pin\|snooze\|wake\|adopt\|clean`, `identify`, `pr --session`, `limit-resume resume\|cancel`, `move` | `mcpControlTarget`; the session itself is allowed |
 | `ledger` | every `ledger` write (all but its reads: the board, `asks`, `ask`, `show`, `goals`, `questions`, `digest`, and `work list\|show\|ready\|next\|critical-path\|search`), for `--project` or the folder's project | `ledger.write` and the caller's own project, as `agenthail_ledger_write`; `out_of_scope`, `detail.rule: different_project` otherwise |
