@@ -1537,6 +1537,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     func syncRequests(for session: SessionState) async {
         if retiredAsks.settles(session) { retiredAsks.settle(session) }
+        guard selectedSessionID == session.id else { return }
         guard RequestSync.lists(session) else {
             if sessionRequests != nil { sessionRequests = nil }
             sessionRequestsKey = nil
