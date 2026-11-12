@@ -20,7 +20,7 @@ type stopHookInput struct {
 }
 
 const (
-	turnStopNudge     = "[agenthail] This turn has no end yet. Call " + agenttools.EndTurn + " now with a one-line headline. Don't repeat your reply."
+	turnStopNudge     = agenttools.EndTurnNudge
 	askReminderTools  = "[agenthail] Your reply asks the person something. Raise it with " + agenttools.Ask + " so it reaches Needs you, then stop."
 	askReminderTyped  = "[agenthail] Your reply asks the person something. Raise it with agenthail ask \"<title>\" --option <label> --option <label> so it reaches Needs you, then stop."
 	maxSpokenQuestion = 8 << 10
