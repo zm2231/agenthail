@@ -29,6 +29,9 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
                                  Comment on an item from any session
   ledger handoff <item_id> --done/--remaining/--decisions/--uncertain "..."
                                  Hand off a claimed item with its state; it reopens for the next session
+  ledger park <item_id>... --usage <provider[:root]>|--later "<why>"|--person "<question>"|--idea --utterance <ref>
+                                 Set work aside with why it waits; takes the handoff flags and --until
+  ledger unpark <item_id>...     Bring parked work back to open
   ledger block <item_id> --reason "..." | ledger unblock <item_id>
   ledger review <item_id>        Submit a claimed item for review (submit)
   ledger approve <item_id> | ledger reject <item_id> --reason "..." [--utterance <id>]

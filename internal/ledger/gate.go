@@ -51,7 +51,7 @@ func (s *Store) GateTurn(projectKey, sessionID, turnID string, now time.Time) (G
 	}
 	var open []string
 	for _, c := range owned {
-		if !progressed[c.ID] && !c.liveWait(sessionID, now) && !board.blockedOnOthers(c, sessionID) && !board.gates.waived[gateKey(sessionID, c.ID)] {
+		if !progressed[c.ID] && !c.liveWait(sessionID, now) && !board.blockedOnOthers(c, sessionID) && !board.parkedOnly(c) && !board.gates.waived[gateKey(sessionID, c.ID)] {
 			open = append(open, c.ID)
 			result.Open = append(result.Open, c)
 		}

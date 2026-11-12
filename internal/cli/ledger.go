@@ -348,7 +348,7 @@ func (a *App) ledgerSetScope(positional []string, enabled bool, mode ledger.Atta
 
 var ledgerWorkShortForms = map[string]bool{"add": true, "create": true, "new": true, "list": true, "edit": true, "update": true,
 	"start": true, "claim": true, "log": true, "comment": true, "handoff": true, "block": true, "unblock": true, "review": true, "submit": true,
-	"approve": true, "reject": true, "close": true, "reopen": true, "delete": true, "restore": true, "dep": true, "link": true,
+	"approve": true, "reject": true, "park": true, "unpark": true, "close": true, "reopen": true, "delete": true, "restore": true, "dep": true, "link": true,
 	"ready": true, "next": true, "critical-path": true, "search": true}
 
 func workArgs(args []string, i int) []string {

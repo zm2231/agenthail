@@ -18,8 +18,10 @@ var workTransitions = map[WorkAction]struct {
 	WorkReject:  {from: []WorkState{WorkInReview}, to: WorkInProgress},
 	WorkReopen:  {from: []WorkState{WorkDone, WorkClosed}, to: WorkOpen},
 	WorkHandoff: {from: []WorkState{WorkInProgress, WorkBlocked}, to: WorkOpen},
-	WorkClose:   {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkInReview}, to: WorkClosed},
-	WorkDelete:  {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkInReview, WorkDone, WorkClosed}, to: WorkDeleted},
+	WorkClose:   {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkInReview, WorkParked}, to: WorkClosed},
+	WorkDelete:  {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkInReview, WorkDone, WorkClosed, WorkParked}, to: WorkDeleted},
+	WorkPark:    {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked}, to: WorkParked},
+	WorkUnpark:  {from: []WorkState{WorkParked}, to: WorkOpen},
 	WorkRestore: {from: []WorkState{WorkDeleted}, to: WorkOpen},
 }
 
@@ -38,7 +40,7 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 	}
 	transition, ok := workTransitions[req.Action]
 	if !ok {
-		return "", nil, "", refuse("unknown work action %q; use add, claim, block, unblock, submit, approve, reject, reopen, handoff, dep, comment or log", req.Action)
+		return "", nil, "", refuse("unknown work action %q; use add, claim, block, unblock, park, unpark, submit, approve, reject, reopen, handoff, dep, comment or log", req.Action)
 	}
 	item := b.workItems[req.ItemID]
 	if item == nil {
@@ -105,6 +107,14 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 			return "", nil, "", refuse("close needs --reason: what finished %s (\"done: PR #12\"), or %s and why", item.ID, strings.Join(workCloseReasons, ", "))
 		}
 		payload.Assignee = ""
+	case WorkPark:
+		text, err := b.planPark(req, item, &payload)
+		if err != nil {
+			return "", nil, "", err
+		}
+		readback = text
+	case WorkUnpark:
+		readback = fmt.Sprintf("%s unparked, open for the next session (%s)", item.ID, item.origin())
 	case WorkDelete, WorkRestore, WorkReopen:
 		payload.Assignee = ""
 	}

@@ -16,6 +16,7 @@ const (
 	WorkInReview   WorkState = "in_review"
 	WorkDone       WorkState = "done"
 	WorkClosed     WorkState = "closed"
+	WorkParked     WorkState = "parked"
 	WorkDeleted    WorkState = "deleted"
 )
 
@@ -42,6 +43,8 @@ const (
 	WorkClose   WorkAction = "close"
 	WorkDelete  WorkAction = "delete"
 	WorkRestore WorkAction = "restore"
+	WorkPark    WorkAction = "park"
+	WorkUnpark  WorkAction = "unpark"
 )
 
 type Handoff struct {
@@ -69,6 +72,7 @@ type WorkItem struct {
 	Reviewer     string      `json:"reviewer,omitempty"`
 	DependsOn    []string    `json:"dependsOn,omitempty"`
 	Handoff      *Handoff    `json:"handoff,omitempty"`
+	Park         *Park       `json:"park,omitempty"`
 	Timeline     []WorkEntry `json:"timeline,omitempty"`
 }
 
@@ -83,6 +87,8 @@ type WorkRequest struct {
 	DependsOn   string     `json:"dependsOn,omitempty"`
 	UtteranceID string     `json:"utteranceId,omitempty"`
 	Handoff     Handoff    `json:"handoff,omitempty"`
+	Park        *Park      `json:"park,omitempty"`
+	ForSession  string     `json:"forSession,omitempty"`
 	LogType     string     `json:"logType,omitempty"`
 	Fields      WorkFields `json:"fields,omitempty"`
 	Change      WorkChange `json:"change,omitempty"`
@@ -164,6 +170,12 @@ func (b *Board) applyWorkItemState(event Event) error {
 	if p.Handoff != nil {
 		item.Handoff = p.Handoff
 	}
+	switch {
+	case p.Park != nil:
+		item.Park = p.Park
+	case p.FromState == WorkParked:
+		item.Park = nil
+	}
 	item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: "state", State: p.ToState, Text: stateEntryText(p)})
 	return nil
 }
@@ -175,6 +187,9 @@ func stateEntryText(p WorkItemStatePayload) string {
 	}
 	if p.Reviewer != "" {
 		parts = append(parts, "reviewed by "+p.Reviewer)
+	}
+	if p.Park != nil {
+		parts = append(parts, fmt.Sprintf("parked (%s): %s", p.Park.Kind, p.Park.Summary()))
 	}
 	if h := p.Handoff; h != nil {
 		parts = append(parts, fmt.Sprintf("handoff: done %q, remaining %q, decisions %q, uncertain %q", h.Done, h.Remaining, h.Decisions, h.Uncertain))

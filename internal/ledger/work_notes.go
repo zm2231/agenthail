@@ -100,6 +100,10 @@ func (item *WorkItem) snapshot() WorkItem {
 		h.Decisions, h.Uncertain = slices.Clone(h.Decisions), slices.Clone(h.Uncertain)
 		out.Handoff = &h
 	}
+	if item.Park != nil {
+		park := item.Park.clone()
+		out.Park = &park
+	}
 	return out
 }
 

@@ -62,7 +62,7 @@ func (q WorkQuery) normalized() (WorkQuery, error) {
 	return q, nil
 }
 
-var allWorkStates = []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkInReview, WorkDone, WorkClosed, WorkDeleted}
+var allWorkStates = []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkParked, WorkInReview, WorkDone, WorkClosed, WorkDeleted}
 
 func (q WorkQuery) keeps(item *WorkItem) bool {
 	switch {
