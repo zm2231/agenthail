@@ -62,7 +62,10 @@ keeps the only record of tabs:
   a line to fit, `truncated` is true and `full` says, in words a model reads,
   that the whole tree is in `file` and its refs are valid until the next
   snapshot. The daemon passes `limit` 512 bytes under its 16 KiB tool result
-  limit, so a snapshot is never refused for its size.
+  limit, so a snapshot is never refused for its size. Every tab result cuts
+  the page's URL to 2 KiB, its title to 512 bytes and a dialog's message to
+  1 KiB, each ending in `…` when cut, so a page cannot push a result over the
+  limit through them.
 - `tabs.screenshot` writes a PNG of the viewport, of the whole scrollable page
   (`fullPage`) or of one element (`ref`, not with `fullPage`) and returns
   `file`, `bytes`, `width` and `height`.
@@ -81,8 +84,11 @@ keeps the only record of tabs:
 Snapshots and screenshots go under `~/.agenthail/browser-host/out/`, in one
 directory per owner (named by a hash of the owner id, mode 0700; files 0600).
 Each owner keeps at most 64 MiB: a write removes that owner's oldest files
-beyond it. `tabs.closeOwner` removes the owner's directory, and the host
-clears `out/` when it starts. A path is returned only to the owner whose tab
+beyond it, and a single result larger than that is refused (`too_large`).
+`tabs.closeOwner` removes the owner's directory, and a snapshot or screenshot
+still running when its tab closes writes nothing and answers `not_found`. When
+Chromium goes away the tabs go with it and `out/` is cleared; the host also
+clears it when it starts. A path is returned only to the owner whose tab
 made it; like the socket, this keeps sessions apart by convention, since all
 of them run as the same user.
 
