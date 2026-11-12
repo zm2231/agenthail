@@ -83,11 +83,11 @@ func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.Coordi
 	if err != nil {
 		return nil, false, err
 	}
-	key := actionKey(ctx)
-	if key == "" {
-		key = "coordinator-" + uuid.NewString()
+	base := actionKey(ctx)
+	if base == "" {
+		base = "coordinator-" + uuid.NewString()
 	}
-	key += ":" + host.record.ID
+	key := hostActionKey(base, host.record.ID)
 	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, body, http.Header{actionIdempotencyHeader: []string{key}})
 	var payload []byte
 	if err == nil {

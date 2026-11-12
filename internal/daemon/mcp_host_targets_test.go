@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -293,4 +294,32 @@ func TestAWorkerReachesItsSpawnerOnAPairedHostThatIsDownOnceItAnswers(t *testing
 	queuedReceipt(t, out, refused)
 	h.comeBack(t)
 	testkit.Eventually(t, "the send to the spawner delivered once the host answers", 15*time.Second, func() bool { return h.reached("to the spawner while down") })
+}
+
+func TestAReportWithTheLongestRequestIDReachesALeadOnAPairedHost(t *testing.T) {
+	h := newHostTargets(t, false)
+	id := strings.Repeat("r", registry.ActionReceiptKeyLimit-len("agenthail_send:"))
+	out, refused := callMCP(t, h.caller, "agenthail_send", map[string]any{"project": widgetProject, "message": "a long-keyed report", "clientRequestId": id})
+	if refused || !h.reached("a long-keyed report") {
+		t.Fatalf("refused=%v out=%v delivered=%q", refused, out, h.remote.fake.delivered())
+	}
+}
+
+func TestAHeldReportThePairedHostRefusesIsReportedToItsSender(t *testing.T) {
+	h := newHostTargets(t, false)
+	body, _ := json.Marshal(map[string]any{"action": "coordinator-send", "name": "nobody", "message": "to no lead", "sourceSessionId": hosts.Qualify(mustHostID(t, h.local), "local-a")})
+	if _, err := h.local.reg.HoldHostAction(h.record.ID, "report-refused:"+h.record.ID, "@nobody", body, false); err != nil {
+		t.Fatal(err)
+	}
+	host, _ := h.local.daemon.pairedHost(h.record.ID)
+	h.local.daemon.drainHostDeliveries(context.Background(), host)
+	if held, err := h.local.reg.HostHeldActions(h.record.ID); err != nil || len(held) != 0 {
+		t.Fatalf("held=%+v err=%v, want the refused report settled", held, err)
+	}
+	rows, err := h.local.reg.ActiveQueue("local-a", h.local.daemon.adapters())
+	if err != nil || !slices.ContainsFunc(rows, func(row registry.QueueRow) bool {
+		return strings.Contains(row.Message, "@nobody") && strings.Contains(row.Message, "was not delivered")
+	}) {
+		t.Fatalf("queue=%+v err=%v, want the sender told the report was not delivered", rows, err)
+	}
 }
