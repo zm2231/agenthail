@@ -105,10 +105,13 @@ A daemon that runs no simulators, such as one on Linux, forwards each
 - A daemon that can run simulators says so in `GET /api/v1/version`
   (`simulators`). It probes once before its first answer and then answers from
   a status at most a minute old, refreshed in the background. A paired host
-  reads it each time it connects.
+  reads it each time it connects, and again through the host-only
+  `GET /api/v1/simulator/status` when it picks a Mac and what it last read is
+  a minute old or more.
 - The Mac is the one named by `simulatorHost` in the forwarding host's
   `~/.agenthail/dashboard.json`, read on every call; when it is unset, the only
-  connected paired host that runs simulators. With none, or several and no
+  connected paired host that runs simulators. A `dashboard.json` that can't be
+  read refuses the call rather than picking a Mac by itself. With none, or several and no
   choice, the call is refused as `unavailable` and says why.
 - The call goes to the Mac's host-only `POST /api/v1/simulator`
   (`{owner, request}`). Only a device token with the `host` scope bound to the
@@ -121,8 +124,8 @@ A daemon that runs no simulators, such as one on Linux, forwards each
   name the Mac as `host` and carry no `outDir`.
 - `install` is refused for a forwarded session, which has no folder on the
   Mac; a forwarded session launches an app already on the simulator.
-- Archiving the session on the forwarding host releases what it holds on the
-  Mac and removes its folder there. A lease the Mac never hears released ends
+- Archiving the session on the forwarding host releases what it holds on every
+  Mac it has called, and removes its folder there. A lease the Mac never hears released ends
   when it is idle or reaches its limit.
 
 ## Output files

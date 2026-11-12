@@ -15,28 +15,48 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
+type simMac struct {
+	node     *federationNode
+	commands *simCommands
+	host     *simhost.Host
+}
+
 type forwardedSims struct {
 	linux, mac *federationNode
 	commands   *simCommands
 	macHost    *simhost.Host
-	record     string
+	macs       map[string]*simMac
+}
+
+func simulatorsOnHosts(t *testing.T, names ...string) *forwardedSims {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	linux := newFederationNode(t, "local-a")
+	linux.daemon.SetSimulatorHost(simhost.New(simhost.Config{OutRoot: t.TempDir(), GOOS: "linux"}))
+	macs := map[string]*simMac{}
+	var servers []*federationNode
+	for _, name := range names {
+		commands := &simCommands{shotPNG: []byte("\x89PNG\r\n\x1a\nforwarded")}
+		node := newFederationNode(t, "remote-"+name)
+		host := simhost.New(simhost.Config{Exec: commands.exec, OutRoot: t.TempDir(), LockDir: t.TempDir(), GOOS: "darwin"})
+		node.daemon.SetSimulatorHost(host)
+		node.serve(t, nil)
+		macs[name] = &simMac{node: node, commands: commands, host: host}
+		servers = append(servers, node)
+	}
+	linux.start(t, testRoots(servers[0].server))
+	for _, name := range names {
+		record := linux.pair(t, macs[name].node, name)
+		host, _ := linux.daemon.pairedHost(record.ID)
+		testkit.Eventually(t, name+" reports its simulators", 10*time.Second, func() bool { return host.runsSimulators() })
+	}
+	first := macs[names[0]]
+	return &forwardedSims{linux: linux, mac: first.node, commands: first.commands, macHost: first.host, macs: macs}
 }
 
 func simulatorsOnTwoHosts(t *testing.T) *forwardedSims {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	commands := &simCommands{shotPNG: []byte("\x89PNG\r\n\x1a\nforwarded")}
-	mac := newFederationNode(t, "remote-a")
-	macHost := simhost.New(simhost.Config{Exec: commands.exec, OutRoot: t.TempDir(), LockDir: t.TempDir(), GOOS: "darwin"})
-	mac.daemon.SetSimulatorHost(macHost)
-	mac.serve(t, nil)
-	linux := newFederationNode(t, "local-a")
-	linux.daemon.SetSimulatorHost(simhost.New(simhost.Config{OutRoot: t.TempDir(), GOOS: "linux"}))
-	linux.start(t, testRoots(mac.server))
-	record := linux.pair(t, mac, "mac")
-	host, _ := linux.daemon.pairedHost(record.ID)
-	testkit.Eventually(t, "the paired Mac reports its simulators", 10*time.Second, func() bool { return host.runsSimulators() })
-	return &forwardedSims{linux: linux, mac: mac, commands: commands, macHost: macHost, record: record.ID}
+	return simulatorsOnHosts(t, "mac")
 }
 
 func TestAHostWithoutSimulatorsDrivesAPairedMacs(t *testing.T) {
@@ -106,4 +126,82 @@ func refusalOf(err error) string {
 		return refusal.Code
 	}
 	return ""
+}
+
+func TestArchivingReleasesEveryMacTheSessionCalled(t *testing.T) {
+	f := simulatorsOnHosts(t, "mac", "studio")
+	ctx := context.Background()
+	if err := SaveDashboardConfig(DashboardConfig{SimulatorHost: "mac"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "acquire", Kind: "iphone"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveDashboardConfig(DashboardConfig{SimulatorHost: "studio"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "acquire", Kind: "iphone"}); err != nil {
+		t.Fatal(err)
+	}
+	owner := hosts.Qualify(f.linux.daemon.localHost().ID, "local-a")
+	if !f.macs["mac"].host.Holds(owner) || !f.macs["studio"].host.Holds(owner) {
+		t.Fatal("the session does not hold a lease on both Macs")
+	}
+	f.linux.daemon.releaseForwardedSimulators("local-a")
+	for name, mac := range f.macs {
+		if mac.host.Holds(owner) {
+			t.Fatalf("archiving left the lease on %s held", name)
+		}
+	}
+}
+
+func TestAMacThatGainsAXeBecomesSelectableWithoutReconnecting(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	f := simulatorsOnTwoHosts(t)
+	f.commands.mu.Lock()
+	f.commands.noAXe = true
+	f.commands.mu.Unlock()
+	age := func() {
+		f.mac.daemon.simStatusMu.Lock()
+		f.mac.daemon.simStatusAt = time.Now().Add(-2 * time.Minute)
+		f.mac.daemon.simStatusMu.Unlock()
+		for _, host := range f.linux.daemon.pairedHosts() {
+			host.mu.Lock()
+			host.simsAt = time.Now().Add(-2 * time.Minute)
+			host.mu.Unlock()
+		}
+	}
+	age()
+	f.mac.daemon.simulatorStatus(context.Background())
+	age()
+	if _, err := f.linux.daemon.forwardSimulator(context.Background(), "local-a", simhost.Request{Action: "list"}); refusalOf(err) != "unavailable" {
+		t.Fatalf("list while the Mac lacks AXe = %v", err)
+	}
+	f.commands.mu.Lock()
+	f.commands.noAXe = false
+	f.commands.mu.Unlock()
+	age()
+	f.mac.daemon.simulatorStatus(context.Background())
+	age()
+	testkit.Eventually(t, "the Mac becomes selectable once it has AXe", 10*time.Second, func() bool {
+		_, err := f.linux.daemon.forwardSimulator(context.Background(), "local-a", simhost.Request{Action: "list"})
+		return err == nil
+	})
+}
+
+func TestAnUnreadableConfigPicksNoMac(t *testing.T) {
+	f := simulatorsOnTwoHosts(t)
+	if err := os.MkdirAll(filepath.Dir(DashboardConfigPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(DashboardConfigPath(), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.linux.daemon.forwardSimulator(context.Background(), "local-a", simhost.Request{Action: "list"})
+	if refusalOf(err) != "unavailable" || !strings.Contains(err.Error(), "can't be read") {
+		t.Fatalf("a call with an unreadable dashboard.json = %v", err)
+	}
+	if f.commands.ran("xcrun simctl list devices") {
+		t.Fatal("the call reached the Mac")
+	}
 }

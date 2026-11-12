@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
@@ -26,6 +27,19 @@ type simulatorForwardRequest struct {
 
 func (d *Daemon) registerSimulatorRoutes(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/simulator", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiSimulatorHandler)))
+	mux.HandleFunc("/api/v1/simulator/status", d.apiV1Guard(dashboard, "read", d.hostOnly(d.apiSimulatorStatusHandler)))
+}
+
+type simulatorStatusResponse struct {
+	Simulators bool `json:"simulators"`
+}
+
+func (d *Daemon) apiSimulatorStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, simulatorStatusResponse{Simulators: d.runsSimulators(r.Context())})
 }
 
 // runsSimulators answers from the last status after the first probe, so /api/v1/version waits on xcrun at most once.
@@ -127,8 +141,11 @@ func simulatorTimeout(action string) time.Duration {
 	return time.Minute
 }
 
-func (d *Daemon) simulatorDeviceHost() (*pairedHost, error) {
-	config, _ := LoadDashboardConfig()
+func (d *Daemon) simulatorDeviceHost(ctx context.Context) (*pairedHost, error) {
+	config, err := LoadDashboardConfig()
+	if err != nil {
+		return nil, &mcpRefusal{Code: "unavailable", Message: fmt.Sprintf("%s can't be read, so the simulator host it may name is unknown: %v", DashboardConfigPath(), err)}
+	}
 	if name := strings.TrimSpace(config.SimulatorHost); name != "" {
 		host, found := d.pairedHost(name)
 		if !found {
@@ -136,9 +153,26 @@ func (d *Daemon) simulatorDeviceHost() (*pairedHost, error) {
 		}
 		return host, nil
 	}
-	var capable []*pairedHost
+	var connected []*pairedHost
 	for _, host := range d.pairedHosts() {
-		if state, _ := host.status(); state == hostStateConnected && host.runsSimulators() {
+		if state, _ := host.status(); state == hostStateConnected {
+			connected = append(connected, host)
+		}
+	}
+	var wg sync.WaitGroup
+	for _, host := range connected {
+		if host.simulatorsStale(time.Minute) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				d.refreshSimulators(ctx, host)
+			}()
+		}
+	}
+	wg.Wait()
+	var capable []*pairedHost
+	for _, host := range connected {
+		if host.runsSimulators() {
 			capable = append(capable, host)
 		}
 	}
@@ -156,11 +190,20 @@ func (d *Daemon) simulatorDeviceHost() (*pairedHost, error) {
 	}
 }
 
+func (d *Daemon) refreshSimulators(ctx context.Context, host *pairedHost) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var status simulatorStatusResponse
+	if err := d.ledgerHostCall(ctx, host, http.MethodGet, "/api/v1/simulator/status", nil, nil, &status); err == nil {
+		host.setSimulators(status.Simulators)
+	}
+}
+
 func (d *Daemon) forwardSimulator(ctx context.Context, owner string, req simhost.Request) (map[string]any, error) {
 	if req.Action == "install" {
 		return nil, refuse("unavailable", "A session on another host can't install apps on the Mac's simulator yet; launch one already on it.")
 	}
-	host, err := d.simulatorDeviceHost()
+	host, err := d.simulatorDeviceHost(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -197,26 +240,28 @@ func (d *Daemon) noteSimulatorHost(owner, hostID string) {
 	d.simStatusMu.Lock()
 	defer d.simStatusMu.Unlock()
 	if d.simForwarded == nil {
-		d.simForwarded = map[string]string{}
+		d.simForwarded = map[string]map[string]bool{}
 	}
-	d.simForwarded[owner] = hostID
+	if d.simForwarded[owner] == nil {
+		d.simForwarded[owner] = map[string]bool{}
+	}
+	d.simForwarded[owner][hostID] = true
 }
 
 func (d *Daemon) releaseForwardedSimulators(owner string) {
 	d.simStatusMu.Lock()
-	hostID := d.simForwarded[owner]
+	hostIDs := d.simForwarded[owner]
 	delete(d.simForwarded, owner)
 	d.simStatusMu.Unlock()
-	if hostID == "" {
-		return
-	}
-	host, found := d.pairedHost(hostID)
-	if !found {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	if err := d.ledgerHostCall(ctx, host, http.MethodPost, "/api/v1/simulator", nil, simulatorForwardRequest{Owner: owner, Request: simhost.Request{Action: "release"}}, nil); err != nil {
-		log.Printf("release the simulators %s holds on %s: %v", owner, host.record.Name, err)
+	for hostID := range hostIDs {
+		host, found := d.pairedHost(hostID)
+		if !found {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		if err := d.ledgerHostCall(ctx, host, http.MethodPost, "/api/v1/simulator", nil, simulatorForwardRequest{Owner: owner, Request: simhost.Request{Action: "release"}}, nil); err != nil {
+			log.Printf("release the simulators %s holds on %s: %v", owner, host.record.Name, err)
+		}
+		cancel()
 	}
 }

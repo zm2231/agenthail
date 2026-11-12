@@ -130,7 +130,7 @@ type Daemon struct {
 	simStatusMu              sync.Mutex
 	simStatus                simhost.Status
 	simStatusAt              time.Time
-	simForwarded             map[string]string
+	simForwarded             map[string]map[string]bool
 	extensions               *extensionRuntime
 	build                    buildinfo.Identity
 	startup                  daemonStartup
