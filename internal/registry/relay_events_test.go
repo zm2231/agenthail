@@ -443,8 +443,10 @@ func TestAReplyToTheEndTurnNudgeIsCapturedWithNothingToRelay(t *testing.T) {
 	register(t, r, "nudged")
 	batch := surface.CompletionBatch{Cursor: "c1", Events: []surface.Completion{
 		{ID: "m1", InputID: "u1", Text: "ONE", User: "say one"},
-		{ID: "m2", InputID: "f1", Text: "Turn closed.", User: "Stop hook feedback:\n" + agenttools.EndTurnNudge},
+		{ID: "m2", InputID: "f1", Text: "Turn closed.", User: "Stop hook feedback:\n" + agenttools.EndTurnNudge, EndTurnNudge: true},
 		{ID: "m3", InputID: "f2", Text: "fixed the types", User: "Stop hook feedback:\nfix the type errors before stopping"},
+		{ID: "m4", InputID: "u2", Text: "It asks me to close the turn.", User: "What does this mean? " + agenttools.EndTurnNudge},
+		{ID: "m5", InputID: "u3", Text: "relayed answer", User: "[from @peer] " + agenttools.EndTurnNudge},
 	}}
 	if err := r.CaptureRelayCompletions("nudged", "", batch); err != nil {
 		t.Fatal(err)
@@ -462,7 +464,7 @@ func TestAReplyToTheEndTurnNudgeIsCapturedWithNothingToRelay(t *testing.T) {
 		}
 		got[id] = message
 	}
-	if len(got) != 3 || got["m1"] != "ONE" || got["m2"] != "" || got["m3"] != "fixed the types" {
-		t.Fatalf("captured %v, want the nudge's reply kept with no text and the rest unchanged", got)
+	if len(got) != 5 || got["m1"] != "ONE" || got["m2"] != "" || got["m3"] != "fixed the types" || got["m4"] != "It asks me to close the turn." || got["m5"] != "relayed answer" {
+		t.Fatalf("captured %v, want only the marked nudge reply kept with no text", got)
 	}
 }

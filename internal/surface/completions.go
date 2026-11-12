@@ -21,11 +21,12 @@ type CompletionScanner interface {
 }
 
 type Completion struct {
-	CompletedAt time.Time `json:"completedAt,omitempty"`
-	ID          string    `json:"id"`
-	InputID     string    `json:"inputId,omitempty"`
-	Text        string    `json:"text"`
-	User        string    `json:"user,omitempty"`
+	CompletedAt  time.Time `json:"completedAt,omitempty"`
+	ID           string    `json:"id"`
+	InputID      string    `json:"inputId,omitempty"`
+	Text         string    `json:"text"`
+	User         string    `json:"user,omitempty"`
+	EndTurnNudge bool      `json:"endTurnNudge,omitempty"`
 }
 
 type CompletionBatch struct {

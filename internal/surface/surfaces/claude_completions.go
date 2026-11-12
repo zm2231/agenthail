@@ -88,7 +88,7 @@ func (c *Claude) readCompletions(ctx context.Context, sess *surface.Session, pat
 			turn := state.completed
 			checkpoint.CompletedID = turn.MessageID
 			if cursor != "" && !turn.Interrupted {
-				batch.Events = append(batch.Events, surface.Completion{ID: turn.MessageID, InputID: turn.UserID, Text: turn.Assistant, User: turn.User, CompletedAt: turn.TerminalAt})
+				batch.Events = append(batch.Events, surface.Completion{ID: turn.MessageID, InputID: turn.UserID, Text: turn.Assistant, User: turn.User, CompletedAt: turn.TerminalAt, EndTurnNudge: turn.AnswersNudge})
 			}
 		}
 	}

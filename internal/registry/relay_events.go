@@ -6,10 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/agenttools"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -152,7 +150,7 @@ func (r *Registry) captureRelayCompletionsByKey(key, previous string, batch surf
 			completedAt = event.CompletedAt.UnixMilli()
 		}
 		message := event.Text
-		if answersEndTurnNudge(event.User) {
+		if event.EndTurnNudge {
 			message = ""
 		}
 		if _, err := tx.Exec(`INSERT INTO relay_events(source_key,completion_id,input_id,message,relay_hops,completed_at_ms) VALUES(?,?,?,?,?,?) ON CONFLICT(source_key,completion_id) DO NOTHING`, key, event.ID, event.InputID, message, hops, completedAt); err != nil {
@@ -291,9 +289,4 @@ func (r *Registry) consumeRelay(route RouteRow, event RelayEvent, payload, busyD
 		r.signalChange(ChangeHostDeliveries)
 	}
 	return queueID, nil
-}
-
-// The nudge asks for no new reply, so what answers it relays nothing.
-func answersEndTurnNudge(input string) bool {
-	return strings.Contains(input, agenttools.EndTurnNudge)
 }
