@@ -55,6 +55,23 @@ func channelDeliverScope(request dashboardActionRequest) error {
 	return nil
 }
 
+func (d *Daemon) sendScope(session surface.Session, projectID string) error {
+	if projectID == "" {
+		return nil
+	}
+	if project := d.resolveProject(session); project != projectID {
+		return &actionError{Status: http.StatusForbidden, Code: "out_of_scope", Message: fmt.Sprintf("%s is not in the sender's project %s; across hosts a session may send only to its own project", session.ID, projectID), Extra: map[string]any{"detail": map[string]any{"rule": "different_project"}}}
+	}
+	archived, err := d.Registry.SessionArchived(session.ID)
+	if err != nil {
+		return err
+	}
+	if archived {
+		return &actionError{Status: http.StatusForbidden, Code: "out_of_scope", Message: fmt.Sprintf("%s is archived", session.ID), Extra: map[string]any{"detail": map[string]any{"rule": "archived"}}}
+	}
+	return nil
+}
+
 func (d *Daemon) channelDeliverTarget(projectID string) (broadcast.Target, bool, error) {
 	projects, err := broadcast.Projects(d.Registry)
 	if err != nil {

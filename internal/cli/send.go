@@ -77,10 +77,15 @@ func (a *App) cmdSend(args []string) error {
 		return err
 	}
 	if remote != nil {
-		if _, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "send", Target: remote.ID, Mode: sendMode(args)}); err != nil {
+		scope, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "send", Target: remote.ID, Mode: sendMode(args)})
+		if err != nil {
 			return err
 		}
-		return a.sendRemote(ctx, remote, message, args, timeout)
+		scopeProjectID := ""
+		if scope != nil {
+			scopeProjectID = scope.ScopeProjectID
+		}
+		return a.sendRemote(ctx, remote, scopeProjectID, message, args, timeout)
 	}
 	spec, coordinated := coord.Of(sess.ID)
 	scope := daemon.ScopeRequest{Action: "send", Target: sess.ID, Mode: sendMode(args)}

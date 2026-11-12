@@ -30,8 +30,9 @@ type ScopeRequest struct {
 }
 
 type ScopeReply struct {
-	TargetID  string `json:"targetId,omitempty"`
-	ProjectID string `json:"projectId,omitempty"`
+	TargetID       string `json:"targetId,omitempty"`
+	ProjectID      string `json:"projectId,omitempty"`
+	ScopeProjectID string `json:"scopeProjectId,omitempty"`
 }
 
 func (d *Daemon) registerScopeAPI(mux *http.ServeMux, dashboard *dashboardServer) {
@@ -163,7 +164,11 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request ScopeReq
 		if err != nil {
 			return ScopeReply{}, err
 		}
-		return ScopeReply{TargetID: target.ID}, nil
+		reply := ScopeReply{TargetID: target.ID}
+		if request.Action == "send" {
+			reply.ScopeProjectID, err = d.remoteSendScope(caller, target)
+		}
+		return reply, err
 	case "lead-send":
 		project, refusal := d.mcpLeadScope(caller, request.Project, mode)
 		if refusal != nil {

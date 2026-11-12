@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/targets"
@@ -68,9 +70,11 @@ func mcpTargetRefusal(err error) error {
 }
 
 // mcpRemoteTarget admits a session on a paired host for a queued send only:
-// any with control.all, else a non-archived one in the caller's project. The
-// project and the archive come from the owning host's own answer, never from
-// this host's mirror alone, which can be stale.
+// any with control.all or in the caller's spawner chain, else a non-archived
+// one in the caller's project. The project and the archive come from the
+// owning host's own answer, never from this host's mirror alone, which can be
+// stale; while that host does not answer, the send queues and the owner
+// checks the project itself (remoteSendScope).
 func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.Remote, upward bool) (*surface.Session, error) {
 	if !remote.Exact {
 		return nil, refuse("invalid", fmt.Sprintf("%s does not name one session exactly; it matched %s. Address it by @alias or session id.", ref, remote.Label()))
@@ -81,8 +85,12 @@ func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.R
 	if caller.has("control.all") {
 		return remote.Session(), nil
 	}
-	if remote.Project == "" {
-		return nil, &mcpRefusal{Code: "unavailable", Retryable: true, Message: fmt.Sprintf("Host %s did not confirm which project %s is in; it may be unreachable or run an older Agenthail. Try again once it answers.", remote.Host.Name, remote.Label()), Detail: map[string]any{"rule": "project_unconfirmed"}}
+	spawner, err := d.remoteSpawner(caller, remote.ID)
+	if err != nil || spawner {
+		return remote.Session(), err
+	}
+	if remote.Project == "" && caller.project != nil {
+		return remote.Session(), nil
 	}
 	if caller.project == nil || remote.Project != caller.project.ID {
 		return nil, scopeRefusal(remote.ID, "different_project", fmt.Sprintf("%s runs on host %s and is not in your project; across hosts you may message only sessions in your own project.", remote.Label(), remote.Host.Name))
@@ -91,6 +99,32 @@ func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.R
 		return nil, scopeRefusal(remote.ID, "archived", fmt.Sprintf("%s on host %s is archived.", remote.Label(), remote.Host.Name))
 	}
 	return remote.Session(), nil
+}
+
+func (d *Daemon) remoteSpawner(caller *mcpCaller, ref string) (bool, error) {
+	_, id, ok := hosts.Split(ref)
+	if !ok {
+		return false, nil
+	}
+	ancestors, err := d.Registry.SessionAncestors(caller.session.ID)
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(ancestors, id), nil
+}
+
+// remoteSendScope names the project the owning host must find a remote
+// target in before it delivers a send, for a caller whose reach across hosts
+// is its own project.
+func (d *Daemon) remoteSendScope(caller *mcpCaller, target *surface.Session) (string, error) {
+	if _, _, remote := hosts.Split(target.ID); !remote || caller.has("control.all") || caller.project == nil {
+		return "", nil
+	}
+	spawner, err := d.remoteSpawner(caller, target.ID)
+	if err != nil || spawner {
+		return "", err
+	}
+	return caller.project.ID, nil
 }
 
 func hostProjectID(raw json.RawMessage) string {

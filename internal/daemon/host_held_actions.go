@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
@@ -82,7 +83,11 @@ func (d *Daemon) settleHostHeldAction(host *pairedHost, item registry.HostHeldAc
 		d.logRuntimeError("host "+host.record.Name+" held action", err)
 		return
 	}
-	entry := registry.HistoryEntry{Kind: "channel", Message: item.Label + " on " + host.record.Name, Result: "delivered"}
+	kind := "channel"
+	if !strings.HasPrefix(item.Label, "#") {
+		kind = "sent"
+	}
+	entry := registry.HistoryEntry{Kind: kind, Message: item.Label + " on " + host.record.Name, Result: "delivered"}
 	if status == registry.HostActionDead {
 		entry.Result, entry.Error = "failed", outcome
 	}
