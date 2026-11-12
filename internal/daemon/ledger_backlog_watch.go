@@ -87,7 +87,7 @@ func (d *Daemon) sendAskStates(ctx context.Context, store *ledger.Store, keys []
 		}
 		for _, entry := range board.Backlog(ledger.BacklogQuery{Kinds: []ledger.ParkKind{ledger.ParkPerson}}, time.Time{}, ledger.Readings{}) {
 			q := *entry.Item.Park.Person
-			if q.AskID == "" || q.HostID != here || len(states[owner]) >= ledgerAskStatesMost {
+			if q.AskID == "" || q.HostID != here {
 				continue
 			}
 			if states[owner] == nil {
@@ -105,7 +105,7 @@ func (d *Daemon) sendAskStates(ctx context.Context, store *ledger.Store, keys []
 		if sent || !ok {
 			continue
 		}
-		if err := d.ledgerHostCall(ctx, host, http.MethodPost, "/api/v1/ledger/sync/asks", nil, ledgerAskStates{States: held}, nil); err != nil {
+		if err := d.postAskStates(ctx, host, held); err != nil {
 			d.log.Printf("ledger backlog: asks to %s: %s", host.record.Name, err)
 			continue
 		}
@@ -116,6 +116,20 @@ func (d *Daemon) sendAskStates(ctx context.Context, store *ledger.Store, keys []
 		d.backlog.sent[owner] = sentAsks{states: held, at: now}
 		d.backlog.mu.Unlock()
 	}
+}
+
+func (d *Daemon) postAskStates(ctx context.Context, host *pairedHost, held map[string]string) error {
+	ids := slices.Sorted(maps.Keys(held))
+	for start := 0; start < len(ids); start += ledgerAskStatesMost {
+		chunk := map[string]string{}
+		for _, id := range ids[start:min(start+ledgerAskStatesMost, len(ids))] {
+			chunk[id] = held[id]
+		}
+		if err := d.ledgerHostCall(ctx, host, http.MethodPost, "/api/v1/ledger/sync/asks", nil, ledgerAskStates{States: chunk}, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type ledgerAskStates struct {
@@ -145,7 +159,10 @@ func (d *Daemon) apiLedgerSyncAsksHandler(w http.ResponseWriter, r *http.Request
 	if d.backlog.asks == nil {
 		d.backlog.asks = map[string]map[string]string{}
 	}
-	d.backlog.asks[hostID] = req.States
+	if d.backlog.asks[hostID] == nil {
+		d.backlog.asks[hostID] = map[string]string{}
+	}
+	maps.Copy(d.backlog.asks[hostID], req.States)
 	d.backlog.mu.Unlock()
 	d.decisions.poke()
 	writeDashboardJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -201,7 +218,7 @@ func (d *Daemon) backlogReadyLine(ctx context.Context, caller *mcpCaller, now ti
 	if err != nil || !coordinates || spec.ProjectRoot == "" {
 		return ""
 	}
-	key, err := ResolvePathLedgerKey(ctx, d.Registry, spec.ProjectRoot)
+	key, err := d.coordinatedLedgerKey(ctx, caller, spec)
 	if err != nil || key == "" {
 		return ""
 	}
@@ -273,4 +290,11 @@ func (d *Daemon) parkedDecisions(rows []dashboardSession, now time.Time) []decis
 
 func (d *Daemon) parkedDecisionsNow(rows []dashboardSession) []decisionItem {
 	return d.parkedDecisions(rows, time.Now())
+}
+
+func (d *Daemon) coordinatedLedgerKey(ctx context.Context, caller *mcpCaller, spec registry.CoordinatorSpec) (string, error) {
+	if project := caller.project; project != nil && (project.ID == spec.ProjectID || project.LocalID == spec.ProjectID) {
+		return LedgerKey(d.Registry, project)
+	}
+	return ResolvePathLedgerKey(ctx, d.Registry, spec.ProjectRoot)
 }

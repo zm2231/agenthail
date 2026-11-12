@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -291,5 +292,41 @@ func TestACoordinatorIsToldOnlyItsOwnProjectsBacklog(t *testing.T) {
 	}
 	if told, err := mac.reg.BacklogTold(other); err != nil || len(told) != 0 {
 		t.Fatalf("the other project's told marks = %v, %v", told, err)
+	}
+}
+
+func TestEveryAnsweredAskReachesTheOwnerHoweverManyArePending(t *testing.T) {
+	mac, owner, _ := ledgerOnTwoHosts(t)
+	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
+	var last, lastAsk string
+	var asks []string
+	for range ledgerAskStatesMost + 1 {
+		lastAsk = personAsk(t, mac)
+		asks = append(asks, lastAsk)
+		last = parkedWork(t, mac, "search "+lastAsk, ledger.Park{Kind: ledger.ParkPerson, Person: &ledger.ParkQuestion{Question: "titles only?", AskID: lastAsk}})
+	}
+	if claimed, err := mac.reg.ClaimAsk(lastAsk, registry.AskAnswer{}, surface.PersonSessionID, "test", time.Now()); err != nil || !claimed {
+		t.Fatalf("answer %s: claimed=%v err=%v", lastAsk, claimed, err)
+	}
+	mac.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	owner.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	if row := backlogEntry(t, owner, last); row["ready"] != true {
+		t.Fatalf("the last of %d parked asks, answered, reads %+v on the owner", ledgerAskStatesMost+1, row)
+	}
+	for _, ask := range asks {
+		if state := owner.daemon.askState(ledger.ParkQuestion{AskID: ask, HostID: mac.daemon.localHost().ID}); state == "" {
+			t.Fatalf("the owner does not know %s, so a later report replaced an earlier one", ask)
+		}
+	}
+}
+
+func TestOnlyAPairedHostReportsAskStates(t *testing.T) {
+	mac, _, _ := ledgerOnTwoHosts(t)
+	response := mac.request(t, http.MethodPost, "/api/v1/ledger/sync/asks", ledgerAskStates{States: map[string]string{"ask-000000000001": registry.AskAnswered}})
+	if response.Code == http.StatusOK {
+		t.Fatalf("a local client reported ask states: %d %s", response.Code, response.Body)
+	}
+	if state := mac.daemon.askState(ledger.ParkQuestion{AskID: "ask-000000000001", HostID: "elsewhere"}); state != "" {
+		t.Fatalf("the refused report was kept: %q", state)
 	}
 }
