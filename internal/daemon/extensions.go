@@ -58,6 +58,7 @@ type extensionRuntime struct {
 	approvals *extension.Approvals
 	host      *nodehost.Supervisor
 
+	loading sync.Mutex
 	mu      sync.Mutex
 	loaded  map[string]*loadedExtension
 	tokens  map[string]string
@@ -102,8 +103,12 @@ func extensionToken() string { return "ext_" + rand.Text() + rand.Text() }
 
 // loadExtensions reads the workspace again and has the host load every valid
 // extension with fresh credentials; the previous credentials stop working.
+// One load runs at a time, so the host's extensions and the daemon's tokens
+// always come from the same load.
 func (d *Daemon) loadExtensions(ctx context.Context) error {
 	r := d.extensions
+	r.loading.Lock()
+	defer r.loading.Unlock()
 	found, err := extension.Discover(extension.Workspace(r.home))
 	if err != nil {
 		return err
@@ -160,14 +165,7 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 		}
 		loaded.host = summary
 		for _, job := range summary.Jobs {
-			state := &extensionJobState{due: now}
-			if old, ok := previous[summary.ID]; ok {
-				if kept, ok := old.jobs[job.Name]; ok {
-					state.LastRun, state.LastError = kept.LastRun, kept.LastError
-					state.due = kept.LastRun.Add(time.Duration(job.EverySeconds) * time.Second)
-				}
-			}
-			loaded.jobs[job.Name] = state
+			loaded.jobs[job.Name] = carriedJobState(previous[summary.ID], job, now)
 		}
 	}
 	r.up = true
@@ -175,6 +173,20 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	r.mu.Unlock()
 	d.invalidateDashboard()
 	return nil
+}
+
+// A job keeps its state object across loads, so a run still going when the
+// extension reloads holds off the next one until it finishes.
+func carriedJobState(previous *loadedExtension, job extensionJob, now time.Time) *extensionJobState {
+	if previous != nil {
+		if kept, ok := previous.jobs[job.Name]; ok {
+			if !kept.running && !kept.LastRun.IsZero() {
+				kept.due = kept.LastRun.Add(time.Duration(job.EverySeconds) * time.Second)
+			}
+			return kept
+		}
+	}
+	return &extensionJobState{due: now}
 }
 
 func (d *Daemon) reloadExtensions(ctx context.Context) error {

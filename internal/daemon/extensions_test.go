@@ -27,6 +27,13 @@ export default function (ah: any) {
   const ticks = ah.table('ticks');
   ah.db.exec("CREATE TABLE IF NOT EXISTS " + events + " (type TEXT, entity TEXT)");
   ah.db.exec("CREATE TABLE IF NOT EXISTS " + ticks + " (at TEXT)");
+  const slow = ah.table('slow');
+  ah.db.exec("CREATE TABLE IF NOT EXISTS " + slow + " (phase TEXT)");
+  ah.job({ name: 'slow', everySeconds: 60, run: async () => {
+    ah.db.prepare("INSERT INTO " + slow + " VALUES ('start')").run();
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    ah.db.prepare("INSERT INTO " + slow + " VALUES ('end')").run();
+  } });
   ah.on('turn.completed', (event: Event) => {
     ah.db.prepare("INSERT INTO " + events + " VALUES (?, ?)").run(event.type, event.entityId ?? '');
   });
@@ -36,6 +43,8 @@ export default function (ah: any) {
   ah.action('state', () => ({
     events: ah.db.prepare("SELECT entity FROM " + events + " ORDER BY rowid").all().map((row: any) => row.entity),
     ticks: ah.db.prepare("SELECT count(*) AS n FROM " + ticks).get().n,
+    slowStarts: ah.db.prepare("SELECT count(*) AS n FROM " + slow + " WHERE phase = 'start'").get().n,
+    slowEnds: ah.db.prepare("SELECT count(*) AS n FROM " + slow + " WHERE phase = 'end'").get().n,
   }));
   ah.action('sessions', async () => (await ah.call('agenthail_sessions', {})).sessions.map((s: any) => s.id));
   ah.action('send', async (input: { message: string }, ctx: any) => {
@@ -148,8 +157,10 @@ func (f *extensionFixture) awaitState(t *testing.T, state string) {
 }
 
 type fixtureState struct {
-	Events []string `json:"events"`
-	Ticks  int      `json:"ticks"`
+	Events     []string `json:"events"`
+	Ticks      int      `json:"ticks"`
+	SlowStarts int      `json:"slowStarts"`
+	SlowEnds   int      `json:"slowEnds"`
 }
 
 func (f *extensionFixture) state(t *testing.T) fixtureState {
@@ -172,8 +183,16 @@ func extensionRefusalCode(body map[string]json.RawMessage) string {
 
 func TestAnExtensionServesItsPageOnlyToAuthorizedClientsAndNeverItsServerFile(t *testing.T) {
 	f := startExtensionFixture(t)
-	if response, _ := f.request(t, http.MethodGet, "/x/fixture/", "", nil); response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("page without credentials answered %d", response.StatusCode)
+	for _, path := range []string{"/x/fixture/", "/x/fixture", "/x/_ah.js", "/x/fixture/assets/app.css"} {
+		if response, _ := f.request(t, http.MethodGet, path, "", nil); response.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("%s without credentials answered %d", path, response.StatusCode)
+		}
+	}
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	bare, _ := http.NewRequest(http.MethodGet, f.server.URL+"/x/fixture", nil)
+	bare.Header.Set("Authorization", "Bearer secret")
+	if response, err := noRedirect.Do(bare); err != nil || response.StatusCode != http.StatusFound || response.Header.Get("Location") != "/x/fixture/" {
+		t.Fatalf("authorized /x/fixture: %v %+v", err, response)
 	}
 	if response, _ := f.request(t, http.MethodPost, "/x/fixture/a/state", "", nil); response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("action without credentials answered %d", response.StatusCode)
@@ -298,5 +317,38 @@ func TestAnExtensionThatFailsToLoadIsReportedAndOthersKeepWorking(t *testing.T) 
 	}
 	if response, body := f.request(t, http.MethodPost, "/x/broken/a/anything", "secret", nil); response.StatusCode != http.StatusNotFound {
 		t.Fatalf("the broken extension answered %d %s", response.StatusCode, body)
+	}
+}
+
+func TestReloadsRunOneAtATimeAndNeverStartAJobThatIsStillRunning(t *testing.T) {
+	f := startExtensionFixture(t)
+	if err := f.d.extensions.approvals.Grant("fixture", []string{"read.all", "control.all"}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the slow job starts", func() bool { return f.state(t).SlowStarts == 1 })
+
+	errs := make(chan error, 4)
+	for range 4 {
+		go func() { errs <- f.d.reloadExtensions(context.Background()) }()
+	}
+	for range 4 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if status, body := f.action(t, "sessions", nil); status != http.StatusOK {
+		t.Fatalf("after concurrent reloads the extension's own token answered %d %s", status, body)
+	}
+	eventually(t, "the slow job's first run ends", func() bool { return f.state(t).SlowEnds == 1 })
+	time.Sleep(3 * extensionJobTick)
+	if state := f.state(t); state.SlowStarts != 1 {
+		t.Fatalf("the slow job started %d times; a reload must not start a run while one is going", state.SlowStarts)
+	}
+	f.d.extensions.mu.Lock()
+	job := f.d.extensions.loaded["fixture"].jobs["slow"]
+	running, lastRun, due := job.running, job.LastRun, job.due
+	f.d.extensions.mu.Unlock()
+	if running || lastRun.IsZero() || !due.Equal(lastRun.Add(time.Minute)) {
+		t.Fatalf("after the run: running=%v lastRun=%v due=%v", running, lastRun, due)
 	}
 }

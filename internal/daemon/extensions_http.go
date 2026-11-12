@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -43,9 +44,9 @@ func (d *Daemon) registerExtensionRoutes(mux *http.ServeMux, dashboard *dashboar
 	}))
 	mux.HandleFunc("POST /x/{id}/a/{action}", d.apiV1Guard(dashboard, "control", d.extensionActionHandler))
 	mux.HandleFunc("GET /x/{id}/{path...}", d.apiV1Guard(dashboard, "read", d.extensionPageHandler))
-	mux.HandleFunc("GET /x/{id}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/x/"+r.PathValue("id")+"/", http.StatusFound)
-	})
+	mux.HandleFunc("GET /x/{id}", d.apiV1Guard(dashboard, "read", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/x/"+url.PathEscape(r.PathValue("id"))+"/", http.StatusFound)
+	}))
 }
 
 func extensionPageHeaders(w http.ResponseWriter) {
