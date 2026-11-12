@@ -135,6 +135,7 @@ func defaultWrapperDirs() []string {
 
 func managedWrapper(dataDir string, dirs []string) (string, []byte) {
 	binary := filepath.Join(dataDir, "agenthail")
+	quoted := shellQuoted(binary)
 	for _, dir := range dirs {
 		if dir == "" || dir == dataDir {
 			continue
@@ -145,10 +146,17 @@ func managedWrapper(dataDir string, dirs []string) (string, []byte) {
 			continue
 		}
 		text := string(body)
-		quoted := strings.ReplaceAll(binary, " ", "\\ ")
 		if strings.Contains(text, "agenthail-managed-wrapper") && (strings.Contains(text, "exec \""+binary+"\"") || strings.Contains(text, "exec "+quoted+" ")) {
 			return path, body
 		}
 	}
 	return "", nil
+}
+
+func shellQuoted(path string) string {
+	output, err := exec.Command("/bin/bash", "-c", `printf %q "$1"`, "bash", path).Output()
+	if err != nil {
+		return strings.ReplaceAll(path, " ", "\\ ")
+	}
+	return string(output)
 }

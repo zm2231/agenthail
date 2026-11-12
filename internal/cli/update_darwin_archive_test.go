@@ -286,3 +286,25 @@ func TestTheSignerOfAModifiedBinaryIsNotTrusted(t *testing.T) {
 		t.Fatalf("a binary changed after signing read team %q, err=%v", team, err)
 	}
 }
+
+func TestTheCommandIsFoundWhateverCharactersItsInstallFolderHas(t *testing.T) {
+	for _, name := range []string{"plain", "with space", "agenthail[archive]", "cost$HOME", "it's"} {
+		t.Run(name, func(t *testing.T) {
+			dataDir := filepath.Join(t.TempDir(), name)
+			bin := filepath.Join(t.TempDir(), "bin")
+			if err := os.MkdirAll(bin, 0755); err != nil {
+				t.Fatal(err)
+			}
+			script := `printf -v DATA_BINARY_SHELL '%q' "$1/agenthail"; printf '#!/usr/bin/env bash\n# agenthail-managed-wrapper-v1\nexec %s "$@"\n' "$DATA_BINARY_SHELL" > "$2/agenthail"`
+			if output, err := exec.Command("/bin/bash", "-c", script, "bash", dataDir, bin).CombinedOutput(); err != nil {
+				t.Fatalf("write the wrapper as install.sh does: %v %s", err, output)
+			}
+			if wrapper, _ := managedWrapper(dataDir, []string{t.TempDir(), bin}); wrapper != filepath.Join(bin, "agenthail") {
+				t.Fatalf("found %q for an install in %q", wrapper, dataDir)
+			}
+			if wrapper, _ := managedWrapper(dataDir+"-other", []string{bin}); wrapper != "" {
+				t.Fatalf("another install's folder matched %q", wrapper)
+			}
+		})
+	}
+}
