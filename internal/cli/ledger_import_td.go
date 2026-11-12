@@ -119,7 +119,7 @@ func readTD(db *sql.DB, all bool, now time.Time) (tdExport, error) {
 		case "blocked":
 			item.State, item.Reason = ledger.WorkBlocked, "blocked in td"
 		}
-		if is.status != "closed" && is.deferUntil.After(now) {
+		if (is.status == "open" || is.status == "blocked") && is.deferUntil.After(now) {
 			why := "deferred in td"
 			if item.State == ledger.WorkBlocked {
 				why, item.Reason = "blocked and deferred in td", ""

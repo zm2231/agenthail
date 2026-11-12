@@ -272,7 +272,10 @@ func TestLedgerImportTDParksDeferredIssuesForLaterUntilTheirDate(t *testing.T) {
 	if _, err := db.Exec(`UPDATE issues SET defer_until='2099-01-15' WHERE id='td-schema';
 		UPDATE issues SET defer_until='2020-01-01' WHERE id='td-epic';
 		UPDATE issues SET defer_until='2099-02-01T09:00:00Z', status='blocked' WHERE id='td-leak';
-		UPDATE issues SET defer_until='2099-03-01' WHERE id='td-old'`); err != nil {
+		UPDATE issues SET defer_until='2099-03-01' WHERE id='td-old';
+		INSERT INTO issues (id, title, status, type, priority, created_at, defer_until) VALUES
+			('td-busy', 'held', 'in_progress', 'task', 'P2', '2026-07-12T21:00:00-04:00', '2099-01-01'),
+			('td-review', 'in review', 'in_review', 'task', 'P2', '2026-07-12T21:01:00-04:00', '2099-01-01')`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -293,6 +296,11 @@ func TestLedgerImportTDParksDeferredIssuesForLaterUntilTheirDate(t *testing.T) {
 	}
 	if epic := byOrigin["td:td-epic"]; epic.State != ledger.WorkOpen || epic.Park != nil {
 		t.Fatalf("an issue whose defer passed = %+v", epic)
+	}
+	for _, origin := range []string{"td:td-busy", "td:td-review"} {
+		if held := byOrigin[origin]; held.State != ledger.WorkOpen || held.Park != nil {
+			t.Fatalf("a deferred %s issue = %+v", origin, held)
+		}
 	}
 	if old := byOrigin["td:td-old"]; old.State != ledger.WorkDone || old.Park != nil {
 		t.Fatalf("a closed, deferred issue = %+v", old)
