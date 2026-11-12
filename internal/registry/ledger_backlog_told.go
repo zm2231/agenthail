@@ -1,9 +1,6 @@
 package registry
 
-import (
-	"strings"
-	"time"
-)
+import "time"
 
 func (r *Registry) BacklogTold(projectKey string) (map[string]bool, error) {
 	rows, err := r.read.Query(`SELECT item_id FROM ledger_backlog_told WHERE project_key=?`, projectKey)
@@ -31,16 +28,18 @@ func (r *Registry) MarkBacklogTold(projectKey string, ids []string, at time.Time
 	return nil
 }
 
-// KeepBacklogTold forgets every item that is no longer ready, so its next flip to ready is told again.
 func (r *Registry) KeepBacklogTold(projectKey string, ready []string) error {
-	if len(ready) == 0 {
-		_, err := r.db.Exec(`DELETE FROM ledger_backlog_told WHERE project_key=?`, projectKey)
+	told, err := r.BacklogTold(projectKey)
+	if err != nil {
 		return err
 	}
-	args := []any{projectKey}
 	for _, id := range ready {
-		args = append(args, id)
+		delete(told, id)
 	}
-	_, err := r.db.Exec(`DELETE FROM ledger_backlog_told WHERE project_key=? AND item_id NOT IN (?`+strings.Repeat(",?", len(ready)-1)+`)`, args...)
-	return err
+	for id := range told {
+		if _, err := r.db.Exec(`DELETE FROM ledger_backlog_told WHERE project_key=? AND item_id=?`, projectKey, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }

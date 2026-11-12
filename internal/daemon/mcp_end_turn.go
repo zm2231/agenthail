@@ -16,7 +16,7 @@ type mcpEndTurnInput struct {
 	Next     []string `json:"next,omitempty" jsonschema:"At most 3 follow-ups."`
 }
 
-func (d *Daemon) mcpEndTurn(_ context.Context, caller *mcpCaller, input mcpEndTurnInput) (any, error) {
+func (d *Daemon) mcpEndTurn(ctx context.Context, caller *mcpCaller, input mcpEndTurnInput) (any, error) {
 	if refusal := validEndTurn(input); refusal != nil {
 		return nil, refusal
 	}
@@ -34,7 +34,7 @@ func (d *Daemon) mcpEndTurn(_ context.Context, caller *mcpCaller, input mcpEndTu
 	d.requestCatalogDiscovery()
 	d.publishEvent("state.changed", session.ID, map[string]string{"source": "end-turn"})
 	result := map[string]any{"ok": true}
-	if line := d.backlogReadyLine(caller, time.Now()); line != "" {
+	if line := d.backlogReadyLine(ctx, caller, time.Now()); line != "" {
 		result["backlog"] = line
 	}
 	return result, nil

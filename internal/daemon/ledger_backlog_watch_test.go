@@ -136,11 +136,11 @@ func TestTheCoordinatorIsToldOnceEachTimeABacklogItemBecomesReady(t *testing.T) 
 	lead := &mcpCaller{session: surface.Session{ID: "lead"}, project: &CatalogProject{ID: widgetKey, Key: widgetKey}}
 	worker := &mcpCaller{session: surface.Session{ID: "local-a"}, project: lead.project}
 
-	if line := mac.daemon.backlogReadyLine(lead, time.Now()); line != "" {
+	if line := mac.daemon.backlogReadyLine(t.Context(), lead, time.Now()); line != "" {
 		t.Fatalf("told %q before the revisit date", line)
 	}
 	later := revisit.Add(time.Minute)
-	if line := mac.daemon.backlogReadyLine(worker, later); line != "" {
+	if line := mac.daemon.backlogReadyLine(t.Context(), worker, later); line != "" {
 		t.Fatalf("a session that is not the coordinator was told %q", line)
 	}
 	result, err := mac.daemon.mcpEndTurn(t.Context(), &mcpCaller{session: surface.Session{ID: "lead"}, project: lead.project}, mcpEndTurnInput{Headline: "done"})
@@ -150,15 +150,15 @@ func TestTheCoordinatorIsToldOnceEachTimeABacklogItemBecomesReady(t *testing.T) 
 	if line, _ := result.(map[string]any)["backlog"].(string); line != "" {
 		t.Fatalf("the end of turn told %q before the revisit date", line)
 	}
-	if line := mac.daemon.backlogReadyLine(lead, later); line != "Backlog: "+id+" ready (later: its revisit date came), parked by local-a." {
+	if line := mac.daemon.backlogReadyLine(t.Context(), lead, later); line != "Backlog: "+id+" ready (later: its revisit date came), parked by local-a." {
 		t.Fatalf("the ready line = %q", line)
 	}
-	if line := mac.daemon.backlogReadyLine(lead, later); line != "" {
+	if line := mac.daemon.backlogReadyLine(t.Context(), lead, later); line != "" {
 		t.Fatalf("told again with no new flip: %q", line)
 	}
 
 	mac.daemon.sweepLedgerBacklog(t.Context(), time.Now())
-	if line := mac.daemon.backlogReadyLine(lead, later); line != "Backlog: "+id+" ready (later: its revisit date came), parked by local-a." {
+	if line := mac.daemon.backlogReadyLine(t.Context(), lead, later); line != "Backlog: "+id+" ready (later: its revisit date came), parked by local-a." {
 		t.Fatalf("after it read not ready and ready again, the line = %q", line)
 	}
 }
@@ -205,5 +205,71 @@ func TestABacklogItemTurningReadyPublishesALedgerChange(t *testing.T) {
 		if counts, _ := json.Marshal(board["backlog"]); string(counts) != want {
 			t.Fatalf("the board's backlog at %s = %s, want %s", at, counts, want)
 		}
+	}
+}
+
+func TestAnAskAnsweredOnTheParkingHostMakesItsWorkReadyOnTheLedgersOwner(t *testing.T) {
+	mac, owner, record := ledgerOnTwoHosts(t)
+	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
+	ask := personAsk(t, mac)
+	id := parkedWork(t, mac, "search titles", ledger.Park{Kind: ledger.ParkPerson, Person: &ledger.ParkQuestion{Question: "titles only?", AskID: ask}})
+	board, err := owner.daemon.ledgerStore().Board(widgetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item, ok := board.WorkItem(id); !ok || item.Park == nil || item.Park.Person.HostID != mac.daemon.localHost().ID || item.Park.Person.HostID == record.ID {
+		t.Fatalf("the owner holds %+v, want the ask's host %q", item.Park, mac.daemon.localHost().ID)
+	}
+
+	mac.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	owner.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	if parked := parkedInNeedsYou(t, owner); len(parked) != 0 {
+		t.Fatalf("while its ask is open on the parking host, the owner listed %+v", parked)
+	}
+	if claimed, err := mac.reg.ClaimAsk(ask, registry.AskAnswer{}, surface.PersonSessionID, "test", time.Now()); err != nil || !claimed {
+		t.Fatalf("answer %s: claimed=%v err=%v", ask, claimed, err)
+	}
+	mac.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	owner.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	if row := backlogEntry(t, owner, id); row["ready"] != true || row["why"] != "the person answered "+ask {
+		t.Fatalf("on the owner, after the parking host's answer: %+v", row)
+	}
+	if parked := parkedInNeedsYou(t, owner); len(parked) != 0 {
+		t.Fatalf("answered work is still in the owner's Needs you: %+v", parked)
+	}
+
+	if _, err := mac.reg.WriteDB().Exec(`UPDATE asks SET state=? WHERE id=?`, registry.AskExpired, ask); err != nil {
+		t.Fatal(err)
+	}
+	mac.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	owner.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	if parked := parkedInNeedsYou(t, owner); len(parked) != 1 || parked[id].WorkItem != id {
+		t.Fatalf("with its ask expired on the parking host, the owner's Needs you = %+v", parked)
+	}
+}
+
+func TestACoordinatorIsToldOnlyItsOwnProjectsBacklog(t *testing.T) {
+	mac, _, _ := ledgerOnTwoHosts(t)
+	const other = "repo:github.com/example/other"
+	store := mac.daemon.ledgerStore()
+	if err := store.Enable(other, ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Hour)
+	elsewhere, err := store.Work(ledger.WorkRequest{ProjectKey: other, SessionID: "local-a", Action: ledger.WorkAdd, Text: "other work"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Work(ledger.WorkRequest{ProjectKey: other, SessionID: "local-a", Action: ledger.WorkPark, ItemID: elsewhere.Item.ID, Park: &ledger.Park{Kind: ledger.ParkLater, Why: "x", Revisit: past}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	own := parkedWork(t, mac, "own work", ledger.Park{Kind: ledger.ParkLater, Why: "x", Revisit: past})
+	inOther := &mcpCaller{session: surface.Session{ID: "lead"}, project: &CatalogProject{ID: other, Key: other}}
+	line := mac.daemon.backlogReadyLine(t.Context(), inOther, time.Now())
+	if !strings.Contains(line, own+" ready") || strings.Contains(line, elsewhere.Item.ID) {
+		t.Fatalf("the widget coordinator working in another checkout was told %q", line)
+	}
+	if told, err := mac.reg.BacklogTold(other); err != nil || len(told) != 0 {
+		t.Fatalf("the other project's told marks = %v, %v", told, err)
 	}
 }

@@ -15,7 +15,7 @@ type Headroom struct {
 
 type UsageReader func(ParkUsageTarget) Headroom
 
-type AskReader func(askID string) (answered bool)
+type AskReader func(ParkQuestion) (answered bool)
 
 type Readings struct {
 	Usage UsageReader
@@ -66,7 +66,7 @@ func parkReadiness(park Park, now time.Time, readings Readings) (bool, string, t
 	case ParkIdea:
 		return false, "an idea waits for someone to take it up", time.Time{}
 	case ParkPerson:
-		if park.Person.AskID != "" && readings.Asks != nil && readings.Asks(park.Person.AskID) {
+		if park.Person.AskID != "" && readings.Asks != nil && readings.Asks(*park.Person) {
 			return true, "the person answered " + park.Person.AskID, time.Time{}
 		}
 		return false, "waits on the person's answer", time.Time{}

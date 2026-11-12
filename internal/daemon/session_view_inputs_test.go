@@ -34,7 +34,7 @@ var notSessionViewInputs = map[string]string{
 	"signin_profiles": deviceTables, "session_credentials": deviceTables,
 	"channel_members": routingTables, "channels": routingTables, "remote_channels": routingTables, "routes": routingTables, "relay_deliveries": routingTables, "relay_events": routingTables,
 	"relay_provenance": routingTables, "relay_sources": routingTables, "action_receipts": routingTables,
-	"ledger_events": ledgerTables, "ledger_grants": ledgerTables, "ledger_state": ledgerTables, "project_links": ledgerTables, "project_move_refusals": ledgerTables,
+	"ledger_backlog_told": ledgerTables, "ledger_events": ledgerTables, "ledger_grants": ledgerTables, "ledger_state": ledgerTables, "project_links": ledgerTables, "project_move_refusals": ledgerTables,
 	"project_moves": ledgerTables, "removed_project_ledgers": ledgerTables, "repository_keys": ledgerTables, "project_moves_waiting": ledgerTables,
 	"move_dropped_relays": "relays a move did not take over, read by doctor and the move's answer; the session view reads the delivery_history entry written with them",
 	"alias_reservations": sessionOnly, "launcher_pending": sessionOnly, "pending_ceilings": sessionOnly, "session_ceilings": sessionOnly,
