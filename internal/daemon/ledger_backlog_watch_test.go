@@ -318,6 +318,18 @@ func TestEveryAnsweredAskReachesTheOwnerHoweverManyArePending(t *testing.T) {
 			t.Fatalf("the owner does not know %s, so a later report replaced an earlier one", ask)
 		}
 	}
+
+	mustLedger(t, mac, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: widgetKey, SessionID: "local-a", Action: ledger.WorkUnpark, ItemID: last}, nil)
+	owner.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	if state := owner.daemon.askState(ledger.ParkQuestion{AskID: lastAsk, HostID: mac.daemon.localHost().ID}); state != "" {
+		t.Fatalf("the owner still holds %q for %s after its work was unparked", state, lastAsk)
+	}
+	owner.daemon.backlog.mu.Lock()
+	held := len(owner.daemon.backlog.asks[mac.daemon.localHost().ID])
+	owner.daemon.backlog.mu.Unlock()
+	if held != ledgerAskStatesMost {
+		t.Fatalf("the owner holds %d ask states, want the %d still parked", held, ledgerAskStatesMost)
+	}
 }
 
 func TestOnlyAPairedHostReportsAskStates(t *testing.T) {

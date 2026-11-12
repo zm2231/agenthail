@@ -179,6 +179,7 @@ func (d *Daemon) sweepLedgerBacklog(ctx context.Context, now time.Time) {
 	local := sync.OnceValue(func() []usageSet { read.local = true; return d.localUsageSets(ctx, now) })
 	remote := sync.OnceValue(func() []usageSet { read.remote = true; return d.remoteUsageSets(ctx) })
 	d.sendAskStates(ctx, store, keys, time.Now())
+	d.pruneAskStates(store, keys)
 	readings := ledger.Readings{Usage: usageReaderOver(local, remote, d.localHost().ID, now), Asks: d.ledgerAskReader()}
 	ready := map[string][]string{}
 	for _, key := range keys {
@@ -297,4 +298,33 @@ func (d *Daemon) coordinatedLedgerKey(ctx context.Context, caller *mcpCaller, sp
 		return LedgerKey(d.Registry, project)
 	}
 	return ResolvePathLedgerKey(ctx, d.Registry, spec.ProjectRoot)
+}
+
+func (d *Daemon) pruneAskStates(store *ledger.Store, keys []string) {
+	named := map[string]map[string]bool{}
+	for _, key := range keys {
+		if owner, err := store.RemoteOwner(key); err != nil || owner != "" {
+			continue
+		}
+		board, err := store.Board(key)
+		if err != nil {
+			return
+		}
+		for _, entry := range board.Backlog(ledger.BacklogQuery{Kinds: []ledger.ParkKind{ledger.ParkPerson}}, time.Time{}, ledger.Readings{}) {
+			if q := entry.Item.Park.Person; q.AskID != "" && q.HostID != "" {
+				if named[q.HostID] == nil {
+					named[q.HostID] = map[string]bool{}
+				}
+				named[q.HostID][q.AskID] = true
+			}
+		}
+	}
+	d.backlog.mu.Lock()
+	defer d.backlog.mu.Unlock()
+	for hostID, states := range d.backlog.asks {
+		maps.DeleteFunc(states, func(id, _ string) bool { return !named[hostID][id] })
+		if len(states) == 0 {
+			delete(d.backlog.asks, hostID)
+		}
+	}
 }
