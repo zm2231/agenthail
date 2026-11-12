@@ -1,3 +1,4 @@
+import { $ } from "./dom.js";
 import { responseError } from "./http.js";
 
 const state = { selected: "", view: null };
@@ -42,8 +43,8 @@ function describe(ext) {
 }
 
 function render() {
-  const list = document.getElementById("extensions-list");
-  const frame = document.getElementById("extensions-frame");
+  const list = $("#extensions-list");
+  const frame = $("#extensions-frame");
   if (!list || !frame) return;
   const view = state.view;
   list.replaceChildren();
@@ -96,5 +97,5 @@ export async function loadExtensions() {
 }
 
 export function bindExtensions() {
-  document.getElementById("extensions-reload")?.addEventListener("click", () => act({ action: "reload" }));
+  $("#extensions-reload")?.addEventListener("click", () => act({ action: "reload" }));
 }
