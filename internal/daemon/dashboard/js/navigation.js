@@ -6,9 +6,10 @@ import { loadSettings } from "./settings.js";
 import { refreshShownProject } from "./project-pane.js";
 import { listOrderScopes, orderReady } from "./session-order.js";
 import { ensureSessionOrder } from "./dashboard-state.js";
+import { loadExtensions } from "./extensions.js";
 
 export function showView(name) {
-  const allowed = ["overview", "conversations", "operations"];
+  const allowed = ["overview", "conversations", "operations", "extensions"];
   const view = allowed.includes(name) ? name : "overview";
   app.view = view;
   document
@@ -33,6 +34,7 @@ export function showView(name) {
   if (view === "conversations") startLiveStream();
   else stopLiveStream();
   if (view === "operations" && app.operationsTab === "settings") loadSettings();
+  if (view === "extensions") loadExtensions();
 }
 
 export const mobileConversationView = () => window.matchMedia("(max-width: 760px)").matches;

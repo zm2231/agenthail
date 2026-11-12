@@ -252,7 +252,7 @@ if [ -d "$REPO_DIR/sidecar/node_modules" ]; then
 fi
 
 cp sidecar/package.json sidecar/package-lock.json "$STAGE_DIR/"
-for host in claude-host browser-host; do
+for host in claude-host browser-host extension-host; do
 	if [ -f "$REPO_DIR/$host/host.mjs" ] && [ -f "$REPO_DIR/scripts/stage-node-host.sh" ]; then
 		"$REPO_DIR/scripts/stage-node-host.sh" "$host" "$STAGE_DIR/$host"
 	elif [ -d "$REPO_DIR/$host" ]; then

@@ -14,7 +14,7 @@ const source = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..
 const node = path.join(root, 'runtime', 'node', 'bin', 'node');
 const SECRET = randomBytes(32).toString('hex');
 
-for (const host of ['claude-host', 'browser-host']) {
+for (const host of ['claude-host', 'browser-host', 'extension-host']) {
   const shipped = fs.readdirSync(path.join(source, host)).filter(name => name.endsWith('.mjs') || name.startsWith('package'));
   for (const name of shipped) {
     if (!fs.statSync(path.join(root, host, name), { throwIfNoEntry: false })?.isFile()) fail(`${host}/${name} is missing from ${root}`);
@@ -27,6 +27,7 @@ const work = fs.mkdtempSync(path.join(os.tmpdir(), 'staged-'));
 try {
   await claudeHost();
   await browserHost();
+  await extensionHost();
 } catch (error) {
   console.error(`error: ${error.message}`);
   process.exitCode = 1;
@@ -60,6 +61,19 @@ async function browserHost() {
   child.stdin.end();
   await exits(child, 'browser-host');
   console.log(`browser-host started from ${root} (Chromium ${status.version} not downloaded)`);
+}
+
+async function extensionHost() {
+  const socket = path.join(work, 'extension.sock');
+  const child = start(['extension-host/host.mjs', '--socket', socket, '--store', path.join(work, 'extensions-data', 'store.db'), '--version', 'staged'], ['pipe', 'ignore', 'pipe']);
+  child.stdin.write(SECRET + '\n');
+  const hello = await call(child, socket, 'hello');
+  if (hello.pid !== child.pid || hello.hostVersion !== 'staged') fail(`extension-host hello: ${JSON.stringify(hello)}`);
+  const status = await call(child, socket, 'status');
+  if (!Array.isArray(status.extensions)) fail(`extension-host status: ${JSON.stringify(status)}`);
+  child.stdin.end();
+  await exits(child, 'extension-host');
+  console.log(`extension-host started from ${root} (protocol ${hello.protocol})`);
 }
 
 function start(args, stdio) {

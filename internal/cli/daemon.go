@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/browserhost"
+	"github.com/zm2231/agenthail/internal/nodehost"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/poll"
@@ -96,6 +97,9 @@ func (a *App) daemonRun() error {
 	d.SetBrowserHost(&browserhost.Manager{Home: home, Launch: func() (browserhost.Launch, error) {
 		return browserhost.InstalledLaunch(hostVersion)
 	}})
+	d.SetExtensionHost(home, func() (nodehost.Launch, error) {
+		return nodehost.InstalledLaunch("extension host", "extension-host", "AGENTHAIL_EXTENSION_HOST", hostVersion)
+	})
 	return d.RunWithSignal()
 }
 

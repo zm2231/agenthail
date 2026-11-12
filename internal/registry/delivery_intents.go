@@ -27,7 +27,19 @@ func readsNotices(senderSessionID string) bool {
 	if _, ok := surface.AgenthailSender(senderSessionID, ""); ok {
 		return false
 	}
-	return senderSessionID != "" && !surface.IsUnrepliableSender(senderSessionID)
+	return senderSessionID != "" && !surface.IsUnrepliableSender(senderSessionID) && !surface.IsExtensionSender(senderSessionID)
+}
+
+// EnsureExtensionSender records the session an extension sends as, keeping
+// its name in step with the extension's label.
+func (r *Registry) EnsureExtensionSender(id, label string) (string, error) {
+	sender := surface.ExtensionSender(id, label)
+	if existing, err := r.Session(sender.ID); err == nil && existing.Name == sender.Name {
+		return sender.ID, nil
+	} else if err != nil && err != sql.ErrNoRows {
+		return "", err
+	}
+	return sender.ID, r.RegisterSession(sender)
 }
 
 // EnsureSender records the person or the Agenthail CLI the first time either

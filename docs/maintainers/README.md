@@ -23,6 +23,7 @@ A test that runs a host whose packages are missing fails at once and names the `
 - [Daemon runtime profiles: capturing heap, allocs and goroutines](debug-profiles.md)
 - [Claude session host](claude-host.md)
 - [Browser host: Chromium on first use, supervision and status](browser-host.md)
+- [Extensions: pages, actions, jobs and the extension host](extensions.md)
 - [Claude goals: transcript records, statuses and clients](claude-goals.md)
 - [Codex integration decisions](../codex-protocol.md)
 - [Codex Voice orchestrator: setup, flow, limits, and verification](codex-voice.md)

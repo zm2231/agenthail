@@ -1,0 +1,214 @@
+package daemon
+
+import (
+	"bytes"
+	"context"
+	_ "embed"
+	"encoding/json"
+	"errors"
+	"io"
+	"mime"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/zm2231/agenthail/internal/extension"
+	"github.com/zm2231/agenthail/internal/nodehost"
+)
+
+//go:embed extensions_sdk.js
+var extensionSDK []byte
+
+const (
+	extensionActionBodyLimit = 1 << 20
+	extensionPageLimit       = 8 << 20
+	extensionPageCSP         = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'"
+)
+
+func (d *Daemon) registerExtensionRoutes(mux *http.ServeMux, dashboard *dashboardServer) {
+	mux.HandleFunc("/api/v1/extensions", func(w http.ResponseWriter, r *http.Request) {
+		scope := "read"
+		if r.Method != http.MethodGet {
+			scope = "settings"
+		}
+		d.apiV1Guard(dashboard, scope, d.apiExtensionsHandler)(w, r)
+	})
+	mux.HandleFunc("GET /x/_ah.js", d.apiV1Guard(dashboard, "read", func(w http.ResponseWriter, r *http.Request) {
+		extensionPageHeaders(w)
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(extensionSDK)
+	}))
+	mux.HandleFunc("POST /x/{id}/a/{action}", d.apiV1Guard(dashboard, "control", d.extensionActionHandler))
+	mux.HandleFunc("GET /x/{id}/{path...}", d.apiV1Guard(dashboard, "read", d.extensionPageHandler))
+	mux.HandleFunc("GET /x/{id}", d.apiV1Guard(dashboard, "read", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/x/"+url.PathEscape(r.PathValue("id"))+"/", http.StatusFound)
+	}))
+}
+
+func extensionPageHeaders(w http.ResponseWriter) {
+	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+	w.Header().Set("Content-Security-Policy", extensionPageCSP)
+}
+
+func (d *Daemon) extensionPageHandler(w http.ResponseWriter, r *http.Request) {
+	loaded, ok := d.extensions.find(r.PathValue("id"))
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "not_found", "No extension "+r.PathValue("id")+".")
+		return
+	}
+	file, ok := loaded.ext.PagePath(r.PathValue("path"))
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "not_found", "The extension serves its page and files under assets/ only.")
+		return
+	}
+	info, err := os.Stat(file)
+	if err != nil || info.Size() > extensionPageLimit {
+		writeAPIError(w, http.StatusNotFound, "not_found", "That file is missing or too large to serve.")
+		return
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, "not_found", "That file could not be read.")
+		return
+	}
+	kind := mime.TypeByExtension(filepath.Ext(file))
+	if kind == "" {
+		kind = http.DetectContentType(data)
+	}
+	extensionPageHeaders(w)
+	w.Header().Set("Content-Type", kind)
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeContent(w, r, filepath.Base(file), info.ModTime(), bytes.NewReader(data))
+}
+
+type extensionCallerInfo struct {
+	Kind  string `json:"kind"`
+	Actor string `json:"actor"`
+}
+
+func (d *Daemon) extensionActionHandler(w http.ResponseWriter, r *http.Request) {
+	id, action := r.PathValue("id"), r.PathValue("action")
+	loaded, ok := d.extensions.find(id)
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "not_found", "No extension "+id+".")
+		return
+	}
+	if !slices.Contains(loaded.host.Actions, action) {
+		writeAPIError(w, http.StatusNotFound, "not_found", "Extension "+id+" has no action "+action+".")
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, extensionActionBodyLimit))
+	if err != nil {
+		writeAPIError(w, http.StatusRequestEntityTooLarge, "too_large", "The action input is larger than 1 MiB.")
+		return
+	}
+	input := json.RawMessage("{}")
+	if len(bytes.TrimSpace(body)) > 0 {
+		if !json.Valid(body) {
+			writeAPIError(w, http.StatusBadRequest, "invalid", "The action input must be JSON.")
+			return
+		}
+		input = body
+	}
+	p := principalFromRequest(r)
+	ctx, cancel := context.WithTimeout(r.Context(), extensionActionLimit)
+	defer cancel()
+	var reply struct {
+		Result json.RawMessage `json:"result"`
+	}
+	err = d.extensions.host.Client().Call(ctx, "action", map[string]any{"id": id, "name": action, "input": input, "caller": extensionCallerInfo{Kind: string(p.Kind), Actor: p.actor()}}, &reply)
+	if err != nil {
+		writeExtensionError(w, err)
+		return
+	}
+	if len(reply.Result) == 0 {
+		reply.Result = json.RawMessage("null")
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]json.RawMessage{"result": reply.Result})
+}
+
+func writeExtensionError(w http.ResponseWriter, err error) {
+	var hostErr *nodehost.Error
+	switch {
+	case errors.Is(err, nodehost.ErrNotRunning):
+		writeAPIError(w, http.StatusServiceUnavailable, "unavailable", errExtensionHostDown.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		writeAPIError(w, http.StatusGatewayTimeout, "timed_out", "The extension did not answer within 30 seconds.")
+	case errors.As(err, &hostErr):
+		status := http.StatusBadGateway
+		switch hostErr.Code {
+		case "not_found":
+			status = http.StatusNotFound
+		case "invalid":
+			status = http.StatusBadRequest
+		case "unavailable":
+			status = http.StatusServiceUnavailable
+		}
+		writeAPIError(w, status, hostErr.Code, hostErr.Message)
+	default:
+		writeAPIError(w, http.StatusBadGateway, "failed", err.Error())
+	}
+}
+
+func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeDashboardJSON(w, http.StatusOK, d.extensionsView())
+	case http.MethodPost:
+		var request struct {
+			Action string `json:"action"`
+			ID     string `json:"id"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid", "Send {\"action\": \"reload\"} or {\"action\": \"approve\", \"id\": \"<extension>\"}.")
+			return
+		}
+		switch request.Action {
+		case "reload":
+		case "approve":
+			if err := d.approveExtension(request.ID); err != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid", err.Error())
+				return
+			}
+		default:
+			writeAPIError(w, http.StatusBadRequest, "invalid", "Unknown action "+request.Action+"; use reload or approve.")
+			return
+		}
+		if err := d.reloadExtensions(r.Context()); err != nil {
+			writeAPIError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, d.extensionsView())
+	default:
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET or POST.")
+	}
+}
+
+// approveExtension grants what the extension declares on disk now, so the
+// person approves the manifest they can read, not a cached one.
+func (d *Daemon) approveExtension(id string) error {
+	if d.extensions == nil {
+		return errExtensionsOff
+	}
+	if !extension.ValidID(id) {
+		return errors.New("no extension " + id)
+	}
+	found, err := extension.Discover(extension.Workspace(d.extensions.home))
+	if err != nil {
+		return err
+	}
+	for _, ext := range found {
+		if ext.ID != id {
+			continue
+		}
+		if ext.Err != nil {
+			return errors.New("extension " + id + " is not valid: " + ext.Err.Error())
+		}
+		return d.extensions.approvals.Grant(id, ext.Manifest.Capabilities)
+	}
+	return errors.New("no extension " + id + " in " + strings.TrimSuffix(extension.Workspace(d.extensions.home), "/"))
+}
