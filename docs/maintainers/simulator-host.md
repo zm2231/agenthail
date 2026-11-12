@@ -58,10 +58,11 @@ A session drives a device only while it holds its lease:
   appearance or touches apps it did not launch. An action still running when
   the lease ends finishes first, so an app it launches is terminated too, and
   no action starts on an ended lease.
-- Archiving takes the session's leases away at once; their cleanup then runs
-  in the background and holds the device's lock until it is done. The
-  session's output folder is removed after that only if the session has not
-  taken a new lease meanwhile, as a restored session can.
+- A session's simulator calls run one at a time. Archiving releases the
+  session's leases in the background, after any call still running for it has
+  finished, and before a restored session's next call starts; the cleanup holds
+  the device's lock until it is done. The session's output folder is removed
+  after that only if the session holds no lease by then.
 - Sessions run as the same user, so leases and output folders keep them apart
   by convention, as the browser host's tabs do: a session with a shell can run
   `simctl` itself.
@@ -125,7 +126,8 @@ A daemon that runs no simulators, such as one on Linux, forwards each
 - `install` is refused for a forwarded session, which has no folder on the
   Mac; a forwarded session launches an app already on the simulator.
 - Archiving the session on the forwarding host releases what it holds on every
-  Mac it has called, and removes its folder there. A lease the Mac never hears released ends
+  Mac it has called, after any forwarded call still running has finished, and
+  removes its folder there. A lease the Mac never hears released ends
   when it is idle or reaches its limit.
 
 ## Output files

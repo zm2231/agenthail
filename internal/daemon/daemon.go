@@ -131,6 +131,7 @@ type Daemon struct {
 	simStatus                simhost.Status
 	simStatusAt              time.Time
 	simForwarded             map[string]map[string]bool
+	simOwners                map[string]*sync.Mutex
 	extensions               *extensionRuntime
 	build                    buildinfo.Identity
 	startup                  daemonStartup

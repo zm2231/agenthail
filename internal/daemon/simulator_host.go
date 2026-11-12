@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/simhost"
@@ -31,17 +32,42 @@ func (d *Daemon) sweepSimulatorLeases(ctx context.Context) {
 	}
 }
 
+// releaseSimulators takes the session's simulator lock, so it waits for a call still running and a restored session's next call waits for it.
 func (d *Daemon) releaseSimulators(sessionID string) {
 	if d.simHost == nil {
 		return
 	}
-	if !d.simHost.Local() {
-		go d.releaseForwardedSimulators(sessionID)
-		return
-	}
-	detached := d.simHost.Detach(sessionID, "")
 	go func() {
-		d.simHost.End(detached)
+		lock := d.simulatorOwnerLock(sessionID)
+		lock.Lock()
+		defer lock.Unlock()
+		if !d.simHost.Local() {
+			d.releaseForwardedSimulators(sessionID)
+			return
+		}
+		d.simHost.Release(sessionID, "")
 		d.simHost.RemoveIdleOwner(sessionID)
 	}()
+}
+
+func (d *Daemon) simulatorOwnerLock(owner string) *sync.Mutex {
+	d.simStatusMu.Lock()
+	defer d.simStatusMu.Unlock()
+	if d.simOwners == nil {
+		d.simOwners = map[string]*sync.Mutex{}
+	}
+	if d.simOwners[owner] == nil {
+		d.simOwners[owner] = &sync.Mutex{}
+	}
+	return d.simOwners[owner]
+}
+
+func (d *Daemon) callSimulator(ctx context.Context, owner string, req simhost.Request) (map[string]any, error) {
+	lock := d.simulatorOwnerLock(owner)
+	lock.Lock()
+	defer lock.Unlock()
+	if !d.simHost.Local() {
+		return d.forwardSimulator(ctx, owner, req)
+	}
+	return d.simHost.Call(ctx, owner, req)
 }

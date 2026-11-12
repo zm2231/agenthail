@@ -61,11 +61,7 @@ func (d *Daemon) mcpSimulator(ctx context.Context, caller *mcpCaller, input mcpS
 	if input.Action == "describe" || input.Action == "logs" {
 		limit = browserTextLimit
 	}
-	call := d.simHost.Call
-	if !d.simHost.Local() {
-		call = d.forwardSimulator
-	}
-	out, err := call(ctx, caller.session.ID, simhost.Request{Action: input.Action, Kind: input.Kind, App: input.App, BundleID: input.BundleID, Args: input.Args, Env: input.Env, URL: input.URL, Ref: input.Ref, X: input.X, Y: input.Y, ToX: input.ToX, ToY: input.ToY, Seconds: input.Seconds, Text: input.Text, Button: input.Button, Payload: input.Payload, Latitude: input.Latitude, Longitude: input.Longitude, Limit: limit})
+	out, err := d.callSimulator(ctx, caller.session.ID, simhost.Request{Action: input.Action, Kind: input.Kind, App: input.App, BundleID: input.BundleID, Args: input.Args, Env: input.Env, URL: input.URL, Ref: input.Ref, X: input.X, Y: input.Y, ToX: input.ToX, ToY: input.ToY, Seconds: input.Seconds, Text: input.Text, Button: input.Button, Payload: input.Payload, Latitude: input.Latitude, Longitude: input.Longitude, Limit: limit})
 	if err != nil {
 		return nil, simulatorRefusal(err)
 	}

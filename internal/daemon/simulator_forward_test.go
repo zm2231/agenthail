@@ -205,3 +205,41 @@ func TestAnUnreadableConfigPicksNoMac(t *testing.T) {
 		t.Fatal("the call reached the Mac")
 	}
 }
+
+func TestArchivingWaitsForAnAcquireStillOnItsWay(t *testing.T) {
+	f := simulatorsOnTwoHosts(t)
+	f.commands.hold("xcrun simctl boot")
+	acquired := make(chan error, 1)
+	go func() {
+		_, err := f.linux.daemon.callSimulator(context.Background(), "local-a", simhost.Request{Action: "acquire", Kind: "iphone"})
+		acquired <- err
+	}()
+	<-f.commands.held
+	f.linux.daemon.releaseSimulators("local-a")
+	time.Sleep(100 * time.Millisecond)
+	close(f.commands.release)
+	if err := <-acquired; err != nil {
+		t.Fatal(err)
+	}
+	owner := hosts.Qualify(f.linux.daemon.localHost().ID, "local-a")
+	testkit.Eventually(t, "the archived session's lease is released on the Mac", 10*time.Second, func() bool { return !f.macHost.Holds(owner) })
+}
+
+func TestArchivingWaitsForALocalAcquireStillOnItsWay(t *testing.T) {
+	commands := &simCommands{}
+	f := newSimFixture(t, commands)
+	commands.hold("xcrun simctl boot")
+	acquired := make(chan error, 1)
+	go func() {
+		_, err := f.d.callSimulator(context.Background(), f.parentID, simhost.Request{Action: "acquire", Kind: "iphone"})
+		acquired <- err
+	}()
+	<-commands.held
+	f.d.releaseSimulators(f.parentID)
+	time.Sleep(100 * time.Millisecond)
+	close(commands.release)
+	if err := <-acquired; err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the archived session's lease is released", 10*time.Second, func() bool { return !f.d.simHost.Holds(f.parentID) })
+}
