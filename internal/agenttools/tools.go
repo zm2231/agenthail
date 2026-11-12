@@ -42,6 +42,7 @@ var Tools = []Tool{
 	{Name: "agenthail_queue", Description: "Retry or cancel a queued instruction, or clear a session's pending ones. For the person's voice operator only."},
 	{Name: "agenthail_relay", Description: "Add, remove or list relays that pass one session's replies to another. For the person's voice operator only."},
 	{Name: "agenthail_channel", Description: "Create, delete, rename or list channels, and add or remove their members. For the person's voice operator only."},
+	{Name: "agenthail_simulator", Description: "An iOS simulator on a Mac: acquire the iPhone or iPad for yourself, install a .app you copied into your outDir, launch it, read the screen with describe, tap a ref or point, type, swipe, press home, screenshot, send a push, set a location and read its logs; release it when done. Use it only when the request is about an iOS app. acquire says how to drive it."},
 	{Name: "agenthail_browser", Description: "A headless browser on your host with your own cookies: open a tab, snapshot its accessibility tree with element refs, read its text and links, scroll, dismiss overlays, screenshot it, and act, wait, answer dialogs, resize, list or close. Use it only when the request asks for browser work or names a page, never to check your own edit unasked. servers lists this host's listening ports and the session that started each; localhost reaches them. open says how to drive it."},
 }
 

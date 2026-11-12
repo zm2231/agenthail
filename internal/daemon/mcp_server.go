@@ -106,6 +106,7 @@ func (d *Daemon) mcpHandlers() map[string]mcpRegistrar {
 		"agenthail_relay":            bindMCP(d, d.mcpRelay),
 		"agenthail_channel":          bindMCP(d, d.mcpChannel),
 		"agenthail_browser":          bindMCP(d, d.mcpBrowser),
+		"agenthail_simulator":        bindMCP(d, d.mcpSimulator),
 	}
 }
 

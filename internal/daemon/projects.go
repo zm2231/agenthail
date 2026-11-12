@@ -695,6 +695,7 @@ func (d *Daemon) archiveSession(sessionID string, at time.Time) error {
 		return err
 	}
 	go d.closeBrowserTabs(sessionID)
+	go d.releaseSimulators(sessionID)
 	return nil
 }
 
