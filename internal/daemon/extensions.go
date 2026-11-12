@@ -1,0 +1,402 @@
+package daemon
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"slices"
+	"sync"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/extension"
+	"github.com/zm2231/agenthail/internal/nodehost"
+)
+
+const (
+	extensionHostProtocol = 1
+	extensionActionLimit  = 30 * time.Second
+	extensionJobLimit     = 10 * time.Minute
+	extensionEventBatch   = 200
+)
+
+var extensionJobTick = time.Second
+
+type extensionJob struct {
+	Name         string `json:"name"`
+	EverySeconds int    `json:"everySeconds"`
+}
+
+type extensionHostSummary struct {
+	ID             string         `json:"id"`
+	State          string         `json:"state"`
+	Error          string         `json:"error,omitempty"`
+	Actions        []string       `json:"actions"`
+	Jobs           []extensionJob `json:"jobs"`
+	Events         bool           `json:"events"`
+	LastEventError string         `json:"lastEventError,omitempty"`
+}
+
+type extensionJobState struct {
+	LastRun   time.Time `json:"lastRun,omitzero"`
+	LastError string    `json:"lastError,omitempty"`
+	running   bool
+	due       time.Time
+}
+
+type loadedExtension struct {
+	ext     extension.Extension
+	held    []string
+	pending []string
+	token   string
+	host    extensionHostSummary
+	jobs    map[string]*extensionJobState
+}
+
+type extensionRuntime struct {
+	home      string
+	approvals *extension.Approvals
+	host      *nodehost.Supervisor
+
+	mu      sync.Mutex
+	loaded  map[string]*loadedExtension
+	tokens  map[string]string
+	hostErr string
+	up      bool
+}
+
+func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, error)) {
+	runtime := &extensionRuntime{home: home, approvals: extension.NewApprovals(home), loaded: map[string]*loadedExtension{}, tokens: map[string]string{}}
+	runtime.host = &nodehost.Supervisor{
+		Name:     "extension host",
+		StateDir: extensionHostDir(home),
+		Protocol: extensionHostProtocol,
+		Launch:   launch,
+		Args:     func() []string { return []string{"--store", extension.StorePath(home)} },
+		Ready: func(ctx context.Context, _ nodehost.Client) error {
+			return d.loadExtensions(ctx)
+		},
+		Down: func(err error) {
+			runtime.mu.Lock()
+			runtime.up = false
+			runtime.hostErr = err.Error()
+			runtime.mu.Unlock()
+			d.invalidateDashboard()
+		},
+	}
+	d.extensions = runtime
+}
+
+func extensionHostDir(home string) string { return extension.DataDir(home) + "/host" }
+
+func (d *Daemon) superviseExtensions(ctx context.Context) {
+	if d.extensions == nil {
+		return
+	}
+	go d.runExtensionJobs(ctx)
+	go d.pumpExtensionEvents(ctx)
+	d.extensions.host.Run(ctx)
+}
+
+func extensionToken() string { return "ext_" + rand.Text() + rand.Text() }
+
+// loadExtensions reads the workspace again and has the host load every valid
+// extension with fresh credentials; the previous credentials stop working.
+func (d *Daemon) loadExtensions(ctx context.Context) error {
+	r := d.extensions
+	found, err := extension.Discover(extension.Workspace(r.home))
+	if err != nil {
+		return err
+	}
+	mcpURL := ""
+	if credentials := d.mcpCredentials.Load(); credentials != nil {
+		mcpURL = credentials.URL()
+	}
+	next := map[string]*loadedExtension{}
+	tokens := map[string]string{}
+	type spec struct {
+		ID     string `json:"id"`
+		Dir    string `json:"dir"`
+		Token  string `json:"token"`
+		MCPURL string `json:"mcpURL"`
+	}
+	var specs []spec
+	for _, ext := range found {
+		loaded := &loadedExtension{ext: ext, jobs: map[string]*extensionJobState{}}
+		next[ext.ID] = loaded
+		if ext.Err != nil {
+			loaded.host = extensionHostSummary{ID: ext.ID, State: "invalid", Error: ext.Err.Error()}
+			continue
+		}
+		granted, err := r.approvals.Granted(ext.ID)
+		if err != nil {
+			return fmt.Errorf("read extension approvals: %w", err)
+		}
+		loaded.held, loaded.pending = extension.Effective(ext.Manifest.Capabilities, granted)
+		if _, err := d.Registry.EnsureExtensionSender(ext.ID, ext.Manifest.Label); err != nil {
+			return fmt.Errorf("record extension %s as a sender: %w", ext.ID, err)
+		}
+		loaded.token = extensionToken()
+		tokens[loaded.token] = ext.ID
+		specs = append(specs, spec{ID: ext.ID, Dir: ext.Dir, Token: loaded.token, MCPURL: mcpURL})
+	}
+	var status struct {
+		Extensions []extensionHostSummary `json:"extensions"`
+	}
+	r.mu.Lock()
+	previous := r.loaded
+	r.loaded = next
+	r.tokens = tokens
+	r.mu.Unlock()
+	if err := r.host.Client().Call(ctx, "load", map[string]any{"extensions": specs, "writeTools": extensionWriteTools()}, &status); err != nil {
+		return fmt.Errorf("load extensions: %w", err)
+	}
+	now := time.Now()
+	r.mu.Lock()
+	for _, summary := range status.Extensions {
+		loaded, ok := next[summary.ID]
+		if !ok {
+			continue
+		}
+		loaded.host = summary
+		for _, job := range summary.Jobs {
+			state := &extensionJobState{due: now}
+			if old, ok := previous[summary.ID]; ok {
+				if kept, ok := old.jobs[job.Name]; ok {
+					state.LastRun, state.LastError = kept.LastRun, kept.LastError
+					state.due = kept.LastRun.Add(time.Duration(job.EverySeconds) * time.Second)
+				}
+			}
+			loaded.jobs[job.Name] = state
+		}
+	}
+	r.up = true
+	r.hostErr = ""
+	r.mu.Unlock()
+	d.invalidateDashboard()
+	return nil
+}
+
+func (d *Daemon) reloadExtensions(ctx context.Context) error {
+	if d.extensions == nil {
+		return errExtensionsOff
+	}
+	d.extensions.mu.Lock()
+	up := d.extensions.up
+	d.extensions.mu.Unlock()
+	if !up {
+		return errExtensionHostDown
+	}
+	return d.loadExtensions(ctx)
+}
+
+var (
+	errExtensionsOff     = errors.New("extensions are not available in this daemon")
+	errExtensionHostDown = errors.New("the extension host is starting or restarting; try again in a moment")
+)
+
+func (r *extensionRuntime) extensionByToken(token string) (string, []string, bool) {
+	if r == nil || token == "" {
+		return "", nil, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.tokens[token]
+	if !ok {
+		return "", nil, false
+	}
+	loaded := r.loaded[id]
+	return id, slices.Clone(loaded.held), true
+}
+
+func (r *extensionRuntime) find(id string) (*loadedExtension, bool) {
+	if r == nil {
+		return nil, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	loaded, ok := r.loaded[id]
+	return loaded, ok
+}
+
+func (d *Daemon) runExtensionJobs(ctx context.Context) {
+	ticker := time.NewTicker(extensionJobTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			d.startDueExtensionJobs(ctx, now)
+		}
+	}
+}
+
+func (d *Daemon) startDueExtensionJobs(ctx context.Context, now time.Time) {
+	r := d.extensions
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.up {
+		return
+	}
+	for id, loaded := range r.loaded {
+		if loaded.host.State != "loaded" {
+			continue
+		}
+		for _, job := range loaded.host.Jobs {
+			state := loaded.jobs[job.Name]
+			if state == nil || state.running || now.Before(state.due) {
+				continue
+			}
+			state.running = true
+			go d.runExtensionJob(ctx, id, job, state)
+		}
+	}
+}
+
+func (d *Daemon) runExtensionJob(ctx context.Context, id string, job extensionJob, state *extensionJobState) {
+	r := d.extensions
+	runCtx, cancel := context.WithTimeout(ctx, extensionJobLimit)
+	err := r.host.Client().Call(runCtx, "job", map[string]string{"id": id, "name": job.Name}, nil)
+	cancel()
+	finished := time.Now()
+	r.mu.Lock()
+	state.running = false
+	state.LastRun = finished
+	state.due = finished.Add(time.Duration(job.EverySeconds) * time.Second)
+	state.LastError = ""
+	if err != nil {
+		state.LastError = err.Error()
+	}
+	r.mu.Unlock()
+	if err != nil && ctx.Err() == nil {
+		d.log.Printf("extension %s: job %s: %s", id, job.Name, err)
+	}
+}
+
+// pumpExtensionEvents hands every daemon event to the extensions that hold
+// read.all. Its cursor outlives host restarts, so events published while the
+// host was down are delivered once it is back.
+func (d *Daemon) pumpExtensionEvents(ctx context.Context) {
+	_, follower, _ := d.events.subscribe(d.events.cursor())
+	defer follower.Cancel()
+	var queued []apiEvent
+	retry := time.NewTimer(time.Hour)
+	retry.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, open := <-follower.Wake:
+			if !open {
+				return
+			}
+			events, _ := follower.read()
+			queued = append(queued, events...)
+			if len(queued) > eventHistoryLimit {
+				queued = queued[len(queued)-eventHistoryLimit:]
+			}
+		case <-retry.C:
+		}
+		for len(queued) > 0 {
+			batch := queued[:min(len(queued), extensionEventBatch)]
+			if err := d.deliverExtensionEvents(ctx, batch); err != nil {
+				retry.Reset(time.Second)
+				break
+			}
+			queued = queued[len(batch):]
+		}
+	}
+}
+
+func (d *Daemon) deliverExtensionEvents(ctx context.Context, events []apiEvent) error {
+	r := d.extensions
+	r.mu.Lock()
+	up := r.up
+	var to []string
+	for id, loaded := range r.loaded {
+		if loaded.host.State == "loaded" && loaded.host.Events && slices.Contains(loaded.held, "read.all") {
+			to = append(to, id)
+		}
+	}
+	r.mu.Unlock()
+	if !up {
+		return errExtensionHostDown
+	}
+	if len(to) == 0 {
+		return nil
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return r.host.Client().Call(callCtx, "events", map[string]any{"events": events, "to": to}, nil)
+}
+
+type extensionView struct {
+	ID           string                        `json:"id"`
+	Label        string                        `json:"label"`
+	Description  string                        `json:"description,omitempty"`
+	State        string                        `json:"state"`
+	Error        string                        `json:"error,omitempty"`
+	Page         string                        `json:"page,omitempty"`
+	Capabilities []string                      `json:"capabilities"`
+	Pending      []string                      `json:"pendingCapabilities,omitempty"`
+	Actions      []string                      `json:"actions"`
+	Jobs         map[string]*extensionJobState `json:"jobs,omitempty"`
+	EventError   string                        `json:"lastEventError,omitempty"`
+}
+
+type extensionsView struct {
+	Host       string          `json:"host"`
+	HostError  string          `json:"hostError,omitempty"`
+	Extensions []extensionView `json:"extensions"`
+}
+
+func (d *Daemon) extensionsView() extensionsView {
+	r := d.extensions
+	if r == nil {
+		return extensionsView{Host: "off", Extensions: []extensionView{}}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	view := extensionsView{Host: "running", Extensions: []extensionView{}}
+	if !r.up {
+		view.Host, view.HostError = "unavailable", r.hostErr
+	}
+	for _, loaded := range r.loaded {
+		item := extensionView{
+			ID:           loaded.ext.ID,
+			Label:        loaded.ext.Manifest.Label,
+			Description:  loaded.ext.Manifest.Description,
+			State:        loaded.host.State,
+			Error:        loaded.host.Error,
+			Capabilities: append([]string{}, loaded.held...),
+			Pending:      loaded.pending,
+			Actions:      append([]string{}, loaded.host.Actions...),
+			EventError:   loaded.host.LastEventError,
+		}
+		if item.Label == "" {
+			item.Label = loaded.ext.ID
+		}
+		if loaded.ext.HasPage {
+			item.Page = "/x/" + loaded.ext.ID + "/"
+		}
+		if len(loaded.jobs) > 0 {
+			item.Jobs = map[string]*extensionJobState{}
+			for name, state := range loaded.jobs {
+				copied := *state
+				item.Jobs[name] = &copied
+			}
+		}
+		view.Extensions = append(view.Extensions, item)
+	}
+	slices.SortFunc(view.Extensions, func(a, b extensionView) int {
+		if a.ID < b.ID {
+			return -1
+		}
+		if a.ID > b.ID {
+			return 1
+		}
+		return 0
+	})
+	return view
+}

@@ -121,6 +121,7 @@ type Daemon struct {
 	transportResolver        *SessionTransportResolver
 	claudeHost               *claudehost.Manager
 	browserHost              *browserhost.Manager
+	extensions               *extensionRuntime
 	build                    buildinfo.Identity
 	startup                  daemonStartup
 	identityMu               sync.RWMutex
@@ -358,6 +359,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer close(browserDone)
 		d.superviseBrowserHost(ctx)
 	}()
+	extensionsDone := make(chan struct{})
+	go func() {
+		defer close(extensionsDone)
+		d.superviseExtensions(ctx)
+	}()
 	go d.sweepUploads(ctx)
 	go d.runLimitResumes(ctx)
 	go d.runIdleCompaction(ctx)
@@ -387,6 +393,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			<-catalogDone
 			<-hostDone
 			<-browserDone
+			<-extensionsDone
 			<-uiDone
 			d.log.Printf("stopping")
 			return nil

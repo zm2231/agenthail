@@ -219,6 +219,9 @@ Other:
   triggers retry <run-id> [--json]
                                 Run a finished run again
   triggers reload [--json]      Read triggers.json again
+  extensions [list] [--json]    Extensions in ~/.agenthail/extensions, their state and pages
+  extensions approve <id>       Grant an extension the capabilities its extension.json declares
+  extensions reload             Load every extension again from disk
   permissions [--json]          The daemon's macOS privacy grants and where to change them
   permissions request           Have macOS ask for the grants the daemon lacks
   person name [<name>|--reset]  The name sessions see on your messages

@@ -115,6 +115,9 @@ func addMCPTool[In any](d *Daemon, server *mcp.Server, tool *mcp.Tool, run func(
 		if caller == nil {
 			return mcpRefused(&mcpRefusal{Code: "unauthenticated", Message: "This session is still starting; try again in a moment.", Retryable: true}), nil, nil
 		}
+		if _, allowed := extensionTools[tool.Name]; caller.extension != "" && !allowed {
+			return mcpRefused(&mcpRefusal{Code: "not_for_extensions", Message: tool.Name + " belongs to agent sessions; extensions cannot call it."}), nil, nil
+		}
 		ctx, replay := d.replayMCPWrite(ctx, caller, tool.Name, input)
 		var value any
 		var err error

@@ -17,6 +17,13 @@ func BrowserHost(t testing.TB) string {
 	return hostBundle(t, "browser-host", "playwright-core")
 }
 
+// The extension host has no packages to install.
+func ExtensionHost(t testing.TB) string {
+	t.Helper()
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(file), "..", "..", "extension-host")
+}
+
 // A host without its packages exits at import, which a test would otherwise see only as a start timeout.
 func hostBundle(t testing.TB, bundle, dependency string) string {
 	t.Helper()

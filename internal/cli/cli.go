@@ -222,6 +222,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdHooks(rest)
 	case "triggers":
 		return a.cmdTriggers(rest)
+	case "extensions":
+		return a.cmdExtensions(rest)
 	case "permissions":
 		return a.cmdPermissions(rest)
 	case "person":

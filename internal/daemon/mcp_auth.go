@@ -21,6 +21,7 @@ type mcpCaller struct {
 	project      *CatalogProject
 	capabilities []string
 	ceiling      json.RawMessage
+	extension    string
 }
 
 func (c *mcpCaller) has(capability string) bool {
@@ -58,6 +59,10 @@ func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 			return
 		}
 		token := bearerToken(r)
+		if caller, ok := d.extensionCaller(token); ok {
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpCallerKey{}, caller)))
+			return
+		}
 		credential, err := d.authenticateSession(token, time.Now())
 		if errors.Is(err, registry.ErrCredentialUnknown) {
 			// Codex connects during thread/start, before its token can bind; with no caller every tool call is refused.

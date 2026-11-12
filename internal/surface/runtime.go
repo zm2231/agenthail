@@ -118,6 +118,15 @@ func UnrepliableSender(hostID, sessionID, name string) Session {
 // IsUnrepliableSender reports whether id names an unrepliable stand-in.
 func IsUnrepliableSender(id string) bool { return strings.HasPrefix(id, unrepliablePrefix) }
 
+const extensionPrefix = "extension:"
+
+// ExtensionSender is the session an extension sends as. No model reads it.
+func ExtensionSender(id, label string) Session {
+	return Session{ID: extensionPrefix + id, Surface: "extension", RuntimeKind: RuntimeOperator, Name: label + " (extension)", Status: StatusIdle}
+}
+
+func IsExtensionSender(id string) bool { return strings.HasPrefix(id, extensionPrefix) }
+
 // UnrepliableSenderOf names the host and session an unrepliable stand-in
 // speaks for.
 func UnrepliableSenderOf(id string) (hostID, sessionID string, ok bool) {
@@ -143,6 +152,8 @@ func (e NoReplyRouteError) Error() string {
 	switch {
 	case e.SessionID == PersonSessionID:
 		return fmt.Sprintf("not delivered: %s is the person, who reads this session. Put your answer in your reply.", e.SessionID)
+	case IsExtensionSender(e.SessionID):
+		return fmt.Sprintf("not delivered: %s is %s, which reads no messages. Its page or its owner acts on what it sent.", e.SessionID, e.Name)
 	case e.Host == "":
 		return fmt.Sprintf("not delivered: %s is the Agenthail CLI, which sends messages from outside any session (agenthail send, a script or an API call), and no session reads it. Send to the session that should act on this directly.", e.SessionID)
 	}
@@ -157,6 +168,10 @@ func NoReplyRoute(session *Session) error {
 		return nil
 	}
 	result := NoReplyRouteError{SessionID: session.ID}
+	if IsExtensionSender(session.ID) {
+		result.Name = session.Name
+		return result
+	}
 	if rest, ok := strings.CutPrefix(session.ID, unrepliablePrefix); ok {
 		if host, sender, ok := strings.Cut(rest, ":"); ok && host != "" && sender != "" {
 			result.Host, result.Sender = host, sender
