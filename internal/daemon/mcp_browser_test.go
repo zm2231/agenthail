@@ -226,8 +226,9 @@ func TestTextAndLinksFitTheResultAndAScreenshotIsSavedOnlyInsideTheSessionsFolde
 	if code := refusalCode(t, f.parent, "agenthail_browser", map[string]any{"action": "snapshot", "tab": tab, "depth": 0}); code != "invalid" {
 		t.Fatalf("snapshot depth 0: code %q", code)
 	}
-	if shallow := browse(t, f.parent, map[string]any{"action": "snapshot", "tab": tab, "depth": 1}); shallow["truncated"] != false {
-		t.Fatalf("snapshot depth 1 = %v", shallow)
+	shallow := browse(t, f.parent, map[string]any{"action": "snapshot", "tab": tab, "depth": 1})
+	if tree, err := os.ReadFile(shallow["file"].(string)); err != nil || shallow["lines"] != float64(601) || strings.Contains(string(tree), "link ") {
+		t.Fatalf("snapshot depth 1: %v lines, want the list and its 600 items without their links (err %v)", shallow["lines"], err)
 	}
 	links := browse(t, f.parent, map[string]any{"action": "links", "tab": tab})
 	if !strings.HasPrefix(links["links"].(string), `["quoted" & 0](`+f.page+`/long#0)`) {
