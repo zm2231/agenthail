@@ -45,6 +45,7 @@ type ParkIdeaShape struct {
 type ParkQuestion struct {
 	Question string `json:"question"`
 	AskID    string `json:"askId,omitempty"`
+	HostID   string `json:"hostId,omitempty"`
 }
 
 func (b *Board) planPark(req WorkRequest, item *WorkItem, payload *WorkItemStatePayload) (string, error) {

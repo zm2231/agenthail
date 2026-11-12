@@ -76,7 +76,7 @@ struct DecisionList: View {
         }
         .buttonStyle(.plain)
         .selectionMark(selected)
-        .accessibilityIdentifier("decision-" + item.sessionId)
+        .accessibilityIdentifier("decision-" + item.id)
     }
 
     private func stopRow(_ stop: InboxStop, selected: Bool) -> some View {

@@ -229,10 +229,14 @@ A park is a `work_item.state` event carrying `park` (`kind`, `why`, `revisit`, t
 - Usage work can come back when its provider's reading shows headroom again on the host it named, or when its `resetsAt` has passed. Headroom means under 90% of both the session and weekly windows, the same test as the offer to move a limited Claude session to another account. When work is parked for usage, the host that takes the write records itself, the Claude root (when none is named, the one the parked session hit its limit on, otherwise the primary one) and, if the provider is at its limit, the reset time from its own reading. A write that goes on to another host's ledger carries that reading with it. A reading older than an hour counts as no reading. With no live reading, the item comes back after that recorded reset, and with neither, it waits.
 - Later work can come back on its `--until` date. Without one, it waits until someone unparks it.
 - An idea waits until someone takes it up.
-- Work waiting on the person waits for their answer.
+- Work waiting on the person comes back once the ask it names (`--ask`) is answered. Until then it is listed in the person's Needs you, as a row of its own under the session that parked it. While that ask is still open, the ask's own row stands for it. An ask that expired unanswered leaves the item in Needs you, and work parked with no ask stays there until someone unparks it. Only the host that keeps the ledger lists it, so it shows once when several computers' pages are merged. The host that takes the park records itself as the ask's host when it holds that ask, and each sweep it tells the ledger's owner the state of its asks, since the owner may not be able to reach it.
 - A parked item with unfinished dependencies still waits on them.
 
 `--kind usage,later` keeps those kinds, and `--ready` keeps the items that can come back. The read goes through the daemon, because it holds the usage readings. The same list is `view=backlog` on `GET /api/v1/ledger` (`kind`, `ready`) and `view: backlog` in the MCP ledger read. The ETag covers readiness.
+
+The board's `backlog` counts parked items and how many can come back, in total and by kind. The daemon checks readiness every 30 seconds, from the usage readings it took last, and sends `ledger.changed` when an item turns ready or stops being ready.
+
+When a project's coordinator ends a turn with `agenthail_end_turn`, the reply carries `backlog`, one line naming each item of the project it coordinates (not of the checkout it is working in) that has become ready since it was last told, for example `Backlog: widget-W12 ready (later: its revisit date came), parked by <session>.` Each item is named once each time it turns ready. The mark is kept on this host only, in its registry, and is dropped when the item stops being ready. Only the coordinator is told, and nothing unparks or starts a session.
 
 `agenthail ledger backlog --triage [--days N]` lists open or blocked items that nobody holds and that have had no activity for N days (14 by default), to park them in a batch with `ledger park <id>...`. It is `view=triage` (`days`) on the same endpoint.
 
@@ -317,7 +321,7 @@ GET /api/v1/ledger/events                                   # ledger.changed, on
 ```
 
 - **Views.** `view` is one of:
-  - `board`, the default: capture state, sync state, counts, the first page of goals, and the newest five provisional words with their total (`provisional`), how many messages were filed automatically and overridden (`autoFiled`), and, when a sorter is configured, its health (`sorter`);
+  - `board`, the default: capture state, sync state, counts, parked work by kind with how many can come back (`backlog`), the first page of goals, and the newest five provisional words with their total (`provisional`), how many messages were filed automatically and overridden (`autoFiled`), and, when a sorter is configured, its health (`sorter`);
   - one list, paged: `goals`, `asks`, `decisions`, `questions` or `work`;
   - `ready`, the ranked next work;
   - `backlog`, parked work with whether each item can come back and why (`kind`, `ready`), and `triage`, unowned open or blocked work idle `days` days (14 by default), as `agenthail ledger backlog` prints them;

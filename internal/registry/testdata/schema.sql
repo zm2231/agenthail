@@ -1,4 +1,4 @@
--- schemaVersion 94
+-- schemaVersion 95
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -464,6 +464,14 @@ CREATE TABLE launcher_pending (
 	expires_at_ms INTEGER NOT NULL DEFAULT 0,
 	location BLOB NOT NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table ledger_backlog_told
+CREATE TABLE ledger_backlog_told (
+	project_key TEXT NOT NULL,
+	item_id TEXT NOT NULL,
+	told_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (project_key, item_id)
 );
 
 -- table ledger_events

@@ -26,6 +26,7 @@ type decisionItem struct {
 	Requests     []openRequestView `json:"requests,omitempty"`
 	RequestError string            `json:"requestError,omitempty"`
 	HoldsUp      []string          `json:"holdsUp,omitempty"`
+	WorkItem     string            `json:"workItem,omitempty"`
 }
 
 type leadHandledItem struct {
@@ -52,6 +53,7 @@ type decisionSources struct {
 	hearer   func(dashboardSession) (decisionHearer, bool)
 	requests func([]dashboardSession) map[string]decisionRequests
 	queued   map[string][]string
+	parked   func([]dashboardSession) []decisionItem
 }
 
 type decisionRequests struct {
@@ -103,6 +105,9 @@ func buildDecisions(sources decisionSources) decisionsPage {
 		}
 		page.Decisions = append(page.Decisions, item)
 	}
+	if sources.parked != nil {
+		page.Decisions = append(page.Decisions, sources.parked(sources.rows)...)
+	}
 	sort.SliceStable(page.Decisions, func(i, j int) bool {
 		a, b := page.Decisions[i], page.Decisions[j]
 		if a.Group != b.Group {
@@ -111,7 +116,10 @@ func buildDecisions(sources decisionSources) decisionsPage {
 		if !a.Since.Equal(b.Since) {
 			return a.Since.Before(b.Since)
 		}
-		return a.SessionID < b.SessionID
+		if a.SessionID != b.SessionID {
+			return a.SessionID < b.SessionID
+		}
+		return a.WorkItem < b.WorkItem
 	})
 	return page
 }

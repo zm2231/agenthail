@@ -15,6 +15,13 @@ type Headroom struct {
 
 type UsageReader func(ParkUsageTarget) Headroom
 
+type AskReader func(ParkQuestion) (answered bool)
+
+type Readings struct {
+	Usage UsageReader
+	Asks  AskReader
+}
+
 type BacklogQuery struct {
 	Kinds []ParkKind
 	Ready bool
@@ -27,7 +34,7 @@ type BacklogEntry struct {
 	ReadyAt time.Time `json:"readyAt,omitzero"`
 }
 
-func (b *Board) Backlog(q BacklogQuery, now time.Time, usage UsageReader) []BacklogEntry {
+func (b *Board) Backlog(q BacklogQuery, now time.Time, readings Readings) []BacklogEntry {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	entries := []BacklogEntry{}
@@ -36,7 +43,7 @@ func (b *Board) Backlog(q BacklogQuery, now time.Time, usage UsageReader) []Back
 			continue
 		}
 		entry := BacklogEntry{Item: item.snapshot()}
-		entry.Ready, entry.Why, entry.ReadyAt = parkReadiness(*item.Park, now, usage)
+		entry.Ready, entry.Why, entry.ReadyAt = parkReadiness(*item.Park, now, readings)
 		if waits := b.openDeps(item); entry.Ready && len(waits) > 0 {
 			entry.Ready, entry.Why = false, "waits on "+waits[0]
 		}
@@ -54,11 +61,14 @@ func (b *Board) Backlog(q BacklogQuery, now time.Time, usage UsageReader) []Back
 	return entries
 }
 
-func parkReadiness(park Park, now time.Time, usage UsageReader) (bool, string, time.Time) {
+func parkReadiness(park Park, now time.Time, readings Readings) (bool, string, time.Time) {
 	switch park.Kind {
 	case ParkIdea:
 		return false, "an idea waits for someone to take it up", time.Time{}
 	case ParkPerson:
+		if park.Person.AskID != "" && readings.Asks != nil && readings.Asks(*park.Person) {
+			return true, "the person answered " + park.Person.AskID, time.Time{}
+		}
 		return false, "waits on the person's answer", time.Time{}
 	case ParkLater:
 		if park.Revisit.IsZero() {
@@ -69,7 +79,7 @@ func parkReadiness(park Park, now time.Time, usage UsageReader) (bool, string, t
 		}
 		return true, "its revisit date came", park.Revisit
 	case ParkUsage:
-		return usageReadiness(*park.Usage, now, usage)
+		return usageReadiness(*park.Usage, now, readings.Usage)
 	}
 	return false, fmt.Sprintf("unknown park kind %q", park.Kind), time.Time{}
 }

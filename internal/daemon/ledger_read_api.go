@@ -27,11 +27,17 @@ func (d *Daemon) ledgerRead(key string, req ledger.ReadRequest) (map[string]any,
 		req.Sync = &ledger.SyncHealth{OwnerHead: last.Head, Error: last.Error}
 	}
 	req.Sorter = d.sorterHealth()
-	if req.View == "backlog" && req.Usage == nil {
-		if req.Now.IsZero() {
-			req.Now = time.Now()
+	if req.Now.IsZero() {
+		req.Now = time.Now()
+	}
+	if req.Usage == nil {
+		req.Usage = d.cachedLedgerUsage(req.Now)
+		if req.View == "backlog" {
+			req.Usage = d.ledgerUsageReader(context.Background(), req.Now)
 		}
-		req.Usage = d.ledgerUsageReader(context.Background(), req.Now)
+	}
+	if req.Asks == nil {
+		req.Asks = d.ledgerAskReader()
 	}
 	result, err := d.ledgerStore().Read(key, req)
 	if err != nil {
@@ -234,6 +240,7 @@ func (d *Daemon) ledgerChanges() *ledgerChangeHub {
 
 func (d *Daemon) ledgerChanged(key string) {
 	d.ledgerChanges().changed(key)
+	d.decisions.poke()
 }
 
 var ledgerChangeWait = time.Second

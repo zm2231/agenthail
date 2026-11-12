@@ -15,6 +15,10 @@ export function decisionHosts() {
   return [{ id: "", name: local?.name || "this computer", state: "connected" }, ...paired.map((host) => ({ id: host.id, name: host.name, state: host.state }))];
 }
 
+export function decisionKey(item) {
+  return item.workItem ? `${item.sessionId}#${item.workItem}` : item.sessionId;
+}
+
 export function qualify(hostId, id) {
   if (!hostId || !id || id.includes(separator)) return id;
   return `${hostId}${separator}${id}`;
@@ -39,7 +43,7 @@ export function mergeDecisions(answers) {
       inbox.leadHandling.push(...(answer.page.leadHandling || []).map((item) => qualified(item, answer.host.id)));
     }
   }
-  inbox.decisions.sort((a, b) => (rank[a.group] - rank[b.group]) || String(a.since || "").localeCompare(String(b.since || "")) || a.sessionId.localeCompare(b.sessionId));
+  inbox.decisions.sort((a, b) => (rank[a.group] - rank[b.group]) || String(a.since || "").localeCompare(String(b.since || "")) || decisionKey(a).localeCompare(decisionKey(b)));
   inbox.unreachable.sort();
   inbox.outdated.sort();
   return inbox;

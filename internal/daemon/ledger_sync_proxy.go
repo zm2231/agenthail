@@ -39,7 +39,7 @@ func (d *Daemon) ledgerWriteRoute(next http.HandlerFunc) http.HandlerFunc {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		body = d.stampUsagePark(r.Context(), r.URL.Path, body, time.Now())
+		body = d.stampPark(r.Context(), r.URL.Path, body, time.Now())
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		var head struct {
 			ProjectKey string `json:"projectKey"`

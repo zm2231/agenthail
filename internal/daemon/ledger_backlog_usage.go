@@ -15,14 +15,7 @@ import (
 func (d *Daemon) ledgerUsageReader(ctx context.Context, now time.Time) ledger.UsageReader {
 	local := sync.OnceValue(func() []usageSet { return d.localUsageSets(ctx, now) })
 	remote := sync.OnceValue(func() []usageSet { return d.remoteUsageSets(ctx) })
-	here := d.localHost().ID
-	return func(target ledger.ParkUsageTarget) ledger.Headroom {
-		sets := remote
-		if target.HostID == "" || target.HostID == here {
-			sets = local
-		}
-		return parkHeadroom(sets(), target, now)
-	}
+	return usageReaderOver(local, remote, d.localHost().ID, now)
 }
 
 func parkUsageSet(sets []usageSet, target ledger.ParkUsageTarget) (usageSet, bool) {
@@ -47,10 +40,14 @@ func parkHeadroom(sets []usageSet, target ledger.ParkUsageTarget, now time.Time)
 	return ledger.Headroom{Known: read, Room: room, Frees: frees}
 }
 
-func (d *Daemon) stampUsagePark(ctx context.Context, path string, body []byte, now time.Time) []byte {
+func (d *Daemon) stampPark(ctx context.Context, path string, body []byte, now time.Time) []byte {
 	if path != "/api/v1/ledger/work" {
 		return body
 	}
+	body = stampPersonParkFrom(body, d.localHost().ID, func(id string) bool {
+		_, found, err := d.Registry.Ask(id)
+		return err == nil && found
+	})
 	limited := func(session string) (registry.LimitResume, bool) {
 		stop, ok, err := d.Registry.LimitResumeFor(session)
 		return stop, ok && err == nil
@@ -91,21 +88,38 @@ func stampUsageParkFrom(body []byte, here string, local func() []usageSet, limit
 			target.ResetsAt = room.Frees
 		}
 	}
+	return patchPark(body, "usage", target)
+}
+
+func stampPersonParkFrom(body []byte, here string, held func(askID string) bool) []byte {
+	var req ledger.WorkRequest
+	if json.Unmarshal(body, &req) != nil || req.Action != ledger.WorkPark || req.Park == nil || req.Park.Kind != ledger.ParkPerson || req.Park.Person == nil {
+		return body
+	}
+	question := *req.Park.Person
+	if question.AskID == "" || question.HostID != "" || !held(question.AskID) {
+		return body
+	}
+	question.HostID = here
+	return patchPark(body, "person", question)
+}
+
+func patchPark(body []byte, field string, value any) []byte {
 	var fields, park map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) != nil || json.Unmarshal(fields["park"], &park) != nil {
 		return body
 	}
-	usage, err := json.Marshal(target)
+	encoded, err := json.Marshal(value)
 	if err != nil {
 		return body
 	}
-	park["usage"] = usage
+	park[field] = encoded
 	if fields["park"], err = json.Marshal(park); err != nil {
 		return body
 	}
-	stamped, err := json.Marshal(fields)
+	patched, err := json.Marshal(fields)
 	if err != nil {
 		return body
 	}
-	return stamped
+	return patched
 }

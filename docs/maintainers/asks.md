@@ -129,6 +129,7 @@ Fetch the card when `ask.routedTo` is `person`, `answeredAt` is absent and the s
 - `links` open outside the app.
 - `actions` exist only for a single-question ask: an option button each when it has 4 or fewer options, plus `reply`.
 - The decisions inbox (`/api/v1/decisions`) lists the same request under the session's `ask` item.
+- Work parked on the person's decision is its own item there: `kind: "parked"`, `group: "waiting"`, `answerable: false`, with the work item's id in `workItem` and the session that parked it in `sessionId`. Clients key items by `sessionId` and `workItem` together, because one session can have both its own item and parked ones.
 
 ## The card
 

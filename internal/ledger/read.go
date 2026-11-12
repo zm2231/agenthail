@@ -33,6 +33,7 @@ type ReadRequest struct {
 	Sorter  *SorterHealth
 	Now     time.Time
 	Usage   UsageReader
+	Asks    AskReader
 	Backlog BacklogQuery
 	Idle    time.Duration
 }
@@ -159,6 +160,7 @@ func (s *Store) readBoard(projectKey string, board *Board, req ReadRequest, resu
 		newest[i].Context = ClipReply(newest[i].Context)
 	}
 	goals, next := pageEntries(entriesOf(board.Goals()), "", readDefaultLimit, req.Budget)
+	result["backlog"] = backlogCounts(board, req)
 	result["appliedSeq"] = board.AppliedSeq()
 	result["capture"], result["sync"], result["counts"] = capture, syncView, counts
 	result["provisional"] = map[string]any{"total": len(provisional), "newest": readJSON(newest)}

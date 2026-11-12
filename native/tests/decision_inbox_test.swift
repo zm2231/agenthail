@@ -47,6 +47,17 @@ struct DecisionInboxTest {
         check(inbox.leadHandling.map(\.heldBy) == ["lead", "h::lead"], "the lead holding a prompt is qualified too")
         check(inbox.items(in: .holding).isEmpty && inbox.items(in: .waiting).count == 2, "items are read by group")
         check(inbox.removing("h::w").decisions.map(\.sessionId) == ["h::s", "s", "w"], "an answered session leaves the inbox")
+
+        let parked = try! JSONDecoder().decode(DecisionsPage.self, from: Data(#"""
+        {"decisions":[
+          {"group":"waiting","sessionId":"w","kind":"request","reason":"r","since":"2026-11-08T10:00:00Z","answerable":true},
+          {"group":"waiting","sessionId":"w","kind":"parked","workItem":"widget-W12","reason":"widget-W12 waits on you: titles only?","since":"2026-11-08T10:00:00Z","answerable":false}
+        ],"leadHandling":[]}
+        """#.utf8))
+        var withParked = DecisionInbox()
+        withParked.add(parked, host: "") { $0 }
+        check(withParked.decisions.map(\.id) == ["w", "w#widget-W12"], "a parked item and its session's own request are two rows")
+        check(withParked.removing("w").decisions.map(\.id) == ["w#widget-W12"], "answering the session leaves its parked item waiting on the person")
         print("decision inbox ok")
     }
 

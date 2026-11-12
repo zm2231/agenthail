@@ -48,7 +48,7 @@ func TestAttachingThePersonsWordsAsAnIdeaParksNewFoundWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entries := board.Backlog(ledger.BacklogQuery{Kinds: []ledger.ParkKind{ledger.ParkIdea}}, item.Timeline[0].At, nil); len(entries) != 1 || entries[0].Ready {
+	if entries := board.Backlog(ledger.BacklogQuery{Kinds: []ledger.ParkKind{ledger.ParkIdea}}, item.Timeline[0].At, ledger.Readings{}); len(entries) != 1 || entries[0].Ready {
 		t.Fatalf("the idea in the backlog = %+v", entries)
 	}
 

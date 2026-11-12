@@ -46,6 +46,16 @@ func (r *decisionsRevision) setPeer(hostID, own string) {
 	}
 }
 
+func (r *decisionsRevision) poke() {
+	if r == nil {
+		return
+	}
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
+}
+
 func (r *decisionsRevision) current() (own, rev string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -120,7 +130,7 @@ func (d *Daemon) ownDecisionsRevision(ctx context.Context) (string, error) {
 		return "", err
 	}
 	waiting := map[string][]string{}
-	page := buildDecisions(decisionSources{rows: rows, hearer: d.decisionHearer, queued: queued, requests: func(asking []dashboardSession) map[string]decisionRequests {
+	page := buildDecisions(decisionSources{rows: rows, hearer: d.decisionHearer, queued: queued, parked: d.parkedDecisionsNow, requests: func(asking []dashboardSession) map[string]decisionRequests {
 		read := make(map[string]decisionRequests, len(asking))
 		for _, row := range asking {
 			read[row.ID] = decisionRequests{requests: []openRequestView{{}}}
