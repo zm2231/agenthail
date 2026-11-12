@@ -85,12 +85,15 @@ type Daemon struct {
 	// withdrawDesktop removes a desktop notification; it is
 	// WithdrawNotification outside tests.
 	withdrawDesktop func(identifier string) error
-	background      *backgroundWork
-	triggers        *triggerService
-	events          *eventHub
-	catalog         *catalogHub
-	decisions       *decisionsRevision
-	catalogEnded    catalogEnded
+	// withdrawing holds the asks whose notification withdraw is being sent.
+	withdrawMu   sync.Mutex
+	withdrawing  map[string]bool
+	background   *backgroundWork
+	triggers     *triggerService
+	events       *eventHub
+	catalog      *catalogHub
+	decisions    *decisionsRevision
+	catalogEnded catalogEnded
 	// catalogLiveMu guards catalogLive, which discovery replaces and the
 	// status pass reads from its own goroutine. It is held only for map
 	// reads and writes; a session's waiting lock orders its row and entry.
@@ -343,6 +346,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.log.Printf("dead-lettered %d message(s) with an uncertain delivery outcome", recovered)
 	}
 	d.startTriggers()
+	d.sendWithdraws()
 	d.startFederation(ctx)
 	defer d.stopFederation()
 	catalogDone := make(chan struct{})

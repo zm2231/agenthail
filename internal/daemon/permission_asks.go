@@ -134,9 +134,7 @@ func (d *Daemon) closePermissionAsk(ask registry.Ask) {
 			d.log.Printf("withdraw the notice of %s: %s", ask.ID, err)
 		}
 	}
-	if !ask.AnnouncedAt.IsZero() {
-		d.withdrawAsk(ask.ID)
-	}
+	d.sendWithdraws()
 }
 
 // permissionRequest is the provider's open request behind an ask, read now
@@ -193,11 +191,7 @@ func (d *Daemon) announcePermission(ctx context.Context, ask registry.Ask) {
 	if err := d.Registry.MarkAskAnnounced(ask.ID, time.Now()); err != nil {
 		d.log.Printf("mark %s announced: %s", ask.ID, err)
 	}
-	// An ask that closed while it was being announced was not withdrawn with
-	// it, since it was not marked announced yet.
-	if current, found, err := d.Registry.Ask(ask.ID); err == nil && (!found || current.State != registry.AskOpen || current.RoutedTo != registry.AskToPerson) {
-		d.withdrawAskNow(ctx, ask.ID)
-	}
+	d.withdrawIfClosed(ask.ID)
 }
 
 func (d *Daemon) noticePermission(ctx context.Context, ask registry.Ask) {

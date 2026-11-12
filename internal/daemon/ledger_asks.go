@@ -73,7 +73,7 @@ func (d *Daemon) syncLedgerAsks(key string) {
 		return
 	}
 	for _, ask := range closed {
-		d.withdrawAsk(ask.ID)
+		d.sendWithdraws()
 		if _, id, ok := registry.ParseLedgerAskRef(ask.Ref); ok && ask.State == registry.AskExpired {
 			q := byID[id]
 			d.tellLedgerOwner(ask, fmt.Sprintf("[intent ledger] %s (%q) had no answer by its deadline, so its default applied: %s", q.ID, q.Text, q.Answer), "ledger-ask-expired:"+ask.ID)
@@ -164,7 +164,7 @@ func (d *Daemon) answerLedger(ctx context.Context, ask registry.Ask, response su
 	if err := d.Registry.RecordAskApplied(ask.ID, "applied", ref, time.Now()); err != nil {
 		d.log.Printf("record the answer to %s: %s", ask.ID, err)
 	}
-	d.withdrawAsk(ask.ID)
+	d.sendWithdraws()
 	d.tellLedgerOwner(ask, fmt.Sprintf("[intent ledger] The person answered %s (%q): %s", q.ID, q.Text, words), "ledger-ask-answered:"+ask.ID)
 	return actionOK(map[string]any{"ok": true, "result": map[string]any{"requestId": ask.ID, "outcome": "answered", "utteranceId": ref}}), nil
 }
