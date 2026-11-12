@@ -99,3 +99,27 @@ func TestParseRevisitTakesADateATimeOrASpan(t *testing.T) {
 		}
 	}
 }
+
+func TestLedgerAttachAsIdeaSendsTheSessionsShapeOfIt(t *testing.T) {
+	app, calls := ledgerWriteFixture(t, func(string, map[string]any) (int, any) {
+		return http.StatusOK, ledger.AttachResult{Readback: "intent ledger: +widget-W7 idea, parked"}
+	})
+	if _, err := captureStdout(t, func() error {
+		return app.cmdLedger([]string{"attach", "claude-prompt:3", "--as", "idea", "--clause", "search everywhere", "--goal", "one box", "--plan", "fan out", "--first-test", "two projects"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := (*calls)[0]
+	idea, _ := got["idea"].(map[string]any)
+	if got["as"] != "idea" || got["clauses"].([]any)[0] != "search everywhere" || idea["goal"] != "one box" || idea["plan"] != "fan out" || idea["firstTest"] != "two projects" {
+		t.Fatalf("attach request %v", got)
+	}
+	if _, err := captureStdout(t, func() error {
+		return app.cmdLedger([]string{"attach", "claude-prompt:4", "--as", "new-ask", "--clause", "x"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := (*calls)[1]["idea"]; has {
+		t.Fatalf("an attach with no shape sent one: %v", (*calls)[1])
+	}
+}

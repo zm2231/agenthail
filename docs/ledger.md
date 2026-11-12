@@ -214,10 +214,11 @@ agenthail ledger park <item>... --usage claude[:<root>]|codex   # waits for that
 agenthail ledger park <item>... --later "after the release" [--until 2026-12-01|7d|2w]
 agenthail ledger park <item>... --person "Titles only, or bodies too?" [--ask <ask id>]   # waits on the person's decision
 agenthail ledger park <item> --idea --utterance <ref> [--goal "..."] [--plan "..."] [--first-test "..."]   # the person's idea, in their words
+agenthail ledger attach <utterance> --as idea --clause "<title>" [--goal "..."] [--plan "..."] [--first-test "..."]   # a new idea from the person's words
 agenthail ledger unpark <item>...
 ```
 
-Each item is parked on its own: a refused one is named and the others still park, and the command fails so the session sees it. Every kind takes `--why` and `--until`. An idea keeps the ref of the person's captured words, and the ledger refuses one that names no captured utterance; the goal, plan and first test are the session's free-form shape of it.
+Each item is parked on its own: a refused one is named and the others still park, and the command fails so the session sees it. Every kind takes `--why` and `--until`. An idea keeps the ref of the person's captured words, and the ledger refuses one that names no captured utterance; the goal, plan and first test are the session's free-form shape of it. `attach --as idea` turns the person's words into a new work item of type `idea`, already parked, and attaches the words to it like any other attach. It is found work under no goal, so it stays out of goals, asks and the end-of-turn check until it is linked to a clause with `work link` or the person's words are attached as a new ask. A work item can't be added or edited into an idea any other way.
 
 Claimed work is parked by its assignee, or for it with `--for-session <session>`, as when a session has run out of usage and cannot make the call itself. Parking claimed work takes the same `--done`, `--remaining`, `--decisions` and `--uncertain` as a handoff, so whoever picks it up reads where it stopped in `ledger work <item>`. `unpark` returns the item to open with that handoff, for the next session to claim. `close`, `delete` and `edit` work on parked items too.
 
@@ -225,7 +226,7 @@ A park is a `work_item.state` event carrying `park` (`kind`, `why`, `revisit`, t
 
 `agenthail ledger backlog` lists parked work, with the items that can come back first, and says why each one waits. Unpark is still a choice: the backlog never unparks anything itself.
 
-- Usage work can come back when its provider's reading shows headroom again on the host it named, or when its `resetsAt` has passed. Headroom means under 90% of both the session and weekly windows, the same test as the offer to move a limited Claude session to another account. With no reading, the item waits.
+- Usage work can come back when its provider's reading shows headroom again on the host it named, or when its `resetsAt` has passed. Headroom means under 90% of both the session and weekly windows, the same test as the offer to move a limited Claude session to another account. When work is parked for usage, the host that takes the write records itself, the Claude root (when none is named, the one the parked session hit its limit on, otherwise the primary one) and, if the provider is at its limit, the reset time from its own reading. A write that goes on to another host's ledger carries that reading with it. A reading older than an hour counts as no reading. With no live reading, the item comes back after that recorded reset, and with neither, it waits.
 - Later work can come back on its `--until` date. Without one, it waits until someone unparks it.
 - An idea waits until someone takes it up.
 - Work waiting on the person waits for their answer.
@@ -252,7 +253,8 @@ The import maps td onto the ledger as follows:
 - `P4` becomes `P3`.
 - In-progress and in-review issues come over open: their claims were td sessions, which cannot submit or hand off in the ledger.
 - A log type the ledger does not have becomes a progress log whose text starts with that type.
-- Deleted issues, points, sprints, minor flags, due and defer dates, and td's notes, boards, file links and work sessions are not carried over. The import lists how many of each it left behind.
+- An open or blocked issue deferred to a future date arrives parked for later (`deferred in td`), coming back on that date. A defer date that has passed is dropped, and the issue arrives open.
+- Deleted issues, points, sprints, minor flags, due dates, and td's notes, boards, file links and work sessions are not carried over. The import lists how many of each it left behind.
 
 Each item records the td issue it came from (`imported from td:td-1a2b3c` in `ledger work <item>`), and running the import again skips issues already imported, so an interrupted import can simply be rerun. Imported items are found work until they are linked to a clause of the person's.
 

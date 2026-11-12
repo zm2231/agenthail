@@ -16,6 +16,7 @@ type WorkImport struct {
 	Reason       string      `json:"reason,omitempty"`
 	Reviewer     string      `json:"reviewer,omitempty"`
 	Handoff      *Handoff    `json:"handoff,omitempty"`
+	Park         *Park       `json:"park,omitempty"`
 	CreatedAt    time.Time   `json:"createdAt"`
 	CreatedBy    string      `json:"createdBy,omitempty"`
 	Timeline     []WorkEntry `json:"timeline,omitempty"`
@@ -55,11 +56,12 @@ type WorkHistory struct {
 	Reason    string      `json:"reason,omitempty"`
 	Reviewer  string      `json:"reviewer,omitempty"`
 	Handoff   *Handoff    `json:"handoff,omitempty"`
+	Park      *Park       `json:"park,omitempty"`
 	CreatedAt time.Time   `json:"createdAt"`
 	Timeline  []WorkEntry `json:"timeline,omitempty"`
 }
 
-var importableStates = []WorkState{WorkOpen, WorkBlocked, WorkDone, WorkClosed}
+var importableStates = []WorkState{WorkOpen, WorkBlocked, WorkParked, WorkDone, WorkClosed}
 
 func (s *Store) ImportWork(req WorkImportRequest, now time.Time) (WorkImportResult, error) {
 	var result WorkImportResult
@@ -152,12 +154,22 @@ func importPayload(in WorkImport, origin, session string) (WorkItemPayload, erro
 	if !slices.Contains(importableStates, state) {
 		return WorkItemPayload{}, refuse("an imported item is %s, not %s", joinStates(importableStates), state)
 	}
+	var park *Park
+	switch {
+	case state == WorkParked && (in.Park == nil || in.Park.Kind != ParkLater || strings.TrimSpace(in.Park.Why) == ""):
+		return WorkItemPayload{}, refuse("an imported item is parked only for later, with why")
+	case state == WorkParked:
+		later := Park{Kind: ParkLater, Why: strings.TrimSpace(in.Park.Why), Revisit: in.Park.Revisit, Session: in.Park.Session}
+		park = &later
+	case in.Park != nil:
+		return WorkItemPayload{}, refuse("an imported item with a park is parked, not %s", state)
+	}
 	createdBy := in.CreatedBy
 	if createdBy == "" {
 		createdBy = session
 	}
 	return WorkItemPayload{Text: text, CreatedBy: createdBy, WorkFields: fields, ImportedFrom: origin,
-		History: &WorkHistory{State: state, Reason: strings.TrimSpace(in.Reason), Reviewer: in.Reviewer, Handoff: in.Handoff, CreatedAt: in.CreatedAt, Timeline: in.Timeline}}, nil
+		History: &WorkHistory{State: state, Reason: strings.TrimSpace(in.Reason), Reviewer: in.Reviewer, Handoff: in.Handoff, Park: park, CreatedAt: in.CreatedAt, Timeline: in.Timeline}}, nil
 }
 
 func reachesThrough(waitsOn func(string) []string, from, to string) bool {

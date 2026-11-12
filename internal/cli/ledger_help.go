@@ -66,7 +66,9 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
                                  Attach the person's words, several fragments in one call with --and:
                                  new-ask, extends, constrains, refines,
                                  reacts (--adopt|--reject a clause, --ack a cut), delegates [--session],
-                                 decides, conversation; --covers <cut> withdraws a checker's cut
+                                 decides, idea (--clause "<title>" [--goal|--plan|--first-test "..."],
+                                 parked found work in the person's words), conversation;
+                                 --covers <cut> withdraws a checker's cut
                                  with a clause from the words it was raised from. Without --as it
                                  is read from the flags: words on a clause or ask extend the ask,
                                  on a goal or the project start a new ask, on a question answer it;

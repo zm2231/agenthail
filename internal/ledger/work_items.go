@@ -145,6 +145,10 @@ func (b *Board) applyWorkItem(event Event) error {
 		Timeline: []WorkEntry{{At: event.CreatedAt, Actor: p.CreatedBy, Kind: "created", Text: p.Text, State: WorkOpen}}}
 	if h := p.History; h != nil {
 		item.ImportedFrom, item.State, item.Reason, item.Reviewer, item.Handoff = p.ImportedFrom, h.State, h.Reason, h.Reviewer, h.Handoff
+		if h.Park != nil {
+			park := h.Park.clone()
+			item.Park = &park
+		}
 		item.Timeline[0].At = h.CreatedAt
 		item.Timeline = append(append(item.Timeline, h.Timeline...),
 			WorkEntry{At: event.CreatedAt, Actor: event.ActorSessionID, Kind: "imported", Text: "from " + p.ImportedFrom, State: h.State})

@@ -15,9 +15,10 @@ const (
 	WorkTask    WorkType = "task"
 	WorkBug     WorkType = "bug"
 	WorkFeature WorkType = "feature"
+	WorkIdea    WorkType = "idea"
 )
 
-var workTypes = []WorkType{WorkTask, WorkBug, WorkFeature}
+var workTypes = []WorkType{WorkTask, WorkBug, WorkFeature, WorkIdea}
 
 var workPriorities = []string{"P0", "P1", "P2", "P3"}
 
@@ -73,7 +74,7 @@ func workType(s string) (WorkType, error) {
 	if t == "" || slices.Contains(workTypes, t) {
 		return t, nil
 	}
-	return "", refuse("unknown work type %q; use task, bug or feature", s)
+	return "", refuse("unknown work type %q; use task, bug, feature or idea", s)
 }
 
 func workPriority(s string) (string, error) {
@@ -170,6 +171,9 @@ func (b *Board) planWorkEdit(req WorkRequest) (EventType, any, string, error) {
 		t, err := workType(string(*c.Type))
 		if err != nil || t == "" {
 			return "", nil, "", refuse("unknown work type %q; use task, bug or feature", *c.Type)
+		}
+		if t == WorkIdea {
+			return "", nil, "", refuse("an idea keeps the person's words: agenthail ledger attach <utterance> --as idea --clause \"<title>\"")
 		}
 		c.Type, changed = &t, append(changed, "type "+string(t))
 	}

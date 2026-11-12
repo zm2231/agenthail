@@ -136,6 +136,9 @@ func (b *Board) planWorkAdd(req WorkRequest, ids *idIssuer) (EventType, any, str
 	if err != nil {
 		return "", nil, "", err
 	}
+	if fields.Type == WorkIdea {
+		return "", nil, "", refuse("an idea keeps the person's words: agenthail ledger attach <utterance> --as idea --clause \"<title>\"")
+	}
 	if req.ClauseID != "" && fields.From != "" {
 		return "", nil, "", refuse("--clause is asked work and --found-in is found work; give one")
 	}

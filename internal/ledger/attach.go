@@ -19,24 +19,26 @@ const (
 	AsDecides      AttachAs = "decides"
 	AsConversation AttachAs = "conversation"
 	AsAnswers      AttachAs = "answers"
+	AsIdea         AttachAs = "idea"
 )
 
 const ProjectTarget = "project"
 
 type AttachRequest struct {
-	ProjectKey  string       `json:"projectKey"`
-	SessionID   string       `json:"sessionId"`
-	UtteranceID string       `json:"utteranceId,omitempty"`
-	As          AttachAs     `json:"as"`
-	To          string       `json:"to,omitempty"`
-	Clauses     []string     `json:"clauses,omitempty"`
-	AskType     AskType      `json:"askType,omitempty"`
-	Source      ClauseSource `json:"source,omitempty"`
-	Adopt       bool         `json:"adopt,omitempty"`
-	Reject      bool         `json:"reject,omitempty"`
-	Ack         bool         `json:"ack,omitempty"`
-	Delegate    string       `json:"delegate,omitempty"`
-	Covers      []string     `json:"covers,omitempty"`
+	ProjectKey  string         `json:"projectKey"`
+	SessionID   string         `json:"sessionId"`
+	UtteranceID string         `json:"utteranceId,omitempty"`
+	As          AttachAs       `json:"as"`
+	To          string         `json:"to,omitempty"`
+	Clauses     []string       `json:"clauses,omitempty"`
+	AskType     AskType        `json:"askType,omitempty"`
+	Source      ClauseSource   `json:"source,omitempty"`
+	Adopt       bool           `json:"adopt,omitempty"`
+	Reject      bool           `json:"reject,omitempty"`
+	Ack         bool           `json:"ack,omitempty"`
+	Delegate    string         `json:"delegate,omitempty"`
+	Covers      []string       `json:"covers,omitempty"`
+	Idea        *ParkIdeaShape `json:"idea,omitempty"`
 }
 
 type AttachResult struct {
@@ -152,12 +154,15 @@ func (p *attachPlan) build() error {
 
 func (p *attachPlan) relate() error {
 	req := p.req
+	if req.Idea != nil && req.As != AsIdea {
+		return refuse("--goal, --plan and --first-test shape an idea; they go with --as idea")
+	}
 	switch req.As {
 	case AsNewAsk, AsExtends, AsConstrains:
 		return p.addClauses()
-	case AsRefines, AsReacts, AsDelegates, AsDecides, AsConversation, AsAnswers:
+	case AsRefines, AsReacts, AsDelegates, AsDecides, AsConversation, AsAnswers, AsIdea:
 	default:
-		return refuse("unknown --as %q; use new-ask, extends, constrains, refines, reacts, delegates, decides, answers or conversation", req.As)
+		return refuse("unknown --as %q; use new-ask, extends, constrains, refines, reacts, delegates, decides, answers, idea or conversation", req.As)
 	}
 	if req.Source != "" || len(req.Covers) > 0 {
 		return refuse("--source and --covers apply only to new clauses (new-ask, extends, constrains)")
@@ -176,6 +181,8 @@ func (p *attachPlan) relate() error {
 		return p.decide()
 	case AsAnswers:
 		return p.answer()
+	case AsIdea:
+		return p.idea()
 	}
 	p.summary = req.UtteranceID + " is conversation"
 	if len(req.Clauses) > 0 {
