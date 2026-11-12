@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -35,6 +36,20 @@ func (r *KeyRef) set() int {
 		}
 	}
 	return count
+}
+
+func (r *KeyRef) Validate() error {
+	switch {
+	case r.set() != 1:
+		return fmt.Errorf("must name one of file, keychain, env or command")
+	case r.File != "" && !filepath.IsAbs(r.File):
+		return fmt.Errorf("file must be an absolute path")
+	case r.Keychain != nil && (r.Keychain.Service == "" || r.Keychain.Account == ""):
+		return fmt.Errorf("keychain needs service and account")
+	case len(r.Command) > 0 && !filepath.IsAbs(r.Command[0]):
+		return fmt.Errorf("command must start with an absolute path")
+	}
+	return nil
 }
 
 func (r *KeyRef) Describe() string {

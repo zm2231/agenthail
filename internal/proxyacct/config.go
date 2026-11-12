@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -54,17 +53,8 @@ func (c *Config) normalize() error {
 	}
 	c.URL = strings.TrimRight(c.URL, "/")
 	if m := c.Management; m != nil {
-		if m.set() != 1 {
-			return fmt.Errorf("proxy %s: management must name one of file, keychain, env or command", c.Name)
-		}
-		if m.File != "" && !filepath.IsAbs(m.File) {
-			return fmt.Errorf("proxy %s: management file must be an absolute path", c.Name)
-		}
-		if m.Keychain != nil && (m.Keychain.Service == "" || m.Keychain.Account == "") {
-			return fmt.Errorf("proxy %s: management keychain needs service and account", c.Name)
-		}
-		if len(m.Command) > 0 && !filepath.IsAbs(m.Command[0]) {
-			return fmt.Errorf("proxy %s: management command must start with an absolute path", c.Name)
+		if err := m.Validate(); err != nil {
+			return fmt.Errorf("proxy %s: management %w", c.Name, err)
 		}
 	}
 	return nil
