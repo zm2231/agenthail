@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -208,10 +207,7 @@ func (d *Daemon) noticePermission(ctx context.Context, ask registry.Ask) {
 			asks += ": " + detail
 		}
 	}
-	target, mcp := d.answerTarget(session.ID), d.usesMCP(ask.RoutedTo)
-	if owner, err := d.Registry.SessionHost(ask.RoutedTo); err == nil && owner != "" {
-		target, mcp = hosts.Qualify(d.hostIdentity().ID, target), true
-	}
+	target, mcp := d.askAddress(session.ID, ask.RoutedTo)
 	message := permissionNotice(d.resolveDisplay(session.ID), target, ask.ID, asks, mcp, d.permissionEscalateAfter())
 	hearer := noticeRecipient{sessionID: ask.RoutedTo, role: "lead"}
 	d.taskNoticeMu.Lock()

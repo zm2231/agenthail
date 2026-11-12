@@ -210,10 +210,11 @@ func (d *Daemon) askNoticeFor(ask registry.Ask, hearerID string) string {
 			header = "Your message: " + ask.Title
 		}
 	}
-	return askNotice(header, ask, d.usesMCP(hearerID))
+	target, mcp := d.askAddress(ask.SessionID, hearerID)
+	return askNotice(header, ask, target, mcp)
 }
 
-func askNotice(header string, ask registry.Ask, mcp bool) string {
+func askNotice(header string, ask registry.Ask, target string, mcp bool) string {
 	var b strings.Builder
 	b.WriteString("[agenthail] " + header)
 	for i, question := range ask.Questions {
@@ -231,11 +232,11 @@ func askNotice(header string, ask registry.Ask, mcp bool) string {
 	}
 	switch {
 	case ask.Origin == registry.AskOriginDelivery && mcp:
-		fmt.Fprintf(&b, "\nAnswer it: agenthail_answer {\"requestId\":%q,\"decision\":\"<%s>\"}, or pass it on: agenthail_answer {\"requestId\":%q,\"decision\":\"escalate\"}", ask.ID, strings.ReplaceAll(deliveryOptionIDs(ask), ", ", "|"), ask.ID)
+		fmt.Fprintf(&b, "\nAnswer it: agenthail_answer {\"requestId\":%q,\"sessionId\":%q,\"decision\":\"<%s>\"}, or pass it on: agenthail_answer {\"requestId\":%q,\"sessionId\":%q,\"decision\":\"escalate\"}", ask.ID, target, strings.ReplaceAll(deliveryOptionIDs(ask), ", ", "|"), ask.ID, target)
 	case ask.Origin == registry.AskOriginDelivery:
 		fmt.Fprintf(&b, "\nAnswer it: agenthail ask answer %s <%s>, or pass it on: agenthail ask escalate %s", ask.ID, strings.ReplaceAll(deliveryOptionIDs(ask), ", ", "|"), ask.ID)
 	case mcp:
-		fmt.Fprintf(&b, "\nAnswer it: agenthail_answer {\"requestId\":%q,\"answers\":{\"<question>\":\"<answer>\"}}, or pass it to the person: agenthail_answer {\"requestId\":%q,\"decision\":\"escalate\"}", ask.ID, ask.ID)
+		fmt.Fprintf(&b, "\nAnswer it: agenthail_answer {\"requestId\":%q,\"sessionId\":%q,\"answers\":{\"<question>\":\"<answer>\"}}, or pass it to the person: agenthail_answer {\"requestId\":%q,\"sessionId\":%q,\"decision\":\"escalate\"}", ask.ID, target, ask.ID, target)
 	default:
 		fmt.Fprintf(&b, "\nAnswer it: agenthail ask answer %s \"<answer>\", or pass it to the person: agenthail ask escalate %s", ask.ID, ask.ID)
 	}

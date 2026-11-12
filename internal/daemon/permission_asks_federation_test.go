@@ -114,3 +114,37 @@ func TestALeadOnAPairedHostAnswersItsWorkersPromptAsItself(t *testing.T) {
 		t.Fatalf("history=%+v, want the answer recorded as the lead's", history)
 	}
 }
+
+func TestALeadOnAPairedHostAnswersItsWorkersAskFromTheNotice(t *testing.T) {
+	l := leadOnTheOtherHost(t)
+	worker, err := l.laptop.reg.Session(l.worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asking := mcpSession(t, mcpServer(t, l.laptop.daemon), issueMCPToken(t, l.laptop.daemon, *worker))
+	out, refused := callMCP(t, asking, "agenthail_ask", deployAsk)
+	if refused {
+		t.Fatalf("ask: %v", out)
+	}
+	askID, _ := out["askId"].(string)
+	if askID == "" || out["routedTo"] != "vps-a" {
+		t.Fatalf("ask reply %v, want it routed to the lead on the paired host", out)
+	}
+	testkit.Eventually(t, "the lead told how to answer from its own host", 10*time.Second, func() bool {
+		return slices.ContainsFunc(l.vps.fake.delivered(), func(got string) bool {
+			return strings.Contains(got, askID) && strings.Contains(got, `"sessionId":"`+l.workerQ+`"`)
+		})
+	})
+	lead, err := l.vps.reg.Session("vps-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := mcpSession(t, mcpServer(t, l.vps.daemon), issueMCPToken(t, l.vps.daemon, *lead))
+	if out, refused := callMCP(t, client, "agenthail_answer", map[string]any{"requestId": askID, "sessionId": l.workerQ, "answers": map[string]any{"Deploy it now?": "Wait"}, "clientRequestId": "answer-ask"}); refused {
+		t.Fatalf("the lead's answer from its own host: %v", out)
+	}
+	ask, found, err := l.laptop.reg.Ask(askID)
+	if err != nil || !found || ask.State != registry.AskAnswered || ask.AnsweredBy != "vps-a" {
+		t.Fatalf("ask=%+v found=%v err=%v, want it answered by the lead", ask, found, err)
+	}
+}

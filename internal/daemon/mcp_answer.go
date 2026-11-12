@@ -12,7 +12,7 @@ import (
 type mcpAnswerInput struct {
 	mcpWrite
 	RequestID string            `json:"requestId" jsonschema:"The open request's id, as agenthail_requests lists it."`
-	SessionID string            `json:"sessionId,omitempty" jsonschema:"The session that holds the request, for one on another host, as its notice names it."`
+	SessionID string            `json:"sessionId,omitempty" jsonschema:"For a request on another host: its session, as the notice names it."`
 	Decision  string            `json:"decision,omitempty" jsonschema:"A permission request: allow, always (keep allowing with the rule the request offers; for the person's voice operator only), deny, never (keep denying) or stop (deny and end the turn). Any other ask: the id of the option you pick, as agenthail_requests lists it, or omit it and give answers or a message. Any: escalate passes it on."`
 	Message   string            `json:"message,omitempty" jsonschema:"With deny: why, which the session reads. On an agent's ask: a note."`
 	Answers   map[string]string `json:"answers,omitempty" jsonschema:"One answer per question, keyed by its text."`
