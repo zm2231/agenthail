@@ -75,6 +75,11 @@ func (h *Host) prune(owner, keep string) {
 	}
 }
 
-func (h *Host) RemoveOwner(owner string) {
-	_ = os.RemoveAll(h.ownerDir(owner))
+// RemoveIdleOwner leaves the folder of an owner that has since taken a new lease, such as a session restored from archive.
+func (h *Host) RemoveIdleOwner(owner string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.ownedKinds(owner) == 0 {
+		_ = os.RemoveAll(h.ownerDir(owner))
+	}
 }

@@ -15,31 +15,18 @@ import (
 var envPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func (h *Host) install(ctx context.Context, owner string, l *lease, app string) (map[string]any, error) {
-	if !filepath.IsAbs(app) || !strings.HasSuffix(filepath.Clean(app), ".app") {
+	if !filepath.IsAbs(app) || filepath.Ext(filepath.Clean(app)) != ".app" {
 		return nil, refuse("invalid", "app must be the absolute path of a .app.")
 	}
-	real, err := filepath.EvalSymlinks(app)
-	if err != nil {
-		return nil, refuse("not_found", "No app is at that path.")
-	}
-	dir := h.ownerDir(owner)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	root, err := filepath.EvalSymlinks(dir)
+	staged, cleanup, err := h.stageApp(owner, filepath.Clean(app))
 	if err != nil {
 		return nil, err
 	}
-	if rel, err := filepath.Rel(root, real); err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return nil, &Error{Code: "out_of_scope", Message: "Copy the .app into your outDir first; install takes apps only from there.", Detail: map[string]any{"outDir": dir}}
-	}
-	if info, err := os.Stat(real); err != nil || !info.IsDir() {
-		return nil, refuse("invalid", "app must be a .app folder.")
-	}
-	if _, err := h.run(ctx, "xcrun", "simctl", "install", l.udid, real); err != nil {
+	defer cleanup()
+	if _, err := h.run(ctx, "xcrun", "simctl", "install", l.udid, staged); err != nil {
 		return nil, err
 	}
-	return map[string]any{"installed": real}, nil
+	return map[string]any{"installed": app}, nil
 }
 
 func (h *Host) launch(ctx context.Context, l *lease, req Request) (map[string]any, error) {
@@ -63,9 +50,7 @@ func (h *Host) launch(ctx context.Context, l *lease, req Request) (map[string]an
 	if err != nil {
 		return nil, err
 	}
-	h.mu.Lock()
 	l.launched[req.BundleID] = true
-	h.mu.Unlock()
 	result := map[string]any{"launched": req.BundleID}
 	if fields := strings.Fields(string(out)); len(fields) > 0 {
 		if pid, err := strconv.Atoi(fields[len(fields)-1]); err == nil {

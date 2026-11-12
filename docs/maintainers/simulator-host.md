@@ -34,7 +34,10 @@ the way the script does: on the newest iOS runtime, as an iPhone or an 11-inch
 iPad Pro, and, when simslim is installed, slimmed with the profile in
 `internal/simhost/simslim-profile.json` (a copy of
 `scripts/simslim-profile.json`, kept equal by a test) before it takes its name,
-so a device whose slimming failed is never found and reused.
+so a device whose slimming failed is never found and reused. The daemon and the
+script both find or create a device only while holding
+`/tmp/agenthail-simulator-create.lock`, so two first users on a Mac create one
+device between them.
 
 ## Leases
 
@@ -52,7 +55,16 @@ A session drives a device only while it holds its lease:
   it.
 - Ending a lease terminates the apps it launched and clears the device's
   location and status bar overrides. It never erases the device, changes its
-  appearance or touches apps it did not launch.
+  appearance or touches apps it did not launch. An action still running when
+  the lease ends finishes first, so an app it launches is terminated too, and
+  no action starts on an ended lease.
+- Archiving takes the session's leases away at once; their cleanup then runs
+  in the background and holds the device's lock until it is done. The
+  session's output folder is removed after that only if the session has not
+  taken a new lease meanwhile, as a restored session can.
+- Sessions run as the same user, so leases and output folders keep them apart
+  by convention, as the browser host's tabs do: a session with a shell can run
+  `simctl` itself.
 
 ## Actions
 
@@ -67,10 +79,13 @@ Every action except `list`, `acquire`, `renew` and `release` needs a lease.
   or `x`, `y` and `toX`, `toY`, with `seconds` (0.6 by default). `type` sends
   its text to the focused field on AXe's standard input. `button` presses
   `home`, `lock` or `side-button`. There is no Siri, Apple Pay, microphone or
-  voice action: a microphone prompt on the Mac aborts simulator calls.
+  voice action.
 - `install` takes a `.app` folder inside the session's `outDir` (in the lease
-  and `list`), symlinks resolved; any other path, including another session's
-  folder, is `out_of_scope`. `launch` passes `args`, and `env` as
+  and `list`); any other path, including another session's folder or one
+  reached through a link, is `out_of_scope`. The daemon copies the app through
+  an `os.Root` opened on that folder, refusing an app that holds a link, into a
+  private staging folder, and installs that copy, so the path cannot be
+  swapped between the check and the install. `launch` passes `args`, and `env` as
   `SIMCTL_CHILD_` variables, and restarts an app already running.
   `terminate` and `openUrl` do what they say.
 - `screenshot` writes a PNG of the screen and returns `file`, `bytes`, `width`

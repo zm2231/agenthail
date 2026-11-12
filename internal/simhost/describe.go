@@ -83,7 +83,6 @@ func describeNode(node axNode) string {
 	return strings.Join(parts, " ")
 }
 
-// head cuts lines to fit limit bytes, at a line, and says whether it cut.
 func head(lines []string, limit int) (string, bool) {
 	var b strings.Builder
 	for _, line := range lines {

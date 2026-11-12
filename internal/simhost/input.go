@@ -18,9 +18,7 @@ func (h *Host) describe(ctx context.Context, owner string, l *lease, limit int) 
 	if err != nil {
 		return nil, err
 	}
-	h.mu.Lock()
 	l.refs = refs
-	h.mu.Unlock()
 	whole := strings.Join(lines, "\n") + "\n"
 	file, err := h.writeOut(owner, "describe.txt", []byte(whole))
 	if err != nil {
@@ -39,9 +37,7 @@ func (h *Host) describe(ctx context.Context, owner string, l *lease, limit int) 
 
 func (h *Host) at(l *lease, ref string, x, y *float64) (point, error) {
 	if ref != "" {
-		h.mu.Lock()
 		p, ok := l.refs[ref]
-		h.mu.Unlock()
 		if !ok {
 			return point{}, refuse("not_found", "No ref %s in the latest describe; describe again.", ref)
 		}
@@ -86,6 +82,9 @@ func (h *Host) screenshot(ctx context.Context, owner string, l *lease) (map[stri
 		return nil, err
 	}
 	if _, err := h.run(ctx, "xcrun", "simctl", "io", l.udid, "screenshot", "--type=png", path); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
 		return nil, err
 	}
 	data, err := os.ReadFile(path)

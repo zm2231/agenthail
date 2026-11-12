@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -34,6 +35,8 @@ type lease struct {
 	lastUsed time.Time
 	capAt    time.Time
 	lock     *os.File
+	mu       sync.Mutex
+	ended    bool
 	launched map[string]bool
 	refs     map[string]point
 }
@@ -61,6 +64,7 @@ func (h *Host) acquire(ctx context.Context, owner, kindName string) (LeaseView, 
 	if !ok {
 		return LeaseView{}, refuse("invalid", "kind must be iphone or ipad.")
 	}
+	h.endExpired(func(l *lease) bool { return l.kind == kindName })
 	h.mu.Lock()
 	for _, l := range h.leases {
 		if l.kind == kindName {
@@ -119,6 +123,7 @@ func (h *Host) boot(ctx context.Context, udid string) error {
 }
 
 func (h *Host) held(owner, kindName string) (*lease, error) {
+	h.endExpired(func(l *lease) bool { return l.owner == owner })
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, l := range h.leases {
@@ -155,30 +160,42 @@ func (h *Host) renew(owner, kindName string) (LeaseView, error) {
 }
 
 func (h *Host) Release(owner, kindName string) []string {
-	h.mu.Lock()
-	var ended []*lease
-	for udid, l := range h.leases {
-		if l.owner == owner && (kindName == "" || l.kind == kindName) {
-			ended = append(ended, l)
-			delete(h.leases, udid)
-		}
-	}
-	h.mu.Unlock()
-	return h.end(ended)
+	return h.end(h.Detach(owner, kindName).leases)
+}
+
+type Detached struct{ leases []*lease }
+
+func (h *Host) Detach(owner, kindName string) Detached {
+	return Detached{h.detach(func(l *lease) bool { return l.owner == owner && (kindName == "" || l.kind == kindName) })}
 }
 
 func (h *Host) Sweep() []string {
-	now := h.now()
+	return h.end(h.detach(h.expired))
+}
+
+func (h *Host) endExpired(match func(*lease) bool) {
+	h.end(h.detach(func(l *lease) bool { return match(l) && h.expired(l) }))
+}
+
+func (h *Host) expired(l *lease) bool {
+	return !h.now().Before(h.ends(l))
+}
+
+func (h *Host) detach(match func(*lease) bool) []*lease {
 	h.mu.Lock()
-	var ended []*lease
+	defer h.mu.Unlock()
+	var detached []*lease
 	for udid, l := range h.leases {
-		if !now.Before(h.ends(l)) {
-			ended = append(ended, l)
+		if match(l) {
+			detached = append(detached, l)
 			delete(h.leases, udid)
 		}
 	}
-	h.mu.Unlock()
-	return h.end(ended)
+	return detached
+}
+
+func (h *Host) End(detached Detached) {
+	h.end(detached.leases)
 }
 
 func (h *Host) end(ended []*lease) []string {
@@ -191,7 +208,14 @@ func (h *Host) end(ended []*lease) []string {
 	return kinds
 }
 
+// cleanup takes the lease's own lock, so it waits for an action still running and no action starts after it.
 func (h *Host) cleanup(l *lease) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.ended {
+		return
+	}
+	l.ended = true
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	bundles := make([]string, 0, len(l.launched))
@@ -208,4 +232,10 @@ func (h *Host) cleanup(l *lease) {
 		}
 	}
 	l.lock.Close()
+}
+
+func (h *Host) Holds(owner string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.ownedKinds(owner) > 0
 }

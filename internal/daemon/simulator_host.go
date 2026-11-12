@@ -34,6 +34,9 @@ func (d *Daemon) releaseSimulators(sessionID string) {
 	if d.simHost == nil {
 		return
 	}
-	d.simHost.Release(sessionID, "")
-	d.simHost.RemoveOwner(sessionID)
+	detached := d.simHost.Detach(sessionID, "")
+	go func() {
+		d.simHost.End(detached)
+		d.simHost.RemoveIdleOwner(sessionID)
+	}()
 }

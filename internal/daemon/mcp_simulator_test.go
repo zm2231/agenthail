@@ -91,7 +91,11 @@ func TestSimulatorToolLeasesADeviceToOneSessionAndArchivingReleasesIt(t *testing
 	if code := refusalCode(t, f.child, "agenthail_simulator", map[string]any{"action": "button", "button": "home"}); code != "not_held" {
 		t.Fatalf("second session button = %q", code)
 	}
-	if code := refusalCode(t, f.parent, "agenthail_simulator", map[string]any{"action": "install", "app": "/Applications/Safari.app"}); code != "out_of_scope" {
+	elsewhere := filepath.Join(t.TempDir(), "Elsewhere.app")
+	if err := os.MkdirAll(elsewhere, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if code := refusalCode(t, f.parent, "agenthail_simulator", map[string]any{"action": "install", "app": elsewhere}); code != "out_of_scope" {
 		t.Fatalf("install from outside outDir = %q", code)
 	}
 	lock, err := os.OpenFile(filepath.Join(f.lockDir, "agenthail-simulator-U1.lock"), os.O_RDWR, 0)

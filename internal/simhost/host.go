@@ -170,6 +170,11 @@ func (h *Host) find(ctx context.Context, name string) (device, bool, error) {
 func (h *Host) resolve(ctx context.Context, kind Kind) (device, error) {
 	h.create.Lock()
 	defer h.create.Unlock()
+	unlock, err := h.lockCreate(ctx)
+	if err != nil {
+		return device{}, err
+	}
+	defer unlock()
 	if d, ok, err := h.find(ctx, kind.Name); err != nil || ok {
 		return d, err
 	}

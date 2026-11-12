@@ -12,24 +12,24 @@ import (
 
 type mcpSimulatorInput struct {
 	Action    string            `json:"action" jsonschema:"list, acquire, renew, release, install, launch, terminate, openUrl, describe, tap, type, swipe, button, screenshot, push, location or logs."`
-	Kind      string            `json:"kind,omitempty" jsonschema:"iphone or ipad: acquire; for the rest, which of your simulators when you hold both."`
-	App       string            `json:"app,omitempty" jsonschema:"install: absolute path of a .app inside your outDir."`
-	BundleID  string            `json:"bundleId,omitempty" jsonschema:"launch, terminate, push, logs: the app's bundle id."`
-	Args      []string          `json:"args,omitempty" jsonschema:"launch: launch arguments."`
-	Env       map[string]string `json:"env,omitempty" jsonschema:"launch: environment for the app."`
+	Kind      string            `json:"kind,omitempty" jsonschema:"iphone or ipad; needed when you hold both."`
+	App       string            `json:"app,omitempty" jsonschema:"install: a .app path inside your outDir."`
+	BundleID  string            `json:"bundleId,omitempty" jsonschema:"The app's bundle id."`
+	Args      []string          `json:"args,omitempty" jsonschema:"launch: arguments."`
+	Env       map[string]string `json:"env,omitempty" jsonschema:"launch: environment."`
 	URL       string            `json:"url,omitempty" jsonschema:"openUrl: a link or deep link."`
-	Ref       string            `json:"ref,omitempty" jsonschema:"tap, swipe start: a ref from the latest describe."`
-	X         *float64          `json:"x,omitempty" jsonschema:"tap, swipe start: x in points."`
-	Y         *float64          `json:"y,omitempty" jsonschema:"tap, swipe start: y in points."`
-	ToX       *float64          `json:"toX,omitempty" jsonschema:"swipe: end x in points."`
-	ToY       *float64          `json:"toY,omitempty" jsonschema:"swipe: end y in points."`
-	Seconds   float64           `json:"seconds,omitempty" jsonschema:"swipe: duration, default 0.6; logs: how far back, at most 300, default 60."`
+	Ref       string            `json:"ref,omitempty" jsonschema:"tap, swipe: a ref from the latest describe."`
+	X         *float64          `json:"x,omitempty" jsonschema:"tap, swipe: x in points."`
+	Y         *float64          `json:"y,omitempty" jsonschema:"tap, swipe: y in points."`
+	ToX       *float64          `json:"toX,omitempty" jsonschema:"swipe: end x."`
+	ToY       *float64          `json:"toY,omitempty" jsonschema:"swipe: end y."`
+	Seconds   float64           `json:"seconds,omitempty" jsonschema:"swipe: duration; logs: how far back, at most 300."`
 	Text      string            `json:"text,omitempty" jsonschema:"type: text for the focused field."`
-	Button    string            `json:"button,omitempty" jsonschema:"button: home, lock or side-button."`
-	Payload   json.RawMessage   `json:"payload,omitempty" jsonschema:"push: the notification, a JSON object with aps."`
+	Button    string            `json:"button,omitempty" jsonschema:"home, lock or side-button."`
+	Payload   json.RawMessage   `json:"payload,omitempty" jsonschema:"push: a JSON object with aps."`
 	Latitude  *float64          `json:"latitude,omitempty" jsonschema:"location: with longitude; neither clears it."`
 	Longitude *float64          `json:"longitude,omitempty" jsonschema:"location: with latitude."`
-	Path      string            `json:"path,omitempty" jsonschema:"screenshot: a new absolute .png path in your folders to save to."`
+	Path      string            `json:"path,omitempty" jsonschema:"screenshot: a new absolute .png path in your folders."`
 }
 
 func (d *Daemon) mcpSimulator(ctx context.Context, caller *mcpCaller, input mcpSimulatorInput) (any, error) {

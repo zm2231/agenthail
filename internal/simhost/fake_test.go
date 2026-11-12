@@ -18,6 +18,8 @@ type fakeSim struct {
 	missing  map[string]bool
 	describe string
 	created  int
+	block    map[string]chan struct{}
+	onCall   func(Command)
 }
 
 const runtimesJSON = `{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-18-5","isAvailable":true},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","isAvailable":true}]}`
@@ -25,10 +27,26 @@ const runtimesJSON = `{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRun
 const deviceTypesJSON = `{"devicetypes":[{"identifier":"t.iPad-Pro-13","name":"iPad Pro 13-inch (M5)"},{"identifier":"t.iPad-Pro-11","name":"iPad Pro 11-inch (M5)"},{"identifier":"t.iPhone-17","name":"iPhone 17"}]}`
 
 func newFakeSim() *fakeSim {
-	return &fakeSim{devices: map[string]string{}, missing: map[string]bool{}}
+	return &fakeSim{devices: map[string]string{}, missing: map[string]bool{}, block: map[string]chan struct{}{}}
 }
 
 func (f *fakeSim) exec(_ context.Context, cmd Command) ([]byte, error) {
+	f.mu.Lock()
+	line0 := strings.Join(append([]string{cmd.Name}, cmd.Args...), " ")
+	var wait chan struct{}
+	for prefix, ch := range f.block {
+		if strings.HasPrefix(line0, prefix) {
+			wait = ch
+		}
+	}
+	onCall := f.onCall
+	f.mu.Unlock()
+	if onCall != nil {
+		onCall(cmd)
+	}
+	if wait != nil {
+		<-wait
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, cmd)

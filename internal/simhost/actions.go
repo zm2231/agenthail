@@ -37,7 +37,6 @@ var buttons = map[string]bool{"home": true, "lock": true, "side-button": true}
 var bundlePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,254}$`)
 
 func (h *Host) Call(ctx context.Context, owner string, req Request) (map[string]any, error) {
-	h.Sweep()
 	switch req.Action {
 	case "list":
 		return h.list(ctx, owner)
@@ -56,6 +55,11 @@ func (h *Host) Call(ctx context.Context, owner string, req Request) (map[string]
 	l, err := h.held(owner, req.Kind)
 	if err != nil {
 		return nil, err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.ended {
+		return nil, refuse("not_held", "Your lease of that simulator has ended; acquire it again.")
 	}
 	switch req.Action {
 	case "install":
