@@ -95,7 +95,9 @@ keeps the only record of tabs:
   `file`, `bytes`, `width` and `height`. Given `path`, the daemon copies it
   there: an absolute `.png` whose folder exists, symlinks resolved, inside the
   session's ceiling roots or else its own folder (`out_of_scope` otherwise),
-  and not already a file (`exists`).
+  and not already a file (`exists`). The result's `path` is that real path, the
+  one checked against the roots, so it can differ from the path given when a
+  folder on the way is a symlink (on macOS, `/var` is `/private/var`).
 - `tabs.act` takes a `kind` (`click`, `type`, `select`, `hover`, `drag`,
   `press`, `upload`) and a `ref` from the latest snapshot, with a
   10-second limit. `tabs.wait` waits for text, a ref, a URL part or network

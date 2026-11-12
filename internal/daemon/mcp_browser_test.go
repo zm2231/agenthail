@@ -209,7 +209,16 @@ func TestASnapshotOfALongPageReturnsAnExcerptAndTheFileThatHoldsAllOfIt(t *testi
 func TestTextAndLinksFitTheResultAndAScreenshotIsSavedOnlyInsideTheSessionsFolders(t *testing.T) {
 	f := newBrowserFixture(t)
 	eventually(t, "the browser host answers", func() bool { return f.host.Status().State != browserhost.StateUnavailable })
-	work, outside := t.TempDir(), t.TempDir()
+	real, outside := t.TempDir(), t.TempDir()
+	work := filepath.Join(t.TempDir(), "work")
+	if err := os.Symlink(real, work); err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := filepath.EvalSymlinks(real); err != nil {
+		t.Fatal(err)
+	} else {
+		real = resolved
+	}
 	session, err := f.d.Registry.Session("from")
 	if err != nil {
 		t.Fatal(err)
@@ -237,7 +246,7 @@ func TestTextAndLinksFitTheResultAndAScreenshotIsSavedOnlyInsideTheSessionsFolde
 
 	saved := filepath.Join(work, "page.png")
 	shot := browse(t, f.parent, map[string]any{"action": "screenshot", "tab": tab, "path": saved})
-	if png, err := os.ReadFile(saved); err != nil || shot["path"] != saved || !bytes.HasPrefix(png, []byte("\x89PNG")) {
+	if png, err := os.ReadFile(saved); err != nil || shot["path"] != filepath.Join(real, "page.png") || !bytes.HasPrefix(png, []byte("\x89PNG")) {
 		t.Fatalf("screenshot = %v, err %v", shot, err)
 	}
 	if err := os.Symlink(outside, filepath.Join(work, "out")); err != nil {
