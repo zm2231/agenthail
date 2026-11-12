@@ -71,6 +71,7 @@ type pairedHost struct {
 	detail string
 	epoch  string
 	build  buildinfo.Identity
+	sims   bool
 	drain  sync.Mutex
 	wake   chan struct{}
 	// tokenProblem, guarded by mu, says how to pair again when this daemon's
@@ -121,6 +122,18 @@ func (d *Daemon) checkHostToken(ctx context.Context, host *pairedHost) {
 	if changed {
 		d.invalidateDashboard()
 	}
+}
+
+func (h *pairedHost) setSimulators(runs bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sims = runs
+}
+
+func (h *pairedHost) runsSimulators() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.sims
 }
 
 func (h *pairedHost) setBuild(build buildinfo.Identity) {
@@ -533,6 +546,7 @@ func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *h
 		return false, err
 	}
 	host.setBuild(version.Identity)
+	host.setSimulators(version.Simulators)
 	d.hostAnswered(host, outage)
 	d.checkHostToken(ctx, host)
 	for ctx.Err() == nil {

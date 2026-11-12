@@ -13,9 +13,10 @@ func (d *Daemon) SetSimulatorHost(host *simhost.Host) {
 }
 
 func (d *Daemon) sweepSimulatorLeases(ctx context.Context) {
-	if d.simHost == nil {
+	if d.simHost == nil || !d.simHost.Local() {
 		return
 	}
+	d.simulatorStatus(ctx)
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -32,6 +33,10 @@ func (d *Daemon) sweepSimulatorLeases(ctx context.Context) {
 
 func (d *Daemon) releaseSimulators(sessionID string) {
 	if d.simHost == nil {
+		return
+	}
+	if !d.simHost.Local() {
+		go d.releaseForwardedSimulators(sessionID)
 		return
 	}
 	detached := d.simHost.Detach(sessionID, "")
