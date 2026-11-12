@@ -8,11 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudepick"
-	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/worktree"
 )
 
 type threadCreateOutput struct {
@@ -107,7 +104,8 @@ func (a *App) cmdThread(args []string) error {
 	if err != nil {
 		return err
 	}
-	if hostText := strings.TrimSpace(flagVal(args, "--host")); hostText != "" {
+	hostText := strings.TrimSpace(flagVal(args, "--host"))
+	if hostText != "" {
 		local, err := a.isLocalHost(hostText)
 		if err != nil {
 			return err
@@ -115,158 +113,15 @@ func (a *App) cmdThread(args []string) error {
 		if !local && agentEnvironment() {
 			return &agentScopeRefusal{Code: "out_of_scope", Message: "An agent session starts sessions only on its own host; ask your coordinator or the person to start one on " + hostText + "."}
 		}
-		if !local {
-			return a.createThreadThroughDaemon(hostText, request, creator, args)
-		}
-		if request.cwd, err = resolveThreadCwd(request.cwd); err != nil {
-			return err
-		}
-		request.options.Cwd = request.cwd
-	}
-	if agentEnvironment() {
-		return a.createThreadThroughDaemon("", request, creator, args)
-	}
-	adapter := a.adapters().ForSurface(request.surface)
-	if adapter == nil {
-		return fmt.Errorf("surface %s is not configured", request.surface)
-	}
-	starter, ok := adapter.(surface.SessionStarter)
-	if !ok {
-		return fmt.Errorf("%s cannot start conversations", request.surface)
-	}
-	timeout, err := commandTimeout(args, a.DefaultTimeout)
-	if err != nil {
-		return err
-	}
-	ctx, cancel, err := a.deadlineContext(timeout)
-	if err != nil {
-		return err
-	}
-	defer cancel()
-	var pick *claudepick.Pick
-	if request.surface == surface.KindClaude && request.options.ConfigRoot == "" {
-		chosen, err := a.placeClaudeSession(creator)
-		if err != nil {
-			return err
-		}
-		request.options.ConfigRoot, pick = chosen.Root, &chosen
-	}
-	reservation, err := a.registry().ReserveAlias(request.alias, time.Now().Add(timeout+threadNameMargin))
-	if err != nil {
-		return fmt.Errorf("reserve thread alias: %w", err)
-	}
-	defer a.cleanUp("free the name @"+reservation.Name, func() error { return a.registry().ReleaseAliasReservation(reservation) })
-	messageUUID := uuid.NewString()
-	ctx = surface.WithMessageUUID(ctx, messageUUID)
-	var readyErr error
-	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
-		readyErr = a.registry().RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
-		return readyErr
-	})
-	var work *worktree.Plan
-	if request.worktree {
-		plan, err := worktree.Begin(ctx, a.registry(), worktree.Spec{Cwd: request.cwd, Branch: request.branch, Base: request.base, Name: request.alias})
-		if err != nil {
-			return err
-		}
-		work, request.options.Cwd = &plan, plan.Cwd
-	}
-
-	session, deliveryResult, startErr := starter.StartSession(ctx, request.options)
-	if work != nil {
-		if session == nil {
-			a.cleanUp("take back worktree "+work.WorktreePath, func() error {
-				return worktree.Abandon(context.WithoutCancel(ctx), a.registry(), *work)
-			})
-		} else if activated, err := a.registry().ActivateWork(work.WorktreePath, session.ID); err != nil || !activated {
-			fmt.Fprintf(os.Stderr, "record worktree %s: activated=%t %v\n", work.WorktreePath, activated, err)
-		}
-	}
-	if session != nil && readyErr != nil {
-		return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but could not be recorded before its first turn, which was not sent: %s; do not retry automatically", session.ID, readyErr))
-	}
-	if session != nil {
-		if err := a.registry().RegisterSession(*session); err != nil {
-			return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but local registration failed: %s; do not retry automatically", session.ID, err))
-		}
-		if err := a.registry().BindReservedAlias(reservation, session.ID); err != nil {
-			return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but its name could not be persisted: %s; do not retry automatically", session.ID, err))
-		}
-		if err := a.registry().RecordSessionOrigin(registry.OriginOf(session.ID, creator)); err != nil {
-			return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but who started it could not be recorded: %s; do not retry automatically", session.ID, err))
-		}
-	}
-
-	output := threadCreateOutput{OK: startErr == nil, Session: session, Delivery: deliveryResult, Alias: request.alias, Account: pick}
-	if work != nil && session != nil {
-		output.Worktree = &threadWorktree{Path: work.WorktreePath, Branch: work.Branch, Base: work.BaseRef, Behind: work.Behind}
-	}
-	if startErr != nil {
-		if session != nil {
-			intent, intentErr := a.registry().RecordSessionCreationIntent(session.ID, surface.SendOptions{SourceSessionID: creator}.Sender(), messageUUID, request.message)
-			if intentErr != nil {
-				output.Status = "storage_failed"
-				output.Code = "create_storage_failed"
-				output.Retryable = false
-				output.Error = fmt.Sprintf("session was created, but its delivery intent could not be persisted: %s; do not retry automatically", intentErr)
-				return emitThreadFailure(request, output, fmt.Errorf("%s", output.Error))
+		if local {
+			if request.cwd, err = resolveThreadCwd(request.cwd); err != nil {
+				return err
 			}
-			output.DeliveryID = intent.ID
-			if surface.IsDeliveryOutcomeUnknown(startErr) {
-				recordThreadCreateHistory(a.registry(), "submitted", session, request.message, "", startErr.Error())
-				return emitSubmittedThreadOutput(request, output)
-			}
-			_, _ = a.registry().RecordDeliveryFailure(intent.ID, startErr.Error())
-			recordThreadCreateHistory(a.registry(), "failed", session, request.message, "", startErr.Error())
-			output.OK = false
-			output.Status = "failed"
-			output.Code = "initial_turn_failed"
-			output.Retryable = false
-			output.Error = startErr.Error()
-			return emitThreadFailure(request, output, startErr)
-		}
-		output.Error = startErr.Error()
-		output.Status, output.Code = "failed", "create_failed"
-		if surface.IsDeliveryOutcomeUnknown(startErr) {
-			output.Unknown = true
-			output.Status, output.Code = "unknown", "create_unknown"
-			output.Error = fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
-		}
-		recordThreadCreateHistory(a.registry(), output.Status, session, request.message, "", output.Error)
-		output.Retryable = false
-		if output.Unknown {
-			return emitThreadFailure(request, output, fmt.Errorf("%s: %w", output.Error, startErr))
-		}
-		return emitThreadFailure(request, output, startErr)
-	}
-	if session == nil {
-		return fmt.Errorf("thread creation returned no session")
-	}
-	result := ""
-	if deliveryResult != nil {
-		result = deliveryResult.UUID
-	}
-	if result != "" {
-		if err := a.registry().MarkDeliveryStarted(session.ID, result, ""); err != nil {
-			_ = a.registry().RecordHistory(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: request.message, Result: result, Error: err.Error()})
+			request.options.Cwd = request.cwd
+			hostText = ""
 		}
 	}
-	recordThreadCreateHistory(a.registry(), "sent", session, request.message, result, "")
-	if request.jsonOut {
-		return emit(output)
-	}
-	target := string(session.Surface) + "/" + session.ID
-	if request.alias != "" {
-		target = "@" + request.alias
-	}
-	if result == "" {
-		fmt.Printf("created %s in %s\n", target, session.Cwd)
-	} else {
-		fmt.Printf("created %s in %s and started turn %s\n", target, session.Cwd, result)
-	}
-	printThreadWorktree(output.Worktree)
-	printPickedAccount(output.Account)
-	return nil
+	return a.createThreadThroughDaemon(hostText, request, creator, args)
 }
 
 func printThreadWorktree(work *threadWorktree) {
@@ -286,34 +141,6 @@ func printPickedAccount(pick *claudepick.Pick) {
 	if pick != nil {
 		fmt.Printf("account: %s (%s)\n", pickTitle(*pick), pick.Reason)
 	}
-}
-
-func emitSubmittedThreadOutput(request threadCreateRequest, output threadCreateOutput) error {
-	output.OK = true
-	output.Status = "submitted"
-	output.Accepted = true
-	output.Retryable = false
-	output.Delivery = nil
-	output.Detail = submittedThreadDetail(output.Session, request.alias)
-	if request.jsonOut {
-		return emit(output)
-	}
-	fmt.Println(output.Detail)
-	return nil
-}
-
-func submittedThreadDetail(session *surface.Session, alias string) string {
-	target := alias
-	if target != "" {
-		target = "@" + target
-	} else {
-		target = string(session.Surface) + ":" + session.ID
-	}
-	return "Submitted to " + target + "."
-}
-
-func emitCreateStorageFailure(request threadCreateRequest, session *surface.Session, message string) error {
-	return emitThreadFailure(request, threadCreateOutput{OK: false, Status: "storage_failed", Code: "create_storage_failed", Retryable: false, Session: session, Error: message, Warning: message, Alias: request.alias}, fmt.Errorf("%s", message))
 }
 
 func emitThreadFailure(request threadCreateRequest, output threadCreateOutput, err error) error {
@@ -429,15 +256,4 @@ func resolveThreadCwd(value string) (string, error) {
 		return "", fmt.Errorf("working directory is not a directory")
 	}
 	return filepath.Clean(resolved), nil
-}
-
-func recordThreadCreateHistory(reg *registry.Registry, kind string, session *surface.Session, message, result, errorText string) {
-	if reg == nil {
-		return
-	}
-	sessionID := ""
-	if session != nil {
-		sessionID = session.ID
-	}
-	_ = reg.RecordHistory(registry.HistoryEntry{Kind: kind, SessionID: sessionID, Message: message, Result: result, Error: errorText})
 }

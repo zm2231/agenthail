@@ -55,6 +55,7 @@ func TestASessionWithAgenthailsToolsIsTaughtTheToolsAndATerminalOneTheCLI(t *tes
 
 func TestANewCodexThreadsFirstPromptGetsItsToolCard(t *testing.T) {
 	app, starter, cwd := cardFixture(t)
+	serveCreates(t, app)
 	pending, err := app.Registry.IssuePendingCredential(nil, time.Now(), time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +85,7 @@ func TestANewCodexThreadsFirstPromptGetsItsToolCard(t *testing.T) {
 
 func TestAThreadThatCannotBeRecordedBeforeItsFirstTurnIsReportedAsNotSent(t *testing.T) {
 	app, starter, cwd := cardFixture(t)
+	serveCreates(t, app)
 	starter.session.RuntimeKind = ""
 	starter.ready = true
 	turned := false

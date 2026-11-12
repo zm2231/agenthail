@@ -59,6 +59,7 @@ func callerCardJSON(t *testing.T, app *App, variable, id string) agentcard.Card 
 
 func TestASessionAnAgentStartsReportsToThatAgent(t *testing.T) {
 	app, _, cwd := cardFixture(t)
+	serveCreates(t, app)
 	if _, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--alias", "builder", "--from", "@planner", "--json"})
 	}); err != nil {
@@ -89,6 +90,7 @@ func TestASessionAnAgentStartsReportsToThatAgent(t *testing.T) {
 
 func TestASessionThePersonStartsReportsToTheCoordinator(t *testing.T) {
 	app, _, cwd := cardFixture(t)
+	serveCreates(t, app)
 	if _, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--json"})
 	}); err != nil {
@@ -124,6 +126,7 @@ func helpAgentAs(t *testing.T, app *App, sessionID string) string {
 
 func TestTheLeadIsToldItAnswersItsSessionsPrompts(t *testing.T) {
 	app, _, cwd := cardFixture(t)
+	serveCreates(t, app)
 	if _, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--from", "@planner", "--json"})
 	}); err != nil {
@@ -179,6 +182,7 @@ func TestATerminalLeadIsToldWhenClaudesSettingsHoldItsMessages(t *testing.T) {
 
 func TestASessionWhoseWorkerHasNoLeadIsToldItAnswersItsPrompts(t *testing.T) {
 	app, starter, _ := cardFixture(t)
+	serveCreates(t, app)
 	elsewhere := mustEvalSymlinks(t, t.TempDir())
 	starter.session.Cwd = elsewhere
 	if text := helpAgentAs(t, app, "planner-conversation"); strings.Contains(text, "permission prompts") {
@@ -228,6 +232,7 @@ func TestThreadCreateRefusesACallerFromAnotherAgenthail(t *testing.T) {
 
 func TestThreadCreateFromNamesTheCreator(t *testing.T) {
 	app, starter, cwd := cardFixture(t)
+	serveCreates(t, app)
 	if err := app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--from", "@nobody"}); err == nil || len(starter.options) != 0 {
 		t.Fatalf("an unknown --from started a thread: err=%v", err)
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type starterCLISurface struct {
@@ -21,6 +22,7 @@ type starterCLISurface struct {
 	delivery *surface.SendResult
 	err      error
 	wait     bool
+	stopped  chan struct{}
 	ready    bool
 	during   func()
 }
@@ -38,6 +40,9 @@ func (f *starterCLISurface) StartSession(ctx context.Context, options surface.Se
 	if f.wait {
 		noteBound(f.bounded, ctx)
 		<-ctx.Done()
+		if f.stopped != nil {
+			close(f.stopped)
+		}
 		return nil, nil, ctx.Err()
 	}
 	return f.session, f.delivery, f.err
@@ -59,6 +64,7 @@ func TestThreadCreateCodexRegistersAndPrintsJSON(t *testing.T) {
 		delivery:   &surface.SendResult{UUID: "turn-456", Accepted: true},
 	}
 	app := threadFixture(t, starter)
+	serveCreates(t, app)
 	output, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", cwd, "--alias", "builder", "--model", "gpt-test", "--approval", "on-request", "--json"})
 	})
@@ -101,6 +107,7 @@ func TestThreadCreateCodexAcceptsMessageFlagAndDefaultsToCallerCwd(t *testing.T)
 		delivery:   &surface.SendResult{UUID: "turn-flag", Accepted: true},
 	}
 	app := threadFixture(t, starter)
+	serveCreates(t, app)
 	wantCwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -141,6 +148,7 @@ func TestThreadCreateCodexReadsLongMessageFromStdin(t *testing.T) {
 		delivery:   &surface.SendResult{UUID: "turn", Accepted: true},
 	}
 	app := threadFixture(t, starter)
+	serveCreates(t, app)
 	if _, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "--message", "-"})
 	}); err != nil {
@@ -160,6 +168,7 @@ func TestThreadCreateCodexPreservesCreatedThreadOnUnknownTurn(t *testing.T) {
 		err:        surface.DeliveryOutcomeUnknown(errors.New("connection closed")),
 	}
 	app := threadFixture(t, starter)
+	serveCreates(t, app)
 	output, runErr := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", cwd, "--alias", "builder", "--json"})
 	})
@@ -199,6 +208,7 @@ func TestThreadCreateWithoutIdentityReportsItsOutcomeAsUnknownOrFailed(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			cwd := t.TempDir()
 			app := threadFixture(t, &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}, err: tc.err})
+			serveCreates(t, app)
 			output, runErr := captureStdout(t, func() error {
 				return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", cwd, "--json"})
 			})
@@ -226,6 +236,7 @@ func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 		err:        errors.New("initial message rejected"),
 	}
 	app := threadFixture(t, starter)
+	serveCreates(t, app)
 	output, runErr := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", cwd, "--json"})
 	})
@@ -277,16 +288,22 @@ func TestThreadCreateCodexValidatesInputs(t *testing.T) {
 }
 
 func TestThreadCreateCodexHonorsTimeout(t *testing.T) {
-	base := &cliSurface{kind: surface.KindCodex, bounded: make(chan boundedCall, 1)}
-	starter := &starterCLISurface{cliSurface: base, wait: true}
+	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}, wait: true, stopped: make(chan struct{})}
 	app := threadFixture(t, starter)
-	built := probeDeadlines(app)
+	serveCreates(t, app)
+	began := time.Now()
 	err := app.Run([]string{"thread", "create", "codex", "hello", "--timeout", "10ms"})
-	returned := time.Now()
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v", err)
 	}
-	requireFlagDeadline(t, built, base.bounded, returned, 10*time.Millisecond)
+	if waited := time.Since(began); waited > cancelledWithin {
+		t.Fatalf("the command waited %s past a 10ms --timeout", waited)
+	}
+	select {
+	case <-starter.stopped:
+	case <-time.After(cancelledWithin):
+		t.Fatal("the daemon kept starting the thread after the command gave up")
+	}
 }
 
 func TestThreadCreateHoldsItsNameFromBeforeTheStart(t *testing.T) {
@@ -298,6 +315,7 @@ func TestThreadCreateHoldsItsNameFromBeforeTheStart(t *testing.T) {
 		delivery:   &surface.SendResult{UUID: "turn-456", Accepted: true},
 	}
 	app := threadFixture(t, starter)
+	serveCreates(t, app)
 	starter.during = func() {
 		if err := app.Run([]string{"identify", "codex:alpha", "builder"}); err == nil || !strings.Contains(err.Error(), "@builder is the name of a conversation being started") {
 			t.Errorf("identify during the start: err=%v", err)
@@ -321,22 +339,27 @@ func TestThreadCreateThatStartsNothingFreesItsName(t *testing.T) {
 	}); err == nil {
 		t.Fatal("a start that timed out succeeded")
 	}
-	if _, err := app.Registry.ReserveAlias("builder", time.Now().Add(time.Minute)); err != nil {
-		t.Fatalf("the timed-out start kept its name: %v", err)
-	}
+	testkit.Eventually(t, "the timed-out start frees its name", cancelledWithin, func() bool {
+		reservation, err := app.Registry.ReserveAlias("builder", time.Now().Add(time.Minute))
+		if err != nil {
+			return false
+		}
+		_ = app.Registry.ReleaseAliasReservation(reservation)
+		return true
+	})
 }
 
 func TestThreadCreateRefusesANameAnotherStartHolds(t *testing.T) {
 	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}}
 	app := threadFixture(t, starter)
+	serveCreates(t, app)
 	if _, err := app.Registry.ReserveAlias("builder", time.Now().Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	_, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", t.TempDir(), "--alias", "builder"})
 	})
-	var reserved registry.AliasReservedError
-	if !errors.As(err, &reserved) || len(starter.options) != 0 {
+	if err == nil || !strings.Contains(err.Error(), "@builder is the name of a conversation being started") || len(starter.options) != 0 {
 		t.Fatalf("err=%v starts=%d", err, len(starter.options))
 	}
 }

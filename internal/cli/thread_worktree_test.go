@@ -17,6 +17,7 @@ func TestThreadCreateInAWorktreeStartsTheThreadThereAndRecordsIt(t *testing.T) {
 	checkout := worktreetest.PushedCheckout(t)
 	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}, session: &surface.Session{ID: "thread-wt", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}}
 	app := threadFixture(t, starter)
+	serveCreates(t, app)
 	output, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "fix it", "--cwd", filepath.Join(checkout, "app"), "--worktree", "--branch", "fix/it", "--json"})
 	})

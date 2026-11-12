@@ -194,6 +194,7 @@ func TestResolvingARegisteredSessionTheSurfaceCannotGiveDoesNotRefreshIt(t *test
 func exitedHostSession(t *testing.T) (*hostCLI, string) {
 	t.Helper()
 	c := newHostCLI(t)
+	stop := serveCreates(t, c.app)
 	output, err := c.run(t, "thread", "create", "claude", "start the work", "--name", "host-replace", "--cwd", c.host.Cwd, "--json")
 	if err != nil {
 		t.Fatalf("output=%q err=%v", output, err)
@@ -207,6 +208,7 @@ func exitedHostSession(t *testing.T) (*hostCLI, string) {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 	c.firstTurn(t, created.Session.ID)
+	stop()
 	end(t, c, created.Session.ID)
 	return c, created.Session.ID
 }

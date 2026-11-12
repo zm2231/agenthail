@@ -28,19 +28,6 @@ func nameIsFree(t *testing.T, app *App, name string, started time.Time) {
 	}
 }
 
-func TestAThreadCreatePastItsDeadlineFreesItsNameOnceTheRegistryIsFree(t *testing.T) {
-	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}, wait: true}
-	app := threadFixture(t, starter)
-	starter.during = func() { lockPastTheDeadline(t, app) }
-	started := time.Now()
-	if _, err := captureStdout(t, func() error {
-		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", t.TempDir(), "--alias", "builder", "--timeout", cleanupTimeout.String()})
-	}); err == nil {
-		t.Fatal("a start that ran out of time succeeded")
-	}
-	nameIsFree(t, app, "builder", started)
-}
-
 type deadlineForker struct {
 	*cliSurface
 	during func()

@@ -361,7 +361,7 @@ func (a *App) createThreadThroughDaemon(hostText string, request threadCreateReq
 	}
 	var data []byte
 	var status int
-	if hostText == "" {
+	if hostText == "" && agentEnvironment() {
 		data, status, err = a.agentCreate(ctx, payload)
 		if err != nil {
 			return err
@@ -371,11 +371,16 @@ func (a *App) createThreadThroughDaemon(hostText string, request threadCreateReq
 		if clientErr != nil {
 			return clientErr
 		}
-		data, status, err = client.action(ctx, payload)
+		if hostText == "" {
+			data, status, err = client.actionReceipt(ctx, payload)
+		} else {
+			data, status, err = client.action(ctx, payload)
+		}
 	}
 	var response struct {
 		OK         bool                `json:"ok"`
 		Status     string              `json:"status"`
+		Accepted   bool                `json:"accepted"`
 		Retryable  bool                `json:"retryable"`
 		Detail     string              `json:"detail"`
 		Warning    string              `json:"warning"`
@@ -386,25 +391,32 @@ func (a *App) createThreadThroughDaemon(hostText string, request threadCreateReq
 		Worktree   *threadWorktree     `json:"worktree"`
 		Error      json.RawMessage     `json:"error"`
 	}
-	message := ""
+	message, code := "", ""
 	if err != nil {
 		var statusErr hosts.StatusError
 		if !errors.As(err, &statusErr) || statusErr.Status != http.StatusBadGateway {
 			return fmt.Errorf("create%s: %w", where, err)
 		}
-		message = statusErr.Message
+		message, code = statusErr.Message, statusErr.Code
 	} else if decodeErr := json.Unmarshal(data, &response); decodeErr != nil {
 		return fmt.Errorf("decode create response (HTTP %d): %w", status, decodeErr)
 	} else {
-		message = createErrorText(response.Error)
+		message, code = createErrorText(response.Error), createErrorCode(response.Error)
 	}
-	output := threadCreateOutput{OK: err == nil && response.OK, Status: response.Status, Retryable: response.Retryable, Detail: response.Detail, Warning: response.Warning, DeliveryID: response.DeliveryID, Session: response.Session, Delivery: response.Result, Alias: request.alias, Account: response.Account, Worktree: response.Worktree, Error: message}
-	output.Unknown = output.Status == string(registry.DeliveryIntentSubmitted)
+	output := threadCreateOutput{OK: err == nil && response.OK, Status: response.Status, Code: code, Accepted: response.Accepted, Retryable: response.Retryable, Detail: response.Detail, Warning: response.Warning, DeliveryID: response.DeliveryID, Session: response.Session, Delivery: response.Result, Alias: request.alias, Account: response.Account, Worktree: response.Worktree, Error: message}
+	output.Unknown = code == "create_unknown"
 	if !output.OK {
 		if output.Error == "" {
 			output.Error = fmt.Sprintf("create%s failed", where)
 		}
-		return emitThreadFailure(request, output, errors.New(output.Error))
+		if output.Status == "" {
+			output.Status = createFailureStatus(code)
+		}
+		failure := errors.New(output.Error)
+		if output.Unknown {
+			failure = surface.DeliveryOutcomeUnknown(failure)
+		}
+		return emitThreadFailure(request, output, failure)
 	}
 	if request.jsonOut {
 		return emit(output)
@@ -421,7 +433,7 @@ func (a *App) createThreadThroughDaemon(hostText string, request threadCreateReq
 		label = hostText + hosts.Separator + label
 	}
 	switch {
-	case output.Unknown:
+	case output.Status == string(registry.DeliveryIntentSubmitted):
 		fmt.Printf("created %s in %s; first turn submitted: %s\n", label, output.Session.Cwd, output.Detail)
 	case output.Delivery != nil && output.Delivery.UUID != "":
 		fmt.Printf("created %s in %s and started turn %s\n", label, output.Session.Cwd, output.Delivery.UUID)
@@ -431,6 +443,26 @@ func (a *App) createThreadThroughDaemon(hostText string, request threadCreateReq
 	printThreadWorktree(output.Worktree)
 	printPickedAccount(output.Account)
 	return nil
+}
+
+func createErrorCode(raw json.RawMessage) string {
+	var envelope struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal(raw, &envelope) == nil {
+		return envelope.Code
+	}
+	return ""
+}
+
+func createFailureStatus(code string) string {
+	switch code {
+	case "create_unknown":
+		return "unknown"
+	case "create_storage_failed":
+		return "storage_failed"
+	}
+	return "failed"
 }
 
 // A create's error is text in its receipt and an object in the API's error envelope.
