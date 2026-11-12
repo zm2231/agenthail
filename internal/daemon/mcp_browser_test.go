@@ -205,3 +205,66 @@ func TestASnapshotOfALongPageReturnsAnExcerptAndTheFileThatHoldsAllOfIt(t *testi
 		t.Fatalf("another session's screenshot: code %q", code)
 	}
 }
+
+func TestTextAndLinksFitTheResultAndAScreenshotIsSavedOnlyInsideTheSessionsFolders(t *testing.T) {
+	f := newBrowserFixture(t)
+	eventually(t, "the browser host answers", func() bool { return f.host.Status().State != browserhost.StateUnavailable })
+	real, outside := t.TempDir(), t.TempDir()
+	work := filepath.Join(t.TempDir(), "work")
+	if err := os.Symlink(real, work); err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := filepath.EvalSymlinks(real); err != nil {
+		t.Fatal(err)
+	} else {
+		real = resolved
+	}
+	session, err := f.d.Registry.Session("from")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.Cwd = work
+	if err := f.d.Registry.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	tab := browse(t, f.parent, map[string]any{"action": "open", "url": f.page + "/long"})["tab"].(string)
+	text := browse(t, f.parent, map[string]any{"action": "text", "tab": tab})
+	if whole, err := os.ReadFile(text["file"].(string)); err != nil || text["truncated"] != true || !strings.Contains(string(whole), "Buy 599") {
+		t.Fatalf("text = %v, file err %v", text["full"], err)
+	}
+	if code := refusalCode(t, f.parent, "agenthail_browser", map[string]any{"action": "snapshot", "tab": tab, "depth": 0}); code != "invalid" {
+		t.Fatalf("snapshot depth 0: code %q", code)
+	}
+	shallow := browse(t, f.parent, map[string]any{"action": "snapshot", "tab": tab, "depth": 1})
+	if tree, err := os.ReadFile(shallow["file"].(string)); err != nil || shallow["lines"] != float64(601) || strings.Contains(string(tree), "link ") {
+		t.Fatalf("snapshot depth 1: %v lines, want the list and its 600 items without their links (err %v)", shallow["lines"], err)
+	}
+	links := browse(t, f.parent, map[string]any{"action": "links", "tab": tab})
+	if !strings.HasPrefix(links["links"].(string), `["quoted" & 0](`+f.page+`/long#0)`) {
+		t.Fatalf("links begin %.120q", links["links"])
+	}
+
+	saved := filepath.Join(work, "page.png")
+	shot := browse(t, f.parent, map[string]any{"action": "screenshot", "tab": tab, "path": saved})
+	if png, err := os.ReadFile(saved); err != nil || shot["path"] != filepath.Join(real, "page.png") || !bytes.HasPrefix(png, []byte("\x89PNG")) {
+		t.Fatalf("screenshot = %v, err %v", shot, err)
+	}
+	if err := os.Symlink(outside, filepath.Join(work, "out")); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{
+		saved:                                  "exists",
+		filepath.Join(outside, "page.png"):     "out_of_scope",
+		filepath.Join(work, "out", "page.png"): "out_of_scope",
+		filepath.Join(work, "none", "a.png"):   "invalid",
+		"page.png":                             "invalid",
+		filepath.Join(work, "page.jpg"):        "invalid",
+	} {
+		if code := refusalCode(t, f.parent, "agenthail_browser", map[string]any{"action": "screenshot", "tab": tab, "path": path}); code != want {
+			t.Errorf("screenshot to %s: code %q, want %q", path, code, want)
+		}
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("a screenshot was written outside the session's folders: %v", entries)
+	}
+}

@@ -31,7 +31,7 @@ secret, `hello` included.
 | `status` | the status below |
 | `launch` | downloads Chromium if absent, starts it, returns the status |
 | `close` | closes Chromium, returns the status |
-| `tabs.open`, `tabs.navigate`, `tabs.snapshot`, `tabs.screenshot`, `tabs.act`, `tabs.wait`, `tabs.dialog`, `tabs.resize`, `tabs.list`, `tabs.close`, `tabs.closeOwner` | see [Tabs](#tabs) |
+| `tabs.open`, `tabs.navigate`, `tabs.snapshot`, `tabs.text`, `tabs.links`, `tabs.screenshot`, `tabs.scroll`, `tabs.act`, `tabs.dismiss`, `tabs.wait`, `tabs.dialog`, `tabs.resize`, `tabs.list`, `tabs.close`, `tabs.closeOwner` | see [Tabs](#tabs) |
 
 The daemon accepts a host only when `hello` reports protocol 2, the daemon's
 own version and the pid it spawned, within 15 seconds. Every call is bounded by
@@ -66,11 +66,40 @@ keeps the only record of tabs:
   the page's URL to 2 KiB, its title to 512 bytes and a dialog's message to
   1 KiB, each ending in `…` when cut, so a page cannot push a result over the
   limit through them.
+- A snapshot can be narrowed. `interactive` keeps only the lines for elements
+  an agent acts on (buttons, links, fields, options, tabs and the like), each
+  with its ref, one per line. `ref` or `selector` (one of them) takes the tree
+  of that part of the page; refs outside it stop working, since a snapshot
+  replaces the last one's refs. `depth` keeps that many levels, at least 1.
+- `tabs.text` returns the `innerText` of the page or of `ref` or `selector`,
+  and `tabs.links` each link once as `[text](absolute URL)`, both through the
+  same `file`, `truncated` and `full` result as a snapshot. With `scroll`,
+  `tabs.text` first scrolls to the bottom every half second until the page
+  stops growing (at most 20 seconds), waits up to 5 seconds for network idle,
+  and reports `loaded: {complete, idle, scrollHeight}`, so a lazy page's text
+  is all there.
+- `tabs.scroll` scrolls `to` `top` or `bottom`, or `by` a non-zero number of pixels, and returns
+  `moved`, `scrollTop`, `scrollHeight`, `clientHeight`, `atEnd` and which
+  `scroller` it used: the page when the page scrolls, or else the scrollable
+  element covering most of the view, since many apps scroll a container. With
+  `ref` it scrolls inside that element, or with neither `to` nor `by` brings it
+  into view and returns `moved` and `inView`. It scrolls instantly, so a page's
+  smooth scrolling does not hide the move; `idle` also waits for network idle.
+- `tabs.dismiss` presses Escape and, if a dialog or modal is still visible,
+  clicks its button named Close, Dismiss or ×; never an Accept, which is the
+  person's choice. It returns `dismissed`, and `by` with the number still `open`, or a
+  `detail` saying why not. Escape closing one of several stacked modals
+  counts as dismissed.
 - `tabs.screenshot` writes a PNG of the viewport, of the whole scrollable page
   (`fullPage`) or of one element (`ref`, not with `fullPage`) and returns
-  `file`, `bytes`, `width` and `height`.
+  `file`, `bytes`, `width` and `height`. Given `path`, the daemon copies it
+  there: an absolute `.png` whose folder exists, symlinks resolved, inside the
+  session's ceiling roots or else its own folder (`out_of_scope` otherwise),
+  and not already a file (`exists`). The result's `path` is that real path, the
+  one checked against the roots, so it can differ from the path given when a
+  folder on the way is a symlink (on macOS, `/var` is `/private/var`).
 - `tabs.act` takes a `kind` (`click`, `type`, `select`, `hover`, `drag`,
-  `press`, `scroll`, `upload`) and a `ref` from the latest snapshot, with a
+  `press`, `upload`) and a `ref` from the latest snapshot, with a
   10-second limit. `tabs.wait` waits for text, a ref, a URL part or network
   idle, at most 30 seconds.
 - A JavaScript dialog is held until `tabs.dialog` accepts or dismisses it.
@@ -81,7 +110,7 @@ keeps the only record of tabs:
 
 ## Output files
 
-Snapshots and screenshots go under `~/.agenthail/browser-host/out/`, in one
+Snapshots, text, link lists and screenshots go under `~/.agenthail/browser-host/out/`, in one
 directory per owner (named by a hash of the owner id, mode 0700; files 0600).
 Each owner keeps at most 64 MiB: a write removes that owner's oldest files
 beyond it, and a single result larger than that is refused (`too_large`).

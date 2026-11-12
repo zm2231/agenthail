@@ -8,7 +8,61 @@ const MESSAGE_BYTES = 1 << 10;
 const ACTION_TIMEOUT_MS = 10_000;
 const NAVIGATE_TIMEOUT_MS = 30_000;
 const MAX_WAIT_MS = 30_000;
-const KINDS = new Set(['click', 'type', 'select', 'hover', 'drag', 'press', 'scroll', 'upload']);
+const IDLE_MS = 5_000;
+const LOAD_ALL_MS = 20_000;
+const LOAD_STEP_MS = 500;
+const KINDS = new Set(['click', 'type', 'select', 'hover', 'drag', 'press', 'upload']);
+const INTERACTIVE = new Set(['button', 'link', 'textbox', 'searchbox', 'checkbox', 'radio', 'combobox', 'listbox', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'switch', 'slider', 'spinbutton', 'treeitem']);
+const CLOSE_NAME = /^(close|dismiss|×|✕|✖|x)$/i;
+
+// Runs in the page. Without self it picks the page when it scrolls, or else
+// the scrollable element covering most of the view, since many apps scroll a
+// container rather than the document. Instant behavior keeps a CSS
+// scroll-behavior: smooth from reporting the old position.
+function scrollIn(node, { to, by, self }) {
+  const page = document.scrollingElement || document.documentElement;
+  const scrollable = el => el.scrollHeight > el.clientHeight + 1 && /(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY);
+  let el = node;
+  if (!self) {
+    el = page;
+    if (page.scrollHeight <= innerHeight + 1) {
+      let area = 0;
+      for (const candidate of document.querySelectorAll('*')) {
+        if (!scrollable(candidate)) continue;
+        const r = candidate.getBoundingClientRect();
+        const seen = Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
+        if (seen > area) [el, area] = [candidate, seen];
+      }
+    }
+  }
+  const before = el.scrollTop;
+  const top = to === 'top' ? 0 : to === 'bottom' ? el.scrollHeight : before + (by ?? 0);
+  el.scrollTo({ top, behavior: 'instant' });
+  const clientHeight = el === page ? innerHeight : el.clientHeight;
+  return { scroller: el === page ? 'page' : 'element', moved: el.scrollTop !== before, scrollTop: Math.round(el.scrollTop), scrollHeight: el.scrollHeight, clientHeight, atEnd: el.scrollTop + clientHeight >= el.scrollHeight - 1 };
+}
+
+function linksIn(node) {
+  const seen = new Set();
+  const lines = [];
+  const anchors = node.matches('a[href]') ? [node] : [];
+  for (const a of [...anchors, ...node.querySelectorAll('a[href]')]) {
+    if (!/^https?:|^mailto:|^tel:/.test(a.href)) continue;
+    const text = (a.innerText || a.getAttribute('aria-label') || a.title || '').replace(/\s+/g, ' ').trim();
+    const line = `[${text}](${a.href})`;
+    if (seen.has(line)) continue;
+    seen.add(line);
+    lines.push(line);
+  }
+  return lines.join('\n');
+}
+
+export function interactiveLines(tree) {
+  return tree.split('\n').flatMap(line => {
+    const match = /^\s*- ([a-z]+)\b.*\[ref=e\d+\]/.exec(line);
+    return match && INTERACTIVE.has(match[1]) ? [line.trim().replace(/:$/, '')] : [];
+  }).join('\n');
+}
 
 function failure(code, message) {
   return Object.assign(new Error(message), { code });
@@ -92,23 +146,182 @@ export class Tabs {
     return this.describe(tab);
   }
 
-  async snapshot(params) {
-    const tab = this.tab(params);
+  limit(params) {
     const limit = Number(params.limit);
     if (!(limit >= MIN_LIMIT)) throw failure('invalid', `limit must be at least ${MIN_LIMIT} bytes`);
+    return limit;
+  }
+
+  // paged returns a page-text result whole when it fits under limit, and
+  // otherwise its head with the file that keeps all of it.
+  paged(tab, out, { extension, field, noun, note = '' }, body, limit) {
+    const file = this.keep(tab, extension, body);
+    const bytes = Buffer.byteLength(body);
+    const lines = body === '' ? 0 : body.split('\n').length;
+    const full = `The whole ${noun} is in ${file} (${bytes} bytes, ${lines} lines); read it there.${note}`;
+    const rest = { ...out, file, bytes, lines, truncated: true, full, [field]: '' };
+    const { text, truncated } = excerpt(body, limit - encodedBytes(JSON.stringify(rest)));
+    if (truncated) return { ...rest, [field]: text };
+    delete rest.full;
+    return { ...rest, truncated: false, [field]: text };
+  }
+
+  root(tab, { ref, selector }) {
+    if (ref && selector) throw failure('invalid', 'give ref or selector, not both');
+    if (ref) return this.locate(tab, ref);
+    if (selector) return tab.page.locator(selector);
+    return null;
+  }
+
+  async snapshot(params) {
+    const tab = this.tab(params);
+    const limit = this.limit(params);
+    const depth = params.depth ?? undefined;
+    if (depth !== undefined && !(Number.isInteger(depth) && depth >= 1)) throw failure('invalid', 'depth must be a whole number of levels, at least 1');
+    const root = this.root(tab, params);
     let tree;
-    await this.guarded(tab, async () => {
-      tree = await tab.page.ariaSnapshot({ mode: 'ai', timeout: ACTION_TIMEOUT_MS });
-    });
+    try {
+      await this.guarded(tab, async () => {
+        const options = { mode: 'ai', depth, timeout: ACTION_TIMEOUT_MS };
+        tree = await (root ?? tab.page).ariaSnapshot(options);
+      });
+    } catch (error) {
+      throw failure(error.code === 'invalid' ? 'invalid' : 'action_failed', error.message.split('\n')[0]);
+    }
     const out = await this.describe(tab);
     if (tab.dialog || tree === undefined) return out;
-    const file = this.keep(tab, 'snapshot.yml', tree);
-    const bytes = Buffer.byteLength(tree);
-    const lines = tree.split('\n').length;
-    const full = `The whole snapshot is in ${file} (${bytes} bytes, ${lines} lines); read it there. Its refs are valid until your next snapshot.`;
-    const rest = { ...out, file, bytes, lines, truncated: true, full, snapshot: '' };
-    const { text, truncated } = excerpt(tree, limit - encodedBytes(JSON.stringify(rest)));
-    return truncated ? { ...rest, snapshot: text } : { ...out, file, bytes, lines, truncated: false, snapshot: text };
+    if (params.interactive) tree = interactiveLines(tree);
+    const note = root ? ' Its refs are valid until your next snapshot; refs outside this part of the page stop working now.' : ' Its refs are valid until your next snapshot.';
+    return this.paged(tab, out, { extension: 'snapshot.yml', field: 'snapshot', noun: 'snapshot', note }, tree, limit);
+  }
+
+  async idle(tab) {
+    try {
+      await tab.page.waitForLoadState('networkidle', { timeout: IDLE_MS });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async loadAll(tab) {
+    const html = tab.page.locator('html');
+    const deadline = Date.now() + LOAD_ALL_MS;
+    let height = -1;
+    let still = 0;
+    let last;
+    while (Date.now() < deadline && still < 2) {
+      last = await html.evaluate(scrollIn, { to: 'bottom' });
+      still = last.scrollHeight === height ? still + 1 : 0;
+      height = last.scrollHeight;
+      await tab.page.waitForTimeout(LOAD_STEP_MS);
+    }
+    return { complete: still >= 2, idle: await this.idle(tab), scrollHeight: height };
+  }
+
+  async text(params) {
+    const tab = this.tab(params);
+    const limit = this.limit(params);
+    let body;
+    let loaded;
+    try {
+      await this.guarded(tab, async () => {
+        if (params.scroll) loaded = await this.loadAll(tab);
+        body = await (this.root(tab, params) ?? tab.page.locator('body')).innerText({ timeout: ACTION_TIMEOUT_MS });
+      });
+    } catch (error) {
+      throw failure(error.code === 'invalid' ? 'invalid' : 'action_failed', error.message.split('\n')[0]);
+    }
+    const out = await this.describe(tab);
+    if (tab.dialog || body === undefined) return out;
+    if (loaded) out.loaded = loaded;
+    return this.paged(tab, out, { extension: 'txt', field: 'text', noun: 'text' }, body, limit);
+  }
+
+  async links(params) {
+    const tab = this.tab(params);
+    const limit = this.limit(params);
+    let body;
+    try {
+      await this.guarded(tab, async () => {
+        body = await (this.root(tab, params) ?? tab.page.locator('body')).evaluate(linksIn);
+      });
+    } catch (error) {
+      throw failure(error.code === 'invalid' ? 'invalid' : 'action_failed', error.message.split('\n')[0]);
+    }
+    const out = await this.describe(tab);
+    if (tab.dialog || body === undefined) return out;
+    return this.paged(tab, out, { extension: 'links.md', field: 'links', noun: 'link list' }, body, limit);
+  }
+
+  async scroll(params) {
+    const tab = this.tab(params);
+    const { to, ref } = params;
+    const by = params.by ?? undefined;
+    if (to !== undefined && to !== null && to !== '' && to !== 'top' && to !== 'bottom') throw failure('invalid', 'to must be top or bottom');
+    const target = to || by !== undefined;
+    if (to && by !== undefined) throw failure('invalid', 'give to or by, not both');
+    if (by !== undefined && !(Number.isFinite(by) && by !== 0)) throw failure('invalid', 'by must be a non-zero number of CSS pixels, negative for up');
+    if (!target && !ref) throw failure('invalid', 'scroll needs to (top or bottom), by (pixels, negative for up) or a ref to bring into view');
+    if (tab.dialog) throw failure('dialog_open', 'a dialog is open; answer it with the dialog action first');
+    let result;
+    try {
+      await this.guarded(tab, async () => {
+        if (target) {
+          result = await (ref ? this.locate(tab, ref) : tab.page.locator('html')).evaluate(scrollIn, { to: to || undefined, by, self: Boolean(ref) });
+          return;
+        }
+        const element = this.locate(tab, ref);
+        const before = await element.boundingBox({ timeout: ACTION_TIMEOUT_MS });
+        await element.scrollIntoViewIfNeeded({ timeout: ACTION_TIMEOUT_MS });
+        const after = await element.boundingBox({ timeout: ACTION_TIMEOUT_MS });
+        const view = tab.page.viewportSize();
+        result = { moved: before?.y !== after?.y, inView: Boolean(after && view && after.y < view.height && after.y + after.height > 0) };
+      });
+    } catch (error) {
+      throw failure(error.code === 'invalid' ? 'invalid' : 'action_failed', error.message.split('\n')[0]);
+    }
+    const out = await this.describe(tab);
+    if (tab.dialog || !result) return out;
+    if (params.idle) result.idle = await this.idle(tab);
+    return { ...out, ...result };
+  }
+
+  async dismiss(params) {
+    const tab = this.tab(params);
+    if (tab.dialog) throw failure('dialog_open', 'a browser dialog is open; answer it with the dialog action');
+    const modals = tab.page.locator('[role=dialog]:visible, [role=alertdialog]:visible, [aria-modal=true]:visible, dialog[open]:visible');
+    let result;
+    try {
+      await this.guarded(tab, async () => {
+        const before = await modals.count();
+        await tab.page.keyboard.press('Escape');
+        await tab.page.waitForTimeout(200);
+        const after = await modals.count();
+        if (after < before) {
+          result = { dismissed: true, by: 'Escape', open: after };
+          return;
+        }
+        if (after === 0) {
+          result = { dismissed: false, detail: 'No dialog or modal was open; Escape was pressed.' };
+          return;
+        }
+        const close = modals.first().getByRole('button', { name: CLOSE_NAME }).first();
+        if (!await close.count()) {
+          result = { dismissed: false, detail: 'A dialog is still open and has no Close or Dismiss button; take a snapshot and choose its button yourself.' };
+          return;
+        }
+        const name = (await close.getAttribute('aria-label')) || (await close.innerText()).trim();
+        await close.click({ timeout: ACTION_TIMEOUT_MS });
+        await tab.page.waitForTimeout(200);
+        const open = await modals.count();
+        result = { dismissed: open < after, by: `button "${name}"`, open };
+      });
+    } catch (error) {
+      throw failure('action_failed', error.message.split('\n')[0]);
+    }
+    const out = await this.describe(tab);
+    return result ? { ...out, ...result } : out;
   }
 
   async screenshot(params) {
@@ -147,7 +360,7 @@ export class Tabs {
     return tab.page.getByRef(ref);
   }
 
-  async perform(tab, { kind, ref, target, text, key, values, files, deltaY }) {
+  async perform(tab, { kind, ref, target, text, key, values, files }) {
     const timeout = ACTION_TIMEOUT_MS;
     switch (kind) {
       case 'click': return this.locate(tab, ref).click({ timeout });
@@ -159,8 +372,6 @@ export class Tabs {
       case 'press':
         if (!key) throw failure('invalid', 'key is required, for example Enter');
         return ref ? this.locate(tab, ref).press(key, { timeout }) : tab.page.keyboard.press(key);
-      case 'scroll':
-        return ref ? this.locate(tab, ref).scrollIntoViewIfNeeded({ timeout }) : tab.page.mouse.wheel(0, deltaY ?? 600);
     }
   }
 

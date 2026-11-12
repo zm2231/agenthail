@@ -32,7 +32,7 @@ const tabs = new Tabs({ browser, output });
 browser.disconnected = () => tabs.forget();
 
 const methods = {
-  ...Object.fromEntries(['open', 'navigate', 'snapshot', 'screenshot', 'act', 'wait', 'dialog', 'resize', 'list', 'close', 'closeOwner']
+  ...Object.fromEntries(['open', 'navigate', 'snapshot', 'text', 'links', 'screenshot', 'scroll', 'act', 'dismiss', 'wait', 'dialog', 'resize', 'list', 'close', 'closeOwner']
     .map(name => [`tabs.${name}`, params => tabs[name](params)])),
   hello: () => ({ protocol: PROTOCOL, hostVersion: args.version, pid: process.pid }),
   status: () => browser.status(),

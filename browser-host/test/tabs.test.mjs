@@ -47,6 +47,42 @@ function serve(t) {
       response.end(`<title>${'<&>'.repeat(7000)}</title><p>body</p>`);
       return;
     }
+    if (request.url === '/lazy') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end(`<title>Lazy</title><style>html { scroll-behavior: smooth } p { height: 60px }</style><main id="rows"></main><script>
+        let next = 0;
+        const more = () => { for (let i = 0; i < 20; i++) rows.append(Object.assign(document.createElement('p'), { textContent: 'Row ' + next++ })); };
+        more();
+        addEventListener('scroll', () => { if (next < 100 && innerHeight + scrollY >= document.body.scrollHeight - 10) setTimeout(more, 100); });
+      </script>`);
+      return;
+    }
+    if (request.url === '/app') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      const items = Array.from({ length: 80 }, (_, i) => `<p>Item ${i} <a href="/item/${i}">open ${i}</a></p>`).join('');
+      response.end(`<title>App</title><style>html, body { height: 100%; margin: 0; overflow: hidden } #pane { height: 100%; overflow: auto }</style><div id="pane">${items}<a href="/item/0">open 0</a></div>`);
+      return;
+    }
+    if (request.url === '/modal') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end(`<title>Modal</title><p id="out">none</p><div role="dialog" aria-modal="true" aria-label="Cookies"><p>We use cookies</p>
+        <button onclick="out.textContent = 'accepted'; this.parentElement.remove()">Accept all</button>
+        <button aria-label="Close" onclick="out.textContent = 'closed'; this.parentElement.remove()">×</button></div>
+        <div role="dialog" aria-modal="true" aria-label="Survey" hidden><button>Take it</button></div>`);
+      return;
+    }
+    if (request.url === '/stacked') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end(`<title>Stacked</title><div role="dialog" aria-label="Plan"><p>Choose a plan</p><button>Basic</button></div>
+        <div role="dialog" aria-modal="true" aria-label="News" id="news"><p>Subscribe?</p></div>
+        <script>addEventListener('keydown', e => { if (e.key === 'Escape') news.remove(); });</script>`);
+      return;
+    }
+    if (request.url === '/stuck') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end('<title>Stuck</title><div role="dialog" aria-label="Plan"><p>Choose a plan</p><button>Basic</button><button>Pro</button></div>');
+      return;
+    }
     if (request.url === '/whoami') {
       response.writeHead(200, { 'content-type': 'text/html' });
       response.end(`<title>Who</title><p>cookie: ${request.headers.cookie ?? 'none'}</p>`);
@@ -285,4 +321,109 @@ test('a snapshot still running when its owner is closed writes nothing', async (
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('text scrolls a lazy page to its end first and returns all of its text, cut to fit when long', { timeout: 600_000 }, async t => {
+  const url = await serve(t);
+  const host = startHost(t, process.env.AGENTHAIL_BROWSER_TEST_BROWSERS);
+  const owner = 'session-a';
+  const { tab } = await ok(host.socket, 'tabs.open', { owner, url: `${url}/lazy` });
+  const first = await ok(host.socket, 'tabs.text', { limit: LIMIT, owner, tab });
+  assert.ok(!first.text.includes('Row 99'), 'the lazy rows were there before scrolling');
+  const loaded = await ok(host.socket, 'tabs.text', { limit: LIMIT, owner, tab, scroll: true });
+  assert.equal(loaded.loaded.complete, true);
+  assert.equal(loaded.truncated, false);
+  assert.match(loaded.text, /Row 99/);
+  assert.equal(fs.readFileSync(loaded.file, 'utf8'), loaded.text);
+
+  const long = await ok(host.socket, 'tabs.open', { owner, url: `${url}/long` });
+  const cut = await ok(host.socket, 'tabs.text', { limit: LIMIT, owner, tab: long.tab });
+  assert.equal(cut.truncated, true);
+  assert.ok(resultBytes(cut) <= LIMIT, `the result encodes to ${resultBytes(cut)} bytes`);
+  assert.ok(cut.full.includes(cut.file), cut.full);
+  assert.match(fs.readFileSync(cut.file, 'utf8'), /Buy 599/);
+  const tree = fs.readFileSync((await ok(host.socket, 'tabs.snapshot', { limit: LIMIT, owner, tab: long.tab })).file, 'utf8');
+  const one = await ok(host.socket, 'tabs.text', { limit: LIMIT, owner, tab: long.tab, ref: ref(tree, 'button "Buy 7"') });
+  assert.equal(one.text, 'Buy 7');
+});
+
+test('scroll moves the page, or the container that scrolls when the page does not, and says whether it moved', { timeout: 600_000 }, async t => {
+  const url = await serve(t);
+  const host = startHost(t, process.env.AGENTHAIL_BROWSER_TEST_BROWSERS);
+  const owner = 'session-a';
+  const page = await ok(host.socket, 'tabs.open', { owner, url: `${url}/lazy` });
+  const down = await ok(host.socket, 'tabs.scroll', { owner, tab: page.tab, by: 300 });
+  assert.deepEqual([down.scroller, down.moved, down.scrollTop], ['page', true, 300]);
+  await ok(host.socket, 'tabs.scroll', { owner, tab: page.tab, to: 'top' });
+  const again = await ok(host.socket, 'tabs.scroll', { owner, tab: page.tab, to: 'top' });
+  assert.equal(again.moved, false);
+
+  const app = await ok(host.socket, 'tabs.open', { owner, url: `${url}/app` });
+  const bottom = await ok(host.socket, 'tabs.scroll', { owner, tab: app.tab, to: 'bottom' });
+  assert.deepEqual([bottom.scroller, bottom.moved, bottom.atEnd], ['element', true, true]);
+  await ok(host.socket, 'tabs.scroll', { owner, tab: app.tab, to: 'top' });
+  const { snapshot } = await ok(host.socket, 'tabs.snapshot', { limit: LIMIT, owner, tab: app.tab, interactive: true });
+  const shown = await ok(host.socket, 'tabs.scroll', { owner, tab: app.tab, ref: ref(snapshot, 'link "open 79"') });
+  assert.deepEqual([shown.moved, shown.inView], [true, true]);
+  for (const params of [{}, { by: 0 }, { to: 'middle' }, { to: 'top', by: 10 }]) {
+    assert.equal((await call(host.socket, 'tabs.scroll', { owner, tab: app.tab, ...params })).error.code, 'invalid', JSON.stringify(params));
+  }
+  assert.equal((await call(host.socket, 'tabs.act', { owner, tab: app.tab, kind: 'scroll' })).error.code, 'invalid');
+});
+
+test('links lists each link once with its full URL, for the page or one part of it', { timeout: 600_000 }, async t => {
+  const url = await serve(t);
+  const host = startHost(t, process.env.AGENTHAIL_BROWSER_TEST_BROWSERS);
+  const owner = 'session-a';
+  const { tab } = await ok(host.socket, 'tabs.open', { owner, url: `${url}/app` });
+  const all = await ok(host.socket, 'tabs.links', { limit: LIMIT, owner, tab });
+  assert.equal(all.lines, 80);
+  assert.equal(all.links.split('\n')[0], `[open 0](${url}/item/0)`);
+  const { snapshot } = await ok(host.socket, 'tabs.snapshot', { limit: LIMIT, owner, tab });
+  const part = await ok(host.socket, 'tabs.links', { limit: LIMIT, owner, tab, ref: ref(snapshot, 'link "open 5"') });
+  assert.equal(part.links, `[open 5](${url}/item/5)`);
+});
+
+test('a snapshot narrows to the interactive elements, a ref or a selector, or a depth', { timeout: 600_000 }, async t => {
+  const url = await serve(t);
+  const host = startHost(t, process.env.AGENTHAIL_BROWSER_TEST_BROWSERS);
+  const owner = 'session-a';
+  const { tab } = await ok(host.socket, 'tabs.open', { owner, url: `${url}/long` });
+  const interactive = await ok(host.socket, 'tabs.snapshot', { limit: LIMIT, owner, tab, interactive: true });
+  const lines = fs.readFileSync(interactive.file, 'utf8').split('\n');
+  assert.equal(lines.length, 1200);
+  assert.ok(lines.every(line => /^- (link|button) .*\[ref=e\d+\]/.test(line)), lines.find(line => !/^- (link|button)/.test(line)));
+  await ok(host.socket, 'tabs.act', { owner, tab, kind: 'click', ref: ref(lines.join('\n'), 'button "Buy 3"') });
+  await ok(host.socket, 'tabs.wait', { owner, tab, text: 'bought 3', timeoutMs: 5000 });
+
+  const scoped = await ok(host.socket, 'tabs.snapshot', { limit: LIMIT, owner, tab, selector: 'li:nth-child(2)' });
+  assert.equal(scoped.truncated, false);
+  assert.match(scoped.snapshot, /Buy 1/);
+  assert.doesNotMatch(scoped.snapshot, /Buy 2/);
+  const shallow = await ok(host.socket, 'tabs.snapshot', { limit: LIMIT, owner, tab, depth: 1 });
+  assert.ok(shallow.bytes < interactive.bytes / 10, `depth 1 is ${shallow.bytes} bytes`);
+  for (const params of [{ ref: 'e1', selector: 'li' }, { depth: 0 }, { depth: -1 }, { depth: 1.5 }]) {
+    assert.equal((await call(host.socket, 'tabs.snapshot', { limit: LIMIT, owner, tab, ...params })).error.code, 'invalid', JSON.stringify(params));
+  }
+});
+
+test('dismiss closes a modal with its Close button, never Accept, and says when it could not', { timeout: 600_000 }, async t => {
+  const url = await serve(t);
+  const host = startHost(t, process.env.AGENTHAIL_BROWSER_TEST_BROWSERS);
+  const owner = 'session-a';
+  const { tab } = await ok(host.socket, 'tabs.open', { owner, url: `${url}/modal` });
+  const closed = await ok(host.socket, 'tabs.dismiss', { owner, tab });
+  assert.deepEqual([closed.dismissed, closed.by], [true, 'button "Close"']);
+  await ok(host.socket, 'tabs.wait', { owner, tab, text: 'closed', timeoutMs: 5000 });
+  const none = await ok(host.socket, 'tabs.dismiss', { owner, tab });
+  assert.equal(none.dismissed, false);
+
+  const stuck = await ok(host.socket, 'tabs.open', { owner, url: `${url}/stuck` });
+  const refused = await ok(host.socket, 'tabs.dismiss', { owner, tab: stuck.tab });
+  assert.equal(refused.dismissed, false);
+  assert.match(refused.detail, /no Close or Dismiss button/);
+
+  const stacked = await ok(host.socket, 'tabs.open', { owner, url: `${url}/stacked` });
+  const top = await ok(host.socket, 'tabs.dismiss', { owner, tab: stacked.tab });
+  assert.deepEqual([top.dismissed, top.by, top.open], [true, 'Escape', 1]);
 });
