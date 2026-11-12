@@ -65,3 +65,25 @@ func TestImportedWorkKeepsItsHistoryAndASecondImportChangesNothing(t *testing.T)
 		}
 	}
 }
+
+func TestAnImportedItemCanArriveParkedForLater(t *testing.T) {
+	s := newStore(t)
+	revisit := time.Date(2099, 1, 15, 0, 0, 0, 0, time.UTC)
+	result, err := s.ImportWork(ledger.WorkImportRequest{ProjectKey: project, SessionID: "s1", Items: []ledger.WorkImport{
+		{ImportedFrom: "td:a", Text: "deferred", State: ledger.WorkParked, Park: &ledger.Park{Kind: ledger.ParkLater, Why: " deferred in td ", Revisit: revisit}},
+		{ImportedFrom: "td:b", Text: "no why", State: ledger.WorkParked, Park: &ledger.Park{Kind: ledger.ParkLater}},
+		{ImportedFrom: "td:c", Text: "usage", State: ledger.WorkParked, Park: &ledger.Park{Kind: ledger.ParkUsage, Why: "x", Usage: &ledger.ParkUsageTarget{Provider: "codex"}}},
+		{ImportedFrom: "td:d", Text: "open with a park", Park: &ledger.Park{Kind: ledger.ParkLater, Why: "x"}},
+	}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Imported) != 1 || len(result.Skipped) != 3 {
+		t.Fatalf("result = %+v", result)
+	}
+	item, ok := rebuild(t, s).WorkItem(result.Imported[0].ItemID)
+	if !ok || item.State != ledger.WorkParked || item.Park == nil || item.Park.Kind != ledger.ParkLater || item.Park.Why != "deferred in td" || !item.Park.Revisit.Equal(revisit) {
+		t.Fatalf("imported = %+v park %+v", item, item.Park)
+	}
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkUnpark, ItemID: item.ID})
+}

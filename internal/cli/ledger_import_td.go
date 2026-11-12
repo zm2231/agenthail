@@ -17,6 +17,7 @@ type tdIssue struct {
 	id, title, description, status, typ, priority, labels, parent, acceptance, creator string
 	created                                                                            time.Time
 	deleted, extras                                                                    bool
+	deferUntil                                                                         time.Time
 }
 
 type tdExport struct {
@@ -56,7 +57,17 @@ func tdTime(s string) time.Time {
 	return time.Time{}
 }
 
-func readTD(db *sql.DB, all bool) (tdExport, error) {
+func tdDate(s string) time.Time {
+	if t := tdTime(s); !t.IsZero() {
+		return t
+	}
+	if t, err := time.ParseInLocation("2006-01-02", s, time.Local); err == nil {
+		return t
+	}
+	return time.Time{}
+}
+
+func readTD(db *sql.DB, all bool, now time.Time) (tdExport, error) {
 	var out tdExport
 	issues, err := tdIssues(db)
 	if err != nil {
@@ -108,6 +119,13 @@ func readTD(db *sql.DB, all bool) (tdExport, error) {
 		case "blocked":
 			item.State, item.Reason = ledger.WorkBlocked, "blocked in td"
 		}
+		if is.status != "closed" && is.deferUntil.After(now) {
+			why := "deferred in td"
+			if item.State == ledger.WorkBlocked {
+				why, item.Reason = "blocked and deferred in td", ""
+			}
+			item.State, item.Park = ledger.WorkParked, &ledger.Park{Kind: ledger.ParkLater, Why: why, Revisit: is.deferUntil}
+		}
 		out.items = append(out.items, item)
 		if is.parent != "" {
 			out.deps = append(out.deps, ledger.WorkImportDep{Item: tdOrigin(is.parent), On: tdOrigin(is.id)})
@@ -137,7 +155,7 @@ func readTD(db *sql.DB, all bool) (tdExport, error) {
 		{deleted, "deleted issues"},
 		{closed, "closed issues (--all brings them over as done)"},
 		{reset, "in-progress or in-review issues, imported as open: their claims were td sessions, not ledger sessions"},
-		{extras, "issues with points, sprint, minor, due or defer dates, which the ledger does not keep"},
+		{extras, "issues with points, sprint, minor or due dates, which the ledger does not keep"},
 	}
 	for _, l := range leftOver {
 		if l.n > 0 {
@@ -164,7 +182,7 @@ func readTD(db *sql.DB, all bool) (tdExport, error) {
 func tdIssues(db *sql.DB) ([]tdIssue, error) {
 	rows, err := db.Query(`SELECT id, title, COALESCE(description,''), status, type, priority, COALESCE(labels,''), COALESCE(parent_id,''),
 		COALESCE(acceptance,''), COALESCE(creator_session,''), CAST(created_at AS TEXT), deleted_at IS NOT NULL,
-		COALESCE(points,0)>0 OR COALESCE(sprint,'')!='' OR COALESCE(minor,0)!=0 OR due_date IS NOT NULL OR defer_until IS NOT NULL
+		COALESCE(points,0)>0 OR COALESCE(sprint,'')!='' OR COALESCE(minor,0)!=0 OR due_date IS NOT NULL, COALESCE(CAST(defer_until AS TEXT),'')
 		FROM issues ORDER BY created_at, id`)
 	if err != nil {
 		return nil, err
@@ -173,11 +191,11 @@ func tdIssues(db *sql.DB) ([]tdIssue, error) {
 	var issues []tdIssue
 	for rows.Next() {
 		var is tdIssue
-		var created string
-		if err := rows.Scan(&is.id, &is.title, &is.description, &is.status, &is.typ, &is.priority, &is.labels, &is.parent, &is.acceptance, &is.creator, &created, &is.deleted, &is.extras); err != nil {
+		var created, deferUntil string
+		if err := rows.Scan(&is.id, &is.title, &is.description, &is.status, &is.typ, &is.priority, &is.labels, &is.parent, &is.acceptance, &is.creator, &created, &is.deleted, &is.extras, &deferUntil); err != nil {
 			return nil, err
 		}
-		is.created = tdTime(created)
+		is.created, is.deferUntil = tdTime(created), tdDate(deferUntil)
 		issues = append(issues, is)
 	}
 	return issues, rows.Err()

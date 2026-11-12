@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 )
@@ -33,7 +34,7 @@ func (a *App) ledgerImport(store *ledger.Store, args []string) error {
 	if err != nil {
 		return err
 	}
-	export, err := readTD(db, w.bools["--all"])
+	export, err := readTD(db, w.bools["--all"], time.Now())
 	db.Close()
 	if err != nil {
 		return fmt.Errorf("read td database %s: %w", path, err)
