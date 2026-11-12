@@ -49,7 +49,7 @@ func TestAPromptReachesAPairedHostsLeadOnceAcrossARestart(t *testing.T) {
 		defer remote.fake.mu.Unlock()
 		count := 0
 		for _, message := range remote.fake.messages {
-			if strings.Contains(message, "--request "+askID) {
+			if strings.Contains(message, askID) {
 				count++
 			}
 		}
@@ -62,7 +62,7 @@ func TestAPromptReachesAPairedHostsLeadOnceAcrossARestart(t *testing.T) {
 		}
 		var mine []registry.QueueRow
 		for _, row := range rows {
-			if strings.Contains(row.Message, "--request "+askID) {
+			if strings.Contains(row.Message, askID) {
 				mine = append(mine, row)
 			}
 		}

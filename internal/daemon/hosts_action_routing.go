@@ -66,7 +66,8 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 	}
 	action, _ := request["action"].(string)
 	if action == "respond" && d.holdsAsk(request) {
-		return nil, rewritten, nil
+		sourceRewritten, err := d.routeSource(ctx, request, nil)
+		return nil, rewritten || sourceRewritten, err
 	}
 	if strings.HasPrefix(action, "channel-") || strings.HasPrefix(action, "relay-") {
 		return d.routeLinkAction(ctx, request, action, host, local, rewritten)

@@ -40,6 +40,24 @@ type federatedSurface struct {
 	options   []surface.SendOptions
 	usage     *surface.Usage
 	subagents []surface.ClaudeSubagentLink
+	open      map[string][]surface.Request
+	answered  map[string]surface.Decision
+}
+
+func (s *federatedSurface) Requests(_ context.Context, session *surface.Session) (surface.RequestState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return surface.RequestState{PermissionMode: "default", Requests: s.open[session.ID]}, nil
+}
+
+func (s *federatedSurface) Respond(_ context.Context, session *surface.Session, requestID string, decision surface.Decision) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.answered == nil {
+		s.answered = map[string]surface.Decision{}
+	}
+	s.answered[session.ID+"/"+requestID] = decision
+	return "allowed", nil
 }
 
 func (s *federatedSurface) Usage(context.Context) (*surface.Usage, error) {

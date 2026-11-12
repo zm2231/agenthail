@@ -139,14 +139,11 @@ func askRequest(ask registry.Ask) surface.Request {
 	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery, CreatedAt: ask.CreatedAt, Deadline: ask.Deadline}.WithOptionIDs()
 }
 
-// askHearer is who an ask goes to first: a session an agent or coordinator started reports to its lead or spawner while that one runs.
+// askHearer is who an ask goes to first: its project's lead, else its
+// spawner, while that one runs, whoever started the session.
 func (d *Daemon) askHearer(sessionID string) (noticeRecipient, bool) {
 	session, err := d.Registry.Session(sessionID)
 	if err != nil {
-		return noticeRecipient{}, false
-	}
-	origin, found, err := d.Registry.SessionOrigin(session.ID)
-	if err != nil || !found || origin.Via != registry.OriginAgent && origin.Via != registry.OriginCoordinator {
 		return noticeRecipient{}, false
 	}
 	hearer, ok := d.noticeRecipient(*session)
@@ -461,7 +458,13 @@ func (d *Daemon) publishAsk(sessionID string) {
 }
 
 // askAnswerer is who may answer an open ask: the person always, an agent only while the ask is routed to it.
-func askAnswerer(ask registry.Ask, p principal) (string, error) {
+func askAnswerer(ask registry.Ask, p principal, source string) (string, error) {
+	if p.Kind == principalHost && source != "" {
+		if ask.RoutedTo != source {
+			return "", actionFailed(http.StatusForbidden, "forbidden", "this ask is not routed to "+source)
+		}
+		return source, nil
+	}
 	if p.Kind != principalSession || p.ForPerson {
 		return registry.AskToPerson, nil
 	}
@@ -490,7 +493,7 @@ func composeAskAnswer(questions []surface.Question, decision surface.Decision) s
 // answerAsk sends the answer to the asking session as one message, exactly
 // once: the ask is claimed before delivery and released only when delivery
 // provably did not happen.
-func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session *surface.Session, askID string, response surface.Response, p principal, personName string) (actionResult, error) {
+func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session *surface.Session, askID string, response surface.Response, p principal, source, personName string) (actionResult, error) {
 	ask, found, err := d.Registry.Ask(askID)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
@@ -498,7 +501,7 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 	if !found || ask.SessionID != session.ID || ask.State != registry.AskOpen {
 		return actionResult{}, staleRequest()
 	}
-	by, err := askAnswerer(ask, p)
+	by, err := askAnswerer(ask, p, source)
 	if err != nil {
 		return actionResult{}, err
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -207,7 +208,11 @@ func (d *Daemon) noticePermission(ctx context.Context, ask registry.Ask) {
 			asks += ": " + detail
 		}
 	}
-	message := permissionNotice(d.resolveDisplay(session.ID), d.answerTarget(session.ID), ask.ID, asks, d.usesMCP(ask.RoutedTo), d.permissionEscalateAfter())
+	target, mcp := d.answerTarget(session.ID), d.usesMCP(ask.RoutedTo)
+	if owner, err := d.Registry.SessionHost(ask.RoutedTo); err == nil && owner != "" {
+		target, mcp = hosts.Qualify(d.hostIdentity().ID, target), true
+	}
+	message := permissionNotice(d.resolveDisplay(session.ID), target, ask.ID, asks, mcp, d.permissionEscalateAfter())
 	hearer := noticeRecipient{sessionID: ask.RoutedTo, role: "lead"}
 	d.taskNoticeMu.Lock()
 	read := d.taskRequestsRead[ask.SessionID] == (taskRequestRead{waitingID: ask.ID, reader: ask.RoutedTo})
@@ -228,8 +233,8 @@ func permissionNotice(name, target, askID, asks string, mcp bool, window time.Du
 	pass := fmt.Sprintf("agenthail ask escalate %s", askID)
 	if mcp {
 		read = fmt.Sprintf(`agenthail_requests {"sessionId":%q,"requestId":%q}`, target, askID)
-		answer = fmt.Sprintf(`agenthail_answer {"requestId":%q,"decision":"allow|deny"}`, askID)
-		pass = fmt.Sprintf(`agenthail_answer {"requestId":%q,"decision":"escalate"}`, askID)
+		answer = fmt.Sprintf(`agenthail_answer {"requestId":%q,"sessionId":%q,"decision":"allow|deny"}`, askID, target)
+		pass = fmt.Sprintf(`agenthail_answer {"requestId":%q,"sessionId":%q,"decision":"escalate"}`, askID, target)
 	}
 	return fmt.Sprintf("[agenthail] %s is blocked on a prompt: %s\nRead the request first: %s\nAnswer it: %s\nOr pass it to the person: %s\nIt goes to the person by itself if it is not answered within %s.", name, asks, read, answer, pass, plainDuration(window))
 }

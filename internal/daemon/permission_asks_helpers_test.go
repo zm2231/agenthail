@@ -72,5 +72,5 @@ func answerRequest(ctx context.Context, d *Daemon, adapter surface.Surface, sess
 			return actionResult{}, staleRequest()
 		}
 	}
-	return d.answerAsk(ctx, adapter, session, ask.ID, response, principal{ID: localDashboardPrincipal, Kind: principalPerson}, "")
+	return d.answerAsk(ctx, adapter, session, ask.ID, response, principal{ID: localDashboardPrincipal, Kind: principalPerson}, "", "")
 }

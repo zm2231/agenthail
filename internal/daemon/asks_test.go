@@ -293,7 +293,7 @@ func TestAnAskTheHearerPassesOnSitsOnOrCannotHearReachesThePerson(t *testing.T) 
 	}
 }
 
-func TestInAProjectWithALeadOnlyAgentStartedSessionsAskTheLead(t *testing.T) {
+func TestEverySessionInAProjectAsksItsLeadWhoeverStartedIt(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	f := newNoticeFixture(t)
 	f.setLead(t, "lead")
@@ -321,12 +321,9 @@ func TestInAProjectWithALeadOnlyAgentStartedSessionsAskTheLead(t *testing.T) {
 		}
 		asked[id] = out["routedTo"]
 	}
-	if asked["worker"] != "@widget-lead" || asked["by-person"] != registry.AskToPerson || asked["by-voice"] != registry.AskToPerson {
-		t.Fatalf("asked %v: the worker asks its lead, the person's and voice's sessions ask the person", asked)
-	}
-	for _, id := range []string{"by-person", "by-voice"} {
-		if row := viewRow(t, f.d, id); row.Attention == nil || row.Attention.Kind != AttentionAsk {
-			t.Fatalf("%s is not in front of the person: %+v", id, row.Attention)
+	for id, to := range asked {
+		if to != "@widget-lead" {
+			t.Fatalf("asked %v: %s did not ask the project's lead", asked, id)
 		}
 	}
 }

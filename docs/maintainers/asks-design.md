@@ -156,7 +156,7 @@ Each source is migrated in its own layer, and its old path goes in the same chan
 
 ## Routing: worker → lead → person
 
-- At raise time `routedTo` is the session's hearer from `coordinator.PromptHearer` (project lead first, then spawner), if that hearer is running. Otherwise it is the person. A lead's own asks, and asks from sessions the person started, go to the person.
+- At raise time `routedTo` is the session's hearer from `coordinator.PromptHearer` (project lead first, then spawner), if that hearer is running. Otherwise it is the person. A lead's own asks go to the person. A session the person started reports to its project's lead like any other: being in the project is what routes it, and the escalation window still passes an unanswered ask to the person. A lead on a paired host answers with `agenthail_answer {requestId, sessionId}`, the session named host-qualified; that host forwards the answer as `respond` naming the answering session, and the host holding the ask accepts it only from the session the ask is routed to.
 - The hearer is told once with a notice carrying the ask id. The notice tells it to answer with `agenthail_answer` or `agenthail ask answer <id>`, not `agenthail send`, so the ask closes.
 - The hearer can **escalate** (`agenthail ask escalate <id>` / `agenthail_answer` with `escalate`). The ask moves one hop up and the hop is appended to `route`.
 - The ask escalates by itself when its hearer:

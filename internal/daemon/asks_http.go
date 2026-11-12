@@ -165,6 +165,6 @@ func (d *Daemon) answerAskLocally(ctx context.Context, w http.ResponseWriter, re
 		response = surface.Response{Choices: []string{askEscalate}}
 	}
 	personName, _ := d.Registry.PersonName()
-	result, err := d.answerAsk(ctx, adapter, session, ask.ID, response, p, personName)
+	result, err := d.answerAsk(ctx, adapter, session, ask.ID, response, p, "", personName)
 	writeActionResult(w, result, err)
 }
