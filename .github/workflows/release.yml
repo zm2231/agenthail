@@ -65,9 +65,29 @@ jobs:
         working-directory: push-relay
         run: npm test
 
-  macos-test:
+  source-proof:
     needs: guard
     if: needs.guard.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      proven: ${{ steps.find.outputs.proven }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts
+      - id: find
+        name: Find the CI run that tested this commit on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release-source-proof.sh "$GITHUB_SHA"
+
+  macos-test:
+    needs: [guard, source-proof]
+    if: ${{ !cancelled() && needs.guard.outputs.run == 'true' && needs.source-proof.outputs.proven != 'true' }}
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -184,11 +204,42 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  linux-test:
+    needs: [guard, source-proof]
+    if: ${{ !cancelled() && needs.guard.outputs.run == 'true' && needs.source-proof.outputs.proven != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            claude-host/package-lock.json
+            browser-host/package-lock.json
+      - name: Node host tests
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix claude-host
+          npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix browser-host
+      - name: Stage the shipped Node
+        run: scripts/fetch-node.sh
+      - name: Test source on Linux
+        run: |
+          go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+          go vet ./...
+
   linux-archive:
     needs: guard
     if: needs.guard.outputs.run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 20
     strategy:
       matrix:
         arch: [amd64, arm64]
@@ -207,21 +258,6 @@ jobs:
           cache-dependency-path: |
             claude-host/package-lock.json
             browser-host/package-lock.json
-      - name: Node host tests
-        if: matrix.arch == 'amd64'
-        run: |
-          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
-          npm test --prefix claude-host
-          npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
-          npm test --prefix browser-host
-      - name: Stage the shipped Node
-        if: matrix.arch == 'amd64'
-        run: scripts/fetch-node.sh
-      - name: Test source on Linux
-        if: matrix.arch == 'amd64'
-        run: |
-          go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
-          go vet ./...
       - name: Build Linux archive
         env:
           GOOS: linux
@@ -405,8 +441,8 @@ jobs:
       force: true
 
   publish:
-    needs: [push-relay-check, macos-test, macos-package, linux-archive, ios-archive, ios-proof, ios-suite]
-    if: always() && needs.push-relay-check.result == 'success' && needs.macos-test.result == 'success' && needs.macos-package.result == 'success' && needs.linux-archive.result == 'success' && needs.ios-archive.result == 'success' && needs.ios-proof.result == 'success'
+    needs: [push-relay-check, source-proof, macos-test, linux-test, macos-package, linux-archive, ios-archive, ios-proof, ios-suite]
+    if: always() && needs.push-relay-check.result == 'success' && (needs.source-proof.outputs.proven == 'true' || (needs.macos-test.result == 'success' && needs.linux-test.result == 'success')) && needs.macos-package.result == 'success' && needs.linux-archive.result == 'success' && needs.ios-archive.result == 'success' && needs.ios-proof.result == 'success'
     runs-on: macos-15
     timeout-minutes: 55
     env:

@@ -224,8 +224,10 @@ jobs:
         run: scripts/fetch-node.sh
       - name: Shipped Node download test
         run: scripts/test-fetch-node.sh
-      - name: Release iOS proof tests
-        run: scripts/test-release-ios-proof.sh
+      - name: Release proof tests
+        run: |
+          scripts/test-release-ios-proof.sh
+          scripts/test-release-source-proof.sh
 
       - name: Race tests
         # No workflow race-instruments sqlite's generated C; plain go test -race does.
