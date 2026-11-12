@@ -109,6 +109,9 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		if err := checkMessageAuthor(d, request); err != nil {
 			return actionResult{}, err
 		}
+		if err := d.sendScope(*session, request.ScopeProjectID); err != nil {
+			return actionResult{}, err
+		}
 		if request.RelayHops != 0 {
 			if len(attached) > 0 {
 				return actionResult{}, invalidRequest("a relay leg carries no attached files")

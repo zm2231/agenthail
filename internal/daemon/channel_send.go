@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/hosts"
@@ -82,12 +83,20 @@ func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.Coordi
 	if err != nil {
 		return nil, false, err
 	}
-	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, body, nil)
-	if err != nil {
-		return nil, false, err
+	base := actionKey(ctx)
+	if base == "" {
+		base = "coordinator-" + uuid.NewString()
 	}
-	payload, err := hosts.ReadResponse(response)
+	key := hostActionKey(base, host.record.ID)
+	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, body, http.Header{actionIdempotencyHeader: []string{key}})
+	var payload []byte
+	if err == nil {
+		payload, err = hosts.ReadResponse(response)
+	}
 	var refused hosts.StatusError
+	if err != nil && !errors.As(err, &refused) {
+		return d.holdPeerCoordinatorSend(host, spec, key, body, err)
+	}
 	if errors.As(err, &refused) && refused.Code == movedCode {
 		if next, found := d.pairedHost(refused.MovedToHost); found && next != host && !redirectedAfterMove(ctx) {
 			spec.HostID = next.record.ID
@@ -106,4 +115,19 @@ func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.Coordi
 		return nil, false, err
 	}
 	return &answer.Result, answer.Started, nil
+}
+
+func (d *Daemon) holdPeerCoordinatorSend(host *pairedHost, spec registry.CoordinatorSpec, key string, body []byte, err error) (*delivery.Receipt, bool, error) {
+	var notSent hosts.NotSentError
+	sent := !errors.As(err, &notSent)
+	if _, holdErr := d.Registry.HoldHostAction(host.record.ID, key, "@"+spec.Name, body, sent); holdErr != nil {
+		return nil, false, errors.Join(err, holdErr)
+	}
+	d.refreshHostQueueCounts()
+	receipt := delivery.Receipt{Evidence: surface.EvidenceQueued, Status: "queued", Detail: fmt.Sprintf("host %s is unreachable; held until it reconnects", host.record.Name)}
+	if sent {
+		receipt.Evidence, receipt.Status = surface.EvidenceUnknown, "submitted"
+		receipt.Detail = fmt.Sprintf("host %s did not answer; held until it confirms", host.record.Name)
+	}
+	return &receipt, false, nil
 }

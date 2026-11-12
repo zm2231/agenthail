@@ -73,7 +73,7 @@ func (d *Daemon) channelHostLegs(ctx context.Context, target broadcast.Target, m
 	var wg sync.WaitGroup
 	for index, hostID := range hostIDs {
 		wg.Go(func() {
-			answers[index], legs[index] = d.channelHostLeg(ctx, hostID, base+":"+hostID, maps.Clone(template), target)
+			answers[index], legs[index] = d.channelHostLeg(ctx, hostID, hostActionKey(base, hostID), maps.Clone(template), target)
 		})
 	}
 	wg.Wait()

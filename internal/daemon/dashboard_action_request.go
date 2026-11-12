@@ -57,6 +57,7 @@ type dashboardActionRequest struct {
 	PIDStartedAt    int64                      `json:"pidStartedAt"`
 	ProjectID       string                     `json:"projectId"`
 	SourceProjectID string                     `json:"sourceProjectId"`
+	ScopeProjectID  string                     `json:"scopeProjectId"`
 	ExceptHosts     []string                   `json:"exceptHosts"`
 	Project         string                     `json:"project"`
 	Path            string                     `json:"path"`

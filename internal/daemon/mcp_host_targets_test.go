@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -156,14 +157,76 @@ func TestACrossHostSendIsJudgedByTheProjectThePairedHostReportsNow(t *testing.T)
 	moveSession(t, h.remote, "remote-c", widgetRepo(t, "https://github.com/example/gadget.git"), time.Now())
 	out, refused := h.send(t, "vps::@builder", "after it moved", nil)
 	refusedFor(t, out, refused, "out_of_scope", "different_project")
+	if h.reached("after it moved") {
+		t.Fatal("a refused send reached the paired host")
+	}
+}
+
+func (h hostTargets) goAway(t *testing.T) {
+	t.Helper()
 	h.remote.gate.proxyDown.Store(true)
 	h.remote.server.CloseClientConnections()
-	out, refused = h.send(t, "vps::remote-a", "while the host is down", nil)
-	refusedFor(t, out, refused, "unavailable", "project_unconfirmed")
-	for _, message := range []string{"after it moved", "while the host is down"} {
-		if h.reached(message) {
-			t.Fatalf("a refused send reached the paired host: %q", message)
+	testkit.Eventually(t, "the paired host shown down", 10*time.Second, func() bool { return !h.local.daemon.hostConnected(h.record.ID) })
+}
+
+func (h hostTargets) comeBack(t *testing.T) {
+	t.Helper()
+	h.remote.gate.proxyDown.Store(false)
+}
+
+func queuedReceipt(t *testing.T, out map[string]any, refused bool) {
+	t.Helper()
+	result, _ := out["result"].(map[string]any)
+	if refused || result["status"] != "queued" || result["evidence"] != string(surface.EvidenceQueued) {
+		t.Fatalf("refused=%v out=%v, want the send queued for the host", refused, out)
+	}
+}
+
+func TestASendToAPairedHostThatIsDownQueuesAndGoesOutOnceItAnswers(t *testing.T) {
+	h := newHostTargets(t, false)
+	h.goAway(t)
+	out, refused := h.send(t, "vps::remote-a", "while the host is down", nil)
+	queuedReceipt(t, out, refused)
+	out, refused = h.send(t, "vps::remote-b", "to another project while down", nil)
+	queuedReceipt(t, out, refused)
+	if h.reached("while the host is down") {
+		t.Fatal("delivered while the host was down")
+	}
+	h.comeBack(t)
+	testkit.Eventually(t, "the queued send delivered once the host answers", 15*time.Second, func() bool { return h.reached("while the host is down") })
+	testkit.Eventually(t, "the out-of-project send settled", 15*time.Second, func() bool {
+		queued, err := h.local.reg.HostDeliveries(h.record.ID)
+		return err == nil && len(queued) == 0
+	})
+	if h.reached("to another project while down") {
+		t.Fatal("the owner delivered a send outside the sender's project")
+	}
+}
+
+func TestAReportToAProjectLeadOnAHostThatIsDownIsHeldAndDeliveredOnceItAnswers(t *testing.T) {
+	h := newHostTargets(t, false)
+	h.goAway(t)
+	out, refused := callMCP(t, h.caller, "agenthail_send", map[string]any{"project": widgetProject, "message": "report while down", "clientRequestId": "report-1"})
+	queuedReceipt(t, out, refused)
+	again, refused := callMCP(t, h.caller, "agenthail_send", map[string]any{"project": widgetProject, "message": "report while down", "clientRequestId": "report-1"})
+	queuedReceipt(t, again, refused)
+	if held, err := h.local.reg.HostHeldActions(h.record.ID); err != nil || len(held) != 1 || held[0].Status != registry.HostActionPending {
+		t.Fatalf("held=%+v err=%v, want one report held and never sent", held, err)
+	}
+	h.comeBack(t)
+	testkit.Eventually(t, "the held report delivered once the host answers", 15*time.Second, func() bool { return h.reached("report while down") })
+	testkit.Eventually(t, "the held report settled", 15*time.Second, func() bool {
+		held, err := h.local.reg.HostHeldActions(h.record.ID)
+		return err == nil && len(held) == 0
+	})
+	delivered := 0
+	for _, got := range h.remote.fake.delivered() {
+		if strings.Contains(got, "report while down") {
+			delivered++
 		}
+	}
+	if delivered != 1 {
+		t.Fatalf("delivered %d times, want once: %q", delivered, h.remote.fake.delivered())
 	}
 }
 
@@ -219,4 +282,44 @@ func mustHostID(t *testing.T, node *federationNode) string {
 		t.Fatal(err)
 	}
 	return identity.ID
+}
+
+func TestAWorkerReachesItsSpawnerOnAPairedHostThatIsDownOnceItAnswers(t *testing.T) {
+	h := newHostTargets(t, false)
+	if err := h.local.reg.RecordSessionOrigin(registry.OriginOf("local-a", "remote-b")); err != nil {
+		t.Fatal(err)
+	}
+	h.goAway(t)
+	out, refused := h.send(t, "vps::remote-b", "to the spawner while down", nil)
+	queuedReceipt(t, out, refused)
+	h.comeBack(t)
+	testkit.Eventually(t, "the send to the spawner delivered once the host answers", 15*time.Second, func() bool { return h.reached("to the spawner while down") })
+}
+
+func TestAReportWithTheLongestRequestIDReachesALeadOnAPairedHost(t *testing.T) {
+	h := newHostTargets(t, false)
+	id := strings.Repeat("r", registry.ActionReceiptKeyLimit-len("agenthail_send:"))
+	out, refused := callMCP(t, h.caller, "agenthail_send", map[string]any{"project": widgetProject, "message": "a long-keyed report", "clientRequestId": id})
+	if refused || !h.reached("a long-keyed report") {
+		t.Fatalf("refused=%v out=%v delivered=%q", refused, out, h.remote.fake.delivered())
+	}
+}
+
+func TestAHeldReportThePairedHostRefusesIsReportedToItsSender(t *testing.T) {
+	h := newHostTargets(t, false)
+	body, _ := json.Marshal(map[string]any{"action": "coordinator-send", "name": "nobody", "message": "to no lead", "sourceSessionId": hosts.Qualify(mustHostID(t, h.local), "local-a")})
+	if _, err := h.local.reg.HoldHostAction(h.record.ID, "report-refused:"+h.record.ID, "@nobody", body, false); err != nil {
+		t.Fatal(err)
+	}
+	host, _ := h.local.daemon.pairedHost(h.record.ID)
+	h.local.daemon.drainHostDeliveries(context.Background(), host)
+	if held, err := h.local.reg.HostHeldActions(h.record.ID); err != nil || len(held) != 0 {
+		t.Fatalf("held=%+v err=%v, want the refused report settled", held, err)
+	}
+	rows, err := h.local.reg.ActiveQueue("local-a", h.local.daemon.adapters())
+	if err != nil || !slices.ContainsFunc(rows, func(row registry.QueueRow) bool {
+		return strings.Contains(row.Message, "@nobody") && strings.Contains(row.Message, "was not delivered")
+	}) {
+		t.Fatalf("queue=%+v err=%v, want the sender told the report was not delivered", rows, err)
+	}
 }

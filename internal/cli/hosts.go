@@ -186,7 +186,7 @@ func remoteReceipt(data []byte) (delivery.Receipt, error) {
 	return response.Result, nil
 }
 
-func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message string, args []string, timeout time.Duration) error {
+func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, scopeProjectID, message string, args []string, timeout time.Duration) error {
 	wantStream, wantReply, jsonOut := hasFlag(args, "--stream"), hasFlag(args, "--reply"), hasFlag(args, "--json")
 	if hasFlag(args, "--no-queue") {
 		return fmt.Errorf("--no-queue is not available for %s: the daemon holds a send to another host until that host answers", remote.Label())
@@ -210,6 +210,9 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 	}
 	if source != "" {
 		payload["sourceSessionId"] = source
+	}
+	if scopeProjectID != "" {
+		payload["scopeProjectId"] = scopeProjectID
 	}
 	if model := flagVal(args, "--model"); model != "" {
 		payload["model"] = model

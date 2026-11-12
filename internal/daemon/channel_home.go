@@ -92,7 +92,7 @@ func (d *Daemon) postToChannelHome(ctx context.Context, home, name string, reque
 	}
 	post := map[string]any{"action": "channel-send", "channel": name, "message": request.Message, "sourceSessionId": request.SourceSessionID}
 	target := broadcast.Target{Name: name, Channel: name}
-	recipients, leg := d.channelHostLeg(ctx, home, key+":"+home, post, target)
+	recipients, leg := d.channelHostLeg(ctx, home, hostActionKey(key, home), post, target)
 	if leg.State == channelLegRefused && (leg.Rule == channelRuleGone || leg.Rule == channelRuleNotMember) {
 		if err := d.Registry.DropRemoteChannel(request.SourceSessionID, name, home); err != nil {
 			return actionResult{}, err
