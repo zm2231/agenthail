@@ -28,7 +28,7 @@ func TestAUsageParkedItemReadsReadyOnceItsProviderResets(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := time.Now().Add(time.Hour)
-	entries := board.Backlog(ledger.BacklogQuery{}, before, reading(before))
+	entries := board.Backlog(ledger.BacklogQuery{}, before, ledger.Readings{Usage: reading(before)})
 	if len(entries) != 1 || entries[0].Ready || !entries[0].ReadyAt.Equal(reset) || entries[0].Why != "claude:bb is at its limit until "+reset.UTC().Format(time.RFC3339) {
 		t.Fatalf("before the reset = %+v", entries)
 	}
@@ -36,11 +36,11 @@ func TestAUsageParkedItemReadsReadyOnceItsProviderResets(t *testing.T) {
 		t.Fatalf("asked for %+v", asked)
 	}
 	after := reset.Add(time.Minute)
-	entries = board.Backlog(ledger.BacklogQuery{Ready: true}, after, reading(after))
+	entries = board.Backlog(ledger.BacklogQuery{Ready: true}, after, ledger.Readings{Usage: reading(after)})
 	if len(entries) != 1 || entries[0].Item.ID != id || !entries[0].Ready || entries[0].Why != "claude:bb has headroom" {
 		t.Fatalf("after the reset = %+v", entries)
 	}
-	if entries := board.Backlog(ledger.BacklogQuery{}, after, nil); entries[0].Ready || entries[0].Why != "no usage reading for claude:bb" {
+	if entries := board.Backlog(ledger.BacklogQuery{}, after, ledger.Readings{}); entries[0].Ready || entries[0].Why != "no usage reading for claude:bb" {
 		t.Fatalf("with no reading = %+v", entries)
 	}
 }
@@ -70,7 +70,7 @@ func TestTheBacklogSaysWhenEachKindCanComeBack(t *testing.T) {
 			t.Fatal(err)
 		}
 		out := map[string]ledger.BacklogEntry{}
-		for _, entry := range board.Backlog(q, now, nil) {
+		for _, entry := range board.Backlog(q, now, ledger.Readings{}) {
 			out[entry.Item.ID] = entry
 		}
 		return out
