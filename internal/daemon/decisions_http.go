@@ -33,7 +33,7 @@ func (d *Daemon) decisionsHandler(w http.ResponseWriter, r *http.Request) {
 	read := func(asking []dashboardSession) map[string]decisionRequests {
 		return d.readDecisionRequests(r.Context(), asking)
 	}
-	page := buildDecisions(decisionSources{rows: rows, hearer: d.decisionHearer, requests: read, queued: queued})
+	page := buildDecisions(decisionSources{rows: rows, hearer: d.decisionHearer, requests: read, queued: queued, parked: d.parkedDecisionsNow})
 	tag, err := contentTag(epoch, page)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())

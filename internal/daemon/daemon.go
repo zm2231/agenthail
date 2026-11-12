@@ -102,6 +102,7 @@ type Daemon struct {
 	ledger            *ledger.Store
 	ledgerHub         *ledgerChangeHub
 	ledgerSync        ledgerSyncHealth
+	backlog           backlogWatch
 	ledgerClaims      ledgerClaims
 	sorter            *ledgerSorter
 	contexts          *messageContexts

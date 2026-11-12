@@ -30,6 +30,7 @@ func (d *Daemon) runLedgerSweeps(ctx context.Context) {
 		d.sweepLedgerQuestions(now)
 		d.syncAllLedgerAsks()
 		d.sweepLedgerChecks(ctx, now)
+		d.sweepLedgerBacklog(ctx, now)
 	}
 	sweep(time.Now())
 	for {

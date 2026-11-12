@@ -15,14 +15,7 @@ import (
 func (d *Daemon) ledgerUsageReader(ctx context.Context, now time.Time) ledger.UsageReader {
 	local := sync.OnceValue(func() []usageSet { return d.localUsageSets(ctx, now) })
 	remote := sync.OnceValue(func() []usageSet { return d.remoteUsageSets(ctx) })
-	here := d.localHost().ID
-	return func(target ledger.ParkUsageTarget) ledger.Headroom {
-		sets := remote
-		if target.HostID == "" || target.HostID == here {
-			sets = local
-		}
-		return parkHeadroom(sets(), target, now)
-	}
+	return usageReaderOver(local, remote, d.localHost().ID, now)
 }
 
 func parkUsageSet(sets []usageSet, target ledger.ParkUsageTarget) (usageSet, bool) {

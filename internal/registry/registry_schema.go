@@ -782,4 +782,10 @@ CREATE TABLE IF NOT EXISTS ledger_state (
 	deadline_ms INTEGER NOT NULL DEFAULT 0,
 	freeze_version TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS ledger_backlog_told (
+	project_key TEXT NOT NULL,
+	item_id TEXT NOT NULL,
+	told_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (project_key, item_id)
+);
 `
