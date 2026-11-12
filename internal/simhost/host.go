@@ -97,6 +97,8 @@ func (h *Host) Status(ctx context.Context) Status {
 	return Status{Ready: true, AXe: strings.TrimSpace(string(out)), Runtime: runtime, Simslim: slimErr == nil}
 }
 
+func (h *Host) Local() bool { return h.goos == "darwin" }
+
 func (h *Host) run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return h.exec(ctx, Command{Name: name, Args: args})
 }

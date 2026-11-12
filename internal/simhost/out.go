@@ -24,6 +24,10 @@ func (h *Host) outFile(owner, name string) (string, error) {
 	return filepath.Join(dir, fmt.Sprintf("%d-%s", h.now().UnixNano(), name)), nil
 }
 
+func (h *Host) WriteOwnerFile(owner, name string, data []byte) (string, error) {
+	return h.writeOut(owner, name, data)
+}
+
 func (h *Host) writeOut(owner, name string, data []byte) (string, error) {
 	if len(data) > ownerOutLimit {
 		return "", refuse("too_large", "The result is over %d MiB.", ownerOutLimit>>20)

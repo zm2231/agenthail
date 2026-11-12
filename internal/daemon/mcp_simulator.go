@@ -39,8 +39,10 @@ func (d *Daemon) mcpSimulator(ctx context.Context, caller *mcpCaller, input mcpS
 	if d.simHost == nil {
 		return nil, refuse("unavailable", "This host runs no iOS simulators.")
 	}
-	if status := d.simulatorStatus(ctx); !status.Ready {
-		return nil, &mcpRefusal{Code: "unavailable", Message: "This host can't run iOS simulators: " + status.Problem + ".", Detail: map[string]any{"fix": status.Fix}}
+	if d.simHost.Local() {
+		if status := d.simulatorStatus(ctx); !status.Ready {
+			return nil, &mcpRefusal{Code: "unavailable", Message: "This host can't run iOS simulators: " + status.Problem + ".", Detail: map[string]any{"fix": status.Fix}}
+		}
 	}
 	var save string
 	if input.Action == "screenshot" && input.Path != "" {
@@ -59,7 +61,7 @@ func (d *Daemon) mcpSimulator(ctx context.Context, caller *mcpCaller, input mcpS
 	if input.Action == "describe" || input.Action == "logs" {
 		limit = browserTextLimit
 	}
-	out, err := d.simHost.Call(ctx, caller.session.ID, simhost.Request{Action: input.Action, Kind: input.Kind, App: input.App, BundleID: input.BundleID, Args: input.Args, Env: input.Env, URL: input.URL, Ref: input.Ref, X: input.X, Y: input.Y, ToX: input.ToX, ToY: input.ToY, Seconds: input.Seconds, Text: input.Text, Button: input.Button, Payload: input.Payload, Latitude: input.Latitude, Longitude: input.Longitude, Limit: limit})
+	out, err := d.callSimulator(ctx, caller.session.ID, simhost.Request{Action: input.Action, Kind: input.Kind, App: input.App, BundleID: input.BundleID, Args: input.Args, Env: input.Env, URL: input.URL, Ref: input.Ref, X: input.X, Y: input.Y, ToX: input.ToX, ToY: input.ToY, Seconds: input.Seconds, Text: input.Text, Button: input.Button, Payload: input.Payload, Latitude: input.Latitude, Longitude: input.Longitude, Limit: limit})
 	if err != nil {
 		return nil, simulatorRefusal(err)
 	}

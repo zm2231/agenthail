@@ -36,6 +36,8 @@ type DashboardConfig struct {
 	AskEscalateMinutes int `json:"askEscalateMinutes,omitempty"`
 	// AskPermissionEscalateMinutes is the same for a permission request, which holds a tool call; unset is 3.
 	AskPermissionEscalateMinutes int `json:"askPermissionEscalateMinutes,omitempty"`
+	// SimulatorHost names the paired Mac a host without simulators forwards to; unset picks the only connected one that runs them.
+	SimulatorHost string `json:"simulatorHost,omitempty"`
 }
 
 // ResumesAfterLimit reports whether sessions a usage limit stopped resume

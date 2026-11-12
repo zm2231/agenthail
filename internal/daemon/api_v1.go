@@ -102,6 +102,7 @@ type apiVersionResponse struct {
 	PushRelayURL      string `json:"pushRelayUrl"`
 	HostID            string `json:"hostId"`
 	HostName          string `json:"hostName"`
+	Simulators        bool   `json:"simulators,omitempty"`
 	buildinfo.Identity
 }
 
@@ -118,6 +119,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	d.registerLedgerRoutes(mux, dashboard)
 	d.registerScopeAPI(mux, dashboard)
 	d.registerExtensionRoutes(mux, dashboard)
+	d.registerSimulatorRoutes(mux, dashboard)
 	mux.HandleFunc(MCPClaimPath, d.apiV1Guard(dashboard, "control", d.apiMCPClaimHandler))
 	mux.HandleFunc("/api/v1/version", d.apiV1Guard(dashboard, "read", d.apiVersionHandler))
 	mux.HandleFunc("/api/v1/snapshot", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) })))
@@ -198,7 +200,7 @@ func (d *Daemon) apiVersionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := d.hostIdentity()
-	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolMinimum, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name, Identity: d.build})
+	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolMinimum, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name, Simulators: d.runsSimulators(r.Context()), Identity: d.build})
 }
 
 func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {

@@ -98,9 +98,7 @@ func (a *App) daemonRun() error {
 	d.SetBrowserHost(&browserhost.Manager{Home: home, Launch: func() (browserhost.Launch, error) {
 		return browserhost.InstalledLaunch(hostVersion)
 	}})
-	if runtime.GOOS == "darwin" {
-		d.SetSimulatorHost(simhost.New(simhost.Config{OutRoot: filepath.Join(home, ".agenthail", "simulator", "out")}))
-	}
+	d.SetSimulatorHost(simhost.New(simhost.Config{OutRoot: filepath.Join(home, ".agenthail", "simulator", "out")}))
 	d.SetExtensionHost(home, func() (nodehost.Launch, error) {
 		return nodehost.InstalledLaunch("extension host", "extension-host", "AGENTHAIL_EXTENSION_HOST", hostVersion)
 	})

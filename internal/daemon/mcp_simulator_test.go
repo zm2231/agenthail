@@ -19,12 +19,29 @@ type simCommands struct {
 	lines   []string
 	noAXe   bool
 	shotPNG []byte
+	holdOn  string
+	held    chan struct{}
+	release chan struct{}
+}
+
+func (s *simCommands) hold(prefix string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.holdOn, s.held, s.release = prefix, make(chan struct{}), make(chan struct{})
 }
 
 func (s *simCommands) exec(_ context.Context, cmd simhost.Command) ([]byte, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	line := strings.Join(append([]string{cmd.Name}, cmd.Args...), " ")
+	s.mu.Lock()
+	if s.holdOn != "" && strings.HasPrefix(line, s.holdOn) {
+		held, release := s.held, s.release
+		s.holdOn = ""
+		s.mu.Unlock()
+		close(held)
+		<-release
+		s.mu.Lock()
+	}
+	defer s.mu.Unlock()
 	s.lines = append(s.lines, line)
 	switch {
 	case cmd.Name == "axe" && s.noAXe:

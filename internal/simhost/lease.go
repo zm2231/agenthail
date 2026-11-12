@@ -48,7 +48,7 @@ type LeaseView struct {
 	Acquired  time.Time `json:"acquired"`
 	IdleUntil time.Time `json:"idleUntil"`
 	EndsAt    time.Time `json:"endsAt"`
-	OutDir    string    `json:"outDir"`
+	OutDir    string    `json:"outDir,omitempty"`
 }
 
 func (h *Host) view(l *lease) LeaseView {
