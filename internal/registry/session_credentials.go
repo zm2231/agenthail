@@ -131,7 +131,26 @@ func (r *Registry) issueSessionCredential(sessionID string, now time.Time, rotat
 	}}, nil
 }
 
+// CredentialIdleError is ErrCredentialExpired for an unused day, naming the
+// session so the caller can renew it with AuthenticateRunningSessionToken
+// while that session runs.
+type CredentialIdleError struct{ SessionID string }
+
+func (e CredentialIdleError) Error() string { return ErrCredentialExpired.Error() }
+
+func (e CredentialIdleError) Is(target error) bool { return target == ErrCredentialExpired }
+
 func (r *Registry) AuthenticateSessionToken(token string, now time.Time) (SessionCredential, error) {
+	return r.authenticateSessionToken(token, now, false)
+}
+
+// AuthenticateRunningSessionToken also accepts and renews a credential past
+// its idle expiry, for a session the caller knows is running.
+func (r *Registry) AuthenticateRunningSessionToken(token string, now time.Time) (SessionCredential, error) {
+	return r.authenticateSessionToken(token, now, true)
+}
+
+func (r *Registry) authenticateSessionToken(token string, now time.Time, running bool) (SessionCredential, error) {
 	if !strings.HasPrefix(token, SessionTokenPrefix) {
 		return SessionCredential{}, ErrCredentialUnknown
 	}
@@ -171,8 +190,8 @@ func (r *Registry) AuthenticateSessionToken(token string, now time.Time) (Sessio
 	if !credential.MaxExpiresAt.After(now) {
 		return SessionCredential{}, ErrCredentialMaxExpired
 	}
-	if !credential.IdleExpiresAt.After(now) {
-		return SessionCredential{}, ErrCredentialExpired
+	if !running && !credential.IdleExpiresAt.After(now) {
+		return SessionCredential{}, CredentialIdleError{SessionID: credential.SessionID}
 	}
 	idle := now.Add(CredentialIdleLifetime)
 	if _, err := tx.Exec(`UPDATE session_credentials SET last_used_at_ms=?,idle_expires_at_ms=? WHERE id=?`, now.UnixMilli(), idle.UnixMilli(), credential.ID); err != nil {

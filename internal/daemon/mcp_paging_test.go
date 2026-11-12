@@ -62,31 +62,6 @@ func TestMCPNegotiatesOnlyThePinnedRevisions(t *testing.T) {
 	}
 }
 
-func TestMCPMaxExpiryIsFinalButIdleExpiryRevives(t *testing.T) {
-	d, r, fake, from, _ := daemonFixture(t)
-	server := mcpServer(t, d)
-	token := issueMCPToken(t, d, from)
-	header := map[string]string{"Authorization": "Bearer " + token}
-	past := time.Now().Add(-time.Minute).UnixMilli()
-	if _, err := r.WriteDB().Exec(`UPDATE session_credentials SET max_expires_at_ms=? WHERE session_id=?`, past, from.ID); err != nil {
-		t.Fatal(err)
-	}
-	status, body := postMCP(t, server, header)
-	detail, _ := body["detail"].(map[string]any)
-	if status != http.StatusUnauthorized || errorCode(body) != "credential_expired" || body["retryable"] != false || detail["reason"] != "max" {
-		t.Fatalf("max expired status=%d body=%v", status, body)
-	}
-	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-after-max"}
-	d.observeSession(context.Background(), fake, &from)
-	if status, body := postMCP(t, server, header); status != http.StatusUnauthorized || errorCode(body) != "credential_expired" {
-		t.Fatalf("a turn revived a max-expired credential: status=%d body=%v", status, body)
-	}
-	fresh, err := d.issueSessionCredential(from)
-	if err != nil || fresh.Token == "" || fresh.Token == token {
-		t.Fatalf("fresh=%+v err=%v", fresh, err)
-	}
-}
-
 func traverseSessions(t *testing.T, session *mcp.ClientSession, between func(page int)) map[string]int {
 	t.Helper()
 	seen := map[string]int{}

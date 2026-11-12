@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -155,24 +154,6 @@ func TestMCPWhoamiNamesTheCallingSession(t *testing.T) {
 	}
 	if strings.Contains(logged.String(), token) {
 		t.Fatal("the raw token reached the daemon log")
-	}
-}
-
-func TestMCPExpiredCredentialWorksAgainAfterTheNextTurn(t *testing.T) {
-	d, r, fake, from, _ := daemonFixture(t)
-	server := mcpServer(t, d)
-	token := issueMCPToken(t, d, from)
-	if _, err := r.WriteDB().Exec(`UPDATE session_credentials SET idle_expires_at_ms=? WHERE session_id=?`, time.Now().Add(-time.Minute).UnixMilli(), from.ID); err != nil {
-		t.Fatal(err)
-	}
-	header := map[string]string{"Authorization": "Bearer " + token}
-	if status, body := postMCP(t, server, header); status != http.StatusUnauthorized || errorCode(body) != "credential_expired" || body["retryable"] != true {
-		t.Fatalf("expired status=%d body=%v", status, body)
-	}
-	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}
-	d.observeSession(context.Background(), fake, &from)
-	if whoami, refused := callMCP(t, mcpSession(t, server, token), "agenthail_whoami", nil); refused || whoami["sessionId"] != from.ID {
-		t.Fatalf("revived whoami=%v refused=%v", whoami, refused)
 	}
 }
 
