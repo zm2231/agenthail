@@ -23,6 +23,8 @@ type QueuedMessage struct {
 	Author          surface.Author
 	Uploads         surface.Uploads
 	PersonName      string
+	HolderPID       int
+	HolderStart     string
 }
 
 const (
