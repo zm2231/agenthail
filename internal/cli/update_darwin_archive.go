@@ -20,6 +20,9 @@ func isDarwinArchiveInstall(dataDir string) bool {
 }
 
 func defaultSigningTeam(path string) (string, error) {
+	if output, err := exec.Command("/usr/bin/codesign", "--verify", "--strict", path).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("the signature of %s does not verify: %s", path, strings.TrimSpace(string(output)))
+	}
 	output, err := exec.Command("/usr/bin/codesign", "-dv", "--verbose=2", path).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("read the signature of %s: %w", path, err)

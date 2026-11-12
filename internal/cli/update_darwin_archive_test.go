@@ -193,3 +193,28 @@ func TestDoctorNamesADarwinArchiveInstall(t *testing.T) {
 		t.Fatalf("a source build in the same folder reads %q", got)
 	}
 }
+
+func TestTheSignerOfAModifiedBinaryIsNotTrusted(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/codesign"); err != nil {
+		t.Skip("codesign is macOS only")
+	}
+	binary := filepath.Join(t.TempDir(), "signed")
+	if err := os.WriteFile(binary, []byte(versionScript("v0.2.134")), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("/usr/bin/codesign", "--sign", "-", binary).CombinedOutput(); err != nil {
+		t.Skipf("cannot sign a fixture here: %s", output)
+	}
+	if team, err := defaultSigningTeam(binary); err == nil {
+		t.Fatalf("an ad hoc signature names team %q, want it refused", team)
+	}
+	file, err := os.OpenFile(binary, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file.WriteString("echo changed\n")
+	file.Close()
+	if team, err := defaultSigningTeam(binary); err == nil || !strings.Contains(err.Error(), "does not verify") {
+		t.Fatalf("a binary changed after signing read team %q, err=%v", team, err)
+	}
+}
