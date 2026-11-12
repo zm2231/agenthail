@@ -1,4 +1,4 @@
--- schemaVersion 96
+-- schemaVersion 97
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -540,7 +540,10 @@ CREATE TABLE message_queue (
 	uploads TEXT NOT NULL DEFAULT '[]',
 	refused INTEGER NOT NULL DEFAULT 0,
 	refusal INTEGER NOT NULL DEFAULT 0,
-	person_name TEXT NOT NULL DEFAULT ''
+	person_name TEXT NOT NULL DEFAULT '',
+	holders_json TEXT NOT NULL DEFAULT '[]',
+	holder_pid INTEGER NOT NULL DEFAULT 0,
+	holder_start TEXT NOT NULL DEFAULT ''
 );
 
 -- table move_dropped_relays
@@ -1184,7 +1187,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_message_queue_update
-CREATE TRIGGER catalog_presentation_version_message_queue_update AFTER UPDATE OF attempts,author,available_at_ms,busy_delivery,dead_at_ms,deferrals,delivered,delivery_key,evidence,host_request,id,inflight_at_ms,last_error,message,model,operation,person_name,queued_at,refusal,refused,relay_hops,session_id,source_session_id,status,turn_options,updated_at,uploads ON message_queue WHEN (NEW.attempts IS NOT OLD.attempts OR NEW.author IS NOT OLD.author OR NEW.available_at_ms IS NOT OLD.available_at_ms OR NEW.busy_delivery IS NOT OLD.busy_delivery OR NEW.dead_at_ms IS NOT OLD.dead_at_ms OR NEW.deferrals IS NOT OLD.deferrals OR NEW.delivered IS NOT OLD.delivered OR NEW.delivery_key IS NOT OLD.delivery_key OR NEW.evidence IS NOT OLD.evidence OR NEW.host_request IS NOT OLD.host_request OR NEW.id IS NOT OLD.id OR NEW.inflight_at_ms IS NOT OLD.inflight_at_ms OR NEW.last_error IS NOT OLD.last_error OR NEW.message IS NOT OLD.message OR NEW.model IS NOT OLD.model OR NEW.operation IS NOT OLD.operation OR NEW.person_name IS NOT OLD.person_name OR NEW.queued_at IS NOT OLD.queued_at OR NEW.refusal IS NOT OLD.refusal OR NEW.refused IS NOT OLD.refused OR NEW.relay_hops IS NOT OLD.relay_hops OR NEW.session_id IS NOT OLD.session_id OR NEW.source_session_id IS NOT OLD.source_session_id OR NEW.status IS NOT OLD.status OR NEW.turn_options IS NOT OLD.turn_options OR NEW.updated_at IS NOT OLD.updated_at OR NEW.uploads IS NOT OLD.uploads)
+CREATE TRIGGER catalog_presentation_version_message_queue_update AFTER UPDATE OF attempts,author,available_at_ms,busy_delivery,dead_at_ms,deferrals,delivered,delivery_key,evidence,holder_pid,holder_start,holders_json,host_request,id,inflight_at_ms,last_error,message,model,operation,person_name,queued_at,refusal,refused,relay_hops,session_id,source_session_id,status,turn_options,updated_at,uploads ON message_queue WHEN (NEW.attempts IS NOT OLD.attempts OR NEW.author IS NOT OLD.author OR NEW.available_at_ms IS NOT OLD.available_at_ms OR NEW.busy_delivery IS NOT OLD.busy_delivery OR NEW.dead_at_ms IS NOT OLD.dead_at_ms OR NEW.deferrals IS NOT OLD.deferrals OR NEW.delivered IS NOT OLD.delivered OR NEW.delivery_key IS NOT OLD.delivery_key OR NEW.evidence IS NOT OLD.evidence OR NEW.holder_pid IS NOT OLD.holder_pid OR NEW.holder_start IS NOT OLD.holder_start OR NEW.holders_json IS NOT OLD.holders_json OR NEW.host_request IS NOT OLD.host_request OR NEW.id IS NOT OLD.id OR NEW.inflight_at_ms IS NOT OLD.inflight_at_ms OR NEW.last_error IS NOT OLD.last_error OR NEW.message IS NOT OLD.message OR NEW.model IS NOT OLD.model OR NEW.operation IS NOT OLD.operation OR NEW.person_name IS NOT OLD.person_name OR NEW.queued_at IS NOT OLD.queued_at OR NEW.refusal IS NOT OLD.refusal OR NEW.refused IS NOT OLD.refused OR NEW.relay_hops IS NOT OLD.relay_hops OR NEW.session_id IS NOT OLD.session_id OR NEW.source_session_id IS NOT OLD.source_session_id OR NEW.status IS NOT OLD.status OR NEW.turn_options IS NOT OLD.turn_options OR NEW.updated_at IS NOT OLD.updated_at OR NEW.uploads IS NOT OLD.uploads)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
