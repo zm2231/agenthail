@@ -20,16 +20,23 @@ import (
 )
 
 const fixtureServer = `
+import fs from 'node:fs';
+import path from 'node:path';
+
 type Event = { type: string; entityId?: string };
 
-export default function (ah: any) {
+export default async function (ah: any) {
+  const hold = path.join(ah.dir, 'hold-load');
+  while (fs.existsSync(hold)) await new Promise(resolve => setTimeout(resolve, 20));
+  const interval = path.join(ah.dir, 'slow-interval');
+  const slowEvery = fs.existsSync(interval) ? Number(fs.readFileSync(interval, 'utf8')) : 60;
   const events = ah.table('events');
   const ticks = ah.table('ticks');
   ah.db.exec("CREATE TABLE IF NOT EXISTS " + events + " (type TEXT, entity TEXT)");
   ah.db.exec("CREATE TABLE IF NOT EXISTS " + ticks + " (at TEXT)");
   const slow = ah.table('slow');
   ah.db.exec("CREATE TABLE IF NOT EXISTS " + slow + " (phase TEXT)");
-  ah.job({ name: 'slow', everySeconds: 60, run: async () => {
+  ah.job({ name: 'slow', everySeconds: slowEvery, run: async () => {
     ah.db.prepare("INSERT INTO " + slow + " VALUES ('start')").run();
     await new Promise(resolve => setTimeout(resolve, 2500));
     ah.db.prepare("INSERT INTO " + slow + " VALUES ('end')").run();
@@ -327,6 +334,9 @@ func TestReloadsRunOneAtATimeAndNeverStartAJobThatIsStillRunning(t *testing.T) {
 	}
 	eventually(t, "the slow job starts", func() bool { return f.state(t).SlowStarts == 1 })
 
+	if err := os.WriteFile(filepath.Join(f.workdir, "slow-interval"), []byte("120"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	errs := make(chan error, 4)
 	for range 4 {
 		go func() { errs <- f.d.reloadExtensions(context.Background()) }()
@@ -348,7 +358,40 @@ func TestReloadsRunOneAtATimeAndNeverStartAJobThatIsStillRunning(t *testing.T) {
 	job := f.d.extensions.loaded["fixture"].jobs["slow"]
 	running, lastRun, due := job.running, job.LastRun, job.due
 	f.d.extensions.mu.Unlock()
-	if running || lastRun.IsZero() || !due.Equal(lastRun.Add(time.Minute)) {
+	if running || lastRun.IsZero() || !due.Equal(lastRun.Add(2*time.Minute)) {
 		t.Fatalf("after the run: running=%v lastRun=%v due=%v", running, lastRun, due)
 	}
+}
+
+func TestEventsPublishedWhileExtensionsReloadAreDeliveredOnceTheyLoad(t *testing.T) {
+	f := startExtensionFixture(t)
+	if err := f.d.extensions.approvals.Grant("fixture", []string{"read.all", "control.all"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.d.reloadExtensions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	hold := filepath.Join(f.workdir, "hold-load")
+	if err := os.WriteFile(hold, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := make(chan error, 1)
+	go func() { reloaded <- f.d.reloadExtensions(context.Background()) }()
+	eventually(t, "the reload is under way", func() bool {
+		f.d.extensions.mu.Lock()
+		defer f.d.extensions.mu.Unlock()
+		return f.d.extensions.reloading
+	})
+	f.d.publishEvent("turn.completed", "during-reload", map[string]string{})
+	time.Sleep(300 * time.Millisecond)
+	if err := os.Remove(hold); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-reloaded; err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the event published during the reload arrives", func() bool {
+		state := f.state(t)
+		return len(state.Events) == 1 && state.Events[0] == "during-reload"
+	})
 }

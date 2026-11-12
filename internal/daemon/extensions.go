@@ -42,6 +42,7 @@ type extensionJobState struct {
 	LastError string    `json:"lastError,omitempty"`
 	running   bool
 	due       time.Time
+	every     time.Duration
 }
 
 type loadedExtension struct {
@@ -60,10 +61,11 @@ type extensionRuntime struct {
 
 	loading sync.Mutex
 	mu      sync.Mutex
-	loaded  map[string]*loadedExtension
-	tokens  map[string]string
-	hostErr string
-	up      bool
+	loaded    map[string]*loadedExtension
+	tokens    map[string]string
+	hostErr   string
+	up        bool
+	reloading bool
 }
 
 func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, error)) {
@@ -104,7 +106,8 @@ func extensionToken() string { return "ext_" + rand.Text() + rand.Text() }
 // loadExtensions reads the workspace again and has the host load every valid
 // extension with fresh credentials; the previous credentials stop working.
 // One load runs at a time, so the host's extensions and the daemon's tokens
-// always come from the same load.
+// always come from the same load. Events wait until a load succeeds, since
+// until then the host may hold no handlers.
 func (d *Daemon) loadExtensions(ctx context.Context) error {
 	r := d.extensions
 	r.loading.Lock()
@@ -152,12 +155,15 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	previous := r.loaded
 	r.loaded = next
 	r.tokens = tokens
+	r.reloading = true
 	r.mu.Unlock()
-	if err := r.host.Client().Call(ctx, "load", map[string]any{"extensions": specs, "writeTools": extensionWriteTools()}, &status); err != nil {
+	err = r.host.Client().Call(ctx, "load", map[string]any{"extensions": specs, "writeTools": extensionWriteTools()}, &status)
+	now := time.Now()
+	if err != nil {
 		return fmt.Errorf("load extensions: %w", err)
 	}
-	now := time.Now()
 	r.mu.Lock()
+	r.reloading = false
 	for _, summary := range status.Extensions {
 		loaded, ok := next[summary.ID]
 		if !ok {
@@ -178,15 +184,17 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 // A job keeps its state object across loads, so a run still going when the
 // extension reloads holds off the next one until it finishes.
 func carriedJobState(previous *loadedExtension, job extensionJob, now time.Time) *extensionJobState {
+	every := time.Duration(job.EverySeconds) * time.Second
 	if previous != nil {
 		if kept, ok := previous.jobs[job.Name]; ok {
+			kept.every = every
 			if !kept.running && !kept.LastRun.IsZero() {
-				kept.due = kept.LastRun.Add(time.Duration(job.EverySeconds) * time.Second)
+				kept.due = kept.LastRun.Add(every)
 			}
 			return kept
 		}
 	}
-	return &extensionJobState{due: now}
+	return &extensionJobState{due: now, every: every}
 }
 
 func (d *Daemon) reloadExtensions(ctx context.Context) error {
@@ -275,7 +283,7 @@ func (d *Daemon) runExtensionJob(ctx context.Context, id string, job extensionJo
 	r.mu.Lock()
 	state.running = false
 	state.LastRun = finished
-	state.due = finished.Add(time.Duration(job.EverySeconds) * time.Second)
+	state.due = finished.Add(state.every)
 	state.LastError = ""
 	if err != nil {
 		state.LastError = err.Error()
@@ -324,7 +332,7 @@ func (d *Daemon) pumpExtensionEvents(ctx context.Context) {
 func (d *Daemon) deliverExtensionEvents(ctx context.Context, events []apiEvent) error {
 	r := d.extensions
 	r.mu.Lock()
-	up := r.up
+	up := r.up && !r.reloading
 	var to []string
 	for id, loaded := range r.loaded {
 		if loaded.host.State == "loaded" && loaded.host.Events && slices.Contains(loaded.held, "read.all") {
