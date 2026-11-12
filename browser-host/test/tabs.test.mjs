@@ -5,7 +5,9 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
-import { encodedBytes, excerpt } from '../output.mjs';
+import os from 'node:os';
+import { encodedBytes, excerpt, Output } from '../output.mjs';
+import { Tabs } from '../tabs.mjs';
 import { call, callWith, processesUnder, startHost } from './support.mjs';
 
 const LIMIT = 16 << 10;
@@ -38,6 +40,11 @@ function serve(t) {
       response.writeHead(200, { 'content-type': 'text/html' });
       const rows = Array.from({ length: 600 }, (_, i) => `<li><a href="#${i}">"quoted" <item> & ${i}</a> <button onclick="out.textContent='bought ${i}'">Buy ${i}</button></li>`).join('');
       response.end(`<title>Long</title><p id="out">none</p><ul>${rows}</ul>`);
+      return;
+    }
+    if (request.url.startsWith('/titled')) {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end(`<title>${'<&>'.repeat(7000)}</title><p>body</p>`);
       return;
     }
     if (request.url === '/whoami') {
@@ -147,6 +154,7 @@ test('when Chromium crashes under a running host its tabs are gone and open star
   const host = startHost(t, process.env.AGENTHAIL_BROWSER_TEST_BROWSERS);
   const owner = 'session-a';
   const { tab } = await ok(host.socket, 'tabs.open', { owner, url });
+  const { file } = await ok(host.socket, 'tabs.snapshot', { limit: LIMIT, owner, tab });
   const parentOf = pid => Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' }).trim());
   const [chromium] = processesUnder(host.dir, 'chrome-headless-shell').filter(pid => parentOf(pid) === host.child.pid);
   assert.ok(chromium, 'no Chromium under the host');
@@ -156,6 +164,7 @@ test('when Chromium crashes under a running host its tabs are gone and open star
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.equal((await call(host.socket, 'tabs.snapshot', { limit: LIMIT, owner, tab })).error.code, 'not_found');
+  assert.equal(fs.existsSync(file), false, 'a snapshot outlived the browser that took it');
   const reopened = await ok(host.socket, 'tabs.open', { owner, url });
   assert.notEqual(reopened.tab, tab);
   assert.equal(reopened.title, 'Home');
@@ -228,4 +237,52 @@ test('a screenshot saves the view, the whole page or one element, for its owner 
 
   await ok(host.socket, 'tabs.closeOwner', { owner });
   for (const shot of [view, page, element]) assert.equal(fs.existsSync(shot.file), false, `${shot.file} outlived its owner`);
+});
+
+test('a page whose title and URL are each over the limit still returns a result that fits', { timeout: 600_000 }, async t => {
+  const url = await serve(t);
+  const host = startHost(t, process.env.AGENTHAIL_BROWSER_TEST_BROWSERS);
+  const owner = 'session-a';
+  const { tab } = await ok(host.socket, 'tabs.open', { owner, url: `${url}/titled#${'x'.repeat(20_000)}` });
+  for (const [method, params] of [['tabs.snapshot', { limit: LIMIT }], ['tabs.screenshot', {}], ['tabs.list', {}]]) {
+    const result = await ok(host.socket, method, { owner, tab, ...params });
+    assert.ok(resultBytes(result) <= LIMIT, `${method} encodes to ${resultBytes(result)} bytes`);
+  }
+  const taken = await ok(host.socket, 'tabs.snapshot', { limit: LIMIT, owner, tab });
+  assert.ok(taken.title.endsWith('…') && taken.url.endsWith('…'), `${taken.title.slice(-20)} ${taken.url.slice(-20)}`);
+  assert.match(fs.readFileSync(taken.file, 'utf8'), /body/);
+});
+
+test('an owner keeps no more than its cap, and one result over it is refused', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'out-'));
+  try {
+    const output = new Output(root, 1000);
+    const first = output.write('a', 't1', 'txt', 'x'.repeat(600));
+    const second = output.write('a', 't1', 'txt', 'y'.repeat(600));
+    assert.equal(fs.existsSync(first), false);
+    assert.equal(fs.readFileSync(second, 'utf8'), 'y'.repeat(600));
+    assert.throws(() => output.write('a', 't1', 'txt', 'z'.repeat(1001)), { code: 'too_large' });
+    const kept = fs.readdirSync(output.dir('a')).reduce((sum, name) => sum + fs.statSync(path.join(output.dir('a'), name)).size, 0);
+    assert.ok(kept <= 1000, `kept ${kept} bytes`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a snapshot still running when its owner is closed writes nothing', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'out-'));
+  try {
+    const output = new Output(root);
+    const tabs = new Tabs({ browser: {}, output });
+    let release;
+    const page = { on() {}, off() {}, url: () => 'about:blank', title: async () => '', close: async () => {}, ariaSnapshot: () => new Promise(resolve => { release = resolve; }) };
+    tabs.tabs.set('t1', { id: 't1', owner: 'a', page, dialog: null });
+    const taking = tabs.snapshot({ owner: 'a', tab: 't1', limit: LIMIT });
+    await tabs.closeOwner({ owner: 'a' });
+    release('- generic [ref=e1]');
+    await assert.rejects(taking, { code: 'not_found' });
+    assert.equal(fs.existsSync(output.dir('a')), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

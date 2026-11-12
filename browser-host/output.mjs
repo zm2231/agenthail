@@ -10,6 +10,19 @@ export function encodedBytes(text) {
   return Buffer.byteLength(JSON.stringify(text)) + 5 * (text.match(/[<>&\u2028\u2029]/g)?.length ?? 0);
 }
 
+export function clipText(text, budget) {
+  if (encodedBytes(text) <= budget) return text;
+  let kept = '';
+  let used = encodedBytes('…');
+  for (const char of text) {
+    const cost = encodedBytes(char) - 2;
+    if (used + cost > budget) break;
+    kept += char;
+    used += cost;
+  }
+  return kept + '…';
+}
+
 export function excerpt(text, budget) {
   if (encodedBytes(text) <= budget) return { text, truncated: false };
   let kept = '';
@@ -38,6 +51,10 @@ export class Output {
   }
 
   write(owner, stem, extension, data) {
+    const size = Buffer.byteLength(data);
+    if (size > this.ownerBytes) {
+      throw Object.assign(new Error(`the result is ${size} bytes, over the ${this.ownerBytes} a session may keep`), { code: 'too_large' });
+    }
     const dir = this.dir(owner);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const file = path.join(dir, `${stem}-${Date.now()}-${randomBytes(3).toString('hex')}.${extension}`);
@@ -47,10 +64,10 @@ export class Output {
   }
 
   evict(dir, keep) {
-    const files = fs.readdirSync(dir).map(name => {
+    const files = fs.readdirSync(dir).flatMap(name => {
       const file = path.join(dir, name);
-      const stat = fs.statSync(file);
-      return { file, size: stat.size, mtime: stat.mtimeMs };
+      const stat = fs.statSync(file, { throwIfNoEntry: false });
+      return stat ? [{ file, size: stat.size, mtime: stat.mtimeMs }] : [];
     }).sort((a, b) => a.mtime - b.mtime);
     let total = files.reduce((sum, entry) => sum + entry.size, 0);
     for (const entry of files) {

@@ -1,7 +1,10 @@
 import { randomBytes } from 'node:crypto';
-import { encodedBytes, excerpt } from './output.mjs';
+import { clipText, encodedBytes, excerpt } from './output.mjs';
 
 const MIN_LIMIT = 1 << 10;
+const URL_BYTES = 2 << 10;
+const TITLE_BYTES = 512;
+const MESSAGE_BYTES = 1 << 10;
 const ACTION_TIMEOUT_MS = 10_000;
 const NAVIGATE_TIMEOUT_MS = 30_000;
 const MAX_WAIT_MS = 30_000;
@@ -51,9 +54,14 @@ export class Tabs {
   }
 
   async describe(tab) {
-    const out = { tab: tab.id, url: tab.page.url(), title: await tab.page.title().catch(() => '') };
-    if (tab.dialog) out.dialog = { type: tab.dialog.type(), message: tab.dialog.message() };
+    const out = { tab: tab.id, url: clipText(tab.page.url(), URL_BYTES), title: clipText(await tab.page.title().catch(() => ''), TITLE_BYTES) };
+    if (tab.dialog) out.dialog = { type: tab.dialog.type(), message: clipText(tab.dialog.message(), MESSAGE_BYTES) };
     return out;
+  }
+
+  keep(tab, extension, data) {
+    if (this.tabs.get(tab.id) !== tab) throw failure('not_found', `tab ${tab.id} was closed while this ran`);
+    return this.output.write(tab.owner, tab.id, extension, data);
   }
 
   async guarded(tab, run) {
@@ -94,7 +102,7 @@ export class Tabs {
     });
     const out = await this.describe(tab);
     if (tab.dialog || tree === undefined) return out;
-    const file = this.output.write(tab.owner, tab.id, 'snapshot.yml', tree);
+    const file = this.keep(tab, 'snapshot.yml', tree);
     const bytes = Buffer.byteLength(tree);
     const lines = tree.split('\n').length;
     const full = `The whole snapshot is in ${file} (${bytes} bytes, ${lines} lines); read it there. Its refs are valid until your next snapshot.`;
@@ -118,7 +126,7 @@ export class Tabs {
     }
     const out = await this.describe(tab);
     if (tab.dialog || image === undefined) return out;
-    const file = this.output.write(tab.owner, tab.id, 'png', image);
+    const file = this.keep(tab, 'png', image);
     return { ...out, file, bytes: image.length, width: image.readUInt32BE(16), height: image.readUInt32BE(20) };
   }
 
@@ -221,5 +229,6 @@ export class Tabs {
   forget() {
     this.tabs.clear();
     this.contexts.clear();
+    this.output.clear();
   }
 }
