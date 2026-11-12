@@ -110,6 +110,7 @@ type WorkItemStatePayload struct {
 	Reviewer    string    `json:"reviewer,omitempty"`
 	UtteranceID string    `json:"utteranceId,omitempty"`
 	Handoff     *Handoff  `json:"handoff,omitempty"`
+	Park        *Park     `json:"park,omitempty"`
 }
 
 type DelegationPayload struct {
