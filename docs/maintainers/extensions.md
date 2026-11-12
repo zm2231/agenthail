@@ -106,12 +106,14 @@ so a send to it is refused with a reason.
 ## Process and protocol
 
 The daemon runs `runtime/node/bin/node extension-host/host.mjs --socket
-~/.agenthail/extensions-data/host/host.sock --version <daemon version> --store
+~/.agenthail/extension-host.sock --version <daemon version> --store
 ~/.agenthail/extensions-data/store.db`, supervised like the
 [browser host](browser-host.md): a fresh secret on stdin, a 0600 socket, the
 `hello` check, restarts with backoff from 1 to 30 seconds, and a log at
 `~/.agenthail/extensions-data/host/host.log`. `AGENTHAIL_EXTENSION_HOST`
-overrides the script path.
+overrides the script path. A Unix socket path holds at most 103 bytes on macOS
+and 107 on Linux; with a home directory long enough to pass that, the host does
+not start and its error says so.
 
 | Method | Params | Result |
 |---|---|---|

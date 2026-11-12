@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -73,6 +74,7 @@ func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, e
 	runtime.host = &nodehost.Supervisor{
 		Name:     "extension host",
 		StateDir: extensionHostDir(home),
+		Socket:   filepath.Join(home, ".agenthail", "extension-host.sock"),
 		Protocol: extensionHostProtocol,
 		Launch:   launch,
 		Args:     func() []string { return []string{"--store", extension.StorePath(home)} },

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type Launch struct {
 type Supervisor struct {
 	Name     string
 	StateDir string
+	Socket   string
 	Protocol int
 	Launch   func() (Launch, error)
 	Args     func() []string
@@ -67,7 +69,7 @@ func (s *Supervisor) Restart() {
 	}
 }
 
-func (s *Supervisor) SocketPath() string { return filepath.Join(s.StateDir, "host.sock") }
+func (s *Supervisor) SocketPath() string { return s.Socket }
 
 func (s *Supervisor) LogPath() string { return filepath.Join(s.StateDir, "host.log") }
 
@@ -112,8 +114,13 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.StateDir, 0o700); err != nil {
-		return err
+	if err := checkSocketPath(s.Socket, runtime.GOOS); err != nil {
+		return fmt.Errorf("start the %s: %w", s.Name, err)
+	}
+	for _, dir := range []string{s.StateDir, filepath.Dir(s.Socket)} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
 	}
 	restart := s.restarts()
 	select {

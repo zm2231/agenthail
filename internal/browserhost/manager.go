@@ -39,6 +39,7 @@ func (m *Manager) host() *nodehost.Supervisor {
 		m.supervisor = &nodehost.Supervisor{
 			Name:       "browser host",
 			StateDir:   StateDir(m.Home),
+			Socket:     SocketPath(m.Home),
 			Protocol:   Protocol,
 			Launch:     m.Launch,
 			Args:       func() []string { return []string{"--browsers", BrowsersDir(m.Home)} },
