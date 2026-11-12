@@ -6,6 +6,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 import { Browser } from './browser.mjs';
+import { Output } from './output.mjs';
 import { Tabs } from './tabs.mjs';
 
 const PROTOCOL = 2;
@@ -26,11 +27,12 @@ for (const name of ['socket', 'browsers', 'version']) {
 }
 
 const browser = new Browser({ browsers: args.browsers, node: process.execPath });
-const tabs = new Tabs({ browser, shots: path.join(path.dirname(args.socket), 'shots') });
+const output = new Output(path.join(path.dirname(args.socket), 'out'));
+const tabs = new Tabs({ browser, output });
 browser.disconnected = () => tabs.forget();
 
 const methods = {
-  ...Object.fromEntries(['open', 'navigate', 'snapshot', 'act', 'wait', 'dialog', 'resize', 'list', 'close', 'closeOwner']
+  ...Object.fromEntries(['open', 'navigate', 'snapshot', 'screenshot', 'act', 'wait', 'dialog', 'resize', 'list', 'close', 'closeOwner']
     .map(name => [`tabs.${name}`, params => tabs[name](params)])),
   hello: () => ({ protocol: PROTOCOL, hostVersion: args.version, pid: process.pid }),
   status: () => browser.status(),
@@ -104,6 +106,8 @@ readline.createInterface({ input: process.stdin }).once('line', line => {
     process.stderr.write('browser host: the secret on stdin is missing or too short\n');
     process.exit(2);
   }
+  output.clear();
+  fs.rmSync(path.join(path.dirname(args.socket), 'shots'), { recursive: true, force: true });
   fs.rmSync(args.socket, { force: true });
   server.listen(args.socket, () => fs.chmodSync(args.socket, 0o600));
 });

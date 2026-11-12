@@ -1,8 +1,10 @@
 import { randomBytes } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
+import { clipText, encodedBytes, excerpt } from './output.mjs';
 
-const SNAPSHOT_BYTES = 20 << 10;
+const MIN_LIMIT = 1 << 10;
+const URL_BYTES = 2 << 10;
+const TITLE_BYTES = 512;
+const MESSAGE_BYTES = 1 << 10;
 const ACTION_TIMEOUT_MS = 10_000;
 const NAVIGATE_TIMEOUT_MS = 30_000;
 const MAX_WAIT_MS = 30_000;
@@ -12,20 +14,10 @@ function failure(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
-export function clip(text, limit = SNAPSHOT_BYTES) {
-  if (Buffer.byteLength(text) <= limit) return { text, truncated: false };
-  let kept = '';
-  for (const line of text.split('\n')) {
-    if (Buffer.byteLength(kept) + Buffer.byteLength(line) + 1 > limit) break;
-    kept += line + '\n';
-  }
-  return { text: kept, truncated: true };
-}
-
 export class Tabs {
-  constructor({ browser, shots }) {
+  constructor({ browser, output }) {
     this.browser = browser;
-    this.shots = shots;
+    this.output = output;
     this.contexts = new Map();
     this.tabs = new Map();
   }
@@ -62,9 +54,14 @@ export class Tabs {
   }
 
   async describe(tab) {
-    const out = { tab: tab.id, url: tab.page.url(), title: await tab.page.title().catch(() => '') };
-    if (tab.dialog) out.dialog = { type: tab.dialog.type(), message: tab.dialog.message() };
+    const out = { tab: tab.id, url: clipText(tab.page.url(), URL_BYTES), title: clipText(await tab.page.title().catch(() => ''), TITLE_BYTES) };
+    if (tab.dialog) out.dialog = { type: tab.dialog.type(), message: clipText(tab.dialog.message(), MESSAGE_BYTES) };
     return out;
+  }
+
+  keep(tab, extension, data) {
+    if (this.tabs.get(tab.id) !== tab) throw failure('not_found', `tab ${tab.id} was closed while this ran`);
+    return this.output.write(tab.owner, tab.id, extension, data);
   }
 
   async guarded(tab, run) {
@@ -97,20 +94,40 @@ export class Tabs {
 
   async snapshot(params) {
     const tab = this.tab(params);
-    const taken = {};
+    const limit = Number(params.limit);
+    if (!(limit >= MIN_LIMIT)) throw failure('invalid', `limit must be at least ${MIN_LIMIT} bytes`);
+    let tree;
     await this.guarded(tab, async () => {
-      const { text, truncated } = clip(await tab.page.ariaSnapshot({ mode: 'ai', timeout: ACTION_TIMEOUT_MS }));
-      taken.snapshot = text;
-      if (truncated) taken.truncated = true;
-      if (params.includeImage) {
-        fs.mkdirSync(this.shots, { recursive: true, mode: 0o700 });
-        const image = path.join(this.shots, `${tab.id}-${Date.now()}.png`);
-        await tab.page.screenshot({ path: image, timeout: ACTION_TIMEOUT_MS });
-        taken.image = image;
-      }
+      tree = await tab.page.ariaSnapshot({ mode: 'ai', timeout: ACTION_TIMEOUT_MS });
     });
     const out = await this.describe(tab);
-    return tab.dialog ? out : { ...out, ...taken };
+    if (tab.dialog || tree === undefined) return out;
+    const file = this.keep(tab, 'snapshot.yml', tree);
+    const bytes = Buffer.byteLength(tree);
+    const lines = tree.split('\n').length;
+    const full = `The whole snapshot is in ${file} (${bytes} bytes, ${lines} lines); read it there. Its refs are valid until your next snapshot.`;
+    const rest = { ...out, file, bytes, lines, truncated: true, full, snapshot: '' };
+    const { text, truncated } = excerpt(tree, limit - encodedBytes(JSON.stringify(rest)));
+    return truncated ? { ...rest, snapshot: text } : { ...out, file, bytes, lines, truncated: false, snapshot: text };
+  }
+
+  async screenshot(params) {
+    const tab = this.tab(params);
+    if (params.fullPage && params.ref) throw failure('invalid', 'fullPage and ref cannot be combined: a ref captures one element');
+    let image;
+    try {
+      await this.guarded(tab, async () => {
+        image = params.ref
+          ? await this.locate(tab, params.ref).screenshot({ timeout: ACTION_TIMEOUT_MS })
+          : await tab.page.screenshot({ fullPage: Boolean(params.fullPage), timeout: ACTION_TIMEOUT_MS });
+      });
+    } catch (error) {
+      throw failure(error.code === 'invalid' ? 'invalid' : 'action_failed', error.message.split('\n')[0]);
+    }
+    const out = await this.describe(tab);
+    if (tab.dialog || image === undefined) return out;
+    const file = this.keep(tab, 'png', image);
+    return { ...out, file, bytes: image.length, width: image.readUInt32BE(16), height: image.readUInt32BE(20) };
   }
 
   async act(params) {
@@ -205,11 +222,13 @@ export class Tabs {
     const context = this.contexts.get(owner);
     this.contexts.delete(owner);
     await context?.close().catch(() => {});
+    this.output.removeOwner(owner);
     return { closed };
   }
 
   forget() {
     this.tabs.clear();
     this.contexts.clear();
+    this.output.clear();
   }
 }
