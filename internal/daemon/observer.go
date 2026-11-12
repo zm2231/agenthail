@@ -264,11 +264,6 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	if notice.desktop != "" && observation.Reply.Error == "" {
 		notice = d.endTurnNotifications(session, observation.CompletedTurnID, notice.desktop, notice.mobile)
 	}
-	if observation.ActiveTurnID != "" && observation.ActiveTurnID != previous.ActiveTurnID || completionChanged {
-		if err := d.Registry.ReviveSessionCredential(session.ID, time.Now()); err != nil {
-			d.log.Printf("revive session credential %s: %s", d.resolveDisplay(session.ID), err)
-		}
-	}
 	if held != previous.HeldCompletionTurnID {
 		if err := d.Registry.HoldCompletion(session.ID, held); err != nil {
 			d.log.Printf("hold completion %s: %s", d.resolveDisplay(session.ID), err)

@@ -96,7 +96,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	steerText, steerImages, canSteer := surface.SteerParts(adapter, session, item.Message, options)
 	steer := steers && canSteer && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer
 	if steer {
-		steered, sendErr = surface.SteerWithEvidence(operationCtx, adapter, session, steerText, steerImages)
+		steered, sendErr = d.dispatcher().SteerTurn(operationCtx, adapter, session, steerText, steerImages)
 		if sendErr == nil {
 			result = &surface.SendResult{UUID: steered.RequestID, Accepted: true}
 		}
@@ -212,7 +212,7 @@ func (d *Daemon) runQueuedGoal(ctx context.Context, adapter surface.Surface, ses
 	operationCtx, cancel := context.WithTimeout(ctx, goalOperationTimeout)
 	defer cancel()
 	addressed := *session
-	err := runner.RunGoalCommand(operationCtx, session, item.Message)
+	err := d.dispatcher().RunGoalCommand(operationCtx, runner, session, item.Message)
 	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {
 		d.finishReachedHostOwned(item, &addressed, item.Message, ownedErr, registry.SendTrace{})
 		return

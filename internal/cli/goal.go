@@ -84,19 +84,19 @@ func (a *App) cmdGoal(args []string) error {
 		if action == "resume" {
 			status = surface.GoalStatusActive
 		}
-		return controller.UpdateGoal(ctx, sess, surface.GoalUpdate{Status: &status})
+		return dispatcher.UpdateGoal(ctx, controller, sess, surface.GoalUpdate{Status: &status})
 	case "budget":
 		if !typed || len(positional) != 3 {
 			return fmt.Errorf("usage: agenthail goal <target> budget <tokens|clear>")
 		}
 		if positional[2] == "clear" {
-			return controller.UpdateGoal(ctx, sess, surface.GoalUpdate{ClearTokenBudget: true})
+			return dispatcher.UpdateGoal(ctx, controller, sess, surface.GoalUpdate{ClearTokenBudget: true})
 		}
 		budget, parseErr := strconv.ParseInt(positional[2], 10, 64)
 		if parseErr != nil || budget < 0 {
 			return fmt.Errorf("goal token budget must be a non-negative integer")
 		}
-		return controller.UpdateGoal(ctx, sess, surface.GoalUpdate{TokenBudget: &budget})
+		return dispatcher.UpdateGoal(ctx, controller, sess, surface.GoalUpdate{TokenBudget: &budget})
 	}
 	return nil
 }

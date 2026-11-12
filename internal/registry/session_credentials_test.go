@@ -135,6 +135,33 @@ func TestSessionCredentialMaxExpiryNeedsANewCredential(t *testing.T) {
 	}
 }
 
+func TestRunningSessionRenewsOnlyAnIdleExpiredCredential(t *testing.T) {
+	r, session := credentialFixture(t)
+	now := time.Now()
+	issued, err := r.IssueSessionCredential(session, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle := now.Add(25 * time.Hour)
+	if _, err := r.AuthenticateRunningSessionToken(issued.Token, idle); err != nil {
+		t.Fatalf("running session refused: %v", err)
+	}
+	if _, err := r.AuthenticateSessionToken(issued.Token, idle.Add(time.Minute)); err != nil {
+		t.Fatalf("renewed credential refused: %v", err)
+	}
+	past := now.Add(CredentialMaxLifetime + time.Minute)
+	if _, err := r.AuthenticateRunningSessionToken(issued.Token, past); !errors.Is(err, ErrCredentialMaxExpired) {
+		t.Fatalf("max err=%v", err)
+	}
+	if err := r.RevokeSessionCredentials(session, RevokedRotated, idle); err != nil {
+		t.Fatal(err)
+	}
+	var revoked CredentialRevokedError
+	if _, err := r.AuthenticateRunningSessionToken(issued.Token, idle.Add(time.Hour)); !errors.As(err, &revoked) {
+		t.Fatalf("revoked err=%v", err)
+	}
+}
+
 func TestSessionCredentialRevokedWhenTheSessionEnds(t *testing.T) {
 	now := time.Now()
 	cases := []struct {

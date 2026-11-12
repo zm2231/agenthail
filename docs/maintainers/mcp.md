@@ -14,7 +14,7 @@ The server negotiates only protocol revisions `2026-07-28`, `2025-11-25` and `20
 | Status | Code | When |
 | --- | --- | --- |
 | 401 | `unauthenticated` | No credential, or one that is unknown |
-| 401 | `credential_expired` | `detail.reason: "idle"`: unused for a day, `retryable: true`, revived by the session's next turn. `detail.reason: "max"`: 30 days old, `retryable: false`, only a newly issued credential works |
+| 401 | `credential_expired` | `detail.reason: "idle"`: unused for a day while the session is not running, `retryable: true`, revived when the daemon next sends the session a message. `detail.reason: "max"`: 30 days old, `retryable: false`, only a newly issued credential works |
 | 401 | `credential_revoked` | Rotated, revoked, or its session was archived or moved to another host; `detail.reason` names which |
 | 403 | `remote_refused` | Not a local caller |
 
@@ -26,7 +26,11 @@ The registry table `session_credentials` holds at most one live credential per s
 - **Identity only:** a credential names a session and its expiry, nothing else. It carries no capabilities, so a change in what a session may do never touches its token.
 - **Issue:** `issueSessionCredential` reuses the live credential until its maximum expiry and otherwise mints a new one. A reused credential's token cannot be recovered, so the caller keeps the token it was first given.
 - **Rotation:** a credential is replaced only when a runtime must be given a token this daemon process does not hold (after a restart, since the registry stores hashes) or when it reached its maximum expiry. `Rotate` returns the held live token when there is one; concurrent resumes of one session share a per-session lock and one token.
-- **Idle expiry, 24 hours:** every authenticated call refreshes it. An expired credential is suspended, not revoked: the next turn the observer sees (a new active turn or a new completion) refreshes it.
+- **Idle expiry, 24 hours:** every authenticated call refreshes it. An expired credential is suspended, not revoked, and two things renew it:
+  - The daemon handing the session work: a send on any route (queue drain, direct send, relay, channel and notice deliveries all go through it), a steer, or a goal control (set, clear, pause, resume, budget, and a held Claude `/goal` when it runs). Compaction does not count, since its turn calls no tools. The credential is refreshed just before the message goes out, so the turn it starts can call tools.
+  - A call from a session that is running. A turn can start where the daemon never sees it, such as a Claude peer message or a Claude background task notification, so the call is accepted and renews the credential when the session's surface already knows it runs, without a new probe: for Claude, the session record of the session's recorded process (or of its holder, when another process holds the conversation) names the conversation and its `procStart` matches the running process, read from `/proc` on Linux and `sysctl` on macOS, so a reused pid does not count; for Codex, an app-server connection has the thread loaded.
+
+  Otherwise the call is refused, and `daemon.log` gets a line naming the session and why.
 - **Maximum expiry, 30 days from issue:** nothing extends it, and a turn does not revive it. Issuing again after it mints a fresh credential.
 - **Revocation:** archiving a session revokes its credential in the same transaction. Authentication also revokes a credential whose session is archived or now belongs to another host. Deleting a session deletes its credentials.
 

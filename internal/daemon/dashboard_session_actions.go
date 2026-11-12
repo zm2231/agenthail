@@ -158,7 +158,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		if updateErr != nil {
 			return actionResult{}, updateErr
 		}
-		err = controller.UpdateGoal(ctx, session, update)
+		err = d.dispatcher().UpdateGoal(ctx, controller, session, update)
 	case "model":
 		if !effective.Model {
 			return actionResult{}, invalidRequest("this session does not support model switching")

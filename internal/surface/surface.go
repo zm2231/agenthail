@@ -842,6 +842,12 @@ type RuntimeStopper interface {
 	RuntimeStopped(ctx context.Context, sess *Session) bool
 }
 
+// RuntimeRunner reports whether a session's process or thread runs now, from
+// what the surface already holds rather than a new probe.
+type RuntimeRunner interface {
+	RuntimeRunning(sess *Session) bool
+}
+
 // ConversationKeeper is a surface that can tell a conversation it would
 // resume from one whose history is gone.
 type ConversationKeeper interface {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -113,6 +115,7 @@ func Trace(adapter surface.Surface, session *surface.Session, author surface.Aut
 // stored and published first, so what the person sees matches it, and the
 // message is sent once more on it.
 func (d Dispatcher) SendRouted(ctx context.Context, adapter surface.Surface, session *surface.Session, route surface.Route, message string, options surface.SendOptions) (*surface.SendResult, error) {
+	d.reviveCredential(session)
 	routed := *session
 	result, err := route.Send(ctx, adapter, session, message, options)
 	next := surface.RouteFor(adapter, session, options.RouteAuthor())
@@ -127,6 +130,22 @@ func (d Dispatcher) SendRouted(ctx context.Context, adapter surface.Surface, ses
 		return nil, err
 	}
 	return next.Send(ctx, adapter, session, message, options)
+}
+
+func (d Dispatcher) SteerTurn(ctx context.Context, adapter surface.Surface, session *surface.Session, message string, images surface.Uploads) (*surface.ControlResult, error) {
+	d.reviveCredential(session)
+	return surface.SteerWithEvidence(ctx, adapter, session, message, images)
+}
+
+// reviveCredential keeps the session's credential usable for the turn the
+// daemon is about to start or steer, however long the session sat idle.
+func (d Dispatcher) reviveCredential(session *surface.Session) {
+	if d.Registry == nil || session.ID == "" {
+		return
+	}
+	if err := d.Registry.ReviveSessionCredential(session.ID, time.Now()); err != nil {
+		log.Printf("revive session credential %s: %s", session.ID, err)
+	}
 }
 
 // RefreshRoute points session at what its live process offers before a
@@ -221,8 +240,9 @@ func (d Dispatcher) GoalSet(ctx context.Context, adapter surface.Surface, sessio
 			status := surface.GoalStatusActive
 			update.Status = &status
 		}
-		err = controller.UpdateGoal(ctx, session, update)
+		err = d.UpdateGoal(ctx, controller, session, update)
 	} else {
+		d.reviveCredential(session)
 		err = adapter.GoalSet(ctx, session, objective)
 	}
 	return d.goalReceipt(session, "goal "+objective, err)
@@ -238,7 +258,18 @@ func (d Dispatcher) GoalClear(ctx context.Context, adapter surface.Surface, sess
 	if receipt, held, err := d.holdGoalCommand(adapter, session, ""); held {
 		return receipt, err
 	}
+	d.reviveCredential(session)
 	return d.goalReceipt(session, "goal clear", adapter.GoalClear(ctx, session))
+}
+
+func (d Dispatcher) UpdateGoal(ctx context.Context, controller surface.GoalController, session *surface.Session, update surface.GoalUpdate) error {
+	d.reviveCredential(session)
+	return controller.UpdateGoal(ctx, session, update)
+}
+
+func (d Dispatcher) RunGoalCommand(ctx context.Context, runner surface.GoalCommandRunner, session *surface.Session, command string) error {
+	d.reviveCredential(session)
+	return runner.RunGoalCommand(ctx, session, command)
 }
 
 // goalSettable refuses a session whose goal is not set here, with the
@@ -340,7 +371,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 // steer reports the evidence the surface proved: a Claude Remote Control steer
 // is accepted by the transport, which does not show it reached the turn.
 func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message string, images surface.Uploads, target, sourceID, label string, intent *registry.DeliveryIntent, sendIfEnded bool) (*Receipt, error) {
-	result, err := surface.SteerWithEvidence(ctx, adapter, session, message, images)
+	result, err := d.SteerTurn(ctx, adapter, session, message, images)
 	if sendIfEnded && errors.Is(err, surface.ErrNothingToSteer) {
 		return nil, errTurnEnded
 	}
