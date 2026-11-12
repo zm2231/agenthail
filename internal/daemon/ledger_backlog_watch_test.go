@@ -321,6 +321,10 @@ func TestEveryAnsweredAskReachesTheOwnerHoweverManyArePending(t *testing.T) {
 
 	mustLedger(t, mac, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: widgetKey, SessionID: "local-a", Action: ledger.WorkUnpark, ItemID: last}, nil)
 	owner.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	if state := owner.daemon.askState(ledger.ParkQuestion{AskID: lastAsk, HostID: mac.daemon.localHost().ID}); state != registry.AskAnswered {
+		t.Fatalf("a fresh report was dropped at once (%q), though its park may still be on its way by replay", state)
+	}
+	owner.daemon.sweepLedgerBacklog(t.Context(), time.Now().Add(2*ledgerAskStatesEvery+time.Minute))
 	if state := owner.daemon.askState(ledger.ParkQuestion{AskID: lastAsk, HostID: mac.daemon.localHost().ID}); state != "" {
 		t.Fatalf("the owner still holds %q for %s after its work was unparked", state, lastAsk)
 	}

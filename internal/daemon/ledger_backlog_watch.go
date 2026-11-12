@@ -26,8 +26,13 @@ type backlogWatch struct {
 	ready  map[string][]string
 	local  []usageSet
 	remote []usageSet
-	asks   map[string]map[string]string
+	asks   map[string]map[string]askReport
 	sent   map[string]sentAsks
+}
+
+type askReport struct {
+	state string
+	at    time.Time
 }
 
 type sentAsks struct {
@@ -69,7 +74,7 @@ func (d *Daemon) askState(q ledger.ParkQuestion) string {
 	}
 	d.backlog.mu.Lock()
 	defer d.backlog.mu.Unlock()
-	return d.backlog.asks[q.HostID][q.AskID]
+	return d.backlog.asks[q.HostID][q.AskID].state
 }
 
 // sendAskStates tells each remote ledger owner the state of the asks held here that its person parks name, since an owner may not reach this host.
@@ -157,12 +162,15 @@ func (d *Daemon) apiLedgerSyncAsksHandler(w http.ResponseWriter, r *http.Request
 	}
 	d.backlog.mu.Lock()
 	if d.backlog.asks == nil {
-		d.backlog.asks = map[string]map[string]string{}
+		d.backlog.asks = map[string]map[string]askReport{}
 	}
 	if d.backlog.asks[hostID] == nil {
-		d.backlog.asks[hostID] = map[string]string{}
+		d.backlog.asks[hostID] = map[string]askReport{}
 	}
-	maps.Copy(d.backlog.asks[hostID], req.States)
+	now := time.Now()
+	for id, state := range req.States {
+		d.backlog.asks[hostID][id] = askReport{state: state, at: now}
+	}
 	d.backlog.mu.Unlock()
 	d.decisions.poke()
 	writeDashboardJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -179,7 +187,7 @@ func (d *Daemon) sweepLedgerBacklog(ctx context.Context, now time.Time) {
 	local := sync.OnceValue(func() []usageSet { read.local = true; return d.localUsageSets(ctx, now) })
 	remote := sync.OnceValue(func() []usageSet { read.remote = true; return d.remoteUsageSets(ctx) })
 	d.sendAskStates(ctx, store, keys, time.Now())
-	d.pruneAskStates(store, keys)
+	d.pruneAskStates(store, keys, now)
 	readings := ledger.Readings{Usage: usageReaderOver(local, remote, d.localHost().ID, now), Asks: d.ledgerAskReader()}
 	ready := map[string][]string{}
 	for _, key := range keys {
@@ -300,7 +308,8 @@ func (d *Daemon) coordinatedLedgerKey(ctx context.Context, caller *mcpCaller, sp
 	return ResolvePathLedgerKey(ctx, d.Registry, spec.ProjectRoot)
 }
 
-func (d *Daemon) pruneAskStates(store *ledger.Store, keys []string) {
+// pruneAskStates keeps a report its boards do not name yet for two resend intervals, since a park can arrive by replay after its ask state.
+func (d *Daemon) pruneAskStates(store *ledger.Store, keys []string, now time.Time) {
 	named := map[string]map[string]bool{}
 	for _, key := range keys {
 		if owner, err := store.RemoteOwner(key); err != nil || owner != "" {
@@ -322,7 +331,9 @@ func (d *Daemon) pruneAskStates(store *ledger.Store, keys []string) {
 	d.backlog.mu.Lock()
 	defer d.backlog.mu.Unlock()
 	for hostID, states := range d.backlog.asks {
-		maps.DeleteFunc(states, func(id, _ string) bool { return !named[hostID][id] })
+		maps.DeleteFunc(states, func(id string, report askReport) bool {
+			return !named[hostID][id] && now.Sub(report.at) > 2*ledgerAskStatesEvery
+		})
 		if len(states) == 0 {
 			delete(d.backlog.asks, hostID)
 		}
