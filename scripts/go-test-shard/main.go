@@ -25,6 +25,7 @@ import (
 	"go/token"
 	"hash/fnv"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -180,7 +181,7 @@ func readSeconds(path string) (map[string]float64, error) {
 	for line := 1; scanner.Scan(); line++ {
 		value, name, ok := strings.Cut(scanner.Text(), "\t")
 		s, err := strconv.ParseFloat(value, 64)
-		if !ok || err != nil || name == "" || s < 0 {
+		if !ok || err != nil || name == "" || strings.ContainsRune(name, '\t') || math.IsNaN(s) || math.IsInf(s, 0) || s < 0 {
 			return nil, fmt.Errorf("%s:%d: want <seconds>\\t<test name>", path, line)
 		}
 		seconds[name] = s

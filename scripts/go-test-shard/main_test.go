@@ -112,3 +112,15 @@ func TestRecordWritesEachTopLevelTestsSecondsForThePackage(t *testing.T) {
 		t.Fatal("a recording with no test of the package succeeded")
 	}
 }
+
+func TestASecondsFileWithAnUnusableLineIsRefused(t *testing.T) {
+	for _, line := range []string{"NaN\tTestA", "Inf\tTestA", "-1\tTestA", "1\tTestA\textra", "1\t", "TestA", "x\tTestA"} {
+		path := filepath.Join(t.TempDir(), "seconds.tsv")
+		if err := os.WriteFile(path, []byte("2\tTestB\n"+line+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readSeconds(path); err == nil {
+			t.Errorf("a seconds file with the line %q was accepted", line)
+		}
+	}
+}
