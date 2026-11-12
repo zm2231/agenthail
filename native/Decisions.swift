@@ -23,14 +23,15 @@ struct DecisionItem: Decodable, Identifiable, Hashable {
     var requests: [SessionRequest]?
     var requestError: String?
     var holdsUp: [String]?
+    var workItem: String?
     var hostID: String?
 
-    var id: String { sessionId }
+    var id: String { workItem.map { sessionId + "#" + $0 } ?? sessionId }
     var sinceDate: Date? { since.flatMap(TimestampParser.date) }
     var openRequests: [SessionRequest] { requests ?? [] }
 
     private enum CodingKeys: String, CodingKey {
-        case group, sessionId, projectId, kind, reason, since, answerable, requests, requestError, holdsUp
+        case group, sessionId, projectId, kind, reason, since, answerable, requests, requestError, holdsUp, workItem
     }
 }
 
@@ -80,7 +81,7 @@ struct DecisionInbox: Equatable {
 
     func removing(_ sessionID: String) -> DecisionInbox {
         var inbox = self
-        inbox.decisions.removeAll { $0.sessionId == sessionID }
+        inbox.decisions.removeAll { $0.sessionId == sessionID && $0.workItem == nil }
         return inbox
     }
 
@@ -107,7 +108,7 @@ struct DecisionInbox: Equatable {
             if lhs.group != rhs.group { return rank[lhs.group]! < rank[rhs.group]! }
             switch (lhs.sinceDate, rhs.sinceDate) {
             case let (left?, right?) where left != right: return left < right
-            default: return lhs.sessionId < rhs.sessionId
+            default: return lhs.id < rhs.id
             }
         }
     }

@@ -2,7 +2,7 @@ import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape, timeAgo } from "./format.js";
 import { displayName } from "./session-labels.js";
-import { decisionGroups, decisionsKey, loadDecisions } from "./decisions.js";
+import { decisionGroups, decisionKey, decisionsKey, loadDecisions } from "./decisions.js";
 import { currentStops, renderInboxScope } from "./decision-card.js";
 import { renderTiles } from "./project-tiles-view.js";
 
@@ -61,7 +61,7 @@ function decisionItem(item) {
   const open = item.answerable
     ? `<button class="primary-button" data-open-decision="${escape(item.sessionId)}" type="button">Answer</button>`
     : `<button class="soft-button" data-session="${escape(item.sessionId)}" type="button">Open</button>`;
-  return `<article class="attention-item" data-decision="${escape(item.sessionId)}"><div><div class="attention-target">${escape(place)}</div><strong>${escape(headline || item.reason)}</strong><p>${holds}${escape(item.reason)}${escape(more)}${escape(since)}</p></div><div class="operation-actions">${open}</div></article>`;
+  return `<article class="attention-item" data-decision="${escape(decisionKey(item))}"><div><div class="attention-target">${escape(place)}</div><strong>${escape(headline || item.reason)}</strong><p>${holds}${escape(item.reason)}${escape(more)}${escape(since)}</p></div><div class="operation-actions">${open}</div></article>`;
 }
 
 const stopRow = { replacement: leadReplacementItem, decision: decisionItem };

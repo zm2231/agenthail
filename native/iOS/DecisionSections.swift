@@ -70,7 +70,7 @@ struct DecisionSections: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint(item.answerable ? "Opens the request to answer it" : "Opens the session")
-        .accessibilityIdentifier("decision-\(item.sessionId)")
+        .accessibilityIdentifier("decision-\(item.id)")
     }
 
     private func headline(of item: DecisionItem) -> String {

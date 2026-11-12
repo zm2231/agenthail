@@ -142,4 +142,8 @@ pending.shift()(busy(4));
 await streaming;
 assert.equal(app.decisions.decisions[0].sessionId, "busy-4");
 assert.equal(app.decisionsKey.endsWith("|r13"), true, "the quiet decisions' load is kept as current");
+const parked = { group: "waiting", sessionId: "worker", kind: "parked", workItem: "widget-W12", reason: "widget-W12 waits on you: titles only?", since: "2026-03-01T09:09:00Z", answerable: false };
+const withParked = plain(vm.runInContext("mergeDecisions", context)([{ host: { id: "", name: "laptop" }, page: { decisions: [parked, local.decisions[0]], leadHandling: [] } }]));
+const decisionKey = vm.runInContext("decisionKey", context);
+assert.deepEqual(withParked.decisions.map(decisionKey), ["worker", "worker#widget-W12"], "a parked item is a row of its own beside its session's request");
 console.log("dashboard decisions ok");

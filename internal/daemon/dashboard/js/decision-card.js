@@ -4,7 +4,7 @@ import { escape, timeAgo } from "./format.js";
 import { displayName } from "./session-labels.js";
 import { postAction } from "./actions.js";
 import { toast } from "./feedback.js";
-import { decisionGroups } from "./decisions.js";
+import { decisionGroups, decisionKey } from "./decisions.js";
 import { inboxStops } from "./inbox-stops.js";
 import { renderQuestionCard } from "./question-pager.js";
 import { bindQuestionPager } from "./question-pager-events.js";
@@ -43,7 +43,7 @@ export function currentStops() {
 
 export function selectedDecision() {
   const decisions = shownDecisions();
-  return decisions.find((item) => item.sessionId === app.decisionSelected) || decisions[0] || null;
+  return decisions.find((item) => decisionKey(item) === app.decisionSelected) || decisions[0] || null;
 }
 
 function nameOf(id) {
@@ -60,7 +60,7 @@ function summary(item) {
 export function renderDecisionList() {
   const decisions = shownDecisions();
   const selected = selectedDecision();
-  const row = (item) => `<button class="session${item.sessionId === selected?.sessionId ? " active" : ""}" type="button" data-decision-select="${escape(item.sessionId)}"><div class="session-name"><span>${escape(nameOf(item.sessionId))}</span></div><div class="session-detail"><span>${escape(summary(item))}</span>${item.holdsUp?.length ? `<span class="decision-holds">Holds up ${item.holdsUp.length}</span>` : ""}</div></button>`;
+  const row = (item) => `<button class="session${selected && decisionKey(item) === decisionKey(selected) ? " active" : ""}" type="button" data-decision-select="${escape(decisionKey(item))}"><div class="session-name"><span>${escape(nameOf(item.sessionId))}</span></div><div class="session-detail"><span>${escape(summary(item))}</span>${item.holdsUp?.length ? `<span class="decision-holds">Holds up ${item.holdsUp.length}</span>` : ""}</div></button>`;
   const groups = decisionGroups.map(([key, title]) => {
     const items = decisions.filter((item) => item.group === key);
     return items.length ? `<div class="filter-summary">${escape(title)} · ${items.length}</div>${items.map(row).join("")}` : "";
@@ -130,9 +130,9 @@ export async function respondDecision(requestId, decision, { reload } = {}) {
   }
   if (drop) {
     app.decisionsAnswered = new Set([...(app.decisionsAnswered || []), mark(item.sessionId, requestId)]);
-    if (!shownDecisions().some((shown) => shown.sessionId === item.sessionId)) {
+    if (!shownDecisions().some((shown) => decisionKey(shown) === decisionKey(item))) {
       const order = shownDecisions();
-      app.decisionSelected = order[0]?.sessionId || null;
+      app.decisionSelected = order[0] ? decisionKey(order[0]) : null;
     }
   }
   if (app.scope === "inbox") renderInboxScope();
