@@ -154,7 +154,7 @@ func managedWrapper(dataDir string, dirs []string) (string, []byte) {
 }
 
 func shellQuoted(path string) string {
-	output, err := exec.Command("/bin/bash", "-c", `printf %q "$1"`, "bash", path).Output()
+	output, err := exec.Command("bash", "-c", `printf %q "$1"`, "bash", path).Output()
 	if err != nil {
 		return strings.ReplaceAll(path, " ", "\\ ")
 	}
