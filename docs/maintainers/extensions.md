@@ -125,6 +125,9 @@ overrides the script path.
 `load` replaces everything loaded: it calls each cleanup function, imports
 every `server.ts` again and returns each extension's state, `loaded` or
 `failed` with the error. One extension that fails does not stop the others.
+The daemon runs one `load` at a time and delivers no events while one is in
+flight. A `load` that fails or times out leaves the host's state unknown, so
+the daemon restarts the host, and the new host's own `load` ends the wait.
 
 Each load gives every extension a new random token. The host calls tools by
 posting MCP `tools/call` to the daemon's loopback `/mcp` with that token as the

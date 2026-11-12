@@ -44,8 +44,27 @@ type Supervisor struct {
 	MinRestart time.Duration
 	MaxRestart time.Duration
 
-	mu     sync.Mutex
-	secret string
+	mu      sync.Mutex
+	secret  string
+	restart chan struct{}
+}
+
+func (s *Supervisor) restarts() chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.restart == nil {
+		s.restart = make(chan struct{}, 1)
+	}
+	return s.restart
+}
+
+// Restart stops the running host so Run starts a fresh one, for a caller
+// that can no longer tell what state the host is in.
+func (s *Supervisor) Restart() {
+	select {
+	case s.restarts() <- struct{}{}:
+	default:
+	}
 }
 
 func (s *Supervisor) SocketPath() string { return filepath.Join(s.StateDir, "host.sock") }
@@ -96,6 +115,11 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 	if err := os.MkdirAll(s.StateDir, 0o700); err != nil {
 		return err
 	}
+	restart := s.restarts()
+	select {
+	case <-restart:
+	default:
+	}
 	cmd, owner, err := s.spawn(launch)
 	if err != nil {
 		return err
@@ -120,6 +144,8 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 	case err := <-exited:
 		exited <- err
 		return fmt.Errorf("the %s exited: %v%s", s.Name, err, s.logTail())
+	case <-restart:
+		return fmt.Errorf("the %s was restarted because its state was uncertain", s.Name)
 	}
 }
 

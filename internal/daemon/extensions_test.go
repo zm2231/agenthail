@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -393,5 +394,39 @@ func TestEventsPublishedWhileExtensionsReloadAreDeliveredOnceTheyLoad(t *testing
 	eventually(t, "the event published during the reload arrives", func() bool {
 		state := f.state(t)
 		return len(state.Events) == 1 && state.Events[0] == "during-reload"
+	})
+}
+
+func TestAReloadTheHostCannotFinishRestartsItAndHeldEventsStillArrive(t *testing.T) {
+	f := startExtensionFixture(t)
+	if err := f.d.extensions.approvals.Grant("fixture", []string{"read.all", "control.all"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.d.reloadExtensions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.d.extensions.host.Client().Hello(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.workdir, "hold-load"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if err := f.d.reloadExtensions(ctx); !errors.Is(err, errExtensionLoadFailed) {
+		t.Fatalf("a reload the host could not finish answered %v", err)
+	}
+	f.d.publishEvent("turn.completed", "after-failed-load", map[string]string{})
+	if err := os.Remove(filepath.Join(f.workdir, "hold-load")); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "a new host loads and gets the held event", func() bool {
+		hello, err := f.d.extensions.host.Client().Hello(context.Background())
+		if err != nil || hello.PID == before.PID || f.d.extensionsView().Extensions[0].State != "loaded" {
+			return false
+		}
+		state := f.state(t)
+		return len(state.Events) == 1 && state.Events[0] == "after-failed-load"
 	})
 }

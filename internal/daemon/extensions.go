@@ -59,8 +59,8 @@ type extensionRuntime struct {
 	approvals *extension.Approvals
 	host      *nodehost.Supervisor
 
-	loading sync.Mutex
-	mu      sync.Mutex
+	loading   sync.Mutex
+	mu        sync.Mutex
 	loaded    map[string]*loadedExtension
 	tokens    map[string]string
 	hostErr   string
@@ -107,7 +107,8 @@ func extensionToken() string { return "ext_" + rand.Text() + rand.Text() }
 // extension with fresh credentials; the previous credentials stop working.
 // One load runs at a time, so the host's extensions and the daemon's tokens
 // always come from the same load. Events wait until a load succeeds, since
-// until then the host may hold no handlers.
+// until then the host may hold no handlers; a failed load is followed by a
+// host restart, whose own load ends the wait.
 func (d *Daemon) loadExtensions(ctx context.Context) error {
 	r := d.extensions
 	r.loading.Lock()
@@ -160,7 +161,7 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	err = r.host.Client().Call(ctx, "load", map[string]any{"extensions": specs, "writeTools": extensionWriteTools()}, &status)
 	now := time.Now()
 	if err != nil {
-		return fmt.Errorf("load extensions: %w", err)
+		return fmt.Errorf("%w: %w", errExtensionLoadFailed, err)
 	}
 	r.mu.Lock()
 	r.reloading = false
@@ -207,12 +208,18 @@ func (d *Daemon) reloadExtensions(ctx context.Context) error {
 	if !up {
 		return errExtensionHostDown
 	}
-	return d.loadExtensions(ctx)
+	err := d.loadExtensions(ctx)
+	if errors.Is(err, errExtensionLoadFailed) {
+		d.extensions.host.Restart()
+		return fmt.Errorf("%w; the extension host restarts and loads again", err)
+	}
+	return err
 }
 
 var (
-	errExtensionsOff     = errors.New("extensions are not available in this daemon")
-	errExtensionHostDown = errors.New("the extension host is starting or restarting; try again in a moment")
+	errExtensionsOff       = errors.New("extensions are not available in this daemon")
+	errExtensionHostDown   = errors.New("the extension host is starting or restarting; try again in a moment")
+	errExtensionLoadFailed = errors.New("the extension host did not finish loading")
 )
 
 func (r *extensionRuntime) extensionByToken(token string) (string, []string, bool) {
