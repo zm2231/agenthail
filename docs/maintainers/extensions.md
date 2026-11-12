@@ -111,7 +111,8 @@ approval. Each approved mount listens on `127.0.0.1` on a port from 7420 to
 daemon publishes each mount's port in Tailscale Serve at
 `https://<machine>.<tailnet>.ts.net:<port>`, and removes it when remote access
 goes off or the mount goes away; it never removes a route it did not publish,
-and Funnel is refused. The dashboard's Extensions tab lists each mount and
+and Funnel is refused. `agenthail dashboard remote off` withdraws the mounts'
+routes before it returns, itself when the daemon is not running. The dashboard's Extensions tab lists each mount and
 opens it in a frame.
 
 Every request to a mount is checked the way `/x/` is: the dashboard cookie or

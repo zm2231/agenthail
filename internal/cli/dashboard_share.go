@@ -168,7 +168,14 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 		if err := daemon.SaveDashboardConfig(config); err != nil {
 			return err
 		}
-		if err := a.syncDaemonMounts(); err != nil {
+		if dashboardDaemonRunning() {
+			err = a.syncDaemonMounts()
+		} else if home, homeErr := os.UserHomeDir(); homeErr != nil {
+			err = homeErr
+		} else {
+			err = daemon.WithdrawMountRoutes(home, run, node.Self.DNSName)
+		}
+		if err != nil {
 			return err
 		}
 		if asJSON {

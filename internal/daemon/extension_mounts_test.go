@@ -452,3 +452,41 @@ func TestMountsAreOnTheTailnetOnlyWhileRemoteAccessIsOnAndOnlyTheirOwnRoutesAreR
 		t.Fatalf("a removed mount keeps its port: %v %v", ports, err)
 	}
 }
+
+func TestRemoteAccessOffWithNoDaemonRunningWithdrawsTheMountsItPublished(t *testing.T) {
+	upstream, _ := startUpstream(t)
+	f := startMountFixture(t)
+	fake := &fakeTailscale{routes: map[int]string{9000: "http://127.0.0.1:9000"}}
+	previous := remoteTailscale
+	remoteTailscale = func(string) (tailscale.Runner, string, error) { return fake.run, "/fake/tailscale", nil }
+	t.Cleanup(func() { remoteTailscale = previous })
+	config, err := LoadDashboardConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.RemoteAccess.Enabled = true
+	if err := SaveDashboardConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	f.declare(t, upstream.URL)
+	f.approve(t)
+	port := f.mount(t).Port
+	if fake.route(port) == "" {
+		t.Fatal("the mount was not published")
+	}
+	f.d.extensions.mounts.close()
+
+	if err := WithdrawMountRoutes(f.home, fake.run, fakeTailnetName); err != nil {
+		t.Fatal(err)
+	}
+	if fake.route(port) != "" {
+		t.Fatal("the mount stayed on the tailnet")
+	}
+	if fake.route(9000) == "" {
+		t.Fatal("a route Agenthail did not publish was removed")
+	}
+	ports, err := extension.ReadMountPorts(f.home)
+	if err != nil || ports["fixture/app"].Published || ports["fixture/app"].Port != port {
+		t.Fatalf("after withdrawing, mounts.json holds %v %v; want the port kept and not published", ports, err)
+	}
+}
