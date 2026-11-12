@@ -77,6 +77,18 @@ func (f *viewFixture) populate(rng *rand.Rand, steps int, after func(step int, w
 	}
 }
 
+func (f *viewFixture) populateRounds(rng *rand.Rand, rounds int, after func(step int, write string)) {
+	step := 0
+	for range rounds {
+		for _, index := range rng.Perm(len(f.writes)) {
+			write := f.writes[index]
+			write.do(rng)
+			after(step, write.name)
+			step++
+		}
+	}
+}
+
 func newViewFixture(t *testing.T) *viewFixture {
 	d, reg, fake, _, _, cwd := baseFixture(t)
 	f := &viewFixture{d: d, reg: reg, ctx: context.Background(), clock: time.Now().UTC()}

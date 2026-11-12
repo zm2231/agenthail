@@ -29,8 +29,12 @@ func referenceReverseLines(data []byte, floor, offset int64) []visitedLine {
 }
 
 func TestReverseTranscriptLinesVisitEveryLineWhateverItsLength(t *testing.T) {
+	previous := reverseLineChunk
+	reverseLineChunk = 4 << 10
+	t.Cleanup(func() { reverseLineChunk = previous })
+	chunk := int(reverseLineChunk)
 	rng := rand.New(rand.NewSource(5))
-	sizes := []int{1, 40, reverseLineChunk - 1, reverseLineChunk, reverseLineChunk + 1, 3*reverseLineChunk + 7}
+	sizes := []int{1, 40, chunk - 1, chunk, chunk + 1, 3*chunk + 7}
 	var data []byte
 	var starts []int64
 	for index := 0; index < 24; index++ {

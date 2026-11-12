@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const reverseLineChunk = 1 << 20
+var reverseLineChunk int64 = 1 << 20
 
 func reverseTranscriptLines(ctx context.Context, file *os.File, floor, offset int64, visit func(start int64, line []byte) bool) error {
 	buf := make([]byte, reverseLineChunk)
