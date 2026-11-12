@@ -225,7 +225,7 @@ A park is a `work_item.state` event carrying `park` (`kind`, `why`, `revisit`, t
 
 `agenthail ledger backlog` lists parked work, with the items that can come back first, and says why each one waits. Unpark is still a choice: the backlog never unparks anything itself.
 
-- Usage work can come back when its provider's reading shows headroom again on the host it named, or when its `resetsAt` has passed. Headroom means under 90% of both the session and weekly windows, the same test as the offer to move a limited Claude session to another account. With no reading, the item waits.
+- Usage work can come back when its provider's reading shows headroom again on the host it named, or when its `resetsAt` has passed. Headroom means under 90% of both the session and weekly windows, the same test as the offer to move a limited Claude session to another account. When work is parked for usage, the host that takes the write records itself, the Claude root (the primary one when none is named) and, if the provider is at its limit, the reset time from its own reading. A write that goes on to another host's ledger carries that reading with it. With no live reading, the item comes back after that recorded reset, and with neither, it waits.
 - Later work can come back on its `--until` date. Without one, it waits until someone unparks it.
 - An idea waits until someone takes it up.
 - Work waiting on the person waits for their answer.
