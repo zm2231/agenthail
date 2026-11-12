@@ -55,3 +55,40 @@ func TestANotificationWithdrawnWhileTheDaemonStopsLeavesTheDevicesWhenItStartsAg
 		return err == nil && len(pending) == 0
 	})
 }
+
+func TestAQuestionAnnouncedByADaemonStoppedMidDeliveryAndAnsweredMeanwhileIsWithdrawnAfterTheRestart(t *testing.T) {
+	q := newClaudeQuestion(t)
+	stall := make(chan struct{})
+	q.pushes.mu.Lock()
+	q.pushes.stall = stall
+	q.pushes.mu.Unlock()
+	t.Cleanup(func() { close(stall) })
+	_, stop := runDaemon(t, q.store, q.claude)
+	testkit.Eventually(t, "the question on the person's phone", 5*time.Second, func() bool { return q.pushes.count("session.waiting") == 1 })
+	key := askNotificationKey(askIDOfRequest(t, q.store, q.session.ID, questionID))
+	stop()
+	if _, announced, err := recordedWait(q.store, q.session.ID); err != nil || announced {
+		t.Fatalf("announced=%v err=%v before the delivery finished", announced, err)
+	}
+	q.pushes.mu.Lock()
+	q.pushes.stall = nil
+	q.pushes.mu.Unlock()
+
+	q.answer(t)
+	runDaemon(t, q.store, q.claude)
+	testkit.Eventually(t, "the question withdrawn from the phone", 5*time.Second, func() bool {
+		for _, withdrawn := range q.pushes.all("") {
+			if withdrawn["collapseId"] == key {
+				return true
+			}
+		}
+		return false
+	})
+	testkit.Eventually(t, "the withdraw forgotten once sent", 5*time.Second, func() bool {
+		pending, err := q.store.PendingNotificationWithdraws()
+		return err == nil && len(pending) == 0
+	})
+	if got := q.pushes.count("session.waiting"); got != 1 {
+		t.Fatalf("an answered question was announced %d times", got)
+	}
+}

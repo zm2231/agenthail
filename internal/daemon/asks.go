@@ -308,6 +308,7 @@ func (d *Daemon) runAskSweeps(ctx context.Context) {
 }
 
 func (d *Daemon) sweepAsks(now time.Time) {
+	d.sendWithdraws()
 	open, err := d.Registry.OpenAsks()
 	if err != nil {
 		d.log.Printf("read open asks: %s", err)
@@ -352,11 +353,23 @@ func (d *Daemon) announceAsk(ask registry.Ask) {
 	desktop := fmt.Sprintf("%s needs you: %s", d.resolveDisplay(session.ID), ask.Title)
 	mobile := mobileNotification{Title: "Agenthail", Message: fmt.Sprintf("%s needs you%s: %s", notificationSurfaceName(session.Surface), d.onHost(), ask.Title), SessionID: session.ID, TurnID: ask.ID, EventType: "ask.opened",
 		CollapseID: askNotificationKey(ask.ID), RequestID: ask.ID, DedupeKey: askDedupeKey(d.hostIdentity().ID, ask.ID)}
-	d.sendAskNotifications(desktop, mobile, request.Actions())
+	d.background.start(func(ctx context.Context) {
+		d.deliverAskNotifications(ctx, desktop, mobile, request.Actions())
+		d.withdrawIfClosed(ask.ID)
+	})
 }
 
-func (d *Daemon) sendAskNotifications(desktop string, mobile mobileNotification, actions []surface.RequestAction) {
-	d.background.start(func(ctx context.Context) { d.deliverAskNotifications(ctx, desktop, mobile, actions) })
+// An ask closed while its notification was on its way was withdrawn before
+// the notification arrived, so it is withdrawn again.
+func (d *Daemon) withdrawIfClosed(askID string) {
+	current, found, err := d.Registry.Ask(askID)
+	if err != nil {
+		d.log.Printf("read %s: %s", askID, err)
+		return
+	}
+	if !found || current.State != registry.AskOpen || current.RoutedTo != registry.AskToPerson {
+		d.withdrawAsk(askID)
+	}
 }
 
 // The desktop notification goes through a helper app that can take seconds
@@ -376,46 +389,61 @@ func (d *Daemon) deliverAskNotifications(ctx context.Context, desktop string, mo
 }
 
 func (d *Daemon) withdrawAsk(askID string) {
-	key := d.queueWithdraw(askID)
-	d.background.start(func(ctx context.Context) { d.withdrawNotification(ctx, key) })
-}
-
-func (d *Daemon) withdrawAskNow(ctx context.Context, askID string) {
-	d.withdrawNotification(ctx, d.queueWithdraw(askID))
-}
-
-func (d *Daemon) queueWithdraw(askID string) string {
-	key := askNotificationKey(askID)
-	if err := d.Registry.QueueNotificationWithdraw(key, time.Now()); err != nil {
-		d.log.Printf("record the withdraw of %s: %s", key, err)
+	if err := d.Registry.QueueNotificationWithdraw(askID); err != nil {
+		d.log.Printf("record the withdraw of %s: %s", askID, err)
 	}
-	return key
+	d.sendWithdraws()
 }
 
-func (d *Daemon) resumeNotificationWithdraws() {
-	keys, err := d.Registry.PendingNotificationWithdraws()
+func (d *Daemon) sendWithdraws() {
+	pending, err := d.Registry.PendingNotificationWithdraws()
 	if err != nil {
 		d.log.Printf("read pending notification withdraws: %s", err)
 		return
 	}
-	for _, key := range keys {
-		d.background.start(func(ctx context.Context) { d.withdrawNotification(ctx, key) })
+	for _, w := range pending {
+		d.withdrawMu.Lock()
+		if d.withdrawing[w.AskID] {
+			d.withdrawMu.Unlock()
+			continue
+		}
+		if d.withdrawing == nil {
+			d.withdrawing = map[string]bool{}
+		}
+		d.withdrawing[w.AskID] = true
+		d.withdrawMu.Unlock()
+		if !d.background.start(func(ctx context.Context) { d.withdrawNotification(ctx, w) }) {
+			d.withdrawDone(w.AskID)
+		}
 	}
 }
 
-func (d *Daemon) withdrawNotification(ctx context.Context, key string) {
-	started := time.Now()
+func (d *Daemon) withdrawDone(askID string) {
+	d.withdrawMu.Lock()
+	delete(d.withdrawing, askID)
+	d.withdrawMu.Unlock()
+}
+
+func (d *Daemon) withdrawNotification(ctx context.Context, w registry.NotificationWithdraw) {
+	key := askNotificationKey(w.AskID)
 	if err := d.withdrawDesktop("agenthail-" + key); err != nil {
 		d.log.Printf("withdraw desktop notification: %s", err)
 	}
 	withdrawCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
 	d.withdrawFromPairedDevices(withdrawCtx, key)
+	cancel()
 	if ctx.Err() != nil {
+		d.withdrawDone(w.AskID)
 		return
 	}
-	if err := d.Registry.ClearNotificationWithdraw(key, started); err != nil {
+	cleared, err := d.Registry.ClearNotificationWithdraw(w)
+	d.withdrawDone(w.AskID)
+	if err != nil {
 		d.log.Printf("forget the withdraw of %s: %s", key, err)
+		return
+	}
+	if !cleared {
+		d.sendWithdraws()
 	}
 }
 
@@ -530,7 +558,7 @@ func (d *Daemon) settleAsk(ask registry.Ask, status, messageID string) {
 			d.log.Printf("withdraw the notice of %s: %s", ask.ID, err)
 		}
 	}
-	d.withdrawAsk(ask.ID)
+	d.sendWithdraws()
 }
 
 func (d *Daemon) withdrawOwnAsk(session surface.Session, askID string) error {
@@ -553,7 +581,7 @@ func (d *Daemon) withdrawOwnAsk(session surface.Session, askID string) error {
 			d.log.Printf("withdraw the notice of %s: %s", ask.ID, err)
 		}
 	}
-	d.withdrawAsk(askID)
+	d.sendWithdraws()
 	d.publishAsk(session.ID)
 	return nil
 }

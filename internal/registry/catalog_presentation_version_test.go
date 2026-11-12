@@ -60,6 +60,9 @@ func asBeforePresentationTriggers(t *testing.T, r *Registry) {
 	if err := dropPresentationTriggers(tx); err != nil {
 		t.Fatal(err)
 	}
+	if err := dropWithdrawTriggers(tx); err != nil {
+		t.Fatal(err)
+	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}

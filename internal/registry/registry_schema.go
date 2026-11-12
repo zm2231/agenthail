@@ -789,7 +789,7 @@ CREATE TABLE IF NOT EXISTS ledger_backlog_told (
 	PRIMARY KEY (project_key, item_id)
 );
 CREATE TABLE IF NOT EXISTS notification_withdrawals (
-	key TEXT PRIMARY KEY,
-	queued_at_ms INTEGER NOT NULL
+	ask_id TEXT PRIMARY KEY,
+	seq INTEGER NOT NULL
 );
 `

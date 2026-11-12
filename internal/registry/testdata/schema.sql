@@ -555,8 +555,8 @@ CREATE TABLE move_dropped_relays (
 
 -- table notification_withdrawals
 CREATE TABLE notification_withdrawals (
-	key TEXT PRIMARY KEY,
-	queued_at_ms INTEGER NOT NULL
+	ask_id TEXT PRIMARY KEY,
+	seq INTEGER NOT NULL
 );
 
 -- table paired_devices
@@ -1005,6 +1005,27 @@ CREATE TABLE work_records (
 	created_at_ms INTEGER NOT NULL,
 	settled_at_ms INTEGER NOT NULL DEFAULT 0
 );
+
+-- trigger asks_applied_withdraw
+CREATE TRIGGER asks_applied_withdraw AFTER UPDATE OF applied_at_ms ON asks
+WHEN OLD.applied_at_ms=0 AND NEW.applied_at_ms>0 AND (OLD.announced_at_ms>0 OR EXISTS(SELECT 1 FROM json_each(OLD.route_json) WHERE json_extract(value,'$.to')='person'))
+BEGIN
+	INSERT INTO notification_withdrawals(ask_id, seq) VALUES (NEW.id, (SELECT COALESCE(MAX(seq),0)+1 FROM notification_withdrawals)) ON CONFLICT(ask_id) DO UPDATE SET seq=excluded.seq;
+END;
+
+-- trigger asks_closed_withdraw
+CREATE TRIGGER asks_closed_withdraw AFTER UPDATE OF state ON asks
+WHEN OLD.state='open' AND NEW.state IN ('withdrawn','expired') AND (OLD.announced_at_ms>0 OR EXISTS(SELECT 1 FROM json_each(OLD.route_json) WHERE json_extract(value,'$.to')='person'))
+BEGIN
+	INSERT INTO notification_withdrawals(ask_id, seq) VALUES (NEW.id, (SELECT COALESCE(MAX(seq),0)+1 FROM notification_withdrawals)) ON CONFLICT(ask_id) DO UPDATE SET seq=excluded.seq;
+END;
+
+-- trigger asks_deleted_withdraw
+CREATE TRIGGER asks_deleted_withdraw AFTER DELETE ON asks
+WHEN OLD.state='open' AND (OLD.announced_at_ms>0 OR EXISTS(SELECT 1 FROM json_each(OLD.route_json) WHERE json_extract(value,'$.to')='person'))
+BEGIN
+	INSERT INTO notification_withdrawals(ask_id, seq) VALUES (OLD.id, (SELECT COALESCE(MAX(seq),0)+1 FROM notification_withdrawals)) ON CONFLICT(ask_id) DO UPDATE SET seq=excluded.seq;
+END;
 
 -- trigger catalog_presentation_version_aliases_delete
 CREATE TRIGGER catalog_presentation_version_aliases_delete AFTER DELETE ON aliases

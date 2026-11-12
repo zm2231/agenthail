@@ -94,6 +94,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := dropPresentationTriggers(tx); err != nil {
 		return err
 	}
+	if err := dropWithdrawTriggers(tx); err != nil {
+		return err
+	}
 	if err := setAsideReleasedProjectsTable(tx); err != nil {
 		return err
 	}
@@ -476,6 +479,9 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if err := createPresentationTriggers(tx); err != nil {
+		return err
+	}
+	if err := createWithdrawTriggers(tx); err != nil {
 		return err
 	}
 	if version == schemaVersion {

@@ -46,6 +46,7 @@ func (d *Daemon) tellDeliveryAsks() {
 			d.log.Printf("publish delivery asks: %s", err)
 		}
 	}
+	d.sendWithdraws()
 }
 
 func deliveryChoice(ask registry.Ask, response surface.Response) (registry.AskOption, bool) {
