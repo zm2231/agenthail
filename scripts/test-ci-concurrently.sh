@@ -28,6 +28,22 @@ grep -q '^::group::broken (exit 3, ' "$work/out" || fail "no exit status for bro
 grep -q '^::error::broken failed$' "$work/out" || fail "no error for broken: $(cat "$work/out")"
 grep -q '^::error::ok failed$' "$work/out" && fail "ok reported as failed"
 
+RUNNER_TEMP="$work" "$run" sleeper "sh -c 'echo \$\$ >\"$work/child\"; exec sleep 60'" >/dev/null 2>&1 &
+runner=$!
+for _ in $(seq 100); do [ -s "$work/child" ] && break; sleep 0.05; done
+[ -s "$work/child" ] || fail "the sleeper did not start"
+kill -TERM "$runner"
+status=0
+wait "$runner" || status=$?
+[ "$status" -eq 143 ] || fail "a cancelled run exited $status, want 143"
+child="$(cat "$work/child")"
+for _ in $(seq 100); do kill -0 "$child" 2>/dev/null || break; sleep 0.05; done
+if kill -0 "$child" 2>/dev/null; then
+	kill "$child"
+	fail "a cancelled run left its command running"
+fi
+rm -f "$work/child"
+
 if "$run" lonely >/dev/null 2>&1; then
 	fail "an odd argument count passed"
 fi
