@@ -20,6 +20,7 @@ import (
 	"github.com/zm2231/agenthail/internal/github"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/simhost"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/uploads"
 )
@@ -125,6 +126,10 @@ type Daemon struct {
 	transportResolver        *SessionTransportResolver
 	claudeHost               *claudehost.Manager
 	browserHost              *browserhost.Manager
+	simHost                  *simhost.Host
+	simStatusMu              sync.Mutex
+	simStatus                simhost.Status
+	simStatusAt              time.Time
 	extensions               *extensionRuntime
 	build                    buildinfo.Identity
 	startup                  daemonStartup
@@ -370,6 +375,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.superviseExtensions(ctx)
 	}()
 	go d.sweepUploads(ctx)
+	go d.sweepSimulatorLeases(ctx)
 	go d.runLimitResumes(ctx)
 	go d.runIdleCompaction(ctx)
 	go d.runGoalSweeps(ctx)

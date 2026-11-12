@@ -91,27 +91,39 @@ case "$kind" in
 esac
 name="${AGENTHAIL_SIMULATOR_NAME:-$name}"
 
-devices="$(xcrun simctl list devices available --json)"
-udid="$(jq -r --arg name "$name" '[.devices[][] | select(.name == $name)] | first | .udid // empty' <<<"$devices")"
+find_or_create() {
+  local devices udid runtime device
+  devices="$(xcrun simctl list devices available --json)"
+  udid="$(jq -r --arg name "$name" '[.devices[][] | select(.name == $name)] | first | .udid // empty' <<<"$devices")"
 
-if [ -z "$udid" ]; then
-  runtime="$(xcrun simctl list runtimes --json | jq -r '.runtimes | map(select(.isAvailable and (.identifier | contains("iOS")))) | last | .identifier')"
-  # The iPad UI tests are written for the 11-inch iPad Pro; Xcode lists the 13-inch first.
-  device="$(xcrun simctl list devicetypes --json | jq -r --arg family "$family" --arg prefer "$prefer" '.devicetypes | (map(select(.name | startswith($prefer))) | first) // (map(select(.name | startswith($family))) | first) | .identifier')"
-  if command -v simslim >/dev/null; then
-    # The device takes its name only once slimmed and shut down, so a failed slim is never found and reused.
-    udid="$(xcrun simctl create "$name (slimming)" "$device" "$runtime")"
-    if ! { simslim on "$udid" --profile "$(dirname "$(readlink -f "$0")")/simslim-profile.json" >&2 &&
-      xcrun simctl shutdown "$udid" && xcrun simctl rename "$udid" "$name"; }; then
-      xcrun simctl shutdown "$udid" 2>/dev/null || true
-      xcrun simctl delete "$udid" || echo "$0: could not delete $udid; delete '$name (slimming)' by hand" >&2
-      echo "$0: could not slim and name a new $name simulator" >&2
-      exit 1
+  if [ -z "$udid" ]; then
+    runtime="$(xcrun simctl list runtimes --json | jq -r '.runtimes | map(select(.isAvailable and (.identifier | contains("iOS")))) | last | .identifier')"
+    # The iPad UI tests are written for the 11-inch iPad Pro; Xcode lists the 13-inch first.
+    device="$(xcrun simctl list devicetypes --json | jq -r --arg family "$family" --arg prefer "$prefer" '.devicetypes | (map(select(.name | startswith($prefer))) | first) // (map(select(.name | startswith($family))) | first) | .identifier')"
+    if command -v simslim >/dev/null; then
+      # The device takes its name only once slimmed and shut down, so a failed slim is never found and reused.
+      udid="$(xcrun simctl create "$name (slimming)" "$device" "$runtime")"
+      if ! { simslim on "$udid" --profile "$(dirname "$(readlink -f "$0")")/simslim-profile.json" >&2 &&
+        xcrun simctl shutdown "$udid" && xcrun simctl rename "$udid" "$name"; }; then
+        xcrun simctl shutdown "$udid" 2>/dev/null || true
+        xcrun simctl delete "$udid" || echo "$0: could not delete $udid; delete '$name (slimming)' by hand" >&2
+        echo "$0: could not slim and name a new $name simulator" >&2
+        exit 1
+      fi
+    else
+      udid="$(xcrun simctl create "$name" "$device" "$runtime")"
     fi
-  else
-    udid="$(xcrun simctl create "$name" "$device" "$runtime")"
   fi
+  printf '%s\n' "$udid"
+}
+
+if [ -n "${AGENTHAIL_SIMULATOR_FIND_LOCKED:-}" ]; then
+  find_or_create
+  exit 0
 fi
+# One machine-wide lock, shared with the Agenthail daemon, so two first users cannot both create the simulator.
+udid="$(AGENTHAIL_SIMULATOR_FIND_LOCKED=1 lockf -k /tmp/agenthail-simulator-create.lock "$0" "$kind")"
+[ -n "$udid" ]
 
 case "${2:-}" in
   "") ;;

@@ -12,10 +12,15 @@ mkdir -p "$WORK/bin"
 cat >"$WORK/bin/xcrun" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2 ${3:-}" in
-  "simctl list devices") echo '{"devices":{"ios":[{"name":"Agenthail iPhone","udid":"UDID-IPHONE"}]}}' ;;
+  "simctl list devices")
+    if [ -n "${STATE:-}" ]; then cat "$STATE"; sleep 0.5
+    else echo '{"devices":{"ios":[{"name":"Agenthail iPhone","udid":"UDID-IPHONE"}]}}'; fi ;;
   "simctl list runtimes") echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","isAvailable":true}]}' ;;
   "simctl list devicetypes") echo "${DEVICE_TYPES:?}" ;;
-  "simctl create"*) printf '%s\n' "$@" >"$CREATED"; echo UDID-NEW ;;
+  "simctl create"*)
+    printf '%s\n' "$@" >"$CREATED"
+    [ -z "${STATE:-}" ] || { echo x >>"$STATE.creates"; printf '{"devices":{"ios":[{"name":"%s","udid":"UDID-NEW"}]}}\n' "$3" >"$STATE"; }
+    echo UDID-NEW ;;
   "simctl boot"*|"simctl bootstatus"*) ;;
   "simctl shutdown"*) echo "$3" >"$SHUTDOWN" ;;
   "simctl delete"*) echo "$3" >"$DELETED"; exit "${DELETE_EXIT:-0}" ;;
@@ -25,6 +30,7 @@ esac
 EOF
 cat >"$WORK/bin/lockf" <<'EOF'
 #!/usr/bin/env bash
+[ "$2" != /tmp/agenthail-simulator-create.lock ] || exec /usr/bin/lockf "$@"
 shift 2
 printf '%s\n' "$@" >"$LOCKED"
 EOF
@@ -152,6 +158,15 @@ for delete_exit in 0 1; do
 done
 slim env PATH="$WORK/slim:$PATH" RENAME_EXIT=1 AGENTHAIL_SIMULATOR_NAME="Agenthail CI phone" "$ROOT/scripts/ios-simulator.sh" iphone
 { [ "$slim_status" != 0 ] && [ "$(cat "$DELETED" 2>/dev/null || true)" = UDID-NEW ]; } || fail "a slimmed simulator that could not take its name was left behind: exit $slim_status"
+
+echo '{"devices":{"ios":[]}}' >"$WORK/state"
+for n in 1 2; do
+  STATE="$WORK/state" DEVICE_TYPES="{\"devicetypes\":[$phone]}" AGENTHAIL_SIMULATOR_NAME="Agenthail Race" \
+    "$ROOT/scripts/ios-simulator.sh" iphone >"$WORK/race-$n" 2>&1 &
+done
+wait
+{ [ "$(wc -l <"$WORK/state.creates")" -eq 1 ] && [ "$(cat "$WORK/race-1")" = UDID-NEW ] && [ "$(cat "$WORK/race-2")" = UDID-NEW ]; } ||
+  fail "two first runs did not share one new simulator: $(wc -l <"$WORK/state.creates" 2>/dev/null) created ($(cat "$WORK/race-1") / $(cat "$WORK/race-2"))"
 
 if [ "$failures" -gt 0 ]; then
   exit 1
