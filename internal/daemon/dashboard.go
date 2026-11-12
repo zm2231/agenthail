@@ -60,13 +60,13 @@ func (d *Daemon) startDashboard() (*dashboardServer, error) {
 		MaxHeaderBytes:    32 << 10,
 		BaseContext:       func(net.Listener) context.Context { return serverCtx },
 	}
+	d.attachMCPCredentials(listener.Addr().String())
 	go func() {
 		if serveErr := dashboard.server.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
 			d.log.Printf("dashboard server: %s", serveErr)
 		}
 	}()
 	d.log.Printf("dashboard enabled on http://%s", config.Listen)
-	d.attachMCPCredentials(listener.Addr().String())
 	return dashboard, nil
 }
 
