@@ -101,6 +101,9 @@ func (d *Daemon) sendAskStates(ctx context.Context, store *ledger.Store, keys []
 			states[owner][q.AskID] = d.askState(ledger.ParkQuestion{AskID: q.AskID})
 		}
 	}
+	d.backlog.mu.Lock()
+	maps.DeleteFunc(d.backlog.sent, func(owner string, _ sentAsks) bool { _, held := states[owner]; return !held })
+	d.backlog.mu.Unlock()
 	for owner, held := range states {
 		d.backlog.mu.Lock()
 		last := d.backlog.sent[owner]

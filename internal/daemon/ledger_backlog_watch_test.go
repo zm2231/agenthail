@@ -267,6 +267,15 @@ func TestAnAskAnsweredOnTheParkingHostMakesItsWorkReadyOnTheLedgersOwner(t *test
 	if state := owner.daemon.askState(ledger.ParkQuestion{AskID: ask, HostID: mac.daemon.localHost().ID}); state != registry.AskAnswered {
 		t.Fatalf("an owner that lost its states got %q back, want them resent", state)
 	}
+
+	mustLedger(t, mac, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: widgetKey, SessionID: "local-a", Action: ledger.WorkUnpark, ItemID: id}, nil)
+	mac.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	mac.daemon.backlog.mu.Lock()
+	remembered := len(mac.daemon.backlog.sent)
+	mac.daemon.backlog.mu.Unlock()
+	if remembered != 0 {
+		t.Fatalf("with no person parks left, the parking host still remembers %d owners' reports", remembered)
+	}
 }
 
 func TestACoordinatorIsToldOnlyItsOwnProjectsBacklog(t *testing.T) {
