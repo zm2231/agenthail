@@ -20,17 +20,21 @@ const (
 	readReplyClip    = 600
 )
 
-var readViews = []string{"board", "goals", "asks", "decisions", "questions", "work", "ready", "item"}
+var readViews = []string{"board", "goals", "asks", "decisions", "questions", "work", "ready", "backlog", "triage", "item"}
 
 type ReadRequest struct {
-	View   string
-	ID     string
-	Limit  int
-	Cursor string
-	Work   *WorkQuery
-	Budget int
-	Sync   *SyncHealth
-	Sorter *SorterHealth
+	View    string
+	ID      string
+	Limit   int
+	Cursor  string
+	Work    *WorkQuery
+	Budget  int
+	Sync    *SyncHealth
+	Sorter  *SorterHealth
+	Now     time.Time
+	Usage   UsageReader
+	Backlog BacklogQuery
+	Idle    time.Duration
 }
 
 type SorterHealth struct {
@@ -79,6 +83,8 @@ func (s *Store) Read(projectKey string, req ReadRequest) (map[string]any, error)
 		}
 		result["ready"], result["total"], result["truncated"] = rows, len(ready), len(rows) < len(ready)
 		return result, nil
+	case "backlog", "triage":
+		return readBacklog(board, view, req, result)
 	}
 	limit, err := readLimit(req.Limit, readMaxLimit)
 	if err != nil {

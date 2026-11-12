@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -26,6 +27,12 @@ func (d *Daemon) ledgerRead(key string, req ledger.ReadRequest) (map[string]any,
 		req.Sync = &ledger.SyncHealth{OwnerHead: last.Head, Error: last.Error}
 	}
 	req.Sorter = d.sorterHealth()
+	if req.View == "backlog" && req.Usage == nil {
+		if req.Now.IsZero() {
+			req.Now = time.Now()
+		}
+		req.Usage = d.ledgerUsageReader(context.Background(), req.Now)
+	}
 	result, err := d.ledgerStore().Read(key, req)
 	if err != nil {
 		return nil, err
@@ -64,6 +71,23 @@ func ledgerReadQuery(query url.Values) (ledger.ReadRequest, error) {
 			return req, fmt.Errorf("limit must be a number")
 		}
 		req.Limit = limit
+	}
+	for _, kind := range query["kind"] {
+		req.Backlog.Kinds = append(req.Backlog.Kinds, ledger.ParkKind(kind))
+	}
+	if raw := query.Get("ready"); raw != "" {
+		ready, err := strconv.ParseBool(raw)
+		if err != nil {
+			return req, fmt.Errorf("ready must be true or false")
+		}
+		req.Backlog.Ready = ready
+	}
+	if raw := query.Get("days"); raw != "" {
+		days, err := strconv.Atoi(raw)
+		if err != nil || days < 1 {
+			return req, fmt.Errorf("days must be a whole number of days, 1 or more")
+		}
+		req.Idle = time.Duration(days) * 24 * time.Hour
 	}
 	filtered := false
 	for _, name := range ledgerWorkFilters {

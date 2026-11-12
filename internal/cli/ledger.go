@@ -48,6 +48,7 @@ var ledgerCommands = map[string]func(a *App, c ledgerCall) error{
 	"question":     func(a *App, c ledgerCall) error { return a.ledgerQuestion(c.args) },
 	"questions":    func(a *App, c ledgerCall) error { return a.ledgerQuestions(c.store, c.args) },
 	"work":         func(a *App, c ledgerCall) error { return a.ledgerWork(c.store, c.args) },
+	"backlog":      func(a *App, c ledgerCall) error { return a.ledgerBacklog(c.args) },
 	"import":       func(a *App, c ledgerCall) error { return a.ledgerImport(c.store, c.args) },
 	"owner":        func(a *App, c ledgerCall) error { return a.ledgerOwner(c.store, c.args) },
 	"digest":       func(a *App, c ledgerCall) error { return a.ledgerDigest(c.store, c.args) },
@@ -96,7 +97,7 @@ func (a *App) cmdLedger(args []string) error {
 }
 
 var ledgerReads = map[string]bool{"asks": true, "ask": true, "show": true, "words": true, "goals": true, "questions": true, "digest": true,
-	"list": true, "ready": true, "next": true, "critical-path": true, "search": true}
+	"list": true, "ready": true, "next": true, "critical-path": true, "search": true, "backlog": true}
 
 func ledgerRead(positional []string) bool {
 	if positional[0] == "work" {

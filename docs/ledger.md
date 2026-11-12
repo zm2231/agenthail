@@ -223,6 +223,18 @@ Claimed work is parked by its assignee, or for it with `--for-session <session>`
 
 A park is a `work_item.state` event carrying `park` (`kind`, `why`, `revisit`, the parking `session`, and `usage`, `idea` or `person`), so it replicates like any other state change.
 
+`agenthail ledger backlog` lists parked work, with the items that can come back first, and says why each one waits. Unpark is still a choice: the backlog never unparks anything itself.
+
+- Usage work can come back when its provider's reading shows headroom again on the host it named, or when its `resetsAt` has passed. Headroom means under 90% of both the session and weekly windows, the same test as the offer to move a limited Claude session to another account. With no reading, the item waits.
+- Later work can come back on its `--until` date. Without one, it waits until someone unparks it.
+- An idea waits until someone takes it up.
+- Work waiting on the person waits for their answer.
+- A parked item with unfinished dependencies still waits on them.
+
+`--kind usage,later` keeps those kinds, and `--ready` keeps the items that can come back. The read goes through the daemon, because it holds the usage readings. The same list is `view=backlog` on `GET /api/v1/ledger` (`kind`, `ready`) and `view: backlog` in the MCP ledger read. The ETag covers readiness.
+
+`agenthail ledger backlog --triage [--days N]` lists open or blocked items that nobody holds and that have had no activity for N days (14 by default), to park them in a batch with `ledger park <id>...`. It is `view=triage` (`days`) on the same endpoint.
+
 To pick up work:
 
 - `agenthail ledger work ready` lists open items whose dependencies are settled, the most urgent first and then the ones that unblock the most.
@@ -306,6 +318,7 @@ GET /api/v1/ledger/events                                   # ledger.changed, on
   - `board`, the default: capture state, sync state, counts, the first page of goals, and the newest five provisional words with their total (`provisional`), how many messages were filed automatically and overridden (`autoFiled`), and, when a sorter is configured, its health (`sorter`);
   - one list, paged: `goals`, `asks`, `decisions`, `questions` or `work`;
   - `ready`, the ranked next work;
+  - `backlog`, parked work with whether each item can come back and why (`kind`, `ready`), and `triage`, unowned open or blocked work idle `days` days (14 by default), as `agenthail ledger backlog` prints them;
   - `item`: one work item with its context, or one ask, as `agenthail ledger show --json` prints it.
 - **Work filters.** With no filter, the `work` view lists every work item, settled and deleted ones included. With any filter, it selects as `agenthail ledger list` does: `q`, `state`, `type`, `priority`, `label`, `assignee`, `clause`, `found` and `all`.
 - **Paging.** Lists are ordered by id and paged with `limit` (1 to 100) and the `nextCursor` of the previous page. A page starts after that id, so items added meanwhile don't shift it.
