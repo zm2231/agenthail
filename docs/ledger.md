@@ -214,10 +214,11 @@ agenthail ledger park <item>... --usage claude[:<root>]|codex   # waits for that
 agenthail ledger park <item>... --later "after the release" [--until 2026-12-01|7d|2w]
 agenthail ledger park <item>... --person "Titles only, or bodies too?" [--ask <ask id>]   # waits on the person's decision
 agenthail ledger park <item> --idea --utterance <ref> [--goal "..."] [--plan "..."] [--first-test "..."]   # the person's idea, in their words
+agenthail ledger attach <utterance> --as idea --clause "<title>" [--goal "..."] [--plan "..."] [--first-test "..."]   # a new idea from the person's words
 agenthail ledger unpark <item>...
 ```
 
-Each item is parked on its own: a refused one is named and the others still park, and the command fails so the session sees it. Every kind takes `--why` and `--until`. An idea keeps the ref of the person's captured words, and the ledger refuses one that names no captured utterance; the goal, plan and first test are the session's free-form shape of it.
+Each item is parked on its own: a refused one is named and the others still park, and the command fails so the session sees it. Every kind takes `--why` and `--until`. An idea keeps the ref of the person's captured words, and the ledger refuses one that names no captured utterance; the goal, plan and first test are the session's free-form shape of it. `attach --as idea` turns the person's words into a new work item of type `idea`, already parked, and attaches the words to it like any other attach. It is found work under no goal, so it stays out of goals, asks and the end-of-turn check until it is linked to a clause with `work link` or the person's words are attached as a new ask. A work item can't be added or edited into an idea any other way.
 
 Claimed work is parked by its assignee, or for it with `--for-session <session>`, as when a session has run out of usage and cannot make the call itself. Parking claimed work takes the same `--done`, `--remaining`, `--decisions` and `--uncertain` as a handoff, so whoever picks it up reads where it stopped in `ledger work <item>`. `unpark` returns the item to open with that handoff, for the next session to claim. `close`, `delete` and `edit` work on parked items too.
 

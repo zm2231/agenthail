@@ -129,11 +129,15 @@ func (a *App) ledgerGoal(args []string) error {
 }
 
 func attachFields(w ledgerWriteArgs) ledger.AttachRequest {
-	return ledger.AttachRequest{
+	req := ledger.AttachRequest{
 		As: ledger.AttachAs(w.value("--as")), To: w.value("--to"), Clauses: w.values["--clause"],
 		AskType: ledger.AskType(w.value("--type")), Source: ledger.ClauseSource(w.value("--source")),
 		Adopt: w.bools["--adopt"], Reject: w.bools["--reject"], Ack: w.bools["--ack"], Delegate: w.value("--session"), Covers: w.values["--covers"],
 	}
+	if shape := (ledger.ParkIdeaShape{Goal: w.value("--goal"), Plan: w.value("--plan"), FirstTest: w.value("--first-test")}); shape != (ledger.ParkIdeaShape{}) {
+		req.Idea = &shape
+	}
+	return req
 }
 
 func attachSegments(args []string) [][]string {
@@ -158,7 +162,7 @@ func attachSegments(args []string) [][]string {
 	return segments
 }
 
-const attachUsage = `usage: agenthail ledger attach <utterance_id> [--as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation>] [--to <goal|ask|clause|item|project>] [--clause "..."] [--and <utterance_id> ...]...`
+const attachUsage = `usage: agenthail ledger attach <utterance_id> [--as <new-ask|extends|constrains|refines|reacts|delegates|decides|idea|conversation>] [--to <goal|ask|clause|item|project>] [--clause "..."] [--and <utterance_id> ...]...`
 
 func (a *App) ledgerAttach(args []string, propose bool) error {
 	segments := attachSegments(args)
