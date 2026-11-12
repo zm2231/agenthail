@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 func TestAParkedItemReadsTheHeadroomOfTheProviderRootAndHostItNamed(t *testing.T) {
@@ -78,6 +79,53 @@ func TestTheLedgerReadRouteServesTheBacklogAndTriage(t *testing.T) {
 	}
 }
 
+func unlimited(string) (registry.LimitResume, bool) { return registry.LimitResume{}, false }
+
+func TestAUsageParkDefaultsToTheRootTheParkedSessionRanOutOn(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	stopped := now.Add(4 * time.Hour)
+	sets := []usageSet{
+		{Provider: "claude", Name: "default", Root: "/home/me/.claude", Primary: true, HostID: "here", Meters: []usageMeter{{Kind: "session", Percent: 10}}},
+		{Provider: "claude", Name: "bb", Root: "/home/me/.claude-bb", HostID: "here"},
+	}
+	limited := func(session string) (registry.LimitResume, bool) {
+		if session == "worker" {
+			return registry.LimitResume{SessionID: "worker", AccountKey: "/home/me/.claude-bb", ResetsAt: stopped}, true
+		}
+		if session == "elsewhere" {
+			return registry.LimitResume{SessionID: "elsewhere", AccountKey: "/somewhere/else"}, true
+		}
+		return registry.LimitResume{}, false
+	}
+	park := func(session, forSession string) ledger.ParkUsageTarget {
+		t.Helper()
+		body, _ := json.Marshal(ledger.WorkRequest{SessionID: session, ForSession: forSession, Action: ledger.WorkPark, ItemID: "widget-W1",
+			Park: &ledger.Park{Kind: ledger.ParkUsage, Usage: &ledger.ParkUsageTarget{Provider: "claude"}}})
+		var req ledger.WorkRequest
+		if err := json.Unmarshal(stampUsageParkFrom(body, "here", func() []usageSet { return sets }, limited, now), &req); err != nil {
+			t.Fatal(err)
+		}
+		return *req.Park.Usage
+	}
+	if got := park("lead", "worker"); got.Root != "/home/me/.claude-bb" || !got.ResetsAt.Equal(stopped) {
+		t.Fatalf("parked for a limited session = %+v", got)
+	}
+	if got := park("worker", ""); got.Root != "/home/me/.claude-bb" {
+		t.Fatalf("a limited session parking itself = %+v", got)
+	}
+	if got := park("elsewhere", ""); got.Root != "default" || !got.ResetsAt.IsZero() {
+		t.Fatalf("a stop on a root this host does not hold = %+v", got)
+	}
+}
+
+func TestAnAgedReadingIsNoReading(t *testing.T) {
+	now := time.Now()
+	sets := []usageSet{{Provider: "codex", Meters: []usageMeter{{Kind: "session", Percent: 5, Aged: true}}}}
+	if got := parkHeadroom(sets, ledger.ParkUsageTarget{Provider: "codex"}, now); got.Known {
+		t.Fatalf("an aged reading = %+v", got)
+	}
+}
+
 func TestAUsageParkRecordsTheHostRootAndResetFromTheParkingHostsReading(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	reset := now.Add(90 * time.Minute)
@@ -92,7 +140,7 @@ func TestAUsageParkRecordsTheHostRootAndResetFromTheParkingHostsReading(t *testi
 		body, _ := json.Marshal(ledger.WorkRequest{ProjectKey: "k", SessionID: "worker", Action: ledger.WorkPark, ItemID: "widget-W1", Reason: "kept",
 			Park: &ledger.Park{Kind: ledger.ParkUsage, Why: "out of usage", Usage: &target}})
 		var req ledger.WorkRequest
-		if err := json.Unmarshal(stampUsageParkFrom(body, "here", local, now), &req); err != nil {
+		if err := json.Unmarshal(stampUsageParkFrom(body, "here", local, unlimited, now), &req); err != nil {
 			t.Fatal(err)
 		}
 		if req.Reason != "kept" || req.Park.Why != "out of usage" || req.ItemID != "widget-W1" {
@@ -115,7 +163,7 @@ func TestAUsageParkRecordsTheHostRootAndResetFromTheParkingHostsReading(t *testi
 		t.Fatalf("a park for another host = %+v, %d reads", got, reads-before)
 	}
 	for _, body := range []string{`{"action":"claim","itemId":"widget-W1"}`, `{"action":"park","itemId":"widget-W1","park":{"kind":"later","why":"x"}}`, `not json`} {
-		if got := string(stampUsageParkFrom([]byte(body), "here", local, now)); got != body {
+		if got := string(stampUsageParkFrom([]byte(body), "here", local, unlimited, now)); got != body {
 			t.Fatalf("%s became %s", body, got)
 		}
 	}
@@ -135,7 +183,7 @@ func TestAUsageItemWithNoLiveReadingComesBackAfterItsRecordedReset(t *testing.T)
 	sets := []usageSet{{Provider: "claude", Name: "default", Primary: true, HostID: "here", Meters: []usageMeter{{Kind: "weekly", Percent: 99, ResetsAt: reset}}}}
 	body, _ := json.Marshal(ledger.WorkRequest{ProjectKey: p.key, SessionID: "worker", Action: ledger.WorkPark, ItemID: item.ID, Park: &ledger.Park{Kind: ledger.ParkUsage, Usage: &ledger.ParkUsageTarget{Provider: "claude"}}})
 	var req ledger.WorkRequest
-	if err := json.Unmarshal(stampUsageParkFrom(body, "here", func() []usageSet { return sets }, now), &req); err != nil {
+	if err := json.Unmarshal(stampUsageParkFrom(body, "here", func() []usageSet { return sets }, unlimited, now), &req); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Work(req, now); err != nil {

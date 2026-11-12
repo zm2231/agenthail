@@ -3,11 +3,13 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudepick"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 func (d *Daemon) ledgerUsageReader(ctx context.Context, now time.Time) ledger.UsageReader {
@@ -38,7 +40,7 @@ func parkUsageSet(sets []usageSet, target ledger.ParkUsageTarget) (usageSet, boo
 
 func parkHeadroom(sets []usageSet, target ledger.ParkUsageTarget, now time.Time) ledger.Headroom {
 	set, ok := parkUsageSet(sets, target)
-	if !ok {
+	if !ok || slices.ContainsFunc(set.Meters, func(m usageMeter) bool { return m.Aged }) {
 		return ledger.Headroom{}
 	}
 	read, room, frees := claudepick.Headroom(limitMoveCandidates([]usageSet{set}, now)[0])
@@ -49,10 +51,14 @@ func (d *Daemon) stampUsagePark(ctx context.Context, path string, body []byte, n
 	if path != "/api/v1/ledger/work" {
 		return body
 	}
-	return stampUsageParkFrom(body, d.localHost().ID, func() []usageSet { return d.localUsageSets(ctx, now) }, now)
+	limited := func(session string) (registry.LimitResume, bool) {
+		stop, ok, err := d.Registry.LimitResumeFor(session)
+		return stop, ok && err == nil
+	}
+	return stampUsageParkFrom(body, d.localHost().ID, func() []usageSet { return d.localUsageSets(ctx, now) }, limited, now)
 }
 
-func stampUsageParkFrom(body []byte, here string, local func() []usageSet, now time.Time) []byte {
+func stampUsageParkFrom(body []byte, here string, local func() []usageSet, limited func(session string) (registry.LimitResume, bool), now time.Time) []byte {
 	var req ledger.WorkRequest
 	if json.Unmarshal(body, &req) != nil || req.Action != ledger.WorkPark || req.Park == nil || req.Park.Kind != ledger.ParkUsage || req.Park.Usage == nil {
 		return body
@@ -62,7 +68,21 @@ func stampUsageParkFrom(body []byte, here string, local func() []usageSet, now t
 		return body
 	}
 	target.HostID = here
-	set, ok := parkUsageSet(local(), target)
+	sets := local()
+	if target.Provider == "claude" && target.Root == "" {
+		for _, session := range []string{req.ForSession, req.SessionID} {
+			if stop, found := limited(session); session != "" && found {
+				if _, known := parkUsageSet(sets, ledger.ParkUsageTarget{Provider: "claude", HostID: here, Root: stop.AccountKey}); known {
+					target.Root = stop.AccountKey
+					if target.ResetsAt.IsZero() && stop.ResetsAt.After(now) {
+						target.ResetsAt = stop.ResetsAt
+					}
+					break
+				}
+			}
+		}
+	}
+	set, ok := parkUsageSet(sets, target)
 	if ok && target.Provider == "claude" && target.Root == "" {
 		target.Root = set.Name
 	}
