@@ -243,3 +243,36 @@ func TestArchivingWaitsForALocalAcquireStillOnItsWay(t *testing.T) {
 	}
 	testkit.Eventually(t, "the archived session's lease is released", 10*time.Second, func() bool { return !f.d.simHost.Holds(f.parentID) })
 }
+
+func TestARestoredSessionsNextCallWaitsForTheArchiveRelease(t *testing.T) {
+	commands := &simCommands{}
+	f := newSimFixture(t, commands)
+	if _, err := f.d.callSimulator(context.Background(), f.parentID, simhost.Request{Action: "acquire", Kind: "iphone"}); err != nil {
+		t.Fatal(err)
+	}
+	commands.hold("xcrun simctl location")
+	f.d.releaseSimulators(f.parentID)
+	<-commands.held
+	called := make(chan error, 1)
+	go func() {
+		_, err := f.d.callSimulator(context.Background(), f.parentID, simhost.Request{Action: "button", Button: "home"})
+		called <- err
+	}()
+	select {
+	case err := <-called:
+		t.Fatalf("the restored session's call ran while the release was still going: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if commands.ran("axe button") {
+		t.Fatal("the restored session's call reached the simulator before the release finished")
+	}
+	close(commands.release)
+	if err := <-called; err == nil || !strings.Contains(err.Error(), "acquire") {
+		t.Fatalf("after the release the call = %v, want it to find no lease", err)
+	}
+	testkit.Eventually(t, "the session's simulator lock is reclaimed", 10*time.Second, func() bool {
+		f.d.simOwnersMu.Lock()
+		defer f.d.simOwnersMu.Unlock()
+		return len(f.d.simOwners) == 0
+	})
+}

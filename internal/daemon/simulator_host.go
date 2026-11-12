@@ -32,15 +32,31 @@ func (d *Daemon) sweepSimulatorLeases(ctx context.Context) {
 	}
 }
 
-// releaseSimulators takes the session's simulator lock, so it waits for a call still running and a restored session's next call waits for it.
+type simulatorOwner struct {
+	mu      sync.Mutex
+	refs    int
+	release chan struct{}
+}
+
+// releaseSimulators marks the release before archive returns, so a restored session's next call waits for it, and runs it once any call still running is done.
 func (d *Daemon) releaseSimulators(sessionID string) {
 	if d.simHost == nil {
 		return
 	}
+	owner, done := d.holdSimulatorOwner(sessionID)
+	released := make(chan struct{})
+	d.simOwnersMu.Lock()
+	previous := owner.release
+	owner.release = released
+	d.simOwnersMu.Unlock()
 	go func() {
-		lock := d.simulatorOwnerLock(sessionID)
-		lock.Lock()
-		defer lock.Unlock()
+		defer done()
+		defer close(released)
+		if previous != nil {
+			<-previous
+		}
+		owner.mu.Lock()
+		defer owner.mu.Unlock()
 		if !d.simHost.Local() {
 			d.releaseForwardedSimulators(sessionID)
 			return
@@ -50,24 +66,44 @@ func (d *Daemon) releaseSimulators(sessionID string) {
 	}()
 }
 
-func (d *Daemon) simulatorOwnerLock(owner string) *sync.Mutex {
-	d.simStatusMu.Lock()
-	defer d.simStatusMu.Unlock()
+func (d *Daemon) holdSimulatorOwner(id string) (*simulatorOwner, func()) {
+	d.simOwnersMu.Lock()
+	defer d.simOwnersMu.Unlock()
 	if d.simOwners == nil {
-		d.simOwners = map[string]*sync.Mutex{}
+		d.simOwners = map[string]*simulatorOwner{}
 	}
-	if d.simOwners[owner] == nil {
-		d.simOwners[owner] = &sync.Mutex{}
+	owner := d.simOwners[id]
+	if owner == nil {
+		owner = &simulatorOwner{}
+		d.simOwners[id] = owner
 	}
-	return d.simOwners[owner]
+	owner.refs++
+	return owner, func() {
+		d.simOwnersMu.Lock()
+		defer d.simOwnersMu.Unlock()
+		if owner.refs--; owner.refs == 0 && d.simOwners[id] == owner {
+			delete(d.simOwners, id)
+		}
+	}
 }
 
-func (d *Daemon) callSimulator(ctx context.Context, owner string, req simhost.Request) (map[string]any, error) {
-	lock := d.simulatorOwnerLock(owner)
-	lock.Lock()
-	defer lock.Unlock()
-	if !d.simHost.Local() {
-		return d.forwardSimulator(ctx, owner, req)
+func (d *Daemon) callSimulator(ctx context.Context, id string, req simhost.Request) (map[string]any, error) {
+	owner, done := d.holdSimulatorOwner(id)
+	defer done()
+	d.simOwnersMu.Lock()
+	pending := owner.release
+	d.simOwnersMu.Unlock()
+	if pending != nil {
+		select {
+		case <-pending:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
-	return d.simHost.Call(ctx, owner, req)
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if !d.simHost.Local() {
+		return d.forwardSimulator(ctx, id, req)
+	}
+	return d.simHost.Call(ctx, id, req)
 }

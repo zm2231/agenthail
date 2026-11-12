@@ -237,8 +237,8 @@ func (d *Daemon) forwardSimulator(ctx context.Context, owner string, req simhost
 }
 
 func (d *Daemon) noteSimulatorHost(owner, hostID string) {
-	d.simStatusMu.Lock()
-	defer d.simStatusMu.Unlock()
+	d.simOwnersMu.Lock()
+	defer d.simOwnersMu.Unlock()
 	if d.simForwarded == nil {
 		d.simForwarded = map[string]map[string]bool{}
 	}
@@ -249,10 +249,10 @@ func (d *Daemon) noteSimulatorHost(owner, hostID string) {
 }
 
 func (d *Daemon) releaseForwardedSimulators(owner string) {
-	d.simStatusMu.Lock()
+	d.simOwnersMu.Lock()
 	hostIDs := d.simForwarded[owner]
 	delete(d.simForwarded, owner)
-	d.simStatusMu.Unlock()
+	d.simOwnersMu.Unlock()
 	for hostID := range hostIDs {
 		host, found := d.pairedHost(hostID)
 		if !found {
