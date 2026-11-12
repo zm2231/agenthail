@@ -134,8 +134,8 @@ func readBounded(path string, limit int64) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-func simulatorTimeout(action string) time.Duration {
-	if action == "acquire" {
+func simulatorTimeout(simulatorAction string) time.Duration {
+	if simulatorAction == "acquire" {
 		return 11 * time.Minute
 	}
 	return time.Minute
