@@ -228,16 +228,14 @@ jobs:
         run: |
           scripts/test-release-ios-proof.sh
           scripts/test-release-source-proof.sh
+      - name: Vet
+        run: go vet ./...
 
       - name: Race tests
         # No workflow race-instruments sqlite's generated C; plain go test -race does.
-        run: AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test $(go list ./... | grep -vx 'github.com/zm2231/agenthail/internal/daemon') -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+        run: AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test $(go list ./... | grep -vxE 'github.com/zm2231/agenthail/internal/(daemon|surface/surfaces)') -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
 
-  verify-linux-daemon:
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2]
+  verify-linux-surfaces:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -259,16 +257,7 @@ jobs:
         with:
           path: ~/.cache/agenthail-build/playwright
           key: agenthail-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('browser-host/package-lock.json') }}
-      - name: Vet
-        if: matrix.shard == 0
-        run: go vet ./...
-      - name: Node host modules
-        if: matrix.shard != 1
-        run: |
-          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
-          npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
       - name: Node host tests
-        if: matrix.shard == 1
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
@@ -280,22 +269,62 @@ jobs:
           key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
       - name: Stage the shipped Node
         run: scripts/fetch-node.sh
+      - name: Race tests of internal/surface/surfaces
+        # No workflow race-instruments sqlite's generated C; plain go test -race does.
+        run: AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test ./internal/surface/surfaces -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+
+  verify-linux-daemon:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            claude-host/package-lock.json
+            browser-host/package-lock.json
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/agenthail-build/playwright
+          key: agenthail-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('browser-host/package-lock.json') }}
+      - name: Node host modules
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/agenthail-build/node-v*.tar.gz
+          key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
+      - name: Stage the shipped Node
+        run: scripts/fetch-node.sh
       - name: Race tests, one shard of internal/daemon
         # No workflow race-instruments sqlite's generated C; plain go test -race does.
         run: |
-          pattern="$(go run ./scripts/go-test-shard ${{ matrix.shard }} ${{ strategy.job-total }} ./internal/daemon -race)"
+          pattern="$(go run ./scripts/go-test-shard -seconds scripts/go-test-shard/seconds/internal-daemon.tsv ${{ matrix.shard }} ${{ strategy.job-total }} ./internal/daemon -race)"
           AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test ./internal/daemon -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m -run "$pattern"
       - name: The shards together hold every internal/daemon test go test lists
         if: matrix.shard == 0
         run: |
           AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test ./internal/daemon -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -list '.*' | grep -E '^(Test|Example|Fuzz)' | sort > "$RUNNER_TEMP/listed"
           for shard in $(seq 0 $((${{ strategy.job-total }} - 1))); do
-            go run ./scripts/go-test-shard -names "$shard" ${{ strategy.job-total }} ./internal/daemon -race
+            go run ./scripts/go-test-shard -names -seconds scripts/go-test-shard/seconds/internal-daemon.tsv "$shard" ${{ strategy.job-total }} ./internal/daemon -race
           done | sort > "$RUNNER_TEMP/sharded"
           diff "$RUNNER_TEMP/listed" "$RUNNER_TEMP/sharded"
 
   verify-linux:
-    needs: [verify-linux-rest, verify-linux-daemon]
+    needs: [verify-linux-rest, verify-linux-surfaces, verify-linux-daemon]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
