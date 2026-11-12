@@ -21,12 +21,12 @@ var ledgerWriteValueFlags = map[string]bool{"--as": true, "--to": true, "--claus
 	"--on": true, "--utterance": true, "--done": true, "--remaining": true, "--decisions": true, "--uncertain": true,
 	"--covers": true, "--missing": true, "--in": true, "--through": true, "--context": true,
 	"--priority": true, "--description": true, "--acceptance": true, "--label": true, "--unlabel": true, "--text": true, "--found-in": true, "--state": true, "--assignee": true, "--sort": true, "--limit": true, "--attach": true,
-	"--usage": true, "--later": true, "--person": true, "--ask": true, "--why": true, "--until": true, "--goal": true, "--plan": true, "--first-test": true, "--for-session": true}
+	"--usage": true, "--later": true, "--person": true, "--ask": true, "--why": true, "--until": true, "--goal": true, "--plan": true, "--first-test": true, "--for-session": true, "--days": true}
 
 var ledgerRepeatableFlags = map[string]bool{"--clause": true, "--done": true, "--remaining": true, "--decisions": true, "--uncertain": true,
 	"--covers": true, "--missing": true, "--in": true, "--label": true, "--unlabel": true}
 
-var ledgerWriteBoolFlags = map[string]bool{"--adopt": true, "--reject": true, "--ack": true, "--json": true, "--keeps-breadth": true, "--mine": true, "--none": true, "--all": true, "--found": true, "--dry-run": true, "--idea": true}
+var ledgerWriteBoolFlags = map[string]bool{"--adopt": true, "--reject": true, "--ack": true, "--json": true, "--keeps-breadth": true, "--mine": true, "--none": true, "--all": true, "--found": true, "--dry-run": true, "--idea": true, "--ready": true, "--triage": true}
 
 func parseLedgerWrite(args []string) (ledgerWriteArgs, error) {
 	parsed := ledgerWriteArgs{values: map[string][]string{}, bools: map[string]bool{}}

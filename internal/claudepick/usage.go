@@ -87,3 +87,16 @@ func readings(c Candidate) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+func Headroom(c Candidate) (read, room bool, freesAt time.Time) {
+	if !known(c) {
+		return false, false, time.Time{}
+	}
+	if under(c) {
+		return true, true, time.Time{}
+	}
+	if at := frees(c); at.Before(time.Unix(math.MaxInt32, 0)) {
+		return true, false, at
+	}
+	return true, false, time.Time{}
+}
