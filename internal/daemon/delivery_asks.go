@@ -92,7 +92,7 @@ func (d *Daemon) answerDelivery(ctx context.Context, ask registry.Ask, response 
 		return actionResult{}, staleRequest()
 	}
 	defer d.publishAsk(ask.SessionID)
-	if err := d.applyDelivery(ctx, ask, ref, option.ID, by); err != nil {
+	if err := d.applyDelivery(ctx, ref, option.ID); err != nil {
 		if releaseErr := d.Registry.ReleaseAsk(ask.ID); releaseErr != nil {
 			d.log.Printf("reopen %s: %s", ask.ID, releaseErr)
 		}
@@ -105,10 +105,7 @@ func (d *Daemon) answerDelivery(ctx context.Context, ask registry.Ask, response 
 	return actionOK(map[string]any{"ok": true, "result": map[string]any{"requestId": ask.ID, "outcome": "answered", "choice": option.ID}}), nil
 }
 
-func (d *Daemon) applyDelivery(ctx context.Context, ask registry.Ask, ref registry.DeliveryRef, choice, by string) error {
-	if pid, ok := registry.TerminalChoice(choice); ok && ref.Kind == registry.DeliveryShared {
-		return d.Registry.PinHeldMessage(ref.QueueID, pid)
-	}
+func (d *Daemon) applyDelivery(ctx context.Context, ref registry.DeliveryRef, choice string) error {
 	switch choice {
 	case registry.DeliveryDismiss:
 		return nil
@@ -119,18 +116,8 @@ func (d *Daemon) applyDelivery(ctx context.Context, ask registry.Ask, ref regist
 		}
 		return err
 	case registry.DeliveryCancel:
-		item, err := d.Registry.QueueItem(ref.QueueID, d.adapters())
-		if err != nil {
-			return err
-		}
-		canceled, err := d.Registry.CancelMessage(ref.QueueID)
-		if err != nil {
-			return err
-		}
-		if item.SourceSessionID == ask.SessionID && ask.SessionID != by {
-			d.tellCanceled(ref.QueueID, ask.SessionID, canceled)
-		}
-		return nil
+		_, err := d.Registry.CancelMessage(ref.QueueID)
+		return err
 	case registry.DeliveryRetry:
 		queueID := ref.QueueID
 		if ref.IntentID != 0 {
@@ -181,13 +168,4 @@ func (d *Daemon) sendFailed(status int, code string, err error) error {
 		failure.Extra = map[string]any{"askId": ask.ID}
 	}
 	return failure
-}
-
-// tellCanceled tells the session that sent a message that someone it
-// passed the ask to stopped its delivery, so it does not wait on a reply.
-func (d *Daemon) tellCanceled(queueID int64, sender string, canceled registry.CanceledMessage) {
-	message := fmt.Sprintf("[agenthail] Your message to %s was canceled before it was delivered: %q", d.resolveDisplay(canceled.SessionID), canceled.Message)
-	if _, err := d.sendNotice(noticeRecipient{sessionID: sender, role: "sender"}, message, fmt.Sprintf("canceled-%d", queueID)); err != nil {
-		d.log.Printf("tell %s its message was canceled: %s", d.resolveDisplay(sender), err)
-	}
 }

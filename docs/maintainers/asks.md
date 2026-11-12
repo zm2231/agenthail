@@ -38,10 +38,8 @@ A message that did not reach its session, or whose arrival the daemon cannot con
 | The target's Claude holds the message | Message held by its target | `dismiss` |
 | A queued message whose delivery could not be confirmed | Message not confirmed | `retry`, `dismiss` |
 | The target refused to start (an untrusted workspace, a missing settings file) | Target refused to start | `cancel`, `dismiss` |
-| The target's Claude conversation is open in several terminals | Message held: open in N terminals | `pid-<pid>` for each terminal, `cancel`, `dismiss` |
 
 - The single question reads `<reason>: "<message>"`, the message clipped to 120 characters. The recommended option is the first.
-- A message held among several terminals offers each one by its terminal program, terminal device, folder and pid, as far as they are known; the recommended option is `dismiss`, so an unanswered ask leaves it held. Its ref names the set of terminals, so a change in who holds the conversation raises a new ask. Each terminal is the process that held the conversation when the message was held: a pick never reaches a later process that reused its pid.
 - A failure is deletable only when it failed while still `submitted` (the provider refused it) or `queued` (its queue row died before an attempt left it unconfirmed). A failure from `sent`, `unknown` or `held` may have reached the session and is never deletable.
 - Routing follows the rule above, starting at the sender: an agent that sent the message is asked first, then its hearer, then the person. A message from the person, the CLI or a relay asks the person on the target's row. A relay source is never asked: its answer would start a turn the same relay forwards again.
 - A failure stops asking after a day, or once a later message from the same sender reached the same target. A held message asks until its target releases or drops it. A dead queue row asks for the dead-letter review window. A refusal asks until an attempt is not refused; a later refusal raises a new ask.
@@ -53,8 +51,7 @@ Answer with `respond`, `decision.choices` a one-element list of the option id (`
 |---|---|
 | `retry` | the dead queue row is pending again |
 | `delete` | the dead queue row is canceled and kept in history; it cannot be retried |
-| `cancel` | the refused queue row is canceled; a sender that passed the ask on is told |
-| `pid-<pid>` | the held queue row is sent now to that terminal alone, after a restart too; if it no longer holds the conversation, the row is held again among the terminals that do, with a new ask |
+| `cancel` | the refused queue row is canceled |
 | `dismiss` | nothing changes; the ask closes |
 
 A queue row (`/api/v1/queue`, the dashboard queue) and an inbox message (`/api/v1/inbox`) carry `askId` while a delivery ask about them is open, so an app opens the ask from the row.

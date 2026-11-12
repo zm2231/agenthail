@@ -139,8 +139,6 @@ class Session {
     this.tasks = [];
     this.taskSince = new Map();
     this.owed = new Set();
-    this.running = false;
-    this.interruptOwed = false;
     this.human = [];
     this.ambient = new Set();
     this.context = null;
@@ -246,20 +244,6 @@ class Session {
     const owedTask = this.taskTurnOwed();
     this.owed.clear();
     if (owedTask) this.emitTasks();
-    if (this.interruptOwed) {
-      this.interruptOwed = false;
-      this.query?.interrupt().catch((error) => log(`interrupt Claude ${this.pid} as its turn started: ${error.message}`));
-    }
-  }
-
-  // interrupt stops the running turn. Claude ignores an interrupt that comes
-  // before it starts the turn for a message it took, so that one is sent
-  // again as the turn starts. A turn owed for a finished background task may
-  // start first, so then the interrupt is not sent again.
-  async interrupt() {
-    const owed = [...this.owed];
-    if (!this.running && owed.length > 0 && owed.every((key) => !key.startsWith('task:'))) this.interruptOwed = true;
-    await this.query.interrupt();
   }
 
   // emitTasks tells subscribers the session's background work changed: its
@@ -400,7 +384,7 @@ const methods = {
   open,
   send,
   interrupt: async ({ sessionId }) => {
-    await session(sessionId).interrupt();
+    await session(sessionId).query.interrupt();
     return {};
   },
   respond: ({ sessionId, requestId, decision }) => {
@@ -1120,8 +1104,6 @@ async function run(s, exit) {
       }
       if (message.type === 'system' && message.subtype === 'session_state_changed') {
         s.stateEvents = true;
-        s.running = message.state !== 'idle';
-        if (!s.running) s.interruptOwed = false;
         if (message.state === 'running') s.turnStarted();
         s.setState(message.state === 'idle' ? 'idle' : 'busy');
       } else if (message.type === 'system' && message.subtype === 'background_tasks_changed') {
@@ -1144,7 +1126,6 @@ async function run(s, exit) {
         }
       } else if (message.type === 'result' && !s.stateEvents && s.inbox.length === 0) {
         s.guessesIdle = true;
-        s.interruptOwed = false;
         s.turnStarted();
         if (!stateEventsMissing) {
           stateEventsMissing = true;

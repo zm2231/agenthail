@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,17 +122,19 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	mcpURL := ""
+	mcpURL, fetchURL := "", ""
 	if credentials := d.mcpCredentials.Load(); credentials != nil {
 		mcpURL = credentials.URL()
+		fetchURL = strings.TrimSuffix(mcpURL, "/mcp") + extensionFetchPath
 	}
 	next := map[string]*loadedExtension{}
 	tokens := map[string]string{}
 	type spec struct {
-		ID     string `json:"id"`
-		Dir    string `json:"dir"`
-		Token  string `json:"token"`
-		MCPURL string `json:"mcpURL"`
+		ID       string `json:"id"`
+		Dir      string `json:"dir"`
+		Token    string `json:"token"`
+		MCPURL   string `json:"mcpURL"`
+		FetchURL string `json:"fetchURL"`
 	}
 	var specs []spec
 	for _, ext := range found {
@@ -151,7 +154,7 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 		}
 		loaded.token = extensionToken()
 		tokens[loaded.token] = ext.ID
-		specs = append(specs, spec{ID: ext.ID, Dir: ext.Dir, Token: loaded.token, MCPURL: mcpURL})
+		specs = append(specs, spec{ID: ext.ID, Dir: ext.Dir, Token: loaded.token, MCPURL: mcpURL, FetchURL: fetchURL})
 	}
 	var status struct {
 		Extensions []extensionHostSummary `json:"extensions"`

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -73,6 +74,11 @@ type extensionFixture struct {
 
 func startExtensionFixture(t *testing.T) *extensionFixture {
 	t.Helper()
+	return startExtensionFixtureWith(t, nil)
+}
+
+func startExtensionFixtureWith(t *testing.T, replace map[string]string) *extensionFixture {
+	t.Helper()
 	d, _, _, _, handler, _ := baseFixture(t)
 	home, err := os.MkdirTemp("", "ext")
 	if err != nil {
@@ -90,6 +96,7 @@ func startExtensionFixture(t *testing.T) *extensionFixture {
 		"assets/app.css":  `body { color: red }`,
 		"notes-secret.md": `not served`,
 	}
+	maps.Copy(files, replace)
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)

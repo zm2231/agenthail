@@ -115,5 +115,6 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/settings/remote-qr", dashboard.guard(d.dashboardRemoteQRHandler))
 	d.registerAPIV1(mux, dashboard)
 	mux.Handle("/mcp", d.mcpHandler())
+	mux.Handle(extensionFetchPath, d.extensionFetchHandler())
 	return d.dashboardHeaders(mux)
 }
