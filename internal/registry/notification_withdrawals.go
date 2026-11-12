@@ -2,6 +2,7 @@ package registry
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -63,6 +64,17 @@ func (r *Registry) PendingNotificationWithdraws() ([]NotificationWithdraw, error
 		pending = append(pending, w)
 	}
 	return pending, rows.Err()
+}
+
+// OwedNotificationWithdraw reads the withdraw still owed for askID, which a
+// drain that read it earlier may have sent and cleared since.
+func (r *Registry) OwedNotificationWithdraw(askID string) (NotificationWithdraw, bool, error) {
+	w := NotificationWithdraw{AskID: askID}
+	err := r.db.QueryRow(`SELECT seq FROM notification_withdrawals WHERE ask_id=?`, askID).Scan(&w.Seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return w, false, nil
+	}
+	return w, err == nil, err
 }
 
 // ClearNotificationWithdraw reports false when w was queued again after it

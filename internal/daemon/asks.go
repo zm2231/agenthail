@@ -412,7 +412,15 @@ func (d *Daemon) sendWithdraws() {
 		}
 		d.withdrawing[w.AskID] = true
 		d.withdrawMu.Unlock()
-		if !d.background.start(func(ctx context.Context) { d.withdrawNotification(ctx, w) }) {
+		owed, found, err := d.Registry.OwedNotificationWithdraw(w.AskID)
+		if err != nil {
+			d.log.Printf("read the withdraw of %s: %s", w.AskID, err)
+		}
+		if !found {
+			d.withdrawDone(w.AskID)
+			continue
+		}
+		if !d.background.start(func(ctx context.Context) { d.withdrawNotification(ctx, owed) }) {
 			d.withdrawDone(w.AskID)
 		}
 	}
