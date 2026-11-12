@@ -31,7 +31,7 @@ secret, `hello` included.
 | `status` | the status below |
 | `launch` | downloads Chromium if absent, starts it, returns the status |
 | `close` | closes Chromium, returns the status |
-| `tabs.open`, `tabs.navigate`, `tabs.snapshot`, `tabs.act`, `tabs.wait`, `tabs.dialog`, `tabs.resize`, `tabs.list`, `tabs.close`, `tabs.closeOwner` | see [Tabs](#tabs) |
+| `tabs.open`, `tabs.navigate`, `tabs.snapshot`, `tabs.screenshot`, `tabs.act`, `tabs.wait`, `tabs.dialog`, `tabs.resize`, `tabs.list`, `tabs.close`, `tabs.closeOwner` | see [Tabs](#tabs) |
 
 The daemon accepts a host only when `hello` reports protocol 2, the daemon's
 own version and the pid it spawned, within 15 seconds. Every call is bounded by
@@ -53,10 +53,19 @@ keeps the only record of tabs:
   or Chromium restarts, every tab is gone: `list` is empty, an old id answers
   `not_found` (tab ids are random, so one never names a newer tab), and `open`
   starts a fresh tab.
-- `tabs.snapshot` returns the page's accessibility tree in Playwright's `ai`
-  mode, with `[ref=eN]` element refs, cut at a line to at most 20 KiB
-  (`truncated: true`). `includeImage` also writes a PNG under
-  `~/.agenthail/browser-host/shots` and returns its path.
+- `tabs.snapshot` takes the page's accessibility tree in Playwright's `ai`
+  mode, with `[ref=eN]` element refs, writes all of it to a file (see
+  [Output files](#output-files)) and returns `file`, `bytes`, `lines` and
+  `snapshot`. When the whole result fits the caller's `limit` (encoded bytes,
+  counting `<`, `>` and `&` as the daemon's six-byte escapes), `snapshot` is the
+  whole tree and `truncated` is false. Otherwise `snapshot` is its head, cut at
+  a line to fit, `truncated` is true and `full` says, in words a model reads,
+  that the whole tree is in `file` and its refs are valid until the next
+  snapshot. The daemon passes `limit` 512 bytes under its 16 KiB tool result
+  limit, so a snapshot is never refused for its size.
+- `tabs.screenshot` writes a PNG of the viewport, of the whole scrollable page
+  (`fullPage`) or of one element (`ref`, not with `fullPage`) and returns
+  `file`, `bytes`, `width` and `height`.
 - `tabs.act` takes a `kind` (`click`, `type`, `select`, `hover`, `drag`,
   `press`, `scroll`, `upload`) and a `ref` from the latest snapshot, with a
   10-second limit. `tabs.wait` waits for text, a ref, a URL part or network
@@ -66,6 +75,16 @@ keeps the only record of tabs:
   `act`, `wait`, `resize`) during which one opens returns at once with
   `dialog: {type, message}`; `snapshot` then carries no tree, and `act`
   answers `dialog_open` until the dialog is answered.
+
+## Output files
+
+Snapshots and screenshots go under `~/.agenthail/browser-host/out/`, in one
+directory per owner (named by a hash of the owner id, mode 0700; files 0600).
+Each owner keeps at most 64 MiB: a write removes that owner's oldest files
+beyond it. `tabs.closeOwner` removes the owner's directory, and the host
+clears `out/` when it starts. A path is returned only to the owner whose tab
+made it; like the socket, this keeps sessions apart by convention, since all
+of them run as the same user.
 
 ## Servers
 

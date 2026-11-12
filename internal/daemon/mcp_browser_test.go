@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -61,7 +62,15 @@ func newBrowserFixture(t *testing.T) *browserFixture {
 		cancel()
 		<-done
 	})
-	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/long" {
+			fmt.Fprint(w, `<!doctype html><title>Long</title><ul>`)
+			for i := range 600 {
+				fmt.Fprintf(w, `<li><a href="#%d">"quoted" <item> & %d</a> <button>Buy %d</button></li>`, i, i, i)
+			}
+			fmt.Fprint(w, `</ul>`)
+			return
+		}
 		fmt.Fprint(w, `<!doctype html><title>Counter</title><button onclick="out.textContent='pressed'">Press</button><p id="out">waiting</p>`)
 	}))
 	t.Cleanup(page.Close)
@@ -171,5 +180,28 @@ func TestAfterTheBrowserHostRestartsASessionsTabsAreGoneAndOpenWorksAgain(t *tes
 	reopened := browse(t, f.parent, map[string]any{"action": "open", "url": f.page})
 	if reopened["tab"] == tab || reopened["title"] != "Counter" {
 		t.Fatalf("open after the restart = %v", reopened)
+	}
+}
+
+func TestASnapshotOfALongPageReturnsAnExcerptAndTheFileThatHoldsAllOfIt(t *testing.T) {
+	f := newBrowserFixture(t)
+	eventually(t, "the browser host answers", func() bool { return f.host.Status().State != browserhost.StateUnavailable })
+	tab := browse(t, f.parent, map[string]any{"action": "open", "url": f.page + "/long"})["tab"].(string)
+	taken := browse(t, f.parent, map[string]any{"action": "snapshot", "tab": tab})
+	file, _ := taken["file"].(string)
+	whole, err := os.ReadFile(file)
+	if err != nil || taken["truncated"] != true || !strings.Contains(taken["full"].(string), file) {
+		t.Fatalf("snapshot = %v, file err %v", taken, err)
+	}
+	if len(whole) <= mcpOutputLimit || !strings.Contains(string(whole), `button "Buy 599"`) || !strings.HasPrefix(string(whole), taken["snapshot"].(string)) {
+		t.Fatalf("the file holds %d bytes; want the whole tree, beginning with the excerpt", len(whole))
+	}
+
+	shot := browse(t, f.parent, map[string]any{"action": "screenshot", "tab": tab, "fullPage": true})
+	if png, err := os.ReadFile(shot["file"].(string)); err != nil || !bytes.HasPrefix(png, []byte("\x89PNG")) || shot["height"].(float64) <= 720 {
+		t.Fatalf("screenshot = %v, err %v", shot, err)
+	}
+	if code := refusalCode(t, f.child, "agenthail_browser", map[string]any{"action": "screenshot", "tab": tab}); code != "not_found" {
+		t.Fatalf("another session's screenshot: code %q", code)
 	}
 }

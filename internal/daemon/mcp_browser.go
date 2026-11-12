@@ -8,25 +8,27 @@ import (
 	"github.com/zm2231/agenthail/internal/browserhost"
 )
 
-const browserHowTo = "Drive this tab with snapshot, then act on a ref from it (kind click, type, select, hover, drag, press, scroll or upload); refs last until the next snapshot. Use wait for text, a ref, a URL or network idle. A dialog blocks the page until you answer it with dialog. Tabs stay open between turns; close the ones you opened before you reply unless the person uses them."
+const browserHowTo = "Drive this tab with snapshot, then act on a ref from it (kind click, type, select, hover, drag, press, scroll or upload); refs last until the next snapshot. A snapshot too long to return whole comes back cut, with the file that holds all of it; its refs work too. screenshot saves a PNG of the view, the whole page (fullPage) or one ref and returns its file. Use wait for text, a ref, a URL or network idle. A dialog blocks the page until you answer it with dialog. Tabs stay open between turns; close the ones you opened before you reply unless the person uses them."
+
+const browserSnapshotLimit = mcpOutputLimit - 512
 
 type mcpBrowserInput struct {
-	Action       string   `json:"action" jsonschema:"servers, open, navigate, snapshot, act, wait, dialog, resize, list or close."`
-	Tab          string   `json:"tab,omitempty" jsonschema:"Tab id from open or list."`
-	URL          string   `json:"url,omitempty" jsonschema:"open, navigate; wait: a URL part to reach."`
-	IncludeImage bool     `json:"includeImage,omitempty" jsonschema:"snapshot: also save a screenshot; its path is returned."`
-	Kind         string   `json:"kind,omitempty" jsonschema:"act: click, type, select, hover, drag, press, scroll or upload."`
-	Ref          string   `json:"ref,omitempty" jsonschema:"act, wait: an element ref from the latest snapshot."`
-	Target       string   `json:"target,omitempty" jsonschema:"act drag: the ref to drop on."`
-	Text         string   `json:"text,omitempty" jsonschema:"act type: text to enter; wait: text to appear; dialog: a prompt's answer."`
-	Key          string   `json:"key,omitempty" jsonschema:"act press: a key such as Enter."`
-	Values       []string `json:"values,omitempty" jsonschema:"act select: option values or labels."`
-	Files        []string `json:"files,omitempty" jsonschema:"act upload: file paths on this host."`
-	Idle         bool     `json:"idle,omitempty" jsonschema:"wait: for network idle."`
-	Seconds      int      `json:"seconds,omitempty" jsonschema:"wait: at most 30, the default."`
-	Accept       bool     `json:"accept,omitempty" jsonschema:"dialog: true accepts, false dismisses."`
-	Width        int      `json:"width,omitempty" jsonschema:"resize: viewport width in CSS pixels."`
-	Height       int      `json:"height,omitempty" jsonschema:"resize: viewport height in CSS pixels."`
+	Action   string   `json:"action" jsonschema:"servers, open, navigate, snapshot, screenshot, act, wait, dialog, resize, list or close."`
+	Tab      string   `json:"tab,omitempty" jsonschema:"Tab id from open or list."`
+	URL      string   `json:"url,omitempty" jsonschema:"open, navigate; wait: a URL part to reach."`
+	FullPage bool     `json:"fullPage,omitempty" jsonschema:"screenshot: the whole scrollable page instead of the view."`
+	Kind     string   `json:"kind,omitempty" jsonschema:"act: click, type, select, hover, drag, press, scroll or upload."`
+	Ref      string   `json:"ref,omitempty" jsonschema:"act, wait, screenshot: an element ref from the latest snapshot."`
+	Target   string   `json:"target,omitempty" jsonschema:"act drag: the ref to drop on."`
+	Text     string   `json:"text,omitempty" jsonschema:"act type: text to enter; wait: text to appear; dialog: a prompt's answer."`
+	Key      string   `json:"key,omitempty" jsonschema:"act press: a key such as Enter."`
+	Values   []string `json:"values,omitempty" jsonschema:"act select: option values or labels."`
+	Files    []string `json:"files,omitempty" jsonschema:"act upload: file paths on this host."`
+	Idle     bool     `json:"idle,omitempty" jsonschema:"wait: for network idle."`
+	Seconds  int      `json:"seconds,omitempty" jsonschema:"wait: at most 30, the default."`
+	Accept   bool     `json:"accept,omitempty" jsonschema:"dialog: true accepts, false dismisses."`
+	Width    int      `json:"width,omitempty" jsonschema:"resize: viewport width in CSS pixels."`
+	Height   int      `json:"height,omitempty" jsonschema:"resize: viewport height in CSS pixels."`
 }
 
 func (d *Daemon) mcpBrowser(ctx context.Context, caller *mcpCaller, input mcpBrowserInput) (any, error) {
@@ -77,7 +79,9 @@ func browserCall(owner string, input mcpBrowserInput) (map[string]any, time.Dura
 		}
 		params["url"] = input.URL
 	case "snapshot":
-		params["includeImage"] = input.IncludeImage
+		params["limit"] = browserSnapshotLimit
+	case "screenshot":
+		params["fullPage"], params["ref"] = input.FullPage, input.Ref
 	case "act":
 		for key, value := range map[string]any{"kind": input.Kind, "ref": input.Ref, "target": input.Target, "text": input.Text, "key": input.Key, "values": input.Values, "files": input.Files} {
 			params[key] = value
@@ -97,7 +101,7 @@ func browserCall(owner string, input mcpBrowserInput) (map[string]any, time.Dura
 		params["width"], params["height"] = input.Width, input.Height
 	case "list", "close":
 	default:
-		return nil, 0, refuse("invalid", "action must be servers, open, navigate, snapshot, act, wait, dialog, resize, list or close.")
+		return nil, 0, refuse("invalid", "action must be servers, open, navigate, snapshot, screenshot, act, wait, dialog, resize, list or close.")
 	}
 	return params, timeout, nil
 }
