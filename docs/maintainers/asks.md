@@ -191,7 +191,7 @@ Refetch the row and requests after any response.
 ## Notifications
 
 - A person ask is announced when it is raised or escalated to the person: "<session> needs you: <title>", event `ask.opened`, `requestId` the ask id, collapse key `ask-<hash>`, and buttons from the request's `actions`. A paired viewer announces a mirrored host's ask under the same dedupe key, so a phone paired to both shows it once.
-- It is withdrawn from the desktop and phones when answered or withdrawn.
+- It is withdrawn from the desktop and phones when answered or withdrawn. The collapse key goes into `notification_withdrawals` before the withdraw starts and leaves it once the desktop and every device were tried, so a withdraw the daemon stopped before finishing is sent when it next starts.
 - Every ask push carries `requestId`, the ask id, and `sessionId` as the pushing host routes it: `<host>::<id>` for an ask a paired host holds. A notification extension reads the ask from `/api/v1/requests?sessionId=` on that host and picks the request by id; it lists the options' ids, `actions`, `optionsOnly` and `deadline`.
 - A browser notification for an ask shows the request's `actions` as buttons, except `reply`, up to the browser's limit (`Notification.maxActions`, often 2). A button posts `respond` with `{"choices": ["<id>"]}` from the dashboard's service worker; when that is refused or cannot be sent, it opens the session instead. Ask pushes go to browsers with high urgency.
 - The turn that leaves an open person ask completes with outcome `needs_you` and `requestId` the ask id, and sends no completion push of its own.

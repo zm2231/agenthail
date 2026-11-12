@@ -376,17 +376,47 @@ func (d *Daemon) deliverAskNotifications(ctx context.Context, desktop string, mo
 }
 
 func (d *Daemon) withdrawAsk(askID string) {
-	d.background.start(func(ctx context.Context) { d.withdrawAskNow(ctx, askID) })
+	key := d.queueWithdraw(askID)
+	d.background.start(func(ctx context.Context) { d.withdrawNotification(ctx, key) })
 }
 
 func (d *Daemon) withdrawAskNow(ctx context.Context, askID string) {
+	d.withdrawNotification(ctx, d.queueWithdraw(askID))
+}
+
+func (d *Daemon) queueWithdraw(askID string) string {
 	key := askNotificationKey(askID)
+	if err := d.Registry.QueueNotificationWithdraw(key, time.Now()); err != nil {
+		d.log.Printf("record the withdraw of %s: %s", key, err)
+	}
+	return key
+}
+
+func (d *Daemon) resumeNotificationWithdraws() {
+	keys, err := d.Registry.PendingNotificationWithdraws()
+	if err != nil {
+		d.log.Printf("read pending notification withdraws: %s", err)
+		return
+	}
+	for _, key := range keys {
+		d.background.start(func(ctx context.Context) { d.withdrawNotification(ctx, key) })
+	}
+}
+
+func (d *Daemon) withdrawNotification(ctx context.Context, key string) {
+	started := time.Now()
 	if err := d.withdrawDesktop("agenthail-" + key); err != nil {
 		d.log.Printf("withdraw desktop notification: %s", err)
 	}
 	withdrawCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	d.withdrawFromPairedDevices(withdrawCtx, key)
+	if ctx.Err() != nil {
+		return
+	}
+	if err := d.Registry.ClearNotificationWithdraw(key, started); err != nil {
+		d.log.Printf("forget the withdraw of %s: %s", key, err)
+	}
 }
 
 func (d *Daemon) publishAsk(sessionID string) {

@@ -1,4 +1,4 @@
--- schemaVersion 95
+-- schemaVersion 96
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -551,6 +551,12 @@ CREATE TABLE move_dropped_relays (
 	to_session TEXT NOT NULL,
 	at_ms INTEGER NOT NULL,
 	PRIMARY KEY (move_id, relay_id)
+);
+
+-- table notification_withdrawals
+CREATE TABLE notification_withdrawals (
+	key TEXT PRIMARY KEY,
+	queued_at_ms INTEGER NOT NULL
 );
 
 -- table paired_devices
