@@ -254,9 +254,11 @@ class Session {
 
   // interrupt stops the running turn. Claude ignores an interrupt that comes
   // before it starts the turn for a message it took, so that one is sent
-  // again as the turn starts.
+  // again as the turn starts. A turn owed for a finished background task may
+  // start first, so then the interrupt is not sent again.
   async interrupt() {
-    if (!this.running && [...this.owed].some((key) => !key.startsWith('task:'))) this.interruptOwed = true;
+    const owed = [...this.owed];
+    if (!this.running && owed.length > 0 && owed.every((key) => !key.startsWith('task:'))) this.interruptOwed = true;
     await this.query.interrupt();
   }
 
@@ -1142,6 +1144,7 @@ async function run(s, exit) {
         }
       } else if (message.type === 'result' && !s.stateEvents && s.inbox.length === 0) {
         s.guessesIdle = true;
+        s.interruptOwed = false;
         s.turnStarted();
         if (!stateEventsMissing) {
           stateEventsMissing = true;
