@@ -9,6 +9,14 @@ import (
 
 const DefaultRemoteAccessPort = 7412
 
+var remoteTailscale = func(explicit string) (tailscale.Runner, string, error) {
+	path, err := tailscale.Executable(explicit)
+	if err != nil {
+		return nil, "", err
+	}
+	return tailscale.Command(path), path, nil
+}
+
 type RemoteAccessConfig struct {
 	Enabled       bool   `json:"enabled"`
 	Provider      string `json:"provider"`
@@ -40,12 +48,11 @@ func normalizeRemoteAccessConfig(config RemoteAccessConfig) RemoteAccessConfig {
 func RemoteAccessStatusForConfig(config DashboardConfig) RemoteAccessStatus {
 	remote := normalizeRemoteAccessConfig(config.RemoteAccess)
 	result := RemoteAccessStatus{Desired: remote.Enabled, Provider: remote.Provider, Port: remote.Port}
-	path, err := tailscale.Executable(remote.TailscalePath)
+	run, _, err := remoteTailscale(remote.TailscalePath)
 	if err != nil {
 		result.Error = err.Error()
 		return result
 	}
-	run := tailscale.Command(path)
 	node, err := tailscale.ReadNode(run)
 	if err != nil {
 		result.Error = err.Error()
@@ -77,11 +84,10 @@ func RemoteAccessStatusForConfig(config DashboardConfig) RemoteAccessStatus {
 
 func EnableRemoteAccess(config DashboardConfig) (DashboardConfig, RemoteAccessStatus, error) {
 	config.RemoteAccess = normalizeRemoteAccessConfig(config.RemoteAccess)
-	path, err := tailscale.Executable(config.RemoteAccess.TailscalePath)
+	run, path, err := remoteTailscale(config.RemoteAccess.TailscalePath)
 	if err != nil {
 		return config, RemoteAccessStatus{}, err
 	}
-	run := tailscale.Command(path)
 	node, err := tailscale.ReadNode(run)
 	if err != nil {
 		return config, RemoteAccessStatus{}, err
@@ -107,11 +113,10 @@ func EnableRemoteAccess(config DashboardConfig) (DashboardConfig, RemoteAccessSt
 
 func DisableRemoteAccess(config DashboardConfig) (DashboardConfig, error) {
 	config.RemoteAccess = normalizeRemoteAccessConfig(config.RemoteAccess)
-	path, err := tailscale.Executable(config.RemoteAccess.TailscalePath)
+	run, _, err := remoteTailscale(config.RemoteAccess.TailscalePath)
 	if err != nil {
 		return config, err
 	}
-	run := tailscale.Command(path)
 	node, err := tailscale.ReadNode(run)
 	if err != nil {
 		return config, err

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -39,7 +40,20 @@ type Manifest struct {
 	Label        string   `json:"label"`
 	Description  string   `json:"description,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`
+	Mounts       []Mount  `json:"mounts,omitempty"`
 }
+
+type Mount struct {
+	Name     string `json:"name"`
+	Label    string `json:"label"`
+	Upstream string `json:"upstream"`
+	Entry    string `json:"entry,omitempty"`
+	// Signin is a script under assets/ that Agenthail adds to the app's pages
+	// so the app sends the key placeholder, which Agenthail swaps for the key.
+	Signin string `json:"signin,omitempty"`
+}
+
+const maxMounts = 16
 
 type Extension struct {
 	ID       string
@@ -117,7 +131,53 @@ func readManifest(file string) (Manifest, error) {
 	}
 	slices.Sort(manifest.Capabilities)
 	manifest.Capabilities = slices.Compact(manifest.Capabilities)
+	if len(manifest.Mounts) > maxMounts {
+		return Manifest{}, fmt.Errorf("%s declares more than %d mounts", ManifestFile, maxMounts)
+	}
+	seen := map[string]bool{}
+	for i := range manifest.Mounts {
+		mount := &manifest.Mounts[i]
+		if err := mount.normalize(); err != nil {
+			return Manifest{}, fmt.Errorf("%s: mount %q: %w", ManifestFile, mount.Name, err)
+		}
+		if seen[mount.Name] {
+			return Manifest{}, fmt.Errorf("%s declares mount %q twice", ManifestFile, mount.Name)
+		}
+		seen[mount.Name] = true
+	}
 	return manifest, nil
+}
+
+func (m *Mount) normalize() error {
+	if !idPattern.MatchString(m.Name) {
+		return errors.New("a name is a lowercase letter followed by up to 39 lowercase letters, digits or dashes")
+	}
+	m.Label = strings.TrimSpace(m.Label)
+	if m.Label == "" {
+		return errors.New("needs a label")
+	}
+	upstream, err := url.Parse(m.Upstream)
+	if err != nil || (upstream.Scheme != "http" && upstream.Scheme != "https") || upstream.Host == "" || upstream.User != nil || upstream.RawQuery != "" || upstream.Fragment != "" || (upstream.Path != "" && upstream.Path != "/") {
+		return errors.New("upstream must be an http or https origin, such as http://127.0.0.1:8317, with no path")
+	}
+	m.Upstream = upstream.Scheme + "://" + upstream.Host
+	if m.Entry == "" {
+		m.Entry = "/"
+	}
+	if !strings.HasPrefix(m.Entry, "/") || strings.HasPrefix(m.Entry, "//") {
+		return errors.New("entry must be a path on the app, starting with /")
+	}
+	if m.Signin != "" && !strings.HasPrefix(path.Clean("/"+m.Signin), "/"+AssetsDir+"/") {
+		return errors.New("signin must be a file under assets/")
+	}
+	return nil
+}
+
+func (e Extension) Asset(sub string) (string, bool) {
+	if path.Clean("/"+sub) == "/" {
+		return "", false
+	}
+	return e.PagePath(sub)
 }
 
 // Only the page and files under assets/ are served; server.ts never is.

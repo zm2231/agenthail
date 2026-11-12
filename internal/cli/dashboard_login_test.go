@@ -25,10 +25,11 @@ const dashboardTestSecret = "0123456789abcdef0123456789abcdef0123456789abcdef012
 // token on disk, a pid file naming a daemon process, a dashboard API that
 // issues login links, and a Tailscale that already serves it.
 type dashboardLoginFixture struct {
-	app       *App
-	tailscale string
-	opened    string
-	links     atomic.Int32
+	app        *App
+	tailscale  string
+	opened     string
+	links      atomic.Int32
+	mountSyncs atomic.Int32
 }
 
 func newDashboardLoginFixture(t *testing.T) *dashboardLoginFixture {
@@ -44,11 +45,16 @@ func newDashboardLoginFixture(t *testing.T) *dashboardLoginFixture {
 	}
 	fixture := &dashboardLoginFixture{app: &App{daemonService: &fakeService{loaded: true}}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/dashboard/login-links" {
+		if r.Header.Get("Authorization") != "Bearer "+dashboardTestSecret {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		if r.Header.Get("Authorization") != "Bearer "+dashboardTestSecret {
+		if r.URL.Path == "/api/v1/extensions" && r.Method == http.MethodPost {
+			fixture.mountSyncs.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"host": "running", "extensions": []any{}})
+			return
+		}
+		if r.URL.Path != "/api/v1/dashboard/login-links" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -128,6 +134,9 @@ func TestNoDashboardCommandPrintsTheDashboardToken(t *testing.T) {
 	}
 	if fixture.links.Load() == 0 {
 		t.Fatal("no command asked the daemon for a login link")
+	}
+	if fixture.mountSyncs.Load() == 0 {
+		t.Fatal("turning remote access on did not have the daemon publish extension mounts")
 	}
 	qr, err := os.ReadFile(dashboardShareQRPath())
 	if err != nil || strings.Contains(string(qr), dashboardTestSecret) {

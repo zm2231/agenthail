@@ -59,6 +59,7 @@ type extensionRuntime struct {
 	home      string
 	approvals *extension.Approvals
 	host      *nodehost.Supervisor
+	mounts    *extensionMounts
 
 	loading   sync.Mutex
 	mu        sync.Mutex
@@ -70,7 +71,7 @@ type extensionRuntime struct {
 }
 
 func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, error)) {
-	runtime := &extensionRuntime{home: home, approvals: extension.NewApprovals(home), loaded: map[string]*loadedExtension{}, tokens: map[string]string{}}
+	runtime := &extensionRuntime{home: home, approvals: extension.NewApprovals(home), mounts: newExtensionMounts(home), loaded: map[string]*loadedExtension{}, tokens: map[string]string{}}
 	runtime.host = &nodehost.Supervisor{
 		Name:     "extension host",
 		StateDir: extensionHostDir(home),
@@ -99,6 +100,7 @@ func (d *Daemon) superviseExtensions(ctx context.Context) {
 		return
 	}
 	go d.runExtensionJobs(ctx)
+	go d.runExtensionMounts(ctx)
 	go d.pumpExtensionEvents(ctx)
 	d.extensions.host.Run(ctx)
 }
@@ -143,7 +145,7 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("read extension approvals: %w", err)
 		}
-		loaded.held, loaded.pending = extension.Effective(ext.Manifest.Capabilities, granted)
+		loaded.held, loaded.pending = extension.Effective(ext.Manifest.Capabilities, granted.Capabilities)
 		if _, err := d.Registry.EnsureExtensionSender(ext.ID, ext.Manifest.Label); err != nil {
 			return fmt.Errorf("record extension %s as a sender: %w", ext.ID, err)
 		}
@@ -372,6 +374,7 @@ type extensionView struct {
 	Actions      []string                      `json:"actions"`
 	Jobs         map[string]*extensionJobState `json:"jobs,omitempty"`
 	EventError   string                        `json:"lastEventError,omitempty"`
+	Mounts       []mountState                  `json:"mounts,omitempty"`
 }
 
 type extensionsView struct {
@@ -385,6 +388,7 @@ func (d *Daemon) extensionsView() extensionsView {
 	if r == nil {
 		return extensionsView{Host: "off", Extensions: []extensionView{}}
 	}
+	mounts, labels := r.mounts.view()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	view := extensionsView{Host: "running", Extensions: []extensionView{}}
@@ -409,6 +413,8 @@ func (d *Daemon) extensionsView() extensionsView {
 		if loaded.ext.HasPage {
 			item.Page = "/x/" + loaded.ext.ID + "/"
 		}
+		item.Mounts = mounts[loaded.ext.ID]
+		delete(mounts, loaded.ext.ID)
 		if len(loaded.jobs) > 0 {
 			item.Jobs = map[string]*extensionJobState{}
 			for name, state := range loaded.jobs {
@@ -417,6 +423,9 @@ func (d *Daemon) extensionsView() extensionsView {
 			}
 		}
 		view.Extensions = append(view.Extensions, item)
+	}
+	for id, list := range mounts {
+		view.Extensions = append(view.Extensions, extensionView{ID: id, Label: labels[id], State: "not loaded", Capabilities: []string{}, Actions: []string{}, Mounts: list})
 	}
 	slices.SortFunc(view.Extensions, func(a, b extensionView) int {
 		if a.ID < b.ID {

@@ -273,7 +273,7 @@ func TestAnExtensionActsOnlyWithTheCapabilitiesThePersonApproved(t *testing.T) {
 
 func TestAnExtensionGetsEventsAndJobTicksAndKeepsEventsPublishedWhileItsHostRestarts(t *testing.T) {
 	f := startExtensionFixture(t)
-	if err := f.d.extensions.approvals.Grant("fixture", []string{"read.all", "control.all"}); err != nil {
+	if err := f.d.extensions.approvals.Grant("fixture", extension.Manifest{Capabilities: []string{"read.all", "control.all"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.d.reloadExtensions(context.Background()); err != nil {
@@ -330,7 +330,7 @@ func TestAnExtensionThatFailsToLoadIsReportedAndOthersKeepWorking(t *testing.T) 
 
 func TestReloadsRunOneAtATimeAndNeverStartAJobThatIsStillRunning(t *testing.T) {
 	f := startExtensionFixture(t)
-	if err := f.d.extensions.approvals.Grant("fixture", []string{"read.all", "control.all"}); err != nil {
+	if err := f.d.extensions.approvals.Grant("fixture", extension.Manifest{Capabilities: []string{"read.all", "control.all"}}); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, "the slow job starts", func() bool { return f.state(t).SlowStarts == 1 })
@@ -366,7 +366,7 @@ func TestReloadsRunOneAtATimeAndNeverStartAJobThatIsStillRunning(t *testing.T) {
 
 func TestEventsPublishedWhileExtensionsReloadAreDeliveredOnceTheyLoad(t *testing.T) {
 	f := startExtensionFixture(t)
-	if err := f.d.extensions.approvals.Grant("fixture", []string{"read.all", "control.all"}); err != nil {
+	if err := f.d.extensions.approvals.Grant("fixture", extension.Manifest{Capabilities: []string{"read.all", "control.all"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.d.reloadExtensions(context.Background()); err != nil {
@@ -399,7 +399,7 @@ func TestEventsPublishedWhileExtensionsReloadAreDeliveredOnceTheyLoad(t *testing
 
 func TestAReloadTheHostCannotFinishRestartsItAndHeldEventsStillArrive(t *testing.T) {
 	f := startExtensionFixture(t)
-	if err := f.d.extensions.approvals.Grant("fixture", []string{"read.all", "control.all"}); err != nil {
+	if err := f.d.extensions.approvals.Grant("fixture", extension.Manifest{Capabilities: []string{"read.all", "control.all"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.d.reloadExtensions(context.Background()); err != nil {
