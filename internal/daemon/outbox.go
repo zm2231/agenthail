@@ -85,9 +85,6 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	} else if messageUUID != "" {
 		operationCtx = surface.WithMessageUUID(operationCtx, messageUUID)
 	}
-	if item.HolderPID > 0 {
-		session = d.pinnedSession(operationCtx, adapter, session, item)
-	}
 	d.dispatcher().RefreshRoute(operationCtx, adapter, session)
 	var result *surface.SendResult
 	var sendErr error
@@ -247,38 +244,8 @@ func (d *Daemon) finishReachedHostOwned(item *registry.QueuedMessage, addressed 
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "unknown", SessionID: addressed.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
 }
 
-// pinnedSession addresses a queued message to the terminal it was pinned to.
-// Once that process no longer holds the conversation, the pin is dropped and
-// the message is held again among the terminals that do.
-func (d *Daemon) pinnedSession(ctx context.Context, adapter surface.Surface, session *surface.Session, item *registry.QueuedMessage) *surface.Session {
-	pinned := *session
-	if err := pinHolder(ctx, adapter, &pinned, item.HolderPID, 0); err == nil && pinned.HolderStart == item.HolderStart {
-		return &pinned
-	}
-	d.unpin(item)
-	return session
-}
-
-func (d *Daemon) unpin(item *registry.QueuedMessage) {
-	if err := d.Registry.UnpinMessage(item.ID); err != nil {
-		d.log.Printf("unpin queue item %d: %s", item.ID, err)
-	}
-	item.HolderPID, item.HolderStart = 0, ""
-}
-
 func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surface.Session, sendErr error, now time.Time, trace registry.SendTrace) {
 	message := item.Message
-	if item.HolderPID > 0 && surface.DeliveryTerminalReason(sendErr) == surface.DeliveryTargetMissing {
-		err := d.Registry.RetryUnpinned(item.ID, sendErr)
-		if d.settledElsewhere(item.ID, err) {
-			return
-		}
-		if err != nil {
-			d.log.Printf("unpin queue item %d: %s", item.ID, err)
-		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "deferred", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
-		return
-	}
 	if item.Operation == registry.QueueOperationCompact {
 		message = string(item.Operation)
 	}

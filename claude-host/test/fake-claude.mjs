@@ -451,10 +451,7 @@ lines.on('line', (line) => {
   const message = JSON.parse(line);
   if (message.type === 'control_request') {
     const subtype = message.request.subtype;
-    if (subtype === 'interrupt') {
-      fs.appendFileSync(path.join(dir, 'interrupts.jsonl'), JSON.stringify({ sessionId, pid: process.pid }) + '\n');
-      interrupt?.();
-    }
+    if (subtype === 'interrupt') interrupt?.();
     if (subtype === 'set_model') model = message.request.model || 'claude-opus-5-5';
     if (subtype === 'initialize') {
       hooks = message.request.hooks ?? {};

@@ -363,6 +363,15 @@ func (m *extensionMounts) serving(key string) bool {
 	return m.served[key] != nil
 }
 
+func (m *extensionMounts) config(key string) *mountConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if served := m.served[key]; served != nil {
+		return served.config.Load()
+	}
+	return nil
+}
+
 func (m *extensionMounts) view() (map[string][]mountState, map[string]string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

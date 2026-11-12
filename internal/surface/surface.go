@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -303,26 +302,11 @@ func SameObservedSettings(a, b *ObservedSettings) bool {
 // when it is resumed or branched into a second terminal. A session lists its
 // holders only when there are several; a write to it then names one holder by
 // HolderPID or is refused, so no single process is chosen for it silently.
-// Start identifies the process behind PID, so a pin to it never matches a
-// later process that reuses the pid.
 type Holder struct {
 	PID       int           `json:"pid"`
-	Start     string        `json:"start,omitempty"`
 	TTY       string        `json:"tty,omitempty"`
-	App       string        `json:"app,omitempty"`
-	Cwd       string        `json:"cwd,omitempty"`
 	Status    SessionStatus `json:"status"`
 	StartedAt time.Time     `json:"startedAt,omitzero"`
-}
-
-func (h Holder) Label() string {
-	var parts []string
-	for _, part := range []string{h.App, h.TTY, filepath.Base(h.Cwd)} {
-		if part != "" && part != "." && part != string(filepath.Separator) {
-			parts = append(parts, part)
-		}
-	}
-	return strings.Join(append(parts, fmt.Sprintf("pid %d", h.PID)), " · ")
 }
 
 // SharedConversationError refuses a write to a conversation that several live

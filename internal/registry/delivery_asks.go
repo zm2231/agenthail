@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
 const AskOriginDelivery = "delivery"
@@ -46,7 +44,7 @@ func ParseDeliveryRef(ref string) (DeliveryRef, bool) {
 	switch {
 	case parts[0] == "intent" && len(parts) == 4 && (parts[3] == deliveryFailed || parts[3] == deliveryHeld):
 		return DeliveryRef{IntentID: id, Kind: parts[3]}, true
-	case parts[0] == "queue" && (parts[2] == deliveryDead && len(parts) == 3 || parts[2] == deliveryRefused && len(parts) == 4 || parts[2] == DeliveryShared && len(parts) == 5):
+	case parts[0] == "queue" && (parts[2] == deliveryDead && len(parts) == 3 || parts[2] == deliveryRefused && len(parts) == 4):
 		return DeliveryRef{QueueID: id, Kind: parts[2]}, true
 	}
 	return DeliveryRef{}, false
@@ -158,8 +156,8 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT mq.id,mq.session_id,mq.source_session_id,COALESCE(di.relayed,0),mq.message,mq.refusal,mq.refused_now,mq.reason,mq.holders_json
-		FROM (SELECT id,session_id,source_session_id,message,refusal,`+queueRefusedRow+` AS refused_now,`+deliveryReason+` AS reason,holders_json
+	rows, err = tx.QueryContext(ctx, `SELECT mq.id,mq.session_id,mq.source_session_id,COALESCE(di.relayed,0),mq.message,mq.refusal,mq.refused_now,mq.reason
+		FROM (SELECT id,session_id,source_session_id,message,refusal,`+queueRefusedRow+` AS refused_now,`+deliveryReason+` AS reason
 			FROM message_queue WHERE status='dead' AND dead_at_ms>? OR `+queueRefusedRow+`) mq
 		LEFT JOIN delivery_intents di ON di.queue_id=mq.id
 		WHERE COALESCE(di.status,'') NOT IN ('failed','held')
@@ -170,20 +168,14 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 	defer rows.Close()
 	for rows.Next() {
 		var id, refusal int64
-		var target, sender, message, reason, rawHolders string
+		var target, sender, message, reason string
 		var relayed, refused bool
-		if err := rows.Scan(&id, &target, &sender, &relayed, &message, &refusal, &refused, &reason, &rawHolders); err != nil {
-			return nil, err
-		}
-		var holders []surface.Holder
-		if err := json.Unmarshal([]byte(rawHolders), &holders); err != nil {
+		if err := rows.Scan(&id, &target, &sender, &relayed, &message, &refusal, &refused, &reason); err != nil {
 			return nil, err
 		}
 		var problem deliveryProblem
 		problem.sessionID, problem.routedTo = deliveryRoute(sender, target, relayed)
-		if refused && len(holders) > 1 {
-			problem.ref, problem.title, problem.question = sharedProblem(id, refusal, message, holders)
-		} else if refused {
+		if refused {
 			problem.ref = fmt.Sprintf("queue:%d:%s:%d", id, deliveryRefused, refusal)
 			problem.title = "Target refused to start"
 			problem.question = deliveryQuestion(message, reason, DeliveryCancel, DeliveryDismiss)

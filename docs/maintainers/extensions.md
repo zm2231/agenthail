@@ -40,6 +40,7 @@ the API and may return a cleanup function, called before the next reload.
 | `ah.job({name, everySeconds, run})` | Registers a background job. The daemon runs it once the extension loads and then every `everySeconds` (at least 60) after the previous run ends, never two at once, for at most 10 minutes. |
 | `ah.on(type, handler)` | Receives daemon events of `type`, or every event for `'*'`: `{id, type, timestamp, entityId, data}`, the same as `/api/v1/events`. Only an extension that holds `read.all` receives events. |
 | `ah.call(tool, args)` | Calls an Agenthail tool as the extension (below) and returns its result, or throws an error with `code` and `message`. A write gets a fresh `clientRequestId` unless one is given. |
+| `ah.fetch(mount, path, init)` | Requests `path` on the upstream of one of the extension's approved mounts, with the mount's key (below). `init` takes `method`, `headers` and `body`; a body that is not a string is sent as JSON. Returns `{status, ok, headers, text(), json(), bytes()}`, or throws an error with `code` and `message`. |
 | `ah.db` | The shared SQLite store (`node:sqlite` `DatabaseSync`, WAL), `~/.agenthail/extensions-data/store.db` |
 | `ah.table(name)` | `<id>_<name>` with dashes as underscores: the name an extension's own tables use |
 | `ah.log(...)` | A line in the extension host's log |
@@ -159,6 +160,18 @@ storage can be one line:
 ```js
 if (!localStorage.getItem('apiKey')) localStorage.setItem('apiKey', 'agenthail-key');
 ```
+
+The extension's server reaches the app with `ah.fetch`, and the daemon makes
+the request. The path is joined to the mount's approved upstream, so an
+absolute URL, a `//host` path or a `Host` header is refused, and so are
+`Authorization`, `Cookie`, forwarding, `Accept-Encoding` and `Range` headers.
+The daemon adds `Authorization: Bearer <key>` when the mount has a key,
+follows redirects only within the upstream, stops after 30 seconds and refuses
+an answer over 8 MiB. It decodes gzip itself and refuses an answer in any
+other content encoding, so the key is replaced with `[redacted]` wherever the
+answer repeats it, and no error names it. The daemon logs each request by extension, mount, method and
+path, without the query or headers. Requests to services that need no key can
+use Node's own `fetch`.
 
 ## Capabilities and the extension sender
 
