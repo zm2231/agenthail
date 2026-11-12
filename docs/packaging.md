@@ -85,6 +85,15 @@ The release runner then installs the real package, verifies the supervised daemo
 
 Installed package users can run `agenthail update --check` to inspect the latest GitHub release and `agenthail update` to install it. The updater requires the matching package and checksum assets, verifies the checksum, checks the package against the Apple team embedded by the release build, requires a successful macOS notarization assessment, and then hands the package to `/usr/sbin/installer` through `sudo`. Builds without an embedded installer team fail closed instead of trusting an arbitrary package. The package scripts preserve user data and replace the daemon, sidecars, operations skill, and Mac app together.
 
+An install made from the macOS release archive (`agenthail-<tag>-darwin-arm64.tar.gz` and its `install.sh`) also updates itself. `agenthail update` treats a macOS build as an archive install when its version is exactly a release tag and its folder holds the release's `Agenthail.app` and `sidecar.py`. A build made from source with `./install.sh` carries a `git describe` version, so it stays a source install. The updater:
+
+- downloads the matching darwin archive and its checksum and verifies the checksum;
+- runs the downloaded `agenthail version --json` and requires the release tag;
+- requires the downloaded binary and `Agenthail.app` to be signed by the same Apple team as the installed binary, and refuses an install whose signer can't be read;
+- runs the archive's own `install.sh` with `AGENTHAIL_DATA_DIR` set to the current install's folder.
+
+That installer stages the new folder, stops and reinstalls the supervised daemon, and restores the previous folder, wrapper and daemon if any step fails. Afterwards the updater checks that the daemon answers. `agenthail doctor` prints the install kind (`package`, `homebrew`, `archive` or `source`), and `--json` reports it as `install`.
+
 ## Uninstall
 
 ```bash

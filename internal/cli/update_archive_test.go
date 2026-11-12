@@ -56,7 +56,7 @@ func buildArchive(t *testing.T, entries []archiveEntry) []byte {
 }
 
 func releaseArchive(t *testing.T, tag string) []byte {
-	root := linuxArchiveName(tag, "amd64")
+	root := releaseArchiveName(tag, "linux", "amd64")
 	return buildArchive(t, []archiveEntry{
 		{name: root + "/"},
 		{name: root + "/agenthail", body: versionScript(tag), mode: 0755},
@@ -77,7 +77,7 @@ type archiveUpdateFixture struct {
 
 func newArchiveUpdateFixture(t *testing.T, archive []byte) *archiveUpdateFixture {
 	t.Helper()
-	name := linuxArchiveName("v0.2.0", "amd64")
+	name := releaseArchiveName("v0.2.0", "linux", "amd64")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/latest":
@@ -259,7 +259,7 @@ func TestLinuxUpdateRefusesDirectoryWithForeignFiles(t *testing.T) {
 }
 
 func TestLinuxUpdateRejectsArchiveEntriesOutsideItsRoot(t *testing.T) {
-	root := linuxArchiveName("v0.2.0", "amd64")
+	root := releaseArchiveName("v0.2.0", "linux", "amd64")
 	archive := buildArchive(t, []archiveEntry{
 		{name: root + "/agenthail", body: versionScript("v0.2.0"), mode: 0755},
 		{name: root + "/../escape", body: "x", mode: 0644},
@@ -275,7 +275,7 @@ func TestLinuxUpdateRejectsArchiveEntriesOutsideItsRoot(t *testing.T) {
 }
 
 func TestLinuxUpdateRejectsBinaryWithWrongVersion(t *testing.T) {
-	root := linuxArchiveName("v0.2.0", "amd64")
+	root := releaseArchiveName("v0.2.0", "linux", "amd64")
 	fixture := newArchiveUpdateFixture(t, buildArchive(t, []archiveEntry{{name: root + "/agenthail", body: versionScript("v0.1.9"), mode: 0755}}))
 	err := fixture.app.Run([]string{"update"})
 	if err == nil || !strings.Contains(err.Error(), `reports version "v0.1.9", want v0.2.0`) {
