@@ -90,9 +90,10 @@ An install made from the macOS release archive (`agenthail-<tag>-darwin-arm64.ta
 - downloads the matching darwin archive and its checksum and verifies the checksum;
 - runs the downloaded `agenthail version --json` and requires the release tag;
 - requires the downloaded binary and `Agenthail.app` to pass `codesign --verify --strict` and to be signed by the same Apple team as the installed binary, and refuses an install whose signature does not verify or names no team (an ad hoc signed build);
-- runs the archive's own `install.sh` with `AGENTHAIL_DATA_DIR` set to the current install's folder.
+- keeps a copy of the current install folder;
+- runs the archive's own `install.sh` with `AGENTHAIL_DATA_DIR` set to the current install's folder and `AGENTHAIL_INSTALL_DIR` set to the folder of the `agenthail` command that runs it, so the command stays where the person put it.
 
-That installer stages the new folder, stops and reinstalls the supervised daemon, and restores the previous folder, wrapper and daemon if any step fails. Afterwards the updater checks that the daemon answers. `agenthail doctor` prints the install kind (`package`, `homebrew`, `archive` or `source`), and `--json` reports it as `install`.
+That installer stages the new folder and stops and reinstalls the supervised daemon. If the installer fails at any step, or the daemon was running and the new one does not answer, the updater restores the copy and the command and restarts the previous daemon. `agenthail doctor` prints the install kind (`package`, `homebrew`, `archive` or `source`), and `--json` reports it as `install`.
 
 ## Uninstall
 

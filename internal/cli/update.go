@@ -37,6 +37,8 @@ type updateDeps struct {
 	daemonHealthy   func() error
 	signingTeam     func(string) (string, error)
 	runInstaller    func(string, []string) error
+	copyTree        func(string, string) error
+	wrapperDirs     func() []string
 }
 
 type releaseAsset struct {
@@ -72,6 +74,8 @@ func defaultUpdateDeps() *updateDeps {
 		daemonHealthy:   defaultDaemonHealthy,
 		signingTeam:     defaultSigningTeam,
 		runInstaller:    defaultRunInstaller,
+		copyTree:        defaultCopyTree,
+		wrapperDirs:     defaultWrapperDirs,
 		run: func(name string, args ...string) error {
 			command := exec.Command(name, args...)
 			command.Stdin = os.Stdin
@@ -104,7 +108,7 @@ func (a *App) cmdUpdate(args []string) error {
 	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
 		executable = resolved
 	}
-	method := updateInstallMethod(executable, deps.goos, a.Version)
+	method := updateInstallMethod(executable, deps.goos, a.Version, deps.teamSigned)
 	if method == "homebrew" {
 		return a.updateHomebrew(args, deps)
 	}
@@ -198,10 +202,18 @@ func (a *App) installMethod(goos string) string {
 	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
 		executable = resolved
 	}
-	return updateInstallMethod(executable, goos, a.Version)
+	return updateInstallMethod(executable, goos, a.Version, deps.teamSigned)
 }
 
-func updateInstallMethod(executable, goos, version string) string {
+func (deps *updateDeps) teamSigned(path string) bool {
+	if deps.signingTeam == nil {
+		return false
+	}
+	_, err := deps.signingTeam(path)
+	return err == nil
+}
+
+func updateInstallMethod(executable, goos, version string, teamSigned func(string) bool) string {
 	clean := filepath.Clean(executable)
 	if strings.Contains(clean, "/Cellar/agenthail/") || strings.Contains(clean, "/Homebrew/Cellar/agenthail/") {
 		return "homebrew"
@@ -213,7 +225,7 @@ func updateInstallMethod(executable, goos, version string) string {
 	if goos == "linux" && released {
 		return "archive"
 	}
-	if goos == "darwin" && released && !strings.Contains(version, "-") && isDarwinArchiveInstall(filepath.Dir(clean)) {
+	if goos == "darwin" && released && !strings.Contains(version, "-") && isDarwinArchiveInstall(filepath.Dir(clean)) && teamSigned(clean) {
 		return "archive"
 	}
 	return "source"

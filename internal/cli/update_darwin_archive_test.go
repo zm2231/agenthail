@@ -28,6 +28,10 @@ func darwinInstall(t *testing.T) string {
 	return dataDir
 }
 
+func teamSigned(string) bool { return true }
+
+func adHoc(string) bool { return false }
+
 func TestADarwinReleaseArchiveInstallIsAnArchiveInstall(t *testing.T) {
 	dataDir := darwinInstall(t)
 	binary := filepath.Join(dataDir, "agenthail")
@@ -40,17 +44,20 @@ func TestADarwinReleaseArchiveInstallIsAnArchiveInstall(t *testing.T) {
 		{"darwin", "dev", "source"},
 		{"linux", "v0.2.133", "archive"},
 	} {
-		if got := updateInstallMethod(binary, c.goos, c.version); got != c.want {
+		if got := updateInstallMethod(binary, c.goos, c.version, teamSigned); got != c.want {
 			t.Errorf("%s %s: install method %q, want %q", c.goos, c.version, got, c.want)
 		}
+	}
+	if got := updateInstallMethod(binary, "darwin", "v0.2.133", adHoc); got != "source" {
+		t.Fatalf("a source build of an exact tag, signed ad hoc, is a %q install, want source", got)
 	}
 	if err := os.RemoveAll(filepath.Join(dataDir, "Agenthail.app")); err != nil {
 		t.Fatal(err)
 	}
-	if got := updateInstallMethod(binary, "darwin", "v0.2.133"); got != "source" {
+	if got := updateInstallMethod(binary, "darwin", "v0.2.133", teamSigned); got != "source" {
 		t.Fatalf("a folder without the release's Mac app is a %q install, want source", got)
 	}
-	if got := updateInstallMethod("/Library/Application Support/Agenthail/Agenthail Daemon.app/Contents/MacOS/agenthail", "darwin", "v0.2.133"); got != "package" {
+	if got := updateInstallMethod("/Library/Application Support/Agenthail/Agenthail Daemon.app/Contents/MacOS/agenthail", "darwin", "v0.2.133", teamSigned); got != "package" {
 		t.Fatalf("the package install is %q", got)
 	}
 }
@@ -58,11 +65,13 @@ func TestADarwinReleaseArchiveInstallIsAnArchiveInstall(t *testing.T) {
 type darwinUpdateFixture struct {
 	app       *App
 	dataDir   string
+	wrapper   string
 	installs  []string
 	env       [][]string
 	teams     map[string]string
-	installer error
-	healthy   error
+	installer func(dataDir string) error
+	healthy   []error
+	restarts  []string
 }
 
 func newDarwinUpdateFixture(t *testing.T) *darwinUpdateFixture {
@@ -92,6 +101,14 @@ func newDarwinUpdateFixture(t *testing.T) *darwinUpdateFixture {
 	}))
 	t.Cleanup(server.Close)
 	f := &darwinUpdateFixture{dataDir: darwinInstall(t), teams: map[string]string{"agenthail": "TEAM123", "Agenthail.app": "TEAM123"}}
+	wrapperDir := filepath.Join(t.TempDir(), "custom bin")
+	if err := os.MkdirAll(wrapperDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	f.wrapper = filepath.Join(wrapperDir, "agenthail")
+	if err := os.WriteFile(f.wrapper, []byte("#!/usr/bin/env bash\n# agenthail-managed-wrapper-v1\nexec "+filepath.Join(f.dataDir, "agenthail")+" \"$@\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	f.app = &App{Version: "v0.2.133", update: &updateDeps{
 		client:     server.Client(),
 		releaseURL: server.URL + "/latest",
@@ -104,8 +121,21 @@ func newDarwinUpdateFixture(t *testing.T) *darwinUpdateFixture {
 		goarch:         "arm64",
 		daemonExpected: func() bool { return true },
 		serviceCheck:   func() error { return errors.New("the darwin path must not ask systemd") },
-		restartDaemon:  func(string) error { return errors.New("the installer restarts the daemon") },
-		daemonHealthy:  func() error { return f.healthy },
+		restartDaemon: func(binary string) error {
+			data, err := os.ReadFile(binary)
+			f.restarts = append(f.restarts, string(data))
+			return err
+		},
+		daemonHealthy: func() error {
+			if len(f.healthy) == 0 {
+				return nil
+			}
+			next := f.healthy[0]
+			f.healthy = f.healthy[1:]
+			return next
+		},
+		copyTree:    defaultCopyTree,
+		wrapperDirs: func() []string { return []string{t.TempDir(), wrapperDir} },
 		signingTeam: func(path string) (string, error) {
 			if strings.HasPrefix(path, f.dataDir+string(filepath.Separator)) {
 				return "TEAM123", nil
@@ -124,7 +154,10 @@ func newDarwinUpdateFixture(t *testing.T) *darwinUpdateFixture {
 				return fmt.Errorf("the installer runs outside the extracted release: %w", err)
 			}
 			f.installs, f.env = append(f.installs, filepath.Base(script)), append(f.env, env)
-			return f.installer
+			if f.installer != nil {
+				return f.installer(f.dataDir)
+			}
+			return os.WriteFile(filepath.Join(f.dataDir, "agenthail"), []byte(versionScript("v0.2.134")), 0755)
 		},
 	}}
 	return f
@@ -138,8 +171,11 @@ func TestADarwinArchiveInstallUpdatesThroughItsReleasesOwnInstaller(t *testing.T
 	if len(f.installs) != 1 || f.installs[0] != "install.sh" {
 		t.Fatalf("installers run: %v", f.installs)
 	}
-	if len(f.env) != 1 || len(f.env[0]) != 1 || f.env[0][0] != "AGENTHAIL_DATA_DIR="+f.dataDir {
-		t.Fatalf("installer env = %v, want this install's data dir", f.env)
+	if len(f.env) != 1 || strings.Join(f.env[0], "|") != "AGENTHAIL_DATA_DIR="+f.dataDir+"|AGENTHAIL_INSTALL_DIR="+filepath.Dir(f.wrapper) {
+		t.Fatalf("installer env = %v, want this install's data dir and its command's folder", f.env)
+	}
+	if len(f.restarts) != 0 {
+		t.Fatalf("restarted %d times after a healthy install", len(f.restarts))
 	}
 	leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(f.dataDir), ".agenthail-update-*"))
 	if len(leftovers) != 0 {
@@ -164,22 +200,54 @@ func TestADarwinArchiveUpdateRefusesAReleaseSignedByAnotherTeam(t *testing.T) {
 	}
 }
 
-func TestADarwinArchiveUpdateReportsAFailedInstallOrAnUnhealthyDaemon(t *testing.T) {
-	f := newDarwinUpdateFixture(t)
-	f.installer = errors.New("exit status 1")
-	_, err := captureStdout(t, func() error { return f.app.Run([]string{"update"}) })
-	if err == nil || !strings.Contains(err.Error(), "restores the previous install") {
-		t.Fatalf("a failed installer reported %v", err)
+func TestADarwinArchiveUpdateRollsBackAFailureAfterTheInstallerActivatedIt(t *testing.T) {
+	activate := func(dataDir string) error {
+		if err := os.WriteFile(filepath.Join(dataDir, "agenthail"), []byte(versionScript("v0.2.134")), 0755); err != nil {
+			return err
+		}
+		return os.Remove(filepath.Join(dataDir, "sidecar.py"))
 	}
-	if got, _ := os.ReadFile(filepath.Join(f.dataDir, "agenthail")); string(got) != versionScript("v0.2.133") {
-		t.Fatalf("the install changed though the installer failed: %q", got)
-	}
-
-	f = newDarwinUpdateFixture(t)
-	f.healthy = errors.New("daemon is not running")
-	_, err = captureStdout(t, func() error { return f.app.Run([]string{"update"}) })
-	if err == nil || !strings.Contains(err.Error(), "daemon is not answering") {
-		t.Fatalf("an unhealthy daemon after the install reported %v", err)
+	for name, setup := range map[string]func(*darwinUpdateFixture){
+		"the installer fails after activating": func(f *darwinUpdateFixture) {
+			f.installer = func(dataDir string) error {
+				if err := activate(dataDir); err != nil {
+					return err
+				}
+				os.WriteFile(f.wrapper, []byte("replaced"), 0755)
+				return errors.New("exit status 1")
+			}
+		},
+		"the new daemon does not answer": func(f *darwinUpdateFixture) {
+			f.installer = activate
+			f.healthy = []error{errors.New("daemon is not running")}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newDarwinUpdateFixture(t)
+			wrapper, _ := os.ReadFile(f.wrapper)
+			setup(f)
+			_, err := captureStdout(t, func() error { return f.app.Run([]string{"update"}) })
+			if err == nil || !strings.Contains(err.Error(), "rolled back") {
+				t.Fatalf("update reported %v, want a rollback", err)
+			}
+			if got, _ := os.ReadFile(filepath.Join(f.dataDir, "agenthail")); string(got) != versionScript("v0.2.133") {
+				t.Fatalf("after the rollback the binary is %q", got)
+			}
+			if _, err := os.Stat(filepath.Join(f.dataDir, "sidecar.py")); err != nil {
+				t.Fatalf("the rollback lost a file of the previous install: %v", err)
+			}
+			if got, _ := os.ReadFile(f.wrapper); string(got) != string(wrapper) {
+				t.Fatalf("the command at %s is %q after the rollback", f.wrapper, got)
+			}
+			if len(f.restarts) != 1 || f.restarts[0] != versionScript("v0.2.133") {
+				t.Fatalf("restarts after the rollback = %q, want the previous daemon once", f.restarts)
+			}
+			for _, leftover := range []string{f.dataDir + ".failed"} {
+				if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+					t.Fatalf("%s left behind: %v", leftover, err)
+				}
+			}
+		})
 	}
 }
 
