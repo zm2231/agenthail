@@ -54,10 +54,10 @@ struct DecisionInboxTest {
           {"group":"waiting","sessionId":"w","kind":"parked","workItem":"widget-W12","reason":"widget-W12 waits on you: titles only?","since":"2026-11-08T10:00:00Z","answerable":false}
         ],"leadHandling":[]}
         """#.utf8))
-        var both = DecisionInbox()
-        both.add(parked, host: "") { $0 }
-        check(both.decisions.map(\.id) == ["w", "w#widget-W12"], "a parked item and its session's own request are two rows")
-        check(both.removing("w").decisions.map(\.id) == ["w#widget-W12"], "answering the session leaves its parked item waiting on the person")
+        var withParked = DecisionInbox()
+        withParked.add(parked, host: "") { $0 }
+        check(withParked.decisions.map(\.id) == ["w", "w#widget-W12"], "a parked item and its session's own request are two rows")
+        check(withParked.removing("w").decisions.map(\.id) == ["w#widget-W12"], "answering the session leaves its parked item waiting on the person")
         print("decision inbox ok")
     }
 
