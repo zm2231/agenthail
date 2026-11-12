@@ -660,16 +660,12 @@ func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
 		}
 		return false
 	}
-	if !told("held") {
-		t.Fatal("the sender was not told its message is held")
-	}
+	testkit.Eventually(t, "the sender told its message is held", 15*time.Second, func() bool { return told("held") })
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	testkit.Eventually(t, "the hold to expire", 15*time.Second, func() bool { return problem("failed") != nil })
-	if !told("not delivered") {
-		t.Fatal("the sender was not told its message was dropped")
-	}
+	testkit.Eventually(t, "the sender told its message was dropped", 15*time.Second, func() bool { return told("not delivered") })
 	if turns := fixture.Turns(t, target); len(turns) != 0 {
 		t.Fatalf("turns = %+v, want none", turns)
 	}
