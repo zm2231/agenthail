@@ -17,6 +17,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/nodehost"
+	"github.com/zm2231/agenthail/internal/proxyacct"
 )
 
 //go:embed extensions_sdk.js
@@ -160,11 +161,13 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 		writeDashboardJSON(w, http.StatusOK, d.extensionsView())
 	case http.MethodPost:
 		var request struct {
-			Action string `json:"action"`
-			ID     string `json:"id"`
+			Action string            `json:"action"`
+			ID     string            `json:"id"`
+			Mount  string            `json:"mount"`
+			Key    *proxyacct.KeyRef `json:"key"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil {
-			writeAPIError(w, http.StatusBadRequest, "invalid", "Send {\"action\": \"reload\"} or {\"action\": \"approve\", \"id\": \"<extension>\"}.")
+			writeAPIError(w, http.StatusBadRequest, "invalid", "Send {\"action\": \"reload\"}, {\"action\": \"approve\", \"id\": \"<extension>\"} or {\"action\": \"key\", \"id\": \"<extension>\", \"mount\": \"<mount>\", \"key\": {...}}.")
 			return
 		}
 		switch request.Action {
@@ -174,13 +177,24 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 				writeAPIError(w, http.StatusBadRequest, "invalid", err.Error())
 				return
 			}
+		case "key":
+			if err := d.setExtensionMountKey(request.ID, request.Mount, request.Key); err != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid", err.Error())
+				return
+			}
 		default:
-			writeAPIError(w, http.StatusBadRequest, "invalid", "Unknown action "+request.Action+"; use reload or approve.")
+			writeAPIError(w, http.StatusBadRequest, "invalid", "Unknown action "+request.Action+"; use reload, approve or key.")
 			return
 		}
-		if err := d.reloadExtensions(r.Context()); err != nil {
-			writeAPIError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
+		if err := d.syncExtensionMounts(); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
+		}
+		if request.Action != "key" {
+			if err := d.reloadExtensions(r.Context()); err != nil {
+				writeAPIError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
+				return
+			}
 		}
 		writeDashboardJSON(w, http.StatusOK, d.extensionsView())
 	default:
@@ -188,27 +202,52 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// approveExtension grants what the extension declares on disk now, so the
-// person approves the manifest they can read, not a cached one.
-func (d *Daemon) approveExtension(id string) error {
+// onDisk reads the extension's manifest as it is now, so the person approves
+// what they can read, not a cached copy.
+func (d *Daemon) onDisk(id string) (extension.Extension, error) {
 	if d.extensions == nil {
-		return errExtensionsOff
+		return extension.Extension{}, errExtensionsOff
 	}
 	if !extension.ValidID(id) {
-		return errors.New("no extension " + id)
+		return extension.Extension{}, errors.New("no extension " + id)
 	}
 	found, err := extension.Discover(extension.Workspace(d.extensions.home))
 	if err != nil {
-		return err
+		return extension.Extension{}, err
 	}
 	for _, ext := range found {
 		if ext.ID != id {
 			continue
 		}
 		if ext.Err != nil {
-			return errors.New("extension " + id + " is not valid: " + ext.Err.Error())
+			return extension.Extension{}, errors.New("extension " + id + " is not valid: " + ext.Err.Error())
 		}
-		return d.extensions.approvals.Grant(id, ext.Manifest.Capabilities)
+		return ext, nil
 	}
-	return errors.New("no extension " + id + " in " + strings.TrimSuffix(extension.Workspace(d.extensions.home), "/"))
+	return extension.Extension{}, errors.New("no extension " + id + " in " + strings.TrimSuffix(extension.Workspace(d.extensions.home), "/"))
+}
+
+func (d *Daemon) approveExtension(id string) error {
+	ext, err := d.onDisk(id)
+	if err != nil {
+		return err
+	}
+	return d.extensions.approvals.Grant(id, ext.Manifest)
+}
+
+func (d *Daemon) setExtensionMountKey(id, name string, key *proxyacct.KeyRef) error {
+	ext, err := d.onDisk(id)
+	if err != nil {
+		return err
+	}
+	index := slices.IndexFunc(ext.Manifest.Mounts, func(mount extension.Mount) bool { return mount.Name == name })
+	if index < 0 {
+		return errors.New("extension " + id + " declares no mount " + name)
+	}
+	if key != nil {
+		if err := key.Validate(); err != nil {
+			return errors.New("the key " + err.Error())
+		}
+	}
+	return d.extensions.approvals.SetKey(id, ext.Manifest.Mounts[index], key)
 }

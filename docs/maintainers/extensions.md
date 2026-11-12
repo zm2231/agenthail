@@ -1,7 +1,7 @@
 # Extensions
 
-An extension adds a page, background jobs and event handlers to Agenthail
-without changing the daemon. Each one is a folder in
+An extension adds a page, background jobs, event handlers and existing web
+apps to Agenthail without changing the daemon. Each one is a folder in
 `~/.agenthail/extensions/<id>/`. The daemon serves its page and checks who may
 use it, and a supervised Node process, the extension host, runs its server
 code.
@@ -79,6 +79,86 @@ one-time login link, or a paired device's token. Loading a page or asset needs
 the `read` scope; an action is a POST and needs `control`, and with the cookie
 alone it must come from the same origin.
 
+## Mounting an existing web app
+
+A mount puts a web app that already runs somewhere, such as a proxy's console
+or a service's dashboard, behind Agenthail on a port of its own, so the app
+keeps its own origin and paths and needs no change:
+
+```json
+{
+  "label": "Forge",
+  "mounts": [
+    {"name": "console", "label": "Proxy console", "upstream": "http://100.124.126.9:8317",
+     "entry": "/management.html", "signin": "assets/console-signin.js"}
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `name` | 1 to 40 characters, a lowercase letter followed by lowercase letters, digits or dashes |
+| `label` | What the dashboard calls it |
+| `upstream` | The app's origin, `http` or `https`, with no path |
+| `entry` | The path the dashboard opens, `/` if omitted; it may carry a query or `#fragment` |
+| `signin` | Optional: a script under `assets/` that signs the app in (below) |
+
+A mount serves nothing until the person approves it, and approval covers the
+upstream it names: pointing the mount at another upstream waits for a new
+approval. Each approved mount listens on `127.0.0.1` on a port from 7420 to
+7469 that it keeps while the extension declares it, recorded in
+`~/.agenthail/extensions-data/mounts.json`. While remote access is on, the
+daemon publishes each mount's port in Tailscale Serve at
+`https://<machine>.<tailnet>.ts.net:<port>`, and removes it when remote access
+goes off or the mount goes away; it never removes a route it did not publish,
+and Funnel is refused. The dashboard's Extensions tab lists each mount and
+opens it in a frame.
+
+Every request to a mount is checked the way `/x/` is: the dashboard cookie or
+a paired device's token, `read` for GET and HEAD, `control` for anything else,
+and with the cookie alone a write must come from the mount's own origin. A
+request whose Host is neither loopback nor this machine's tailnet name gets
+421, and a connection upgrade (WebSocket) must come from the mount's own
+origin. On the way to the app the daemon removes Agenthail's cookie and token
+and the Referer, sets Origin to the app's, and passes only the app's own
+cookies. On the way back it renames each cookie the app sets to
+`ah_<id>_<mount>_<name>` without its Domain, so apps on other ports of the same
+host cannot read each other's cookies. It drops `X-Frame-Options`, the app's
+`frame-ancestors` and `Access-Control-*` headers, allows the dashboard to frame
+the app, and rewrites a redirect to the app's own origin into a path.
+
+### Keys
+
+An app that needs a key gets it from the daemon, never from the page. The
+person names where the key is kept:
+
+```
+agenthail extensions key <id> <mount> --key-file <path>
+agenthail extensions key <id> <mount> --key-env <name>
+agenthail extensions key <id> <mount> --keychain-service <service> --keychain-account <account>
+agenthail extensions key <id> <mount> --key-command -- <argv...>
+agenthail extensions key <id> <mount> --clear
+```
+
+`approvals.json` records only that place, bound to the mount's approved
+upstream. Approving a new upstream forgets it, so a key never reaches an app it
+was not given for. The daemon reads the key when a request needs it and keeps
+it in memory for a minute. It never writes the key to the extension's folder,
+the store, a log or a page.
+
+The page sends the placeholder `Authorization: Bearer agenthail-key`. The
+daemon swaps in the key only when the browser marks the request
+`Sec-Fetch-Site: same-origin`, so another page cannot spend it. The `signin`
+script is how the placeholder gets into the app: while a key is named, the
+daemon adds `<script src="/_agenthail/signin.js">` to the app's HTML pages when
+the dashboard frames them or the person opens them directly, and serves the
+extension's script there. A script for an app that keeps its key in local
+storage can be one line:
+
+```js
+if (!localStorage.getItem('apiKey')) localStorage.setItem('apiKey', 'agenthail-key');
+```
+
 ## Capabilities and the extension sender
 
 `ah.call` reaches the tools that need no session of the caller's own:
@@ -147,8 +227,12 @@ it is back.
 agenthail extensions [list] [--json]   each extension's state, page, capabilities, jobs and last errors
 agenthail extensions approve <id>      grant the capabilities extension.json declares
 agenthail extensions reload            read the folder again and reload every extension
+agenthail extensions key <id> <mount> ...  name where a mount's key is kept, or --clear it
 ```
 
-`GET /api/v1/extensions` returns the same list (`read` scope). `POST
-/api/v1/extensions` with `{"action": "reload"}` or `{"action": "approve",
-"id": "<id>"}` changes it (`settings` scope).
+`GET /api/v1/extensions` returns the same list, each mount with its port,
+state, whether it is on the tailnet and where its key is kept (`read` scope).
+`POST /api/v1/extensions` with `{"action": "reload"}`, `{"action": "approve",
+"id": "<id>"}` or `{"action": "key", "id": "<id>", "mount": "<mount>", "key":
+{"file": "<path>"}}` (or `env`, `keychain`, `command`, or `null` to forget it)
+changes it (`settings` scope).

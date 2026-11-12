@@ -27,13 +27,35 @@ function element(tag, props = {}, children = []) {
   return node;
 }
 
+export function mountURL(mount, where = location) {
+  return `${where.protocol}//${where.hostname}:${mount.port}${mount.entry}`;
+}
+
+function mountOpens(mount, where = location) {
+  return mount.state === "serving" && mount.port > 0 && (where.protocol !== "https:" || mount.published);
+}
+
+function frames(ext) {
+  const targets = [];
+  if (ext.page && ext.state === "loaded") targets.push({ key: `page:${ext.id}`, label: ext.label, src: ext.page });
+  for (const mount of ext.mounts ?? []) {
+    if (mountOpens(mount)) targets.push({ key: `mount:${ext.id}/${mount.name}`, label: mount.label, src: mountURL(mount) });
+  }
+  return targets;
+}
+
 function describe(ext) {
   const lines = [];
   if (ext.error) lines.push(element("p", { className: "extension-error", textContent: ext.error }));
-  if (ext.pendingCapabilities?.length) {
-    const approve = element("button", { className: "soft-button", type: "button", textContent: `Approve ${ext.pendingCapabilities.join(", ")}` });
+  const pending = [...(ext.pendingCapabilities ?? []), ...(ext.mounts ?? []).filter((mount) => mount.state === "pending").map((mount) => `${mount.label} (${mount.upstream})`)];
+  if (pending.length) {
+    const approve = element("button", { className: "soft-button", type: "button", textContent: `Approve ${pending.join(", ")}` });
     approve.addEventListener("click", () => act({ action: "approve", id: ext.id }));
-    lines.push(element("p", { textContent: "Waits for your approval to act: " }), approve);
+    lines.push(element("p", { textContent: "Waits for your approval: " }), approve);
+  }
+  for (const mount of ext.mounts ?? []) {
+    if (mount.error) lines.push(element("p", { className: "extension-error", textContent: `${mount.label}: ${mount.error}` }));
+    else if (mount.signin && !mount.key && mount.state === "serving") lines.push(element("p", { textContent: `${mount.label} signs in once you name its key: agenthail extensions key ${ext.id} ${mount.name} --key-file <path>` }));
   }
   for (const [name, job] of Object.entries(ext.jobs ?? {})) {
     if (job.lastError) lines.push(element("p", { className: "extension-error", textContent: `Job ${name} failed: ${job.lastError}` }));
@@ -58,19 +80,23 @@ function render() {
   if (!view.extensions.length) {
     list.append(element("div", { className: "empty-card", textContent: "No extensions yet. Each one is a folder in ~/.agenthail/extensions." }));
   }
-  if (!view.extensions.some((ext) => ext.id === state.selected && ext.page)) {
-    state.selected = view.extensions.find((ext) => ext.page && ext.state === "loaded")?.id ?? "";
-  }
+  const targets = view.extensions.flatMap(frames);
+  if (!targets.some((target) => target.key === state.selected)) state.selected = targets[0]?.key ?? "";
   for (const ext of view.extensions) {
-    const title = element("button", { type: "button", className: `extension-title${ext.id === state.selected ? " active" : ""}`, disabled: !ext.page, textContent: ext.label });
-    title.addEventListener("click", () => {
-      state.selected = ext.id;
-      render();
+    const opens = frames(ext);
+    const buttons = opens.map((target) => {
+      const button = element("button", { type: "button", className: `extension-title${target.key === state.selected ? " active" : ""}`, textContent: target.label });
+      button.addEventListener("click", () => {
+        state.selected = target.key;
+        render();
+      });
+      return button;
     });
+    if (!buttons.length) buttons.push(element("span", { className: "extension-title", textContent: ext.label }));
     const pill = element("span", { className: `status-pill ${ext.state === "loaded" ? "open" : "dead"}`, textContent: ext.state });
-    list.append(element("section", { className: "settings-card extension-card" }, [element("div", { className: "extension-heading" }, [title, pill]), ...describe(ext)]));
+    list.append(element("section", { className: "settings-card extension-card" }, [element("div", { className: "extension-heading" }, [...buttons, pill]), ...describe(ext)]));
   }
-  const page = view.extensions.find((ext) => ext.id === state.selected)?.page ?? "";
+  const page = targets.find((target) => target.key === state.selected)?.src ?? "";
   if (frame.dataset.page !== page) {
     frame.dataset.page = page;
     frame.src = page || "about:blank";
