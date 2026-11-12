@@ -79,6 +79,20 @@ func (r *Registry) PinHeldMessage(id int64, pid int) error {
 	})
 }
 
+// RetryUnpinned returns an in-flight message whose pinned terminal left
+// during the send to the queue at once without its pin, so the next attempt
+// holds it again among the terminals that hold its conversation now.
+func (r *Registry) RetryUnpinned(id int64, cause error) error {
+	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),last_error=?,available_at_ms=0,inflight_at_ms=0,holder_pid=0,holder_start='',updated_at=datetime('now') WHERE id=? AND status='inflight'`, cause.Error(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return queueItemNotInflight(id)
+	}
+	return nil
+}
+
 func (r *Registry) UnpinMessage(id int64) error {
 	_, err := r.db.Exec(`UPDATE message_queue SET holder_pid=0,holder_start='',updated_at=datetime('now') WHERE id=? AND holder_pid!=0`, id)
 	return err

@@ -1,11 +1,13 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,10 +27,25 @@ type heldInTerminals struct {
 	cwd     string
 	holders []*claudetest.Holder
 	queued  int64
+	closing atomic.Pointer[claudetest.Holder]
+}
+
+// closingOnSend closes a picked terminal as the daemon sends to it, after the
+// daemon checked that it still holds the conversation.
+type closingOnSend struct {
+	nativeSenderClaude
+	held *heldInTerminals
+}
+
+func (c closingOnSend) Send(ctx context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
+	if closing := c.held.closing.Load(); closing != nil && session.HolderPID == closing.PID {
+		closing.Exit()
+	}
+	return c.nativeSenderClaude.Send(ctx, session, message)
 }
 
 func (s *heldInTerminals) claude() surface.Surface {
-	return nativeSenderClaude{Claude: surfaces.NewClaude(nil, s.fixture.Home), source: "sender-native"}
+	return closingOnSend{nativeSenderClaude: nativeSenderClaude{Claude: surfaces.NewClaude(nil, s.fixture.Home), source: "sender-native"}, held: s}
 }
 
 func (s *heldInTerminals) run(t *testing.T) (*runningDaemon, func()) {
@@ -207,6 +224,27 @@ func TestAPickedTerminalThatClosedHoldsTheMessageAgainAmongTheOthers(t *testing.
 	again := s.awaitAsk(t, s.holders[1:]...)
 	if again.ID == ask.ID || again.Title != "Message held: open in 2 terminals" {
 		t.Fatalf("ask=%+v, want a new ask naming the two terminals left", again)
+	}
+	if got := s.received(t); !slices.Equal(got, []int{0, 0, 0}) {
+		t.Fatalf("a message whose terminal closed reached another: %v", got)
+	}
+}
+
+func TestATerminalThatClosesAsThePickedMessageIsSentHoldsItAgainAmongTheOthers(t *testing.T) {
+	s, h, _ := holdInTerminals(t, 3)
+	ask := s.awaitAsk(t, s.holders...)
+	s.closing.Store(s.holders[0])
+	status, payload := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": ask.SessionID, "requestId": ask.ID, "decision": map[string]any{"choices": []string{registry.TerminalOption(s.holders[0].PID)}}})
+	if status != http.StatusOK {
+		t.Fatalf("pick status=%d body=%s", status, payload)
+	}
+
+	again := s.awaitAsk(t, s.holders[1:]...)
+	if again.ID == ask.ID || again.Title != "Message held: open in 2 terminals" {
+		t.Fatalf("ask=%+v, want a new ask naming the two terminals left", again)
+	}
+	if row := s.queueRow(t); row.Status != "pending" {
+		t.Fatalf("row status=%q, want it held", row.Status)
 	}
 	if got := s.received(t); !slices.Equal(got, []int{0, 0, 0}) {
 		t.Fatalf("a message whose terminal closed reached another: %v", got)

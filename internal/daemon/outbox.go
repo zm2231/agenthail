@@ -267,11 +267,18 @@ func (d *Daemon) unpin(item *registry.QueuedMessage) {
 }
 
 func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surface.Session, sendErr error, now time.Time, trace registry.SendTrace) {
-	if item.HolderPID > 0 && surface.DeliveryTerminalReason(sendErr) == surface.DeliveryTargetMissing {
-		d.unpin(item)
-		sendErr = surface.DeliveryUnavailable(sendErr)
-	}
 	message := item.Message
+	if item.HolderPID > 0 && surface.DeliveryTerminalReason(sendErr) == surface.DeliveryTargetMissing {
+		err := d.Registry.RetryUnpinned(item.ID, sendErr)
+		if d.settledElsewhere(item.ID, err) {
+			return
+		}
+		if err != nil {
+			d.log.Printf("unpin queue item %d: %s", item.ID, err)
+		}
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "deferred", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+		return
+	}
 	if item.Operation == registry.QueueOperationCompact {
 		message = string(item.Operation)
 	}
