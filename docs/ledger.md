@@ -318,6 +318,7 @@ GET /api/v1/ledger/events                                   # ledger.changed, on
   - `board`, the default: capture state, sync state, counts, the first page of goals, and the newest five provisional words with their total (`provisional`), how many messages were filed automatically and overridden (`autoFiled`), and, when a sorter is configured, its health (`sorter`);
   - one list, paged: `goals`, `asks`, `decisions`, `questions` or `work`;
   - `ready`, the ranked next work;
+  - `backlog`, parked work with whether each item can come back and why (`kind`, `ready`), and `triage`, unowned open or blocked work idle `days` days (14 by default), as `agenthail ledger backlog` prints them;
   - `item`: one work item with its context, or one ask, as `agenthail ledger show --json` prints it.
 - **Work filters.** With no filter, the `work` view lists every work item, settled and deleted ones included. With any filter, it selects as `agenthail ledger list` does: `q`, `state`, `type`, `priority`, `label`, `assignee`, `clause`, `found` and `all`.
 - **Paging.** Lists are ordered by id and paged with `limit` (1 to 100) and the `nextCursor` of the previous page. A page starts after that id, so items added meanwhile don't shift it.

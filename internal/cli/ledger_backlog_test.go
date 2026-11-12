@@ -54,6 +54,15 @@ func TestLedgerBacklogAsksTheDaemonAndSaysWhyEachItemWaits(t *testing.T) {
 			t.Fatalf("%v was accepted", args)
 		}
 	}
+	for _, args := range [][]string{
+		{"work", "add", "x", "--days", "3"},
+		{"work", "add", "x", "--ready"},
+		{"goal", "x", "--triage"},
+	} {
+		if _, err := captureStdout(t, func() error { return app.cmdLedger(args) }); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+			t.Fatalf("%v: err=%v, want the backlog flag refused", args, err)
+		}
+	}
 	if len(*queries) != 1 {
 		t.Fatalf("a refused backlog still asked the daemon: %v", *queries)
 	}

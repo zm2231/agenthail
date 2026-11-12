@@ -36,8 +36,36 @@ type ledgerBacklogPage struct {
 	Truncated bool               `json:"truncated"`
 }
 
+var ledgerBacklogValueFlags = map[string]bool{"--kind": true, "--days": true, "--limit": true, "--project": true}
+
+var ledgerBacklogBoolFlags = map[string]bool{"--ready": true, "--triage": true, "--json": true}
+
+func parseLedgerBacklog(args []string) (ledgerWriteArgs, error) {
+	parsed := ledgerWriteArgs{values: map[string][]string{}, bools: map[string]bool{}}
+	for i := 0; i < len(args); i++ {
+		switch arg := args[i]; {
+		case ledgerBacklogValueFlags[arg]:
+			if i+1 >= len(args) {
+				return parsed, fmt.Errorf("flag %s requires a value\n%s", arg, ledgerBacklogUsage)
+			}
+			if len(parsed.values[arg]) > 0 {
+				return parsed, fmt.Errorf("flag %s may only be specified once\n%s", arg, ledgerBacklogUsage)
+			}
+			parsed.values[arg] = []string{args[i+1]}
+			i++
+		case ledgerBacklogBoolFlags[arg]:
+			parsed.bools[arg] = true
+		case strings.HasPrefix(arg, "-"):
+			return parsed, fmt.Errorf("unknown flag %s for ledger backlog\n%s", arg, ledgerBacklogUsage)
+		default:
+			parsed.positional = append(parsed.positional, arg)
+		}
+	}
+	return parsed, nil
+}
+
 func (a *App) ledgerBacklog(args []string) error {
-	w, err := parseLedgerWrite(args)
+	w, err := parseLedgerBacklog(args)
 	if err != nil {
 		return err
 	}

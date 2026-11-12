@@ -90,6 +90,12 @@ func TestTheBacklogSaysWhenEachKindCanComeBack(t *testing.T) {
 	if !now[dated].ReadyAt.Equal(revisit) || !now[stamped].ReadyAt.Equal(revisit) {
 		t.Fatalf("dated = %+v stamped = %+v", now[dated], now[stamped])
 	}
+	if at := read(revisit, ledger.BacklogQuery{Ready: true}); len(at) != 2 {
+		t.Fatalf("ready at the exact revisit and reset = %+v", at)
+	}
+	if before := read(revisit.Add(-time.Nanosecond), ledger.BacklogQuery{Ready: true}); len(before) != 0 {
+		t.Fatalf("ready just before the revisit = %+v", before)
+	}
 	later := read(revisit.Add(time.Minute), ledger.BacklogQuery{Ready: true})
 	if len(later) != 2 || !later[dated].Ready || !later[stamped].Ready {
 		t.Fatalf("ready once the dates pass = %+v", later)
