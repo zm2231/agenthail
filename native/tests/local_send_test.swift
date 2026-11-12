@@ -67,6 +67,13 @@ struct LocalSendTest {
         expect(long.utf8.count > 16 * 1024, "the long send is over the timeline limit")
         expect(LocalSend.reconcile([longSend], with: [truncated("m", long)]).isEmpty, "a send whose timeline row was cut is absorbed by that row")
         expect(LocalSend.reconcile([longSend], with: [truncated("n", "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1.sock\" from-session=\"s\" from-name=\"agenthail/agenthail: operator\">\n" + long + "\n</cross-session-message>")]).isEmpty, "a cut send inside a peer envelope is absorbed")
+        let envelopeHead = "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1.sock\" from-session=\"s\" from-name=\"agenthail/agenthail: operator\">\n"
+        let closeAtLimit = String(repeating: "x", count: 16 * 1024 - envelopeHead.utf8.count - 10)
+        let closeSend = LocalSend(text: closeAtLimit, sentAt: sentAt, status: "Sent")
+        expect(LocalSend.reconcile([closeSend], with: [truncated("r", envelopeHead + closeAtLimit + "\n</cross-session-message>")]).isEmpty, "a send whose envelope was cut inside its closing tag is absorbed")
+        let decomposed = String(repeating: "Cafe\u{301} ", count: 3000)
+        expect(Array(decomposed.utf8)[16 * 1024 - 1] == UInt8(ascii: "e"), "the limit falls between a letter and its combining accent")
+        expect(LocalSend.reconcile([LocalSend(text: decomposed, sentAt: sentAt, status: "Sent")], with: [truncated("s", decomposed)]).isEmpty, "a cut inside a character made of several scalars is absorbed")
         expect(LocalSend.reconcile([longSend], with: [truncated("o", "Different text. " + long)]) == [longSend], "a cut row that is not the start of the send does not absorb it")
         expect(LocalSend.reconcile([longSend], with: [user("p", cut(long), "2026-10-04T12:00:02Z")]) == [longSend], "an uncut row still needs the whole text")
         expect(LocalSend.reconcile([first], with: [TimelineItem(id: "q", kind: "message", role: "user", title: "user", text: "", timestamp: "2026-10-04T12:00:02Z", callId: nil, status: nil, truncated: true, truncationReason: "timeline text limit", bodyRef: nil)]) == [first], "an empty cut row absorbs nothing")

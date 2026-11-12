@@ -31,6 +31,12 @@ struct PeerEnvelopeTest {
         expect(cutBody.sender == "peer-a" && cutBody.body == "long report, cut he", "a cut envelope unwraps up to the cut: \(cutBody)")
         let cutTrailer = PeerEnvelope(String(native.dropLast(200)), truncated: true)
         expect(cutTrailer.sender == "peer-a" && cutTrailer.body == "status ping", "an envelope cut inside its trailer unwraps: \(cutTrailer)")
+        for tail in ["<", "</cross", "</cross-session-messag"] {
+            let cutClose = PeerEnvelope("<cross-session-message from=\"a\">\nreport body\n" + tail, truncated: true)
+            expect(cutClose.sender == "a" && cutClose.body == "report body", "an envelope cut inside its closing tag drops the partial tag: \(tail) -> \(cutClose)")
+        }
+        let literal = PeerEnvelope("<cross-session-message from=\"a\">\nif a <", truncated: true)
+        expect(literal.body == "if a <", "a literal < ending a cut body is kept: \(literal)")
         let innerClose = PeerEnvelope("<cross-session-message from=\"a\">\nquoting </cross-session-message> then more", truncated: true)
         expect(innerClose.sender == "a" && innerClose.body == "quoting </cross-session-message> then more", "a cut envelope ignores a closing tag inside its body: \(innerClose)")
         expect(PeerEnvelope("<cross-session-message from=\"a\">hello").body == "<cross-session-message from=\"a\">hello", "an uncut envelope still needs its closing tag")

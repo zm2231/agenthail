@@ -32,7 +32,7 @@ struct PeerEnvelope: Equatable {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let close = trimmed.range(of: Self.closeTag, options: .backwards).flatMap { Self.isKnownTrailer(trimmed[$0.upperBound...], cut: truncated) ? $0 : nil }
         guard let open = trimmed.range(of: Self.openTag),
-              let end = close?.lowerBound ?? (truncated ? trimmed.endIndex : nil),
+              let end = close?.lowerBound ?? (truncated ? Self.cutCloseStart(trimmed) : nil),
               open.upperBound <= end,
               let tagEnd = trimmed[open.lowerBound..<end].firstIndex(of: ">"),
               Self.isKnownPreamble(trimmed[..<open.lowerBound])
@@ -55,6 +55,13 @@ struct PeerEnvelope: Equatable {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty || preambles.contains(value) { return true }
         return value.hasPrefix("[Claude peer message from ") && value.hasSuffix("]") && !value.contains("\n")
+    }
+
+    private static func cutCloseStart(_ text: String) -> String.Index {
+        for length in stride(from: min(closeTag.count - 1, text.count - 1), through: 1, by: -1) where text.hasSuffix("\n" + closeTag.prefix(length)) {
+            return text.index(text.endIndex, offsetBy: -length)
+        }
+        return text.endIndex
     }
 
     private static func isKnownTrailer(_ text: Substring, cut: Bool) -> Bool {
