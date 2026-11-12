@@ -21,8 +21,43 @@ import (
 
 var archiveLayout = map[string]bool{"agenthail": true, "browser-host": true, "extension-host": true, "claude-host": true, "runtime": true, "skills": true, "README.md": true, "LICENSE": true, "COMMERCIAL.md": true}
 
-func linuxArchiveName(tag, goarch string) string {
-	return "agenthail-" + tag + "-linux-" + goarch
+func releaseArchiveName(tag, goos, goarch string) string {
+	return "agenthail-" + tag + "-" + goos + "-" + goarch
+}
+
+func fetchReleaseArchive(deps *updateDeps, release *latestRelease, name, work string) (string, error) {
+	archiveURL := assetURL(release.Assets, name+".tar.gz")
+	checksumURL := assetURL(release.Assets, name+".tar.gz.sha256")
+	if archiveURL == "" || checksumURL == "" {
+		return "", fmt.Errorf("release %s does not include %s.tar.gz and its checksum", release.TagName, name)
+	}
+	archivePath := filepath.Join(work, name+".tar.gz")
+	checksumPath := archivePath + ".sha256"
+	if err := downloadAsset(deps.client, checksumURL, checksumPath, 8192); err != nil {
+		return "", fmt.Errorf("download checksum: %w", err)
+	}
+	if err := downloadAsset(deps.client, archiveURL, archivePath, 300<<20); err != nil {
+		return "", fmt.Errorf("download archive: %w", err)
+	}
+	if err := verifyDownloadedChecksum(archivePath, checksumPath); err != nil {
+		return "", err
+	}
+	stage := filepath.Join(work, "stage")
+	if err := extractReleaseArchive(archivePath, stage, name); err != nil {
+		return "", err
+	}
+	next := filepath.Join(stage, name)
+	output, err := deps.output(filepath.Join(next, "agenthail"), "version", "--json")
+	if err != nil {
+		return "", fmt.Errorf("run downloaded agenthail: %w", err)
+	}
+	var stamped struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(output, &stamped); err != nil || stamped.Version != release.TagName {
+		return "", fmt.Errorf("downloaded agenthail reports version %q, want %s", stamped.Version, release.TagName)
+	}
+	return next, nil
 }
 
 func defaultRestartDaemon(binary string) error {
@@ -97,42 +132,14 @@ func installArchiveUpdate(deps *updateDeps, release *latestRelease, executable s
 	if err := verifyArchiveLayout(dataDir); err != nil {
 		return err
 	}
-	name := linuxArchiveName(release.TagName, deps.goarch)
-	archiveURL := assetURL(release.Assets, name+".tar.gz")
-	checksumURL := assetURL(release.Assets, name+".tar.gz.sha256")
-	if archiveURL == "" || checksumURL == "" {
-		return fmt.Errorf("release %s does not include %s.tar.gz and its checksum", release.TagName, name)
-	}
 	work, err := os.MkdirTemp(filepath.Dir(dataDir), ".agenthail-update-")
 	if err != nil {
 		return fmt.Errorf("create update directory: %w", err)
 	}
 	defer os.RemoveAll(work)
-	archivePath := filepath.Join(work, name+".tar.gz")
-	checksumPath := archivePath + ".sha256"
-	if err := downloadAsset(deps.client, checksumURL, checksumPath, 8192); err != nil {
-		return fmt.Errorf("download checksum: %w", err)
-	}
-	if err := downloadAsset(deps.client, archiveURL, archivePath, 300<<20); err != nil {
-		return fmt.Errorf("download archive: %w", err)
-	}
-	if err := verifyDownloadedChecksum(archivePath, checksumPath); err != nil {
-		return err
-	}
-	stage := filepath.Join(work, "stage")
-	if err := extractReleaseArchive(archivePath, stage, name); err != nil {
-		return err
-	}
-	next := filepath.Join(stage, name)
-	output, err := deps.output(filepath.Join(next, "agenthail"), "version", "--json")
+	next, err := fetchReleaseArchive(deps, release, releaseArchiveName(release.TagName, deps.goos, deps.goarch), work)
 	if err != nil {
-		return fmt.Errorf("run downloaded agenthail: %w", err)
-	}
-	var stamped struct {
-		Version string `json:"version"`
-	}
-	if err := json.Unmarshal(output, &stamped); err != nil || stamped.Version != release.TagName {
-		return fmt.Errorf("downloaded agenthail reports version %q, want %s", stamped.Version, release.TagName)
+		return err
 	}
 	if err := deps.serviceCheck(); err != nil {
 		return fmt.Errorf("refusing to update without a reachable service manager to restart and verify the daemon: %w", err)

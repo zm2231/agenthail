@@ -247,6 +247,7 @@ func (a *App) cmdDoctor(args []string) error {
 		silentHosts, silentHostsErr = r.SilentHostSessions(silentHostAfter, time.Now())
 	}
 	uiProblems, uiErr := a.uiConfProblems()
+	install := a.installMethod(runtime.GOOS)
 	if hasFlag(args, "--json") {
 		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(notCarried) == 0 && notCarriedErr == nil && len(hostProblems) == 0, "projectLinks": projectNotes, "projectHistoryNotCarried": notCarried, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeCrossSessionInbound": claudeInbound, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
@@ -262,6 +263,7 @@ func (a *App) cmdDoctor(args []string) error {
 			report["hostPairingError"] = hostsErr.Error()
 		}
 		report["connection"] = connection
+		report["install"] = install
 		report["relaysNotTakenOverOnMove"] = droppedRelays
 		if droppedRelaysErr != nil {
 			report["relaysNotTakenOverOnMoveError"] = droppedRelaysErr.Error()
@@ -398,6 +400,7 @@ func (a *App) cmdDoctor(args []string) error {
 		case surfaces.CodexHooksNoNudge:
 			fmt.Printf("codex hooks: %s; update Codex, then run: agenthail hooks install codex\n", surfaces.CodexHooksNoNudge)
 		}
+		fmt.Printf("install: %s\n", install)
 		if build != nil {
 			fmt.Printf("[daemon] build: %s\n", build.Detail)
 		}

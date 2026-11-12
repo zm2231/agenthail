@@ -85,6 +85,16 @@ The release runner then installs the real package, verifies the supervised daemo
 
 Installed package users can run `agenthail update --check` to inspect the latest GitHub release and `agenthail update` to install it. The updater requires the matching package and checksum assets, verifies the checksum, checks the package against the Apple team embedded by the release build, requires a successful macOS notarization assessment, and then hands the package to `/usr/sbin/installer` through `sudo`. Builds without an embedded installer team fail closed instead of trusting an arbitrary package. The package scripts preserve user data and replace the daemon, sidecars, operations skill, and Mac app together.
 
+An install made from the macOS release archive (`agenthail-<tag>-darwin-arm64.tar.gz` and its `install.sh`) also updates itself. `agenthail update` treats a macOS build as an archive install when its version is exactly a release tag and its folder holds the release's `Agenthail.app` and `sidecar.py`. A build made from source with `./install.sh` carries a `git describe` version, so it stays a source install. The updater:
+
+- downloads the matching darwin archive and its checksum and verifies the checksum;
+- runs the downloaded `agenthail version --json` and requires the release tag;
+- requires the downloaded binary and `Agenthail.app` to pass `codesign --verify --strict` and to be signed by the same Apple team as the installed binary, and refuses an install whose signature does not verify or names no team (an ad hoc signed build);
+- keeps a copy of the current install folder;
+- runs the archive's own `install.sh` with `AGENTHAIL_DATA_DIR` set to the current install's folder and `AGENTHAIL_INSTALL_DIR` set to the folder of the `agenthail` command that runs it, so the command stays where the person put it.
+
+That installer stages the new folder and stops and reinstalls the supervised daemon. If the installer fails at any step, or the daemon was running and the new one does not answer, the updater restores the copy and the command and restarts the previous daemon. `agenthail doctor` prints the install kind (`package`, `homebrew`, `archive` or `source`), and `--json` reports it as `install`.
+
 ## Uninstall
 
 ```bash

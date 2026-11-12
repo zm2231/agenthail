@@ -35,6 +35,10 @@ type updateDeps struct {
 	serviceCheck    func() error
 	restartDaemon   func(string) error
 	daemonHealthy   func() error
+	signingTeam     func(string) (string, error)
+	runInstaller    func(string, []string) error
+	copyTree        func(string, string) error
+	wrapperDirs     func() []string
 }
 
 type releaseAsset struct {
@@ -68,6 +72,10 @@ func defaultUpdateDeps() *updateDeps {
 		serviceCheck:    func() error { return newDaemonService("linux").Check() },
 		restartDaemon:   defaultRestartDaemon,
 		daemonHealthy:   defaultDaemonHealthy,
+		signingTeam:     defaultSigningTeam,
+		runInstaller:    defaultRunInstaller,
+		copyTree:        defaultCopyTree,
+		wrapperDirs:     defaultWrapperDirs,
 		run: func(name string, args ...string) error {
 			command := exec.Command(name, args...)
 			command.Stdin = os.Stdin
@@ -100,7 +108,7 @@ func (a *App) cmdUpdate(args []string) error {
 	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
 		executable = resolved
 	}
-	method := updateInstallMethod(executable, deps.goos, a.Version)
+	method := updateInstallMethod(executable, deps.goos, a.Version, deps.teamSigned)
 	if method == "homebrew" {
 		return a.updateHomebrew(args, deps)
 	}
@@ -110,11 +118,14 @@ func (a *App) cmdUpdate(args []string) error {
 			return fmt.Errorf("package updates require Apple silicon macOS")
 		}
 	case "archive":
+		if deps.goos == "darwin" && deps.goarch != "arm64" {
+			return fmt.Errorf("macOS release archives are published for arm64, not %s", deps.goarch)
+		}
 		if deps.goarch != "amd64" && deps.goarch != "arm64" {
 			return fmt.Errorf("Linux release archives are published for amd64 and arm64, not %s", deps.goarch)
 		}
 	default:
-		return fmt.Errorf("self-update is available for package, Homebrew and Linux release archive installs; update this source install with git pull and ./install.sh")
+		return fmt.Errorf("self-update is available for package, Homebrew and release archive installs; update this source install with git pull and ./install.sh")
 	}
 	release, err := fetchLatestRelease(deps)
 	if err != nil {
@@ -131,7 +142,9 @@ func (a *App) cmdUpdate(args []string) error {
 		return printUpdateStatus(status, hasFlag(args, "--json"))
 	}
 	install := func() error { return installPackageUpdate(deps, release) }
-	if method == "archive" {
+	if method == "archive" && deps.goos == "darwin" {
+		install = func() error { return installDarwinArchiveUpdate(deps, release, executable) }
+	} else if method == "archive" {
 		install = func() error { return installArchiveUpdate(deps, release, executable) }
 	}
 	if err := install(); err != nil {
@@ -177,7 +190,30 @@ func exitedWithCode(err error, code int) bool {
 	return errors.As(err, &exitErr) && exitErr.ExitCode() == code
 }
 
-func updateInstallMethod(executable, goos, version string) string {
+func (a *App) installMethod(goos string) string {
+	deps := a.update
+	if deps == nil {
+		deps = defaultUpdateDeps()
+	}
+	executable, err := deps.executable()
+	if err != nil {
+		return "unknown"
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
+		executable = resolved
+	}
+	return updateInstallMethod(executable, goos, a.Version, deps.teamSigned)
+}
+
+func (deps *updateDeps) teamSigned(path string) bool {
+	if deps.signingTeam == nil {
+		return false
+	}
+	_, err := deps.signingTeam(path)
+	return err == nil
+}
+
+func updateInstallMethod(executable, goos, version string, teamSigned func(string) bool) string {
 	clean := filepath.Clean(executable)
 	if strings.Contains(clean, "/Cellar/agenthail/") || strings.Contains(clean, "/Homebrew/Cellar/agenthail/") {
 		return "homebrew"
@@ -185,7 +221,11 @@ func updateInstallMethod(executable, goos, version string) string {
 	if strings.HasPrefix(clean, "/Library/Application Support/Agenthail/") {
 		return "package"
 	}
-	if _, released := numericVersion(version); goos == "linux" && released {
+	_, released := numericVersion(version)
+	if goos == "linux" && released {
+		return "archive"
+	}
+	if goos == "darwin" && released && !strings.Contains(version, "-") && isDarwinArchiveInstall(filepath.Dir(clean)) && teamSigned(clean) {
 		return "archive"
 	}
 	return "source"
