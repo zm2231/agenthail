@@ -1197,6 +1197,23 @@ test('drain retires the host: it gives up the socket and lock and serves its ses
   r.close();
 });
 
+test('an interrupt that reaches Claude before it starts the turn stops the turn once it starts', async () => {
+  const f = fixture();
+  const gate = path.join(f.root, 'init-gate');
+  await startHost(f, { env: { FAKE_CLAUDE_INIT_GATE: gate } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'SLOW 60000' });
+  await c.call('interrupt', { sessionId: id });
+  fs.writeFileSync(gate, '');
+  await c.event(turnResult(id, uuid));
+  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['interrupted']);
+  c.close();
+});
+
 test('retiring lets go of subscribers that came in through the daemon socket', async () => {
   const f = fixture();
   const host = await startHost(f);
