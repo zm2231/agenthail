@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="/css/panes.css" />
     <link rel="stylesheet" href="/css/agent-messages.css" />
     <link rel="stylesheet" href="/css/project-view.css" />
+    <link rel="stylesheet" href="/css/extensions.css" />
   </head>
   <body>
     <main class="shell">
@@ -31,7 +32,8 @@
         <nav class="nav" aria-label="Dashboard">
           <a href="#overview" data-view="overview">Overview</a
           ><a href="#conversations" data-view="conversations">Conversations</a
-          ><a href="#operations" data-view="operations">Operations</a>
+          ><a href="#operations" data-view="operations">Operations</a
+          ><a href="#extensions" data-view="extensions">Extensions</a>
         </nav>
         <div class="usage-slot">
           <button class="usage-line" id="usage-line" type="button" aria-label="Usage limits" aria-haspopup="dialog" aria-controls="usage-panel" aria-expanded="false" hidden></button>
@@ -579,6 +581,20 @@
             </section>
           </div>
         </section>
+      </section>
+
+      <section class="view hidden" id="extensions-view" data-view-panel="extensions">
+        <header class="page-heading" data-pane="content">
+          <div>
+            <h1>Extensions.</h1>
+            <p class="lede">Pages and background jobs you add in ~/.agenthail/extensions.</p>
+          </div>
+          <button class="soft-button" id="extensions-reload" type="button">Reload</button>
+        </header>
+        <div class="extensions-layout" data-pane="content">
+          <div class="extensions-list" id="extensions-list"></div>
+          <iframe class="extensions-frame" id="extensions-frame" title="Extension page" hidden></iframe>
+        </div>
       </section>
     </main>
     <dialog class="voice-dialog" id="voice-dialog" data-pane="float" aria-labelledby="voice-title">

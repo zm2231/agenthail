@@ -366,6 +366,10 @@ To continue an idle Claude session or Codex thread on another paired machine, ru
 
 The intent ledger records what you asked for in a project, from your own words, next to the work agents do about it: goals, asks and their clauses, open questions with their defaults, and work items with comments and logs. A project's lead has your words to it captured by default. Each message is recorded word for word and stays provisional until a session attaches it, reading back how it recorded it; nothing waits on a provisional message. Turn it on with `agenthail ledger enable` in a project to capture your words to every session, each of which is then held at the end of a turn for the clauses it owns until it reports progress. With `agenthail ledger owner server` one paired machine keeps the project's ledger and the others replicate it, checked by a log digest on every sync. [The intent ledger](docs/ledger.md).
 
+## Add your own pages
+
+An extension is a folder in `~/.agenthail/extensions/` with a page (`ui.html`), a server file (`server.ts`) and an `extension.json` naming it. The server file registers actions for its page, background jobs that run every minute or longer, and handlers for Agenthail's events, and keeps its data in one SQLite store shared by every extension. Its page opens in the dashboard's Extensions tab, and from any device on your tailnet once remote access is on, behind the same login as the dashboard. An extension can read sessions, send messages or answer approvals only with the capabilities you approve with `agenthail extensions approve <id>`, and what it sends is marked as from the extension, never from you. `agenthail extensions` lists them and their errors. [Writing an extension](docs/maintainers/extensions.md).
+
 ## What Agenthail remembers
 
 Agenthail keeps a local record of messages it moved, work still waiting, retries, failures, and automatic handoffs. The Audit view makes it possible to come back hours later and understand what happened.

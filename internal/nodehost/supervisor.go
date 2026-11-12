@@ -37,9 +37,9 @@ type Supervisor struct {
 	StateDir string
 	Protocol int
 	Launch   func() (Launch, error)
-	Args func() []string
-	Ready func(ctx context.Context, client Client) error
-	Down func(err error)
+	Args     func() []string
+	Ready    func(ctx context.Context, client Client) error
+	Down     func(err error)
 
 	MinRestart time.Duration
 	MaxRestart time.Duration

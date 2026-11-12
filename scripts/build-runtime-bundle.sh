@@ -35,6 +35,7 @@ cp "$ROOT/sidecar/package.json" "$ROOT/sidecar/package-lock.json" "$OUTPUT/"
 PATH="$NODE_DIST/bin:/usr/bin:/bin" "$NODE_DIST/bin/npm" ci --omit=dev --prefix "$OUTPUT"
 PATH="$NODE_DIST/bin:/usr/bin:/bin" NPM="$NODE_DIST/bin/npm" "$ROOT/scripts/stage-node-host.sh" claude-host "$OUTPUT/claude-host"
 PATH="$NODE_DIST/bin:/usr/bin:/bin" NPM="$NODE_DIST/bin/npm" "$ROOT/scripts/stage-node-host.sh" browser-host "$OUTPUT/browser-host"
+PATH="$NODE_DIST/bin:/usr/bin:/bin" NPM="$NODE_DIST/bin/npm" "$ROOT/scripts/stage-node-host.sh" extension-host "$OUTPUT/extension-host"
 rm -rf "$OUTPUT/runtime/python/include" "$OUTPUT/runtime/python/share"
 rm -rf "$OUTPUT/runtime/python/lib/python3.13/ensurepip" "$OUTPUT/runtime/python/lib/python3.13/site-packages/pip" "$OUTPUT/runtime/python/lib/python3.13/site-packages/pip-"*.dist-info
 rm -rf "$OUTPUT/runtime/python/lib/tcl9" "$OUTPUT/runtime/python/lib/tcl9.0" "$OUTPUT/runtime/python/lib/tk9.0" "$OUTPUT/runtime/python/lib/itcl4.3.5" "$OUTPUT/runtime/python/lib/thread3.0.4"

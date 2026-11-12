@@ -19,7 +19,7 @@ import (
 	"github.com/zm2231/agenthail/internal/poll"
 )
 
-var archiveLayout = map[string]bool{"agenthail": true, "browser-host": true, "claude-host": true, "runtime": true, "skills": true, "README.md": true, "LICENSE": true, "COMMERCIAL.md": true}
+var archiveLayout = map[string]bool{"agenthail": true, "browser-host": true, "extension-host": true, "claude-host": true, "runtime": true, "skills": true, "README.md": true, "LICENSE": true, "COMMERCIAL.md": true}
 
 func linuxArchiveName(tag, goarch string) string {
 	return "agenthail-" + tag + "-linux-" + goarch

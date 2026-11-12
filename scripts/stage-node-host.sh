@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-NAME="${1:?usage: stage-node-host.sh claude-host|browser-host DEST}"
-DEST="${2:?usage: stage-node-host.sh claude-host|browser-host DEST}"
+NAME="${1:?usage: stage-node-host.sh claude-host|browser-host|extension-host DEST}"
+DEST="${2:?usage: stage-node-host.sh claude-host|browser-host|extension-host DEST}"
 NPM="${NPM:-npm}"
 SOURCE="$ROOT/$NAME"
 test -f "$SOURCE/package.json"
@@ -29,7 +29,7 @@ if find "$DEST" ! -type d ! -type f -print -quit | grep -q .; then
 	echo "error: the staged $NAME contains entries that are not directories or regular files" >&2
 	exit 1
 fi
-if find "$DEST/node_modules" -name '*.node' -print -quit | grep -q .; then
+if [ -d "$DEST/node_modules" ] && find "$DEST/node_modules" -name '*.node' -print -quit | grep -q .; then
 	echo "error: $NAME gained a native dependency; it can no longer ship as one tree" >&2
 	exit 1
 fi
