@@ -75,7 +75,7 @@ struct LocalSend: Identifiable, Equatable {
         if item.kind == "attachment" {
             return text.isEmpty && fileNames.isEmpty && attachments.contains(where: \.isImage)
         }
-        guard PeerEnvelope(item.text).body.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return false }
+        guard item.carries(text) else { return false }
         let delivered = (item.files ?? []).map(\.name)
         guard !text.isEmpty || !delivered.isEmpty else { return false }
         return Set(fileNames).isSubset(of: delivered) && delivered.allSatisfy(names.contains)

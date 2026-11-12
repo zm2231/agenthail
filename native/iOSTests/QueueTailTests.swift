@@ -14,8 +14,8 @@ final class QueueTailTests: XCTestCase {
         return item
     }
 
-    private func user(_ text: String, at timestamp: String = "2026-11-04T10:00:30Z") throws -> TimelineItem {
-        let object: [String: Any] = ["id": UUID().uuidString, "kind": "message", "role": "user", "title": "You", "text": text, "timestamp": timestamp, "truncated": false]
+    private func user(_ text: String, at timestamp: String = "2026-11-04T10:00:30Z", truncated: Bool = false) throws -> TimelineItem {
+        let object: [String: Any] = ["id": UUID().uuidString, "kind": "message", "role": "user", "title": "You", "text": text, "timestamp": timestamp, "truncated": truncated]
         return try JSONDecoder().decode(TimelineItem.self, from: JSONSerialization.data(withJSONObject: object))
     }
 
@@ -61,6 +61,18 @@ final class QueueTailTests: XCTestCase {
         try tail.update(active: [row(1, message: envelope("ready"), author: "agent")], timeline: [], now: start)
         tail.update(active: [], timeline: [], now: start.addingTimeInterval(1))
         try tail.update(active: [], timeline: [user(envelope("ready"))], now: start.addingTimeInterval(2))
+        XCTAssertTrue(tail.rows.isEmpty)
+    }
+
+    func testALongMessageMatchesItsCutTimelineRow() throws {
+        let long = String(repeating: "Café ", count: 3000)
+        let cut = String(decoding: Array(long.utf8)[..<(16 * 1024 - 2)], as: UTF8.self)
+        var tail = QueueTail()
+        try tail.update(active: [row(1, message: long)], timeline: [], now: start)
+        tail.update(active: [], timeline: [], now: start.addingTimeInterval(1))
+        try tail.update(active: [], timeline: [user(cut)], now: start.addingTimeInterval(2))
+        XCTAssertEqual(tail.rows.count, 1, "an uncut row still needs the whole text")
+        try tail.update(active: [], timeline: [user(cut, truncated: true)], now: start.addingTimeInterval(3))
         XCTAssertTrue(tail.rows.isEmpty)
     }
 
