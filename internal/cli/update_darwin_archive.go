@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -73,10 +74,10 @@ func installDarwinArchiveUpdate(deps *updateDeps, release *latestRelease, execut
 	if err := deps.copyTree(dataDir, previous); err != nil {
 		return fmt.Errorf("keep a copy of the current install to roll back to: %w", err)
 	}
+	wrapper, wrapperBody, named := managedWrapper(dataDir, deps.wrapperDirs())
 	env := []string{"AGENTHAIL_DATA_DIR=" + dataDir}
-	wrapper, wrapperBody := managedWrapper(dataDir, deps.wrapperDirs())
 	if wrapper != "" {
-		env = append(env, "AGENTHAIL_INSTALL_DIR="+filepath.Dir(wrapper))
+		env = []string{"AGENTHAIL_DATA_DIR=" + named, "AGENTHAIL_INSTALL_DIR=" + filepath.Dir(wrapper)}
 	}
 	running := deps.daemonExpected()
 	rollback := func(cause error) error {
@@ -133,30 +134,116 @@ func defaultWrapperDirs() []string {
 	return append(dirs, "/opt/homebrew/bin", "/usr/local/bin")
 }
 
-func managedWrapper(dataDir string, dirs []string) (string, []byte) {
-	binary := filepath.Join(dataDir, "agenthail")
-	quoted := shellQuoted(binary)
+func managedWrapper(dataDir string, dirs []string) (string, []byte, string) {
+	installed, err := os.Stat(filepath.Join(dataDir, "agenthail"))
+	if err != nil {
+		return "", nil, ""
+	}
 	for _, dir := range dirs {
-		if dir == "" || dir == dataDir {
+		if dir == "" {
 			continue
 		}
 		path := filepath.Join(dir, "agenthail")
 		body, err := os.ReadFile(path)
-		if err != nil || len(body) > 64<<10 {
+		if err != nil || len(body) > 64<<10 || !strings.Contains(string(body), "agenthail-managed-wrapper") {
 			continue
 		}
-		text := string(body)
-		if strings.Contains(text, "agenthail-managed-wrapper") && (strings.Contains(text, "exec \""+binary+"\"") || strings.Contains(text, "exec "+quoted+" ")) {
-			return path, body
+		for line := range strings.SplitSeq(string(body), "\n") {
+			rest, ok := strings.CutPrefix(strings.TrimSpace(line), "exec ")
+			if !ok {
+				continue
+			}
+			if target, ok := shellWord(rest); ok {
+				if found, err := os.Stat(target); err == nil && os.SameFile(found, installed) {
+					return path, body, filepath.Dir(target)
+				}
+			}
 		}
 	}
-	return "", nil
+	return "", nil, ""
 }
 
-func shellQuoted(path string) string {
-	output, err := exec.Command("bash", "-c", `printf %q "$1"`, "bash", path).Output()
-	if err != nil {
-		return strings.ReplaceAll(path, " ", "\\ ")
+func shellWord(text string) (string, bool) {
+	var word strings.Builder
+	for i := 0; i < len(text); {
+		switch c := text[i]; {
+		case c == ' ' || c == '\t':
+			return word.String(), word.Len() > 0
+		case c == '\\':
+			if i+1 >= len(text) {
+				return "", false
+			}
+			word.WriteByte(text[i+1])
+			i += 2
+		case c == '\'':
+			end := strings.IndexByte(text[i+1:], '\'')
+			if end < 0 {
+				return "", false
+			}
+			word.WriteString(text[i+1 : i+1+end])
+			i += end + 2
+		case c == '"':
+			i++
+			for ; i < len(text) && text[i] != '"'; i++ {
+				if text[i] == '\\' && i+1 < len(text) && strings.IndexByte("$`\"\\", text[i+1]) >= 0 {
+					i++
+				}
+				word.WriteByte(text[i])
+			}
+			if i >= len(text) {
+				return "", false
+			}
+			i++
+		case c == '$' && i+1 < len(text) && text[i+1] == '\'':
+			n, ok := ansiCQuoted(text[i+2:], &word)
+			if !ok {
+				return "", false
+			}
+			i += 2 + n
+		default:
+			word.WriteByte(c)
+			i++
+		}
 	}
-	return string(output)
+	return word.String(), word.Len() > 0
+}
+
+func ansiCQuoted(text string, word *strings.Builder) (int, bool) {
+	escapes := map[byte]byte{'n': '\n', 't': '\t', 'r': '\r', 'a': '\a', 'b': '\b', 'f': '\f', 'v': '\v', 'e': 0x1b, 'E': 0x1b, '\\': '\\', '\'': '\'', '"': '"', '?': '?'}
+	for i := 0; i < len(text); i++ {
+		switch c := text[i]; {
+		case c == '\'':
+			return i + 1, true
+		case c != '\\' || i+1 >= len(text):
+			word.WriteByte(c)
+		case escapes[text[i+1]] != 0:
+			word.WriteByte(escapes[text[i+1]])
+			i++
+		case text[i+1] == 'x':
+			j := i + 2
+			for j < len(text) && j < i+4 && strings.IndexByte("0123456789abcdefABCDEF", text[j]) >= 0 {
+				j++
+			}
+			value, err := strconv.ParseUint(text[i+2:j], 16, 8)
+			if err != nil {
+				return 0, false
+			}
+			word.WriteByte(byte(value))
+			i = j - 1
+		case text[i+1] >= '0' && text[i+1] <= '7':
+			j := i + 1
+			for j < len(text) && j < i+4 && text[j] >= '0' && text[j] <= '7' {
+				j++
+			}
+			value, err := strconv.ParseUint(text[i+1:j], 8, 8)
+			if err != nil {
+				return 0, false
+			}
+			word.WriteByte(byte(value))
+			i = j - 1
+		default:
+			word.WriteByte(c)
+		}
+	}
+	return 0, false
 }

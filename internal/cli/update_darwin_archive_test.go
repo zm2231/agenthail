@@ -288,23 +288,82 @@ func TestTheSignerOfAModifiedBinaryIsNotTrusted(t *testing.T) {
 }
 
 func TestTheCommandIsFoundWhateverCharactersItsInstallFolderHas(t *testing.T) {
-	for _, name := range []string{"plain", "with space", "agenthail[archive]", "cost$HOME", "it's"} {
+	for _, name := range []string{"plain", "with space", "agenthail[archive]", "cost$HOME", "it's", "tab\there", "line\nbreak"} {
 		t.Run(name, func(t *testing.T) {
 			dataDir := filepath.Join(t.TempDir(), name)
 			bin := filepath.Join(t.TempDir(), "bin")
-			if err := os.MkdirAll(bin, 0755); err != nil {
+			for _, dir := range []string{dataDir, bin} {
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(dataDir, "agenthail"), []byte(versionScript("v0.2.133")), 0755); err != nil {
 				t.Fatal(err)
 			}
 			script := `printf -v DATA_BINARY_SHELL '%q' "$1/agenthail"; printf '#!/usr/bin/env bash\n# agenthail-managed-wrapper-v1\nexec %s "$@"\n' "$DATA_BINARY_SHELL" > "$2/agenthail"`
 			if output, err := exec.Command("/bin/bash", "-c", script, "bash", dataDir, bin).CombinedOutput(); err != nil {
 				t.Fatalf("write the wrapper as install.sh does: %v %s", err, output)
 			}
-			if wrapper, _ := managedWrapper(dataDir, []string{t.TempDir(), bin}); wrapper != filepath.Join(bin, "agenthail") {
+			if wrapper, _, _ := managedWrapper(dataDir, []string{t.TempDir(), bin}); wrapper != filepath.Join(bin, "agenthail") {
 				t.Fatalf("found %q for an install in %q", wrapper, dataDir)
 			}
-			if wrapper, _ := managedWrapper(dataDir+"-other", []string{bin}); wrapper != "" {
+			other := dataDir + "-other"
+			if err := os.MkdirAll(other, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(other, "agenthail"), []byte(versionScript("v0.2.133")), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if wrapper, _, _ := managedWrapper(other, []string{bin}); wrapper != "" {
 				t.Fatalf("another install's folder matched %q", wrapper)
 			}
 		})
+	}
+}
+
+func TestTheCommandIsFoundWhenTheInstallIsReachedThroughASymlink(t *testing.T) {
+	real := filepath.Join(t.TempDir(), "real", "agenthail")
+	if err := os.MkdirAll(real, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "agenthail"), []byte(versionScript("v0.2.133")), 0755); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(t.TempDir(), "home")
+	if err := os.Symlink(filepath.Dir(real), linked); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	script := `printf -v DATA_BINARY_SHELL '%q' "$1/agenthail"; printf '#!/usr/bin/env bash\n# agenthail-managed-wrapper-v1\nexec %s "$@"\n' "$DATA_BINARY_SHELL" > "$2/agenthail"`
+	if output, err := exec.Command("/bin/bash", "-c", script, "bash", filepath.Join(linked, "agenthail"), bin).CombinedOutput(); err != nil {
+		t.Fatalf("write the wrapper: %v %s", err, output)
+	}
+	resolved, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dataDir := range []string{resolved, filepath.Join(linked, "agenthail")} {
+		wrapper, _, named := managedWrapper(dataDir, []string{bin})
+		if wrapper != filepath.Join(bin, "agenthail") {
+			t.Fatalf("with the install named %q, the command written through the symlink was not found (got %q)", dataDir, wrapper)
+		}
+		if named != filepath.Join(linked, "agenthail") {
+			t.Fatalf("the installer would be given %q, not the folder its command names (%q)", named, filepath.Join(linked, "agenthail"))
+		}
+	}
+}
+
+func TestShellWordReadsWhatBashQuotes(t *testing.T) {
+	for _, path := range []string{"/plain/agenthail", "/with space/a", "/br[a]ck$et/a", "/it's/a", "/tab\tline\nend/a", "/bell\a/e\x1b/a", `/back\slash"quote/a`} {
+		output, err := exec.Command("/bin/bash", "-c", `printf %q "$1"`, "bash", path).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := shellWord(string(output) + ` "$@"`); !ok || got != path {
+			t.Errorf("bash quoted %q as %s; read back %q", path, output, got)
+		}
+	}
+	if got, ok := shellWord(`"/old wrapper/agenthail" "$@"`); !ok || got != "/old wrapper/agenthail" {
+		t.Errorf("a double-quoted target read back %q", got)
 	}
 }
