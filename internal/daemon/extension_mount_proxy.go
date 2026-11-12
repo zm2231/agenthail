@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 const (
@@ -66,7 +68,7 @@ func (d *Daemon) serveMount(w http.ResponseWriter, r *http.Request, served *serv
 	}
 	shell := d.shellOrigins(r, dashboard)
 	request := mountRequest{
-		dropAuthorization: dashboardBearer(r.Context()) || r.Context().Value(apiDeviceTokenContextKey{}) != nil,
+		dropAuthorization: d.agenthailCredential(bearerToken(r), dashboard),
 		frameAncestors:    strings.Join(shell, " "),
 	}
 	if config.key != nil && r.Header.Get("Sec-Fetch-Site") == "same-origin" && r.Header.Get("Authorization") == "Bearer "+extensionKeyPlaceholder {
@@ -79,6 +81,23 @@ func (d *Daemon) serveMount(w http.ResponseWriter, r *http.Request, served *serv
 	}
 	request.inject = config.key != nil && config.mount.Signin != "" && navigation(r) && launchedBy(r, shell)
 	config.proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mountRequestKey{}, request)))
+}
+
+// A bearer that signs anything in to Agenthail never reaches the app, even
+// when this request was let in by the cookie instead.
+func (d *Daemon) agenthailCredential(token string, dashboard *dashboardServer) bool {
+	if token == "" {
+		return false
+	}
+	if constantTokenEqual(token, dashboard.token) {
+		return true
+	}
+	for _, scope := range []string{"read", "control", registry.HostScope} {
+		if _, err := d.Registry.AuthenticateDevice(token, scope); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func serveMountSignin(w http.ResponseWriter, r *http.Request, config *mountConfig) {

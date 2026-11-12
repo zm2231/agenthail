@@ -54,9 +54,13 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 	}
 	switch request.Action {
 	case "remote-enable":
-		config, _, err = EnableRemoteAccess(config)
+		if config, _, err = EnableRemoteAccess(config); err == nil {
+			err = d.syncExtensionMounts()
+		}
 	case "remote-disable":
-		config, err = DisableRemoteAccess(config)
+		if config, err = DisableRemoteAccess(config); err == nil {
+			err = d.syncExtensionMounts()
+		}
 	case "dashboard-config":
 		config.CodexRecentHours = request.CodexRecentHours
 		if request.BusyDelivery != "" {

@@ -25,13 +25,6 @@ const extensionMountSyncEvery = 10 * time.Second
 var (
 	extensionMountPortBase  = 7420
 	extensionMountPortCount = 50
-	extensionTailscale      = func(config RemoteAccessConfig) (tailscale.Runner, error) {
-		path, err := tailscale.Executable(config.TailscalePath)
-		if err != nil {
-			return nil, err
-		}
-		return tailscale.Command(path), nil
-	}
 )
 
 type mountConfig struct {
@@ -127,6 +120,9 @@ func (m *extensionMounts) close() {
 // A port stays assigned while the extension still declares the mount, so a
 // mount waiting for approval comes back on the same port.
 func (d *Daemon) syncExtensionMounts() error {
+	if d.extensions == nil {
+		return nil
+	}
 	m := d.extensions.mounts
 	m.syncing.Lock()
 	defer m.syncing.Unlock()
@@ -329,7 +325,7 @@ func (d *Daemon) publishMounts(remote RemoteAccessConfig, ports map[string]exten
 		}
 		return "", errs
 	}
-	run, err := extensionTailscale(remote)
+	run, _, err := remoteTailscale(remote.TailscalePath)
 	if err != nil {
 		return fail(err)
 	}

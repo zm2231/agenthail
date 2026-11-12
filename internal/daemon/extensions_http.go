@@ -171,7 +171,7 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch request.Action {
-		case "reload":
+		case "reload", "mounts":
 		case "approve":
 			if err := d.approveExtension(request.ID); err != nil {
 				writeAPIError(w, http.StatusBadRequest, "invalid", err.Error())
@@ -190,7 +190,7 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		if request.Action != "key" {
+		if request.Action != "key" && request.Action != "mounts" {
 			if err := d.reloadExtensions(r.Context()); err != nil {
 				writeAPIError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
 				return

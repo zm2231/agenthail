@@ -2,8 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,6 +105,24 @@ func (a *App) ensureDashboardReady() (daemon.DashboardConfig, error) {
 	return config, nil
 }
 
+// The daemon publishes extension mounts beside the dashboard, so it has to
+// follow a remote access change at once rather than on its next poll.
+func (a *App) syncDaemonMounts() error {
+	if !dashboardDaemonRunning() {
+		return nil
+	}
+	client, err := a.daemonAPI()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	if _, _, err := client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "mounts"}, nil); err != nil {
+		return fmt.Errorf("the daemon did not update extension mounts on the tailnet: %w", err)
+	}
+	return nil
+}
+
 func dashboardDaemonRunning() bool {
 	_, running := daemon.IsRunning()
 	return running
@@ -146,6 +166,9 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 		}
 		config.RemoteAccess.Enabled = false
 		if err := daemon.SaveDashboardConfig(config); err != nil {
+			return err
+		}
+		if err := a.syncDaemonMounts(); err != nil {
 			return err
 		}
 		if asJSON {
@@ -202,6 +225,9 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 	}
 	config.RemoteAccess = daemon.RemoteAccessConfig{Enabled: true, Provider: "tailscale", Port: daemon.DefaultRemoteAccessPort, TailscalePath: path}
 	if err := daemon.SaveDashboardConfig(config); err != nil {
+		return err
+	}
+	if err := a.syncDaemonMounts(); err != nil {
 		return err
 	}
 	link, err := a.createDashboardLoginLink(true)

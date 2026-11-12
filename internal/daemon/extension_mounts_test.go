@@ -20,6 +20,7 @@ import (
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/nodehost"
 	"github.com/zm2231/agenthail/internal/proxyacct"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/tailscale"
 )
 
@@ -88,15 +89,17 @@ func startUpstream(t *testing.T) (*httptest.Server, *upstreamSeen) {
 }
 
 type mountFixture struct {
-	d      *Daemon
-	home   string
+	d       *Daemon
+	reg     *registry.Registry
+	handler http.Handler
+	home    string
 	dir    string
 	cookie *http.Cookie
 }
 
 func startMountFixture(t *testing.T) *mountFixture {
 	t.Helper()
-	d, reg, _, dashboard, _, _ := baseFixture(t)
+	d, reg, _, dashboard, handler, _ := baseFixture(t)
 	dashboard.listen = "127.0.0.1:7412"
 	previous := extensionMountPortBase
 	extensionMountPortBase = 0
@@ -119,7 +122,7 @@ func startMountFixture(t *testing.T) *mountFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &mountFixture{d: d, home: home, dir: dir, cookie: cookie}
+	return &mountFixture{d: d, reg: reg, handler: handler, home: home, dir: dir, cookie: cookie}
 }
 
 func (f *mountFixture) declare(t *testing.T, upstream string) {
@@ -234,6 +237,20 @@ func TestAMountServesItsAppOnlyToSignedInClientsAndKeepsAgenthailCredentialsFrom
 	f.call(t, mount.Port, mountCall{path: "/", headers: map[string]string{"Authorization": "Bearer secret"}})
 	if got := seen.last(t); got.Header.Get("Authorization") != "" {
 		t.Fatalf("the upstream got the Agenthail token %q", got.Header.Get("Authorization"))
+	}
+	pairing, err := f.reg.CreateDevicePairing("Phone", []string{"control"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, controlOnly, err := f.reg.CompleteDevicePairing(pairing.Secret, "Phone", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response, _ := f.call(t, mount.Port, mountCall{path: "/", cookie: true, headers: map[string]string{"Authorization": "Bearer " + controlOnly}}); response.StatusCode != http.StatusOK {
+		t.Fatalf("a signed-in GET with a control-only token got %d", response.StatusCode)
+	}
+	if got := seen.last(t); got.Header.Get("Authorization") != "" {
+		t.Fatalf("a device token that could not read was still passed upstream: %q", got.Header.Get("Authorization"))
 	}
 
 	if response, _ := f.call(t, mount.Port, mountCall{path: "/moved", cookie: true}); response.Header.Get("Location") != "/landing?x=1" {
@@ -372,20 +389,22 @@ func (s *fakeTailscale) route(port int) string {
 func TestMountsAreOnTheTailnetOnlyWhileRemoteAccessIsOnAndOnlyTheirOwnRoutesAreRemoved(t *testing.T) {
 	upstream, _ := startUpstream(t)
 	f := startMountFixture(t)
-	fake := &fakeTailscale{routes: map[int]string{7412: "http://127.0.0.1:7412"}}
-	previous := extensionTailscale
-	extensionTailscale = func(RemoteAccessConfig) (tailscale.Runner, error) { return fake.run, nil }
-	t.Cleanup(func() { extensionTailscale = previous })
+	fake := &fakeTailscale{routes: map[int]string{9000: "http://127.0.0.1:9000"}}
+	previous := remoteTailscale
+	remoteTailscale = func(string) (tailscale.Runner, string, error) { return fake.run, "/fake/tailscale", nil }
+	t.Cleanup(func() { remoteTailscale = previous })
 	setRemote := func(on bool) {
-		config, err := LoadDashboardConfig()
-		if err != nil {
-			t.Fatal(err)
+		action := "remote-disable"
+		if on {
+			action = "remote-enable"
 		}
-		config.RemoteAccess.Enabled = on
-		if err := SaveDashboardConfig(config); err != nil {
-			t.Fatal(err)
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/settings", strings.NewReader(`{"action": "`+action+`"}`))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		f.handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", action, response.Code, response.Body)
 		}
-		f.sync(t)
 	}
 	f.declare(t, upstream.URL)
 	f.approve(t)
@@ -425,7 +444,7 @@ func TestMountsAreOnTheTailnetOnlyWhileRemoteAccessIsOnAndOnlyTheirOwnRoutesAreR
 	if fake.route(port) != "" {
 		t.Fatal("a removed mount stayed on the tailnet")
 	}
-	if fake.route(7412) != "http://127.0.0.1:7412" {
+	if fake.route(9000) != "http://127.0.0.1:9000" {
 		t.Fatal("a route Agenthail did not publish for a mount was removed")
 	}
 	ports, err := extension.ReadMountPorts(f.home)
