@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"syscall"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -36,6 +37,15 @@ func matchPattern(pattern, text string) bool {
 	}
 	match, err := regexp.Compile(pattern)
 	return err == nil && match.MatchString(text)
+}
+
+func goalReplyIndex(events []registry.RelayEvent, since time.Time) int {
+	for index := len(events) - 1; index >= 0; index-- {
+		if events[index].Message != "" && !events[index].CompletedAt.Before(since) {
+			return index
+		}
+	}
+	return len(events) - 1
 }
 
 func relayable(route registry.RouteRow, event registry.RelayEvent) bool {
@@ -220,7 +230,7 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 						case goalKey == route.LastGoalKey:
 							err = fmt.Errorf("waiting for a new completed goal")
 						default:
-							events = events[len(events)-1:]
+							events = events[goalReplyIndex(events, goal.CreatedAt):]
 							if goalStopped(goal.Status) {
 								stopped = goal
 							}

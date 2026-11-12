@@ -8,8 +8,9 @@ type Tool struct {
 }
 
 const (
-	EndTurn = "agenthail_end_turn"
-	Ask     = "agenthail_ask"
+	EndTurn      = "agenthail_end_turn"
+	Ask          = "agenthail_ask"
+	EndTurnNudge = "[agenthail] This turn has no end yet. Call " + EndTurn + " now with a one-line headline. Don't repeat your reply."
 )
 
 var Tools = []Tool{

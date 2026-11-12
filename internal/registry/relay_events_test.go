@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/agenttools"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -434,5 +435,36 @@ func TestARelayReadBeforeItsRouteMovedIsNotDeliveredToTheOldDestination(t *testi
 	moved, _ := r.ListRoutes()
 	if _, err := r.ConsumeRelay(moved[0], events[0], "payload", "queue", ""); err != nil || r.QueueCount("new-lead") != 1 {
 		t.Fatalf("the moved route did not deliver: err=%v", err)
+	}
+}
+
+func TestAReplyToTheEndTurnNudgeIsCapturedWithNothingToRelay(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "nudged")
+	batch := surface.CompletionBatch{Cursor: "c1", Events: []surface.Completion{
+		{ID: "m1", InputID: "u1", Text: "ONE", User: "say one"},
+		{ID: "m2", InputID: "f1", Text: "Turn closed.", User: "Stop hook feedback:\n" + agenttools.EndTurnNudge, EndTurnNudge: true},
+		{ID: "m3", InputID: "f2", Text: "fixed the types", User: "Stop hook feedback:\nfix the type errors before stopping"},
+		{ID: "m4", InputID: "u2", Text: "It asks me to close the turn.", User: "What does this mean? " + agenttools.EndTurnNudge},
+		{ID: "m5", InputID: "u3", Text: "relayed answer", User: "[from @peer] " + agenttools.EndTurnNudge},
+	}}
+	if err := r.CaptureRelayCompletions("nudged", "", batch); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := r.read.Query(`SELECT completion_id, message FROM relay_events ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := map[string]string{}
+	for rows.Next() {
+		var id, message string
+		if err := rows.Scan(&id, &message); err != nil {
+			t.Fatal(err)
+		}
+		got[id] = message
+	}
+	if len(got) != 5 || got["m1"] != "ONE" || got["m2"] != "" || got["m3"] != "fixed the types" || got["m4"] != "It asks me to close the turn." || got["m5"] != "relayed answer" {
+		t.Fatalf("captured %v, want only the marked nudge reply kept with no text", got)
 	}
 }

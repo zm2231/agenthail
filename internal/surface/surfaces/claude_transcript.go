@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/agenttools"
 )
 
 const maxClaudeTranscriptRecordBytes = 32 * 1024 * 1024
@@ -17,16 +19,17 @@ const maxClaudeTranscriptRecordBytes = 32 * 1024 * 1024
 var ansiEscapeRe = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 type claudeTurn struct {
-	UserID      string
-	MessageID   string
-	User        string
-	Assistant   string
-	Model       string
-	StartedAt   time.Time
-	TerminalAt  time.Time
-	Done        bool
-	Closing     bool
-	Interrupted bool
+	UserID       string
+	MessageID    string
+	User         string
+	Assistant    string
+	Model        string
+	StartedAt    time.Time
+	TerminalAt   time.Time
+	Done         bool
+	Closing      bool
+	Interrupted  bool
+	AnswersNudge bool
 	// APIError is the message Claude Code wrote in place of a reply the API
 	// refused; UsageLimited marks a refusal by a usage limit, which lifts at
 	// UsageResetsAt when Claude said when, and Refused one by the API's
@@ -256,7 +259,8 @@ func foldClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 			}
 			endClaudeTurn(&turns[n-1], turns[n-1].LastAt)
 		}
-		return append(turns, claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text), StartedAt: startedAt})
+		nudge := record.IsMeta && isClaudeStopHookFeedback(strings.TrimSpace(text)) && strings.Contains(text, agenttools.EndTurnNudge)
+		return append(turns, claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text), StartedAt: startedAt, AnswersNudge: nudge})
 	case "assistant":
 		if len(turns) == 0 {
 			turns = append(turns, claudeTurn{})
