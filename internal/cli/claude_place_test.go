@@ -98,9 +98,10 @@ func TestDoctorReportsAnUnreadableSettingsFile(t *testing.T) {
 }
 
 func TestThreadCreateStartsInTheCreatorsRootElseTheDefault(t *testing.T) {
-	keys := claudeRootsHome(t)
 	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindClaude}, session: &surface.Session{ID: "c1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Cwd: t.TempDir()}}
 	app := threadFixture(t, starter)
+	serveCreates(t, app)
+	keys := claudeRootsHome(t)
 	home, _ := os.UserHomeDir()
 	agent := surface.Session{ID: "agent-primary", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transcript: filepath.Join(home, ".claude", "projects", "-repo", "agent-primary.jsonl")}
 	if err := app.registry().RegisterSession(agent); err != nil {

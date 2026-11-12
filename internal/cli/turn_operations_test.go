@@ -14,6 +14,7 @@ func TestThreadCreateClaudeForwardsAdvancedOptions(t *testing.T) {
 	cwd := t.TempDir()
 	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindClaude}, session: &surface.Session{ID: "claude-new", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: cwd}}
 	app := threadFixture(t, starter)
+	serveCreates(t, app)
 	output, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "claude", "hello", "--cwd", cwd, "--effort", "high", "--permission-mode", "plan", "--json"})
 	})

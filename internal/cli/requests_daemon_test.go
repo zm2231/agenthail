@@ -5,6 +5,7 @@ import (
 	"net"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,13 +19,13 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-func serveTestDaemon(t *testing.T, store *registry.Registry, claudeHome, listen string) func() {
+func serveTestDaemon(t *testing.T, store *registry.Registry, adapters []surface.Surface, listen string) func() {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if err := daemon.New(store, []surface.Surface{surfaces.NewClaude(nil, claudeHome)}).Serve(ctx); err != nil {
+		if err := daemon.New(store, adapters).Serve(ctx); err != nil {
 			t.Errorf("serve: %v", err)
 		}
 	}()
@@ -44,6 +45,17 @@ func serveTestDaemon(t *testing.T, store *registry.Registry, claudeHome, listen 
 // The caller sets HOME first: the dashboard config is written there.
 func startTestDaemon(t *testing.T, app *App, store *registry.Registry, claudeHome string) {
 	t.Helper()
+	serveAppDaemon(t, app, store, []surface.Surface{surfaces.NewClaude(nil, claudeHome)})
+}
+
+func serveCreates(t *testing.T, app *App) func() {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	return serveAppDaemon(t, app, app.registry(), app.allSurfaces())
+}
+
+func serveAppDaemon(t *testing.T, app *App, store *registry.Registry, adapters []surface.Surface) func() {
+	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -53,13 +65,23 @@ func startTestDaemon(t *testing.T, app *App, store *registry.Registry, claudeHom
 	if err := daemon.SaveDashboardConfig(daemon.DashboardConfig{Enabled: true, Listen: listen}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(serveTestDaemon(t, store, claudeHome, listen))
+	stopServing := serveTestDaemon(t, store, adapters, listen)
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			stopServing()
+			app.catalogDaemonRunning = func() bool { return false }
+			app.daemonAPIOverride = nil
+		})
+	}
+	t.Cleanup(stop)
 	client, err := newDaemonAPIClient()
 	if err != nil {
 		t.Fatal(err)
 	}
 	app.catalogDaemonRunning = func() bool { return true }
 	app.daemonAPIOverride = func() (*daemonAPIClient, error) { return client, nil }
+	return stop
 }
 
 func TestTheCLIReadsAndAnswersATerminalQuestionTheDaemonHolds(t *testing.T) {

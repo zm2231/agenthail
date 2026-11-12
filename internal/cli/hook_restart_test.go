@@ -71,7 +71,7 @@ func newPromptRestart(t *testing.T) (*promptRestart, func()) {
 
 func (h *promptRestart) serve() func() {
 	h.t.Helper()
-	return serveTestDaemon(h.t, h.store, h.claude.Home, h.listen)
+	return serveTestDaemon(h.t, h.store, []surface.Surface{surfaces.NewClaude(nil, h.claude.Home)}, h.listen)
 }
 
 func (h *promptRestart) heldRequest() string {

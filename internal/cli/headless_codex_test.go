@@ -24,6 +24,7 @@ func TestHeadlessCodexCLICreatesReadsAndDrivesAThread(t *testing.T) {
 	}
 	t.Cleanup(func() { r.Close() })
 	app := &App{Registry: r, Surfaces: []SurfaceEntry{{Name: "codex", Surface: surfaces.NewCodex("1")}}, DefaultTimeout: 10 * time.Second, catalogDaemonRunning: func() bool { return false }}
+	stop := serveCreates(t, app)
 
 	output, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "Draft the changelog", "--cwd", t.TempDir(), "--alias", "headless", "--json"})
@@ -33,7 +34,8 @@ func TestHeadlessCodexCLICreatesReadsAndDrivesAThread(t *testing.T) {
 		t.Fatalf("create output=%s err=%v", output, err)
 	}
 	id := created.Session.ID
-	if commands := lifecycle.Commands(); len(commands) != 1 || commands[0] != "app-server daemon start" {
+	stop()
+	if commands := lifecycle.Commands(); countOf(commands, "app-server daemon start") != 1 {
 		t.Fatalf("lifecycle commands=%v", commands)
 	}
 
@@ -63,7 +65,7 @@ func TestHeadlessCodexCLICreatesReadsAndDrivesAThread(t *testing.T) {
 	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 3 || thread.Turns[2].User != surface.CLILabel+"After the daemon stopped" {
 		t.Fatalf("thread=%+v", thread)
 	}
-	if commands := lifecycle.Commands(); len(commands) != 2 {
+	if commands := lifecycle.Commands(); countOf(commands, "app-server daemon start") != 2 {
 		t.Fatalf("lifecycle commands=%v, want a second start after the daemon stopped", commands)
 	}
 
@@ -77,7 +79,7 @@ func TestHeadlessCodexCLICreatesReadsAndDrivesAThread(t *testing.T) {
 	if resumes := lifecycle.Daemon().Calls("thread/resume"); len(resumes) != 1 {
 		t.Fatalf("restarted daemon resumes=%v", resumes)
 	}
-	if commands := lifecycle.Commands(); len(commands) != 3 {
+	if commands := lifecycle.Commands(); countOf(commands, "app-server daemon start") != 3 {
 		t.Fatalf("lifecycle commands=%v, want a third start", commands)
 	}
 
@@ -98,7 +100,17 @@ func TestHeadlessCodexCLICreatesReadsAndDrivesAThread(t *testing.T) {
 	if resumes := lifecycle.Daemon().Calls("thread/resume"); len(resumes) != 1 {
 		t.Fatalf("restarted daemon resumes=%v", resumes)
 	}
-	if commands := lifecycle.Commands(); len(commands) != 4 {
+	if commands := lifecycle.Commands(); countOf(commands, "app-server daemon start") != 4 {
 		t.Fatalf("lifecycle commands=%v, want a fourth start", commands)
 	}
+}
+
+func countOf(values []string, want string) int {
+	count := 0
+	for _, value := range values {
+		if value == want {
+			count++
+		}
+	}
+	return count
 }
