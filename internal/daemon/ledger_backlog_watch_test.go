@@ -246,6 +246,26 @@ func TestAnAskAnsweredOnTheParkingHostMakesItsWorkReadyOnTheLedgersOwner(t *test
 	if parked := parkedInNeedsYou(t, owner); len(parked) != 1 || parked[id].WorkItem != id {
 		t.Fatalf("with its ask expired on the parking host, the owner's Needs you = %+v", parked)
 	}
+
+	if _, err := mac.reg.WriteDB().Exec(`UPDATE asks SET state=? WHERE id=?`, registry.AskAnswered, ask); err != nil {
+		t.Fatal(err)
+	}
+	mac.daemon.sweepLedgerBacklog(t.Context(), time.Now())
+	owner.daemon.backlog.mu.Lock()
+	owner.daemon.backlog.asks = nil
+	owner.daemon.backlog.mu.Unlock()
+	keys, err := mac.daemon.ledgerStore().ProjectKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac.daemon.sendAskStates(t.Context(), mac.daemon.ledgerStore(), keys, time.Now())
+	if state := owner.daemon.askState(ledger.ParkQuestion{AskID: ask, HostID: mac.daemon.localHost().ID}); state != "" {
+		t.Fatalf("unchanged states were sent again at once: %q", state)
+	}
+	mac.daemon.sendAskStates(t.Context(), mac.daemon.ledgerStore(), keys, time.Now().Add(ledgerAskStatesEvery))
+	if state := owner.daemon.askState(ledger.ParkQuestion{AskID: ask, HostID: mac.daemon.localHost().ID}); state != registry.AskAnswered {
+		t.Fatalf("an owner that lost its states got %q back, want them resent", state)
+	}
 }
 
 func TestACoordinatorIsToldOnlyItsOwnProjectsBacklog(t *testing.T) {

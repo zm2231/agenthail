@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	decisionParked      = "parked"
-	ledgerAskStatesMost = 100
+	decisionParked       = "parked"
+	ledgerAskStatesMost  = 100
+	ledgerAskStatesEvery = 5 * time.Minute
 )
 
 type backlogWatch struct {
@@ -26,7 +27,12 @@ type backlogWatch struct {
 	local  []usageSet
 	remote []usageSet
 	asks   map[string]map[string]string
-	sent   map[string]map[string]string
+	sent   map[string]sentAsks
+}
+
+type sentAsks struct {
+	states map[string]string
+	at     time.Time
 }
 
 func usageReaderOver(local, remote func() []usageSet, here string, now time.Time) ledger.UsageReader {
@@ -67,7 +73,7 @@ func (d *Daemon) askState(q ledger.ParkQuestion) string {
 }
 
 // sendAskStates tells each remote ledger owner the state of the asks held here that its person parks name, since an owner may not reach this host.
-func (d *Daemon) sendAskStates(ctx context.Context, store *ledger.Store, keys []string) {
+func (d *Daemon) sendAskStates(ctx context.Context, store *ledger.Store, keys []string, now time.Time) {
 	here := d.localHost().ID
 	states := map[string]map[string]string{}
 	for _, key := range keys {
@@ -92,8 +98,9 @@ func (d *Daemon) sendAskStates(ctx context.Context, store *ledger.Store, keys []
 	}
 	for owner, held := range states {
 		d.backlog.mu.Lock()
-		sent := maps.Equal(d.backlog.sent[owner], held)
+		last := d.backlog.sent[owner]
 		d.backlog.mu.Unlock()
+		sent := maps.Equal(last.states, held) && now.Sub(last.at) < ledgerAskStatesEvery
 		host, ok := d.pairedHost(owner)
 		if sent || !ok {
 			continue
@@ -104,9 +111,9 @@ func (d *Daemon) sendAskStates(ctx context.Context, store *ledger.Store, keys []
 		}
 		d.backlog.mu.Lock()
 		if d.backlog.sent == nil {
-			d.backlog.sent = map[string]map[string]string{}
+			d.backlog.sent = map[string]sentAsks{}
 		}
-		d.backlog.sent[owner] = held
+		d.backlog.sent[owner] = sentAsks{states: held, at: now}
 		d.backlog.mu.Unlock()
 	}
 }
@@ -154,7 +161,7 @@ func (d *Daemon) sweepLedgerBacklog(ctx context.Context, now time.Time) {
 	var read struct{ local, remote bool }
 	local := sync.OnceValue(func() []usageSet { read.local = true; return d.localUsageSets(ctx, now) })
 	remote := sync.OnceValue(func() []usageSet { read.remote = true; return d.remoteUsageSets(ctx) })
-	d.sendAskStates(ctx, store, keys)
+	d.sendAskStates(ctx, store, keys, time.Now())
 	readings := ledger.Readings{Usage: usageReaderOver(local, remote, d.localHost().ID, now), Asks: d.ledgerAskReader()}
 	ready := map[string][]string{}
 	for _, key := range keys {
