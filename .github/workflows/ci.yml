@@ -63,22 +63,23 @@ jobs:
         with:
           path: ~/.cache/agenthail-build/playwright
           key: agenthail-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('browser-host/package-lock.json') }}
-      - name: Node host tests
+      - name: Node host modules
+        # verify-linux-daemon runs the Node host tests; --omit=optional leaves out the platform builds, so macOS adds nothing to them.
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
-          npm test --prefix claude-host
           npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
-          AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" npm test --prefix browser-host
+          npm ci --prefix scripts/dashboard-guard --ignore-scripts --no-audit --no-fund
       - name: Cookie bridge dependencies
         working-directory: sidecar
         run: npm ci --ignore-scripts
       - name: Stage the shipped Node
         run: scripts/fetch-node.sh
-      - name: Tests of the packages with macOS code paths
-        # Linux runs every package with -race.
-        run: |
-          packages="$(go run ./scripts/go-darwin-packages ./...)"
-          AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" go test $packages -count=1 -timeout 25m
+      - name: Tests of the packages with macOS code paths, the readability guard and native helpers
+        # Linux runs every package with -race. A gate that did not decide runs the native helper tests.
+        env:
+          FULL: ${{ needs.gate.outputs.full == 'true' || needs.gate.result != 'success' }}
+          GUARD_CACHE: ${{ runner.tool_cache }}/agenthail-cache/chrome-for-testing
+        run: AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" scripts/ci-darwin-tests.sh
       - name: Real Codex app-server tests
         # The tests above skip these when codex is not installed; here each must pass.
         shell: bash
@@ -135,13 +136,6 @@ jobs:
           node scripts/test-dashboard-config-roots.mjs
           node scripts/test-dashboard-devices.mjs
           node scripts/test-session-controls.mjs
-      - name: Dashboard readability guard
-        env:
-          AGENTHAIL_BROWSER_GUARD: "1"
-          AGENTHAIL_BROWSER_CACHE: ${{ runner.tool_cache }}/agenthail-cache/chrome-for-testing
-        run: |
-          npm ci --prefix scripts/dashboard-guard --ignore-scripts --no-audit --no-fund
-          go test ./internal/daemon -run '^TestDashboardTextIsReadableOverEveryBackground$' -count=1 -v
       - name: Public copy check
         run: |
           scripts/test-check-public-copy.sh
@@ -149,6 +143,7 @@ jobs:
       - name: Runner hook tests
         run: |
           scripts/test-ci-runner-job-started.sh
+          scripts/test-ci-concurrently.sh
           scripts/test-ci-full-label.sh
           scripts/test-ci-failure-issue.sh
           scripts/test-ios-ui-tests.sh
@@ -179,10 +174,6 @@ jobs:
           scripts/test-macos-app-resources-check.sh
           bash -n packaging/scripts/preinstall packaging/scripts/postinstall
           python3 -m py_compile sidecar/sidecar.py
-      - name: Native helper tests
-        # A gate that did not decide runs them.
-        if: needs.gate.outputs.full == 'true' || needs.gate.result != 'success'
-        run: scripts/test-native-helpers.sh
       - name: Simulator run guard tests
         if: needs.gate.outputs.full == 'true' || needs.gate.result != 'success'
         run: scripts/test-ios-simulator.sh
