@@ -288,16 +288,23 @@ func TestThreadCreateCodexValidatesInputs(t *testing.T) {
 }
 
 func TestThreadCreateCodexHonorsTimeout(t *testing.T) {
-	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}, wait: true, stopped: make(chan struct{})}
+	entered := make(chan struct{})
+	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}, wait: true, stopped: make(chan struct{}), during: func() { close(entered) }}
 	app := threadFixture(t, starter)
 	serveCreates(t, app)
 	began := time.Now()
-	err := app.Run([]string{"thread", "create", "codex", "hello", "--timeout", "10ms"})
+	// The deadline must outlast the request's trip to the daemon, or the command gives up before any start exists to stop.
+	err := app.Run([]string{"thread", "create", "codex", "hello", "--timeout", "1s"})
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v", err)
 	}
 	if waited := time.Since(began); waited > cancelledWithin {
-		t.Fatalf("the command waited %s past a 10ms --timeout", waited)
+		t.Fatalf("the command waited %s past a 1s --timeout", waited)
+	}
+	select {
+	case <-entered:
+	default:
+		t.Fatal("the create never reached the daemon's start before the command gave up")
 	}
 	select {
 	case <-starter.stopped:
