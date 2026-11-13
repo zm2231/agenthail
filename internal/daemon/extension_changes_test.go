@@ -210,7 +210,7 @@ func TestAChangeCannotBeUndoneUnderALaterOneAndHandEditsAreNotPinnedOnATurn(t *t
 	first := f.changes(t)[0]
 	write("<p>second</p>\n")
 	f.turn(t, "to", "turn-2")
-	unrelated := filepath.Join(f.workdir, "assets", "unrecorded.css")
+	unrelated := filepath.Join(f.workdir, "assets", "app.css")
 	if err := os.WriteFile(unrelated, []byte("p {}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestAChangeCannotBeUndoneUnderALaterOneAndHandEditsAreNotPinnedOnATurn(t *t
 		t.Fatalf("a refused undo touched an unrecorded edit: %q", data)
 	}
 	write("<p>second</p>\n")
-	if err := os.Remove(unrelated); err != nil {
+	if err := os.WriteFile(unrelated, []byte(`body { color: red }`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
