@@ -1,15 +1,21 @@
 // Command go-test-shard prints a go test -run pattern that selects one shard
-// of a package's top-level tests. A test's shard is the FNV-1a hash of its
-// name modulo the shard count, so a new test always lands in exactly one
-// shard without a hand-kept list. Tests are read from the package's source,
-// as go list selects its test files, so nothing in the package runs.
+// of a package's top-level tests. Tests are read from the package's source, as
+// go list selects its test files, so nothing in the package runs.
 //
-//	go run ./scripts/go-test-shard [-names] <shard> <count> <package> [build flags...]
+//	go run ./scripts/go-test-shard [-names] [-seconds <file>] <shard> <count> <package> [build flags...]
+//	go run ./scripts/go-test-shard -record <package import path> < go-test.json > <file>
 //
-// With -names it prints the shard's test names, one per line, instead.
+// With -seconds, tests are dealt longest first to the shard with the least
+// time so far, using the seconds the file records for each test; a test the
+// file lacks counts as the file's median. Without it, a test's shard is the
+// FNV-1a hash of its name modulo the count. Either way every test lands in
+// exactly one shard without a hand-kept list. With -names it prints the
+// shard's test names, one per line, instead. -record reads go test -json
+// output and writes the seconds file for one package.
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +24,8 @@ import (
 	"go/parser"
 	"go/token"
 	"hash/fnv"
+	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,17 +33,34 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
 
 func main() {
 	args := os.Args[1:]
+	if len(args) == 2 && args[0] == "-record" {
+		if err := record(os.Stdin, os.Stdout, args[1]); err != nil {
+			fmt.Fprintf(os.Stderr, "go-test-shard: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	names := len(args) > 0 && args[0] == "-names"
 	if names {
 		args = args[1:]
 	}
-	selected, summary, err := shard(args)
+	var seconds map[string]float64
+	if len(args) > 1 && args[0] == "-seconds" {
+		var err error
+		if seconds, err = readSeconds(args[1]); err != nil {
+			fmt.Fprintf(os.Stderr, "go-test-shard: %v\n", err)
+			os.Exit(1)
+		}
+		args = args[2:]
+	}
+	selected, summary, err := shard(args, seconds)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "go-test-shard: %v\n", err)
 		os.Exit(1)
@@ -56,9 +81,9 @@ func pattern(selected []string) string {
 	return "^(" + strings.Join(quoted, "|") + ")$"
 }
 
-func shard(args []string) ([]string, string, error) {
+func shard(args []string, seconds map[string]float64) ([]string, string, error) {
 	if len(args) < 3 {
-		return nil, "", errors.New("usage: go-test-shard [-names] <shard> <count> <package> [build flags...]")
+		return nil, "", errors.New("usage: go-test-shard [-names] [-seconds <file>] <shard> <count> <package> [build flags...]")
 	}
 	index, err1 := strconv.Atoi(args[0])
 	count, err2 := strconv.Atoi(args[1])
@@ -72,11 +97,19 @@ func shard(args []string) ([]string, string, error) {
 	if len(names) == 0 {
 		return nil, "", fmt.Errorf("%s has no tests", args[2])
 	}
-	selected := shardOf(names, index, count)
+	var selected []string
+	summary := fmt.Sprintf("tests in shard %d of %d", index, count)
+	if seconds == nil {
+		selected = shardOf(names, index, count)
+	} else {
+		var total float64
+		selected, total = balancedShardOf(names, seconds, index, count)
+		summary += fmt.Sprintf(", about %.0fs by the recorded seconds", total)
+	}
 	if len(selected) == 0 {
 		return nil, "", fmt.Errorf("shard %d of %d selects no tests", index, count)
 	}
-	return selected, fmt.Sprintf("%d of %d tests in shard %d of %d", len(selected), len(names), index, count), nil
+	return selected, fmt.Sprintf("%d of %d %s", len(selected), len(names), summary), nil
 }
 
 func shardOf(names []string, shard, count int) []string {
@@ -89,6 +122,132 @@ func shardOf(names []string, shard, count int) []string {
 		}
 	}
 	return selected
+}
+
+// Ties go by name, then to the lowest-numbered shard, so every shard computes the same deal.
+func balancedShardOf(names []string, seconds map[string]float64, shard, count int) ([]string, float64) {
+	fallback := median(seconds)
+	weight := func(name string) float64 {
+		if s, ok := seconds[name]; ok {
+			return s
+		}
+		return fallback
+	}
+	order := append([]string(nil), names...)
+	sort.Slice(order, func(i, j int) bool {
+		wi, wj := weight(order[i]), weight(order[j])
+		if wi != wj {
+			return wi > wj
+		}
+		return order[i] < order[j]
+	})
+	totals := make([]float64, count)
+	var selected []string
+	for _, name := range order {
+		least := 0
+		for i := range totals {
+			if totals[i] < totals[least] {
+				least = i
+			}
+		}
+		totals[least] += weight(name)
+		if least == shard {
+			selected = append(selected, name)
+		}
+	}
+	sort.Strings(selected)
+	return selected, totals[shard]
+}
+
+func median(seconds map[string]float64) float64 {
+	if len(seconds) == 0 {
+		return 1
+	}
+	values := make([]float64, 0, len(seconds))
+	for _, s := range seconds {
+		values = append(values, s)
+	}
+	sort.Float64s(values)
+	return values[len(values)/2]
+}
+
+func readSeconds(path string) (map[string]float64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	seconds := map[string]float64{}
+	scanner := bufio.NewScanner(file)
+	for line := 1; scanner.Scan(); line++ {
+		value, name, ok := strings.Cut(scanner.Text(), "\t")
+		s, err := strconv.ParseFloat(value, 64)
+		if !ok || err != nil || name == "" || strings.ContainsRune(name, '\t') || math.IsNaN(s) || math.IsInf(s, 0) || s < 0 {
+			return nil, fmt.Errorf("%s:%d: want <seconds>\\t<test name>", path, line)
+		}
+		seconds[name] = s
+	}
+	return seconds, scanner.Err()
+}
+
+// A top-level test's seconds run from its start to the last event of it or a
+// subtest, since its Elapsed leaves out parallel subtests that finish after it.
+func record(in io.Reader, out io.Writer, pkg string) error {
+	type event struct {
+		Time    time.Time
+		Action  string
+		Package string
+		Test    string
+		Elapsed float64
+	}
+	started := map[string]time.Time{}
+	last := map[string]time.Time{}
+	seconds := map[string]float64{}
+	decoder := json.NewDecoder(in)
+	for {
+		var e event
+		if err := decoder.Decode(&e); err == io.EOF {
+			break
+		} else if err != nil {
+			return err
+		}
+		if e.Package != pkg || e.Test == "" {
+			continue
+		}
+		top, _, _ := strings.Cut(e.Test, "/")
+		if e.Action == "run" && top == e.Test {
+			started[top] = e.Time
+		}
+		if e.Time.After(last[top]) {
+			last[top] = e.Time
+		}
+		if top == e.Test && (e.Action == "pass" || e.Action == "fail") {
+			seconds[top] = e.Elapsed
+		}
+	}
+	for name, elapsed := range seconds {
+		if start, ok := started[name]; ok {
+			seconds[name] = max(elapsed, last[name].Sub(start).Seconds())
+		}
+	}
+	if len(seconds) == 0 {
+		return fmt.Errorf("no test of %s passed or failed in the input", pkg)
+	}
+	names := make([]string, 0, len(seconds))
+	for name := range seconds {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if seconds[names[i]] != seconds[names[j]] {
+			return seconds[names[i]] > seconds[names[j]]
+		}
+		return names[i] < names[j]
+	})
+	w := bufio.NewWriter(out)
+	for _, name := range names {
+		fmt.Fprintf(w, "%.2f\t%s\n", seconds[name], name)
+	}
+	return w.Flush()
 }
 
 // packageTests lists the top-level tests, examples and fuzz targets go test
