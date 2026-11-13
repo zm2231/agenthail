@@ -99,6 +99,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	turns := newClaudeTurnTracker(replayed.current, closing)
 	turns.meter, turns.between, turns.betweenKnown = replayed.meter, replayed.between, replayed.betweenKnown
 	completed := false
+	calls := newClaudeToolCalls(path)
 	finish := func(ended []claudeTurnEnd) {
 		for _, end := range ended {
 			if uuid != "" && end.TurnID != uuid && end.Status == "" {
@@ -132,6 +133,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if json.Unmarshal(line, &record) != nil {
 				return nil
 			}
+			calls.observe(record, recordOffset)
 			items := claudeTimelineItems(record)
 			turnID, ended, interrupted := turns.observe(record, recordOffset, line, func() int { return len(items) })
 			if interrupted && uuid != "" && turnID == uuid {
@@ -142,6 +144,10 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				return nil
 			}
 			if err := decorateTimelineAttachments(ctx, items, record, "claude", recordOffset); err != nil {
+				return err
+			}
+			items, err := appendSentFiles(ctx, items, calls, record, recordOffset, line)
+			if err != nil {
 				return err
 			}
 			if uuid != "" && turnID != uuid {

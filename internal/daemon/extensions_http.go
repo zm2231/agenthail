@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/nodehost"
@@ -51,6 +52,7 @@ func (d *Daemon) registerExtensionRoutes(mux *http.ServeMux, dashboard *dashboar
 		_, _ = w.Write(extensionSDK)
 	}))
 	mux.HandleFunc("POST /x/{id}/a/{action}", d.apiV1Guard(dashboard, "control", d.extensionActionHandler))
+	mux.HandleFunc("GET /x/{id}/s", d.apiV1Guard(dashboard, "read", d.extensionSourcesHandler))
 	mux.HandleFunc("GET /x/{id}/{path...}", d.apiV1Guard(dashboard, "read", d.extensionPageHandler))
 	mux.HandleFunc("GET /x/{id}", d.apiV1Guard(dashboard, "read", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/x/"+url.PathEscape(r.PathValue("id"))+"/", http.StatusFound)
@@ -342,4 +344,35 @@ func (d *Daemon) apiExtensionChangeHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"change": extensionChangeView{Change: changes[0], Pending: d.pendingExtensionRevs()[changes[0].Rev]}, "patch": patch, "truncated": truncated})
+}
+
+func (d *Daemon) extensionSourcesHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	loaded, ok := d.extensions.snapshot(id)
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "not_found", "No extension "+id+".")
+		return
+	}
+	if loaded.host.State != "loaded" {
+		writeAPIError(w, http.StatusServiceUnavailable, "unavailable", "Extension "+id+" is "+loaded.host.State+"; its sources come back once it loads.")
+		return
+	}
+	params := map[string]any{"id": id}
+	if name := r.URL.Query().Get("name"); name != "" {
+		params["name"] = name
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	var reply json.RawMessage
+	if err := d.extensions.host.Client().Call(ctx, "sources", params, &reply); err != nil {
+		if hostErr, ok := errors.AsType[*nodehost.Error](err); ok && hostErr.Code == "not_found" {
+			writeAPIError(w, http.StatusNotFound, "not_found", hostErr.Message)
+			return
+		}
+		writeAPIError(w, http.StatusServiceUnavailable, "unavailable", "The extension host did not answer: "+err.Error())
+		return
+	}
+	extensionPageHeaders(w)
+	w.Header().Set("Cache-Control", "no-store")
+	writeDashboardJSON(w, http.StatusOK, reply)
 }

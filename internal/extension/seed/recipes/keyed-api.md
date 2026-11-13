@@ -21,13 +21,16 @@ and adds it to each request.
 
    ```ts
    export default function (ah) {
-     ah.action('invoices', async () => {
+     ah.source({ name: 'invoices', everySeconds: 300, collect: async () => {
        const response = await ah.fetch('api', '/v1/invoices?limit=20');
        if (!response.ok) throw new Error(`the API answered ${response.status}`);
        return response.json();
-     });
+     } });
    }
    ```
+
+   The page shows it with `source('invoices', ...)` from the template in
+   `data-page.md`.
 
    Paths only: no absolute URLs and no `Authorization`, `Cookie` or `Host`
    headers.
@@ -52,5 +55,5 @@ and adds it to each request.
 7. Once the person has approved it and named the key, verify:
 
    ```
-   agenthail extensions call <id> invoices
+   agenthail extensions run <id> invoices
    ```

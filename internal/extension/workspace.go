@@ -28,7 +28,7 @@ const (
 var idPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
 
 // read.all also subscribes the extension to every daemon event.
-var Capabilities = []string{"read.all", "control.all", "requests.answer"}
+var Capabilities = []string{"read.all", "control.all", "requests.answer", "tools"}
 
 func Workspace(home string) string { return filepath.Join(home, ".agenthail", "extensions") }
 

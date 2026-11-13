@@ -41,6 +41,9 @@ func init() {
 }
 
 func (d *Daemon) extensionCaller(token string) (*mcpCaller, bool) {
+	if caller, ok := d.extensions.toolCaller(token); ok {
+		return caller, true
+	}
 	id, capabilities, ok := d.extensions.extensionByToken(token)
 	if !ok {
 		return nil, false
@@ -50,4 +53,19 @@ func (d *Daemon) extensionCaller(token string) (*mcpCaller, bool) {
 		label = loaded.ext.Manifest.Label
 	}
 	return &mcpCaller{session: surface.ExtensionSender(id, label), capabilities: capabilities, extension: id}, true
+}
+
+func (r *extensionRuntime) toolCaller(token string) (*mcpCaller, bool) {
+	if r == nil || token == "" {
+		return nil, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	caller, ok := r.callers[token]
+	if !ok {
+		return nil, false
+	}
+	copied := *caller
+	copied.capabilities = slices.Clone(caller.capabilities)
+	return &copied, true
 }
