@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -45,7 +46,7 @@ func (r *streamRoute) reread(ctx context.Context) bool {
 	}
 	stamp := ""
 	if info, err := os.Stat(r.record); err == nil {
-		stamp = surface.Stamp(info).String()
+		stamp = surface.SettledStamp(info, time.Now())
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
