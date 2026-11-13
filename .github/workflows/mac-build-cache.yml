@@ -8,6 +8,7 @@ on:
     paths:
       - native/Package.resolved
       - native/Package.swift
+      - native/Packages/**
       - scripts/build-mac-swift.sh
       - scripts/mac-swift-cache-key.sh
       - .github/workflows/mac-build-cache.yml
@@ -15,6 +16,7 @@ on:
     paths:
       - native/Package.resolved
       - native/Package.swift
+      - native/Packages/**
       - scripts/build-mac-swift.sh
       - scripts/mac-swift-cache-key.sh
       - .github/workflows/mac-build-cache.yml
