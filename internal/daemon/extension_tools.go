@@ -51,22 +51,28 @@ func offerExtensionTools(loaded map[string]*loadedExtension) []offeredExtensionT
 	}
 	sort.Strings(ids)
 	var offered []offeredExtensionTool
-	total := 0
+	var listed []*mcp.Tool
 	for _, id := range ids {
 		ext := loaded[id]
 		ext.offered, ext.toolsNote = nil, ""
 		if ext.host.State != "loaded" || len(ext.host.Tools) == 0 || !slices.Contains(ext.held, extensionToolsCapability) {
 			continue
 		}
-		tools, size, err := extensionMCPTools(id, ext.host.Tools)
-		if err == nil && total+size > extensionToolTotalBytes {
-			err = fmt.Errorf("tools not offered: together with the extensions before it they pass the %d-byte tool budget", extensionToolTotalBytes)
+		tools, err := extensionMCPTools(id, ext.host.Tools)
+		candidate := slices.Clone(listed)
+		for _, tool := range tools {
+			candidate = append(candidate, tool.tool)
+		}
+		if err == nil {
+			if encoded, marshalErr := json.Marshal(candidate); marshalErr != nil || len(encoded) > extensionToolTotalBytes {
+				err = fmt.Errorf("tools not offered: together with the extensions before it they pass the %d-byte tool budget", extensionToolTotalBytes)
+			}
 		}
 		if err != nil {
 			ext.toolsNote = err.Error()
 			continue
 		}
-		total += size
+		listed = candidate
 		for _, tool := range tools {
 			offered = append(offered, tool)
 			ext.offered = append(ext.offered, tool.tool.Name)
@@ -75,30 +81,28 @@ func offerExtensionTools(loaded map[string]*loadedExtension) []offeredExtensionT
 	return offered
 }
 
-func extensionMCPTools(id string, specs []extensionToolSpec) ([]offeredExtensionTool, int, error) {
+func extensionMCPTools(id string, specs []extensionToolSpec) ([]offeredExtensionTool, error) {
 	var tools []offeredExtensionTool
-	size := 0
 	for _, spec := range specs {
 		name := extensionToolName(id, spec.Name)
 		if len(name) > mcpToolNameLimit {
-			return nil, 0, fmt.Errorf("tools not offered: %s is longer than %d characters", name, mcpToolNameLimit)
+			return nil, fmt.Errorf("tools not offered: %s is longer than %d characters", name, mcpToolNameLimit)
 		}
 		var schema map[string]any
 		if err := json.Unmarshal(spec.InputSchema, &schema); err != nil || schema["type"] != "object" {
-			return nil, 0, fmt.Errorf("tools not offered: %s needs an inputSchema with type \"object\"", name)
+			return nil, fmt.Errorf("tools not offered: %s needs an inputSchema with type \"object\"", name)
 		}
 		tool := &mcp.Tool{Name: name, Description: spec.Description, InputSchema: spec.InputSchema}
 		encoded, err := json.Marshal(tool)
 		if err != nil {
-			return nil, 0, fmt.Errorf("tools not offered: %s: %w", name, err)
+			return nil, fmt.Errorf("tools not offered: %s: %w", name, err)
 		}
 		if len(encoded) > extensionToolBytes {
-			return nil, 0, fmt.Errorf("tools not offered: %s is %d bytes, over the %d-byte limit for one tool", name, len(encoded), extensionToolBytes)
+			return nil, fmt.Errorf("tools not offered: %s is %d bytes, over the %d-byte limit for one tool", name, len(encoded), extensionToolBytes)
 		}
-		size += len(encoded)
 		tools = append(tools, offeredExtensionTool{id: id, name: spec.Name, tool: tool})
 	}
-	return tools, size, nil
+	return tools, nil
 }
 
 func (d *Daemon) mcpServerFor(base *mcp.Server) func(*http.Request) *mcp.Server {

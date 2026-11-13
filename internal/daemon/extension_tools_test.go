@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -164,5 +165,99 @@ func TestExtensionToolsPastTheBudgetAreNotOfferedAndSaySo(t *testing.T) {
 		if ext.ID == "a-big" && (len(ext.Tools) != 0 || !strings.Contains(ext.ToolsNote, "budget")) {
 			t.Fatalf("the over-budget extension shows %+v", ext)
 		}
+	}
+}
+
+func sizedToolSpec(t *testing.T, id, name string, size int) extensionToolSpec {
+	t.Helper()
+	spec := extensionToolSpec{Name: name, InputSchema: json.RawMessage(`{"type":"object"}`)}
+	encoded, err := json.Marshal(&mcp.Tool{Name: extensionToolName(id, name), Description: "x", InputSchema: spec.InputSchema})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Description = strings.Repeat("x", size-len(encoded)+1)
+	return spec
+}
+
+func TestTheToolBudgetCountsTheListAsSessionsReceiveIt(t *testing.T) {
+	var specs []extensionToolSpec
+	for i := range 4 {
+		specs = append(specs, sizedToolSpec(t, "full", fmt.Sprintf("t%d", i), extensionToolBytes))
+	}
+	loaded := map[string]*loadedExtension{"full": {held: []string{extensionToolsCapability}, host: extensionHostSummary{State: "loaded", Tools: specs}}}
+	offered := offerExtensionTools(loaded)
+	var listed []*mcp.Tool
+	for _, tool := range offered {
+		listed = append(listed, tool.tool)
+	}
+	encoded, err := json.Marshal(listed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offered) > 0 && len(encoded) > extensionToolTotalBytes {
+		t.Fatalf("offered %d tools whose list is %d bytes, over the %d-byte budget", len(offered), len(encoded), extensionToolTotalBytes)
+	}
+	if len(offered) != 0 || !strings.Contains(loaded["full"].toolsNote, "budget") {
+		t.Fatalf("four 2048-byte tools are 8192 bytes before the list's brackets and commas; offered %d, note %q", len(offered), loaded["full"].toolsNote)
+	}
+}
+
+const heldToolServer = `
+import fs from 'node:fs';
+import path from 'node:path';
+
+export default async function (ah: any) {
+  while (fs.existsSync(path.join(ah.dir, 'hold-load'))) await new Promise(resolve => setTimeout(resolve, 20));
+  if (fs.existsSync(path.join(ah.dir, 'no-tool'))) return;
+  ah.tool({ name: 'peek', description: 'Peek', run: () => 'ok' });
+}
+`
+
+func TestAToolTheReloadRemovesIsNotListedWhileTheReloadRuns(t *testing.T) {
+	home := extensionTestHome(t)
+	writeToolExtension(t, home, "held", `{"label": "Held", "capabilities": ["tools"]}`, heldToolServer)
+	f := startExtensionDaemon(t, home, extensionDaemonOptions{})
+	f.awaitAllLoaded(t, "held")
+	f.approve(t, "held")
+	from, err := f.d.Registry.Session("from")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := mcpSession(t, f.server, issueMCPToken(t, f.d, *from))
+	if names := listedToolNames(t, session); !slices.Contains(names, "ext_held_peek") {
+		t.Fatalf("before the reload the session lists %v", names)
+	}
+
+	dir := filepath.Join(extension.Workspace(home), "held")
+	for _, name := range []string{"no-tool", "hold-load"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reloaded := make(chan error, 1)
+	go func() { reloaded <- f.d.reloadExtensions(context.Background()) }()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := poll.Until(ctx, 10*time.Millisecond, func() (bool, error) {
+		f.d.extensions.mu.Lock()
+		defer f.d.extensions.mu.Unlock()
+		return f.d.extensions.reloading, nil
+	}); err != nil {
+		t.Fatal("the reload never started")
+	}
+	if names := listedToolNames(t, session); slices.Contains(names, "ext_held_peek") {
+		t.Fatalf("while the reload that removes it runs, the session still lists %v", names)
+	}
+	if result, err := session.CallTool(t.Context(), callParams("ext_held_peek", nil)); err == nil && !result.IsError {
+		t.Fatalf("a tool the running reload removes still answered %v", result.StructuredContent)
+	}
+	if err := os.Remove(filepath.Join(dir, "hold-load")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-reloaded; err != nil {
+		t.Fatal(err)
+	}
+	if names := listedToolNames(t, session); slices.Contains(names, "ext_held_peek") {
+		t.Fatalf("after the reload the session lists %v", names)
 	}
 }

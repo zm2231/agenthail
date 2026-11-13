@@ -204,6 +204,8 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	r.loaded = next
 	r.tokens = tokens
 	r.reloading = true
+	r.tools = nil
+	r.toolServer = nil
 	r.generation++
 	r.mu.Unlock()
 	err = r.host.Client().Call(ctx, "load", map[string]any{"extensions": specs, "writeTools": extensionWriteTools()}, &status)

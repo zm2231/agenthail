@@ -67,7 +67,8 @@ size. Extensions are counted in id order, and one that would pass either limit
 offers none of its tools; `agenthail extensions list` and the dashboard say
 why. The MCP endpoint is stateless and sends no `list_changed`, so a session
 sees tools added or removed when it next starts or resumes, and a call to a
-tool no longer offered answers `not_found`.
+tool no longer offered is refused. While a reload runs, sessions are offered
+no extension tools.
 
 `run(input, {caller, ah})` gets `caller` as `{kind: "session", sessionId,
 actor}`. `ctx.ah.call` uses a token that lives for the call (at most 60
