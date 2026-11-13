@@ -152,8 +152,14 @@ func (d *Daemon) askPersonToGrant(sessionID, kind, id, mountName string, key *pr
 	return actionFailed(http.StatusForbidden, "ask_the_person", "Only the person can do this. They were asked on their devices ("+ask.ID+"); it applies when they approve.")
 }
 
-func (d *Daemon) answerExtensionGrant(ctx context.Context, ask registry.Ask, response surface.Response, p principal) (actionResult, error) {
-	if p.Kind == principalSession && !p.ForPerson {
+// No session answers for the person here, not even one that may act for
+// them elsewhere: the session asking could otherwise approve its own request.
+func answeredByThePerson(p principal, by string) bool {
+	return p.Kind != principalSession && by == registry.AskToPerson
+}
+
+func (d *Daemon) answerExtensionGrant(ctx context.Context, ask registry.Ask, response surface.Response, p principal, by string) (actionResult, error) {
+	if !answeredByThePerson(p, by) {
 		return actionResult{}, actionFailed(http.StatusForbidden, "forbidden", "only the person approves extensions")
 	}
 	if len(response.Choices) != 1 || (response.Choices[0] != extensionGrantYes && response.Choices[0] != extensionGrantNo) {

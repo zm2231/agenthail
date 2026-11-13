@@ -379,9 +379,8 @@ func clipText(text string, limit int) string {
 	return string(runes[:limit-1]) + "…"
 }
 
-// An agent keeping its own change is not the person keeping it.
-func (d *Daemon) answerExtensionChange(ctx context.Context, ask registry.Ask, response surface.Response, p principal) (actionResult, error) {
-	if p.Kind == principalSession && !p.ForPerson {
+func (d *Daemon) answerExtensionChange(ctx context.Context, ask registry.Ask, response surface.Response, p principal, by string) (actionResult, error) {
+	if !answeredByThePerson(p, by) {
 		return actionResult{}, actionFailed(http.StatusForbidden, "forbidden", "only the person keeps or undoes a change to extensions")
 	}
 	if len(response.Choices) != 1 || (response.Choices[0] != extensionKeep && response.Choices[0] != extensionUndo) {

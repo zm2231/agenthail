@@ -1,16 +1,21 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/extension"
+	"github.com/zm2231/agenthail/internal/poll"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestBuildStartsAPersonSessionInTheExtensionsFolderWithItsGuide(t *testing.T) {
@@ -175,6 +180,23 @@ func TestApprovingFromASessionAsksThePersonAndGrantsOnlyWhatTheyWereShown(t *tes
 	if grant, _ := f.d.extensions.approvals.Granted("notes"); len(grant.Capabilities) != 0 {
 		t.Fatalf("the session's approve granted %+v before the person answered", grant)
 	}
+	session, err := reg.Session("to")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actingForThePerson := sessionPrincipal("from")
+	actingForThePerson.ForPerson = true
+	for _, ask := range []registry.Ask{asks[0], mustOpenChangeAsk(t, reg, "to")} {
+		if _, err := f.d.answerAsk(context.Background(), nil, session, ask.ID, surface.Response{Choices: []string{ask.Questions[0].Options[0].ID}}, actingForThePerson, "", ""); !strings.Contains(fmt.Sprint(err), "only the person") {
+			t.Fatalf("a session acting for the person answered %s: %v", ask.Origin, err)
+		}
+	}
+	if len(openGrantAsks(t, reg, "to")) != 1 {
+		t.Fatal("a refused answer closed the grant ask")
+	}
+	if grant, _ := f.d.extensions.approvals.Granted("notes"); len(grant.Capabilities) != 0 {
+		t.Fatalf("a session acting for the person granted %+v", grant)
+	}
 	if status := f.answer(t, asks[0], extensionGrantYes); status != http.StatusOK {
 		t.Fatalf("the person's approval answered %d", status)
 	}
@@ -199,5 +221,52 @@ func TestApprovingFromASessionAsksThePersonAndGrantsOnlyWhatTheyWereShown(t *tes
 	}
 	if status := f.answer(t, asks[0], extensionGrantNo); status != http.StatusOK || len(openGrantAsks(t, reg, "to")) != 0 {
 		t.Fatalf("declining answered %d", status)
+	}
+}
+
+func mustOpenChangeAsk(t *testing.T, reg *registry.Registry, sessionID string) registry.Ask {
+	t.Helper()
+	ask, open := openChangeAsk(t, reg, sessionID)
+	if !open {
+		t.Fatalf("%s has no open change ask", sessionID)
+	}
+	return ask
+}
+
+func TestARunThatAReloadOverlapsIsNotRecordedAsACheck(t *testing.T) {
+	f := startExtensionFixture(t)
+	type outcome struct {
+		status int
+		result extensionCallResult
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		status, result := f.call(t, "fixture", map[string]any{"action": "held"})
+		done <- outcome{status, result}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := poll.Until(ctx, 20*time.Millisecond, func() (bool, error) {
+		_, err := os.Stat(filepath.Join(f.workdir, "held-started"))
+		return err == nil, nil
+	}); err != nil {
+		t.Fatal("the held action never started")
+	}
+	before, _ := f.d.extensions.snapshot("fixture")
+	if err := f.d.reloadExtensions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.workdir, "held-release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := <-done
+	if got.status != http.StatusOK || string(got.result.Result) != `"released"` {
+		t.Fatalf("the held action answered %d %+v", got.status, got.result)
+	}
+	if got.result.Tree != "" {
+		t.Fatalf("a run a reload overlapped was recorded against %s", got.result.Tree)
+	}
+	if _, ok := f.d.extensions.calls.verified("fixture", before.tree); ok {
+		t.Fatal("a run a reload overlapped checks the version loaded before it")
 	}
 }

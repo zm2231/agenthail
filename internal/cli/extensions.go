@@ -282,6 +282,7 @@ func printExtensionCall(data []byte) error {
 	var view struct {
 		Result   json.RawMessage `json:"result"`
 		Ran      string          `json:"ran"`
+		Tree     string          `json:"tree"`
 		Reloaded bool            `json:"reloaded"`
 	}
 	if err := json.Unmarshal(data, &view); err != nil {
@@ -291,6 +292,9 @@ func printExtensionCall(data []byte) error {
 		fmt.Println("[extensions] loaded the folder as it is now")
 	}
 	fmt.Printf("[extensions] %s ran ok\n", view.Ran)
+	if view.Tree == "" {
+		fmt.Println("[extensions] not recorded as a check: the folder changed or the extensions reloaded while it ran; run it again")
+	}
 	if len(view.Result) > 0 {
 		fmt.Println(string(view.Result))
 	}

@@ -208,6 +208,9 @@ func (d *Daemon) callExtension(ctx context.Context, id string, request extension
 	} else {
 		out.Result, err = d.runExtensionAction(ctx, id, loaded.host.Actions, request.Action, request.Input, caller)
 	}
+	if d.extensions.loads() != loaded.generation {
+		call.Tree, out.Tree = "", ""
+	}
 	call.At, call.OK = time.Now(), err == nil
 	if err != nil {
 		call.Error = err.Error()
@@ -265,8 +268,9 @@ func (d *Daemon) runExtensionJobNow(ctx context.Context, id string, jobs []exten
 }
 
 type extensionSnapshot struct {
-	tree string
-	host extensionHostSummary
+	tree       string
+	host       extensionHostSummary
+	generation uint64
 }
 
 func (r *extensionRuntime) snapshot(id string) (extensionSnapshot, bool) {
@@ -276,7 +280,13 @@ func (r *extensionRuntime) snapshot(id string) (extensionSnapshot, bool) {
 	if !ok {
 		return extensionSnapshot{}, false
 	}
-	return extensionSnapshot{tree: loaded.tree, host: loaded.host}, true
+	return extensionSnapshot{tree: loaded.tree, host: loaded.host, generation: r.generation}, true
+}
+
+func (r *extensionRuntime) loads() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.generation
 }
 
 func extensionNotFound(message string) error {

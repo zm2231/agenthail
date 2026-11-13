@@ -521,9 +521,9 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 	case registry.AskOriginLedger:
 		return d.answerLedger(ctx, ask, response, p)
 	case registry.AskOriginExtensionChange:
-		return d.answerExtensionChange(ctx, ask, response, p)
+		return d.answerExtensionChange(ctx, ask, response, p, by)
 	case registry.AskOriginExtensionGrant:
-		return d.answerExtensionGrant(ctx, ask, response, p)
+		return d.answerExtensionGrant(ctx, ask, response, p, by)
 	}
 	request := askRequest(ask)
 	decision, err := request.Resolve(response)

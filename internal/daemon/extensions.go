@@ -76,6 +76,8 @@ type extensionRuntime struct {
 	hostErr   string
 	up        bool
 	reloading bool
+	// generation counts loads; a run that saw it change may have run other code.
+	generation uint64
 }
 
 func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, error)) {
@@ -181,6 +183,7 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	r.loaded = next
 	r.tokens = tokens
 	r.reloading = true
+	r.generation++
 	r.mu.Unlock()
 	err = r.host.Client().Call(ctx, "load", map[string]any{"extensions": specs, "writeTools": extensionWriteTools()}, &status)
 	now := time.Now()

@@ -62,6 +62,11 @@ export default async function (ah: any) {
   });
   ah.action('create', () => ah.call('agenthail_create', { surface: 'claude', message: 'hi' }));
   ah.action('caller', (_: unknown, ctx: any) => ctx.caller);
+  ah.action('held', async () => {
+    fs.writeFileSync(path.join(ah.dir, 'held-started'), '');
+    while (!fs.existsSync(path.join(ah.dir, 'held-release'))) await new Promise(resolve => setTimeout(resolve, 20));
+    return 'released';
+  });
 }
 `
 
