@@ -242,9 +242,9 @@ type actionGate struct {
 	movedTo atomic.Pointer[string]
 }
 
-// failSnapshots ends every catalog stream and refuses snapshots and new
-// streams until snapshotsDown is cleared. Closing connections instead can
-// miss a stream that has not answered yet, which net/http then retries.
+// failSnapshots ends every catalog stream, including one that has not
+// answered yet, and refuses snapshots and new streams until snapshotsDown is
+// cleared.
 func (g *actionGate) failSnapshots() {
 	g.cutMu.Lock()
 	defer g.cutMu.Unlock()
