@@ -1,0 +1,57 @@
+name: Mac build cache
+
+# A tag's run restores only caches saved on the default branch, so the release
+# reads the Mac app's Swift build that main saves here.
+on:
+  push:
+    branches: [main]
+    paths:
+      - native/Package.resolved
+      - native/Package.swift
+      - native/Packages/**
+      - scripts/build-mac-swift.sh
+      - scripts/mac-swift-cache-key.sh
+      - .github/workflows/mac-build-cache.yml
+  pull_request:
+    paths:
+      - native/Package.resolved
+      - native/Package.swift
+      - native/Packages/**
+      - scripts/build-mac-swift.sh
+      - scripts/mac-swift-cache-key.sh
+      - .github/workflows/mac-build-cache.yml
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-build-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swift-release-build:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - id: key
+        run: echo "key=$(scripts/mac-swift-cache-key.sh)" >> "$GITHUB_OUTPUT"
+      - id: saved
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/restore@v5
+        with:
+          path: native/.build
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+      - name: Build the Mac app's Swift product
+        if: steps.saved.outputs.cache-hit != 'true'
+        run: scripts/build-mac-swift.sh arm64
+      - uses: actions/cache/save@v5
+        if: github.ref == 'refs/heads/main' && steps.saved.outputs.cache-hit != 'true'
+        with:
+          path: native/.build
+          key: ${{ steps.key.outputs.key }}

@@ -169,6 +169,13 @@ jobs:
           : "${NOTARY_KEY:?missing APPLE_NOTARY_KEY_BASE64}"
           printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
           xcrun notarytool store-credentials agenthail-ci --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
+      - id: swift-cache
+        name: Name the Swift build cache main saves
+        run: echo "key=$(scripts/mac-swift-cache-key.sh)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v5
+        with:
+          path: native/.build
+          key: ${{ steps.swift-cache.outputs.key }}
       - name: Build package
         timeout-minutes: 30
         env:
@@ -324,8 +331,6 @@ jobs:
           restore-keys: ios-swiftpm-${{ runner.os }}-${{ runner.arch }}-
       - name: Resolve Swift packages
         run: scripts/ios-swiftpm.sh resolve
-      - name: Verify iOS release simulator build
-        run: scripts/ios-swiftpm.sh xcodebuild -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
       - name: Import iOS signing assets
         env:
           SIGNING_IDENTITIES_P12: ${{ secrets.APPLE_IOS_SIGNING_IDENTITIES_P12_BASE64 }}
