@@ -24,8 +24,7 @@ const (
 	ClaudeSourceCloudProvider = "cloud_provider"
 )
 
-// claudeProviderSwitches are the variables that send Claude to a cloud
-// provider instead of Anthropic's API, in the order Claude checks them.
+// In the order Claude checks them.
 var claudeProviderSwitches = []struct{ name, source string }{
 	{"CLAUDE_CODE_USE_BEDROCK", ClaudeSourceBedrock},
 	{"CLAUDE_CODE_USE_VERTEX", ClaudeSourceVertex},
@@ -44,8 +43,6 @@ var claudeSourceNames = map[string]struct{ title, phrase string }{
 	ClaudeSourceCloudProvider: {"cloud provider", "a cloud provider"},
 }
 
-// ClaudeLoginTitle names an api_key or signed_out login for a person, or is
-// empty for a login that names itself by its account or proxy.
 func ClaudeLoginTitle(login, source string) string {
 	switch login {
 	case ClaudeLoginAPIKey:
@@ -59,7 +56,6 @@ func ClaudeLoginTitle(login, source string) string {
 	return ""
 }
 
-// ClaudeLoginPhrase is what an api_key login uses, as a sentence names it.
 func ClaudeLoginPhrase(source string) string {
 	if name, ok := claudeSourceNames[source]; ok {
 		return name.phrase
@@ -69,10 +65,8 @@ func ClaudeLoginPhrase(source string) string {
 
 var claudeAPIKeyEnv = []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"}
 
-// ClaudeRootLogin is how a Claude the host launches with root signs in, and
-// for an api_key login what it uses. The host launches Claude with its own
-// environment, which the root's settings.json env overrides. Only whether a
-// variable is set is read; no credential leaves this function.
+// ClaudeRootLogin reads the environment the host launches Claude with, its
+// own, under the root's settings.json env, and only whether each variable is set.
 func ClaudeRootLogin(home string, root ClaudeConfigRoot) (login, source string) {
 	if root.Proxy != "" {
 		return ClaudeLoginProxy, ""

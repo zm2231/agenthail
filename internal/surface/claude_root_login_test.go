@@ -28,6 +28,7 @@ func TestEachWayClaudeSignsInIsRecognisedFromTheEnvironmentItIsLaunchedWith(t *t
 		{"CLAUDE_CODE_USE_VERTEX", "true", ClaudeSourceVertex},
 		{"CLAUDE_CODE_USE_FOUNDRY", "yes", ClaudeSourceFoundry},
 		{"CLAUDE_CODE_USE_ANTHROPIC_AWS", "on", ClaudeSourceCloudProvider},
+		{"CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD", "TRUE", ClaudeSourceCloudProvider},
 		{"CLAUDE_CODE_USE_MANTLE", "1", ClaudeSourceCloudProvider},
 	} {
 		t.Run(path.name, func(t *testing.T) {
@@ -37,6 +38,14 @@ func TestEachWayClaudeSignsInIsRecognisedFromTheEnvironmentItIsLaunchedWith(t *t
 				t.Fatalf("%s set: login=%q source=%q, want api_key %q", path.name, login, source, path.source)
 			}
 		})
+	}
+}
+
+func TestAKeyStoredInTheRootsGlobalConfigSignsItIn(t *testing.T) {
+	home, root := claudeLoginRoot(t)
+	writeClaudeGlobalConfigFixture(t, ClaudeGlobalConfigPath(home, root.Root), map[string]any{"primaryApiKey": "sk-stored"})
+	if login, source := ClaudeRootLogin(home, root); login != ClaudeLoginAPIKey || source != ClaudeSourceAPIKey {
+		t.Fatalf("a stored key: login=%q source=%q", login, source)
 	}
 }
 
