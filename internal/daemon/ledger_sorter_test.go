@@ -502,6 +502,26 @@ func TestAMessageRecordedFirstButQueuedSecondIsNotAskedTwice(t *testing.T) {
 	}
 }
 
+func TestWhileTheSorterIsDownAMessageHeldBehindAnotherIsAskedOnceBeforeTheRetry(t *testing.T) {
+	stub := &sorterStub{answer: func(string) (int, string) { return http.StatusServiceUnavailable, "down" }}
+	d, _, _, p, _ := sorterFixture(t, stub)
+	runSorter(t, d)
+	first, second := ledger.PromptRef("first"), ledger.PromptRef("second")
+	firstSeq := recordIn(t, p, first, "recorded first")
+	secondSeq := recordIn(t, p, second, "recorded second")
+	d.queueSort(p.key, second, secondSeq, time.Now())
+	d.queueSort(p.key, first, firstSeq, time.Now())
+	eventually(t, "the held message to be asked", func() bool { return len(d.sorter.heldJobs()) == 0 && len(stub.asks()) >= 2 })
+	time.Sleep(200 * time.Millisecond)
+	counts := map[string]int{}
+	for _, a := range stub.asks() {
+		counts[a.Message]++
+	}
+	if counts["recorded first"] != 1 || counts["recorded second"] != 1 || d.sorterHealth().Failures != 2 {
+		t.Fatalf("asks per message = %v, failures = %d; want each asked once until the retry", counts, d.sorterHealth().Failures)
+	}
+}
+
 func TestAMessageBothOwedAtStartAndQueuedIsAskedOnce(t *testing.T) {
 	for name, answer := range map[string]func(string) (int, string){
 		"answered without a goal": func(string) (int, string) {
