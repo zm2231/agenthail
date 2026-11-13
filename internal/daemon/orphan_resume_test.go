@@ -182,7 +182,12 @@ func TestAPIPersonSendToEndedBackgroundJobResumesItInTheHostAndDeliversOnce(t *t
 	if code, _ := f.sendAsPerson(t, "orphan-2", "next"); code != http.StatusOK || f.resumes(t) != 1 {
 		t.Fatalf("second send status=%d resumes=%d", code, f.resumes(t))
 	}
-	testkit.Eventually(t, "the second turn", 15*time.Second, func() bool { return len(f.turns(t)) == 2 })
+	// The first turn is recorded before it ends, so the second send may find
+	// the session busy and queue; the daemon's loop sends it once the turn ends.
+	testkit.Eventually(t, "the second turn", 15*time.Second, func() bool {
+		f.daemon.scanAndRelay(context.Background())
+		return len(f.turns(t)) == 2
+	})
 }
 
 func TestAPIAgentSendToEndedBackgroundJobResumesItAndTakesItsSocket(t *testing.T) {
