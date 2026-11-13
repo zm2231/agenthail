@@ -88,7 +88,7 @@ enum HostProblem: Equatable {
 
     static func summary(_ failing: [Failing], hostCount: Int, tailnetUp: () -> Bool) -> String? {
         guard !failing.isEmpty else { return nil }
-        if failing.allSatisfy({ $0.problem == .offline }) { return HostProblem.offline.message }
+        if failing.allSatisfy({ $0.problem != nil }), failing.contains(where: { $0.problem == .offline }) { return HostProblem.offline.message }
         if failing.allSatisfy({ $0.problem != nil && Tailnet.names($0.endpoint) }), !tailnetUp() { return tailnetOff }
         if hostCount == 1 { return failing[0].error }
         return failing.map { "\($0.name): \($0.error)" }.joined(separator: "\n")

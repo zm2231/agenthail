@@ -191,6 +191,24 @@ final class HostDropTests: XCTestCase {
         XCTAssertTrue((model.connectionError ?? "").hasPrefix("Didn't answer within"), "the reason: \(model.connectionError ?? "nil")")
     }
 
+    func testAServerErrorAfterATimeoutIsNotBlamedOnTheNetwork() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        let connection = try XCTUnwrap(model.connection("hdrop"))
+        connection.grace.window = 0.2
+        model.tailnetUp = { false }
+        HostDropProtocol.state.setSnapshotTimesOut(true)
+        model.resumeConnection()
+        for _ in 0..<300 where model.connectionError != HostProblem.tailnetOff { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.connectionError, HostProblem.tailnetOff)
+        HostDropProtocol.state.setSnapshotTimesOut(false)
+        HostDropProtocol.state.setSnapshotFails(true)
+        model.resumeConnection()
+        for _ in 0..<300 where model.connectionError == HostProblem.tailnetOff { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNotEqual(model.connectionError, HostProblem.tailnetOff, "an HTTP error kept the earlier network diagnosis")
+        XCTAssertNil(connection.problem)
+    }
+
     func testAFailureAfterALongAbsenceIsShownAtOnce() async throws {
         let model = try await connectedModel()
         defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }

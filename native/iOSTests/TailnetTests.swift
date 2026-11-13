@@ -58,5 +58,7 @@ final class TailnetTests: XCTestCase {
         let a = HostProblem.Failing(name: "a", error: HostProblem.offline.message, problem: .offline, endpoint: URL(string: "https://a.example.ts.net")!)
         let b = HostProblem.Failing(name: "b", error: HostProblem.offline.message, problem: .offline, endpoint: URL(string: "https://b.example.ts.net")!)
         XCTAssertEqual(HostProblem.summary([a, b], hostCount: 2, tailnetUp: { false }), HostProblem.offline.message)
+        let slow = HostProblem.Failing(name: "b", error: "Didn't answer within 8 s.", problem: .timedOut(8), endpoint: URL(string: "https://b.example.ts.net")!)
+        XCTAssertEqual(HostProblem.summary([a, slow], hostCount: 2, tailnetUp: { false }), HostProblem.offline.message, "no internet is the cause even when another request timed out first")
     }
 }

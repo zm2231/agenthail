@@ -197,8 +197,7 @@ final class HostConnection {
             }
             adoptCurrentView(readCurrent)
             if settles {
-                connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The computer could not refresh its agents.") : nil
-                problem = nil
+                show(loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The computer could not refresh its agents.") : nil)
             }
             delegate?.hostDidChange(self)
             await delegate?.hostRefreshed(self)
@@ -215,7 +214,7 @@ final class HostConnection {
                 drops?.failed(host: id, path: "request", error: ConnectionDropLog.code(error), elapsed: elapsed, shown: shownReachable ? .held : .offline)
             }
             guard settles else { return false }
-            connectionError = HostProblem(error, waited: elapsed)?.message ?? error.localizedDescription
+            show(error, waited: elapsed)
             delegate?.hostDidChange(self)
             return false
         }
@@ -302,8 +301,7 @@ final class HostConnection {
         reachable = false
         holding = false
         reconnecting = false
-        problem = nil
-        connectionError = hostProtocol < AgenthailAPI.snapshotProtocol ? "Update Agenthail on \(name) to connect." : apiError.localizedDescription
+        show(hostProtocol < AgenthailAPI.snapshotProtocol ? "Update Agenthail on \(name) to connect." : apiError.localizedDescription)
         delegate?.hostDidChange(self)
         return true
     }
@@ -312,8 +310,7 @@ final class HostConnection {
         guard let probeError else {
             recovered(by: "stream probe")
             reconnecting = true
-            connectionError = nil
-            problem = nil
+            show(nil)
             delegate?.hostDidChange(self)
             return
         }
@@ -340,6 +337,16 @@ final class HostConnection {
         drops?.failed(host: host, via: id, path: "request", error: "relay.\(code)", elapsed: nil, shown: .offline)
     }
 
+    private func show(_ message: String?) {
+        connectionError = message
+        problem = nil
+    }
+
+    private func show(_ error: Error, waited: TimeInterval?) {
+        problem = HostProblem(error, waited: waited)
+        connectionError = problem?.message ?? error.localizedDescription
+    }
+
     private func recordFailure(_ error: Error, during step: String, elapsed: TimeInterval? = nil) {
         let held = (reachable || holding) && grace.holds(error)
         drops?.failed(host: id, path: step, error: ConnectionDropLog.code(error), elapsed: elapsed, shown: held ? .held : .offline)
@@ -351,8 +358,7 @@ final class HostConnection {
         reachable = false
         holding = held
         reconnecting = held
-        problem = held ? nil : HostProblem(error, waited: elapsed)
-        connectionError = held ? nil : problem?.message ?? error.localizedDescription
+        if held { show(nil) } else { show(error, waited: elapsed) }
         delegate?.hostDidChange(self)
     }
 

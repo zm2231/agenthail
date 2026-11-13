@@ -40,7 +40,7 @@ extension XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         var upward = true
         var swipes = 0
-        while !row.waitForExistence(timeout: 1) {
+        while !row.waitForExistence(timeout: min(1, max(0, deadline.timeIntervalSinceNow))) {
             guard Date() < deadline else { return false }
             let list = app.collectionViews.firstMatch
             let target = list.exists ? list : app
@@ -54,10 +54,20 @@ extension XCTestCase {
     func reveal(_ row: XCUIElement, in app: XCUIApplication, value: String, matching: Bool = true, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if reveal(row, in: app, timeout: max(1, deadline.timeIntervalSinceNow)), ((row.value as? String) == value) == matching { return true }
-            Thread.sleep(forTimeInterval: 0.5)
+            if reveal(row, in: app, timeout: max(0, deadline.timeIntervalSinceNow)), ((row.value as? String) == value) == matching { return true }
+            Thread.sleep(forTimeInterval: min(0.5, max(0, deadline.timeIntervalSinceNow)))
         } while Date() < deadline
         return false
+    }
+
+    func showAllSessions(in app: XCUIApplication) {
+        app.tab("Sessions").tapWhenReady(timeout: 20)
+        let scopeAll = app.buttons["scope-all"]
+        for _ in 0..<12 where !scopeAll.isHittable {
+            let list = app.collectionViews.firstMatch
+            (list.exists ? list : app).swipeDown()
+        }
+        scopeAll.tapWhenReady(timeout: 20)
     }
 
     func requireLive(_ condition: Bool, _ message: String, _ app: XCUIApplication) {

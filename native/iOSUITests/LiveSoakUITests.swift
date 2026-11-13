@@ -39,10 +39,7 @@ final class LiveSoakUITests: XCTestCase {
                 print("ios-soak: iteration \(iteration) \(step) ok at \(Int(Date().timeIntervalSince(end) + seconds)) s")
             }
 
-            app.tab("Sessions").tapWhenReady(timeout: 20)
-            let scopeAll = app.buttons["scope-all"]
-            for _ in 0..<6 where !scopeAll.isHittable { app.swipeDown() }
-            scopeAll.tapWhenReady(timeout: 20)
+            showAllSessions(in: app)
             app.swipeUp()
             app.swipeDown()
             up("sessions list")
