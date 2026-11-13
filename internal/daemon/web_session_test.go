@@ -214,3 +214,55 @@ func TestAMountPortTakesAWebSessionForItsAppOnlyAndKeepsTheCookieFromIt(t *testi
 		t.Fatalf("POST with a read-only web session: %d", status)
 	}
 }
+
+func TestWebSessionsStayBoundedAndDropTheSoonestToExpire(t *testing.T) {
+	var sessions webSessions
+	now := time.Now()
+	sessions.now = func() time.Time { return now }
+	first, _, err := sessions.mint("minter", []string{"read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range webSessionLimit {
+		now = now.Add(time.Millisecond)
+		if _, _, err := sessions.mint("minter", []string{"read"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(sessions.byID); n != webSessionLimit {
+		t.Fatalf("%d sessions held, want %d", n, webSessionLimit)
+	}
+	if _, ok := sessions.find(first); ok {
+		t.Fatal("the oldest session survived going over the limit")
+	}
+	now = now.Add(webSessionLifetime)
+	if _, _, err := sessions.mint("minter", []string{"read"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(sessions.byID); n != 1 {
+		t.Fatalf("minting after every session expired left %d", n)
+	}
+}
+
+func TestWebSessionsMintAndFindConcurrently(t *testing.T) {
+	var sessions webSessions
+	done := make(chan string, 64)
+	for range 64 {
+		go func() {
+			value, _, err := sessions.mint("minter", []string{"read"})
+			if err != nil {
+				done <- ""
+				return
+			}
+			if _, ok := sessions.find(value); !ok {
+				value = ""
+			}
+			done <- value
+		}()
+	}
+	for range 64 {
+		if <-done == "" {
+			t.Fatal("a session minted concurrently could not be found")
+		}
+	}
+}

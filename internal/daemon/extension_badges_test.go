@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -135,5 +137,36 @@ func TestAnExtensionSetsItsBadgeThroughAh(t *testing.T) {
 	}
 	if _, reply := f.action(t, "bad-badge", nil); string(reply["result"]) != `"invalid"` {
 		t.Fatalf("an invalid badge answered %s", reply["result"])
+	}
+}
+
+func TestTheLastBadgeChangeIsAlwaysPublishedEvenAsTheTimerFires(t *testing.T) {
+	previous := extensionBadgeInterval
+	extensionBadgeInterval = 5 * time.Millisecond
+	t.Cleanup(func() { extensionBadgeInterval = previous })
+	var badges extensionBadges
+	var mu sync.Mutex
+	var published []string
+	publish := func(id string) {
+		value := badges.get(id, "")
+		mu.Lock()
+		published = append(published, value)
+		mu.Unlock()
+	}
+	for round := range 200 {
+		badges.set("fixture", "", strconv.Itoa(round+1), publish)
+		time.Sleep(time.Duration(round%7) * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	err := poll.Until(ctx, 5*time.Millisecond, func() (bool, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(published) > 0 && published[len(published)-1] == "200", nil
+	})
+	if err != nil {
+		mu.Lock()
+		defer mu.Unlock()
+		t.Fatalf("the last publish saw %q, want 200", published[len(published)-1])
 	}
 }
