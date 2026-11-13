@@ -35,6 +35,12 @@ final class LiveBackAfterReconnectUITests: XCTestCase {
             }
             requireLive(reveal(upRow, in: app, timeout: 60), "the running host's conversation is listed", app)
             let before = alerts
+            if round == 1 {
+                XCUIDevice.shared.press(.home)
+                sleep(2)
+                app.activate()
+                requireLive(app.alerts.firstMatch.waitForExistence(timeout: 30), "reconnecting raises the test alert before the open", app)
+            }
             upRow.tapWhenReady(timeout: 30)
             if alerts > before { interruptedOpens += 1 }
 
