@@ -291,6 +291,7 @@ func TestExpiredIdentitiesRefreshInTheBackgroundOnePerPathWithinTheBound(t *test
 	var repos []string
 	for range catalogIdentityRefreshes + 2 {
 		repo := catalogTestRepo(t)
+		settleGitFiles(t, repo)
 		repos = append(repos, repo)
 		cache.identity(context.Background(), surface.Session{Cwd: repo}, now, noStoredProject)
 	}
