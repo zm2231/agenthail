@@ -126,6 +126,17 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - id: swift-cache
+        name: Name the Swift build cache main saves
+        run: echo "key=$(scripts/mac-swift-cache-key.sh)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v5
+        with:
+          path: native/.build
+          key: ${{ steps.swift-cache.outputs.key }}
+      # The Swift build runs while the job sets up and the package build stages the runtime and the Go
+      # binary. SwiftPM locks native/.build, so the package build's own Swift build waits for this one.
+      - name: Start the Mac app's Swift build
+        run: scripts/build-mac-swift.sh arm64 >"$RUNNER_TEMP/swift-build.log" 2>&1 </dev/null &
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -169,13 +180,6 @@ jobs:
           : "${NOTARY_KEY:?missing APPLE_NOTARY_KEY_BASE64}"
           printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
           xcrun notarytool store-credentials agenthail-ci --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
-      - id: swift-cache
-        name: Name the Swift build cache main saves
-        run: echo "key=$(scripts/mac-swift-cache-key.sh)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v5
-        with:
-          path: native/.build
-          key: ${{ steps.swift-cache.outputs.key }}
       - name: Build package
         timeout-minutes: 30
         env:
@@ -186,20 +190,32 @@ jobs:
           AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
           : "${AGENTHAIL_PUSH_RELAY_URL:?missing AGENTHAIL_PUSH_RELAY_URL repository variable}"
-          scripts/build-pkg.sh
-      - name: Verify package artifact
-        run: scripts/test-pkg-artifact.sh dist/Agenthail-*.pkg
-      - name: Verify clean install, upgrade, and uninstall
-        run: scripts/test-pkg-install.sh dist/Agenthail-*.pkg
-      - name: Build release archive
-        timeout-minutes: 30
+          AGENTHAIL_NOTARY_WAIT=0 scripts/build-pkg.sh
+      # The archive builds and is notarized while the package's notarization finishes and the package
+      # is verified and installed. Its app build is warm and runs alone on native/.build.
+      - name: Start the release archive
         env:
           AGENTHAIL_NOTARY_PROFILE: agenthail-ci
           AGENTHAIL_PUSH_RELAY_URL: ${{ vars.AGENTHAIL_PUSH_RELAY_URL }}
           AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
           : "${AGENTHAIL_PUSH_RELAY_URL:?missing AGENTHAIL_PUSH_RELAY_URL repository variable}"
-          scripts/package-release.sh
+          (status=0; scripts/package-release.sh || status=$?; echo "$status" >"$RUNNER_TEMP/release-archive.status") >"$RUNNER_TEMP/release-archive.log" 2>&1 </dev/null &
+      - name: Finish package notarization
+        timeout-minutes: 25
+        env:
+          AGENTHAIL_NOTARY_PROFILE: agenthail-ci
+        run: scripts/notarize-pkg.sh finish dist/Agenthail-*.pkg
+      - name: Verify package artifact
+        run: scripts/test-pkg-artifact.sh dist/Agenthail-*.pkg
+      - name: Verify clean install, upgrade, and uninstall
+        run: scripts/test-pkg-install.sh dist/Agenthail-*.pkg
+      - name: Finish release archive
+        timeout-minutes: 30
+        run: |
+          until [ -f "$RUNNER_TEMP/release-archive.status" ]; do sleep 5; done
+          cat "$RUNNER_TEMP/release-archive.log"
+          [ "$(cat "$RUNNER_TEMP/release-archive.status")" = 0 ]
       - uses: actions/upload-artifact@v7
         with:
           name: agenthail-macos-release
