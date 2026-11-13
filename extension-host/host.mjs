@@ -31,6 +31,8 @@ const methods = {
   load: params => extensions.load(params),
   action: params => extensions.action(params),
   job: params => extensions.job(params),
+  sources: params => extensions.sources(params),
+  tool: params => extensions.tool(params),
   events: params => extensions.deliver(params),
 };
 

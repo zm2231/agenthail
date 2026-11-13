@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	providers "github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/uploads"
 )
 
@@ -46,6 +47,10 @@ func (d *Daemon) forwardHostRequest(w http.ResponseWriter, r *http.Request, host
 
 func writeHostResponse(w http.ResponseWriter, host *pairedHost, response *http.Response) {
 	answer, err := readHostAnswer(host, response)
+	if errors.Is(err, errHostAnswerTooLarge) {
+		writeAPIErrorWith(w, http.StatusBadGateway, "host_answer_too_large", fmt.Sprintf("Host %s answered with more than %d MiB.", host.record.Name, maxHostAnswerBytes>>20), map[string]any{"host": host.record.ID})
+		return
+	}
 	if err != nil {
 		writeHostError(w, host, err)
 		return
@@ -59,11 +64,18 @@ type hostAnswer struct {
 	payload []byte
 }
 
+const maxHostAnswerBytes = max(32<<20, providers.MaxSentFileBytes)
+
+var errHostAnswerTooLarge = errors.New("host answer too large")
+
 func readHostAnswer(host *pairedHost, response *http.Response) (hostAnswer, error) {
 	defer response.Body.Close()
-	payload, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	payload, err := io.ReadAll(io.LimitReader(response.Body, maxHostAnswerBytes+1))
 	if err != nil {
 		return hostAnswer{}, err
+	}
+	if int64(len(payload)) > maxHostAnswerBytes {
+		return hostAnswer{}, errHostAnswerTooLarge
 	}
 	contentType := response.Header.Get("Content-Type")
 	if strings.Contains(contentType, "application/json") && len(bytes.TrimSpace(payload)) > 0 {
@@ -76,6 +88,9 @@ func readHostAnswer(host *pairedHost, response *http.Response) (hostAnswer, erro
 		if value := response.Header.Get(key); value != "" {
 			header.Set(key, value)
 		}
+	}
+	for _, policy := range response.Header.Values("Content-Security-Policy") {
+		header.Add("Content-Security-Policy", policy)
 	}
 	return hostAnswer{status: response.StatusCode, header: header, payload: payload}, nil
 }

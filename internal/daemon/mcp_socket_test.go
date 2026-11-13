@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -264,4 +265,35 @@ func socketClient(t *testing.T) *mcp.ClientSession {
 	}
 	t.Cleanup(func() { _ = session.Close() })
 	return session
+}
+
+type processOwner struct {
+	*daemonSurface
+	pid int
+	id  string
+}
+
+func (p processOwner) ProcessSession(pid int) string {
+	if pid == p.pid {
+		return p.id
+	}
+	return ""
+}
+
+func TestASessionNamedByItsProcessGetsExtensionToolsToo(t *testing.T) {
+	home := extensionTestHome(t)
+	writeToolExtension(t, home, "wide", `{"label": "Wide", "capabilities": ["tools"]}`, toolServer)
+	f := startExtensionDaemon(t, home, extensionDaemonOptions{})
+	f.awaitAllLoaded(t, "wide")
+	f.approve(t, "wide")
+	f.d.Surfaces = append(f.d.Surfaces, processOwner{daemonSurface: f.fake, pid: os.Getppid(), id: "from"})
+	stop, err := f.d.startMCPSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	names := listedToolNames(t, socketClient(t))
+	if !slices.Contains(names, "ext_wide_peek") || !slices.Contains(names, "agenthail_send") {
+		t.Fatalf("a session named by its process lists %v", names)
+	}
 }

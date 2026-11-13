@@ -563,12 +563,14 @@ func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, 
 	}
 	var items []surface.TimelineItem
 	var itemErr error
+	calls := newClaudeToolCalls(path)
 	err = scanTranscriptRecords(ctx, file, from, end, false, func(record map[string]any, offset int64, line []byte) {
 		if itemErr != nil {
 			return
 		}
+		calls.observe(record, offset)
 		turnID, ended, interrupted := turns.observe(record, offset, line, func() int { return len(claudeTimelineItems(record)) })
-		recordItems, err := claudeRecordTimelineItems(ctx, record, offset, line, turnID, ended, interrupted)
+		recordItems, err := claudeRecordTimelineItems(ctx, calls, record, offset, line, turnID, ended, interrupted)
 		if err != nil {
 			itemErr = err
 			return

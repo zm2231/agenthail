@@ -1,7 +1,8 @@
 # A background collector
 
-For data that should be gathered over time, or a source too slow to read on
-every page load: a job writes rows into a table, and the page reads the table.
+For history: data gathered over time, such as a chart of the last day. A job
+writes rows into a table and a source reads the table for the page. For the
+current value of something, a source alone is enough (see `data-page.md`).
 
 1. Look at the real source read-only and print a redacted sample. Type the
    rows from the fields you saw.
@@ -22,7 +23,7 @@ every page load: a job writes rows into a table, and the page reads the table.
        },
      });
 
-     ah.action('recent', () => ah.db.prepare(`SELECT at, value FROM ${samples} ORDER BY at DESC LIMIT 500`).all());
+     ah.source({ name: 'recent', everySeconds: 60, collect: () => ah.db.prepare(`SELECT at, value FROM ${samples} ORDER BY at DESC LIMIT 500`).all() });
    }
    ```
 
@@ -33,7 +34,7 @@ every page load: a job writes rows into a table, and the page reads the table.
 
    ```
    agenthail extensions run <id> collect
-   agenthail extensions call <id> recent
+   agenthail extensions run <id> recent
    ```
 
    Check that the rows look like the sample from step 1.

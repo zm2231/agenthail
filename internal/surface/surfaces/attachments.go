@@ -25,7 +25,10 @@ var ErrAttachmentNotFound = errors.New("attachment not found")
 var ErrAttachmentTooLarge = errors.New("attachment exceeds 10 MiB")
 var ErrAttachmentInvalid = errors.New("attachment is not a supported image")
 
-type attachmentReference struct{ MediaType, Data, Path string }
+type attachmentReference struct {
+	MediaType, Data, Path string
+	Sent, Image           bool
+}
 
 func (c *Claude) ReadAttachment(ctx context.Context, s *surface.Session, id string) (*surface.Attachment, []byte, error) {
 	if _, err := c.sessionTranscript(s); err != nil {
@@ -52,6 +55,14 @@ func readTranscriptAttachment(ctx context.Context, s *surface.Session, id, sourc
 	}
 	if !ok {
 		return nil, nil, ErrAttachmentNotFound
+	}
+	if ref.Sent {
+		attachment, data, err := readSentFile(ctx, ref, expected)
+		if err != nil {
+			return nil, nil, err
+		}
+		attachment.ID = id
+		return attachment, data, nil
 	}
 	data, err := readAttachmentReference(ctx, ref)
 	if err != nil {
@@ -142,6 +153,15 @@ func readAttachmentRecord(ctx context.Context, path, source string, offset int64
 		}
 		refIndex++
 	}
+	if source == "claude" && index >= len(items) {
+		_, files, err := verifiedSentFiles(ctx, newClaudeToolCalls(path), record, offset)
+		if err != nil {
+			return attachmentReference{}, false, err
+		}
+		if sent := index - len(items); sent < len(files) {
+			return sentFileReference(files[sent]), true, nil
+		}
+	}
 	return attachmentReference{}, false, nil
 }
 
@@ -168,14 +188,18 @@ func readAttachmentReference(ctx context.Context, ref attachmentReference) ([]by
 		}
 		return data, nil
 	}
-	if !filepath.IsAbs(ref.Path) {
+	return readLocalFile(ctx, ref.Path, maxAttachmentBytes)
+}
+
+func readLocalFile(ctx context.Context, path string, limit int64) ([]byte, error) {
+	if !filepath.IsAbs(path) {
 		return nil, ErrAttachmentNotFound
 	}
-	info, err := os.Lstat(ref.Path)
+	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, ErrAttachmentNotFound
 	}
-	f, err := os.Open(ref.Path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, ErrAttachmentNotFound
 	}
@@ -194,7 +218,7 @@ func readAttachmentReference(ctx context.Context, ref attachmentReference) ([]by
 		}
 		read, readErr := f.Read(chunk)
 		if read > 0 {
-			if int64(len(data)+read) > maxAttachmentBytes {
+			if int64(len(data)+read) > limit {
 				return nil, ErrAttachmentTooLarge
 			}
 			data = append(data, chunk[:read]...)
@@ -220,7 +244,10 @@ func validateAttachment(data []byte) (string, int, int, error) {
 }
 func hashBytes(data []byte) string { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
 func attachmentID(offset int64, index int, data []byte) string {
-	return "attachment:" + strconv.FormatInt(offset, 10) + ":" + strconv.Itoa(index) + ":" + hashBytes(data)
+	return attachmentIDFromHash(offset, index, hashBytes(data))
+}
+func attachmentIDFromHash(offset int64, index int, hash string) string {
+	return "attachment:" + strconv.FormatInt(offset, 10) + ":" + strconv.Itoa(index) + ":" + hash
 }
 
 func attachmentReferenceFromValue(v any) (attachmentReference, bool) {
@@ -364,6 +391,9 @@ func decorateTimelineAttachments(ctx context.Context, items []surface.TimelineIt
 }
 func AttachmentHTTPStatus(err error) (int, string, string) {
 	if errors.Is(err, ErrAttachmentTooLarge) {
+		if errors.Is(err, ErrSentFileTooLarge) {
+			return http.StatusRequestEntityTooLarge, "attachment_too_large", "The file exceeds the 50 MiB limit for sent files."
+		}
 		return http.StatusRequestEntityTooLarge, "attachment_too_large", "The attachment exceeds the 10 MiB limit."
 	}
 	if errors.Is(err, ErrAttachmentInvalid) {

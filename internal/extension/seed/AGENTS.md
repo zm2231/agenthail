@@ -35,31 +35,49 @@ function. Register everything while it runs.
 | Member | Use |
 |---|---|
 | `ah.action(name, handler)` | `handler(input, {caller})` returns JSON for the page or for `agenthail extensions call` |
+| `ah.source({name, everySeconds, timeoutSeconds, collect})` | Data a page shows. Agenthail runs `collect({signal, now})` at load, after every reload or undo, and every `everySeconds` (at least 10), stops it after `timeoutSeconds` (below the interval, at most 30), and stores its JSON result (at most 512 KiB) with when it was collected. A failed run keeps the last value beside the error |
+| `ah.sources()` | Every source's stored state, `{name: {state, value, at, error, errorAt}}` |
 | `ah.job({name, everySeconds, run})` | Runs once after load, then every `everySeconds` (at least 60) after the last run ends, at most 10 minutes each |
 | `ah.on(type, handler)` | Daemon events (`'*'` for all); needs the `read.all` capability |
 | `ah.call(tool, args)` | Agenthail tools as the extension: `agenthail_sessions`, `agenthail_read`, `agenthail_history`, `agenthail_projects`, `agenthail_requests`, `agenthail_answer`, `agenthail_send`, `agenthail_channel_send` |
+| `ah.tool({name, description, inputSchema, run})` | A tool agent sessions call as `ext_<id>_<name>`; needs the `tools` capability. `run(input, {caller, ah})`: `ctx.ah.call` acts for the calling session, limited to what this extension was approved for. Sessions see a new tool when they next start or resume |
 | `ah.fetch(mount, path, init)` | A request to an approved mount's upstream, with the mount's key added by Agenthail |
 | `ah.db` | The shared SQLite store (`node:sqlite` `DatabaseSync`) |
 | `ah.table(name)` | The table name to use: `<id>_<name>` with dashes as underscores |
 | `ah.log(...)` | A line in the extension host's log |
 
 Capabilities: `read.all` (read every session, receive events), `control.all`
-(send to any session), `requests.answer` (answer approvals and questions).
+(send to any session), `requests.answer` (answer approvals and questions), `tools` (offer tools to
+agent sessions).
 Declare only what the extension uses.
 
 ## The page
 
-Plain HTML and ES modules. Reach the server with:
+Plain HTML and ES modules. The page draws its layout at once, and each part
+fills in from its source as that source is collected:
 
 ```html
+<section id="hosts"><h2>Hosts <small class="age"></small></h2><div class="body">collecting</div></section>
 <script type="module">
-  import { action } from '/x/_ah.js';
-  const rows = await action('overview', {});
+  import { source, age } from '/x/_ah.js';
+  source('hosts', (state) => {
+    const card = document.getElementById('hosts');
+    card.querySelector('.age').textContent = age(state);
+    if (state.value !== undefined) card.querySelector('.body').replaceChildren(renderHosts(state.value));
+  });
 </script>
 ```
 
-The page may fetch only its own origin, so everything else goes through an
-action.
+`source(name, render)` calls `render` right away and again each time the
+source is collected, with `{state: 'collecting' | 'ok' | 'failed', value, at,
+error, errorAt}`; a failed source still carries its last value. `age(state)`
+words it as "updated 2 min ago" or "failed 1 min ago: ..., showing 5 min old",
+and `render` is called again every 30 seconds so the age stays true.
+`sources({a: renderA, b: renderB})` watches several. `action(name, input)`
+calls an action, for what the person does on the page (a button, a form).
+
+The page may fetch only its own origin, so everything else goes through a
+source or an action.
 
 ## Mounts and keys
 
@@ -76,19 +94,25 @@ reads it and adds it to requests. The page sends
 
 ## Rules
 
+- A page never waits on a live source. Everything a page shows comes from an
+  `ah.source`, one per thing that can be slow or fail on its own (one host,
+  one API, one service), so a slow one only ages its own part of the page.
+  An action that the page calls on load, or that reads a service, a command
+  or a mount while the person waits, is the bug this rule exists for.
+
 - Never put a key, token or password in this folder, the store, a log or a
   page. Not in code, not in a comment, not in a test fixture.
 - A keyed source goes through a mount, and the person names the key.
 - Don't run `agenthail extensions approve` or `agenthail extensions key`
   yourself. Tell the person what to approve, or which key to name, and why.
 - Name your tables with `ah.table`, so undoing the extension removes them.
-- Jobs run at most once a minute.
+- Sources run at most every 10 seconds, jobs at most once a minute.
 - Before you end a turn, run the extension against the real source and see it
   succeed:
 
   ```
   agenthail extensions call <id> <action> --input '{"...": "..."}'
-  agenthail extensions run <id> <job>
+  agenthail extensions run <id> <job or source>
   ```
 
   `call` and `run` load what is in the folder first. Fix what fails and run
@@ -104,7 +128,7 @@ folder and its tables. `agenthail extensions history` lists the changes.
 
 ## Recipes
 
-- `recipes/data-page.md`: a page that reads a data source
+- `recipes/data-page.md`: a page that shows data, with the page template
 - `recipes/mount-app.md`: putting an existing web app in the dashboard
 - `recipes/keyed-api.md`: an API that needs a key, through a mount and `ah.fetch`
-- `recipes/collector.md`: a background job that collects into a table and prunes it
+- `recipes/collector.md`: history over time: a job that collects into a table and prunes it

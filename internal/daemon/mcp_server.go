@@ -41,15 +41,19 @@ func scopeRefusal(target, rule, message string) *mcpRefusal {
 }
 
 func (d *Daemon) mcpHandler() http.Handler {
-	server := d.newMCPServer()
-	d.registerMCPTools(server)
-	stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, mcpStreamOptions)
+	stream := mcp.NewStreamableHTTPHandler(d.mcpServerFor(d.newMCPServer()), mcpStreamOptions)
 	return d.mcpAuth(http.NewCrossOriginProtection().Handler(stream))
 }
 
 var mcpStreamOptions = &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true}
 
 func (d *Daemon) newMCPServer() *mcp.Server {
+	server := d.newBareMCPServer()
+	d.registerMCPTools(server)
+	return server
+}
+
+func (d *Daemon) newBareMCPServer() *mcp.Server {
 	return mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{SupportedProtocolVersions: mcpProtocolVersions})
 }
 
@@ -144,11 +148,15 @@ func addMCPTool[In any](d *Daemon, server *mcp.Server, tool *mcp.Tool, run func(
 		if err != nil {
 			return nil, nil, err
 		}
-		if len(encoded) > mcpOutputLimit {
-			return mcpRefused(&mcpRefusal{Code: "invalid", Message: fmt.Sprintf("The result exceeds %d bytes; ask for a smaller limit.", mcpOutputLimit)}), nil, nil
-		}
-		return &mcp.CallToolResult{StructuredContent: json.RawMessage(encoded), Content: []mcp.Content{&mcp.TextContent{Text: string(encoded)}}}, nil, nil
+		return mcpEncoded(encoded), nil, nil
 	})
+}
+
+func mcpEncoded(encoded []byte) *mcp.CallToolResult {
+	if len(encoded) > mcpOutputLimit {
+		return mcpRefused(&mcpRefusal{Code: "invalid", Message: fmt.Sprintf("The result exceeds %d bytes; ask for a smaller limit.", mcpOutputLimit)})
+	}
+	return &mcp.CallToolResult{StructuredContent: json.RawMessage(encoded), Content: []mcp.Content{&mcp.TextContent{Text: string(encoded)}}}
 }
 
 func mcpRefused(refusal *mcpRefusal) *mcp.CallToolResult {

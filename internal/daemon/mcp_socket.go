@@ -68,13 +68,12 @@ func (d *Daemon) startMCPSocket() (func(), error) {
 // live session process among its ancestors; any other process gets a server
 // with no tools.
 func (d *Daemon) mcpSocketHandler() http.Handler {
-	full, empty := d.newMCPServer(), d.newMCPServer()
-	d.registerMCPTools(full)
+	empty, forCaller := d.newBareMCPServer(), d.mcpServerFor(d.newMCPServer())
 	stream := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		if mcpCallerFrom(r.Context()) == nil {
 			return empty
 		}
-		return full
+		return forCaller(r)
 	}, mcpStreamOptions)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if caller := d.socketCaller(r.Context()); caller != nil {

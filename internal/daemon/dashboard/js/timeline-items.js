@@ -1,6 +1,6 @@
 import { clockTime, escape, labels, turnFooter } from "./format.js";
 import { markdown } from "./markdown.js";
-import { renderMessage, userLabel } from "./messages.js";
+import { fileSize, renderMessage, userLabel } from "./messages.js";
 import { toolKinds } from "./tool-view.js";
 import { renderToolRun } from "./tool-runs.js";
 
@@ -11,6 +11,24 @@ export function renderImageAttachment(item, session) {
     return `<div class="turn"><p>${fallback}</p></div>`;
   const url = `/api/session-attachment?sessionId=${encodeURIComponent(session.id)}&id=${encodeURIComponent(attachment.id)}`;
   return `<figure class="turn transcript-image"><img src="${escape(url)}" loading="lazy" decoding="async" alt="${fallback}" referrerpolicy="no-referrer"><figcaption>${fallback}</figcaption></figure>`;
+}
+
+const sentFileLimit = 50 * 1024 * 1024;
+
+export function renderSentFile(item, session) {
+  const file = item.files?.[0] || {};
+  const attachment = item.attachment;
+  const name = attachment?.name || file.name || item.title || "File";
+  const size = fileSize(attachment?.bytes || file.bytes);
+  const caption = item.text ? `<p class="sent-file-caption">${escape(item.text)}</p>` : "";
+  const sizeTag = size ? `<span class="attached-file-size">${escape(size)}</span>` : "";
+  if (!attachment?.id) {
+    const why = file.bytes > sentFileLimit ? "Over 50 MiB, open it on its computer" : "No longer available";
+    return `<div class="turn sent-file">${caption}<div class="attached-files"><button class="attached-file" type="button" data-copy-text="${escape(file.path || "")}" data-copy-done="Path copied." title="${escape(file.path || "")}"><span class="attached-file-name">${escape(name)}</span>${sizeTag}<span class="attached-file-size">${why}</span></button></div></div>`;
+  }
+  const url = `/api/session-attachment?sessionId=${encodeURIComponent(session.id)}&id=${encodeURIComponent(attachment.id)}`;
+  const open = attachment.mediaType === "application/pdf" ? `<a class="attached-file" href="${escape(url)}" target="_blank" rel="noopener noreferrer">Open</a>` : "";
+  return `<div class="turn sent-file">${caption}<div class="attached-files"><a class="attached-file" href="${escape(url)}" download="${escape(name)}" rel="noreferrer"><span class="attached-file-name">${escape(name)}</span>${sizeTag}</a>${open}</div></div>`;
 }
 
 export function timelineKindClass(kind) {
@@ -39,6 +57,9 @@ export function renderTimelineItem(item, session, turnEnd = null, after = "") {
   const metadata = renderTimelineMetadata(item);
   if (kind === "attachment") {
     return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderImageAttachment(item, session)}${metadata}</section>`;
+  }
+  if (kind === "file") {
+    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderSentFile(item, session)}${metadata}</section>`;
   }
   if (isInstructions(item)) {
     const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';

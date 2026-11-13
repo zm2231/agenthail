@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,6 +42,18 @@ func (d *Daemon) apiSessionAttachmentHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.Header().Set("Content-Type", attachment.MediaType)
+	if attachment.Name != "" {
+		disposition := "attachment"
+		// A browser's PDF viewer refuses a sandboxed document, so only bytes
+		// that are a PDF open inline; every other file downloads, sandboxed.
+		if attachment.MediaType == "application/pdf" && http.DetectContentType(data) == "application/pdf" {
+			disposition = "inline"
+		} else {
+			w.Header().Add("Content-Security-Policy", "sandbox")
+		}
+		w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": attachment.Name}))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+	}
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.Header().Set("Cache-Control", "private, immutable, max-age=31536000")
 	w.Header().Set("ETag", `"`+attachment.ID+`"`)
