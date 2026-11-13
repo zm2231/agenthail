@@ -14,7 +14,6 @@ import (
 	"github.com/zm2231/agenthail/internal/uploads"
 )
 
-
 type queuedUploadView struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`

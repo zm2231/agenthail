@@ -60,7 +60,7 @@ func newFakeSystemctl(t *testing.T) (*fakeSystemctl, *systemdService) {
 	previousListen := daemon.DefaultDashboardListen
 	daemon.DefaultDashboardListen = dashboard.Listener.Addr().String()
 	t.Cleanup(func() { daemon.DefaultDashboardListen = previousListen })
-	bin :=filepath.Join(t.TempDir(), "agenthail")
+	bin := filepath.Join(t.TempDir(), "agenthail")
 	script := "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)

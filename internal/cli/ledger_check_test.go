@@ -41,7 +41,7 @@ func TestCheckCommandsPostWhatTheCheckerAndTheProposerSay(t *testing.T) {
 	run("attach", "claude-prompt:2", "--as", "extends", "--to", "widget-A1", "--clause", "typo tolerance", "--covers", "widget-X1")
 	got := *calls
 	report, _ := json.Marshal(got[0]["missing"])
-	if got[0]["run"] != "run-1" || got[0]["token"] != "run-secret" || got[0]["sessionId"] != nil || string(report) !=`[{"breadth":"typo tolerance","from":"claude-prompt:2"},{"breadth":"csv export","from":"claude-prompt:2"}]` {
+	if got[0]["run"] != "run-1" || got[0]["token"] != "run-secret" || got[0]["sessionId"] != nil || string(report) != `[{"breadth":"typo tolerance","from":"claude-prompt:2"},{"breadth":"csv export","from":"claude-prompt:2"}]` {
 		t.Fatalf("check-report request %v", got[0])
 	}
 	if got[1]["path"] != "/api/v1/ledger/check" || got[1]["goalId"] != "widget-G1" || got[1]["sessionId"] != "s1" {

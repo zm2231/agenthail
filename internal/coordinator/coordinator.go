@@ -20,9 +20,9 @@ import (
 // delivered or queued for the running conversation, or it starts a new one
 // from the saved spec when the old conversation is gone.
 type Service struct {
-	Registry     *registry.Registry
-	Adapters     surface.Adapters
-	Dispatcher   delivery.Dispatcher
+	Registry   *registry.Registry
+	Adapters   surface.Adapters
+	Dispatcher delivery.Dispatcher
 	// ClaudeRoot is the root of a lead conversation that replaces previous, which is empty for a first start.
 	ClaudeRoot   func(previous string) (string, error)
 	LeadsChanged func()

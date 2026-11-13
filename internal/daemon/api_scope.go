@@ -15,15 +15,15 @@ import (
 const ScopePath = "/api/v1/scope"
 
 type ScopeRequest struct {
-	SessionID      string `json:"sessionId"`
-	Action         string `json:"action"`
-	Target         string `json:"target,omitempty"`
-	Project        string `json:"project,omitempty"`
-	Mode           string `json:"mode,omitempty"`
-	Channel        string `json:"channel,omitempty"`
-	Surface        string `json:"surface,omitempty"`
-	PermissionMode string `json:"permissionMode,omitempty"`
-	Cwd            string `json:"cwd,omitempty"`
+	SessionID      string          `json:"sessionId"`
+	Action         string          `json:"action"`
+	Target         string          `json:"target,omitempty"`
+	Project        string          `json:"project,omitempty"`
+	Mode           string          `json:"mode,omitempty"`
+	Channel        string          `json:"channel,omitempty"`
+	Surface        string          `json:"surface,omitempty"`
+	PermissionMode string          `json:"permissionMode,omitempty"`
+	Cwd            string          `json:"cwd,omitempty"`
 	Operation      string          `json:"operation,omitempty"`
 	Sessions       []string        `json:"sessions,omitempty"`
 	Create         json.RawMessage `json:"create,omitempty"`

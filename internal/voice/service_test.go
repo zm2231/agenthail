@@ -414,11 +414,11 @@ type voiceFixture struct {
 	// are, so a follower waiting on a delegation cannot take the poll's tick.
 	clockTicks chan time.Time
 	mu         sync.Mutex
-	now      time.Time
-	cycles   chan time.Time
-	ticked   int64
-	gate     *gate
-	target   *targetFixture
+	now        time.Time
+	cycles     chan time.Time
+	ticked     int64
+	gate       *gate
+	target     *targetFixture
 }
 
 // gate holds a fixture call by name until the test releases it or the

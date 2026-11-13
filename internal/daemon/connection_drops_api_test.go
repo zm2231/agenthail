@@ -27,7 +27,12 @@ func TestAPhonesConnectionDropsAreRecordedOnceAndInvalidOnesAreSkipped(t *testin
 	}
 	body := map[string]any{"drops": []map[string]any{
 		drop("good0001", nil),
-		drop("relay001", func(row map[string]any) { row["via"] = "h00000000aaaa"; row["host"] = "h00000000bbbb"; row["path"] = "request"; row["recoveredBy"] = "peer connected" }),
+		drop("relay001", func(row map[string]any) {
+			row["via"] = "h00000000aaaa"
+			row["host"] = "h00000000bbbb"
+			row["path"] = "request"
+			row["recoveredBy"] = "peer connected"
+		}),
 		drop("future01", func(row map[string]any) { row["recoveredAt"] = now.Add(time.Hour).Format(time.RFC3339Nano) }),
 		drop("BADID", nil),
 		drop("badpath1", func(row map[string]any) { row["path"] = "teleport" }),

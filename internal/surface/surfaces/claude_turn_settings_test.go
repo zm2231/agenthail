@@ -63,7 +63,7 @@ func TestAHostSessionTurnSettingsChangeModelEffortAndModeNow(t *testing.T) {
 	for _, line := range claudehosttest.Lines(data) {
 		var control struct {
 			Subtype, Mode, Model string
-			Settings            struct{ EffortLevel string }
+			Settings             struct{ EffortLevel string }
 		}
 		if err := json.Unmarshal(line, &control); err != nil {
 			t.Fatal(err)

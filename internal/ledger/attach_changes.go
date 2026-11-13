@@ -49,7 +49,9 @@ func (p *attachPlan) react() error {
 		return refuse("--as reacts takes one of --adopt, --reject or --ack, not several")
 	}
 	if len(p.req.Clauses) > 0 {
-		defer func() { p.summary += "; the --clause was not recorded: a reaction keeps the wording (reword it with --as refines)" }()
+		defer func() {
+			p.summary += "; the --clause was not recorded: a reaction keeps the wording (reword it with --as refines)"
+		}()
 	}
 	if p.req.Ack {
 		return p.ackCut()

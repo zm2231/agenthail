@@ -376,10 +376,10 @@ func resolveUnlinkedCatalogIdentity(ctx context.Context, path string, projects [
 }
 
 type catalogRepository struct {
-	bare       bool
-	toplevel   string
-	commonDir  string
-	gitDir     string
+	bare        bool
+	toplevel    string
+	commonDir   string
+	gitDir      string
 	mainRoot    string
 	repository  *project.Repository
 	rootCommits []string

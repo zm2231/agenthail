@@ -12,9 +12,9 @@ import (
 
 type endedSurface struct {
 	*daemonSurface
-	missing map[string]bool
-	changed time.Time
-	checks  atomic.Int32
+	missing     map[string]bool
+	changed     time.Time
+	checks      atomic.Int32
 	unseen      []surface.Session
 	asked       []string
 	entrypoints map[string]string

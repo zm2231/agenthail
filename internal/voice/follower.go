@@ -15,18 +15,18 @@ type follower struct {
 	attemptID string
 	target    surface.Session
 	// ctx ends with the target or the call, so nothing is said about a session voice has left.
-	ctx      context.Context
-	cancel   context.CancelFunc
-	ready    chan struct{}
-	err      error
-	voice    map[string][]string
-	pending  int
-	settled  chan struct{}
-	held     []string
-	typed    map[string]*typedTurn
-	retired  map[string]bool
-	earlier  []requestRecord
-	next     *follower
+	ctx     context.Context
+	cancel  context.CancelFunc
+	ready   chan struct{}
+	err     error
+	voice   map[string][]string
+	pending int
+	settled chan struct{}
+	held    []string
+	typed   map[string]*typedTurn
+	retired map[string]bool
+	earlier []requestRecord
+	next    *follower
 }
 
 // followTarget replaces the current follower with one for target. The caller holds s.mu.
