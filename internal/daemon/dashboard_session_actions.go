@@ -65,7 +65,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 	}
 	if request.Action == "respond" {
 		if ask, found, err := d.Registry.Ask(strings.TrimSpace(request.RequestID)); err == nil && found && (ask.Origin == registry.AskOriginDelivery || ask.Origin == registry.AskOriginLedger) {
-			return d.answerAsk(ctx, nil, session, ask.ID, request.Decision, p, "")
+			return d.answerAsk(ctx, nil, session, ask.ID, request.Decision, p, request.SourceSessionID, "")
 		}
 	}
 	adapter, transportErr := d.adapters().For(session)
@@ -232,7 +232,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		if personName == "" {
 			personName, _ = d.Registry.PersonName()
 		}
-		return d.answerAsk(ctx, adapter, session, requestID, request.Decision, p, personName)
+		return d.answerAsk(ctx, adapter, session, requestID, request.Decision, p, request.SourceSessionID, personName)
 	case "request-withdraw":
 		return d.withdrawReplacedRequest(ctx, adapter, session, strings.TrimSpace(request.RequestID), p.actor())
 	case "context", "usage", "status", "effort", "rename":

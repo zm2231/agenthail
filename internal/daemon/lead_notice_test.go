@@ -112,7 +112,7 @@ func TestALeadWithAgenthailToolsIsToldTheToolsToAnswerWith(t *testing.T) {
 	if len(notices) != 1 {
 		t.Fatalf("notices=%+v", notices)
 	}
-	for _, want := range []string{`agenthail_requests {"sessionId":"@builder","requestId":"` + ask.ID + `"}`, `agenthail_answer {"requestId":"` + ask.ID + `","decision":"allow|deny"}`, `agenthail_answer {"requestId":"` + ask.ID + `","decision":"escalate"}`} {
+	for _, want := range []string{`agenthail_requests {"sessionId":"@builder","requestId":"` + ask.ID + `"}`, `agenthail_answer {"requestId":"` + ask.ID + `","sessionId":"@builder","decision":"allow|deny"}`, `agenthail_answer {"requestId":"` + ask.ID + `","sessionId":"@builder","decision":"escalate"}`} {
 		if !strings.Contains(notices[0].Message, want) {
 			t.Fatalf("the notice %q does not say %q", notices[0].Message, want)
 		}

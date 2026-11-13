@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -50,6 +51,14 @@ func (d *Daemon) answerTarget(sessionID string) string {
 		return "@" + alias
 	}
 	return sessionID
+}
+
+func (d *Daemon) askAddress(sessionID, hearerID string) (string, bool) {
+	target := d.answerTarget(sessionID)
+	if owner, err := d.Registry.SessionHost(hearerID); err == nil && owner != "" {
+		return hosts.Qualify(d.hostIdentity().ID, target), true
+	}
+	return target, d.usesMCP(hearerID)
 }
 
 func (d *Daemon) usesMCP(sessionID string) bool {

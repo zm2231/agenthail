@@ -139,14 +139,11 @@ func askRequest(ask registry.Ask) surface.Request {
 	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery, CreatedAt: ask.CreatedAt, Deadline: ask.Deadline}.WithOptionIDs()
 }
 
-// askHearer is who an ask goes to first: a session an agent or coordinator started reports to its lead or spawner while that one runs.
+// askHearer is who an ask goes to first: its project's lead, else its
+// spawner, while that one runs, whoever started the session.
 func (d *Daemon) askHearer(sessionID string) (noticeRecipient, bool) {
 	session, err := d.Registry.Session(sessionID)
 	if err != nil {
-		return noticeRecipient{}, false
-	}
-	origin, found, err := d.Registry.SessionOrigin(session.ID)
-	if err != nil || !found || origin.Via != registry.OriginAgent && origin.Via != registry.OriginCoordinator {
 		return noticeRecipient{}, false
 	}
 	hearer, ok := d.noticeRecipient(*session)
@@ -213,10 +210,11 @@ func (d *Daemon) askNoticeFor(ask registry.Ask, hearerID string) string {
 			header = "Your message: " + ask.Title
 		}
 	}
-	return askNotice(header, ask, d.usesMCP(hearerID))
+	target, mcp := d.askAddress(ask.SessionID, hearerID)
+	return askNotice(header, ask, target, mcp)
 }
 
-func askNotice(header string, ask registry.Ask, mcp bool) string {
+func askNotice(header string, ask registry.Ask, target string, mcp bool) string {
 	var b strings.Builder
 	b.WriteString("[agenthail] " + header)
 	for i, question := range ask.Questions {
@@ -234,11 +232,11 @@ func askNotice(header string, ask registry.Ask, mcp bool) string {
 	}
 	switch {
 	case ask.Origin == registry.AskOriginDelivery && mcp:
-		fmt.Fprintf(&b, "\nAnswer it: agenthail_answer {\"requestId\":%q,\"decision\":\"<%s>\"}, or pass it on: agenthail_answer {\"requestId\":%q,\"decision\":\"escalate\"}", ask.ID, strings.ReplaceAll(deliveryOptionIDs(ask), ", ", "|"), ask.ID)
+		fmt.Fprintf(&b, "\nAnswer it: agenthail_answer {\"requestId\":%q,\"sessionId\":%q,\"decision\":\"<%s>\"}, or pass it on: agenthail_answer {\"requestId\":%q,\"sessionId\":%q,\"decision\":\"escalate\"}", ask.ID, target, strings.ReplaceAll(deliveryOptionIDs(ask), ", ", "|"), ask.ID, target)
 	case ask.Origin == registry.AskOriginDelivery:
 		fmt.Fprintf(&b, "\nAnswer it: agenthail ask answer %s <%s>, or pass it on: agenthail ask escalate %s", ask.ID, strings.ReplaceAll(deliveryOptionIDs(ask), ", ", "|"), ask.ID)
 	case mcp:
-		fmt.Fprintf(&b, "\nAnswer it: agenthail_answer {\"requestId\":%q,\"answers\":{\"<question>\":\"<answer>\"}}, or pass it to the person: agenthail_answer {\"requestId\":%q,\"decision\":\"escalate\"}", ask.ID, ask.ID)
+		fmt.Fprintf(&b, "\nAnswer it: agenthail_answer {\"requestId\":%q,\"sessionId\":%q,\"answers\":{\"<question>\":\"<answer>\"}}, or pass it to the person: agenthail_answer {\"requestId\":%q,\"sessionId\":%q,\"decision\":\"escalate\"}", ask.ID, target, ask.ID, target)
 	default:
 		fmt.Fprintf(&b, "\nAnswer it: agenthail ask answer %s \"<answer>\", or pass it to the person: agenthail ask escalate %s", ask.ID, ask.ID)
 	}
@@ -461,7 +459,13 @@ func (d *Daemon) publishAsk(sessionID string) {
 }
 
 // askAnswerer is who may answer an open ask: the person always, an agent only while the ask is routed to it.
-func askAnswerer(ask registry.Ask, p principal) (string, error) {
+func askAnswerer(ask registry.Ask, p principal, source string) (string, error) {
+	if p.Kind == principalHost && source != "" {
+		if ask.RoutedTo != source {
+			return "", actionFailed(http.StatusForbidden, "forbidden", "this ask is not routed to "+source)
+		}
+		return source, nil
+	}
 	if p.Kind != principalSession || p.ForPerson {
 		return registry.AskToPerson, nil
 	}
@@ -490,7 +494,7 @@ func composeAskAnswer(questions []surface.Question, decision surface.Decision) s
 // answerAsk sends the answer to the asking session as one message, exactly
 // once: the ask is claimed before delivery and released only when delivery
 // provably did not happen.
-func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session *surface.Session, askID string, response surface.Response, p principal, personName string) (actionResult, error) {
+func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session *surface.Session, askID string, response surface.Response, p principal, source, personName string) (actionResult, error) {
 	ask, found, err := d.Registry.Ask(askID)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
@@ -498,7 +502,7 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 	if !found || ask.SessionID != session.ID || ask.State != registry.AskOpen {
 		return actionResult{}, staleRequest()
 	}
-	by, err := askAnswerer(ask, p)
+	by, err := askAnswerer(ask, p, source)
 	if err != nil {
 		return actionResult{}, err
 	}
