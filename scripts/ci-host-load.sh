@@ -19,7 +19,9 @@ sample() {
 		/^Pages occupied by compressor/ { gsub(/\./, "", $NF); used += $NF; comp = $NF }
 		END { g = size / 1073741824; printf "%.1f\t%.1f\t%.1f", used * g, avail * g, comp * g }')"
 	procs="$(ps -axo pcpu=,comm= | awk '
-		{ pct = $1; $1 = ""; name = substr($0, 2); sub(/.*\//, "", name); cpu[name] += pct; total += pct }
+		{ pct = $1; $1 = ""; path = substr($0, 2); name = path; sub(/.*\//, "", name); cpu[name] += pct; total += pct }
+		path ~ /\/RuntimeRoot\// { simcpu += pct }
+		name == "tart" || name ~ /Virtualization.VirtualMachine/ { vmcpu += pct }
 		name == "launchd_sim" { sims++ }
 		name ~ /Virtualization.VirtualMachine/ { vms++ }
 		END {
@@ -28,7 +30,7 @@ sample() {
 			for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++) if (cpu[order[j]] > cpu[order[i]]) { t = order[i]; order[i] = order[j]; order[j] = t }
 			top = ""
 			for (i = 1; i <= n && i <= 6; i++) top = top (i > 1 ? "," : "") order[i] "=" int(cpu[order[i]])
-			printf "%d\t%d\t%d\t%s", total, sims, vms, top
+			printf "%d\t%d\t%d\t%s\t%d\t%d", total, sims, vms, top, simcpu, vmcpu
 		}')"
 	printf '%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "$load" "$vm" "${swap:-0}" "$procs"
 }
@@ -36,7 +38,7 @@ sample() {
 start() {
 	{
 		printf 'host\t%s\t%s cores\t%s GB\n' "$(sysctl -n hw.model)" "$(sysctl -n hw.ncpu)" "$(($(sysctl -n hw.memsize) / 1073741824))"
-		printf 'time\tload1\tused_gb\tavailable_gb\tcompressed_gb\tswap_mb\tcpu_pct\tsimulators\tvms\ttop_cpu_pct\n'
+		printf 'time\tload1\tused_gb\tavailable_gb\tcompressed_gb\tswap_mb\tcpu_pct\tsimulators\tvms\ttop_cpu_pct\tsimulator_services_cpu_pct\tvm_cpu_pct\n'
 	} >"$samples"
 	"$(cd "$(dirname "$0")" && pwd)/$(basename "$0")" loop </dev/null >/dev/null 2>&1 &
 	echo $! >"$pidfile"
@@ -62,6 +64,7 @@ report() {
 			if ($6 > maxswap) maxswap = $6
 			if ($8 > maxsims) maxsims = $8
 			if ($9 > maxvms) maxvms = $9
+			cpu += $7; simcpu += $11; vmcpu += $12
 			if (n == 1) first = $1; last = $1
 			split($10, top, ",")
 			for (i in top) { split(top[i], kv, "="); share[kv[1]] += kv[2] }
@@ -81,6 +84,7 @@ report() {
 			line = ""
 			for (i = 1; i <= m && i <= 8; i++) line = line (i > 1 ? ", " : "") order[i] " " int(share[order[i]] / n) "%"
 			print "mean CPU among the top processes: " line
+			printf "mean CPU: all processes %d%%, simulator services %d%%, VMs %d%%\n", cpu / n, simcpu / n, vmcpu / n
 		}' "$samples"
 	echo "::group::host load samples"
 	cat "$samples"

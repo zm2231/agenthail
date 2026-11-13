@@ -39,8 +39,11 @@ cat >"$work/bin/ps" <<'SH'
 cat <<'EOF'
 350.0 /usr/local/go/pkg/tool/darwin_arm64/compile
 120.5 /private/var/folders/x/daemon.test
- 60.0 /Library/Developer/CoreSimulator/launchd_sim
- 55.0 /Library/Developer/CoreSimulator/launchd_sim
+ 60.0 /Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/sbin/launchd_sim
+ 55.0 /Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/sbin/launchd_sim
+ 25.0 /Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/PosterKit.framework/KaleidoscopePoster
+ 40.0 /Users/runner/Library/Developer/CoreSimulator/Devices/ABC/data/Containers/Bundle/Application/DEF/Agenthail.app/Agenthail
+ 30.0 /opt/homebrew/bin/tart
  90.0 /System/Library/Frameworks/Virtualization.framework/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualization.VirtualMachine
  10.0 /Applications/Google Chrome Helper
 EOF
@@ -63,7 +66,8 @@ out="$(run report)"
 
 grep -q '^host load on Mac16,10 10 cores 64 GB while agenthail-test ran: ' <<<"$out" || fail "no header in: $out"
 grep -q 'load1 median 42.5, p90 42.5, max 42.5 (4.2 per core at max); used memory max 16.0 GB, available min 5.0 GB, swap max 512 MB; simulators max 2, VMs max 1' <<<"$out" || fail "wrong summary in: $out"
-grep -q 'mean CPU among the top processes: compile 350%, daemon.test 120%, launchd_sim 115%, com.apple.Virtualization.VirtualMachine 90%, Google Chrome Helper 10%' <<<"$out" || fail "wrong processes in: $out"
+grep -q 'mean CPU among the top processes: compile 350%, daemon.test 120%, launchd_sim 115%, com.apple.Virtualization.VirtualMachine 90%, Agenthail 40%, tart 30%' <<<"$out" || fail "wrong processes in: $out"
+grep -q '^mean CPU: all processes 780%, simulator services 140%, VMs 120%$' <<<"$out" || fail "wrong groups in: $out"
 
 rm -f "$work/temp/host-load.pid"
 summary() {
