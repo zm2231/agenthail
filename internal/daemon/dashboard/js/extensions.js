@@ -1,5 +1,8 @@
 import { $ } from "./dom.js";
 import { responseError } from "./http.js";
+import { toast } from "./feedback.js";
+import { load } from "./dashboard-state.js";
+import { selectSession } from "./session-selection.js";
 
 const state = { selected: "", view: null };
 
@@ -122,6 +125,37 @@ export async function loadExtensions() {
   render();
 }
 
+async function build(form) {
+  const button = form.querySelector('button[type="submit"]');
+  const values = Object.fromEntries(new FormData(form).entries());
+  form.dataset.key ||= crypto.randomUUID();
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/v1/extensions/build", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "Idempotency-Key": form.dataset.key },
+      body: JSON.stringify(values),
+    });
+    if (!response.ok) throw await responseError(response);
+    const created = await response.json();
+    delete form.dataset.key;
+    form.reset();
+    toast("The builder started. Each turn asks you to keep or undo what it changed.");
+    await load(true);
+    if (created.session?.id) await selectSession(created.session.id, true);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 export function bindExtensions() {
   $("#extensions-reload")?.addEventListener("click", () => act({ action: "reload" }));
+  $("#extensions-build")?.addEventListener("input", (event) => delete event.currentTarget.dataset.key);
+  $("#extensions-build")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    build(event.currentTarget);
+  });
 }

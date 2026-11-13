@@ -19,25 +19,28 @@ final class LiveBackAfterReconnectUITests: XCTestCase {
         let upHost = try pairLiveHost(1, control: control, in: app)
         let downRow = liveRow("Check the release notes", host: downHost, in: app).firstMatch
         let upRow = liveRow("Check the release notes", host: upHost, in: app).firstMatch
-        requireLive(downRow.waitForExistence(timeout: 30) && upRow.waitForExistence(timeout: 30), "both hosts list their conversations", app)
+        requireLive(reveal(downRow, in: app, timeout: 30) && reveal(upRow, in: app, timeout: 30), "both hosts list their conversations", app)
         try control.stop(host: 0)
         addTeardownBlock { try? control.start(host: 0) }
 
         var interruptedOpens = 0
         for round in 1...6 {
-            app.tab("Sessions").tapWhenReady(timeout: 20)
-            let scopeAll = app.buttons["scope-all"]
-            for _ in 0..<6 where !scopeAll.isHittable { app.swipeDown() }
-            scopeAll.tapWhenReady(timeout: 20)
+            showAllSessions(in: app)
             app.swipeUp()
             app.swipeDown()
-            if downRow.waitForExistence(timeout: 10), downRow.isHittable {
+            if reveal(downRow, in: app, timeout: 10), downRow.isHittable {
                 downRow.tap()
                 _ = app.buttons["session-summary"].waitForExistence(timeout: 10)
                 app.backToSessions()
             }
-            requireLive(upRow.waitForExistence(timeout: 60), "the running host's conversation is listed", app)
+            requireLive(reveal(upRow, in: app, timeout: 60), "the running host's conversation is listed", app)
             let before = alerts
+            if round == 1 {
+                XCUIDevice.shared.press(.home)
+                sleep(2)
+                app.activate()
+                requireLive(app.alerts.firstMatch.waitForExistence(timeout: 30), "reconnecting raises the test alert before the open", app)
+            }
             upRow.tapWhenReady(timeout: 30)
             if alerts > before { interruptedOpens += 1 }
 

@@ -153,27 +153,26 @@ func (d *Daemon) sortQueued(ctx context.Context, job sortJob) {
 		d.sorter.hold(job, until)
 		return
 	}
-	if !d.sortAndSettle(ctx, config, job) {
-		return
+	if d.sortAndSettle(ctx, config, job) && d.releaseHeld(ctx, config) {
+		d.sortOwedWith(ctx, config)
 	}
-	d.releaseHeld(ctx, config)
-	d.sortOwedWith(ctx, config)
 }
 
 func (d *Daemon) sortWaiting(ctx context.Context) {
 	if len(d.sorter.heldJobs()) == 0 && len(d.sorter.owedJobs()) == 0 {
 		return
 	}
-	if config, ok := d.sorterConfig(); ok {
-		d.releaseHeld(ctx, config)
+	if config, ok := d.sorterConfig(); ok && d.releaseHeld(ctx, config) {
 		d.sortOwedWith(ctx, config)
 	}
 }
 
-func (d *Daemon) releaseHeld(ctx context.Context, config goalsort.Config) {
+// releaseHeld reports whether every held message it asked about was answered; after a failed ask the owed ones
+// wait for the retry rather than being asked again at once.
+func (d *Daemon) releaseHeld(ctx context.Context, config goalsort.Config) bool {
 	for _, job := range d.sorter.heldJobs() {
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 		if until, held := d.heldBehind(job); held {
 			d.sorter.hold(job, until)
@@ -181,9 +180,10 @@ func (d *Daemon) releaseHeld(ctx context.Context, config goalsort.Config) {
 		}
 		d.sorter.release(job)
 		if !d.sortAndSettle(ctx, config, job) {
-			return
+			return false
 		}
 	}
+	return true
 }
 
 func (d *Daemon) sortOwed(ctx context.Context) {

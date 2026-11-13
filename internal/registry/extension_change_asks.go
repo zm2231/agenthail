@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 )
 
-const AskOriginExtensionChange = "extension-change"
+const (
+	AskOriginExtensionChange = "extension-change"
+	AskOriginExtensionGrant  = "extension-grant"
+)
 
 // RewordAsk replaces an open ask's title and questions in place, so a ask
 // that rolls up later changes keeps its id and is announced only once.

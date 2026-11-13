@@ -36,6 +36,8 @@ Tests in the `live` tier pair the app with real daemons, so they run only under 
 
 `scripts/ios-ui-tests.sh tiers` decides the tiers from the event, the changed files and the labels; the paths that widen a pull request to `main` are in its `wide` pattern. `scripts/ios-ui-tests.sh check` fails when a UI test is in no tier, in two, or a listed test no longer exists, so a new test cannot silently never run. `ios`, `iOS nightly` and `verify` run the check, and `scripts/test-ios-ui-tests.sh` checks the script.
 
+`ios` runs the unit tests and the UI tests of its tiers on three parallel clones of its simulator (`-parallel-testing-worker-count 3`), then, one at a time on the simulator itself, the tests marked `alone` in `native/ui-test-tiers.txt`. A test that counts renders, times something, or checks where moving content is after a wait gets `alone`: sharing the CPU with other simulators changes what it measures. `scripts/ios-ui-tests.sh args parallel|alone|all <tier>...` prints each set. Xcode keeps the clones in its testing device set as `Clone N of <simulator>` and deletes them when a run ends, but a run the stall guard or a cancel kills can leave them booted; `scripts/ios-simulator-clones.sh` deletes any left of the job's simulator before the parallel run, before the tests marked `alone` so no clone shares their CPU, and when the job ends. The clones are stock simulators: Xcode creates and boots them itself, so they are not slimmed, and three of them add about 10 GB of memory on a Mac mini runner.
+
 A failed `ios` run on a push to `main` opens the issue `iOS tests on main are failing`, assigned to the repository owner, or comments on it if it is open; the next passing push closes it. A cancelled run, such as one a later push replaced, reports nothing. `iOS nightly` runs the suite once on an iPhone simulator and once on an 11-inch iPad Pro simulator, through `.github/workflows/ios-device-tests.yml`. Each device reports on its own issue, `Nightly iOS tests are failing` and `Nightly iPad tests are failing`, and a run that stopped or was cancelled is reported too. Pull requests and pushes run the iOS tests on iPhone only. Both use `scripts/ci-failure-issue.sh`, which `scripts/test-ci-failure-issue.sh` checks.
 
 ## Fork protection
@@ -47,7 +49,7 @@ The `runs-on` expression in a workflow comes from the pull request, so a fork ca
 
 ## Runner setup
 
-Each runner is a separate service under the same macOS user, in `~/actions-runner-agenthail-N`, registered with the labels `self-hosted,macOS,ARM64,agenthail`.
+Each runner is a separate service under the same macOS user, in `~/actions-runner-agenthail-N`, registered with the labels `self-hosted,macOS,ARM64,agenthail`. Exactly one of them also has the label `agenthail-ios`, which `ios`, `iOS nightly` and `iOS live nightly` require: an iOS job boots its simulator and three parallel clones of it, and with one iOS job at a time on the host they never compete with each other, and only one set of simulators shares the CPU with the `verify` jobs on the other runners. Other iOS jobs wait for that runner. A runner that is configured again loses the label; add it back with `config.sh --labels` or the repository's runner settings, or every iOS job waits.
 
 1. Install Xcode, select it with `sudo xcode-select -s`, then run `sudo xcodebuild -license accept`, `sudo xcodebuild -runFirstLaunch` and `xcodebuild -downloadPlatform iOS`.
 2. Install `jq` and `xcodegen` with Homebrew.

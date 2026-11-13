@@ -591,6 +591,14 @@
           </div>
           <button class="soft-button" id="extensions-reload" type="button">Reload</button>
         </header>
+        <form class="settings-card extensions-build" id="extensions-build" data-pane="content">
+          <label for="extensions-build-message">Build an extension</label>
+          <textarea id="extensions-build-message" name="message" rows="2" maxlength="60000" required placeholder="A page that shows my proxy's request counts for the last day"></textarea>
+          <div class="extensions-build-row">
+            <select name="surface" aria-label="Builder"><option value="claude">Claude</option><option value="codex">Codex</option></select>
+            <button class="soft-button" type="submit">Build</button>
+          </div>
+        </form>
         <div class="extensions-layout" data-pane="content">
           <div class="extensions-list" id="extensions-list"></div>
           <iframe class="extensions-frame" id="extensions-frame" title="Extension page" hidden></iframe>

@@ -15,13 +15,15 @@ concurrency:
 jobs:
   ios-live:
     if: github.repository == 'zm2231/agenthail' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, macOS, ARM64, agenthail]
+    runs-on: [self-hosted, macOS, ARM64, agenthail, agenthail-ios]
     timeout-minutes: 60
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-url }}
       details: ${{ steps.details.outputs.details }}
     steps:
       - uses: actions/checkout@v5
+      - name: Sample host load
+        run: scripts/ci-host-load.sh start
       - name: Check crash reporter dialogs are off
         run: |
           if [ "$(defaults read com.apple.CrashReporter DialogType 2>/dev/null)" != none ]; then
@@ -59,7 +61,7 @@ jobs:
           TMPDIR="$(getconf DARWIN_USER_TEMP_DIR)"
           export TMPDIR
           only=()
-          while IFS= read -r arg; do [ "$arg" = -only-testing:AgenthailIOSTests ] || only+=("$arg"); done < <(scripts/ios-ui-tests.sh args live)
+          while IFS= read -r arg; do [ "$arg" = -only-testing:AgenthailIOSTests ] || only+=("$arg"); done < <(scripts/ios-ui-tests.sh args all live)
           set -o pipefail
           "$RUNNER_TEMP/live-bin/ios-live-harness" -agenthail "$RUNNER_TEMP/live-bin/agenthail" -hosts 2 -- \
             scripts/ios-simulator.sh iphone run xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug \
@@ -85,6 +87,9 @@ jobs:
             ${{ runner.temp }}/ios-live.log
           retention-days: 14
           if-no-files-found: ignore
+      - name: Report host load
+        if: always()
+        run: scripts/ci-host-load.sh report
       - name: Clean up self-hosted job
         if: always()
         run: scripts/ci-self-hosted.sh cleanup

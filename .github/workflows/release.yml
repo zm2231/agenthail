@@ -126,6 +126,16 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - id: swift-cache
+        name: Name the Swift build cache main saves
+        run: echo "key=$(scripts/mac-swift-cache-key.sh)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v5
+        with:
+          path: native/.build
+          key: ${{ steps.swift-cache.outputs.key }}
+      # Build package's Swift build waits for swift-build.done (AGENTHAIL_WAIT_FOR_SWIFT_BUILD).
+      - name: Start the Mac app's Swift build
+        run: (scripts/build-mac-swift.sh arm64 || true; touch "$RUNNER_TEMP/swift-build.done") >"$RUNNER_TEMP/swift-build.log" 2>&1 </dev/null &
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -169,37 +179,42 @@ jobs:
           : "${NOTARY_KEY:?missing APPLE_NOTARY_KEY_BASE64}"
           printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
           xcrun notarytool store-credentials agenthail-ci --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
-      - id: swift-cache
-        name: Name the Swift build cache main saves
-        run: echo "key=$(scripts/mac-swift-cache-key.sh)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v5
-        with:
-          path: native/.build
-          key: ${{ steps.swift-cache.outputs.key }}
       - name: Build package
         timeout-minutes: 30
         env:
           AGENTHAIL_NOTARY_PROFILE: agenthail-ci
+          AGENTHAIL_WAIT_FOR_SWIFT_BUILD: ${{ runner.temp }}/swift-build.done
           AGENTHAIL_INSTALLER_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           AGENTHAIL_PUSH_RELAY_URL: ${{ vars.AGENTHAIL_PUSH_RELAY_URL }}
           AGENTHAIL_UPDATE_RELEASE_URL: https://api.github.com/repos/${{ github.repository }}/releases/latest
           AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
           : "${AGENTHAIL_PUSH_RELAY_URL:?missing AGENTHAIL_PUSH_RELAY_URL repository variable}"
-          scripts/build-pkg.sh
-      - name: Verify package artifact
-        run: scripts/test-pkg-artifact.sh dist/Agenthail-*.pkg
-      - name: Verify clean install, upgrade, and uninstall
-        run: scripts/test-pkg-install.sh dist/Agenthail-*.pkg
-      - name: Build release archive
-        timeout-minutes: 30
+          AGENTHAIL_NOTARY_WAIT=0 scripts/build-pkg.sh
+      # Runs alongside the package's notarization and checks; "Finish release archive" collects it.
+      - name: Start the release archive
         env:
           AGENTHAIL_NOTARY_PROFILE: agenthail-ci
           AGENTHAIL_PUSH_RELAY_URL: ${{ vars.AGENTHAIL_PUSH_RELAY_URL }}
           AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
           : "${AGENTHAIL_PUSH_RELAY_URL:?missing AGENTHAIL_PUSH_RELAY_URL repository variable}"
-          scripts/package-release.sh
+          (status=0; scripts/package-release.sh || status=$?; echo "$status" >"$RUNNER_TEMP/release-archive.status") >"$RUNNER_TEMP/release-archive.log" 2>&1 </dev/null &
+      - name: Finish package notarization
+        timeout-minutes: 25
+        env:
+          AGENTHAIL_NOTARY_PROFILE: agenthail-ci
+        run: scripts/notarize-pkg.sh finish dist/Agenthail-*.pkg
+      - name: Verify package artifact
+        run: scripts/test-pkg-artifact.sh dist/Agenthail-*.pkg
+      - name: Verify clean install, upgrade, and uninstall
+        run: scripts/test-pkg-install.sh dist/Agenthail-*.pkg
+      - name: Finish release archive
+        timeout-minutes: 30
+        run: |
+          until [ -f "$RUNNER_TEMP/release-archive.status" ]; do sleep 5; done
+          cat "$RUNNER_TEMP/release-archive.log"
+          [ "$(cat "$RUNNER_TEMP/release-archive.status")" = 0 ]
       - uses: actions/upload-artifact@v7
         with:
           name: agenthail-macos-release
@@ -445,50 +460,21 @@ jobs:
     with:
       force: true
 
-  publish:
-    needs: [push-relay-check, source-proof, macos-test, linux-test, macos-package, linux-archive, ios-archive, ios-proof, ios-suite]
-    if: always() && needs.push-relay-check.result == 'success' && (needs.source-proof.outputs.proven == 'true' || (needs.macos-test.result == 'success' && needs.linux-test.result == 'success')) && needs.macos-package.result == 'success' && needs.linux-archive.result == 'success' && needs.ios-archive.result == 'success' && needs.ios-proof.result == 'success'
+  # Not gated on the Mac package: a build here reaches only the internal TestFlight group.
+  testflight:
+    needs: [push-relay-check, ios-archive, ios-proof, ios-suite]
+    if: ${{ !cancelled() && needs.push-relay-check.result == 'success' && needs.ios-archive.result == 'success' && needs.ios-proof.result == 'success' }}
     runs-on: macos-15
-    timeout-minutes: 55
-    env:
-      AGENTHAIL_PUSH_RELAY_URL: ${{ vars.AGENTHAIL_PUSH_RELAY_URL }}
-      IOS_BUNDLE_ID: ${{ vars.AGENTHAIL_IOS_BUNDLE_ID }}
-      RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
-          name: agenthail-macos-release
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: agenthail-linux-*
-          path: dist
-          merge-multiple: true
-      - uses: actions/download-artifact@v4
-        with:
           name: agenthail-ios-release
           path: ios
-      - uses: actions/download-artifact@v4
-        with:
-          name: agenthail-ios-dsyms
-          path: dsyms
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: push-relay/package-lock.json
-      - name: Create draft GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.version || github.ref_name }}
-          draft: true
-          files: |
-            dist/Agenthail-*.pkg
-            dist/Agenthail-*.pkg.sha256
-            dist/agenthail-*.tar.gz
-            dist/agenthail-*.tar.gz.sha256
-            dsyms/Agenthail-iOS-*-dSYMs.zip
       - name: Require a passing iOS suite
         env:
           PROVEN: ${{ needs.ios-proof.outputs.proven }}
@@ -534,6 +520,47 @@ jobs:
           ASC_MARKETING_VERSION: ${{ github.event.inputs.version || github.ref_name }}
           ASC_BUNDLE_ID: ${{ vars.AGENTHAIL_IOS_BUNDLE_ID }}
         run: node push-relay/scripts/wait-testflight-build.mjs
+
+  publish:
+    needs: [push-relay-check, source-proof, macos-test, linux-test, macos-package, linux-archive, ios-archive, testflight]
+    if: ${{ !cancelled() && needs.push-relay-check.result == 'success' && (needs.source-proof.outputs.proven == 'true' || (needs.macos-test.result == 'success' && needs.linux-test.result == 'success')) && needs.macos-package.result == 'success' && needs.linux-archive.result == 'success' && needs.ios-archive.result == 'success' && needs.testflight.result == 'success' }}
+    runs-on: macos-15
+    timeout-minutes: 55
+    env:
+      AGENTHAIL_PUSH_RELAY_URL: ${{ vars.AGENTHAIL_PUSH_RELAY_URL }}
+      IOS_BUNDLE_ID: ${{ vars.AGENTHAIL_IOS_BUNDLE_ID }}
+      RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: agenthail-macos-release
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agenthail-linux-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: agenthail-ios-dsyms
+          path: dsyms
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: push-relay/package-lock.json
+      - name: Create draft GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          draft: true
+          files: |
+            dist/Agenthail-*.pkg
+            dist/Agenthail-*.pkg.sha256
+            dist/agenthail-*.tar.gz
+            dist/agenthail-*.tar.gz.sha256
+            dsyms/Agenthail-iOS-*-dSYMs.zip
       - name: Deploy validated relay
         working-directory: push-relay
         env:

@@ -35,6 +35,41 @@ extension XCTestCase {
         app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "session-\(hostID)::", title))
     }
 
+    // The sessions list is lazy, so a row below the fold is not in the tree until the list scrolls to it.
+    func reveal(_ row: XCUIElement, in app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        var upward = true
+        var swipes = 0
+        while !row.waitForExistence(timeout: min(1, max(0, deadline.timeIntervalSinceNow))) {
+            guard Date() < deadline else { return false }
+            let list = app.collectionViews.firstMatch
+            let target = list.exists ? list : app
+            if upward { target.swipeUp() } else { target.swipeDown() }
+            swipes += 1
+            if swipes % 6 == 0 { upward.toggle() }
+        }
+        return true
+    }
+
+    func reveal(_ row: XCUIElement, in app: XCUIApplication, value: String, matching: Bool = true, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if reveal(row, in: app, timeout: max(0, deadline.timeIntervalSinceNow)), ((row.value as? String) == value) == matching { return true }
+            Thread.sleep(forTimeInterval: min(0.5, max(0, deadline.timeIntervalSinceNow)))
+        } while Date() < deadline
+        return false
+    }
+
+    func showAllSessions(in app: XCUIApplication) {
+        app.tab("Sessions").tapWhenReady(timeout: 20)
+        let scopeAll = app.buttons["scope-all"]
+        for _ in 0..<12 where !scopeAll.isHittable {
+            let list = app.collectionViews.firstMatch
+            (list.exists ? list : app).swipeDown()
+        }
+        scopeAll.tapWhenReady(timeout: 20)
+    }
+
     func requireLive(_ condition: Bool, _ message: String, _ app: XCUIApplication) {
         guard !condition else { return }
         let shot = XCTAttachment(screenshot: app.screenshot())

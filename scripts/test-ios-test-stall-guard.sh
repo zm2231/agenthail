@@ -26,7 +26,11 @@ if [ "$CHILD" = yes ]; then
 	echo $! >"$WORK/child.pid"
 fi
 for seconds in $DURATIONS; do
-	echo "Test Case '-[AgenthailIOSUITests.Suite test$seconds]' $RESULT ($seconds.123 seconds)."
+	if [ "${PARALLEL:-}" = yes ]; then
+		echo "Test case 'Suite.test$seconds()' $RESULT on 'Clone 1 of Agenthail CI' ($seconds.123 seconds)"
+	else
+		echo "Test Case '-[AgenthailIOSUITests.Suite test$seconds]' $RESULT ($seconds.123 seconds)."
+	fi
 done
 if [ "$HANG" = yes ]; then
 	wait
@@ -64,5 +68,10 @@ if alive "$work/tests.pid"; then fail "the test command is still running"; fi
 alive "$work/child.pid" || fail "the child ended before the guard returned, so the guard may have waited for it"
 grep -q "3 tests each took over 200 s" "$work/out" || fail "missing the stop message: $(cat "$work/out")"
 grep -q "Suite test400" "$work/out" || fail "the stop message does not name the slow tests"
+
+status=0
+PARALLEL=yes run "201 3 300 400" passed 0 no yes || status=$?
+[ "$status" = 1 ] || fail "three slow tests in a parallel run did not stop it: status $status"
+grep -q "Suite.test400() (400 s)" "$work/out" || fail "the stop message does not name the slow parallel tests: $(cat "$work/out")"
 
 echo "ios-test-stall-guard tests passed"

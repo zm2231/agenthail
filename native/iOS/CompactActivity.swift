@@ -85,11 +85,26 @@ struct CompactActivityGroup: View, @MainActor Equatable {
     @Environment(\.transcriptRows) private var rows
     @Environment(\.revealRow) private var revealRow
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.group == rhs.group && lhs.owner == rhs.owner }
+    static func == (lhs: Self, rhs: Self) -> Bool {
+#if DEBUG
+        BodyRuns.compared("group", ["group": lhs.group == rhs.group, "owner": lhs.owner == rhs.owner])
+#endif
+        return lhs.group == rhs.group && lhs.owner == rhs.owner
+    }
+
+#if DEBUG
+    private func probeOpenedInputs() {
+        guard group.foldLabel == nil, !group.isSend, group.isActivity, group.folds else { return }
+        BodyRuns.changed("in.group.opened", group.id, rows.current(opened))
+        BodyRuns.changed("in.group.rows", group.id, rows)
+    }
+#endif
 
     var body: some View {
 #if DEBUG
         let _ = BodyRuns.hit("CompactActivityGroup")
+        let _ = BodyRuns.changed("in.group.group", group.id, group)
+        let _ = probeOpenedInputs()
 #endif
         if group.foldLabel != nil {
             IOSAgentFoldRow(group: group)

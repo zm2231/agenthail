@@ -84,12 +84,27 @@ env -i HOME="$work/home" PATH=/usr/bin:/bin PYTHONPATH="$root/pydeps" PYTHONDONT
 (cd "$root" && env -i HOME="$work/home" PATH="$root/runtime/node/bin:/usr/bin:/bin" "$root/runtime/node/bin/node" -e "import('@steipete/sweet-cookie').then(module => { if (!module.getCookies) process.exit(1) })")
 "$root/runtime/node/bin/node" "$(dirname "$0")/test-staged-hosts.mjs" "$root"
 
+# Thin and universal Mach-O magic numbers in both byte orders: the files file(1) reports as Mach-O.
+machos="$work/macho.txt"
+python3 -I - "$root" >"$machos" <<'PY'
+import os
+import sys
+
+magics = {bytes.fromhex(m) for m in ("feedface", "cefaedfe", "feedfacf", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca")}
+for top, _, names in os.walk(sys.argv[1]):
+    for name in names:
+        path = os.path.join(top, name)
+        if not os.path.islink(path):
+            with open(path, "rb") as f:
+                if f.read(4) in magics:
+                    print(path)
+PY
+grep -qxF "$root/runtime/node/bin/node" "$machos" || { echo "error: the Mach-O scan missed the bundled node" >&2; exit 1; }
 linkage="$work/linkage.txt"
+: >"$linkage"
 while IFS= read -r path; do
-	if file "$path" | grep -q 'Mach-O'; then
-		otool -L "$path" >> "$linkage" 2>/dev/null || true
-	fi
-done < <(find "$root" -type f)
+	otool -L "$path" >> "$linkage" 2>/dev/null || true
+done <"$machos"
 if grep -En '/opt/homebrew|/usr/local/Cellar' "$linkage"; then
 	echo "error: package has a Homebrew runtime linkage" >&2
 	exit 1

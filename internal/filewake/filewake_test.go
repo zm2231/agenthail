@@ -308,17 +308,75 @@ func TestAFolderCreatedInAFollowedFolderWakesForItsOwnNewEntries(t *testing.T) {
 	}
 }
 
-func TestReleasingAFolderClosesItsPlatformWatcher(t *testing.T) {
+func openDescriptors(t *testing.T) int {
+	t.Helper()
+	dir, err := os.Open("/dev/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(names)
+}
+
+func armed(w *Watcher, dir string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	folder := w.dirs[dir]
+	return folder != nil && folder.armed
+}
+
+func TestFollowingAndReleasingAFolderLeavesNoDescriptorOpen(t *testing.T) {
 	w := New(DefaultLimit, t.Logf)
 	t.Cleanup(func() { _ = w.Close() })
 	dir := t.TempDir()
-	wake := w.FollowDir(dir)
-	if wake.C() == nil {
-		t.Fatal("directory not watched")
+	for index := range 20 {
+		appendLine(t, filepath.Join(dir, fmt.Sprintf("%d.json", index)), "{}")
 	}
-	own := w.dirs[dir].own
-	wake.Release()
-	if len(w.dirs) != 0 || own.WatchList() != nil {
-		t.Fatalf("dirs=%d watching=%v after the last reader left", len(w.dirs), own.WatchList())
+	before := openDescriptors(t)
+	for round := range 100 {
+		wake := w.FollowDir(dir)
+		if wake.C() == nil {
+			t.Fatal("directory not watched")
+		}
+		appendLine(t, filepath.Join(dir, fmt.Sprintf("new-%d.json", round)), "{}")
+		appendLine(t, filepath.Join(dir, "0.json"), "{}")
+		wake.Release()
+	}
+	if after := openDescriptors(t); after != before {
+		t.Fatalf("descriptors: %d before, %d after following and releasing the folder 100 times", before, after)
+	}
+}
+
+func TestAFollowedFolderRemovedOrRenamedDropsItsWatch(t *testing.T) {
+	w := New(DefaultLimit, t.Logf)
+	t.Cleanup(func() { _ = w.Close() })
+	root := t.TempDir()
+	removed, renamed := filepath.Join(root, "removed"), filepath.Join(root, "renamed")
+	for _, dir := range []string{removed, renamed} {
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		wake := w.FollowDir(dir)
+		defer wake.Release()
+		if !armed(w, dir) {
+			t.Fatalf("%s not watched", dir)
+		}
+	}
+	if err := os.Remove(removed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(renamed, filepath.Join(root, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for armed(w, removed) || armed(w, renamed) {
+		if time.Now().After(deadline) {
+			t.Fatalf("removed armed=%v renamed armed=%v, want both watches dropped", armed(w, removed), armed(w, renamed))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

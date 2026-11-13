@@ -1,3 +1,21 @@
+.extensions-build {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.extensions-build textarea {
+  width: 100%;
+  font: inherit;
+}
+
+.extensions-build-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .extensions-layout {
   display: grid;
   grid-template-columns: minmax(14rem, 20rem) 1fr;

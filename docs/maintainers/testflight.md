@@ -12,7 +12,7 @@ Pushing a `v*` tag triggers Release. CI runs on pull requests and never uploads 
 gh workflow run release.yml --repo zm2231/agenthail --ref main -f version=v0.2.22
 ```
 
-Release is a combined product release: it builds and validates the Mac package and iOS archive, validates the IPA, creates a draft GitHub release, uploads to TestFlight, verifies internal availability, deploys the relay, and publishes the GitHub release. Use the management workflow for TestFlight-only operations. See [push notification service](push-relay.md) for relay credentials and deployment behavior.
+Release is a combined product release: it builds and validates the Mac package and iOS archive and validates the IPA. Its `testflight` job uploads the IPA and verifies internal availability as soon as the iOS archive and the iOS suite gate pass, while the Mac package is still building, since a build reaches only the internal group. Once every job has passed, `publish` creates a draft GitHub release, deploys the relay, and publishes the GitHub release. Use the management workflow for TestFlight-only operations. See [push notification service](push-relay.md) for relay credentials and deployment behavior.
 
 Nothing goes to TestFlight, the relay or the published release until the iOS suite (the `ios` job of the [iOS workflow](../../.github/workflows/ios.yml): unit tests and the smoke and main UI tiers) has passed on code with the release commit's iOS inputs. [`scripts/ios-inputs.sh list`](../../scripts/ios-inputs.sh) defines those inputs; the list includes the scripts and workflow that define and check them.
 
@@ -33,7 +33,7 @@ Successful upload or `processingState: VALID` alone does not establish tester ac
 - At least one tester and the exact build assigned to that group.
 - Internal state `READY_FOR_BETA_TESTING` or `IN_BETA_TESTING`.
 
-[The gate implementation](../../push-relay/scripts/wait-testflight-build.mjs) shares a default 30-minute wait budget across processing and internal readiness. Missing compliance, invalid processing, expiry, or a failed readiness check stops publication. Upload and subsequent deployment are separate steps: a failed overall release can still have uploaded a build. Inspect the exact build before rerunning a release; rerunning the same GitHub run reuses its build number.
+[The gate implementation](../../push-relay/scripts/wait-testflight-build.mjs) shares a default 30-minute wait budget across processing and internal readiness. Missing compliance, invalid processing, expiry, or a failed readiness check stops publication. Upload and deployment are separate jobs: a release that fails later, in the Mac package for example, can still have uploaded a build. Inspect the exact build before rerunning a release; rerunning the same GitHub run reuses its build number.
 
 ## App, group, and credentials
 
