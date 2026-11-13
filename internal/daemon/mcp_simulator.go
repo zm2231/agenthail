@@ -79,8 +79,6 @@ const (
 	simulatorProbeLimit  = 20 * time.Second
 )
 
-// simulatorStatus waits for a status under a minute old, probing when there
-// is none, and returns the last status known when ctx ends first.
 func (d *Daemon) simulatorStatus(ctx context.Context) simhost.Status {
 	select {
 	case <-d.probeSimulators():
@@ -91,11 +89,8 @@ func (d *Daemon) simulatorStatus(ctx context.Context) simhost.Status {
 	return d.simStatus
 }
 
-// probeSimulators starts a probe when the status is missing or a minute old
-// and none is running, and returns a channel closed once that probe ends.
-// Every caller shares the one probe, which runs outside simStatusMu so a
-// reader of the last status never waits on xcrun. A probe that runs out of
-// time leaves the last status in place.
+// probeSimulators runs outside simStatusMu so a reader of the last status
+// never waits on xcrun, and a probe that runs out of time keeps the last one.
 func (d *Daemon) probeSimulators() <-chan struct{} {
 	d.simStatusMu.Lock()
 	defer d.simStatusMu.Unlock()
