@@ -22,7 +22,7 @@ permissions:
 jobs:
   tests:
     if: github.repository == 'zm2231/agenthail'
-    runs-on: [self-hosted, macOS, ARM64, agenthail]
+    runs-on: [self-hosted, macOS, ARM64, agenthail, agenthail-ios]
     timeout-minutes: 90
     env:
       DERIVED: ${{ github.workspace }}/../ios-derived

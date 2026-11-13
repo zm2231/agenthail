@@ -76,7 +76,7 @@ jobs:
   ios:
     needs: changes
     if: needs.changes.outputs.ios == 'true' && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size)
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail","agenthail-ios"]') }}
     timeout-minutes: 45
     env:
       DERIVED: ${{ github.workspace }}/../ios-derived
