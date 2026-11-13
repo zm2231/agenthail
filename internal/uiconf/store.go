@@ -1,28 +1,23 @@
 package uiconf
 
 import (
-	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/atomicfile"
+	"github.com/zm2231/agenthail/internal/gitstore"
 )
 
 const (
 	FileName       = "ui.conf"
 	backgroundsDir = "backgrounds"
 	maxImageBytes  = 30 << 20
-	gitTimeout     = 20 * time.Second
 	initialFile    = "# Interface preferences. Every key and its default: agenthail ui show-defaults --docs\nversion = 1\n"
 )
 
@@ -38,20 +33,21 @@ func DefaultDir() string {
 // Store is the git repository that holds ui.conf. Every change is a commit
 // whose author is the person or an @agent.
 type Store struct {
-	dir string
+	dir  string
+	repo *gitstore.Repo
 }
 
 // Open returns the store at dir, creating the repository and a minimal
 // ui.conf the first time.
 func Open(dir string) (*Store, error) {
-	if _, err := exec.LookPath("git"); err != nil {
+	if err := gitstore.Available(); err != nil {
 		return nil, errors.New("ui.conf history needs git on this host")
 	}
-	s := &Store{dir: dir}
+	s := &Store{dir: dir, repo: gitstore.New(dir, "ui@agenthail.invalid", "ui.conf is busy: another change is still being saved")}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+	if s.repo.Initialized() {
 		return s, nil
 	}
 	unlock, err := s.lock()
@@ -59,7 +55,7 @@ func Open(dir string) (*Store, error) {
 		return nil, err
 	}
 	defer unlock()
-	if _, err := s.git("init", "-q", "-b", "main"); err != nil {
+	if err := s.repo.InitLocked(); err != nil {
 		return nil, err
 	}
 	if _, err := os.Stat(s.Path()); errors.Is(err, os.ErrNotExist) {
@@ -100,11 +96,11 @@ func (s *Store) read() (State, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return State{}, err
 	}
-	rev, err := s.git("rev-parse", "--short=12", "HEAD")
+	rev, err := s.repo.Head()
 	if err != nil {
 		return State{}, err
 	}
-	return State{Rev: strings.TrimSpace(rev), Text: string(text), Parsed: Parse(string(text))}, nil
+	return State{Rev: rev, Text: string(text), Parsed: Parse(string(text))}, nil
 }
 
 // Write replaces ui.conf with text and commits it. An unchanged file makes
@@ -171,34 +167,16 @@ func (s *Store) CommitHandEdit() (string, bool, error) {
 	if err != nil || !changed {
 		return "", changed, err
 	}
-	rev, err := s.git("rev-parse", "--short=12", "HEAD")
-	return strings.TrimSpace(rev), true, err
+	rev, err := s.repo.Head()
+	return rev, true, err
 }
 
 // Entry is one commit in ui.conf's history.
-type Entry struct {
-	Rev     string    `json:"rev"`
-	Author  string    `json:"author"`
-	Time    time.Time `json:"time"`
-	Message string    `json:"message"`
-}
+type Entry = gitstore.Entry
 
 // Log returns up to limit commits, newest first.
 func (s *Store) Log(limit int) ([]Entry, error) {
-	out, err := s.git("log", fmt.Sprintf("-n%d", limit), "--format=%h%x1f%an%x1f%aI%x1f%s", "--abbrev=12")
-	if err != nil {
-		return nil, err
-	}
-	var entries []Entry
-	for _, row := range strings.Split(strings.TrimSpace(out), "\n") {
-		fields := strings.Split(row, "\x1f")
-		if len(fields) != 4 {
-			continue
-		}
-		at, _ := time.Parse(time.RFC3339, fields[2])
-		entries = append(entries, Entry{Rev: fields[0], Author: fields[1], Time: at, Message: fields[3]})
-	}
-	return entries, nil
+	return s.repo.Log(limit)
 }
 
 // Diff shows what rev changed, or with an empty rev what the last commit
@@ -207,10 +185,10 @@ func (s *Store) Diff(rev string) (string, error) {
 	if rev == "" {
 		rev = "HEAD"
 	}
-	if err := s.checkRev(rev); err != nil {
+	if err := s.repo.CheckRev(rev); err != nil {
 		return "", err
 	}
-	return s.git("show", "--format=%h %an: %s%n", "--abbrev=12", rev, "--")
+	return s.repo.Git("show", "--format=%h %an: %s%n", "--abbrev=12", rev, "--")
 }
 
 // Undo reverts rev, or the last commit when rev is empty, as a new commit.
@@ -227,27 +205,7 @@ func (s *Store) Undo(rev, author string) (State, Entry, error) {
 	if rev == "" {
 		rev = "HEAD"
 	}
-	if err := s.checkRev(rev); err != nil {
-		return State{}, Entry{}, err
-	}
-	parents, err := s.git("rev-list", "--parents", "-n1", rev)
-	if err != nil {
-		return State{}, Entry{}, err
-	}
-	if len(strings.Fields(parents)) < 2 {
-		return State{}, Entry{}, errors.New("the first commit can't be undone")
-	}
-	subject, err := s.git("log", "-n1", "--format=%s", rev)
-	if err != nil {
-		return State{}, Entry{}, err
-	}
-	reverted := strings.TrimSpace(subject)
-	if _, err := s.gitAs(author, "revert", "--no-edit", "--no-commit", rev); err != nil {
-		_, _ = s.git("revert", "--abort")
-		_, _ = s.git("reset", "-q", "--hard", "HEAD")
-		return State{}, Entry{}, fmt.Errorf("can't undo %q cleanly: a later change edited the same lines", reverted)
-	}
-	if _, err := s.gitAs(author, "commit", "-q", "--allow-empty", "-m", "Undo "+reverted); err != nil {
+	if _, err := s.repo.RevertLocked(rev, author); err != nil {
 		return State{}, Entry{}, err
 	}
 	state, err := s.read()
@@ -374,80 +332,13 @@ var errAssetPath = errors.New("only images in the ui backgrounds folder and buil
 // missing file.
 func IsAssetPath(err error) bool { return errors.Is(err, errAssetPath) }
 
-func (s *Store) checkRev(rev string) error {
-	if strings.HasPrefix(rev, "-") {
-		return fmt.Errorf("unknown revision %s", rev)
-	}
-	if _, err := s.git("rev-parse", "--verify", "-q", rev+"^{commit}"); err != nil {
-		return fmt.Errorf("unknown revision %s", rev)
-	}
-	return nil
-}
-
 func (s *Store) commitLocked(author, message string) (bool, error) {
-	if _, err := s.git("add", "-A", "--", FileName, backgroundsDir); err != nil {
-		if _, err := s.git("add", "-A", "--", FileName); err != nil {
+	if err := s.repo.Stage(FileName, backgroundsDir); err != nil {
+		if err := s.repo.Stage(FileName); err != nil {
 			return false, err
 		}
 	}
-	if _, err := s.git("rev-parse", "-q", "--verify", "HEAD"); err == nil {
-		if _, err := s.git("diff", "--cached", "--quiet"); err == nil {
-			return false, nil
-		}
-	}
-	if _, err := s.gitAs(author, "commit", "-q", "--allow-empty", "-m", message); err != nil {
-		return false, err
-	}
-	return true, nil
+	return s.repo.CommitStaged(author, message)
 }
 
-func (s *Store) lock() (func(), error) {
-	if err := os.MkdirAll(s.dir, 0o700); err != nil {
-		return nil, err
-	}
-	file, err := os.OpenFile(filepath.Join(s.dir, ".lock"), os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	deadline := time.Now().Add(gitTimeout)
-	for {
-		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			file.Close()
-			return nil, errors.New("ui.conf is busy: another change is still being saved")
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return func() {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		file.Close()
-	}, nil
-}
-
-func (s *Store) git(args ...string) (string, error) {
-	return s.gitAs("agenthail", args...)
-}
-
-func (s *Store) gitAs(author string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
-	defer cancel()
-	full := append([]string{"-C", s.dir, "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + os.DevNull, "-c", "core.autocrlf=false"}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Env = append(os.Environ(),
-		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL="+os.DevNull,
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_OPTIONAL_LOCKS=0",
-		"GIT_AUTHOR_NAME="+author, "GIT_AUTHOR_EMAIL=ui@agenthail.invalid",
-		"GIT_COMMITTER_NAME="+author, "GIT_COMMITTER_EMAIL=ui@agenthail.invalid",
-	)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return stdout.String(), fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
-	}
-	return stdout.String(), nil
-}
+func (s *Store) lock() (func(), error) { return s.repo.Lock() }

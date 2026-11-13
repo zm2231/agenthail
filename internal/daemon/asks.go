@@ -136,7 +136,7 @@ func askRequest(ask registry.Ask) surface.Request {
 		}
 		questions = append(questions, question)
 	}
-	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery, CreatedAt: ask.CreatedAt, Deadline: ask.Deadline}.WithOptionIDs()
+	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery || ask.Origin == registry.AskOriginExtensionChange, CreatedAt: ask.CreatedAt, Deadline: ask.Deadline}.WithOptionIDs()
 }
 
 // askHearer is who an ask goes to first: its project's lead, else its
@@ -520,6 +520,8 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 		return d.answerDelivery(ctx, ask, response, by, p.actor())
 	case registry.AskOriginLedger:
 		return d.answerLedger(ctx, ask, response, p)
+	case registry.AskOriginExtensionChange:
+		return d.answerExtensionChange(ctx, ask, response, p)
 	}
 	request := askRequest(ask)
 	decision, err := request.Resolve(response)
