@@ -193,8 +193,10 @@ func TestClientSendsNothingUntilTheLatestVersionCheckPasses(t *testing.T) {
 	if _, err := client.Version(context.Background()); err == nil {
 		t.Fatal("an older federation range passed")
 	}
-	if err := send(); !errors.Is(err, ErrUnverified) {
-		t.Fatalf("after a failed version check err=%v", err)
+	err = send()
+	var mismatch ErrProtocolMismatch
+	if !errors.Is(err, ErrUnverified) || !errors.As(err, &notSent) || errors.As(err, &mismatch) || !strings.Contains(err.Error(), "federation") || err.Error() == ErrUnverified.Error() {
+		t.Fatalf("after a failed version check err=%v, want a refusal naming why the check failed", err)
 	}
 	version.Store(strings.Replace(currentVersion, "h0123456789ab", "h0000000000ff", 1))
 	if _, err := client.Version(context.Background()); !errors.Is(err, ErrHostIdentityChanged) {

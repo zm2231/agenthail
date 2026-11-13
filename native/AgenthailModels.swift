@@ -639,6 +639,10 @@ struct SessionState: Codable, Identifiable, Hashable {
         remoteHostName.map { name in String(name.split(separator: ".", maxSplits: 1).first ?? Substring(name)) }
     }
     var isUnavailable: Bool { remoteHostName != nil && !(unavailableReason ?? "").isEmpty }
+    var unreachableHostName: String? {
+        guard let host, host.state != "local", host.state != "connected" || isUnavailable else { return nil }
+        return shortRemoteHostName ?? host.name
+    }
     /// The paired host that owns this session, or nil for this machine.
     var remoteHostID: String? { remoteHostName == nil ? nil : host?.id }
     var modelCatalogKey: String { "\(remoteHostID ?? "")/\(surface)" }

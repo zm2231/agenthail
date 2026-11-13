@@ -8,6 +8,6 @@ struct StatusItemsState: Equatable {
     let hosts: String
 
     static func hosts(_ hosts: [HostHealth]) -> String {
-        (["this Mac"] + hosts.filter { $0.state == "connected" }.map(\.name)).joined(separator: " · ")
+        (["this Mac"] + hosts.map { $0.state == "connected" ? $0.name : "\($0.name) (\($0.stateLabel.lowercased()))" }).joined(separator: " · ")
     }
 }

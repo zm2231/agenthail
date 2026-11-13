@@ -10,9 +10,11 @@ enum ComposerStatusLine {
         var steerRefusal: String?
         var followUpHint = ""
         var stopShortcut: String?
+        var unreachableHost: String?
     }
 
     static func text(_ state: State) -> String {
+        if let host = state.unreachableHost { return "Will send when \(host) is back." }
         if state.waitingOnYou { return "This agent is waiting on you. Messages queue until you answer it." }
         if !state.turnNotice.isEmpty { return state.turnNotice }
         guard state.working else { return "Ready to send." }

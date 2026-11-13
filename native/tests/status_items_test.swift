@@ -7,6 +7,8 @@ import SwiftUI
 struct StatusItemsTest {
     @MainActor
     static func main() {
+        let down = [HostHealth(id: "a", name: "vps", state: "unreachable"), HostHealth(id: "b", name: "box", state: "connected")]
+        check(StatusItemsState.hosts(down) == "this Mac · vps (unreachable) · box", "a down host stays in the status bar, marked: \(StatusItemsState.hosts(down))")
         let model = AgenthailModel(connecting: false)
         let pane = model.openPane()
         let state = StatusItemsState(items: ["working", "needs-you", "hosts", "terminal"], short: false, working: 2, needsYou: 1, hosts: "this Mac")
