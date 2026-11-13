@@ -56,7 +56,7 @@ function renderChanges() {
     list.append(element("div", { className: "empty-card", textContent: "No changes recorded yet." }));
     return;
   }
-  state.changes.forEach((change, index) => {
+  state.changes.forEach((change) => {
     const buttons = [];
     const show = element("button", { type: "button", className: "soft-button", textContent: state.patches.has(change.rev) ? "Hide" : "Show" });
     show.addEventListener("click", () => togglePatch(change.rev));
@@ -66,7 +66,7 @@ function renderChanges() {
       keep.addEventListener("click", () => changeAction({ action: "keep", rev: change.rev }));
       buttons.push(keep);
     }
-    if (index < state.changes.length - 1 || state.changes.length === 30) {
+    if (!change.root) {
       const undo = element("button", { type: "button", className: "soft-button", textContent: "Undo" });
       undo.addEventListener("click", () => changeAction({ action: "undo", rev: change.rev }));
       buttons.push(undo);

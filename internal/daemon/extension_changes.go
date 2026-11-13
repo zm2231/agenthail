@@ -458,7 +458,15 @@ func (d *Daemon) undoExtensionChange(ctx context.Context, rev string) (extension
 	if history == nil {
 		return extension.Undone{}, invalidRequest("there is no extensions folder")
 	}
+	// The revert and forgetting its pending entry share the lock Keep takes,
+	// so a Keep of the same change sees either both or neither.
+	c := d.extensions.changes
+	c.mu.Lock()
 	undone, err := history.Undo(rev)
+	if err == nil {
+		d.forgetPendingExtensionChangeLocked(undone.Reverted.Rev)
+	}
+	c.mu.Unlock()
 	if errors.Is(err, extension.ErrUndoLater) || errors.Is(err, extension.ErrUnrecorded) {
 		return extension.Undone{}, actionFailed(http.StatusConflict, "conflict", err.Error())
 	}
@@ -479,7 +487,6 @@ func (d *Daemon) undoExtensionChange(ctx context.Context, rev string) (extension
 		}
 	}
 	d.applyExtensionChange(ctx, undone.Reverted.Rev)
-	d.forgetPendingExtensionChange(undone.Reverted.Rev)
 	return undone, nil
 }
 
@@ -573,10 +580,8 @@ func (d *Daemon) rewordExtensionChangeAsks() {
 	}
 }
 
-func (d *Daemon) forgetPendingExtensionChange(rev string) {
+func (d *Daemon) forgetPendingExtensionChangeLocked(rev string) {
 	c := d.extensions.changes
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	pending, err := c.readPending()
 	if err != nil {
 		d.log.Printf("extensions: read pending changes: %s", err)

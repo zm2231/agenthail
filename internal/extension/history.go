@@ -43,6 +43,8 @@ type Change struct {
 	// recorded; the change may hold their edits too.
 	AlsoRunning []string      `json:"alsoRunning,omitempty"`
 	Extensions  []FileChanges `json:"extensions,omitempty"`
+	// Root is the history's first commit, which can't be undone.
+	Root bool `json:"root,omitempty"`
 }
 
 type FileChanges struct {
@@ -140,7 +142,7 @@ func (h *History) Log(limit int, rev string) ([]Change, error) {
 	if err := h.repo.CheckRev(rev); err != nil {
 		return nil, err
 	}
-	out, err := h.repo.Git("log", fmt.Sprintf("-n%d", limit), "--format=%x1e%h%x1f%an%x1f%aI%x1f%s%x1f%(trailers:key="+sessionTrailer+",valueonly,separator=)%x1f%(trailers:key="+turnTrailer+",valueonly,separator=)%x1f%(trailers:key="+alsoTrailer+",valueonly,separator=%x2C)", "--abbrev=12", "--name-status", "--no-renames", rev)
+	out, err := h.repo.Git("log", fmt.Sprintf("-n%d", limit), "--format=%x1e%h%x1f%an%x1f%aI%x1f%s%x1f%(trailers:key="+sessionTrailer+",valueonly,separator=)%x1f%(trailers:key="+turnTrailer+",valueonly,separator=)%x1f%(trailers:key="+alsoTrailer+",valueonly,separator=%x2C)%x1f%P", "--abbrev=12", "--name-status", "--no-renames", rev)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +150,7 @@ func (h *History) Log(limit int, rev string) ([]Change, error) {
 	for _, record := range strings.Split(out, "\x1e") {
 		header, files, _ := strings.Cut(record, "\n")
 		fields := strings.Split(header, "\x1f")
-		if len(fields) != 7 {
+		if len(fields) != 8 {
 			continue
 		}
 		at, _ := time.Parse(time.RFC3339, fields[2])
@@ -156,6 +158,7 @@ func (h *History) Log(limit int, rev string) ([]Change, error) {
 		if also := strings.TrimSpace(fields[6]); also != "" {
 			change.AlsoRunning = strings.Split(also, ",")
 		}
+		change.Root = strings.TrimSpace(fields[7]) == ""
 		change.Extensions = fileChanges(files)
 		changes = append(changes, change)
 	}

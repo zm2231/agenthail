@@ -307,14 +307,20 @@ func TestEachPendingChangeIsKeptOnItsOwnAndShowsWhatItChanged(t *testing.T) {
 	if response, _ := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "keep", "rev": notes.Rev}); response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("keeping a kept change again answered %d", response.StatusCode)
 	}
-	if response, body := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "keep", "rev": jots.Rev}); response.StatusCode != http.StatusOK {
-		t.Fatalf("keeping the last change answered %d %s", response.StatusCode, body)
+	if root := f.changes(t); !root[len(root)-1].Root || root[0].Root {
+		t.Fatalf("history marks the root as %v and the newest as %v", root[len(root)-1].Root, root[0].Root)
+	}
+	if status, body := f.undo(t, jots.Rev); status != http.StatusOK {
+		t.Fatalf("undoing jots answered %d %s", status, body)
+	}
+	if response, _ := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "keep", "rev": jots.Rev}); response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("keeping an undone change answered %d", response.StatusCode)
 	}
 	if _, open := openChangeAsk(t, reg, "to"); open {
-		t.Fatal("the ask stayed open with every change kept")
+		t.Fatal("the ask stayed open with nothing left in it")
 	}
-	if closed, found, _ := reg.Ask(ask.ID); !found || closed.Answer.Answers[closed.Questions[0].Question] != extensionKeep {
-		t.Fatalf("the ask closed as %+v", closed.Answer)
+	if closed, found, _ := reg.Ask(ask.ID); !found || closed.Answer.Answers[closed.Questions[0].Question] != extensionUndo {
+		t.Fatalf("the ask whose last change was undone closed as %+v", closed.Answer)
 	}
 	if _, body := f.request(t, http.MethodGet, "/api/v1/extensions/history", "secret", nil); strings.Contains(string(body), `"pending":true`) {
 		t.Fatalf("kept changes are still listed as pending: %s", body)

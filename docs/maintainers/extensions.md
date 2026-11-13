@@ -372,4 +372,5 @@ Keep/Undo ask: the ask drops it, and closes as kept when none is left.
 at 256 KiB with `truncated` set. `GET /api/v1/extensions/history?limit=50` lists the changes (`read`
 scope): each with `rev`, `author`, `time`, `message`, `sessionId`, `turnId`
 and, per extension, `created`, `removed` and the files `added`, `updated` and
-`deleted`, and `pending` while the change waits in a Keep/Undo ask.
+`deleted`, `pending` while the change waits in a Keep/Undo ask, and `root`
+for the first commit, which can't be undone.
