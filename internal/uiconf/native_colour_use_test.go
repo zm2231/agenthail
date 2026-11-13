@@ -3,6 +3,7 @@ package uiconf
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -116,30 +117,42 @@ var paletteAlias = regexp.MustCompile(`=\s*(DesktopPalette|PhonePalette|PaletteT
 func nativeSwiftSources(t *testing.T) map[string]string {
 	t.Helper()
 	root := filepath.Join("..", "..", "native")
+	listed, err := exec.Command("git", "-C", root, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory").Output()
+	if err != nil {
+		t.Fatalf("finding ignored native files needs a git checkout: %v", err)
+	}
+	ignored := map[string]bool{}
+	for _, rel := range strings.Split(string(listed), "\x00") {
+		ignored[strings.TrimSuffix(rel, "/")] = true
+	}
 	sources := map[string]string{}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if entry.IsDir() {
-			if testDirectories[entry.Name()] {
+		rel, _ := filepath.Rel(root, path)
+		rel = filepath.ToSlash(rel)
+		if ignored[rel] || entry.IsDir() && testDirectories[entry.Name()] {
+			if entry.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".swift") {
+		if entry.IsDir() || !strings.HasSuffix(path, ".swift") {
 			return nil
 		}
 		source, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		rel, _ := filepath.Rel(root, path)
-		sources[filepath.ToSlash(rel)] = string(source)
+		sources[rel] = string(source)
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(sources) == 0 {
+		t.Fatal("found no native Swift sources")
 	}
 	return sources
 }
