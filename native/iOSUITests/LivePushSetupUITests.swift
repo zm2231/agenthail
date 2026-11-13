@@ -24,7 +24,7 @@ final class LivePushSetupUITests: XCTestCase {
         _ = try pairLiveHost(0, control: control, in: app)
         let host = try pairLiveHost(1, control: control, in: app)
         let row = liveRow("Check the release notes", host: host, in: app).firstMatch
-        requireLive(row.waitForExistence(timeout: 30), "the host's conversation is listed", app)
+        requireLive(reveal(row, in: app, timeout: 30), "the host's conversation is listed", app)
 
         for cycle in 1...2 {
             XCUIDevice.shared.press(.home)
@@ -35,7 +35,7 @@ final class LivePushSetupUITests: XCTestCase {
             sleep(10)
             try control.start(host: 1)
             app.tab("Sessions").tapWhenReady(timeout: 20)
-            requireLive(row.waitForExistence(timeout: 60), "the host is back in cycle \(cycle)", app)
+            requireLive(reveal(row, in: app, timeout: 60), "the host is back in cycle \(cycle)", app)
             app.swipeUp()
             app.swipeDown()
             requireLive(appAlerts.isEmpty, "no alert after reconnect cycle \(cycle): \(appAlerts)", app)
