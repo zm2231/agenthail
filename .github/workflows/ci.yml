@@ -234,7 +234,7 @@ jobs:
       - name: Format
         run: |
           unformatted=$(gofmt -l $(git ls-files '*.go' ':(exclude)**/testdata/**'))
-          if [ -n "$unformatted" ]; then echo "run gofmt -w on:"; echo "$unformatted"; exit 1; fi
+          if [ -n "$unformatted" ]; then echo "run gofmt -w from the toolchain go.mod pins, $(go env GOVERSION) (see docs/maintainers/self-hosted-ci.md), on:"; echo "$unformatted"; exit 1; fi
       - name: Vet
         run: go vet ./...
 
