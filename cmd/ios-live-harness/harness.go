@@ -75,6 +75,12 @@ func newHarness(binary string, count int) (*harness, error) {
 			h.cleanup()
 			return nil, err
 		}
+		stub, err := host.installStubClaude()
+		if err != nil {
+			h.cleanup()
+			return nil, fmt.Errorf("install the Claude stub for %s: %w", host.name, err)
+		}
+		host.stub = stub
 		if err := host.seed(); err != nil {
 			h.cleanup()
 			return nil, fmt.Errorf("seed %s: %w", host.name, err)
@@ -95,7 +101,14 @@ func newHarness(binary string, count int) (*harness, error) {
 }
 
 func (h *harness) scope(host *host) scope {
-	return scope{name: host.name, root: host.root, port: host.port, trap: host.trap, forbidden: h.forbidden, executables: h.executables, executableDirs: h.executableDirs}
+	executables := make(map[string]bool, len(h.executables)+1)
+	for path := range h.executables {
+		executables[path] = true
+	}
+	if host.stub != "" {
+		executables[host.stub] = true
+	}
+	return scope{name: host.name, root: host.root, port: host.port, trap: host.trap, forbidden: h.forbidden, executables: executables, executableDirs: h.executableDirs}
 }
 
 func (h *harness) start(ctx context.Context, control string) error {
@@ -176,6 +189,8 @@ type hostStatus struct {
 //	POST /hosts/{i}/reply   append an assistant reply to one of host i's seeded conversations
 //	POST /hosts/{i}/turn/start   open a turn in a running Claude conversation on host i
 //	POST /hosts/{i}/turn/finish  end that turn as Claude does
+//	POST /hosts/{i}/turn/ask     raise a Bash permission prompt in that turn through the host's hook path
+//	GET  /hosts/{i}/turn/ask     whether that prompt was answered, and the decision
 //	POST /hosts/{i}/stop    stop host i's daemon
 //	POST /hosts/{i}/start   start host i's daemon again on the same port
 func (h *harness) controlHandler(ctx context.Context) http.Handler {
@@ -256,6 +271,15 @@ func (h *harness) controlHandler(ctx context.Context) http.Handler {
 	}
 	mux.HandleFunc("POST /hosts/{i}/turn/start", turn((*host).startTurn))
 	mux.HandleFunc("POST /hosts/{i}/turn/finish", turn((*host).finishTurn))
+	mux.HandleFunc("POST /hosts/{i}/turn/ask", turn((*host).askInTurn))
+	mux.HandleFunc("GET /hosts/{i}/turn/ask", withHost(func(w http.ResponseWriter, host *host) {
+		status, err := host.askResult()
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, status)
+	}))
 	mux.HandleFunc("POST /hosts/{i}/stop", withHost(func(w http.ResponseWriter, host *host) {
 		host.stop()
 		writeJSON(w, http.StatusOK, status(host))

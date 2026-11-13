@@ -35,9 +35,20 @@ struct LiveControl {
         _ = try post("hosts/\(host)/turn/finish", body: try JSONSerialization.data(withJSONObject: ["text": reply]))
     }
 
-    private func post(_ path: String, body: Data? = nil) throws -> Data {
+    func ask(host: Int, command: String) throws {
+        _ = try post("hosts/\(host)/turn/ask", body: try JSONSerialization.data(withJSONObject: ["text": command]))
+    }
+
+    func askAnswer(host: Int) throws -> String? {
+        let reply = try post("hosts/\(host)/turn/ask", method: "GET")
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: reply) as? [String: Any])
+        guard object["answered"] as? Bool == true else { return nil }
+        return (object["decision"] as? [String: Any])?["behavior"] as? String
+    }
+
+    private func post(_ path: String, body: Data? = nil, method: String = "POST") throws -> Data {
         var request = URLRequest(url: base.appendingPathComponent(path), timeoutInterval: 30)
-        request.httpMethod = "POST"
+        request.httpMethod = method
         request.httpBody = body
         let reply = Reply()
         URLSession.shared.dataTask(with: request) { data, response, error in

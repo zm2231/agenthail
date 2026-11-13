@@ -19,6 +19,9 @@ import (
 const helperEnv = "IOS_LIVE_HARNESS_HELPER"
 
 func TestMain(m *testing.M) {
+	if filepath.Base(os.Args[0]) == stubClaudeName {
+		os.Exit(runStubClaude(os.Args[1:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "daemon-run" {
 		fakeDaemon()
 		return
