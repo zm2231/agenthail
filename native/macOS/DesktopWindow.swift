@@ -140,7 +140,7 @@ private struct WindowChromeLayout<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        let tabs = pane.tabsEnabled
+        let tabs = pane.tabsEnabled && !pane.pageFills
         VStack(spacing: 0) {
             content
                 .environment(\.windowChromeTop, tabs ? TitleBarStrip.height : 0)
@@ -157,7 +157,9 @@ private struct WindowChromeLayout<Content: View>: View {
                             .transition(.opacity)
                     }
                 }
-            StatusStrip(model: model, pane: pane, interface: interface)
+            if !pane.pageFills {
+                StatusStrip(model: model, pane: pane, interface: interface)
+            }
         }
     }
 }

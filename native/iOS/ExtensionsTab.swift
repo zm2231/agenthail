@@ -47,7 +47,7 @@ struct ExtensionsHub: View {
         }
         .listStyle(.insetGrouped)
         .phoneBackdrop(.list)
-        .navigationTitle("Extensions")
+        .navigationTitle("Apps")
         .navigationDestination(for: ExtensionRoute.self) { route in
             ExtensionPageScreen(model: model, entryID: route.entryID)
         }

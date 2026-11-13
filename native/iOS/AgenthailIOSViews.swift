@@ -137,7 +137,7 @@ struct MainTabs: View {
             }
             NavigationStack { ExtensionsHub(model: model) }
                 .solidTabBar()
-                .tabItem { Label("Extensions", systemImage: ExtensionEntry.fallbackIcon) }
+                .tabItem { Label("Apps", systemImage: ExtensionEntry.fallbackIcon) }
                 .tag(MainTab.extensions)
             NavigationStack { SettingsView(model: model) }
                 .solidTabBar()

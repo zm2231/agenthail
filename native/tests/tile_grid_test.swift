@@ -10,7 +10,7 @@ struct TileGridTest {
             let columns = TileGrid.columns(width: sidebar - padding)
             check(columns == expected, "a \(sidebar) pt sidebar fits \(expected) columns, got \(columns)")
             let tile = (sidebar - padding - CGFloat(columns - 1) * TileGrid.spacing) / CGFloat(columns)
-            for name in ["backend", "mobile1", "website", "monitor", "Inbox", "All", "+10"] {
+            for name in ["backend", "mobile1", "website", "monitor", "Inbox", "Apps", "All", "+10"] {
                 let label = (name as NSString).size(withAttributes: [.font: font]).width
                 check(label <= tile, "\(name) (\(label) pt) fits a \(tile) pt tile at \(sidebar) pt")
             }

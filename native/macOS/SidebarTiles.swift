@@ -19,7 +19,7 @@ struct SidebarTiles: View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: TileGrid.spacing, alignment: .top), count: count)
         LazyVGrid(columns: columns, alignment: .leading, spacing: TileGrid.spacing) {
             tile("Inbox", mark: .symbol("tray"), count: model.needsYouCount, selected: pane.scope == .inbox, id: "sidebar-tile-inbox", action: pane.showInbox)
-            tile("Extensions", mark: .symbol(ExtensionEntry.fallbackIcon), count: 0, selected: pane.scope == .extensions, id: "sidebar-tile-extensions", action: pane.showExtensions)
+            tile("Apps", mark: .symbol(ExtensionEntry.fallbackIcon), count: 0, selected: pane.scope == .extensions, id: "sidebar-tile-extensions", action: pane.showExtensions)
             ForEach(pinned) { entry in
                 tile(entry.label, mark: .symbol(entry.icon), count: 0, badge: entry.badge, selected: pane.scope == .extensionEntry(entry.id), id: "sidebar-tile-extension-" + entry.id) { pane.showExtension(entry.id) }
             }

@@ -14,9 +14,14 @@ struct ExtensionsPane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesktopSpace.l) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("Extensions")
-                        .font(.system(size: DesktopType.display, weight: .semibold))
-                        .foregroundStyle(DesktopPalette.text)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Apps")
+                            .font(.system(size: DesktopType.display, weight: .semibold))
+                            .foregroundStyle(DesktopPalette.text)
+                        Text(catalog.hostName.isEmpty ? "Extensions on this computer" : "Extensions on \(catalog.hostName)")
+                            .font(.system(size: DesktopType.secondary))
+                            .foregroundStyle(DesktopPalette.text2)
+                    }
                     Spacer()
                     Button("History") { showsHistory = true }
                         .accessibilityIdentifier("extensions-history")
@@ -43,7 +48,7 @@ struct ExtensionsPane: View {
                         }
                     }
                 }
-                Text(catalog.hostName.isEmpty ? "Extensions on this computer. Extensions on paired hosts come later." : "Extensions on \(catalog.hostName). Extensions on paired hosts come later.")
+                Text("Extensions on paired hosts come later.")
                     .font(.system(size: DesktopType.meta))
                     .foregroundStyle(DesktopPalette.text2)
             }
@@ -112,6 +117,7 @@ private struct ExtensionCard: View {
             .padding(DesktopSpace.s)
             .help(pinned ? "Unpin from the sidebar" : entry.offered ? "This extension asks for a sidebar entry. Pin it." : "Pin to the sidebar")
             .accessibilityLabel(pinned ? "Unpin \(entry.label)" : "Pin \(entry.label)")
+            .accessibilityIdentifier("extension-pin-" + entry.id)
         }
         .contextMenu {
             Button(pinned ? "Unpin from Sidebar" : "Pin to Sidebar", action: togglePin)
@@ -132,7 +138,6 @@ struct ExtensionPagePane: View {
     var model: AgenthailModel
     var pane: SessionPane
     let entryID: String
-    @State private var enteredFullScreen = false
 
     var body: some View {
         let catalog = model.extensionCatalog
@@ -153,19 +158,22 @@ struct ExtensionPagePane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea(.all, edges: pane.pageFills ? .all : [])
-        .onKeyPress(.escape) {
-            guard pane.pageFills else { return .ignored }
-            setFills(false)
-            return .handled
+        .background {
+            if pane.pageFills {
+                Button("Show sidebar and toolbar") { setFills(false) }
+                    .keyboardShortcut(.cancelAction)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
         }
-        .onDisappear { if enteredFullScreen { setFills(false) } }
     }
 
     private func controls(_ entry: ExtensionEntry) -> some View {
         HStack(spacing: DesktopSpace.xs) {
-            control("chevron.left", "All extensions", id: "extension-back") { pane.showExtensions() }
+            control("chevron.left", "All apps", id: "extension-back") { pane.showExtensions() }
             control("arrow.clockwise", "Reload", id: "extension-reload") { ExtensionPages.controller(for: entry).reload() }
-            control(pane.pageFills ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right", pane.pageFills ? "Exit full screen" : "Full screen", id: "extension-full-screen") {
+            control(pane.pageFills ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right", pane.pageFills ? "Show sidebar and toolbar" : "Fill the window", id: "extension-full-screen") {
                 setFills(!pane.pageFills)
             }
         }
@@ -189,15 +197,6 @@ struct ExtensionPagePane: View {
 
     private func setFills(_ fills: Bool) {
         pane.pageFills = fills
-        guard let window = model.mainWindow ?? NSApp.keyWindow else { return }
-        let full = window.styleMask.contains(.fullScreen)
-        if fills && !full {
-            enteredFullScreen = true
-            window.toggleFullScreen(nil)
-        } else if !fills && full && enteredFullScreen {
-            enteredFullScreen = false
-            window.toggleFullScreen(nil)
-        }
     }
 
     private func gone(_ title: String, _ detail: String) -> some View {
@@ -206,7 +205,7 @@ struct ExtensionPagePane: View {
         } description: {
             Text(detail)
         } actions: {
-            Button("All Extensions") { pane.showExtensions() }
+            Button("All Apps") { pane.showExtensions() }
         }
     }
 }
