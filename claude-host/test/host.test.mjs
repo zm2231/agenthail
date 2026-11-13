@@ -1197,6 +1197,43 @@ test('drain retires the host: it gives up the socket and lock and serves its ses
   r.close();
 });
 
+test('an interrupt that reaches Claude before it starts the turn stops the turn once it starts', async () => {
+  const f = fixture();
+  const gate = path.join(f.root, 'init-gate');
+  await startHost(f, { env: { FAKE_CLAUDE_INIT_GATE: gate } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'SLOW 60000' });
+  await c.call('interrupt', { sessionId: id });
+  fs.writeFileSync(gate, '');
+  await c.event(turnResult(id, uuid));
+  assert.deepEqual(transcript(f, id).map((l) => l.reply), ['interrupted']);
+  c.close();
+});
+
+test('an interrupt while a finished background task is owed its turn is not sent again to that turn', async () => {
+  const f = fixture();
+  const release = path.join(f.root, 'notify');
+  await startHost(f, { env: { FAKE_CLAUDE_NOTIFY_RELEASE: release } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'BACKGROUND 200' });
+  await c.event((e) => e.sessionId === id && e.kind === 'tasks' && e.taskTurnOwed === true, 5000);
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'SLOW 300' });
+  await c.call('interrupt', { sessionId: id });
+  fs.writeFileSync(release, '');
+  await c.event(turnResult(id, uuid), 5000);
+  const interrupts = fs.readFileSync(path.join(f.claudeDir, 'interrupts.jsonl'), 'utf8').trim().split('\n');
+  assert.equal(interrupts.length, 1, 'the turn the task is owed gets no second interrupt');
+  c.close();
+});
+
 test('retiring lets go of subscribers that came in through the daemon socket', async () => {
   const f = fixture();
   const host = await startHost(f);
