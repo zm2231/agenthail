@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -66,9 +67,12 @@ func TestCodexFoldersFollowedStayBoundedAsDaysPass(t *testing.T) {
 			t.Fatalf("day %d: followed=%d previous=%v today=%v, want the sessions, year, month and today's folders", days, followed, stale, current)
 		}
 	}
+	// Other tests in the process may still be closing descriptors of their own.
 	final := openDescriptors(t)
-	t.Logf("descriptors: %d after the first sync, %d after 60 more days", settled, final)
-	if grown := final - settled; grown > 4 {
-		t.Fatalf("descriptors grew by %d over 60 days", grown)
+	for deadline := time.Now().Add(5 * time.Second); final > settled && time.Now().Before(deadline); final = openDescriptors(t) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if final > settled {
+		t.Fatalf("descriptors: %d after the first sync, %d after 60 more days", settled, final)
 	}
 }
