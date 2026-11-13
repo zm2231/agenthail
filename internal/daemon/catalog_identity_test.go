@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,22 @@ func catalogTestRepo(t *testing.T) string {
 	gitRun(t, repo, "add", "README.md")
 	gitRun(t, repo, "commit", "-m", "base")
 	return repo
+}
+
+// settleGitFiles moves every file under repo's .git an hour back, as for a
+// repository nobody has touched since well before the daemon read it.
+func settleGitFiles(t *testing.T, repo string) {
+	t.Helper()
+	settled := time.Now().Add(-time.Hour)
+	err := filepath.WalkDir(filepath.Join(repo, ".git"), func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(path, settled, settled)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestCatalogIdentityMapsWorktreesAndSubfoldersToTheMainCheckout(t *testing.T) {
@@ -352,5 +369,68 @@ func TestAnUntrackedFileInANewFolderMakesTheCheckoutDirty(t *testing.T) {
 	}
 	if dirty := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject); !dirty.Checkout.Dirty {
 		t.Fatalf("untracked file did not make the checkout dirty: %+v", dirty.Checkout)
+	}
+}
+
+// inOneTick is a modification time a later read still counts as inside the
+// tick of its change, however slowly the test runs.
+func inOneTick() time.Time { return time.Now().Add(time.Minute) }
+
+func setRemoteKeepingTime(t *testing.T, repo, url string, at time.Time) {
+	t.Helper()
+	gitRun(t, repo, "remote", "set-url", "origin", url)
+	config := filepath.Join(repo, ".git", "config")
+	if err := os.Chtimes(config, at, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestARemoteRewrittenAtTheSameSizeInOneTickMovesTheProject(t *testing.T) {
+	repo := catalogTestRepo(t)
+	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/gadget.git")
+	tick := inOneTick()
+	setRemoteKeepingTime(t, repo, "https://github.com/example/gadget.git", tick)
+	cache := newCatalogIdentityCache()
+	before := catalogProjectAt(t, cache, repo)
+	setRemoteKeepingTime(t, repo, "https://github.com/example/gidget.git", tick)
+	later := catalogProjectAt(t, cache, repo)
+	if before.ID != "repo:github.com/example/gadget" || later.ID != "repo:github.com/example/gidget" {
+		t.Fatalf("before=%s later=%s, want the rewritten remote", before.ID, later.ID)
+	}
+}
+
+func TestABranchSwitchThatKeepsHEADsSizeAndTimeShowsTheNewBranch(t *testing.T) {
+	repo := catalogTestRepo(t)
+	gitRun(t, repo, "branch", "dev1")
+	head := filepath.Join(repo, ".git", "HEAD")
+	tick := inOneTick()
+	rewriteKeepingTime(t, head, "ref: refs/heads/main\n", tick)
+	cache := newCatalogIdentityCache()
+	session := surface.Session{Cwd: repo}
+	if first := cache.identity(context.Background(), session, time.Now(), noStoredProject); first.Checkout.Branch != "main" {
+		t.Fatalf("first=%+v", first.Checkout)
+	}
+	rewriteKeepingTime(t, head, "ref: refs/heads/dev1\n", tick)
+	cache.identity(context.Background(), session, time.Now(), noStoredProject)
+	cache.wait()
+	if later := cache.identity(context.Background(), session, time.Now(), noStoredProject); later.Checkout.Branch != "dev1" {
+		t.Fatalf("later=%+v, want the switched branch", later.Checkout)
+	}
+}
+
+func TestAProjectRootFollowsARemoteRewrittenAtTheSameSizeInOneTick(t *testing.T) {
+	repo := catalogTestRepo(t)
+	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/gadget.git")
+	tick := inOneTick()
+	setRemoteKeepingTime(t, repo, "https://github.com/example/gadget.git", tick)
+	cache := newCatalogIdentityCache()
+	beforeKey, _, ok := cache.rootRepository(context.Background(), repo, time.Now())
+	if !ok {
+		t.Fatal("root not read")
+	}
+	setRemoteKeepingTime(t, repo, "https://github.com/example/gidget.git", tick)
+	laterKey, repository, ok := cache.rootRepository(context.Background(), repo, time.Now())
+	if !ok || beforeKey == laterKey || !strings.Contains(string(repository), "gidget") {
+		t.Fatalf("before=%q later=%q repository=%s, want the rewritten remote", beforeKey, laterKey, repository)
 	}
 }

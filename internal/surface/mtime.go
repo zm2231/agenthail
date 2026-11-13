@@ -3,6 +3,7 @@ package surface
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -25,6 +26,18 @@ func (s FileStamp) Equal(other FileStamp) bool {
 
 func (s FileStamp) UnchangedSince(readAt time.Time, current os.FileInfo) bool {
 	return s.Size == current.Size() && UnchangedSince(readAt, s.Modified, current.ModTime())
+}
+
+// SettledStamp is the stamp a cache keeps to tell whether a file changed since
+// it was read at readAt. A file modified within MtimeGranularity of the read
+// can change again without its time moving, so its stamp also carries the read
+// time and matches no later stamp.
+func SettledStamp(info os.FileInfo, readAt time.Time) string {
+	stamp := Stamp(info).String()
+	if readAt.Sub(info.ModTime()) <= MtimeGranularity {
+		stamp += "@" + strconv.FormatInt(readAt.UnixNano(), 10)
+	}
+	return stamp
 }
 
 // MtimeGranularity bounds how coarse a file system's modification times are.
