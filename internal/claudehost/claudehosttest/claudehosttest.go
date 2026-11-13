@@ -76,9 +76,9 @@ func New(t testing.TB, home string) *Fixture {
 
 // Manager starts hosts that report the given version and run the fake CLI,
 // which writes its session record and serves its messaging socket.
-func (f *Fixture) Manager(t testing.TB, version string) *claudehost.Manager {
+func (f *Fixture) Manager(t testing.TB, version string, env ...string) *claudehost.Manager {
 	t.Helper()
-	launch := f.launch(t, "host.mjs", version)
+	launch := f.launch(t, "host.mjs", version, env...)
 	return &claudehost.Manager{Home: f.Home, Launch: func() (claudehost.Launch, error) { return launch, nil }}
 }
 

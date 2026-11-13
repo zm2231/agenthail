@@ -298,11 +298,14 @@ once for that request: the daemon logs `idle compaction held for <session> at
 resolves to and `session` as the session's display name. The dashboard's
 compaction settings show the latest five under each root, and `agenthail claude
 settings compact` prints them under each root, saying so when the daemon can't
-be reached. The reasons, in the order they are checked: off for the root, not
-idle (a status that never left busy shows here), waiting on a prompt, a
+be reached. The reasons, in the order they are checked: the session ended
+(its Claude process is gone, as when a retiring host closed it), off for the
+root, not idle (a status that never left busy shows here), waiting on a prompt, a
 background task running, the root at a usage limit, no compact for the
 session, and a queued or in-flight item. The holds live in the daemon's memory
-and start empty when it restarts.
+and start empty when it restarts. A session that a retiring Claude host still
+runs stays there while it could be compacted, and the same pass releases it
+otherwise (see [Claude host](claude-host.md#replacement)).
 
 Each transcript changed in the last hour is read on every pass, held or not,
 so the reads are incremental: `Claude.IdleCompactionState` continues from the

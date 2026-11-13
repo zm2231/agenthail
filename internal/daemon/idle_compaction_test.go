@@ -90,6 +90,7 @@ func TestAnIdleLargeSessionIsCompactedOnceBeforeItsCacheExpires(t *testing.T) {
 		s.UsageLimit = &surface.UsageLimit{ResetsAt: now.Add(2 * time.Hour)}
 	})
 	add("turned-off", off, due, nil)
+	add("ended", primary, due, func(s *surface.Session) { s.Ended = true })
 
 	d := newTestDaemon(t, r, []surface.Surface{fake})
 	read := map[string]idleTranscript{}
@@ -139,6 +140,7 @@ func TestAnIdleLargeSessionIsCompactedOnceBeforeItsCacheExpires(t *testing.T) {
 		"queued":        "a message or command is queued or in flight",
 		"under-a-limit": "the account under this root is at a usage limit",
 		"turned-off":    "idle compaction is off for this root",
+		"ended":         "the session has ended",
 	}
 	if !maps.Equal(held, wantHeld) {
 		t.Errorf("held = %v, want %v", held, wantHeld)

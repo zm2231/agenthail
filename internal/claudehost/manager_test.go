@@ -220,6 +220,22 @@ func listed(t *testing.T, client claudehost.Client, sessionID string, requests i
 	return found
 }
 
+// releaseOnRetiringHost releases a session from whichever retiring host runs
+// it, the way the daemon releases one it does not keep.
+func releaseOnRetiringHost(t *testing.T, client claudehost.Client, sessionID string) {
+	t.Helper()
+	for _, host := range client.Retiring() {
+		err := host.Release(context.Background(), sessionID)
+		if err == nil {
+			return
+		}
+		if !claudehost.IsCode(err, "not_open") {
+			t.Fatalf("release %s from %s = %v", sessionID, host.Socket, err)
+		}
+	}
+	t.Fatalf("no retiring host runs %s", sessionID)
+}
+
 func replies(turns []claudehosttest.Turn) []string {
 	var out []string
 	for _, turn := range turns {
@@ -278,12 +294,14 @@ func TestReplacingTheHostKeepsAPendingRequestAnswerableAndItsSessionReachable(t 
 			if outcome, err := client.Respond(ctx, sessionID, request.RequestID, test.decision); err != nil || outcome != test.outcome {
 				t.Fatalf("respond after the update = %q, %v; want %s", outcome, err, test.outcome)
 			}
-			testkit.Eventually(t, "the old host to finish the turns and leave", 15*time.Second, func() bool {
-				return !claudehosttest.Alive(oldHello.PID) && !claudehosttest.Alive(opened.PID)
-			})
+			testkit.Eventually(t, "the old host to finish the turns", 15*time.Second, func() bool { return len(f.Turns(t, sessionID)) == 2 })
 			if got := replies(f.Turns(t, sessionID)); !slices.Equal(got, []string{test.reply, "echo:after the update"}) {
 				t.Fatalf("turns = %v, want the answer to reach Claude and then the message", got)
 			}
+			releaseOnRetiringHost(t, client, sessionID)
+			testkit.Eventually(t, "the old host to leave once its session is released", 15*time.Second, func() bool {
+				return !claudehosttest.Alive(oldHello.PID) && !claudehosttest.Alive(opened.PID)
+			})
 			if retiring := client.Retiring(); len(retiring) != 0 {
 				t.Fatalf("retiring hosts after the old one left = %v", retiring)
 			}
@@ -332,6 +350,7 @@ func TestRetiredHostsLeaveWithTheirSessions(t *testing.T) {
 	if err := client.Interrupt(ctx, sessionID); err != nil {
 		t.Fatalf("interrupt the turn through the retiring host = %v", err)
 	}
+	releaseOnRetiringHost(t, client, sessionID)
 	testkit.Eventually(t, "the first host to leave after the turn", 15*time.Second, func() bool {
 		return !claudehosttest.Alive(first.PID) && !claudehosttest.Alive(opened.PID)
 	})
