@@ -19,8 +19,18 @@ final class LiveHostOutageUITests: XCTestCase {
         let banner = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "live-a: Refused the connection")).firstMatch
         showAllSessions(in: app)
         requireLive(!banner.exists, "host A has no reason shown while it runs", app)
+        rowA.tapWhenReady()
+        let seeded = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Done: check the release notes.")).firstMatch
+        requireLive(seeded.waitForExistence(timeout: 20), "host A's conversation opens before it stops", app)
+        let hostDown = app.descendants(matching: .any).matching(identifier: "composer-host-down").firstMatch
+        requireLive(!hostDown.exists, "host A's composer has no outage note while it runs", app)
         let stopped = Date()
         try control.stop(host: 0)
+        requireLive(hostDown.waitForExistence(timeout: 90), "host A's composer says the message waits for the host", app)
+        print("ios-live: host A's composer says \(hostDown.label) \(String(format: "%.1f", Date().timeIntervalSince(stopped))) s after it stopped")
+        step("2a host A's composer says it will send when the host is back", app)
+        app.backToSessions()
+        showAllSessions(in: app)
         requireLive(banner.waitForExistence(timeout: 90), "the list says why the stopped host can't be reached", app)
         print("ios-live: host A shown unreachable with its reason \(String(format: "%.1f", Date().timeIntervalSince(stopped))) s after it stopped: \(banner.label)")
         requireLive(reveal(rowA, in: app, value: "Unavailable", timeout: 30), "the stopped host's conversation is marked unavailable", app)
@@ -31,7 +41,6 @@ final class LiveHostOutageUITests: XCTestCase {
         step("3 host B still lists", app)
 
         rowB.tapWhenReady()
-        let seeded = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Done: check the release notes.")).firstMatch
         requireLive(seeded.waitForExistence(timeout: 20), "host B's conversation opens on its transcript", app)
         step("4 host B opens a conversation", app)
         app.backToSessions()
