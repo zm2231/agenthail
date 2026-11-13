@@ -42,6 +42,7 @@ the API and may return a cleanup function, called before the next reload.
 | `ah.job({name, everySeconds, run})` | Registers a background job. The daemon runs it once the extension loads and then every `everySeconds` (at least 60) after the previous run ends, never two at once, for at most 10 minutes. |
 | `ah.on(type, handler)` | Receives daemon events of `type`, or every event for `'*'`: `{id, type, timestamp, entityId, data}`, the same as `/api/v1/events`. Only an extension that holds `read.all` receives events. |
 | `ah.call(tool, args)` | Calls an Agenthail tool as the extension (below) and returns its result, or throws an error with `code` and `message`. A write gets a fresh `clientRequestId` unless one is given. |
+| `ah.tool({name, description, inputSchema, run})` | Offers a tool to agent sessions (below). |
 | `ah.fetch(mount, path, init)` | Requests `path` on the upstream of one of the extension's approved mounts, with the mount's key (below). `init` takes `method`, `headers` and `body`; a body that is not a string is sent as JSON. Returns `{status, ok, headers, text(), json(), bytes()}`, or throws an error with `code` and `message`. |
 | `ah.db` | The shared SQLite store (`node:sqlite` `DatabaseSync`, WAL), `~/.agenthail/extensions-data/store.db` |
 | `ah.table(name)` | `<id>_<name>` with dashes as underscores: the name an extension's own tables use |
@@ -79,6 +80,32 @@ last good `value`, if any).
 Every extension shares one store, so one extension can read another's tables.
 Keeping to `ah.table` names is what lets Agenthail find and remove an
 extension's data.
+
+## Tools for agent sessions
+
+An extension that holds `tools` offers each tool it registers to every agent
+session on this host as `ext_<id>_<name>`, at most 64 characters. Extensions
+are never offered each other's tools. `inputSchema` is a JSON Schema object
+with `type: "object"` (that alone if omitted); the daemon advertises it and
+checks only that the arguments are a JSON object of at most 64 KiB.
+
+Each tool's listing (name, description and schema) may encode to 2048 bytes
+and all extensions' tools together to 8192, beside the built-in tools' pinned
+size. Extensions are counted in id order, and one that would pass either limit
+offers none of its tools; `agenthail extensions list` and the dashboard say
+why. The MCP endpoint is stateless and sends no `list_changed`, so a session
+sees tools added or removed when it next starts or resumes, and a call to a
+tool no longer offered is refused. While a reload runs, sessions are offered
+no extension tools.
+
+`run(input, {caller, ah})` gets `caller` as `{kind: "session", sessionId,
+actor}`. `ctx.ah.call` uses a token that lives for the call (at most 60
+seconds) and acts as the calling session, with the same tool list as
+`ah.call` and only the session's capabilities the extension's own allow:
+`read.*` if it holds `read.all`, `control.*` if it holds `control.all`, and
+`requests.answer` if both hold it. Writes through it are the session's. The
+result is limited to 16 KiB like any tool's; an error thrown without a `code`
+answers `tool_failed`.
 
 ## The page
 
@@ -228,6 +255,7 @@ caller without those capabilities, usually `out_of_scope`.
 | `read.all` | read every session on this host, and receive every daemon event |
 | `control.all` | send to any session on this host |
 | `requests.answer` | answer the approvals and questions it can read |
+| `tools` | offer tools to agent sessions |
 
 Messages and history name the extension as `extension:<id>`, labelled
 `<label> (extension)`. It is never taken for the person. It reads no messages,
@@ -248,11 +276,12 @@ not start and its error says so.
 | Method | Params | Result |
 |---|---|---|
 | `hello` | | `{protocol: 1, hostVersion, pid}` |
-| `status` | | `{extensions: [{id, state, error, actions, jobs: [{name, everySeconds, source}], events, lastEventError}]}` |
+| `status` | | `{extensions: [{id, state, error, actions, jobs: [{name, everySeconds, source}], tools, events, lastEventError}]}` |
 | `load` | `{extensions: [{id, dir, token, mcpURL}], writeTools}` | as `status` |
 | `action` | `{id, name, input, caller}` | `{result}` |
 | `job` | `{id, name}` | `{}`; for a source, after storing its value or error |
 | `sources` | `{id, name?}` | `{sources}` or `{source}`, as `/x/<id>/s` |
+| `tool` | `{id, name, input, caller, token}` | `{result}` |
 | `events` | `{events, to}` | `{}`, at once; handlers run after |
 
 `load` replaces everything loaded: it calls each cleanup function, imports

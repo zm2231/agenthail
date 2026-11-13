@@ -41,6 +41,20 @@ assert.ok(imageHTML.includes('/api/session-attachment?sessionId=session%261&id=i
 assert.ok(imageHTML.includes('loading="lazy"'));
 problemContext.imageItem.attachment.mediaType = 'image/svg+xml';
 assert.ok(!vm.runInContext('renderImageAttachment(imageItem, imageSession)', problemContext).includes('<img'), 'active SVG is not embedded');
+problemContext.fileItem = {kind: 'file', title: 'report.pdf', text: 'The <b>report</b>', files: [{name: 'report.pdf', path: '/work/report.pdf', bytes: 2048}], attachment: {id: 'attachment:1:2:abc', mediaType: 'application/pdf', bytes: 2048, name: 'report.pdf'}};
+const pdfHTML = vm.runInContext('renderTimelineItem(fileItem, imageSession)', problemContext);
+assert.ok(pdfHTML.includes('href="/api/session-attachment?sessionId=session%261&id=attachment%3A1%3A2%3Aabc"'), pdfHTML);
+assert.ok(pdfHTML.includes('target="_blank"') && pdfHTML.includes('download="report.pdf"'), 'a sent PDF opens in a tab and downloads');
+assert.ok(pdfHTML.includes('The &lt;b&gt;report&lt;/b&gt;') && pdfHTML.includes('2.0 KB'), 'the caption is escaped and the size shown');
+problemContext.fileItem.attachment = {id: 'attachment:1:3:def', mediaType: 'text/markdown', bytes: 10, name: 'notes.md'};
+const markdownHTML = vm.runInContext('renderTimelineItem(fileItem, imageSession)', problemContext);
+assert.ok(!markdownHTML.includes('target="_blank"') && markdownHTML.includes('download="notes.md"'), 'any other sent file is a download card');
+problemContext.fileItem.attachment = undefined;
+problemContext.fileItem.files = [{name: 'gone.txt', path: '/work/gone.txt'}];
+const goneHTML = vm.runInContext('renderTimelineItem(fileItem, imageSession)', problemContext);
+assert.ok(goneHTML.includes('No longer available') && goneHTML.includes('data-copy-text="/work/gone.txt"') && !goneHTML.includes('href='), 'a missing sent file keeps its path to copy');
+problemContext.fileItem.files = [{name: 'huge.bin', path: '/work/huge.bin', bytes: 60 * 1024 * 1024}];
+assert.ok(vm.runInContext('renderTimelineItem(fileItem, imageSession)', problemContext).includes('Over 50 MiB'));
 problemContext.imageSession.surface = 'claude';
 problemContext.imageItem.attachment.mediaType = 'image/png';
 problemContext.imageItems = [

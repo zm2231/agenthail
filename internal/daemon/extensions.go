@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/nodehost"
 )
@@ -31,13 +32,14 @@ type extensionJob struct {
 }
 
 type extensionHostSummary struct {
-	ID             string         `json:"id"`
-	State          string         `json:"state"`
-	Error          string         `json:"error,omitempty"`
-	Actions        []string       `json:"actions"`
-	Jobs           []extensionJob `json:"jobs"`
-	Events         bool           `json:"events"`
-	LastEventError string         `json:"lastEventError,omitempty"`
+	ID             string              `json:"id"`
+	State          string              `json:"state"`
+	Error          string              `json:"error,omitempty"`
+	Actions        []string            `json:"actions"`
+	Jobs           []extensionJob      `json:"jobs"`
+	Events         bool                `json:"events"`
+	Tools          []extensionToolSpec `json:"tools"`
+	LastEventError string              `json:"lastEventError,omitempty"`
 }
 
 type extensionJobState struct {
@@ -50,12 +52,14 @@ type extensionJobState struct {
 }
 
 type loadedExtension struct {
-	ext     extension.Extension
-	held    []string
-	pending []string
-	token   string
-	host    extensionHostSummary
-	jobs    map[string]*extensionJobState
+	ext       extension.Extension
+	held      []string
+	pending   []string
+	token     string
+	host      extensionHostSummary
+	jobs      map[string]*extensionJobState
+	offered   []string
+	toolsNote string
 	// tree is the folder's hash while this load read it, or "" when it
 	// changed during the load, so a call is recorded only against a version
 	// known to be the one that ran.
@@ -71,20 +75,25 @@ type extensionRuntime struct {
 	calls     *extensionCalls
 	grants    *extensionGrants
 
-	loading   sync.Mutex
-	mu        sync.Mutex
-	loaded    map[string]*loadedExtension
-	tokens    map[string]string
-	hostErr   string
-	loggedErr string
-	up        bool
-	reloading bool
+	loading sync.Mutex
+	mu      sync.Mutex
+	loaded  map[string]*loadedExtension
+	tokens  map[string]string
+	// callers maps a tool call's token to the session it acts for, for as
+	// long as the call runs.
+	callers    map[string]*mcpCaller
+	tools      []offeredExtensionTool
+	toolServer *mcp.Server
+	hostErr    string
+	loggedErr  string
+	up         bool
+	reloading  bool
 	// generation counts loads; a run that saw it change may have run other code.
 	generation uint64
 }
 
 func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, error)) {
-	runtime := &extensionRuntime{home: home, approvals: extension.NewApprovals(home), mounts: newExtensionMounts(home), changes: newExtensionChanges(home), calls: &extensionCalls{path: filepath.Join(extension.DataDir(home), "calls.json")}, grants: &extensionGrants{path: filepath.Join(extension.DataDir(home), "grants.json")}, loaded: map[string]*loadedExtension{}, tokens: map[string]string{}}
+	runtime := &extensionRuntime{home: home, approvals: extension.NewApprovals(home), mounts: newExtensionMounts(home), changes: newExtensionChanges(home), calls: &extensionCalls{path: filepath.Join(extension.DataDir(home), "calls.json")}, grants: &extensionGrants{path: filepath.Join(extension.DataDir(home), "grants.json")}, loaded: map[string]*loadedExtension{}, tokens: map[string]string{}, callers: map[string]*mcpCaller{}}
 	runtime.host = &nodehost.Supervisor{
 		Name:     "extension host",
 		StateDir: extensionHostDir(home),
@@ -197,6 +206,8 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	r.loaded = next
 	r.tokens = tokens
 	r.reloading = true
+	r.tools = nil
+	r.toolServer = nil
 	r.generation++
 	r.mu.Unlock()
 	err = r.host.Client().Call(ctx, "load", map[string]any{"extensions": specs, "writeTools": extensionWriteTools()}, &status)
@@ -220,6 +231,8 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 			loaded.jobs[job.Name] = carriedJobState(previous[summary.ID], job, now)
 		}
 	}
+	r.tools = offerExtensionTools(next)
+	r.toolServer = nil
 	r.up = true
 	r.hostErr = ""
 	recovered := r.loggedErr != ""
@@ -432,6 +445,8 @@ type extensionView struct {
 	Capabilities []string                      `json:"capabilities"`
 	Pending      []string                      `json:"pendingCapabilities,omitempty"`
 	Actions      []string                      `json:"actions"`
+	Tools        []string                      `json:"tools,omitempty"`
+	ToolsNote    string                        `json:"toolsNote,omitempty"`
 	Jobs         map[string]*extensionJobState `json:"jobs,omitempty"`
 	EventError   string                        `json:"lastEventError,omitempty"`
 	Mounts       []mountState                  `json:"mounts,omitempty"`
@@ -466,6 +481,8 @@ func (d *Daemon) extensionsView() extensionsView {
 			Pending:      loaded.pending,
 			Actions:      append([]string{}, loaded.host.Actions...),
 			EventError:   loaded.host.LastEventError,
+			Tools:        slices.Clone(loaded.offered),
+			ToolsNote:    loaded.toolsNote,
 		}
 		if item.Label == "" {
 			item.Label = loaded.ext.ID

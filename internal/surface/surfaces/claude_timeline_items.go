@@ -11,13 +11,19 @@ import (
 // claudeRecordTimelineItems returns the timeline items of one transcript
 // record at offset, in its turn, after the done items of the turns it ended.
 // The live stream ends an interrupted turn with its cancelled done alone.
-func claudeRecordTimelineItems(ctx context.Context, record map[string]any, offset int64, line []byte, turnID string, ended []claudeTurnEnd, interrupted bool) ([]surface.TimelineItem, error) {
+func claudeRecordTimelineItems(ctx context.Context, calls *claudeToolCalls, record map[string]any, offset int64, line []byte, turnID string, ended []claudeTurnEnd, interrupted bool) ([]surface.TimelineItem, error) {
 	var items []surface.TimelineItem
 	if !interrupted {
 		items = claudeTimelineItems(record)
 	}
 	if err := decorateTimelineAttachments(ctx, items, record, "claude", offset); err != nil {
 		return nil, err
+	}
+	if !interrupted {
+		var err error
+		if items, err = appendSentFiles(ctx, items, calls, record, offset, line); err != nil {
+			return nil, err
+		}
 	}
 	at := str(record, "timestamp")
 	for i := range items {

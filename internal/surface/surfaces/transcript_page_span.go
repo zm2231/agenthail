@@ -90,7 +90,9 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 	result.CodexToolWindow = window
 	var claudeEnds map[int][]claudeTurnEnd
 	var claudeInterrupts map[int]bool
+	var calls *claudeToolCalls
 	if source == "claude" {
+		calls = newClaudeToolCalls(path)
 		turns, err := claudeTurnStateFrom(ctx, file, start, starts)
 		if err != nil {
 			return false, err
@@ -105,6 +107,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 			if decodeCompactRecord(line, &record) != nil {
 				continue
 			}
+			calls.observe(record, recordOffset)
 			turnID, ended, interrupted := turns.observe(record, recordOffset, line, func() int { return len(claudeTimelineItems(record)) })
 			recordTurnIDs[index] = turnID
 			claudeEnds[index] = ended
@@ -148,7 +151,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 		}
 		var items []surface.TimelineItem
 		if source == "claude" {
-			items, err = claudeRecordTimelineItems(ctx, record, offset, line, recordTurnIDs[index], claudeEnds[index], claudeInterrupts[index])
+			items, err = claudeRecordTimelineItems(ctx, calls, record, offset, line, recordTurnIDs[index], claudeEnds[index], claudeInterrupts[index])
 			if err != nil {
 				return false, err
 			}

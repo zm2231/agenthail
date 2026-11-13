@@ -40,13 +40,15 @@ function. Register everything while it runs.
 | `ah.job({name, everySeconds, run})` | Runs once after load, then every `everySeconds` (at least 60) after the last run ends, at most 10 minutes each |
 | `ah.on(type, handler)` | Daemon events (`'*'` for all); needs the `read.all` capability |
 | `ah.call(tool, args)` | Agenthail tools as the extension: `agenthail_sessions`, `agenthail_read`, `agenthail_history`, `agenthail_projects`, `agenthail_requests`, `agenthail_answer`, `agenthail_send`, `agenthail_channel_send` |
+| `ah.tool({name, description, inputSchema, run})` | A tool agent sessions call as `ext_<id>_<name>`; needs the `tools` capability. `run(input, {caller, ah})`: `ctx.ah.call` acts for the calling session, limited to what this extension was approved for. Sessions see a new tool when they next start or resume |
 | `ah.fetch(mount, path, init)` | A request to an approved mount's upstream, with the mount's key added by Agenthail |
 | `ah.db` | The shared SQLite store (`node:sqlite` `DatabaseSync`) |
 | `ah.table(name)` | The table name to use: `<id>_<name>` with dashes as underscores |
 | `ah.log(...)` | A line in the extension host's log |
 
 Capabilities: `read.all` (read every session, receive events), `control.all`
-(send to any session), `requests.answer` (answer approvals and questions).
+(send to any session), `requests.answer` (answer approvals and questions), `tools` (offer tools to
+agent sessions).
 Declare only what the extension uses.
 
 ## The page

@@ -1474,6 +1474,12 @@ select {
   object-fit: contain;
   border-radius: 8px;
 }
+.sent-file-caption {
+  margin: 0 0 8px;
+}
+a.attached-file {
+  text-decoration: none;
+}
 .transcript-image figcaption {
   color: var(--quiet);
   font-size: 0.875rem;
