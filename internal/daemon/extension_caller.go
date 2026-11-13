@@ -22,7 +22,7 @@ var extensionTools = map[string]bool{
 }
 
 func extensionWriteTools() []string {
-	var writes []string
+	writes := []string{}
 	for name, write := range extensionTools {
 		if write {
 			writes = append(writes, name)

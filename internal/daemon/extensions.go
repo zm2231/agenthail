@@ -74,6 +74,7 @@ type extensionRuntime struct {
 	loaded    map[string]*loadedExtension
 	tokens    map[string]string
 	hostErr   string
+	loggedErr string
 	up        bool
 	reloading bool
 	// generation counts loads; a run that saw it change may have run other code.
@@ -96,7 +97,16 @@ func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, e
 			runtime.mu.Lock()
 			runtime.up = false
 			runtime.hostErr = err.Error()
+			failure := err.Error()
+			if hostErr, ok := errors.AsType[*nodehost.HostError](err); ok {
+				failure = hostErr.Cause.Error()
+			}
+			fresh := failure != runtime.loggedErr
+			runtime.loggedErr = failure
 			runtime.mu.Unlock()
+			if fresh {
+				d.log.Printf("extension host: %s", err)
+			}
 			d.invalidateDashboard()
 		},
 	}
@@ -155,7 +165,9 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 		MCPURL   string `json:"mcpURL"`
 		FetchURL string `json:"fetchURL"`
 	}
-	var specs []spec
+	// The host iterates this list, so a workspace with no extensions must send
+	// [] and not null.
+	specs := []spec{}
 	for _, ext := range found {
 		loaded := &loadedExtension{ext: ext, jobs: map[string]*extensionJobState{}, tree: trees[ext.ID]}
 		next[ext.ID] = loaded
@@ -208,7 +220,12 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	}
 	r.up = true
 	r.hostErr = ""
+	recovered := r.loggedErr != ""
+	r.loggedErr = ""
 	r.mu.Unlock()
+	if recovered {
+		d.log.Printf("extension host: loaded again")
+	}
 	d.invalidateDashboard()
 	return nil
 }
