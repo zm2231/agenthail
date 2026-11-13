@@ -115,6 +115,20 @@ func (a *Approvals) SetKey(id string, mount Mount, key *proxyacct.KeyRef) error 
 	return a.write(granted)
 }
 
+func (a *Approvals) Forget(id string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	granted, err := a.read()
+	if err != nil {
+		return err
+	}
+	if _, ok := granted[id]; !ok {
+		return nil
+	}
+	delete(granted, id)
+	return a.write(granted)
+}
+
 func Effective(declared, granted []string) (held, pending []string) {
 	for _, capability := range declared {
 		if slices.Contains(granted, capability) {

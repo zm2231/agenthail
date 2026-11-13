@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/extension"
@@ -37,6 +38,7 @@ func (d *Daemon) registerExtensionRoutes(mux *http.ServeMux, dashboard *dashboar
 		}
 		d.apiV1Guard(dashboard, scope, d.apiExtensionsHandler)(w, r)
 	})
+	mux.HandleFunc("GET /api/v1/extensions/history", d.apiV1Guard(dashboard, "read", d.apiExtensionHistoryHandler))
 	mux.HandleFunc("GET /x/_ah.js", d.apiV1Guard(dashboard, "read", func(w http.ResponseWriter, r *http.Request) {
 		extensionPageHeaders(w)
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -165,12 +167,22 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 			ID     string            `json:"id"`
 			Mount  string            `json:"mount"`
 			Key    *proxyacct.KeyRef `json:"key"`
+			Rev    string            `json:"rev"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid", "Send {\"action\": \"reload\"}, {\"action\": \"approve\", \"id\": \"<extension>\"} or {\"action\": \"key\", \"id\": \"<extension>\", \"mount\": \"<mount>\", \"key\": {...}}.")
 			return
 		}
+		d.commitExtensionHandEdits()
 		switch request.Action {
+		case "undo":
+			undone, err := d.undoExtensionChange(r.Context(), request.Rev)
+			if err != nil {
+				writeActionResult(w, actionResult{}, err)
+				return
+			}
+			writeDashboardJSON(w, http.StatusOK, map[string]any{"undone": undone.Reverted, "removed": undone.Removed})
+			return
 		case "reload", "mounts":
 		case "approve":
 			if err := d.approveExtension(request.ID); err != nil {
@@ -183,7 +195,7 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		default:
-			writeAPIError(w, http.StatusBadRequest, "invalid", "Unknown action "+request.Action+"; use reload, approve or key.")
+			writeAPIError(w, http.StatusBadRequest, "invalid", "Unknown action "+request.Action+"; use reload, approve, key or undo.")
 			return
 		}
 		if err := d.syncExtensionMounts(); err != nil {
@@ -250,4 +262,24 @@ func (d *Daemon) setExtensionMountKey(id, name string, key *proxyacct.KeyRef) er
 		}
 	}
 	return d.extensions.approvals.SetKey(id, ext.Manifest.Mounts[index], key)
+}
+
+func (d *Daemon) apiExtensionHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	history, err := d.extensionHistory()
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
+		return
+	}
+	changes := []extension.Change{}
+	if history != nil {
+		limit := 50
+		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+		if changes, err = history.Log(limit, "HEAD"); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"changes": changes})
 }

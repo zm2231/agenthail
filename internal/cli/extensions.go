@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const extensionsUsage = "usage: agenthail extensions [list] | approve <id> | reload | key <id> <mount> (--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account> | --key-command -- <argv...> | --clear), each with [--json]"
+const extensionsUsage = "usage: agenthail extensions [list] | approve <id> | reload | history | undo <rev> | key <id> <mount> (--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account> | --key-command -- <argv...> | --clear), each with [--json]"
 
 type extensionsListView struct {
 	Host       string `json:"host"`
@@ -70,6 +70,16 @@ func (a *App) cmdExtensions(args []string) error {
 		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "reload"}, nil)
 	case sub == "approve" && len(positional) == 2:
 		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "approve", "id": positional[1]}, nil)
+	case sub == "history" && len(positional) == 1:
+		data, _, err = client.call(ctx, http.MethodGet, "/api/v1/extensions/history", nil, nil, nil)
+		if err == nil && !asJSON {
+			return printExtensionHistory(data)
+		}
+	case sub == "undo" && len(positional) == 2:
+		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "undo", "rev": positional[1]}, nil)
+		if err == nil && !asJSON {
+			return printExtensionUndo(data)
+		}
 	case sub == "key" && len(positional) == 3:
 		ref, refErr := keyRefFromFlags(args, command)
 		if refErr != nil {
@@ -167,4 +177,69 @@ func describeExtensions(view extensionsListView) string {
 		}
 	}
 	return out.String()
+}
+
+type extensionChangeView struct {
+	Rev        string    `json:"rev"`
+	Author     string    `json:"author"`
+	Time       time.Time `json:"time"`
+	Message    string    `json:"message"`
+	Extensions []struct {
+		ID      string   `json:"id"`
+		Created bool     `json:"created"`
+		Removed bool     `json:"removed"`
+		Added   []string `json:"added"`
+		Updated []string `json:"updated"`
+		Deleted []string `json:"deleted"`
+	} `json:"extensions"`
+}
+
+func printExtensionHistory(data []byte) error {
+	var view struct {
+		Changes []extensionChangeView `json:"changes"`
+	}
+	if err := json.Unmarshal(data, &view); err != nil {
+		return err
+	}
+	if len(view.Changes) == 0 {
+		fmt.Println("[extensions] no history yet")
+	}
+	for _, change := range view.Changes {
+		fmt.Printf("%s  %s  %s: %s\n", change.Rev, change.Time.Local().Format(time.DateTime), change.Author, change.Message)
+		for _, files := range change.Extensions {
+			what := "changed"
+			switch {
+			case files.Created:
+				what = "created"
+			case files.Removed:
+				what = "removed"
+			}
+			fmt.Printf("  %s %s:", what, files.ID)
+			for _, list := range []struct {
+				mark  string
+				files []string
+			}{{"+", files.Added}, {"~", files.Updated}, {"-", files.Deleted}} {
+				for _, file := range list.files {
+					fmt.Printf(" %s%s", list.mark, file)
+				}
+			}
+			fmt.Println()
+		}
+	}
+	return nil
+}
+
+func printExtensionUndo(data []byte) error {
+	var view struct {
+		Undone  extensionChangeView `json:"undone"`
+		Removed []string            `json:"removed"`
+	}
+	if err := json.Unmarshal(data, &view); err != nil {
+		return err
+	}
+	fmt.Printf("[extensions] undid %s (%s)\n", view.Undone.Rev, view.Undone.Message)
+	if len(view.Removed) > 0 {
+		fmt.Printf("[extensions] removed %s with its tables and approvals\n", strings.Join(view.Removed, ", "))
+	}
+	return nil
 }

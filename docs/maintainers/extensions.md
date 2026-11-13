@@ -235,6 +235,38 @@ is down it holds what it has not delivered (up to 1024 events) and retries
 every second, so events published while the host restarts are delivered once
 it is back.
 
+## History, Keep and Undo
+
+`~/.agenthail/extensions/` is a git repository the daemon owns, so whatever an
+agent changes there can be shown and undone. Git runs with no user or system
+configuration and no hooks. `node_modules/`, `.DS_Store` and `.lock` are
+ignored.
+
+- When a session's turn starts, anything changed in the folder since the last
+  commit is committed as `person`, `Edited by hand`. When the turn completes,
+  what changed during it is committed as the session's name, with the trailers
+  `Agenthail-Session` and `Agenthail-Turn`. A turn that changed nothing makes
+  no commit. The first commit holds what the folder held when the daemon first
+  saw it; a folder a turn created starts empty, so its files are that turn's.
+- After a turn's commit the daemon assigns mount ports, reloads the host and
+  publishes `extension.changed` with `{"rev": "<rev>"}`.
+- A session's first change raises an ask of origin `extension-change` to the
+  person: `<session> changed extensions`, with `Keep` and `Undo`. Later turns
+  of that session reword the same ask instead of raising another, and push
+  nothing new: `<session> changed extensions in 3 turns`, `Keep all` and
+  `Undo last`. Keep closes the ask. Undo last undoes the newest pending turn
+  and rewords the ask, or closes it when no turn is left. Only the person
+  answers; a session is refused with `403 forbidden`. What is pending is kept
+  in `~/.agenthail/extensions-data/changes.json`.
+- Undo reverts one commit as a new commit by `person`. A revert that meets a
+  later change to the same lines is abandoned with `409 conflict` and the
+  folder is left as it was. Undoing the commit that created an extension is
+  refused the same way while a later commit touched that extension. Otherwise
+  the extension's folder is removed, its approval and key references are
+  forgotten, its mounts give up their ports, and the tables it made in the
+  store (those named with its `ah.table` prefix) are dropped. A table whose
+  name another remaining extension's prefix also matches is kept.
+
 ## Commands
 
 ```
@@ -242,6 +274,8 @@ agenthail extensions [list] [--json]   each extension's state, page, capabilitie
 agenthail extensions approve <id>      grant the capabilities extension.json declares
 agenthail extensions reload            read the folder again and reload every extension
 agenthail extensions key <id> <mount> ...  name where a mount's key is kept, or --clear it
+agenthail extensions history [--json]  the folder's changes, newest first, with who made each
+agenthail extensions undo <rev>        undo one change
 ```
 
 `GET /api/v1/extensions` returns the same list, each mount with its port,
@@ -249,4 +283,8 @@ state, whether it is on the tailnet and where its key is kept (`read` scope).
 `POST /api/v1/extensions` with `{"action": "reload"}`, `{"action": "approve",
 "id": "<id>"}` or `{"action": "key", "id": "<id>", "mount": "<mount>", "key":
 {"file": "<path>"}}` (or `env`, `keychain`, `command`, or `null` to forget it)
-changes it (`settings` scope).
+changes it (`settings` scope). `{"action": "undo", "rev": "<rev>"}` undoes a
+change. `GET /api/v1/extensions/history?limit=50` lists the changes (`read`
+scope): each with `rev`, `author`, `time`, `message`, `sessionId`, `turnId`
+and, per extension, `created`, `removed` and the files `added`, `updated` and
+`deleted`.

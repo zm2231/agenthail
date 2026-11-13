@@ -222,6 +222,8 @@ Other:
   extensions [list] [--json]    Extensions in ~/.agenthail/extensions, their state and pages
   extensions approve <id>       Grant an extension the capabilities its extension.json declares
   extensions reload             Load every extension again from disk
+  extensions history            List changes to the extensions folder, newest first
+  extensions undo <rev>         Undo one change; undoing an extension's creation also drops its tables
   extensions key <id> <mount> --key-file <path> | --key-env <name> | --keychain-service <s> --keychain-account <a> | --key-command -- <argv...> | --clear
                                 Name where a mount's key is kept; Agenthail reads it per request and never stores it
   permissions [--json]          The daemon's macOS privacy grants and where to change them
