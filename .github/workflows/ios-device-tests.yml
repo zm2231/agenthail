@@ -54,7 +54,7 @@ jobs:
         run: |
           rm -rf "$RUNNER_TEMP/ios-tests.xcresult"
           only=()
-          while IFS= read -r arg; do only+=("$arg"); done < <(scripts/ios-ui-tests.sh args smoke main nightly)
+          while IFS= read -r arg; do only+=("$arg"); done < <(scripts/ios-ui-tests.sh args all smoke main nightly)
           scripts/ios-test-stall-guard.sh xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" "${only[@]}" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
       - name: Upload test results
         id: upload

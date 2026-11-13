@@ -18,15 +18,17 @@ stop_child() {
 "$@" >"$dir/out" 2>&1 &
 pid=$!
 
-pattern="^Test Case '-\[([^]]+)\]' (passed|failed) \(([0-9]+)(\.[0-9]+)? seconds\)"
+# A serial run prints Test Case '-[Class test]' passed (N seconds); a parallel
+# one prints Test case 'Class.test()' passed on 'Clone 1 of ...' (N seconds).
+pattern="^Test [Cc]ase '(-\[([^]]+)\]|([^']+))' (passed|failed)( on '[^']*')? \(([0-9]+)(\.[0-9]+)? seconds\)"
 (
 	count=0
 	slow=""
 	while IFS= read -r line; do
 		printf '%s\n' "$line"
-		if [[ "$line" =~ $pattern ]] && [ "${BASH_REMATCH[3]}" -gt "$limit" ]; then
+		if [[ "$line" =~ $pattern ]] && [ "${BASH_REMATCH[6]}" -gt "$limit" ]; then
 			count=$((count + 1))
-			slow="$slow ${BASH_REMATCH[1]} (${BASH_REMATCH[3]} s);"
+			slow="$slow ${BASH_REMATCH[2]}${BASH_REMATCH[3]} (${BASH_REMATCH[6]} s);"
 			if [ "$count" -ge "$max" ]; then
 				printf '%s' "$slow" >"$dir/tripped"
 				stop_child "$pid"

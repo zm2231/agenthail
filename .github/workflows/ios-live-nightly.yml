@@ -59,7 +59,7 @@ jobs:
           TMPDIR="$(getconf DARWIN_USER_TEMP_DIR)"
           export TMPDIR
           only=()
-          while IFS= read -r arg; do [ "$arg" = -only-testing:AgenthailIOSTests ] || only+=("$arg"); done < <(scripts/ios-ui-tests.sh args live)
+          while IFS= read -r arg; do [ "$arg" = -only-testing:AgenthailIOSTests ] || only+=("$arg"); done < <(scripts/ios-ui-tests.sh args all live)
           set -o pipefail
           "$RUNNER_TEMP/live-bin/ios-live-harness" -agenthail "$RUNNER_TEMP/live-bin/agenthail" -hosts 2 -- \
             scripts/ios-simulator.sh iphone run xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug \
