@@ -13,11 +13,11 @@ struct ExtensionsHub: View {
             ForEach(model.extensionHosts, id: \.hostID) { catalog in
                 Section {
                     if let error = catalog.error {
-                        Text(error).font(.footnote).foregroundStyle(.secondary)
+                        Text(error).font(.footnote).foregroundStyle(PhonePalette.muted)
                     }
                     if catalog.entries.isEmpty && catalog.error == nil {
                         Text(catalog.list == nil ? "Looking for extensions…" : "No extensions yet.")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(PhonePalette.muted)
                     }
                     ForEach(catalog.entries) { entry in
                         row(entry)
@@ -37,6 +37,7 @@ struct ExtensionsHub: View {
                         }
                     }
                 }
+                .listRowBackground(GlassRowBackground(selected: false))
             }
             Section {
                 EmptyView()
@@ -44,6 +45,8 @@ struct ExtensionsHub: View {
                 Text(footer)
             }
         }
+        .listStyle(.insetGrouped)
+        .phoneBackdrop(.list)
         .navigationTitle("Extensions")
         .navigationDestination(for: ExtensionRoute.self) { route in
             ExtensionPageScreen(model: model, entryID: route.entryID)
@@ -78,14 +81,14 @@ struct ExtensionsHub: View {
                     Text(entry.label)
                     Text(entry.unavailable ?? (entry.kind == .page ? entry.extensionLabel : "\(entry.extensionLabel) · app"))
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PhonePalette.muted)
                         .lineLimit(2)
                 }
                 Spacer()
                 if let badge = entry.badge {
                     Text(badge).font(.footnote.weight(.semibold)).monospacedDigit().foregroundStyle(.tint)
                 }
-                if pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(.secondary) }
+                if pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(PhonePalette.muted) }
             }
         }
         .disabled(entry.url == nil)
@@ -207,15 +210,15 @@ struct ExtensionHistoryList: View {
     var body: some View {
         List {
             Section {
-                if let failure { Text(failure).foregroundStyle(.red) }
-                if let changes, changes.isEmpty { Text("No changes recorded yet.").foregroundStyle(.secondary) }
+                if let failure { Text(failure).foregroundStyle(PhonePalette.failed) }
+                if let changes, changes.isEmpty { Text("No changes recorded yet.").foregroundStyle(PhonePalette.muted) }
                 ForEach(changes ?? []) { change in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(ExtensionHistory.describe(change))
                             Text(change.time.formatted(date: .abbreviated, time: .shortened))
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(PhonePalette.muted)
                         }
                         Spacer()
                         if change.root != true {
@@ -270,7 +273,7 @@ struct NewExtensionForm: View {
             } footer: {
                 Text("A builder session starts, and its changes are kept as it makes them.")
             }
-            if let failure { Text(failure).foregroundStyle(.red) }
+            if let failure { Text(failure).foregroundStyle(PhonePalette.failed) }
         }
         .navigationTitle("New Extension")
         .navigationBarTitleDisplayMode(.inline)
