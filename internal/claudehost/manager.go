@@ -1,6 +1,7 @@
 package claudehost
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -76,6 +77,7 @@ func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 	ctx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 	var ready Client
+	lockHeld := false
 	err = poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
 		attempt, stop := context.WithTimeout(ctx, time.Second)
 		hello, err := client.Hello(attempt)
@@ -102,11 +104,12 @@ func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
 			return false, err
 		}
+		lockHeld = true
 		lockTaken()
 		return false, nil
 	})
-	if errors.Is(err, context.DeadlineExceeded) {
-		return Client{}, fmt.Errorf("the Claude host holds its lock but does not answer: %w", err)
+	if lockHeld && errors.Is(err, context.DeadlineExceeded) {
+		return Client{}, fmt.Errorf("another process holds the Claude host lock, and no host answered within %s: %w", startTimeout, err)
 	}
 	return ready, err
 }
@@ -116,13 +119,14 @@ func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 var lockTaken = func() {}
 
 func (m *Manager) start(ctx context.Context, client Client, launch Launch, lock *os.File) (Client, error) {
-	exited, err := m.spawn(launch, lock)
+	logged := m.logSize()
+	pid, exited, err := m.spawn(launch, lock)
 	if err != nil {
 		return Client{}, err
 	}
 	hello, err := m.awaitHello(ctx, client, exited)
 	if err != nil {
-		return Client{}, fmt.Errorf("start the Claude host: %w%s", err, m.logTail())
+		return Client{}, fmt.Errorf("the Claude host %s this daemon started as pid %d did not answer: %w%s", launch.Version, pid, err, m.logSince(logged))
 	}
 	if !current(hello, launch) {
 		return Client{}, fmt.Errorf("the started Claude host reports %s protocol %d, want %s protocol %d", hello.HostVersion, hello.Protocol, launch.Version, Protocol)
@@ -180,7 +184,7 @@ func (m *Manager) lock() (*os.File, error) {
 // spawn starts the host in its own session so a daemon exit or a signal to
 // the daemon's process group never reaches it, and passes the held lock as
 // fd 3. The daemon's copy of the lock is closed once the host has it.
-func (m *Manager) spawn(launch Launch, lock *os.File) (<-chan error, error) {
+func (m *Manager) spawn(launch Launch, lock *os.File) (int, <-chan error, error) {
 	defer lock.Close()
 	logPath := m.LogPath()
 	if info, err := os.Stat(logPath); err == nil && info.Size() > maxLogBytes {
@@ -188,7 +192,7 @@ func (m *Manager) spawn(launch Launch, lock *os.File) (<-chan error, error) {
 	}
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	defer logFile.Close()
 	cmd := exec.Command(launch.Node, launch.Script,
@@ -206,11 +210,11 @@ func (m *Manager) spawn(launch Launch, lock *os.File) (<-chan error, error) {
 	cmd.ExtraFiles = []*os.File{lock}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start the Claude host: %w", err)
+		return 0, nil, fmt.Errorf("start the Claude host: %w", err)
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
-	return exited, nil
+	return cmd.Process.Pid, exited, nil
 }
 
 func (m *Manager) awaitHello(ctx context.Context, client Client, exited <-chan error) (Hello, error) {
@@ -235,13 +239,32 @@ func (m *Manager) awaitHello(ctx context.Context, client Client, exited <-chan e
 	return hello, err
 }
 
-func (m *Manager) logTail() string {
+func (m *Manager) logSize() int64 {
+	info, err := os.Stat(m.LogPath())
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// logSince is the last whole lines the log gained after offset, which a host
+// started then wrote, so an error never quotes a host that ran before it.
+func (m *Manager) logSince(offset int64) string {
 	data, err := os.ReadFile(m.LogPath())
-	if err != nil || len(data) == 0 {
+	if err != nil {
 		return ""
+	}
+	if int64(len(data)) >= offset {
+		data = data[offset:]
 	}
 	if len(data) > 1024 {
 		data = data[len(data)-1024:]
+		if newline := bytes.IndexByte(data, '\n'); newline >= 0 {
+			data = data[newline+1:]
+		}
 	}
-	return ": " + strings.TrimSpace(string(data))
+	if text := strings.TrimSpace(string(data)); text != "" {
+		return ": " + text
+	}
+	return ""
 }

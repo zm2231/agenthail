@@ -656,3 +656,31 @@ func TestCloseIdleRefusesAWorkingSessionAndLeavesItsTurnRunning(t *testing.T) {
 		})
 	}
 }
+
+func TestAHostThatNeverAnswersIsNamedWithOnlyWhatItLogged(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".agenthail", "claude-host")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "host.log"), []byte(strings.Repeat("x", 2000)+" pid 48223 protocol 3 version v0.2.133\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(t.TempDir(), "silent-host.mjs")
+	if err := os.WriteFile(script, []byte("console.log(`starting pid ${process.pid}`);\nsetTimeout(() => {}, 5000);\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manager := &claudehost.Manager{Home: home, Launch: func() (claudehost.Launch, error) {
+		return claudehost.Launch{Node: testnode.Path(t), Script: script, Claude: "claude", Version: "v9.9.9"}, nil
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := manager.Ensure(ctx)
+	if err == nil {
+		t.Fatal("a host that never listens was reported ready")
+	}
+	text := err.Error()
+	if strings.Contains(text, "holds its lock") || strings.Contains(text, "v0.2.133") || !strings.Contains(text, "v9.9.9 this daemon started as pid") || !strings.Contains(text, "starting pid") {
+		t.Fatalf("error = %q, want the host this daemon started and only what it logged", text)
+	}
+}
