@@ -9,8 +9,11 @@ on:
 permissions:
   contents: read
 
+# A pull request's newer push replaces its run. Each push to main gets a group
+# of its own, so no later merge cancels or replaces it, and a release can use
+# the result at the commit it tags.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
