@@ -28,6 +28,7 @@ var extensionJobTick = time.Second
 type extensionJob struct {
 	Name         string `json:"name"`
 	EverySeconds int    `json:"everySeconds"`
+	Source       bool   `json:"source,omitempty"`
 }
 
 type extensionHostSummary struct {
@@ -45,6 +46,7 @@ type extensionJobState struct {
 	LastRun   time.Time `json:"lastRun,omitzero"`
 	LastError string    `json:"lastError,omitempty"`
 	running   bool
+	rerun     bool
 	due       time.Time
 	every     time.Duration
 }
@@ -244,13 +246,19 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 }
 
 // A job keeps its state object across loads, so a run still going when the
-// extension reloads holds off the next one until it finishes.
+// extension reloads holds off the next one until it finishes. A source runs
+// again at once, since the code that collects it may have changed.
 func carriedJobState(previous *loadedExtension, job extensionJob, now time.Time) *extensionJobState {
 	every := time.Duration(job.EverySeconds) * time.Second
 	if previous != nil {
 		if kept, ok := previous.jobs[job.Name]; ok {
 			kept.every = every
-			if !kept.running && !kept.LastRun.IsZero() {
+			switch {
+			case kept.running:
+				kept.rerun = job.Source
+			case job.Source:
+				kept.due = now
+			case !kept.LastRun.IsZero():
 				kept.due = kept.LastRun.Add(every)
 			}
 			return kept
@@ -348,17 +356,31 @@ func (d *Daemon) runExtensionJob(ctx context.Context, id string, job extensionJo
 	err := r.host.Client().Call(runCtx, "job", map[string]string{"id": id, "name": job.Name}, nil)
 	cancel()
 	finished := time.Now()
+	if hostErr, ok := errors.AsType[*nodehost.Error](err); ok && hostErr.Code == "source_busy" {
+		r.mu.Lock()
+		state.running = false
+		state.due = finished.Add(extensionJobTick)
+		r.mu.Unlock()
+		return err
+	}
 	r.mu.Lock()
 	state.running = false
 	state.LastRun = finished
 	state.due = finished.Add(state.every)
+	if state.rerun {
+		state.due = finished
+		state.rerun = false
+	}
 	state.LastError = ""
 	if err != nil {
 		state.LastError = err.Error()
 	}
 	r.mu.Unlock()
-	if err != nil && ctx.Err() == nil {
+	if err != nil && ctx.Err() == nil && !job.Source {
 		d.log.Printf("extension %s: job %s: %s", id, job.Name, err)
+	}
+	if job.Source && ctx.Err() == nil {
+		d.publishEvent("extension.source", "", map[string]any{"extension": id, "source": job.Name, "ok": err == nil})
 	}
 	return err
 }
