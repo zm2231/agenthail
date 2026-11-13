@@ -190,8 +190,12 @@ type actionGate struct {
 	proxyDown atomic.Bool
 	// proxyRefusals counts the requests refused while proxyDown is set.
 	proxyRefusals atomic.Int32
-	// snapshotsDown refuses snapshots while the version probe still answers.
+	// snapshotsDown refuses snapshots and catalog streams while the version
+	// probe still answers. Set it with failSnapshots, which also ends the
+	// streams already open.
 	snapshotsDown atomic.Bool
+	cutMu         sync.Mutex
+	cut           chan struct{}
 	older         atomic.Bool
 	streams       atomic.Int64
 	// rootlessPrepare answers a move's prepare as a host that ignores its root.
@@ -236,6 +240,28 @@ type actionGate struct {
 	gaps      atomic.Int32
 	// movedTo, when set, answers every action as moved to that host.
 	movedTo atomic.Pointer[string]
+}
+
+// failSnapshots ends every catalog stream and refuses snapshots and new
+// streams until snapshotsDown is cleared. Closing connections instead can
+// miss a stream that has not answered yet, which net/http then retries.
+func (g *actionGate) failSnapshots() {
+	g.cutMu.Lock()
+	defer g.cutMu.Unlock()
+	g.snapshotsDown.Store(true)
+	if g.cut != nil {
+		close(g.cut)
+	}
+	g.cut = make(chan struct{})
+}
+
+func (g *actionGate) catalogStream() (<-chan struct{}, bool) {
+	g.cutMu.Lock()
+	defer g.cutMu.Unlock()
+	if g.cut == nil {
+		g.cut = make(chan struct{})
+	}
+	return g.cut, g.snapshotsDown.Load()
 }
 
 // unreadableUpserts rewrites the catalog stream's upsert of a session named
@@ -335,9 +361,24 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 				writeDashboardJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"code": "stream_gap"}})
 				return
 			}
+			cut, down := n.gate.catalogStream()
+			if down {
+				http.Error(w, "bad gateway", http.StatusBadGateway)
+				return
+			}
 			n.gate.streams.Add(1)
 			w = unreadableUpserts{ResponseWriter: w}
 			defer n.gate.streamsEnded.Add(1)
+			ctx, cancel := context.WithCancel(r.Context())
+			defer cancel()
+			go func() {
+				select {
+				case <-cut:
+					cancel()
+				case <-ctx.Done():
+				}
+			}()
+			r = r.WithContext(ctx)
 		}
 		if r.URL.Path == "/api/v1/snapshot" {
 			if n.gate.snapshotsDown.Load() {

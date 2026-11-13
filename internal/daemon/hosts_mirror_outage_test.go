@@ -73,8 +73,7 @@ func TestAHostWhoseSnapshotsFailIsShownDownThoughItsVersionAnswers(t *testing.T)
 	local, remote, record := pairedFederationWith(t, func(f *federation) {
 		f.downGrace, f.retryMin = 300*time.Millisecond, 50*time.Millisecond
 	})
-	remote.gate.snapshotsDown.Store(true)
-	remote.server.CloseClientConnections()
+	remote.gate.failSnapshots()
 	testkit.Eventually(t, "the host to be shown down while its snapshots fail", 10*time.Second, func() bool {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) > 0 && rows[0].Host.State != hostStateConnected && rows[0].UnavailableReason != ""
