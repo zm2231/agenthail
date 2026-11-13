@@ -124,3 +124,23 @@ func TestAMoveWhoseOutcomeIsUnknownStillKeepsQueuedDeliveriesOffTheSession(t *te
 		t.Fatalf("a second move of a session whose move is unsettled was not refused: %q err=%v", reason, err)
 	}
 }
+
+func TestRemovingTheTargetHostOfAnUnfinishedMoveMovesThePresentation(t *testing.T) {
+	r := moveRegistry(t)
+	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{"root":"work"}`), MoveCarry{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if move := shownMove(t, r); move == nil || move.HostName != "server" {
+		t.Fatalf("move=%+v", move)
+	}
+	version := presentationVersion(t, r)
+	if _, err := r.RemoveHost(moveTarget); err != nil {
+		t.Fatal(err)
+	}
+	if presentationVersion(t, r) == version {
+		t.Fatal("removing the target host of an unfinished move did not move the presentation version")
+	}
+	if move := shownMove(t, r); move == nil || move.HostName != "" {
+		t.Fatalf("after removing its target host the move shows %+v", move)
+	}
+}

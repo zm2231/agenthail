@@ -329,7 +329,10 @@ Settling is the column `outcome_unknown_at` on a `sent` move, not a state of
 its own, so every reader of `sent` still holds the session: its queue stays
 unclaimed and no second move begins. Any change of state clears it. The move
 code is the only writer of `session_moves`, and it republishes the row on each
-change. The field leaves the row when the move is `done` or `failed`.
+change. The field leaves the row when the move is `done` or `failed`. Every
+`session_moves` column the field shows, and the target's id and name in
+`hosts`, are presentation inputs, so removing the target host while the move is
+unfinished also moves the session view's cache key.
 
 ## What the target machine needs
 

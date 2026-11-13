@@ -1,4 +1,4 @@
--- schemaVersion 96
+-- schemaVersion 98
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -1153,6 +1153,24 @@ BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
 
+-- trigger catalog_presentation_version_hosts_delete
+CREATE TRIGGER catalog_presentation_version_hosts_delete AFTER DELETE ON hosts
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_hosts_insert
+CREATE TRIGGER catalog_presentation_version_hosts_insert AFTER INSERT ON hosts
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_hosts_update
+CREATE TRIGGER catalog_presentation_version_hosts_update AFTER UPDATE OF host_id,name ON hosts WHEN (NEW.host_id IS NOT OLD.host_id OR NEW.name IS NOT OLD.name)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
 -- trigger catalog_presentation_version_limit_resumes_delete
 CREATE TRIGGER catalog_presentation_version_limit_resumes_delete AFTER DELETE ON limit_resumes
 BEGIN
@@ -1238,7 +1256,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_session_moves_update
-CREATE TRIGGER catalog_presentation_version_session_moves_update AFTER UPDATE OF conversation,peer_host,state,detail,outcome_unknown_at ON session_moves WHEN (NEW.role='out' OR OLD.role='out') AND (NEW.conversation IS NOT OLD.conversation OR NEW.peer_host IS NOT OLD.peer_host OR NEW.state IS NOT OLD.state OR NEW.detail IS NOT OLD.detail OR NEW.outcome_unknown_at IS NOT OLD.outcome_unknown_at)
+CREATE TRIGGER catalog_presentation_version_session_moves_update AFTER UPDATE OF id,conversation,peer_host,state,detail,outcome_unknown_at,manifest ON session_moves WHEN (NEW.role='out' OR OLD.role='out') AND (NEW.id IS NOT OLD.id OR NEW.conversation IS NOT OLD.conversation OR NEW.peer_host IS NOT OLD.peer_host OR NEW.state IS NOT OLD.state OR NEW.detail IS NOT OLD.detail OR NEW.outcome_unknown_at IS NOT OLD.outcome_unknown_at OR NEW.manifest IS NOT OLD.manifest)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
