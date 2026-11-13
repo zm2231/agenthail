@@ -40,18 +40,25 @@ jobs:
       - uses: actions/checkout@v5
       - id: key
         run: echo "key=$(scripts/mac-swift-cache-key.sh)" >> "$GITHUB_OUTPUT"
-      - id: saved
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/restore@v5
+      - uses: actions/cache/restore@v5
         with:
           path: native/.build
           key: ${{ steps.key.outputs.key }}
-          lookup-only: true
-      - name: Build the Mac app's Swift product
-        if: steps.saved.outputs.cache-hit != 'true'
-        run: scripts/build-mac-swift.sh arm64
-      - uses: actions/cache/save@v5
-        if: github.ref == 'refs/heads/main' && steps.saved.outputs.cache-hit != 'true'
-        with:
-          path: native/.build
-          key: ${{ steps.key.outputs.key }}
+      - name: Probe a build from the restored cache
+        run: |
+          set -x
+          du -sh native/.build; ls native/.build
+          find native/.build -maxdepth 3 -type d | head -50
+          touch "$RUNNER_TEMP/marker"; sleep 1
+          SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+          B=(swift build --package-path native -c release --build-system swiftbuild --triple arm64-apple-macosx15.0 -Xlinker -platform_version -Xlinker macos -Xlinker 15.0 -Xlinker "$SDK_VERSION")
+          start=$(date +%s); "${B[@]}" --product AgenthailMac -v > "$RUNNER_TEMP/warm1.log" 2>&1 || true; echo "FIRST BUILD AFTER RESTORE: $(( $(date +%s) - start )) s"
+          grep -cE 'swift-frontend|swiftc ' "$RUNNER_TEMP/warm1.log" || true
+          grep -oE '\-module-name [A-Za-z0-9_]+' "$RUNNER_TEMP/warm1.log" | sort | uniq -c | sort -rn | head -40
+          grep -iE 'invalidat|out of date|changed|because|rebuild|stale' "$RUNNER_TEMP/warm1.log" | head -40
+          head -60 "$RUNNER_TEMP/warm1.log"
+          echo "WRITTEN OUTSIDE native/.build:"
+          for d in "$HOME/Library/Caches" "$HOME/Library/Developer" "$HOME/.swiftpm" "$HOME/Library/org.swift.swiftpm" "${TMPDIR:-/tmp}"; do [ -d "$d" ] && find "$d" -newer "$RUNNER_TEMP/marker" -maxdepth 4 -type d 2>/dev/null | head -20 && du -sh "$d" 2>/dev/null; done
+          start=$(date +%s); "${B[@]}" --product AgenthailMac > "$RUNNER_TEMP/warm2.log" 2>&1 || true; echo "SECOND BUILD, NOTHING CHANGED: $(( $(date +%s) - start )) s"
+          tail -5 "$RUNNER_TEMP/warm2.log"
+          find native -newer "$RUNNER_TEMP/marker" -path '*/.build/*' -maxdepth 6 -type d | head -30
