@@ -68,6 +68,7 @@ type extensionRuntime struct {
 	changes   *extensionChanges
 	calls     *extensionCalls
 	grants    *extensionGrants
+	badges    extensionBadges
 
 	loading   sync.Mutex
 	mu        sync.Mutex
@@ -151,10 +152,11 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	mcpURL, fetchURL := "", ""
+	mcpURL, fetchURL, badgeURL := "", "", ""
 	if credentials := d.mcpCredentials.Load(); credentials != nil {
 		mcpURL = credentials.URL()
 		fetchURL = strings.TrimSuffix(mcpURL, "/mcp") + extensionFetchPath
+		badgeURL = strings.TrimSuffix(mcpURL, "/mcp") + extensionBadgePath
 	}
 	next := map[string]*loadedExtension{}
 	tokens := map[string]string{}
@@ -164,6 +166,7 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 		Token    string `json:"token"`
 		MCPURL   string `json:"mcpURL"`
 		FetchURL string `json:"fetchURL"`
+		BadgeURL string `json:"badgeURL"`
 	}
 	// The host iterates this list, so a workspace with no extensions must send
 	// [] and not null.
@@ -185,7 +188,7 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 		}
 		loaded.token = extensionToken()
 		tokens[loaded.token] = ext.ID
-		specs = append(specs, spec{ID: ext.ID, Dir: ext.Dir, Token: loaded.token, MCPURL: mcpURL, FetchURL: fetchURL})
+		specs = append(specs, spec{ID: ext.ID, Dir: ext.Dir, Token: loaded.token, MCPURL: mcpURL, FetchURL: fetchURL, BadgeURL: badgeURL})
 	}
 	var status struct {
 		Extensions []extensionHostSummary `json:"extensions"`
@@ -415,6 +418,7 @@ type extensionView struct {
 	Error        string                        `json:"error,omitempty"`
 	Page         string                        `json:"page,omitempty"`
 	App          *extension.App                `json:"app,omitempty"`
+	Badge        string                        `json:"badge,omitempty"`
 	Capabilities []string                      `json:"capabilities"`
 	Pending      []string                      `json:"pendingCapabilities,omitempty"`
 	Actions      []string                      `json:"actions"`
@@ -453,6 +457,7 @@ func (d *Daemon) extensionsView() extensionsView {
 			Actions:      append([]string{}, loaded.host.Actions...),
 			EventError:   loaded.host.LastEventError,
 			App:          loaded.ext.Manifest.App,
+			Badge:        r.badges.get(loaded.ext.ID, ""),
 		}
 		if item.Label == "" {
 			item.Label = loaded.ext.ID
@@ -461,6 +466,9 @@ func (d *Daemon) extensionsView() extensionsView {
 			item.Page = "/x/" + loaded.ext.ID + "/"
 		}
 		item.Mounts = mounts[loaded.ext.ID]
+		for i := range item.Mounts {
+			item.Mounts[i].Badge = r.badges.get(loaded.ext.ID, item.Mounts[i].Name)
+		}
 		delete(mounts, loaded.ext.ID)
 		if len(loaded.jobs) > 0 {
 			item.Jobs = map[string]*extensionJobState{}

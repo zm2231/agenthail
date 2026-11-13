@@ -16,7 +16,8 @@ person wants on a dashboard tab.
    ```
 
    `upstream` is an origin with no path. `entry` is the path the dashboard
-   opens.
+   opens. Add `"app": {"icon": "<SF Symbol name>"}` to the mount if the
+   person will open it often, so the apps offer it an entry of its own.
 3. An extension needs `server.ts` even if it does nothing:
 
    ```ts

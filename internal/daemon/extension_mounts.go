@@ -70,6 +70,7 @@ type mountState struct {
 	Key       string         `json:"key,omitempty"`
 	Signin    bool           `json:"signin,omitempty"`
 	App       *extension.App `json:"app,omitempty"`
+	Badge     string         `json:"badge,omitempty"`
 }
 
 type extensionMounts struct {

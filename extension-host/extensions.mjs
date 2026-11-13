@@ -4,7 +4,7 @@ import { register } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { callTool, fetchMount } from './mcp.mjs';
+import { callTool, fetchMount, setBadge } from './mcp.mjs';
 
 register('./hooks.mjs', import.meta.url);
 
@@ -27,7 +27,7 @@ class Loaded {
   constructor(spec) {
     this.id = spec.id;
     this.dir = spec.dir;
-    this.daemon = { url: spec.mcpURL, fetchURL: spec.fetchURL, token: spec.token };
+    this.daemon = { url: spec.mcpURL, fetchURL: spec.fetchURL, badgeURL: spec.badgeURL, token: spec.token };
     this.state = 'loading';
     this.error = '';
     this.actions = new Map();
@@ -86,6 +86,7 @@ class Loaded {
         return callTool(self.daemon, tool, input);
       },
       fetch: (mount, path, init) => fetchMount(self.daemon, mount, path, init),
+      badge: (value, { mount } = {}) => setBadge(self.daemon, value, mount),
       log: (...parts) => log(self.id, parts.map(part => (typeof part === 'string' ? part : JSON.stringify(part))).join(' ')),
     });
   }

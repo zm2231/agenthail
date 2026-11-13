@@ -10,6 +10,9 @@ database the person already has.
    missing, how big a full answer is. Type the server code from that, never
    from field names you expect the source to have.
 3. Create `<id>/extension.json` with a label and only the capabilities you use.
+   If the person will open the page often, add
+   `"app": {"icon": "<SF Symbol name>"}` so the apps offer it an entry of
+   its own.
 4. In `server.ts`, read the source inside an action and return only what the
    page shows:
 

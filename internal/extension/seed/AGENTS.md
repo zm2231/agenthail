@@ -21,7 +21,8 @@ after every turn, and they keep it or undo it.
 - An id is a lowercase letter followed by up to 39 lowercase letters, digits
   or dashes. `recipes` is taken.
 - `extension.json` allows only `label` (required), `description`,
-  `capabilities` and `mounts`. Unknown fields make the extension invalid.
+  `capabilities`, `mounts` and `app`. Unknown fields make the extension
+  invalid.
 - `server.ts` runs in Node with type stripping: type annotations are fine,
   enums, namespaces and parameter properties are not. There is no build step.
 - `npm install` inside an extension's folder works; `node_modules/` is not
@@ -39,6 +40,7 @@ function. Register everything while it runs.
 | `ah.on(type, handler)` | Daemon events (`'*'` for all); needs the `read.all` capability |
 | `ah.call(tool, args)` | Agenthail tools as the extension: `agenthail_sessions`, `agenthail_read`, `agenthail_history`, `agenthail_projects`, `agenthail_requests`, `agenthail_answer`, `agenthail_send`, `agenthail_channel_send` |
 | `ah.fetch(mount, path, init)` | A request to an approved mount's upstream, with the mount's key added by Agenthail |
+| `ah.badge(value, {mount})` | A short badge on the extension's entry in the apps: a whole number, up to 8 characters of text, or `null` (0 clears it too). With `mount`, the badge goes on that mount's entry |
 | `ah.db` | The shared SQLite store (`node:sqlite` `DatabaseSync`) |
 | `ah.table(name)` | The table name to use: `<id>_<name>` with dashes as underscores |
 | `ah.log(...)` | A line in the extension host's log |
@@ -73,6 +75,26 @@ A source that needs a key is always reached through a mount, by the page or by
 `ah.fetch` on the server. The person names where the key is kept; Agenthail
 reads it and adds it to requests. The page sends
 `Authorization: Bearer agenthail-key` and Agenthail swaps in the real key.
+
+## In the Agenthail apps
+
+The Mac and iPhone apps list every page and mount in their Extensions hub. To
+ask for an entry of its own, a sidebar entry on the Mac and a tab on iPhone and
+iPad, add `app` to `extension.json` for the page, or to a mount for that
+mount:
+
+```json
+{"label": "Board", "app": {"label": "Board", "icon": "chart.bar.xaxis", "order": 1}}
+```
+
+- `label`: up to 40 characters; the extension's or mount's label when left out.
+- `icon`: an SF Symbol name, lowercase words joined by dots. An unknown name
+  shows a generic icon.
+- `order`: a whole number from -1000 to 1000; lower comes first.
+
+The person decides: an entry that asks is offered, and the person pins it or
+leaves it in the hub. Set a badge with `ah.badge` when something waits for the
+person, and clear it when it doesn't.
 
 ## Rules
 

@@ -17,6 +17,7 @@
   {"event": "task.goal_stopped", "cache": false, "reread": false, "why": "wakes task waiters; task records are not in the snapshot"},
   {"event": "ledger.", "family": true, "cache": false, "reread": false, "why": "intent ledger activity; the ledger is not in the snapshot"},
   {"event": "extension.changed", "cache": false, "reread": false, "why": "extensions are not in the snapshot; the Extensions tab and open extension pages reload through their own handler"},
+  {"event": "extension.badge", "cache": false, "reread": false, "why": "extension badges are not in the snapshot; apps reread the extension list through their own handler"},
   {"event": "ui.changed", "cache": false, "reread": false, "why": "appearance, reloaded through its own handler"},
   {"event": "ui.snapshot.requested", "cache": false, "reread": false, "why": "asks a window for a screenshot through its own handler"},
   {"event": "ui.snapshot.closed", "cache": false, "reread": false, "why": "ends a screenshot request through its own handler"}

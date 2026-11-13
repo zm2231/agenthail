@@ -41,6 +41,7 @@ the API and may return a cleanup function, called before the next reload.
 | `ah.on(type, handler)` | Receives daemon events of `type`, or every event for `'*'`: `{id, type, timestamp, entityId, data}`, the same as `/api/v1/events`. Only an extension that holds `read.all` receives events. |
 | `ah.call(tool, args)` | Calls an Agenthail tool as the extension (below) and returns its result, or throws an error with `code` and `message`. A write gets a fresh `clientRequestId` unless one is given. |
 | `ah.fetch(mount, path, init)` | Requests `path` on the upstream of one of the extension's approved mounts, with the mount's key (below). `init` takes `method`, `headers` and `body`; a body that is not a string is sent as JSON. Returns `{status, ok, headers, text(), json(), bytes()}`, or throws an error with `code` and `message`. |
+| `ah.badge(value, {mount})` | Sets the badge the apps show on the extension's entry, or with `mount` on that mount's entry. `value` is a whole number (0 clears it, above 9999 shows `9999+`), text of up to 8 characters, or `null` to clear it. Returns the badge as shown, or throws an error with `code` and `message`. The daemon keeps the latest value at once and publishes `extension.badge` `{id}` at most once every 2 seconds per extension, the last change always included. |
 | `ah.db` | The shared SQLite store (`node:sqlite` `DatabaseSync`, WAL), `~/.agenthail/extensions-data/store.db` |
 | `ah.table(name)` | `<id>_<name>` with dashes as underscores: the name an extension's own tables use |
 | `ah.log(...)` | A line in the extension host's log |
@@ -80,6 +81,43 @@ one-time login link, or a paired device's token. Loading a page or asset needs
 the `read` scope; an action is a POST and needs `control`, and with the cookie
 alone it must come from the same origin.
 
+## Signing in an app's web view
+
+The Mac and iPhone apps open pages and mounts in a web view, which cannot send
+a bearer token with every request a page makes. An app posts its own token to
+`POST /api/v1/web-session` and gets back a cookie to set:
+`{"name": "agenthail_web", "value", "path": "/", "expiresAt", "scopes"}`.
+
+- Only a bearer can start one; a cookie cannot. Its scopes are `read` and
+  `control`, less any the minting token lacks.
+- It lasts 12 hours and lives in the daemon's memory, so a daemon restart
+  ends it. Every request authenticates the minting token again, so revoking
+  that device ends its web sessions at their next request.
+- On the dashboard's port it counts only for `/x/...` and `GET
+  /api/v1/events`; every other path answers 401. On a mount's port it counts
+  for the whole mount, `read` for GET and HEAD and `control` otherwise. The
+  mount never passes it to the app.
+
+## Entries in the apps
+
+The apps list every page and mount in an Extensions hub. An extension asks
+for an entry of its own, a sidebar entry on the Mac and a tab on iPhone and
+iPad, with `app`, on the manifest for its page or on a mount for that mount:
+
+```json
+{"label": "Board", "app": {"label": "Board", "icon": "chart.bar.xaxis", "order": 1}}
+```
+
+| Field | Meaning |
+|---|---|
+| `label` | Up to 40 characters; the extension's or mount's label when omitted |
+| `icon` | An SF Symbol name (lowercase words joined by dots); an unknown name shows a generic icon |
+| `order` | A whole number from -1000 to 1000; lower comes first |
+
+The person decides what is pinned: a declared entry is offered, any entry can
+be pinned, and the rest stay in the hub. `GET /api/v1/extensions` carries
+`app` and `badge` on each extension and mount.
+
 ## Mounting an existing web app
 
 A mount puts a web app that already runs somewhere, such as a proxy's console
@@ -103,6 +141,7 @@ keeps its own origin and paths and needs no change:
 | `upstream` | The app's origin, `http` or `https`, with no path |
 | `entry` | The path the dashboard opens, `/` if omitted; it may carry a query or `#fragment` |
 | `signin` | Optional: a script under `assets/` that signs the app in (below) |
+| `app` | Optional: asks the apps to offer this mount an entry of its own (below) |
 
 A mount serves nothing until the person approves it, and approval covers the
 upstream it names: pointing the mount at another upstream waits for a new
