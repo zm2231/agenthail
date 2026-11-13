@@ -62,7 +62,7 @@ enum BodyRuns {
     static var summary: String {
         let spread = perID.sorted { $0.key < $1.key }.map { name, ids in
             let runs = ids.values.sorted(by: >)
-            return "\(name).ids=\(runs.count) \(name).top=\(runs.prefix(5).map(String.init).joined(separator: ","))"
+            return "\(name).ids=\(runs.count) \(name).max=\(runs.first ?? 0) \(name).over3=\(runs.filter { $0 > 3 }.count)"
         }
         return (["busyMs=\(Int(busy * 1000))"] + counts.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" } + spread).joined(separator: " ")
     }
