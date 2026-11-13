@@ -69,6 +69,7 @@ func (d *Daemon) queueSort(key, utteranceID string, seq int64, at time.Time) {
 		s.dropped++
 		s.owe(job)
 		s.mu.Unlock()
+		s.wakeAt(s.now())
 	}
 }
 
