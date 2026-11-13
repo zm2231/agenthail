@@ -179,15 +179,21 @@ func TestAPIPersonSendToEndedBackgroundJobResumesItInTheHostAndDeliversOnce(t *t
 	if sid, err := f.r.LookupAlias("orphan"); err != nil || sid != f.session.ID {
 		t.Fatalf("alias=%q err=%v", sid, err)
 	}
-	if code, _ := f.sendAsPerson(t, "orphan-2", "next"); code != http.StatusOK || f.resumes(t) != 1 {
+	code, body = f.sendAsPerson(t, "orphan-2", "next")
+	if code != http.StatusOK || f.resumes(t) != 1 {
 		t.Fatalf("second send status=%d resumes=%d", code, f.resumes(t))
 	}
 	// The first turn is recorded before it ends, so the second send may find
 	// the session busy and queue; the daemon's loop sends it once the turn ends.
 	testkit.Eventually(t, "the second turn", 15*time.Second, func() bool {
 		f.daemon.scanAndRelay(context.Background())
-		return len(f.turns(t)) == 2
+		return len(f.turns(t)) >= 2
 	})
+	turns := f.host.Turns(t, orphanConversation)
+	second, err := f.r.DeliveryIntent(int64(body["result"].(map[string]any)["deliveryId"].(float64)))
+	if err != nil || len(turns) != 2 || turns[1].Text != "next" || turns[1].UUID != second.UUID || turnOrigin(t, turns[1]) != "human" || f.resumes(t) != 1 {
+		t.Fatalf("turns=%+v intent=%+v err=%v resumes=%d", turns, second, err, f.resumes(t))
+	}
 }
 
 func TestAPIAgentSendToEndedBackgroundJobResumesItAndTakesItsSocket(t *testing.T) {
