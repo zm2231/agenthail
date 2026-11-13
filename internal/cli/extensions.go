@@ -30,6 +30,8 @@ type extensionsListView struct {
 		Capabilities []string `json:"capabilities"`
 		Pending      []string `json:"pendingCapabilities"`
 		Actions      []string `json:"actions"`
+		Tools        []string `json:"tools"`
+		ToolsNote    string   `json:"toolsNote"`
 		Jobs         map[string]struct {
 			LastRun   time.Time `json:"lastRun"`
 			LastError string    `json:"lastError"`
@@ -169,6 +171,12 @@ func describeExtensions(view extensionsListView) string {
 		}
 		if len(ext.Actions) > 0 {
 			fmt.Fprintf(&out, "  actions: %s\n", strings.Join(ext.Actions, ", "))
+		}
+		if len(ext.Tools) > 0 {
+			fmt.Fprintf(&out, "  tools: %s\n", strings.Join(ext.Tools, ", "))
+		}
+		if ext.ToolsNote != "" {
+			fmt.Fprintf(&out, "  %s\n", ext.ToolsNote)
 		}
 		names := make([]string, 0, len(ext.Jobs))
 		for name := range ext.Jobs {

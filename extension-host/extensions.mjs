@@ -23,6 +23,12 @@ function log(id, message) {
   process.stderr.write(`extension ${id}: ${message}\n`);
 }
 
+function callAs(daemon, writes, tool, args = {}) {
+  const input = { ...args };
+  if (writes.has(tool) && !('clientRequestId' in input)) input.clientRequestId = crypto.randomUUID();
+  return callTool(daemon, tool, input);
+}
+
 class Loaded {
   constructor(spec) {
     this.id = spec.id;
@@ -32,6 +38,7 @@ class Loaded {
     this.error = '';
     this.actions = new Map();
     this.jobs = new Map();
+    this.tools = new Map();
     this.handlers = [];
     this.dispose = null;
     this.lastEventError = '';
@@ -44,6 +51,7 @@ class Loaded {
       error: this.error || undefined,
       actions: [...this.actions.keys()].sort(),
       jobs: [...this.jobs.values()].map(job => ({ name: job.name, everySeconds: job.everySeconds })),
+      tools: [...this.tools.values()].map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
       events: this.handlers.length > 0,
       lastEventError: this.lastEventError || undefined,
     };
@@ -80,11 +88,17 @@ class Loaded {
         if (self.jobs.has(name)) throw failure('invalid', `job ${name} is registered twice`);
         self.jobs.set(name, { name, everySeconds, run });
       },
-      async call(tool, args = {}) {
-        const input = { ...args };
-        if (writes.has(tool) && !('clientRequestId' in input)) input.clientRequestId = crypto.randomUUID();
-        return callTool(self.daemon, tool, input);
+      tool({ name, description, inputSchema = { type: 'object' }, run }) {
+        registering();
+        if (!NAME.test(name) || typeof run !== 'function') throw failure('invalid', `tool({name, description, inputSchema, run}): name must match ${NAME}`);
+        if (typeof description !== 'string' || description.trim() === '') throw failure('invalid', `tool ${name} needs a description`);
+        if (inputSchema === null || typeof inputSchema !== 'object' || Array.isArray(inputSchema) || inputSchema.type !== 'object') {
+          throw failure('invalid', `tool ${name}: inputSchema must be a JSON Schema object with type "object"`);
+        }
+        if (self.tools.has(name)) throw failure('invalid', `tool ${name} is registered twice`);
+        self.tools.set(name, { name, description: description.trim(), inputSchema, run });
       },
+      call: (tool, args) => callAs(self.daemon, writes, tool, args),
       fetch: (mount, path, init) => fetchMount(self.daemon, mount, path, init),
       log: (...parts) => log(self.id, parts.map(part => (typeof part === 'string' ? part : JSON.stringify(part))).join(' ')),
     });
@@ -150,6 +164,7 @@ export class Extensions {
         extension.error = String(error?.message ?? error);
         extension.actions.clear();
         extension.jobs.clear();
+        extension.tools.clear();
         extension.handlers = [];
         log(extension.id, `load failed: ${error?.stack ?? error}`);
       }
@@ -175,6 +190,24 @@ export class Extensions {
       if (error?.code) throw error;
       log(id, `action ${name} failed: ${error?.stack ?? error}`);
       throw failure('action_failed', String(error?.message ?? error));
+    }
+  }
+
+  // A tool call carries a token that acts for the calling session as far as
+  // this extension may, so ctx.ah reaches only what both of them could.
+  async tool({ id, name, input, caller, token }) {
+    const extension = this.ready(id);
+    const tool = extension.tools.get(name);
+    if (!tool) throw failure('not_found', `extension ${id} has no tool ${name}`);
+    const daemon = { ...extension.daemon, token };
+    const ah = Object.freeze({ call: (toolName, args) => callAs(daemon, this.writeTools, toolName, args) });
+    try {
+      const result = await tool.run(input ?? {}, { caller: caller ?? {}, ah });
+      return { result: result ?? null };
+    } catch (error) {
+      if (error?.code) throw error;
+      log(id, `tool ${name} failed: ${error?.stack ?? error}`);
+      throw failure('tool_failed', String(error?.message ?? error));
     }
   }
 
