@@ -34,8 +34,7 @@ type catalogWakes struct {
 // catalogWake follows one folder. A folder a surface names is followed
 // itself; one that does not exist yet is waited for from its parent, which
 // asks for a pass only once the folder appears. A higher ancestor, or a
-// parent that is the home folder or above it, is left to the ticker: on
-// kqueue a followed folder costs a descriptor per entry.
+// parent that is the home folder or above it, is left to the ticker.
 type catalogWake struct {
 	kinds  map[surface.SurfaceKind]bool
 	named  bool
