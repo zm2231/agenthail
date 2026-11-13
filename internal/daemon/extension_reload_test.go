@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,12 +27,21 @@ func TestAPageOpenedOnItsOwnReloadsForItsOwnChangesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var listening atomic.Int32
 	signedIn := &httputil.ReverseProxy{FlushInterval: -1, Rewrite: func(r *httputil.ProxyRequest) {
+		if r.In.URL.Path == "/api/v1/events" {
+			listening.Add(1)
+		}
 		r.SetURL(target)
 		r.Out.Header.Set("Authorization", "Bearer secret")
 	}}
 	browser := httptest.NewServer(signedIn)
 	t.Cleanup(browser.Close)
+
+	if err := os.WriteFile(filepath.Join(f.workdir, "assets", "app.css"), []byte("body { color: green }"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.turn(t, "to", "turn-0")
 
 	host := runTestBrowserHost(t, f.d)
 	eventually(t, "the browser host answers", func() bool { return host.Status().State != browserhost.StateUnavailable })
@@ -41,6 +51,7 @@ func TestAPageOpenedOnItsOwnReloadsForItsOwnChangesOnly(t *testing.T) {
 		return browse(t, agent, map[string]any{"action": "snapshot", "tab": tab})["title"].(string)
 	}
 	eventually(t, "the page loads", func() bool { return strings.HasPrefix(title(), "fixture ") })
+	eventually(t, "the page listens for changes", func() bool { return listening.Load() > 0 })
 	first := title()
 
 	time.Sleep(1500 * time.Millisecond)
