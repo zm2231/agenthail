@@ -448,7 +448,7 @@ jobs:
   # Not gated on the Mac package: a build here reaches only the internal TestFlight group.
   testflight:
     needs: [push-relay-check, ios-archive, ios-proof, ios-suite]
-    if: always() && needs.push-relay-check.result == 'success' && needs.ios-archive.result == 'success' && needs.ios-proof.result == 'success'
+    if: ${{ !cancelled() && needs.push-relay-check.result == 'success' && needs.ios-archive.result == 'success' && needs.ios-proof.result == 'success' }}
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -508,7 +508,7 @@ jobs:
 
   publish:
     needs: [push-relay-check, source-proof, macos-test, linux-test, macos-package, linux-archive, ios-archive, testflight]
-    if: always() && needs.push-relay-check.result == 'success' && (needs.source-proof.outputs.proven == 'true' || (needs.macos-test.result == 'success' && needs.linux-test.result == 'success')) && needs.macos-package.result == 'success' && needs.linux-archive.result == 'success' && needs.ios-archive.result == 'success' && needs.testflight.result == 'success'
+    if: ${{ !cancelled() && needs.push-relay-check.result == 'success' && (needs.source-proof.outputs.proven == 'true' || (needs.macos-test.result == 'success' && needs.linux-test.result == 'success')) && needs.macos-package.result == 'success' && needs.linux-archive.result == 'success' && needs.ios-archive.result == 'success' && needs.testflight.result == 'success' }}
     runs-on: macos-15
     timeout-minutes: 55
     env:
