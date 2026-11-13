@@ -355,3 +355,42 @@ func TestAStandalonePageHearsOnlyChangesAfterItLoadedAndOnlyItsOwn(t *testing.T)
 		t.Fatalf("the change after the page loaded named %v", changed)
 	}
 }
+
+func TestUndoLastAndKeepingTheNewestChangeAgreeWithTheFolderWhicheverComesFirst(t *testing.T) {
+	f := startExtensionFixture(t)
+	reg := f.d.Registry
+	workspace := extension.Workspace(f.home)
+	writeExtension(t, workspace, "notes", `{"label": "Notes"}`)
+	f.turn(t, "to", "turn-1")
+	writeExtension(t, workspace, "jots", `{"label": "Jots"}`)
+	f.turn(t, "to", "turn-2")
+	ask := mustOpenChangeAsk(t, reg, "to")
+	jots := f.changes(t)[0]
+
+	kept := make(chan int, 1)
+	undone := make(chan int, 1)
+	go func() {
+		response, _ := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "keep", "rev": jots.Rev})
+		kept <- response.StatusCode
+	}()
+	go func() { undone <- f.answer(t, ask, extensionUndo) }()
+	keepStatus, undoStatus := <-kept, <-undone
+	f.d.background.wait()
+	if undoStatus != http.StatusOK {
+		t.Fatalf("Undo last answered %d", undoStatus)
+	}
+	_, jotsErr := os.Stat(filepath.Join(workspace, "jots"))
+	_, notesErr := os.Stat(filepath.Join(workspace, "notes"))
+	switch keepStatus {
+	case http.StatusOK:
+		if jotsErr != nil || !os.IsNotExist(notesErr) {
+			t.Fatalf("Keep came first, so Undo last should have undone notes: jots=%v notes=%v", jotsErr, notesErr)
+		}
+	case http.StatusBadRequest:
+		if !os.IsNotExist(jotsErr) || notesErr != nil {
+			t.Fatalf("Undo came first, so jots should be gone and notes kept: jots=%v notes=%v", jotsErr, notesErr)
+		}
+	default:
+		t.Fatalf("Keep answered %d", keepStatus)
+	}
+}

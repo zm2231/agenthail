@@ -406,7 +406,14 @@ func (d *Daemon) answerExtensionChange(ctx context.Context, ask registry.Ask, re
 		return actionResult{}, staleRequest()
 	}
 	if response.Choices[0] == extensionUndo {
-		if _, err := d.undoExtensionChange(ctx, held.Revs[len(held.Revs)-1]); err != nil {
+		newest := func(pending map[string]pendingExtensionChanges) (string, error) {
+			current := pending[ask.SessionID]
+			if current.AskID != ask.ID || len(current.Revs) == 0 {
+				return "", staleRequest()
+			}
+			return current.Revs[len(current.Revs)-1], nil
+		}
+		if _, err := d.undoPickedExtensionChange(ctx, newest); err != nil {
 			return actionResult{}, err
 		}
 		return actionOK(map[string]any{"ok": true, "result": map[string]any{"requestId": ask.ID, "outcome": "undone"}}), nil
@@ -451,6 +458,10 @@ func (d *Daemon) keepExtensionChanges(ask registry.Ask, p principal) error {
 }
 
 func (d *Daemon) undoExtensionChange(ctx context.Context, rev string) (extension.Undone, error) {
+	return d.undoPickedExtensionChange(ctx, func(map[string]pendingExtensionChanges) (string, error) { return rev, nil })
+}
+
+func (d *Daemon) undoPickedExtensionChange(ctx context.Context, pick func(map[string]pendingExtensionChanges) (string, error)) (extension.Undone, error) {
 	history, err := d.extensionHistory()
 	if err != nil {
 		return extension.Undone{}, actionFailed(http.StatusServiceUnavailable, "unavailable", err.Error())
@@ -458,15 +469,27 @@ func (d *Daemon) undoExtensionChange(ctx context.Context, rev string) (extension
 	if history == nil {
 		return extension.Undone{}, invalidRequest("there is no extensions folder")
 	}
-	// The revert and forgetting its pending entry share the lock Keep takes,
-	// so a Keep of the same change sees either both or neither.
+	// Choosing the change, reverting it and forgetting its pending entry share
+	// the lock Keep takes, so a Keep sees all of it or none.
 	c := d.extensions.changes
 	c.mu.Lock()
-	undone, err := history.Undo(rev)
+	var undone extension.Undone
+	pending, err := c.readPending()
+	rev := ""
+	if err == nil {
+		rev, err = pick(pending)
+	}
+	if err == nil {
+		undone, err = history.Undo(rev)
+	}
 	if err == nil {
 		d.forgetPendingExtensionChangeLocked(undone.Reverted.Rev)
 	}
 	c.mu.Unlock()
+	var picked *actionError
+	if errors.As(err, &picked) {
+		return extension.Undone{}, err
+	}
 	if errors.Is(err, extension.ErrUndoLater) || errors.Is(err, extension.ErrUnrecorded) {
 		return extension.Undone{}, actionFailed(http.StatusConflict, "conflict", err.Error())
 	}
