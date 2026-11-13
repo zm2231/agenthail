@@ -35,7 +35,7 @@ type webSessions struct {
 	now  func() time.Time
 }
 
-type mountPortContextKey struct{}
+type extensionPortContextKey struct{}
 
 func (s *webSessions) clock() time.Time {
 	if s.now != nil {
@@ -95,8 +95,9 @@ func webSessionKey(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// The /x/ and event-stream allowance on the dashboard origin lasts only while that origin serves extension pages.
 func webSessionPath(r *http.Request) bool {
-	if onMountPort(r) {
+	if onExtensionPort(r) {
 		return true
 	}
 	if strings.HasPrefix(r.URL.Path, "/x/") {
@@ -105,8 +106,8 @@ func webSessionPath(r *http.Request) bool {
 	return r.URL.Path == "/api/v1/events" && (r.Method == http.MethodGet || r.Method == http.MethodHead)
 }
 
-func onMountPort(r *http.Request) bool {
-	on, _ := r.Context().Value(mountPortContextKey{}).(bool)
+func onExtensionPort(r *http.Request) bool {
+	on, _ := r.Context().Value(extensionPortContextKey{}).(bool)
 	return on
 }
 
