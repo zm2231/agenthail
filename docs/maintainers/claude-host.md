@@ -48,9 +48,24 @@ process. The old host keeps serving its sessions instead.
 lock and stops writing `state.json`, so the daemon starts the new host at
 once. The retiring host refuses `open` with `draining` and serves everything
 else for its own sessions: `send`, `respond`, `interrupt`, `setModel`,
-`setPermissionMode`, `logs`, `close`, `list` and `subscribe`. It closes a session once
-Claude reports it idle with no open request, no background task and no turn
-owed, and exits when its last session has closed. Claude owes a turn for work
+`setPermissionMode`, `logs`, `close`, `list`, `subscribe` and `release`. It
+closes a session once the daemon has released it and Claude reports it idle
+with no open request, no background task and no turn owed, and exits when its
+last session has closed.
+
+The daemon keeps a session on the retiring host while its idle compaction
+could still run there. It keeps the session if its newest request wrote the
+prompt cache for an hour, holds at least the root's `minContextTokens`, has
+not been compacted since, and is under an hour old, if idle compaction is on
+for the root, and if nothing would refuse the compact. The compact is queued
+on the new daemon and reaches the old host through the client's session
+routing. After the compaction, once the cache hour has passed, or right away
+for a session that does not qualify, the daemon sends `release`. The host then
+closes the session at its next idle point. A person's message to a kept
+session runs in its Claude on the old host. Each decision is logged once per
+request, kept or released, with the reason. Past the drain grace (60 minutes)
+the host closes each session at its next idle point without waiting for a
+release, whether or not background tasks still run. Claude owes a turn for work
 it was handed while idle: a background task that ended, unless the live set
 marked it `ambient` (not activity, so no turn follows), which Claude reports
 before it starts the turn telling the model, and a message the host passed it
@@ -74,7 +89,8 @@ Retiring hosts are bounded by their sessions. A retiring host opens nothing,
 so it holds only sessions it had when it retired, and it exits with the last
 of them. A host retired with no session exits at once. Repeated updates
 therefore leave at most one retiring host per session that has kept working,
-or kept a background task running, since the update that retired its host.
+kept a background task running, or is kept for its idle compaction, since the
+update that retired its host.
 
 The host and its Claude processes outlive the daemon. The launchd service sets
 `AbandonProcessGroup`, and a restarted daemon attaches to the running host

@@ -55,6 +55,8 @@ type Daemon struct {
 	Surfaces             []surface.Surface
 	log                  *log.Logger
 	idleHolds            idleCompactionHolds
+	idleWake             chan struct{}
+	retiringDecisions    retiringDecisions
 	errorMu              sync.Mutex
 	observeErrors        map[string]observedError
 	ui                   *uiState
@@ -222,6 +224,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		limitResumes:      newLimitResumer(),
 		goalSweep:         newGoalSweeper(),
 		workWake:          make(chan struct{}, 1),
+		idleWake:          make(chan struct{}, 1),
 		github:            github.GH{},
 		g2:                newG2Counter(time.Now()),
 		sorter:            newLedgerSorter(),

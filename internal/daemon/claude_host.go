@@ -122,6 +122,7 @@ func (d *Daemon) watchClaudeHostRequests(ctx context.Context) {
 // host that stops answering is still followed, since it may answer again.
 func (d *Daemon) watchRetiringClaudeHost(ctx context.Context, host claudehost.Client) {
 	d.log.Printf("Claude host: following the retiring host on %s until its sessions close", host.Socket)
+	d.wakeIdleCompaction()
 	var after uint64
 	silent := false
 	for ctx.Err() == nil {
@@ -147,6 +148,9 @@ func (d *Daemon) watchRetiringClaudeHost(ctx context.Context, host claudehost.Cl
 				}
 				if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" || event.Kind == "exited" {
 					d.claudeHostChanged()
+				}
+				if event.Kind == "state" || event.Kind == "request_resolved" || event.Kind == "tasks" {
+					d.wakeIdleCompaction()
 				}
 			})
 			if start.Gap {

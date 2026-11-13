@@ -650,6 +650,18 @@ func (c Client) Drain(ctx context.Context) error {
 	return c.call(ctx, "drain", struct{}{}, nil)
 }
 
+// Own is what this host alone runs, without the retiring hosts beside it.
+func (c Client) Own(ctx context.Context) (Listing, error) {
+	var out Listing
+	return out, c.call(ctx, "list", struct{}{}, &out)
+}
+
+// Release lets the retiring host on Socket close a session it keeps, at the
+// session's next idle point. A host only releases while it retires.
+func (c Client) Release(ctx context.Context, sessionID string) error {
+	return c.call(ctx, "release", map[string]string{"sessionId": sessionID}, nil)
+}
+
 type request struct {
 	ID     int    `json:"id"`
 	Method string `json:"method"`

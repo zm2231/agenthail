@@ -136,6 +136,7 @@ class Session {
     this.done = null;
     this.stateEvents = false;
     this.guessesIdle = false;
+    this.released = false;
     this.tasks = [];
     this.taskSince = new Map();
     this.owed = new Set();
@@ -277,8 +278,10 @@ class Session {
 
   // A retiring host closes a session only once Claude is idle with no open
   // request, no background task and no turn owed, since closing ends the
-  // process and every task it runs. The next message resumes the conversation
-  // on the new host.
+  // process and every task it runs, and only once the daemon has released it
+  // or the drain grace is over: the daemon keeps a session whose prompt cache
+  // it can still compact. The next message resumes the conversation on the new
+  // host.
   // A Claude that ended a turn without reporting its states leaves idle a
   // guess that a turn it started itself may still be running, so such a
   // session retires only as a turn result arrives.
@@ -297,7 +300,7 @@ class Session {
 
   retireIfDone({ turnEnded = false } = {}) {
     if (this.guessesIdle && !turnEnded) return;
-    const leaving = draining ? this.retirable() : this.pendingWindow !== undefined && this.settled();
+    const leaving = draining ? (this.released || graceOver) && this.retirable() : this.pendingWindow !== undefined && this.settled();
     if (this.ended || !this.query || !leaving) return;
     if (this.measuring) {
       this.measuring.then(() => this.retireIfDone({ turnEnded }));
@@ -499,6 +502,14 @@ const methods = {
     }
     // done also settles when Claude ends its output but its process lingers.
     killSession(s);
+    return {};
+  },
+  // release lets a retiring host close the session at its next idle point.
+  release: ({ sessionId }) => {
+    if (!draining) throw new HostError('not_draining', 'only a retiring host releases its sessions');
+    const s = session(sessionId);
+    s.released = true;
+    s.retireIfDone();
     return {};
   },
   commands: listCommands,

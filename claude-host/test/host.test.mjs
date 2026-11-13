@@ -1083,6 +1083,14 @@ test('a Claude that exits with an error before it starts refuses the open with i
 
 const retiringSocket = (f, host) => f.socket.replace(/\.sock$/, `.${host.pid}.sock`);
 
+// release lets a retiring host close sessions, the way the daemon does for one
+// it does not keep.
+async function release(f, host, ...ids) {
+  const r = new Client(retiringSocket(f, host));
+  for (const sessionId of ids) await r.call('release', { sessionId });
+  r.close();
+}
+
 // takeLock reports whether another host could start now: a second host is
 // started with the lock, which it can hold only once the first let it go.
 async function lockReleased(f) {
@@ -1146,6 +1154,7 @@ test('a session retired while its context report is slow still records the windo
   await c.call('drain');
   const r = new Client(retiringSocket(f, host));
   await r.call('subscribe', { after: 0 });
+  await release(f, host, id);
   assert.equal(await host.exited, 0);
   const kinds = r.events.filter((e) => e.sessionId === id).map((e) => e.kind);
   assert.ok(kinds.includes('context') && kinds.indexOf('context') < kinds.indexOf('exited'), kinds.join(' '));
@@ -1162,12 +1171,13 @@ test('a session retired on its last turn result still records the window of that
   await c.call('drain');
   const r = new Client(retiringSocket(f, host));
   await r.call('subscribe', { after: 0 });
+  await release(f, host, id);
   assert.equal(await host.exited, 0);
   const kinds = r.events.filter((e) => e.sessionId === id).map((e) => e.kind);
   assert.ok(kinds.includes('context') && kinds.indexOf('context') < kinds.indexOf('exited'), kinds.join(' '));
 });
 
-test('drain retires the host: it gives up the socket and lock and serves its sessions until each is idle', async () => {
+test('drain retires the host: it gives up the socket and lock and serves its sessions until each is released and idle', async () => {
   const f = fixture();
   const host = await startHost(f);
   const c = new Client(f.socket);
@@ -1185,8 +1195,11 @@ test('drain retires the host: it gives up the socket and lock and serves its ses
   const r = new Client(retiringSocket(f, host));
   assert.equal((await r.call('hello')).pid, host.pid);
   await assert.rejects(r.call('open', { sessionId: randomUUID(), cwd: f.cwd }), { code: 'draining' });
+  await sleep(300);
+  assert.ok(alive(idleSession.pid), 'an idle session stays until it is released');
+  await release(f, host, idle, busy);
   for (let i = 0; i < 100 && alive(idleSession.pid); i++) await sleep(50);
-  assert.ok(!alive(idleSession.pid), 'an idle session closes at once');
+  assert.ok(!alive(idleSession.pid), 'a released idle session closes at once');
   const late = randomUUID();
   assert.deepEqual(await r.call('send', { sessionId: busy, uuid: late, text: 'late' }), { accepted: true, duplicate: false });
   await r.call('interrupt', { sessionId: busy });
@@ -1195,6 +1208,16 @@ test('drain retires the host: it gives up the socket and lock and serves its ses
   assert.ok(!fs.existsSync(retiringSocket(f, host)));
   c.close();
   r.close();
+});
+
+test('only a retiring host releases a session', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await assert.rejects(c.call('release', { sessionId: id }), { code: 'not_draining' });
+  c.close();
 });
 
 test('an interrupt that reaches Claude before it starts the turn stops the turn once it starts', async () => {
@@ -1248,6 +1271,7 @@ test('retiring lets go of subscribers that came in through the daemon socket', a
   await closed;
   const r = new Client(retiringSocket(f, host));
   await r.call('subscribe', { after: 0 });
+  await release(f, host, id);
   await r.call('interrupt', { sessionId: id });
   await r.event((e) => e.sessionId === id && e.kind === 'exited');
   d.close();
@@ -1261,6 +1285,7 @@ test('a retiring host keeps an open request answerable and closes the session on
   await c.call('subscribe');
   const { id, uuid, request } = await openPending(f, c, 'TOOL');
   await c.call('drain');
+  await release(f, host, id);
   await sleep(300);
   const r = new Client(retiringSocket(f, host));
   const listed = (await r.call('list')).sessions.find((s) => s.sessionId === id);
@@ -1291,6 +1316,7 @@ async function retiresAfterTheNotificationTurn(env) {
   await c.call('drain');
   const r = new Client(retiringSocket(f, host));
   await r.call('subscribe', { after: 0 });
+  await release(f, host, id);
   const emptied = await r.event((e) => e.sessionId === id && e.kind === 'sdk' && e.message.subtype === 'background_tasks_changed' && e.message.tasks.length === 0, 5000);
   await sleep(300);
   assert.ok(alive(pid), 'the session stays open between the task ending and the turn that reports it');
@@ -1355,6 +1381,7 @@ async function retiresAfterAnAmbientTask(env) {
   await c.event(turnResult(id, uuid));
   await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'idle');
   await c.call('drain');
+  await release(f, host, id);
   assert.equal(await Promise.race([host.exited, sleep(5000).then(() => 'still running')]), 0);
   assert.deepEqual(transcript(f, id).map((l) => l.reply), ['ambient:500']);
   assert.ok(!alive(pid));
@@ -1464,6 +1491,7 @@ test('a retiring host does not close a session on the idle of a turn that ended 
   await c.call('drain');
   const r = new Client(retiringSocket(f, host));
   await r.call('subscribe', { after: 0 });
+  await release(f, host, id);
   await r.event(turnResult(id, first));
   const next = randomUUID();
   await r.call('send', { sessionId: id, uuid: next, text: 'next' });
@@ -1487,6 +1515,7 @@ test('a Claude without session state events falls back to turn results and says 
   await sleep(200);
   assert.equal(host.exitCode, null, 'a busy session is not closed');
   const r = new Client(retiringSocket(f, host));
+  await release(f, host, id);
   await r.call('interrupt', { sessionId: id });
   assert.equal(await host.exited, 0);
   assert.match(host.stderrText, /without session state events/);
@@ -1800,6 +1829,7 @@ test('a retiring host and its replacement both keep the terminal-only commands t
   const first = randomUUID();
   await c.call('send', { sessionId: early, uuid: first, text: 'hello' });
   await c.call('drain');
+  await release(f, old, early);
   assert.ok(await lockReleased(f));
 
   await startHost(f, { env: { FAKE_CLAUDE_TERMINAL_COMMANDS: 'l5-probe' } });
