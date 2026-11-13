@@ -490,3 +490,43 @@ func TestRemoteAccessOffWithNoDaemonRunningWithdrawsTheMountsItPublished(t *test
 		t.Fatalf("after withdrawing, mounts.json holds %v %v; want the port kept and not published", ports, err)
 	}
 }
+
+func TestTheExtensionsViewCarriesWhatEachMountOffersAsAnApp(t *testing.T) {
+	f := startMountFixture(t)
+	manifest := `{"label": "Fixture", "app": {"label": "Board", "icon": "chart.bar"}, "mounts": [{"name": "app", "label": "App", "upstream": "http://127.0.0.1:9", "app": {"icon": "terminal", "order": 3}}]}`
+	if err := os.WriteFile(filepath.Join(f.dir, "extension.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.sync(t)
+	if app := f.mount(t).App; app == nil || app.Icon != "terminal" || app.Order != 3 {
+		t.Fatalf("the mount offers %+v", app)
+	}
+}
+
+func TestOfferingAMountAsAnAppKeepsItsApprovalAndKey(t *testing.T) {
+	upstream, _ := startUpstream(t)
+	f := startMountFixture(t)
+	f.declare(t, upstream.URL)
+	f.approve(t)
+	keyFile := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(keyFile, []byte("k\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.d.setExtensionMountKey("fixture", "app", &proxyacct.KeyRef{File: keyFile}); err != nil {
+		t.Fatal(err)
+	}
+	f.sync(t)
+	before := f.mount(t)
+	manifest := fmt.Sprintf(`{"label": "Fixture", "app": {"icon": "chart.bar"}, "mounts": [{"name": "app", "label": "App", "upstream": %q, "entry": "/index.html", "signin": "assets/signin.js", "app": {"label": "Console", "icon": "terminal"}}]}`, upstream.URL)
+	if err := os.WriteFile(filepath.Join(f.dir, "extension.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.sync(t)
+	after := f.mount(t)
+	if after.State != "serving" || after.Port != before.Port || after.Key != before.Key || after.Key == "" {
+		t.Fatalf("offering the mount as an app changed it from %+v to %+v", before, after)
+	}
+	if after.App == nil || after.App.Label != "Console" {
+		t.Fatalf("the mount offers %+v", after.App)
+	}
+}

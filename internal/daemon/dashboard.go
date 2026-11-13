@@ -116,5 +116,6 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	d.registerAPIV1(mux, dashboard)
 	mux.Handle("/mcp", d.mcpHandler())
 	mux.Handle(extensionFetchPath, d.extensionFetchHandler())
+	mux.Handle(extensionBadgePath, d.extensionBadgeHandler())
 	return d.dashboardHeaders(mux)
 }

@@ -59,16 +59,18 @@ func (c *mountConfig) same(other *mountConfig) bool {
 }
 
 type mountState struct {
-	Name      string `json:"name"`
-	Label     string `json:"label"`
-	Port      int    `json:"port,omitempty"`
-	Entry     string `json:"entry"`
-	Upstream  string `json:"upstream"`
-	State     string `json:"state"`
-	Error     string `json:"error,omitempty"`
-	Published bool   `json:"published,omitempty"`
-	Key       string `json:"key,omitempty"`
-	Signin    bool   `json:"signin,omitempty"`
+	Name      string         `json:"name"`
+	Label     string         `json:"label"`
+	Port      int            `json:"port,omitempty"`
+	Entry     string         `json:"entry"`
+	Upstream  string         `json:"upstream"`
+	State     string         `json:"state"`
+	Error     string         `json:"error,omitempty"`
+	Published bool           `json:"published,omitempty"`
+	Key       string         `json:"key,omitempty"`
+	Signin    bool           `json:"signin,omitempty"`
+	App       *extension.App `json:"app,omitempty"`
+	Badge     string         `json:"badge,omitempty"`
 }
 
 type extensionMounts struct {
@@ -163,7 +165,7 @@ func (d *Daemon) syncExtensionMounts() error {
 		for _, mount := range ext.Manifest.Mounts {
 			key := extension.MountKey(ext.ID, mount.Name)
 			declared[key] = true
-			state := mountState{Name: mount.Name, Label: mount.Label, Entry: mount.Entry, Upstream: mount.Upstream, State: "pending", Signin: mount.Signin != ""}
+			state := mountState{Name: mount.Name, Label: mount.Label, Entry: mount.Entry, Upstream: mount.Upstream, State: "pending", Signin: mount.Signin != "", App: mount.App}
 			if approved, ok := grant.MountApproved(mount); ok {
 				desired[key] = &mountConfig{ext: ext, mount: mount, key: approved.Key}
 				state.State = "serving"

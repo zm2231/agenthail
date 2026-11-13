@@ -41,7 +41,19 @@ type Manifest struct {
 	Description  string   `json:"description,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`
 	Mounts       []Mount  `json:"mounts,omitempty"`
+	App          *App     `json:"app,omitempty"`
 }
+
+// App asks the apps to offer the page or mount its own sidebar entry or tab; the person pins it or not.
+type App struct {
+	Label string `json:"label,omitempty"`
+	Icon  string `json:"icon,omitempty"`
+	Order int    `json:"order,omitempty"`
+}
+
+const maxAppLabel = 40
+
+var iconPattern = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9]+)*$`)
 
 type Mount struct {
 	Name     string `json:"name"`
@@ -51,6 +63,7 @@ type Mount struct {
 	// Signin is a script under assets/ that Agenthail adds to the app's pages
 	// so the app sends the key placeholder, which Agenthail swaps for the key.
 	Signin string `json:"signin,omitempty"`
+	App    *App   `json:"app,omitempty"`
 }
 
 const maxMounts = 16
@@ -130,6 +143,9 @@ func readManifest(file string) (Manifest, error) {
 			return Manifest{}, fmt.Errorf("%s declares unknown capability %q; known: %s", ManifestFile, capability, strings.Join(Capabilities, ", "))
 		}
 	}
+	if err := manifest.App.normalize(); err != nil {
+		return Manifest{}, fmt.Errorf("%s: app: %w", ManifestFile, err)
+	}
 	slices.Sort(manifest.Capabilities)
 	manifest.Capabilities = slices.Compact(manifest.Capabilities)
 	if len(manifest.Mounts) > maxMounts {
@@ -170,6 +186,27 @@ func (m *Mount) normalize() error {
 	}
 	if m.Signin != "" && !strings.HasPrefix(path.Clean("/"+m.Signin), "/"+AssetsDir+"/") {
 		return errors.New("signin must be a file under assets/")
+	}
+	if err := m.App.normalize(); err != nil {
+		return fmt.Errorf("app: %w", err)
+	}
+	return nil
+}
+
+func (a *App) normalize() error {
+	if a == nil {
+		return nil
+	}
+	a.Label = strings.TrimSpace(a.Label)
+	if len([]rune(a.Label)) > maxAppLabel {
+		return fmt.Errorf("label is longer than %d characters", maxAppLabel)
+	}
+	a.Icon = strings.TrimSpace(a.Icon)
+	if a.Icon != "" && (len(a.Icon) > 64 || !iconPattern.MatchString(a.Icon)) {
+		return errors.New("icon is an SF Symbol name, such as chart.bar.xaxis")
+	}
+	if a.Order < -1000 || a.Order > 1000 {
+		return errors.New("order is a whole number from -1000 to 1000")
 	}
 	return nil
 }

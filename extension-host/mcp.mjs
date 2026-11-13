@@ -65,3 +65,14 @@ export async function fetchMount({ fetchURL, token }, mount, path, init = {}) {
     bytes: () => new Uint8Array(content),
   };
 }
+
+export async function setBadge({ badgeURL, token }, value, mount = '') {
+  const response = await fetch(badgeURL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ mount: mount ?? '', value: value ?? null }),
+  });
+  const text = await response.text();
+  if (!response.ok) throw refusalFrom(response.status, text);
+  return JSON.parse(text).badge;
+}
