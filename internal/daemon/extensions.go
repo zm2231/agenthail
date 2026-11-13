@@ -54,8 +54,9 @@ type loadedExtension struct {
 	token   string
 	host    extensionHostSummary
 	jobs    map[string]*extensionJobState
-	// tree is the folder's hash when it was read for this load, so a call
-	// is recorded against the version that ran.
+	// tree is the folder's hash while this load read it, or "" when it
+	// changed during the load, so a call is recorded only against a version
+	// known to be the one that ran.
 	tree string
 }
 
@@ -186,6 +187,7 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", errExtensionLoadFailed, err)
 	}
+	after := d.extensionTrees()
 	r.mu.Lock()
 	r.reloading = false
 	for _, summary := range status.Extensions {
@@ -194,6 +196,9 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 			continue
 		}
 		loaded.host = summary
+		if after[summary.ID] != loaded.tree {
+			loaded.tree = ""
+		}
 		for _, job := range summary.Jobs {
 			loaded.jobs[job.Name] = carriedJobState(previous[summary.ID], job, now)
 		}

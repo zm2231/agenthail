@@ -182,8 +182,7 @@ func (d *Daemon) callExtension(ctx context.Context, id string, request extension
 	}
 	out := extensionCallResult{}
 	if disk := d.extensionTrees()[id]; disk != "" {
-		loaded, ok := d.extensions.find(id)
-		if !ok || loaded.tree != disk {
+		if loaded, ok := d.extensions.snapshot(id); !ok || loaded.tree != disk {
 			if err := d.syncExtensionMounts(); err != nil {
 				d.log.Printf("extensions: sync mounts before a call: %s", err)
 			}
@@ -193,7 +192,7 @@ func (d *Daemon) callExtension(ctx context.Context, id string, request extension
 			out.Reloaded = true
 		}
 	}
-	loaded, ok := d.extensions.find(id)
+	loaded, ok := d.extensions.snapshot(id)
 	if !ok {
 		return out, extensionNotFound("No extension " + id + ".")
 	}
@@ -205,9 +204,9 @@ func (d *Daemon) callExtension(ctx context.Context, id string, request extension
 	var err error
 	if request.Job != "" {
 		call.Kind, call.Name = "job", request.Job
-		err = d.runExtensionJobNow(ctx, id, loaded, request.Job)
+		err = d.runExtensionJobNow(ctx, id, loaded.host.Jobs, request.Job)
 	} else {
-		out.Result, err = d.runExtensionAction(ctx, id, loaded, request.Action, request.Input, caller)
+		out.Result, err = d.runExtensionAction(ctx, id, loaded.host.Actions, request.Action, request.Input, caller)
 	}
 	call.At, call.OK = time.Now(), err == nil
 	if err != nil {
@@ -222,8 +221,8 @@ func (d *Daemon) callExtension(ctx context.Context, id string, request extension
 	return out, err
 }
 
-func (d *Daemon) runExtensionAction(ctx context.Context, id string, loaded *loadedExtension, action string, input json.RawMessage, caller extensionCallerInfo) (json.RawMessage, error) {
-	if !slices.Contains(loaded.host.Actions, action) {
+func (d *Daemon) runExtensionAction(ctx context.Context, id string, actions []string, action string, input json.RawMessage, caller extensionCallerInfo) (json.RawMessage, error) {
+	if !slices.Contains(actions, action) {
 		return nil, extensionNotFound("Extension " + id + " has no action " + action + ".")
 	}
 	if len(bytes.TrimSpace(input)) == 0 {
@@ -245,21 +244,39 @@ func (d *Daemon) runExtensionAction(ctx context.Context, id string, loaded *load
 
 // A job run by hand takes the scheduler's place: never two at once, and the
 // next scheduled run counts from its end.
-func (d *Daemon) runExtensionJobNow(ctx context.Context, id string, loaded *loadedExtension, name string) error {
-	index := slices.IndexFunc(loaded.host.Jobs, func(job extensionJob) bool { return job.Name == name })
+func (d *Daemon) runExtensionJobNow(ctx context.Context, id string, jobs []extensionJob, name string) error {
+	index := slices.IndexFunc(jobs, func(job extensionJob) bool { return job.Name == name })
 	if index < 0 {
 		return extensionNotFound("Extension " + id + " has no job " + name + ".")
 	}
 	r := d.extensions
 	r.mu.Lock()
-	state := loaded.jobs[name]
+	var state *extensionJobState
+	if loaded, ok := r.loaded[id]; ok {
+		state = loaded.jobs[name]
+	}
 	if state == nil || state.running {
 		r.mu.Unlock()
-		return extensionBusy("Job " + name + " is running now; run it again once it ends.")
+		return extensionBusy("Job " + name + " is running now or the extension is reloading; run it again in a moment.")
 	}
 	state.running = true
 	r.mu.Unlock()
-	return d.runExtensionJob(context.WithoutCancel(ctx), id, loaded.host.Jobs[index], state)
+	return d.runExtensionJob(context.WithoutCancel(ctx), id, jobs[index], state)
+}
+
+type extensionSnapshot struct {
+	tree string
+	host extensionHostSummary
+}
+
+func (r *extensionRuntime) snapshot(id string) (extensionSnapshot, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	loaded, ok := r.loaded[id]
+	if !ok {
+		return extensionSnapshot{}, false
+	}
+	return extensionSnapshot{tree: loaded.tree, host: loaded.host}, true
 }
 
 func extensionNotFound(message string) error {
