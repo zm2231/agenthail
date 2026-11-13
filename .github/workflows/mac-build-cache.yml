@@ -38,27 +38,27 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
-      - id: key
-        run: echo "key=$(scripts/mac-swift-cache-key.sh)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v5
         with:
-          path: native/.build
-          key: ${{ steps.key.outputs.key }}
-      - name: Probe a build from the restored cache
+          fetch-depth: 0
+      - name: Probe source mtimes from git
         run: |
-          set -x
-          du -sh native/.build; ls native/.build
-          find native/.build -maxdepth 3 -type d | head -50
-          touch "$RUNNER_TEMP/marker"; sleep 1
+          restore_mtime() {
+            git log --format='T %ct' --name-only -- native | awk '/^T / {t=$2; next} NF && !($0 in seen) {seen[$0]=1; print t "\t" $0}' |
+              while IFS="$(printf '\t')" read -r t f; do [ -f "$f" ] && touch -t "$(date -r "$t" +%Y%m%d%H%M.%S)" "$f"; done
+          }
           SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
-          B=(swift build --package-path native -c release --build-system swiftbuild --triple arm64-apple-macosx15.0 -Xlinker -platform_version -Xlinker macos -Xlinker 15.0 -Xlinker "$SDK_VERSION")
-          start=$(date +%s); "${B[@]}" --product AgenthailMac -v > "$RUNNER_TEMP/warm1.log" 2>&1 || true; echo "FIRST BUILD AFTER RESTORE: $(( $(date +%s) - start )) s"
-          grep -cE 'swift-frontend|swiftc ' "$RUNNER_TEMP/warm1.log" || true
-          grep -oE '\-module-name [A-Za-z0-9_]+' "$RUNNER_TEMP/warm1.log" | sort | uniq -c | sort -rn | head -40
-          grep -iE 'invalidat|out of date|changed|because|rebuild|stale' "$RUNNER_TEMP/warm1.log" | head -40
-          head -60 "$RUNNER_TEMP/warm1.log"
-          echo "WRITTEN OUTSIDE native/.build:"
-          for d in "$HOME/Library/Caches" "$HOME/Library/Developer" "$HOME/.swiftpm" "$HOME/Library/org.swift.swiftpm" "${TMPDIR:-/tmp}"; do [ -d "$d" ] && find "$d" -newer "$RUNNER_TEMP/marker" -maxdepth 4 -type d 2>/dev/null | head -20 && du -sh "$d" 2>/dev/null; done
-          start=$(date +%s); "${B[@]}" --product AgenthailMac > "$RUNNER_TEMP/warm2.log" 2>&1 || true; echo "SECOND BUILD, NOTHING CHANGED: $(( $(date +%s) - start )) s"
-          tail -5 "$RUNNER_TEMP/warm2.log"
-          find native -newer "$RUNNER_TEMP/marker" -path '*/.build/*' -maxdepth 6 -type d | head -30
+          B=(swift build --package-path native -c release --build-system swiftbuild --triple arm64-apple-macosx15.0 -Xlinker -platform_version -Xlinker macos -Xlinker 15.0 -Xlinker "$SDK_VERSION" --product AgenthailMac)
+          start=$(date +%s); restore_mtime; echo "RESTORE MTIME: $(( $(date +%s) - start )) s"
+          start=$(date +%s); "${B[@]}" > "$RUNNER_TEMP/cold.log" 2>&1; echo "COLD BUILD: $(( $(date +%s) - start )) s"
+          git ls-files native | xargs rm -f; git checkout -- native
+          start=$(date +%s); "${B[@]}" -v > "$RUNNER_TEMP/fresh.log" 2>&1; echo "FRESH CHECKOUT, NO MTIME RESTORE: $(( $(date +%s) - start )) s"
+          grep -oE '\-module-name [A-Za-z0-9_]+' "$RUNNER_TEMP/fresh.log" | sort | uniq -c
+          git ls-files native | xargs rm -f; git checkout -- native; restore_mtime
+          start=$(date +%s); "${B[@]}" -v > "$RUNNER_TEMP/restored.log" 2>&1; echo "FRESH CHECKOUT, MTIME RESTORED: $(( $(date +%s) - start )) s"
+          grep -oE '\-module-name [A-Za-z0-9_]+' "$RUNNER_TEMP/restored.log" | sort | uniq -c
+          f="$(git ls-files 'native/macOS/*.swift' | head -1)"; echo "// probe" >> "$f"
+          start=$(date +%s); "${B[@]}" -v > "$RUNNER_TEMP/app.log" 2>&1; echo "ONE APP FILE CHANGED: $(( $(date +%s) - start )) s"
+          grep -oE '\-module-name [A-Za-z0-9_]+' "$RUNNER_TEMP/app.log" | sort | uniq -c
+          git checkout -- "$f"
+          f="$(git ls-files 'native/Packages/Textual/Sources/*.swift' | head -1)"; echo "// probe" >> "$f"
+          start=$(date +%s); "${B[@]}" > "$RUNNER_TEMP/textual.log" 2>&1; echo "ONE TEXTUAL FILE CHANGED: $(( $(date +%s) - start )) s"
