@@ -21,7 +21,7 @@ final class PaneChanges {
         }
     }
 
-    static let trackedCount = 37
+    static let trackedCount = 38
 
     static func readAll(_ p: SessionPane) {
         _ = (p.selectedSessionID, p.tabs, p.newSession, p.shownProjectID, p.archivedTab, p.archivedTabError, p.detail)
@@ -29,7 +29,7 @@ final class PaneChanges {
         _ = (p.inspectorVisible, p.inspectorDocks, p.inspectorOverlay, p.sidebarDocks, p.sidebarOverlay)
         _ = (p.renamingSession, p.movingSession, p.adoptingSession, p.projectSheet, p.messagingProject, p.projectConfirmation, p.forking, p.controlPending)
         _ = (p.requests, p.answeringRequest, p.retiredAsks, p.requestError, p.composerDraft, p.draftIsEmpty)
-        _ = (p.detailLoadError, p.modelCatalogNeeded, p.scope, p.selectedDecisionID)
+        _ = (p.detailLoadError, p.modelCatalogNeeded, p.scope, p.selectedDecisionID, p.pageFills)
     }
 
     /// Tracked properties are stored behind an underscored backing field; ignored ones keep their names.

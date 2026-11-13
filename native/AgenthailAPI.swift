@@ -69,6 +69,8 @@ final class AgenthailAPI: @unchecked Sendable {
     let tagged = TaggedResponses()
     var onRelayFailure: (@Sendable (_ host: String, _ code: String) -> Void)?
 
+    var origin: URL { baseURL }
+
     init(baseURL: URL, token: String, session: URLSession = .shared) {
         self.session = session
         self.baseURL = baseURL

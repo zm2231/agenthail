@@ -111,7 +111,10 @@ final class AgenthailModel {
     @ObservationIgnored nonisolated(unsafe) private var terminationWatch: NSObjectProtocol?
     private(set) var fetchedSubagents = SubagentPageCache()
 
-    private(set) var api: AgenthailAPI?
+    private(set) var api: AgenthailAPI? {
+        didSet { if api !== oldValue { syncExtensionCatalog() } }
+    }
+    let extensionCatalog = ExtensionCatalog()
     let interface = InterfaceStore()
     let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
@@ -143,7 +146,9 @@ final class AgenthailModel {
     }()
 
     private(set) var hasSnapshot = false
-    private(set) var daemon: DaemonState?
+    private(set) var daemon: DaemonState? {
+        didSet { if daemon?.host != oldValue?.host { syncExtensionCatalog() } }
+    }
     private(set) var queue: [QueueState] = []
     private(set) var history: [HistoryState] = []
     private(set) var leadReplacements: [LeadReplacement] = []
@@ -1406,6 +1411,7 @@ final class AgenthailModel {
             if let id = event.entityId { onSnapshotClosed?(id) }
             return
         }
+        if ExtensionCatalog.refreshes(for: event.type) { extensionCatalog.refresh() }
         if event.type == "stream.reset" {
             lastEventID = 0
         } else {
@@ -1429,6 +1435,11 @@ final class AgenthailModel {
                 await loadAudit(reset: true)
             }
         }
+    }
+
+    private func syncExtensionCatalog() {
+        guard let host = daemon?.host else { return }
+        extensionCatalog.attach(api, hostID: host.id, hostName: host.name)
     }
 
     private func eventStreamConnected() {

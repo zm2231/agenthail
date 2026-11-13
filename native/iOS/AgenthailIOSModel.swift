@@ -205,6 +205,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     // HostConnection and the catalog are not observed; views read the parts rebuild() derives from them.
     @ObservationIgnored private var connections: [String: HostConnection] = [:]
     private var hostOrder: [String] = []
+    private(set) var extensionCatalogs: [String: ExtensionCatalog] = [:]
     @ObservationIgnored private var catalog = HostCatalog()
     private var routing = HostCatalog.Routing()
     private(set) var isPaired = false
@@ -320,6 +321,32 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         connection.delegate = self
         connections[connection.id] = connection
         if !hostOrder.contains(connection.id) { hostOrder.append(connection.id) }
+        if !connection.isPreview {
+            let catalog = extensionCatalogs[connection.id] ?? ExtensionCatalog()
+            catalog.attach(connection.api, hostID: connection.id, hostName: connection.name)
+            extensionCatalogs[connection.id] = catalog
+        }
+    }
+
+    var extensionHosts: [ExtensionCatalog] { hostOrder.compactMap { extensionCatalogs[$0] } }
+
+    var extensionEntries: [ExtensionEntry] { extensionHosts.flatMap(\.entries) }
+
+    var hostsWithoutExtensions: [String] {
+        let direct = Set(hostOrder)
+        return hosts.flatMap(\.peers).filter { !direct.contains($0.id) }.map(\.name).reduce(into: [String]()) { names, name in
+            if !names.contains(name) { names.append(name) }
+        }
+    }
+
+    func extensionEntry(_ id: String) -> ExtensionEntry? {
+        extensionEntries.first { $0.id == id }
+    }
+
+    func hostExtensionsChanged(_ host: HostConnection) {
+        guard connections[host.id] === host, let catalog = extensionCatalogs[host.id] else { return }
+        catalog.attach(host.api, hostID: host.id, hostName: host.name)
+        catalog.refresh()
     }
 
     func sessionAppeared(_ id: String) {
@@ -2248,6 +2275,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         cancelPushSetup(hostID)
         pushFailures.removeValue(forKey: hostID)
         connections.removeValue(forKey: hostID)
+        extensionCatalogs.removeValue(forKey: hostID)
         let wasAppearanceHost = hostOrder.first == hostID
         hostOrder.removeAll { $0 == hostID }
         if wasAppearanceHost, let next = hostOrder.first.flatMap({ connections[$0] }), next.reachable { appearance.load(from: next.api) }
@@ -2723,6 +2751,10 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     func hostDidChange(_ host: HostConnection) {
         guard connections[host.id] === host else { return }
+        if let catalog = extensionCatalogs[host.id] {
+            catalog.attach(host.api, hostID: host.id, hostName: host.name)
+            if host.reachable && (catalog.list == nil || catalog.error != nil) && !catalog.loading { catalog.refresh() }
+        }
         if !host.reachable { cancelPushSetup(host.id) }
         rebuild()
         if let snapshot {

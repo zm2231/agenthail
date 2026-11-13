@@ -37,6 +37,9 @@ struct TileGridTest {
         check(few.shown.count == 10 && few.more.isEmpty, "every project shows when they all fit, with no more tile")
         let eleven = TileGrid.fill(columns: 6) { ProjectTiles.order(Array(projects.prefix(11)), limit: $0) }
         check(eleven.shown.count == 9 && eleven.more.count == 2, "one too many gives up a project tile for the more tile")
+        let withPins = TileGrid.fill(columns: 4, fixed: 5) { ProjectTiles.order(projects, limit: $0) }
+        check(5 + withPins.shown.count + (withPins.more.isEmpty ? 0 : 1) == TileGrid.rows * 4, "pinned extension tiles take project slots, got \(withPins.shown.count) projects")
+        check(TileGrid.fill(columns: 3, fixed: 9) { ProjectTiles.order(projects, limit: $0) }.shown.isEmpty, "more pinned tiles than slots leaves no project tiles and no negative limit")
         print("ok")
     }
 
