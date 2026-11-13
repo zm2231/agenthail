@@ -360,13 +360,14 @@ func (d *Daemon) watchUI(ctx context.Context) {
 
 func uiSignature(store *uiconf.Store) string {
 	var parts []string
+	readAt := time.Now()
 	for _, path := range []string{store.Path(), filepath.Join(store.Dir(), ".git", "logs", "HEAD")} {
 		info, err := os.Stat(path)
 		if err != nil {
 			parts = append(parts, "-")
 			continue
 		}
-		parts = append(parts, surface.Stamp(info).String())
+		parts = append(parts, surface.SettledStamp(info, readAt))
 	}
 	return strings.Join(parts, "|")
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,14 +29,16 @@ func (s FileStamp) UnchangedSince(readAt time.Time, current os.FileInfo) bool {
 	return s.Size == current.Size() && UnchangedSince(readAt, s.Modified, current.ModTime())
 }
 
+var unsettledReads atomic.Uint64
+
 // SettledStamp is the stamp a cache keeps to tell whether a file changed since
 // it was read at readAt. A file modified within MtimeGranularity of the read
-// can change again without its time moving, so its stamp also carries the read
-// time and matches no later stamp.
+// can change again without its time moving, so its stamp is marked with a
+// number no other stamp carries and matches no later stamp.
 func SettledStamp(info os.FileInfo, readAt time.Time) string {
 	stamp := Stamp(info).String()
 	if readAt.Sub(info.ModTime()) <= MtimeGranularity {
-		stamp += "@" + strconv.FormatInt(readAt.UnixNano(), 10)
+		stamp += "@" + strconv.FormatUint(unsettledReads.Add(1), 10)
 	}
 	return stamp
 }

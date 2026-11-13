@@ -193,14 +193,31 @@ func TestWatchUICommitsHandEditsAndAnnouncesThem(t *testing.T) {
 		defer d.ui.mu.Unlock()
 		return d.ui.published != ""
 	})
-	if err := os.WriteFile(store.Path(), []byte("version = 1\ntheme = light\n"), 0o600); err != nil {
-		t.Fatal(err)
+	// Both edits share one modification time and size, as two edits in one
+	// tick of a coarse file system clock do. Each lands whole, as an editor's
+	// save over the file does.
+	tick := time.Now().Add(time.Minute)
+	handEdit := func(text string) {
+		t.Helper()
+		staged := store.Path() + ".saving"
+		if err := os.WriteFile(staged, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(staged, tick, tick); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(staged, store.Path()); err != nil {
+			t.Fatal(err)
+		}
 	}
-	testkit.Eventually(t, "the condition", 10*time.Second, func() bool { return len(uiEvents(d)) == 1 })
+	handEdit("version = 1\ntheme = light\n")
+	testkit.Eventually(t, "the first hand edit announced", 10*time.Second, func() bool { return len(uiEvents(d)) == 1 })
 	entries, err := store.Log(1)
 	if err != nil || len(entries) != 1 || entries[0].Author != uiconf.Person || entries[0].Message != "Edited by hand" {
 		t.Fatalf("latest commit = %+v, %v", entries, err)
 	}
+	handEdit("version = 1\ntheme = night\n")
+	testkit.Eventually(t, "the second hand edit announced", 10*time.Second, func() bool { return len(uiEvents(d)) == 2 })
 }
 
 type countingReader struct{ read int }
