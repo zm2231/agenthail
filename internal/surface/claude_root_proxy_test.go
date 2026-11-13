@@ -26,10 +26,10 @@ func TestARootIsViaAProxyByItsBaseURLOrByName(t *testing.T) {
 			t.Fatalf("root %s proxy=%q, want %q", roots[i].Root, roots[i].Proxy, want)
 		}
 	}
-	if login := ClaudeRootLogin(home, roots[1]); login != ClaudeLoginProxy {
+	if login, _ := ClaudeRootLogin(home, roots[1]); login != ClaudeLoginProxy {
 		t.Fatalf("a proxied root is not an API key: %s", login)
 	}
-	if login := ClaudeRootLogin(home, roots[3]); login != ClaudeLoginAPIKey {
+	if login, _ := ClaudeRootLogin(home, roots[3]); login != ClaudeLoginAPIKey {
 		t.Fatalf("a base URL no proxy is configured for stays an API key: %s", login)
 	}
 }

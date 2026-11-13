@@ -27,6 +27,9 @@ const sameLocal = accounts([
 ], now).map((a) => a.title);
 assert.deepEqual(sameLocal, ["studio · work · default", "studio · work · second", "vps · work", "vps (API key) · x", "vps (API key) · y"], "accounts one host would name alike are told apart by root");
 assert.equal(new Set(sameLocal).size, sameLocal.length, "every chip title is distinct");
+const bySource = accounts(["bedrock", "vertex", "oauth_token", "foundry", "cloud_provider", "unknown"].map((loginSource, index) => ({ host: `h${index}`, hostId: `h${index}`, provider: "claude", name: "default", login: "api_key", loginSource, root: "/r" })), now);
+assert.deepEqual(bySource.map((a) => a.title), ["h0 (Bedrock)", "h1 (Vertex AI)", "h2 (OAuth token)", "h3 (Foundry)", "h4 (cloud provider)", "h5 (API key)"], "an api_key root is named for what it signs in with");
+assert.deepEqual(bySource.map((a) => a.login).slice(0, 3), ["Bedrock", "Vertex AI", "OAuth token"]);
 assert.equal(shortLabel(sets[2].meters[2]), "Week, Fable");
 assert.equal(shortLabel({ kind: "weekly_scoped", label: "x" }), "Week, one model");
 assert.equal(list[3].login, "API key");

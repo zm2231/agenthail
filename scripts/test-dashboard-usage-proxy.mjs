@@ -78,4 +78,5 @@ assert.equal(lists.length, 1, "the proxy group has one session list, not one per
 assert.deepEqual(texts(lists[0]), ["s1", "s2"]);
 
 assert.deepEqual(rootTitles([{ name: "default", primary: true, signedInAs: { email: "dev@example.com" } }, { name: "work", login: "proxy", proxy: "shared", signedInAs: { email: "stale@example.com" } }], "laptop"), ["dev", "shared via proxy"], "a root through a proxy is named for the proxy");
+assert.deepEqual(rootTitles([{ name: "default", primary: true, login: "api_key", loginSource: "bedrock" }, { name: "work", login: "api_key", loginSource: "oauth_token" }, { name: "keys", login: "api_key" }, { name: "spare", login: "signed_out" }], "laptop"), ["laptop (Bedrock)", "laptop (OAuth token)", "laptop (API key)", "laptop (signed out)"], "a root without an account is named for what it signs in with");
 console.log("ok");

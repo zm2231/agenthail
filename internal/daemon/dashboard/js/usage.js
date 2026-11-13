@@ -1,4 +1,5 @@
 import { $ } from "./dom.js";
+import { loginLabel } from "./login-labels.js";
 import { fit, wrapped } from "./usage-fit.js";
 import { openPrefer, preferActions } from "./usage-prefer.js";
 import { expandProxies, ownsByProxy } from "./usage-proxy.js";
@@ -69,9 +70,6 @@ export function shortLabel(meter) {
   return meter.label;
 }
 
-export function loginLabel(login) {
-  return { api_key: "API key", signed_out: "signed out" }[login] || null;
-}
 
 const proxyCodex = (set) => (set.group && set.provider === "codex" ? " (Codex)" : "");
 
@@ -80,7 +78,7 @@ function baseName(set) {
   if (set.provider === "proxy") return set.group.title;
   if (set.provider === "codex" && !set.group) return "Codex";
   if (set.account) return (set.account.includes("@") ? set.account.split("@")[0] : set.account) + proxyCodex(set);
-  const kind = loginLabel(set.login);
+  const kind = loginLabel(set.login, set.loginSource);
   if (kind) return `${set.host} (${kind})`;
   return set.name || "Claude";
 }
@@ -90,7 +88,7 @@ function login(set) {
   if (set.provider === "proxy") return set.group.title;
   if (set.provider === "codex" && !set.group) return "Codex";
   if (set.account) return set.account + proxyCodex(set);
-  const kind = loginLabel(set.login);
+  const kind = loginLabel(set.login, set.loginSource);
   if (kind) return kind[0].toUpperCase() + kind.slice(1);
   return set.name || "Claude";
 }
@@ -99,7 +97,7 @@ export function titles(sets) {
   const names = sets.map(baseName);
   const hostsByName = new Map();
   sets.forEach((set, index) => {
-    if (!set.provider || set.group || loginLabel(set.login)) return;
+    if (!set.provider || set.group || loginLabel(set.login, set.loginSource)) return;
     const hosts = hostsByName.get(names[index]) || new Set();
     hosts.add(set.hostId);
     hostsByName.set(names[index], hosts);

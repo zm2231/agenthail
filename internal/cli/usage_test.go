@@ -60,6 +60,18 @@ vps
 	}
 }
 
+func TestUsageNamesARootByWhatItSignsInWith(t *testing.T) {
+	var sets []usageSetView
+	if err := json.Unmarshal([]byte(`[{"host":"cloud","hostId":"h3","provider":"claude","name":"default","login":"api_key","loginSource":"bedrock","root":"/c","meters":[],"problem":"Signed in with Amazon Bedrock; no usage reported."}]`), &sets); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	writeUsage(&out, sets, time.Now())
+	if want := "cloud\n  Bedrock (default)\n    Signed in with Amazon Bedrock; no usage reported.\n"; out.String() != want {
+		t.Fatalf("output:\n%s\nwant:\n%s", out.String(), want)
+	}
+}
+
 func TestUsageListsWorkingSessionsFirstWithShortTitles(t *testing.T) {
 	sessions := []usageSessionView{
 		{Name: "Review every open pull request and summarise what is left to do"},

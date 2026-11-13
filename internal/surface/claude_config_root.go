@@ -26,6 +26,7 @@ type ClaudeConfigRoot struct {
 	Missing       bool         `json:"missing,omitempty"`
 	SignedInAs    *ClaudeLogin `json:"signedInAs,omitempty"`
 	Login         string       `json:"login,omitempty"`
+	LoginSource   string       `json:"loginSource,omitempty"`
 	Proxy         string       `json:"proxy,omitempty"`
 	Signin        string       `json:"signin,omitempty"`
 	SigninProblem string       `json:"signinProblem,omitempty"`

@@ -29,6 +29,10 @@ struct NewSessionLabelsTest {
         check(ClaudeRootLabels.option(work, title: "team") == "team · session 18%, week 92%", "usage is shown, never judged against a ceiling")
         check(ClaudeRootLabels.reason(pick, roots: roots, titles: titles) == "Default is dev: your default root for new sessions", "the full reason")
         check(keys.selectable && !spare.selectable, "an API-key root can be chosen; a signed-out one cannot")
+        let bedrock = ClaudeConfigRootOption(name: "cloud", root: "/home/a/.cloud", primary: false, login: "api_key", loginSource: "bedrock")
+        let token = ClaudeConfigRootOption(name: "token", root: "/home/a/.token", primary: false, login: "api_key", loginSource: "oauth_token")
+        let sourced = ClaudeRootLabels.titles([bedrock, token], host: "studio")
+        check(sourced == ["studio (Bedrock)", "studio (OAuth token)"] && bedrock.selectable && token.selectable, "a root without an account is named for what it signs in with, and can be chosen: \(sourced)")
 
         check(NewSessionLabels.place("agenthail", host: nil) == "agenthail", "on this Mac the place is just the project")
         check(NewSessionLabels.place("agenthail", host: "build-box") == "build-box · agenthail", "another computer is named before the project")

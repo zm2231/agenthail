@@ -37,6 +37,11 @@ struct UsageAccountsTest {
         check(sameLocalTitles == ["studio · work · default", "studio · work · second", "vps · work"], "accounts one host would name alike are told apart by root: \(sameLocalTitles)")
         check(Swift.Set(sameLocalTitles).count == sameLocalTitles.count, "every chip title is distinct")
         check(UsageAccounts.make(twoKeys, now: now).map(\.title) == ["vps (API key) · a", "vps (API key) · b", "box (signed out)"], "two roots one host would name alike are told apart by root: \(UsageAccounts.make(twoKeys, now: now).map(\.title))")
+        let sourced = UsageAccounts.make([
+            UsageReport.Set(host: "cloud", hostId: "h5", provider: "claude", name: "default", login: "api_key", loginSource: "vertex", root: "/v"),
+            UsageReport.Set(host: "token", hostId: "h6", provider: "claude", name: "default", login: "api_key", loginSource: "oauth_token", root: "/t"),
+        ], now: now)
+        check(sourced.map(\.title) == ["cloud (Vertex AI)", "token (OAuth token)"] && sourced.map(\.fullTitle) == ["Vertex AI on cloud", "OAuth token on token"], "a root without an account is named for what it signs in with: \(sourced.map(\.title)) \(sourced.map(\.fullTitle))")
         check(accounts[0].asOf == (try date("2026-10-23T13:59:00Z")), "an account carries when its usage was read")
         check(accounts[2].worst?.percent == 91 && accounts[2].critical, "an account shows its highest limit and flags it")
         check(accounts[2].spoken(now: now).hasPrefix("team@example.com: Claude usage 12 percent"), "the account reads out every limit: \(accounts[2].spoken(now: now))")
