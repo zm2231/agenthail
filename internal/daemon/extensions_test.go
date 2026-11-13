@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -104,7 +107,7 @@ func startExtensionFixtureWith(t *testing.T, replace map[string]string) *extensi
 			t.Fatal(err)
 		}
 	}
-	f := startExtensionDaemon(t, home)
+	f := startExtensionDaemon(t, home, extensionDaemonOptions{})
 	f.workdir = dir
 	f.awaitState(t, "loaded")
 	return f
@@ -120,15 +123,28 @@ func extensionTestHome(t *testing.T) string {
 	return home
 }
 
-func startExtensionDaemon(t *testing.T, home string) *extensionFixture {
+type extensionDaemonOptions struct {
+	log    io.Writer
+	launch func(nodehost.Launch) (nodehost.Launch, error)
+}
+
+func startExtensionDaemon(t *testing.T, home string, opts extensionDaemonOptions) *extensionFixture {
 	t.Helper()
 	d, _, fake, _, handler, _ := baseFixture(t)
+	if opts.log != nil {
+		d.log = log.New(opts.log, "", 0)
+	}
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	d.attachMCPCredentials(strings.TrimPrefix(server.URL, "http://"))
 	script := filepath.Join(testnode.ExtensionHost(t), "host.mjs")
 	launch := nodehost.Launch{Node: testnode.Path(t), Script: script, Version: "test", Env: os.Environ()}
-	d.SetExtensionHost(home, func() (nodehost.Launch, error) { return launch, nil })
+	d.SetExtensionHost(home, func() (nodehost.Launch, error) {
+		if opts.launch != nil {
+			return opts.launch(launch)
+		}
+		return launch, nil
+	})
 	d.extensions.host.MinRestart = 20 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -459,7 +475,7 @@ func TestAReloadTheHostCannotFinishRestartsItAndHeldEventsStillArrive(t *testing
 }
 
 func TestTheExtensionHostRunsWithNoExtensionsAndLoadsTheFirstOnOneReload(t *testing.T) {
-	f := startExtensionDaemon(t, extensionTestHome(t))
+	f := startExtensionDaemon(t, extensionTestHome(t), extensionDaemonOptions{})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var view extensionsView
@@ -478,5 +494,29 @@ func TestTheExtensionHostRunsWithNoExtensionsAndLoadsTheFirstOnOneReload(t *test
 	view = f.d.extensionsView()
 	if view.Host != "running" || len(view.Extensions) != 1 || view.Extensions[0].ID != "notes" || view.Extensions[0].State != "loaded" {
 		t.Fatalf("after one reload: %+v", view)
+	}
+}
+
+func TestAnExtensionHostThatKeepsFailingIsLoggedOnceAndAgainWhenItRecovers(t *testing.T) {
+	var logged syncLog
+	var failing atomic.Bool
+	var launches atomic.Int32
+	failing.Store(true)
+	f := startExtensionDaemon(t, extensionTestHome(t), extensionDaemonOptions{log: &logged, launch: func(real nodehost.Launch) (nodehost.Launch, error) {
+		launches.Add(1)
+		if failing.Load() {
+			return nodehost.Launch{}, errors.New("node is not installed")
+		}
+		return real, nil
+	}})
+	eventually(t, "the host retries on backoff", func() bool { return launches.Load() >= 4 })
+	if n := strings.Count(logged.String(), "extension host: node is not installed"); n != 1 {
+		t.Fatalf("a failure retried %d times was logged %d times:\n%s", launches.Load(), n, logged.String())
+	}
+
+	failing.Store(false)
+	eventually(t, "the host runs", func() bool { return f.d.extensionsView().Host == "running" })
+	if n := strings.Count(logged.String(), "extension host: loaded again"); n != 1 {
+		t.Fatalf("recovery logged %d times:\n%s", n, logged.String())
 	}
 }

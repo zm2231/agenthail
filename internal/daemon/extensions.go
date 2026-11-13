@@ -74,6 +74,7 @@ type extensionRuntime struct {
 	loaded    map[string]*loadedExtension
 	tokens    map[string]string
 	hostErr   string
+	loggedErr string
 	up        bool
 	reloading bool
 	// generation counts loads; a run that saw it change may have run other code.
@@ -96,7 +97,12 @@ func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, e
 			runtime.mu.Lock()
 			runtime.up = false
 			runtime.hostErr = err.Error()
+			fresh := runtime.hostErr != runtime.loggedErr
+			runtime.loggedErr = runtime.hostErr
 			runtime.mu.Unlock()
+			if fresh {
+				d.log.Printf("extension host: %s", err)
+			}
 			d.invalidateDashboard()
 		},
 	}
@@ -210,7 +216,12 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	}
 	r.up = true
 	r.hostErr = ""
+	recovered := r.loggedErr != ""
+	r.loggedErr = ""
 	r.mu.Unlock()
+	if recovered {
+		d.log.Printf("extension host: loaded again")
+	}
 	d.invalidateDashboard()
 	return nil
 }
