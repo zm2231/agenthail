@@ -37,6 +37,8 @@ the API and may return a cleanup function, called before the next reload.
 |---|---|
 | `ah.id`, `ah.dir` | The extension's id and folder |
 | `ah.action(name, handler)` | Registers an action the page calls. `handler(input, {caller})` returns JSON. `caller.kind` is `person`, `device`, `host` or, for `agenthail extensions call` run inside a session, `session`; `caller.actor` names who it was. |
+| `ah.source({name, everySeconds, timeoutSeconds, collect})` | Registers a source: data a page shows (below). |
+| `ah.sources()` | Every source's stored state, `{name: {name, state, value, at, error, errorAt, tookMs}}` |
 | `ah.job({name, everySeconds, run})` | Registers a background job. The daemon runs it once the extension loads and then every `everySeconds` (at least 60) after the previous run ends, never two at once, for at most 10 minutes. |
 | `ah.on(type, handler)` | Receives daemon events of `type`, or every event for `'*'`: `{id, type, timestamp, entityId, data}`, the same as `/api/v1/events`. Only an extension that holds `read.all` receives events. |
 | `ah.call(tool, args)` | Calls an Agenthail tool as the extension (below) and returns its result, or throws an error with `code` and `message`. A write gets a fresh `clientRequestId` unless one is given. |
@@ -45,8 +47,34 @@ the API and may return a cleanup function, called before the next reload.
 | `ah.table(name)` | `<id>_<name>` with dashes as underscores: the name an extension's own tables use |
 | `ah.log(...)` | A line in the extension host's log |
 
-Register actions, jobs and handlers while the default export runs; later calls
-are refused.
+Register actions, sources, jobs and handlers while the default export runs;
+later calls are refused. Sources and jobs share one set of names.
+
+## Sources
+
+A source is how a page shows data without waiting for it. The daemon runs
+`collect({signal, now})` like a job: once the extension loads, again after
+every reload or undo (so new code is collected at once, not after an
+interval), and every `everySeconds` (at least 10, 60 if omitted) after the
+previous run ends, never two at once. A run is stopped after `timeoutSeconds`,
+a whole number below `everySeconds` and at most 30 (by default the smaller of
+30 and one less than the interval); `signal` aborts then. The host stores the
+JSON result, at most 512 KiB, in the extension's table `<id>__sources` with
+when it was collected and how long it took. A run that throws or times out
+records its error beside the last good value instead of replacing it. When a
+run ends the daemon publishes `extension.source` with `{extension, source,
+ok}`.
+
+Pages read sources over the daemon, with the `read` scope like the page's
+own files:
+
+| Request | Answer |
+|---|---|
+| `GET /x/<id>/s` | `{sources: [{name, state, at, error, errorAt, tookMs, everySeconds}]}`, without values |
+| `GET /x/<id>/s?name=<name>` | `{source: {name, state, value, at, error, errorAt, tookMs, everySeconds}}` |
+
+`state` is `collecting` before the first run ends, `ok`, or `failed` (with the
+last good `value`, if any).
 
 Every extension shares one store, so one extension can read another's tables.
 Keeping to `ah.table` names is what lets Agenthail find and remove an
@@ -65,7 +93,15 @@ server through `/x/_ah.js`:
 ```
 
 `action(name, input)` posts to `/x/<id>/a/<name>` and returns the handler's
-result, or throws an error with `code`. Inline scripts and styles are allowed;
+result, or throws an error with `code`.
+
+`source(name, render)` calls `render` at once with `{state: 'collecting'}` or
+what is already stored, fetches the source on its own, and calls `render`
+again whenever `extension.source` names it, and every 30 seconds so ages stay
+current. Each source is fetched separately, so none waits on another.
+`sources({name: render, ...})` watches several, and `age(state)` words a
+state as "updated 2 min ago", "collecting" or "failed 1 min ago: ...,
+showing 5 min old". The seeded recipes build every page this way. Inline scripts and styles are allowed;
 the page may fetch only its own origin and may be framed only by it. The
 dashboard's own pages still refuse every frame.
 
@@ -212,10 +248,11 @@ not start and its error says so.
 | Method | Params | Result |
 |---|---|---|
 | `hello` | | `{protocol: 1, hostVersion, pid}` |
-| `status` | | `{extensions: [{id, state, error, actions, jobs, events, lastEventError}]}` |
+| `status` | | `{extensions: [{id, state, error, actions, jobs: [{name, everySeconds, source}], events, lastEventError}]}` |
 | `load` | `{extensions: [{id, dir, token, mcpURL}], writeTools}` | as `status` |
 | `action` | `{id, name, input, caller}` | `{result}` |
-| `job` | `{id, name}` | `{}` |
+| `job` | `{id, name}` | `{}`; for a source, after storing its value or error |
+| `sources` | `{id, name?}` | `{sources}` or `{source}`, as `/x/<id>/s` |
 | `events` | `{events, to}` | `{}`, at once; handlers run after |
 
 `load` replaces everything loaded: it calls each cleanup function, imports
