@@ -108,6 +108,19 @@ func TestRecordWritesEachTopLevelTestsSecondsForThePackage(t *testing.T) {
 	if read["TestB"] != 9 || math.Abs(read["TestA"]-4.5) > 1e-9 || len(read) != 2 {
 		t.Fatalf("read back %v", read)
 	}
+	parallel := strings.Join([]string{
+		`{"Time":"2026-11-13T00:00:00Z","Action":"run","Package":"p","Test":"TestP"}`,
+		`{"Time":"2026-11-13T00:00:00Z","Action":"run","Package":"p","Test":"TestP/one"}`,
+		`{"Time":"2026-11-13T00:00:02Z","Action":"pass","Package":"p","Test":"TestP","Elapsed":2}`,
+		`{"Time":"2026-11-13T00:01:15Z","Action":"pass","Package":"p","Test":"TestP/one","Elapsed":75}`,
+	}, "\n")
+	out.Reset()
+	if err := record(strings.NewReader(parallel), &out, "p"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), "75.00\tTestP\n"; got != want {
+		t.Fatalf("a test whose parallel subtest ends after it recorded %q, want %q", got, want)
+	}
 	if err := record(strings.NewReader(`{"Action":"pass","Package":"other","Test":"TestD","Elapsed":7}`), &out, "p"); err == nil {
 		t.Fatal("a recording with no test of the package succeeded")
 	}

@@ -33,6 +33,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -189,13 +190,18 @@ func readSeconds(path string) (map[string]float64, error) {
 	return seconds, scanner.Err()
 }
 
+// A top-level test's seconds run from its start to the last event of it or a
+// subtest, since its Elapsed leaves out parallel subtests that finish after it.
 func record(in io.Reader, out io.Writer, pkg string) error {
 	type event struct {
+		Time    time.Time
 		Action  string
 		Package string
 		Test    string
 		Elapsed float64
 	}
+	started := map[string]time.Time{}
+	last := map[string]time.Time{}
 	seconds := map[string]float64{}
 	decoder := json.NewDecoder(in)
 	for {
@@ -205,8 +211,23 @@ func record(in io.Reader, out io.Writer, pkg string) error {
 		} else if err != nil {
 			return err
 		}
-		if e.Package == pkg && e.Test != "" && !strings.Contains(e.Test, "/") && (e.Action == "pass" || e.Action == "fail") {
-			seconds[e.Test] = e.Elapsed
+		if e.Package != pkg || e.Test == "" {
+			continue
+		}
+		top, _, _ := strings.Cut(e.Test, "/")
+		if e.Action == "run" && top == e.Test {
+			started[top] = e.Time
+		}
+		if e.Time.After(last[top]) {
+			last[top] = e.Time
+		}
+		if top == e.Test && (e.Action == "pass" || e.Action == "fail") {
+			seconds[top] = e.Elapsed
+		}
+	}
+	for name, elapsed := range seconds {
+		if start, ok := started[name]; ok {
+			seconds[name] = max(elapsed, last[name].Sub(start).Seconds())
 		}
 	}
 	if len(seconds) == 0 {
