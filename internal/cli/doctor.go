@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehooks"
+	"github.com/zm2231/agenthail/internal/claudemcp"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/nodehost"
 	"github.com/zm2231/agenthail/internal/permissions"
@@ -148,6 +149,7 @@ func (a *App) cmdDoctor(args []string) error {
 		mcpSocket["problem"] = err.Error()
 	}
 	claudeHookStates := map[string]string{}
+	claudeMCPStates := map[string]string{}
 	claudeInbound := map[string]surface.ClaudeInbound{}
 	for _, root := range claudeRoots {
 		claudeInbound[root] = surface.ReadClaudeInbound(root, "")
@@ -156,6 +158,10 @@ func (a *App) cmdDoctor(args []string) error {
 			state = claudehooks.Missing
 		}
 		claudeHookStates[root] = state
+		if state, err = claudemcp.StateAt(surface.ClaudeGlobalConfigPath(home, root), relayExecutable()); err != nil {
+			state = "unknown: " + err.Error()
+		}
+		claudeMCPStates[root] = state
 	}
 	remoteControl := map[string]string{}
 	if a.claudeRemoteControlAvailable() {
@@ -255,7 +261,7 @@ func (a *App) cmdDoctor(args []string) error {
 	install := a.installMethod(runtime.GOOS)
 	simulators := doctorSimulators(ctx)
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(notCarried) == 0 && notCarriedErr == nil && len(hostProblems) == 0, "projectLinks": projectNotes, "projectHistoryNotCarried": notCarried, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "mcpSocket": mcpSocket, "claudeCrossSessionInbound": claudeInbound, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(notCarried) == 0 && notCarriedErr == nil && len(hostProblems) == 0, "projectLinks": projectNotes, "projectHistoryNotCarried": notCarried, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "mcpSocket": mcpSocket, "claudeMCP": claudeMCPStates, "claudeCrossSessionInbound": claudeInbound, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
 			report["ledgerPromptHooksError"] = hookErr.Error()
 		}
@@ -333,6 +339,17 @@ func (a *App) cmdDoctor(args []string) error {
 				fmt.Printf("  hooks: missing; terminal prompts can't be answered from Agenthail, and terminal sessions aren't told who they are, until you run: agenthail hooks install\n")
 			case claudehooks.Outdated:
 				fmt.Printf("  hooks: outdated; terminal prompts may not reach Agenthail, and terminal sessions may not be told who they are, until you run: agenthail hooks install\n")
+			}
+			switch state := claudeMCPStates[root]; state {
+			case claudemcp.Installed:
+			case claudemcp.Missing, claudemcp.Outdated:
+				fmt.Printf("  agenthail MCP server: %s; sessions started outside Agenthail don't have its tools until you run: agenthail mcp install\n", state)
+			case claudemcp.Dangling:
+				fmt.Printf("  agenthail MCP server: its command no longer exists, so Claude shows a failed server at every start; run agenthail mcp install, or agenthail mcp uninstall if Agenthail is gone\n")
+			case claudemcp.Taken:
+				fmt.Printf("  agenthail MCP server: another server is named agenthail in %s; rename it, then run: agenthail mcp install\n", surface.ClaudeGlobalConfigPath(home, root))
+			default:
+				fmt.Printf("  agenthail MCP server: %s\n", state)
 			}
 			if state, ok := remoteControl[root]; ok {
 				fmt.Printf("  remote control at startup: %s\n", state)

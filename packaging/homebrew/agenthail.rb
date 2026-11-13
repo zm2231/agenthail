@@ -82,6 +82,9 @@ class Agenthail < Formula
 
       Verify every connected surface:
         agenthail doctor
+
+      Before brew uninstall agenthail, remove its MCP server from Claude:
+        agenthail mcp uninstall
     EOS
   end
 

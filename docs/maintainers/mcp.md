@@ -82,6 +82,15 @@ The relay answers the session's `initialize` only once it has the daemon's tools
 
 This binds a session to its own process: one session's server cannot act as another session, which the CLI's `/api/v1/scope` cannot prevent. It does not separate sessions from other code running as the same OS user, which can read the dashboard token.
 
+`agenthail mcp install` puts the relay in each configured Claude root's user scope: the `agenthail` key of `mcpServers` in the root's `.claude.json`, as `{"type":"stdio","command":"<agenthail>","args":["mcp","stdio"],"env":{"AGENTHAIL_MCP_INSTALLED_BY":"agenthail mcp install"}}`. That variable marks the entry as install's; one without it is never treated as install's, whatever its shape. `agenthail daemon install`, which the package install runs, does the same and only warns when a root's config can't be updated; `agenthail daemon uninstall`, which the package uninstaller runs for each user, removes it, so a removed binary leaves no failed server behind. A Homebrew install names the `opt/agenthail` link, which survives upgrades, rather than its versioned Cellar path. Install changes nothing else in the file:
+
+- It writes under Claude's own config lock, the directory `.claude.json.lock` (proper-lockfile's form: the holder refreshes its modification time every 5 seconds, and one older than 10 seconds belongs to a process that died holding it), and Claude reads the file afresh under that lock before it saves, so neither write is lost.
+- An install that would change nothing writes nothing, and one from another agenthail path replaces only the command.
+- A server named `agenthail` that install did not write, such as one the person added, is left alone and reported. `agenthail mcp uninstall` removes only an entry install wrote.
+- `agenthail mcp status` and `agenthail doctor` report each root as installed, missing, outdated, taken, or dangling: install's entry whose command no longer exists, as after a removed Homebrew version, which Claude shows as a failed server at every start until `agenthail mcp install` rewrites it or `agenthail mcp uninstall` removes it.
+
+A session Agenthail starts gets its `/mcp` server by name too (`setMcpServers`), and that replaces the user-scope entry of the same name, so a hosted session loads one `agenthail` server, not two.
+
 ## Permissions are computed at each call
 
 `mcpAuth` resolves the bearer to its session, then reads what that session may do from durable state on every request:

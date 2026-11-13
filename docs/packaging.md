@@ -107,4 +107,6 @@ That installer stages the new folder and stops and reinstalls the supervised dae
 sudo agenthail-uninstall
 ```
 
-This removes the application, package payload, launchd service, login item, command launchers, package receipt, and Agenthail-managed skill links. It preserves `~/.agenthail` by default. Use `sudo agenthail-uninstall --purge-data` to remove local registry, queue, history, logs, and dashboard configuration too.
+This removes the application, package payload, launchd service, login item, command launchers, package receipt, Agenthail-managed skill links, and Agenthail's MCP server in each Claude config root. It preserves `~/.agenthail` by default. Use `sudo agenthail-uninstall --purge-data` to remove local registry, queue, history, logs, and dashboard configuration too.
+
+A Homebrew install runs nothing on `brew uninstall`, so run `agenthail mcp uninstall` first; otherwise Claude shows a failed `agenthail` MCP server at every start, and `agenthail doctor` names the missing command.
