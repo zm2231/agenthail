@@ -14,7 +14,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
 )
 
 const script = `#!/bin/sh

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
-	"github.com/zm2231/agenthail/internal/workspace"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/workspace"
 )
 
 func TestListRendersDaemonPagesAndMembers(t *testing.T) {

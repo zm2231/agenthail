@@ -93,8 +93,8 @@ type mountFixture struct {
 	reg     *registry.Registry
 	handler http.Handler
 	home    string
-	dir    string
-	cookie *http.Cookie
+	dir     string
+	cookie  *http.Cookie
 }
 
 func startMountFixture(t *testing.T) *mountFixture {

@@ -48,7 +48,9 @@ func TestLedgerHelpIsAFlagNotAValue(t *testing.T) {
 	if err != nil || out != ledgerHelp || len(*calls) != 0 {
 		t.Fatalf("a --help flag printed %q, err %v, and sent %d requests", out, err, len(*calls))
 	}
-	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"add", "explain", "the", "flags", "--description", "--help"}) }); err != nil {
+	if _, err := captureStdout(t, func() error {
+		return app.cmdLedger([]string{"add", "explain", "the", "flags", "--description", "--help"})
+	}); err != nil {
 		t.Fatal(err)
 	}
 	fields, _ := (*calls)[0]["fields"].(map[string]any)

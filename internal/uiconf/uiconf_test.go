@@ -265,7 +265,9 @@ func TestBackgroundsAreImportedAndOnlyThoseServed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Update(Person, func(text string) (string, string) { return Set(text, mustAssign(t, "background = image: "+rel)), "Wallpaper" }); err != nil {
+	if _, _, err := s.Update(Person, func(text string) (string, string) {
+		return Set(text, mustAssign(t, "background = image: "+rel)), "Wallpaper"
+	}); err != nil {
 		t.Fatal(err)
 	}
 	files, err := s.repo.Git("ls-files")

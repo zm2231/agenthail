@@ -231,6 +231,10 @@ jobs:
         run: |
           scripts/test-release-ios-proof.sh
           scripts/test-release-source-proof.sh
+      - name: Format
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go' ':(exclude)**/testdata/**'))
+          if [ -n "$unformatted" ]; then echo "run gofmt -w on:"; echo "$unformatted"; exit 1; fi
       - name: Vet
         run: go vet ./...
 

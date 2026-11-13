@@ -87,7 +87,7 @@ func TestProjectSlug(t *testing.T) {
 		"repo:github.com/zm2231/agenthail":          "agenthail",
 		"repo:github.com/zm2231/agenthail.git":      "agenthail",
 		"repo:github.com/zm2231/agenthail::apps/ui": "ui",
-		"":                                          "ledger",
+		"": "ledger",
 	} {
 		if got := ledger.ProjectSlug(key); got != want {
 			t.Errorf("ProjectSlug(%q) = %q, want %q", key, got, want)

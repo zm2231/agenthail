@@ -96,4 +96,3 @@ func TestAThirdHostReachesAMovedSessionOnItsNewHostOnceTheHostItLeftSaysWhere(t 
 		}
 	})
 }
-

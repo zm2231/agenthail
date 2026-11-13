@@ -90,7 +90,9 @@ func readClaudeLatestPermissionMode(ctx context.Context, path string) string {
 	if err != nil {
 		return ""
 	}
-	match := func(record map[string]any) bool { return str(record, "type") == "user" && str(record, "permissionMode") != "" }
+	match := func(record map[string]any) bool {
+		return str(record, "type") == "user" && str(record, "permissionMode") != ""
+	}
 	start, found, err := transcriptRecordBefore(ctx, file, info.Size(), lineContains([]byte(`"permissionMode"`)), match)
 	if err != nil || !found {
 		return ""
