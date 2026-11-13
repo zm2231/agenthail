@@ -39,9 +39,9 @@ cat >"$work/bin/ps" <<'SH'
 cat <<'EOF'
 350.0 /usr/local/go/pkg/tool/darwin_arm64/compile
 120.5 /private/var/folders/x/daemon.test
- 60.0 /Library/Developer/CoreSimulator/Volumes/iOS_23A/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/sbin/launchd_sim
- 55.0 /Library/Developer/CoreSimulator/Volumes/iOS_23A/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/sbin/launchd_sim
- 25.0 /Library/Developer/CoreSimulator/Volumes/iOS_23A/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/PosterKit.framework/KaleidoscopePoster
+ 60.0 /Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/sbin/launchd_sim
+ 55.0 /Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/sbin/launchd_sim
+ 25.0 /Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/PosterKit.framework/KaleidoscopePoster
  40.0 /Users/runner/Library/Developer/CoreSimulator/Devices/ABC/data/Containers/Bundle/Application/DEF/Agenthail.app/Agenthail
  30.0 /opt/homebrew/bin/tart
  90.0 /System/Library/Frameworks/Virtualization.framework/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualization.VirtualMachine
