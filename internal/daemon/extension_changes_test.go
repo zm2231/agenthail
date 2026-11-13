@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -70,9 +70,29 @@ func openChangeAsk(t *testing.T, reg *registry.Registry, sessionID string) (regi
 	return registry.Ask{}, false
 }
 
+func (f *extensionFixture) handle(t *testing.T, events ...extensionTurnEvent) {
+	t.Helper()
+	done := make(chan struct{})
+	events[len(events)-1].done = done
+	for _, event := range events {
+		f.d.queueExtensionTurn(event)
+	}
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the turn events were not handled")
+	}
+	f.d.background.wait()
+}
+
 func (f *extensionFixture) turn(t *testing.T, sessionID, turnID string) {
 	t.Helper()
-	f.d.extensionTurnCompleted(context.Background(), sessionID, turnID)
+	f.handle(t, extensionTurnEvent{kind: extensionTurnEnd, sessionID: sessionID, turnID: turnID})
+}
+
+func (f *extensionFixture) start(t *testing.T, sessionID string) {
+	t.Helper()
+	f.handle(t, extensionTurnEvent{kind: extensionTurnStart, sessionID: sessionID})
 }
 
 func (f *extensionFixture) changes(t *testing.T) []extension.Change {
@@ -190,11 +210,30 @@ func TestAChangeCannotBeUndoneUnderALaterOneAndHandEditsAreNotPinnedOnATurn(t *t
 	first := f.changes(t)[0]
 	write("<p>second</p>\n")
 	f.turn(t, "to", "turn-2")
+	unrelated := filepath.Join(f.workdir, "assets", "unrecorded.css")
+	if err := os.WriteFile(unrelated, []byte("p {}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if status, body := f.undo(t, first.Rev); status != http.StatusConflict || !strings.Contains(string(body), "later change") {
 		t.Fatalf("undoing a change a later one edited answered %d %s", status, body)
 	}
 	if data, _ := os.ReadFile(page); string(data) != "<p>second</p>\n" {
 		t.Fatalf("a refused undo changed the page to %q", data)
+	}
+	if data, _ := os.ReadFile(unrelated); string(data) != "p {}" {
+		t.Fatalf("a refused undo lost an edit no turn had recorded yet: %q", data)
+	}
+	latest := f.changes(t)[0]
+	write("<p>third, still being written</p>\n")
+	if status, body := f.undo(t, latest.Rev); status != http.StatusConflict || !strings.Contains(string(body), "not recorded") {
+		t.Fatalf("undoing a change whose files have unrecorded edits answered %d %s", status, body)
+	}
+	if data, _ := os.ReadFile(page); string(data) != "<p>third, still being written</p>\n" {
+		t.Fatalf("a refused undo touched an unrecorded edit: %q", data)
+	}
+	write("<p>second</p>\n")
+	if err := os.Remove(unrelated); err != nil {
+		t.Fatal(err)
 	}
 
 	ask, open := openChangeAsk(t, reg, "to")
@@ -209,13 +248,60 @@ func TestAChangeCannotBeUndoneUnderALaterOneAndHandEditsAreNotPinnedOnATurn(t *t
 	}
 
 	write("<p>by hand</p>\n")
-	f.d.extensionTurnStarted()
+	f.start(t, "from")
 	f.turn(t, "from", "turn-3")
-	latest := f.changes(t)[0]
+	latest = f.changes(t)[0]
 	if latest.Author != extension.Person || latest.SessionID != "" {
 		t.Fatalf("an edit made before the turn was recorded as %+v", latest)
 	}
 	if _, open := openChangeAsk(t, reg, "from"); open {
 		t.Fatal("a turn that changed nothing raised an ask")
+	}
+}
+
+func TestTurnsAreRecordedInOrderAndATurnRunningElsewhereKeepsEditsFromBeingTakenForThePersons(t *testing.T) {
+	f := startExtensionFixture(t)
+	reg := f.d.Registry
+	page := filepath.Join(f.workdir, "ui.html")
+	write := func(text string) {
+		t.Helper()
+		if err := os.WriteFile(page, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("<p>by the turn</p>\n")
+	f.handle(t,
+		extensionTurnEvent{kind: extensionTurnEnd, sessionID: "to", turnID: "turn-1"},
+		extensionTurnEvent{kind: extensionTurnStart, sessionID: "to"},
+	)
+	if latest := f.changes(t)[0]; latest.SessionID != "to" || latest.TurnID != "turn-1" {
+		t.Fatalf("a turn's edits were recorded as %+v when its next turn started at once", latest)
+	}
+
+	f.start(t, "from")
+	write("<p>while two turns run</p>\n")
+	f.start(t, "third")
+	if latest := f.changes(t)[0]; latest.TurnID != "turn-1" {
+		t.Fatalf("a turn starting while others ran recorded their edits as %+v", latest)
+	}
+	f.turn(t, "to", "turn-2")
+	shared := f.changes(t)[0]
+	if shared.SessionID != "to" || !slices.Equal(shared.AlsoRunning, []string{"from", "third"}) {
+		t.Fatalf("the change made while others were mid-turn was recorded as %+v", shared)
+	}
+	ask, open := openChangeAsk(t, reg, "to")
+	if !open || !strings.Contains(ask.Questions[0].Question, "Also mid-turn") {
+		t.Fatalf("the ask does not say others were mid-turn: %+v", ask)
+	}
+
+	if _, err := reg.ClaimAsk(ask.ID, registry.AskAnswer{Answers: map[string]string{ask.Questions[0].Question: extensionKeep}}, registry.AskToPerson, "person", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	write("<p>after the ask closed</p>\n")
+	f.turn(t, "to", "turn-3")
+	next, open := openChangeAsk(t, reg, "to")
+	if !open || next.ID == ask.ID || strings.Contains(next.Title, "turns") {
+		t.Fatalf("a turn recorded after its ask closed raised %+v (open=%v)", next, open)
 	}
 }

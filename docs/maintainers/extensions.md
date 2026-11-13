@@ -242,12 +242,19 @@ agent changes there can be shown and undone. Git runs with no user or system
 configuration and no hooks. `node_modules/`, `.DS_Store` and `.lock` are
 ignored.
 
-- When a session's turn starts, anything changed in the folder since the last
-  commit is committed as `person`, `Edited by hand`. When the turn completes,
-  what changed during it is committed as the session's name, with the trailers
-  `Agenthail-Session` and `Agenthail-Turn`. A turn that changed nothing makes
-  no commit. The first commit holds what the folder held when the daemon first
-  saw it; a folder a turn created starts empty, so its files are that turn's.
+- When a turn completes, everything changed in the folder since the last
+  commit is committed under the session's name, with the trailers
+  `Agenthail-Session` and `Agenthail-Turn`, plus one `Agenthail-Also-Running`
+  per other session that was mid-turn then (`alsoRunning` in the history),
+  since the change may hold their edits too. A turn that changed nothing makes
+  no commit. Turn starts and ends are handled one at a time in the order they
+  were observed.
+- When a turn starts and no other session is mid-turn, anything changed since
+  the last commit is committed as `person`, `Edited by hand`. While another
+  turn runs those edits may be its own, so they wait for the next turn's
+  commit and its ask instead.
+- The first commit holds what the folder held when the daemon first saw it; a
+  folder a turn created starts empty, so its files are that turn's.
 - After a turn's commit the daemon assigns mount ports, reloads the host and
   publishes `extension.changed` with `{"rev": "<rev>"}`.
 - A session's first change raises an ask of origin `extension-change` to the
@@ -260,7 +267,10 @@ ignored.
   in `~/.agenthail/extensions-data/changes.json`.
 - Undo reverts one commit as a new commit by `person`. A revert that meets a
   later change to the same lines is abandoned with `409 conflict` and the
-  folder is left as it was. Undoing the commit that created an extension is
+  folder is left as it was. Edits not yet committed may belong to a turn still
+  running, so undo never commits or discards them: undoing a commit whose
+  files have such edits is refused with `409 conflict` until a turn records
+  them. Undoing the commit that created an extension is
   refused the same way while a later commit touched that extension. Otherwise
   the extension's folder is removed, its approval and key references are
   forgotten, its mounts give up their ports, and the tables it made in the

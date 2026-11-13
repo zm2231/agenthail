@@ -119,8 +119,9 @@ func (r *Repo) CheckRev(rev string) error {
 	return nil
 }
 
-// The caller holds the lock and has committed any pending change, or the
-// abandoned revert's reset would discard it.
+// The caller holds the lock. Uncommitted edits to files rev did not touch
+// survive, including an abandoned revert; the caller makes sure the files rev
+// touched have none.
 func (r *Repo) RevertLocked(rev, author string) (string, error) {
 	if err := r.CheckRev(rev); err != nil {
 		return "", err
@@ -138,8 +139,7 @@ func (r *Repo) RevertLocked(rev, author string) (string, error) {
 	}
 	reverted := strings.TrimSpace(subject)
 	if _, err := r.GitAs(author, "revert", "--no-edit", "--no-commit", rev); err != nil {
-		_, _ = r.Git("revert", "--abort")
-		_, _ = r.Git("reset", "-q", "--hard", "HEAD")
+		_, _ = r.Git("reset", "-q", "--merge", "HEAD")
 		return reverted, fmt.Errorf("can't undo %q cleanly: %w", reverted, ErrConflict)
 	}
 	if _, err := r.GitAs(author, "commit", "-q", "--allow-empty", "-m", "Undo "+reverted); err != nil {

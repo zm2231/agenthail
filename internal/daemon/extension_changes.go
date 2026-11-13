@@ -38,6 +38,31 @@ type extensionChanges struct {
 
 	mu      sync.Mutex
 	history *extension.History
+
+	queueMu sync.Mutex
+	queue   []extensionTurnEvent
+	wake    chan struct{}
+	// Only the worker touches inFlight.
+	inFlight map[string]bool
+}
+
+type extensionTurnKind int
+
+const (
+	extensionTurnStart extensionTurnKind = iota
+	extensionTurnEnd
+	extensionTurnIdle
+)
+
+type extensionTurnEvent struct {
+	kind      extensionTurnKind
+	sessionID string
+	turnID    string
+	done      chan struct{}
+}
+
+func newExtensionChanges(home string) *extensionChanges {
+	return &extensionChanges{home: home, wake: make(chan struct{}, 1), inFlight: map[string]bool{}}
 }
 
 func (c *extensionChanges) pendingPath() string {
@@ -97,11 +122,63 @@ func (d *Daemon) openExtensionHistory(existing bool) (*extension.History, error)
 	return c.open(existing)
 }
 
-// A turn starting is the last moment edits made since the previous turn can
-// be told apart from the turn's own.
-func (d *Daemon) extensionTurnStarted() { d.commitExtensionHandEdits() }
+// Turn starts and ends are handled one at a time in the order the observer
+// saw them, so a turn's commit is made before the next turn's start is
+// looked at.
+func (d *Daemon) queueExtensionTurn(event extensionTurnEvent) {
+	if d.extensions == nil {
+		return
+	}
+	c := d.extensions.changes
+	c.queueMu.Lock()
+	c.queue = append(c.queue, event)
+	c.queueMu.Unlock()
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
+}
 
-func (d *Daemon) commitExtensionHandEdits() {
+func (d *Daemon) runExtensionTurns(ctx context.Context) {
+	c := d.extensions.changes
+	for {
+		c.queueMu.Lock()
+		events := c.queue
+		c.queue = nil
+		c.queueMu.Unlock()
+		for _, event := range events {
+			switch event.kind {
+			case extensionTurnStart:
+				d.extensionTurnStarted(event.sessionID)
+			case extensionTurnEnd:
+				if rev, changed := d.extensionTurnCompleted(event.sessionID, event.turnID); changed {
+					d.background.start(func(ctx context.Context) { d.applyExtensionChange(ctx, rev) })
+				}
+			case extensionTurnIdle:
+				delete(c.inFlight, event.sessionID)
+			}
+			if event.done != nil {
+				close(event.done)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.wake:
+		}
+	}
+}
+
+// Edits found when a turn starts are the person's only if no other turn is
+// running; otherwise they may be that turn's, and are left for the next
+// turn's commit, whose ask the person answers.
+func (d *Daemon) extensionTurnStarted(sessionID string) {
+	c := d.extensions.changes
+	quiet := len(c.inFlight) == 0 || (len(c.inFlight) == 1 && c.inFlight[sessionID])
+	c.inFlight[sessionID] = true
+	if !quiet {
+		return
+	}
 	history, err := d.extensionHistory()
 	if err != nil || history == nil {
 		d.logExtensionHistory(err)
@@ -112,24 +189,31 @@ func (d *Daemon) commitExtensionHandEdits() {
 	}
 }
 
-func (d *Daemon) extensionTurnCompleted(ctx context.Context, sessionID, turnID string) {
+func (d *Daemon) extensionTurnCompleted(sessionID, turnID string) (string, bool) {
+	c := d.extensions.changes
+	delete(c.inFlight, sessionID)
 	history, err := d.openExtensionHistory(false)
 	if err != nil || history == nil {
 		d.logExtensionHistory(err)
-		return
+		return "", false
 	}
-	change, changed, err := history.CommitTurn(sessionID, d.resolveDisplay(sessionID), turnID)
+	var also []string
+	for id := range c.inFlight {
+		also = append(also, id)
+	}
+	slices.Sort(also)
+	change, changed, err := history.CommitTurn(sessionID, d.resolveDisplay(sessionID), turnID, also)
 	if err != nil {
 		d.log.Printf("extensions: record %s's turn: %s", d.resolveDisplay(sessionID), err)
-		return
+		return "", false
 	}
 	if !changed {
-		return
+		return "", false
 	}
-	d.applyExtensionChange(ctx, change.Rev)
 	if err := d.holdExtensionChange(sessionID, change.Rev); err != nil {
 		d.log.Printf("extensions: ask about %s's change: %s", d.resolveDisplay(sessionID), err)
 	}
+	return change.Rev, true
 }
 
 func (d *Daemon) logExtensionHistory(err error) {
@@ -174,10 +258,13 @@ func (d *Daemon) holdExtensionChange(sessionID, rev string) error {
 		return err
 	}
 	if open {
-		if _, err := d.Registry.RewordAsk(held.AskID, title, questions); err != nil {
+		reworded, err := d.Registry.RewordAsk(held.AskID, title, questions)
+		if err != nil {
 			return err
 		}
-	} else {
+		open = reworded
+	}
+	if !open {
 		ask, err := d.Registry.RaiseAsk(registry.Ask{SessionID: sessionID, Origin: registry.AskOriginExtensionChange, Title: title, Questions: questions, RoutedTo: registry.AskToPerson}, time.Now())
 		if err != nil {
 			return err
@@ -203,14 +290,19 @@ func (d *Daemon) extensionChangeAsk(sessionID string, revs []string) (string, []
 		return "", nil, errors.Join(err, errors.New("the extensions folder is gone"))
 	}
 	var summaries []string
+	var last extension.Change
 	for _, rev := range revs {
 		changes, err := history.Log(1, rev)
 		if err != nil {
 			return "", nil, err
 		}
 		if len(changes) > 0 {
-			summaries = append(summaries, describeExtensionChange(changes[0]))
+			last = changes[0]
+			summaries = append(summaries, describeExtensionChange(last))
 		}
+	}
+	if len(summaries) == 0 {
+		return "", nil, errors.New("none of its changes is in the history")
 	}
 	who := d.resolveDisplay(sessionID)
 	title := who + " changed extensions"
@@ -221,11 +313,25 @@ func (d *Daemon) extensionChangeAsk(sessionID string, revs []string) (string, []
 		keep, undo = "Keep all", "Undo last"
 		question = fmt.Sprintf("%d turns pending. Last: %s", len(revs), summaries[len(summaries)-1])
 	}
+	if len(last.AlsoRunning) > 0 {
+		question += ". Also mid-turn, so it may hold their edits: " + d.namesOf(last.AlsoRunning)
+	}
 	return title, []registry.AskQuestion{{
 		Question:    clipText(question, registry.MaxAskQuestion),
 		Options:     []registry.AskOption{{ID: extensionKeep, Label: keep}, {ID: extensionUndo, Label: undo, Does: clipText("Undo "+summaries[len(summaries)-1], registry.MaxAskDoes)}},
 		Recommended: extensionKeep,
 	}}, nil
+}
+
+func (d *Daemon) namesOf(sessionIDs []string) string {
+	var names []string
+	for _, id := range sessionIDs[:min(len(sessionIDs), 3)] {
+		names = append(names, d.resolveDisplay(id))
+	}
+	if more := len(sessionIDs) - len(names); more > 0 {
+		names = append(names, fmt.Sprintf("%d more", more))
+	}
+	return strings.Join(names, ", ")
 }
 
 func describeExtensionChange(change extension.Change) string {
@@ -282,28 +388,36 @@ func (d *Daemon) answerExtensionChange(ctx context.Context, ask registry.Ask, re
 		}
 		return actionOK(map[string]any{"ok": true, "result": map[string]any{"requestId": ask.ID, "outcome": "undone"}}), nil
 	}
-	if err := d.settleExtensionAsk(ask, extensionKeep, p); err != nil {
+	if err := d.keepExtensionChanges(ask, p); err != nil {
 		return actionResult{}, err
 	}
-	c.mu.Lock()
-	if pending, err := c.readPending(); err == nil && pending[ask.SessionID].AskID == ask.ID {
-		delete(pending, ask.SessionID)
-		err = c.writePending(pending)
-		if err != nil {
-			d.log.Printf("extensions: forget kept changes: %s", err)
-		}
-	}
-	c.mu.Unlock()
 	return actionOK(map[string]any{"ok": true, "result": map[string]any{"requestId": ask.ID, "outcome": "kept"}}), nil
 }
 
-func (d *Daemon) settleExtensionAsk(ask registry.Ask, choice string, p principal) error {
-	claimed, err := d.Registry.ClaimAsk(ask.ID, registry.AskAnswer{Answers: map[string]string{ask.Questions[0].Question: choice}}, registry.AskToPerson, p.actor(), time.Now())
+// The ask closes and its turns are forgotten under the lock the rolling
+// reword takes, so a turn recorded meanwhile either joins the ask before it
+// closes or raises a new one.
+func (d *Daemon) keepExtensionChanges(ask registry.Ask, p principal) error {
+	c := d.extensions.changes
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pending, err := c.readPending()
+	if err != nil {
+		return actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
+	}
+	if pending[ask.SessionID].AskID != ask.ID {
+		return staleRequest()
+	}
+	claimed, err := d.Registry.ClaimAsk(ask.ID, registry.AskAnswer{Answers: map[string]string{ask.Questions[0].Question: extensionKeep}}, registry.AskToPerson, p.actor(), time.Now())
 	if err != nil {
 		return actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
 	if !claimed {
 		return staleRequest()
+	}
+	delete(pending, ask.SessionID)
+	if err := c.writePending(pending); err != nil {
+		d.log.Printf("extensions: forget kept changes: %s", err)
 	}
 	if err := d.Registry.RecordAskApplied(ask.ID, "applied", "", time.Now()); err != nil {
 		d.log.Printf("extensions: record the answer to %s: %s", ask.ID, err)
@@ -322,7 +436,7 @@ func (d *Daemon) undoExtensionChange(ctx context.Context, rev string) (extension
 		return extension.Undone{}, invalidRequest("there is no extensions folder")
 	}
 	undone, err := history.Undo(rev)
-	if errors.Is(err, extension.ErrUndoLater) {
+	if errors.Is(err, extension.ErrUndoLater) || errors.Is(err, extension.ErrUnrecorded) {
 		return extension.Undone{}, actionFailed(http.StatusConflict, "conflict", err.Error())
 	}
 	if err != nil {
@@ -376,8 +490,8 @@ func (d *Daemon) forgetPendingExtensionChange(rev string) {
 			pending[sessionID] = held
 			if open {
 				if title, questions, err := d.extensionChangeAsk(sessionID, held.Revs); err == nil {
-					if _, err := d.Registry.RewordAsk(ask.ID, title, questions); err != nil {
-						d.log.Printf("extensions: reword %s: %s", ask.ID, err)
+					if reworded, err := d.Registry.RewordAsk(ask.ID, title, questions); err != nil || !reworded {
+						d.log.Printf("extensions: reword %s: closed meanwhile or %v", ask.ID, err)
 					}
 				}
 			}

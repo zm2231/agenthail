@@ -173,7 +173,6 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusBadRequest, "invalid", "Send {\"action\": \"reload\"}, {\"action\": \"approve\", \"id\": \"<extension>\"} or {\"action\": \"key\", \"id\": \"<extension>\", \"mount\": \"<mount>\", \"key\": {...}}.")
 			return
 		}
-		d.commitExtensionHandEdits()
 		switch request.Action {
 		case "undo":
 			undone, err := d.undoExtensionChange(r.Context(), request.Rev)

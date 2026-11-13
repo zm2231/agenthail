@@ -249,7 +249,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	}
 	if found && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
 		d.armCompletionNotification(session.ID)
-		d.extensionTurnStarted()
+		d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnStart, sessionID: session.ID})
 	}
 	d.settleTaskFromObservation(ctx, adapter, session, observation)
 	if err := d.Registry.SaveRuntimeState(session.ID, *observation); err != nil {
@@ -270,14 +270,16 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 			d.log.Printf("hold completion %s: %s", d.resolveDisplay(session.ID), err)
 		}
 	}
+	if found && previous.LastStatus == surface.StatusBusy && observation.Status != surface.StatusBusy && !completionChanged {
+		d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnIdle, sessionID: session.ID})
+	}
 	changed := !found || previous.LastStatus != observation.Status || previous.ActiveTurnID != observation.ActiveTurnID || previous.CompletedTurnID != observation.CompletedTurnID
 	if changed {
 		d.publishEvent("session.updated", session.ID, map[string]any{"status": observation.Status, "activeTurnId": observation.ActiveTurnID, "completedTurnId": observation.CompletedTurnID})
 	}
 	if completionChanged {
 		d.publishEvent("turn.completed", session.ID, map[string]string{"turnId": observation.CompletedTurnID})
-		completedID, turnID := session.ID, observation.CompletedTurnID
-		d.background.start(func(ctx context.Context) { d.extensionTurnCompleted(ctx, completedID, turnID) })
+		d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnEnd, sessionID: session.ID, turnID: observation.CompletedTurnID})
 		if d.agenthailStarted(*session) {
 			observed := *session
 			d.background.start(func(ctx context.Context) { d.linkCreatedPRs(ctx, adapter, observed) })

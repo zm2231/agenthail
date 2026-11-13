@@ -73,7 +73,7 @@ type extensionRuntime struct {
 }
 
 func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, error)) {
-	runtime := &extensionRuntime{home: home, approvals: extension.NewApprovals(home), mounts: newExtensionMounts(home), changes: &extensionChanges{home: home}, loaded: map[string]*loadedExtension{}, tokens: map[string]string{}}
+	runtime := &extensionRuntime{home: home, approvals: extension.NewApprovals(home), mounts: newExtensionMounts(home), changes: newExtensionChanges(home), loaded: map[string]*loadedExtension{}, tokens: map[string]string{}}
 	runtime.host = &nodehost.Supervisor{
 		Name:     "extension host",
 		StateDir: extensionHostDir(home),
@@ -101,7 +101,10 @@ func (d *Daemon) superviseExtensions(ctx context.Context) {
 	if d.extensions == nil {
 		return
 	}
-	d.commitExtensionHandEdits()
+	if _, err := d.extensionHistory(); err != nil {
+		d.logExtensionHistory(err)
+	}
+	go d.runExtensionTurns(ctx)
 	go d.runExtensionJobs(ctx)
 	go d.runExtensionMounts(ctx)
 	go d.pumpExtensionEvents(ctx)

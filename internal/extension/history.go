@@ -17,10 +17,14 @@ const (
 	handEdit       = "Edited by hand"
 	sessionTrailer = "Agenthail-Session"
 	turnTrailer    = "Agenthail-Turn"
+	alsoTrailer    = "Agenthail-Also-Running"
 	gitignore      = "node_modules/\n.DS_Store\n.lock\n"
 )
 
-var ErrUndoLater = errors.New("undo the later change first")
+var (
+	ErrUndoLater  = errors.New("undo the later change first")
+	ErrUnrecorded = errors.New("undo it once the turn making those changes ends")
+)
 
 // The workspace is a git repository the daemon owns, so every change an
 // agent's turn makes is a commit that can be shown and undone.
@@ -29,13 +33,16 @@ type History struct {
 }
 
 type Change struct {
-	Rev        string        `json:"rev"`
-	Author     string        `json:"author"`
-	Time       time.Time     `json:"time"`
-	Message    string        `json:"message"`
-	SessionID  string        `json:"sessionId,omitempty"`
-	TurnID     string        `json:"turnId,omitempty"`
-	Extensions []FileChanges `json:"extensions,omitempty"`
+	Rev       string    `json:"rev"`
+	Author    string    `json:"author"`
+	Time      time.Time `json:"time"`
+	Message   string    `json:"message"`
+	SessionID string    `json:"sessionId,omitempty"`
+	TurnID    string    `json:"turnId,omitempty"`
+	// AlsoRunning lists sessions that were mid-turn when the change was
+	// recorded; the change may hold their edits too.
+	AlsoRunning []string      `json:"alsoRunning,omitempty"`
+	Extensions  []FileChanges `json:"extensions,omitempty"`
 }
 
 type FileChanges struct {
@@ -106,8 +113,12 @@ func (h *History) CommitHandEdit() (Change, bool, error) {
 	return h.commit(Person, handEdit)
 }
 
-func (h *History) CommitTurn(sessionID, author, turnID string) (Change, bool, error) {
-	return h.commit(author, fmt.Sprintf("Turn in %s\n\n%s: %s\n%s: %s", author, sessionTrailer, sessionID, turnTrailer, turnID))
+func (h *History) CommitTurn(sessionID, author, turnID string, also []string) (Change, bool, error) {
+	message := fmt.Sprintf("Turn in %s\n\n%s: %s\n%s: %s", author, sessionTrailer, sessionID, turnTrailer, turnID)
+	for _, id := range also {
+		message += fmt.Sprintf("\n%s: %s", alsoTrailer, id)
+	}
+	return h.commit(author, message)
 }
 
 func (h *History) commit(author, message string) (Change, bool, error) {
@@ -129,7 +140,7 @@ func (h *History) Log(limit int, rev string) ([]Change, error) {
 	if err := h.repo.CheckRev(rev); err != nil {
 		return nil, err
 	}
-	out, err := h.repo.Git("log", fmt.Sprintf("-n%d", limit), "--format=%x1e%h%x1f%an%x1f%aI%x1f%s%x1f%(trailers:key="+sessionTrailer+",valueonly,separator=)%x1f%(trailers:key="+turnTrailer+",valueonly,separator=)", "--abbrev=12", "--name-status", "--no-renames", rev)
+	out, err := h.repo.Git("log", fmt.Sprintf("-n%d", limit), "--format=%x1e%h%x1f%an%x1f%aI%x1f%s%x1f%(trailers:key="+sessionTrailer+",valueonly,separator=)%x1f%(trailers:key="+turnTrailer+",valueonly,separator=)%x1f%(trailers:key="+alsoTrailer+",valueonly,separator=%x2C)", "--abbrev=12", "--name-status", "--no-renames", rev)
 	if err != nil {
 		return nil, err
 	}
@@ -137,11 +148,14 @@ func (h *History) Log(limit int, rev string) ([]Change, error) {
 	for _, record := range strings.Split(out, "\x1e") {
 		header, files, _ := strings.Cut(record, "\n")
 		fields := strings.Split(header, "\x1f")
-		if len(fields) != 6 {
+		if len(fields) != 7 {
 			continue
 		}
 		at, _ := time.Parse(time.RFC3339, fields[2])
 		change := Change{Rev: fields[0], Author: fields[1], Time: at, Message: fields[3], SessionID: strings.TrimSpace(fields[4]), TurnID: strings.TrimSpace(fields[5])}
+		if also := strings.TrimSpace(fields[6]); also != "" {
+			change.AlsoRunning = strings.Split(also, ",")
+		}
 		change.Extensions = fileChanges(files)
 		changes = append(changes, change)
 	}
@@ -194,18 +208,36 @@ type Undone struct {
 // Undo reverts rev as the person's change. Undoing the change that created an
 // extension waits until every later change to that extension is undone, and
 // then removes what is left of its folder, such as installed packages.
+// Uncommitted edits may belong to a turn still running, so they are never
+// recorded or discarded here: an undo that would touch them is refused.
 func (h *History) Undo(rev string) (Undone, error) {
 	unlock, err := h.repo.Lock()
 	if err != nil {
 		return Undone{}, err
 	}
 	defer unlock()
-	if _, err := h.commitLocked(Person, handEdit); err != nil {
-		return Undone{}, err
-	}
 	change, err := h.changeAt(rev)
 	if err != nil {
 		return Undone{}, err
+	}
+	paths, err := h.repo.Git("diff-tree", "--no-commit-id", "--name-only", "-r", "--root", change.Rev)
+	if err != nil {
+		return Undone{}, err
+	}
+	touched := strings.Fields(paths)
+	for _, files := range change.Extensions {
+		if files.Created {
+			touched = append(touched, files.ID)
+		}
+	}
+	if len(touched) > 0 {
+		dirty, err := h.repo.Git(append([]string{"status", "--porcelain", "--untracked-files=all", "--"}, touched...)...)
+		if err != nil {
+			return Undone{}, err
+		}
+		if strings.TrimSpace(dirty) != "" {
+			return Undone{}, fmt.Errorf("files it touched have changes not recorded yet: %w", ErrUnrecorded)
+		}
 	}
 	var created []string
 	for _, files := range change.Extensions {
