@@ -759,10 +759,11 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 // catalogFileStamps fingerprints each file by size and modification time; a
 // missing file has an empty stamp.
 func catalogFileStamps(paths []string) []string {
+	readAt := time.Now()
 	stamps := make([]string, len(paths))
 	for index, path := range paths {
 		if info, err := os.Stat(path); err == nil {
-			stamps[index] = surface.Stamp(info).String()
+			stamps[index] = surface.SettledStamp(info, readAt)
 		}
 	}
 	return stamps

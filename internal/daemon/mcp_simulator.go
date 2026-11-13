@@ -74,16 +74,49 @@ func (d *Daemon) mcpSimulator(ctx context.Context, caller *mcpCaller, input mcpS
 	return out, nil
 }
 
+const (
+	simulatorStatusFresh = time.Minute
+	simulatorProbeLimit  = 20 * time.Second
+)
+
 func (d *Daemon) simulatorStatus(ctx context.Context) simhost.Status {
+	select {
+	case <-d.probeSimulators():
+	case <-ctx.Done():
+	}
 	d.simStatusMu.Lock()
 	defer d.simStatusMu.Unlock()
-	if time.Since(d.simStatusAt) < time.Minute {
-		return d.simStatus
-	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	d.simStatus, d.simStatusAt = d.simHost.Status(ctx), time.Now()
 	return d.simStatus
+}
+
+// probeSimulators runs outside simStatusMu so a reader of the last status
+// never waits on xcrun, and a probe that runs out of time keeps the last one.
+func (d *Daemon) probeSimulators() <-chan struct{} {
+	d.simStatusMu.Lock()
+	defer d.simStatusMu.Unlock()
+	if d.simProbing != nil {
+		return d.simProbing
+	}
+	done := make(chan struct{})
+	if !d.simStatusAt.IsZero() && time.Since(d.simStatusAt) < simulatorStatusFresh {
+		close(done)
+		return done
+	}
+	d.simProbing = done
+	go func() {
+		defer close(done)
+		ctx, cancel := context.WithTimeout(context.Background(), simulatorProbeLimit)
+		status := d.simHost.Status(ctx)
+		finished := ctx.Err() == nil
+		cancel()
+		d.simStatusMu.Lock()
+		defer d.simStatusMu.Unlock()
+		if finished {
+			d.simStatus, d.simStatusAt = status, time.Now()
+		}
+		d.simProbing = nil
+	}()
+	return done
 }
 
 func simulatorRefusal(err error) error {

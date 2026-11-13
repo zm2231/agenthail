@@ -22,7 +22,7 @@ permissions:
 jobs:
   tests:
     if: github.repository == 'zm2231/agenthail'
-    runs-on: [self-hosted, macOS, ARM64, agenthail]
+    runs-on: [self-hosted, macOS, ARM64, agenthail, agenthail-ios]
     timeout-minutes: 90
     env:
       DERIVED: ${{ github.workspace }}/../ios-derived
@@ -30,6 +30,8 @@ jobs:
       artifact: ${{ steps.upload.outputs.artifact-url }}
     steps:
       - uses: actions/checkout@v5
+      - name: Sample host load
+        run: scripts/ci-host-load.sh start
       - name: Check crash reporter dialogs are off
         run: |
           if [ "$(defaults read com.apple.CrashReporter DialogType 2>/dev/null)" != none ]; then
@@ -65,6 +67,9 @@ jobs:
           path: ${{ runner.temp }}/ios-tests.xcresult
           retention-days: 14
           if-no-files-found: ignore
+      - name: Report host load
+        if: always()
+        run: scripts/ci-host-load.sh report
       - name: Clean up self-hosted job
         if: always()
         run: scripts/ci-self-hosted.sh cleanup

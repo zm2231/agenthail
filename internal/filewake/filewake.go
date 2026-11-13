@@ -21,10 +21,8 @@ const DefaultLimit = 256
 
 // Watcher shares one platform watcher across every reader of a file and keeps
 // one watch per file or directory however many readers follow it. Each
-// followed directory has a platform watcher of its own: kqueue watches the
-// entries of a watched directory itself, and its watch of a subdirectory can
-// replace the one a reader of that subdirectory asked for, which then misses
-// every new entry.
+// followed directory has a platform watcher of its own, so no watch one folder
+// takes on its entries can replace the watch a reader of a subfolder asked for.
 type Watcher struct {
 	limit int
 	logf  func(string, ...any)
@@ -43,7 +41,7 @@ type watchedFile struct {
 	armed    bool
 	failed   bool
 	wakes    map[*Wake]struct{}
-	own      *fsnotify.Watcher
+	own      folderWatcher
 }
 
 // Wake is one reader's interest in a file or a directory. C fires after a
@@ -213,7 +211,7 @@ func (w *Watcher) startLocked() bool {
 	if w.add == nil {
 		w.add = watcher.Add
 	}
-	go w.run(watcher, w.notifyFile)
+	go w.run(watcher.Events, watcher.Errors, w.notifyFile)
 	return true
 }
 
@@ -221,13 +219,13 @@ func (w *Watcher) startDirLocked(path string, file *watchedFile, dir bool) bool 
 	if !dir {
 		return true
 	}
-	watcher, err := fsnotify.NewWatcher()
+	watcher, err := newFolderWatcher()
 	if err != nil {
 		w.refuseLocked(path, file, err)
 		return false
 	}
 	file.own = watcher
-	go w.run(watcher, func(event fsnotify.Event) { w.notifyDir(path, watcher, event) })
+	go w.run(watcher.Events(), watcher.Errors(), func(event fsnotify.Event) { w.notifyDir(path, watcher, event) })
 	return true
 }
 
@@ -279,15 +277,15 @@ func (w *Watcher) refuseLocked(path string, file *watchedFile, err error) {
 	}
 }
 
-func (w *Watcher) run(watcher *fsnotify.Watcher, notify func(fsnotify.Event)) {
+func (w *Watcher) run(events <-chan fsnotify.Event, errs <-chan error, notify func(fsnotify.Event)) {
 	for {
 		select {
-		case event, open := <-watcher.Events:
+		case event, open := <-events:
 			if !open {
 				return
 			}
 			notify(event)
-		case err, open := <-watcher.Errors:
+		case err, open := <-errs:
 			if !open {
 				return
 			}
@@ -315,7 +313,7 @@ func (w *Watcher) notify(path string, gone bool) {
 }
 
 // The directory's watcher also reports writes to its entries; those wake nobody.
-func (w *Watcher) notifyDir(dir string, own *fsnotify.Watcher, event fsnotify.Event) {
+func (w *Watcher) notifyDir(dir string, own folderWatcher, event fsnotify.Event) {
 	path := filepath.Clean(event.Name)
 	w.mu.Lock()
 	defer w.mu.Unlock()

@@ -306,13 +306,14 @@ type catalogGitDirs struct {
 // commit or staging change, and the repository config, which holds the
 // remote the project key comes from.
 func catalogGitStamp(dirs catalogGitDirs) string {
+	readAt := time.Now()
 	var stamp strings.Builder
 	for _, file := range []struct{ dir, name string }{{dirs.checkout, "HEAD"}, {dirs.checkout, "index"}, {dirs.common, "config"}} {
 		if file.dir == "" {
 			continue
 		}
 		if info, err := os.Stat(filepath.Join(file.dir, file.name)); err == nil {
-			fmt.Fprintf(&stamp, "%s:%s;", file.name, surface.Stamp(info))
+			fmt.Fprintf(&stamp, "%s:%s;", file.name, surface.SettledStamp(info, readAt))
 		} else {
 			fmt.Fprintf(&stamp, "%s:missing;", file.name)
 		}
@@ -476,7 +477,7 @@ type catalogRepositoryEntry struct {
 func (repositories *catalogRepositoryCache) repository(ctx context.Context, commonDir string) (*project.Repository, []string, error) {
 	stamp := "missing"
 	if info, err := os.Stat(filepath.Join(commonDir, "config")); err == nil {
-		stamp = surface.Stamp(info).String()
+		stamp = surface.SettledStamp(info, time.Now())
 	}
 	if repositories != nil {
 		repositories.mu.Lock()

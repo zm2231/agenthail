@@ -40,7 +40,7 @@ components="$work/components.plist"
 output="$dist/Agenthail-$version-arm64.pkg"
 checksum="$output.sha256"
 
-rm -rf "$work" "$output" "$checksum"
+rm -rf "$work" "$output" "$checksum" "$output.notary-submission"
 mkdir -p "$payload" "$root/Applications" "$root/usr/local/bin"
 "$ROOT/scripts/build-runtime-bundle.sh" "$payload"
 
@@ -123,12 +123,14 @@ fi
 
 pkgutil --check-signature "$output" || [ "${AGENTHAIL_ALLOW_UNNOTARIZED:-0}" = "1" ]
 if [ -n "${AGENTHAIL_NOTARY_PROFILE:-}" ]; then
-	echo "Submitting package for notarization"
-	xcrun notarytool submit "$output" --keychain-profile "$AGENTHAIL_NOTARY_PROFILE" --no-s3-acceleration --wait --timeout "${AGENTHAIL_NOTARY_TIMEOUT:-20m}"
-	xcrun stapler staple "$output"
-	xcrun stapler validate "$output"
-	spctl --assess --type install --verbose=2 "$output"
+	"$ROOT/scripts/notarize-pkg.sh" submit "$output"
+	if [ "${AGENTHAIL_NOTARY_WAIT:-1}" = "0" ]; then
+		echo "package: $output (finish its notarization with scripts/notarize-pkg.sh finish)"
+		exit 0
+	fi
+	"$ROOT/scripts/notarize-pkg.sh" finish "$output"
+else
+	(cd "$dist" && shasum -a 256 "$(basename "$output")" > "$(basename "$checksum")")
 fi
-(cd "$dist" && shasum -a 256 "$(basename "$output")" > "$(basename "$checksum")")
 echo "package: $output"
 echo "checksum: $checksum"

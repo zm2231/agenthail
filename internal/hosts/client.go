@@ -276,7 +276,8 @@ type Version struct {
 	MaximumFederation int    `json:"maximumFederation"`
 	HostID            string `json:"hostId"`
 	HostName          string `json:"hostName"`
-	Simulators        bool   `json:"simulators,omitempty"`
+	// Simulators is nil until the host has finished its first look.
+	Simulators *bool `json:"simulators,omitempty"`
 	buildinfo.Identity
 }
 

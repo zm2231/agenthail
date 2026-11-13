@@ -69,12 +69,14 @@ func (s *localStatusSurface) writeStatus(t *testing.T, id string, status surface
 	if err := os.WriteFile(path, []byte(status+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// Each write moves the time a second on from an hour back, so the file has
+	// settled and every write still reads as a change.
+	written := time.Now().Add(-time.Hour)
 	if previous != nil {
-		// Same-size rewrites inside one timestamp tick must still read as a change.
-		bumped := previous.ModTime().Add(time.Second)
-		if err := os.Chtimes(path, bumped, bumped); err != nil {
-			t.Fatal(err)
-		}
+		written = previous.ModTime().Add(time.Second)
+	}
+	if err := os.Chtimes(path, written, written); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -513,6 +515,7 @@ func TestCatalogIdentityCacheReusesResolvedCheckout(t *testing.T) {
 	}
 	gitRun(t, repo, "add", "README.md")
 	gitRun(t, repo, "commit", "-m", "base")
+	settleGitFiles(t, repo)
 	calls := countGitCalls(t)
 	cache := newCatalogIdentityCache()
 	now := time.Now()
@@ -978,5 +981,31 @@ func TestAWaitPublishedOnAWorkingRowDropsItsActivity(t *testing.T) {
 	}
 	if got := activity(); got != nil {
 		t.Fatalf("a row waiting on the person kept its quiet note: %+v", got)
+	}
+}
+
+// rewriteKeepingTime writes content over path and puts its modification time
+// back to at, as a same-size rewrite inside one timestamp tick leaves it.
+func rewriteKeepingTime(t *testing.T, path, content string, at time.Time) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAStatusRewrittenAtTheSameSizeInTheTickOfItsLastReadIsPublished(t *testing.T) {
+	d, store, source := localStatusFixture(t)
+	d.discoverCatalog(context.Background())
+	tick := time.Now().Add(time.Minute)
+	rewriteKeepingTime(t, source.statusPath("from"), string(surface.StatusIdle)+"\n", tick)
+	d.refreshCatalogStatus(context.Background())
+	after := latestCatalogSeq(t, store)
+	rewriteKeepingTime(t, source.statusPath("from"), string(surface.StatusBusy)+"\n", tick)
+	d.refreshCatalogStatus(context.Background())
+	if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) != 1 || statuses[0] != string(surface.StatusBusy) {
+		t.Fatalf("events=%v, want the rewritten status published", statuses)
 	}
 }

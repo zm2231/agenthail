@@ -12,7 +12,7 @@ final class LiveHostUITests: XCTestCase {
         let hostID = try pairLiveHost(0, control: control, in: app)
         for title in ["Check the release notes", "Tidy the build script"] {
             let rows = liveRow(title, host: hostID, in: app)
-            requireLive(rows.firstMatch.waitForExistence(timeout: 30), "\(title) is listed from Live A", app)
+            requireLive(reveal(rows.firstMatch, in: app, timeout: 30), "\(title) is listed from Live A", app)
             XCTAssertEqual(rows.count, 1, "Live A lists \(title) once")
         }
     }
@@ -22,7 +22,7 @@ final class LiveHostUITests: XCTestCase {
         let app = launchForLiveHosts()
         let hostID = try pairLiveHost(0, control: control, in: app)
         let row = liveRow("Check the release notes", host: hostID, in: app).firstMatch
-        requireLive(row.waitForExistence(timeout: 30), "the conversation is listed", app)
+        requireLive(reveal(row, in: app, timeout: 30), "the conversation is listed", app)
         row.tapWhenReady()
         let seeded = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Done: check the release notes.")).firstMatch
         requireLive(seeded.waitForExistence(timeout: 20), "the conversation opens on its transcript", app)
@@ -38,12 +38,12 @@ final class LiveHostUITests: XCTestCase {
         let app = launchForLiveHosts()
         let hostID = try pairLiveHost(0, control: control, in: app)
         let row = liveRow("Check the release notes", host: hostID, in: app).firstMatch
-        requireLive(row.waitForExistence(timeout: 30), "the conversation is listed", app)
+        requireLive(reveal(row, in: app, timeout: 30), "the conversation is listed", app)
 
         try control.stop(host: 0)
-        requireLive(waitFor(row, value: "Unavailable", timeout: 90), "a stopped host's conversation is marked unavailable", app)
+        requireLive(reveal(row, in: app, value: "Unavailable", timeout: 90), "a stopped host's conversation is marked unavailable", app)
         try control.start(host: 0)
-        requireLive(waitFor(row, notValue: "Unavailable", timeout: 90), "the conversation is available again once the host is back", app)
+        requireLive(reveal(row, in: app, value: "Unavailable", matching: false, timeout: 90), "the conversation is available again once the host is back", app)
 
         row.tapWhenReady()
         let seeded = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Done: check the release notes.")).firstMatch
@@ -61,8 +61,8 @@ final class LiveHostUITests: XCTestCase {
         let prompt = "Ship release " + UUID().uuidString.prefix(8)
         try control.startTurn(host: 0, prompt: prompt)
         let row = liveRow(prompt, host: hostID, in: app).firstMatch
-        requireLive(row.waitForExistence(timeout: 30), "the conversation with an open turn is listed", app)
-        requireLive(waitFor(row, value: "Working", timeout: 30), "the open turn's conversation is listed as working", app)
+        requireLive(reveal(row, in: app, timeout: 30), "the conversation with an open turn is listed", app)
+        requireLive(reveal(row, in: app, value: "Working", timeout: 30), "the open turn's conversation is listed as working", app)
         row.tapWhenReady()
         let summary = app.buttons["session-summary"]
         requireLive(summary.waitForExistence(timeout: 20), "the conversation opens", app)
@@ -78,11 +78,6 @@ final class LiveHostUITests: XCTestCase {
 
     private func waitFor(_ element: XCUIElement, labelContains text: String? = nil, labelLacks missing: String? = nil, timeout: TimeInterval) -> Bool {
         let predicate = text.map { NSPredicate(format: "label CONTAINS %@", $0) } ?? NSPredicate(format: "exists == true AND NOT (label CONTAINS %@)", missing ?? "")
-        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
-    }
-
-    private func waitFor(_ element: XCUIElement, value: String? = nil, notValue: String? = nil, timeout: TimeInterval) -> Bool {
-        let predicate = value.map { NSPredicate(format: "value == %@", $0) } ?? NSPredicate(format: "exists == true AND value != %@", notValue ?? "")
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
     }
 }

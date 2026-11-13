@@ -49,7 +49,7 @@ The `runs-on` expression in a workflow comes from the pull request, so a fork ca
 
 ## Runner setup
 
-Each runner is a separate service under the same macOS user, in `~/actions-runner-agenthail-N`, registered with the labels `self-hosted,macOS,ARM64,agenthail`.
+Each runner is a separate service under the same macOS user, in `~/actions-runner-agenthail-N`, registered with the labels `self-hosted,macOS,ARM64,agenthail`. Exactly one of them also has the label `agenthail-ios`, which `ios`, `iOS nightly` and `iOS live nightly` require: an iOS job boots its simulator and three parallel clones of it, and with one iOS job at a time on the host they never compete with each other, and only one set of simulators shares the CPU with the `verify` jobs on the other runners. Other iOS jobs wait for that runner. A runner that is configured again loses the label; add it back with `config.sh --labels` or the repository's runner settings, or every iOS job waits.
 
 1. Install Xcode, select it with `sudo xcode-select -s`, then run `sudo xcodebuild -license accept`, `sudo xcodebuild -runFirstLaunch` and `xcodebuild -downloadPlatform iOS`.
 2. Install `jq` and `xcodegen` with Homebrew.

@@ -69,6 +69,23 @@ func TestABriefHostOutageKeepsItsRowsAvailable(t *testing.T) {
 	assertRowsAvailableUntil(t, local, record.ID, "a last look", func() bool { return true })
 }
 
+func TestAHostWhoseSnapshotsFailIsShownDownThoughItsVersionAnswers(t *testing.T) {
+	local, remote, record := pairedFederationWith(t, func(f *federation) {
+		f.downGrace, f.retryMin = 300*time.Millisecond, 50*time.Millisecond
+	})
+	remote.gate.snapshotsDown.Store(true)
+	remote.server.CloseClientConnections()
+	testkit.Eventually(t, "the host to be shown down while its snapshots fail", 10*time.Second, func() bool {
+		rows := sessionsOf(local.snapshot(t), record.ID)
+		return len(rows) > 0 && rows[0].Host.State != hostStateConnected && rows[0].UnavailableReason != ""
+	})
+	remote.gate.snapshotsDown.Store(false)
+	testkit.Eventually(t, "the host to be connected once its snapshots answer", 10*time.Second, func() bool {
+		rows := sessionsOf(local.snapshot(t), record.ID)
+		return len(rows) > 0 && rows[0].Host.State == hostStateConnected && rows[0].UnavailableReason == ""
+	})
+}
+
 func awaitNewStream(t *testing.T, remote *federationNode, after int64) {
 	t.Helper()
 	testkit.Eventually(t, "the mirror to open a new catalog stream", 10*time.Second, func() bool {

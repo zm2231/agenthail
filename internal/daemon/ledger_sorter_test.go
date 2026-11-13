@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -499,6 +500,45 @@ func TestAMessageRecordedFirstButQueuedSecondIsNotAskedTwice(t *testing.T) {
 	}
 	if counts["recorded second"] != 1 {
 		t.Fatalf("asks per message = %v, want the message answered while healthy asked once", counts)
+	}
+}
+
+// queuedInReverse records messages in capture order and queues them newest first, as context workers finishing
+// out of order do, with the sorter's clock in the test's hands.
+func queuedInReverse(t *testing.T, d *Daemon, p ledgerProject, texts ...string) (advance func()) {
+	t.Helper()
+	now := time.Now()
+	d.sorter.now = func() time.Time { return now }
+	jobs := make([]sortJob, len(texts))
+	for i, text := range texts {
+		ref := ledger.PromptRef(fmt.Sprintf("reverse-%d", i))
+		jobs[i] = sortJob{key: p.key, utteranceID: ref, seq: recordIn(t, p, ref, text), at: now}
+	}
+	for i := len(jobs) - 1; i >= 0; i-- {
+		d.sortQueued(context.Background(), jobs[i])
+	}
+	return func() { now = now.Add(d.contexts.wait + contextLanding + time.Second) }
+}
+
+func askedMessages(stub *sorterStub) []string {
+	var messages []string
+	for _, a := range stub.asks() {
+		messages = append(messages, a.Message)
+	}
+	return messages
+}
+
+func TestWhileTheSorterIsDownAPassStopsAtTheFirstFailedAsk(t *testing.T) {
+	stub := &sorterStub{answer: func(string) (int, string) { return http.StatusServiceUnavailable, "down" }}
+	d, _, _, p, _ := sorterFixture(t, stub)
+	advance := queuedInReverse(t, d, p, "recorded first", "recorded second")
+	advance()
+	d.sortWaiting(context.Background())
+	if asked := askedMessages(stub); !slices.Equal(asked, []string{"recorded first", "recorded second"}) || d.sorterHealth().Failures != 2 {
+		t.Fatalf("asked %q with %d failures; want each asked once and the owed one left to the retry", asked, d.sorterHealth().Failures)
+	}
+	if len(d.sorter.heldJobs()) != 0 || len(d.sorter.owedJobs()) != 2 {
+		t.Fatalf("held %v owed %v; want both owed", d.sorter.heldJobs(), d.sorter.owedJobs())
 	}
 }
 

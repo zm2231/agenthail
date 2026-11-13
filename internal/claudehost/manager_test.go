@@ -656,3 +656,50 @@ func TestCloseIdleRefusesAWorkingSessionAndLeavesItsTurnRunning(t *testing.T) {
 		})
 	}
 }
+
+func TestAHostThatNeverAnswersIsNamedWithOnlyWhatItLogged(t *testing.T) {
+	for _, heldFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("lock held first %v", heldFirst), func(t *testing.T) {
+			hostThatNeverAnswers(t, heldFirst)
+		})
+	}
+}
+
+func hostThatNeverAnswers(t *testing.T, heldFirst bool) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".agenthail", "claude-host")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "host.log"), []byte(strings.Repeat("x", 2000)+" pid 48223 protocol 3 version v0.2.133\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(t.TempDir(), "silent-host.mjs")
+	if err := os.WriteFile(script, []byte("console.log(`starting pid ${process.pid}`);\nsetTimeout(() => {}, 5000);\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manager := &claudehost.Manager{Home: home, Launch: func() (claudehost.Launch, error) {
+		return claudehost.Launch{Node: testnode.Path(t), Script: script, Claude: "claude", Version: "v9.9.9"}, nil
+	}}
+	if heldFirst {
+		holder, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_CREATE|os.O_RDONLY, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			t.Fatal(err)
+		}
+		var once sync.Once
+		t.Cleanup(claudehost.OnLockTaken(func() { once.Do(func() { holder.Close() }) }))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := manager.Ensure(ctx)
+	if err == nil {
+		t.Fatal("a host that never listens was reported ready")
+	}
+	text := err.Error()
+	if strings.Contains(text, "holds") || strings.Contains(text, "v0.2.133") || !strings.Contains(text, "v9.9.9 this daemon started as pid") || !strings.Contains(text, "starting pid") {
+		t.Fatalf("error = %q, want the host this daemon started and only what it logged", text)
+	}
+}

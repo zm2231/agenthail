@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -129,4 +130,35 @@ func TestAStreamsCommandsFollowRemoteControlStartingAndStoppingWithoutATranscrip
 	next("")
 	fixture.Record(goneConversation, fixture.Home, "")
 	next(claudeCommandsUnavailable)
+}
+
+func TestAStreamRouteFollowsABridgeRewrittenAtTheSameSizeInOneTick(t *testing.T) {
+	fixture := claudetest.New(t)
+	fixture.Listen()
+	fixture.Record(goneConversation, fixture.Home, "session_aaaaaaaa")
+	c := NewClaude(nil, fixture.Home)
+	session := &surface.Session{ID: goneConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: fixture.PID, HasLocal: true}
+	record := c.peerRecordPath(fixture.PID)
+	tick := time.Now().Add(time.Minute)
+	if err := os.Chtimes(record, tick, tick); err != nil {
+		t.Fatal(err)
+	}
+	route := c.newStreamRoute(context.Background(), session)
+	if bridge := route.current().Bridge; bridge != "session_aaaaaaaa" {
+		t.Fatalf("bridge=%q before the rewrite", bridge)
+	}
+	before, err := os.Stat(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.Record(goneConversation, fixture.Home, "session_bbbbbbbb")
+	if err := os.Chtimes(record, tick, tick); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := os.Stat(record); err != nil || after.Size() != before.Size() {
+		t.Fatalf("rewrite changed the record's size: before=%d after=%v err=%v", before.Size(), after, err)
+	}
+	if !route.reread(context.Background()) || route.current().Bridge != "session_bbbbbbbb" {
+		t.Fatalf("bridge=%q after a same-size rewrite in one tick", route.current().Bridge)
+	}
 }

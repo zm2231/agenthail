@@ -130,6 +130,7 @@ type Daemon struct {
 	simStatusMu              sync.Mutex
 	simStatus                simhost.Status
 	simStatusAt              time.Time
+	simProbing               chan struct{}
 	simForwarded             map[string]map[string]bool
 	simOwnersMu              sync.Mutex
 	simOwners                map[string]*simulatorOwner

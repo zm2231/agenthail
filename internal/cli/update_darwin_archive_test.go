@@ -72,6 +72,7 @@ type darwinUpdateFixture struct {
 	installer func(dataDir string) error
 	healthy   []error
 	restarts  []string
+	registry  *updateRegistry
 }
 
 func newDarwinUpdateFixture(t *testing.T) *darwinUpdateFixture {
@@ -160,6 +161,8 @@ func newDarwinUpdateFixture(t *testing.T) *darwinUpdateFixture {
 			return os.WriteFile(filepath.Join(f.dataDir, "agenthail"), []byte(versionScript("v0.2.134")), 0755)
 		},
 	}}
+	f.registry = &updateRegistry{schema: 96, backup: 96, binary: filepath.Join(f.dataDir, "agenthail")}
+	f.registry.wire(f.app.update)
 	return f
 }
 
@@ -365,5 +368,42 @@ func TestShellWordReadsWhatBashQuotes(t *testing.T) {
 	}
 	if got, ok := shellWord(`"/old wrapper/agenthail" "$@"`); !ok || got != "/old wrapper/agenthail" {
 		t.Errorf("a double-quoted target read back %q", got)
+	}
+}
+
+func TestADarwinArchiveUpdateRestoresTheRegistryItsStoppedDaemonMigrated(t *testing.T) {
+	f := newDarwinUpdateFixture(t)
+	f.installer = func(dataDir string) error {
+		f.registry.schema = 97
+		return os.WriteFile(filepath.Join(dataDir, "agenthail"), []byte(versionScript("v0.2.134")), 0755)
+	}
+	f.healthy = []error{errors.New("daemon is not running")}
+	_, err := captureStdout(t, func() error { return f.app.Run([]string{"update"}) })
+	if err == nil || !strings.Contains(err.Error(), "rolled back") || !strings.Contains(err.Error(), "registry is back at schema 96") {
+		t.Fatalf("update reported %v", err)
+	}
+	want := []string{"lock with " + versionScript("v0.2.134"), "restore before v97", "unlock with " + versionScript("v0.2.133")}
+	if strings.Join(f.registry.events, "|") != strings.Join(want, "|") {
+		t.Fatalf("events=%q", f.registry.events)
+	}
+	if len(f.restarts) != 1 || f.restarts[0] != versionScript("v0.2.133") {
+		t.Fatalf("restarts=%q", f.restarts)
+	}
+}
+
+func TestADarwinArchiveUpdateKeepsTheUpdateWhenItsDaemonMadeTheOnlyRegistry(t *testing.T) {
+	f := newDarwinUpdateFixture(t)
+	f.registry.schema = -1
+	f.installer = func(dataDir string) error {
+		f.registry.schema = 97
+		return os.WriteFile(filepath.Join(dataDir, "agenthail"), []byte(versionScript("v0.2.134")), 0755)
+	}
+	f.healthy = []error{errors.New("daemon is not running")}
+	_, err := captureStdout(t, func() error { return f.app.Run([]string{"update"}) })
+	if err == nil || !strings.Contains(err.Error(), "the update stays in place") {
+		t.Fatalf("update reported %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(f.dataDir, "agenthail")); string(got) != versionScript("v0.2.134") || len(f.restarts) != 0 {
+		t.Fatalf("binary=%q restarts=%q", got, f.restarts)
 	}
 }

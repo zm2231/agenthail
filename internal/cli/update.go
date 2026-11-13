@@ -15,6 +15,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 var (
@@ -39,6 +42,9 @@ type updateDeps struct {
 	runInstaller    func(string, []string) error
 	copyTree        func(string, string) error
 	wrapperDirs     func() []string
+	registrySchema  func() int
+	holdDaemonLock  func() (func(), error)
+	restoreRegistry func(int) (registry.RestoredRegistry, error)
 }
 
 type releaseAsset struct {
@@ -76,6 +82,9 @@ func defaultUpdateDeps() *updateDeps {
 		runInstaller:    defaultRunInstaller,
 		copyTree:        defaultCopyTree,
 		wrapperDirs:     defaultWrapperDirs,
+		registrySchema:  registry.DiskSchema,
+		holdDaemonLock:  daemon.HoldDaemonLock,
+		restoreRegistry: registry.RestoreMigrationBackup,
 		run: func(name string, args ...string) error {
 			command := exec.Command(name, args...)
 			command.Stdin = os.Stdin
