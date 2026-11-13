@@ -356,6 +356,13 @@ func (d *Daemon) runExtensionJob(ctx context.Context, id string, job extensionJo
 	err := r.host.Client().Call(runCtx, "job", map[string]string{"id": id, "name": job.Name}, nil)
 	cancel()
 	finished := time.Now()
+	if hostErr, ok := errors.AsType[*nodehost.Error](err); ok && hostErr.Code == "source_busy" {
+		r.mu.Lock()
+		state.running = false
+		state.due = finished.Add(extensionJobTick)
+		r.mu.Unlock()
+		return err
+	}
 	r.mu.Lock()
 	state.running = false
 	state.LastRun = finished

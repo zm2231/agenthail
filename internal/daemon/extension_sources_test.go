@@ -1,14 +1,17 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/extension"
+	"github.com/zm2231/agenthail/internal/poll"
 )
 
 const sourcesServer = `
@@ -123,24 +126,44 @@ func TestASourceKeepsItsLastValueBesideTheErrorAndStopsAtItsTimeout(t *testing.T
 	}
 }
 
-func TestACollectorThatIgnoresItsTimeoutHoldsOffTheNextRun(t *testing.T) {
+func TestACollectorThatIgnoresItsTimeoutHoldsTheSourceThroughAReload(t *testing.T) {
 	f := startExtensionFixtureWith(t, map[string]string{"server.ts": `
+import fs from 'node:fs';
+import path from 'node:path';
+
 export default function (ah: any) {
-  let runs = 0;
-  ah.source({ name: 'stuck', everySeconds: 10, timeoutSeconds: 1, collect: () => {
-    runs++;
-    return new Promise(() => {});
+  const outside = (name: string) => path.join(ah.dir, '..', '..', name);
+  ah.source({ name: 'stuck', everySeconds: 10, timeoutSeconds: 1, collect: async () => {
+    const runs = fs.existsSync(outside('runs')) ? Number(fs.readFileSync(outside('runs'), 'utf8')) + 1 : 1;
+    fs.writeFileSync(outside('runs'), String(runs));
+    while (!fs.existsSync(outside('release'))) await new Promise(resolve => setTimeout(resolve, 20));
+    return runs;
   } });
-  ah.action('runs', () => runs);
 }
 `})
-	eventually(t, "the stuck source times out", func() bool { return f.source(t, "stuck").State == "failed" })
-	f.runJob(t, "stuck")
-	if again := f.source(t, "stuck"); !strings.Contains(again.Error, "has not finished") {
-		t.Fatalf("a run beside the one still going failed with %q", again.Error)
+	outside := filepath.Dir(filepath.Dir(f.workdir))
+	runs := func() string {
+		got, _ := os.ReadFile(filepath.Join(outside, "runs"))
+		return string(got)
 	}
-	if _, result := f.call(t, "fixture", map[string]any{"action": "runs"}); string(result.Result) != "1" {
-		t.Fatalf("a second collector started while the first had not settled: %s runs", result.Result)
+	eventually(t, "the stuck source times out", func() bool { return f.source(t, "stuck").State == "failed" })
+	if _, body := f.request(t, http.MethodPost, "/api/v1/extensions/fixture/call", "secret", map[string]string{"job": "stuck"}); !strings.Contains(string(body), "has not finished") {
+		t.Fatalf("a run beside the one still going answered %s", body)
+	}
+	if err := f.d.reloadExtensions(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(3 * time.Second)
+	if got := runs(); got != "1" {
+		t.Fatalf("the reloaded source started beside the collector still going: %s runs", got)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := poll.Until(ctx, 50*time.Millisecond, func() (bool, error) { return runs() == "2", nil }); err != nil {
+		t.Fatalf("the reloaded source did not run once the old collector settled, well before its 10 s interval: %s runs", runs())
 	}
 }
 

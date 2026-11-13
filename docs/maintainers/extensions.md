@@ -59,7 +59,10 @@ every reload or undo (so new code is collected at once, not after an
 interval), and every `everySeconds` (at least 10, 60 if omitted) after the
 previous run ends, never two at once. A run is stopped after `timeoutSeconds`,
 a whole number below `everySeconds` and at most 30 (by default the smaller of
-30 and one less than the interval); `signal` aborts then. The host stores the
+30 and one less than the interval); `signal` aborts then. A collector that
+ignores `signal` still holds its source, through reloads too: no other run of
+it starts until that one settles, and the daemon tries again every second, so
+the next run starts as soon as it does. The host stores the
 JSON result, at most 512 KiB, in the extension's table `<id>__sources` with
 when it was collected and how long it took. A run that throws or times out
 records its error beside the last good value instead of replacing it. When a

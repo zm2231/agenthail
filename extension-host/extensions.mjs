@@ -36,8 +36,11 @@ function ensureSourceTable(db, id) {
 
 // A failed run keeps the last good value, so a page goes on showing it
 // beside the error. A collector that outlives its timeout still holds the
-// source, so no second one starts beside it.
-async function collectSource(db, id, name, timeoutSeconds, collect, held) {
+// source, through reloads too, so no second one starts beside it.
+async function collectSource(db, id, name, timeoutSeconds, collect, holds) {
+  const key = `${id}/${name}`;
+  const held = holds.get(key);
+  if (held) throw failure('source_busy', `source ${name}: the collection started ${Math.round((Date.now() - held.since) / 1000)} s ago has not finished`);
   ensureSourceTable(db, id);
   const table = sourceTable(id);
   const started = Date.now();
@@ -50,12 +53,11 @@ async function collectSource(db, id, name, timeoutSeconds, collect, held) {
         fail(new Error(`no answer in ${timeoutSeconds} s`));
       }, timeoutSeconds * 1000);
     });
-    if (held.run) throw new Error(`the collection started ${Math.round((started - held.since) / 1000)} s ago has not finished`);
     const run = Promise.resolve().then(() => collect({ signal: abort.signal, now: new Date() }));
-    held.run = run;
-    held.since = started;
+    const hold = { since: started };
+    holds.set(key, hold);
     run.then(() => {}, () => {}).finally(() => {
-      if (held.run === run) held.run = null;
+      if (holds.get(key) === hold) holds.delete(key);
     });
     const value = await Promise.race([run, deadline]);
     const encoded = JSON.stringify(value ?? null);
@@ -127,7 +129,7 @@ class Loaded {
     };
   }
 
-  api(db, writes) {
+  api(db, writes, holds) {
     const self = this;
     const registering = () => {
       if (self.state !== 'loading') throw failure('invalid', 'register actions, jobs and handlers while the extension loads');
@@ -167,8 +169,7 @@ class Loaded {
           throw failure('invalid', `source ${name}: timeoutSeconds must be a whole number from 1 to ${MAX_SOURCE_TIMEOUT_SECONDS} and below everySeconds`);
         }
         if (self.jobs.has(name)) throw failure('invalid', `${name} is registered twice as a job or source`);
-        const held = { run: null, since: 0 };
-        self.jobs.set(name, { name, everySeconds, source: true, run: () => collectSource(db, self.id, name, timeout, collect, held) });
+        self.jobs.set(name, { name, everySeconds, source: true, run: () => collectSource(db, self.id, name, timeout, collect, holds) });
       },
       sources: () => readSources(db, self.id, true),
       tool({ name, description, inputSchema = { type: 'object' }, run }) {
@@ -195,6 +196,7 @@ export class Extensions {
     this.loaded = new Map();
     this.generation = 0;
     this.writeTools = new Set();
+    this.holds = new Map();
   }
 
   database() {
@@ -239,7 +241,7 @@ export class Extensions {
         url.searchParams.set('agenthail-root', pathToFileURL(extension.dir).pathname + '/');
         const module = await import(url.href);
         if (typeof module.default !== 'function') throw failure('invalid', 'server.ts must export a default function that receives the extension API');
-        const dispose = await module.default(extension.api(this.database(), this.writeTools));
+        const dispose = await module.default(extension.api(this.database(), this.writeTools, this.holds));
         extension.dispose = typeof dispose === 'function' ? dispose : null;
         extension.state = 'loaded';
       } catch (error) {
@@ -314,6 +316,7 @@ export class Extensions {
       await job.run({ now: new Date() });
       return {};
     } catch (error) {
+      if (error?.code === 'source_busy') throw error;
       log(id, `job ${name} failed: ${error?.stack ?? error}`);
       throw failure('job_failed', String(error?.message ?? error));
     }
