@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -39,12 +40,14 @@ func (d *Daemon) registerExtensionRoutes(mux *http.ServeMux, dashboard *dashboar
 		d.apiV1Guard(dashboard, scope, d.apiExtensionsHandler)(w, r)
 	})
 	mux.HandleFunc("GET /api/v1/extensions/history", d.apiV1Guard(dashboard, "read", d.apiExtensionHistoryHandler))
+	mux.HandleFunc("GET /api/v1/extensions/history/{rev}", d.apiV1Guard(dashboard, "read", d.apiExtensionChangeHandler))
 	mux.HandleFunc("POST /api/v1/extensions/build", d.apiV1Guard(dashboard, "control", d.apiExtensionBuildHandler))
 	mux.HandleFunc("POST /api/v1/extensions/{id}/call", d.apiV1Guard(dashboard, "control", d.apiExtensionCallHandler))
 	mux.HandleFunc("GET /x/_ah.js", d.apiV1Guard(dashboard, "read", func(w http.ResponseWriter, r *http.Request) {
 		extensionPageHeaders(w)
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
+		_, _ = fmt.Fprintf(w, "const changesAfter = %d;\n", d.events.cursor())
 		_, _ = w.Write(extensionSDK)
 	}))
 	mux.HandleFunc("POST /x/{id}/a/{action}", d.apiV1Guard(dashboard, "control", d.extensionActionHandler))
@@ -185,6 +188,17 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch request.Action {
+		case "keep":
+			if d.extensions == nil {
+				writeAPIError(w, http.StatusServiceUnavailable, "unavailable", errExtensionsOff.Error())
+				return
+			}
+			if err := d.keepExtensionChange(request.Rev, principalFromRequest(r)); err != nil {
+				writeActionResult(w, actionResult{}, err)
+				return
+			}
+			writeDashboardJSON(w, http.StatusOK, map[string]any{"kept": request.Rev})
+			return
 		case "undo":
 			undone, err := d.undoExtensionChange(r.Context(), request.Rev)
 			if err != nil {
@@ -291,5 +305,41 @@ func (d *Daemon) apiExtensionHistoryHandler(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"changes": changes})
+	pending := d.pendingExtensionRevs()
+	listed := make([]extensionChangeView, 0, len(changes))
+	for _, change := range changes {
+		listed = append(listed, extensionChangeView{Change: change, Pending: pending[change.Rev]})
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"changes": listed})
+}
+
+type extensionChangeView struct {
+	extension.Change
+	Pending bool `json:"pending,omitempty"`
+}
+
+const extensionPatchLimit = 256 << 10
+
+func (d *Daemon) apiExtensionChangeHandler(w http.ResponseWriter, r *http.Request) {
+	history, err := d.extensionHistory()
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
+		return
+	}
+	if history == nil {
+		writeAPIError(w, http.StatusNotFound, "not_found", "There is no extensions folder.")
+		return
+	}
+	rev := r.PathValue("rev")
+	changes, err := history.Log(1, rev)
+	if err != nil || len(changes) == 0 {
+		writeAPIError(w, http.StatusNotFound, "not_found", "Unknown change "+rev+".")
+		return
+	}
+	patch, truncated, err := history.Patch(changes[0].Rev, extensionPatchLimit)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"change": extensionChangeView{Change: changes[0], Pending: d.pendingExtensionRevs()[changes[0].Rev]}, "patch": patch, "truncated": truncated})
 }

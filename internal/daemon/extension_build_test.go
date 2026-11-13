@@ -270,3 +270,82 @@ func TestARunThatAReloadOverlapsIsNotRecordedAsACheck(t *testing.T) {
 		t.Fatal("a run a reload overlapped checks the version loaded before it")
 	}
 }
+
+func TestEachPendingChangeIsKeptOnItsOwnAndShowsWhatItChanged(t *testing.T) {
+	f := startExtensionFixture(t)
+	reg := f.d.Registry
+	workspace := extension.Workspace(f.home)
+	writeExtension(t, workspace, "notes", `{"label": "Notes"}`)
+	f.turn(t, "to", "turn-1")
+	writeExtension(t, workspace, "jots", `{"label": "Jots"}`)
+	f.turn(t, "to", "turn-2")
+
+	response, body := f.request(t, http.MethodGet, "/api/v1/extensions/history", "secret", nil)
+	var listed struct {
+		Changes []extensionChangeView `json:"changes"`
+	}
+	if response.StatusCode != http.StatusOK || json.Unmarshal(body, &listed) != nil || len(listed.Changes) < 2 || !listed.Changes[0].Pending || !listed.Changes[1].Pending {
+		t.Fatalf("history listed %d %s", response.StatusCode, body)
+	}
+	jots, notes := listed.Changes[0], listed.Changes[1]
+
+	response, body = f.request(t, http.MethodGet, "/api/v1/extensions/history/"+notes.Rev, "secret", nil)
+	var shown struct {
+		Patch string `json:"patch"`
+	}
+	if response.StatusCode != http.StatusOK || json.Unmarshal(body, &shown) != nil || !strings.Contains(shown.Patch, "+++ b/notes/extension.json") || strings.Contains(shown.Patch, "jots/") {
+		t.Fatalf("the notes change showed %d %s", response.StatusCode, body)
+	}
+
+	if response, body := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "keep", "rev": notes.Rev}); response.StatusCode != http.StatusOK {
+		t.Fatalf("keeping one change answered %d %s", response.StatusCode, body)
+	}
+	ask := mustOpenChangeAsk(t, reg, "to")
+	if strings.Contains(ask.Title, "turns") || !strings.Contains(ask.Questions[0].Question, "created jots") {
+		t.Fatalf("after keeping notes the ask reads %q / %q", ask.Title, ask.Questions[0].Question)
+	}
+	if response, _ := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "keep", "rev": notes.Rev}); response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("keeping a kept change again answered %d", response.StatusCode)
+	}
+	if response, body := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "keep", "rev": jots.Rev}); response.StatusCode != http.StatusOK {
+		t.Fatalf("keeping the last change answered %d %s", response.StatusCode, body)
+	}
+	if _, open := openChangeAsk(t, reg, "to"); open {
+		t.Fatal("the ask stayed open with every change kept")
+	}
+	if closed, found, _ := reg.Ask(ask.ID); !found || closed.Answer.Answers[closed.Questions[0].Question] != extensionKeep {
+		t.Fatalf("the ask closed as %+v", closed.Answer)
+	}
+	if _, body := f.request(t, http.MethodGet, "/api/v1/extensions/history", "secret", nil); strings.Contains(string(body), `"pending":true`) {
+		t.Fatalf("kept changes are still listed as pending: %s", body)
+	}
+}
+
+func TestAStandalonePageHearsOnlyChangesAfterItLoadedAndOnlyItsOwn(t *testing.T) {
+	f := startExtensionFixture(t)
+	response, body := f.request(t, http.MethodGet, "/x/_ah.js", "secret", nil)
+	cursor := f.d.events.cursor()
+	if response.StatusCode != http.StatusOK || !strings.HasPrefix(string(body), fmt.Sprintf("const changesAfter = %d;\n", cursor)) {
+		t.Fatalf("_ah.js began %.80q, want the cursor %d", body, cursor)
+	}
+	writeExtension(t, extension.Workspace(f.home), "notes", `{"label": "Notes"}`)
+	f.turn(t, "to", "turn-1")
+	backlog, follower, _ := f.d.events.subscribe(cursor)
+	follower.Cancel()
+	var changed []string
+	for _, event := range backlog {
+		if event.Type != "extension.changed" {
+			continue
+		}
+		var data struct {
+			Extensions []string `json:"extensions"`
+		}
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			t.Fatal(err)
+		}
+		changed = append(changed, data.Extensions...)
+	}
+	if !slices.Equal(changed, []string{"notes"}) {
+		t.Fatalf("the change after the page loaded named %v", changed)
+	}
+}

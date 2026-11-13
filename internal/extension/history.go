@@ -198,6 +198,21 @@ func fileChanges(lines string) []FileChanges {
 	return out
 }
 
+// Patch is what rev changed, as git shows it, cut at limit bytes.
+func (h *History) Patch(rev string, limit int) (string, bool, error) {
+	if err := h.repo.CheckRev(rev); err != nil {
+		return "", false, err
+	}
+	out, err := h.repo.Git("show", "--format=", "--patch", "--no-color", "--no-renames", "--no-ext-diff", rev)
+	if err != nil {
+		return "", false, err
+	}
+	if len(out) > limit {
+		return out[:limit], true, nil
+	}
+	return out, false, nil
+}
+
 // FolderTrees hashes each extension's folder as it is on disk, the way a
 // commit would record it, through a scratch index so nothing is staged.
 func (h *History) FolderTrees() (map[string]string, error) {

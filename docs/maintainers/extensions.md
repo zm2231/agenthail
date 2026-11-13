@@ -255,14 +255,23 @@ ignored.
   commit and its ask instead.
 - The first commit holds what the folder held when the daemon first saw it; a
   folder a turn created starts empty, so its files are that turn's.
-- After a turn's commit the daemon assigns mount ports, reloads the host and
-  publishes `extension.changed` with `{"rev": "<rev>"}`.
+- After a turn's commit, and after an undo, the daemon assigns mount ports,
+  reloads the host and publishes `extension.changed` with `{"rev": "<rev>",
+  "extensions": ["<id>", ...]}`, the extensions that change touched. The
+  dashboard's Extensions tab then reads the list and the changes again, and
+  reloads the page or mount it frames when its extension is among them and the
+  folder's newest change moved. A page opened on its own reloads itself through
+  `/x/_ah.js`, which the daemon serves with its event cursor at that moment, so
+  the page hears only changes made after it loaded, and only its own; it
+  reloads too when the stream reports it missed events.
 - A session's first change raises an ask of origin `extension-change` to the
   person: `<session> changed extensions`, with `Keep` and `Undo`. Later turns
   of that session reword the same ask instead of raising another, and push
   nothing new: `<session> changed extensions in 3 turns`, `Keep all` and
   `Undo last`. Keep closes the ask. Undo last undoes the newest pending turn
-  and rewords the ask, or closes it when no turn is left. Only the person
+  and rewords the ask, or closes it when no turn is left. The Extensions tab
+  lists the latest 30 changes with Show (the patch), Undo, and Keep for each
+  change still waiting, so one change can be kept or undone on its own. Only the person
   answers; every session, including one that may act for the person
   elsewhere, is refused with `403 forbidden`. What is pending is kept
   in `~/.agenthail/extensions-data/changes.json`.
@@ -357,7 +366,10 @@ change. `POST /api/v1/extensions/build` with `{"message": "<text>", "surface":
 or `{"job": "<name>"}` runs it (`control` scope) and answers `{result, ran,
 tree, reloaded}`; `"sessionId"` runs it as that session, accepted only from
 this machine. `approve` and `key` with `"sessionId"` raise the person's ask
-instead. `GET /api/v1/extensions/history?limit=50` lists the changes (`read`
+instead. `{"action": "keep", "rev": "<rev>"}` keeps one change still waiting in a
+Keep/Undo ask: the ask drops it, and closes as kept when none is left.
+`GET /api/v1/extensions/history/<rev>` returns the change and its `patch`, cut
+at 256 KiB with `truncated` set. `GET /api/v1/extensions/history?limit=50` lists the changes (`read`
 scope): each with `rev`, `author`, `time`, `message`, `sessionId`, `turnId`
 and, per extension, `created`, `removed` and the files `added`, `updated` and
-`deleted`.
+`deleted`, and `pending` while the change waits in a Keep/Undo ask.
