@@ -52,7 +52,7 @@ func (d *Daemon) mountHandler(served *servedMount) http.Handler {
 		}
 		d.apiV1Guard(dashboard, scope, func(w http.ResponseWriter, r *http.Request) {
 			d.serveMount(w, r, served, dashboard)
-		})(w, r)
+		})(w, r.WithContext(context.WithValue(r.Context(), mountPortContextKey{}, true)))
 	})
 }
 

@@ -119,6 +119,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	d.registerLedgerRoutes(mux, dashboard)
 	d.registerScopeAPI(mux, dashboard)
 	d.registerExtensionRoutes(mux, dashboard)
+	mux.HandleFunc("POST /api/v1/web-session", d.apiV1Guard(dashboard, "read", d.apiWebSessionHandler(dashboard)))
 	d.registerSimulatorRoutes(mux, dashboard)
 	mux.HandleFunc(MCPClaimPath, d.apiV1Guard(dashboard, "control", d.apiMCPClaimHandler))
 	mux.HandleFunc("/api/v1/version", d.apiV1Guard(dashboard, "read", d.apiVersionHandler))
@@ -183,8 +184,18 @@ func (d *Daemon) apiV1Guard(dashboard *dashboardServer, scope string, next http.
 			}
 		}
 		if !cookieAuthorized && !bearerAuthorized {
-			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "A valid Agenthail device token is required.")
-			return
+			var result webSessionResult
+			r, result = d.authorizeWebSession(dashboard, r, scope)
+			switch result {
+			case webSessionAllowed:
+				cookieAuthorized = true
+			case webSessionForbidden:
+				writeAPIError(w, http.StatusForbidden, "forbidden", "This web session does not hold the "+scope+" scope.")
+				return
+			default:
+				writeAPIError(w, http.StatusUnauthorized, "unauthorized", "A valid Agenthail device token is required.")
+				return
+			}
 		}
 		if cookieAuthorized && !bearerAuthorized && r.Method != http.MethodGet && r.Method != http.MethodHead && !sameOrigin(r) {
 			writeAPIError(w, http.StatusForbidden, "cross_origin", "Cross-origin dashboard requests are not allowed.")

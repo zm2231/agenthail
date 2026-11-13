@@ -44,6 +44,7 @@ type Daemon struct {
 	presentation         presentationClock
 	coordinatorNow       func() time.Time
 	Registry             *registry.Registry
+	webSessions          webSessions
 	sessionFiles         sessionFileLists
 	claudeConfigRootsMu  sync.Mutex
 	claudeConfigRootsAt  time.Time
