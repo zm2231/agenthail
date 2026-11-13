@@ -86,12 +86,7 @@ func startExtensionFixture(t *testing.T) *extensionFixture {
 
 func startExtensionFixtureWith(t *testing.T, replace map[string]string) *extensionFixture {
 	t.Helper()
-	d, _, fake, _, handler, _ := baseFixture(t)
-	home, err := os.MkdirTemp("", "ext")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(home) })
+	home := extensionTestHome(t)
 	dir := filepath.Join(extension.Workspace(home), "fixture")
 	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o700); err != nil {
 		t.Fatal(err)
@@ -109,6 +104,25 @@ func startExtensionFixtureWith(t *testing.T, replace map[string]string) *extensi
 			t.Fatal(err)
 		}
 	}
+	f := startExtensionDaemon(t, home)
+	f.workdir = dir
+	f.awaitState(t, "loaded")
+	return f
+}
+
+func extensionTestHome(t *testing.T) string {
+	t.Helper()
+	home, err := os.MkdirTemp("", "ext")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	return home
+}
+
+func startExtensionDaemon(t *testing.T, home string) *extensionFixture {
+	t.Helper()
+	d, _, fake, _, handler, _ := baseFixture(t)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	d.attachMCPCredentials(strings.TrimPrefix(server.URL, "http://"))
@@ -122,9 +136,8 @@ func startExtensionFixtureWith(t *testing.T, replace map[string]string) *extensi
 		defer close(done)
 		d.superviseExtensions(ctx)
 	}()
-	f := &extensionFixture{d: d, fake: fake, server: server, home: home, workdir: dir, stop: func() { cancel(); <-done }}
+	f := &extensionFixture{d: d, fake: fake, server: server, home: home, stop: func() { cancel(); <-done }}
 	t.Cleanup(f.stop)
-	f.awaitState(t, "loaded")
 	return f
 }
 
@@ -443,4 +456,27 @@ func TestAReloadTheHostCannotFinishRestartsItAndHeldEventsStillArrive(t *testing
 		state := f.state(t)
 		return len(state.Events) == 1 && state.Events[0] == "after-failed-load"
 	})
+}
+
+func TestTheExtensionHostRunsWithNoExtensionsAndLoadsTheFirstOnOneReload(t *testing.T) {
+	f := startExtensionDaemon(t, extensionTestHome(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var view extensionsView
+	if err := poll.Until(ctx, 20*time.Millisecond, func() (bool, error) {
+		view = f.d.extensionsView()
+		return view.Host == "running", nil
+	}); err != nil {
+		t.Fatalf("the extension host never ran with no extensions: %+v", view)
+	}
+
+	writeExtension(t, extension.Workspace(f.home), "notes", `{"label": "Notes"}`)
+	response, body := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "reload"})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the first reload after adding an extension = %d %s", response.StatusCode, body)
+	}
+	view = f.d.extensionsView()
+	if view.Host != "running" || len(view.Extensions) != 1 || view.Extensions[0].ID != "notes" || view.Extensions[0].State != "loaded" {
+		t.Fatalf("after one reload: %+v", view)
+	}
 }

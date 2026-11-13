@@ -155,7 +155,9 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 		MCPURL   string `json:"mcpURL"`
 		FetchURL string `json:"fetchURL"`
 	}
-	var specs []spec
+	// The host iterates this list, so a workspace with no extensions must send
+	// [] and not null.
+	specs := []spec{}
 	for _, ext := range found {
 		loaded := &loadedExtension{ext: ext, jobs: map[string]*extensionJobState{}, tree: trees[ext.ID]}
 		next[ext.ID] = loaded
