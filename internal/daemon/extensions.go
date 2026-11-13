@@ -27,6 +27,7 @@ var extensionJobTick = time.Second
 type extensionJob struct {
 	Name         string `json:"name"`
 	EverySeconds int    `json:"everySeconds"`
+	Source       bool   `json:"source,omitempty"`
 }
 
 type extensionHostSummary struct {
@@ -231,13 +232,18 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 }
 
 // A job keeps its state object across loads, so a run still going when the
-// extension reloads holds off the next one until it finishes.
+// extension reloads holds off the next one until it finishes. A source runs
+// again at once, since the code that collects it may have changed.
 func carriedJobState(previous *loadedExtension, job extensionJob, now time.Time) *extensionJobState {
 	every := time.Duration(job.EverySeconds) * time.Second
 	if previous != nil {
 		if kept, ok := previous.jobs[job.Name]; ok {
 			kept.every = every
-			if !kept.running && !kept.LastRun.IsZero() {
+			switch {
+			case kept.running:
+			case job.Source:
+				kept.due = now
+			case !kept.LastRun.IsZero():
 				kept.due = kept.LastRun.Add(every)
 			}
 			return kept
@@ -344,8 +350,11 @@ func (d *Daemon) runExtensionJob(ctx context.Context, id string, job extensionJo
 		state.LastError = err.Error()
 	}
 	r.mu.Unlock()
-	if err != nil && ctx.Err() == nil {
+	if err != nil && ctx.Err() == nil && !job.Source {
 		d.log.Printf("extension %s: job %s: %s", id, job.Name, err)
+	}
+	if job.Source && ctx.Err() == nil {
+		d.publishEvent("extension.source", "", map[string]any{"extension": id, "source": job.Name, "ok": err == nil})
 	}
 	return err
 }

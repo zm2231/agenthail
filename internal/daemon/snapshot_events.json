@@ -16,6 +16,7 @@
   {"event": "trigger.finished", "cache": false, "reread": false, "why": "trigger runs are not in the snapshot; the CLI reads them from /api/v1/triggers"},
   {"event": "task.goal_stopped", "cache": false, "reread": false, "why": "wakes task waiters; task records are not in the snapshot"},
   {"event": "ledger.", "family": true, "cache": false, "reread": false, "why": "intent ledger activity; the ledger is not in the snapshot"},
+  {"event": "extension.source", "cache": false, "reread": false, "why": "extension sources are not in the snapshot; open extension pages fetch the source that changed"},
   {"event": "extension.changed", "cache": false, "reread": false, "why": "extensions are not in the snapshot; the Extensions tab and open extension pages reload through their own handler"},
   {"event": "ui.changed", "cache": false, "reread": false, "why": "appearance, reloaded through its own handler"},
   {"event": "ui.snapshot.requested", "cache": false, "reread": false, "why": "asks a window for a screenshot through its own handler"},
