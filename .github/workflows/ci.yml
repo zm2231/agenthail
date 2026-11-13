@@ -45,6 +45,9 @@ jobs:
       - name: Isolate self-hosted job
         if: runner.environment == 'self-hosted'
         run: scripts/ci-self-hosted.sh prepare >> "$GITHUB_ENV"
+      - name: Sample host load
+        if: runner.environment == 'self-hosted'
+        run: scripts/ci-host-load.sh start
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -172,6 +175,7 @@ jobs:
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
           scripts/test-codesign-retry.sh
           scripts/test-ci-self-hosted.sh
+          scripts/test-ci-host-load.sh
           scripts/test-ci-needs-passed.sh
           scripts/test-ios-test-stall-guard.sh
           scripts/test-ios-simulator-clones.sh
@@ -181,6 +185,9 @@ jobs:
       - name: Simulator run guard tests
         if: needs.gate.outputs.full == 'true' || needs.gate.result != 'success'
         run: scripts/test-ios-simulator.sh
+      - name: Report host load
+        if: always() && runner.environment == 'self-hosted'
+        run: scripts/ci-host-load.sh report
       - name: Clean up self-hosted job
         if: always() && runner.environment == 'self-hosted'
         run: scripts/ci-self-hosted.sh cleanup
