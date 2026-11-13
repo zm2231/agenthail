@@ -34,7 +34,10 @@ On Linux (amd64 or arm64) the release ships `agenthail-<tag>-linux-<arch>.tar.gz
 with a `.sha256`. Unpack it to `~/.local/share/agenthail`, link
 `~/.local/bin/agenthail` to the binary, then run `agenthail daemon install`.
 `agenthail update` replaces that directory in place, restarts the daemon and
-rolls back when the restarted daemon does not answer on its API.
+rolls back when the restarted daemon does not answer on its API within a
+minute. If that daemon already moved the registry to a newer schema, it puts
+back the registry copy from before as well, or, while that daemon is still
+running, keeps the update and reports it as unverified.
 
 For a source checkout:
 

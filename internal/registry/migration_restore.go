@@ -28,6 +28,12 @@ type RestoredRegistry struct {
 	Aside  string
 }
 
+// DiskSchema is the schema of the registry on disk, or -1 when it cannot be
+// read. It never migrates, so it reads a registry newer than this build.
+func DiskSchema() int {
+	return schemaOf(defaultPath())
+}
+
 func ListMigrationBackups() []MigrationBackup {
 	return listMigrationBackups(defaultPath())
 }

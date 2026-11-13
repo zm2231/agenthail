@@ -2,6 +2,7 @@ package cli
 
 import (
 	"archive/tar"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -74,11 +75,15 @@ func defaultDaemonExpected() bool {
 	return newDaemonService("linux").Loaded()
 }
 
+const daemonAnswerLimit = 60 * time.Second
+
 func defaultDaemonHealthy() error {
-	return waitForDaemonAPI(20 * time.Second)
+	return waitForDaemonAPI(daemonAnswerLimit)
 }
 
-func waitForDaemonAPI(timeout time.Duration) error {
+// waitForDaemonAPI gives a daemon limit to start and then limit from its
+// first running pid to answer, so a slow start does not eat its answer time.
+func waitForDaemonAPI(limit time.Duration) error {
 	config, err := daemon.LoadDashboardConfig()
 	if err != nil {
 		return err
@@ -91,16 +96,18 @@ func waitForDaemonAPI(timeout time.Duration) error {
 		}
 		token = strings.TrimSpace(string(data))
 	}
-	client := &http.Client{Timeout: time.Second}
-	var stableSince time.Time
+	client := &http.Client{Timeout: 5 * time.Second}
+	var stableSince, runningSince time.Time
 	lastErr := errors.New("daemon is not running")
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	if err := poll.Until(ctx, 100*time.Millisecond, func() (bool, error) {
+	started := time.Now()
+	if err := poll.Until(context.Background(), 100*time.Millisecond, func() (bool, error) {
+		if origin := cmp.Or(runningSince, started); time.Since(origin) >= limit {
+			return false, lastErr
+		}
 		if _, running := daemon.IsRunning(); !running {
 			stableSince = time.Time{}
 			lastErr = errors.New("daemon is not running")
-		} else if !config.Enabled {
+		} else if runningSince = cmp.Or(runningSince, time.Now()); !config.Enabled {
 			if stableSince.IsZero() {
 				stableSince = time.Now()
 			} else if time.Since(stableSince) >= 2*time.Second {
@@ -124,7 +131,7 @@ func waitForDaemonAPI(timeout time.Duration) error {
 	}); err == nil {
 		return nil
 	}
-	return fmt.Errorf("daemon did not answer on its API within %s: %w", timeout, lastErr)
+	return fmt.Errorf("daemon did not answer on its API within %s of starting: %w", limit, lastErr)
 }
 
 func installArchiveUpdate(deps *updateDeps, release *latestRelease, executable string) error {
@@ -145,6 +152,7 @@ func installArchiveUpdate(deps *updateDeps, release *latestRelease, executable s
 		return fmt.Errorf("refusing to update without a reachable service manager to restart and verify the daemon: %w", err)
 	}
 	restart := deps.daemonExpected()
+	schema := deps.registrySchema()
 	previous := dataDir + ".previous"
 	if err := os.RemoveAll(previous); err != nil {
 		return fmt.Errorf("clear %s: %w", previous, err)
@@ -161,7 +169,7 @@ func installArchiveUpdate(deps *updateDeps, release *latestRelease, executable s
 	if restart {
 		binary := filepath.Join(dataDir, "agenthail")
 		if err := restartAndCheck(deps, binary); err != nil {
-			return rollbackArchiveUpdate(deps, dataDir, previous, release.TagName, err)
+			return rollBackUpdate(deps, release.TagName, schema, binary, err, func() error { return swapArchiveBack(dataDir, previous) })
 		}
 	}
 	return os.RemoveAll(previous)
@@ -174,22 +182,52 @@ func restartAndCheck(deps *updateDeps, binary string) error {
 	return deps.daemonHealthy()
 }
 
-func rollbackArchiveUpdate(deps *updateDeps, dataDir, previous, tag string, cause error) error {
+// rollBackUpdate puts the previous install back with swapBack and restarts
+// the binary restart names, if any. The previous build refuses a registry its failed successor migrated, so
+// when the schema moved past before: a daemon still holding the registry
+// keeps the update in place, unverified; otherwise the copy taken before the
+// migration goes back first, under the daemon lock, so a service manager
+// cannot start the new build on it before the swap.
+func rollBackUpdate(deps *updateDeps, tag string, before int, restart string, cause error, swapBack func() error) error {
+	release, restoredNote := func() {}, ""
+	if after := deps.registrySchema(); before > 0 && after > before {
+		unlock, err := deps.holdDaemonLock()
+		if err != nil {
+			return fmt.Errorf("update to %s is in place but unverified: %v; its daemon is running on the registry it moved from schema %d to %d, which the previous version cannot open; check it with 'agenthail daemon status'", tag, cause, before, after)
+		}
+		restored, err := deps.restoreRegistry(after)
+		if err != nil {
+			unlock()
+			return fmt.Errorf("update to %s failed (%v) after moving the registry from schema %d to %d, and the copy from before could not be restored, so the update stays in place: %v", tag, cause, before, after, err)
+		}
+		release = unlock
+		restoredNote = fmt.Sprintf("; the registry is back at schema %d from %s, and the one it replaced is kept as %s", restored.Schema, restored.From, restored.Aside)
+	}
+	err := swapBack()
+	release()
+	if err != nil {
+		return fmt.Errorf("update to %s failed (%v)%s; %w", tag, cause, restoredNote, err)
+	}
+	if restart != "" {
+		if err := restartAndCheck(deps, restart); err != nil {
+			return fmt.Errorf("update to %s failed (%v)%s; restored the previous install, but its daemon did not come back: %v", tag, cause, restoredNote, err)
+		}
+	}
+	return fmt.Errorf("update to %s failed and was rolled back%s; the previous version is in place again: %w", tag, restoredNote, cause)
+}
+
+func swapArchiveBack(dataDir, previous string) error {
 	failed := dataDir + ".failed"
 	if err := os.RemoveAll(failed); err != nil {
-		return fmt.Errorf("update to %s failed (%v); could not clear %s: %v; the previous install is at %s", tag, cause, failed, err, previous)
+		return fmt.Errorf("could not clear %s: %v; the previous install is at %s", failed, err, previous)
 	}
-	if err := os.Rename(dataDir, failed); err != nil {
-		return fmt.Errorf("update to %s failed (%v); could not move it aside: %v; the previous install is at %s", tag, cause, err, previous)
+	if err := os.Rename(dataDir, failed); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("could not move it aside: %v; the previous install is at %s", err, previous)
 	}
 	if err := os.Rename(previous, dataDir); err != nil {
-		return fmt.Errorf("update to %s failed (%v); could not restore %s from %s: %v", tag, cause, dataDir, previous, err)
+		return fmt.Errorf("could not restore %s from %s: %v", dataDir, previous, err)
 	}
-	if err := restartAndCheck(deps, filepath.Join(dataDir, "agenthail")); err != nil {
-		return fmt.Errorf("update to %s failed (%v); restored the previous install, but its daemon did not come back: %v", tag, cause, err)
-	}
-	os.RemoveAll(failed)
-	return fmt.Errorf("update to %s failed and was rolled back; the previous version is running again: %w", tag, cause)
+	return os.RemoveAll(failed)
 }
 
 func verifyArchiveLayout(dataDir string) error {

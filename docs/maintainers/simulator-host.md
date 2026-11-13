@@ -104,11 +104,13 @@ A daemon that runs no simulators, such as one on Linux, forwards each
 ([paired hosts](hosts.md)):
 
 - A daemon that can run simulators says so in `GET /api/v1/version`
-  (`simulators`). It probes once before its first answer and then answers from
-  a status at most a minute old, refreshed in the background. A paired host
+  (`simulators`). The version never waits on a probe: it leaves the field out
+  until the first probe finishes, then answers from the last status, and a
+  status a minute old starts one background probe that every caller shares. A
+  probe that runs out of time leaves the last status in place. A paired host
   reads it each time it connects, and again through the host-only
-  `GET /api/v1/simulator/status` when it picks a Mac and what it last read is
-  a minute old or more.
+  `GET /api/v1/simulator/status`, which does wait for a fresh probe, when it
+  picks a Mac and what it last read is a minute old or more.
 - The Mac is the one named by `simulatorHost` in the forwarding host's
   `~/.agenthail/dashboard.json`, read on every call; when it is unset, the only
   connected paired host that runs simulators. A `dashboard.json` that can't be
