@@ -3,7 +3,13 @@
 # Builds the Mac app's Swift product in release and prints the directory that
 # holds the binary and its resource bundles. The build lives in native/.build,
 # which release CI restores from the cache scripts/mac-swift-cache-key.sh names.
+# AGENTHAIL_WAIT_FOR_SWIFT_BUILD names a file that another run of this script,
+# started in the background, writes when it ends; this run starts only then.
 set -euo pipefail
+
+if [ -n "${AGENTHAIL_WAIT_FOR_SWIFT_BUILD:-}" ]; then
+	until [ -e "$AGENTHAIL_WAIT_FOR_SWIFT_BUILD" ]; do sleep 2; done
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SWIFT_ARCH="${1:-$(uname -m)}"

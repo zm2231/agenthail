@@ -14,15 +14,21 @@ fi
 profile="${AGENTHAIL_NOTARY_PROFILE:?AGENTHAIL_NOTARY_PROFILE is required}"
 submission="$pkg.notary-submission"
 
+json_field() {
+	jq -Rrs --arg field "$1" 'capture("(?s)(?<json>\\{.*\\})").json | fromjson | .[$field] // empty'
+}
+
 if [ "$action" = submit ]; then
 	echo "Submitting $(basename "$pkg") for notarization"
-	xcrun notarytool submit "$pkg" --keychain-profile "$profile" --no-s3-acceleration --output-format json | tail -n 1 | jq -er .id >"$submission"
-	echo "submission: $(cat "$submission")"
+	id="$(xcrun notarytool submit "$pkg" --keychain-profile "$profile" --no-s3-acceleration --output-format json | json_field id)"
+	[ -n "$id" ] || { echo "error: notarytool returned no submission id for $(basename "$pkg")" >&2; exit 1; }
+	echo "$id" >"$submission"
+	echo "submission: $id"
 	exit 0
 fi
 
 id="$(cat "$submission")"
-status="$(xcrun notarytool wait "$id" --keychain-profile "$profile" --timeout "${AGENTHAIL_NOTARY_TIMEOUT:-20m}" --output-format json | tail -n 1 | jq -r '.status // empty')" || true
+status="$(xcrun notarytool wait "$id" --keychain-profile "$profile" --timeout "${AGENTHAIL_NOTARY_TIMEOUT:-20m}" --output-format json | json_field status)" || true
 if [ "$status" != Accepted ]; then
 	echo "error: notarization $id of $(basename "$pkg") ended with status '${status:-unknown}'" >&2
 	xcrun notarytool log "$id" --keychain-profile "$profile" >&2 || true

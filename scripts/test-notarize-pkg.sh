@@ -17,12 +17,12 @@ echo "xcrun $*" >>"$CALLS"
 case "$1 $2" in
 "notarytool submit")
 	echo "Conducting pre-submission checks"
-	echo '{"id":"sub-1","message":"Successfully uploaded file"}'
+	printf '{\n  "id" : "sub-1",\n  "message" : "Successfully uploaded file"\n}\n'
 	;;
 "notarytool wait")
 	[ "$3" = sub-1 ] || exit 3
 	echo "Current status: In Progress..."
-	echo "{\"id\":\"sub-1\",\"status\":\"$STATUS\"}"
+	printf '{\n  "id" : "sub-1",\n  "status" : "%s"\n}\n' "$STATUS"
 	[ "$STATUS" = Accepted ]
 	;;
 "notarytool log") echo "notary log for $3" ;;

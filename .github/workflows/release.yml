@@ -133,10 +133,9 @@ jobs:
         with:
           path: native/.build
           key: ${{ steps.swift-cache.outputs.key }}
-      # The Swift build runs while the job sets up and the package build stages the runtime and the Go
-      # binary. SwiftPM locks native/.build, so the package build's own Swift build waits for this one.
+      # Build package's Swift build waits for swift-build.done (AGENTHAIL_WAIT_FOR_SWIFT_BUILD).
       - name: Start the Mac app's Swift build
-        run: scripts/build-mac-swift.sh arm64 >"$RUNNER_TEMP/swift-build.log" 2>&1 </dev/null &
+        run: (scripts/build-mac-swift.sh arm64 || true; touch "$RUNNER_TEMP/swift-build.done") >"$RUNNER_TEMP/swift-build.log" 2>&1 </dev/null &
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -184,6 +183,7 @@ jobs:
         timeout-minutes: 30
         env:
           AGENTHAIL_NOTARY_PROFILE: agenthail-ci
+          AGENTHAIL_WAIT_FOR_SWIFT_BUILD: ${{ runner.temp }}/swift-build.done
           AGENTHAIL_INSTALLER_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           AGENTHAIL_PUSH_RELAY_URL: ${{ vars.AGENTHAIL_PUSH_RELAY_URL }}
           AGENTHAIL_UPDATE_RELEASE_URL: https://api.github.com/repos/${{ github.repository }}/releases/latest
@@ -191,8 +191,7 @@ jobs:
         run: |
           : "${AGENTHAIL_PUSH_RELAY_URL:?missing AGENTHAIL_PUSH_RELAY_URL repository variable}"
           AGENTHAIL_NOTARY_WAIT=0 scripts/build-pkg.sh
-      # The archive builds and is notarized while the package's notarization finishes and the package
-      # is verified and installed. Its app build is warm and runs alone on native/.build.
+      # Runs alongside the package's notarization and checks; "Finish release archive" collects it.
       - name: Start the release archive
         env:
           AGENTHAIL_NOTARY_PROFILE: agenthail-ci
