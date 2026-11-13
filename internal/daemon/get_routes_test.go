@@ -24,7 +24,13 @@ import (
 )
 
 // routePatterns reads every pattern the daemon registers, from its source, so
-// a route added later is audited without anyone listing it here.
+// a route added later is audited without anyone listing it here. A pattern it
+// cannot read fails the test, except a helper's own parameter, whose callers
+// are read instead.
+var notOnABrowserOrigin = map[string]string{
+	"debug_socket.go": "the runtime profiles are served only on the daemon's 0600 Unix socket",
+}
+
 func routePatterns(t *testing.T) []string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -32,17 +38,28 @@ func routePatterns(t *testing.T) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	type registration struct {
+		call   *ast.CallExpr
+		params map[string]bool
+		at     token.Position
+	}
 	consts := map[string]string{}
-	var calls []*ast.CallExpr
+	var calls []registration
 	for _, source := range sources {
-		if strings.HasSuffix(source, "_test.go") {
+		if strings.HasSuffix(source, "_test.go") || notOnABrowserOrigin[source] != "" {
 			continue
 		}
 		file, err := parser.ParseFile(fset, source, nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
+		var stack []ast.Node
 		ast.Inspect(file, func(node ast.Node) bool {
+			if node == nil {
+				stack = stack[:len(stack)-1]
+				return true
+			}
+			stack = append(stack, node)
 			switch node := node.(type) {
 			case *ast.ValueSpec:
 				for i, name := range node.Names {
@@ -53,13 +70,31 @@ func routePatterns(t *testing.T) []string {
 					}
 				}
 			case *ast.CallExpr:
-				calls = append(calls, node)
+				params := map[string]bool{}
+				for _, enclosing := range stack {
+					var fields *ast.FieldList
+					switch fn := enclosing.(type) {
+					case *ast.FuncLit:
+						fields = fn.Type.Params
+					case *ast.FuncDecl:
+						fields = fn.Type.Params
+					}
+					if fields != nil {
+						for _, field := range fields.List {
+							for _, name := range field.Names {
+								params[name.Name] = true
+							}
+						}
+					}
+				}
+				calls = append(calls, registration{call: node, params: params, at: fset.Position(node.Pos())})
 			}
 			return true
 		})
 	}
 	var patterns []string
-	for _, call := range calls {
+	for _, found := range calls {
+		call := found.call
 		name := ""
 		switch fun := call.Fun.(type) {
 		case *ast.SelectorExpr:
@@ -74,12 +109,18 @@ func routePatterns(t *testing.T) []string {
 		case *ast.BasicLit:
 			if pattern, err := strconv.Unquote(arg.Value); err == nil && arg.Kind == token.STRING {
 				patterns = append(patterns, pattern)
+				continue
 			}
 		case *ast.Ident:
 			if pattern, ok := consts[arg.Name]; ok {
 				patterns = append(patterns, pattern)
+				continue
+			}
+			if found.params[arg.Name] {
+				continue
 			}
 		}
+		t.Fatalf("%s registers a route whose pattern this test cannot read; give it a literal or a string constant", found.at)
 	}
 	slices.Sort(patterns)
 	return slices.Compact(patterns)

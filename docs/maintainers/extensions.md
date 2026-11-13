@@ -133,8 +133,8 @@ current. Each source is fetched separately, so none waits on another.
 `sources({name: render, ...})` watches several, and `age(state)` words a
 state as "updated 2 min ago", "collecting" or "failed 1 min ago: ...,
 showing 5 min old". The seeded recipes build every page this way. Inline scripts and styles are allowed;
-the page may fetch only its own origin and may be framed only by it. The
-dashboard's own pages still refuse every frame.
+the page may fetch only its own origin and may be framed only by itself and
+the dashboard. The dashboard's own pages still refuse every frame.
 
 ## The page's own origin
 
