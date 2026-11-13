@@ -554,12 +554,21 @@ func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *h
 	}
 	host.setBuild(version.Identity)
 	host.setSimulators(version.Simulators)
-	d.hostAnswered(host, outage)
+	// During an outage only a snapshot proves the host serves again; a version that answers alone does not end it.
+	answered := outage.since.IsZero()
+	if answered {
+		d.hostAnswered(host, outage)
+	}
 	d.checkHostToken(ctx, host)
 	for ctx.Err() == nil {
 		seq, err := d.reconcileHost(ctx, host)
 		if err != nil {
 			return true, err
+		}
+		if !answered {
+			answered = true
+			d.hostAnswered(host, outage)
+			continue
 		}
 		d.drainHostDeliveries(ctx, host)
 		d.resumeHostMoves(ctx, host)
