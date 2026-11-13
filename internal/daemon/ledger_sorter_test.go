@@ -173,6 +173,28 @@ func TestAfterARestartAnOlderMessageStillWaitingForItsContextIsAskedAboutFirst(t
 	}
 }
 
+func TestAnOlderMessageWhoseContextLandsSecondIsStillAskedAboutFirst(t *testing.T) {
+	stub := &sorterStub{}
+	d, r, handler, p, search := sorterFixture(t, stub)
+	stub.setAnswer(fileTo(search))
+	d.contexts.wait = 10 * time.Second
+	older, newer := p.session(t, r, "claude-older"), p.session(t, r, "claude-newer")
+	runSorter(t, d)
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: older.ID, PromptID: "older", Prompt: "the older message"})
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: newer.ID, PromptID: "newer", Prompt: "the newer message"})
+	journal(t, r, newer.ID, "u-newer", map[string]any{"kind": "message", "role": "user", "promptId": "newer", "body": "the newer message", "ts": at(0)})
+	eventually(t, "the newer message's context", func() bool { _, ok := recordedContext(t, p, ledger.PromptRef("newer")); return ok })
+	time.Sleep(200 * time.Millisecond)
+	if asked := stub.asks(); len(asked) != 0 {
+		t.Fatalf("asked %+v while the older message still waited for its context", asked)
+	}
+	journal(t, r, older.ID, "u-older", map[string]any{"kind": "message", "role": "user", "promptId": "older", "body": "the older message", "ts": at(0)})
+	eventually(t, "both messages to be asked about", func() bool { return len(stub.asks()) == 2 })
+	if asked := stub.asks(); asked[0].Message != "the older message" || asked[1].Message != "the newer message" {
+		t.Fatalf("asked %q then %q, want the older message first though its context landed second", asked[0].Message, asked[1].Message)
+	}
+}
+
 func TestARecoveryThatFailsPartwayOwesOnlyWhatItHadNotAsked(t *testing.T) {
 	stub := &sorterStub{}
 	d, r, handler, p, search := sorterFixture(t, stub)
