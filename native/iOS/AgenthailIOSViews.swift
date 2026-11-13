@@ -909,9 +909,35 @@ struct IOSComposer: View, @MainActor Equatable {
     @State private var editor = IOSComposerEditor()
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.model === rhs.model && lhs.draft === rhs.draft && lhs.store === rhs.store
+#if DEBUG
+        BodyRuns.compared("composer", [
+            "refs": lhs.model === rhs.model && lhs.draft === rhs.draft && lhs.store === rhs.store,
+            "session": lhs.session == rhs.session, "context": lhs.context == rhs.context, "queuedRow": lhs.showQueuedRow == rhs.showQueuedRow,
+        ])
+#endif
+        return lhs.model === rhs.model && lhs.draft === rhs.draft && lhs.store === rhs.store
             && lhs.session == rhs.session && lhs.context == rhs.context && lhs.showQueuedRow == rhs.showQueuedRow
     }
+
+#if DEBUG
+    private func probeComposerInputs() {
+        let id = session.id
+        BodyRuns.changed("in.composer.session", id, session)
+        BodyRuns.changed("in.composer.context", id, context)
+        BodyRuns.changed("in.composer.queuedRow", id, showQueuedRow)
+        BodyRuns.observe("obs.composer.receipt", id) {
+            _ = model.deliveryStatus[session.id] != nil && model.failedSends[session.id] == nil && model.pendingSends[session.id]?.contains(where: \.unconfirmed) != true
+        }
+        BodyRuns.observe("obs.composer.attachments", id) { _ = model.composerAttachments.isEmpty }
+        BodyRuns.observe("obs.composer.attachmentProblem", id) { _ = model.attachmentProblem }
+        BodyRuns.observe("obs.composer.stash", id) { _ = model.stashes[session.id] }
+        BodyRuns.observe("obs.composer.steering", id) { _ = steering }
+        BodyRuns.observe("obs.composer.sending", id) { _ = sending }
+        BodyRuns.observe("obs.composer.canSend", id) { _ = canSend }
+        BodyRuns.watch("pub.composer.draft", draft)
+        BodyRuns.watch("pub.composer.store", store)
+    }
+#endif
 
     private var steering: Bool { context.busy && !context.waiting && context.capabilities.steer && model.busyDelivery(for: context.sessionID) == "steer" }
     private var sending: Bool { model.pendingSends[session.id]?.first.map { !$0.unconfirmed } == true && draft.text.isEmpty }
@@ -995,6 +1021,7 @@ struct IOSComposer: View, @MainActor Equatable {
     var body: some View {
 #if DEBUG
         let _ = BodyRuns.hit("IOSComposer")
+        let _ = probeComposerInputs()
 #endif
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {

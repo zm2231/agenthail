@@ -1,4 +1,6 @@
 #if DEBUG
+import Combine
+import Observation
 import SwiftUI
 
 @MainActor
@@ -12,6 +14,42 @@ enum BodyRuns {
     static func hit(_ name: String) {
         guard enabled else { return }
         counts[name, default: 0] += 1
+    }
+
+    private static var seen: [String: Any] = [:]
+    private static var armed: Set<String> = []
+    private static var watched: [String: AnyCancellable] = [:]
+
+    static func changed<Value: Equatable>(_ name: String, _ id: String, _ value: Value) {
+        guard enabled else { return }
+        let key = name + "|" + id
+        if let old = seen[key] as? Value, old != value { hit(name) }
+        seen[key] = value
+    }
+
+    static func compared(_ name: String, _ fields: KeyValuePairs<String, Bool>) {
+        guard enabled else { return }
+        hit("eq." + name)
+        for (field, same) in fields where !same { hit("eq.\(name).\(field)") }
+    }
+
+    static func observe(_ name: String, _ id: String, _ read: () -> Void) {
+        guard enabled else { return }
+        let key = name + "|" + id
+        guard armed.insert(key).inserted else { return }
+        withObservationTracking(read) {
+            MainActor.assumeIsolated {
+                armed.remove(key)
+                hit(name)
+            }
+        }
+    }
+
+    static func watch(_ name: String, _ object: some ObservableObject) {
+        guard enabled else { return }
+        let key = name + "|\(ObjectIdentifier(object))"
+        guard watched[key] == nil else { return }
+        watched[key] = object.objectWillChange.sink { _ in MainActor.assumeIsolated { hit(name) } }
     }
 
     static var summary: String {
