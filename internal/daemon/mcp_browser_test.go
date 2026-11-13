@@ -30,7 +30,7 @@ type browserFixture struct {
 	token  string
 }
 
-func newBrowserFixture(t *testing.T) *browserFixture {
+func runTestBrowserHost(t *testing.T, d *Daemon) *browserhost.Manager {
 	t.Helper()
 	home, err := os.MkdirTemp("", "bh")
 	if err != nil {
@@ -49,7 +49,6 @@ func newBrowserFixture(t *testing.T) *browserFixture {
 		}
 	}
 	launch := browserhost.Launch{Node: testnode.Path(t), Script: filepath.Join(testnode.BrowserHost(t), "host.mjs"), Version: "test", Env: os.Environ()}
-	d, _, _, parent, child := daemonFixture(t)
 	manager := &browserhost.Manager{Home: home, Launch: func() (browserhost.Launch, error) { return launch, nil }}
 	d.SetBrowserHost(manager)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -62,6 +61,13 @@ func newBrowserFixture(t *testing.T) *browserFixture {
 		cancel()
 		<-done
 	})
+	return manager
+}
+
+func newBrowserFixture(t *testing.T) *browserFixture {
+	t.Helper()
+	d, _, _, parent, child := daemonFixture(t)
+	manager := runTestBrowserHost(t, d)
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/long" {
 			fmt.Fprint(w, `<!doctype html><title>Long</title><ul>`)

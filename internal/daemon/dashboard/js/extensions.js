@@ -3,8 +3,84 @@ import { responseError } from "./http.js";
 import { toast } from "./feedback.js";
 import { load } from "./dashboard-state.js";
 import { selectSession } from "./session-selection.js";
+import { SharedEventSource } from "./shared-stream.js";
 
-const state = { selected: "", view: null };
+const state = { selected: "", view: null, changes: null, head: "", patches: new Map() };
+
+export function describeChange(change) {
+  const parts = (change.extensions ?? []).map((files) => {
+    const count = (files.added?.length ?? 0) + (files.updated?.length ?? 0) + (files.deleted?.length ?? 0);
+    if (files.created) return `created ${files.id}`;
+    if (files.removed) return `removed ${files.id}`;
+    return `changed ${count} ${count === 1 ? "file" : "files"} in ${files.id}`;
+  });
+  return parts.join(", ") || "no extension files";
+}
+
+async function readChanges() {
+  const response = await fetch("/api/v1/extensions/history?limit=30", { credentials: "same-origin" });
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()).changes ?? [];
+}
+
+async function changeAction(body) {
+  try {
+    await postExtensions(body);
+  } catch (error) {
+    toast(error.message);
+  }
+  await loadExtensions();
+}
+
+async function togglePatch(rev) {
+  if (state.patches.has(rev)) {
+    state.patches.delete(rev);
+  } else {
+    const response = await fetch(`/api/v1/extensions/history/${encodeURIComponent(rev)}`, { credentials: "same-origin" });
+    if (!response.ok) {
+      toast((await responseError(response)).message);
+      return;
+    }
+    const shown = await response.json();
+    state.patches.set(rev, shown.patch + (shown.truncated ? "\n[cut: the change is larger than this view]" : ""));
+  }
+  renderChanges();
+}
+
+function renderChanges() {
+  const list = $("#extensions-changes");
+  if (!list) return;
+  list.replaceChildren(element("h2", { textContent: "Changes" }));
+  if (state.changes === null) return;
+  if (!state.changes.length) {
+    list.append(element("div", { className: "empty-card", textContent: "No changes recorded yet." }));
+    return;
+  }
+  state.changes.forEach((change) => {
+    const buttons = [];
+    const show = element("button", { type: "button", className: "soft-button", textContent: state.patches.has(change.rev) ? "Hide" : "Show" });
+    show.addEventListener("click", () => togglePatch(change.rev));
+    buttons.push(show);
+    if (change.pending) {
+      const keep = element("button", { type: "button", className: "soft-button", textContent: "Keep" });
+      keep.addEventListener("click", () => changeAction({ action: "keep", rev: change.rev }));
+      buttons.push(keep);
+    }
+    if (!change.root) {
+      const undo = element("button", { type: "button", className: "soft-button", textContent: "Undo" });
+      undo.addEventListener("click", () => changeAction({ action: "undo", rev: change.rev }));
+      buttons.push(undo);
+    }
+    const when = new Date(change.time).toLocaleString();
+    const card = element("section", { className: "settings-card extension-change" }, [
+      element("p", { className: "extension-title", textContent: `${change.author}: ${change.message}` }),
+      element("p", { textContent: `${describeChange(change)} · ${when}${change.pending ? " · waiting for you" : ""}` }),
+      element("div", { className: "extension-change-actions" }, buttons),
+    ]);
+    if (state.patches.has(change.rev)) card.append(element("pre", { className: "extension-change-patch", textContent: state.patches.get(change.rev) }));
+    list.append(card);
+  });
+}
 
 async function readExtensions() {
   const response = await fetch("/api/v1/extensions", { credentials: "same-origin" });
@@ -117,12 +193,30 @@ async function act(body) {
 }
 
 export async function loadExtensions() {
-  try {
-    state.view = await readExtensions();
-  } catch (error) {
-    state.view = { host: "unavailable", hostError: error.message, extensions: [] };
-  }
+  const [view, changes] = await Promise.allSettled([readExtensions(), readChanges()]);
+  state.view = view.status === "fulfilled" ? view.value : { host: "unavailable", hostError: view.reason.message, extensions: [] };
+  state.changes = changes.status === "fulfilled" ? changes.value : [];
+  state.head = state.changes[0]?.rev ?? "";
   render();
+  renderChanges();
+}
+
+// The shared stream replays recent events when it connects, so a frame is
+// reloaded only when the folder's newest change actually moved.
+async function extensionsChanged(event) {
+  if ($("#extensions-view")?.classList.contains("hidden")) return;
+  let changed = [];
+  try {
+    changed = JSON.parse(event.data).data?.extensions ?? [];
+  } catch {
+    changed = [];
+  }
+  const before = state.head;
+  await loadExtensions();
+  if (!before || state.head === before) return;
+  const selected = state.selected.replace(/^(page|mount):/, "").split("/")[0];
+  const frame = $("#extensions-frame");
+  if (frame?.dataset.page && changed.includes(selected)) frame.src = frame.dataset.page;
 }
 
 async function build(form) {
@@ -152,6 +246,7 @@ async function build(form) {
 }
 
 export function bindExtensions() {
+  new SharedEventSource().addEventListener("extension.changed", extensionsChanged);
   $("#extensions-reload")?.addEventListener("click", () => act({ action: "reload" }));
   $("#extensions-build")?.addEventListener("input", (event) => delete event.currentTarget.dataset.key);
   $("#extensions-build")?.addEventListener("submit", (event) => {

@@ -242,7 +242,15 @@ func (d *Daemon) applyExtensionChange(ctx context.Context, rev string) {
 	if err := d.reloadExtensions(ctx); err != nil && !errors.Is(err, errExtensionHostDown) {
 		d.log.Printf("extensions: reload after %s: %s", rev, err)
 	}
-	d.publishEvent("extension.changed", "", map[string]string{"rev": rev})
+	ids := []string{}
+	if history, err := d.extensionHistory(); err == nil && history != nil {
+		if changes, err := history.Log(1, rev); err == nil && len(changes) == 1 {
+			for _, files := range changes[0].Extensions {
+				ids = append(ids, files.ID)
+			}
+		}
+	}
+	d.publishEvent("extension.changed", "", map[string]any{"rev": rev, "extensions": ids})
 }
 
 func (d *Daemon) holdExtensionChange(sessionID, rev string) error {
@@ -398,7 +406,14 @@ func (d *Daemon) answerExtensionChange(ctx context.Context, ask registry.Ask, re
 		return actionResult{}, staleRequest()
 	}
 	if response.Choices[0] == extensionUndo {
-		if _, err := d.undoExtensionChange(ctx, held.Revs[len(held.Revs)-1]); err != nil {
+		newest := func(pending map[string]pendingExtensionChanges) (string, error) {
+			current := pending[ask.SessionID]
+			if current.AskID != ask.ID || len(current.Revs) == 0 {
+				return "", staleRequest()
+			}
+			return current.Revs[len(current.Revs)-1], nil
+		}
+		if _, err := d.undoPickedExtensionChange(ctx, newest); err != nil {
 			return actionResult{}, err
 		}
 		return actionOK(map[string]any{"ok": true, "result": map[string]any{"requestId": ask.ID, "outcome": "undone"}}), nil
@@ -443,6 +458,10 @@ func (d *Daemon) keepExtensionChanges(ask registry.Ask, p principal) error {
 }
 
 func (d *Daemon) undoExtensionChange(ctx context.Context, rev string) (extension.Undone, error) {
+	return d.undoPickedExtensionChange(ctx, func(map[string]pendingExtensionChanges) (string, error) { return rev, nil })
+}
+
+func (d *Daemon) undoPickedExtensionChange(ctx context.Context, pick func(map[string]pendingExtensionChanges) (string, error)) (extension.Undone, error) {
 	history, err := d.extensionHistory()
 	if err != nil {
 		return extension.Undone{}, actionFailed(http.StatusServiceUnavailable, "unavailable", err.Error())
@@ -450,7 +469,27 @@ func (d *Daemon) undoExtensionChange(ctx context.Context, rev string) (extension
 	if history == nil {
 		return extension.Undone{}, invalidRequest("there is no extensions folder")
 	}
-	undone, err := history.Undo(rev)
+	// Choosing the change, reverting it and forgetting its pending entry share
+	// the lock Keep takes, so a Keep sees all of it or none.
+	c := d.extensions.changes
+	c.mu.Lock()
+	var undone extension.Undone
+	pending, err := c.readPending()
+	rev := ""
+	if err == nil {
+		rev, err = pick(pending)
+	}
+	if err == nil {
+		undone, err = history.Undo(rev)
+	}
+	if err == nil {
+		d.forgetPendingExtensionChangeLocked(undone.Reverted.Rev)
+	}
+	c.mu.Unlock()
+	var picked *actionError
+	if errors.As(err, &picked) {
+		return extension.Undone{}, err
+	}
 	if errors.Is(err, extension.ErrUndoLater) || errors.Is(err, extension.ErrUnrecorded) {
 		return extension.Undone{}, actionFailed(http.StatusConflict, "conflict", err.Error())
 	}
@@ -471,8 +510,73 @@ func (d *Daemon) undoExtensionChange(ctx context.Context, rev string) (extension
 		}
 	}
 	d.applyExtensionChange(ctx, undone.Reverted.Rev)
-	d.forgetPendingExtensionChange(undone.Reverted.Rev)
 	return undone, nil
+}
+
+func (d *Daemon) keepExtensionChange(rev string, p principal) error {
+	c := d.extensions.changes
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pending, err := c.readPending()
+	if err != nil {
+		return err
+	}
+	for sessionID, held := range pending {
+		index := slices.Index(held.Revs, rev)
+		if index < 0 {
+			continue
+		}
+		held.Revs = slices.Delete(held.Revs, index, index+1)
+		ask, found, err := d.Registry.Ask(held.AskID)
+		if err != nil {
+			return err
+		}
+		open := found && ask.State == registry.AskOpen
+		if len(held.Revs) == 0 {
+			delete(pending, sessionID)
+			if open {
+				if _, err := d.Registry.ClaimAsk(ask.ID, registry.AskAnswer{Answers: map[string]string{ask.Questions[0].Question: extensionKeep}}, registry.AskToPerson, p.actor(), time.Now()); err != nil {
+					return err
+				}
+				if err := d.Registry.RecordAskApplied(ask.ID, "applied", "", time.Now()); err != nil {
+					d.log.Printf("extensions: record the answer to %s: %s", ask.ID, err)
+				}
+				d.sendWithdraws()
+			}
+		} else {
+			pending[sessionID] = held
+			if open {
+				if title, questions, err := d.extensionChangeAsk(sessionID, held.Revs); err == nil {
+					if _, err := d.Registry.RewordAsk(ask.ID, title, questions); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		if err := c.writePending(pending); err != nil {
+			return err
+		}
+		d.publishAsk(sessionID)
+		return nil
+	}
+	return invalidRequest("change " + rev + " is not waiting to be kept")
+}
+
+func (d *Daemon) pendingExtensionRevs() map[string]bool {
+	c := d.extensions.changes
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pending, err := c.readPending()
+	if err != nil {
+		return nil
+	}
+	revs := map[string]bool{}
+	for _, held := range pending {
+		for _, rev := range held.Revs {
+			revs[rev] = true
+		}
+	}
+	return revs
 }
 
 // A call recorded after a turn's commit can check that turn's version, so
@@ -499,10 +603,8 @@ func (d *Daemon) rewordExtensionChangeAsks() {
 	}
 }
 
-func (d *Daemon) forgetPendingExtensionChange(rev string) {
+func (d *Daemon) forgetPendingExtensionChangeLocked(rev string) {
 	c := d.extensions.changes
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	pending, err := c.readPending()
 	if err != nil {
 		d.log.Printf("extensions: read pending changes: %s", err)
