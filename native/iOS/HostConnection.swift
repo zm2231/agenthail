@@ -31,6 +31,7 @@ final class HostConnection {
     var shownReachable: Bool { reachable || holding }
     private(set) var reconnecting = false
     private(set) var connectionError: String?
+    private(set) var problem: HostProblem?
     private(set) var pushRelayURL: URL?
     private(set) var build: AgenthailBuild?
     private(set) var catalogStreamCursor: UInt64 = 0
@@ -101,7 +102,6 @@ final class HostConnection {
         lastEventID = 0
         reconnecting = true
         streamOpen = false
-        if reachable { grace.contact() }
         delegate?.hostDidChange(self)
         connectionTask = Task {
             let backoff = EventRetryBackoff()
@@ -110,7 +110,6 @@ final class HostConnection {
                 do {
                     let version = try await api.version(requiring: AgenthailAPI.snapshotProtocol, timeout: AgenthailAPI.probeTimeout)
                     guard !Task.isCancelled, !stopped else { return }
-                    grace.contact()
                     build = version.build
                     if let value = version.pushRelayUrl, let url = URL(string: value) {
                         pushRelayURL = url
@@ -197,17 +196,26 @@ final class HostConnection {
                 catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
             }
             adoptCurrentView(readCurrent)
-            if settles { connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The computer could not refresh its agents.") : nil }
+            if settles {
+                connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The computer could not refresh its agents.") : nil
+                problem = nil
+            }
             delegate?.hostDidChange(self)
             await delegate?.hostRefreshed(self)
             return true
         } catch {
             guard !stopped else { return false }
-            if ConnectionGrace.isTransport(error) {
-                drops?.failed(host: id, path: "request", error: ConnectionDropLog.code(error), elapsed: Date().timeIntervalSince(started), shown: shownReachable ? .held : .offline)
+            let elapsed = Date().timeIntervalSince(started)
+            let settles = !error.isCancellation && !Task.isCancelled && refreshOrder.settles(request)
+            if ConnectionGrace.isTransport(error), settles, !streamOpen {
+                recordFailure(error, during: "request", elapsed: elapsed)
+                return false
             }
-            guard !error.isCancellation, !Task.isCancelled, refreshOrder.settles(request) else { return false }
-            connectionError = error.localizedDescription
+            if ConnectionGrace.isTransport(error) {
+                drops?.failed(host: id, path: "request", error: ConnectionDropLog.code(error), elapsed: elapsed, shown: shownReachable ? .held : .offline)
+            }
+            guard settles else { return false }
+            connectionError = HostProblem(error, waited: elapsed)?.message ?? error.localizedDescription
             delegate?.hostDidChange(self)
             return false
         }
@@ -294,6 +302,7 @@ final class HostConnection {
         reachable = false
         holding = false
         reconnecting = false
+        problem = nil
         connectionError = hostProtocol < AgenthailAPI.snapshotProtocol ? "Update Agenthail on \(name) to connect." : apiError.localizedDescription
         delegate?.hostDidChange(self)
         return true
@@ -304,6 +313,7 @@ final class HostConnection {
             recovered(by: "stream probe")
             reconnecting = true
             connectionError = nil
+            problem = nil
             delegate?.hostDidChange(self)
             return
         }
@@ -341,7 +351,8 @@ final class HostConnection {
         reachable = false
         holding = held
         reconnecting = held
-        connectionError = held ? nil : error.localizedDescription
+        problem = held ? nil : HostProblem(error, waited: elapsed)
+        connectionError = held ? nil : problem?.message ?? error.localizedDescription
         delegate?.hostDidChange(self)
     }
 

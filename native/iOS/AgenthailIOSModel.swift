@@ -253,6 +253,8 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     @ObservationIgnored private var pushFailures: [String: String] = [:]
     @ObservationIgnored private var deviceRegistrationFailure: String?
     @ObservationIgnored private var appActive = true
+    @ObservationIgnored private var inactiveSince: Date?
+    @ObservationIgnored var tailnetUp: () -> Bool = { Tailnet.isUp() }
     @ObservationIgnored private var repairingPush: Set<String> = []
     @ObservationIgnored private let notificationDefaults: UserDefaults
     private static let notificationsOffKey = "notificationsTurnedOff"
@@ -387,10 +389,9 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         creationHosts = catalog.hosts.map { host in
             CreationHost(id: host.id, name: host.name, state: catalog.target(forHost: host.id) == nil ? (host.state == "connected" ? "unreachable" : host.state) : "connected")
         }
-        let failing = ordered.filter { $0.connectionError != nil }
-        if failing.isEmpty { connectionError = nil }
-        else if ordered.count == 1 { connectionError = failing[0].connectionError }
-        else { connectionError = failing.map { "\($0.name): \($0.connectionError ?? "")" }.joined(separator: "\n") }
+        connectionError = HostProblem.summary(ordered.compactMap { connection in
+            connection.connectionError.map { HostProblem.Failing(name: connection.name, error: $0, problem: connection.problem, endpoint: connection.credential.endpoint) }
+        }, hostCount: ordered.count, tailnetUp: tailnetUp)
         reconnecting = ordered.contains(where: \.reconnecting)
         deriveParts(ordered)
         if let voice = voiceHostID, connections[voice] == nil { voiceHostID = nil }
@@ -2374,6 +2375,13 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     func setAppActive(_ active: Bool) {
         appActive = active
+        if active, let since = inactiveSince {
+            inactiveSince = nil
+            // Contact from before a long absence says nothing about the network now, so the first failure after it is shown at once.
+            for connection in connections.values where Date().timeIntervalSince(since) >= connection.grace.window { connection.grace.forget() }
+        } else if !active, inactiveSince == nil {
+            inactiveSince = Date()
+        }
         if !active {
             for id in Array(pushRetries.keys) { cancelPushSetup(id) }
             return

@@ -9,6 +9,7 @@ final class HostDropTests: XCTestCase {
         HostDropProtocol.state.reset()
         let configuration = FixtureScope.open(self).configuration([HostDropProtocol.self])
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration), drops: .isolated())
+        model.tailnetUp = { true }
         model.connect()
         for _ in 0..<200 where !(HostDropProtocol.state.streaming && model.snapshot?.sessions.first?.host?.state == "connected") {
             try await Task.sleep(for: .milliseconds(20))
@@ -174,6 +175,43 @@ final class HostDropTests: XCTestCase {
         XCTAssertFalse(connection.holding)
     }
 
+    func testAProbeThatAnswersWhileTheSnapshotTimesOutEndsUpShownUnreachable() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        let connection = try XCTUnwrap(model.connection("hdrop"))
+        connection.grace.window = 1
+        HostDropProtocol.state.setSnapshotTimesOut(true)
+        model.resumeConnection()
+        let clock = ContinuousClock()
+        let end = clock.now + .seconds(10)
+        while clock.now < end, model.snapshot?.sessions.first?.host?.state != "unreachable" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(model.snapshot?.sessions.first?.host?.state, "unreachable", "answering probes kept a computer that serves nothing shown connected")
+        XCTAssertTrue((model.connectionError ?? "").hasPrefix("Didn't answer within"), "the reason: \(model.connectionError ?? "nil")")
+    }
+
+    func testAFailureAfterALongAbsenceIsShownAtOnce() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        let connection = try XCTUnwrap(model.connection("hdrop"))
+        model.setAppActive(false)
+        try await Task.sleep(for: .milliseconds(100))
+        connection.grace.window = 0.05
+        HostDropProtocol.state.setDown(true)
+        model.setAppActive(true)
+        connection.grace.window = 30
+        model.resumeConnection()
+        let seen = try await states(of: model, for: .seconds(2))
+        XCTAssertEqual(seen, ["connected", "unreachable"])
+        XCTAssertFalse(connection.holding, "contact from before the absence held the computer")
+        XCTAssertEqual(model.connectionError, "The connection dropped.")
+        model.tailnetUp = { false }
+        model.resumeConnection()
+        for _ in 0..<100 where model.connectionError != HostProblem.tailnetOff { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.connectionError, HostProblem.tailnetOff, "a tailnet computer failing with Tailscale off says so once")
+    }
+
     func testSubagentsThatFailedWhileHeldReloadOnceAndDoNotLoop() async throws {
         let model = try await connectedModel()
         defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
@@ -263,12 +301,15 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
         private var downNow = false
         private var refused = false
         private var snapshotsFail = false
+        private var snapshotsTimeOut = false
         private var subagentsFail = false
         private var drops: [Data] = []
-        func reset() { lock.withLock { open = []; failing = 0; failureDelay = 0; timeouts = []; downNow = false; refused = false; snapshotsFail = false; subagentsFail = false; drops = [] } }
+        func reset() { lock.withLock { open = []; failing = 0; failureDelay = 0; timeouts = []; downNow = false; refused = false; snapshotsFail = false; snapshotsTimeOut = false; subagentsFail = false; drops = [] } }
         func postedDrops(_ body: Data) { lock.withLock { drops.append(body) } }
         var dropUploads: [Data] { lock.withLock { drops } }
         func setSnapshotFails(_ value: Bool) { lock.withLock { snapshotsFail = value } }
+        func setSnapshotTimesOut(_ value: Bool) { lock.withLock { snapshotsTimeOut = value } }
+        func timesOut(snapshotFor query: String?) -> Bool { lock.withLock { snapshotsTimeOut && query?.contains("parentId") != true } }
         func setSubagentsFail(_ value: Bool) { lock.withLock { subagentsFail = value } }
         func fails(snapshotFor query: String?) -> Bool {
             lock.withLock { (query?.contains("parentId") == true) ? subagentsFail : snapshotsFail }
@@ -312,6 +353,10 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
             Self.state.opened(self)
             client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/event-stream"])!, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Data(": connected\n\n".utf8))
+            return
+        }
+        if path == "/api/v1/snapshot", Self.state.timesOut(snapshotFor: request.url!.query) {
+            client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
             return
         }
         if path == "/api/v1/snapshot", Self.state.fails(snapshotFor: request.url!.query) {

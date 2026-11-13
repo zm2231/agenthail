@@ -33,8 +33,7 @@ final class ConnectionDrops {
         else if path.usesInterfaceType(.cellular) { interface = "cellular" }
         else if path.usesInterfaceType(.wiredEthernet) { interface = "wired" }
         else { interface = "other" }
-        let vpn = path.availableInterfaces.contains { $0.type == .other || $0.name.hasPrefix("utun") || $0.name.hasPrefix("ipsec") }
-        return NetworkSnapshot(interface: interface, vpn: vpn, expensive: path.isExpensive, constrained: path.isConstrained)
+        return NetworkSnapshot(interface: interface, vpn: Tailnet.isUp(), expensive: path.isExpensive, constrained: path.isConstrained)
     }
 
     func failed(host: String, via: String? = nil, path: String, error: String, elapsed: TimeInterval?, shown: ConnectionDrop.Shown) {

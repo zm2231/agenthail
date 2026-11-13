@@ -24,12 +24,11 @@ final class LiveSoakUITests: XCTestCase {
         let upHost = try pairLiveHost(1, control: control, in: app)
         let downRow = liveRow("Check the release notes", host: downHost, in: app).firstMatch
         let upRow = liveRow("Check the release notes", host: upHost, in: app).firstMatch
-        requireLive(downRow.waitForExistence(timeout: 30) && upRow.waitForExistence(timeout: 30), "both hosts list their conversations", app)
+        requireLive(reveal(downRow, in: app, timeout: 30) && reveal(upRow, in: app, timeout: 30), "both hosts list their conversations", app)
 
         try control.stop(host: 0)
         addTeardownBlock { try? control.start(host: 0) }
-        let unavailable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Unavailable"), object: downRow)
-        requireLive(XCTWaiter.wait(for: [unavailable], timeout: 90) == .completed, "the stopped host's conversation is marked unavailable", app)
+        requireLive(reveal(downRow, in: app, value: "Unavailable", timeout: 90), "the stopped host's conversation is marked unavailable", app)
 
         let end = Date().addingTimeInterval(seconds)
         var iteration = 0
@@ -41,19 +40,21 @@ final class LiveSoakUITests: XCTestCase {
             }
 
             app.tab("Sessions").tapWhenReady(timeout: 20)
-            app.buttons["scope-all"].tapWhenReady(timeout: 20)
+            let scopeAll = app.buttons["scope-all"]
+            for _ in 0..<6 where !scopeAll.isHittable { app.swipeDown() }
+            scopeAll.tapWhenReady(timeout: 20)
             app.swipeUp()
             app.swipeDown()
             up("sessions list")
 
-            if downRow.waitForExistence(timeout: 10), downRow.isHittable {
+            if reveal(downRow, in: app, timeout: 10), downRow.isHittable {
                 downRow.tap()
                 _ = app.buttons["session-summary"].waitForExistence(timeout: 10)
                 app.backToSessions()
             }
             up("unreachable host's conversation")
 
-            requireLive(upRow.waitForExistence(timeout: 60), "the running host's conversation is listed", app)
+            requireLive(reveal(upRow, in: app, timeout: 60), "the running host's conversation is listed", app)
             upRow.tapWhenReady(timeout: 30)
             let text = "Soak \(iteration) " + UUID().uuidString.prefix(6)
             try control.reply(host: 1, conversation: 0, text: text)
