@@ -15,7 +15,7 @@ concurrency:
 jobs:
   ios-live:
     if: github.repository == 'zm2231/agenthail' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, macOS, ARM64, agenthail]
+    runs-on: [self-hosted, macOS, ARM64, agenthail, agenthail-ios]
     timeout-minutes: 60
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-url }}
