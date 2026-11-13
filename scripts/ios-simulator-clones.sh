@@ -16,7 +16,7 @@ name="$(xcrun simctl list devices --json | jq -r --arg udid "$udid" '[.devices[]
 	exit 1
 }
 xcrun simctl --set testing list devices --json |
-	jq -r --arg name "$name" '.devices[][] | select(.name | test("^Clone [0-9]+ of ") and endswith(" of " + $name)) | .udid' |
+	jq -r --arg name "$name" '.devices[][] | select(.name | test("^Clone [0-9]+ of ") and sub("^Clone [0-9]+ of "; "") == $name) | .udid' |
 	while read -r clone; do
 		echo "Deleting simulator clone $clone of $name"
 		xcrun simctl --set testing shutdown "$clone" 2>/dev/null || true
