@@ -66,26 +66,28 @@ func (d *Daemon) queueContext(job contextJob) {
 	}()
 }
 
-func (d *Daemon) startMessageContexts(ctx context.Context) <-chan struct{} {
+func (d *Daemon) startMessageContexts(ctx context.Context) (recovered, done <-chan struct{}) {
 	c := d.contexts
 	c.mu.Lock()
 	c.ctx = ctx
 	c.running.Add(1)
 	c.mu.Unlock()
+	recovering := make(chan struct{})
 	go func() {
 		defer c.running.Done()
+		defer close(recovering)
 		d.recoverContexts(ctx)
 	}()
-	done := make(chan struct{})
+	stopped := make(chan struct{})
 	go func() {
 		<-ctx.Done()
 		c.mu.Lock()
 		c.stopped = true
 		c.mu.Unlock()
 		c.running.Wait()
-		close(done)
+		close(stopped)
 	}()
-	return done
+	return recovering, stopped
 }
 
 func (d *Daemon) recoverContexts(ctx context.Context) {

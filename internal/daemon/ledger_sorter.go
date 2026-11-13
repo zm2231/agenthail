@@ -19,6 +19,8 @@ const (
 	sorterDeadline = 10 * time.Second
 	sorterRecovery = 24 * time.Hour
 	sorterRetry    = 5 * time.Minute
+	// contextLanding covers the whole second a capture time is stored to and the write after a context's wait.
+	contextLanding = 2 * time.Second
 )
 
 type sortJob struct {
@@ -46,10 +48,12 @@ type ledgerSorter struct {
 	dropped   int
 	configErr string
 	owed      map[owedSort]sortJob
+	held      map[owedSort]sortJob
+	wake      time.Time
 }
 
 func newLedgerSorter() *ledgerSorter {
-	return &ledgerSorter{jobs: make(chan sortJob, sorterQueue), now: time.Now, retry: sorterRetry, owed: map[owedSort]sortJob{}}
+	return &ledgerSorter{jobs: make(chan sortJob, sorterQueue), now: time.Now, retry: sorterRetry, owed: map[owedSort]sortJob{}, held: map[owedSort]sortJob{}}
 }
 
 func (d *Daemon) queueSort(key, utteranceID string, seq int64, at time.Time) {
@@ -65,10 +69,13 @@ func (d *Daemon) queueSort(key, utteranceID string, seq int64, at time.Time) {
 		s.dropped++
 		s.owe(job)
 		s.mu.Unlock()
+		s.wakeAt(s.now())
 	}
 }
 
-func (d *Daemon) startLedgerSorter(ctx context.Context) <-chan struct{} {
+// The sorter starts after recovery has recorded the contexts owed at start, which it does oldest first, so an older
+// message is never asked about after a newer one whose context was already there.
+func (d *Daemon) startLedgerSorter(ctx context.Context, contextsRecovered <-chan struct{}) <-chan struct{} {
 	done := make(chan struct{})
 	if d.sorter == nil {
 		close(done)
@@ -77,6 +84,11 @@ func (d *Daemon) startLedgerSorter(ctx context.Context) <-chan struct{} {
 	d.oweRecentCaptures()
 	go func() {
 		defer close(done)
+		select {
+		case <-contextsRecovered:
+		case <-ctx.Done():
+			return
+		}
 		d.runLedgerSorter(ctx)
 	}()
 	return done
@@ -86,15 +98,25 @@ func (d *Daemon) runLedgerSorter(ctx context.Context) {
 	s := d.sorter
 	retry := time.NewTicker(s.retry)
 	defer retry.Stop()
+	wake := time.NewTimer(time.Hour)
+	wake.Stop()
+	var armed time.Time
 	d.sortOwed(ctx)
 	for {
+		if next := s.takeWake(); !next.IsZero() && (armed.IsZero() || next.Before(armed)) {
+			armed = next
+			wake.Reset(time.Until(next))
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case job := <-s.jobs:
 			d.sortQueued(ctx, job)
 		case <-retry.C:
-			d.sortOwed(ctx)
+			d.sortWaiting(ctx)
+		case <-wake.C:
+			armed = time.Time{}
+			d.sortWaiting(ctx)
 		}
 	}
 }
@@ -124,13 +146,44 @@ func (d *Daemon) oweRecentCaptures() {
 
 func (d *Daemon) sortQueued(ctx context.Context, job sortJob) {
 	config, ok := d.sorterConfig()
-	if !ok || d.sorter.isOwed(job) {
+	if !ok || d.sorter.isOwed(job) || d.sorter.isHeld(job) {
+		return
+	}
+	if until, held := d.heldBehind(job); held {
+		d.sorter.hold(job, until)
 		return
 	}
 	if !d.sortAndSettle(ctx, config, job) {
 		return
 	}
+	d.releaseHeld(ctx, config)
 	d.sortOwedWith(ctx, config)
+}
+
+func (d *Daemon) sortWaiting(ctx context.Context) {
+	if len(d.sorter.heldJobs()) == 0 && len(d.sorter.owedJobs()) == 0 {
+		return
+	}
+	if config, ok := d.sorterConfig(); ok {
+		d.releaseHeld(ctx, config)
+		d.sortOwedWith(ctx, config)
+	}
+}
+
+func (d *Daemon) releaseHeld(ctx context.Context, config goalsort.Config) {
+	for _, job := range d.sorter.heldJobs() {
+		if ctx.Err() != nil {
+			return
+		}
+		if until, held := d.heldBehind(job); held {
+			d.sorter.hold(job, until)
+			continue
+		}
+		d.sorter.release(job)
+		if !d.sortAndSettle(ctx, config, job) {
+			return
+		}
+	}
 }
 
 func (d *Daemon) sortOwed(ctx context.Context) {
@@ -152,10 +205,40 @@ func (d *Daemon) sortOwedWith(ctx context.Context, config goalsort.Config) {
 			d.sorter.settle(job)
 			continue
 		}
+		if until, held := d.heldBehind(job); held {
+			d.sorter.wakeAt(until)
+			continue
+		}
 		if !d.sortAndSettle(ctx, config, job) {
 			return
 		}
 	}
+}
+
+// heldBehind keeps a project's messages asked about in the order they were captured: a message waits while an
+// earlier one in its project, not yet asked about, is still within its context's wait, until the first such wait ends.
+// A message already owed is not waited on: the owed pass asks in order, and one whose ask failed is retried later.
+func (d *Daemon) heldBehind(job sortJob) (time.Time, bool) {
+	window := d.contexts.wait + contextLanding
+	now := d.sorter.now()
+	pending, err := d.ledgerStore().LocalProvisionalSince(job.key, now.Add(-window))
+	if err != nil {
+		d.log.Printf("ledger sorter: list earlier messages to sort in %s: %s", job.key, err)
+		return time.Time{}, false
+	}
+	var until time.Time
+	for _, earlier := range pending {
+		if earlier.Seq >= job.seq {
+			break
+		}
+		if d.sorter.isOwed(sortJob{key: job.key, utteranceID: earlier.Ref}) {
+			continue
+		}
+		if end := earlier.At.Add(window); now.Before(end) && (until.IsZero() || end.Before(until)) {
+			until = end
+		}
+	}
+	return until, !until.IsZero()
 }
 
 func (d *Daemon) sortAndSettle(ctx context.Context, config goalsort.Config, job sortJob) bool {
@@ -229,6 +312,48 @@ func (d *Daemon) sortOne(ctx context.Context, config goalsort.Config, job sortJo
 
 func (s *ledgerSorter) owe(job sortJob) {
 	s.owed[owedSort{key: job.key, utteranceID: job.utteranceID}] = job
+}
+
+func (s *ledgerSorter) hold(job sortJob, until time.Time) {
+	s.mu.Lock()
+	s.held[owedSort{key: job.key, utteranceID: job.utteranceID}] = job
+	s.mu.Unlock()
+	s.wakeAt(until)
+}
+
+func (s *ledgerSorter) isHeld(job sortJob) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, held := s.held[owedSort{key: job.key, utteranceID: job.utteranceID}]
+	return held
+}
+
+func (s *ledgerSorter) release(job sortJob) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.held, owedSort{key: job.key, utteranceID: job.utteranceID})
+}
+
+func (s *ledgerSorter) heldJobs() []sortJob {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.SortedFunc(maps.Values(s.held), func(a, b sortJob) int { return cmp.Compare(a.seq, b.seq) })
+}
+
+func (s *ledgerSorter) wakeAt(until time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.wake.IsZero() || until.Before(s.wake) {
+		s.wake = until
+	}
+}
+
+func (s *ledgerSorter) takeWake() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := s.wake
+	s.wake = time.Time{}
+	return next
 }
 
 func (s *ledgerSorter) isOwed(job sortJob) bool {
