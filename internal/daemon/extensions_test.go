@@ -497,26 +497,43 @@ func TestTheExtensionHostRunsWithNoExtensionsAndLoadsTheFirstOnOneReload(t *test
 	}
 }
 
-func TestAnExtensionHostThatKeepsFailingIsLoggedOnceAndAgainWhenItRecovers(t *testing.T) {
+func TestAnExtensionHostThatKeepsCrashingIsLoggedOnceAndAgainWhenItRecovers(t *testing.T) {
+	home := extensionTestHome(t)
+	crash := filepath.Join(home, "crash.mjs")
+	if err := os.WriteFile(crash, []byte("console.error('crashed at ' + Date.now()); process.exit(3);\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var logged syncLog
-	var failing atomic.Bool
+	var crashing atomic.Bool
 	var launches atomic.Int32
-	failing.Store(true)
-	f := startExtensionDaemon(t, extensionTestHome(t), extensionDaemonOptions{log: &logged, launch: func(real nodehost.Launch) (nodehost.Launch, error) {
+	crashing.Store(true)
+	f := startExtensionDaemon(t, home, extensionDaemonOptions{log: &logged, launch: func(real nodehost.Launch) (nodehost.Launch, error) {
 		launches.Add(1)
-		if failing.Load() {
-			return nodehost.Launch{}, errors.New("node is not installed")
+		if crashing.Load() {
+			real.Script = crash
 		}
 		return real, nil
 	}})
 	eventually(t, "the host retries on backoff", func() bool { return launches.Load() >= 4 })
-	if n := strings.Count(logged.String(), "extension host: node is not installed"); n != 1 {
-		t.Fatalf("a failure retried %d times was logged %d times:\n%s", launches.Load(), n, logged.String())
+	failures := func() []string {
+		var lines []string
+		for line := range strings.Lines(logged.String()) {
+			if strings.HasPrefix(line, "extension host: ") && !strings.Contains(line, "loaded again") {
+				lines = append(lines, line)
+			}
+		}
+		return lines
+	}
+	if lines := failures(); len(lines) != 1 || !strings.Contains(lines[0], "crashed at") {
+		t.Fatalf("a crash repeated %d times was logged as %q", launches.Load(), lines)
 	}
 
-	failing.Store(false)
+	crashing.Store(false)
 	eventually(t, "the host runs", func() bool { return f.d.extensionsView().Host == "running" })
 	if n := strings.Count(logged.String(), "extension host: loaded again"); n != 1 {
 		t.Fatalf("recovery logged %d times:\n%s", n, logged.String())
+	}
+	if lines := failures(); len(lines) != 1 {
+		t.Fatalf("failures logged after recovery: %q", lines)
 	}
 }

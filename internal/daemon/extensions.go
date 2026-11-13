@@ -97,8 +97,12 @@ func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, e
 			runtime.mu.Lock()
 			runtime.up = false
 			runtime.hostErr = err.Error()
-			fresh := runtime.hostErr != runtime.loggedErr
-			runtime.loggedErr = runtime.hostErr
+			failure := err.Error()
+			if hostErr, ok := errors.AsType[*nodehost.HostError](err); ok {
+				failure = hostErr.Cause.Error()
+			}
+			fresh := failure != runtime.loggedErr
+			runtime.loggedErr = failure
 			runtime.mu.Unlock()
 			if fresh {
 				d.log.Printf("extension host: %s", err)

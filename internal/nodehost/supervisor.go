@@ -135,7 +135,7 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 	go func() { exited <- cmd.Wait() }()
 	defer stop(cmd, owner, exited)
 	if err := s.awaitHello(ctx, launch, cmd.Process.Pid, exited); err != nil {
-		return fmt.Errorf("start the %s: %w%s", s.Name, err, s.logTail())
+		return s.withLogTail(fmt.Errorf("start the %s: %w", s.Name, err))
 	}
 	if s.Ready != nil {
 		readyCtx, cancel := context.WithTimeout(ctx, startTimeout)
@@ -150,7 +150,7 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 		return ctx.Err()
 	case err := <-exited:
 		exited <- err
-		return fmt.Errorf("the %s exited: %v%s", s.Name, err, s.logTail())
+		return s.withLogTail(fmt.Errorf("the %s exited: %v", s.Name, err))
 	case <-restart:
 		return fmt.Errorf("the %s was restarted because its state was uncertain", s.Name)
 	}
@@ -231,13 +231,30 @@ func (s *Supervisor) awaitHello(ctx context.Context, launch Launch, pid int, exi
 	})
 }
 
-func (s *Supervisor) logTail() string {
+// HostError is a host process failure followed by the end of the host's log.
+// Cause leaves out the log, which grows with every attempt, so retries that
+// fail the same way compare equal.
+type HostError struct {
+	Cause error
+	Tail  string
+}
+
+func (e *HostError) Error() string {
+	if e.Tail == "" {
+		return e.Cause.Error()
+	}
+	return e.Cause.Error() + ": " + e.Tail
+}
+
+func (e *HostError) Unwrap() error { return e.Cause }
+
+func (s *Supervisor) withLogTail(cause error) error {
 	data, err := os.ReadFile(s.LogPath())
-	if err != nil || len(data) == 0 {
-		return ""
+	if err != nil {
+		data = nil
 	}
 	if len(data) > 1024 {
 		data = data[len(data)-1024:]
 	}
-	return ": " + strings.TrimSpace(string(data))
+	return &HostError{Cause: cause, Tail: strings.TrimSpace(string(data))}
 }
