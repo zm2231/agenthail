@@ -80,29 +80,24 @@ func installDarwinArchiveUpdate(deps *updateDeps, release *latestRelease, execut
 		env = []string{"AGENTHAIL_DATA_DIR=" + named, "AGENTHAIL_INSTALL_DIR=" + filepath.Dir(wrapper)}
 	}
 	running := deps.daemonExpected()
-	rollback := func(cause error) error {
-		failed := dataDir + ".failed"
-		if err := os.RemoveAll(failed); err != nil {
-			return fmt.Errorf("update to %s failed (%v); could not clear %s: %v; the previous install is at %s", release.TagName, cause, failed, err, previous)
+	schema := deps.registrySchema()
+	restart := ""
+	if running {
+		restart = filepath.Join(dataDir, "agenthail")
+	}
+	swapBack := func() error {
+		if err := swapArchiveBack(dataDir, previous); err != nil {
+			return err
 		}
-		if err := os.Rename(dataDir, failed); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("update to %s failed (%v); could not move it aside: %v; the previous install is at %s", release.TagName, cause, err, previous)
-		}
-		if err := os.Rename(previous, dataDir); err != nil {
-			return fmt.Errorf("update to %s failed (%v); could not restore %s from %s: %v", release.TagName, cause, dataDir, previous, err)
-		}
-		os.RemoveAll(failed)
 		if wrapper != "" {
 			if err := os.WriteFile(wrapper, wrapperBody, 0755); err != nil {
-				return fmt.Errorf("update to %s failed (%v); restored the previous install, but not its command at %s: %v", release.TagName, cause, wrapper, err)
+				return fmt.Errorf("restored the previous install, but not its command at %s: %v", wrapper, err)
 			}
 		}
-		if running {
-			if err := restartAndCheck(deps, filepath.Join(dataDir, "agenthail")); err != nil {
-				return fmt.Errorf("update to %s failed (%v); restored the previous install, but its daemon did not come back: %v", release.TagName, cause, err)
-			}
-		}
-		return fmt.Errorf("update to %s failed and was rolled back; the previous version is in place again: %w", release.TagName, cause)
+		return nil
+	}
+	rollback := func(cause error) error {
+		return rollBackUpdate(deps, release.TagName, schema, restart, cause, swapBack)
 	}
 	if err := deps.runInstaller(filepath.Join(next, "install.sh"), env); err != nil {
 		return rollback(fmt.Errorf("the release's installer: %w", err))

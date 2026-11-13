@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -275,4 +277,53 @@ func TestARestoredSessionsNextCallWaitsForTheArchiveRelease(t *testing.T) {
 		defer f.d.simOwnersMu.Unlock()
 		return len(f.d.simOwners) == 0
 	})
+}
+
+func TestTheVersionAnswersWhileASimulatorProbeIsSlow(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	commands := &simCommands{}
+	commands.hold("xcrun simctl help")
+	d.SetSimulatorHost(simhost.New(simhost.Config{Exec: commands.exec, OutRoot: t.TempDir(), LockDir: t.TempDir(), GOOS: "darwin"}))
+	version := func() apiVersionResponse {
+		t.Helper()
+		answered := make(chan apiVersionResponse, 1)
+		go func() {
+			response := httptest.NewRecorder()
+			d.apiVersionHandler(response, httptest.NewRequest(http.MethodGet, "/api/v1/version", nil))
+			var v apiVersionResponse
+			_ = json.Unmarshal(response.Body.Bytes(), &v)
+			answered <- v
+		}()
+		select {
+		case v := <-answered:
+			return v
+		case <-time.After(2 * time.Second):
+			t.Fatal("the version waited on the simulator probe")
+			return apiVersionResponse{}
+		}
+	}
+	if v := version(); v.Simulators != nil {
+		t.Fatalf("simulators before any probe finished = %v", *v.Simulators)
+	}
+	<-commands.held
+	if v := version(); v.Simulators != nil {
+		t.Fatalf("simulators while the probe runs = %v", *v.Simulators)
+	}
+	close(commands.release)
+	testkit.Eventually(t, "the finished probe shows in the version", 5*time.Second, func() bool {
+		v := version()
+		return v.Simulators != nil && *v.Simulators
+	})
+	d.simStatusMu.Lock()
+	d.simStatusAt = time.Now().Add(-2 * time.Minute)
+	d.simStatusMu.Unlock()
+	commands.hold("xcrun simctl help")
+	if v := version(); v.Simulators == nil || !*v.Simulators {
+		t.Fatalf("a stale status was dropped while it is reprobed: %v", v.Simulators)
+	}
+	<-commands.held
+	if v := version(); v.Simulators == nil || !*v.Simulators {
+		t.Fatalf("simulators while the reprobe runs = %v", v.Simulators)
+	}
+	close(commands.release)
 }

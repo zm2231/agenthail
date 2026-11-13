@@ -102,7 +102,7 @@ type apiVersionResponse struct {
 	PushRelayURL      string `json:"pushRelayUrl"`
 	HostID            string `json:"hostId"`
 	HostName          string `json:"hostName"`
-	Simulators        bool   `json:"simulators,omitempty"`
+	Simulators        *bool  `json:"simulators,omitempty"`
 	buildinfo.Identity
 }
 
@@ -148,7 +148,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/queue", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.mobileQueueHandler))))
 	mux.HandleFunc("/api/v1/triggers", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.apiTriggersHandler)))
 	mux.HandleFunc("/api/v1/inbox", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.inboxHandler))))
-	mux.HandleFunc("/api/v1/history",d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.dashboardHistoryHandler))))
+	mux.HandleFunc("/api/v1/history", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.dashboardHistoryHandler))))
 	mux.HandleFunc("/api/v1/prompts", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.promptsHandler))))
 	mux.HandleFunc("/api/v1/session-files", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.sessionFilesHandler))))
 	mux.HandleFunc("/api/v1/actions", d.apiV1Guard(dashboard, "control", d.actionsHTTPHandler(actionFormatAPIv1)))
@@ -200,7 +200,7 @@ func (d *Daemon) apiVersionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := d.hostIdentity()
-	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolMinimum, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name, Simulators: d.runsSimulators(r.Context()), Identity: d.build})
+	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolMinimum, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name, Simulators: d.knownSimulators(), Identity: d.build})
 }
 
 func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {

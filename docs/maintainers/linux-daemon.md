@@ -68,8 +68,14 @@ Claude Remote Control and Notion depend on the Python sidecar and a signed-in de
 2. downloads the arch archive and checksum, verifies the checksum, and extracts only regular files and directories under the archive root (release packaging refuses any other entry type, so npm bin links are not staged)
 3. checks that the new binary's `version --json` reports the release tag
 4. renames the install directory to `<dir>.previous` and moves the new one into place
-5. when a daemon is running or a service is installed, runs `<dir>/agenthail daemon restart` with the new binary and waits up to 20 seconds for `/api/v1/version` to answer (or, with the dashboard disabled, for the daemon to stay up for 2 seconds)
-6. on success deletes `<dir>.previous`; on failure moves the new directory aside, restores the previous one, restarts it, and reports the failure
+5. when a daemon is running or a service is installed, runs `<dir>/agenthail daemon restart` with the new binary and waits for `/api/v1/version` to answer within 60 seconds of the new daemon's pid appearing (or, with the dashboard disabled, for the daemon to stay up for 2 seconds)
+6. on success deletes `<dir>.previous`; on failure it compares the registry's schema with the one before the restart:
+   - unchanged: moves the new directory aside, restores the previous one, restarts it, and reports the failure
+   - migrated, and the new daemon still holds the registry: keeps the update, because the previous version cannot open the migrated registry, and fails with "in place but unverified"
+   - no registry could be read before, and the new daemon has exited leaving one: keeps the update, since there is no earlier copy, and reports the failure
+   - migrated, and the new daemon has exited: under the daemon lock, restores the registry copy taken before the migration (the replaced one is kept beside it) and the previous directory, then restarts it and reports the failure
+
+The macOS release archive's update follows the same rollback through its own installer.
 
 ## Verifying on a Linux host
 

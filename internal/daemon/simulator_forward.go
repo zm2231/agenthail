@@ -39,24 +39,24 @@ func (d *Daemon) apiSimulatorStatusHandler(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, simulatorStatusResponse{Simulators: d.runsSimulators(r.Context())})
+	ready := d.simHost != nil && d.simHost.Local() && d.simulatorStatus(r.Context()).Ready
+	writeDashboardJSON(w, http.StatusOK, simulatorStatusResponse{Simulators: ready})
 }
 
-// runsSimulators answers from the last status after the first probe, so /api/v1/version waits on xcrun at most once.
-func (d *Daemon) runsSimulators(ctx context.Context) bool {
+// knownSimulators is whether this host runs simulators by its last probe,
+// without waiting on one: nil until a first probe ends. A missing or stale
+// status starts a probe.
+func (d *Daemon) knownSimulators() *bool {
 	if d.simHost == nil || !d.simHost.Local() {
-		return false
+		return new(false)
 	}
+	d.probeSimulators()
 	d.simStatusMu.Lock()
-	ready, never, stale := d.simStatus.Ready, d.simStatusAt.IsZero(), time.Since(d.simStatusAt) >= time.Minute
-	d.simStatusMu.Unlock()
-	if never {
-		return d.simulatorStatus(ctx).Ready
+	defer d.simStatusMu.Unlock()
+	if d.simStatusAt.IsZero() {
+		return nil
 	}
-	if stale {
-		go d.simulatorStatus(context.WithoutCancel(ctx))
-	}
-	return ready
+	return new(d.simStatus.Ready)
 }
 
 func (d *Daemon) apiSimulatorHandler(w http.ResponseWriter, r *http.Request) {

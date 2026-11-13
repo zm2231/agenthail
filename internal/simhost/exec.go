@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type Command struct {
@@ -33,8 +34,11 @@ func (e *CommandError) Error() string {
 
 func (e *CommandError) Unwrap() error { return e.Err }
 
+const commandWaitDelay = 2 * time.Second
+
 func RunCommand(ctx context.Context, cmd Command) ([]byte, error) {
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
+	c.WaitDelay = commandWaitDelay
 	if len(cmd.Env) > 0 {
 		c.Env = append(os.Environ(), cmd.Env...)
 	}

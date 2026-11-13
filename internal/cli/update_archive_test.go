@@ -13,9 +13,43 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/registry"
 )
+
+// updateRegistry stands in for the registry an update's daemon migrates and
+// for the daemon lock, recording the installed binary at each lock change.
+type updateRegistry struct {
+	schema int
+	backup int
+	held   bool
+	binary string
+	events []string
+}
+
+func (r *updateRegistry) wire(deps *updateDeps) {
+	deps.registrySchema = func() int { return r.schema }
+	deps.holdDaemonLock = func() (func(), error) {
+		if r.held {
+			return nil, errors.New("the daemon holds the lock")
+		}
+		r.events = append(r.events, "lock with "+r.installed())
+		return func() { r.events = append(r.events, "unlock with "+r.installed()) }, nil
+	}
+	deps.restoreRegistry = func(target int) (registry.RestoredRegistry, error) {
+		r.events = append(r.events, fmt.Sprintf("restore before v%d", target))
+		r.schema = r.backup
+		return registry.RestoredRegistry{Schema: r.backup, From: fmt.Sprintf("registry-before-v%d.db.zst", target), Aside: fmt.Sprintf("registry-v%d.db", target)}, nil
+	}
+}
+
+func (r *updateRegistry) installed() string {
+	data, _ := os.ReadFile(r.binary)
+	return string(data)
+}
 
 type archiveEntry struct {
 	name string
@@ -73,6 +107,7 @@ type archiveUpdateFixture struct {
 	app      *App
 	dataDir  string
 	restarts []string
+	registry *updateRegistry
 }
 
 func newArchiveUpdateFixture(t *testing.T, archive []byte) *archiveUpdateFixture {
@@ -125,6 +160,8 @@ func newArchiveUpdateFixture(t *testing.T, archive []byte) *archiveUpdateFixture
 		},
 		daemonHealthy: func() error { return nil },
 	}
+	fixture.registry = &updateRegistry{schema: 96, backup: 96, binary: filepath.Join(dataDir, "agenthail")}
+	fixture.registry.wire(deps)
 	fixture.app = &App{Version: "v0.1.7", update: deps}
 	return fixture
 }
@@ -309,5 +346,60 @@ func TestLinuxUpdateRefusesToSwapWhenServiceManagerIsUnreachable(t *testing.T) {
 	}
 	if _, err := os.Stat(fixture.dataDir + ".previous"); !os.IsNotExist(err) {
 		t.Fatalf("previous install moved: %v", err)
+	}
+}
+
+func TestLinuxUpdateRestoresTheRegistryItsStoppedDaemonMigratedBeforeRollingBack(t *testing.T) {
+	fixture := newArchiveUpdateFixture(t, releaseArchive(t, "v0.2.0"))
+	healthChecks := 0
+	fixture.app.update.daemonHealthy = func() error {
+		healthChecks++
+		if healthChecks == 1 {
+			fixture.registry.schema = 97
+			return errors.New("daemon did not answer on its API")
+		}
+		return nil
+	}
+	err := fixture.app.Run([]string{"update"})
+	if err == nil || !strings.Contains(err.Error(), "rolled back") || !strings.Contains(err.Error(), "registry is back at schema 96") {
+		t.Fatalf("err=%v", err)
+	}
+	want := []string{"lock with " + versionScript("v0.2.0"), "restore before v97", "unlock with " + versionScript("v0.1.7")}
+	if strings.Join(fixture.registry.events, "|") != strings.Join(want, "|") {
+		t.Fatalf("events=%q, want the registry restored and the previous binary in place before the lock is let go", fixture.registry.events)
+	}
+	if len(fixture.restarts) != 2 || fixture.restarts[1] != versionScript("v0.1.7") || fixture.installedVersion(t) != versionScript("v0.1.7") {
+		t.Fatalf("restarts=%q installed=%q", fixture.restarts, fixture.installedVersion(t))
+	}
+}
+
+func TestLinuxUpdateStaysUnverifiedWhenItsRunningDaemonMigratedTheRegistry(t *testing.T) {
+	fixture := newArchiveUpdateFixture(t, releaseArchive(t, "v0.2.0"))
+	fixture.app.update.daemonHealthy = func() error {
+		fixture.registry.schema, fixture.registry.held = 97, true
+		return errors.New("daemon did not answer on its API")
+	}
+	err := fixture.app.Run([]string{"update"})
+	if err == nil || !strings.Contains(err.Error(), "in place but unverified") || !strings.Contains(err.Error(), "from schema 96 to 97") {
+		t.Fatalf("err=%v", err)
+	}
+	if fixture.installedVersion(t) != versionScript("v0.2.0") || len(fixture.restarts) != 1 || len(fixture.registry.events) != 0 {
+		t.Fatalf("installed=%q restarts=%q events=%q; the update must stay with its running daemon", fixture.installedVersion(t), fixture.restarts, fixture.registry.events)
+	}
+}
+
+func TestLinuxUpdateKeepsTheUpdateWhenItsDaemonMadeTheOnlyRegistry(t *testing.T) {
+	fixture := newArchiveUpdateFixture(t, releaseArchive(t, "v0.2.0"))
+	fixture.registry.schema = -1
+	fixture.app.update.daemonHealthy = func() error {
+		fixture.registry.schema = 97
+		return errors.New("daemon did not answer on its API")
+	}
+	err := fixture.app.Run([]string{"update"})
+	if err == nil || !strings.Contains(err.Error(), "the update stays in place") {
+		t.Fatalf("err=%v", err)
+	}
+	if fixture.installedVersion(t) != versionScript("v0.2.0") || len(fixture.restarts) != 1 || slices.Contains(fixture.registry.events, "restore before v97") {
+		t.Fatalf("installed=%q restarts=%q events=%q", fixture.installedVersion(t), fixture.restarts, fixture.registry.events)
 	}
 }
