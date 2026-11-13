@@ -97,6 +97,7 @@ func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 		}
 		lock, err := m.lock()
 		if err == nil {
+			lockHeld = false
 			started, err := m.start(ctx, client, launch, lock)
 			ready = started
 			return err == nil, err

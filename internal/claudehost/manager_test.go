@@ -658,6 +658,14 @@ func TestCloseIdleRefusesAWorkingSessionAndLeavesItsTurnRunning(t *testing.T) {
 }
 
 func TestAHostThatNeverAnswersIsNamedWithOnlyWhatItLogged(t *testing.T) {
+	for _, heldFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("lock held first %v", heldFirst), func(t *testing.T) {
+			hostThatNeverAnswers(t, heldFirst)
+		})
+	}
+}
+
+func hostThatNeverAnswers(t *testing.T, heldFirst bool) {
 	home := t.TempDir()
 	dir := filepath.Join(home, ".agenthail", "claude-host")
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -673,6 +681,17 @@ func TestAHostThatNeverAnswersIsNamedWithOnlyWhatItLogged(t *testing.T) {
 	manager := &claudehost.Manager{Home: home, Launch: func() (claudehost.Launch, error) {
 		return claudehost.Launch{Node: testnode.Path(t), Script: script, Claude: "claude", Version: "v9.9.9"}, nil
 	}}
+	if heldFirst {
+		holder, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_CREATE|os.O_RDONLY, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			t.Fatal(err)
+		}
+		var once sync.Once
+		t.Cleanup(claudehost.OnLockTaken(func() { once.Do(func() { holder.Close() }) }))
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, err := manager.Ensure(ctx)
@@ -680,7 +699,7 @@ func TestAHostThatNeverAnswersIsNamedWithOnlyWhatItLogged(t *testing.T) {
 		t.Fatal("a host that never listens was reported ready")
 	}
 	text := err.Error()
-	if strings.Contains(text, "holds its lock") || strings.Contains(text, "v0.2.133") || !strings.Contains(text, "v9.9.9 this daemon started as pid") || !strings.Contains(text, "starting pid") {
+	if strings.Contains(text, "holds") || strings.Contains(text, "v0.2.133") || !strings.Contains(text, "v9.9.9 this daemon started as pid") || !strings.Contains(text, "starting pid") {
 		t.Fatalf("error = %q, want the host this daemon started and only what it logged", text)
 	}
 }
