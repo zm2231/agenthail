@@ -634,6 +634,7 @@ struct SessionScreen: View {
                             .rebuilt(group.id, generation: rowsGeneration)
                             .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).probesScrollJump(group.id)
                             .countsAppearances("groupAppeared")
+                            .countsDisappearances("groupDisappeared")
                             .onAppear { if group.id == groups.last?.id { openingRowAppeared(group.id) } }.id(group.id)
                     }
                 }
