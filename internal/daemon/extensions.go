@@ -414,6 +414,7 @@ type extensionView struct {
 	State        string                        `json:"state"`
 	Error        string                        `json:"error,omitempty"`
 	Page         string                        `json:"page,omitempty"`
+	App          *extension.App                `json:"app,omitempty"`
 	Capabilities []string                      `json:"capabilities"`
 	Pending      []string                      `json:"pendingCapabilities,omitempty"`
 	Actions      []string                      `json:"actions"`
@@ -451,6 +452,7 @@ func (d *Daemon) extensionsView() extensionsView {
 			Pending:      loaded.pending,
 			Actions:      append([]string{}, loaded.host.Actions...),
 			EventError:   loaded.host.LastEventError,
+			App:          loaded.ext.Manifest.App,
 		}
 		if item.Label == "" {
 			item.Label = loaded.ext.ID

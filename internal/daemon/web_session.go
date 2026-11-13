@@ -177,4 +177,3 @@ func (d *Daemon) apiWebSessionHandler(dashboard *dashboardServer) http.HandlerFu
 		writeDashboardJSON(w, http.StatusOK, webSessionView{Name: webSessionCookieName, Value: value, Path: "/", ExpiresAt: expiresAt, Scopes: scopes})
 	}
 }
-

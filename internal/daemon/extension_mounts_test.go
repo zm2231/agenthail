@@ -490,3 +490,15 @@ func TestRemoteAccessOffWithNoDaemonRunningWithdrawsTheMountsItPublished(t *test
 		t.Fatalf("after withdrawing, mounts.json holds %v %v; want the port kept and not published", ports, err)
 	}
 }
+
+func TestTheExtensionsViewCarriesWhatEachMountOffersAsAnApp(t *testing.T) {
+	f := startMountFixture(t)
+	manifest := `{"label": "Fixture", "app": {"label": "Board", "icon": "chart.bar"}, "mounts": [{"name": "app", "label": "App", "upstream": "http://127.0.0.1:9", "app": {"icon": "terminal", "order": 3}}]}`
+	if err := os.WriteFile(filepath.Join(f.dir, "extension.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.sync(t)
+	if app := f.mount(t).App; app == nil || app.Icon != "terminal" || app.Order != 3 {
+		t.Fatalf("the mount offers %+v", app)
+	}
+}
