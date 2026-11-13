@@ -35,8 +35,9 @@ function ensureSourceTable(db, id) {
 }
 
 // A failed run keeps the last good value, so a page goes on showing it
-// beside the error.
-async function collectSource(db, id, name, timeoutSeconds, collect) {
+// beside the error. A collector that outlives its timeout still holds the
+// source, so no second one starts beside it.
+async function collectSource(db, id, name, timeoutSeconds, collect, held) {
   ensureSourceTable(db, id);
   const table = sourceTable(id);
   const started = Date.now();
@@ -49,9 +50,17 @@ async function collectSource(db, id, name, timeoutSeconds, collect) {
         fail(new Error(`no answer in ${timeoutSeconds} s`));
       }, timeoutSeconds * 1000);
     });
-    const value = await Promise.race([Promise.resolve().then(() => collect({ signal: abort.signal, now: new Date() })), deadline]);
+    if (held.run) throw new Error(`the collection started ${Math.round((started - held.since) / 1000)} s ago has not finished`);
+    const run = Promise.resolve().then(() => collect({ signal: abort.signal, now: new Date() }));
+    held.run = run;
+    held.since = started;
+    run.then(() => {}, () => {}).finally(() => {
+      if (held.run === run) held.run = null;
+    });
+    const value = await Promise.race([run, deadline]);
     const encoded = JSON.stringify(value ?? null);
-    if (encoded.length > MAX_SOURCE_BYTES) throw new Error(`the value is ${encoded.length} bytes, over the ${MAX_SOURCE_BYTES}-byte limit`);
+    const bytes = Buffer.byteLength(encoded, 'utf8');
+    if (bytes > MAX_SOURCE_BYTES) throw new Error(`the value is ${bytes} bytes, over the ${MAX_SOURCE_BYTES}-byte limit`);
     db.prepare(`INSERT INTO ${table} (name, value, at, error, error_at, took_ms) VALUES (?, ?, ?, NULL, NULL, ?)
       ON CONFLICT(name) DO UPDATE SET value = excluded.value, at = excluded.at, error = NULL, error_at = NULL, took_ms = excluded.took_ms`).run(name, encoded, Date.now(), Date.now() - started);
   } catch (error) {
@@ -150,7 +159,8 @@ class Loaded {
           throw failure('invalid', `source ${name}: timeoutSeconds must be a whole number from 1 to ${MAX_SOURCE_TIMEOUT_SECONDS} and below everySeconds`);
         }
         if (self.jobs.has(name)) throw failure('invalid', `${name} is registered twice as a job or source`);
-        self.jobs.set(name, { name, everySeconds, source: true, run: () => collectSource(db, self.id, name, timeout, collect) });
+        const held = { run: null, since: 0 };
+        self.jobs.set(name, { name, everySeconds, source: true, run: () => collectSource(db, self.id, name, timeout, collect, held) });
       },
       sources: () => readSources(db, self.id, true),
       async call(tool, args = {}) {

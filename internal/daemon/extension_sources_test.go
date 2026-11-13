@@ -17,18 +17,21 @@ import path from 'node:path';
 
 export default function (ah: any) {
   const file = (name: string) => path.join(ah.dir, name);
+  const counter = (name: string) => path.join(ah.dir, '..', '..', name);
+  const count = (name: string) => {
+    const runs = fs.existsSync(counter(name)) ? Number(fs.readFileSync(counter(name), 'utf8')) + 1 : 1;
+    fs.writeFileSync(counter(name), String(runs));
+    return runs;
+  };
   ah.source({ name: 'fast', everySeconds: 600, collect: () => 'fast-value' });
   if (fs.existsSync(file('with-slow'))) ah.source({ name: 'slow', everySeconds: 60, timeoutSeconds: 30, collect: async () => {
+    count('slow-runs');
     while (!fs.existsSync(file('release'))) await new Promise(resolve => setTimeout(resolve, 20));
     return 'slow-value';
   } });
   ah.source({ name: 'file', everySeconds: 600, collect: () => fs.readFileSync(file('value'), 'utf8') });
   ah.source({ name: 'stuck', everySeconds: 10, timeoutSeconds: 1, collect: () => new Promise(() => {}) });
-  ah.source({ name: 'loads', everySeconds: 600, collect: () => {
-    const runs = fs.existsSync(file('runs')) ? Number(fs.readFileSync(file('runs'), 'utf8')) + 1 : 1;
-    fs.writeFileSync(file('runs'), String(runs));
-    return runs;
-  } });
+  ah.source({ name: 'loads', everySeconds: 600, collect: () => count('runs') });
   ah.action('all', () => Object.fromEntries(Object.entries(ah.sources()).map(([name, s]: [string, any]) => [name, s.state])));
 }
 `
@@ -84,6 +87,14 @@ func TestASourceKeepsItsLastValueBesideTheErrorAndStopsAtItsTimeout(t *testing.T
 		t.Fatalf("the file source holds %+v", got)
 	}
 
+	if err := os.WriteFile(filepath.Join(f.workdir, "value"), []byte(strings.Repeat("€", 200_000)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.runJob(t, "file")
+	if big := f.source(t, "file"); big.State != "failed" || string(big.Value) != `"one"` || !strings.Contains(big.Error, "over the 524288-byte limit") {
+		t.Fatalf("a value of 600 KB in UTF-8 but 200 K characters was not refused: state %s error %q", big.State, big.Error)
+	}
+
 	if err := os.Remove(filepath.Join(f.workdir, "value")); err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +123,27 @@ func TestASourceKeepsItsLastValueBesideTheErrorAndStopsAtItsTimeout(t *testing.T
 	}
 }
 
+func TestACollectorThatIgnoresItsTimeoutHoldsOffTheNextRun(t *testing.T) {
+	f := startExtensionFixtureWith(t, map[string]string{"server.ts": `
+export default function (ah: any) {
+  let runs = 0;
+  ah.source({ name: 'stuck', everySeconds: 10, timeoutSeconds: 1, collect: () => {
+    runs++;
+    return new Promise(() => {});
+  } });
+  ah.action('runs', () => runs);
+}
+`})
+	eventually(t, "the stuck source times out", func() bool { return f.source(t, "stuck").State == "failed" })
+	f.runJob(t, "stuck")
+	if again := f.source(t, "stuck"); !strings.Contains(again.Error, "has not finished") {
+		t.Fatalf("a run beside the one still going failed with %q", again.Error)
+	}
+	if _, result := f.call(t, "fixture", map[string]any{"action": "runs"}); string(result.Result) != "1" {
+		t.Fatalf("a second collector started while the first had not settled: %s runs", result.Result)
+	}
+}
+
 func TestEverySourceRunsAgainWhenTheExtensionReloads(t *testing.T) {
 	f := startExtensionFixtureWith(t, map[string]string{"server.ts": sourcesServer, "value": "one"})
 	eventually(t, "the loads source runs once the extension loads", func() bool { return string(f.source(t, "loads").Value) == "1" })
@@ -121,6 +153,22 @@ func TestEverySourceRunsAgainWhenTheExtensionReloads(t *testing.T) {
 	eventually(t, "the loads source runs again after the reload, long before its 600 s interval", func() bool {
 		return string(f.source(t, "loads").Value) == "2"
 	})
+}
+
+func TestASourceReloadedMidRunRunsTheNewCodeAsSoonAsTheOldRunEnds(t *testing.T) {
+	f := startExtensionFixtureWith(t, map[string]string{"server.ts": sourcesServer, "value": "one", "with-slow": ""})
+	runs := func() string {
+		got, _ := os.ReadFile(filepath.Join(f.workdir, "..", "..", "slow-runs"))
+		return string(got)
+	}
+	eventually(t, "the slow source starts", func() bool { return runs() == "1" })
+	if err := f.d.reloadExtensions(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.workdir, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the reloaded source runs again right after the old run, not 60 s later", func() bool { return runs() == "2" })
 }
 
 func TestASourceMustRunAtLeastTenSecondsApartAndTimeOutWithinItsInterval(t *testing.T) {

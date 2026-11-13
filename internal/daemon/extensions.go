@@ -44,6 +44,7 @@ type extensionJobState struct {
 	LastRun   time.Time `json:"lastRun,omitzero"`
 	LastError string    `json:"lastError,omitempty"`
 	running   bool
+	rerun     bool
 	due       time.Time
 	every     time.Duration
 }
@@ -241,6 +242,7 @@ func carriedJobState(previous *loadedExtension, job extensionJob, now time.Time)
 			kept.every = every
 			switch {
 			case kept.running:
+				kept.rerun = job.Source
 			case job.Source:
 				kept.due = now
 			case !kept.LastRun.IsZero():
@@ -345,6 +347,10 @@ func (d *Daemon) runExtensionJob(ctx context.Context, id string, job extensionJo
 	state.running = false
 	state.LastRun = finished
 	state.due = finished.Add(state.every)
+	if state.rerun {
+		state.due = finished
+		state.rerun = false
+	}
 	state.LastError = ""
 	if err != nil {
 		state.LastError = err.Error()
