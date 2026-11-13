@@ -47,4 +47,16 @@ struct BodyRunsProbe: View {
         .onAppear(perform: BodyRuns.watchMainThread)
     }
 }
+
+extension View {
+    func countsAppearances(_ name: String) -> some View {
+        onAppear { BodyRuns.hit(name) }
+    }
+}
+#else
+import SwiftUI
+
+extension View {
+    func countsAppearances(_ name: String) -> some View { self }
+}
 #endif

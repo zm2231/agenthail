@@ -2628,6 +2628,9 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             }
         }
         if older != olderActivity { olderActivity = older }
+#if DEBUG
+        BodyRuns.hit(!changed ? "streamBatchUnchanged" : textOnly ? "streamBatchText" : "streamBatchDetail")
+#endif
         if changed, textOnly { streamText(into: detail) } else if changed { selectedDetail = detail }
         if error != sessionError { sessionError = error }
         if changed, !replaying, snapshot?.sessions.contains(where: { $0.id == selected }) != true { readUnlistedState(selected) }

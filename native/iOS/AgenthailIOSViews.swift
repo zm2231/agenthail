@@ -544,6 +544,9 @@ struct SessionScreen: View {
 
     private func rebuildOpeningRows() {
         guard followingLatest, !userScrolling else { return }
+#if DEBUG
+        BodyRuns.hit("rowsRebuilt")
+#endif
         rowsGeneration += 1
     }
 
@@ -562,6 +565,7 @@ struct SessionScreen: View {
 
     private func goToLatest() {
 #if DEBUG
+        BodyRuns.hit("jumpedToLatest")
         PreviewFollowStuck.enabled = false
 #endif
         olderPlace.release()
@@ -629,6 +633,7 @@ struct SessionScreen: View {
                             .equatable()
                             .rebuilt(group.id, generation: rowsGeneration)
                             .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).probesScrollJump(group.id)
+                            .countsAppearances("groupAppeared")
                             .onAppear { if group.id == groups.last?.id { openingRowAppeared(group.id) } }.id(group.id)
                     }
                 }
@@ -660,6 +665,7 @@ struct SessionScreen: View {
     var body: some View {
 #if DEBUG
         let _ = BodyRuns.hit("SessionScreen")
+        let _ = detail == nil ? BodyRuns.hit("SessionScreenNoDetail") : ()
 #endif
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Self.rowSpacing) {
@@ -788,6 +794,7 @@ struct SessionScreen: View {
                         }
                         IOSComposer(model: model, draft: model.draft, store: model.store, session: session, context: ComposerContext(detail), showQueuedRow: showQueuedRow)
                             .equatable()
+                            .countsAppearances("composerAppeared")
                     }
                 }
             }
