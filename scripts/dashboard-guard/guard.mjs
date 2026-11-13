@@ -21,7 +21,9 @@ async function signedIn(browser, dashboard) {
   const context = await browser.createBrowserContext();
   const [name, value] = dashboard.cookie.split("=");
   await context.setCookie({ name, value, url: dashboard.url });
-  return context.newPage();
+  const page = await context.newPage();
+  page.setDefaultTimeout(60_000);
+  return page;
 }
 
 async function brightest(page, dashboard, theme) {
