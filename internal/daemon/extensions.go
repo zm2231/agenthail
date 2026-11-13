@@ -104,11 +104,16 @@ func (d *Daemon) superviseExtensions(ctx context.Context) {
 	if _, err := d.extensionHistory(); err != nil {
 		d.logExtensionHistory(err)
 	}
-	go d.runExtensionTurns(ctx)
+	turns := make(chan struct{})
+	go func() {
+		defer close(turns)
+		d.runExtensionTurns(ctx)
+	}()
 	go d.runExtensionJobs(ctx)
 	go d.runExtensionMounts(ctx)
 	go d.pumpExtensionEvents(ctx)
 	d.extensions.host.Run(ctx)
+	<-turns
 }
 
 func extensionToken() string { return "ext_" + rand.Text() + rand.Text() }

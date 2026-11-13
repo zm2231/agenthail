@@ -139,13 +139,31 @@ func (d *Daemon) queueExtensionTurn(event extensionTurnEvent) {
 	}
 }
 
+// A turn's end still queued at shutdown is recorded before the worker
+// returns; left uncommitted, the next quiet start would take it for the
+// person's edit.
 func (d *Daemon) runExtensionTurns(ctx context.Context) {
+	for {
+		d.handleExtensionTurns()
+		select {
+		case <-ctx.Done():
+			d.handleExtensionTurns()
+			return
+		case <-d.extensions.changes.wake:
+		}
+	}
+}
+
+func (d *Daemon) handleExtensionTurns() {
 	c := d.extensions.changes
 	for {
 		c.queueMu.Lock()
 		events := c.queue
 		c.queue = nil
 		c.queueMu.Unlock()
+		if len(events) == 0 {
+			return
+		}
 		for _, event := range events {
 			switch event.kind {
 			case extensionTurnStart:
@@ -160,11 +178,6 @@ func (d *Daemon) runExtensionTurns(ctx context.Context) {
 			if event.done != nil {
 				close(event.done)
 			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-c.wake:
 		}
 	}
 }

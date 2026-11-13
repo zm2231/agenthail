@@ -305,3 +305,27 @@ func TestTurnsAreRecordedInOrderAndATurnRunningElsewhereKeepsEditsFromBeingTaken
 		t.Fatalf("a turn recorded after its ask closed raised %+v (open=%v)", next, open)
 	}
 }
+
+func TestTurnEventsQueuedAtShutdownAreHandledBeforeTheWorkerReturns(t *testing.T) {
+	f := startExtensionFixture(t)
+	c := f.d.extensions.changes
+	c.mu.Lock()
+	f.d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnEnd, sessionID: "busy", turnID: "turn-0"})
+	time.Sleep(50 * time.Millisecond)
+	f.d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnStart, sessionID: "to"})
+	stopped := make(chan struct{})
+	go func() {
+		f.stop()
+		close(stopped)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	c.mu.Unlock()
+	select {
+	case <-stopped:
+	case <-time.After(30 * time.Second):
+		t.Fatal("shutdown did not finish")
+	}
+	if !c.inFlight["to"] {
+		t.Fatal("a turn start queued at shutdown was dropped, so a later start would take that turn's edits for the person's")
+	}
+}
