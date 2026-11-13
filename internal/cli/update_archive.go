@@ -185,15 +185,20 @@ func restartAndCheck(deps *updateDeps, binary string) error {
 // rollBackUpdate puts the previous install back with swapBack and restarts
 // the binary restart names, if any. The previous build refuses a registry its failed successor migrated, so
 // when the schema moved past before: a daemon still holding the registry
-// keeps the update in place, unverified; otherwise the copy taken before the
+// keeps the update in place, unverified, as does a registry that could not be
+// read before, which has no copy to go back to; otherwise the copy taken before the
 // migration goes back first, under the daemon lock, so a service manager
 // cannot start the new build on it before the swap.
 func rollBackUpdate(deps *updateDeps, tag string, before int, restart string, cause error, swapBack func() error) error {
 	release, restoredNote := func() {}, ""
-	if after := deps.registrySchema(); before > 0 && after > before {
+	if after := deps.registrySchema(); after > before {
 		unlock, err := deps.holdDaemonLock()
 		if err != nil {
 			return fmt.Errorf("update to %s is in place but unverified: %v; its daemon is running on the registry it moved from schema %d to %d, which the previous version cannot open; check it with 'agenthail daemon status'", tag, cause, before, after)
+		}
+		if before < 1 {
+			unlock()
+			return fmt.Errorf("update to %s failed (%v); its daemon left a schema %d registry where none could be read before, which the previous version cannot open, so the update stays in place", tag, cause, after)
 		}
 		restored, err := deps.restoreRegistry(after)
 		if err != nil {

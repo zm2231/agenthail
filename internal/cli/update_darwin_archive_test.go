@@ -390,3 +390,20 @@ func TestADarwinArchiveUpdateRestoresTheRegistryItsStoppedDaemonMigrated(t *test
 		t.Fatalf("restarts=%q", f.restarts)
 	}
 }
+
+func TestADarwinArchiveUpdateKeepsTheUpdateWhenItsDaemonMadeTheOnlyRegistry(t *testing.T) {
+	f := newDarwinUpdateFixture(t)
+	f.registry.schema = -1
+	f.installer = func(dataDir string) error {
+		f.registry.schema = 97
+		return os.WriteFile(filepath.Join(dataDir, "agenthail"), []byte(versionScript("v0.2.134")), 0755)
+	}
+	f.healthy = []error{errors.New("daemon is not running")}
+	_, err := captureStdout(t, func() error { return f.app.Run([]string{"update"}) })
+	if err == nil || !strings.Contains(err.Error(), "the update stays in place") {
+		t.Fatalf("update reported %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(f.dataDir, "agenthail")); string(got) != versionScript("v0.2.134") || len(f.restarts) != 0 {
+		t.Fatalf("binary=%q restarts=%q", got, f.restarts)
+	}
+}

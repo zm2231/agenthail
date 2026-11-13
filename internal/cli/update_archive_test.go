@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -384,5 +385,21 @@ func TestLinuxUpdateStaysUnverifiedWhenItsRunningDaemonMigratedTheRegistry(t *te
 	}
 	if fixture.installedVersion(t) != versionScript("v0.2.0") || len(fixture.restarts) != 1 || len(fixture.registry.events) != 0 {
 		t.Fatalf("installed=%q restarts=%q events=%q; the update must stay with its running daemon", fixture.installedVersion(t), fixture.restarts, fixture.registry.events)
+	}
+}
+
+func TestLinuxUpdateKeepsTheUpdateWhenItsDaemonMadeTheOnlyRegistry(t *testing.T) {
+	fixture := newArchiveUpdateFixture(t, releaseArchive(t, "v0.2.0"))
+	fixture.registry.schema = -1
+	fixture.app.update.daemonHealthy = func() error {
+		fixture.registry.schema = 97
+		return errors.New("daemon did not answer on its API")
+	}
+	err := fixture.app.Run([]string{"update"})
+	if err == nil || !strings.Contains(err.Error(), "the update stays in place") {
+		t.Fatalf("err=%v", err)
+	}
+	if fixture.installedVersion(t) != versionScript("v0.2.0") || len(fixture.restarts) != 1 || slices.Contains(fixture.registry.events, "restore before v97") {
+		t.Fatalf("installed=%q restarts=%q events=%q", fixture.installedVersion(t), fixture.restarts, fixture.registry.events)
 	}
 }

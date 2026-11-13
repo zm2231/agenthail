@@ -72,6 +72,7 @@ Claude Remote Control and Notion depend on the Python sidecar and a signed-in de
 6. on success deletes `<dir>.previous`; on failure it compares the registry's schema with the one before the restart:
    - unchanged: moves the new directory aside, restores the previous one, restarts it, and reports the failure
    - migrated, and the new daemon still holds the registry: keeps the update, because the previous version cannot open the migrated registry, and fails with "in place but unverified"
+   - no registry could be read before, and the new daemon has exited leaving one: keeps the update, since there is no earlier copy, and reports the failure
    - migrated, and the new daemon has exited: under the daemon lock, restores the registry copy taken before the migration (the replaced one is kept beside it) and the previous directory, then restarts it and reports the failure
 
 The macOS release archive's update follows the same rollback through its own installer.
