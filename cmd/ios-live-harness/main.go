@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -25,6 +26,9 @@ const (
 )
 
 func main() {
+	if filepath.Base(os.Args[0]) == stubClaudeName {
+		os.Exit(runStubClaude(os.Args[1:], os.Stdout, os.Stderr))
+	}
 	os.Exit(run(os.Args[1:]))
 }
 

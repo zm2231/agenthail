@@ -35,7 +35,9 @@ The daemon runs as `agenthail daemon-run` in the foreground. No install, service
 | `AGENTHAIL_PUSH_RELAY_URL` | `http://127.0.0.1:<the trap port>` |
 | `LANG` | `en_US.UTF-8` |
 
-`<dir>/bin` holds links to `git`, `kill`, `ps` and `sleep`, the commands the daemon runs by name, and nothing else. No Claude or Codex CLI is on it, so a host cannot find the machine's own.
+`<dir>/bin` holds links to `git`, `kill`, `ps` and `sleep`, the commands the daemon runs by name, and a copy of the harness named `claude`. No real Claude or Codex CLI is on it, so a host cannot find the machine's own.
+
+The `claude` copy is a stub. Run as `claude --bg ... -- <message>`, it records a background job and writes a transcript holding the message, and prints `backgrounded · <id>` as Claude does. `claude agents --json --all` lists the jobs it recorded, and `claude --version` prints a version. Anything else exits with an error. A session started from the phone through the `claude-bg` launcher therefore runs the daemon's real start path, but no Claude process runs behind it, so the session reads as unavailable once started.
 
 The trap port is a loopback port the harness holds for the whole run and closes every connection on. No other service on the machine can take it, so a host that looks for Codex or sends a notification reaches nothing.
 
@@ -74,6 +76,8 @@ The test command gets the control address in `AGENTHAIL_LIVE_CONTROL`. It also g
 | `POST /hosts/{i}/reply` with `{"conversation": n, "text": "..."}` | appends an assistant reply to host `i`'s seeded conversation `n`, as Claude would, and answers `{"session": id}` |
 | `POST /hosts/{i}/turn/start` with `{"text": "..."}` | opens a turn in a running Claude conversation on host `i` and answers `{"session": id}`. A `sleep` the harness starts from `<dir>/bin` stands in for the Claude process, with a socket in `<dir>/sockets` and a session record saying `busy`; the transcript ends on the prompt. One turn at a time per host; a second answers 409 |
 | `POST /hosts/{i}/turn/finish` with `{"text": "..."}` | ends that turn as Claude does: the reply with `end_turn`, a `turn_duration` record, then the session record going `idle` |
+| `POST /hosts/{i}/turn/ask` with `{"text": "..."}` | raises a Bash permission prompt for that command in the open turn, as Claude and its hook do: the session record goes to `waiting` on a permission prompt, then the hook's own request to the host's `/api/v1/claude/permission-request`, with the host's dashboard token and the turn's process ID, is held until someone answers. One prompt at a time; a second answers 409 |
+| `GET /hosts/{i}/turn/ask` | `{"session", "answered", "decision", "error"}`: whether the open turn's prompt was answered, the decision the hook got, or why the host refused it |
 | `POST /hosts/{i}/stop` | stops host `i`'s daemon by the process ID the harness recorded |
 | `POST /hosts/{i}/start` | starts it again on the same port and waits until it answers |
 
@@ -103,6 +107,7 @@ Live tests are in the `live` tier of `native/ui-test-tiers.txt`, which no pull r
 | `LiveHostUITests` finished turn | a conversation with an open turn is listed as Working and its header says Working; once the turn finishes the reply shows and the header stops saying Working within 10 seconds. It prints how long that took |
 | `LiveHostsUITests` two hosts | each host lists its own conversation; stopping one marks only its conversation unavailable |
 | `LiveHostsUITests` file suggestions | typing `@` in the git checkout's conversation lists its files from git on the host, not the ignored one |
+| `LiveHostOutageUITests` outage | with `Live A` stopped, the list names it with its reason and marks its conversation unavailable; `Live B` still lists, opens a conversation, takes a message, shows a prompt that the phone allows, streams a reply and starts a session; once `Live A` starts again its reason goes and its conversation opens. It prints how long each change took |
 
 To run them on a Mac:
 

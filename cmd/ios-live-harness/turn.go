@@ -1,14 +1,19 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +26,122 @@ type liveTurn struct {
 	record       string
 	conversation conversation
 	startedAt    time.Time
+	ask          *liveAsk
+	cancel       context.CancelFunc
+}
+
+type liveAsk struct {
+	done     chan struct{}
+	decision json.RawMessage
+	err      error
+}
+
+type askStatus struct {
+	Session  string          `json:"session"`
+	Answered bool            `json:"answered"`
+	Decision json.RawMessage `json:"decision,omitempty"`
+	Error    string          `json:"error,omitempty"`
+}
+
+// The record goes to waiting first because the host holds a hook's prompt only while the session's record shows one.
+func (h *host) askInTurn(command string) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	turn := h.turn
+	if turn == nil {
+		return "", errors.New("no turn is open on this host")
+	}
+	if turn.ask != nil {
+		select {
+		case <-turn.ask.done:
+		default:
+			return "", errors.New("the open turn already waits on a prompt")
+		}
+	}
+	token, err := os.ReadFile(filepath.Join(h.home, ".agenthail", "dashboard.token"))
+	if err != nil {
+		return "", fmt.Errorf("read the host's dashboard token: %w", err)
+	}
+	asked := time.Now()
+	if err := turn.writeRecordWaiting("waiting", "permission prompt", asked); err != nil {
+		return "", err
+	}
+	input, err := json.Marshal(map[string]string{"command": command})
+	if err != nil {
+		return "", err
+	}
+	body, err := json.Marshal(map[string]any{
+		"prompt": map[string]any{"session_id": turn.conversation.id, "transcript_path": turn.conversation.transcript, "cwd": turn.conversation.cwd,
+			"permission_mode": "default", "tool_name": "Bash", "tool_input": json.RawMessage(input)},
+		"pid": turn.process.Process.Pid, "askedAt": asked.UnixMilli(),
+	})
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	turn.cancel = cancel
+	ask := &liveAsk{done: make(chan struct{})}
+	turn.ask = ask
+	go func() {
+		defer close(ask.done)
+		ask.decision, ask.err = holdPrompt(ctx, h.endpoint(), strings.TrimSpace(string(token)), body)
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if h.turn == turn {
+			turn.writeRecord("busy")
+		}
+	}()
+	return turn.conversation.id, nil
+}
+
+func (h *host) askResult() (askStatus, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.turn == nil || h.turn.ask == nil {
+		return askStatus{}, errors.New("no prompt was raised in an open turn on this host")
+	}
+	status := askStatus{Session: h.turn.conversation.id}
+	select {
+	case <-h.turn.ask.done:
+		status.Answered = h.turn.ask.err == nil
+		status.Decision = h.turn.ask.decision
+		if h.turn.ask.err != nil {
+			status.Error = h.turn.ask.err.Error()
+		}
+	default:
+	}
+	return status, nil
+}
+
+func holdPrompt(ctx context.Context, endpoint, token string, body []byte) (json.RawMessage, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/api/v1/claude/permission-request", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("the host answered %s: %s", response.Status, strings.TrimSpace(string(data)))
+	}
+	var answer struct {
+		Decision json.RawMessage `json:"decision"`
+	}
+	if err := json.Unmarshal(data, &answer); err != nil {
+		return nil, err
+	}
+	if len(answer.Decision) == 0 || string(answer.Decision) == "null" {
+		return nil, errors.New("the host settled the prompt without a decision")
+	}
+	return answer.Decision, nil
 }
 
 func (h *host) startTurn(prompt string) (string, error) {
@@ -105,6 +226,9 @@ func (h *host) endTurn() {
 }
 
 func (t *liveTurn) end() {
+	if t.cancel != nil {
+		t.cancel()
+	}
 	if t.socket != nil {
 		t.socket.Close()
 	}
@@ -117,10 +241,17 @@ func (t *liveTurn) end() {
 }
 
 func (t *liveTurn) writeRecord(status string) error {
+	return t.writeRecordWaiting(status, "", time.Now())
+}
+
+func (t *liveTurn) writeRecordWaiting(status, waitingFor string, at time.Time) error {
 	pid := t.process.Process.Pid
-	at := time.Now().UnixMilli()
-	data, err := json.Marshal(map[string]any{"pid": pid, "sessionId": t.conversation.id, "cwd": t.conversation.cwd, "kind": "interactive", "status": status,
-		"messagingSocketPath": t.socket.Addr().String(), "peerFeatures": []string{"notify_idle"}, "statusUpdatedAt": at, "updatedAt": at})
+	record := map[string]any{"pid": pid, "sessionId": t.conversation.id, "cwd": t.conversation.cwd, "kind": "interactive", "entrypoint": "cli", "status": status,
+		"messagingSocketPath": t.socket.Addr().String(), "peerFeatures": []string{"notify_idle"}, "statusUpdatedAt": at.UnixMilli(), "updatedAt": at.UnixMilli()}
+	if waitingFor != "" {
+		record["waitingFor"] = waitingFor
+	}
+	data, err := json.Marshal(record)
 	if err != nil {
 		return err
 	}

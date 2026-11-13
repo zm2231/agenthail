@@ -42,6 +42,7 @@ type host struct {
 	trap    int
 	binary  string
 	logPath string
+	stub    string
 
 	conversations []conversation
 	turn          *liveTurn
