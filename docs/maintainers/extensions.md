@@ -183,8 +183,9 @@ a bearer token with every request a page makes. An app posts its own token to
   that device ends its web sessions at their next request.
 - It counts only on extension ports: on a page's port for the whole page,
   its actions, sources and events, and on a mount's port for the whole mount,
-  `read` for GET and HEAD and `control` otherwise. On the dashboard's port
-  every path answers 401. The mount never passes it to the app.
+  `read` for GET and HEAD and `control` otherwise. The dashboard's port never
+  takes it: an API path answers 401, and the dashboard serves no `/x/` paths.
+  The mount never passes it to the app.
 
 ## Entries in the apps
 
