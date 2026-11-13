@@ -310,7 +310,12 @@ func TestAFolderCreatedInAFollowedFolderWakesForItsOwnNewEntries(t *testing.T) {
 
 func openDescriptors(t *testing.T) int {
 	t.Helper()
-	names, err := os.ReadDir("/dev/fd")
+	dir, err := os.Open("/dev/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+	names, err := dir.Readdirnames(-1)
 	if err != nil {
 		t.Fatal(err)
 	}
