@@ -11,7 +11,7 @@ wide='^(native/iOSUITests/|native/ui-test-tiers\.txt$|scripts/ios-ui-tests\.sh$|
 usage() {
 	cat >&2 <<EOF
 usage: $0 check
-       $0 args <tier>...
+       $0 args all|parallel|alone <tier>...
        $0 tiers <event> <changed-files> <labels>
 EOF
 	exit 2
@@ -33,10 +33,10 @@ declared() {
 }
 
 check() {
-	local bad=0 tier test
-	while read -r tier test extra; do
-		if [ -n "${extra:-}" ] || [[ ! " $known_tiers " == *" $tier "* ]] || [[ ! "$test" =~ ^[A-Za-z0-9_]+/test[A-Za-z0-9_]*$ ]]; then
-			echo "malformed line: $tier $test ${extra:-}" >&2
+	local bad=0 tier test flag extra
+	while read -r tier test flag extra; do
+		if [ -n "${extra:-}" ] || { [ -n "${flag:-}" ] && [ "$flag" != alone ]; } || [[ ! " $known_tiers " == *" $tier "* ]] || [[ ! "$test" =~ ^[A-Za-z0-9_]+/test[A-Za-z0-9_]*$ ]]; then
+			echo "malformed line: $tier $test ${flag:-} ${extra:-}" >&2
 			bad=1
 		fi
 	done < <(entries)
@@ -54,11 +54,20 @@ check() {
 }
 
 args() {
-	[ "$#" -gt 0 ] || usage
-	local wanted=" $* " tier test
-	echo "-only-testing:AgenthailIOSTests"
-	while read -r tier test; do
-		[[ "$wanted" == *" $tier "* ]] && echo "-only-testing:AgenthailIOSUITests/$test"
+	[ "$#" -gt 1 ] || usage
+	local set="$1" tier test flag
+	shift
+	local wanted=" $* "
+	case "$set" in
+		all | parallel) echo "-only-testing:AgenthailIOSTests" ;;
+		alone) ;;
+		*) usage ;;
+	esac
+	while read -r tier test flag; do
+		[[ "$wanted" == *" $tier "* ]] || continue
+		case "$set:${flag:-}" in
+			all:* | parallel: | alone:alone) echo "-only-testing:AgenthailIOSUITests/$test" ;;
+		esac
 	done < <(entries)
 }
 

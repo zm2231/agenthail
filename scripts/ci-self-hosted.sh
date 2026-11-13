@@ -75,6 +75,7 @@ stop_pids() {
 cleanup() {
 	stop_pids "$RUNNER_TEMP/" "$GITHUB_WORKSPACE/" ${tmp:+"$tmp/"}
 	if [ -n "${SIMULATOR_UDID:-}" ]; then
+		"$(dirname "$0")/ios-simulator-clones.sh" delete "$SIMULATOR_UDID" || true
 		xcrun simctl shutdown "$SIMULATOR_UDID" 2>/dev/null || true
 		xcrun simctl erase "$SIMULATOR_UDID"
 	fi

@@ -108,12 +108,21 @@ jobs:
         env:
           TIERS: ${{ needs.changes.outputs.tiers }}
         run: |
-          rm -rf "$RUNNER_TEMP/ios-tests.xcresult"
+          rm -rf "$RUNNER_TEMP/ios-tests.xcresult" "$RUNNER_TEMP/ios-alone.xcresult"
           read -r -a tiers <<< "$TIERS"
-          only=()
-          while IFS= read -r arg; do only+=("$arg"); done < <(scripts/ios-ui-tests.sh args "${tiers[@]}")
-          echo "UI test tiers: $TIERS (${#only[@]} -only-testing targets)"
-          scripts/ios-test-stall-guard.sh xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" "${only[@]}" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
+          parallel=()
+          while IFS= read -r arg; do parallel+=("$arg"); done < <(scripts/ios-ui-tests.sh args parallel "${tiers[@]}")
+          alone=()
+          while IFS= read -r arg; do alone+=("$arg"); done < <(scripts/ios-ui-tests.sh args alone "${tiers[@]}")
+          echo "UI test tiers: $TIERS (${#parallel[@]} -only-testing targets on parallel clones, ${#alone[@]} alone)"
+          status=0
+          scripts/ios-simulator-clones.sh delete "$SIMULATOR_UDID"
+          scripts/ios-test-stall-guard.sh xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" "${parallel[@]}" -parallel-testing-enabled YES -parallel-testing-worker-count 3 -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult" || status=$?
+          scripts/ios-simulator-clones.sh delete "$SIMULATOR_UDID"
+          if [ "${#alone[@]}" -gt 0 ]; then
+            scripts/ios-test-stall-guard.sh xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" "${alone[@]}" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-alone.xcresult" || status=$?
+          fi
+          [ "$status" = 0 ]
           plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
           test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your computer, or take a photo to send to an agent."
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
@@ -128,7 +137,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ios-tests-xcresult-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-tests.xcresult
+          path: |
+            ${{ runner.temp }}/ios-tests.xcresult
+            ${{ runner.temp }}/ios-alone.xcresult
           retention-days: 3
           if-no-files-found: ignore
       - name: Clean up self-hosted job
