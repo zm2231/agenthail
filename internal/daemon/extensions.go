@@ -54,6 +54,9 @@ type loadedExtension struct {
 	token   string
 	host    extensionHostSummary
 	jobs    map[string]*extensionJobState
+	// tree is the folder's hash when it was read for this load, so a call
+	// is recorded against the version that ran.
+	tree string
 }
 
 type extensionRuntime struct {
@@ -62,6 +65,8 @@ type extensionRuntime struct {
 	host      *nodehost.Supervisor
 	mounts    *extensionMounts
 	changes   *extensionChanges
+	calls     *extensionCalls
+	grants    *extensionGrants
 
 	loading   sync.Mutex
 	mu        sync.Mutex
@@ -73,7 +78,7 @@ type extensionRuntime struct {
 }
 
 func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, error)) {
-	runtime := &extensionRuntime{home: home, approvals: extension.NewApprovals(home), mounts: newExtensionMounts(home), changes: newExtensionChanges(home), loaded: map[string]*loadedExtension{}, tokens: map[string]string{}}
+	runtime := &extensionRuntime{home: home, approvals: extension.NewApprovals(home), mounts: newExtensionMounts(home), changes: newExtensionChanges(home), calls: &extensionCalls{path: filepath.Join(extension.DataDir(home), "calls.json")}, grants: &extensionGrants{path: filepath.Join(extension.DataDir(home), "grants.json")}, loaded: map[string]*loadedExtension{}, tokens: map[string]string{}}
 	runtime.host = &nodehost.Supervisor{
 		Name:     "extension host",
 		StateDir: extensionHostDir(home),
@@ -101,7 +106,7 @@ func (d *Daemon) superviseExtensions(ctx context.Context) {
 	if d.extensions == nil {
 		return
 	}
-	if _, err := d.extensionHistory(); err != nil {
+	if err := d.seedExtensionWorkspace(true); err != nil {
 		d.logExtensionHistory(err)
 	}
 	turns := make(chan struct{})
@@ -128,6 +133,7 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	r := d.extensions
 	r.loading.Lock()
 	defer r.loading.Unlock()
+	trees := d.extensionTrees()
 	found, err := extension.Discover(extension.Workspace(r.home))
 	if err != nil {
 		return err
@@ -148,7 +154,7 @@ func (d *Daemon) loadExtensions(ctx context.Context) error {
 	}
 	var specs []spec
 	for _, ext := range found {
-		loaded := &loadedExtension{ext: ext, jobs: map[string]*extensionJobState{}}
+		loaded := &loadedExtension{ext: ext, jobs: map[string]*extensionJobState{}, tree: trees[ext.ID]}
 		next[ext.ID] = loaded
 		if ext.Err != nil {
 			loaded.host = extensionHostSummary{ID: ext.ID, State: "invalid", Error: ext.Err.Error()}
@@ -293,12 +299,12 @@ func (d *Daemon) startDueExtensionJobs(ctx context.Context, now time.Time) {
 				continue
 			}
 			state.running = true
-			go d.runExtensionJob(ctx, id, job, state)
+			go func() { _ = d.runExtensionJob(ctx, id, job, state) }()
 		}
 	}
 }
 
-func (d *Daemon) runExtensionJob(ctx context.Context, id string, job extensionJob, state *extensionJobState) {
+func (d *Daemon) runExtensionJob(ctx context.Context, id string, job extensionJob, state *extensionJobState) error {
 	r := d.extensions
 	runCtx, cancel := context.WithTimeout(ctx, extensionJobLimit)
 	err := r.host.Client().Call(runCtx, "job", map[string]string{"id": id, "name": job.Name}, nil)
@@ -316,6 +322,7 @@ func (d *Daemon) runExtensionJob(ctx context.Context, id string, job extensionJo
 	if err != nil && ctx.Err() == nil {
 		d.log.Printf("extension %s: job %s: %s", id, job.Name, err)
 	}
+	return err
 }
 
 // pumpExtensionEvents hands every daemon event to the extensions that hold

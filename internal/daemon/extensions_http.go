@@ -39,6 +39,8 @@ func (d *Daemon) registerExtensionRoutes(mux *http.ServeMux, dashboard *dashboar
 		d.apiV1Guard(dashboard, scope, d.apiExtensionsHandler)(w, r)
 	})
 	mux.HandleFunc("GET /api/v1/extensions/history", d.apiV1Guard(dashboard, "read", d.apiExtensionHistoryHandler))
+	mux.HandleFunc("POST /api/v1/extensions/build", d.apiV1Guard(dashboard, "control", d.apiExtensionBuildHandler))
+	mux.HandleFunc("POST /api/v1/extensions/{id}/call", d.apiV1Guard(dashboard, "control", d.apiExtensionCallHandler))
 	mux.HandleFunc("GET /x/_ah.js", d.apiV1Guard(dashboard, "read", func(w http.ResponseWriter, r *http.Request) {
 		extensionPageHeaders(w)
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -136,7 +138,11 @@ func (d *Daemon) extensionActionHandler(w http.ResponseWriter, r *http.Request) 
 
 func writeExtensionError(w http.ResponseWriter, err error) {
 	var hostErr *nodehost.Error
+	var callErr *extensionCallError
 	switch {
+	case errors.As(err, &callErr):
+		status := map[string]int{"not_found": http.StatusNotFound, "invalid": http.StatusBadRequest, "conflict": http.StatusConflict}[callErr.code]
+		writeAPIError(w, status, callErr.code, callErr.message)
 	case errors.Is(err, nodehost.ErrNotRunning):
 		writeAPIError(w, http.StatusServiceUnavailable, "unavailable", errExtensionHostDown.Error())
 	case errors.Is(err, context.DeadlineExceeded):
@@ -163,14 +169,19 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 		writeDashboardJSON(w, http.StatusOK, d.extensionsView())
 	case http.MethodPost:
 		var request struct {
-			Action string            `json:"action"`
-			ID     string            `json:"id"`
-			Mount  string            `json:"mount"`
-			Key    *proxyacct.KeyRef `json:"key"`
-			Rev    string            `json:"rev"`
+			Action    string            `json:"action"`
+			ID        string            `json:"id"`
+			Mount     string            `json:"mount"`
+			Key       *proxyacct.KeyRef `json:"key"`
+			Rev       string            `json:"rev"`
+			SessionID string            `json:"sessionId"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid", "Send {\"action\": \"reload\"}, {\"action\": \"approve\", \"id\": \"<extension>\"} or {\"action\": \"key\", \"id\": \"<extension>\", \"mount\": \"<mount>\", \"key\": {...}}.")
+			return
+		}
+		if (request.Action == "approve" || request.Action == "key") && strings.TrimSpace(request.SessionID) != "" {
+			writeActionResult(w, actionResult{}, d.askPersonToGrant(request.SessionID, request.Action, request.ID, request.Mount, request.Key))
 			return
 		}
 		switch request.Action {

@@ -36,7 +36,7 @@ the API and may return a cleanup function, called before the next reload.
 | Member | What it does |
 |---|---|
 | `ah.id`, `ah.dir` | The extension's id and folder |
-| `ah.action(name, handler)` | Registers an action the page calls. `handler(input, {caller})` returns JSON. `caller.kind` is `person`, `device` or `host`; `caller.actor` names who it was. |
+| `ah.action(name, handler)` | Registers an action the page calls. `handler(input, {caller})` returns JSON. `caller.kind` is `person`, `device`, `host` or, for `agenthail extensions call` run inside a session, `session`; `caller.actor` names who it was. |
 | `ah.job({name, everySeconds, run})` | Registers a background job. The daemon runs it once the extension loads and then every `everySeconds` (at least 60) after the previous run ends, never two at once, for at most 10 minutes. |
 | `ah.on(type, handler)` | Receives daemon events of `type`, or every event for `'*'`: `{id, type, timestamp, entityId, data}`, the same as `/api/v1/events`. Only an extension that holds `read.all` receives events. |
 | `ah.call(tool, args)` | Calls an Agenthail tool as the extension (below) and returns its result, or throws an error with `code` and `message`. A write gets a fresh `clientRequestId` unless one is given. |
@@ -277,10 +277,64 @@ ignored.
   store (those named with its `ah.table` prefix) are dropped. A table whose
   name another remaining extension's prefix also matches is kept.
 
+## Building with an agent
+
+`agenthail extensions build "<what it should do>" [--agent claude|codex]`, or
+the Build box on the dashboard's Extensions tab, starts an ordinary session as
+the person: Claude unless Codex is named, with `~/.agenthail/extensions` as its
+working directory and the surface's own permission mode, so it asks only what
+the person's other sessions ask. Its first message is "Build or change an
+Agenthail extension in this folder. Read AGENTS.md first." followed by the
+person's text. The person keeps talking to it to iterate, and each of its turns
+is a Keep/Undo change. Run from inside a session, `build` is refused.
+
+The daemon writes `AGENTS.md`, `CLAUDE.md` (`@AGENTS.md`) and `recipes/*.md`
+into the folder from copies built into the binary, when the daemon starts with
+the folder present and before a build starts. A file is written when it is
+missing or when the built-in copy differs from the one last written (recorded
+in `~/.agenthail/extensions-data/seeded.json`), so the person's own edit lasts
+until a newer Agenthail changes that file. Each write is committed as
+`agenthail`. `recipes` is not a valid extension id.
+
+### Verified from what ran
+
+`agenthail extensions call <id> <action> [--input <json>]` runs an action and
+`agenthail extensions run <id> <job>` runs a job once, never while the same job
+is running. Both first reload the extensions if the folder's files differ from
+what the host loaded, so they run what is on disk. Inside a session they run as
+that session.
+
+Each run is recorded in `~/.agenthail/extensions-data/calls.json`, the newest
+20 per extension: action or job, ok or the error, time, who ran it and the git
+tree hash of the extension's folder that was loaded (hashed through a scratch
+index, so nothing is staged). The Keep/Undo ask says `<id> verified: <name> ran
+ok at 23:01 against this version` only when a successful run's hash equals the
+folder's tree in the change's commit, and `<id> not verified` otherwise. A
+successful run rewords open asks at once. The ask also says `<id> needs your
+approval: ...` while capabilities or mounts the folder declares are not
+approved.
+
+### Approval stays the person's
+
+`approve` and `key` run inside a session are refused with `403
+ask_the_person`, and raise an ask of origin `extension-grant` to the person,
+pushed to their devices: `Approve` or `Decline`, with what would be granted, or
+which key place and upstream. The same request while its ask is open raises no
+second ask. Approving applies exactly what the ask showed: if
+`extension.json` or the mount's upstream changed since, the answer is refused
+with `409` and nothing is granted. Only the person answers. A key place too
+long to show in an ask is refused outright; the person names it from their own
+shell. Pending requests are kept in `~/.agenthail/extensions-data/grants.json`.
+This keeps an agent from approving by habit; it is not a wall, since an agent
+in bypass mode on the same account can reach what the CLI uses.
+
 ## Commands
 
 ```
 agenthail extensions [list] [--json]   each extension's state, page, capabilities, jobs and last errors
+agenthail extensions build "<text>" [--agent claude|codex]  start a session that builds or changes extensions
+agenthail extensions call <id> <action> [--input <json>]  run an action against the folder as it is now
+agenthail extensions run <id> <job>    run a job once now
 agenthail extensions approve <id>      grant the capabilities extension.json declares
 agenthail extensions reload            read the folder again and reload every extension
 agenthail extensions key <id> <mount> ...  name where a mount's key is kept, or --clear it
@@ -294,7 +348,13 @@ state, whether it is on the tailnet and where its key is kept (`read` scope).
 "id": "<id>"}` or `{"action": "key", "id": "<id>", "mount": "<mount>", "key":
 {"file": "<path>"}}` (or `env`, `keychain`, `command`, or `null` to forget it)
 changes it (`settings` scope). `{"action": "undo", "rev": "<rev>"}` undoes a
-change. `GET /api/v1/extensions/history?limit=50` lists the changes (`read`
+change. `POST /api/v1/extensions/build` with `{"message": "<text>", "surface":
+"claude"}` starts the builder (`control` scope) and answers as `session-create`.
+`POST /api/v1/extensions/<id>/call` with `{"action": "<name>", "input": {...}}`
+or `{"job": "<name>"}` runs it (`control` scope) and answers `{result, ran,
+tree, reloaded}`; `"sessionId"` runs it as that session, accepted only from
+this machine. `approve` and `key` with `"sessionId"` raise the person's ask
+instead. `GET /api/v1/extensions/history?limit=50` lists the changes (`read`
 scope): each with `rev`, `author`, `time`, `message`, `sessionId`, `turnId`
 and, per extension, `created`, `removed` and the files `added`, `updated` and
 `deleted`.

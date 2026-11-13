@@ -220,6 +220,9 @@ Other:
                                 Run a finished run again
   triggers reload [--json]      Read triggers.json again
   extensions [list] [--json]    Extensions in ~/.agenthail/extensions, their state and pages
+  extensions build "<what it should do>" [--agent claude|codex]  Start a session that builds or changes extensions
+  extensions call <id> <action> [--input <json>]  Run an action against the folder as it is now
+  extensions run <id> <job>     Run a job once now
   extensions approve <id>       Grant an extension the capabilities its extension.json declares
   extensions reload             Load every extension again from disk
   extensions history            List changes to the extensions folder, newest first

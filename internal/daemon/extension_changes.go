@@ -329,6 +329,9 @@ func (d *Daemon) extensionChangeAsk(sessionID string, revs []string) (string, []
 	if len(last.AlsoRunning) > 0 {
 		question += ". Also mid-turn, so it may hold their edits: " + d.namesOf(last.AlsoRunning)
 	}
+	if checks := d.extensionChecks(history, last); len(checks) > 0 {
+		question += ". " + strings.Join(checks, "; ")
+	}
 	return title, []registry.AskQuestion{{
 		Question:    clipText(question, registry.MaxAskQuestion),
 		Options:     []registry.AskOption{{ID: extensionKeep, Label: keep}, {ID: extensionUndo, Label: undo, Does: clipText("Undo "+summaries[len(summaries)-1], registry.MaxAskDoes)}},
@@ -459,6 +462,9 @@ func (d *Daemon) undoExtensionChange(ctx context.Context, rev string) (extension
 		if err := d.extensions.approvals.Forget(id); err != nil {
 			d.log.Printf("extensions: forget %s's approvals: %s", id, err)
 		}
+		if err := d.extensions.calls.forget(id); err != nil {
+			d.log.Printf("extensions: forget %s's calls: %s", id, err)
+		}
 	}
 	if len(undone.Removed) > 0 {
 		if err := d.dropExtensionTables(undone.Removed); err != nil {
@@ -468,6 +474,30 @@ func (d *Daemon) undoExtensionChange(ctx context.Context, rev string) (extension
 	d.applyExtensionChange(ctx, undone.Reverted.Rev)
 	d.forgetPendingExtensionChange(undone.Reverted.Rev)
 	return undone, nil
+}
+
+// A call recorded after a turn's commit can check that turn's version, so
+// every open ask is worded again.
+func (d *Daemon) rewordExtensionChangeAsks() {
+	c := d.extensions.changes
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pending, err := c.readPending()
+	if err != nil {
+		d.log.Printf("extensions: read pending changes: %s", err)
+		return
+	}
+	for sessionID, held := range pending {
+		title, questions, err := d.extensionChangeAsk(sessionID, held.Revs)
+		if err != nil {
+			continue
+		}
+		if reworded, err := d.Registry.RewordAsk(held.AskID, title, questions); err != nil {
+			d.log.Printf("extensions: reword %s: %s", held.AskID, err)
+		} else if reworded {
+			d.publishAsk(sessionID)
+		}
+	}
 }
 
 func (d *Daemon) forgetPendingExtensionChange(rev string) {

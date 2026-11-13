@@ -61,11 +61,13 @@ export default async function (ah: any) {
     return { status: sent.status, caller: ctx.caller.kind };
   });
   ah.action('create', () => ah.call('agenthail_create', { surface: 'claude', message: 'hi' }));
+  ah.action('caller', (_: unknown, ctx: any) => ctx.caller);
 }
 `
 
 type extensionFixture struct {
 	d       *Daemon
+	fake    *daemonSurface
 	server  *httptest.Server
 	home    string
 	stop    func()
@@ -79,7 +81,7 @@ func startExtensionFixture(t *testing.T) *extensionFixture {
 
 func startExtensionFixtureWith(t *testing.T, replace map[string]string) *extensionFixture {
 	t.Helper()
-	d, _, _, _, handler, _ := baseFixture(t)
+	d, _, fake, _, handler, _ := baseFixture(t)
 	home, err := os.MkdirTemp("", "ext")
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +117,7 @@ func startExtensionFixtureWith(t *testing.T, replace map[string]string) *extensi
 		defer close(done)
 		d.superviseExtensions(ctx)
 	}()
-	f := &extensionFixture{d: d, server: server, home: home, workdir: dir, stop: func() { cancel(); <-done }}
+	f := &extensionFixture{d: d, fake: fake, server: server, home: home, workdir: dir, stop: func() { cancel(); <-done }}
 	t.Cleanup(f.stop)
 	f.awaitState(t, "loaded")
 	return f
