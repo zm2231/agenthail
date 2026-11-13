@@ -94,20 +94,30 @@ func TestUsageNamesHowARootWithoutAClaudeAILoginSignsIn(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
-	keys, out := filepath.Join(home, ".keys"), filepath.Join(home, ".out")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "")
+	keys, out, cloud, token := filepath.Join(home, ".keys"), filepath.Join(home, ".out"), filepath.Join(home, ".cloud"), filepath.Join(home, ".token")
 	writeUsageFixture(t, map[string]string{
-		filepath.Join(keys, "settings.json"): `{"apiKeyHelper":"print-key"}`,
-		filepath.Join(out, "settings.json"):  `{}`,
+		filepath.Join(keys, "settings.json"):  `{"apiKeyHelper":"print-key"}`,
+		filepath.Join(out, "settings.json"):   `{}`,
+		filepath.Join(cloud, "settings.json"): `{"env":{"CLAUDE_CODE_USE_BEDROCK":"1"}}`,
+		filepath.Join(token, "settings.json"): `{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"sk-ant-oat-x"}}`,
 	})
 	d := &Daemon{}
 	reader := &scriptedRootReader{}
 	for _, c := range []struct {
 		root   string
 		login  string
+		source string
 		prefix string
-	}{{keys, surface.ClaudeLoginAPIKey, "Signed in with an API key"}, {out, surface.ClaudeLoginSignedOut, "Not signed in"}} {
+	}{
+		{keys, surface.ClaudeLoginAPIKey, surface.ClaudeSourceAPIKey, "Signed in with an API key"},
+		{out, surface.ClaudeLoginSignedOut, "", "Not signed in"},
+		{cloud, surface.ClaudeLoginAPIKey, surface.ClaudeSourceBedrock, "Signed in with Amazon Bedrock"},
+		{token, surface.ClaudeLoginAPIKey, surface.ClaudeSourceOAuthToken, "Signed in with an OAuth token"},
+	} {
 		set := d.claudeUsageSet(context.Background(), reader, surface.ClaudeConfigRoot{Name: "keys", Root: c.root}, time.Now())
-		if set.Login != c.login || !strings.HasPrefix(set.Problem, c.prefix) || set.Detail == "" || set.Account != "" || set.Meters != nil {
+		if set.Login != c.login || set.LoginSource != c.source || !strings.HasPrefix(set.Problem, c.prefix) || set.Detail == "" || set.Account != "" || set.Meters != nil || strings.Contains(set.Problem+set.Detail, "sk-ant") {
 			t.Fatalf("a root without a claude.ai login says how it signs in: %+v", set)
 		}
 	}

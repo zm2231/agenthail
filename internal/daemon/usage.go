@@ -15,19 +15,20 @@ import (
 
 // A set with no provider is a host that could not answer.
 type usageSet struct {
-	Host     string       `json:"host"`
-	HostID   string       `json:"hostId"`
-	Local    bool         `json:"local"`
-	Provider string       `json:"provider,omitempty"`
-	Name     string       `json:"name,omitempty"`
-	Account  string       `json:"account,omitempty"`
-	Login    string       `json:"login,omitempty"`
-	Root     string       `json:"root,omitempty"`
-	Primary  bool         `json:"primary,omitempty"`
-	Meters   []usageMeter `json:"meters"`
-	AsOf     time.Time    `json:"asOf,omitzero"`
-	Problem  string       `json:"problem,omitempty"`
-	Detail   string       `json:"problemDetail,omitempty"`
+	Host        string       `json:"host"`
+	HostID      string       `json:"hostId"`
+	Local       bool         `json:"local"`
+	Provider    string       `json:"provider,omitempty"`
+	Name        string       `json:"name,omitempty"`
+	Account     string       `json:"account,omitempty"`
+	Login       string       `json:"login,omitempty"`
+	LoginSource string       `json:"loginSource,omitempty"`
+	Root        string       `json:"root,omitempty"`
+	Primary     bool         `json:"primary,omitempty"`
+	Meters      []usageMeter `json:"meters"`
+	AsOf        time.Time    `json:"asOf,omitzero"`
+	Problem     string       `json:"problem,omitempty"`
+	Detail      string       `json:"problemDetail,omitempty"`
 
 	Proxy        *usageProxy    `json:"proxy,omitempty"`
 	Accounts     []usageAccount `json:"accounts,omitempty"`
@@ -97,9 +98,15 @@ func (d *Daemon) claudeUsageSets(ctx context.Context, now time.Time) []usageSet 
 	return sets
 }
 
-var claudeNoUsageProblems = map[string][2]string{
-	surface.ClaudeLoginAPIKey:    {"Signed in with an API key; no usage reported.", "claude.ai reports usage only for a claude.ai login, and this config root uses an API key."},
-	surface.ClaudeLoginSignedOut: {"Not signed in; no usage reported.", "This config root holds no login. Run /login in a Claude session that uses it to sign in."},
+func claudeNoUsageProblem(login, source string) (problem, detail string, ok bool) {
+	switch login {
+	case surface.ClaudeLoginAPIKey:
+		uses := surface.ClaudeLoginPhrase(source)
+		return "Signed in with " + uses + "; no usage reported.", "claude.ai reports usage only for a claude.ai login, and this config root uses " + uses + ".", true
+	case surface.ClaudeLoginSignedOut:
+		return "Not signed in; no usage reported.", "This config root holds no login. Run /login in a Claude session that uses it to sign in.", true
+	}
+	return "", "", false
 }
 
 func (d *Daemon) claudeUsageSet(ctx context.Context, reader claudeConfigRootReader, root surface.ClaudeConfigRoot, now time.Time) usageSet {
@@ -112,14 +119,14 @@ func (d *Daemon) claudeUsageSet(ctx context.Context, reader claudeConfigRootRead
 		return set
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		set.Login = surface.ClaudeRootLogin(home, root)
+		set.Login, set.LoginSource = surface.ClaudeRootLogin(home, root)
 	}
 	if set.Login == surface.ClaudeLoginProxy {
 		set.Proxy = d.rootProxy(root.Proxy)
 		return set
 	}
-	if problem, ok := claudeNoUsageProblems[set.Login]; ok {
-		set.Problem, set.Detail = problem[0], problem[1]
+	if problem, detail, ok := claudeNoUsageProblem(set.Login, set.LoginSource); ok {
+		set.Problem, set.Detail = problem, detail
 		return set
 	}
 	live, usage, err := d.claudeUsage.read(ctx, reader, root, now)

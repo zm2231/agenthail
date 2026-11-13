@@ -50,6 +50,7 @@ struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
     let primary: Bool
     var signedInAs: Login? = nil
     var login: String? = nil
+    var loginSource: String? = nil
     var proxy: String? = nil
     var usage: ProviderUsage? = nil
     var best: String? = nil
@@ -214,6 +215,7 @@ struct UsageReport: Decodable, Hashable {
         var name: String? = nil
         var account: String? = nil
         var login: String? = nil
+        var loginSource: String? = nil
         var root: String? = nil
         var primary: Bool? = nil
         var meters: [Meter]? = nil

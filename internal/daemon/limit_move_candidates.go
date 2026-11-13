@@ -16,7 +16,8 @@ func (d *Daemon) claudeCachedUsageSets(roots []surface.ClaudeConfigRoot, now tim
 	}
 	sets := []usageSet{}
 	for _, root := range roots {
-		set := usageSet{Provider: "claude", Name: root.Name, Root: root.Root, Primary: root.Primary, Login: surface.ClaudeRootLogin(home, root)}
+		set := usageSet{Provider: "claude", Name: root.Name, Root: root.Root, Primary: root.Primary}
+		set.Login, set.LoginSource = surface.ClaudeRootLogin(home, root)
 		if root.SignedInAs != nil {
 			set.Account = root.SignedInAs.Email
 		}

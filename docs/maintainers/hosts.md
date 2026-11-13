@@ -295,11 +295,24 @@ session in the chosen project's root; a typed folder is still accepted.
 
 `GET /api/v1/usage` is every account's limits on this machine and on every
 connected paired host, as `sets[{host, hostId, local, provider, name, account,
-login, root, primary, meters, asOf, problem, problemDetail}]`. Each machine lists its primary Claude
+login, loginSource, root, primary, meters, asOf, problem, problemDetail}]`. Each machine lists its primary Claude
 account first, then Codex while it is healthy, then its other Claude accounts.
 A Claude set's `name` is its root's name, `account` the email the root is
 signed in with, and `login` how the root signs in: `claude.ai`, `api_key` or
-`signed_out`. `asOf` is when its usage was read. Each meter has a `provider`, a
+`signed_out`. An `api_key` login is any sign-in that is not a claude.ai account,
+and its `loginSource` says which: `api_key` (`ANTHROPIC_API_KEY`,
+`ANTHROPIC_AUTH_TOKEN`, an `apiKeyHelper` or a stored key), `oauth_token`
+(`CLAUDE_CODE_OAUTH_TOKEN`), or a cloud provider Claude is switched to:
+`bedrock`, `vertex`, `foundry`, or `cloud_provider` for the others. A cloud
+provider wins over the root's claude.ai account, as it does in Claude. The
+daemon reads these from the environment it launches Claude with, its own,
+overridden by the root's `settings.json` `env`, and checks only whether each is
+set. A key exported only in your shell profile is not in a launchd or systemd
+daemon's environment, so a root that relies on it reads `signed_out`: the
+sessions the host starts cannot use it either. A Claude you start from that
+shell, or a tmux session whose server holds the key, can still sign in with it;
+the label does not see that. The new-session `claudeConfigRoots` carry the same
+`login` and `loginSource`. `asOf` is when its usage was read. Each meter has a `provider`, a
 `kind` (`session`, `5h`, `weekly`, `weekly_all`, `weekly_scoped` or `<n>m`), a
 `label`, `percent`, `asOf` and `aged`, and when known a `severity`, `resetsAt`,
 `until` and, for `weekly_scoped`, the `scope` model's name. A client hides a
@@ -310,8 +323,8 @@ A Claude root's usage is claude.ai's answer for the root's login, read with the
 browser sign-in profile signed into that login. The daemon reads it at most
 once a minute per root and shares the read across every client and poll; a
 login change starts a fresh read. A read that fails keeps the last reading for
-that login, with its `asOf` and the `problem`. A root that uses an API key or holds
-no login is a set with no meters, a short `problem` that says which, and a
+that login, with its `asOf` and the `problem`. A root that signs in without a claude.ai
+account or holds no login is a set with no meters, a short `problem` that says which, and a
 `problemDetail` that explains it; it never asks claude.ai. The daemon learns an
 API key only from its presence in the environment, the root's `settings.json`
 or `.claude.json`, never its value.

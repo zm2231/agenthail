@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type usageMeterView struct {
@@ -48,20 +50,21 @@ type usageSessionView struct {
 }
 
 type usageSetView struct {
-	Host     string             `json:"host"`
-	HostID   string             `json:"hostId"`
-	Local    bool               `json:"local"`
-	Provider string             `json:"provider,omitempty"`
-	Name     string             `json:"name,omitempty"`
-	Account  string             `json:"account,omitempty"`
-	Login    string             `json:"login,omitempty"`
-	Root     string             `json:"root,omitempty"`
-	Primary  bool               `json:"primary,omitempty"`
-	Meters   []usageMeterView   `json:"meters"`
-	AsOf     time.Time          `json:"asOf,omitzero"`
-	Problem  string             `json:"problem,omitempty"`
-	Detail   string             `json:"problemDetail,omitempty"`
-	Sessions []usageSessionView `json:"sessions"`
+	Host        string             `json:"host"`
+	HostID      string             `json:"hostId"`
+	Local       bool               `json:"local"`
+	Provider    string             `json:"provider,omitempty"`
+	Name        string             `json:"name,omitempty"`
+	Account     string             `json:"account,omitempty"`
+	Login       string             `json:"login,omitempty"`
+	LoginSource string             `json:"loginSource,omitempty"`
+	Root        string             `json:"root,omitempty"`
+	Primary     bool               `json:"primary,omitempty"`
+	Meters      []usageMeterView   `json:"meters"`
+	AsOf        time.Time          `json:"asOf,omitzero"`
+	Problem     string             `json:"problem,omitempty"`
+	Detail      string             `json:"problemDetail,omitempty"`
+	Sessions    []usageSessionView `json:"sessions"`
 
 	Proxy        *usageProxyView    `json:"proxy,omitempty"`
 	Accounts     []usageAccountView `json:"accounts,omitempty"`
@@ -200,7 +203,7 @@ func usageSetTitle(set usageSetView, now time.Time) string {
 	}
 	title := set.Account
 	if title == "" {
-		title = map[string]string{"api_key": "API key", "signed_out": "signed out"}[set.Login]
+		title = surface.ClaudeLoginTitle(set.Login, set.LoginSource)
 	}
 	if title == "" {
 		title = set.Name

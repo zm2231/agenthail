@@ -1,11 +1,11 @@
-const kinds = { api_key: "API key", signed_out: "signed out" };
+import { loginLabel } from "./login-labels.js";
 
 export function rootTitles(roots, host) {
   const names = roots.map((root) => {
     if (root.proxy) return `${root.proxy} via proxy`;
     const email = root.signedInAs?.email;
     if (email) return email.split("@")[0];
-    return `${host || "this host"} (${kinds[root.login] || "signed out"})`;
+    return `${host || "this host"} (${loginLabel(root.login, root.loginSource) || "signed out"})`;
   });
   return names.map((name, index) => (names.filter((other) => other === name).length > 1 ? `${name} · ${roots[index].name}` : name));
 }

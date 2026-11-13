@@ -59,7 +59,7 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	claudeConfigRoots := append([]surface.ClaudeConfigRoot{}, d.claudeConfigRoots()...)
 	if home, err := os.UserHomeDir(); err == nil {
 		for i := range claudeConfigRoots {
-			claudeConfigRoots[i].Login = surface.ClaudeRootLogin(home, claudeConfigRoots[i])
+			claudeConfigRoots[i].Login, claudeConfigRoots[i].LoginSource = surface.ClaudeRootLogin(home, claudeConfigRoots[i])
 		}
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"host": d.localHost(), "surfaces": options, "projects": projects, "folders": folders, "launchers": launchers, "claudeConfigRoots": claudeConfigRoots})

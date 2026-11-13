@@ -5,7 +5,7 @@ enum ClaudeRootLabels {
         let names = roots.map { root -> String in
             if let proxy = root.proxy, !proxy.isEmpty { return "\(proxy) via proxy" }
             if let email = root.signedInAs?.email, !email.isEmpty { return String(email.split(separator: "@")[0]) }
-            return "\(host) (\(root.login == "api_key" ? "API key" : "signed out"))"
+            return "\(host) (\(UsageAccounts.loginLabel(root.login, source: root.loginSource) ?? "signed out"))"
         }
         return zip(roots, names).map { root, name in
             names.filter { $0 == name }.count > 1 ? "\(name) · \(root.name)" : name

@@ -137,9 +137,17 @@ enum UsageAccounts {
         set.hostId + "|" + (set.provider ?? "") + "|" + (set.root ?? set.proxy?.id ?? "")
     }
 
-    static func loginLabel(_ login: String?) -> String? {
+    static func loginLabel(_ login: String?, source: String?) -> String? {
         switch login {
-        case "api_key": return "API key"
+        case "api_key":
+            switch source {
+            case "oauth_token": return "OAuth token"
+            case "bedrock": return "Bedrock"
+            case "vertex": return "Vertex AI"
+            case "foundry": return "Foundry"
+            case "cloud_provider": return "cloud provider"
+            default: return "API key"
+            }
         case "signed_out": return "signed out"
         default: return nil
         }
@@ -148,7 +156,7 @@ enum UsageAccounts {
     private static func titles(_ entries: [(UsageReport.Set, UsageProxyGroup?)]) -> [String] {
         let names = entries.map { baseName($0.0, group: $0.1) }
         var hostsByName: [String: Swift.Set<String>] = [:]
-        for ((set, group), name) in zip(entries, names) where set.provider != nil && group == nil && loginLabel(set.login) == nil {
+        for ((set, group), name) in zip(entries, names) where set.provider != nil && group == nil && loginLabel(set.login, source: set.loginSource) == nil {
             hostsByName[name, default: []].insert(set.hostId)
         }
         let titles = zip(entries, names).map { entry, name in
@@ -177,7 +185,7 @@ enum UsageAccounts {
             if let account = set.account, !account.isEmpty {
                 return (account.contains("@") ? String(account.split(separator: "@")[0]) : account) + codex
             }
-            if let kind = loginLabel(set.login) { return "\(set.host) (\(kind))" }
+            if let kind = loginLabel(set.login, source: set.loginSource) { return "\(set.host) (\(kind))" }
             return set.name ?? "Claude"
         }
     }
@@ -190,7 +198,7 @@ enum UsageAccounts {
         case "codex" where group == nil: return "Codex"
         default:
             if let account = set.account, !account.isEmpty { return account + codex }
-            if let kind = loginLabel(set.login) { return kind.prefix(1).uppercased() + kind.dropFirst() }
+            if let kind = loginLabel(set.login, source: set.loginSource) { return kind.prefix(1).uppercased() + kind.dropFirst() }
             return set.name ?? "Claude"
         }
     }
