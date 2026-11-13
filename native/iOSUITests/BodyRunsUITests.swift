@@ -68,3 +68,4 @@ final class BodyRunsUITests: XCTestCase {
         XCTAssertLessThanOrEqual(runs["IOSSessionRow", default: 0], upserts + 4, "rows other than the updated one redrew")
     }
 }
+
