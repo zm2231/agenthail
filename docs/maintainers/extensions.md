@@ -263,7 +263,8 @@ ignored.
   nothing new: `<session> changed extensions in 3 turns`, `Keep all` and
   `Undo last`. Keep closes the ask. Undo last undoes the newest pending turn
   and rewords the ask, or closes it when no turn is left. Only the person
-  answers; a session is refused with `403 forbidden`. What is pending is kept
+  answers; every session, including one that may act for the person
+  elsewhere, is refused with `403 forbidden`. What is pending is kept
   in `~/.agenthail/extensions-data/changes.json`.
 - Undo reverts one commit as a new commit by `person`. A revert that meets a
   later change to the same lines is abandoned with `409 conflict` and the
@@ -310,6 +311,8 @@ tree hash of the extension's folder that was loaded (hashed through a scratch
 index, so nothing is staged). The Keep/Undo ask says `<id> verified: <name> ran
 ok at 23:01 against this version` only when a successful run's hash equals the
 folder's tree in the change's commit, and `<id> not verified` otherwise. A
+run is recorded without a hash, and so checks nothing, when the folder changed
+while the host loaded it or the extensions reloaded while it ran. A
 successful run rewords open asks at once. The ask also says `<id> needs your
 approval: ...` while capabilities or mounts the folder declares are not
 approved.
@@ -322,7 +325,7 @@ pushed to their devices: `Approve` or `Decline`, with what would be granted, or
 which key place and upstream. The same request while its ask is open raises no
 second ask. Approving applies exactly what the ask showed: if
 `extension.json` or the mount's upstream changed since, the answer is refused
-with `409` and nothing is granted. Only the person answers. A key place too
+with `409` and nothing is granted. Only the person answers, as for Keep and Undo. A key place too
 long to show in an ask is refused outright; the person names it from their own
 shell. Pending requests are kept in `~/.agenthail/extensions-data/grants.json`.
 This keeps an agent from approving by habit; it is not a wall, since an agent
