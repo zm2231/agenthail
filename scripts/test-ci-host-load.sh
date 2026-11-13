@@ -78,6 +78,7 @@ summary() {
 summary 5 1 | grep -q '^load1 median 3.0, p90 5.0, max 5.0 ' || fail "two samples: $(summary 5 1)"
 summary 9 1 8 2 7 3 6 4 5 10 | grep -q '^load1 median 5.5, p90 9.0, max 10.0 ' || fail "ten samples: $(summary 9 1 8 2 7 3 6 4 5 10)"
 summary 3 1 2 | grep -q '^load1 median 2.0, p90 3.0, max 3.0 ' || fail "three samples: $(summary 3 1 2)"
+summary 6 1 5 2 4 3 | grep -q '^load1 median 3.5, p90 6.0, max 6.0 ' || fail "six samples: $(summary 6 1 5 2 4 3)"
 
 run start
 pid="$(cat "$work/temp/host-load.pid")"
