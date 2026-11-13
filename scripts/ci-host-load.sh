@@ -38,13 +38,15 @@ start() {
 		printf 'host\t%s\t%s cores\t%s GB\n' "$(sysctl -n hw.model)" "$(sysctl -n hw.ncpu)" "$(($(sysctl -n hw.memsize) / 1073741824))"
 		printf 'time\tload1\tused_gb\tavailable_gb\tcompressed_gb\tswap_mb\tcpu_pct\tsimulators\tvms\ttop_cpu_pct\n'
 	} >"$samples"
-	(
-		while :; do
-			sample >>"$samples" 2>/dev/null
-			sleep "$interval"
-		done
-	) </dev/null >/dev/null 2>&1 &
+	"$(cd "$(dirname "$0")" && pwd)/$(basename "$0")" loop </dev/null >/dev/null 2>&1 &
 	echo $! >"$pidfile"
+}
+
+loop() {
+	while [ -f "$samples" ]; do
+		sample >>"$samples" 2>/dev/null
+		sleep "$interval"
+	done
 }
 
 report() {
@@ -67,11 +69,12 @@ report() {
 		END {
 			if (!n) { print "no host load samples"; exit }
 			for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++) if (load[j] < load[i]) { t = load[i]; load[i] = load[j]; load[j] = t }
+			median = n % 2 ? load[(n + 1) / 2] : (load[n / 2] + load[n / 2 + 1]) / 2
+			p90 = int(n * 0.9)
+			if (p90 < n * 0.9) p90++
 			printf "host load on %s while %s ran: %d samples over %d s\n", host, runner, n, last - first
-			p90 = int(n * 0.9 + 0.5)
-			if (p90 < 1) p90 = 1
 			percore = cores ? maxload / cores : 0
-			printf "load1 median %.0f, p90 %.0f, max %.0f (%.1f per core at max); used memory max %.1f GB, available min %.1f GB, swap max %.0f MB; simulators max %d, VMs max %d\n", load[int((n + 1) / 2)], load[p90], maxload, percore, maxused, minavail, maxswap, maxsims, maxvms
+			printf "load1 median %.1f, p90 %.1f, max %.1f (%.1f per core at max); used memory max %.1f GB, available min %.1f GB, swap max %.0f MB; simulators max %d, VMs max %d\n", median, load[p90], maxload, percore, maxused, minavail, maxswap, maxsims, maxvms
 			m = 0
 			for (k in share) order[++m] = k
 			for (i = 1; i <= m; i++) for (j = i + 1; j <= m; j++) if (share[order[j]] > share[order[i]]) { t = order[i]; order[i] = order[j]; order[j] = t }
@@ -87,6 +90,7 @@ report() {
 case "${1:-}" in
 	start) start ;;
 	report) report ;;
+	loop) loop ;;
 	*) echo "usage: $0 start|report" >&2; exit 2 ;;
 esac
 exit 0

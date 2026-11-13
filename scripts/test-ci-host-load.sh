@@ -56,15 +56,39 @@ for _ in $(seq 50); do
 	[ "$(wc -l <"$work/temp/host-load.tsv")" -ge 4 ] && break
 	sleep 0.1
 done
-out="$(run report)"
 pid="$(cat "$work/temp/host-load.pid")"
+case "$(ps -o args= -p "$pid")" in *"$ROOT/scripts/ci-host-load.sh loop"*) ;; *) fail "cleanup cannot match the sampler by its path: $(ps -o args= -p "$pid")" ;; esac
+out="$(run report)"
 ! kill -0 "$pid" 2>/dev/null || fail "report left the sampler running"
 
 grep -q '^host load on Mac16,10 10 cores 64 GB while agenthail-test ran: ' <<<"$out" || fail "no header in: $out"
-grep -q 'load1 median 42, p90 42, max 42 (4.2 per core at max); used memory max 16.0 GB, available min 5.0 GB, swap max 512 MB; simulators max 2, VMs max 1' <<<"$out" || fail "wrong summary in: $out"
+grep -q 'load1 median 42.5, p90 42.5, max 42.5 (4.2 per core at max); used memory max 16.0 GB, available min 5.0 GB, swap max 512 MB; simulators max 2, VMs max 1' <<<"$out" || fail "wrong summary in: $out"
 grep -q 'mean CPU among the top processes: compile 350%, daemon.test 120%, launchd_sim 115%, com.apple.Virtualization.VirtualMachine 90%, Google Chrome Helper 10%' <<<"$out" || fail "wrong processes in: $out"
 
-rm -f "$work/temp/host-load.tsv" "$work/temp/host-load.pid"
+rm -f "$work/temp/host-load.pid"
+summary() {
+	head -2 "$work/temp/host-load.tsv" >"$work/temp/fixture"
+	local t=1000 load
+	for load in "$@"; do
+		printf '%s\t%s\t1\t1\t0\t0\t0\t0\t0\tgo=1\n' "$((t += 10))" "$load" >>"$work/temp/fixture"
+	done
+	mv "$work/temp/fixture" "$work/temp/host-load.tsv"
+	run report | sed -n 2p
+}
+summary 5 1 | grep -q '^load1 median 3.0, p90 5.0, max 5.0 ' || fail "two samples: $(summary 5 1)"
+summary 9 1 8 2 7 3 6 4 5 10 | grep -q '^load1 median 5.5, p90 9.0, max 10.0 ' || fail "ten samples: $(summary 9 1 8 2 7 3 6 4 5 10)"
+summary 3 1 2 | grep -q '^load1 median 2.0, p90 3.0, max 3.0 ' || fail "three samples: $(summary 3 1 2)"
+
+run start
+pid="$(cat "$work/temp/host-load.pid")"
+rm -f "$work/temp/host-load.tsv"
+for _ in $(seq 50); do
+	kill -0 "$pid" 2>/dev/null || break
+	sleep 0.1
+done
+! kill -0 "$pid" 2>/dev/null || fail "the sampler outlived its samples file"
+
+rm -f "$work/temp/host-load.pid"
 run report | grep -q '^no host load samples$' || fail "a report without samples failed"
 RUNNER_TEMP="$work/temp" "$ROOT/scripts/ci-host-load.sh" bogus 2>/dev/null && fail "an unknown command succeeded"
 
