@@ -52,6 +52,7 @@ type Attachment struct {
 	Width     int    `json:"width,omitempty"`
 	Height    int    `json:"height,omitempty"`
 	Bytes     int64  `json:"bytes,omitempty"`
+	Name      string `json:"name,omitempty"`
 }
 
 type SessionTimeline struct {
