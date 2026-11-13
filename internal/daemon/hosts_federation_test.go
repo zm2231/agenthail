@@ -190,6 +190,8 @@ type actionGate struct {
 	proxyDown atomic.Bool
 	// proxyRefusals counts the requests refused while proxyDown is set.
 	proxyRefusals atomic.Int32
+	// snapshotsDown refuses snapshots while the version probe still answers.
+	snapshotsDown atomic.Bool
 	older         atomic.Bool
 	streams       atomic.Int64
 	// rootlessPrepare answers a move's prepare as a host that ignores its root.
@@ -338,6 +340,10 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			defer n.gate.streamsEnded.Add(1)
 		}
 		if r.URL.Path == "/api/v1/snapshot" {
+			if n.gate.snapshotsDown.Load() {
+				http.Error(w, "bad gateway", http.StatusBadGateway)
+				return
+			}
 			n.gate.snapshotsServed.Add(1)
 		}
 		if hold := n.gate.versions.Load(); hold != nil && r.URL.Path == "/api/v1/version" {
