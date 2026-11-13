@@ -16,6 +16,13 @@ enum BodyRuns {
         counts[name, default: 0] += 1
     }
 
+    private static var perID: [String: [String: Int]] = [:]
+
+    static func hit(_ name: String, id: String) {
+        guard enabled else { return }
+        perID[name, default: [:]][id, default: 0] += 1
+    }
+
     private static var seen: [String: Any] = [:]
     private static var armed: Set<String> = []
     private static var watched: [String: AnyCancellable] = [:]
@@ -53,7 +60,10 @@ enum BodyRuns {
     }
 
     static var summary: String {
-        (["busyMs=\(Int(busy * 1000))"] + counts.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }).joined(separator: " ")
+        let rows = perID.sorted { $0.key < $1.key }.flatMap { name, ids in
+            ids.map { id, runs in "\(name)#\(id.map { $0 == " " || $0 == "=" ? "_" : $0 }.map(String.init).joined())=\(runs)" }
+        }
+        return (["busyMs=\(Int(busy * 1000))"] + counts.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" } + rows).joined(separator: " ")
     }
 
     static func watchMainThread() {
@@ -90,11 +100,21 @@ extension View {
     func countsAppearances(_ name: String) -> some View {
         onAppear { BodyRuns.hit(name) }
     }
+
+    func countsDisappearances(_ name: String) -> some View {
+        onDisappear { BodyRuns.hit(name) }
+    }
+
+    func countsGeometryChanges(_ name: String) -> some View {
+        onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TranscriptRows.contentSpace)).minY } action: { _ in BodyRuns.hit(name) }
+    }
 }
 #else
 import SwiftUI
 
 extension View {
     func countsAppearances(_ name: String) -> some View { self }
+    func countsDisappearances(_ name: String) -> some View { self }
+    func countsGeometryChanges(_ name: String) -> some View { self }
 }
 #endif

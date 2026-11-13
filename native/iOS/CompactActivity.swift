@@ -103,7 +103,9 @@ struct CompactActivityGroup: View, @MainActor Equatable {
     var body: some View {
 #if DEBUG
         let _ = BodyRuns.hit("CompactActivityGroup")
+        let _ = BodyRuns.hit("CompactActivityGroup", id: group.id)
         let _ = BodyRuns.changed("in.group.group", group.id, group)
+        let _ = BodyRuns.changed("in.group.env", group.id, rows)
         let _ = probeOpenedInputs()
 #endif
         if group.foldLabel != nil {
@@ -123,6 +125,7 @@ struct CompactActivityGroup: View, @MainActor Equatable {
                     .accessibilityValue(open ? "Expanded" : "Collapsed")
                     .accessibilityHint("Show each tool in this run")
                     .contentTop($top)
+                    .countsGeometryChanges("group.topMoved")
                 }
                 if open {
                     ForEach(group.invocations) { invocation in
