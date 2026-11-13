@@ -16,15 +16,14 @@ import (
 )
 
 const (
-	journalTables  = "session transcripts, read only by session streams"
-	deviceTables   = "paired devices, push and sign-in, read by the device and push paths"
-	routingTables  = "message routing and relays, which reach a view only through the queue and delivery intents"
-	ledgerTables   = "project ledgers and project identity history, applied to catalog_sessions.host_project at discovery"
-	sessionOnly    = "per-session state read by its own command or the launcher, not by any view query"
-	voiceOperators = "voice operator roles, read by LocalSessionRoles, which the view build does not call"
-	queueMarks     = "mirrored sessions whose queue changed, read only by RefreshHostQueueCounts, which writes the count a view reads into catalog_sessions"
-	idleAttempts   = "idle compaction attempts, read by the idle compactor and when a turn record is journaled, not by any view query"
-	codexConfig    = "a Codex thread's config overrides, read when Agenthail resumes the thread and by session metadata, not by any view query"
+	journalTables = "session transcripts, read only by session streams"
+	deviceTables  = "paired devices, push and sign-in, read by the device and push paths"
+	routingTables = "message routing and relays, which reach a view only through the queue and delivery intents"
+	ledgerTables  = "project ledgers and project identity history, applied to catalog_sessions.host_project at discovery"
+	sessionOnly   = "per-session state read by its own command or the launcher, not by any view query"
+	queueMarks    = "mirrored sessions whose queue changed, read only by RefreshHostQueueCounts, which writes the count a view reads into catalog_sessions"
+	idleAttempts  = "idle compaction attempts, read by the idle compactor and when a turn record is journaled, not by any view query"
+	codexConfig   = "a Codex thread's config overrides, read when Agenthail resumes the thread and by session metadata, not by any view query"
 )
 
 var notSessionViewInputs = map[string]string{
@@ -37,13 +36,18 @@ var notSessionViewInputs = map[string]string{
 	"ledger_backlog_told": ledgerTables, "ledger_events": ledgerTables, "ledger_grants": ledgerTables, "ledger_state": ledgerTables, "project_links": ledgerTables, "project_move_refusals": ledgerTables,
 	"project_moves": ledgerTables, "removed_project_ledgers": ledgerTables, "repository_keys": ledgerTables, "project_moves_waiting": ledgerTables,
 	"move_dropped_relays": "relays a move did not take over, read by doctor and the move's answer; the session view reads the delivery_history entry written with them",
-	"alias_reservations": sessionOnly, "launcher_pending": sessionOnly, "pending_ceilings": sessionOnly, "session_ceilings": sessionOnly,
-	"session_context": sessionOnly, "session_moves": sessionOnly, "session_rekeys": sessionOnly, "tasks": sessionOnly,
-	"session_origins": voiceOperators, "host_queue_dirty": queueMarks, "idle_compactions": idleAttempts,
+	"alias_reservations":  sessionOnly, "launcher_pending": sessionOnly, "pending_ceilings": sessionOnly, "session_ceilings": sessionOnly,
+	"session_context": sessionOnly, "session_rekeys": sessionOnly,
+	"host_queue_dirty": queueMarks, "idle_compactions": idleAttempts,
 	"session_codex_config": codexConfig, "trigger_runs": "only GET /api/v1/triggers reads trigger runs; a finished run reaches a session view as its delivery_history entry",
 	"host_held_actions": "a held channel leg belongs to a paired host, not a session; it reaches a session view only as the host's deliveries",
 }
 
+// Dropping session_archive or projects from the registry's presentation inputs
+// leaves this test passing, and that is not a gap: the
+// catalog_retired_version_* triggers on both tables (catalog_retired.go) bump
+// catalog_retired_version, itself an input, on every change a view reads. The
+// inputs stay as a second guard should those triggers change.
 func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T) {
 	f := newViewFixture(t)
 	f.populate(rand.New(rand.NewSource(20261107)), 300, func(int, string) {})

@@ -482,6 +482,20 @@ func newViewFixture(t *testing.T) *viewFixture {
 		if err := reg.QueueMessage("s2", "filled"); err != nil {
 			t.Fatal(err)
 		}
+		// A mirrored session's count adds the sends this computer holds for it,
+		// which no catalog event records.
+		if err := reg.QueueMessage("far", "filled"); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.RecordSessionOrigin(registry.OriginOf("s1", "s0")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := reg.CreateTask("s0", "s2", "filled", f.clock); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.BeginMoveOut("move-fill", "s1", hostID, []byte(`{"root":"work"}`), registry.MoveCarry{}, d.hostIdentity().ID); err != nil {
+			t.Fatal(err)
+		}
 		intent, err := reg.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "s5", TargetSessionID: "s2", Status: registry.DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
 		if err != nil {
 			t.Fatal(err)

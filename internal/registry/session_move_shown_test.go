@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -122,5 +123,65 @@ func TestAMoveWhoseOutcomeIsUnknownStillKeepsQueuedDeliveriesOffTheSession(t *te
 	}
 	if reason, err := r.SessionMoveRefusal(moveConversation, true); err != nil || reason == "" {
 		t.Fatalf("a second move of a session whose move is unsettled was not refused: %q err=%v", reason, err)
+	}
+}
+
+func TestRemovingTheTargetHostOfAnUnfinishedMoveMovesThePresentation(t *testing.T) {
+	r := moveRegistry(t)
+	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{"root":"work"}`), MoveCarry{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if move := shownMove(t, r); move == nil || move.HostName != "server" {
+		t.Fatalf("move=%+v", move)
+	}
+	version := presentationVersion(t, r)
+	if _, err := r.RemoveHost(moveTarget); err != nil {
+		t.Fatal(err)
+	}
+	if presentationVersion(t, r) == version {
+		t.Fatal("removing the target host of an unfinished move did not move the presentation version")
+	}
+	if move := shownMove(t, r); move == nil || move.HostName != "" {
+		t.Fatalf("after removing its target host the move shows %+v", move)
+	}
+}
+
+func TestARegistryFromTheVersionBeforeWatchesTheMoveBadgeAfterUpgrading(t *testing.T) {
+	r := moveRegistry(t)
+	for _, step := range []string{
+		`DROP TRIGGER catalog_presentation_version_hosts_insert`,
+		`DROP TRIGGER catalog_presentation_version_hosts_update`,
+		`DROP TRIGGER catalog_presentation_version_hosts_delete`,
+		`DROP TRIGGER catalog_presentation_version_session_moves_update`,
+		`CREATE TRIGGER catalog_presentation_version_session_moves_update AFTER UPDATE OF conversation,peer_host,state,detail,outcome_unknown_at ON session_moves WHEN (NEW.role='out' OR OLD.role='out') AND (NEW.conversation IS NOT OLD.conversation OR NEW.peer_host IS NOT OLD.peer_host OR NEW.state IS NOT OLD.state OR NEW.detail IS NOT OLD.detail OR NEW.outcome_unknown_at IS NOT OLD.outcome_unknown_at)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END`,
+		fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion-1),
+	} {
+		if _, err := r.db.Exec(step); err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+	}
+	if err := r.migrate(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{"root":"work"}`), MoveCarry{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	version := presentationVersion(t, r)
+	if _, err := r.db.Exec(`UPDATE session_moves SET manifest='{"root":"elsewhere"}' WHERE id='move-1'`); err != nil {
+		t.Fatal(err)
+	}
+	if next := presentationVersion(t, r); next == version {
+		t.Fatal("after upgrading, a change to the move's manifest did not move the presentation version")
+	} else {
+		version = next
+	}
+	if _, err := r.RemoveHost(moveTarget); err != nil {
+		t.Fatal(err)
+	}
+	if presentationVersion(t, r) == version {
+		t.Fatal("after upgrading, removing the target host of an unfinished move did not move the presentation version")
 	}
 }
