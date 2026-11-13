@@ -15,7 +15,19 @@ final class BodyRunsUITests: XCTestCase {
         let before = Self.counts(probe.label)
         Thread.sleep(forTimeInterval: 10)
         let after = Self.counts(probe.label)
-        return after.reduce(into: [:]) { $0[$1.key] = $1.value - (before[$1.key] ?? 0) }
+        let window = after.reduce(into: [String: Int]()) { $0[$1.key] = $1.value - (before[$1.key] ?? 0) }
+        return Self.foldRows(window)
+    }
+
+    private static func foldRows(_ window: [String: Int]) -> [String: Int] {
+        var folded = window.filter { !$0.key.contains("#") }
+        let perRow = Dictionary(grouping: window.filter { $0.key.contains("#") && $0.value > 0 }) { String($0.key.prefix { $0 != "#" }) }
+        for (name, rows) in perRow {
+            folded[name + ".ids"] = rows.count
+            folded[name + ".max"] = rows.map(\.value).max() ?? 0
+            folded[name + ".over3"] = rows.filter { $0.value > 3 }.count
+        }
+        return folded
     }
 
     private static func counts(_ label: String) -> [String: Int] {
