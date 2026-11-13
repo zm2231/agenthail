@@ -68,7 +68,9 @@ func (d *Daemon) queueSort(key, utteranceID string, seq int64, at time.Time) {
 	}
 }
 
-func (d *Daemon) startLedgerSorter(ctx context.Context) <-chan struct{} {
+// The sorter starts after recovery has recorded the contexts owed at start, which it does oldest first, so an older
+// message is never asked about after a newer one whose context was already there.
+func (d *Daemon) startLedgerSorter(ctx context.Context, contextsRecovered <-chan struct{}) <-chan struct{} {
 	done := make(chan struct{})
 	if d.sorter == nil {
 		close(done)
@@ -77,6 +79,11 @@ func (d *Daemon) startLedgerSorter(ctx context.Context) <-chan struct{} {
 	d.oweRecentCaptures()
 	go func() {
 		defer close(done)
+		select {
+		case <-contextsRecovered:
+		case <-ctx.Done():
+			return
+		}
 		d.runLedgerSorter(ctx)
 	}()
 	return done

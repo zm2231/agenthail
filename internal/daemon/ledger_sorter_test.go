@@ -109,7 +109,8 @@ func sorterFixture(t *testing.T, stub *sorterStub) (*Daemon, *registry.Registry,
 func runSorter(t *testing.T, d *Daemon) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	contexts, done := d.startMessageContexts(ctx), d.startLedgerSorter(ctx)
+	recovered, contexts := d.startMessageContexts(ctx)
+	done := d.startLedgerSorter(ctx, recovered)
 	stop = func() {
 		cancel()
 		<-contexts
@@ -145,6 +146,30 @@ func TestAfterARestartOwedMessagesAreSortedOldestFirstAcrossProjects(t *testing.
 	eventually(t, "the message after the second restart to be asked", func() bool { return len(stub.asks()) >= 3 })
 	if asked := stub.asks(); len(asked) != 3 || asked[2].Message != "after the second restart" {
 		t.Fatalf("asks = %+v, want messages answered before a restart never asked again", asked)
+	}
+}
+
+func TestAfterARestartAnOlderMessageStillWaitingForItsContextIsAskedAboutFirst(t *testing.T) {
+	stub := &sorterStub{answer: fileTo("new")}
+	d, r, handler, p, _ := sorterFixture(t, stub)
+	early := addLedgerProject(t, r, "proj-a", "a-sorter-key")
+	if err := early.store.Enable(early.key, ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := early.store.EnsureGoal(early.key, "billing", "lead"); err != nil {
+		t.Fatal(err)
+	}
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: p.session(t, r, "claude-older").ID, PromptID: "older", Prompt: "the older message"})
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: early.session(t, r, "claude-newer").ID, PromptID: "newer", Prompt: "the newer message"})
+	if _, err := early.store.RecordContext(early.key, ledger.ContextPayload{UtteranceID: ledger.PromptRef("newer"), Status: ledger.ReplyNone}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	restarted := newTestDaemon(t, r, []surface.Surface{&daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}})
+	restarted.sorter.http = d.sorter.http
+	runSorter(t, restarted)
+	eventually(t, "both owed messages to be asked about", func() bool { return len(stub.asks()) == 2 })
+	if asked := stub.asks(); asked[0].Message != "the older message" || asked[1].Message != "the newer message" {
+		t.Fatalf("asked %q then %q, want the older message first though only the newer one had its context", asked[0].Message, asked[1].Message)
 	}
 }
 
