@@ -198,6 +198,61 @@ func fileChanges(lines string) []FileChanges {
 	return out
 }
 
+// FolderTrees hashes each extension's folder as it is on disk, the way a
+// commit would record it, through a scratch index so nothing is staged.
+func (h *History) FolderTrees() (map[string]string, error) {
+	index, err := os.CreateTemp(filepath.Join(h.repo.Dir(), ".git"), "verify-index-")
+	if err != nil {
+		return nil, err
+	}
+	name := index.Name()
+	index.Close()
+	os.Remove(name)
+	defer os.Remove(name)
+	env := []string{"GIT_INDEX_FILE=" + name}
+	if _, err := h.repo.GitWith("agenthail", env, "add", "-A"); err != nil {
+		return nil, err
+	}
+	tree, err := h.repo.GitWith("agenthail", env, "write-tree")
+	if err != nil {
+		return nil, err
+	}
+	out, err := h.repo.Git("ls-tree", strings.TrimSpace(tree))
+	if err != nil {
+		return nil, err
+	}
+	trees := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		meta, id, ok := strings.Cut(line, "\t")
+		fields := strings.Fields(meta)
+		if ok && len(fields) == 3 && fields[1] == "tree" && ValidID(id) {
+			trees[id] = fields[2]
+		}
+	}
+	return trees, nil
+}
+
+// CommittedTree is the hash of an extension's folder as rev recorded it, or
+// "" when rev holds no such folder.
+func (h *History) CommittedTree(rev, id string) (string, error) {
+	if err := h.repo.CheckRev(rev); err != nil {
+		return "", err
+	}
+	return h.subtree(rev, id)
+}
+
+func (h *History) subtree(treeish, id string) (string, error) {
+	out, err := h.repo.Git("ls-tree", treeish, "--", id)
+	if err != nil {
+		return "", err
+	}
+	fields := strings.Fields(out)
+	if len(fields) < 3 || fields[1] != "tree" {
+		return "", nil
+	}
+	return fields[2], nil
+}
+
 // Undone reports what an undo did: the change it reverted, and the
 // extensions that change had created, which no longer exist.
 type Undone struct {

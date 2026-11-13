@@ -63,7 +63,8 @@ type Extension struct {
 	Err      error
 }
 
-func ValidID(id string) bool { return idPattern.MatchString(id) }
+// The seeded recipes folder sits beside the extensions, so its name is taken.
+func ValidID(id string) bool { return idPattern.MatchString(id) && id != recipesDir }
 
 func Discover(workspace string) ([]Extension, error) {
 	entries, err := os.ReadDir(workspace)

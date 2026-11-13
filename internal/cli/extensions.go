@@ -6,12 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const extensionsUsage = "usage: agenthail extensions [list] | approve <id> | reload | history | undo <rev> | key <id> <mount> (--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account> | --key-command -- <argv...> | --clear), each with [--json]"
+const extensionsUsage = "usage: agenthail extensions [list] | build \"<what it should do>\" [--agent claude|codex] | call <id> <action> [--input <json>] | run <id> <job> | approve <id> | reload | history | undo <rev> | key <id> <mount> (--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account> | --key-command -- <argv...> | --clear), each with [--json]"
 
 type extensionsListView struct {
 	Host       string `json:"host"`
@@ -55,21 +60,50 @@ func (a *App) cmdExtensions(args []string) error {
 	if len(positional) > 0 {
 		sub = positional[0]
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	timeout := 45 * time.Second
+	if sub == "run" {
+		timeout = 11 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	client, err := a.daemonAPI()
 	if err != nil {
 		return err
 	}
 	asJSON := hasFlag(args, "--json")
+	caller := ""
+	if agentEnvironment() && (sub == "approve" || sub == "key" || sub == "call" || sub == "run") {
+		if caller, err = a.sourceSessionID(ctx, ""); err != nil {
+			return err
+		}
+	}
 	var data []byte
 	switch {
+	case sub == "build" && len(positional) >= 2:
+		if agentEnvironment() {
+			return errors.New("starting a builder is the person's to do; to work on an extension yourself, edit ~/.agenthail/extensions and read its AGENTS.md")
+		}
+		return a.buildExtension(ctx, client, strings.Join(positional[1:], " "), flagVal(args, "--agent"), asJSON)
+	case sub == "call" && len(positional) == 3:
+		input := json.RawMessage(flagVal(args, "--input"))
+		if len(input) > 0 && !json.Valid(input) {
+			return errors.New("--input must be JSON")
+		}
+		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions/"+url.PathEscape(positional[1])+"/call", nil, map[string]any{"action": positional[2], "input": input, "sessionId": caller}, nil)
+		if err == nil && !asJSON {
+			return printExtensionCall(data)
+		}
+	case sub == "run" && len(positional) == 3:
+		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions/"+url.PathEscape(positional[1])+"/call", nil, map[string]any{"job": positional[2], "sessionId": caller}, nil)
+		if err == nil && !asJSON {
+			return printExtensionCall(data)
+		}
 	case sub == "list" && len(positional) <= 1:
 		data, _, err = client.call(ctx, http.MethodGet, "/api/v1/extensions", nil, nil, nil)
 	case sub == "reload" && len(positional) == 1:
 		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "reload"}, nil)
 	case sub == "approve" && len(positional) == 2:
-		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "approve", "id": positional[1]}, nil)
+		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "approve", "id": positional[1], "sessionId": caller}, nil)
 	case sub == "history" && len(positional) == 1:
 		data, _, err = client.call(ctx, http.MethodGet, "/api/v1/extensions/history", nil, nil, nil)
 		if err == nil && !asJSON {
@@ -88,7 +122,7 @@ func (a *App) cmdExtensions(args []string) error {
 		if (ref == nil) != hasFlag(args, "--clear") {
 			return errors.New(extensionsUsage)
 		}
-		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "key", "id": positional[1], "mount": positional[2], "key": ref}, nil)
+		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "key", "id": positional[1], "mount": positional[2], "key": ref, "sessionId": caller}, nil)
 	default:
 		return errors.New(extensionsUsage)
 	}
@@ -241,5 +275,61 @@ func printExtensionUndo(data []byte) error {
 	if len(view.Removed) > 0 {
 		fmt.Printf("[extensions] removed %s with its tables and approvals\n", strings.Join(view.Removed, ", "))
 	}
+	return nil
+}
+
+func printExtensionCall(data []byte) error {
+	var view struct {
+		Result   json.RawMessage `json:"result"`
+		Ran      string          `json:"ran"`
+		Tree     string          `json:"tree"`
+		Reloaded bool            `json:"reloaded"`
+	}
+	if err := json.Unmarshal(data, &view); err != nil {
+		return err
+	}
+	if view.Reloaded {
+		fmt.Println("[extensions] loaded the folder as it is now")
+	}
+	fmt.Printf("[extensions] %s ran ok\n", view.Ran)
+	if view.Tree == "" {
+		fmt.Println("[extensions] not recorded as a check: the folder changed or the extensions reloaded while it ran; run it again")
+	}
+	if len(view.Result) > 0 {
+		fmt.Println(string(view.Result))
+	}
+	return nil
+}
+
+func (a *App) buildExtension(ctx context.Context, client *daemonAPIClient, message, agent string, asJSON bool) error {
+	if agent == "" {
+		agent = "claude"
+	}
+	if agent != "claude" && agent != "codex" {
+		return errors.New("--agent is claude or codex")
+	}
+	data, _, err := client.call(ctx, http.MethodPost, "/api/v1/extensions/build", nil, map[string]any{"message": message, "surface": agent}, http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemon.ActionActorHeader: []string{daemon.CLIActor}})
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		fmt.Println(string(data))
+		return nil
+	}
+	var view struct {
+		Session *surface.Session `json:"session"`
+		Error   json.RawMessage  `json:"error"`
+	}
+	if err := json.Unmarshal(data, &view); err != nil {
+		return err
+	}
+	if view.Session == nil {
+		if text := createErrorText(view.Error); text != "" {
+			return errors.New(text)
+		}
+		return errors.New("the builder did not start")
+	}
+	fmt.Printf("[extensions] started %s:%s in ~/.agenthail/extensions; talk to it with agenthail send %s:%s \"...\"\n", view.Session.Surface, view.Session.ID, view.Session.Surface, view.Session.ID)
+	fmt.Println("[extensions] each of its turns asks you to keep or undo what it changed")
 	return nil
 }

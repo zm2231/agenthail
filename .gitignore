@@ -23,6 +23,8 @@ docs/research/
 .claude/
 AGENTS.md
 CLAUDE.md
+!/internal/extension/seed/AGENTS.md
+!/internal/extension/seed/CLAUDE.md
 .todos/
 .hallmark/
 
