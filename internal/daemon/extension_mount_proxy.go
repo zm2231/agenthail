@@ -36,23 +36,8 @@ type mountRequest struct {
 }
 
 func (d *Daemon) mountHandler(served *servedMount) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !d.extensions.mounts.allowedHost(r.Host) {
-			writeAPIError(w, http.StatusMisdirectedRequest, "misdirected", "This port answers only for this machine's own names.")
-			return
-		}
-		dashboard := d.dashboard.Load()
-		if dashboard == nil {
-			writeAPIError(w, http.StatusServiceUnavailable, "unavailable", "The dashboard is off, so mounts cannot check who is asking.")
-			return
-		}
-		scope := "control"
-		if r.Method == http.MethodGet || r.Method == http.MethodHead {
-			scope = "read"
-		}
-		d.apiV1Guard(dashboard, scope, func(w http.ResponseWriter, r *http.Request) {
-			d.serveMount(w, r, served, dashboard)
-		})(w, r.WithContext(context.WithValue(r.Context(), extensionPortContextKey{}, true)))
+	return d.extensionPortHandler(func(w http.ResponseWriter, r *http.Request, dashboard *dashboardServer) {
+		d.serveMount(w, r, served, dashboard)
 	})
 }
 

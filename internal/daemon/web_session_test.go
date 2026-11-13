@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/nodehost"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -47,8 +49,17 @@ func mintWebSession(t *testing.T, handler http.Handler, bearer string) webSessio
 	return view
 }
 
+func webSessionPage(t *testing.T, d *Daemon) http.Handler {
+	t.Helper()
+	d.SetExtensionHost(t.TempDir(), func() (nodehost.Launch, error) {
+		return nodehost.Launch{}, errors.New("this test runs no extension host")
+	})
+	return d.pageHandler(&servedMount{id: "missing"})
+}
+
 func webSessionCall(handler http.Handler, method, path string, session webSessionView, headers map[string]string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader("{}"))
+	request.Host = "127.0.0.1:7420"
 	request.AddCookie(&http.Cookie{Name: session.Name, Value: session.Value})
 	for name, value := range headers {
 		request.Header.Set(name, value)
@@ -58,20 +69,21 @@ func webSessionCall(handler http.Handler, method, path string, session webSessio
 	return recorder
 }
 
-func TestAWebSessionOpensExtensionPagesAndTheEventStreamAndNothingElse(t *testing.T) {
-	_, reg, _, _, handler, _ := baseFixture(t)
+func TestAWebSessionOpensExtensionPortsAndNothingElse(t *testing.T) {
+	d, reg, _, _, handler, _ := baseFixture(t)
+	page := webSessionPage(t, d)
 	_, token := pairWebDevice(t, reg, "read", "control")
 	session := mintWebSession(t, handler, token)
 	if !slices.Equal(session.Scopes, []string{"read", "control"}) {
 		t.Fatalf("scopes %v", session.Scopes)
 	}
-	if got := webSessionCall(handler, http.MethodGet, "/x/_ah.js", session, nil); got.Code != http.StatusOK {
+	if got := webSessionCall(page, http.MethodGet, "/_ah.js", session, nil); got.Code != http.StatusOK {
 		t.Fatalf("the extension SDK answered %d %s", got.Code, got.Body)
 	}
-	if got := webSessionCall(handler, http.MethodPost, "/x/missing/a/run", session, nil); got.Code != http.StatusNotFound {
+	if got := webSessionCall(page, http.MethodPost, "/a/run", session, nil); got.Code != http.StatusNotFound {
 		t.Fatalf("an action on a missing extension answered %d, want the handler's 404", got.Code)
 	}
-	for _, path := range []string{"/api/v1/extensions", "/api/v1/snapshot", "/api/v1/hosts", "/api/v1/version", "/"} {
+	for _, path := range []string{"/api/v1/extensions", "/api/v1/snapshot", "/api/v1/hosts", "/api/v1/version", "/api/v1/events", "/"} {
 		if got := webSessionCall(handler, http.MethodGet, path, session, nil); got.Code != http.StatusUnauthorized {
 			t.Fatalf("GET %s with only a web session answered %d", path, got.Code)
 		}
@@ -82,20 +94,20 @@ func TestAWebSessionOpensExtensionPagesAndTheEventStreamAndNothingElse(t *testin
 	if got := webSessionCall(handler, http.MethodPost, "/api/v1/extensions", session, nil); got.Code != http.StatusUnauthorized {
 		t.Fatalf("a web session reloaded extensions with %d", got.Code)
 	}
-	if got := webSessionCall(handler, http.MethodPost, "/x/missing/a/run", session, map[string]string{"Origin": "http://elsewhere.example"}); got.Code != http.StatusForbidden {
+	if got := webSessionCall(page, http.MethodPost, "/a/run", session, map[string]string{"Origin": "http://elsewhere.example"}); got.Code != http.StatusForbidden {
 		t.Fatalf("a cross-origin action answered %d", got.Code)
 	}
 	forged := session
 	forged.Value = webSessionPrefix + "forged"
-	if got := webSessionCall(handler, http.MethodGet, "/x/_ah.js", forged, nil); got.Code != http.StatusUnauthorized {
+	if got := webSessionCall(page, http.MethodGet, "/_ah.js", forged, nil); got.Code != http.StatusUnauthorized {
 		t.Fatalf("an unknown web session answered %d", got.Code)
 	}
 
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(page)
 	t.Cleanup(server.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/events", nil)
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/events", nil)
 	request.AddCookie(&http.Cookie{Name: session.Name, Value: session.Value})
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -108,16 +120,17 @@ func TestAWebSessionOpensExtensionPagesAndTheEventStreamAndNothingElse(t *testin
 }
 
 func TestAWebSessionHoldsNoMoreThanTheCredentialThatMintedIt(t *testing.T) {
-	_, reg, _, dashboard, handler, _ := baseFixture(t)
+	d, reg, _, dashboard, handler, _ := baseFixture(t)
+	page := webSessionPage(t, d)
 	_, readOnly := pairWebDevice(t, reg, "read")
 	session := mintWebSession(t, handler, readOnly)
 	if !slices.Equal(session.Scopes, []string{"read"}) {
 		t.Fatalf("a read-only device minted %v", session.Scopes)
 	}
-	if got := webSessionCall(handler, http.MethodGet, "/x/_ah.js", session, nil); got.Code != http.StatusOK {
+	if got := webSessionCall(page, http.MethodGet, "/_ah.js", session, nil); got.Code != http.StatusOK {
 		t.Fatalf("a read-only page load answered %d", got.Code)
 	}
-	if got := webSessionCall(handler, http.MethodPost, "/x/missing/a/run", session, nil); got.Code != http.StatusForbidden {
+	if got := webSessionCall(page, http.MethodPost, "/a/run", session, nil); got.Code != http.StatusForbidden {
 		t.Fatalf("a read-only web session ran an action with %d", got.Code)
 	}
 	if full := mintWebSession(t, handler, dashboard.token); !slices.Equal(full.Scopes, []string{"read", "control"}) {
@@ -137,22 +150,24 @@ func TestAWebSessionHoldsNoMoreThanTheCredentialThatMintedIt(t *testing.T) {
 }
 
 func TestRevokingTheMintingDeviceEndsItsWebSessionsAtTheNextRequest(t *testing.T) {
-	_, reg, _, _, handler, _ := baseFixture(t)
+	d, reg, _, _, handler, _ := baseFixture(t)
+	page := webSessionPage(t, d)
 	device, token := pairWebDevice(t, reg, "read", "control")
 	session := mintWebSession(t, handler, token)
-	if got := webSessionCall(handler, http.MethodGet, "/x/_ah.js", session, nil); got.Code != http.StatusOK {
+	if got := webSessionCall(page, http.MethodGet, "/_ah.js", session, nil); got.Code != http.StatusOK {
 		t.Fatalf("before revoking: %d", got.Code)
 	}
 	if err := reg.RevokeDevice(device.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got := webSessionCall(handler, http.MethodGet, "/x/_ah.js", session, nil); got.Code != http.StatusUnauthorized {
+	if got := webSessionCall(page, http.MethodGet, "/_ah.js", session, nil); got.Code != http.StatusUnauthorized {
 		t.Fatalf("the first request after revoking answered %d", got.Code)
 	}
 }
 
 func TestAWebSessionEndsAfterItsLifetime(t *testing.T) {
 	d, reg, _, _, handler, _ := baseFixture(t)
+	page := webSessionPage(t, d)
 	now := time.Now()
 	d.webSessions.now = func() time.Time { return now }
 	_, token := pairWebDevice(t, reg, "read")
@@ -161,11 +176,11 @@ func TestAWebSessionEndsAfterItsLifetime(t *testing.T) {
 		t.Fatalf("expires %v", session.ExpiresAt)
 	}
 	now = now.Add(webSessionLifetime - time.Second)
-	if got := webSessionCall(handler, http.MethodGet, "/x/_ah.js", session, nil); got.Code != http.StatusOK {
+	if got := webSessionCall(page, http.MethodGet, "/_ah.js", session, nil); got.Code != http.StatusOK {
 		t.Fatalf("just before expiry: %d", got.Code)
 	}
 	now = now.Add(time.Second)
-	if got := webSessionCall(handler, http.MethodGet, "/x/_ah.js", session, nil); got.Code != http.StatusUnauthorized {
+	if got := webSessionCall(page, http.MethodGet, "/_ah.js", session, nil); got.Code != http.StatusUnauthorized {
 		t.Fatalf("at expiry: %d", got.Code)
 	}
 }

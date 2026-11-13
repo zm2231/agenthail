@@ -329,9 +329,9 @@ func TestEachPendingChangeIsKeptOnItsOwnAndShowsWhatItChanged(t *testing.T) {
 
 func TestAStandalonePageHearsOnlyChangesAfterItLoadedAndOnlyItsOwn(t *testing.T) {
 	f := startExtensionFixture(t)
-	response, body := f.request(t, http.MethodGet, "/x/_ah.js", "secret", nil)
+	response, body := f.page(t, http.MethodGet, "/_ah.js", "secret", nil)
 	cursor := f.d.events.cursor()
-	if response.StatusCode != http.StatusOK || !strings.HasPrefix(string(body), fmt.Sprintf("const changesAfter = %d;\n", cursor)) {
+	if response.StatusCode != http.StatusOK || !strings.HasPrefix(string(body), fmt.Sprintf("const changesAfter = %d;\nconst extensionId = \"fixture\";\n", cursor)) {
 		t.Fatalf("_ah.js began %.80q, want the cursor %d", body, cursor)
 	}
 	writeExtension(t, extension.Workspace(f.home), "notes", `{"label": "Notes"}`)

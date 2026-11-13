@@ -1,11 +1,9 @@
-// Imported by extension pages as /x/_ah.js. Calls go to the extension that serves the page.
-const mount = location.pathname.match(/^\/x\/[^/]+\//)?.[0];
-
-export const id = mount ? mount.slice(3, -1) : '';
+// Imported by extension pages as /_ah.js. Each page has an origin of its own,
+// so every call goes to the extension that serves it.
+export const id = extensionId;
 
 export async function action(name, input = {}) {
-  if (!mount) throw new Error('action() works only on a page under /x/<extension>/');
-  const response = await fetch(`${mount}a/${encodeURIComponent(name)}`, {
+  const response = await fetch(`/a/${encodeURIComponent(name)}`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'content-type': 'application/json' },
@@ -48,7 +46,7 @@ async function refetch(name) {
   }
   entry.inFlight = true;
   try {
-    const response = await fetch(`${mount}s?name=${encodeURIComponent(name)}`, { credentials: 'same-origin' });
+    const response = await fetch(`/s?name=${encodeURIComponent(name)}`, { credentials: 'same-origin' });
     const body = await response.json().catch(() => ({}));
     if (response.ok) entry.state = body.source;
     else if (!entry.state || entry.state.state === 'collecting') {
@@ -79,7 +77,6 @@ function draw(entry) {
 // source calls render at once and again whenever the source is collected,
 // so a page draws everything it can without waiting for any one source.
 export function source(name, render) {
-  if (!mount) throw new Error('source() works only on a page under /x/<extension>/');
   let entry = watched.get(name);
   if (!entry) {
     entry = { renders: [], state: { name, state: 'collecting' }, inFlight: false, again: false };
@@ -99,18 +96,18 @@ let events = null;
 
 // changesAfter is the daemon's event cursor when it served this file, so a
 // page hears only changes made after it loaded and never reloads for an
-// older one. A page framed by the dashboard is reloaded by the dashboard.
+// older one. A page framed by the dashboard is reloaded by the dashboard. The
+// stream carries only this extension's own events.
 function listen() {
-  if (events || !id || typeof EventSource === 'undefined') return;
-  events = new EventSource(`/api/v1/events?after=${changesAfter}`);
+  if (events || typeof EventSource === 'undefined') return;
+  events = new EventSource(`/events?after=${changesAfter}`);
   const top = window.top === window;
   events.addEventListener('extension.changed', (event) => {
-    const changed = JSON.parse(event.data).data?.extensions ?? [];
-    if (top && changed.includes(id)) location.reload();
+    if (top) location.reload();
   });
   events.addEventListener('extension.source', (event) => {
     const data = JSON.parse(event.data).data ?? {};
-    if (data.extension === id && watched.has(data.source)) refetch(data.source);
+    if (watched.has(data.source)) refetch(data.source);
   });
   events.addEventListener('stream.reset', () => {
     if (top) location.reload();
@@ -121,4 +118,4 @@ function listen() {
   }, AGE_REFRESH_MS);
 }
 
-if (id && window.top === window) listen();
+if (window.top === window) listen();

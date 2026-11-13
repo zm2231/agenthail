@@ -6,11 +6,9 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -44,24 +42,6 @@ func (d *Daemon) registerExtensionRoutes(mux *http.ServeMux, dashboard *dashboar
 	mux.HandleFunc("GET /api/v1/extensions/history/{rev}", d.apiV1Guard(dashboard, "read", d.apiExtensionChangeHandler))
 	mux.HandleFunc("POST /api/v1/extensions/build", d.apiV1Guard(dashboard, "control", d.apiExtensionBuildHandler))
 	mux.HandleFunc("POST /api/v1/extensions/{id}/call", d.apiV1Guard(dashboard, "control", d.apiExtensionCallHandler))
-	mux.HandleFunc("GET /x/_ah.js", d.apiV1Guard(dashboard, "read", func(w http.ResponseWriter, r *http.Request) {
-		extensionPageHeaders(w)
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_, _ = fmt.Fprintf(w, "const changesAfter = %d;\n", d.events.cursor())
-		_, _ = w.Write(extensionSDK)
-	}))
-	mux.HandleFunc("POST /x/{id}/a/{action}", d.apiV1Guard(dashboard, "control", d.extensionActionHandler))
-	mux.HandleFunc("GET /x/{id}/s", d.apiV1Guard(dashboard, "read", d.extensionSourcesHandler))
-	mux.HandleFunc("GET /x/{id}/{path...}", d.apiV1Guard(dashboard, "read", d.extensionPageHandler))
-	mux.HandleFunc("GET /x/{id}", d.apiV1Guard(dashboard, "read", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/x/"+url.PathEscape(r.PathValue("id"))+"/", http.StatusFound)
-	}))
-}
-
-func extensionPageHeaders(w http.ResponseWriter) {
-	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-	w.Header().Set("Content-Security-Policy", extensionPageCSP)
 }
 
 func (d *Daemon) extensionPageHandler(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +69,6 @@ func (d *Daemon) extensionPageHandler(w http.ResponseWriter, r *http.Request) {
 	if kind == "" {
 		kind = http.DetectContentType(data)
 	}
-	extensionPageHeaders(w)
 	w.Header().Set("Content-Type", kind)
 	w.Header().Set("Cache-Control", "no-store")
 	http.ServeContent(w, r, filepath.Base(file), info.ModTime(), bytes.NewReader(data))
@@ -372,7 +351,6 @@ func (d *Daemon) extensionSourcesHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusServiceUnavailable, "unavailable", "The extension host did not answer: "+err.Error())
 		return
 	}
-	extensionPageHeaders(w)
 	w.Header().Set("Cache-Control", "no-store")
 	writeDashboardJSON(w, http.StatusOK, reply)
 }

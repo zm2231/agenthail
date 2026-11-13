@@ -19,6 +19,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export default function (ah: any) {
+  ah.action('loaded', () => {
+    const loads = path.join(ah.dir, '..', '..', 'page-loads');
+    fs.writeFileSync(loads, String((fs.existsSync(loads) ? Number(fs.readFileSync(loads, 'utf8')) : 0) + 1));
+    return null;
+  });
   const file = (name: string) => path.join(ah.dir, name);
   const counter = (name: string) => path.join(ah.dir, '..', '..', name);
   const count = (name: string) => {
@@ -42,7 +47,7 @@ export default function (ah: any) {
 const sourcesPage = `<!doctype html><title>loading</title>
 <p id="stamp"></p>
 <script type="module">
-  import { id, sources } from '/x/_ah.js';
+  import { action, sources } from '/_ah.js';
   document.getElementById('stamp').textContent = Math.random().toString(36).slice(2);
   const seen = {};
   const show = name => state => {
@@ -50,7 +55,7 @@ const sourcesPage = `<!doctype html><title>loading</title>
     document.title = 'fast:' + seen.fast + ' slow:' + seen.slow;
   };
   sources({ fast: show('fast'), slow: show('slow') });
-  fetch('/x/' + id + '/loaded', { cache: 'no-store' });
+  action('loaded');
 </script>`
 
 type sourceView struct {
@@ -65,7 +70,7 @@ type sourceView struct {
 
 func (f *extensionFixture) source(t *testing.T, name string) sourceView {
 	t.Helper()
-	response, body := f.request(t, http.MethodGet, "/x/fixture/s?name="+name, "secret", nil)
+	response, body := f.page(t, http.MethodGet, "/s?name="+name, "secret", nil)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("source %s answered %d %s", name, response.StatusCode, body)
 	}
@@ -112,7 +117,7 @@ func TestASourceKeepsItsLastValueBesideTheErrorAndStopsAtItsTimeout(t *testing.T
 		t.Fatalf("the stuck source failed with %q", stuck.Error)
 	}
 
-	response, body := f.request(t, http.MethodGet, "/x/fixture/s", "secret", nil)
+	response, body := f.page(t, http.MethodGet, "/s", "secret", nil)
 	var list struct {
 		Sources []sourceView `json:"sources"`
 	}
@@ -221,15 +226,15 @@ func TestASourceMustRunAtLeastTenSecondsApartAndTimeOutWithinItsInterval(t *test
 
 func TestAPageDrawsEachSourceAsItLandsWithoutWaitingForTheSlowest(t *testing.T) {
 	f := startExtensionFixtureWith(t, map[string]string{"server.ts": sourcesServer, "ui.html": sourcesPage, "value": "one"})
-	browser := signIn(t, f)
 	agent := browserAgent(t, f)
+	browser := signIn(t, f, agent)
 	if err := os.WriteFile(filepath.Join(f.workdir, "with-slow"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.d.reloadExtensions(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	tab := browse(t, agent, map[string]any{"action": "open", "url": browser.URL + "/x/fixture/"})["tab"].(string)
+	tab := browse(t, agent, map[string]any{"action": "open", "url": browser.page + "/"})["tab"].(string)
 	snapshot := func() (string, string) {
 		got := browse(t, agent, map[string]any{"action": "snapshot", "tab": tab})
 		text := browse(t, agent, map[string]any{"action": "text", "tab": tab})

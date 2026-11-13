@@ -110,13 +110,17 @@ export function mountURL(mount, where = location) {
   return `${where.protocol}//${where.hostname}:${mount.port}${mount.entry}`;
 }
 
+function portOpens(target, where = location) {
+  return target.port > 0 && (where.protocol !== "https:" || target.published);
+}
+
 function mountOpens(mount, where = location) {
-  return mount.state === "serving" && mount.port > 0 && (where.protocol !== "https:" || mount.published);
+  return mount.state === "serving" && portOpens(mount, where);
 }
 
 function frames(ext) {
   const targets = [];
-  if (ext.page && ext.state === "loaded") targets.push({ key: `page:${ext.id}`, label: ext.label, src: ext.page });
+  if (ext.page && ext.state === "loaded" && portOpens(ext.page)) targets.push({ key: `page:${ext.id}`, label: ext.label, src: mountURL(ext.page) });
   for (const mount of ext.mounts ?? []) {
     if (mountOpens(mount)) targets.push({ key: `mount:${ext.id}/${mount.name}`, label: mount.label, src: mountURL(mount) });
   }

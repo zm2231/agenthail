@@ -12,8 +12,8 @@ code.
 ~/.agenthail/extensions/<id>/
   extension.json   {"label": "Forge", "description": "...", "capabilities": ["read.all"]}
   server.ts        export default function (ah) { ... }
-  ui.html          the page, served at /x/<id>/
-  assets/          files the page loads, served at /x/<id>/assets/...
+  ui.html          the page, served at / on the extension's own port
+  assets/          files the page loads, served at /assets/... there
 ```
 
 An id is 1 to 40 characters, a lowercase letter followed by lowercase
@@ -70,13 +70,13 @@ records its error beside the last good value instead of replacing it. When a
 run ends the daemon publishes `extension.source` with `{extension, source,
 ok}`.
 
-Pages read sources over the daemon, with the `read` scope like the page's
-own files:
+Pages read sources from their own port, with the `read` scope like the
+page's own files:
 
 | Request | Answer |
 |---|---|
-| `GET /x/<id>/s` | `{sources: [{name, state, at, error, errorAt, tookMs, everySeconds}]}`, without values |
-| `GET /x/<id>/s?name=<name>` | `{source: {name, state, value, at, error, errorAt, tookMs, everySeconds}}` |
+| `GET /s` | `{sources: [{name, state, at, error, errorAt, tookMs, everySeconds}]}`, without values |
+| `GET /s?name=<name>` | `{source: {name, state, value, at, error, errorAt, tookMs, everySeconds}}` |
 
 `state` is `collecting` before the first run ends, `ok`, or `failed` (with the
 last good `value`, if any).
@@ -114,16 +114,16 @@ answers `tool_failed`.
 ## The page
 
 The page is plain HTML and ES modules, with no build step. It reaches its
-server through `/x/_ah.js`:
+server through `/_ah.js`:
 
 ```html
 <script type="module">
-  import { action } from '/x/_ah.js';
+  import { action } from '/_ah.js';
   const health = await action('health', { verbose: true });
 </script>
 ```
 
-`action(name, input)` posts to `/x/<id>/a/<name>` and returns the handler's
+`action(name, input)` posts to `/a/<name>` and returns the handler's
 result, or throws an error with `code`.
 
 `source(name, render)` calls `render` at once with `{state: 'collecting'}` or
@@ -136,16 +136,38 @@ showing 5 min old". The seeded recipes build every page this way. Inline scripts
 the page may fetch only its own origin and may be framed only by it. The
 dashboard's own pages still refuse every frame.
 
-## Reaching a page from another device
+## The page's own origin
 
-Pages are served by the daemon's dashboard listener (127.0.0.1:7412 by
-default). With remote access on, Tailscale Serve already publishes that
-listener at `https://<machine>.<tailnet>.ts.net:7412`, so a page is at
-`https://<machine>.<tailnet>.ts.net:7412/x/<id>/` with no other listener. Every
-`/x/` request needs the dashboard cookie, which a browser gets by opening a
-one-time login link, or a paired device's token. Loading a page or asset needs
-the `read` scope; an action is a POST and needs `control`, and with the cookie
-alone it must come from the same origin.
+Each extension with a page gets a port of its own on `127.0.0.1`, from the
+pool mounts use (7420 to 7619), kept in
+`~/.agenthail/extensions-data/mounts.json` under the extension's id while it
+has a page. Ports are origins, so the browser keeps a page from reading
+another extension's routes, the dashboard's API, or a mount. The dashboard's
+own listener serves no extension pages. While remote access is on the port is
+published in Tailscale Serve at `https://<machine>.<tailnet>.ts.net:<port>`,
+like a mount's. The extensions view gives each page as `{port, entry,
+published}`, the shape of a mount, so the dashboard and the apps build both
+URLs the same way and refuse an unpublished one over https.
+
+The port serves only its own extension:
+
+| Request | |
+|---|---|
+| `GET /`, `GET /assets/...` | the page and its files |
+| `GET /_ah.js` | the page SDK, with the event cursor when it was served |
+| `POST /a/<name>` | an action (`control` scope) |
+| `GET /s`, `GET /s?name=<name>` | sources, as above |
+| `GET /events?after=<cursor>` | the event stream, holding only `extension.changed` and `extension.source` for this extension, and `stream.reset` |
+
+Every request is checked as a mount's is: the dashboard cookie or a paired
+device's token, `read` for GET and HEAD, `control` for anything else, and
+with the cookie alone a write must come from the port's own origin. A request
+whose Host is neither loopback nor this machine's tailnet name gets 421.
+Ports share a site, so the browser sends the dashboard cookie to each of them;
+it is `HttpOnly` and `SameSite=Strict`, so a page can neither read nor replace
+it. A page may still send a blind GET to another port, so no GET route on the
+dashboard or on an extension port changes anything; a test sends every one
+and fails on any change. A page is framed only by itself and the dashboard.
 
 ## Signing in an app's web view
 
@@ -159,10 +181,10 @@ a bearer token with every request a page makes. An app posts its own token to
 - It lasts 12 hours and lives in the daemon's memory, so a daemon restart
   ends it. Every request authenticates the minting token again, so revoking
   that device ends its web sessions at their next request.
-- On the dashboard's port it counts only for `/x/...` and `GET
-  /api/v1/events`; every other path answers 401. On a mount's port it counts
-  for the whole mount, `read` for GET and HEAD and `control` otherwise. The
-  mount never passes it to the app.
+- It counts only on extension ports: on a page's port for the whole page,
+  its actions, sources and events, and on a mount's port for the whole mount,
+  `read` for GET and HEAD and `control` otherwise. On the dashboard's port
+  every path answers 401. The mount never passes it to the app.
 
 ## Entries in the apps
 
@@ -212,7 +234,7 @@ keeps its own origin and paths and needs no change:
 A mount serves nothing until the person approves it, and approval covers the
 upstream it names: pointing the mount at another upstream waits for a new
 approval. Each approved mount listens on `127.0.0.1` on a port from 7420 to
-7469 that it keeps while the extension declares it, recorded in
+7619 that it keeps while the extension declares it, recorded in
 `~/.agenthail/extensions-data/mounts.json`. While remote access is on, the
 daemon publishes each mount's port in Tailscale Serve at
 `https://<machine>.<tailnet>.ts.net:<port>`, and removes it when remote access
@@ -221,7 +243,7 @@ and Funnel is refused. `agenthail dashboard remote off` withdraws the mounts'
 routes before it returns, itself when the daemon is not running. The dashboard's Extensions tab lists each mount and
 opens it in a frame.
 
-Every request to a mount is checked the way `/x/` is: the dashboard cookie or
+Every request to a mount is checked the way a page's is: the dashboard cookie or
 a paired device's token, `read` for GET and HEAD, `control` for anything else,
 and with the cookie alone a write must come from the mount's own origin. A
 request whose Host is neither loopback nor this machine's tailnet name gets
@@ -322,7 +344,7 @@ not start and its error says so.
 | `load` | `{extensions: [{id, dir, token, mcpURL}], writeTools}` | as `status` |
 | `action` | `{id, name, input, caller}` | `{result}` |
 | `job` | `{id, name}` | `{}`; for a source, after storing its value or error |
-| `sources` | `{id, name?}` | `{sources}` or `{source}`, as `/x/<id>/s` |
+| `sources` | `{id, name?}` | `{sources}` or `{source}`, as a page's `/s` |
 | `tool` | `{id, name, input, caller, token}` | `{result}` |
 | `events` | `{events, to}` | `{}`, at once; handlers run after |
 
@@ -369,7 +391,7 @@ ignored.
   dashboard's Extensions tab then reads the list and the changes again, and
   reloads the page or mount it frames when its extension is among them and the
   folder's newest change moved. A page opened on its own reloads itself through
-  `/x/_ah.js`, which the daemon serves with its event cursor at that moment, so
+  `/_ah.js`, which the daemon serves with its event cursor at that moment, so
   the page hears only changes made after it loaded, and only its own; it
   reloads too when the stream reports it missed events.
 - A session's first change raises an ask of origin `extension-change` to the
