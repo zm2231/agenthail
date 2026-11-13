@@ -2,12 +2,17 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -143,4 +148,45 @@ func TestRepairSnapshotsForEventsThatKeepFailingSettleAtTheCeiling(t *testing.T)
 	if wait := backoff.next(now.Add(9*time.Second), time.Second, 8*time.Second); wait != 0 {
 		t.Fatalf("a failure long after the follower resumed waits %s, want a snapshot at once", wait)
 	}
+}
+
+func TestASendToADownHostIsQueuedUntilItIsBackAndItsSessionSaysWhy(t *testing.T) {
+	local, remote, record := pairedFederationWith(t, func(f *federation) {
+		f.downGrace, f.retryMin = 300*time.Millisecond, 50*time.Millisecond
+	})
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	remote.gate.proxyDown.Store(true)
+	remote.server.CloseClientConnections()
+	testkit.Eventually(t, "the host to be shown down", 10*time.Second, func() bool {
+		rows := sessionsOf(local.snapshot(t), record.ID)
+		return len(rows) > 0 && rows[0].Host.State != hostStateConnected && rows[0].UnavailableReason != ""
+	})
+
+	detail := local.request(t, http.MethodGet, "/api/v1/session?id="+url.QueryEscape(qualified), nil)
+	if detail.Code != http.StatusServiceUnavailable || !strings.Contains(detail.Body.String(), "host_unreachable") || !strings.Contains(detail.Body.String(), "answered HTTP 502") || strings.Contains(detail.Body.String(), hosts.ErrUnverified.Error()) {
+		t.Fatalf("opening the down host's session answered %d: %s", detail.Code, detail.Body.String())
+	}
+
+	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "sent during the outage"})
+	var receipt struct {
+		Result struct {
+			Evidence string `json:"evidence"`
+			Status   string `json:"status"`
+			Detail   string `json:"detail"`
+		} `json:"result"`
+	}
+	if send.Code != http.StatusOK || json.Unmarshal(send.Body.Bytes(), &receipt) != nil || receipt.Result.Evidence != string(surface.EvidenceQueued) || !strings.Contains(receipt.Result.Detail, "unreachable") {
+		t.Fatalf("a send to the down host answered %d: %s", send.Code, send.Body.String())
+	}
+	if got := remote.fake.delivered(); len(got) != 0 {
+		t.Fatalf("the down host got %v", got)
+	}
+
+	remote.gate.proxyDown.Store(false)
+	testkit.Eventually(t, "the host to be connected again", 10*time.Second, func() bool {
+		rows := sessionsOf(local.snapshot(t), record.ID)
+		return len(rows) > 0 && rows[0].Host.State == hostStateConnected
+	})
+	host, _ := local.daemon.pairedHost(record.ID)
+	awaitReplayed(t, local, remote, host, "sent during the outage")
 }

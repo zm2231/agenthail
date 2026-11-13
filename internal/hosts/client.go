@@ -69,6 +69,18 @@ func (e NotSentError) Unwrap() error { return e.Err }
 // identity have not been confirmed by the latest Version call.
 var ErrUnverified = errors.New("this daemon has not confirmed that it speaks the host's federation version")
 
+// The cause is the message only: the refused request was never sent, so it must not match what the failed Version call ran into.
+type unverifiedError struct{ cause string }
+
+func (e unverifiedError) Error() string {
+	if e.cause != "" {
+		return e.cause
+	}
+	return ErrUnverified.Error()
+}
+
+func (e unverifiedError) Is(target error) bool { return target == ErrUnverified }
+
 // ErrHostIdentityChanged means the daemon at the paired address reported a
 // different host id than the one this client was paired with.
 var ErrHostIdentityChanged = errors.New("the daemon at this address is a different host")
@@ -111,6 +123,14 @@ type Client struct {
 	http     *http.Client
 	stream   *http.Client
 	verified atomic.Bool
+	failure  atomic.Pointer[string]
+}
+
+func (c *Client) refused() error {
+	if cause := c.failure.Load(); cause != nil {
+		return NotSentError{Err: unverifiedError{cause: *cause}}
+	}
+	return NotSentError{Err: unverifiedError{}}
 }
 
 type ClientOptions struct {
@@ -159,7 +179,7 @@ func (c *Client) url(path string, query url.Values) string {
 // NotSentError; any later failure leaves the outcome unknown.
 func (c *Client) Do(ctx context.Context, method, path string, query url.Values, body []byte, header http.Header) (*http.Response, error) {
 	if !c.verified.Load() {
-		return nil, NotSentError{Err: ErrUnverified}
+		return nil, c.refused()
 	}
 	var reader io.Reader
 	if body != nil {
@@ -172,7 +192,7 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 // body too large to hold in memory.
 func (c *Client) Stream(ctx context.Context, path string, query url.Values, body io.Reader, header http.Header) (*http.Response, error) {
 	if !c.verified.Load() {
-		return nil, NotSentError{Err: ErrUnverified}
+		return nil, c.refused()
 	}
 	return c.do(ctx, c.stream, http.MethodPost, path, query, body, header)
 }
@@ -180,7 +200,7 @@ func (c *Client) Stream(ctx context.Context, path string, query url.Values, body
 // Open is Do without a response deadline, for event streams.
 func (c *Client) Open(ctx context.Context, path string, query url.Values, header http.Header) (*http.Response, error) {
 	if !c.verified.Load() {
-		return nil, NotSentError{Err: ErrUnverified}
+		return nil, c.refused()
 	}
 	return c.do(ctx, c.stream, http.MethodGet, path, query, nil, header)
 }
@@ -286,6 +306,18 @@ type Version struct {
 // Do and Open through; any failure stops them until the next success.
 func (c *Client) Version(ctx context.Context) (Version, error) {
 	c.verified.Store(false)
+	version, err := c.version(ctx)
+	if err != nil {
+		cause := err.Error()
+		c.failure.Store(&cause)
+		return version, err
+	}
+	c.failure.Store(nil)
+	c.verified.Store(true)
+	return version, nil
+}
+
+func (c *Client) version(ctx context.Context) (Version, error) {
 	var version Version
 	response, err := c.do(ctx, c.http, http.MethodGet, "/api/v1/version", nil, nil, nil)
 	if err := decodeJSON(response, err, &version); err != nil {
@@ -297,7 +329,6 @@ func (c *Client) Version(ctx context.Context) (Version, error) {
 	if c.hostID != "" && version.HostID != c.hostID {
 		return version, fmt.Errorf("%w (%s)", ErrHostIdentityChanged, version.HostID)
 	}
-	c.verified.Store(true)
 	return version, nil
 }
 

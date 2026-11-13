@@ -1029,6 +1029,11 @@ struct IOSComposer: View, @MainActor Equatable {
                     ComposerReceipt(status: status, showQueuedRow: showQueuedRow.map { action in { action(()) } })
                 }
                 ComposerSendStatus(model: model, session: session)
+                if let host = session.unreachableHostName {
+                    Label("Will send when \(host) is back.", systemImage: "wifi.slash")
+                        .font(.footnote).foregroundStyle(PhonePalette.muted).padding(.horizontal, 8)
+                        .accessibilityIdentifier("composer-host-down")
+                }
                 if !model.composerAttachments.isEmpty {
                     ComposerAttachmentStrip(model: model)
                 }

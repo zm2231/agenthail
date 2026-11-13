@@ -1410,7 +1410,7 @@ struct ComposerView: View {
     private var statusLine: String {
         if takesTurnOptions, let problem = draft.turnOptionsProblem { return problem }
         if session.move != nil { return SessionMove.composerNote }
-        return ComposerStatusLine.text(.init(waitingOnYou: session.isWaitingOnYou, turnNotice: PersonMessageNote.statusLine(session.capabilities), working: session.isWorking, hasMessage: hasText, isCommand: draftIsCommand, steerRefusal: session.capabilities.steer ? steerRefusal : nil, followUpHint: hint, stopShortcut: shortcuts.label(.stop)))
+        return ComposerStatusLine.text(.init(waitingOnYou: session.isWaitingOnYou, turnNotice: PersonMessageNote.statusLine(session.capabilities), working: session.isWorking, hasMessage: hasText, isCommand: draftIsCommand, steerRefusal: session.capabilities.steer ? steerRefusal : nil, followUpHint: hint, stopShortcut: shortcuts.label(.stop), unreachableHost: session.unreachableHostName))
     }
     private var pasteAttachments: ((PastedAttachments) -> Void)? {
         guard session.capabilities.attach else { return nil }

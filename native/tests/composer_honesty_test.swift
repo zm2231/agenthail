@@ -14,6 +14,7 @@ struct ComposerHonestyTest {
     private static func checkStatusLine() {
         typealias State = ComposerStatusLine.State
         check(ComposerStatusLine.text(State()) == "Ready to send.", "an idle composer says it is ready")
+        check(ComposerStatusLine.text(State(waitingOnYou: true, working: true, unreachableHost: "vps")) == "Will send when vps is back.", "a session on a host that is down says its messages wait for the host")
         check(ComposerStatusLine.text(State(waitingOnYou: true, turnNotice: "Turn notice", working: true)) == "This agent is waiting on you. Messages queue until you answer it.", "waiting on you comes first")
         check(ComposerStatusLine.text(State(turnNotice: "Messages reach this terminal when its turn ends.", working: true, hasMessage: true)) == "Messages reach this terminal when its turn ends.", "the session's turn notice comes next")
         check(ComposerStatusLine.text(State(working: true, stopShortcut: "⌘.")) == "This agent is working. Stop (⌘.) ends the current turn.", "a working agent with an empty composer names Stop")
