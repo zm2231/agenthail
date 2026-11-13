@@ -52,12 +52,21 @@ func writePageTranscript(t *testing.T, records func(turn int, rng *rand.Rand) []
 	return pageTranscript{path: path, boundaries: boundaries}
 }
 
+// scaleTranscriptReads keeps the doublings from first window to budget while shrinking both.
+func scaleTranscriptReads(t *testing.T) {
+	t.Helper()
+	budget, window := timelineReadBudget, timelineFirstWindow
+	timelineReadBudget, timelineFirstWindow = budget/16, window/16
+	t.Cleanup(func() { timelineReadBudget, timelineFirstWindow = budget, window })
+}
+
 func toolOutput(rng *rand.Rand) string {
+	window := int(timelineFirstWindow)
 	switch roll := rng.Intn(1000); {
 	case roll == 0:
-		return strings.Repeat("o", 700<<10+rng.Intn(2<<20))
+		return strings.Repeat("o", window*11/8+rng.Intn(4*window))
 	case roll < 30:
-		return strings.Repeat("o", 20<<10+rng.Intn(200<<10))
+		return strings.Repeat("o", window/25+rng.Intn(window*2/5))
 	default:
 		return strings.Repeat("o", rng.Intn(400))
 	}
@@ -157,16 +166,19 @@ func checkPagesMatchTheWholeBudgetRead(t *testing.T, transcript pageTranscript, 
 }
 
 func TestATranscriptPageReadsWhatItShowsAndMatchesAReadOfTheWholeBudget(t *testing.T) {
-	transcript := writePageTranscript(t, claudePageRecords, 26000, 1)
+	scaleTranscriptReads(t)
+	transcript := writePageTranscript(t, claudePageRecords, 26000/16, 1)
 	checkPagesMatchTheWholeBudgetRead(t, transcript, "claude", 24)
 }
 
 func TestACodexTranscriptPageMatchesAReadOfTheWholeBudget(t *testing.T) {
-	transcript := writePageTranscript(t, codexPageRecords, 20000, 2)
+	scaleTranscriptReads(t)
+	transcript := writePageTranscript(t, codexPageRecords, 20000/16, 2)
 	checkPagesMatchTheWholeBudgetRead(t, transcript, "codex", 16)
 }
 
 func TestAPageWhoseToolOutputIsLargerThanTheFirstWindowStillShowsIt(t *testing.T) {
+	scaleTranscriptReads(t)
 	huge := func(turn int, rng *rand.Rand) []map[string]any {
 		records := claudePageRecords(turn, rng)
 		if turn == 30 || turn == 60 {
@@ -248,7 +260,8 @@ func TestTheReplyOfAPageWhoseLatestTurnsHaveNoAnswerMatchesAReadOfTheWholeBudget
 }
 
 func TestARolloutSegmentPageAboveAFloorMatchesAReadOfTheWholeBudget(t *testing.T) {
-	transcript := writePageTranscript(t, codexPageRecords, 20000, 6)
+	scaleTranscriptReads(t)
+	transcript := writePageTranscript(t, codexPageRecords, 20000/16, 6)
 	rng := rand.New(rand.NewSource(8))
 	for sample := 0; sample < 12; sample++ {
 		high := len(transcript.boundaries)/2 + rng.Intn(len(transcript.boundaries)/2)

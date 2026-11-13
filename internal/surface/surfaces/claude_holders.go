@@ -46,7 +46,8 @@ func recordPID(record map[string]any) int {
 func sessionHolders(records []map[string]any) []surface.Holder {
 	holders := make([]surface.Holder, 0, len(records))
 	for _, record := range records {
-		holder := surface.Holder{PID: recordPID(record), TTY: processTTY(recordPID(record)), Status: claudePeerStatus(record)}
+		pid := recordPID(record)
+		holder := surface.Holder{PID: pid, Start: recordStart(record), TTY: processTTY(pid), App: terminalApp(pid), Cwd: str(record, "cwd"), Status: claudePeerStatus(record)}
 		if startedAt, ok := record["startedAt"].(float64); ok {
 			holder.StartedAt = time.UnixMilli(int64(startedAt))
 		}

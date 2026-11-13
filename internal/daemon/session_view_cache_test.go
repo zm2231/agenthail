@@ -43,7 +43,7 @@ func TestCachedSessionViewsMatchUncachedAfterEveryKindOfWrite(t *testing.T) {
 	if f.d.presentation.hits == hitsBefore {
 		t.Fatal("a read with nothing changed did not use the cache")
 	}
-	f.populate(rand.New(rand.NewSource(20261106)), 400, func(step int, write string) {
+	f.populateRounds(rand.New(rand.NewSource(20261106)), 4, func(step int, write string) {
 		compare(fmt.Sprintf("step %d, %s", step, write))
 	})
 	t.Logf("cache hits %d, builds %d", f.d.presentation.hits, f.d.presentation.builds)

@@ -61,6 +61,7 @@ type extensionRuntime struct {
 	approvals *extension.Approvals
 	host      *nodehost.Supervisor
 	mounts    *extensionMounts
+	changes   *extensionChanges
 
 	loading   sync.Mutex
 	mu        sync.Mutex
@@ -72,7 +73,7 @@ type extensionRuntime struct {
 }
 
 func (d *Daemon) SetExtensionHost(home string, launch func() (nodehost.Launch, error)) {
-	runtime := &extensionRuntime{home: home, approvals: extension.NewApprovals(home), mounts: newExtensionMounts(home), loaded: map[string]*loadedExtension{}, tokens: map[string]string{}}
+	runtime := &extensionRuntime{home: home, approvals: extension.NewApprovals(home), mounts: newExtensionMounts(home), changes: newExtensionChanges(home), loaded: map[string]*loadedExtension{}, tokens: map[string]string{}}
 	runtime.host = &nodehost.Supervisor{
 		Name:     "extension host",
 		StateDir: extensionHostDir(home),
@@ -100,10 +101,19 @@ func (d *Daemon) superviseExtensions(ctx context.Context) {
 	if d.extensions == nil {
 		return
 	}
+	if _, err := d.extensionHistory(); err != nil {
+		d.logExtensionHistory(err)
+	}
+	turns := make(chan struct{})
+	go func() {
+		defer close(turns)
+		d.runExtensionTurns(ctx)
+	}()
 	go d.runExtensionJobs(ctx)
 	go d.runExtensionMounts(ctx)
 	go d.pumpExtensionEvents(ctx)
 	d.extensions.host.Run(ctx)
+	<-turns
 }
 
 func extensionToken() string { return "ext_" + rand.Text() + rand.Text() }

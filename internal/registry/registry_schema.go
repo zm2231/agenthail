@@ -122,7 +122,10 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	uploads TEXT NOT NULL DEFAULT '[]',
 	refused INTEGER NOT NULL DEFAULT 0,
 	refusal INTEGER NOT NULL DEFAULT 0,
-	person_name TEXT NOT NULL DEFAULT ''
+	person_name TEXT NOT NULL DEFAULT '',
+	holders_json TEXT NOT NULL DEFAULT '[]',
+	holder_pid INTEGER NOT NULL DEFAULT 0,
+	holder_start TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
