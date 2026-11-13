@@ -74,16 +74,54 @@ func (d *Daemon) mcpSimulator(ctx context.Context, caller *mcpCaller, input mcpS
 	return out, nil
 }
 
+const (
+	simulatorStatusFresh = time.Minute
+	simulatorProbeLimit  = 20 * time.Second
+)
+
+// simulatorStatus waits for a status under a minute old, probing when there
+// is none, and returns the last status known when ctx ends first.
 func (d *Daemon) simulatorStatus(ctx context.Context) simhost.Status {
+	select {
+	case <-d.probeSimulators():
+	case <-ctx.Done():
+	}
 	d.simStatusMu.Lock()
 	defer d.simStatusMu.Unlock()
-	if time.Since(d.simStatusAt) < time.Minute {
-		return d.simStatus
-	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	d.simStatus, d.simStatusAt = d.simHost.Status(ctx), time.Now()
 	return d.simStatus
+}
+
+// probeSimulators starts a probe when the status is missing or a minute old
+// and none is running, and returns a channel closed once that probe ends.
+// Every caller shares the one probe, which runs outside simStatusMu so a
+// reader of the last status never waits on xcrun. A probe that runs out of
+// time leaves the last status in place.
+func (d *Daemon) probeSimulators() <-chan struct{} {
+	d.simStatusMu.Lock()
+	defer d.simStatusMu.Unlock()
+	if d.simProbing != nil {
+		return d.simProbing
+	}
+	done := make(chan struct{})
+	if !d.simStatusAt.IsZero() && time.Since(d.simStatusAt) < simulatorStatusFresh {
+		close(done)
+		return done
+	}
+	d.simProbing = done
+	go func() {
+		defer close(done)
+		ctx, cancel := context.WithTimeout(context.Background(), simulatorProbeLimit)
+		status := d.simHost.Status(ctx)
+		finished := ctx.Err() == nil
+		cancel()
+		d.simStatusMu.Lock()
+		defer d.simStatusMu.Unlock()
+		if finished {
+			d.simStatus, d.simStatusAt = status, time.Now()
+		}
+		d.simProbing = nil
+	}()
+	return done
 }
 
 func simulatorRefusal(err error) error {

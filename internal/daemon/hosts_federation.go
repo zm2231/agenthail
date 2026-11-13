@@ -553,7 +553,9 @@ func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *h
 		return false, err
 	}
 	host.setBuild(version.Identity)
-	host.setSimulators(version.Simulators)
+	if version.Simulators != nil {
+		host.setSimulators(*version.Simulators)
+	}
 	d.hostAnswered(host, outage)
 	d.checkHostToken(ctx, host)
 	for ctx.Err() == nil {

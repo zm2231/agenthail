@@ -17,7 +17,7 @@ func (d *Daemon) sweepSimulatorLeases(ctx context.Context) {
 	if d.simHost == nil || !d.simHost.Local() {
 		return
 	}
-	d.simulatorStatus(ctx)
+	d.probeSimulators()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
