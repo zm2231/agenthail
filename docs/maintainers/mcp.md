@@ -6,7 +6,7 @@ The server negotiates only protocol revisions `2026-07-28`, `2025-11-25` and `20
 
 ## Who may call it
 
-- Only `ahs_` session credentials are accepted. The dashboard token and paired-device tokens are refused.
+- Only `ahs_` session credentials are accepted at `/mcp`. The dashboard token and paired-device tokens are refused. A session that runs `agenthail mcp stdio` is named by its process instead (see "Sessions named by their process" below).
 - Only callers on this machine are accepted. A request from a non-loopback address, or one carrying forwarding headers (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Real-Ip`, `Tailscale-User-Login`), is refused with `403 remote_refused`. Remote access publishes the listener through a proxy that also arrives from loopback, so the address alone is not enough.
 - A cross-origin browser request is refused (`http.CrossOriginProtection`), and the SDK's localhost DNS-rebinding check stays on.
 - All of this runs before any MCP method. A refused request gets an HTTP error with `{error: {code, message}, retryable}`:
@@ -64,6 +64,23 @@ The lifetime is the start timeout plus its naming margin (50 s) for starts the d
 **Terminal launches.** A tmux or cmux Codex launch runs `agenthail codex` in the terminal, which starts the thread itself. The daemon mints a pending credential for the launch; the launcher writes it to `~/.agenthail/launches/<launch id>.mcp` (mode 0600) before the terminal starts, and removes it if the launch never starts. Files older than the pending-launch lifetime are swept whenever the daemon issues a launch credential or starts the MCP server. The CLI takes the file (reads it once and removes it) before any other step that can fail, starts its thread with the token, and claims the ref through `POST /api/v1/mcp/claim` (`{ref, threadId}`, dashboard token). The claimed credential binds when the daemon registers the located session.
 
 **Claude host.** Every host `open` goes through `hostOpen`, which passes `mcp: {url, token}`; `TestOnlyHostOpenOpensAClaudeHostConversation` keeps it the only caller. The host gives Claude an http MCP server named `agenthail` whose tools run without asking (`allowedTools: ["mcp__agenthail"]`). A new conversation claims a pending credential for the id chosen before `open`; a resume sends the held token, or rotates the session's credential, or, for a conversation not yet registered here, claims a pending one. Opening a conversation the host already runs with a different token replaces the server on the live query (`setMcpServers`). When a retiring host still holds the conversation, `open` hands that host the new token through `replaceMcp`. A swap the server refuses is returned as `mcpError` on the opened session and logged; the host records a new token only after its swap succeeds, so the next open retries a failed one. A narrowing checker opens without the server.
+
+## Sessions named by their process
+
+A session Agenthail did not start, such as Claude in a plain terminal, gets the tools from a stdio server, `agenthail mcp stdio`, which holds no credential. It relays each call to the daemon's socket `~/.agenthail/mcp.sock` (the directory 0700, the socket 0600), where the same tools are served the same way as at `/mcp`: the same SDK, stateless, JSON responses.
+
+The daemon names the caller from the kernel, never from anything the relay sends:
+
+- It reads the connecting process's uid and pid (`SO_PEERCRED` on Linux; `LOCAL_PEERCRED` and `LOCAL_PEERPID` on macOS) and refuses a uid other than its own.
+- It walks up to four of that process's ancestors to the first one that is a live Claude process: its session record (`sessions/<pid>.json` in a configured Claude root) names it, and the process is the one that wrote the record (`procStart`, or `startedAt` for a record without it). Claude starts a user-scope stdio server as its direct child.
+- It reads the session from that record on every request. Claude rewrites the record in place on `/clear` and `/resume`, while the stdio server keeps running with the environment it started with, so the caller follows the record and never the relay's `CLAUDE_CODE_SESSION_ID`.
+- The session must be registered on this host and not archived. Claude lists a server's tools once, as soon as it starts, so a session discovery has not registered yet is waited for, up to 5 seconds, with a discovery pass requested.
+
+A process with no live session among its ancestors, a session that has moved or been archived, or a caller of another uid gets a server with no tools: `initialize` succeeds, `tools/list` is empty and a tool call fails. An empty server costs a non-session process no context and puts no failed server in Claude's `/mcp`.
+
+The relay answers the session's `initialize` only once it has the daemon's tools, or after 8 seconds, so the first `tools/list` is whole; 8 seconds outlasts the daemon's wait for a new session and is well inside the time Claude gives a server to start. Tools that arrive later, for a session that started while the daemon was down, are announced with `tools/list_changed`. Each call is its own request, so a daemon restart does not break a running relay. `agenthail_whoami` shows no `credential` for a caller named this way; nothing is issued, rotated or revoked, and an archive takes effect at the next call.
+
+This binds a session to its own process: one session's server cannot act as another session, which the CLI's `/api/v1/scope` cannot prevent. It does not separate sessions from other code running as the same OS user, which can read the dashboard token.
 
 ## Permissions are computed at each call
 

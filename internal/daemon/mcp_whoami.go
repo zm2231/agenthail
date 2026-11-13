@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 type mcpProjectView struct {
@@ -23,7 +25,7 @@ type mcpWhoamiView struct {
 	Coordinator  bool              `json:"coordinator"`
 	Capabilities []string          `json:"capabilities"`
 	Ceiling      json.RawMessage   `json:"ceiling"`
-	Credential   map[string]string `json:"credential"`
+	Credential   map[string]string `json:"credential,omitempty"`
 }
 
 func (d *Daemon) mcpWhoami(_ context.Context, caller *mcpCaller, _ struct{}) (any, error) {
@@ -39,11 +41,19 @@ func (d *Daemon) mcpWhoami(_ context.Context, caller *mcpCaller, _ struct{}) (an
 		Coordinator:  d.coordinates(caller),
 		Capabilities: caller.capabilities,
 		Ceiling:      caller.ceiling,
-		Credential: map[string]string{
-			"idleExpiresAt": caller.credential.IdleExpiresAt.UTC().Format(time.RFC3339),
-			"maxExpiresAt":  caller.credential.MaxExpiresAt.UTC().Format(time.RFC3339),
-		},
+		Credential:   credentialView(caller.credential),
 	}, nil
+}
+
+// A caller the socket named by its process holds no credential.
+func credentialView(credential registry.SessionCredential) map[string]string {
+	if credential.SessionID == "" {
+		return nil
+	}
+	return map[string]string{
+		"idleExpiresAt": credential.IdleExpiresAt.UTC().Format(time.RFC3339),
+		"maxExpiresAt":  credential.MaxExpiresAt.UTC().Format(time.RFC3339),
+	}
 }
 
 func projectView(project *CatalogProject) *mcpProjectView {

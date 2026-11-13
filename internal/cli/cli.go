@@ -210,6 +210,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.daemonRun()
 	case "debug":
 		return a.cmdDebug(rest)
+	case "mcp":
+		return a.cmdMCP(rest)
 	case "launch":
 		return a.cmdLaunch(rest)
 	case "doctor":
