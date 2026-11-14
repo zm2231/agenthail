@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"maps"
@@ -31,6 +32,11 @@ import path from 'node:path';
 type Event = { type: string; entityId?: string };
 
 export default async function (ah: any) {
+  ah.action('loaded', () => {
+    const loads = path.join(ah.dir, '..', '..', 'page-loads');
+    fs.writeFileSync(loads, String((fs.existsSync(loads) ? Number(fs.readFileSync(loads, 'utf8')) : 0) + 1));
+    return null;
+  });
   const hold = path.join(ah.dir, 'hold-load');
   while (fs.existsSync(hold)) await new Promise(resolve => setTimeout(resolve, 20));
   const interval = path.join(ah.dir, 'slow-interval');
@@ -97,7 +103,7 @@ func startExtensionFixtureWith(t *testing.T, replace map[string]string) *extensi
 	files := map[string]string{
 		"extension.json":  `{"label": "Fixture", "capabilities": ["read.all", "control.all"]}`,
 		"server.ts":       fixtureServer,
-		"ui.html":         `<!doctype html><script type="module">import { action } from '/x/_ah.js';</script>`,
+		"ui.html":         `<!doctype html><script type="module">import { action } from '/_ah.js';</script>`,
 		"assets/app.css":  `body { color: red }`,
 		"notes-secret.md": `not served`,
 	}
@@ -130,12 +136,16 @@ type extensionDaemonOptions struct {
 
 func startExtensionDaemon(t *testing.T, home string, opts extensionDaemonOptions) *extensionFixture {
 	t.Helper()
-	d, _, fake, _, handler, _ := baseFixture(t)
+	d, _, fake, dashboard, handler, _ := baseFixture(t)
 	if opts.log != nil {
 		d.log = log.New(opts.log, "", 0)
 	}
+	previous := extensionPortBase
+	extensionPortBase = 0
+	t.Cleanup(func() { extensionPortBase = previous })
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
+	dashboard.listen = strings.TrimPrefix(server.URL, "http://")
 	d.attachMCPCredentials(strings.TrimPrefix(server.URL, "http://"))
 	script := filepath.Join(testnode.ExtensionHost(t), "host.mjs")
 	launch := nodehost.Launch{Node: testnode.Path(t), Script: script, Version: "test", Env: os.Environ()}
@@ -159,6 +169,35 @@ func startExtensionDaemon(t *testing.T, home string, opts extensionDaemonOptions
 
 func (f *extensionFixture) request(t *testing.T, method, path, token string, body any) (*http.Response, []byte) {
 	t.Helper()
+	return requestTo(t, f.server.URL, method, path, token, body)
+}
+
+func (f *extensionFixture) pageURL(t *testing.T) string {
+	t.Helper()
+	return f.pageOf(t, "fixture")
+}
+
+func (f *extensionFixture) pageOf(t *testing.T, id string) string {
+	t.Helper()
+	port := 0
+	eventually(t, id+"'s page gets a port", func() bool {
+		for _, ext := range f.d.extensionsView().Extensions {
+			if ext.ID == id && ext.Page != nil && ext.Page.Port > 0 {
+				port = ext.Page.Port
+			}
+		}
+		return port > 0
+	})
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
+}
+
+func (f *extensionFixture) page(t *testing.T, method, path, token string, body any) (*http.Response, []byte) {
+	t.Helper()
+	return requestTo(t, f.pageURL(t), method, path, token, body)
+}
+
+func requestTo(t *testing.T, base, method, path, token string, body any) (*http.Response, []byte) {
+	t.Helper()
 	var reader *bytes.Reader
 	if body != nil {
 		encoded, _ := json.Marshal(body)
@@ -166,7 +205,7 @@ func (f *extensionFixture) request(t *testing.T, method, path, token string, bod
 	} else {
 		reader = bytes.NewReader(nil)
 	}
-	request, err := http.NewRequest(method, f.server.URL+path, reader)
+	request, err := http.NewRequest(method, base+path, reader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +225,7 @@ func (f *extensionFixture) request(t *testing.T, method, path, token string, bod
 
 func (f *extensionFixture) action(t *testing.T, name string, input any) (int, map[string]json.RawMessage) {
 	t.Helper()
-	response, body := f.request(t, http.MethodPost, "/x/fixture/a/"+name, "secret", input)
+	response, body := f.page(t, http.MethodPost, "/a/"+name, "secret", input)
 	var decoded map[string]json.RawMessage
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatalf("action %s answered %d %s", name, response.StatusCode, body)
@@ -232,39 +271,80 @@ func extensionRefusalCode(body map[string]json.RawMessage) string {
 	return refusal.Code
 }
 
-func TestAnExtensionServesItsPageOnlyToAuthorizedClientsAndNeverItsServerFile(t *testing.T) {
+func TestAnExtensionServesItsPageOnItsOwnOriginOnlyToAuthorizedClientsAndNeverItsServerFile(t *testing.T) {
 	f := startExtensionFixture(t)
-	for _, path := range []string{"/x/fixture/", "/x/fixture", "/x/_ah.js", "/x/fixture/assets/app.css"} {
-		if response, _ := f.request(t, http.MethodGet, path, "", nil); response.StatusCode != http.StatusUnauthorized {
+	for _, path := range []string{"/", "/_ah.js", "/assets/app.css", "/s", "/events"} {
+		if response, _ := f.page(t, http.MethodGet, path, "", nil); response.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("%s without credentials answered %d", path, response.StatusCode)
 		}
 	}
-	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	bare, _ := http.NewRequest(http.MethodGet, f.server.URL+"/x/fixture", nil)
-	bare.Header.Set("Authorization", "Bearer secret")
-	if response, err := noRedirect.Do(bare); err != nil || response.StatusCode != http.StatusFound || response.Header.Get("Location") != "/x/fixture/" {
-		t.Fatalf("authorized /x/fixture: %v %+v", err, response)
-	}
-	if response, _ := f.request(t, http.MethodPost, "/x/fixture/a/state", "", nil); response.StatusCode != http.StatusUnauthorized {
+	if response, _ := f.page(t, http.MethodPost, "/a/state", "", nil); response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("action without credentials answered %d", response.StatusCode)
 	}
-	response, body := f.request(t, http.MethodGet, "/x/fixture/", "secret", nil)
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "/x/_ah.js") {
+	response, body := f.page(t, http.MethodGet, "/", "secret", nil)
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "/_ah.js") {
 		t.Fatalf("page answered %d %s", response.StatusCode, body)
 	}
-	if csp := response.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self'") || response.Header.Get("X-Frame-Options") != "SAMEORIGIN" {
+	if csp := response.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'self' "+f.server.URL) || response.Header.Get("X-Frame-Options") != "" {
 		t.Fatalf("page frame headers: %v", response.Header)
 	}
-	if response, _ := f.request(t, http.MethodGet, "/x/fixture/assets/app.css", "secret", nil); response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/css") {
+	if response, _ := f.page(t, http.MethodGet, "/assets/app.css", "secret", nil); response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/css") {
 		t.Fatalf("asset answered %d %s", response.StatusCode, response.Header.Get("Content-Type"))
 	}
-	for _, path := range []string{"/x/fixture/server.ts", "/x/fixture/extension.json", "/x/fixture/notes-secret.md", "/x/fixture/assets/../server.ts"} {
-		if response, _ := f.request(t, http.MethodGet, path, "secret", nil); response.StatusCode != http.StatusNotFound {
+	for _, path := range []string{"/server.ts", "/extension.json", "/notes-secret.md", "/assets/../server.ts"} {
+		if response, _ := f.page(t, http.MethodGet, path, "secret", nil); response.StatusCode != http.StatusNotFound {
 			t.Fatalf("%s answered %d", path, response.StatusCode)
+		}
+	}
+	for _, path := range []string{"/x/fixture/", "/x/_ah.js", "/x/fixture/s"} {
+		if _, body := f.request(t, http.MethodGet, path, "secret", nil); strings.Contains(string(body), "/_ah.js") || strings.Contains(string(body), `"sources"`) || strings.Contains(string(body), "changesAfter") {
+			t.Fatalf("the dashboard's origin still serves %s: %.200s", path, body)
 		}
 	}
 	if response, _ := f.request(t, http.MethodGet, "/", "", nil); response.Header.Get("X-Frame-Options") != "DENY" {
 		t.Fatalf("the dashboard lost its frame denial: %v", response.Header)
+	}
+}
+
+func TestAPageCannotWriteToAnotherExtensionsOriginWithTheCookie(t *testing.T) {
+	f := startExtensionFixture(t)
+	writeExtension(t, extension.Workspace(f.home), "notes", `{"label": "Notes"}`)
+	if err := os.WriteFile(filepath.Join(extension.Workspace(f.home), "notes", "ui.html"), []byte("<!doctype html><p>notes</p>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.turn(t, "to", "turn-1")
+	fixture, notes := f.pageURL(t), f.pageOf(t, "notes")
+	if fixture == notes {
+		t.Fatalf("two extensions share the origin %s", fixture)
+	}
+	cookie := signInWithLoginLink(t, f.server.Config.Handler)
+	post := func(origin string) *http.Response {
+		request, _ := http.NewRequest(http.MethodPost, fixture+"/a/state", strings.NewReader("{}"))
+		request.Header.Set("Origin", origin)
+		request.AddCookie(cookie)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response
+	}
+	if response := post(notes); response.StatusCode != http.StatusForbidden {
+		t.Fatalf("a write from another extension's page answered %d", response.StatusCode)
+	}
+	if response := post(fixture); response.StatusCode != http.StatusOK {
+		t.Fatalf("a write from the page's own origin answered %d", response.StatusCode)
+	}
+	read, _ := http.NewRequest(http.MethodGet, fixture+"/s", nil)
+	read.Header.Set("Origin", notes)
+	read.AddCookie(cookie)
+	response, err := http.DefaultClient.Do(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if allowed := response.Header.Get("Access-Control-Allow-Origin"); allowed != "" {
+		t.Fatalf("a page's sources are readable from %q", allowed)
 	}
 }
 
@@ -365,9 +445,6 @@ func TestAnExtensionThatFailsToLoadIsReportedAndOthersKeepWorking(t *testing.T) 
 	}
 	if status, _ := f.action(t, "state", nil); status != http.StatusOK {
 		t.Fatalf("the healthy extension answered %d", status)
-	}
-	if response, body := f.request(t, http.MethodPost, "/x/broken/a/anything", "secret", nil); response.StatusCode != http.StatusNotFound {
-		t.Fatalf("the broken extension answered %d %s", response.StatusCode, body)
 	}
 }
 

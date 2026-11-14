@@ -52,7 +52,7 @@ in as its source is collected, so nothing on the page waits for the slowest.
    <section class="card" id="disks"><h2>Disks<span class="age"></span></h2><div class="body">collecting</div></section>
    <section class="card" id="backups"><h2>Backups<span class="age"></span></h2><div class="body">collecting</div></section>
    <script type="module">
-     import { sources, age } from '/x/_ah.js';
+     import { sources, age } from '/_ah.js';
 
      const card = (id, draw) => (state) => {
        const el = document.getElementById(id);

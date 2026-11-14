@@ -95,15 +95,8 @@ func webSessionKey(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// The /x/ and event-stream allowance on the dashboard origin lasts only while that origin serves extension pages.
 func webSessionPath(r *http.Request) bool {
-	if onExtensionPort(r) {
-		return true
-	}
-	if strings.HasPrefix(r.URL.Path, "/x/") {
-		return true
-	}
-	return r.URL.Path == "/api/v1/events" && (r.Method == http.MethodGet || r.Method == http.MethodHead)
+	return onExtensionPort(r)
 }
 
 func onExtensionPort(r *http.Request) bool {

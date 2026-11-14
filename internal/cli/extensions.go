@@ -22,11 +22,16 @@ type extensionsListView struct {
 	Host       string `json:"host"`
 	HostError  string `json:"hostError"`
 	Extensions []struct {
-		ID           string   `json:"id"`
-		Label        string   `json:"label"`
-		State        string   `json:"state"`
-		Error        string   `json:"error"`
-		Page         string   `json:"page"`
+		ID    string `json:"id"`
+		Label string `json:"label"`
+		State string `json:"state"`
+		Error string `json:"error"`
+		Page  *struct {
+			Port      int    `json:"port"`
+			Entry     string `json:"entry"`
+			Published bool   `json:"published"`
+			Error     string `json:"error"`
+		} `json:"page"`
 		Capabilities []string `json:"capabilities"`
 		Pending      []string `json:"pendingCapabilities"`
 		Actions      []string `json:"actions"`
@@ -160,8 +165,17 @@ func describeExtensions(view extensionsListView) string {
 		if ext.Error != "" {
 			fmt.Fprintf(&out, "  error: %s\n", ext.Error)
 		}
-		if ext.Page != "" {
-			fmt.Fprintf(&out, "  page: %s\n", ext.Page)
+		if page := ext.Page; page != nil {
+			switch {
+			case page.Error != "":
+				fmt.Fprintf(&out, "  page: %s\n", page.Error)
+			case page.Port > 0:
+				fmt.Fprintf(&out, "  page: http://127.0.0.1:%d%s", page.Port, page.Entry)
+				if page.Published {
+					out.WriteString(", on the tailnet")
+				}
+				out.WriteString("\n")
+			}
 		}
 		if len(ext.Capabilities) > 0 {
 			fmt.Fprintf(&out, "  holds: %s\n", strings.Join(ext.Capabilities, ", "))

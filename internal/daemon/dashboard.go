@@ -90,6 +90,9 @@ func (d *dashboardServer) shutdown() error {
 
 func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	d.dashboard.Store(dashboard)
+	if _, err := webPushKey(); err != nil {
+		d.log.Printf("dashboard: %s", err)
+	}
 	dashboard.devices = d.Registry
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", dashboard.page)

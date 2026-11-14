@@ -46,9 +46,9 @@ func TestAnExtensionFetchesOnlyFromItsMountsUpstreamAndNeverSeesTheKey(t *testin
 
 	manifest := fmt.Sprintf(`{"label": "Fixture", "mounts": [{"name": "app", "label": "App", "upstream": %q, "entry": "/"}]}`, upstream.URL)
 	f := startExtensionFixtureWith(t, map[string]string{"extension.json": manifest, "server.ts": fetchFixtureServer})
-	previous := extensionMountPortBase
-	extensionMountPortBase = 0
-	t.Cleanup(func() { extensionMountPortBase = previous })
+	previous := extensionPortBase
+	extensionPortBase = 0
+	t.Cleanup(func() { extensionPortBase = previous })
 	t.Cleanup(f.d.extensions.mounts.close)
 
 	fetch := func(input map[string]any) fetchOutcome {

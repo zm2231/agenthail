@@ -125,9 +125,9 @@ func (f *extensionFixture) undo(t *testing.T, rev string) (int, []byte) {
 func TestUndoingTheTurnThatCreatedAnExtensionRemovesItsTablesAndPortsWhileALaterExtensionsTablesSurvive(t *testing.T) {
 	f := startExtensionFixture(t)
 	reg := f.d.Registry
-	previous := extensionMountPortBase
-	extensionMountPortBase = 0
-	t.Cleanup(func() { extensionMountPortBase = previous })
+	previous := extensionPortBase
+	extensionPortBase = 0
+	t.Cleanup(func() { extensionPortBase = previous })
 	t.Cleanup(f.d.extensions.mounts.close)
 	workspace := extension.Workspace(f.home)
 

@@ -14,8 +14,8 @@ after every turn, and they keep it or undo it.
 <id>/
   extension.json   {"label": "Forge", "description": "...", "capabilities": ["read.all"], "mounts": [...]}
   server.ts        export default function (ah) { ... }
-  ui.html          the page, served at /x/<id>/ (optional)
-  assets/          files the page loads, served at /x/<id>/assets/...
+  ui.html          the page, served at / on the extension's own port (optional)
+  assets/          files the page loads, served at /assets/... there
 ```
 
 - An id is a lowercase letter followed by up to 39 lowercase letters, digits
@@ -61,7 +61,7 @@ fills in from its source as that source is collected:
 ```html
 <section id="hosts"><h2>Hosts <small class="age"></small></h2><div class="body">collecting</div></section>
 <script type="module">
-  import { source, age } from '/x/_ah.js';
+  import { source, age } from '/_ah.js';
   source('hosts', (state) => {
     const card = document.getElementById('hosts');
     card.querySelector('.age').textContent = age(state);

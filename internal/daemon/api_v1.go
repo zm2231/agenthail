@@ -219,6 +219,15 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
 		return
 	}
+	d.streamEvents(w, r, nil)
+}
+
+func (d *Daemon) streamEvents(w http.ResponseWriter, r *http.Request, keep func(apiEvent) bool) {
+	write := func(event apiEvent) {
+		if keep == nil || keep(event) {
+			writeSSEEvent(w, event)
+		}
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "stream_unavailable", "Streaming is unavailable.")
@@ -232,7 +241,7 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 		writeStreamReset(w)
 	} else {
 		for _, event := range backlog {
-			writeSSEEvent(w, event)
+			write(event)
 		}
 	}
 	flusher.Flush()
@@ -246,7 +255,7 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 			writeStreamReset(w)
 		}
 		for _, event := range events {
-			writeSSEEvent(w, event)
+			write(event)
 		}
 		return sse.Flush(w) == nil
 	}, authorized)

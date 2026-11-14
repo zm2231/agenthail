@@ -23,8 +23,8 @@ import (
 const extensionMountSyncEvery = 10 * time.Second
 
 var (
-	extensionMountPortBase  = 7420
-	extensionMountPortCount = 50
+	extensionPortBase  = 7420
+	extensionPortCount = 200
 )
 
 type mountConfig struct {
@@ -73,6 +73,13 @@ type mountState struct {
 	Badge     string         `json:"badge,omitempty"`
 }
 
+type pageState struct {
+	Port      int    `json:"port,omitempty"`
+	Entry     string `json:"entry"`
+	Published bool   `json:"published,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
 type extensionMounts struct {
 	home    string
 	syncing sync.Mutex
@@ -80,6 +87,7 @@ type extensionMounts struct {
 	mu         sync.Mutex
 	served     map[string]*servedMount
 	states     map[string][]mountState
+	pages      map[string]pageState
 	labels     map[string]string
 	dnsName    string
 	remotePort int
@@ -152,11 +160,17 @@ func (d *Daemon) syncExtensionMounts() error {
 	keepAll := map[string]bool{}
 	desired := map[string]*mountConfig{}
 	states := map[string][]mountState{}
+	pages := map[string]pageState{}
 	labels := map[string]string{}
 	for _, ext := range found {
 		if ext.Err != nil {
 			keepAll[ext.ID] = true
 			continue
+		}
+		if ext.HasPage {
+			declared[ext.ID] = true
+			desired[ext.ID] = &mountConfig{ext: ext}
+			pages[ext.ID] = pageState{Entry: "/"}
 		}
 		grant, err := d.extensions.approvals.Granted(ext.ID)
 		if err != nil {
@@ -208,7 +222,9 @@ func (d *Daemon) syncExtensionMounts() error {
 			}
 			m.served[key] = served
 		}
-		config.proxy = d.mountProxy(config)
+		if served.name != "" {
+			config.proxy = d.mountProxy(config)
+		}
 		served.config.Store(config)
 	}
 	needName := remote.Enabled && len(m.served) > 0 && m.dnsName == ""
@@ -238,7 +254,11 @@ func (d *Daemon) syncExtensionMounts() error {
 			}
 		}
 	}
-	m.states, m.labels = states, labels
+	for id, page := range pages {
+		page.Port, page.Published, page.Error = ports[id].Port, ports[id].Published, errs[id]
+		pages[id] = page
+	}
+	m.states, m.pages, m.labels = states, pages, labels
 	m.remotePort = remote.Port
 	if !remote.Enabled {
 		m.dnsName = ""
@@ -274,7 +294,7 @@ func (d *Daemon) listenMount(key string, ports map[string]extension.MountPort) (
 	served := &servedMount{id: id, name: name, port: assigned.Port, cancel: cancel}
 	served.server = &http.Server{
 		BaseContext:       func(net.Listener) context.Context { return ctx },
-		Handler:           d.mountHandler(served),
+		Handler:           d.portHandler(served),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    64 << 10,
@@ -282,21 +302,21 @@ func (d *Daemon) listenMount(key string, ports map[string]extension.MountPort) (
 	}
 	go func() {
 		if err := served.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			d.log.Printf("extension %s: mount %s: %s", id, name, err)
+			d.log.Printf("extension %s: port %d: %s", id, assigned.Port, err)
 		}
 	}()
 	return served, nil
 }
 
 func listenFreeMountPort(ports map[string]extension.MountPort) (net.Listener, error) {
-	if extensionMountPortBase == 0 {
+	if extensionPortBase == 0 {
 		return net.Listen("tcp", "127.0.0.1:0")
 	}
 	taken := map[int]bool{}
 	for _, assigned := range ports {
 		taken[assigned.Port] = true
 	}
-	for port := extensionMountPortBase; port < extensionMountPortBase+extensionMountPortCount; port++ {
+	for port := extensionPortBase; port < extensionPortBase+extensionPortCount; port++ {
 		if taken[port] {
 			continue
 		}
@@ -304,7 +324,7 @@ func listenFreeMountPort(ports map[string]extension.MountPort) (net.Listener, er
 			return listener, nil
 		}
 	}
-	return nil, fmt.Errorf("no free port from %d to %d for the mount", extensionMountPortBase, extensionMountPortBase+extensionMountPortCount-1)
+	return nil, fmt.Errorf("no free port from %d to %d", extensionPortBase, extensionPortBase+extensionPortCount-1)
 }
 
 // A mount that is not served, or any mount while remote access is off, has
@@ -374,14 +394,14 @@ func (m *extensionMounts) config(key string) *mountConfig {
 	return nil
 }
 
-func (m *extensionMounts) view() (map[string][]mountState, map[string]string) {
+func (m *extensionMounts) view() (map[string][]mountState, map[string]pageState, map[string]string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	states := map[string][]mountState{}
 	for id, list := range m.states {
 		states[id] = slices.Clone(list)
 	}
-	return states, maps.Clone(m.labels)
+	return states, maps.Clone(m.pages), maps.Clone(m.labels)
 }
 
 // A page on another site that rebinds its hostname to 127.0.0.1 is refused

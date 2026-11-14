@@ -451,7 +451,7 @@ type extensionView struct {
 	Description  string                        `json:"description,omitempty"`
 	State        string                        `json:"state"`
 	Error        string                        `json:"error,omitempty"`
-	Page         string                        `json:"page,omitempty"`
+	Page         *pageState                    `json:"page,omitempty"`
 	App          *extension.App                `json:"app,omitempty"`
 	Badge        string                        `json:"badge,omitempty"`
 	Capabilities []string                      `json:"capabilities"`
@@ -475,7 +475,7 @@ func (d *Daemon) extensionsView() extensionsView {
 	if r == nil {
 		return extensionsView{Host: "off", Extensions: []extensionView{}}
 	}
-	mounts, labels := r.mounts.view()
+	mounts, pages, labels := r.mounts.view()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	view := extensionsView{Host: "running", Extensions: []extensionView{}}
@@ -501,8 +501,8 @@ func (d *Daemon) extensionsView() extensionsView {
 		if item.Label == "" {
 			item.Label = loaded.ext.ID
 		}
-		if loaded.ext.HasPage {
-			item.Page = "/x/" + loaded.ext.ID + "/"
+		if page, ok := pages[loaded.ext.ID]; ok {
+			item.Page = &page
 		}
 		item.Mounts = mounts[loaded.ext.ID]
 		for i := range item.Mounts {
