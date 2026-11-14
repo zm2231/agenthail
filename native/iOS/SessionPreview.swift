@@ -525,6 +525,8 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/actions" where PinPreview.handles(sentAction): body = PinPreview.respond(sentAction)
         case "/api/v1/snapshot": body = requestQuery.first(where: { $0.name == "scope" }).map { PreviewOrder.scoped(SessionPreview.snapshotJSON, $0.value, status: requestQuery.first { $0.name == "status" }?.value, surface: requestQuery.first { $0.name == "surface" }?.value) } ?? SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
+        case "/api/v1/projects/project-fieldnotes/brief" where request.httpMethod == "POST":
+            body = #"{"ok":true,"ref":"@release-lead","result":{"status":"sent","evidence":"queued","sessionId":"codex-demo","deliveryId":7},"started":false,"since":{"at":"2026-09-12T03:45:00Z","fallback":true}}"#
         case "/api/v1/actions" where SessionOperationsPreview.enabled:
             body = SessionOperationsPreview.respond(sentAction)
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-project-message"):
