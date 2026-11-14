@@ -90,7 +90,7 @@ func TestIsTempNamesOnlyTheFileAWriteLeavesBesideItsTarget(t *testing.T) {
 	if len(reader.seen) != 1 || !IsTemp(filepath.Join(dir, reader.seen[0])) {
 		t.Fatalf("during the write the directory held %v", reader.seen)
 	}
-	for _, name := range []string{"mounts.json", ".atomic", ".report.atomic", ".mounts.json.atomic", ".mounts.json.12a.atomic", "mounts.json.123.atomic"} {
+	for _, name := range []string{"mounts.json", ".atomic", ".report.atomic", ".mounts.json.atomic", ".mounts.json.12a.atomic", ".mounts.json.01.atomic", ".mounts.json.4294967296.atomic", "mounts.json.123.atomic"} {
 		if IsTemp(filepath.Join(dir, name)) {
 			t.Errorf("%s was taken for a write's temporary file", name)
 		}

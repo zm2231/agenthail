@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -17,7 +18,9 @@ func IsTemp(path string) bool {
 	if !ok || !strings.HasPrefix(name, ".") || dot < 2 || dot == len(name)-1 {
 		return false
 	}
-	return strings.Trim(name[dot+1:], "0123456789") == ""
+	random := name[dot+1:]
+	n, err := strconv.ParseUint(random, 10, 32)
+	return err == nil && strconv.FormatUint(n, 10) == random
 }
 
 func Write(path string, data []byte, perm fs.FileMode) error {
