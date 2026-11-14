@@ -70,6 +70,22 @@ final class ConnectionDropsTests: XCTestCase {
         XCTAssertEqual(log.pending(for: "hbuild"), [], "the unreachable computer was asked to take its own drop")
     }
 
+    func testTheAppCancellingItsOwnRetryDoesNotHideTheRealError() {
+        var log = ConnectionDropLog()
+        log.fail(host: "hstudio", path: "stream", error: "URLError.-1001", elapsed: nil, shown: .held, network: wifi, now: start, id: nextID)
+        log.fail(host: "hstudio", path: "stream probe", error: "URLError.-1005", elapsed: 2, shown: .offline, network: wifi, now: start.addingTimeInterval(3), id: nextID)
+        log.fail(host: "hstudio", path: "request", error: "URLError.-999", elapsed: nil, shown: .offline, network: wifi, now: start.addingTimeInterval(4), id: nextID)
+        log.fail(host: "hstudio", path: "request", error: "cancelled", elapsed: nil, shown: .offline, network: wifi, now: start.addingTimeInterval(5), id: nextID)
+        XCTAssertEqual(log.open.values.first?.lastError, "URLError.-1005", "a cancellation replaced the error that took the computer offline")
+        XCTAssertEqual(log.open.values.first?.attempts, 4, "a cancellation still counts as an attempt")
+
+        log.fail(host: "hbuild", path: "request", error: "URLError.-999", elapsed: nil, shown: .offline, network: wifi, now: start, id: nextID)
+        log.fail(host: "hbuild", path: "request", error: "cancelled", elapsed: nil, shown: .offline, network: wifi, now: start.addingTimeInterval(1), id: nextID)
+        XCTAssertEqual(log.open.values.first { $0.host == "hbuild" }?.lastError, "cancelled", "a drop with only cancellations keeps its latest")
+        log.fail(host: "hbuild", path: "request", error: "URLError.-1009", elapsed: nil, shown: .offline, network: wifi, now: start.addingTimeInterval(2), id: nextID)
+        XCTAssertEqual(log.open.values.first { $0.host == "hbuild" }?.lastError, "URLError.-1009", "a real error after cancellations is kept")
+    }
+
     func testStoppingAndForgettingAComputerDropItsRows() {
         var log = ConnectionDropLog()
         log.fail(host: "hstudio", path: "connect", error: "URLError.-1004", elapsed: nil, shown: .offline, network: nil, now: start, id: nextID)

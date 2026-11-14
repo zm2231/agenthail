@@ -48,7 +48,7 @@ struct ConnectionDropLog: Codable, Equatable {
         let key = Self.key(host, via)
         if var episode = open[key] {
             episode.attempts += 1
-            episode.lastError = error
+            if !Self.cancelled(error) || Self.cancelled(episode.lastError) { episode.lastError = error }
             if shown == .offline { episode.shown = .offline }
             open[key] = episode
             return
@@ -111,6 +111,8 @@ struct ConnectionDropLog: Codable, Equatable {
             closed.removeAll { dropped.contains($0.id) }
         }
     }
+
+    static func cancelled(_ code: String) -> Bool { code == "URLError.-999" || code == "cancelled" }
 
     static func code(_ error: Error) -> String {
         let raw: String
