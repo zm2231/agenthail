@@ -8,6 +8,16 @@ const themes = JSON.parse(process.env.AGENTHAIL_GUARD_DASHBOARDS);
 const shots = process.env.AGENTHAIL_GUARD_SHOTS;
 const CANDIDATES = ["art: field", "art: tide", "art: aurora", "art: dawn", "gradient: dusk", "gradient: slate", "gradient: forest", "gradient: ember", "gradient: violet", "gradient: mono"];
 const SIZES = { wide: [1440, 900], phone: [390, 844] };
+const STALL_LIMIT_MS = 3 * 60_000;
+const progress = new Map(Object.keys(themes).map((theme) => [theme, { last: Date.now(), longest: 0, doing: "starting" }]));
+
+function working(theme, label) {
+  const now = Date.now();
+  const mine = progress.get(theme);
+  mine.longest = Math.max(mine.longest, now - mine.last);
+  mine.last = now;
+  mine.doing = label;
+}
 async function setUI(dashboard, lines) {
   const response = await fetch(`${dashboard.url}/api/v1/ui`, {
     method: "POST",
@@ -22,7 +32,7 @@ async function signedIn(browser, dashboard) {
   const [name, value] = dashboard.cookie.split("=");
   await context.setCookie({ name, value, url: dashboard.url });
   const page = await context.newPage();
-  page.setDefaultTimeout(60_000);
+  page.setDefaultTimeout(0);
   return page;
 }
 
@@ -30,6 +40,7 @@ async function brightest(page, dashboard, theme) {
   let best = null;
   await page.setViewport({ width: SIZES.wide[0], height: SIZES.wide[1] });
   for (const background of CANDIDATES) {
+    working(theme, `brightest ${background}`);
     await setUI(dashboard, [`theme = ${theme}`, `background = ${background}`]);
     await page.goto("about:blank");
     await page.goto(`${dashboard.url}/#overview`, { waitUntil: "load" });
@@ -114,6 +125,7 @@ async function guardTheme(browser, theme, dashboards) {
       const target = contrast === "more" ? 7 : 4.5;
       await pages.full.setViewport({ width: SIZES.wide[0], height: SIZES.wide[1] });
       await pages.full.emulateMediaFeatures([{ name: "prefers-contrast", value: contrast }]);
+      working(theme, `${theme} ${background} ${contrast === "more" ? "more contrast " : ""}theme pass`);
       failures.push(...(await themeSurvivesHiddenText(pages.full, dashboards.full, `${theme} ${background} ${contrast === "more" ? "more contrast " : ""}theme pass`)));
       for (const [width, height] of Object.values(SIZES)) {
         for (const view of VIEWS) {
@@ -122,6 +134,7 @@ async function guardTheme(browser, theme, dashboards) {
           await page.setViewport({ width, height });
           await page.emulateMediaFeatures([{ name: "prefers-contrast", value: contrast }]);
           const label = `${theme} ${background} ${contrast === "more" ? "more contrast " : ""}${width}x${height} ${view.name}`;
+          working(theme, label);
           try {
             await openView(page, dashboards[view.dashboard], view);
             const roles = await page.evaluate(roleOverrides);
@@ -138,11 +151,28 @@ async function guardTheme(browser, theme, dashboards) {
       }
     }
   }
+  working(theme, "done");
   return failures;
 }
 
 const started = Date.now();
-const { browser, close } = await launch();
+const { browser, close, abandon } = await launch();
+const deadline = Number(process.env.AGENTHAIL_GUARD_DEADLINE);
+if (deadline) {
+  setTimeout(() => {
+    console.log(`readability guard: not finished by its deadline after ${((Date.now() - started) / 1000).toFixed(0)} s`);
+    abandon();
+    process.exit(1);
+  }, Math.max(deadline - Date.now(), 0)).unref();
+}
+setInterval(() => {
+  const now = Date.now();
+  const stalled = [...progress].find(([, mine]) => mine.doing !== "done" && now - mine.last > STALL_LIMIT_MS);
+  if (!stalled) return;
+  console.log(`readability guard: ${stalled[0]} finished nothing in ${STALL_LIMIT_MS / 1000} s, stuck on ${stalled[1].doing}`);
+  abandon();
+  process.exit(1);
+}, 1000).unref();
 let failures = [];
 try {
   const results = await Promise.all(Object.entries(themes).map(([theme, dashboards]) => guardTheme(browser, theme, dashboards)));
@@ -150,6 +180,6 @@ try {
 } finally {
   await close();
 }
-console.log(`readability guard: ${failures.length} failures in ${((Date.now() - started) / 1000).toFixed(0)} s`);
+console.log(`readability guard: ${failures.length} failures in ${((Date.now() - started) / 1000).toFixed(0)} s, at most ${(Math.max(...[...progress.values()].map((mine) => mine.longest)) / 1000).toFixed(0)} s between finished steps`);
 for (const failure of failures) console.log(failure);
 process.exitCode = failures.length ? 1 : 0;
