@@ -32,6 +32,7 @@ struct SentFileCache {
     static let fileLimit: Int64 = 50 << 20
     static let maxAge: TimeInterval = 7 * 24 * 3600
     static let maxBytes: Int64 = 500 << 20
+    static let inUse: TimeInterval = 3600
 
     let root: URL
 
@@ -57,7 +58,12 @@ struct SentFileCache {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
         try FileManager.default.moveItem(at: temporary, to: target)
-        Self.quarantine(target)
+        do {
+            try Self.quarantine(target)
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
         touch(folder)
         return target
     }
@@ -67,7 +73,7 @@ struct SentFileCache {
     }
 
     @discardableResult
-    func prune(now: Date = Date(), maxAge: TimeInterval = Self.maxAge, maxBytes: Int64 = Self.maxBytes) -> [URL] {
+    func prune(now: Date = Date(), maxAge: TimeInterval = Self.maxAge, maxBytes: Int64 = Self.maxBytes, beforeRemoving: (URL) -> Void = { _ in }) -> [URL] {
         guard let folders = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey]) else { return [] }
         var entries = folders.compactMap { folder -> (url: URL, used: Date, bytes: Int64)? in
             guard (try? folder.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { return nil }
@@ -78,6 +84,11 @@ struct SentFileCache {
         entries.sort { $0.used < $1.used }
         var total = entries.reduce(Int64(0)) { $0 + $1.bytes }
         for entry in entries where now.timeIntervalSince(entry.used) > maxAge || total > maxBytes {
+            beforeRemoving(entry.url)
+            var fresh = entry.url
+            fresh.removeAllCachedResourceValues()
+            let used = (try? fresh.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? entry.used
+            if Date().timeIntervalSince(used) < Self.inUse { continue }
             guard (try? FileManager.default.removeItem(at: entry.url)) != nil else { continue }
             total -= entry.bytes
             removed.append(entry.url)
@@ -95,11 +106,14 @@ struct SentFileCache {
     }
 
     // Gatekeeper asks before a quarantined script or app runs.
-    static func quarantine(_ url: URL) {
+    static func quarantine(_ url: URL) throws {
         #if os(macOS)
         let value = String(format: "0081;%08x;Agenthail;", Int(Date().timeIntervalSince1970))
-        _ = value.withCString { pointer in
+        let result = value.withCString { pointer in
             setxattr(url.path, "com.apple.quarantine", pointer, strlen(pointer), 0, 0)
+        }
+        if result != 0 {
+            throw AgenthailAPIError.request(0, "The file couldn't be marked as downloaded, so it wasn't kept: \(String(cString: strerror(errno))).")
         }
         #endif
     }

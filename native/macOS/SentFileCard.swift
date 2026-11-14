@@ -46,7 +46,7 @@ struct SentFileCard: View {
         .buttonStyle(.plain)
         .disabled(reason != nil || loading)
         .help(reason ?? "Preview \(name)")
-        .accessibilityLabel(reason == nil ? "Preview \(name)" : "\(name), \(reason ?? "")")
+        .accessibilityLabel(copied ? "\(name), path copied" : reason == nil ? "Preview \(name)" : "\(name), \(reason ?? "")")
         .accessibilityIdentifier("sent-file-" + item.id)
         .contextMenu {
             if reason == nil {
@@ -76,6 +76,7 @@ struct SentFileCard: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(path, forType: .string)
         copied = true
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: "Path copied", .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
     private func fetch(_ then: (URL) -> Void) async {

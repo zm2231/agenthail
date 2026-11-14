@@ -68,7 +68,7 @@ struct IOSSentFileCard: View {
             }
             .buttonStyle(.plain)
             .disabled(loading || (reason != nil && path.isEmpty))
-            .accessibilityLabel(reason == nil ? "\(name), \(SentFileState.detail(item))" : "\(name), \(reason ?? "")")
+            .accessibilityLabel(copied ? "\(name), path copied" : reason == nil ? "\(name), \(SentFileState.detail(item))" : "\(name), \(reason ?? "")")
             .accessibilityHint(reason == nil ? (SentFileState.isPDF(item) ? "Opens the PDF" : "Shares the file") : "Copies the path on the computer that sent it")
             .accessibilityIdentifier("sent-file")
         }
@@ -89,6 +89,7 @@ struct IOSSentFileCard: View {
     private func copyPath() {
         UIPasteboard.general.string = path
         copied = true
+        UIAccessibility.post(notification: .announcement, argument: "Path copied")
     }
 
     private func open() async {

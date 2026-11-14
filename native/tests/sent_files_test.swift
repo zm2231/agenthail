@@ -95,7 +95,12 @@ struct SentFilesTest {
             fm.createFile(atPath: folder.appendingPathComponent("f").path, contents: Data(count: size))
             try? fm.setAttributes([.modificationDate: now.addingTimeInterval(-age * 24 * 3600)], ofItemAtPath: folder.path)
         }
-        let removed = Set(cache.prune(now: now, maxBytes: 1000).map(\.lastPathComponent))
+        let busy = root.appendingPathComponent("prune-busy")
+        try? fm.createDirectory(at: busy, withIntermediateDirectories: true)
+        fm.createFile(atPath: busy.appendingPathComponent("f").path, contents: Data(count: 10))
+        try? fm.setAttributes([.modificationDate: now.addingTimeInterval(-9 * 24 * 3600)], ofItemAtPath: busy.path)
+        let removed = Set(cache.prune(now: now, maxBytes: 1000, beforeRemoving: { if $0.lastPathComponent == "prune-busy" { cache.touch($0) } }).map(\.lastPathComponent))
+        check(!removed.contains("prune-busy") && fm.fileExists(atPath: busy.path), "a folder opened while the prune runs is kept: \(removed)")
         check(removed.contains("prune-old"), "a folder unused for over 7 days is removed: \(removed)")
         check(removed.contains("prune-middle") && !removed.contains("prune-recent") && !removed.contains("prune-newest"), "over the size cap the least recently used go first until it fits: \(removed)")
 
