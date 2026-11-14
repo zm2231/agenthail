@@ -15,7 +15,12 @@ extension AgenthailAPI {
     }
 
     func undoExtensionChange(_ rev: String) async throws {
-        let _: ExtensionsUndone = try await extensionsRequest("/api/v1/extensions", method: "POST", body: ["action": "undo", "rev": rev])
+        let _: ExtensionsUndone = try await extensionsRequest(Self.undoPath(rev), method: "POST", body: nil)
+    }
+
+    static func undoPath(_ rev: String) -> String {
+        let segment = rev.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#"))) ?? rev
+        return "/api/v1/extensions/history/\(segment)/undo"
     }
 
     func buildExtension(_ message: String) async throws -> ExtensionBuildStarted {
