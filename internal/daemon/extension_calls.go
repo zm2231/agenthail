@@ -218,8 +218,6 @@ func (d *Daemon) callExtension(ctx context.Context, id string, request extension
 	out.Ran = call.Kind + " " + call.Name
 	if recordErr := d.extensions.calls.record(id, call); recordErr != nil {
 		d.log.Printf("extensions: record a call to %s: %s", id, recordErr)
-	} else if call.OK {
-		d.rewordExtensionChangeAsks()
 	}
 	return out, err
 }
@@ -321,9 +319,6 @@ func (d *Daemon) extensionChecks(history *extension.History, change extension.Ch
 			lines = append(lines, fmt.Sprintf("%s verified: %s ran ok at %s against this version", files.ID, call.Name, call.At.Local().Format("15:04")))
 		} else {
 			lines = append(lines, files.ID+" not verified")
-		}
-		if waits := d.extensionWaitsFor(files.ID); waits != "" {
-			lines = append(lines, files.ID+" needs your approval: "+waits)
 		}
 	}
 	return lines
