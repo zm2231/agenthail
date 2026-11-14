@@ -123,6 +123,10 @@ final class ExtensionPins {
 
     func isPinned(_ entry: ExtensionEntry) -> Bool { ids.contains(entry.id) }
 
+    func pins(host hostID: String) -> Bool {
+        ids.contains { $0.hasPrefix(hostID + "/") }
+    }
+
     func toggle(_ entry: ExtensionEntry) {
         if ids.contains(entry.id) { ids.remove(entry.id) } else { ids.insert(entry.id) }
         defaults.set(ids.sorted(), forKey: Self.key)
@@ -150,17 +154,23 @@ final class ExtensionCatalog {
         signIn = api.map(ExtensionSignIn.init)
     }
 
-    func attach(_ api: AgenthailAPI?, hostID: String, hostName: String) {
+    @discardableResult
+    func attach(_ api: AgenthailAPI?, hostID: String, hostName: String) -> Bool {
         let renamed = hostID != self.hostID || hostName != self.hostName
         self.hostID = hostID
         self.hostName = hostName
-        if self.api !== api {
-            self.api = api
-            signIn = api.map(ExtensionSignIn.init)
-            refresh()
-        } else if renamed, let list, let api {
-            entries = ExtensionEntries.build(list, hostID: hostID, hostName: hostName, origin: api.origin)
+        guard self.api !== api else {
+            if renamed, let list, let api {
+                entries = ExtensionEntries.build(list, hostID: hostID, hostName: hostName, origin: api.origin)
+            }
+            return false
         }
+        self.api = api
+        signIn = api.map(ExtensionSignIn.init)
+        list = nil
+        entries = []
+        error = nil
+        return true
     }
 
     func entry(_ id: String) -> ExtensionEntry? { entries.first { $0.id == id } }

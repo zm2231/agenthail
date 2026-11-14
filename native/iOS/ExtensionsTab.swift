@@ -52,6 +52,7 @@ struct ExtensionsHub: View {
             ExtensionPageScreen(model: model, entryID: route.entryID)
         }
         .refreshable { model.extensionHosts.forEach { $0.refresh() } }
+        .task { model.extensionHosts.forEach { $0.refresh() } }
         .sheet(item: $showsHistory) { box in
             if let api = box.catalog.api { NavigationStack { ExtensionHistoryList(api: api) } }
         }
@@ -160,8 +161,9 @@ struct ExtensionPageScreen: View {
                     }
             } else if let entry {
                 ContentUnavailableView(entry.label, systemImage: ExtensionEntry.fallbackIcon, description: Text(entry.unavailable ?? "This page can't open right now."))
-            } else if model.extensionHosts.contains(where: { $0.list == nil }) {
+            } else if let catalog = model.extensionCatalogs[String(entryID.prefix { $0 != "/" })], catalog.list == nil {
                 ProgressView()
+                    .task { catalog.refresh() }
             } else {
                 ContentUnavailableView("This extension was removed", systemImage: ExtensionEntry.fallbackIcon, description: Text("It is no longer on any computer this phone is paired with."))
                     .onAppear { ExtensionPages.forget(entryID) }

@@ -1411,7 +1411,7 @@ final class AgenthailModel {
             if let id = event.entityId { onSnapshotClosed?(id) }
             return
         }
-        if ExtensionCatalog.refreshes(for: event.type) { extensionCatalog.refresh() }
+        if ExtensionCatalog.refreshes(for: event.type) && extensionCatalog.list != nil { extensionCatalog.refresh() }
         if event.type == "stream.reset" {
             lastEventID = 0
         } else {
@@ -1439,7 +1439,7 @@ final class AgenthailModel {
 
     private func syncExtensionCatalog() {
         guard let host = daemon?.host else { return }
-        extensionCatalog.attach(api, hostID: host.id, hostName: host.name)
+        if extensionCatalog.attach(api, hostID: host.id, hostName: host.name) && ExtensionPins.shared.pins(host: host.id) { extensionCatalog.refresh() }
     }
 
     private func eventStreamConnected() {

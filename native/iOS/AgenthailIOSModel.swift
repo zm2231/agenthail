@@ -344,7 +344,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func hostExtensionsChanged(_ host: HostConnection) {
-        guard connections[host.id] === host, let catalog = extensionCatalogs[host.id] else { return }
+        guard connections[host.id] === host, host.reachable, let catalog = extensionCatalogs[host.id], catalog.list != nil else { return }
         catalog.attach(host.api, hostID: host.id, hostName: host.name)
         catalog.refresh()
     }
@@ -2753,7 +2753,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         guard connections[host.id] === host else { return }
         if let catalog = extensionCatalogs[host.id] {
             catalog.attach(host.api, hostID: host.id, hostName: host.name)
-            if host.reachable && (catalog.list == nil || catalog.error != nil) && !catalog.loading { catalog.refresh() }
+            if host.reachable && ExtensionPins.shared.pins(host: host.id) && (catalog.list == nil || catalog.error != nil) && !catalog.loading { catalog.refresh() }
         }
         if !host.reachable { cancelPushSetup(host.id) }
         rebuild()
