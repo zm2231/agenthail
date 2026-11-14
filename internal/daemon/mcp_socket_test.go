@@ -163,7 +163,7 @@ func shortSocketHome(t *testing.T) {
 	t.Setenv("HOME", home)
 }
 
-func mcpSocketDaemon(t *testing.T) (*Daemon, *registry.Registry, string, func()) {
+func mcpSocketDaemon(t *testing.T, more ...surface.Surface) (*Daemon, *registry.Registry, string, func()) {
 	t.Helper()
 	shortSocketHome(t)
 	root := t.TempDir()
@@ -173,7 +173,7 @@ func mcpSocketDaemon(t *testing.T) (*Daemon, *registry.Registry, string, func())
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reg.Close() })
-	d := newTestDaemon(t, reg, []surface.Surface{surfaces.NewClaude(nil, os.Getenv("HOME"))})
+	d := newTestDaemon(t, reg, append([]surface.Surface{surfaces.NewClaude(nil, os.Getenv("HOME"))}, more...))
 	stop, err := d.startMCPSocket()
 	if err != nil {
 		t.Fatal(err)
@@ -327,7 +327,12 @@ func TestASessionNamedByItsProcessGetsExtensionToolsToo(t *testing.T) {
 	if !slices.Contains(names, "ext_wide_peek") || !slices.Contains(names, "agenthail_send") {
 		t.Fatalf("a session named by its process lists %v", names)
 	}
+	stop()
 	f.d.Surfaces = append(f.d.Surfaces[:len(f.d.Surfaces)-1], threadOwner{daemonSurface: f.fake, pid: os.Getppid()})
+	if stop, err = f.d.startMCPSocket(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
 	names = listedToolNames(t, socketClient(t))
 	if !slices.Contains(names, "ext_wide_peek") || !slices.Contains(names, "agenthail_send") {
 		t.Fatalf("a Codex process's server, before any call names its thread, lists %v", names)

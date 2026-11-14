@@ -29,9 +29,8 @@ type codexProcess struct {
 
 func codexSocketDaemon(t *testing.T) (*Daemon, *registry.Registry, *codexProcess) {
 	t.Helper()
-	d, reg, _, _ := mcpSocketDaemon(t)
 	home := t.TempDir()
-	d.Surfaces = append(d.Surfaces, surfaces.NewCodexIn(surfaces.CodexHome{Codex: home, State: filepath.Join(home, "state")}, ""))
+	d, reg, _, _ := mcpSocketDaemon(t, surfaces.NewCodexIn(surfaces.CodexHome{Codex: home, State: filepath.Join(home, "state")}, ""))
 	locks := filepath.Join(home, "thread-writer-locks")
 	if err := os.MkdirAll(locks, 0o700); err != nil {
 		t.Fatal(err)

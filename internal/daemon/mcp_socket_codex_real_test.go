@@ -113,7 +113,7 @@ func (s *appServer) call(t *testing.T, method string, params map[string]any) map
 }
 
 func TestARealCodexThreadCallsTheToolsAsItselfThroughTheStdioRelay(t *testing.T) {
-	d, reg, _, _ := mcpSocketDaemon(t)
+	d, reg, _, stop := mcpSocketDaemon(t)
 	ready := filepath.Join(t.TempDir(), "ready")
 	if err := os.WriteFile(ready, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -121,7 +121,13 @@ func TestARealCodexThreadCallsTheToolsAsItselfThroughTheStdioRelay(t *testing.T)
 	model := &whoamiModel{}
 	relay := fmt.Sprintf("[mcp_servers.agenthail]\ncommand = %q\nargs = [\"-test.run=^TestMCPStdioRelayHelper$\"]\ndefault_tools_approval_mode = \"approve\"\nenv = { AGENTHAIL_TEST_RELAY_READY = %q, AGENTHAIL_TEST_RELAY_SOCKET = %q }\n", os.Args[0], ready, MCPSocketPath())
 	real := codextest.StartRealWith(t, model, relay)
+	stop()
 	d.Surfaces = append(d.Surfaces, surfaces.NewCodexIn(surfaces.CodexHome{Codex: real.CodexHome, State: filepath.Join(real.Home, ".agenthail")}, ""))
+	restarted, err := d.startMCPSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(restarted)
 	cwd := filepath.Join(real.Home, "work")
 	if err := os.MkdirAll(cwd, 0o700); err != nil {
 		t.Fatal(err)
