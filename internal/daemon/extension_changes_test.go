@@ -97,7 +97,16 @@ func (f *extensionFixture) start(t *testing.T, sessionID string) {
 
 func (f *extensionFixture) changes(t *testing.T) []extension.Change {
 	t.Helper()
-	response, body := f.request(t, http.MethodGet, "/api/v1/extensions/history", "secret", nil)
+	return f.historyOf(t, "")
+}
+
+func (f *extensionFixture) historyOf(t *testing.T, id string) []extension.Change {
+	t.Helper()
+	path := "/api/v1/extensions/history"
+	if id != "" {
+		path += "?id=" + id
+	}
+	response, body := f.request(t, http.MethodGet, path, "secret", nil)
 	var view struct {
 		Changes []extension.Change `json:"changes"`
 	}

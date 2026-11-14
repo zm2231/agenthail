@@ -137,12 +137,21 @@ func (h *History) commit(author, message string) (Change, bool, error) {
 	return change, true, err
 }
 
-// Log lists up to limit changes, newest first, starting at rev.
-func (h *History) Log(limit int, rev string) ([]Change, error) {
+// Log lists up to limit changes, newest first, starting at rev. With ids it
+// keeps changes touching those extensions but lists all their files, since
+// undo reverts the whole change.
+func (h *History) Log(limit int, rev string, ids ...string) ([]Change, error) {
 	if err := h.repo.CheckRev(rev); err != nil {
 		return nil, err
 	}
-	out, err := h.repo.Git("log", fmt.Sprintf("-n%d", limit), "--format=%x1e%h%x1f%an%x1f%aI%x1f%s%x1f%(trailers:key="+sessionTrailer+",valueonly,separator=)%x1f%(trailers:key="+turnTrailer+",valueonly,separator=)%x1f%(trailers:key="+alsoTrailer+",valueonly,separator=%x2C)%x1f%P", "--abbrev=12", "--name-status", "--no-renames", rev)
+	args := []string{"log", fmt.Sprintf("-n%d", limit), "--format=%x1e%h%x1f%an%x1f%aI%x1f%s%x1f%(trailers:key=" + sessionTrailer + ",valueonly,separator=)%x1f%(trailers:key=" + turnTrailer + ",valueonly,separator=)%x1f%(trailers:key=" + alsoTrailer + ",valueonly,separator=%x2C)%x1f%P", "--abbrev=12", "--name-status", "--no-renames", "--full-diff", rev, "--"}
+	for _, id := range ids {
+		if !ValidID(id) {
+			return nil, fmt.Errorf("invalid extension id %q", id)
+		}
+		args = append(args, id+"/")
+	}
+	out, err := h.repo.Git(args...)
 	if err != nil {
 		return nil, err
 	}

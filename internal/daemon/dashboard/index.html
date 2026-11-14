@@ -589,25 +589,36 @@
             <h1>Extensions.</h1>
             <p class="lede">Pages and background jobs you add in ~/.agenthail/extensions.</p>
           </div>
-          <button class="soft-button" id="extensions-reload" type="button">Reload</button>
+          <div class="extensions-heading-actions">
+            <button class="soft-button" id="extensions-reload" type="button">Reload</button>
+            <button class="primary-button" id="extensions-new" type="button">New extension</button>
+          </div>
         </header>
-        <form class="settings-card extensions-build" id="extensions-build" data-pane="content">
-          <label for="extensions-build-message">Build an extension</label>
-          <textarea id="extensions-build-message" name="message" rows="2" maxlength="60000" required placeholder="A page that shows my proxy's request counts for the last day"></textarea>
-          <div class="extensions-build-row">
-            <select name="surface" aria-label="Builder"><option value="claude">Claude</option><option value="codex">Codex</option></select>
-            <button class="soft-button" type="submit">Build</button>
-          </div>
-        </form>
-        <div class="extensions-layout" data-pane="content">
-          <div class="extensions-side">
-            <div class="extensions-list" id="extensions-list"></div>
-            <section class="extensions-changes" id="extensions-changes" aria-label="Changes to extensions"></section>
-          </div>
-          <iframe class="extensions-frame" id="extensions-frame" title="Extension page" hidden></iframe>
+        <div class="extensions-layout">
+          <nav class="extensions-rail" id="extensions-list" data-pane="sidebar" aria-label="Extension pages"></nav>
+          <section class="extensions-stage" id="extensions-stage" data-pane="content" aria-label="Extension page" hidden>
+            <header class="extensions-toolbar" id="extensions-toolbar"></header>
+            <div class="extensions-notices" id="extensions-notices" hidden></div>
+            <div class="extensions-body">
+              <iframe class="extensions-frame" id="extensions-frame" title="Extension page" hidden></iframe>
+              <aside class="extensions-history" id="extensions-history" aria-label="History" hidden></aside>
+            </div>
+          </section>
         </div>
       </section>
     </main>
+    <dialog class="voice-dialog" id="extensions-new-dialog" data-pane="float" aria-labelledby="extensions-new-title">
+      <form class="voice-dialog-card" id="extensions-build">
+        <header>
+          <h2 id="extensions-new-title">New extension</h2>
+          <button class="icon-button" type="button" id="extensions-new-close" aria-label="Close">×</button>
+        </header>
+        <label class="voice-route"><span>What it should do</span><textarea id="extensions-build-message" name="message" rows="4" maxlength="60000" required placeholder="A page that shows my proxy's request counts for the last day"></textarea></label>
+        <label class="voice-route"><span>Builder</span><select name="surface"><option value="claude">Claude Code</option><option value="codex">Codex</option></select></label>
+        <p class="voice-help">An agent session builds it in ~/.agenthail/extensions. Keep talking to it to change it.</p>
+        <div class="voice-actions"><button class="primary-button" type="submit">Build</button></div>
+      </form>
+    </dialog>
     <dialog class="voice-dialog" id="voice-dialog" data-pane="float" aria-labelledby="voice-title">
       <form method="dialog" class="voice-dialog-card">
         <header>

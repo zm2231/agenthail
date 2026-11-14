@@ -16,7 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const extensionsUsage = "usage: agenthail extensions [list] | build \"<what it should do>\" [--agent claude|codex] | call <id> <action> [--input <json>] | run <id> <job> | approve <id> | reload | history | undo <rev> | key <id> <mount> (--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account> | --key-command -- <argv...> | --clear), each with [--json]"
+const extensionsUsage = "usage: agenthail extensions [list] | build \"<what it should do>\" [--agent claude|codex] | call <id> <action> [--input <json>] | run <id> <job> | approve <id> | reload | history [<id>] | undo <rev> | key <id> <mount> (--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account> | --key-command -- <argv...> | --clear), each with [--json]"
 
 type extensionsListView struct {
 	Host       string `json:"host"`
@@ -111,8 +111,12 @@ func (a *App) cmdExtensions(args []string) error {
 		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "reload"}, nil)
 	case sub == "approve" && len(positional) == 2:
 		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "approve", "id": positional[1], "sessionId": caller}, nil)
-	case sub == "history" && len(positional) == 1:
-		data, _, err = client.call(ctx, http.MethodGet, "/api/v1/extensions/history", nil, nil, nil)
+	case sub == "history" && len(positional) <= 2:
+		query := url.Values{}
+		if len(positional) == 2 {
+			query.Set("id", positional[1])
+		}
+		data, _, err = client.call(ctx, http.MethodGet, "/api/v1/extensions/history", query, nil, nil)
 		if err == nil && !asJSON {
 			return printExtensionHistory(data)
 		}
