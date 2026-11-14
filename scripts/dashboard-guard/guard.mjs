@@ -142,7 +142,15 @@ async function guardTheme(browser, theme, dashboards) {
 }
 
 const started = Date.now();
-const { browser, close } = await launch();
+const { browser, close, abandon } = await launch();
+const deadline = Number(process.env.AGENTHAIL_GUARD_DEADLINE);
+if (deadline) {
+  setTimeout(() => {
+    console.log(`readability guard: not finished by its deadline after ${((Date.now() - started) / 1000).toFixed(0)} s`);
+    abandon();
+    process.exit(1);
+  }, Math.max(deadline - Date.now(), 0)).unref();
+}
 let failures = [];
 try {
   const results = await Promise.all(Object.entries(themes).map(([theme, dashboards]) => guardTheme(browser, theme, dashboards)));

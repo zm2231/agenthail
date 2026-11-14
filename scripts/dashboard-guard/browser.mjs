@@ -25,5 +25,14 @@ export async function launch() {
       await browser.close();
       fs.rmSync(profile, { recursive: true, force: true });
     },
+    abandon() {
+      const pid = browser.process()?.pid;
+      if (pid) {
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {}
+      }
+      fs.rmSync(profile, { recursive: true, force: true });
+    },
   };
 }
