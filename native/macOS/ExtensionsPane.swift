@@ -107,6 +107,7 @@ private struct ExtensionCard: View {
         }
         .buttonStyle(.plain)
         .disabled(entry.url == nil)
+        .accessibilityIdentifier("extension-entry-" + entry.id)
         .overlay(alignment: .topTrailing) {
             Button(action: togglePin) {
                 Image(systemName: pinned ? "pin.fill" : "pin")
@@ -122,7 +123,6 @@ private struct ExtensionCard: View {
         .contextMenu {
             Button(pinned ? "Unpin from Sidebar" : "Pin to Sidebar", action: togglePin)
         }
-        .accessibilityIdentifier("extension-entry-" + entry.id)
     }
 }
 
