@@ -64,3 +64,35 @@ func assertOnly(t *testing.T, dir, name string) {
 type errorReader struct{ err error }
 
 func (r errorReader) Read([]byte) (int, error) { return 0, r.err }
+
+type peekingReader struct {
+	dir  string
+	seen []string
+}
+
+func (r *peekingReader) Read([]byte) (int, error) {
+	entries, err := os.ReadDir(r.dir)
+	if err != nil {
+		return 0, err
+	}
+	for _, entry := range entries {
+		r.seen = append(r.seen, entry.Name())
+	}
+	return 0, io.EOF
+}
+
+func TestIsTempNamesOnlyTheFileAWriteLeavesBesideItsTarget(t *testing.T) {
+	dir := t.TempDir()
+	reader := &peekingReader{dir: dir}
+	if err := WriteFrom(filepath.Join(dir, "mounts.json"), reader, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if len(reader.seen) != 1 || !IsTemp(filepath.Join(dir, reader.seen[0])) {
+		t.Fatalf("during the write the directory held %v", reader.seen)
+	}
+	for _, name := range []string{"mounts.json", ".atomic", ".report.atomic", ".mounts.json.atomic", ".mounts.json.12a.atomic", "mounts.json.123.atomic"} {
+		if IsTemp(filepath.Join(dir, name)) {
+			t.Errorf("%s was taken for a write's temporary file", name)
+		}
+	}
+}

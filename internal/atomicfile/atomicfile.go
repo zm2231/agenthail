@@ -12,8 +12,12 @@ import (
 const tempSuffix = ".atomic"
 
 func IsTemp(path string) bool {
-	base := filepath.Base(path)
-	return strings.HasPrefix(base, ".") && strings.HasSuffix(base, tempSuffix)
+	name, ok := strings.CutSuffix(filepath.Base(path), tempSuffix)
+	dot := strings.LastIndexByte(name, '.')
+	if !ok || !strings.HasPrefix(name, ".") || dot < 2 || dot == len(name)-1 {
+		return false
+	}
+	return strings.Trim(name[dot+1:], "0123456789") == ""
 }
 
 func Write(path string, data []byte, perm fs.FileMode) error {
