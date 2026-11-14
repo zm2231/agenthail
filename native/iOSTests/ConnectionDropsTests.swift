@@ -161,8 +161,14 @@ final class StreamDropElapsedTests: XCTestCase {
         XCTAssertNil(drop.elapsedMs, "the new stream never connected but took the old one's timing")
     }
 
-    private func streamDrop(connects: Bool, reconnect: Bool = false) async throws -> ConnectionDrop {
-        StreamUpProtocol.state.reset(connects: connects, holds: reconnect)
+    func testACutOffLineCountsAsHeard() async throws {
+        let drop = try await streamDrop(connects: true, cutsOff: true)
+        let elapsed = try XCTUnwrap(drop.elapsedMs)
+        XCTAssertLessThan(elapsed, 1_000, "a keepalive cut off before its newline was not counted as heard")
+    }
+
+    private func streamDrop(connects: Bool, reconnect: Bool = false, cutsOff: Bool = false) async throws -> ConnectionDrop {
+        StreamUpProtocol.state.reset(connects: connects, holds: reconnect, cutsOff: cutsOff)
         let suite = "connection-drops-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -190,11 +196,13 @@ private final class StreamUpProtocol: URLProtocol, @unchecked Sendable {
         private var holdsValue = false
         private var heldValue = false
         private var droppedValue = false
+        private var cutsOffValue = false
+        var cutsOff: Bool { lock.withLock { cutsOffValue } }
         var connects: Bool { lock.withLock { connectsValue } }
         var holds: Bool { lock.withLock { holdsValue } }
         var held: Bool { lock.withLock { heldValue } }
         var dropped: Bool { lock.withLock { droppedValue } }
-        func reset(connects: Bool, holds: Bool) { lock.withLock { connectsValue = connects; holdsValue = holds; heldValue = false; droppedValue = false } }
+        func reset(connects: Bool, holds: Bool, cutsOff: Bool) { lock.withLock { connectsValue = connects; holdsValue = holds; cutsOffValue = cutsOff; heldValue = false; droppedValue = false } }
         func hold() { lock.withLock { heldValue = true } }
         func refuseStreams() { lock.withLock { connectsValue = false; holdsValue = false } }
         func drop() { lock.withLock { droppedValue = true } }
@@ -227,7 +235,7 @@ private final class StreamUpProtocol: URLProtocol, @unchecked Sendable {
                 Self.state.hold()
                 return
             }
-            later(1.0) { self.client?.urlProtocol(self, didLoad: Data(": keepalive\n\n".utf8)) }
+            later(1.0) { self.client?.urlProtocol(self, didLoad: Data((Self.state.cutsOff ? ": keepal" : ": keepalive\n\n").utf8)) }
             later(1.2) {
                 Self.state.drop()
                 self.client?.urlProtocolDidFinishLoading(self)

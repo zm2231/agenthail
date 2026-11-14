@@ -959,6 +959,7 @@ final class AgenthailAPI: @unchecked Sendable {
         var line: [UInt8] = []
         for try await byte in bytes {
             guard byte == UInt8(ascii: "\n") else {
+                if line.isEmpty { onLine() }
                 line.append(byte)
                 continue
             }
