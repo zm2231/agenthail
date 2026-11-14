@@ -16,7 +16,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 	if conn == nil {
 		return nil, runtimes.unavailable()
 	}
-	unheld := c.unheld(runtimes, sess, time.Now())
+	unheld := c.unheld(ctx, runtimes, sess, time.Now())
 	runtimes.release(conn)
 	defer conn.Close()
 	thread, err := c.readObservationThread(ctx, conn, sess.ID)
@@ -143,7 +143,7 @@ func codexNewestTurn(ctx context.Context, conn codexClient, threadID string) (ma
 const codexQuietAfter = 5 * time.Minute
 
 // A plain codex terminal is no runtime the daemon can ask, but it keeps writing the rollout.
-func (c *Codex) unheld(runtimes *codexRuntimes, sess *surface.Session, now time.Time) bool {
+func (c *Codex) unheld(ctx context.Context, runtimes *codexRuntimes, sess *surface.Session, now time.Time) bool {
 	if len(runtimes.loadFailures) > 0 {
 		return false
 	}
@@ -162,5 +162,27 @@ func (c *Codex) unheld(runtimes *codexRuntimes, sess *surface.Session, now time.
 		return false
 	}
 	info, err := os.Stat(path)
-	return err == nil && now.Sub(info.ModTime()) > codexQuietAfter
+	if err != nil || now.Sub(info.ModTime()) <= codexQuietAfter || codexTurnOpen(path, info) {
+		return false
+	}
+	return !surface.BackgroundRunning(c.transcriptBackground(ctx, path, info))
+}
+
+func codexTurnOpen(path string, info os.FileInfo) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return true
+	}
+	defer file.Close()
+	open := false
+	scanJSONLBackward(file, info.Size(), info.Size(), func(line []byte, _ int64) bool {
+		record, _, ok := parseCodexLiveTurnRecord(line)
+		if !ok {
+			return true
+		}
+		started, ended := codexLifecycle(record)
+		open = started
+		return !started && !ended
+	})
+	return open
 }

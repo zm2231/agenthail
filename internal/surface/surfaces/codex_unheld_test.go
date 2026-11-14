@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ func TestAThreadCountsAsUnheldOnlyWhenEveryRuntimeAgreesAndItIsQuiet(t *testing.
 		{"no Desktop here and no managed server running", withoutDesktop, &codexRuntimes{}, now, true},
 	}
 	for _, tc := range cases {
-		if got := tc.codex.unheld(tc.runtimes, sess, tc.at); got != tc.want {
+		if got := tc.codex.unheld(t.Context(), tc.runtimes, sess, tc.at); got != tc.want {
 			t.Errorf("%s: unheld=%v, want %v", tc.name, got, tc.want)
 		}
 	}
@@ -67,10 +68,48 @@ func TestAThreadCountsAsUnheldOnlyWhenEveryRuntimeAgreesAndItIsQuiet(t *testing.
 	if err := os.WriteFile(home.socketPath(), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if withoutDesktop.unheld(&codexRuntimes{}, sess, now) {
+	if withoutDesktop.unheld(t.Context(), &codexRuntimes{}, sess, now) {
 		t.Error("a managed server whose socket exists but could not be reached might hold the thread")
 	}
-	if withoutDesktop.unheld(&codexRuntimes{managed: idleCodexClient{}, managedLoaded: listed()}, &surface.Session{ID: "thread-2", Surface: surface.KindCodex, Transcript: filepath.Join(dir, "missing.jsonl")}, now) {
+	if withoutDesktop.unheld(t.Context(), &codexRuntimes{managed: idleCodexClient{}, managedLoaded: listed()}, &surface.Session{ID: "thread-2", Surface: surface.KindCodex, Transcript: filepath.Join(dir, "missing.jsonl")}, now) {
 		t.Error("a thread whose rollout can't be read counted as quiet")
+	}
+}
+
+func TestAQuietThreadWithWorkStillOpenInItsRolloutIsNotUnheld(t *testing.T) {
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "codex"))
+	bridge := startDesktopBridge(t, func(method string) string {
+		switch method {
+		case "thread/loaded/list", "thread/turns/list":
+			return `{"result":{"data":[]}}`
+		case "thread/read":
+			return `{"result":{"thread":{"id":"thread","source":"cli","status":{"type":"notLoaded"}}}}`
+		}
+		return ""
+	})
+	lines := codexBackgroundRollout()
+	cases := []struct {
+		name    string
+		rollout []string
+		want    bool
+	}{
+		{"a turn still running a command", lines[:2], false},
+		{"an ended turn whose command still runs", lines[:4], false},
+		{"an ended turn whose command finished", lines, true},
+	}
+	for _, tc := range cases {
+		rollout := timelineFixture(t, strings.Join(tc.rollout, "\n")+"\n")
+		old := time.Now().Add(-time.Hour)
+		if err := os.Chtimes(rollout, old, old); err != nil {
+			t.Fatal(err)
+		}
+		c := inDaemon(NewCodex(bridge.URL))
+		observation, err := c.Observe(t.Context(), &surface.Session{ID: "thread", Surface: surface.KindCodex, Transcript: rollout})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if observation.Unheld != tc.want {
+			t.Errorf("%s: unheld=%v, want %v", tc.name, observation.Unheld, tc.want)
+		}
 	}
 }
