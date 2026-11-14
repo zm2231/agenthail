@@ -48,6 +48,7 @@ final class HostConnection {
     private var eventRefreshTask: Task<Void, Never>?
     var grace = ConnectionGrace()
     private var streamOpen = false
+    private var streamOpenedAt: Date?
     private static let log = Logger(subsystem: "com.agenthail.app", category: "connection")
     private(set) lazy var reader = makeReader()
     var pages: ScopePages { reader.pages }
@@ -248,6 +249,7 @@ final class HostConnection {
         eventTask = Task {
             let backoff = EventRetryBackoff()
             while !Task.isCancelled, !stopped {
+                streamOpenedAt = nil
                 do {
                     try await api.streamEvents(
                         after: lastEventID,
@@ -262,7 +264,7 @@ final class HostConnection {
                     if streamOpen { grace.contact() }
                     streamOpen = false
                     Self.log.notice("\(self.id, privacy: .public) event stream ended: \(error.localizedDescription, privacy: .public)")
-                    drops?.failed(host: id, path: "stream", error: ConnectionDropLog.code(error), elapsed: nil, shown: shownReachable ? .held : .offline)
+                    drops?.failed(host: id, path: "stream", error: ConnectionDropLog.code(error), elapsed: streamOpenedAt.map { Date().timeIntervalSince($0) }, shown: shownReachable ? .held : .offline)
                     reconnecting = true
                     let probed = Date()
                     do {
@@ -286,6 +288,7 @@ final class HostConnection {
         guard !stopped else { return }
         reconnecting = false
         streamOpen = true
+        streamOpenedAt = Date()
         recovered(by: "event stream")
         if !snapshotCoversEventStream { _ = await refresh(fresh: true) } else {
             snapshotCoversEventStream = false

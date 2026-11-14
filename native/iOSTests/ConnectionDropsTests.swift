@@ -138,3 +138,83 @@ final class ConnectionDropsTests: XCTestCase {
         XCTAssertEqual(drops.log.open.count, 1, "a computer reported unreachable through itself")
     }
 }
+
+@MainActor
+final class StreamDropElapsedTests: XCTestCase {
+    func testAStreamDropRecordsHowLongTheStreamWasUp() async throws {
+        let drop = try await streamDrop(connects: true)
+        XCTAssertEqual(drop.path, "stream")
+        let elapsed = try XCTUnwrap(drop.elapsedMs, "a stream that had been up recorded no duration")
+        XCTAssertGreaterThanOrEqual(elapsed, 400, "the stream was up for at least the held time")
+        XCTAssertLessThan(elapsed, 10_000)
+    }
+
+    func testAStreamThatNeverConnectedRecordsNoDuration() async throws {
+        let drop = try await streamDrop(connects: false)
+        XCTAssertEqual(drop.path, "stream")
+        XCTAssertNil(drop.elapsedMs, "a stream that never connected has no up time")
+    }
+
+    private func streamDrop(connects: Bool) async throws -> ConnectionDrop {
+        StreamUpProtocol.state.reset(connects: connects)
+        let suite = "connection-drops-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let drops = ConnectionDrops(defaults: defaults, watchesNetwork: false)
+        let credential = PairedHostCredential(hostID: "hstudio", hostName: "studio", endpoint: URL(string: "https://studio.example.test")!, token: "token", pairedAt: Date())
+        let connection = HostConnection(credential: credential, session: FixtureScope.open(self).session([StreamUpProtocol.self]), drops: drops)
+        defer { connection.stop() }
+        connection.connect()
+        for _ in 0..<250 where drops.log.open.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        return try XCTUnwrap(drops.log.open.values.first { $0.path == "stream" }, "no stream drop was recorded")
+    }
+}
+
+private final class StreamUpProtocol: URLProtocol, @unchecked Sendable {
+    final class State: @unchecked Sendable {
+        private let lock = NSLock()
+        private var connectsValue = true
+        private var droppedValue = false
+        var connects: Bool { lock.withLock { connectsValue } }
+        var dropped: Bool { lock.withLock { droppedValue } }
+        func reset(connects: Bool) { lock.withLock { connectsValue = connects; droppedValue = false } }
+        func drop() { lock.withLock { droppedValue = true } }
+    }
+    static let state = State()
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { served(answer) }
+    override func stopLoading() {}
+
+    private func answer() {
+        if answeredProjectActivity() { return }
+        let path = request.url!.path
+        if Self.state.dropped, path != "/api/v1/catalog-events" {
+            respond(503, #"{"error":"offline"}"#, finish: true)
+            return
+        }
+        switch path {
+        case "/api/v1/version": respond(200, #"{"protocol":2,"minimumProtocol":1,"maximumProtocol":2}"#, finish: true)
+        case "/api/v1/snapshot": respond(200, SessionPreview.snapshotJSON, finish: true)
+        case "/api/v1/catalog-events": respond(200, ": connected\n\n", finish: false)
+        case "/api/v1/events":
+            guard Self.state.connects else {
+                Self.state.drop()
+                respond(503, #"{"error":"offline"}"#, finish: true)
+                return
+            }
+            respond(200, ": connected\n\n", finish: false)
+            later(0.5) {
+                Self.state.drop()
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
+        default: respond(200, "{}", finish: true)
+        }
+    }
+
+    private func respond(_ status: Int, _ body: String, finish: Bool) {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        if finish { client?.urlProtocolDidFinishLoading(self) }
+    }
+}
