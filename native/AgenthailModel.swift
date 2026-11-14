@@ -108,6 +108,7 @@ final class AgenthailModel {
     var localSends: [String: [LocalSend]] { outbox.rows }
     @ObservationIgnored private var composerStore: ComposerStore?
     @ObservationIgnored private var composerSave: Task<Void, Never>?
+    @ObservationIgnored private var spoolTried: Set<UUID> = []
     @ObservationIgnored private var draftWatches: [ObjectIdentifier: AnyCancellable] = [:]
     @ObservationIgnored nonisolated(unsafe) private var terminationWatch: NSObjectProtocol?
     private(set) var fetchedSubagents = SubagentPageCache()
@@ -963,6 +964,11 @@ final class AgenthailModel {
         outbox.returnToComposer = { [unowned self] send, sessionID in restoreToComposer(send.text, attachments: send.attachments, sessionID: sessionID) }
         outbox.notice = { [unowned self] in operationError = $0 }
         outbox.changed = { [unowned self] in saveComposer() }
+        outbox.keep = { [weak self] send in
+            guard let self, let composerStore else { return }
+            await composerStore.write(send.attachments)
+            saveComposer()
+        }
     }
 
     private func restoreComposer() {
@@ -976,9 +982,11 @@ final class AgenthailModel {
         var notices: [String] = []
         if loaded.unreadable { notices.append("Your saved drafts couldn't be read. The file was set aside.") }
         if let lost = DraftArchive.restore(loaded.saved, unspool: composerStore.unspool, into: draft(for:)) { notices.append(lost) }
-        for send in outbox.restore(loaded.saved.sends, unspool: composerStore.unspool) {
-            draft(for: send.sessionID).restore(send.message)
-            notices.append("Not sent: Agenthail closed before its attachment uploaded. The text is back in the composer; add the attachment again.")
+        outbox.restore(loaded.saved.sends, unspool: composerStore.unspool) { lost in
+            for send in lost {
+                draft(for: send.sessionID).restore(send.message)
+                notices.append("Not sent: Agenthail closed before its attachment uploaded. The text is back in the composer; add the attachment again.")
+            }
         }
         if !notices.isEmpty { operationError = notices.joined(separator: " ") }
         terminationWatch = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
@@ -999,7 +1007,19 @@ final class AgenthailModel {
         composerSave?.cancel()
         composerSave = nil
         guard let composerStore else { return }
-        composerStore.save(DraftArchive.saved(drafts, sends: outbox.saved(spool: composerStore.spool), spool: composerStore.spool))
+        var unwritten: [ComposerAttachment] = []
+        let spool: (ComposerAttachment) -> SpooledAttachment? = { attachment in
+            let record = composerStore.spool(attachment)
+            if record == nil { unwritten.append(attachment) }
+            return record
+        }
+        composerStore.save(DraftArchive.saved(drafts, sends: outbox.saved(spool: spool), spool: spool))
+        let fresh = unwritten.filter { spoolTried.insert($0.id).inserted }
+        guard !fresh.isEmpty else { return }
+        Task { [weak self] in
+            await composerStore.write(fresh)
+            self?.saveComposer()
+        }
     }
 
     private(set) var modelCatalog: [String: [ModelOption]] = [:]

@@ -57,6 +57,7 @@ struct OutboxTest {
         relaunchStore.save(previous)
         StubDaemon.reset { _, _ in .answer }
         let relaunched = AgenthailModel(connecting: false, api: api, composerStore: relaunchStore)
+        check(relaunchStore.load().saved.drafts["U"] == "lost upload", "the text of a send that cannot resume is in the first save after a relaunch, so a kill then loses nothing: \(relaunchStore.load().saved.drafts)")
         check(relaunched.draft(for: "R").text == "kept draft" && relaunched.draft(for: "R").stash?.text == "kept stash", "drafts and stashes come back after a relaunch")
         check(await wait(seconds: 3) { relaunched.localSends["R"]?.first?.status != nil }, "a saved send is delivered after a relaunch: \(String(describing: relaunched.localSends["R"]))")
         let resent = StubDaemon.sends(of: "restored")
@@ -80,9 +81,12 @@ struct OutboxTest {
         check(StubDaemon.sends(of: "overdue").isEmpty, "Put back sends nothing")
 
         let spoolStore = ComposerStore(file: folder.appendingPathComponent("spooled.json"))
-        let pending = PendingSend(sessionID: "P", message: "spooled", attachments: [ComposerAttachment(name: "spooled.txt", data: Data("kept".utf8), mediaType: "text/plain")], idempotencyKey: "k-spooled")
+        let sendFile = ComposerAttachment(name: "spooled.txt", data: Data("kept".utf8), mediaType: "text/plain")
+        let draftFile = ComposerAttachment(name: "draft.txt", data: Data("draft".utf8), mediaType: "text/plain")
+        await spoolStore.write([sendFile, draftFile])
+        let pending = PendingSend(sessionID: "P", message: "spooled", attachments: [sendFile], idempotencyKey: "k-spooled")
         var spooledSave = ComposerStore.Saved(sends: [ComposerStore.Saved.Send(pending, spool: spoolStore.spool)])
-        spooledSave.spooledDrafts = ["D": [spoolStore.spool(ComposerAttachment(name: "draft.txt", data: Data("draft".utf8), mediaType: "text/plain"))!]]
+        spooledSave.spooledDrafts = ["D": [spoolStore.spool(draftFile)!]]
         spoolStore.save(spooledSave)
         StubDaemon.reset { _, _ in .answer }
         let respooled = AgenthailModel(connecting: false, api: api, composerStore: spoolStore)

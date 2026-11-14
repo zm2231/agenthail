@@ -159,6 +159,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private static let composerUnreadNotice = "Saved drafts couldn’t be read. Until they can, drafts and unconfirmed messages are lost if Agenthail closes."
     @ObservationIgnored private var composerWaitAnnounced = false
     @ObservationIgnored private var composerSave: Task<Void, Never>?
+    @ObservationIgnored private var spoolTried: Set<UUID> = []
     @ObservationIgnored private var draftChanges: AnyCancellable?
     var composerAttachments: [ComposerAttachment] = [] {
         didSet { saveComposerStateSoon() }
@@ -1907,6 +1908,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             let (api, route) = try resolve(send.sessionID)
             var uploaded = send.uploaded
             if uploaded == nil {
+                await keepAttachments(of: send)
                 let stored = try await sendQueue.upload(send) { try await api.upload($0, sessionID: route.sessionID) }
                 uploaded = stored.map(\.id)
             }
@@ -2125,11 +2127,11 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         lostAttachments.merge(lost) { $0 + $1 }
         let resumable = saved.sends.compactMap { $0.resumable(unspool: unspool) }
         let resumed = Set(resumable.map(\.id))
-        sendQueue.restore(resumable)
         for record in saved.sends where !resumed.contains(record.id) {
             addToDraft(record.message, for: record.sessionID)
             failedSends[record.sessionID] = "Not sent: the app closed before its attachment uploaded. Add it again."
         }
+        sendQueue.restore(resumable)
     }
 
     private func saveComposerStateSoon() {
@@ -2145,13 +2147,19 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         composerSave?.cancel()
         composerSave = nil
         guard let composerStore else { return }
-        var saved = ComposerStore.Saved(drafts: drafts, stashes: stashes.mapValues(\.text), sends: sendQueue.pending.values.flatMap { $0 }.map { ComposerStore.Saved.Send($0, spool: composerStore.spool) })
+        var unwritten: [ComposerAttachment] = []
+        let spool: (ComposerAttachment) -> SpooledAttachment? = { attachment in
+            let record = composerStore.spool(attachment)
+            if record == nil { unwritten.append(attachment) }
+            return record
+        }
+        var saved = ComposerStore.Saved(drafts: drafts, stashes: stashes.mapValues(\.text), sends: sendQueue.pending.values.flatMap { $0 }.map { ComposerStore.Saved.Send($0, spool: spool) })
         if let selectedSessionID { saved.drafts[selectedSessionID] = composer }
         saved.drafts = saved.drafts.filter { !$0.value.isEmpty }
         var names = lostAttachments
         func spooled(_ attachments: [ComposerAttachment], for session: String) -> [SpooledAttachment] {
             attachments.filter { $0.uploaded == nil }.compactMap { attachment in
-                if let record = composerStore.spool(attachment) { return record }
+                if let record = spool(attachment) { return record }
                 names[session, default: []].append(attachment.name)
                 return nil
             }
@@ -2166,6 +2174,21 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         saved.spooledStashes = spooledStashes.isEmpty ? nil : spooledStashes
         saved.attachmentNames = names
         composerStore.save(saved)
+        writeSpool(unwritten.filter { spoolTried.insert($0.id).inserted }, to: composerStore)
+    }
+
+    private func writeSpool(_ attachments: [ComposerAttachment], to store: ComposerStore) {
+        guard !attachments.isEmpty else { return }
+        Task { [weak self] in
+            await store.write(attachments)
+            self?.saveComposerState()
+        }
+    }
+
+    private func keepAttachments(of send: PendingSend) async {
+        guard let composerStore else { return }
+        await composerStore.write(send.attachments)
+        saveComposerState()
     }
 
     private func announceLostAttachments(for sessionID: String) {

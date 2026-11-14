@@ -449,6 +449,7 @@ final class ComposerSendTests: XCTestCase {
         let (model, session) = try makeModel(store: store)
         model.composerAttachments = [ComposerAttachment(name: "draft.txt", data: Data("draft".utf8), mediaType: "text/plain")]
         model.saveComposerState()
+        try await waitUntil { store.load().saved.spooledDrafts?[session.id] != nil }
 
         let reopened = AgenthailIOSModel(api: makeAPI(), composerStore: store)
         await reopened.loadSession(session.id)
@@ -457,6 +458,36 @@ final class ComposerSendTests: XCTestCase {
         reopened.composerAttachments = []
         reopened.saveComposerState()
         XCTAssertEqual(try spooledFiles(store), [])
+    }
+
+    func testAnUploadStartsOnlyOnceItsAttachmentIsKeptOnDisk() async throws {
+        var store = temporaryStore()
+        let write = store.writeSpool
+        store.writeSpool = { data, target in
+            Thread.sleep(forTimeInterval: 0.5)
+            try write(data, target)
+        }
+        ComposerSendProtocol.state.scriptUploads([.offline, .offline, .offline])
+        let (model, session) = try makeModel(store: store)
+        model.composerAttachments = [ComposerAttachment(name: "slow.txt", data: Data("slow".utf8), mediaType: "text/plain")]
+        model.composer = "Slow disk"
+        model.send(to: session)
+        try await waitUntil(seconds: 5) { ComposerSendProtocol.state.uploads.count >= 1 }
+        XCTAssertNotNil(store.load().saved.sends.first?.attachments, "the upload began before a kill could have resumed it")
+    }
+
+    func testRestoringKeepsTheTextOfASendThatCannotResumeInTheFirstSave() async throws {
+        let store = temporaryStore()
+        ComposerSendProtocol.state.script([.offline, .offline, .offline])
+        store.save(.init(sends: [
+            .init(id: UUID(), sessionID: "computer::codex-flow", message: "Resumes", idempotencyKey: "k-1", uploaded: [], wire: nil, hadAttachments: false),
+            .init(id: UUID(), sessionID: "computer::other", message: "Cannot resume", idempotencyKey: "k-2", uploaded: nil, wire: nil, hadAttachments: true),
+        ]))
+        let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        let saved = store.load().saved
+        XCTAssertEqual(saved.drafts["computer::other"], "Cannot resume", "a kill right after restoring would lose this text")
+        XCTAssertEqual(saved.sends.map(\.message), ["Resumes"])
+        withExtendedLifetime(model) {}
     }
 
     func testFilesNoSavedMessageOrDraftNamesAreRemoved() async throws {
@@ -743,6 +774,7 @@ final class ComposerSendTests: XCTestCase {
             model.composerAttachments = [ComposerAttachment(name: "stashed.png", data: Data([1]), mediaType: "image/png")]
             model.toggleStash()
             model.saveComposerState()
+            if keeps { try await waitUntil { store.load().saved.spooledStashes?[session.id] != nil } }
 
             let reopened = AgenthailIOSModel(api: makeAPI(), composerStore: store)
             XCTAssertEqual(reopened.stashes[session.id]?.text, "Stashed")

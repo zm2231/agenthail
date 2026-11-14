@@ -42,8 +42,18 @@ struct ComposerStore {
 
     let file: URL
     var protectedDataIsAvailable: @MainActor () -> Bool = { true }
-    // A kill mid-write leaves no file rather than a short one, so a restored attachment is whole or missing.
-    var writeSpool: (Data, URL) throws -> Void = { try $0.write(to: $1, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
+    // A kill mid-write leaves only a partial file, never a short final one, so a restored attachment is whole or missing.
+    var writeSpool: @Sendable (Data, URL) throws -> Void = { data, target in
+        let partial = target.appendingPathExtension("\(UUID().uuidString).partial")
+        try data.write(to: partial, options: .completeFileProtectionUntilFirstUserAuthentication)
+        do {
+            try FileManager.default.moveItem(at: partial, to: target)
+        } catch {
+            try? FileManager.default.removeItem(at: partial)
+            if !FileManager.default.fileExists(atPath: target.path) { throw error }
+        }
+    }
+    static let partialLifetime: TimeInterval = 10 * 60
 
     var spoolFolder: URL {
         file.deletingLastPathComponent().appendingPathComponent("\(file.deletingPathExtension().lastPathComponent)-attachments", isDirectory: true)
@@ -89,31 +99,45 @@ struct ComposerStore {
     func spool(_ attachment: ComposerAttachment) -> SpooledAttachment? {
         let record = SpooledAttachment(id: attachment.id, name: attachment.name, mediaType: attachment.mediaType, uploaded: attachment.uploaded)
         guard attachment.uploaded == nil else { return record }
-        let target = spoolFolder.appendingPathComponent(attachment.id.uuidString)
-        if FileManager.default.fileExists(atPath: target.path) { return record }
-        do {
-            try FileManager.default.createDirectory(at: spoolFolder, withIntermediateDirectories: true)
-            var folder = spoolFolder
+        return FileManager.default.fileExists(atPath: spoolFile(attachment.id).path) ? record : nil
+    }
+
+    func write(_ attachments: [ComposerAttachment]) async {
+        let missing = attachments.filter { $0.uploaded == nil && !FileManager.default.fileExists(atPath: spoolFile($0.id).path) }
+        guard !missing.isEmpty else { return }
+        let folder = spoolFolder
+        let write = writeSpool
+        await Task.detached(priority: .userInitiated) {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            var location = folder
             var values = URLResourceValues()
             values.isExcludedFromBackup = true
-            try? folder.setResourceValues(values)
-            try writeSpool(attachment.data, target)
-            return record
-        } catch {
-            return nil
-        }
+            try? location.setResourceValues(values)
+            for attachment in missing { try? write(attachment.data, folder.appendingPathComponent(attachment.id.uuidString)) }
+        }.value
     }
 
     func unspool(_ record: SpooledAttachment) -> ComposerAttachment? {
         if let uploaded = record.uploaded { return ComposerAttachment(id: record.id, uploaded: uploaded) }
-        guard let data = try? Data(contentsOf: spoolFolder.appendingPathComponent(record.id.uuidString)) else { return nil }
+        guard let data = try? Data(contentsOf: spoolFile(record.id)) else { return nil }
         return ComposerAttachment(id: record.id, name: record.name, data: data, mediaType: record.mediaType)
     }
 
-    private func pruneSpool(keeping kept: Set<UUID>) {
+    private func spoolFile(_ id: UUID) -> URL { spoolFolder.appendingPathComponent(id.uuidString) }
+
+    // A partial file may belong to a write still running off the main actor.
+    private func pruneSpool(keeping kept: Set<UUID>, now: Date = Date()) {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: spoolFolder.path) else { return }
-        for name in names where UUID(uuidString: name).map({ !kept.contains($0) }) ?? true {
-            try? FileManager.default.removeItem(at: spoolFolder.appendingPathComponent(name))
+        for name in names {
+            let location = spoolFolder.appendingPathComponent(name)
+            if let id = UUID(uuidString: name) {
+                if !kept.contains(id) { try? FileManager.default.removeItem(at: location) }
+            } else if name.hasSuffix(".partial") {
+                let modified = (try? location.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                if now.timeIntervalSince(modified) > Self.partialLifetime { try? FileManager.default.removeItem(at: location) }
+            } else {
+                try? FileManager.default.removeItem(at: location)
+            }
         }
     }
 }
