@@ -5,7 +5,11 @@ import SwiftUI
 @MainActor
 enum PreviewVoice {
     static func model() -> VoiceOperatorModel {
-        ProcessInfo.processInfo.arguments.contains("--preview-voice-unreachable")
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--preview-voice-refused") {
+            return VoiceOperatorModel(endpoint: URL(string: "https://127.0.0.1:9")!, token: "preview")
+        }
+        return arguments.contains("--preview-voice-unreachable")
             ? VoiceOperatorModel(api: UnreachableVoiceService())
             : VoiceOperatorModel(preview: true)
     }
