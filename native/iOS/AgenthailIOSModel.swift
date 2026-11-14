@@ -2753,7 +2753,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         guard connections[host.id] === host else { return }
         if let catalog = extensionCatalogs[host.id] {
             catalog.attach(host.api, hostID: host.id, hostName: host.name)
-            if host.reachable && ExtensionPins.shared.pins(host: host.id) && (catalog.list == nil || catalog.error != nil) && !catalog.loading { catalog.refresh() }
+            if host.reachable && (catalog.wanted || ExtensionPins.shared.pins(host: host.id)) && (catalog.list == nil || catalog.error != nil) && !catalog.loading { catalog.refresh() }
         }
         if !host.reachable { cancelPushSetup(host.id) }
         rebuild()

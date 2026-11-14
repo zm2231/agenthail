@@ -146,6 +146,7 @@ final class ExtensionCatalog {
     @ObservationIgnored private(set) var api: AgenthailAPI?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var again = false
+    @ObservationIgnored private(set) var wanted = false
 
     init(hostID: String = "", hostName: String = "", api: AgenthailAPI? = nil) {
         self.hostID = hostID
@@ -170,12 +171,14 @@ final class ExtensionCatalog {
         list = nil
         entries = []
         error = nil
+        if wanted { refresh() }
         return true
     }
 
     func entry(_ id: String) -> ExtensionEntry? { entries.first { $0.id == id } }
 
     func refresh() {
+        wanted = true
         guard refreshTask == nil else {
             again = true
             return

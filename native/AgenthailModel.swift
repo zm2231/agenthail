@@ -1439,7 +1439,7 @@ final class AgenthailModel {
 
     private func syncExtensionCatalog() {
         guard let host = daemon?.host else { return }
-        if extensionCatalog.attach(api, hostID: host.id, hostName: host.name) && ExtensionPins.shared.pins(host: host.id) { extensionCatalog.refresh() }
+        if extensionCatalog.attach(api, hostID: host.id, hostName: host.name) && ExtensionPins.shared.pins(host: host.id) && !extensionCatalog.loading { extensionCatalog.refresh() }
     }
 
     private func eventStreamConnected() {

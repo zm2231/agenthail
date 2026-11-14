@@ -1,6 +1,26 @@
 @testable import AgenthailHelpers
 import Foundation
 
+final class CatalogStub: URLProtocol {
+    nonisolated(unsafe) static var hits: [String] = []
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        CatalogStub.hits.append("\(url.host ?? "")\(url.path)")
+        let body = Data(#"{"host":"running","extensions":[{"id":"board","label":"Board","state":"loaded"}]}"#.utf8)
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@MainActor
+func catalogSettles(_ catalog: ExtensionCatalog) async {
+    for _ in 0..<200 where catalog.loading { try? await Task.sleep(nanoseconds: 10_000_000) }
+}
+
 @main
 struct ExtensionEntriesTest {
     @MainActor
@@ -63,6 +83,26 @@ struct ExtensionEntriesTest {
         if let change = decoded?.changes.first {
             check(ExtensionHistory.describe(change) == "changed 1 file in board", "a change reads as what it did, got \(ExtensionHistory.describe(change))")
         }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CatalogStub.self]
+        let stubbed = URLSession(configuration: config)
+        let first = AgenthailAPI(baseURL: URL(string: "http://first.invalid")!, token: "t", session: stubbed)
+        let second = AgenthailAPI(baseURL: URL(string: "http://second.invalid")!, token: "t", session: stubbed)
+        let idle = ExtensionCatalog()
+        idle.attach(first, hostID: "h1", hostName: "one")
+        idle.attach(second, hostID: "h1", hostName: "one")
+        await catalogSettles(idle)
+        check(CatalogStub.hits.isEmpty, "a catalog nobody shows never fetches, got \(CatalogStub.hits)")
+        let shown = ExtensionCatalog()
+        shown.attach(first, hostID: "h1", hostName: "one")
+        shown.refresh()
+        await catalogSettles(shown)
+        check(shown.list != nil, "the shown catalog loads")
+        CatalogStub.hits = []
+        shown.attach(second, hostID: "h1", hostName: "one")
+        await catalogSettles(shown)
+        check(CatalogStub.hits == ["second.invalid/api/v1/extensions"] && shown.list != nil, "a shown catalog refetches once from its new connection, got \(CatalogStub.hits)")
+
         check(ExtensionCatalog.refreshes(for: "extension.badge") && ExtensionCatalog.refreshes(for: "extension.changed") && !ExtensionCatalog.refreshes(for: "session.updated"), "the list rereads on extension events only")
         print("ok")
     }
