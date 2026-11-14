@@ -193,6 +193,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"holders_json", `TEXT NOT NULL DEFAULT '[]'`},
 		{"holder_pid", `INTEGER NOT NULL DEFAULT 0`},
 		{"holder_start", `TEXT NOT NULL DEFAULT ''`},
+		{"deferred_since_ms", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := ensureColumn(tx, "message_queue", column.name, column.decl); err != nil {
 			return err

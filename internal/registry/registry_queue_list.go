@@ -22,6 +22,8 @@ type QueueRow struct {
 	Status          string                   `json:"status"`
 	Attempts        int                      `json:"attempts"`
 	LastError       string                   `json:"lastError,omitempty"`
+	Deferrals       int                      `json:"deferrals,omitempty"`
+	DeferredSinceMS int64                    `json:"deferredSinceMs,omitempty"`
 	QueuedAt        string                   `json:"queuedAt"`
 	DeadAt          int64                    `json:"-"`
 	HeldBy          QueueHold                `json:"heldBy,omitempty"`
@@ -68,33 +70,40 @@ func queueSteerEligible(alias string, mode deliverypolicy.Mode) string {
 // A row that follows the busy policy steers only once nothing earlier from its
 // sender waits for a turn of its own. An explicit steer may pass them.
 func queueSteerRow(alias string, mode deliverypolicy.Mode) string {
-	return queueSteerEligible(alias, mode) + fmt.Sprintf(` AND (%[1]s.busy_delivery='steer' OR NOT EXISTS (SELECT 1 FROM message_queue ahead WHERE ahead.session_id=%[1]s.session_id AND ahead.source_session_id=%[1]s.source_session_id AND ahead.id<%[1]s.id AND ahead.status IN ('pending','inflight') AND NOT (`, alias) + queueSteerEligible("ahead", mode) + `)))`
+	return queueSteerOrder(alias, mode) + fmt.Sprintf(` AND NOT (%[1]s.source_session_id!='' AND EXISTS(SELECT 1 FROM message_queue sl WHERE sl.session_id=%[1]s.session_id AND sl.host_request='' AND sl.id<%[1]s.id AND sl.status IN ('pending','inflight') AND sl.source_session_id=%[1]s.source_session_id AND `, alias) + queueSteerEligible("sl", mode) + `))`
 }
 
+func queueSteerOrder(alias string, mode deliverypolicy.Mode) string {
+	return queueSteerEligible(alias, mode) + fmt.Sprintf(` AND (%[1]s.busy_delivery='steer' OR %[1]s.source_session_id='' OR NOT EXISTS (SELECT 1 FROM message_queue ahead WHERE ahead.session_id=%[1]s.session_id AND ahead.source_session_id=%[1]s.source_session_id AND ahead.id<%[1]s.id AND ahead.status IN ('pending','inflight') AND NOT (`, alias) + queueSteerEligible("ahead", mode) + `)))`
+}
+
+// A row is behind while an earlier row of its sender waits, or while an
+// earlier row that is due goes first.
+var queueBehind = `(` + fmt.Sprintf(queueBehindSender, "q") + ` OR EXISTS(SELECT 1 FROM message_queue ah WHERE ah.session_id=q.session_id AND ah.host_request='' AND ah.id<q.id AND (ah.status='inflight' OR ` + fmt.Sprintf(queueDueRow, "ah", "?1") + `)))`
+
 func queueHoldCase(canSteer bool, mode deliverypolicy.Mode) string {
-	earliest := `(SELECT MIN(m.id) FROM message_queue m WHERE m.session_id=q.session_id AND m.status IN ('pending','inflight')%s)`
 	steer := ""
 	if canSteer {
 		steer = `
-		WHEN ` + queueTargetStatus + `='busy' AND ` + queueSteerRow("q", mode) + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, " AND "+queueSteerRow("m", mode)) + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END`
+		WHEN ` + queueTargetStatus + `='busy' AND ` + queueSteerOrder("q", mode) + ` THEN CASE WHEN EXISTS(SELECT 1 FROM message_queue m WHERE m.session_id=q.session_id AND m.host_request='' AND m.id<q.id AND (m.status='inflight' OR m.status='pending' AND (m.available_at_ms<=?1 OR q.source_session_id!='' AND m.source_session_id=q.source_session_id)) AND ` + queueSteerOrder("m", mode) + `) THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END`
 	}
 	return `CASE WHEN q.status!='pending' THEN ''
 		WHEN q.host_request!='' THEN 'hostUnreachable'
 		WHEN ` + fmt.Sprintf(limitHeldFilter, "q.session_id") + ` THEN 'limited'
-		WHEN ` + fmt.Sprintf(queueToPeerSocket, "q") + ` AND ` + fmt.Sprintf(queuePeerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END
+		WHEN ` + fmt.Sprintf(queueToPeerSocket, "q") + ` AND ` + fmt.Sprintf(queuePeerRow, "q") + ` THEN CASE WHEN ` + queueBehind + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END
 		WHEN EXISTS(SELECT 1 FROM asks a WHERE a.session_id=q.session_id AND a.origin='permission' AND a.state='open') THEN 'waiting'` + steer + `
 		WHEN ` + queueTargetStatus + `='busy' THEN 'busy'
 		WHEN ` + queueTargetStatus + `='offline' THEN 'offline'
 		WHEN ` + queueTargetStatus + ` NOT IN ('idle','notLoaded') THEN 'unknown'
 		WHEN ` + queueTargetStatus + `='notLoaded' AND NOT (COALESCE(s.surface,'')='codex' AND COALESCE(s.transport,'')='desktop') THEN 'notLoaded'
-		WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind'
+		WHEN ` + queueBehind + ` THEN 'behind'
 		WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused'
 		WHEN q.available_at_ms>?1 THEN 'retrying'
 		ELSE '' END`
 }
 
 func queueRowSelect(mode deliverypolicy.Mode) string {
-	return `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,q.uploads,q.author,
+	return `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.deferrals,q.deferred_since_ms,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,q.uploads,q.author,
 	` + queueHoldCase(true, mode) + `,
 	` + queueHoldCase(false, mode) + `,
 	COALESCE(s.surface,''),COALESCE(s.transport,''),COALESCE(s.bridge,''),COALESCE(s.runtime_kind,'')
@@ -105,7 +114,7 @@ func scanQueueRow(scanner rowScanner, adapters surface.Adapters, now time.Time) 
 	var row QueueRow
 	var evidence, targetSurface, transport, bridge, runtimeKind string
 	var steerHold, otherHold QueueHold
-	if err := scanner.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery, &row.Uploads, &row.Author, &steerHold, &otherHold, &targetSurface, &transport, &bridge, &runtimeKind); err != nil {
+	if err := scanner.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.Deferrals, &row.DeferredSinceMS, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery, &row.Uploads, &row.Author, &steerHold, &otherHold, &targetSurface, &transport, &bridge, &runtimeKind); err != nil {
 		return QueueRow{}, err
 	}
 	target := &surface.Session{ID: row.SessionID, Surface: surface.SurfaceKind(targetSurface), Transport: transport, Bridge: bridge, RuntimeKind: surface.RuntimeKind(runtimeKind)}
@@ -203,7 +212,7 @@ func (r *Registry) RetryMessage(id int64) error {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE message_queue SET refused=0,status='pending',attempts=0,deferrals=0,last_error='',available_at_ms=0,inflight_at_ms=0,dead_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
+	res, err := tx.Exec(`UPDATE message_queue SET refused=0,status='pending',attempts=0,deferrals=0,deferred_since_ms=0,last_error='',available_at_ms=0,inflight_at_ms=0,dead_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
 	if err != nil {
 		return err
 	}

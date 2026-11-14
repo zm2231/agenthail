@@ -26,16 +26,22 @@ const claimPeer = "peer"
 
 const queuePeerRow = `%[1]s.operation='message' AND %[1]s.author!='person' AND %[1]s.busy_delivery='' AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}') AND (%[1]s.uploads='' OR %[1]s.uploads='[]')`
 
-func claimCandidateFilter(sessionID, busyDelivery string, mode deliverypolicy.Mode) (string, []any) {
-	filter := `session_id=? AND host_request='' AND status IN ('pending','inflight') AND NOT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent')) AND NOT ` + fmt.Sprintf(limitHeldFilter, "?")
-	args := []any{sessionID, sessionID, sessionID}
-	if busyDelivery == claimPeer {
-		filter += ` AND id=(SELECT MIN(m.id) FROM message_queue m WHERE m.session_id=? AND m.host_request='' AND m.status IN ('pending','inflight')) AND ` + fmt.Sprintf(queuePeerRow, "message_queue")
-		args = append(args, sessionID)
-	} else if busyDelivery == "steer" {
-		filter += ` AND ` + queueSteerRow("message_queue", mode)
+// A target's queue is ordered per sender: a row waits for every earlier row
+// from its own sender, and otherwise only for earlier rows that are due. A row
+// with no sender is a sender of its own, so a held row never stops anyone
+// else's. The claim takes the oldest row that is due and not behind its sender.
+const queueBehindSender = `%[1]s.source_session_id!='' AND EXISTS(SELECT 1 FROM message_queue lane WHERE lane.session_id=%[1]s.session_id AND lane.host_request='' AND lane.id<%[1]s.id AND lane.status IN ('pending','inflight') AND lane.source_session_id=%[1]s.source_session_id)`
+
+const queueDueRow = `%[1]s.status='pending' AND %[1]s.available_at_ms<=%[2]s AND NOT (` + queueBehindSender + `)`
+
+var queueTargetOpen = `NOT EXISTS(SELECT 1 FROM session_moves WHERE conversation=?1 AND role='out' AND state IN ('preparing','sent')) AND NOT ` + fmt.Sprintf(limitHeldFilter, "?1")
+
+func claimCandidateFilter(busyDelivery string, mode deliverypolicy.Mode) string {
+	due := fmt.Sprintf(queueDueRow, "message_queue", "?2")
+	if busyDelivery == "steer" {
+		due = `status='pending' AND available_at_ms<=?2 AND ` + queueSteerRow("message_queue", mode)
 	}
-	return filter + ` ORDER BY id LIMIT 1`, args
+	return `session_id=?1 AND host_request='' AND ` + due + ` ORDER BY id LIMIT 1`
 }
 
 func claimInflightExpired(status string, operation QueueOperation, inflightAt int64, now time.Time) bool {
@@ -46,26 +52,16 @@ func claimInflightExpired(status string, operation QueueOperation, inflightAt in
 	return status == "inflight" && inflightAt > 0 && inflightAt < now.Add(-inflightTimeout).UnixMilli()
 }
 
-func claimNeedsWrite(status string, operation QueueOperation, availableAt, inflightAt int64, now time.Time) bool {
-	return claimInflightExpired(status, operation, inflightAt, now) || status == "pending" && availableAt <= now.UnixMilli()
-}
-
 func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDelivery string) (*QueuedMessage, error) {
 	if err := r.SyncDeliveryAsks(now); err != nil {
 		return nil, err
 	}
-	filter, args := claimCandidateFilter(sessionID, busyDelivery, r.busyMode())
-	var peekStatus string
-	var peekOperation QueueOperation
-	var peekAvailableAt, peekInflightAt int64
-	err := r.read.QueryRow(`SELECT status,available_at_ms,inflight_at_ms,operation FROM message_queue WHERE `+filter, args...).Scan(&peekStatus, &peekAvailableAt, &peekInflightAt, &peekOperation)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
+	filter := claimCandidateFilter(busyDelivery, r.busyMode())
+	var open, inflight, due bool
+	if err := r.read.QueryRow(`SELECT `+queueTargetOpen+`,EXISTS(SELECT 1 FROM message_queue WHERE session_id=?1 AND host_request='' AND status='inflight'),EXISTS(SELECT 1 FROM message_queue WHERE `+filter+`)`, sessionID, now.UnixMilli()).Scan(&open, &inflight, &due); err != nil {
 		return nil, err
 	}
-	if !claimNeedsWrite(peekStatus, peekOperation, peekAvailableAt, peekInflightAt, now) {
+	if !open || !inflight && !due {
 		return nil, nil
 	}
 	tx, err := r.db.Begin()
@@ -73,31 +69,24 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 		return nil, err
 	}
 	defer tx.Rollback()
-	var item QueuedMessage
-	var status string
-	var availableAt int64
-	var inflightAt int64
-	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery,author,uploads,person_name,holder_pid,holder_start FROM message_queue WHERE `+filter, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery, &item.Author, &item.Uploads, &item.PersonName, &item.HolderPID, &item.HolderStart)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE session_id=? AND host_request='' AND status='inflight')`, sessionID).Scan(&inflight); err != nil {
 		return nil, err
 	}
-	if claimInflightExpired(status, item.Operation, inflightAt, now) {
-		if err := markQueuedDeliveryIntent(tx, item.ID, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), uncertainDeliveryError, item.ID); err != nil {
-			return nil, err
-		}
-		if err := syncDeliveryAsksTx(tx, now); err != nil {
+	if inflight {
+		expired, err := deadLetterExpiredInflight(tx, sessionID, now)
+		if err != nil || !expired {
 			return nil, err
 		}
 		return nil, tx.Commit()
 	}
-	if status != "pending" || availableAt > now.UnixMilli() {
+	var item QueuedMessage
+	var peer bool
+	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,operation,busy_delivery,author,uploads,person_name,holder_pid,holder_start,`+fmt.Sprintf(queuePeerRow, "message_queue")+` FROM message_queue WHERE `+filter, sessionID, now.UnixMilli()).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &item.Operation, &item.BusyDelivery, &item.Author, &item.Uploads, &item.PersonName, &item.HolderPID, &item.HolderStart, &peer)
+	if err == sql.ErrNoRows || err == nil && busyDelivery == claimPeer && !peer {
 		return nil, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	res, err := tx.Exec(`UPDATE message_queue SET status='inflight',attempts=attempts+1,inflight_at_ms=?,updated_at=datetime('now') WHERE id=? AND status='pending'`, now.UnixMilli(), item.ID)
 	if err != nil {
@@ -111,6 +100,42 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 		return nil, err
 	}
 	return &item, nil
+}
+
+// A target takes one delivery at a time: while any row is inflight, nothing
+// else is claimed, and one that never reported back is settled as unknown.
+func deadLetterExpiredInflight(tx *sql.Tx, sessionID string, now time.Time) (bool, error) {
+	rows, err := tx.Query(`SELECT id,operation,inflight_at_ms FROM message_queue WHERE session_id=? AND host_request='' AND status='inflight'`, sessionID)
+	if err != nil {
+		return false, err
+	}
+	var expired []int64
+	for rows.Next() {
+		var id, inflightAt int64
+		var operation QueueOperation
+		if err := rows.Scan(&id, &operation, &inflightAt); err != nil {
+			rows.Close()
+			return false, err
+		}
+		if claimInflightExpired("inflight", operation, inflightAt, now) {
+			expired = append(expired, id)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	for _, id := range expired {
+		if err := markQueuedDeliveryIntent(tx, id, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
+			return false, err
+		}
+		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), uncertainDeliveryError, id); err != nil {
+			return false, err
+		}
+	}
+	if len(expired) == 0 {
+		return false, nil
+	}
+	return true, syncDeliveryAsksTx(tx, now)
 }
 
 func (r *Registry) AckMessage(id int64) error {
@@ -232,7 +257,7 @@ func (r *Registry) DeferMessage(id int64, cause error, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,refused=?,refusal=?,holders_json=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(r.retryBackoff*time.Duration(1<<shift)).UnixMilli(), refused, refusal, holders, id)
+	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,deferred_since_ms=CASE WHEN deferred_since_ms=0 THEN ? ELSE deferred_since_ms END,last_error=?,available_at_ms=?,inflight_at_ms=0,refused=?,refusal=?,holders_json=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), message, now.Add(r.retryBackoff*time.Duration(1<<shift)).UnixMilli(), refused, refusal, holders, id)
 	if err != nil {
 		return err
 	}

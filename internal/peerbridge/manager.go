@@ -377,7 +377,7 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 			return err
 		}
 	}
-	if !own && session.Status == surface.StatusOffline {
+	if !own && !send && session.Status == surface.StatusOffline {
 		return fmt.Errorf("sender %q is offline", id)
 	}
 	if err := ctx.Err(); err != nil {

@@ -733,7 +733,7 @@ func (r *Registry) MoveClaimedMessage(id int64, sessionID string) error {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE message_queue SET session_id=?,status='pending',attempts=MAX(attempts-1,0),available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, sessionID, id)
+	res, err := tx.Exec(`UPDATE message_queue SET session_id=?,status='pending',attempts=MAX(attempts-1,0),deferrals=0,deferred_since_ms=0,available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, sessionID, id)
 	if err != nil {
 		return err
 	}

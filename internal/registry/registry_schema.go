@@ -125,7 +125,8 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	person_name TEXT NOT NULL DEFAULT '',
 	holders_json TEXT NOT NULL DEFAULT '[]',
 	holder_pid INTEGER NOT NULL DEFAULT 0,
-	holder_start TEXT NOT NULL DEFAULT ''
+	holder_start TEXT NOT NULL DEFAULT '',
+	deferred_since_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
