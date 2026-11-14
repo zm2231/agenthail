@@ -69,11 +69,14 @@ struct TransientNoticeTest {
             guard case .done(let message) = change, !message.isEmpty else { check(false, "\(name) finished with a message: \(change)"); return }
             check(model.projectNotice.text == message, "\(name) leaves its message on screen: \(model.projectNotice.text ?? "nil") vs \(message)")
         }
+        let pane = SessionPane(model: model, restoresSelection: false)
+        check(model.projectNotice.text != nil, "a notice from the last change is still up")
         NoticeActionStub.status = 409
         let refused = await model.renameProject("p-1", to: "api")
-        check(refused.error != nil && model.projectNotice.text == nil, "a refused change stays an error and shows no notice: \(refused)")
+        pane.settle(refused) { .done("") }
+        check(refused.error != nil && model.operationError == refused.error, "on the Mac a refused change shows its error: \(refused) \(model.operationError ?? "nil")")
+        check(model.projectNotice.text == nil, "a refused change takes the earlier notice down and shows none")
 
-        let pane = SessionPane(model: model, restoresSelection: false)
         model.operationError = "stale"
         pane.settle(.done("Renamed to web.")) { .done("") }
         check(model.operationError == nil, "on the Mac a finished project change clears the error")

@@ -166,6 +166,14 @@ final class ProjectRoutingTests: XCTestCase {
         let started = ProjectActionProtocol.state.take()
         XCTAssertEqual(started.map { "\($0.host) \($0.action)" }, ["server.invalid coordinator-new"])
         XCTAssertNil(started.first?.remoteHost, "a directly paired computer is asked without a host")
+
+        XCTAssertNotNil(model.projectNotice.text, "a notice from the last change is still up")
+        ProjectActionProtocol.state.refuse("server.invalid")
+        let refused = await model.removeProject(server.projectId, of: project)
+        model.settle(refused)
+        XCTAssertNotNil(model.operationError, "a refused change shows its error: \(refused)")
+        XCTAssertEqual(model.operationError, refused.error)
+        XCTAssertNil(model.projectNotice.text, "a refused change takes the earlier notice down and shows none")
     }
 
     @MainActor
