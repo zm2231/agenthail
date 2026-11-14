@@ -448,8 +448,8 @@ func TestMountsAreOnTheTailnetOnlyWhileRemoteAccessIsOnAndOnlyTheirOwnRoutesAreR
 		t.Fatal("a route Agenthail did not publish for a mount was removed")
 	}
 	ports, err := extension.ReadMountPorts(f.home)
-	if err != nil || len(ports) != 0 {
-		t.Fatalf("a removed mount keeps its port: %v %v", ports, err)
+	if _, kept := ports[extension.Ledger]; err != nil || len(ports) != 1 || !kept {
+		t.Fatalf("a removed mount keeps its port, or the Work page lost its own: %v %v", ports, err)
 	}
 }
 

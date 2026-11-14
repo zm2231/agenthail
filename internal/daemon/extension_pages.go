@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
 )
 
 func (d *Daemon) portHandler(served *servedMount) http.Handler {
-	if served.name == "" {
-		return d.pageHandler(served)
+	if served.name != "" {
+		return d.mountHandler(served)
 	}
-	return d.mountHandler(served)
+	if page, ok := builtinPageFor(served.id); ok {
+		return d.pagePort(page.handler(d))
+	}
+	return d.pageHandler(served)
 }
 
 func (d *Daemon) pageHandler(served *servedMount) http.Handler {
@@ -30,12 +32,7 @@ func (d *Daemon) pageHandler(served *servedMount) http.Handler {
 	route("GET /s", d.extensionSourcesHandler)
 	route("GET /events", d.extensionEventsHandler)
 	route("GET /{path...}", d.extensionPageHandler)
-	return d.extensionPortHandler(func(w http.ResponseWriter, r *http.Request, dashboard *dashboardServer) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", extensionPageCSP+" "+strings.Join(d.shellOrigins(r, dashboard), " "))
-		mux.ServeHTTP(w, r)
-	})
+	return d.pagePort(mux)
 }
 
 // A page on another site that rebinds its hostname to 127.0.0.1 is refused

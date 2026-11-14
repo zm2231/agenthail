@@ -160,6 +160,7 @@ const paneContext = {
   document: { querySelector: (selector) => selector === '[data-view-panel="conversations"]' ? panel : { hidden: false } },
   $: () => pane,
   renderProjectView: () => `rendered ${++renders}`,
+  syncProjectWork() {},
   showView() {}, syncConversationLayout() {}, mobileConversationView: () => false,
   renderOverview() {}, renderSurfaceFilter() {}, renderStartSurfaceOptions() {}, renderSessions() {}, renderOperations() {},
 };
@@ -177,4 +178,42 @@ assert.equal(renders, 1, "a project left behind another view is not rebuilt each
 panel.classList.hidden = false;
 refresh();
 assert.equal(pane.innerHTML, "rendered 2", "returning to Conversations resumes the refresh");
+
+const holder = { hidden: true, dataset: {}, children: [], get childElementCount() { return this.children.length; }, replaceChildren(...nodes) { this.children = nodes; } };
+let extensionReads = 0;
+const workContext = {
+  $: (selector) => (selector === "#project-work" ? holder : null),
+  location: { protocol: "http:", hostname: "127.0.0.1" },
+  document: { createElement: (tag) => ({ tag, append() {} }) },
+  fetch: async (url) => {
+    assert.equal(url, "/api/v1/extensions");
+    extensionReads++;
+    return { ok: true, json: async () => ({ extensions: [], builtIn: { ledger: { port: 47123, entry: "/" } } }) };
+  },
+};
+const { workFrameSrc, syncProjectWork } = (await dashboardModules(["project-work"], workContext))["project-work"];
+const other = { ...project, id: "repo:github.com/demo/other" };
+let resync;
+const reread = new Promise((resolve) => { resync = () => { syncProjectWork(project); resolve(); }; });
+syncProjectWork(project, resync);
+assert.equal(holder.hidden, false);
+assert.match(holder.children[1].textContent, /Reading this project's work/, "the Work section says it is reading until it knows the page's port");
+await reread;
+const frame = holder.children[1];
+assert.equal(frame.tag, "iframe");
+assert.equal(frame.src, "http://127.0.0.1:47123/?project=repo%3Agithub.com%2Fdemo%2Ffieldnotes");
+syncProjectWork(project);
+syncProjectWork(project);
+assert.equal(holder.children[1], frame, "refreshing the project view keeps the framed page rather than reloading it");
+assert.equal(extensionReads, 1, "the page's port is read once, not on every refresh");
+syncProjectWork(other);
+assert.equal(holder.children[1].src, "http://127.0.0.1:47123/?project=repo%3Agithub.com%2Fdemo%2Fother", "another project frames its own work");
+syncProjectWork(null);
+assert.equal(holder.hidden, true);
+assert.equal(holder.children.length, 0, "leaving the project drops the framed page");
+const ledgerPage = { port: 47123, entry: "/", published: false };
+assert.equal(workFrameSrc(project, ledgerPage, { protocol: "http:", hostname: "127.0.0.1" }), "http://127.0.0.1:47123/?project=repo%3Agithub.com%2Fdemo%2Ffieldnotes", "the Work section opens the ledger page on its own port for this project");
+assert.equal(workFrameSrc(project, ledgerPage, { protocol: "https:", hostname: "studio.tailnet.ts.net" }), "", "over the tailnet the page opens only once its port is published");
+assert.equal(workFrameSrc(project, { ...ledgerPage, published: true }, { protocol: "https:", hostname: "studio.tailnet.ts.net" }), "https://studio.tailnet.ts.net:47123/?project=repo%3Agithub.com%2Fdemo%2Ffieldnotes");
+assert.equal(workFrameSrc(project, { entry: "/" }, { protocol: "http:", hostname: "127.0.0.1" }), "", "a page without a port yet is not framed");
 console.log("dashboard project view tests passed");

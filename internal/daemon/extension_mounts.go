@@ -192,6 +192,12 @@ func (d *Daemon) syncExtensionMounts() error {
 		}
 	}
 
+	for _, page := range builtinPages {
+		declared[page.id] = true
+		desired[page.id] = &mountConfig{ext: extension.Extension{ID: page.id}}
+		pages[page.id] = pageState{Entry: "/"}
+	}
+
 	stale := map[string]bool{}
 	for key := range ports {
 		id, _, _ := strings.Cut(key, "/")

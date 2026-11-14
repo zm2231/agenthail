@@ -1,6 +1,7 @@
 import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { renderProjectView } from "./project-view.js";
+import { syncProjectWork } from "./project-work.js";
 import { showView, syncConversationLayout, mobileConversationView } from "./navigation.js";
 
 export function shownProject() {
@@ -13,7 +14,8 @@ export function syncProjectPane() {
   const project = shownProject();
   pane.hidden = !project;
   document.querySelector(".notebook:not(.project-pane):not(.decision-pane)").hidden = Boolean(project) || app.scope === "inbox";
-  pane.innerHTML = project ? renderProjectView(project) : "";
+  $("#project-pane-body").innerHTML = project ? renderProjectView(project) : "";
+  syncProjectWork(project, () => syncProjectWork(shownProject()));
 }
 
 let ticking = 0;
