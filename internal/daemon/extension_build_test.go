@@ -346,4 +346,3 @@ func TestAStandalonePageHearsOnlyChangesAfterItLoadedAndOnlyItsOwn(t *testing.T)
 		t.Fatalf("the change after the page loaded named %v", changed)
 	}
 }
-
