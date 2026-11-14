@@ -80,11 +80,12 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			continue
 		}
 		// An exited or offline Claude or Codex session stays a delivery target,
-		// since a send resumes it; it is observed only to drain its queue. An
-		// offline one may have no PID left to tell whether its process exited.
+		// since a send resumes it; it is observed only to drain its queue, unless
+		// a turn the daemon started is still open on it. An offline one may have
+		// no PID left to tell whether its process exited.
 		inactive := claudeProcessExited(session) || relayTargetInactive(session)
 		resumes := session.Surface == surface.KindClaude || session.Surface == surface.KindCodex
-		if !isTask && inactive && (!resumes || queueCounts[session.ID] == 0) {
+		if !isTask && !watchedSession.Armed && inactive && (!resumes || queueCounts[session.ID] == 0) {
 			d.syncRelaysObserved(ctx, scan, adapter, session, observeOnce(adapter, session, observeAdapter))
 			continue
 		}
@@ -231,10 +232,14 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 			}
 		}
 	}
+	stale := completionChanged && completionStale(observation, time.Now())
 	held, released := heldCompletion(previous, observation, completionChanged)
-	terminalCompletion := completionChanged && observation.ActiveTurnID == "" && !surface.BackgroundRunning(observation.BackgroundTasks) || released
+	if stale {
+		held = ""
+	}
+	terminalCompletion := completionChanged && observation.ActiveTurnID == "" && (stale || !surface.BackgroundRunning(observation.BackgroundTasks)) || released
 	completed := terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && observation.Reply != nil && observation.Reply.Done
-	if completed && !session.Delegated() && !completionStale(observation, time.Now()) {
+	if completed && !session.Delegated() && !stale {
 		notificationOutcome = turnOutcomeFinished
 		if observation.Reply.Error != "" {
 			notificationOutcome = turnOutcomeFailed
@@ -242,7 +247,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 		desktopNotificationMessage = fmt.Sprintf("%s %s", d.resolveDisplay(session.ID), notificationOutcome)
 		mobileNotificationMessage = fmt.Sprintf("%s %s%s", notificationSurfaceName(session.Surface), notificationOutcome, d.onHost())
 	}
-	if terminalCompletion {
+	if terminalCompletion || previous.NotificationArmed && !completionChanged && turnCannotRun(session, observation) {
 		if err := d.Registry.ClearCompletionNotification(session.ID); err != nil {
 			d.log.Printf("clear completion notification %s: %s", d.resolveDisplay(session.ID), err)
 		}
@@ -416,4 +421,8 @@ const staleCompletionAge = 5 * time.Minute
 
 func completionStale(observation *surface.TurnObservation, now time.Time) bool {
 	return !observation.CompletedAt.IsZero() && now.Sub(observation.CompletedAt) > staleCompletionAge
+}
+
+func turnCannotRun(session *surface.Session, observation *surface.TurnObservation) bool {
+	return observation.Status == surface.StatusNotLoaded || observation.Status == surface.StatusOffline || claudeProcessExited(session)
 }
