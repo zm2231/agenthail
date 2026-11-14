@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -403,5 +404,32 @@ func TestAReadOnlySessionCannotPostThroughAPairedPage(t *testing.T) {
 	}
 	if got := f.get(t, pagePort, "/", false); got.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("no cookie answered %d", got.StatusCode)
+	}
+}
+
+func TestAPairedPageStopsReachingAHostThatFailsVerification(t *testing.T) {
+	f := newRemoteExtensionFixture(t)
+	pagePort, _ := f.ports(t)
+	if response := f.get(t, pagePort, "/", true); response.StatusCode != http.StatusOK {
+		t.Fatalf("the page answered %d before the host went away", response.StatusCode)
+	}
+	f.remote.gate.proxyDown.Store(true)
+	host, ok := f.local.daemon.pairedHost(f.record.ID)
+	if !ok {
+		t.Fatal("the host is not paired")
+	}
+	if _, err := host.client.Version(context.Background()); err == nil {
+		t.Fatal("the version probe answered while the host was down")
+	}
+	before := len(f.board.seen())
+	if response := f.get(t, pagePort, "/", true); response.StatusCode != http.StatusServiceUnavailable || len(f.board.seen()) != before {
+		t.Fatalf("an unverified host was still reached: %d, %d new requests", response.StatusCode, len(f.board.seen())-before)
+	}
+	f.remote.gate.proxyDown.Store(false)
+	if _, err := host.client.Version(context.Background()); err != nil {
+		t.Fatalf("the host did not verify again: %v", err)
+	}
+	if response := f.get(t, pagePort, "/", true); response.StatusCode != http.StatusOK {
+		t.Fatalf("the page answered %d once the host was verified again", response.StatusCode)
 	}
 }

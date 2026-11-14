@@ -171,10 +171,17 @@ func NewClient(endpoint, address, token string, options ClientOptions) (*Client,
 
 func (c *Client) Endpoint() string { return c.endpoint.String() }
 
+func (c *Client) Verified() error {
+	if !c.verified.Load() {
+		return c.refused()
+	}
+	return nil
+}
+
 // PortTarget is pinned like the client but sends no token.
 func (c *Client) PortTarget(port int) (*url.URL, *http.Transport, error) {
-	if !c.verified.Load() {
-		return nil, nil, c.refused()
+	if err := c.Verified(); err != nil {
+		return nil, nil, err
 	}
 	if port <= 0 || port > 65535 {
 		return nil, nil, fmt.Errorf("port %d is out of range", port)

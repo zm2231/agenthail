@@ -303,6 +303,9 @@ func loopbackName(hostport string) bool {
 }
 
 func (f *remoteForwarder) target(client *hosts.Client, remotePort int) (*url.URL, *http.Transport, error) {
+	if err := client.Verified(); err != nil {
+		return nil, nil, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.client == client && f.upstreamP == remotePort && f.transport != nil {
