@@ -23,6 +23,7 @@ import { renderChat } from "./chat.js";
 import { renderContextUsage } from "./context-usage.js";
 import { limitMoveQuestion } from "./limit-move.js";
 import { openProject, syncProjectPane } from "./project-pane.js";
+import { briefToast } from "./project-view.js";
 
 export function bindConversationEvents() {
   document.addEventListener("click", async (event) => {
@@ -217,6 +218,19 @@ export function bindConversationEvents() {
       } finally {
         projectMessage.disabled = false;
         await load();
+      }
+      return;
+    }
+    const briefControl = event.target.closest("[data-project-brief]");
+    if (briefControl) {
+      briefControl.disabled = true;
+      try {
+        const result = await action("coordinator-brief", { project: briefControl.dataset.projectBrief, author: "person" }, crypto.randomUUID(), "");
+        toast(briefToast(result));
+      } catch (error) {
+        toast(error.message);
+      } finally {
+        briefControl.disabled = false;
       }
       return;
     }

@@ -239,6 +239,18 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"unknown coordinator action\"}}\n"
   },
+  "api/action coordinator-brief": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"no_coordinator\",\"message\":\"\u003chost\u003e has no coordinator @nobody\"}}\n"
+  },
   "api/action coordinator-clear": {
     "status": 400,
     "header": {
@@ -2806,6 +2818,18 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"unknown coordinator action\"}}\n"
+  },
+  "api/v1/actions coordinator-brief": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"no_coordinator\",\"message\":\"\u003chost\u003e has no coordinator @nobody\"}}\n"
   },
   "api/v1/actions coordinator-clear": {
     "status": 400,

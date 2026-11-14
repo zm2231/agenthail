@@ -95,6 +95,7 @@ func (d *Daemon) mcpHandlers() map[string]mcpRegistrar {
 		"agenthail_projects":         bindMCP(d, d.mcpProjects),
 		"agenthail_channel_send":     bindMCP(d, d.mcpChannelSend),
 		"agenthail_coordinator":      bindMCP(d, d.mcpCoordinator),
+		"agenthail_brief":            bindMCP(d, d.mcpBrief),
 		"agenthail_archive":          bindMCP(d, d.mcpArchive),
 		"agenthail_history":          bindMCP(d, d.mcpHistory),
 		"agenthail_ledger_write":     bindMCP(d, d.mcpLedgerWrite),

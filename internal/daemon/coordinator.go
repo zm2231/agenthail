@@ -110,7 +110,7 @@ type coordinatorRequest struct {
 // A set runs where its conversation lives, which the action router picks
 // from the session or the host the request names.
 func (d *Daemon) doCoordinatorAction(ctx context.Context, p principal, request coordinatorRequest) (actionResult, error) {
-	if request.Action != "coordinator-send" {
+	if request.Action != "coordinator-send" && request.Action != "coordinator-brief" {
 		defer d.syncLeads()
 	}
 	switch request.Action {
@@ -164,7 +164,7 @@ func (d *Daemon) doCoordinatorAction(ctx context.Context, p principal, request c
 		return d.assignCoordinator(ctx, p, request, spec, "")
 	case "coordinator-clear":
 		return d.clearCoordinator(ctx, p, request)
-	case "coordinator-send":
+	case "coordinator-send", "coordinator-brief":
 		return d.sendToCoordinator(ctx, request)
 	default:
 		return actionResult{}, invalidRequest("unknown coordinator action")
@@ -176,6 +176,7 @@ type coordinatorSendReply struct {
 	Ref     string            `json:"ref"`
 	Result  *delivery.Receipt `json:"result"`
 	Started bool              `json:"started"`
+	Since   *briefSince       `json:"since,omitempty"`
 }
 
 // sendToCoordinator delivers to a coordinator named directly on this host, or
@@ -187,7 +188,11 @@ func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorReque
 	if name != "" && project != "" {
 		return actionResult{}, invalidRequest("name a coordinator or a project, not both")
 	}
-	if name == "" && project == "" || strings.TrimSpace(request.Message) == "" {
+	brief := request.Action == "coordinator-brief"
+	if brief && strings.TrimSpace(request.Message) != "" {
+		return actionResult{}, invalidRequest("a brief takes no message; the lead is asked to catch the person up")
+	}
+	if name == "" && project == "" || !brief && strings.TrimSpace(request.Message) == "" {
 		return actionResult{}, invalidRequest("a coordinator name or a project, and a message, are required")
 	}
 	var spec registry.CoordinatorSpec
@@ -212,11 +217,18 @@ func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorReque
 	defer cancel()
 	options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, Author: request.Author, PersonName: request.PersonName, TurnOptions: request.TurnOptions}
 	reply := coordinatorSendReply{OK: true, Ref: d.coordinator().Ref(spec)}
+	if brief && spec.HostID == "" {
+		if request.Message, reply.Since, err = d.briefRequest(spec, request.SourceSessionID); err != nil {
+			return actionResult{}, err
+		}
+	}
 	if spec.HostID != "" {
 		if request.NoQueue {
 			return actionResult{}, invalidRequest(fmt.Sprintf("--no-queue is not available for %s: the daemon holds a send to another host until that host answers", reply.Ref))
 		}
-		reply.Result, reply.Started, err = d.sendToPeerCoordinator(ctx, spec, request.Message, options)
+		var peer peerCoordinatorAnswer
+		peer, err = d.sendToPeerCoordinator(ctx, spec, request.Action, request.Message, options)
+		reply.Result, reply.Started, reply.Since = peer.Result, peer.Started, peer.Since
 	} else {
 		deliver := d.coordinator().Deliver
 		if request.NoQueue {

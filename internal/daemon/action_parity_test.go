@@ -184,6 +184,7 @@ func parityCases() []parityCase {
 		{name: "coordinator-set", action: "coordinator-set", body: `{"action":"coordinator-set","sessionId":"to","path":"relative/path"}`},
 		{name: "coordinator-clear", action: "coordinator-clear", body: `{"action":"coordinator-clear","path":"relative/path"}`},
 		{name: "coordinator-send", action: "coordinator-send", body: `{"action":"coordinator-send","name":"nobody","message":"hi"}`},
+		{name: "coordinator-brief", action: "coordinator-brief", body: `{"action":"coordinator-brief","name":"nobody"}`},
 	}
 	cases = append(append(cases, parityFailureCases()...), parityProjectCases()...)
 	return append(cases, parityLaunchCases()...)

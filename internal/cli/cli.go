@@ -170,6 +170,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdAnswer(rest)
 	case "ask":
 		return a.cmdAsk(rest)
+	case "brief":
+		return a.cmdBrief(rest)
 	case "control":
 		return a.cmdControl(rest)
 	case "interrupt":

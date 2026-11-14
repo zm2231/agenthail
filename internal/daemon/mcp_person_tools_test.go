@@ -42,6 +42,9 @@ func TestOnlyTheOperatorChoosesCoordinatorsAndReadsEveryonesHistory(t *testing.T
 	if code := refusalCode(t, f.parent, "agenthail_coordinator", map[string]any{"action": "clear", "project": "x", "clientRequestId": "k1"}); code != "capability_missing" {
 		t.Fatalf("worker setting coordinators: code=%q", code)
 	}
+	if code := refusalCode(t, f.parent, "agenthail_brief", map[string]any{"project": "x", "clientRequestId": "k-brief"}); code != "capability_missing" {
+		t.Fatalf("worker asking for a brief: code=%q", code)
+	}
 	if code := refusalCode(t, f.parent, "agenthail_history", nil); code != "capability_missing" {
 		t.Fatalf("worker reading all history: code=%q", code)
 	}

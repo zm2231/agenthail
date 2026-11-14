@@ -55,15 +55,24 @@ func (b daemonBroadcastDelivery) Coordinator(ctx context.Context, spec registry.
 	return outcome.Receipt, outcome.Session.ID, nil
 }
 
-func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message string, options surface.SendOptions) (*delivery.Receipt, bool, error) {
+type peerCoordinatorAnswer struct {
+	Result  *delivery.Receipt `json:"result"`
+	Started bool              `json:"started"`
+	Since   *briefSince       `json:"since"`
+}
+
+func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.CoordinatorSpec, action, message string, options surface.SendOptions) (peerCoordinatorAnswer, error) {
 	host, ok := d.pairedHost(spec.HostID)
 	if !ok {
-		return nil, false, fmt.Errorf("host %s is not paired", spec.HostID)
+		return peerCoordinatorAnswer{}, fmt.Errorf("host %s is not paired", spec.HostID)
 	}
 	if err := d.hostTransit(ctx, host); err != nil {
-		return nil, false, err
+		return peerCoordinatorAnswer{}, err
 	}
-	request := map[string]any{"action": "coordinator-send", "name": spec.Name, "message": message}
+	request := map[string]any{"action": action, "name": spec.Name}
+	if message != "" {
+		request["message"] = message
+	}
 	if options.Model != "" {
 		request["model"] = options.Model
 	}
@@ -77,11 +86,11 @@ func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.Coordi
 		request["sourceSessionId"] = options.SourceSessionID
 	}
 	if _, err := d.routeSource(ctx, request, host); err != nil {
-		return nil, false, err
+		return peerCoordinatorAnswer{}, err
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
-		return nil, false, err
+		return peerCoordinatorAnswer{}, err
 	}
 	base := actionKey(ctx)
 	if base == "" {
@@ -100,28 +109,28 @@ func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.Coordi
 	if errors.As(err, &refused) && refused.Code == movedCode {
 		if next, found := d.pairedHost(refused.MovedToHost); found && next != host && !redirectedAfterMove(ctx) {
 			spec.HostID = next.record.ID
-			return d.sendToPeerCoordinator(context.WithValue(ctx, redirectedAfterMoveKey{}, true), spec, message, options)
+			return d.sendToPeerCoordinator(context.WithValue(ctx, redirectedAfterMoveKey{}, true), spec, action, message, options)
 		}
-		return nil, false, &actionError{Status: http.StatusConflict, Code: movedCode, Message: refused.Message, Extra: map[string]any{movedToHostField: refused.MovedToHost}}
+		return peerCoordinatorAnswer{}, &actionError{Status: http.StatusConflict, Code: movedCode, Message: refused.Message, Extra: map[string]any{movedToHostField: refused.MovedToHost}}
 	}
 	if err != nil {
-		return nil, false, err
+		return peerCoordinatorAnswer{}, err
 	}
-	var answer struct {
-		Result  delivery.Receipt `json:"result"`
-		Started bool             `json:"started"`
-	}
+	var answer peerCoordinatorAnswer
 	if err := json.Unmarshal(payload, &answer); err != nil {
-		return nil, false, err
+		return peerCoordinatorAnswer{}, err
 	}
-	return &answer.Result, answer.Started, nil
+	if answer.Result == nil {
+		answer.Result = &delivery.Receipt{}
+	}
+	return answer, nil
 }
 
-func (d *Daemon) holdPeerCoordinatorSend(host *pairedHost, spec registry.CoordinatorSpec, key string, body []byte, err error) (*delivery.Receipt, bool, error) {
+func (d *Daemon) holdPeerCoordinatorSend(host *pairedHost, spec registry.CoordinatorSpec, key string, body []byte, err error) (peerCoordinatorAnswer, error) {
 	var notSent hosts.NotSentError
 	sent := !errors.As(err, &notSent)
 	if _, holdErr := d.Registry.HoldHostAction(host.record.ID, key, "@"+spec.Name, body, sent); holdErr != nil {
-		return nil, false, errors.Join(err, holdErr)
+		return peerCoordinatorAnswer{}, errors.Join(err, holdErr)
 	}
 	d.refreshHostQueueCounts()
 	receipt := delivery.Receipt{Evidence: surface.EvidenceQueued, Status: "queued", Detail: fmt.Sprintf("host %s is unreachable; held until it reconnects", host.record.Name)}
@@ -129,5 +138,5 @@ func (d *Daemon) holdPeerCoordinatorSend(host *pairedHost, spec registry.Coordin
 		receipt.Evidence, receipt.Status = surface.EvidenceUnknown, "submitted"
 		receipt.Detail = fmt.Sprintf("host %s did not answer; held until it confirms", host.record.Name)
 	}
-	return &receipt, false, nil
+	return peerCoordinatorAnswer{Result: &receipt}, nil
 }

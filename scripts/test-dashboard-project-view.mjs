@@ -78,6 +78,10 @@ assert.match(html, /data-project-start="repo:github.com\/demo\/fieldnotes" data-
 assert.match(html, /data-project-earlier=/);
 assert.doesNotMatch(html, /data-session="old"/, "Earlier stays closed until asked");
 assert.doesNotMatch(html, /data-project-lead-replaced/, "a lead never replaced says nothing about it");
+assert.match(html, /<button class="soft-button" type="button" data-project-brief="repo:github.com\/demo\/fieldnotes">Catch me up<\/button>/, "a project with a lead offers to catch the person up");
+assert.equal(run('briefToast({ ref: "@release-lead", since: { at: "2026-11-03T09:00:00Z", fallback: true } })'), "Asked @release-lead to catch you up on the last 24 hours.", "with nothing written to the lead, the brief covers a day");
+assert.match(run('briefToast({ ref: "@release-lead", since: { at: "2026-11-03T09:00:00Z", fallback: false } })'), /^Asked @release-lead to catch you up since /, "otherwise it names when the person last wrote");
+assert.equal(run('briefToast({ ref: "@release-lead" })'), "Asked @release-lead to catch you up.", "a brief held for an unreachable computer has no window yet");
 context.app.projectEarlier = project.id;
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /data-session="old"/);
@@ -145,6 +149,7 @@ context.app.state.sessions = sessions;
 context.app.state.projects = [{ ...projects[0], coordinators: [] }];
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /No lead yet/);
+assert.doesNotMatch(html, /data-project-brief/, "a project without a lead has nobody to catch the person up");
 assert.match(html, /data-project-lead="repo:github.com\/demo\/fieldnotes">Start a lead</);
 
 const panel = { classList: { hidden: false, contains: () => panel.classList.hidden } };
