@@ -124,7 +124,7 @@ func addMCPTool[In any](d *Daemon, server *mcp.Server, tool *mcp.Tool, run func(
 	mcp.AddTool(server, tool, func(ctx context.Context, _ *mcp.CallToolRequest, input In) (*mcp.CallToolResult, any, error) {
 		caller := mcpCallerFrom(ctx)
 		if caller == nil {
-			return mcpRefused(&mcpRefusal{Code: "unauthenticated", Message: "This session is still starting; try again in a moment.", Retryable: true}), nil, nil
+			return mcpRefused(mcpNoCallerRefusal(ctx)), nil, nil
 		}
 		if _, allowed := extensionTools[tool.Name]; caller.extension != "" && !allowed {
 			return mcpRefused(&mcpRefusal{Code: "not_for_extensions", Message: tool.Name + " belongs to agent sessions; extensions cannot call it."}), nil, nil

@@ -87,20 +87,20 @@ jobs:
           GUARD_CACHE: ${{ runner.tool_cache }}/agenthail-cache/chrome-for-testing
         run: AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" scripts/ci-darwin-tests.sh
       - name: Session process identity tests
-        # The macOS kernel's peer credentials and parent pid, named so a run shows each one passing.
+        # The macOS kernel's peer credentials, parent pid and open files, named so a run shows each one passing.
         shell: bash
         run: |
-          go test ./internal/peerproc/ -run '^TestTheKernelNamesTheProcessOnTheOtherEndAndItsParent$' -count=1 -v | tee "$RUNNER_TEMP/peer.log"
-          go test ./internal/daemon/ -run '^(TestASessionsOwnStdioServerActsAsTheSessionItsProcessHoldsNow|TestAProcessThatIsNoSessionGetsNoTools|TestASessionStartedWhileTheDaemonIsDownGetsItsToolsWhenItComesUp)$' -count=1 -v | tee -a "$RUNNER_TEMP/peer.log"
-          test "$(grep -c -- '^--- PASS: ' "$RUNNER_TEMP/peer.log")" -eq 4
+          go test ./internal/peerproc/ -run '^(TestTheKernelNamesTheProcessOnTheOtherEndAndItsParent|TestTheKernelListsTheFilesAnotherProcessHoldsOpen)$' -count=1 -v | tee "$RUNNER_TEMP/peer.log"
+          go test ./internal/daemon/ -run '^(TestASessionsOwnStdioServerActsAsTheSessionItsProcessHoldsNow|TestAProcessThatIsNoSessionGetsNoTools|TestASessionStartedWhileTheDaemonIsDownGetsItsToolsWhenItComesUp|TestACodexToolCallActsAsTheThreadItNamesOnlyWhileItsCodexProcessHoldsIt|TestACodexChildCannotOversizeOrBatchItsRequests)$' -count=1 -v | tee -a "$RUNNER_TEMP/peer.log"
+          test "$(grep -c -- '^--- PASS: ' "$RUNNER_TEMP/peer.log")" -eq 7
       - name: Real Codex app-server tests
         # The tests above skip these when codex is not installed; here each must pass.
         shell: bash
         run: |
           npm install --prefix "$RUNNER_TEMP/codex" --no-audit --no-fund @openai/codex@0.163.0
           PATH="$RUNNER_TEMP/codex/node_modules/.bin:$PATH" go test ./internal/surface/surfaces/ -run '^(TestACodexCompactionHoldsReloadsOnlyUntilItsTurnEnds|TestATurnStartedBeforeTheCodexAppServerRestartedIsNotRunning|TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack)$' -count=1 -v | tee "$RUNNER_TEMP/codex-real.log"
-          PATH="$RUNNER_TEMP/codex/node_modules/.bin:$PATH" go test ./internal/daemon/ -run '^TestAnIdleCodexThreadMovesToAPairedHostAndRunsThere$' -count=1 -v | tee -a "$RUNNER_TEMP/codex-real.log"
-          test "$(grep -c -- '^--- PASS: ' "$RUNNER_TEMP/codex-real.log")" -eq 4
+          PATH="$RUNNER_TEMP/codex/node_modules/.bin:$PATH" go test ./internal/daemon/ -run '^(TestAnIdleCodexThreadMovesToAPairedHostAndRunsThere|TestARealCodexThreadCallsTheToolsAsItselfThroughTheStdioRelay)$' -count=1 -v | tee -a "$RUNNER_TEMP/codex-real.log"
+          test "$(grep -c -- '^--- PASS: ' "$RUNNER_TEMP/codex-real.log")" -eq 5
       - name: Build
         run: go build ./...
       - name: Vet

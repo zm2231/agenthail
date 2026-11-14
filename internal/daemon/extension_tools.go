@@ -142,7 +142,7 @@ func (d *Daemon) extensionToolHandler(offered offeredExtensionTool) mcp.ToolHand
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		caller := mcpCallerFrom(ctx)
 		if caller == nil {
-			return mcpRefused(&mcpRefusal{Code: "unauthenticated", Message: "This session is still starting; try again in a moment.", Retryable: true}), nil
+			return mcpRefused(mcpNoCallerRefusal(ctx)), nil
 		}
 		if caller.extension != "" {
 			return mcpRefused(refuse("not_for_extensions", offered.tool.Name+" belongs to agent sessions; extensions cannot call it.")), nil
