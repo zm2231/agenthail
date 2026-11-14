@@ -9,7 +9,7 @@
 }
 
 .extensions-layout {
-  --extensions-height: max(28rem, calc(100vh - 13rem));
+  --extensions-height: max(28rem, calc(100vh - 15rem));
   display: grid;
   grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
   gap: var(--pane-gap, 16px);
@@ -20,7 +20,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: var(--extensions-height);
+  height: var(--extensions-height);
   overflow-y: auto;
   padding: 8px;
   border-radius: var(--radius);
@@ -211,16 +211,17 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: min(26rem, 100%);
+  width: 100%;
   overflow-y: auto;
   padding: 16px;
-  border-left: 1px solid var(--rule);
   background: var(--panel);
 }
 
 .extensions-frame:not([hidden]) + .extensions-history {
   position: absolute;
   inset: 0 0 0 auto;
+  width: min(26rem, 100%);
+  border-left: 1px solid var(--rule);
   box-shadow: -12px 0 32px var(--shadow-soft);
 }
 
@@ -294,7 +295,7 @@
 
   .extensions-rail {
     flex-direction: row;
-    max-height: none;
+    height: auto;
     overflow-x: auto;
   }
 
@@ -303,7 +304,7 @@
     min-width: 12rem;
   }
 
-  .extensions-history {
+  .extensions-frame:not([hidden]) + .extensions-history {
     width: 100%;
   }
 }

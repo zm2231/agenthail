@@ -241,8 +241,8 @@ daemon publishes each mount's port in Tailscale Serve at
 `https://<machine>.<tailnet>.ts.net:<port>`, and removes it when remote access
 goes off or the mount goes away; it never removes a route it did not publish,
 and Funnel is refused. `agenthail dashboard remote off` withdraws the mounts'
-routes before it returns, itself when the daemon is not running. The dashboard's Extensions tab lists each mount and
-opens it in a frame.
+routes before it returns, itself when the daemon is not running. The dashboard's Extensions tab lists each page and
+mount in its launcher and opens the one you pick beside it.
 
 Every request to a mount is checked the way a page's is: the dashboard cookie or
 a paired device's token, `read` for GET and HEAD, `control` for anything else,
@@ -389,7 +389,7 @@ ignored.
 - After a turn's commit, and after an undo, the daemon assigns mount ports,
   reloads the host and publishes `extension.changed` with `{"rev": "<rev>",
   "extensions": ["<id>", ...]}`, the extensions that change touched. The
-  dashboard's Extensions tab then reads the list and the changes again, and
+  dashboard's Extensions tab then reads the list again, and
   reloads the page or mount it frames when its extension is among them and the
   folder's newest change moved. A page opened on its own reloads itself through
   `/_ah.js`, which the daemon serves with its event cursor at that moment, so
@@ -400,9 +400,10 @@ ignored.
   of that session reword the same ask instead of raising another, and push
   nothing new: `<session> changed extensions in 3 turns`, `Keep all` and
   `Undo last`. Keep closes the ask. Undo last undoes the newest pending turn
-  and rewords the ask, or closes it when no turn is left. The Extensions tab
-  lists the latest 30 changes with Show (the patch), Undo, and Keep for each
-  change still waiting, so one change can be kept or undone on its own. Only the person
+  and rewords the ask, or closes it when no turn is left. Each extension's
+  History on the Extensions tab lists the latest 30 changes that touched it
+  with Show (the patch), Undo, and Keep for each change still waiting, so one
+  change can be kept or undone on its own. Only the person
   answers; every session, including one that may act for the person
   elsewhere, is refused with `403 forbidden`. What is pending is kept
   in `~/.agenthail/extensions-data/changes.json`.
@@ -421,7 +422,7 @@ ignored.
 ## Building with an agent
 
 `agenthail extensions build "<what it should do>" [--agent claude|codex]`, or
-the Build box on the dashboard's Extensions tab, starts an ordinary session as
+New extension on the dashboard's Extensions tab, starts an ordinary session as
 the person: Claude unless Codex is named, with `~/.agenthail/extensions` as its
 working directory and the surface's own permission mode, so it asks only what
 the person's other sessions ask. Its first message is "Build or change an
@@ -481,7 +482,7 @@ agenthail extensions run <id> <job>    run a job once now
 agenthail extensions approve <id>      grant the capabilities extension.json declares
 agenthail extensions reload            read the folder again and reload every extension
 agenthail extensions key <id> <mount> ...  name where a mount's key is kept, or --clear it
-agenthail extensions history [--json]  the folder's changes, newest first, with who made each
+agenthail extensions history [<id>]    the folder's changes, or one extension's, newest first, with who made each
 agenthail extensions undo <rev>        undo one change
 ```
 
@@ -501,7 +502,8 @@ instead. `{"action": "keep", "rev": "<rev>"}` keeps one change still waiting in 
 Keep/Undo ask: the ask drops it, and closes as kept when none is left.
 `GET /api/v1/extensions/history/<rev>` returns the change and its `patch`, cut
 at 256 KiB with `truncated` set. `GET /api/v1/extensions/history?limit=50` lists the changes (`read`
-scope): each with `rev`, `author`, `time`, `message`, `sessionId`, `turnId`
+scope), with `&id=<id>` only those that touched that extension, each still
+with every file it changed since undo reverts all of them: each with `rev`, `author`, `time`, `message`, `sessionId`, `turnId`
 and, per extension, `created`, `removed` and the files `added`, `updated` and
 `deleted`, `pending` while the change waits in a Keep/Undo ask, and `root`
 for the first commit, which can't be undone.
