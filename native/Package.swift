@@ -105,6 +105,7 @@ let package = Package(
                 "SessionCells.swift",
                 "SessionHandle.swift",
                 "ProjectBroadcast.swift",
+                "ProjectBrief.swift",
                 "RelativeAge.swift",
                 "RelayFacts.swift",
                 "MinuteClock.swift",

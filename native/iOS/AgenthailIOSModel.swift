@@ -911,6 +911,14 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         }
     }
 
+    func brief(_ project: ListedProject, lead: ProjectState.Lead, idempotencyKey: String) async throws -> String {
+        let (api, target) = try reach(ProjectRouting.owner(lead.host, of: project))
+        let projectID = target.remote.map { $0 + HostCatalog.separator + project.state.id } ?? project.state.id
+        let reply = try await api.projectBrief(projectID: projectID, idempotencyKey: idempotencyKey)
+        _ = await connection(target.hostID)?.refresh(fresh: true)
+        return ProjectBrief.notice(reply, lead: lead.name)
+    }
+
     func startLead(of project: ListedProject, in checkout: ProjectState.Checkout, surface: String, name: String, replace: Bool) async -> ProjectChange {
         await projectChange(refreshing: nil) {
             let (api, target) = try self.reach(ProjectRouting.owner(checkout.host, of: project))
