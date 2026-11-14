@@ -9,13 +9,14 @@ const shots = process.env.AGENTHAIL_GUARD_SHOTS;
 const CANDIDATES = ["art: field", "art: tide", "art: aurora", "art: dawn", "gradient: dusk", "gradient: slate", "gradient: forest", "gradient: ember", "gradient: violet", "gradient: mono"];
 const SIZES = { wide: [1440, 900], phone: [390, 844] };
 const STALL_LIMIT_MS = 3 * 60_000;
-const progress = { last: Date.now(), longest: 0, doing: {} };
+const progress = new Map(Object.keys(themes).map((theme) => [theme, { last: Date.now(), longest: 0, doing: "starting" }]));
 
 function working(theme, label) {
   const now = Date.now();
-  progress.longest = Math.max(progress.longest, now - progress.last);
-  progress.last = now;
-  progress.doing[theme] = label;
+  const mine = progress.get(theme);
+  mine.longest = Math.max(mine.longest, now - mine.last);
+  mine.last = now;
+  mine.doing = label;
 }
 async function setUI(dashboard, lines) {
   const response = await fetch(`${dashboard.url}/api/v1/ui`, {
@@ -165,9 +166,10 @@ if (deadline) {
   }, Math.max(deadline - Date.now(), 0)).unref();
 }
 setInterval(() => {
-  if (Date.now() - progress.last <= STALL_LIMIT_MS) return;
-  const doing = Object.entries(progress.doing).map(([theme, label]) => `${theme}: ${label}`).join("; ");
-  console.log(`readability guard: nothing finished in ${STALL_LIMIT_MS / 1000} s (${doing})`);
+  const now = Date.now();
+  const stalled = [...progress].find(([, mine]) => mine.doing !== "done" && now - mine.last > STALL_LIMIT_MS);
+  if (!stalled) return;
+  console.log(`readability guard: ${stalled[0]} finished nothing in ${STALL_LIMIT_MS / 1000} s, stuck on ${stalled[1].doing}`);
   abandon();
   process.exit(1);
 }, 1000).unref();
@@ -178,6 +180,6 @@ try {
 } finally {
   await close();
 }
-console.log(`readability guard: ${failures.length} failures in ${((Date.now() - started) / 1000).toFixed(0)} s, at most ${(progress.longest / 1000).toFixed(0)} s between finished steps`);
+console.log(`readability guard: ${failures.length} failures in ${((Date.now() - started) / 1000).toFixed(0)} s, at most ${(Math.max(...[...progress.values()].map((mine) => mine.longest)) / 1000).toFixed(0)} s between finished steps`);
 for (const failure of failures) console.log(failure);
 process.exitCode = failures.length ? 1 : 0;
