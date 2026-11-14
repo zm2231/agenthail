@@ -264,7 +264,8 @@ function fitStage() {
   if (!layout || !stage.offsetParent || state.fullscreen) return;
   const gap = Number.parseFloat(getComputedStyle(layout).getPropertyValue("--pane-gap"));
   const bottom = Number.isFinite(gap) ? gap : 16;
-  layout.style.setProperty("--extensions-fit", `${Math.floor(window.innerHeight - stage.getBoundingClientRect().top - window.scrollY - bottom)}px`);
+  const pageTop = stage.getBoundingClientRect().top + window.scrollY;
+  layout.style.setProperty("--extensions-fit", `${Math.floor(window.innerHeight - pageTop - bottom)}px`);
 }
 
 function render() {
