@@ -423,6 +423,10 @@ func TestHistoryUndoAndBuildingReachAPairedHost(t *testing.T) {
 	if refused := f.local.request(t, http.MethodPost, "/api/v1/extensions/build?host=vps", map[string]string{"message": "refuse"}); refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), "Extensions are off on this host.") {
 		t.Fatalf("the host's refusal came back as %d %s", refused.Code, refused.Body)
 	}
+	f.built.Store(nil)
+	if large := f.local.request(t, http.MethodPost, "/api/v1/extensions/build?host=vps", map[string]string{"message": strings.Repeat("x", extensionBuildBodyLimit)}); large.Code != http.StatusRequestEntityTooLarge || f.built.Load() != nil {
+		t.Fatalf("a build over the local limit answered %d and reached the host: %v", large.Code, f.built.Load() != nil)
+	}
 	if unknown := f.local.request(t, http.MethodPost, "/api/v1/extensions/build?host=nowhere", map[string]string{"message": "x"}); unknown.Code != http.StatusNotFound || !strings.Contains(unknown.Body.String(), "host_not_found") {
 		t.Fatalf("an unknown host answered %d %s", unknown.Code, unknown.Body)
 	}
