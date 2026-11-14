@@ -29,6 +29,29 @@ private extension View {
     }
 }
 
+private struct ProjectBriefControl: View {
+    let lead: String
+    let ask: (String) async throws -> String
+    @State private var brief = ProjectBriefAsk()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+            Button(ProjectBrief.title) { Task { await brief.ask(ask) } }
+                .buttonStyle(.bordered)
+                .disabled(brief.asking)
+                .help("Ask @\(lead) for a brief on everything since you last wrote to this project")
+                .accessibilityIdentifier("project-brief")
+            if let text = brief.failure ?? brief.notice {
+                Text(text)
+                    .font(.system(size: DesktopType.meta))
+                    .foregroundStyle(brief.failure == nil ? DesktopPalette.text2 : DesktopPalette.failed)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("project-brief-notice")
+            }
+        }
+    }
+}
+
 struct ProjectPane: View {
     var model: AgenthailModel
     var pane: SessionPane
@@ -146,6 +169,10 @@ struct ProjectPane: View {
                             .font(.system(size: DesktopType.meta)).foregroundStyle(DesktopPalette.text2)
                             .accessibilityIdentifier("project-lead-replaced")
                     }
+                }
+                if project.archived != true {
+                    ProjectBriefControl(lead: lead.name) { key in try await model.brief(project, lead: lead.name, idempotencyKey: key) }
+                        .id(project.id)
                 }
             }
         } else {

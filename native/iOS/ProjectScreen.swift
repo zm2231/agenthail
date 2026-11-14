@@ -17,6 +17,30 @@ private extension View {
     }
 }
 
+private struct PhoneProjectBriefControl: View {
+    let ask: (String) async throws -> String
+    @State private var brief = ProjectBriefAsk()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                Task { await brief.ask(ask) }
+            } label: {
+                if brief.asking { ProgressView() } else { Text(ProjectBrief.title) }
+            }
+            .buttonStyle(.bordered)
+            .disabled(brief.asking)
+            .accessibilityIdentifier("project-brief")
+            if let text = brief.failure ?? brief.notice {
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(brief.failure == nil ? AnyShapeStyle(PhonePalette.muted) : AnyShapeStyle(PhonePalette.failed))
+                    .accessibilityIdentifier("project-brief-notice")
+            }
+        }
+    }
+}
+
 struct ProjectScreen: View {
     var model: AgenthailIOSModel
     let projectID: String
@@ -222,6 +246,10 @@ struct ProjectScreen: View {
                             .font(.caption).foregroundStyle(PhonePalette.muted)
                             .accessibilityIdentifier("project-lead-replaced")
                     }
+                }
+                if project.state.archived != true {
+                    PhoneProjectBriefControl { key in try await model.brief(project, lead: lead, idempotencyKey: key) }
+                        .id(ProjectContents.key(of: project))
                 }
             }
             .padding(.vertical, 4)

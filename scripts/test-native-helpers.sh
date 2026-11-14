@@ -189,6 +189,7 @@ SOURCES=(
   macOS/PairingProgress.swift
   macOS/ProjectHeaderFacts.swift
   ProjectBroadcast.swift
+  ProjectBrief.swift
   macOS/SessionPane.swift
   macOS/KeptTranscripts.swift
   macOS/MacDecisions.swift

@@ -11,3 +11,12 @@ extension AgenthailModel {
         return sent
     }
 }
+
+extension AgenthailModel {
+    func brief(_ project: ProjectState, lead: String, idempotencyKey: String) async throws -> String {
+        guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
+        let reply = try await api.projectBrief(projectID: project.id, idempotencyKey: idempotencyKey)
+        _ = await refresh(fresh: true)
+        return ProjectBrief.notice(reply, lead: lead)
+    }
+}

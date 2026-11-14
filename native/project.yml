@@ -114,6 +114,7 @@ targets:
       - path: SessionCells.swift
       - path: SessionHandle.swift
       - path: ProjectBroadcast.swift
+      - path: ProjectBrief.swift
       - path: RelativeAge.swift
       - path: RelayFacts.swift
       - path: MinuteClock.swift
