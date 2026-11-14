@@ -346,3 +346,112 @@ func assertFailureStaysInHistory(t *testing.T, r *Registry, deliveryID, queueID 
 	}
 	t.Fatalf("queue list --all lost the failed message %d: %+v", queueID, queued)
 }
+
+func TestADeliveryThatOnlyReachedItsTargetsTransportWaitsAnHourForTheTurnThatReadsIt(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target", "codex")
+	watched := func(id string) bool {
+		t.Helper()
+		sessions, err := r.WatchedSessions()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, session := range sessions {
+			if session.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	send := func(target string, evidence surface.DeliveryEvidence) *DeliveryIntent {
+		t.Helper()
+		intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: target, Message: "hello", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if marked, err := r.MarkDeliveryIntentSent(intent.ID, intent.UUID, evidence); err != nil || !marked {
+			t.Fatalf("marked=%v err=%v", marked, err)
+		}
+		return intent
+	}
+	age := func(intent *DeliveryIntent, by time.Duration) {
+		t.Helper()
+		if _, err := r.db.Exec(`UPDATE delivery_intents SET accepted_at_ms=? WHERE id=?`, time.Now().Add(-by).UnixMilli(), intent.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queuedLong, queued, err := r.QueueDeliveryWithIntent("target", "queued for two hours", "", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE delivery_intents SET created_at=strftime('%Y-%m-%d %H:%M:%f','now','-2 hours') WHERE id=?`, queued); err != nil {
+		t.Fatal(err)
+	}
+	if item, err := r.ClaimNextMessage("target", time.Now()); err != nil || item == nil || item.ID != queuedLong {
+		t.Fatalf("claim=%+v err=%v", item, err)
+	}
+	if err := r.AckMessageWithEvidence(queuedLong, "target", 0, surface.EvidenceTransportAccepted, "queued-uuid"); err != nil {
+		t.Fatal(err)
+	}
+	if failed, err := r.FailUnseenDeliveryTurns(time.Now()); err != nil || failed != 0 || !watched("target") {
+		t.Fatalf("failed=%d err=%v watched=%v, want a delivery accepted now watched though queued two hours ago", failed, err, watched("target"))
+	}
+	if reconciled, err := r.ReconcileDeliveryIntent("target", "queued-uuid"); err != nil || !reconciled {
+		t.Fatalf("reconciled=%v err=%v", reconciled, err)
+	}
+	read := send("target", surface.EvidenceTransportAccepted)
+	started := send("codex", surface.EvidenceDelivered)
+	if !watched("target") || watched("codex") {
+		t.Fatalf("watched target=%v codex=%v, want only the target a transport took the message for", watched("target"), watched("codex"))
+	}
+	if reconciled, err := r.ReconcileDeliveryIntent("target", read.UUID); err != nil || !reconciled {
+		t.Fatalf("reconciled=%v err=%v", reconciled, err)
+	}
+	if watched("target") {
+		t.Fatal("a delivered message still keeps its target watched")
+	}
+	maybeHeld := send("target", surface.EvidenceTransportAccepted)
+	unseen := send("target", surface.EvidenceTransportAccepted)
+	if _, err := r.db.Exec(`UPDATE delivery_intents SET failure='Claude may have held this message' WHERE id=?`, maybeHeld.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, intent := range []*DeliveryIntent{unseen, maybeHeld, started} {
+		age(intent, 59*time.Minute)
+	}
+	if failed, err := r.FailUnseenDeliveryTurns(time.Now()); err != nil || failed != 0 {
+		t.Fatalf("failed=%d err=%v within the hour", failed, err)
+	}
+	for _, intent := range []*DeliveryIntent{unseen, maybeHeld, started} {
+		age(intent, 61*time.Minute)
+	}
+	if watched("target") {
+		t.Fatal("a delivery sent over an hour ago still keeps its target watched")
+	}
+	if failed, err := r.FailUnseenDeliveryTurns(time.Now()); err != nil || failed != 1 {
+		t.Fatalf("failed=%d err=%v, want only the unseen delivery", failed, err)
+	}
+	for _, want := range []struct {
+		intent  *DeliveryIntent
+		status  DeliveryIntentStatus
+		failure string
+	}{
+		{unseen, DeliveryIntentFailed, DeliveryTurnUnseen},
+		{maybeHeld, DeliveryIntentSent, "Claude may have held this message"},
+		{started, DeliveryIntentSent, ""},
+	} {
+		got, err := r.DeliveryIntent(want.intent.ID)
+		if err != nil || got.Status != want.status || got.Failure != want.failure {
+			t.Fatalf("intent=%+v err=%v, want %s %q", got, err, want.status, want.failure)
+		}
+	}
+	asks := openDeliveryAsks(t, r)
+	listed := false
+	for _, ask := range asks {
+		if deliveryRef(t, ask).IntentID == unseen.ID && strings.Contains(ask.Questions[0].Question, DeliveryTurnUnseen) {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Fatalf("asks=%+v, want the unseen delivery listed with its reason", asks)
+	}
+}

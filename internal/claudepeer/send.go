@@ -12,14 +12,14 @@ import (
 )
 
 func Send(ctx context.Context, controlPath, senderID, targetSocket, message string) (*surface.SendResult, error) {
-	return SendWithReplySocket(ctx, controlPath, senderID, targetSocket, "", message)
+	return SendWithReplySocket(ctx, controlPath, senderID, targetSocket, "", "", message)
 }
 
-func SendWithReplySocket(ctx context.Context, controlPath, senderID, targetSocket, replySocket, message string) (*surface.SendResult, error) {
+func SendWithReplySocket(ctx context.Context, controlPath, senderID, targetSocket, replySocket, fromMode, message string) (*surface.SendResult, error) {
 	if err := ValidateSend(senderID, targetSocket, message); err != nil {
 		return nil, err
 	}
-	request := controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket, MsgID: surface.MessageUUID(ctx), PersonName: surface.PersonName(ctx)}
+	request := controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket, FromMode: fromMode, MsgID: surface.MessageUUID(ctx), PersonName: surface.PersonName(ctx)}
 	var response Response
 	if err := unixjson.Call(ctx, controlPath, readDeadline, maxLineBytes, request, &response); err != nil {
 		var notSent *unixjson.NotSentError
@@ -51,7 +51,7 @@ func SendNative(ctx context.Context, home string, sender surface.Session, sender
 	if err := sendAuthenticatedFrame(home, targetSocket, payload); err != nil {
 		return nil, err
 	}
-	return &surface.SendResult{UUID: id, Accepted: true}, nil
+	return &surface.SendResult{UUID: id, Accepted: true, FromMode: statedMode(fromMode)}, nil
 }
 
 func ValidateSend(senderID, targetSocket, message string) error {

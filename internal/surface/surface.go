@@ -501,6 +501,9 @@ type SendResult struct {
 	UUID     string `json:"uuid"`
 	Accepted bool   `json:"accepted"`
 	Notice   string `json:"notice,omitempty"`
+	// FromMode is the permission class a Claude peer message stated for its
+	// sender: bypass, prompting, or empty when the sender's is unknown.
+	FromMode string `json:"fromMode,omitempty"`
 }
 
 type DeliveryEvidence string
@@ -984,9 +987,11 @@ type TurnObservation struct {
 	// TerminalError is why TerminalTurnID ended, when it ended with no reply to carry it.
 	TerminalError string `json:"terminalError,omitempty"`
 	// TurnUnconfirmed means the newest turn can't be told apart from a running one.
-	TurnUnconfirmed bool             `json:"turnUnconfirmed,omitempty"`
-	CompletedTurnID string           `json:"completedTurnId,omitempty"`
-	InputTurnID     string           `json:"inputTurnId,omitempty"`
+	TurnUnconfirmed bool   `json:"turnUnconfirmed,omitempty"`
+	CompletedTurnID string `json:"completedTurnId,omitempty"`
+	// InputTurnIDs are the inputs CompletedTurnID read: the prompt that started
+	// it and any message it took in while running.
+	InputTurnIDs    []string         `json:"inputTurnIds,omitempty"`
 	WaitingOn       *Waiting         `json:"waitingOn,omitempty"`
 	WaitingUnknown  bool             `json:"-"`
 	BackgroundTasks *BackgroundTasks `json:"backgroundTasks,omitempty"`

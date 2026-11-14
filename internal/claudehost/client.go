@@ -276,6 +276,7 @@ type Listing struct {
 
 type Event struct {
 	Seq       uint64          `json:"seq"`
+	At        int64           `json:"at,omitempty"`
 	SessionID string          `json:"sessionId"`
 	Kind      string          `json:"kind"`
 	Message   json.RawMessage `json:"message,omitempty"`

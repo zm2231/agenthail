@@ -214,7 +214,7 @@ func (r *Registry) RecordDeliveryIntent(input DeliveryIntentInput) (*DeliveryInt
 	if id == "" {
 		id = uuid.NewString()
 	}
-	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,provider_key,message,status,evidence) VALUES(?,?,?,?,?,?,?)`, id, input.SenderSessionID, input.TargetSessionID, input.ProviderKey, boundedIntentMessage(input.Message), input.Status, input.Evidence)
+	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,provider_key,message,status,evidence,accepted_at_ms,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,CASE WHEN ?6=?8 THEN `+sqlNowMillis+` ELSE 0 END,strftime('%Y-%m-%d %H:%M:%f','now'))`, id, input.SenderSessionID, input.TargetSessionID, input.ProviderKey, boundedIntentMessage(input.Message), input.Status, input.Evidence, DeliveryIntentSent)
 	if err != nil {
 		return nil, err
 	}
@@ -301,15 +301,15 @@ func (r *Registry) ReconcileDeliveryIntent(targetSessionID, providerKey string) 
 
 // MarkDeliveryIntentSent completes the same logical intent created before a
 // provider side effect. Keeping this transition on the original row preserves
-// the delivery ID across accepted, submitted, and reconciled outcomes. A hold
-// the target reported before the send was recorded stands.
+// the delivery ID across accepted, submitted, and reconciled outcomes. A hold,
+// or a possible hold, the target reported before the send was recorded stands.
 func (r *Registry) MarkDeliveryIntentSent(id int64, providerKey string, evidence surface.DeliveryEvidence) (bool, error) {
 	if id == 0 || strings.TrimSpace(string(evidence)) == "" {
 		return false, fmt.Errorf("delivery intent completion requires an id and evidence")
 	}
 	marked := false
 	err := r.deliveryWrite(func(tx *sql.Tx) error {
-		res, err := tx.Exec(`UPDATE delivery_intents SET status=CASE WHEN status=? THEN status ELSE ? END,evidence=?,provider_key=CASE WHEN ?!='' THEN ? ELSE provider_key END,failure=CASE WHEN status=? THEN failure ELSE '' END,updated_at=datetime('now') WHERE id=? AND status IN (?,?)`, DeliveryIntentHeld, DeliveryIntentSent, evidence, providerKey, providerKey, DeliveryIntentHeld, id, DeliveryIntentSubmitted, DeliveryIntentHeld)
+		res, err := tx.Exec(`UPDATE delivery_intents SET status=CASE WHEN status=? THEN status ELSE ? END,evidence=?,provider_key=CASE WHEN ?!='' THEN ? ELSE provider_key END,accepted_at_ms=`+sqlNowMillis+`,updated_at=datetime('now') WHERE id=? AND status IN (?,?)`, DeliveryIntentHeld, DeliveryIntentSent, evidence, providerKey, providerKey, id, DeliveryIntentSubmitted, DeliveryIntentHeld)
 		if err != nil {
 			return err
 		}
@@ -382,7 +382,7 @@ func failDeliveryIntent(q deliveryIntentExecutor, id int64, failure string) (boo
 }
 
 func insertQueuedDeliveryIntent(tx *sql.Tx, senderSessionID, targetSessionID, message string, queueID int64, relayed bool) (int64, error) {
-	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,message,queue_id,relayed,status,evidence) VALUES(?,?,?,?,?,?,?,?)`, uuid.NewString(), senderSessionID, targetSessionID, boundedIntentMessage(message), queueID, relayed, DeliveryIntentQueued, surface.EvidenceQueued)
+	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,message,queue_id,relayed,status,evidence,created_at) VALUES(?,?,?,?,?,?,?,?,strftime('%Y-%m-%d %H:%M:%f','now'))`, uuid.NewString(), senderSessionID, targetSessionID, boundedIntentMessage(message), queueID, relayed, DeliveryIntentQueued, surface.EvidenceQueued)
 	if err != nil {
 		return 0, err
 	}
@@ -399,7 +399,7 @@ func queuedDeliveryIntentID(q deliveryIntentQuerier, queueID int64) (int64, erro
 }
 
 func markQueuedDeliveryIntent(tx *sql.Tx, queueID int64, status DeliveryIntentStatus, evidence surface.DeliveryEvidence, providerKey string) error {
-	_, err := tx.Exec(`UPDATE delivery_intents SET status=?,evidence=?,provider_key=CASE WHEN ?!='' THEN ? ELSE provider_key END,updated_at=datetime('now') WHERE queue_id=? AND status IN (?,?)`, status, evidence, providerKey, providerKey, queueID, DeliveryIntentQueued, DeliveryIntentUnknown)
+	_, err := tx.Exec(`UPDATE delivery_intents SET status=?1,evidence=?2,provider_key=CASE WHEN ?3!='' THEN ?3 ELSE provider_key END,accepted_at_ms=CASE WHEN ?1=?6 THEN `+sqlNowMillis+` ELSE accepted_at_ms END,updated_at=datetime('now') WHERE queue_id=?4 AND status IN (?5,?7)`, status, evidence, providerKey, queueID, DeliveryIntentQueued, DeliveryIntentSent, DeliveryIntentUnknown)
 	return err
 }
 

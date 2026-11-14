@@ -449,9 +449,20 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	failure TEXT NOT NULL DEFAULT '',
 	failed_from TEXT NOT NULL DEFAULT '',
 	retries INTEGER NOT NULL DEFAULT 0,
+	held_at_ms INTEGER NOT NULL DEFAULT 0,
+	accepted_at_ms INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS peer_relay_sockets (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	socket_path TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	started_ms INTEGER NOT NULL,
+	retired_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS peer_relay_sockets_path
+	ON peer_relay_sockets(socket_path, started_ms DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS delivery_intents_provider_key
 	ON delivery_intents(target_session_id, provider_key) WHERE provider_key!='';
 CREATE INDEX IF NOT EXISTS delivery_intents_sender_status

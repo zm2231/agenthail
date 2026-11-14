@@ -425,7 +425,7 @@ function holdCause(content) {
 
 function hold(frame, cause) {
   const base = { type: 'system', subtype: 'peer_message_hold', lane: 'socket', from: frame.from ?? '', session_id: sessionId };
-  const uuid = { message_uuid: typeof frame.uuid === 'string' ? frame.uuid : crypto.randomUUID() };
+  const uuid = { message_uuid: crypto.randomUUID() };
   write({ ...base, ...uuid, state: 'held', cause, uuid: crypto.randomUUID() });
   let dropped = false;
   const drop = () => {

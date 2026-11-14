@@ -183,6 +183,28 @@ func TestTheSenderIsToldWhenClaudeWillHoldItsMessageForAHostSession(t *testing.T
 	}
 }
 
+func TestAMessageFromNoSessionToAHostSessionWithoutPromptsIsRefusedBeforeSending(t *testing.T) {
+	c, fixture := hostedClaude(t)
+	peers := claudetest.ListenPeerManager(t, fixture.Home)
+	client := fixture.Start(t)
+	bypassing, prompting := uuid.NewString(), uuid.NewString()
+	fixture.OpenInMode(t, client, bypassing, "bypassPermissions")
+	fixture.Open(t, client, prompting)
+	for _, source := range []string{"", surface.CLISessionID} {
+		ctx := surface.WithSourceSessionID(context.Background(), source)
+		_, err := c.Send(ctx, listedSession(t, c, bypassing), "from a shell")
+		if !surface.IsDeliveryTerminal(err) || !strings.Contains(err.Error(), "runs without permission prompts and this sender has no session identity") {
+			t.Fatalf("source=%q err=%v, want the refusal", source, err)
+		}
+		if _, err := c.Send(ctx, listedSession(t, c, prompting), "from a shell"); err != nil {
+			t.Fatalf("source=%q err=%v, want a session with prompts to take it", source, err)
+		}
+	}
+	if sent := peers.Count("from a shell"); sent != 2 {
+		t.Fatalf("sent=%d, want only the two messages to the session with prompts", sent)
+	}
+}
+
 func TestSteerAndInterruptAHostSession(t *testing.T) {
 	c, fixture := hostedClaude(t)
 	client := fixture.Start(t)

@@ -28,11 +28,15 @@ type DeliveryRef struct {
 }
 
 const (
-	deliveryFailed  = "failed"
-	deliveryHeld    = "held"
-	deliveryDead    = "dead"
-	deliveryRefused = "refused"
-	deliveryLate    = "late"
+	deliveryFailed = "failed"
+	deliveryHeld   = "held"
+	// deliveryMaybeHeld is a delivery Claude may have held: it reported a
+	// hold from the delivery's sender to its target without naming which of
+	// several such deliveries it held.
+	deliveryMaybeHeld = "maybe_held"
+	deliveryDead      = "dead"
+	deliveryRefused   = "refused"
+	deliveryLate      = "late"
 )
 
 const deliveryLateAfter = 15 * time.Minute
@@ -49,7 +53,7 @@ func ParseDeliveryRef(ref string) (DeliveryRef, bool) {
 		return DeliveryRef{}, false
 	}
 	switch {
-	case parts[0] == "intent" && len(parts) == 4 && (parts[3] == deliveryFailed || parts[3] == deliveryHeld):
+	case parts[0] == "intent" && len(parts) == 4 && (parts[3] == deliveryFailed || parts[3] == deliveryHeld || parts[3] == deliveryMaybeHeld):
 		return DeliveryRef{IntentID: id, Kind: parts[3]}, true
 	case parts[0] == "queue" && ((parts[2] == deliveryDead || parts[2] == deliveryLate) && len(parts) == 3 || parts[2] == deliveryRefused && len(parts) == 4 || parts[2] == DeliveryShared && len(parts) == 5):
 		return DeliveryRef{QueueID: id, Kind: parts[2]}, true
@@ -125,10 +129,10 @@ func clip(text string, max int) string {
 
 func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliveryProblem, error) {
 	var problems []deliveryProblem
-	rows, err := tx.QueryContext(ctx, `SELECT di.id,di.sender_session_id,di.target_session_id,di.relayed,di.status,di.retries,di.message,CASE WHEN di.status='held' THEN di.failure ELSE `+deliveryReasonOf("di.failure")+` END,(`+deletableFailure+`),
+	rows, err := tx.QueryContext(ctx, `SELECT di.id,di.sender_session_id,di.target_session_id,di.relayed,di.status,di.retries,di.message,CASE WHEN di.status IN ('held','sent') THEN di.failure ELSE `+deliveryReasonOf("di.failure")+` END,(`+deletableFailure+`),
 		EXISTS(SELECT 1 FROM message_queue mq WHERE mq.id=di.queue_id AND di.queue_id!=0 AND mq.status='dead')
 		FROM delivery_intents di
-		WHERE di.status='held' OR di.status='failed' AND di.updated_at>=datetime('now','-1 day') AND NOT (`+settledDeliveryFailure+`)
+		WHERE di.status='held' OR di.status='sent' AND di.failure!='' OR di.status='failed' AND di.updated_at>=datetime('now','-1 day') AND NOT (`+settledDeliveryFailure+`)
 		ORDER BY di.id`)
 	if err != nil {
 		return nil, err
@@ -142,9 +146,15 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 			rows.Close()
 			return nil, err
 		}
+		if status == string(DeliveryIntentSent) {
+			status = deliveryMaybeHeld
+		}
 		problem := deliveryProblem{ref: fmt.Sprintf("intent:%d:%d:%s", id, retries, status)}
 		problem.sessionID, problem.routedTo = deliveryRoute(sender, target, relayed)
-		if status == deliveryHeld {
+		if status == deliveryMaybeHeld {
+			problem.title = "Message may have been held by its target"
+			problem.question = deliveryQuestion(message, failure, DeliveryDismiss)
+		} else if status == deliveryHeld {
 			problem.title = "Message held by its target"
 			problem.question = deliveryQuestion(message, failure, DeliveryDismiss)
 		} else {
@@ -207,6 +217,7 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 }
 
 const deliveryAsksInPlay = `SELECT EXISTS(SELECT 1 FROM delivery_intents WHERE status='held')
+	OR EXISTS(SELECT 1 FROM delivery_intents WHERE status='sent' AND failure!='')
 	OR EXISTS(SELECT 1 FROM delivery_intents WHERE status='failed' AND updated_at>=datetime('now','-1 day'))
 	OR EXISTS(SELECT 1 FROM message_queue WHERE status='dead' AND dead_at_ms>?1)
 	OR EXISTS(SELECT 1 FROM message_queue WHERE ` + queueRefusedRow + `)

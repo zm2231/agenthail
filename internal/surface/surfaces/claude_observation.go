@@ -50,13 +50,13 @@ func (c *Claude) observeTranscript(ctx context.Context, path string, sess *surfa
 		}
 		start := offset
 		for _, line := range lines {
-			_ = state.apply(line)
 			start -= int64(len(line)) + 1
 		}
-		if state.hasCurrent && state.current.UserID == "" && !state.current.Done && start > 0 {
-			if at, ok := claudeTurnStartBefore(path, start); ok {
-				state.current.StartedAt = at
-			}
+		if start > 0 {
+			state.current, state.hasCurrent = claudeTurnBefore(path, start)
+		}
+		for _, line := range lines {
+			_ = state.apply(line)
 		}
 		state.cursor.offset = offset
 		c.observeState[path] = state
@@ -99,8 +99,7 @@ func (s *claudeObservationState) applyTurn(record claudeRecord) {
 		return
 	}
 	if s.hasCurrent && !wasDone && turns[0].Done && turns[0].MessageID != "" {
-		s.completed = turns[0]
-		s.hasCompleted = true
+		s.completed, s.hasCompleted = turns[0], true
 	}
 	s.current = turns[len(turns)-1]
 	s.hasCurrent = true
@@ -111,8 +110,7 @@ func (s *claudeObservationState) settle() {
 	s.current.Closing = false
 	s.current.Done = true
 	if s.current.MessageID != "" {
-		s.completed = s.current
-		s.hasCompleted = true
+		s.completed, s.hasCompleted = s.current, true
 	}
 }
 

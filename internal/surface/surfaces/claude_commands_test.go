@@ -180,7 +180,7 @@ func TestClaudeTypedSlashCommandIsAPromptInEveryReading(t *testing.T) {
 	}
 	session := &surface.Session{ID: "typed-command", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path}
 	observation, err := NewClaude(nil, t.TempDir()).Observe(context.Background(), session)
-	if err != nil || observation.Reply == nil || observation.Reply.UserText != "/goal tests pass" || observation.InputTurnID != "typed" {
+	if err != nil || observation.Reply == nil || observation.Reply.UserText != "/goal tests pass" || strings.Join(observation.InputTurnIDs, ",") != "typed" {
 		t.Fatalf("observation=%+v err=%v", observation, err)
 	}
 	page, err := readTimeline(context.Background(), path, "claude", 0, 0)

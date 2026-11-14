@@ -110,17 +110,22 @@ type Manager struct {
 	rejections chan struct{}
 	ownerLock  *os.File
 	endpoint   os.FileInfo
+	// senderClass is how a sender that is not a Claude process runs, in the
+	// terms of Claude's cross-session policy, or "" when unknown. The manager
+	// asks the daemon rather than taking a class from the request, so no
+	// caller can state one it does not run with.
+	senderClass func(context.Context, surface.Session) string
 }
 
 func managerPath(home string) string {
 	return filepath.Join(home, ".agenthail", "claude-peers.sock")
 }
 
-func Start(ctx context.Context, home string, reg *registry.Registry, executable string) (*Manager, error) {
-	return start(ctx, home, reg, executable, "")
+func Start(ctx context.Context, home string, reg *registry.Registry, executable string, senderClass func(context.Context, surface.Session) string) (*Manager, error) {
+	return start(ctx, home, reg, executable, "", senderClass)
 }
 
-func start(ctx context.Context, home string, reg *registry.Registry, executable, socketDir string) (*Manager, error) {
+func start(ctx context.Context, home string, reg *registry.Registry, executable, socketDir string, senderClass func(context.Context, surface.Session) string) (*Manager, error) {
 	path := managerPath(home)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
@@ -166,6 +171,9 @@ func start(ctx context.Context, home string, reg *registry.Registry, executable,
 	if err := claudepeer.Reconcile(home, socketDir); err != nil {
 		return nil, fmt.Errorf("reconcile Claude peers: %w", err)
 	}
+	if err := reg.RetirePeerRelays(time.Now()); err != nil {
+		return nil, fmt.Errorf("retire earlier reply relays: %w", err)
+	}
 	listener, err := net.Listen("unix", path)
 	if err != nil {
 		return nil, err
@@ -182,7 +190,7 @@ func start(ctx context.Context, home string, reg *registry.Registry, executable,
 		listener.Close()
 		return nil, err
 	}
-	m := &Manager{home: home, socketDir: socketDir, registry: reg, executable: executable, ctx: ctx, listener: listener, children: map[string]*child{}, relays: map[string]*child{}, peerLimit: maxManagedPeers, reserve: senderPeerReserve, generation: uuid.NewString()[:12], requests: make(chan struct{}, maxManagerRequests), rejections: make(chan struct{}, maxManagerRejections), ownerLock: startupLock, endpoint: endpoint}
+	m := &Manager{home: home, socketDir: socketDir, registry: reg, executable: executable, ctx: ctx, listener: listener, children: map[string]*child{}, relays: map[string]*child{}, peerLimit: maxManagedPeers, reserve: senderPeerReserve, generation: uuid.NewString()[:12], requests: make(chan struct{}, maxManagerRequests), rejections: make(chan struct{}, maxManagerRejections), ownerLock: startupLock, endpoint: endpoint, senderClass: senderClass}
 	lockTransferred = true
 	go m.serve()
 	return m, nil
@@ -493,11 +501,14 @@ func (m *Manager) Send(ctx context.Context, sourceID, targetSocket, message stri
 	if err := m.Ensure(ctx, sourceID); err != nil {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("register Claude peer: %w", err))
 	}
-	replySocket := ""
+	replySocket, fromMode := "", ""
 	if !agenthailSender(sourceID) {
 		session, err := m.registry.Session(sourceID)
 		if err != nil {
 			return nil, surface.DeliveryUnavailable(fmt.Errorf("load sender %q: %w", sourceID, err))
+		}
+		if session.Surface != surface.KindClaude && m.senderClass != nil {
+			fromMode = m.senderClass(ctx, *session)
 		}
 		if session.Surface != surface.KindClaude {
 			if err := m.ensureRelay(ctx, *session); err != nil {
@@ -523,7 +534,7 @@ func (m *Manager) Send(ctx context.Context, sourceID, targetSocket, message stri
 	if entry == nil || entry.controlPath == "" {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude peer registration disappeared before delivery"))
 	}
-	return claudepeer.SendWithReplySocket(ctx, entry.controlPath, sourceID, targetSocket, replySocket, message)
+	return claudepeer.SendWithReplySocket(ctx, entry.controlPath, sourceID, targetSocket, replySocket, fromMode, message)
 }
 
 func (m *Manager) ensureRelay(ctx context.Context, session surface.Session) error {
@@ -535,6 +546,7 @@ func (m *Manager) ensureRelay(ctx context.Context, session surface.Session) erro
 	} else if existing != nil {
 		existing.stop(2 * time.Second)
 		existing.cleanup()
+		_ = m.registry.RetirePeerRelay(existing.socketPath, time.Now())
 		delete(m.relays, session.ID)
 	}
 	processToken := uuid.NewString()
@@ -589,6 +601,9 @@ func (m *Manager) ensureRelay(ctx context.Context, session surface.Session) erro
 	entry.record = recordOwnership{PID: command.Process.Pid, SessionID: session.ID, ProcStart: "", Agenthail: "peer-relay", ProcessToken: processToken}
 	if m.closed {
 		return fail(errors.New("peer manager is stopping"))
+	}
+	if err := m.registry.RecordPeerRelay(entry.socketPath, session.ID, time.Now()); err != nil {
+		return fail(err)
 	}
 	m.relays[session.ID] = entry
 	return nil
@@ -651,7 +666,9 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 			<-entry.done
 		}
 		entry.cleanup()
+		_ = m.registry.RetirePeerRelay(entry.socketPath, now)
 	}
+	_ = m.registry.ForgetPeerRelays(now)
 }
 
 // evictionCandidateLocked picks the peer a new peer replaces: the least
@@ -748,6 +765,7 @@ func (m *Manager) Close() {
 		_ = os.Remove(path)
 	}
 	_ = os.Remove(filepath.Join(claudepeer.RuntimeRoot(m.home), m.generation))
+	_ = m.registry.RetirePeerRelays(time.Now())
 	unlockManagerStartup(m.ownerLock)
 	m.ownerLock = nil
 }

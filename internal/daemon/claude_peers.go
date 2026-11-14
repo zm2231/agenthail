@@ -21,7 +21,7 @@ func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	manager, err := peerbridge.Start(ctx, home, d.Registry, executable)
+	manager, err := peerbridge.Start(ctx, home, d.Registry, executable, d.peerSenderClass)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -32,6 +32,24 @@ func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 		d.runClaudePeerRegistration(ctx, manager.Advertise, func(now time.Time) { manager.RetireInactive(now, surface.ActiveWindow) })
 	}()
 	return func() { cancel(); <-done; manager.Close() }, nil
+}
+
+func (d *Daemon) peerSenderClass(ctx context.Context, sender surface.Session) string {
+	if sender.Surface != surface.KindCodex {
+		return ""
+	}
+	adapter, err := d.adapters().For(&sender)
+	reader, ok := adapter.(surface.SessionSettingsReader)
+	if err != nil || !ok {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	settings, err := reader.SessionSettings(ctx, &sender)
+	if err != nil {
+		return ""
+	}
+	return surface.CodexPeerClass(settings.Permission)
 }
 
 // claudePeerChangeSettle is how long registration waits after a session

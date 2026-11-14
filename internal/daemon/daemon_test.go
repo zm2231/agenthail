@@ -556,9 +556,9 @@ func TestClaudeCompletionReconcilesOnlyByInputEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "assistant-baseline", InputTurnID: "other-envelope", Reply: &surface.ReplyResult{Done: true}}
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "assistant-baseline", InputTurnIDs: []string{"other-envelope"}, Reply: &surface.ReplyResult{Done: true}}
 	daemon.observeSession(t.Context(), fake, &from)
-	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "assistant-completion", InputTurnID: "user-envelope", Reply: &surface.ReplyResult{Done: true}}
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "assistant-completion", InputTurnIDs: []string{"user-envelope"}, Reply: &surface.ReplyResult{Done: true}}
 	daemon.observeSession(t.Context(), fake, &from)
 	stored, err := r.DeliveryIntent(intent.ID)
 	if err != nil || stored.Status != registry.DeliveryIntentDelivered {
@@ -868,7 +868,7 @@ func TestRelayStopsAtHopLimit(t *testing.T) {
 		}
 		fake.observations[id] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline-" + id, Reply: &surface.ReplyResult{Text: "baseline", Done: true}}
 		daemon.observeSession(t.Context(), fake, sessionPointer(fake.sessions[id]))
-		fake.observations[id] = &surface.TurnObservation{Status: surface.StatusIdle, InputTurnID: "input-" + id, CompletedTurnID: "done-" + id, Reply: &surface.ReplyResult{Text: "Done", UserText: item.Message, Done: true}}
+		fake.observations[id] = &surface.TurnObservation{Status: surface.StatusIdle, InputTurnIDs: []string{"input-" + id}, CompletedTurnID: "done-" + id, Reply: &surface.ReplyResult{Text: "Done", UserText: item.Message, Done: true}}
 		daemon.observeSession(t.Context(), fake, sessionPointer(fake.sessions[id]))
 	}
 	if r.QueueCount(fmt.Sprintf("hop-%d", maxRelayHops)) != 0 {

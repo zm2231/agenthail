@@ -39,6 +39,7 @@ type controlRequest struct {
 	SenderID     string `json:"senderId"`
 	Message      string `json:"message"`
 	ReplySocket  string `json:"replySocket,omitempty"`
+	FromMode     string `json:"fromMode,omitempty"`
 	MsgID        string `json:"msgId,omitempty"`
 	PersonName   string `json:"personName,omitempty"`
 }

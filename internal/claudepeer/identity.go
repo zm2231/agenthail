@@ -68,8 +68,15 @@ func peerContent(session surface.Session, target, socket, fromMode, message stri
 	}
 	message = peerTag.ReplaceAllString(message, `<\$1`)
 	mode := ""
-	if fromMode == "bypass" || fromMode == "prompting" {
+	if fromMode = statedMode(fromMode); fromMode != "" {
 		mode = ` from-mode="` + fromMode + `"`
 	}
 	return fmt.Sprintf("<cross-session-message from=\"uds:%s\" from-session=\"%s\" from-name=\"%s\"%s>\n%s\n</cross-session-message>", socket, surface.PeerUUID(session.Surface, session.ID), name, mode, message)
+}
+
+func statedMode(mode string) string {
+	if mode == "bypass" || mode == "prompting" {
+		return mode
+	}
+	return ""
 }

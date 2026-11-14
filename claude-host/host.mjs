@@ -1208,7 +1208,7 @@ function unsandboxed(id) {
 }
 
 function emit(sessionId, kind, data) {
-  const event = { seq: ++seq, sessionId, kind, ...data };
+  const event = { seq: ++seq, at: Date.now(), sessionId, kind, ...data };
   events.push(event);
   if (events.length > MAX_EVENTS) events.shift();
   const line = JSON.stringify({ event }) + '\n';

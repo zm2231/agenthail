@@ -210,7 +210,7 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	if state.hasCompleted && state.completed.MessageID != "" {
 		observation.CompletedTurnID = state.completed.MessageID
 		observation.CompletedAt = state.completed.TerminalAt
-		observation.InputTurnID = state.completed.UserID
+		observation.InputTurnIDs = state.completed.Inputs
 		observation.Reply = &surface.ReplyResult{Text: state.completed.Assistant, UserText: state.completed.User, Done: true, Error: claudeTurnError(state.completed)}
 	}
 	if last.Done && last.UsageLimited && (last.UsageResetsAt.IsZero() || time.Now().Before(last.UsageResetsAt)) {

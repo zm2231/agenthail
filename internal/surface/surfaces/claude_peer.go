@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -77,33 +78,77 @@ func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message
 	if socket == "" {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude messaging socket is unavailable"))
 	}
-	sender, senderSocket, native, err := c.nativeCaller(ctx, surface.SourceSessionID(ctx))
-	if err != nil {
+	source := surface.SourceSessionID(ctx)
+	sender, senderSocket, native, err := c.nativeCaller(ctx, source)
+	ambiguous := errors.Is(err, errSenderInSeveralProcesses)
+	if err != nil && !ambiguous {
 		return nil, err
 	}
-	fromMode := ""
+	if ambiguous || source == "" || source == surface.CLISessionID {
+		if err := c.refuseUnknownSender(ctx, session, ambiguous); err != nil {
+			return nil, err
+		}
+	}
 	var result *surface.SendResult
 	if native {
-		fromMode = c.permissionClass(ctx, sender)
-		result, err = claudepeer.SendNative(ctx, c.home, *sender, senderSocket, socket, fromMode, message)
+		result, err = claudepeer.SendNative(ctx, c.home, *sender, senderSocket, socket, c.permissionClass(ctx, sender), message)
 	} else {
-		result, err = peerbridge.Send(ctx, c.home, surface.SourceSessionID(ctx), socket, message)
+		result, err = peerbridge.Send(ctx, c.home, source, socket, message)
 	}
 	if err == nil && result != nil && result.Notice == "" {
-		result.Notice = c.peerHoldNotice(ctx, session, fromMode)
+		result.Notice = c.peerHoldNotice(ctx, session, result.FromMode)
 	}
 	return result, err
 }
 
-// Without a setting, Claude holds a message whose sender's mode differs from the session's.
-func (c *Claude) peerHoldNotice(ctx context.Context, target *surface.Session, fromMode string) string {
+var errSenderInSeveralProcesses = errors.New("the sender's Claude session runs in more than one process")
+
+func (c *Claude) settingsRoot(target *surface.Session) string {
 	root, _ := c.conversationRoot(target.ID)
 	if root == "" {
 		if roots, err := surface.ClaudeConfigRoots(c.home); err == nil && len(roots) > 0 {
 			root = roots[0]
 		}
 	}
-	inbound := surface.ReadClaudeInbound(root, target.Cwd)
+	return root
+}
+
+// PeerHoldDeadline is how long target's Claude keeps a message it held, or
+// false when it keeps it until someone answers. Only a session the Claude host
+// runs has an environment Agenthail knows: the daemon's.
+func (c *Claude) PeerHoldDeadline(target *surface.Session) (time.Duration, bool) {
+	timeout := ""
+	if claudeHosted(target) {
+		for _, entry := range claudeCommandEnv(c.home) {
+			if value, ok := strings.CutPrefix(entry, "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS="); ok {
+				timeout = value
+			}
+		}
+	}
+	return surface.ClaudeHoldDeadline(c.settingsRoot(target), timeout)
+}
+
+// refuseUnknownSender refuses before sending what Claude would hold and let
+// expire: a message whose sender's mode nobody can state, to a session the
+// Claude host runs without permission prompts under Claude's default policy.
+// Stating a mode for such a sender would let any process past that policy.
+func (c *Claude) refuseUnknownSender(ctx context.Context, target *surface.Session, ambiguous bool) error {
+	if !claudeHosted(target) || c.permissionClass(ctx, target) != "bypass" {
+		return nil
+	}
+	if surface.ReadClaudeInbound(c.settingsRoot(target), target.Cwd).Value != "" {
+		return nil
+	}
+	why := "this sender has no session identity; send from a session (--from <session>) or from the Agenthail app"
+	if ambiguous {
+		why = "this sender's Claude session runs in more than one process, so its permission mode is unknown; send from a session with one process or from the Agenthail app"
+	}
+	return surface.DeliveryTerminal(errors.New("this session runs without permission prompts and "+why), surface.DeliveryAccessDenied)
+}
+
+// Without a setting, Claude holds a message whose sender's mode differs from the session's.
+func (c *Claude) peerHoldNotice(ctx context.Context, target *surface.Session, fromMode string) string {
+	inbound := surface.ReadClaudeInbound(c.settingsRoot(target), target.Cwd)
 	switch inbound.Value {
 	case "accept":
 		return ""
@@ -147,7 +192,7 @@ func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session,
 			continue
 		}
 		if sender != nil {
-			return nil, "", false, nil
+			return nil, "", false, errSenderInSeveralProcesses
 		}
 		session := process.session
 		sender, record = &session, candidate
@@ -160,6 +205,32 @@ func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session,
 		return nil, "", false, surface.DeliveryUnavailable(fmt.Errorf("Claude sender messaging socket is unavailable"))
 	}
 	return sender, socket, true, nil
+}
+
+// PeerSocketSession is the session whose live Claude process listens on the
+// peer address Claude reports a message came from, or "" when no single
+// Claude session of the person's does.
+func (c *Claude) PeerSocketSession(ctx context.Context, from string) string {
+	path, ok := strings.CutPrefix(from, "uds:")
+	if !ok || path == "" {
+		return ""
+	}
+	_, records, err := c.records()
+	if err != nil {
+		return ""
+	}
+	session := ""
+	for _, record := range records {
+		if c.peerSocket(ctx, record.fields) != path {
+			continue
+		}
+		id := str(record.fields, "sessionId")
+		if session != "" && session != id {
+			return ""
+		}
+		session = id
+	}
+	return session
 }
 
 // permissionClass is how the sender runs, in the terms Claude's peer policy

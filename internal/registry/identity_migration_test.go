@@ -204,6 +204,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 		exec(`INSERT INTO daemon_events(event_type,entity_id,payload,created_at) VALUES('session.status',?,?,?)`, id, []byte(`{"sessionId":"`+id+`"}`), now)
 		exec(`INSERT INTO daemon_event_items(dedupe_key,event_id) VALUES(?,1)`, "status:"+id)
 		exec(`INSERT INTO host_queue_dirty(session_id) VALUES(?)`, id)
+		exec(`INSERT INTO peer_relay_sockets(socket_path,session_id,started_ms) VALUES(?,?,1)`, "/relay/"+id, id)
 	}
 	exec(`INSERT INTO host_queue_dirty(session_id) VALUES('conversation-native')`)
 	exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,observed_at) VALUES('conversation-native','{}','{}',?)`, now)
