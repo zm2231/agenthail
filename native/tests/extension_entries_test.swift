@@ -12,14 +12,15 @@ struct ExtensionEntriesTest {
                 ExtensionMount(name: "waiting", label: "Waiting", entry: "/", state: "pending"),
             ]),
             ExtensionSummary(id: "broken", label: "Broken", state: "failed", error: "load failed: boom", page: ExtensionPage(port: 7431, entry: "/")),
-            ExtensionSummary(id: "quiet", label: "Quiet", state: "loaded", page: ExtensionPage(port: 7432, entry: "/", published: false)),
+            ExtensionSummary(id: "quiet", label: "Quiet", description: " quiet ", state: "loaded", page: ExtensionPage(port: 7432, entry: "/", published: false)),
         ])
         let local = ExtensionEntries.build(list, hostID: "h1", hostName: "studio", origin: URL(string: "http://127.0.0.1:7412")!)
         let page = local.first { $0.id == "h1/board/page" }
         check(page?.url?.absoluteString == "http://127.0.0.1:7430/", "a loaded page opens on its own port, got \(String(describing: page?.url))")
         check(page?.label == "Team board" && page?.icon == "chart.bar" && page?.order == 2 && page?.offered == true && page?.badge == "3", "the page carries what it offers: \(String(describing: page))")
         check(page?.detail == "Who is working on what", "a page's detail is its description, got \(String(describing: page?.detail))")
-        check(local.first { $0.id == "h1/quiet/page" }?.detail == nil, "a page without a description shows no detail")
+        check(local.first { $0.id == "h1/quiet/page" }?.detail == nil, "a description that only repeats the label shows no detail")
+        check(local.first { $0.id == "h1/broken/page" }?.detail == nil, "a page without a description shows no detail")
         let console = local.first { $0.id == "h1/board/mount/console" }
         check(console?.detail == "Board", "a mount's detail names its extension")
         check(console?.url?.absoluteString == "http://127.0.0.1:7421/admin.html", "a serving mount opens on its own port, got \(String(describing: console?.url))")
