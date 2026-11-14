@@ -349,6 +349,18 @@ CREATE TABLE IF NOT EXISTS device_connection_drops (
 	PRIMARY KEY (device_id, drop_id)
 );
 CREATE INDEX IF NOT EXISTS device_connection_drops_recent ON device_connection_drops(device_id, started_at DESC);
+CREATE TABLE IF NOT EXISTS device_streams (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	device_id TEXT NOT NULL REFERENCES paired_devices(id) ON DELETE CASCADE,
+	route TEXT NOT NULL,
+	opened_at_ms INTEGER NOT NULL,
+	closed_at_ms INTEGER NOT NULL,
+	last_flush_at_ms INTEGER NOT NULL DEFAULT 0,
+	ended TEXT NOT NULL,
+	bytes INTEGER NOT NULL DEFAULT 0,
+	tailnet_path TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS device_streams_recent ON device_streams(device_id, closed_at_ms DESC);
 CREATE TABLE IF NOT EXISTS browser_push_subscriptions (
 	device_id TEXT PRIMARY KEY REFERENCES paired_devices(id) ON DELETE CASCADE,
 	endpoint TEXT NOT NULL,

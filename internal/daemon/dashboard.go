@@ -16,7 +16,7 @@ import (
 
 type dashboardServer struct {
 	server        *http.Server
-	cancel        context.CancelFunc
+	cancel        context.CancelCauseFunc
 	listen        string
 	token         string
 	devices       browserDevices
@@ -51,7 +51,7 @@ func (d *Daemon) startDashboard() (*dashboardServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen dashboard on %s: %w", config.Listen, err)
 	}
-	serverCtx, cancel := context.WithCancel(context.Background())
+	serverCtx, cancel := context.WithCancelCause(context.Background())
 	dashboard := &dashboardServer{listen: config.Listen, token: token, cancel: cancel}
 	dashboard.server = &http.Server{
 		Handler:           d.dashboardHandler(dashboard),
@@ -74,7 +74,7 @@ const dashboardShutdownTimeout = 5 * time.Second
 
 func (d *dashboardServer) shutdown() error {
 	if d.cancel != nil {
-		d.cancel()
+		d.cancel(errDaemonStopping)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), dashboardShutdownTimeout)
 	defer cancel()

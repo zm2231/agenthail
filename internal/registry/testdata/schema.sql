@@ -1,4 +1,4 @@
--- schemaVersion 101
+-- schemaVersion 102
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -54,6 +54,9 @@ CREATE INDEX device_connection_drops_recent ON device_connection_drops(device_id
 
 -- index device_pairings_expires
 CREATE INDEX device_pairings_expires ON device_pairings(expires_at);
+
+-- index device_streams_recent
+CREATE INDEX device_streams_recent ON device_streams(device_id, closed_at_ms DESC);
 
 -- index host_held_actions_open
 CREATE INDEX host_held_actions_open ON host_held_actions(host_id, id) WHERE status IN ('pending','inflight');
@@ -407,6 +410,19 @@ CREATE TABLE device_push_targets (
 	credential TEXT NOT NULL,
 	enabled INTEGER NOT NULL DEFAULT 1,
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table device_streams
+CREATE TABLE device_streams (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	device_id TEXT NOT NULL REFERENCES paired_devices(id) ON DELETE CASCADE,
+	route TEXT NOT NULL,
+	opened_at_ms INTEGER NOT NULL,
+	closed_at_ms INTEGER NOT NULL,
+	last_flush_at_ms INTEGER NOT NULL DEFAULT 0,
+	ended TEXT NOT NULL,
+	bytes INTEGER NOT NULL DEFAULT 0,
+	tailnet_path TEXT NOT NULL DEFAULT ''
 );
 
 -- table host_held_actions

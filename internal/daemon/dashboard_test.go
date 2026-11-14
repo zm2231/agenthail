@@ -893,7 +893,7 @@ func TestDashboardStreamsSelectedSessionOverSSE(t *testing.T) {
 }
 
 func TestDashboardShutdownCancelsActiveStreams(t *testing.T) {
-	serverCtx, cancel := context.WithCancel(context.Background())
+	serverCtx, cancel := context.WithCancelCause(context.Background())
 	started := make(chan struct{})
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -935,7 +935,7 @@ func TestDashboardShutdownCancelsActiveStreams(t *testing.T) {
 }
 
 func TestDashboardShutdownWaitsForARequestInFlight(t *testing.T) {
-	serverCtx, cancel := context.WithCancel(context.Background())
+	serverCtx, cancel := context.WithCancelCause(context.Background())
 	started, release := make(chan struct{}), make(chan struct{})
 	var finished atomic.Bool
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
