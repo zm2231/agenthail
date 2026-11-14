@@ -97,6 +97,23 @@ func TestAQuietThreadWithWorkStillOpenInItsRolloutIsNotUnheld(t *testing.T) {
 		{"an ended turn whose command still runs", lines[:4], false},
 		{"an ended turn whose command finished", lines, true},
 	}
+	event := func(typ string) string {
+		return `{"timestamp":"2026-10-26T10:00:00Z","type":"event_msg","payload":{"type":"` + typ + `","turn_id":"turn-1"}}`
+	}
+	for _, start := range []string{"task_started", "turn_started"} {
+		cases = append(cases, struct {
+			name    string
+			rollout []string
+			want    bool
+		}{"a turn opened by " + start, []string{event(start)}, false})
+		for _, end := range []string{"task_complete", "task_completed", "turn_completed", "task_cancelled", "task_canceled", "task_aborted", "turn_aborted", "interrupted"} {
+			cases = append(cases, struct {
+				name    string
+				rollout []string
+				want    bool
+			}{start + " closed by " + end, []string{event(start), event(end)}, true})
+		}
+	}
 	for _, tc := range cases {
 		rollout := timelineFixture(t, strings.Join(tc.rollout, "\n")+"\n")
 		old := time.Now().Add(-time.Hour)
