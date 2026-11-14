@@ -144,14 +144,16 @@ final class ExtensionCatalog {
     private(set) var loading = false
     private(set) var signIn: ExtensionSignIn?
     @ObservationIgnored private(set) var api: AgenthailAPI?
+    let hostRef: String?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var again = false
     @ObservationIgnored private(set) var wanted = false
 
-    init(hostID: String = "", hostName: String = "", api: AgenthailAPI? = nil) {
+    init(hostID: String = "", hostName: String = "", api: AgenthailAPI? = nil, hostRef: String? = nil) {
         self.hostID = hostID
         self.hostName = hostName
         self.api = api
+        self.hostRef = hostRef
         signIn = api.map(ExtensionSignIn.init)
     }
 
@@ -185,9 +187,10 @@ final class ExtensionCatalog {
         }
         guard let api else { return }
         loading = true
+        let hostRef = hostRef
         refreshTask = Task { [weak self] in
             let result: Result<ExtensionsList, Error>
-            do { result = .success(try await api.extensions()) } catch { result = .failure(error) }
+            do { result = .success(try await api.extensions(host: hostRef)) } catch { result = .failure(error) }
             self?.apply(result, from: api)
         }
     }

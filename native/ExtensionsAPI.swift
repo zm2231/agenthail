@@ -1,17 +1,22 @@
 import Foundation
 
 extension AgenthailAPI {
-    func extensions() async throws -> ExtensionsList {
-        try await extensionsRequest("/api/v1/extensions", method: "GET", body: nil)
+    func extensions(host: String? = nil) async throws -> ExtensionsList {
+        try await extensionsRequest(Self.onHost("/api/v1/extensions", host), method: "GET", body: nil)
     }
 
     func extensionWebSession() async throws -> ExtensionWebSession {
         try await extensionsRequest("/api/v1/web-session", method: "POST", body: nil)
     }
 
-    func extensionChanges(limit: Int = 50) async throws -> [ExtensionChange] {
-        let changes: ExtensionChanges = try await extensionsRequest("/api/v1/extensions/history?limit=\(limit)", method: "GET", body: nil)
+    func extensionChanges(limit: Int = 50, host: String? = nil) async throws -> [ExtensionChange] {
+        let changes: ExtensionChanges = try await extensionsRequest(Self.onHost("/api/v1/extensions/history?limit=\(limit)", host), method: "GET", body: nil)
         return changes.changes
+    }
+
+    static func onHost(_ path: String, _ host: String?) -> String {
+        guard let host, let value = host.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=+?"))) else { return path }
+        return path + (path.contains("?") ? "&" : "?") + "host=" + value
     }
 
     func undoExtensionChange(_ rev: String) async throws {

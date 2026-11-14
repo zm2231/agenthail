@@ -5,7 +5,7 @@ import WebKit
 struct ExtensionsPane: View {
     var model: AgenthailModel
     var pane: SessionPane
-    @State private var showsHistory = false
+    @State private var history: HistoryTarget?
     @State private var showsNew = false
     private var pins: ExtensionPins { .shared }
 
@@ -23,45 +23,80 @@ struct ExtensionsPane: View {
                             .foregroundStyle(DesktopPalette.text2)
                     }
                     Spacer()
-                    Button("History") { showsHistory = true }
+                    Button("History") { history = HistoryTarget(catalog) }
                         .accessibilityIdentifier("extensions-history")
                     Button("New Extension…") { showsNew = true }
                         .accessibilityIdentifier("extensions-new")
                 }
-                if let error = catalog.error {
-                    Text(error)
-                        .font(.system(size: DesktopType.secondary))
-                        .foregroundStyle(DesktopPalette.text2)
-                }
-                if catalog.entries.isEmpty {
-                    Text(catalog.list == nil ? "Looking for extensions…" : "No extensions yet. Use New Extension to describe one.")
-                        .font(.system(size: DesktopType.body))
-                        .foregroundStyle(DesktopPalette.text2)
-                } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: DesktopSpace.m, alignment: .top)], alignment: .leading, spacing: DesktopSpace.m) {
-                        ForEach(catalog.entries) { entry in
-                            ExtensionCard(entry: entry, pinned: pins.isPinned(entry)) {
-                                pane.showExtension(entry.id)
-                            } togglePin: {
-                                pins.toggle(entry)
-                            }
-                        }
+                entries(catalog, empty: "No extensions yet. Use New Extension to describe one.")
+                ForEach(model.pairedExtensionCatalogs, id: \.hostID) { paired in
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Extensions on \(paired.hostName)")
+                            .font(.system(size: DesktopType.title, weight: .semibold))
+                            .foregroundStyle(DesktopPalette.text)
+                        Spacer()
+                        Button("History") { history = HistoryTarget(paired) }
+                            .accessibilityIdentifier("extensions-history-" + paired.hostID)
+                        Button("Build on \(paired.hostName)") {}
+                            .disabled(true)
+                            .help("Start a builder on \(paired.hostName) itself.")
                     }
+                    .padding(.top, DesktopSpace.m)
+                    entries(paired, empty: "No extensions on \(paired.hostName).")
                 }
-                Text("Extensions on paired hosts come later.")
-                    .font(.system(size: DesktopType.meta))
-                    .foregroundStyle(DesktopPalette.text2)
             }
             .padding(DesktopSpace.xxl)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task { catalog.refresh() }
-        .sheet(isPresented: $showsHistory) {
-            ExtensionHistorySheet(api: model.api, extensionID: nil)
+        .task { model.extensionCatalogs.forEach { $0.refresh() } }
+        .onAppear { model.extensionsHubsShown += 1 }
+        .onDisappear { model.extensionsHubsShown -= 1 }
+        .sheet(item: $history) { target in
+            ExtensionHistorySheet(api: target.api, host: target.host, hostName: target.hostName, extensionID: nil)
         }
         .sheet(isPresented: $showsNew) {
             NewExtensionSheet(api: model.api) { sessionID in pane.select(sessionID) }
         }
+    }
+
+    @ViewBuilder
+    private func entries(_ catalog: ExtensionCatalog, empty: String) -> some View {
+        if let error = catalog.error {
+            Text(error)
+                .font(.system(size: DesktopType.secondary))
+                .foregroundStyle(DesktopPalette.text2)
+        }
+        if catalog.entries.isEmpty {
+            if catalog.error == nil {
+                Text(catalog.list == nil ? "Looking for extensions…" : empty)
+                    .font(.system(size: DesktopType.body))
+                    .foregroundStyle(DesktopPalette.text2)
+            }
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: DesktopSpace.m, alignment: .top)], alignment: .leading, spacing: DesktopSpace.m) {
+                ForEach(catalog.entries) { entry in
+                    ExtensionCard(entry: entry, pinned: pins.isPinned(entry)) {
+                        pane.showExtension(entry.id)
+                    } togglePin: {
+                        pins.toggle(entry)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct HistoryTarget: Identifiable {
+    let id: String
+    let api: AgenthailAPI?
+    let host: String?
+    let hostName: String
+
+    @MainActor init(_ catalog: ExtensionCatalog) {
+        id = catalog.hostID
+        api = catalog.api
+        host = catalog.hostRef
+        hostName = catalog.hostName
     }
 }
 
@@ -142,7 +177,7 @@ struct ExtensionPagePane: View {
     let entryID: String
 
     var body: some View {
-        let catalog = model.extensionCatalog
+        let catalog = model.extensionCatalog(forEntry: entryID) ?? model.extensionCatalog
         Group {
             if let entry = catalog.entry(entryID) {
                 if let url = entry.url {
@@ -172,6 +207,7 @@ struct ExtensionPagePane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: entryID) { if catalog.list == nil && !catalog.loading { catalog.refresh() } }
         .ignoresSafeArea(.all, edges: pane.pageFills ? .all : [])
         .background {
             if pane.pageFills {
@@ -258,6 +294,8 @@ private struct ExtensionPageHost: NSViewRepresentable {
 
 struct ExtensionHistorySheet: View {
     let api: AgenthailAPI?
+    var host: String? = nil
+    var hostName = ""
     let extensionID: String?
     @Environment(\.dismiss) private var dismiss
     @State private var changes: [ExtensionChange]?
@@ -271,7 +309,7 @@ struct ExtensionHistorySheet: View {
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
-            Text("Changes are kept as they are made. Undo any change here.")
+            Text(host == nil ? "Changes are kept as they are made. Undo any change here." : "Changes on \(hostName) are kept as they are made. Undo them on \(hostName) itself.")
                 .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.text2)
             if let failure {
@@ -291,8 +329,13 @@ struct ExtensionHistorySheet: View {
                         }
                         Spacer()
                         if change.root != true {
-                            Button("Undo") { Task { await undo(change) } }
-                                .disabled(undoing != nil)
+                            if host == nil {
+                                Button("Undo") { Task { await undo(change) } }
+                                    .disabled(undoing != nil)
+                            } else {
+                                Button("Undo on \(hostName)") {}
+                                    .disabled(true)
+                            }
                         }
                     }
                 }
@@ -309,7 +352,7 @@ struct ExtensionHistorySheet: View {
     private func load() async {
         guard let api else { return }
         do {
-            let all = try await api.extensionChanges()
+            let all = try await api.extensionChanges(host: host)
             changes = extensionID.map { id in all.filter { $0.touches(id) } } ?? all
         } catch {
             failure = error.localizedDescription
