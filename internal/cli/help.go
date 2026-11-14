@@ -169,6 +169,7 @@ Background service:
   daemon uninstall              Stop Agenthail from starting automatically
   debug heap <dir>              Write the daemon's memory statistics and heap, allocation and goroutine profiles to <dir>
   debug cpu <dir> [seconds]     Sample the daemon's CPU for [seconds] (default 30, at most 300) and write the profile to <dir>
+  mcp stdio                     Serve the Agenthail tools to the Claude session that runs it, as that session
 
 Claude hooks (answer terminal Claude prompts from Agenthail; tell each session who it is):
   hooks install                 Add Agenthail's hooks to every Claude config root

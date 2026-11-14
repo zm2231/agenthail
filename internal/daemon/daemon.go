@@ -495,6 +495,11 @@ func (d *Daemon) RunWithSignal() error {
 	} else {
 		defer stopDebug()
 	}
+	if stopMCP, err := d.startMCPSocket(); err != nil {
+		d.log.Printf("MCP socket unavailable: %s", err)
+	} else {
+		defer stopMCP()
+	}
 	stopPeers, err := d.startClaudePeers(ctx)
 	if err != nil {
 		d.log.Printf("Claude peer registration unavailable: %s", err)

@@ -418,6 +418,26 @@ func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 	}
 }
 
+func TestDoctorNamesAnMCPSocketPathTooLongWithoutFailingTheSurfaces(t *testing.T) {
+	t.Setenv("HOME", filepath.Join(t.TempDir(), strings.Repeat("h", 120)))
+	app, _ := cliFixture(t, &cliSurface{kind: surface.KindCodex})
+	app.daemonService = &fakeService{loaded: true}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
+	if err != nil {
+		t.Fatalf("an unavailable MCP socket failed doctor: err=%v output=%s", err, output)
+	}
+	var payload struct {
+		MCPSocket map[string]string `json:"mcpSocket"`
+	}
+	if err := json.Unmarshal([]byte(output), &payload); err != nil || !strings.Contains(payload.MCPSocket["problem"], "shorter home directory") {
+		t.Fatalf("doctor --json does not name the socket problem: %v %s", err, output)
+	}
+	text, _ := captureStdout(t, func() error { return app.Run([]string{"doctor"}) })
+	if !strings.Contains(text, "MCP socket: unavailable") || !strings.Contains(text, payload.MCPSocket["path"]) {
+		t.Fatalf("doctor text does not name the socket problem:\n%s", text)
+	}
+}
+
 func TestDoctorStaysHealthyAndShowsNotesForUnavailableManagedTerminals(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
 	note := surface.RuntimeNote{Problem: surface.RuntimeCodexMissing, Message: "managed terminals unavailable", Remediation: "install the standalone runtime"}

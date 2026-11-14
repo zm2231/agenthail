@@ -41,14 +41,20 @@ func scopeRefusal(target, rule, message string) *mcpRefusal {
 }
 
 func (d *Daemon) mcpHandler() http.Handler {
-	stream := mcp.NewStreamableHTTPHandler(d.mcpServerFor(d.newMCPServer()), &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	stream := mcp.NewStreamableHTTPHandler(d.mcpServerFor(d.newMCPServer()), mcpStreamOptions)
 	return d.mcpAuth(http.NewCrossOriginProtection().Handler(stream))
 }
 
+var mcpStreamOptions = &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true}
+
 func (d *Daemon) newMCPServer() *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{SupportedProtocolVersions: mcpProtocolVersions})
+	server := d.newBareMCPServer()
 	d.registerMCPTools(server)
 	return server
+}
+
+func (d *Daemon) newBareMCPServer() *mcp.Server {
+	return mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{SupportedProtocolVersions: mcpProtocolVersions})
 }
 
 func (d *Daemon) registerMCPTools(server *mcp.Server) {

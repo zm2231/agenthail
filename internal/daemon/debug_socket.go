@@ -14,6 +14,8 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/nodehost"
 )
 
 var DebugProfiles = []string{"heap", "allocs", "goroutine"}
@@ -29,16 +31,32 @@ func DebugSocketPath() string {
 }
 
 // startDebugSocket serves the runtime profiles on a Unix socket only the
-// daemon's user can open. It runs under the daemon lock, so a socket left at
-// the path belongs to a daemon that is gone.
+// daemon's user can open.
 func (d *Daemon) startDebugSocket() (func(), error) {
 	path := DebugSocketPath()
+	listener, err := listenUserSocket(path)
+	if err != nil {
+		return nil, err
+	}
+	stop := serveDebug(listener, debugProfileHandler(), d.log.Printf)
+	return func() {
+		stop()
+		_ = os.Remove(path)
+	}, nil
+}
+
+// listenUserSocket listens at path for the daemon's user alone. It runs under
+// the daemon lock, so a socket left at path belongs to a daemon that is gone.
+func listenUserSocket(path string) (net.Listener, error) {
+	if err := nodehost.CheckSocketPath(path); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
-			return nil, fmt.Errorf("debug socket path is not a socket: %s", path)
+			return nil, fmt.Errorf("socket path is not a socket: %s", path)
 		}
 		if err := os.Remove(path); err != nil {
 			return nil, err
@@ -54,11 +72,7 @@ func (d *Daemon) startDebugSocket() (func(), error) {
 		listener.Close()
 		return nil, err
 	}
-	stop := serveDebug(listener, debugProfileHandler(), d.log.Printf)
-	return func() {
-		stop()
-		_ = os.Remove(path)
-	}, nil
+	return listener, nil
 }
 
 var (
