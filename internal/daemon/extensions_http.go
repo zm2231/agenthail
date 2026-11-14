@@ -275,13 +275,21 @@ func (d *Daemon) apiExtensionHistoryHandler(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
 		return
 	}
+	var ids []string
+	if id := r.URL.Query().Get("id"); id != "" {
+		if !extension.ValidID(id) {
+			writeAPIError(w, http.StatusBadRequest, "invalid", "Not an extension id: "+id+".")
+			return
+		}
+		ids = append(ids, id)
+	}
 	changes := []extension.Change{}
 	if history != nil {
 		limit := 50
 		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
 			limit = n
 		}
-		if changes, err = history.Log(limit, "HEAD"); err != nil {
+		if changes, err = history.Log(limit, "HEAD", ids...); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}

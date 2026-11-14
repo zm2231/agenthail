@@ -14,6 +14,7 @@ import (
 	"slices"
 
 	"github.com/zm2231/agenthail/internal/atomicfile"
+	"github.com/zm2231/agenthail/internal/gitstore"
 )
 
 const recipesDir = "recipes"
@@ -79,7 +80,7 @@ func (h *History) Seed(home string) error {
 		if err := h.repo.Stage(written...); err != nil {
 			return err
 		}
-		if _, err := h.repo.CommitStaged("agenthail", "Update the guide for building extensions"); err != nil {
+		if _, err := h.repo.CommitStaged(gitstore.Agenthail, "Update the guide for building extensions"); err != nil {
 			return err
 		}
 	}

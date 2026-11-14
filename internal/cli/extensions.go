@@ -16,7 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const extensionsUsage = "usage: agenthail extensions [list] | build \"<what it should do>\" [--agent claude|codex] | call <id> <action> [--input <json>] | run <id> <job> | approve <id> | reload | history | undo <rev> | key <id> <mount> (--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account> | --key-command -- <argv...> | --clear), each with [--json]"
+const extensionsUsage = "usage: agenthail extensions [list] | build \"<what it should do>\" [--agent claude|codex] | call <id> <action> [--input <json>] | run <id> <job> | approve <id> | reload | history [<id>] | undo <rev> | key <id> <mount> (--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account> | --key-command -- <argv...> | --clear), each with [--json]"
 
 type extensionsListView struct {
 	Host       string `json:"host"`
@@ -111,8 +111,12 @@ func (a *App) cmdExtensions(args []string) error {
 		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "reload"}, nil)
 	case sub == "approve" && len(positional) == 2:
 		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "approve", "id": positional[1], "sessionId": caller}, nil)
-	case sub == "history" && len(positional) == 1:
-		data, _, err = client.call(ctx, http.MethodGet, "/api/v1/extensions/history", nil, nil, nil)
+	case sub == "history" && len(positional) <= 2:
+		query := url.Values{}
+		if len(positional) == 2 {
+			query.Set("id", positional[1])
+		}
+		data, _, err = client.call(ctx, http.MethodGet, "/api/v1/extensions/history", query, nil, nil)
 		if err == nil && !asJSON {
 			return printExtensionHistory(data)
 		}
@@ -237,9 +241,8 @@ func describeExtensions(view extensionsListView) string {
 
 type extensionChangeView struct {
 	Rev        string    `json:"rev"`
-	Author     string    `json:"author"`
 	Time       time.Time `json:"time"`
-	Message    string    `json:"message"`
+	Title      string    `json:"title"`
 	Extensions []struct {
 		ID      string   `json:"id"`
 		Created bool     `json:"created"`
@@ -261,7 +264,7 @@ func printExtensionHistory(data []byte) error {
 		fmt.Println("[extensions] no history yet")
 	}
 	for _, change := range view.Changes {
-		fmt.Printf("%s  %s  %s: %s\n", change.Rev, change.Time.Local().Format(time.DateTime), change.Author, change.Message)
+		fmt.Printf("%s  %s  %s\n", change.Rev, change.Time.Local().Format(time.DateTime), change.Title)
 		for _, files := range change.Extensions {
 			what := "changed"
 			switch {
@@ -293,7 +296,7 @@ func printExtensionUndo(data []byte) error {
 	if err := json.Unmarshal(data, &view); err != nil {
 		return err
 	}
-	fmt.Printf("[extensions] undid %s (%s)\n", view.Undone.Rev, view.Undone.Message)
+	fmt.Printf("[extensions] undid %s (%s)\n", view.Undone.Rev, view.Undone.Title)
 	if len(view.Removed) > 0 {
 		fmt.Printf("[extensions] removed %s with its tables and approvals\n", strings.Join(view.Removed, ", "))
 	}
