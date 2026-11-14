@@ -106,6 +106,7 @@ struct CompactActivityGroup: View, @MainActor Equatable {
         let _ = BodyRuns.hit("CompactActivityGroup", id: group.id)
         let _ = BodyRuns.changed("in.group.group", group.id, group)
         let _ = BodyRuns.changed("in.group.env", group.id, rows)
+        let _ = BodyRuns.changed("in.group.reveal", group.id, revealRow)
         let _ = probeOpenedInputs()
 #endif
         if group.foldLabel != nil {

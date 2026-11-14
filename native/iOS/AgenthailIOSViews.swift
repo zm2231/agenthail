@@ -823,6 +823,7 @@ struct SessionScreen: View {
                 }
             }
         }
+        .countsScreenChurn()
         .toolbar(ConversationFlow.splits(sizeClass, typeSize) ? .automatic : .hidden, for: .tabBar)
         .navigationTitle(displayTitle)
         .navigationBarTitleDisplayMode(.inline)
