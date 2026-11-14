@@ -34,6 +34,13 @@ func (r *Real) Socket() string { return SocketPath(r.CodexHome) }
 // StartReal leaves the process environment alone, so several can run in one test.
 func StartReal(t testing.TB, model http.Handler) *Real {
 	t.Helper()
+	return StartRealWith(t, model, "")
+}
+
+// StartRealWith appends config, TOML for the Codex home's config.toml, to
+// the mock model's.
+func StartRealWith(t testing.TB, model http.Handler, config string) *Real {
+	t.Helper()
 	if _, err := exec.LookPath("codex"); err != nil {
 		t.Skip("codex is not installed")
 	}
@@ -54,8 +61,8 @@ func StartReal(t testing.TB, model http.Handler) *Real {
 			t.Fatal(err)
 		}
 	}
-	config := fmt.Sprintf("model = \"probe-model\"\nmodel_provider = \"mock\"\n[model_providers.mock]\nname = \"mock\"\nbase_url = \"%s/v1\"\nwire_api = \"responses\"\nenv_key = \"MOCK_KEY\"\n", server.URL)
-	if err := os.WriteFile(filepath.Join(real.CodexHome, "config.toml"), []byte(config), 0o600); err != nil {
+	base := fmt.Sprintf("model = \"probe-model\"\nmodel_provider = \"mock\"\n[model_providers.mock]\nname = \"mock\"\nbase_url = \"%s/v1\"\nwire_api = \"responses\"\nenv_key = \"MOCK_KEY\"\n", server.URL)
+	if err := os.WriteFile(filepath.Join(real.CodexHome, "config.toml"), []byte(base+config), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	stop := real.start(t)

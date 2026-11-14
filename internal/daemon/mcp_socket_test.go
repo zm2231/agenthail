@@ -298,6 +298,18 @@ func (p processOwner) ProcessSession(pid int) string {
 	return ""
 }
 
+type threadOwner struct {
+	*daemonSurface
+	pid int
+}
+
+func (o threadOwner) ProcessThreads(pid int) []string {
+	if pid == o.pid {
+		return []string{"thread"}
+	}
+	return nil
+}
+
 func TestASessionNamedByItsProcessGetsExtensionToolsToo(t *testing.T) {
 	home := extensionTestHome(t)
 	writeToolExtension(t, home, "wide", `{"label": "Wide", "capabilities": ["tools"]}`, toolServer)
@@ -314,6 +326,11 @@ func TestASessionNamedByItsProcessGetsExtensionToolsToo(t *testing.T) {
 	names := listedToolNames(t, socketClient(t))
 	if !slices.Contains(names, "ext_wide_peek") || !slices.Contains(names, "agenthail_send") {
 		t.Fatalf("a session named by its process lists %v", names)
+	}
+	f.d.Surfaces = append(f.d.Surfaces[:len(f.d.Surfaces)-1], threadOwner{daemonSurface: f.fake, pid: os.Getppid()})
+	names = listedToolNames(t, socketClient(t))
+	if !slices.Contains(names, "ext_wide_peek") || !slices.Contains(names, "agenthail_send") {
+		t.Fatalf("a Codex process's server, before any call names its thread, lists %v", names)
 	}
 }
 
