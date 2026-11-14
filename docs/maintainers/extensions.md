@@ -497,6 +497,6 @@ each with `rev`, `author`, `time`, `message`, `title` (who made it and what it
 did, as the dashboard and CLI show it), `sessionId`, `turnId` and, per
 extension, `created`, `removed` and the files `added`, `updated` and
 `deleted`, `checks` (the lines above about whether a run verified it), and
-`root` for the first commit, which can't be undone. With `&id=<id>` it lists
+`root` for the first commit, which can't be undone and has no checks. With `&id=<id>` it lists
 only the changes that touched that extension, each still with every file it
 changed, since undo reverts all of them.

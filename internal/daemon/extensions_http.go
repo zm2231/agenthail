@@ -296,6 +296,9 @@ type extensionChangeView struct {
 }
 
 func (d *Daemon) extensionChangeView(history *extension.History, change extension.Change) extensionChangeView {
+	if change.Root {
+		return extensionChangeView{Change: change}
+	}
 	return extensionChangeView{Change: change, Checks: d.extensionChecks(history, change)}
 }
 
