@@ -108,6 +108,40 @@ extension View {
     func countsGeometryChanges(_ name: String) -> some View {
         onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TranscriptRows.contentSpace)).minY } action: { _ in BodyRuns.hit(name) }
     }
+
+    func countsScreenChurn() -> some View {
+        onGeometryChange(for: CGSize.self) { $0.size } action: { _ in BodyRuns.hit("screen.size") }
+            .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { _ in BodyRuns.hit("screen.safeArea") }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { _ in BodyRuns.hit("kb.frame") }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in BodyRuns.hit("kb.show") }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in BodyRuns.hit("kb.hide") }
+            .background(ScreenTraitsProbe())
+    }
+}
+
+private struct ScreenTraitsProbe: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.horizontalSizeClass) private var horizontal
+    @Environment(\.verticalSizeClass) private var vertical
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.layoutDirection) private var direction
+    @Environment(\.legibilityWeight) private var legibility
+    @Environment(\.isFocused) private var focused
+
+    var body: some View {
+        let _ = BodyRuns.hit("screen.traits")
+        let _ = BodyRuns.changed("screen.trait.scenePhase", "root", scenePhase)
+        let _ = BodyRuns.changed("screen.trait.colorScheme", "root", colorScheme)
+        let _ = BodyRuns.changed("screen.trait.typeSize", "root", typeSize)
+        let _ = BodyRuns.changed("screen.trait.sizeClass", "root", [horizontal, vertical])
+        let _ = BodyRuns.changed("screen.trait.displayScale", "root", displayScale)
+        let _ = BodyRuns.changed("screen.trait.direction", "root", direction)
+        let _ = BodyRuns.changed("screen.trait.legibility", "root", legibility)
+        let _ = BodyRuns.changed("screen.trait.focused", "root", focused)
+        Color.clear
+    }
 }
 #else
 import SwiftUI
@@ -116,5 +150,6 @@ extension View {
     func countsAppearances(_ name: String) -> some View { self }
     func countsDisappearances(_ name: String) -> some View { self }
     func countsGeometryChanges(_ name: String) -> some View { self }
+    func countsScreenChurn() -> some View { self }
 }
 #endif
