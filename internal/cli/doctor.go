@@ -146,7 +146,6 @@ func (a *App) cmdDoctor(args []string) error {
 	mcpSocket := map[string]string{"path": daemon.MCPSocketPath()}
 	if err := nodehost.CheckSocketPath(mcpSocket["path"]); err != nil {
 		mcpSocket["problem"] = err.Error()
-		failures++
 	}
 	claudeHookStates := map[string]string{}
 	claudeInbound := map[string]surface.ClaudeInbound{}
