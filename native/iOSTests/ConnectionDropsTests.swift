@@ -141,24 +141,24 @@ final class ConnectionDropsTests: XCTestCase {
 
 @MainActor
 final class StreamDropElapsedTests: XCTestCase {
-    func testAStreamDropRecordsHowLongTheStreamWasUp() async throws {
+    func testAStreamDropRecordsHowLongTheStreamWasSilent() async throws {
         let drop = try await streamDrop(connects: true)
         XCTAssertEqual(drop.path, "stream")
-        let elapsed = try XCTUnwrap(drop.elapsedMs, "a stream that had been up recorded no duration")
-        XCTAssertGreaterThanOrEqual(elapsed, 400, "the stream was up for at least the held time")
-        XCTAssertLessThan(elapsed, 10_000)
+        let elapsed = try XCTUnwrap(drop.elapsedMs, "a stream that had been up recorded no silence")
+        XCTAssertGreaterThanOrEqual(elapsed, 150, "the stream was silent from its keepalive to its close")
+        XCTAssertLessThan(elapsed, 1_000, "the silence was measured from connect, not from the keepalive")
     }
 
     func testAStreamThatNeverConnectedRecordsNoDuration() async throws {
         let drop = try await streamDrop(connects: false)
         XCTAssertEqual(drop.path, "stream")
-        XCTAssertNil(drop.elapsedMs, "a stream that never connected has no up time")
+        XCTAssertNil(drop.elapsedMs, "a stream that never connected has no silence to measure")
     }
 
     func testAReconnectDoesNotCarryTheOldStreamsUpTime() async throws {
         let drop = try await streamDrop(connects: true, reconnect: true)
         XCTAssertEqual(drop.path, "stream")
-        XCTAssertNil(drop.elapsedMs, "the new stream never connected but took the old one's up time")
+        XCTAssertNil(drop.elapsedMs, "the new stream never connected but took the old one's timing")
     }
 
     private func streamDrop(connects: Bool, reconnect: Bool = false) async throws -> ConnectionDrop {
@@ -227,7 +227,8 @@ private final class StreamUpProtocol: URLProtocol, @unchecked Sendable {
                 Self.state.hold()
                 return
             }
-            later(0.5) {
+            later(1.0) { self.client?.urlProtocol(self, didLoad: Data(": keepalive\n\n".utf8)) }
+            later(1.2) {
                 Self.state.drop()
                 self.client?.urlProtocolDidFinishLoading(self)
             }
