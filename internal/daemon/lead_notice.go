@@ -1,11 +1,10 @@
 package daemon
 
 import (
-	"time"
-
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/sessiontools"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -62,6 +61,18 @@ func (d *Daemon) askAddress(sessionID, hearerID string) (string, bool) {
 }
 
 func (d *Daemon) usesMCP(sessionID string) bool {
-	_, live, err := d.Registry.LiveCredentialHash(sessionID, time.Now())
-	return err == nil && live
+	session, err := d.Registry.Session(sessionID)
+	if err != nil {
+		return false
+	}
+	return sessiontools.Has(d.Registry, *session, func() (string, error) {
+		if session.Cwd == "" {
+			return "", nil
+		}
+		project, err := d.sessionProject(*session)
+		if err != nil || project == nil {
+			return "", err
+		}
+		return project.ID, nil
+	})
 }

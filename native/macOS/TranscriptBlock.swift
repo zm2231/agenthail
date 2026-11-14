@@ -11,6 +11,7 @@ struct TranscriptBlock: Identifiable, Equatable {
         case notice(String)
         case instructions(String)
         case image(SessionAttachment)
+        case sentFile(TimelineItem)
         case unknown(title: String, kind: String, text: String)
     }
 
@@ -63,8 +64,17 @@ struct TranscriptBlock: Identifiable, Equatable {
                 } else {
                     blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .assistant(item.text), truncated: item.truncated, timestamp: item.timestamp))
                 }
+            case "file":
+                flushTools()
+                if item.role != "user", let caption = SentFileState.caption(item) {
+                    blocks.append(TranscriptBlock(id: TranscriptRowID.caption(item.id), kind: .assistant(caption), timestamp: item.timestamp))
+                }
+                blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .sentFile(item), truncated: item.truncated, timestamp: item.timestamp))
             case "attachment":
                 flushTools()
+                if item.role == "assistant", let caption = SentFileState.caption(item) {
+                    blocks.append(TranscriptBlock(id: TranscriptRowID.caption(item.id), kind: .assistant(caption), timestamp: item.timestamp))
+                }
                 if let attachment = item.attachment, attachment.isImage {
                     blocks.append(TranscriptBlock(id: TranscriptRowID.item(item.id), kind: .image(attachment), truncated: item.truncated))
                 } else {

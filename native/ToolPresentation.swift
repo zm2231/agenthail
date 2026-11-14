@@ -23,6 +23,11 @@ struct ToolPresentation {
             }
             if name == "TaskCreate", let subject = input["subject"] as? String, !subject.isEmpty { return subject }
             if name == "AskUserQuestion", let first = Self.questions(input).first { return first.question }
+            if name == "SendUserFile" {
+                if let caption = input["caption"] as? String, !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return caption }
+                let files = (input["files"] as? [Any] ?? []).compactMap { $0 as? String }.map { ($0 as NSString).lastPathComponent }
+                return files.isEmpty ? "Sent a file" : files.joined(separator: ", ")
+            }
             for key in Self.summaryKeys + input.keys.sorted() {
                 if let value = input[key] as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return value }
             }

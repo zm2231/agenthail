@@ -77,6 +77,10 @@ struct AgenthailIOSApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var wasInBackground = false
 
+    init() {
+        Task.detached(priority: .utility) { SentFileCache.standard.prune() }
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {

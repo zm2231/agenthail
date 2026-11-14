@@ -1111,6 +1111,16 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         }
     }
 
+    func sentFile(_ item: TimelineItem, sessionID: String) async throws -> URL {
+        guard let attachment = item.attachment else { throw AgenthailAPIError.invalidResponse }
+        let (connection, route) = try resolveServer(sessionID)
+        return try await connection.api.downloadSentFile(sessionID: route.sessionID, attachment: attachment, name: SentFileState.name(item))
+    }
+
+    func hostName(forSession sessionID: String) -> String? {
+        (try? resolveServer(sessionID))?.connection.name
+    }
+
     func sessionAttachment(for item: TimelineItem, sessionID: String) async -> Data? {
         guard let attachment = item.attachment, selectedSessionID == sessionID, case let (connection, route)? = try? resolveServer(sessionID) else { return nil }
         let cacheKey = "\(sessionID):\(attachment.id)"

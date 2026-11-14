@@ -49,6 +49,10 @@ struct ToolPresentationTest {
         let updated = ToolPresentation(name: "TaskUpdate", text: json(["taskId": "2", "status": "in_progress"]))
         check(updated.verb == "Update task" && updated.object.text == "Task 2 · in progress", "a task update names the task and its status: \(updated.object.text)")
         check(ToolPresentation(name: "send_email", text: json(["subject": "Hi", "description": "Weekly note"])).object.text == "Weekly note", "other tools keep their description")
+        let uncaptioned = ToolPresentation(name: "SendUserFile", text: json(["files": ["/srv/out/gone.txt", "/srv/out/b.md"], "caption": "", "status": "normal"]))
+        check(uncaptioned.object.text == "gone.txt, b.md", "a sent file without a caption names its files, never its status: \(uncaptioned.object.text)")
+        check(ToolPresentation(name: "SendUserFile", text: json(["files": ["/srv/out/a.pdf"], "caption": "The report", "status": "normal"])).object.text == "The report", "a sent file reads by its caption")
+        check(ToolPresentation(name: "SendUserFile", text: json(["status": "normal"])).object.text == "Sent a file", "a call with no files still doesn't show its status")
 
         func call(_ index: Int) -> TimelineItem {
             TimelineItem(id: "c\(index)", kind: "toolCall", role: nil, title: "Bash", text: "{}", timestamp: nil, callId: "c\(index)", status: nil, truncated: false, truncationReason: nil, bodyRef: nil)

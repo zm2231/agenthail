@@ -21,10 +21,19 @@ func TestASessionWithAgenthailsToolsIsTaughtTheToolsAndATerminalOneTheCLI(t *tes
 		t.Fatalf("the terminal card names tools it does not have:\n%s", terminal)
 	}
 
+	installRelayInRoot(t)
+	own := helpAgentAs(t, app, "planner-conversation")
+	if !strings.Contains(own, toolCardLine) || strings.Contains(own, "agenthail_end_turn") {
+		t.Fatalf("a terminal session whose own config starts the relay is not taught the tools without ending its turns through one:\n%s", own)
+	}
+
 	if _, err := app.Registry.IssueSessionCredential("planner-conversation", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	hosted := helpAgentAs(t, app, "planner-conversation")
+	if !strings.Contains(hosted, `agenthail_end_turn {"headline":"<one line>"}`) {
+		t.Fatalf("a session on the server Agenthail gave it is not told to end its turns:\n%s", hosted)
+	}
 	for _, want := range []string{
 		`agenthail_send {"target":"<@alias|session-id>","message":"<message>"}`,
 		`agenthail_create {"surface":"claude|codex"`,
@@ -41,15 +50,16 @@ func TestASessionWithAgenthailsToolsIsTaughtTheToolsAndATerminalOneTheCLI(t *tes
 	}
 
 	var pinned struct {
-		CLICardBytes int `json:"cliCardBytes"`
-		MCPCardBytes int `json:"mcpCardBytes"`
+		CLICardBytes     int `json:"cliCardBytes"`
+		OwnToolCardBytes int `json:"ownToolCardBytes"`
+		MCPCardBytes     int `json:"mcpCardBytes"`
 	}
 	data, err := os.ReadFile("../agenttools/budget.json")
 	if err != nil || json.Unmarshal(data, &pinned) != nil {
 		t.Fatalf("read budget: %v", err)
 	}
-	if len(terminal) != pinned.CLICardBytes || len(hosted) != pinned.MCPCardBytes {
-		t.Fatalf("the cards changed size; if that is intended, set cliCardBytes to %d and mcpCardBytes to %d in internal/agenttools/budget.json (pinned %d and %d)", len(terminal), len(hosted), pinned.CLICardBytes, pinned.MCPCardBytes)
+	if len(terminal) != pinned.CLICardBytes || len(own) != pinned.OwnToolCardBytes || len(hosted) != pinned.MCPCardBytes {
+		t.Fatalf("the cards changed size; if that is intended, set cliCardBytes to %d, ownToolCardBytes to %d and mcpCardBytes to %d in internal/agenttools/budget.json (pinned %d, %d and %d)", len(terminal), len(own), len(hosted), pinned.CLICardBytes, pinned.OwnToolCardBytes, pinned.MCPCardBytes)
 	}
 }
 

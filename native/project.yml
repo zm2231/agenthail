@@ -45,6 +45,7 @@ targets:
       - path: ExtensionModels.swift
       - path: ExtensionEntries.swift
       - path: ExtensionWeb.swift
+      - path: SentFiles.swift
       - path: ClaudeCompactModels.swift
       - path: KeptDelivery.swift
       - path: QueueSteer.swift

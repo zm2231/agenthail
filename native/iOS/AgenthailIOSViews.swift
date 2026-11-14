@@ -697,6 +697,7 @@ struct SessionScreen: View {
                     transcriptRows
                     if let detail { QueueTailRows(model: model, tail: $queueTail, readOnly: detail.readOnly, generation: rowsGeneration) }
                 }.transcriptScrimRow()
+                .environment(\.sentFiles, SentFileContext(hostName: model.hostName(forSession: session.id)) { [model, id = session.id] item in try await model.sentFile(item, sessionID: id) })
             }
             .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? RowAction(owner: session.id) { model.editAndResend($0) } : nil)
             .environment(\.revealRow, RowAction(owner: session.id) {
@@ -1334,10 +1335,15 @@ struct IOSTimelineRow: View {
             ContextRecordRow(title: title, item: item)
         } else if item.kind == "notice" {
             TranscriptDivider(text: "\(item.title): \(item.noticeText)")
+        } else if item.kind == "file" {
+            IOSSentFileCard(item: item)
         } else if item.isSaid {
             IOSMessage(label: messageLabel, text: item.text, timestamp: item.timestamp, files: item.files ?? [], finished: finished)
             if item.truncated { ShortenedNote() }
         } else if item.kind == "attachment" {
+            if item.role == "assistant", let caption = SentFileState.caption(item) {
+                Text(caption).font(.body).textSelection(.enabled)
+            }
             AttachmentRow(item: item, loader: attachmentLoader.map { loader in { await loader(item) } })
         } else if item.kind == "toolCall" {
             ToolActivityRow(call: item, results: [], standaloneRecord: true)

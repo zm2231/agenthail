@@ -14,3 +14,9 @@ func (r *Registry) LiveCredentialHash(sessionID string, now time.Time) (string, 
 	}
 	return hash, err == nil, err
 }
+
+func (r *Registry) SessionCredentialIssued(sessionID string) (bool, error) {
+	var issued bool
+	err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM session_credentials WHERE session_id=?)`, sessionID).Scan(&issued)
+	return issued, err
+}

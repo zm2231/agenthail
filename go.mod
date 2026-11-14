@@ -5,6 +5,7 @@ go 1.26.0
 toolchain go1.26.5
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/dop251/goja v0.0.0-20261024144015-2a9269b6b6de
 	github.com/fsnotify/fsnotify v1.10.1

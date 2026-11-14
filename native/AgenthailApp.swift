@@ -664,6 +664,7 @@ private enum AgenthailMain {
                 .activate(options: [.activateIgnoringOtherApps])
             return
         }
+        Task.detached(priority: .utility) { SentFileCache.standard.prune() }
         withExtendedLifetime(instanceLock) {
             AgenthailMenuBarApp.main()
         }

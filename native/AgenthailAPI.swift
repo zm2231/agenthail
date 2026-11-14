@@ -226,6 +226,51 @@ final class AgenthailAPI: @unchecked Sendable {
         return data
     }
 
+    func downloadSentFile(sessionID: String, attachment: SessionAttachment, name: String, cache: SentFileCache = .standard, limit: Int64 = SentFileCache.fileLimit) async throws -> URL {
+        if let cached = cache.cached(id: attachment.id, name: name) { return cached }
+        let tooLarge = AgenthailAPIError.request(413, "This file is over \(ByteCountFormatter.string(fromByteCount: limit, countStyle: .file)), too large to open here.")
+        var components = URLComponents()
+        components.path = "/api/v1/session-attachment"
+        components.queryItems = [URLQueryItem(name: "sessionId", value: sessionID), URLQueryItem(name: "id", value: attachment.id)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        var request = authorizedRequest(path: path)
+        request.timeoutInterval = 120
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let response = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
+        guard response.statusCode == 200 else {
+            if response.statusCode == 413 { throw tooLarge }
+            if AgenthailAPIError.isUnknownRoute(await Self.errorBody(bytes)) { throw AgenthailAPIError.olderHost }
+            throw AgenthailAPIError.request(response.statusCode, HTTPURLResponse.localizedString(forStatusCode: response.statusCode))
+        }
+        if let length = response.value(forHTTPHeaderField: "Content-Length"), let length = Int64(length), length > limit { throw tooLarge }
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("agenthail-sent-\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: temporary.path, contents: nil) else { throw AgenthailAPIError.invalidResponse }
+        let handle = try FileHandle(forWritingTo: temporary)
+        var stored = false
+        defer {
+            try? handle.close()
+            if !stored { try? FileManager.default.removeItem(at: temporary) }
+        }
+        var buffer = Data()
+        buffer.reserveCapacity(64 << 10)
+        var total: Int64 = 0
+        for try await byte in bytes {
+            buffer.append(byte)
+            total += 1
+            if total > limit { throw tooLarge }
+            if buffer.count >= 64 << 10 {
+                if Task.isCancelled { throw CancellationError() }
+                try handle.write(contentsOf: buffer)
+                buffer.removeAll(keepingCapacity: true)
+            }
+        }
+        try handle.write(contentsOf: buffer)
+        try handle.close()
+        let url = try cache.store(temporary, id: attachment.id, name: name)
+        stored = true
+        return url
+    }
+
     func uiConfig(device: String, kind: String) async throws -> UIConfig {
         var components = URLComponents()
         components.path = "/api/v1/ui"
