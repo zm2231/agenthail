@@ -18,13 +18,20 @@ struct ExtensionMount: Codable, Equatable, Sendable {
     var badge: String?
 }
 
+struct ExtensionPage: Codable, Equatable, Sendable {
+    var port: Int?
+    var entry: String
+    var published: Bool?
+    var error: String?
+}
+
 struct ExtensionSummary: Codable, Equatable, Sendable, Identifiable {
     let id: String
     let label: String
     var description: String?
     var state: String
     var error: String?
-    var page: String?
+    var page: ExtensionPage?
     var app: ExtensionAppOffer?
     var badge: String?
     var mounts: [ExtensionMount]?

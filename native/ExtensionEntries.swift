@@ -37,13 +37,13 @@ enum ExtensionEntries {
         var entries: [ExtensionEntry] = []
         for summary in list.extensions {
             if let page = summary.page {
-                let loaded = summary.state == "loaded"
+                let (url, unavailable) = summary.state == "loaded"
+                    ? target(port: page.port, entry: page.entry, published: page.published, error: page.error ?? summary.error, origin: origin, hostName: hostName)
+                    : (nil, summary.error ?? "This extension is \(summary.state).")
                 entries.append(ExtensionEntry(
                     hostID: hostID, hostName: hostName, extensionID: summary.id, extensionLabel: summary.label, kind: .page,
                     label: label(summary.app, or: summary.label), icon: icon(summary.app), order: summary.app?.order ?? 0,
-                    offered: summary.app != nil, badge: shown(summary.badge),
-                    url: loaded ? URL(string: page, relativeTo: origin)?.absoluteURL : nil,
-                    unavailable: loaded ? nil : (summary.error ?? "This extension is \(summary.state).")))
+                    offered: summary.app != nil, badge: shown(summary.badge), url: url, unavailable: unavailable))
             }
             for mount in summary.mounts ?? [] {
                 let (url, unavailable) = mountTarget(mount, origin: origin, hostName: hostName)
@@ -57,18 +57,21 @@ enum ExtensionEntries {
     }
 
     static func mountTarget(_ mount: ExtensionMount, origin: URL, hostName: String) -> (URL?, String?) {
-        if let error = mount.error, !error.isEmpty { return (nil, error) }
-        guard mount.state == "serving", let port = mount.port, port > 0 else {
-            return (nil, mount.state == "pending" ? "Waiting for approval on \(hostName)." : "This mount is \(mount.state).")
-        }
-        let secure = origin.scheme == "https"
-        if secure && mount.published != true { return (nil, "\(hostName) doesn't publish this mount on the tailnet.") }
+        if mount.state == "pending" && (mount.error ?? "").isEmpty { return (nil, "Waiting for approval on \(hostName).") }
+        guard mount.state == "serving" || !(mount.error ?? "").isEmpty else { return (nil, "This mount is \(mount.state).") }
+        return target(port: mount.port, entry: mount.entry, published: mount.published, error: mount.error, origin: origin, hostName: hostName)
+    }
+
+    static func target(port: Int?, entry: String, published: Bool?, error: String?, origin: URL, hostName: String) -> (URL?, String?) {
+        if let error, !error.isEmpty { return (nil, error) }
+        guard let port, port > 0 else { return (nil, "\(hostName) isn't serving this yet.") }
+        if origin.scheme == "https" && published != true { return (nil, "\(hostName) doesn't publish this on the tailnet.") }
         var parts = URLComponents()
         parts.scheme = origin.scheme
         parts.host = origin.host
         parts.port = port
-        guard let base = parts.url, let url = URL(string: mount.entry.hasPrefix("/") ? mount.entry : "/" + mount.entry, relativeTo: base)?.absoluteURL else {
-            return (nil, "This mount's address is not valid.")
+        guard let base = parts.url, let url = URL(string: entry.hasPrefix("/") ? entry : "/" + entry, relativeTo: base)?.absoluteURL else {
+            return (nil, "This address is not valid.")
         }
         return (url, nil)
     }
