@@ -120,7 +120,14 @@ jobs:
           echo "UI test tiers: $TIERS (${#parallel[@]} -only-testing targets on parallel clones, ${#alone[@]} alone)"
           status=0
           scripts/ios-simulator-clones.sh delete "$SIMULATOR_UDID"
+          slimming="$RUNNER_TEMP/slim-clones"
+          touch "$slimming"
+          scripts/ios-simulator-clones.sh slim "$SIMULATOR_UDID" "$slimming" </dev/null >"$slimming.log" 2>&1 &
+          slimmer=$!
           scripts/ios-test-stall-guard.sh xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" "${parallel[@]}" -parallel-testing-enabled YES -parallel-testing-worker-count 3 -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult" || status=$?
+          rm -f "$slimming"
+          wait "$slimmer" || true
+          cat "$slimming.log"
           scripts/ios-simulator-clones.sh delete "$SIMULATOR_UDID"
           if [ "${#alone[@]}" -gt 0 ]; then
             scripts/ios-test-stall-guard.sh xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" "${alone[@]}" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-alone.xcresult" || status=$?
