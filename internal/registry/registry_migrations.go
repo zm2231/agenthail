@@ -413,6 +413,12 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "delivery_intents", "uuid", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "delivery_intents", "accepted_at_ms", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "delivery_intents", "held_at_ms", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if version < 18 {
 		if err := backfillIntentUUIDs(tx); err != nil {
 			return err
@@ -486,6 +492,9 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if err := createWithdrawTriggers(tx); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS delivery_intents_awaiting_turn ON delivery_intents(status, accepted_at_ms)`); err != nil {
 		return err
 	}
 	if version == schemaVersion {

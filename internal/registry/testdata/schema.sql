@@ -1,4 +1,4 @@
--- schemaVersion 100
+-- schemaVersion 101
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -26,6 +26,9 @@ CREATE INDEX daemon_events_created ON daemon_events(created_at DESC, id DESC);
 
 -- index delivery_history_created_at
 CREATE INDEX delivery_history_created_at ON delivery_history(created_at DESC, id DESC);
+
+-- index delivery_intents_awaiting_turn
+CREATE INDEX delivery_intents_awaiting_turn ON delivery_intents(status, accepted_at_ms);
 
 -- index delivery_intents_provider_key
 CREATE UNIQUE INDEX delivery_intents_provider_key
@@ -76,6 +79,10 @@ CREATE UNIQUE INDEX message_queue_delivery_key
 
 -- index paired_devices_active
 CREATE INDEX paired_devices_active ON paired_devices(revoked_at, created_at DESC);
+
+-- index peer_relay_sockets_path
+CREATE INDEX peer_relay_sockets_path
+	ON peer_relay_sockets(socket_path, started_ms DESC);
 
 -- index push_sends_device
 CREATE INDEX push_sends_device ON push_sends(device_id, sent_at DESC);
@@ -351,6 +358,8 @@ CREATE TABLE delivery_intents (
 	failure TEXT NOT NULL DEFAULT '',
 	failed_from TEXT NOT NULL DEFAULT '',
 	retries INTEGER NOT NULL DEFAULT 0,
+	held_at_ms INTEGER NOT NULL DEFAULT 0,
+	accepted_at_ms INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -574,6 +583,15 @@ CREATE TABLE paired_devices (
 	last_seen_at TEXT NOT NULL DEFAULT '',
 	revoked_at TEXT NOT NULL DEFAULT '',
 	browser INTEGER NOT NULL DEFAULT 0
+);
+
+-- table peer_relay_sockets
+CREATE TABLE peer_relay_sockets (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	socket_path TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	started_ms INTEGER NOT NULL,
+	retired_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- table pending_ceilings

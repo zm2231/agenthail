@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agenttools"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -151,7 +152,7 @@ func TestClaudeObserveAndModelUseCompletedTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observation.ActiveTurnID != "u2" || observation.CompletedTurnID != "m1" || observation.InputTurnID != "u1" || observation.Reply.Text != "answer" {
+	if observation.ActiveTurnID != "u2" || observation.CompletedTurnID != "m1" || strings.Join(observation.InputTurnIDs, ",") != "u1" || observation.Reply.Text != "answer" {
 		t.Fatalf("observation=%+v", observation)
 	}
 	model, err := claude.Model(context.Background(), session, "")
@@ -926,5 +927,50 @@ func TestClaudeLatestModelScansBackwardAcrossChunks(t *testing.T) {
 	initialClaudeObservationBytes = int64(len(later)+len(partial)) + 4
 	if model, err := claude.Model(context.Background(), session, ""); err == nil {
 		t.Fatalf("model outside the observation tail was returned: %q", model)
+	}
+}
+
+func TestAPeerTurnIsTheDeliveryClaudeNamesInItsOrigin(t *testing.T) {
+	shrinkClaudeObservationWindow(t)
+	peer := `{"type":"user","uuid":"claude-own","origin":{"kind":"peer","msg_id":"delivery-uuid","from":"uds:/tmp/cc-socks/1.sock"},"message":{"content":"Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1.sock\">\nhello\n</cross-session-message>"}}` + "\n"
+	answer := `{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-a","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}` + "\n"
+	refused := `{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"API Error: Server error mid-response."}]},"error":"server_error","isApiErrorMessage":true}` + "\n"
+	progress := `{"type":"assistant","uuid":"p","message":{"id":"m1","content":[{"type":"text","text":"` + strings.Repeat("x", 2000) + `"}]}}` + "\n"
+	var longTurn strings.Builder
+	for int64(longTurn.Len()) < 2*initialClaudeObservationBytes {
+		longTurn.WriteString(progress)
+	}
+	text, err := json.Marshal("Stop hook feedback:\n" + agenttools.EndTurnNudge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nudge := `{"type":"user","uuid":"hook","isMeta":true,"message":{"content":` + string(text) + `}}` + "\n" +
+		`{"type":"assistant","uuid":"a2","message":{"id":"m2","model":"model-a","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}` + "\n"
+	working := `{"type":"user","uuid":"u0","origin":{"kind":"human"},"message":{"content":"run the build"}}` + "\n" +
+		`{"type":"assistant","uuid":"a0","message":{"id":"m0","model":"model-a","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"make"}}]}}` + "\n"
+	queued := `{"type":"attachment","uuid":"q1","attachment":{"type":"queued_command","prompt":"hello","origin":{"kind":"peer","msg_id":"delivery-uuid"},"source_uuid":"claude-own"}}` + "\n"
+	built := `{"type":"user","uuid":"r1","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}` + "\n" +
+		`{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-a","stop_reason":"end_turn","content":[{"type":"text","text":"built"}]}}` + "\n"
+	absorbed := queued + built
+	for _, tc := range []struct {
+		name, transcript, input, completed string
+	}{
+		{"its own turn", peer + answer, "delivery-uuid", "m1"},
+		{"the running turn it was queued into", working + absorbed, "u0,delivery-uuid", "m1"},
+		{"the nudge answered after the turn it was queued into", working + absorbed + nudge, "u0,delivery-uuid", "m2"},
+		{"the running turn it was queued into before the first read", working + queued + longTurn.String() + built, "u0,delivery-uuid", "m1"},
+		{"the turn answering the end-turn nudge after it", peer + answer + nudge, "delivery-uuid", "m2"},
+		{"its turn begun before the first read", peer + longTurn.String() + answer + nudge, "delivery-uuid", "m2"},
+		{"not the nudge answered after its turn failed", peer + refused + nudge, "hook", "m2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeTranscript(t, tc.transcript+`{"type":"user","uuid":"u2","message":{"content":"running"}}`)
+			claude := NewClaude(nil, t.TempDir())
+			session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy, Transcript: path}
+			observation, err := claude.Observe(context.Background(), session)
+			if err != nil || strings.Join(observation.InputTurnIDs, ",") != tc.input || observation.CompletedTurnID != tc.completed {
+				t.Fatalf("inputs=%q completed=%q err=%v, want %q completed by %q", observation.InputTurnIDs, observation.CompletedTurnID, err, tc.input, tc.completed)
+			}
+		})
 	}
 }

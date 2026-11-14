@@ -56,3 +56,16 @@ func (s *RuntimeSettings) Missing(field, why string) {
 type SessionSettingsReader interface {
 	SessionSettings(ctx context.Context, sess *Session) (RuntimeSettings, error)
 }
+
+// CodexPeerClass is how a Codex session runs in the terms of Claude's
+// cross-session policy: bypass only when it neither asks for approval nor runs
+// in a sandbox, prompting otherwise, and "" when neither is known.
+func CodexPeerClass(permission *PermissionSetting) string {
+	switch {
+	case permission == nil || permission.ApprovalPolicy == "" && permission.Sandbox == "":
+		return ""
+	case permission.ApprovalPolicy == "never" && permission.Sandbox == "danger-full-access":
+		return "bypass"
+	}
+	return "prompting"
+}

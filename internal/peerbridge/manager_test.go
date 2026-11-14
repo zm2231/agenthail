@@ -64,6 +64,11 @@ type peerRecord struct {
 
 func newPeerFixture(t *testing.T, sessionIDs ...string) *peerFixture {
 	t.Helper()
+	return newClassedPeerFixture(t, nil, sessionIDs...)
+}
+
+func newClassedPeerFixture(t *testing.T, senderClass func(context.Context, surface.Session) string, sessionIDs ...string) *peerFixture {
+	t.Helper()
 	home, err := os.MkdirTemp("/tmp", "ah-peers-")
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +87,7 @@ func newPeerFixture(t *testing.T, sessionIDs ...string) *peerFixture {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 	socketDir := filepath.Join(home, "socks")
-	manager, err := start(ctx, home, reg, binary, socketDir)
+	manager, err := start(ctx, home, reg, binary, socketDir, senderClass)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +514,7 @@ func startIdleManager(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reg.Close() })
-	manager, err := Start(context.Background(), home, reg, "missing")
+	manager, err := Start(context.Background(), home, reg, "missing", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +557,7 @@ func TestEnsureReportsWorkerStartupDiagnostic(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	manager, err := Start(ctx, home, reg, executable)
+	manager, err := Start(ctx, home, reg, executable, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +586,7 @@ func TestManagerRestartReconcilesCrashArtifacts(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	socketDir := filepath.Join(home, "socks")
-	first, err := start(ctx, home, reg, binary, socketDir)
+	first, err := start(ctx, home, reg, binary, socketDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +599,7 @@ func TestManagerRestartReconcilesCrashArtifacts(t *testing.T) {
 	unlockManagerStartup(first.ownerLock)
 	first.ownerLock = nil
 
-	second, err := start(ctx, home, reg, binary, socketDir)
+	second, err := start(ctx, home, reg, binary, socketDir, nil)
 	if err != nil {
 		t.Fatalf("restart after crash: %v", err)
 	}
@@ -626,7 +631,7 @@ func TestManagerRejectsMissingSourceAndPreservesExistingFile(t *testing.T) {
 	if err := os.WriteFile(managerPath(home), []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Start(context.Background(), home, reg, "missing"); err == nil {
+	if _, err := Start(context.Background(), home, reg, "missing", nil); err == nil {
 		t.Fatal("existing file replaced")
 	}
 	data, _ := os.ReadFile(managerPath(home))
@@ -658,7 +663,7 @@ func TestManagerStartPreservesLiveEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	if _, err := Start(context.Background(), home, reg, "missing"); err == nil || !strings.Contains(err.Error(), "already running") {
+	if _, err := Start(context.Background(), home, reg, "missing", nil); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("start error=%v", err)
 	}
 	after, err := os.Lstat(managerPath(home))
@@ -696,7 +701,7 @@ func TestConcurrentManagerStartReplacesStaleEndpointOnce(t *testing.T) {
 	for range 2 {
 		go func() {
 			<-ready
-			manager, err := Start(context.Background(), home, reg, "missing")
+			manager, err := Start(context.Background(), home, reg, "missing", nil)
 			results <- result{manager: manager, err: err}
 		}()
 	}
@@ -730,14 +735,14 @@ func TestManagerLifetimeLockAndClosePreserveReplacementEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	manager, err := Start(context.Background(), home, reg, "missing")
+	manager, err := Start(context.Background(), home, reg, "missing", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(managerPath(home)); err != nil {
 		t.Fatal(err)
 	}
-	if second, err := Start(context.Background(), home, reg, "missing"); err == nil {
+	if second, err := Start(context.Background(), home, reg, "missing", nil); err == nil {
 		second.Close()
 		t.Fatal("second manager started while the lifetime owner lock was held")
 	}
@@ -1040,5 +1045,69 @@ func TestEnsureDoesNotBlameTheDaemonWhenTheManagerQueueIsFull(t *testing.T) {
 	err = Ensure(context.Background(), home, "source")
 	if !surface.IsDeliveryUnavailable(err) || !strings.Contains(err.Error(), "not accepting connections as fast as they arrive") {
 		t.Fatalf("full manager queue: %v", err)
+	}
+}
+
+func TestASenderThatIsNoClaudeStatesTheClassTheDaemonReadsForIt(t *testing.T) {
+	classes := map[string]string{"bypassing": "bypass", "prompting": "prompting", "unknown": ""}
+	f := newClassedPeerFixture(t, func(_ context.Context, sender surface.Session) string { return classes[sender.ID] }, "bypassing", "prompting", "unknown")
+	native := f.startNative()
+	for id, class := range classes {
+		receipt, err := Send(f.ctx, f.home, id, native.socket, "from "+id)
+		if err != nil || receipt == nil || receipt.FromMode != class {
+			t.Fatalf("sender=%s receipt=%+v err=%v, want stated class %q", id, receipt, err, class)
+		}
+		message, _ := native.await(t, "user")["message"].(map[string]any)
+		content, _ := message["content"].(string)
+		stated := strings.Contains(content, `from-mode="`)
+		if !strings.Contains(content, "from "+id) || stated != (class != "") || class != "" && !strings.Contains(content, `from-mode="`+class+`"`) {
+			t.Fatalf("sender=%s content=%q, want from-mode %q", id, content, class)
+		}
+	}
+}
+
+func TestAReplyRelaySocketNamesItsSenderUntilAnHourAfterItRetiresAcrossRestarts(t *testing.T) {
+	f := newClassedPeerFixture(t, nil, "codex-sender")
+	native := f.startNative()
+	relaySocket := func() string {
+		t.Helper()
+		if _, err := Send(f.ctx, f.home, "codex-sender", native.socket, "hello"); err != nil {
+			t.Fatal(err)
+		}
+		from, _ := native.await(t, "user")["from"].(string)
+		path, ok := strings.CutPrefix(from, "uds:")
+		if !ok {
+			t.Fatalf("frame from %q", from)
+		}
+		return path
+	}
+	names := func(socket string, at time.Time, want string) {
+		t.Helper()
+		if got, err := f.reg.PeerRelaySession(socket, at); err != nil || got != want {
+			t.Fatalf("socket %s at %s names %q (err=%v), want %q", socket, at, got, err, want)
+		}
+	}
+	relay := relaySocket()
+	names(relay, time.Now(), "codex-sender")
+	names(native.socket, time.Now(), "")
+	retired := time.Now().Add(2 * time.Hour)
+	f.manager.RetireInactive(retired, time.Minute)
+	names(relay, retired.Add(30*time.Minute), "codex-sender")
+	names(relay, retired.Add(61*time.Minute), "")
+
+	relay = relaySocket()
+	f.manager.Close()
+	left := filepath.Join(f.socketDir, "left-open.sock")
+	if err := f.reg.RecordPeerRelay(left, "codex-sender", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := start(f.ctx, f.home, f.reg, binary, f.socketDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(restarted.Close)
+	for _, socket := range []string{relay, left} {
+		names(socket, time.Now().Add(30*time.Minute), "codex-sender")
+		names(socket, time.Now().Add(2*time.Hour), "")
 	}
 }

@@ -63,6 +63,6 @@ func restartedIntents(tx *sql.Tx, queueID int64) ([]int64, error) {
 }
 
 func settleRestartedIntent(tx *sql.Tx, id int64, to string, status DeliveryIntentStatus, evidence surface.DeliveryEvidence, providerKey string) error {
-	_, err := tx.Exec(`UPDATE delivery_intents SET target_session_id=?,status=?,evidence=?,failure='',provider_key=CASE WHEN ?!='' THEN ? ELSE provider_key END,updated_at=datetime('now') WHERE id=?`, to, status, evidence, providerKey, providerKey, id)
+	_, err := tx.Exec(`UPDATE delivery_intents SET target_session_id=?1,status=?2,evidence=?3,failure='',provider_key=CASE WHEN ?4!='' THEN ?4 ELSE provider_key END,accepted_at_ms=CASE WHEN ?2=?6 THEN `+sqlNowMillis+` ELSE 0 END,updated_at=datetime('now') WHERE id=?5`, to, status, evidence, providerKey, id, DeliveryIntentSent)
 	return err
 }

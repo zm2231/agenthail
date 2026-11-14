@@ -164,7 +164,7 @@ func TestProcessesSharingAConversationAreHoldersAndAPIDTargetsOne(t *testing.T) 
 	if err != nil || len(sessions) != 1 || sessions[0].PID != 0 || len(sessions[0].Holders) != 2 || sessions[0].Holders[0].PID != firstPID || sessions[0].Holders[1].PID != laterPID {
 		t.Fatalf("listed=%+v err=%v", sessions, err)
 	}
-	if _, _, found, err := adapter.nativeCaller(context.Background(), "shared"); err != nil || found {
+	if _, _, found, err := adapter.nativeCaller(context.Background(), "shared"); !errors.Is(err, errSenderInSeveralProcesses) || found {
 		t.Fatalf("a shared session id picked one process's socket: found=%v err=%v", found, err)
 	}
 	resolved, err := adapter.Resolve(context.Background(), strconv.Itoa(laterPID))

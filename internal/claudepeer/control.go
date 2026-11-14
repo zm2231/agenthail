@@ -70,7 +70,7 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 				}
 			}
 		}
-		content := peerContent(sender, replyTarget(reg, sender.ID), senderSocket, "", req.Message)
+		content := peerContent(sender, replyTarget(reg, sender.ID), senderSocket, statedMode(req.FromMode), req.Message)
 		f, _ := json.Marshal(frame{MsgV: 1, MsgID: id, UUID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 		var sendErr error
 		if len(f) >= maxLineBytes {
@@ -82,7 +82,7 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 			resp.Error = classifyControlError(err)
 		} else {
 			resp.OK = true
-			resp.Result = &surface.SendResult{UUID: id, Accepted: true}
+			resp.Result = &surface.SendResult{UUID: id, Accepted: true, FromMode: statedMode(req.FromMode)}
 		}
 	}
 	_ = json.NewEncoder(conn).Encode(resp)

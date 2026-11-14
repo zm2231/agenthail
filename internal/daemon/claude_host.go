@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -225,6 +226,26 @@ type peerHold struct {
 	Cause       string `json:"cause"`
 	Outcome     string `json:"outcome"`
 	MessageUUID string `json:"message_uuid"`
+	From        string `json:"from"`
+}
+
+type claudePeerSockets interface {
+	PeerSocketSession(ctx context.Context, from string) string
+}
+
+func (d *Daemon) peerSender(from string, at time.Time) (string, error) {
+	if sockets, ok := d.adapters().ForSurface(surface.KindClaude).(claudePeerSockets); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if sender := sockets.PeerSocketSession(ctx, from); sender != "" {
+			return sender, nil
+		}
+	}
+	path, ok := strings.CutPrefix(from, "uds:")
+	if !ok {
+		return "", nil
+	}
+	return d.Registry.PeerRelaySession(path, at)
 }
 
 // recordPeerHold keeps a delivery's state equal to what the target's Claude
@@ -243,10 +264,16 @@ func (d *Daemon) recordPeerHold(event claudehost.Event) {
 	switch hold.State {
 	case "held":
 		changed, err = d.Registry.HoldPeerMessage(message, registry.PeerHeldReason(hold.Cause))
+		if err == nil && !changed {
+			changed, err = d.peerReportFromSender(event, hold)
+		}
 	case "released":
 		changed, err = d.Registry.ReleasePeerMessage(message)
 	case "dropped":
 		changed, err = d.Registry.DropPeerMessage(message, registry.PeerDroppedReason(hold.Outcome))
+		if err == nil && !changed {
+			changed, err = d.peerReportFromSender(event, hold)
+		}
 	}
 	if err != nil {
 		d.log.Printf("record a message Claude %s for %s: %s", hold.State, event.SessionID, err)
@@ -259,4 +286,30 @@ func (d *Daemon) recordPeerHold(event claudehost.Event) {
 		d.log.Printf("publish delivery ask: %s", err)
 	}
 	d.publishEvent("state.changed", event.SessionID, map[string]string{"source": "delivery-ask"})
+}
+
+// peerReportFromSender places a hold or drop Claude reported under its own id
+// for the message, which since Claude 2.1.325 is never the delivery's, by the
+// sender's peer address instead: the socket of the Claude session that sent
+// it, or the reply relay Agenthail sent it from for a session that is not
+// Claude. Claude's receipt never reaches such a relay, since Claude sends it
+// only to the process that connected, which is the relay's peer worker.
+func (d *Daemon) peerReportFromSender(event claudehost.Event, hold peerHold) (bool, error) {
+	if event.At <= 0 {
+		return false, nil
+	}
+	known, err := d.Registry.PeerMessageKnown(registry.PeerMessage{MsgID: hold.MessageUUID, TargetSessionID: event.SessionID})
+	if err != nil || known {
+		return false, err
+	}
+	at := time.UnixMilli(event.At)
+	sender, err := d.peerSender(hold.From, at)
+	if err != nil || sender == "" {
+		return false, err
+	}
+	if hold.State == "dropped" {
+		return d.Registry.DropPeerMessageFromSender(sender, event.SessionID, at, registry.PeerDroppedReason(hold.Outcome))
+	}
+	match, err := d.Registry.HoldPeerMessageFromSender(sender, event.SessionID, at, registry.PeerHeldReason(hold.Cause))
+	return match != registry.PeerHoldUnmatched, err
 }

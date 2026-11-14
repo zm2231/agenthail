@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	_ "modernc.org/sqlite"
@@ -100,8 +101,9 @@ func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
 			UNION SELECT session_id FROM session_runtime WHERE held_completion_turn_id<>''
 			UNION SELECT session_id FROM session_runtime WHERE notification_armed=1
 			UNION SELECT child_session_id FROM tasks WHERE state='running'
+			UNION SELECT target_session_id FROM delivery_intents WHERE `+awaitingTurnRow+` AND accepted_at_ms>=?
 		)
-		ORDER BY s.surface,s.id`)
+		ORDER BY s.surface,s.id`, awaitingTurnArgs(time.Now())...)
 	if err != nil {
 		return nil, err
 	}

@@ -15,10 +15,51 @@ import (
 )
 
 func (d *Daemon) syncDeliveryAsks() {
+	d.failUnreportedPeerHolds(time.Now())
+	if failed, err := d.Registry.FailUnseenDeliveryTurns(time.Now()); err != nil {
+		d.log.Printf("fail unseen delivery turns: %s", err)
+	} else if failed > 0 {
+		d.log.Printf("failed %d deliveries no turn was seen reading", failed)
+	}
 	if err := d.Registry.SyncDeliveryAsks(time.Now()); err != nil {
 		d.log.Printf("sync delivery asks: %s", err)
 	}
 	d.tellDeliveryAsks()
+}
+
+type claudeHoldDeadlines interface {
+	PeerHoldDeadline(target *surface.Session) (time.Duration, bool)
+}
+
+const peerHoldMargin = 2 * time.Minute
+
+// failUnreportedPeerHolds fails a held message Claude has dropped by now
+// without the report reaching Agenthail, which a restart, a lost event or a
+// sender it could not place leaves held for good.
+func (d *Daemon) failUnreportedPeerHolds(now time.Time) {
+	held, err := d.Registry.HeldPeerMessages()
+	if err != nil {
+		d.log.Printf("read held messages: %s", err)
+		return
+	}
+	deadlines, ok := d.adapters().ForSurface(surface.KindClaude).(claudeHoldDeadlines)
+	if len(held) == 0 || !ok {
+		return
+	}
+	for _, message := range held {
+		target, err := d.Registry.Session(message.TargetSessionID)
+		if err != nil {
+			d.log.Printf("read the target of held delivery %d: %s", message.ID, err)
+			continue
+		}
+		deadline, expires := deadlines.PeerHoldDeadline(target)
+		if !expires || now.Before(message.HeldAt.Add(deadline+peerHoldMargin)) {
+			continue
+		}
+		if _, err := d.Registry.FailUnreportedPeerHold(message); err != nil {
+			d.log.Printf("fail held delivery %d: %s", message.ID, err)
+		}
+	}
 }
 
 func (d *Daemon) tellDeliveryAsks() {

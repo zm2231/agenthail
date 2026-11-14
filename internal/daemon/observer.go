@@ -215,14 +215,17 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	completionChanged := found && !completionPredatesActiveDelivery && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID
 	if completionChanged {
 		if observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
-			providerKey := ""
+			var providerKeys []string
 			switch session.Surface {
 			case surface.KindCodex:
-				providerKey = observation.CompletedTurnID
+				providerKeys = []string{observation.CompletedTurnID}
 			case surface.KindClaude:
-				providerKey = observation.InputTurnID
+				providerKeys = observation.InputTurnIDs
 			}
-			if providerKey != "" {
+			for _, providerKey := range providerKeys {
+				if providerKey == "" {
+					continue
+				}
 				reconciled, reconcileErr := d.Registry.ReconcileDeliveryIntent(session.ID, providerKey)
 				if reconcileErr != nil {
 					d.log.Printf("reconcile delivery intent %s: %s", d.resolveDisplay(session.ID), reconcileErr)
