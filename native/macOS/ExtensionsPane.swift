@@ -6,7 +6,7 @@ struct ExtensionsPane: View {
     var model: AgenthailModel
     var pane: SessionPane
     @State private var history: HistoryTarget?
-    @State private var showsNew = false
+    @State private var building: ExtensionBuildTarget?
     private var pins: ExtensionPins { .shared }
 
     var body: some View {
@@ -25,7 +25,7 @@ struct ExtensionsPane: View {
                     Spacer()
                     Button("History") { history = HistoryTarget(catalog) }
                         .accessibilityIdentifier("extensions-history")
-                    Button("New Extension…") { showsNew = true }
+                    Button("New Extension…") { building = ExtensionBuildTarget(catalog) }
                         .accessibilityIdentifier("extensions-new")
                 }
                 entries(catalog, empty: "No extensions yet. Use New Extension to describe one.")
@@ -37,9 +37,11 @@ struct ExtensionsPane: View {
                         Spacer()
                         Button("History") { history = HistoryTarget(paired) }
                             .accessibilityIdentifier("extensions-history-" + paired.hostID)
-                        Button("Build on \(paired.hostName)") {}
-                            .disabled(true)
-                            .help("Start a builder on \(paired.hostName) itself.")
+                        let blocked = ExtensionBuildTarget.unavailable(paired)
+                        Button("Build on \(paired.hostName)…") { building = ExtensionBuildTarget(paired) }
+                            .disabled(blocked != nil)
+                            .help(blocked ?? "Start a builder session on \(paired.hostName). It works in that computer's extensions folder.")
+                            .accessibilityIdentifier("extensions-build-" + paired.hostID)
                     }
                     .padding(.top, DesktopSpace.m)
                     entries(paired, empty: "No extensions on \(paired.hostName).")
@@ -54,8 +56,11 @@ struct ExtensionsPane: View {
         .sheet(item: $history) { target in
             ExtensionHistorySheet(api: target.api, host: target.host, hostName: target.hostName, extensionID: nil)
         }
-        .sheet(isPresented: $showsNew) {
-            NewExtensionSheet(api: model.api) { sessionID in pane.select(sessionID) }
+        .sheet(item: $building) { target in
+            NewExtensionSheet(api: model.api, target: target) { sessionID in
+                pane.select(sessionID)
+                model.extensionCatalogs.first { $0.hostID == target.id }?.refresh()
+            }
         }
     }
 
@@ -370,6 +375,7 @@ struct ExtensionHistorySheet: View {
 
 struct NewExtensionSheet: View {
     let api: AgenthailAPI?
+    let target: ExtensionBuildTarget
     let started: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var message = ""
@@ -378,7 +384,7 @@ struct NewExtensionSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesktopSpace.m) {
-            Text("New Extension").font(.system(size: DesktopType.title, weight: .semibold))
+            Text(target.title).font(.system(size: DesktopType.title, weight: .semibold))
             Text("Describe what it should show or do. A builder session starts, and its changes are kept as it makes them.")
                 .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.text2)
@@ -406,7 +412,7 @@ struct NewExtensionSheet: View {
         starting = true
         defer { starting = false }
         do {
-            let created = try await api.buildExtension(message.trimmingCharacters(in: .whitespacesAndNewlines))
+            let created = try await api.buildExtension(message.trimmingCharacters(in: .whitespacesAndNewlines), host: target.host)
             dismiss()
             if let id = created.session?.id { started(id) }
         } catch {

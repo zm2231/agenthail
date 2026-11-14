@@ -230,3 +230,24 @@ enum ExtensionHistory {
         return parts.isEmpty ? (change.message ?? "no extension files") : parts.joined(separator: ", ")
     }
 }
+
+struct ExtensionBuildTarget: Identifiable, Equatable {
+    let id: String
+    let host: String?
+    let hostName: String
+
+    @MainActor
+    init(_ catalog: ExtensionCatalog) {
+        id = catalog.hostID
+        host = catalog.hostRef
+        hostName = catalog.hostName
+    }
+
+    var title: String { host == nil ? "New Extension" : "New Extension on \(hostName)" }
+
+    @MainActor
+    static func unavailable(_ catalog: ExtensionCatalog) -> String? {
+        if let error = catalog.error { return error }
+        return catalog.list == nil ? "Waiting for \(catalog.hostName) to list its extensions." : nil
+    }
+}

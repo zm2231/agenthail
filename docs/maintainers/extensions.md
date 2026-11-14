@@ -223,9 +223,11 @@ a paired host's pages and mounts for it.
 - Cookies the host's app sets stay in a jar for that port alone and go back
   only to it; the browser never sees them, since every port shares the
   `127.0.0.1` cookie site.
-- History and Undo reach the host with `?host=`
+- History, Undo and Build reach the host with `?host=`
   (`GET /api/v1/extensions/history`, `POST
-  /api/v1/extensions/history/<rev>/undo`). Building runs on the host itself.
+  /api/v1/extensions/history/<rev>/undo`, `POST /api/v1/extensions/build`).
+  The builder is a session on that host, working in its folder; the Mac app's
+  Build on <host> opens it, and the host's list is read again once it starts.
 - A host's `extension.changed` and `extension.badge` events do not travel
   over the pairing, so the Mac app rereads a paired host's list every 30
   seconds while the Apps hub is open or one of that host's entries is
@@ -531,6 +533,11 @@ changes it (`settings` scope). `POST /api/v1/extensions/history/<rev>/undo`
 undoes a change (`control` scope, so a paired device can roll one back) and
 answers `{undone, removed}`. `POST /api/v1/extensions/build` with `{"message": "<text>", "surface":
 "claude"}` starts the builder (`control` scope) and answers as `session-create`.
+With `?host=<paired host>` the request, including its idempotency key, goes to
+that host, which starts the builder in its own extensions folder with its own
+agent, and the answer's session id comes back qualified (`host::id`). A host
+that refuses, because its extensions are off or its agent is missing, answers
+for itself; nothing builds here instead.
 `POST /api/v1/extensions/<id>/call` with `{"action": "<name>", "input": {...}}`
 or `{"job": "<name>"}` runs it (`control` scope) and answers `{result, ran,
 tree, reloaded}`; `"sessionId"` runs it as that session, accepted only from

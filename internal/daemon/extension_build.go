@@ -11,7 +11,17 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const extensionBuildLine = "Build or change an Agenthail extension in this folder. Read AGENTS.md first."
+const (
+	extensionBuildLine      = "Build or change an Agenthail extension in this folder. Read AGENTS.md first."
+	extensionBuildBodyLimit = 64 << 10
+)
+
+func limitExtensionBuild(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, extensionBuildBodyLimit)
+		next(w, r)
+	}
+}
 
 // The builder is an ordinary session the person starts: the folder is its
 // working directory and it keeps the surface's own permission mode, so it
@@ -21,7 +31,7 @@ func (d *Daemon) apiExtensionBuildHandler(w http.ResponseWriter, r *http.Request
 		Message string `json:"message"`
 		Surface string `json:"surface"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&request); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, extensionBuildBodyLimit)).Decode(&request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid", "Send {\"message\": \"<what to build>\", \"surface\": \"claude\" or \"codex\"}.")
 		return
 	}

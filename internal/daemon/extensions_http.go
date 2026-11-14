@@ -41,7 +41,7 @@ func (d *Daemon) registerExtensionRoutes(mux *http.ServeMux, dashboard *dashboar
 	mux.HandleFunc("GET /api/v1/extensions/history", d.apiV1Guard(dashboard, "read", d.hostRouted("", d.apiExtensionHistoryHandler)))
 	mux.HandleFunc("GET /api/v1/extensions/history/{rev}", d.apiV1Guard(dashboard, "read", d.hostRouted("", d.apiExtensionChangeHandler)))
 	mux.HandleFunc("POST /api/v1/extensions/history/{rev}/undo", d.apiV1Guard(dashboard, "control", d.hostRouted("", d.apiExtensionUndoHandler)))
-	mux.HandleFunc("POST /api/v1/extensions/build", d.apiV1Guard(dashboard, "control", d.localExtensionsOr(d.apiExtensionBuildHandler, nil)))
+	mux.HandleFunc("POST /api/v1/extensions/build", d.apiV1Guard(dashboard, "control", limitExtensionBuild(d.hostRouted("", d.apiExtensionBuildHandler))))
 	mux.HandleFunc("POST /api/v1/extensions/{id}/call", d.apiV1Guard(dashboard, "control", d.apiExtensionCallHandler))
 }
 
