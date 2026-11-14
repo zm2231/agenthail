@@ -78,15 +78,45 @@ async function step(name, run) {
   }
 }
 
-export async function settle(page) {
-  await step("frames", () => page.evaluate(frames));
-  await step("ui", () => page.waitForSelector("html[data-ui-settled]"));
-  await step("fonts", () => page.evaluate(() => document.fonts.ready.then(() => {})));
-  await step("animations", () =>
-    page.evaluate(async () => {
-      const running = document.getAnimations().filter((animation) => animation.playState === "running" && Number.isFinite(animation.effect?.getComputedTiming().endTime));
-      await Promise.all(running.map((animation) => animation.finished.catch(() => {})));
+const pageState = async () => {
+  const { paneAreas } = await import("/js/ui-areas.js");
+  const html = document.documentElement;
+  return JSON.stringify({ settled: html.hasAttribute("data-ui-settled"), style: html.getAttribute("style"), areas: paneAreas(document, window) });
+};
+
+const backdropDecoded = () => {
+  const sources = [...document.querySelectorAll(".ui-backdrop > *")].flatMap((layer) => [...getComputedStyle(layer).backgroundImage.matchAll(/url\("([^"]+)"\)/g)].map((match) => match[1]));
+  return Promise.all(
+    sources.map((source) => {
+      const image = new Image();
+      image.src = source;
+      return image.decode().catch(() => {});
     }),
-  );
-  await step("frames", () => page.evaluate(frames));
+  ).then(() => {});
+};
+
+const SETTLE_PASSES = 20;
+
+// Load can land the page's own work between any two of these waits, so the
+// page counts as settled only when a full pass leaves its theme and pane
+// layout exactly as the previous pass found them.
+export async function settle(page) {
+  let previous = null;
+  for (let pass = 1; pass <= SETTLE_PASSES; pass++) {
+    await step("frames", () => page.evaluate(frames));
+    await step("ui", () => page.waitForSelector("html[data-ui-settled]"));
+    await step("fonts", () => page.evaluate(() => document.fonts.ready.then(() => {})));
+    await step("backdrop", () => page.evaluate(backdropDecoded));
+    await step("animations", () =>
+      page.evaluate(async () => {
+        const running = document.getAnimations().filter((animation) => animation.playState === "running" && Number.isFinite(animation.effect?.getComputedTiming().endTime));
+        await Promise.all(running.map((animation) => animation.finished.catch(() => {})));
+      }),
+    );
+    await step("frames", () => page.evaluate(frames));
+    const state = await step("state", () => page.evaluate(pageState));
+    if (state === previous && JSON.parse(state).settled) return;
+    previous = state;
+  }
+  throw new Error(`settle: the theme or pane layout was still changing after ${SETTLE_PASSES} passes`);
 }

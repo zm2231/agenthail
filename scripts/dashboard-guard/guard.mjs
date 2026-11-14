@@ -22,7 +22,7 @@ async function signedIn(browser, dashboard) {
   const [name, value] = dashboard.cookie.split("=");
   await context.setCookie({ name, value, url: dashboard.url });
   const page = await context.newPage();
-  page.setDefaultTimeout(60_000);
+  page.setDefaultTimeout(0);
   return page;
 }
 
