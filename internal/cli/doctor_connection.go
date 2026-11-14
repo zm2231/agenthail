@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,6 +12,17 @@ import (
 const (
 	connectionDropWindow   = 24 * time.Hour
 	connectionSteadyLosses = 3
+	phoneStreamIdleTimeout = 25 * time.Second
+	streamCloseNearDrop    = 30 * time.Second
+
+	dropCauseQuiet     = "daemon went quiet"
+	dropCauseStopped   = "daemon stopped"
+	dropCauseTransit   = "lost in transit"
+	dropCauseHalfOpen  = "half-open"
+	dropCauseReset     = "reset"
+	dropCauseNoRecord  = "no daemon record"
+	dropCauseUnclear   = "unclear"
+	dropNetworkUnknown = "unknown network"
 )
 
 type connectionHealth struct {
@@ -25,12 +37,24 @@ type deviceConnection struct {
 	Held     int                      `json:"held"`
 	Offline  int                      `json:"offline"`
 	Relayed  int                      `json:"relayed"`
+	Causes   []dropCauseCount         `json:"causes"`
 	Last     *registry.ConnectionDrop `json:"last,omitempty"`
+}
+
+type dropCauseCount struct {
+	Cause       string `json:"cause"`
+	Network     string `json:"network"`
+	TailnetPath string `json:"tailnetPath,omitempty"`
+	Count       int    `json:"count"`
 }
 
 func connectionHealthOf(r *registry.Registry, now time.Time) (connectionHealth, error) {
 	health := connectionHealth{Devices: []deviceConnection{}, Warnings: []string{}}
 	histories, err := r.ConnectionDropHistories()
+	if err != nil {
+		return health, err
+	}
+	self, err := r.HostIdentity()
 	if err != nil {
 		return health, err
 	}
@@ -41,10 +65,23 @@ func connectionHealthOf(r *registry.Registry, now time.Time) (connectionHealth, 
 	for _, history := range histories {
 		last := history.Drops[0]
 		last.Host, last.Via = named(names, last.Host), named(names, last.Via)
-		device := deviceConnection{DeviceID: history.DeviceID, Name: history.Name, Last: &last}
+		device := deviceConnection{DeviceID: history.DeviceID, Name: history.Name, Causes: []dropCauseCount{}, Last: &last}
+		streams, err := r.DeviceStreams(history.DeviceID, "events", now.Add(-connectionDropWindow-streamCloseNearDrop), now)
+		if err != nil {
+			return health, err
+		}
+		causes := map[dropCauseCount]int{}
 		for _, drop := range history.Drops {
 			if now.Sub(drop.StartedAt) > connectionDropWindow {
 				continue
+			}
+			if drop.Host == self.ID && drop.Via == "" && strings.HasPrefix(drop.Path, "stream") {
+				cause, path := streamDropCause(drop, streams)
+				network := drop.Network
+				if network == "" {
+					network = dropNetworkUnknown
+				}
+				causes[dropCauseCount{Cause: cause, Network: network, TailnetPath: path}]++
 			}
 			device.Recent++
 			if drop.Shown == "held" {
@@ -56,12 +93,82 @@ func connectionHealthOf(r *registry.Registry, now time.Time) (connectionHealth, 
 				device.Relayed++
 			}
 		}
+		for key, count := range causes {
+			key.Count = count
+			device.Causes = append(device.Causes, key)
+		}
+		sort.Slice(device.Causes, func(i, j int) bool {
+			a, b := device.Causes[i], device.Causes[j]
+			if a.Count != b.Count {
+				return a.Count > b.Count
+			}
+			return a.Cause+a.Network+a.TailnetPath < b.Cause+b.Network+b.TailnetPath
+		})
 		health.Devices = append(health.Devices, device)
+		if quiet := quietStreams(device.Causes); quiet > 0 {
+			health.Warnings = append(health.Warnings, fmt.Sprintf("%d of %s's stream drops came after this computer sent it nothing for over %d s; that is an Agenthail bug, not the network", quiet, history.Name, int(phoneStreamIdleTimeout.Seconds())))
+		}
 		if lostInSteadyUse(history.Drops) {
 			health.Warnings = append(health.Warnings, fmt.Sprintf("%s showed a computer offline %d times in a row while in use, not just after returning to the app", history.Name, connectionSteadyLosses))
 		}
 	}
 	return health, nil
+}
+
+func streamDropCause(drop registry.ConnectionDrop, streams []registry.DeviceStream) (string, string) {
+	at := drop.StartedAt
+	var stream *registry.DeviceStream
+	for i, candidate := range streams {
+		if candidate.OpenedAt.After(at) || candidate.ClosedAt.Before(at.Add(-streamCloseNearDrop)) {
+			continue
+		}
+		if stream == nil || candidate.OpenedAt.After(stream.OpenedAt) {
+			stream = &streams[i]
+		}
+	}
+	if stream == nil {
+		return dropCauseNoRecord, ""
+	}
+	lastFlush := stream.LastFlushAt
+	if lastFlush.IsZero() {
+		lastFlush = stream.OpenedAt
+	}
+	closedNear := stream.ClosedAt.Sub(at).Abs() <= streamCloseNearDrop
+	switch {
+	case closedNear && stream.Ended == registry.StreamEndedDaemonStopped:
+		return dropCauseStopped, stream.TailnetPath
+	case closedNear && stream.Ended == registry.StreamEndedWriteFailed:
+		return dropCauseReset, stream.TailnetPath
+	case stream.ClosedAt.Sub(at) > streamCloseNearDrop && lastFlush.After(at):
+		return dropCauseHalfOpen, stream.TailnetPath
+	case at.Sub(lastFlush) > phoneStreamIdleTimeout:
+		return dropCauseQuiet, stream.TailnetPath
+	case closedNear && (stream.Ended == registry.StreamEndedClientClosed || stream.Ended == registry.StreamEndedWriteDeadline):
+		return dropCauseTransit, stream.TailnetPath
+	}
+	return dropCauseUnclear, stream.TailnetPath
+}
+
+func quietStreams(causes []dropCauseCount) int {
+	quiet := 0
+	for _, cause := range causes {
+		if cause.Cause == dropCauseQuiet {
+			quiet += cause.Count
+		}
+	}
+	return quiet
+}
+
+func describeCauses(causes []dropCauseCount) string {
+	parts := make([]string, 0, len(causes))
+	for _, cause := range causes {
+		part := fmt.Sprintf("%d %s on %s", cause.Count, cause.Cause, cause.Network)
+		if cause.TailnetPath != "" {
+			part += " (" + strings.Replace(cause.TailnetPath, "relay:", "relay ", 1) + ")"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func computerNames(r *registry.Registry) (map[string]string, error) {
@@ -147,6 +254,9 @@ func (h connectionHealth) String() string {
 			line += "; last " + describeDrop(*device.Last)
 		}
 		lines = append(lines, line)
+		if len(device.Causes) > 0 {
+			lines = append(lines, "    stream drops as this computer saw them through Tailscale: "+describeCauses(device.Causes))
+		}
 	}
 	for _, warning := range h.Warnings {
 		lines = append(lines, "  warning: "+warning)
