@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/claudemcp"
 	"github.com/zm2231/agenthail/internal/daemon"
@@ -25,7 +26,7 @@ func (a *App) cmdMCP(args []string) error {
 	case "stdio":
 		return mcpstdio.Run(context.Background(), daemon.MCPSocketPath(), a.Version, os.Stdin, os.Stdout)
 	case "install", "uninstall", "status":
-		return claudeMCPAt(args[0])
+		return errors.Join(claudeMCPAt(args[0]), codexMCPAt(args[0]))
 	}
 	return errors.New(mcpUsage)
 }
@@ -125,4 +126,62 @@ func relayExecutable() string {
 		return linked
 	}
 	return executable
+}
+
+func codexMCPAt(action string) error {
+	home := surfaces.CodexHomeFromEnv()
+	label := "codex " + filepath.Join(home.Codex, "config.toml")
+	if !surfaces.CodexSetUp(home) {
+		if action == "status" {
+			fmt.Printf("codex: Codex is not set up for this user\n")
+		}
+		return nil
+	}
+	userHome, _ := os.UserHomeDir()
+	off, err := surface.CodexMCPOff(userHome)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	executable := relayExecutable()
+	var line string
+	switch action {
+	case "install":
+		var changed bool
+		if off {
+			if changed, err = surfaces.UninstallCodexRelay(ctx, home); err == nil {
+				line = map[bool]string{true: "removed, since codexMCP turns it off", false: "off in codexMCP"}[changed]
+			}
+		} else if executable == "" {
+			err = fmt.Errorf("%s: run this from the installed agenthail binary; Codex runs the binary that wrote its MCP server", label)
+		} else if changed, err = surfaces.InstallCodexRelay(ctx, home, executable); err == nil {
+			line = map[bool]string{true: "installed", false: "already installed"}[changed]
+		}
+	case "uninstall":
+		var changed bool
+		if changed, err = surfaces.UninstallCodexRelay(ctx, home); err == nil {
+			line = map[bool]string{true: "removed", false: "not installed"}[changed]
+		}
+	case "status":
+		if line, err = codexMCPState(ctx, home, off, executable); line == surfaces.CodexRelayOutdated || line == surfaces.CodexRelayMissing || line == surfaces.CodexRelayDangling || line == claudeMCPOffInstalled {
+			line += "; run: agenthail mcp install"
+		}
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s: %s MCP server %s\n", label, surfaces.CodexRelayServerName, line)
+	return nil
+}
+
+func codexMCPState(ctx context.Context, home surfaces.CodexHome, off bool, executable string) (string, error) {
+	state, err := surfaces.CodexRelayState(ctx, home, executable)
+	if err != nil || !off || state == "" {
+		return state, err
+	}
+	if state == surfaces.CodexRelayMissing || state == surfaces.CodexRelayTaken {
+		return claudeMCPOff, nil
+	}
+	return claudeMCPOffInstalled, nil
 }

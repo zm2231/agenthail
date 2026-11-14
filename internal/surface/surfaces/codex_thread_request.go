@@ -17,10 +17,13 @@ const (
 )
 
 func mcpServerConfig(url, token string) map[string]any {
-	return map[string]any{"mcp_servers": map[string]any{mcpServerName: map[string]any{
-		"url": url, "http_headers": map[string]any{"Authorization": "Bearer " + token}, "tool_timeout_sec": mcpToolTimeoutSec,
-		"default_tools_approval_mode": "approve",
-	}}}
+	return map[string]any{"mcp_servers": map[string]any{
+		mcpServerName: map[string]any{
+			"url": url, "http_headers": map[string]any{"Authorization": "Bearer " + token}, "tool_timeout_sec": mcpToolTimeoutSec,
+			"default_tools_approval_mode": "approve",
+		},
+		CodexRelayServerName: codexRelayDisabled(),
+	}}
 }
 
 func withMCPConfig(params map[string]any, url, token string) map[string]any {

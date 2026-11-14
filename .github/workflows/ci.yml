@@ -98,9 +98,10 @@ jobs:
         shell: bash
         run: |
           npm install --prefix "$RUNNER_TEMP/codex" --no-audit --no-fund @openai/codex@0.163.0
-          PATH="$RUNNER_TEMP/codex/node_modules/.bin:$PATH" go test ./internal/surface/surfaces/ -run '^(TestACodexCompactionHoldsReloadsOnlyUntilItsTurnEnds|TestATurnStartedBeforeTheCodexAppServerRestartedIsNotRunning|TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack)$' -count=1 -v | tee "$RUNNER_TEMP/codex-real.log"
+          PATH="$RUNNER_TEMP/codex/node_modules/.bin:$PATH" go test ./internal/surface/surfaces/ -run '^(TestACodexCompactionHoldsReloadsOnlyUntilItsTurnEnds|TestATurnStartedBeforeTheCodexAppServerRestartedIsNotRunning|TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack|TestInstallingTheCodexRelayWritesOnlyItsTablesAndUninstallRestoresTheBytes|TestTheCodexRelayInstallLeavesAServerItDidNotWrite|TestAnInstallBuiltOnAConfigCodexHasSinceRewrittenIsBuiltAgain|TestAThreadAgenthailStartsHasOnlyItsOwnServerWhileThePersonsThreadsGetTheRelay)$' -count=1 -v | tee "$RUNNER_TEMP/codex-real.log"
           PATH="$RUNNER_TEMP/codex/node_modules/.bin:$PATH" go test ./internal/daemon/ -run '^(TestAnIdleCodexThreadMovesToAPairedHostAndRunsThere|TestARealCodexThreadCallsTheToolsAsItselfThroughTheStdioRelay)$' -count=1 -v | tee -a "$RUNNER_TEMP/codex-real.log"
-          test "$(grep -c -- '^--- PASS: ' "$RUNNER_TEMP/codex-real.log")" -eq 5
+          PATH="$RUNNER_TEMP/codex/node_modules/.bin:$PATH" go test ./internal/cli/ -run '^TestCodexMCPOffTakesTheRelayOutOfCodexsConfigOnInstallAndSaysSo$' -count=1 -v | tee -a "$RUNNER_TEMP/codex-real.log"
+          test "$(grep -c -- '^--- PASS: ' "$RUNNER_TEMP/codex-real.log")" -eq 10
       - name: Build
         run: go build ./...
       - name: Vet
