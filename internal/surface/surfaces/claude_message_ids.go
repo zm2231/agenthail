@@ -27,17 +27,24 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 	return items
 }
 
-// Claude keeps the sender's id as msg_id on peer prompts and source_uuid on prompts absorbed mid-turn.
+// Claude keeps a peer sender's id as origin.msg_id, both on the prompt that
+// starts a turn and on one absorbed mid-turn; other prompts absorbed mid-turn
+// carry theirs as source_uuid.
 func claudeMessageID(record map[string]any) string {
-	if attachment, _ := record["attachment"].(map[string]any); str(attachment, "type") == "queued_command" {
-		return str(attachment, "source_uuid")
-	}
-	if str(record, "type") != "user" {
+	attachment, _ := record["attachment"].(map[string]any)
+	queued := str(attachment, "type") == "queued_command"
+	if !queued && str(record, "type") != "user" {
 		return ""
 	}
 	origin, _ := record["origin"].(map[string]any)
+	if queued {
+		origin, _ = attachment["origin"].(map[string]any)
+	}
 	if id := str(origin, "msg_id"); id != "" {
 		return id
+	}
+	if queued {
+		return str(attachment, "source_uuid")
 	}
 	return str(record, "uuid")
 }

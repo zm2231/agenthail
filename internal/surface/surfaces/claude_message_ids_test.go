@@ -20,6 +20,7 @@ func TestClaudePromptsCarryTheIDTheirSenderGaveThem(t *testing.T) {
 		{"typed or posted prompt", map[string]any{"type": "user", "uuid": "record-1", "origin": map[string]any{"kind": "human"}, "message": map[string]any{"content": "Run the tests"}}, "user", "record-1"},
 		{"peer message", map[string]any{"type": "user", "uuid": "record-2", "origin": map[string]any{"kind": "peer", "msg_id": "peer-1", "name": "voice"}, "message": map[string]any{"content": "<cross-session-message>Run the tests</cross-session-message>"}}, "peer", "peer-1"},
 		{"prompt absorbed mid-turn", map[string]any{"type": "attachment", "uuid": "record-3", "attachment": map[string]any{"type": "queued_command", "prompt": "Run the tests", "source_uuid": "posted-1", "origin": map[string]any{"kind": "human"}}}, "user", "posted-1"},
+		{"peer message absorbed mid-turn", map[string]any{"type": "attachment", "uuid": "record-5", "attachment": map[string]any{"type": "queued_command", "prompt": "<cross-session-message>Run the tests</cross-session-message>", "source_uuid": "claude-own-1", "origin": map[string]any{"kind": "peer", "msg_id": "peer-2", "name": "voice"}}}, "peer", "peer-2"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

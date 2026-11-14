@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -73,11 +75,34 @@ func TestACommandThatOpensAClosedClaudeConversationOpensItThroughTheDaemonWithIt
 	}
 }
 
-func TestAReplySendToAClosedClaudeConversationFollowsTheDaemonsDelivery(t *testing.T) {
+func TestAReplySendToAClosedClaudeConversationPrintsTheReplyOfTheTurnItsMessageStarted(t *testing.T) {
 	e := exitedClaudeApp(t)
-	output, err := captureStdout(t, func() error { return e.app.Run([]string{"send", terminalConversation, "hello", "--reply"}) })
-	if err != nil || e.peers.Count("hello") != 1 || len(e.host.Spawns(t, terminalConversation)) != 1 {
-		t.Fatalf("output=%q err=%v peer=%d, want one delivery through one open", output, err, e.peers.Count("hello"))
+	go func() {
+		for deadline := time.Now().Add(10 * time.Second); e.peers.Count("hello") == 0; time.Sleep(20 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				return
+			}
+		}
+		at := time.Now().UTC().Format(time.RFC3339Nano)
+		var lines []byte
+		for _, record := range []map[string]any{
+			{"type": "user", "uuid": "turn-1", "sessionId": terminalConversation, "timestamp": at, "origin": map[string]any{"kind": "peer", "msg_id": "peer-1", "name": "cli"}, "message": map[string]any{"role": "user", "content": "<cross-session-message>hello</cross-session-message>"}},
+			{"type": "assistant", "uuid": "answer-1", "sessionId": terminalConversation, "timestamp": at, "message": map[string]any{"id": "m-1", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "the reply to hello"}}}},
+			{"type": "system", "subtype": "turn_duration", "sessionId": terminalConversation, "timestamp": at},
+		} {
+			line, _ := json.Marshal(record)
+			lines = append(append(lines, line...), '\n')
+		}
+		if file, err := os.OpenFile(e.session.Transcript, os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+			_, _ = file.Write(lines)
+			_ = file.Close()
+		}
+	}()
+	output, err := captureStdout(t, func() error {
+		return e.app.Run([]string{"send", terminalConversation, "hello", "--reply", "--timeout", "30s"})
+	})
+	if err != nil || !strings.HasPrefix(output, "the reply to hello\n") || e.peers.Count("hello") != 1 || len(e.host.Spawns(t, terminalConversation)) != 1 {
+		t.Fatalf("output=%q err=%v peer=%d, want the turn's reply after one delivery through one open", output, err, e.peers.Count("hello"))
 	}
 }
 

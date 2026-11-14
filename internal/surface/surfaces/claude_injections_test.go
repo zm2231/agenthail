@@ -215,3 +215,36 @@ func TestClaudeTimelineShowsTheLimitResumeNoticeAsAgenthails(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeStreamMarksThePeerMessageThatStartedItsTurn(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"u0","timestamp":"2026-11-14T10:00:00Z","origin":{"kind":"human"},"message":{"content":"earlier"}}`)
+	session := seededClaudeStreamSession(t, path, "")
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.WriteString(`{"type":"assistant","uuid":"a0","timestamp":"2026-11-14T10:00:01Z","message":{"id":"m0","stop_reason":"end_turn","content":[{"type":"text","text":"done earlier"}]}}
+{"type":"user","uuid":"record-1","isMeta":true,"timestamp":"2026-11-14T10:01:00Z","origin":{"kind":"peer","name":"sender","msg_id":"delivery-1","body":"started a turn"},"message":{"role":"user","content":"<cross-session-message from=\"uds:/tmp/s.sock\" from-name=\"sender\">started a turn</cross-session-message>"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-11-14T10:01:05Z","message":{"id":"m1","content":[{"type":"tool_use","id":"call-1","name":"Bash","input":{"command":"sleep 12"}}]}}
+{"type":"attachment","uuid":"q1","timestamp":"2026-11-14T10:01:08Z","attachment":{"type":"queued_command","prompt":"<cross-session-message from=\"uds:/tmp/s.sock\" from-name=\"sender\">joined it</cross-session-message>","source_uuid":"claude-own-2","commandMode":"prompt","origin":{"kind":"peer","name":"sender","msg_id":"delivery-2","body":"joined it"}}}
+`)
+	file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]surface.StreamEvent{}
+	err = NewClaude(nil, t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+		if event.MessageID == "delivery-1" || event.MessageID == "delivery-2" {
+			got[event.MessageID] = event
+		}
+	}, 150*time.Millisecond)
+	if !errors.Is(err, surface.ErrStreamWindow) {
+		t.Fatalf("stream err=%v", err)
+	}
+	if started := got["delivery-1"]; started.TurnID != "record-1" || !started.TurnStart {
+		t.Fatalf("started=%+v, want the turn its record started, marked as its start", started)
+	}
+	if joined := got["delivery-2"]; joined.TurnID != "record-1" || joined.TurnStart {
+		t.Fatalf("joined=%+v, want the running turn, not marked as its start", joined)
+	}
+}

@@ -339,22 +339,28 @@ func streamDirectOutput(ctx context.Context, surf surface.Surface, sess *surface
 	return err
 }
 
-func consumeSessionReply(ctx context.Context, subscription sessionstream.Subscription, turnID string) (*surface.ReplyResult, error) {
+func consumeSessionReply(ctx context.Context, subscription sessionstream.Subscription, follow *turnFollow) (*surface.ReplyResult, error) {
 	bodies := map[string]string{}
 	versions := map[string]uint64{}
 	var latest string
+	settle, stop := settleTicker(follow)
+	defer stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, follow.timedOut(ctx.Err())
+		case <-settle:
+			if err := checkSettled(ctx, follow); err != nil {
+				return nil, err
+			}
 		case event, ok := <-subscription.Events:
 			if !ok {
-				return nil, fmt.Errorf("session stream ended before turn %s completed", turnID)
+				return nil, fmt.Errorf("session stream ended before %s completed", follow.label())
 			}
 			if event.Kind == "source-error" {
 				return nil, fmt.Errorf("session source failed: %s", event.Reason)
 			}
-			if event.TurnID != turnID {
+			if !follow.takes(event) {
 				continue
 			}
 			if event.SpokenAssistantContent() {
@@ -370,7 +376,7 @@ func consumeSessionReply(ctx context.Context, subscription sessionstream.Subscri
 			}
 			if event.Terminal() {
 				if event.Failed() {
-					return nil, fmt.Errorf("turn %s did not complete successfully: %s", turnID, event.FailureReason())
+					return nil, fmt.Errorf("%s did not complete successfully: %s", follow.label(), event.FailureReason())
 				}
 				return &surface.ReplyResult{Text: latest, Done: true, Source: "daemon-journal"}, nil
 			}
@@ -378,26 +384,37 @@ func consumeSessionReply(ctx context.Context, subscription sessionstream.Subscri
 	}
 }
 
-func consumeDaemonStreamOutput(ctx context.Context, subscription sessionstream.Subscription, turnID string, timeout time.Duration) error {
+func consumeDaemonStreamOutput(ctx context.Context, subscription sessionstream.Subscription, follow *turnFollow, timeout time.Duration) error {
 	bodies := map[string]string{}
 	versions := map[string]uint64{}
+	settle, stop := settleTicker(follow)
+	defer stop()
+	announced := false
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("timed out waiting for stream after %s: %w", timeout, ctx.Err())
+			return follow.timedOut(fmt.Errorf("timed out waiting for stream after %s: %w", timeout, ctx.Err()))
+		case <-settle:
+			if err := checkSettled(ctx, follow); err != nil {
+				return err
+			}
 		case event, ok := <-subscription.Events:
 			if !ok {
-				return fmt.Errorf("session stream ended before turn %s completed", turnID)
+				return fmt.Errorf("session stream ended before %s completed", follow.label())
 			}
 			if event.Kind == "source-error" {
 				return fmt.Errorf("session source failed: %s", event.Reason)
 			}
-			if event.TurnID != turnID {
+			if !follow.takes(event) {
 				continue
+			}
+			if follow.joined && !announced {
+				announced = true
+				fmt.Println(joinedRunningTurnNote)
 			}
 			if event.Kind == "done" {
 				if event.Failed() {
-					return fmt.Errorf("turn %s did not complete successfully: %s", turnID, event.FailureReason())
+					return fmt.Errorf("%s did not complete successfully: %s", follow.label(), event.FailureReason())
 				}
 				fmt.Println()
 				return nil
