@@ -73,7 +73,7 @@ func TestAdoptResumesAConversationInTheConfigRootThatHoldsIt(t *testing.T) {
 	spare := fixture.AddRoot("spare")
 	host := claudehosttest.New(t, fixture.Home)
 	host.Start(t)
-	c := NewClaude(nil, fixture.Home)
+	c := inDaemon(NewClaude(nil, fixture.Home))
 	fixture.Transcript(fixtureConversation, fixture.Home)
 	result, err := c.AdoptSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.AdoptRequest{})
 	if err != nil {

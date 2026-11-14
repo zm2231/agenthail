@@ -237,6 +237,13 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		reg.SetBusyPolicy(d.busyPolicy)
 		attachCodexConfigStore(reg, surfaces)
 	}
+	for _, adapter := range surfaces {
+		if opener, ok := adapter.(interface {
+			OpensConversations(func(sessionID string, err error))
+		}); ok {
+			opener.OpensConversations(d.openedWithoutMCP)
+		}
+	}
 	d.sources.prompts = d.backfillPrompt
 	d.sources.hookCaptured = d.holdsUncheckedHookCapture
 	d.ui = newUIState(reg)

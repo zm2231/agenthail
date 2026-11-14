@@ -32,7 +32,7 @@ fi
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	return home, NewClaude(nil, home)
+	return home, inDaemon(NewClaude(nil, home))
 }
 
 func TestClaudeBackgroundCommandsDropCmuxTerminalState(t *testing.T) {
@@ -63,7 +63,7 @@ const fixtureConversation = "fe758937-0caa-4912-823f-927677775b2b"
 func TestClaudeStartsASessionInTheHostWithItsFirstTurn(t *testing.T) {
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	turn := uuid.NewString()
 	ctx := surface.WithSourceSessionID(surface.WithMessageUUID(context.Background(), turn), surface.PersonSessionID)
 	session, sent, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, Name: "builder", PermissionMode: "acceptEdits", LaunchSettings: surface.LaunchSettings{Effort: "high"}})
@@ -90,7 +90,7 @@ func TestClaudeStartsASessionInTheHostWithItsFirstTurn(t *testing.T) {
 func TestASessionAnAgentStartsDoesNotTakeItsBriefAsThePersonsTurn(t *testing.T) {
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	ctx := surface.WithSourceSessionID(context.Background(), "spawner-session")
 	session, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
 	if err != nil {
@@ -104,7 +104,7 @@ func TestASessionAnAgentStartsDoesNotTakeItsBriefAsThePersonsTurn(t *testing.T) 
 
 func TestClaudeStartWithoutTheHostCreatesNothing(t *testing.T) {
 	home := t.TempDir()
-	session, sent, err := NewClaude(nil, home).StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: home})
+	session, sent, err := inDaemon(NewClaude(nil, home)).StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: home})
 	if err == nil || session != nil || sent != nil || surface.IsDeliveryOutcomeUnknown(err) || !strings.Contains(err.Error(), "Claude host is not running") {
 		t.Fatalf("session=%+v sent=%+v err=%v", session, sent, err)
 	}
@@ -146,7 +146,7 @@ func TestClaudeHostSessionLifecycle(t *testing.T) {
 	host := claudehosttest.New(t, "")
 	claudetest.New(t)
 	host.Start(t)
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	session, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ fi
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	_, err := NewClaude(nil, home).SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "stop")
+	_, err := inDaemon(NewClaude(nil, home)).SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "stop")
 	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
 	}
@@ -198,7 +198,7 @@ fi
 
 func TestClaudeCreationTheHostNeverReceivedIsAFailureNotUnknown(t *testing.T) {
 	host := claudehosttest.New(t, "")
-	session, sent, err := NewClaude(nil, host.Home).StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
+	session, sent, err := inDaemon(NewClaude(nil, host.Home)).StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
 	if session != nil || sent != nil || !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("session=%+v sent=%+v err=%v", session, sent, err)
 	}
@@ -218,7 +218,7 @@ fi
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	c := NewClaude(nil, home)
+	c := inDaemon(NewClaude(nil, home))
 	for _, action := range []string{"stop", "logs"} {
 		if _, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, action); err != nil {
 			t.Fatalf("%s: %v", action, err)
@@ -246,7 +246,7 @@ func TestClaudeModelCatalogInAFolderThatIsGoneSaysSo(t *testing.T) {
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
 	home := filepath.Join(t.TempDir(), "removed")
-	if _, err := NewClaude(nil, home).Models(context.Background()); err == nil || !strings.Contains(err.Error(), "folder "+home+" is gone") {
+	if _, err := inDaemon(NewClaude(nil, home)).Models(context.Background()); err == nil || !strings.Contains(err.Error(), "folder "+home+" is gone") {
 		t.Fatalf("err=%v", err)
 	}
 }

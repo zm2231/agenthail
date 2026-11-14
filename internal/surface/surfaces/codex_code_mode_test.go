@@ -58,7 +58,7 @@ func codexStreamedItems(t *testing.T, path string) []surface.TimelineItem {
 	session := &surface.Session{ID: "code-mode", Transcript: path, TranscriptOffsetSet: true}
 	var items []surface.TimelineItem
 	index := map[string]int{}
-	err := NewCodex("").Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+	err := inDaemon(NewCodex("")).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
 		if event.Kind == "commands" {
 			return
 		}

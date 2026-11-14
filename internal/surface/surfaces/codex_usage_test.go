@@ -46,7 +46,7 @@ func TestCodexUsageReadsTheNewestRolloutThatRecordsLimits(t *testing.T) {
 	writeRollout(t, home, "2026/10/23", "rollout-new.jsonl", now,
 		`{"timestamp":"2026-10-23T13:59:00Z","type":"session_meta","payload":{}}`)
 
-	usage, err := NewCodex("").Usage(context.Background())
+	usage, err := inDaemon(NewCodex("")).Usage(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,11 +62,11 @@ func TestCodexUsageReadsTheNewestRolloutThatRecordsLimits(t *testing.T) {
 func TestCodexUsageSaysWhenNoRolloutRecordsLimits(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	if _, err := NewCodex("").Usage(context.Background()); !errors.Is(err, ErrNoCodexUsage) {
+	if _, err := inDaemon(NewCodex("")).Usage(context.Background()); !errors.Is(err, ErrNoCodexUsage) {
 		t.Fatalf("an empty Codex home: err=%v", err)
 	}
 	writeRollout(t, home, "2026/10/23", "rollout.jsonl", time.Now(), tokenCount("2026-10-23T13:00:00Z", `{"primary":null,"secondary":null}`))
-	if _, err := NewCodex("").Usage(context.Background()); !errors.Is(err, ErrNoCodexUsage) {
+	if _, err := inDaemon(NewCodex("")).Usage(context.Background()); !errors.Is(err, ErrNoCodexUsage) {
 		t.Fatalf("a rollout whose token counts carry no window: err=%v", err)
 	}
 }
@@ -75,7 +75,7 @@ func TestCodexUsageRereadsARolloutOnlyWhenItGrows(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
 	path := writeRollout(t, home, "2026/10/23", "rollout.jsonl", time.Now(), tokenCount("2026-10-23T13:00:00Z", `{"primary":{"used_percent":19.0,"window_minutes":10080,"resets_at":1793293773}}`))
-	codex := NewCodex("")
+	codex := inDaemon(NewCodex(""))
 	if usage, err := codex.Usage(context.Background()); err != nil || usage.Limits[0].Percent != 19 {
 		t.Fatalf("usage=%+v err=%v", usage, err)
 	}

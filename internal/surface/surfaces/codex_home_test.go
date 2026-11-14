@@ -20,7 +20,7 @@ func TestTwoCodexAdaptersInOneProcessKeepToTheirOwnHomes(t *testing.T) {
 		writeRollout(t, home.Codex, "2026/10/23", "rollout.jsonl", now,
 			tokenCount("2026-10-23T13:00:00Z", `{"primary":{"used_percent":`+strconv.FormatFloat(used, 'f', -1, 64)+`,"window_minutes":10080,"resets_at":1793293773},"secondary":null}`))
 		homes[used] = home
-		adapters[used] = NewCodexIn(home, "")
+		adapters[used] = inDaemon(NewCodexIn(home, ""))
 	}
 	elsewhere := t.TempDir()
 	t.Setenv("HOME", elsewhere)

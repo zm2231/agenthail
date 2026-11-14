@@ -12,8 +12,8 @@ import (
 )
 
 // hostInOtherRootThanCaller starts the Claude host as the daemon does, under
-// the default root, and leaves this process running in a second root, as an
-// agent's CLI in that root does.
+// the default root, and leaves this process running in a second root, so a
+// conversation's root is never taken from the opener's environment.
 func hostInOtherRootThanCaller(t *testing.T) (*claudetest.Fixture, *claudehosttest.Fixture, *Claude, string) {
 	t.Helper()
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
@@ -25,7 +25,7 @@ func hostInOtherRootThanCaller(t *testing.T) (*claudetest.Fixture, *claudehostte
 	host := claudehosttest.New(t, fixture.Home)
 	host.Start(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", second)
-	return fixture, host, NewClaude(nil, fixture.Home), second
+	return fixture, host, inDaemon(NewClaude(nil, fixture.Home)), second
 }
 
 func TestASendFromACallerInAnotherRootResumesTheConversationInTheRootThatHoldsIt(t *testing.T) {
@@ -71,7 +71,7 @@ func TestAResumeInTheDefaultRootThroughAHostStartedInAnotherRootRunsWithoutAConf
 	}
 	fixture.Root = filepath.Join(fixture.Home, ".claude")
 	session := exitedSession(fixture)
-	if _, err := NewClaude(nil, fixture.Home).SendHumanTurn(context.Background(), &session, "are you there", nil); err != nil {
+	if _, err := inDaemon(NewClaude(nil, fixture.Home)).SendHumanTurn(context.Background(), &session, "are you there", nil); err != nil {
 		t.Fatal(err)
 	}
 	spawns := host.Spawns(t, fixtureConversation)
@@ -100,7 +100,7 @@ func TestASessionStartedInThePrimaryRootThroughAHostStartedInAnotherRootRunsInTh
 			if err := surface.RecordDaemonClaudeRoot(fixture.Home); err != nil {
 				t.Fatal(err)
 			}
-			session, _, err := NewClaude(nil, fixture.Home).StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: t.TempDir(), Name: "in-" + uuid.NewString()[:8]})
+			session, _, err := inDaemon(NewClaude(nil, fixture.Home)).StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: t.TempDir(), Name: "in-" + uuid.NewString()[:8]})
 			if err != nil {
 				t.Fatal(err)
 			}

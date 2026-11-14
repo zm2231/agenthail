@@ -23,7 +23,11 @@ type claudeHookInput struct {
 	PromptID  string `json:"prompt_id"`
 	// Set by the Claude host to the uuid of the message Claude took.
 	MessageUUID string `json:"agenthail_message_uuid"`
+	// Set by the Claude host to whether the conversation has its agenthail MCP server.
+	AgenthailTools string `json:"agenthail_tools"`
 }
+
+const hostToolsAbsent = "absent"
 
 // sessionContext is what the session-context hook adds to a Claude or Codex
 // session: its card once per start, then one line each time the card changes.
@@ -64,7 +68,11 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	if hook.Event == claudehooks.PromptSubmit.Event {
 		_ = store.OpenTurn(session.ID, now)
 	}
-	card, err := a.cardSources().For(ctx, *session)
+	sources := a.cardSources()
+	if hook.AgenthailTools == hostToolsAbsent {
+		sources.MCP = nil
+	}
+	card, err := sources.For(ctx, *session)
 	if err != nil {
 		return nil
 	}

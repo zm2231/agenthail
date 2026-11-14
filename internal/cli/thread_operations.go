@@ -89,6 +89,16 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 			defer a.cleanUp("free the name @"+name.Name, func() error { return a.registry().ReleaseAliasReservation(name) })
 		}
 		fork, err := forker.ForkSession(ctx, session, surface.ForkOptions{Model: flagVal(args, "--model"), LastTurnID: flagVal(args, "--last-turn")})
+		if errors.Is(err, surface.ErrOpenIsTheDaemons) {
+			target, err := a.throughDaemon(session)
+			if err != nil {
+				return err
+			}
+			if err := a.registry().ReleaseAliasReservation(name); err != nil {
+				return err
+			}
+			return a.threadOperationRemote(ctx, target, operation, positional, args)
+		}
 		if err != nil {
 			return err
 		}
@@ -132,6 +142,13 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 		}
 		addressed := *session
 		output, err = lifecycle.SessionAction(ctx, session, operation)
+		if errors.Is(err, surface.ErrOpenIsTheDaemons) {
+			target, err := a.throughDaemon(session)
+			if err != nil {
+				return err
+			}
+			return a.threadOperationRemote(ctx, target, operation, positional, args)
+		}
 		if err == nil && operation == "resume" {
 			err = (delivery.Dispatcher{Registry: a.registry()}).RegisterReached(&addressed, session)
 		}

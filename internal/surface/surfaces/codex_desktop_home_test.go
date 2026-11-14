@@ -51,7 +51,7 @@ func TestCodexDialsTheDefaultDesktopPortOnlyFromTheAccountsOwnCodexHome(t *testi
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("HOME", test.home)
 			t.Setenv("CODEX_HOME", test.codexHome)
-			if got := NewCodex(test.port).desktopURL; got != test.want {
+			if got := inDaemon(NewCodex(test.port)).desktopURL; got != test.want {
 				t.Fatalf("desktop endpoint %q, want %q", got, test.want)
 			}
 		})
@@ -62,7 +62,7 @@ func TestCodexDialsTheDefaultDesktopPortOnlyFromTheAccountsOwnCodexHome(t *testi
 		t.Cleanup(func() { codexAccountHome = func() string { return account } })
 		t.Setenv("HOME", account)
 		t.Setenv("CODEX_HOME", "")
-		if got := NewCodex("").desktopURL; got != "" {
+		if got := inDaemon(NewCodex("")).desktopURL; got != "" {
 			t.Fatalf("desktop endpoint %q without a known account home", got)
 		}
 	})
@@ -76,7 +76,7 @@ func TestCodexDialsTheDefaultDesktopPortOnlyFromTheAccountsOwnCodexHome(t *testi
 		t.Cleanup(func() { codexAccountHome = func() string { return account } })
 		t.Setenv("HOME", scratch)
 		t.Setenv("CODEX_HOME", filepath.Join(account, ".codex"))
-		if got := NewCodex("").desktopURL; got != "ws://127.0.0.1:9231" {
+		if got := inDaemon(NewCodex("")).desktopURL; got != "ws://127.0.0.1:9231" {
 			t.Fatalf("desktop endpoint %q", got)
 		}
 	})
@@ -90,7 +90,7 @@ func TestCodexDialsTheDefaultDesktopPortOnlyFromTheAccountsOwnCodexHome(t *testi
 		t.Cleanup(func() { codexAccountHome = func() string { return account } })
 		t.Setenv("HOME", scratch)
 		t.Setenv("CODEX_HOME", filepath.Join(resolvedRoot, "fresh", ".codex"))
-		if got := NewCodex("").desktopURL; got != "ws://127.0.0.1:9231" {
+		if got := inDaemon(NewCodex("")).desktopURL; got != "ws://127.0.0.1:9231" {
 			t.Fatalf("desktop endpoint %q", got)
 		}
 	})
@@ -105,7 +105,7 @@ func TestACodexHomeOfItsOwnNamesTheDesktopOptIn(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CODEX_HOME", "")
 
-	codex := NewCodex("")
+	codex := inDaemon(NewCodex(""))
 	err := codex.DesktopReady(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "not used from this Codex home") || !strings.Contains(err.Error(), "AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT") {
 		t.Fatalf("Desktop from a Codex home of its own: %v", err)

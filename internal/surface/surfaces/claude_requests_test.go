@@ -173,7 +173,7 @@ func TestAHostSessionChangesModelAndPermissionModeLive(t *testing.T) {
 }
 
 func TestAPermissionModeChangeNeedsTheHost(t *testing.T) {
-	c := NewClaude(nil, t.TempDir())
+	c := inDaemon(NewClaude(nil, t.TempDir()))
 	sess := &surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: os.Getpid(), LastActive: time.Now()}
 	if _, err := c.Control(context.Background(), sess, surface.ControlRequest{Action: "permission-mode", Value: "plan"}); err == nil {
 		t.Fatal("a CLI session changed its permission mode")

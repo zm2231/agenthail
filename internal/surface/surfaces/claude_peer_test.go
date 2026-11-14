@@ -42,7 +42,7 @@ func TestClaudeLifecycleCapabilitiesFollowTheRuntime(t *testing.T) {
 	if adapter.Capabilities().Lifecycle != (surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true, Adopt: true}) {
 		t.Fatal("the adapter advertises less lifecycle than its sessions reach")
 	}
-	var codex surface.Surface = NewCodex("")
+	var codex surface.Surface = inDaemon(NewCodex(""))
 	if codex.Capabilities().Lifecycle != (surface.Lifecycle{}) {
 		t.Fatalf("Codex advertises a lifecycle: %+v", codex.Capabilities().Lifecycle)
 	}

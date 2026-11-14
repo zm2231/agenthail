@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -53,23 +53,16 @@ func (a *App) cmdThreadAdopt(args []string) (adoptErr error) {
 	if err := a.controlScope(ctx, session, nil); err != nil {
 		return err
 	}
-	adopter, ok := adapter.(surface.SessionAdopter)
-	if !ok {
+	if _, ok := adapter.(surface.SessionAdopter); !ok {
 		return fmt.Errorf("%s sessions cannot be opened in Agenthail", session.Surface)
 	}
-	result, err := adopter.AdoptSession(ctx, session, request)
+	result, err := a.adoptThroughDaemon(ctx, session, request)
 	if err != nil {
-		var consent *surface.AdoptConsentError
-		if errors.As(err, &consent) && !jsonOut {
+		var refused hosts.StatusError
+		if errors.As(err, &refused) && refused.Code == "session_adopt_needs_consent" && !jsonOut {
 			return fmt.Errorf("%w; pass --stop-terminal to stop it", err)
 		}
 		return err
-	}
-	if a.registry() != nil && result.Session != nil {
-		if err := a.registry().RegisterSession(*result.Session); err != nil {
-			return fmt.Errorf("session %s opened in Agenthail, but its registration failed: %w", session.ID, err)
-		}
-		_ = a.registry().RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: "adopt"})
 	}
 	if jsonOut {
 		return emit(map[string]any{"ok": true, "result": result})

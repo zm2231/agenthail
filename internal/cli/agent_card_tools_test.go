@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestASessionWithAgenthailsToolsIsTaughtTheToolsAndATerminalOneTheCLI(t *testing.T) {
@@ -119,5 +121,25 @@ func TestAHostedLeadIsToldToReadAndAnswerPromptsWithTheTools(t *testing.T) {
 	text := helpAgentAs(t, app, "lead-conversation")
 	if !strings.Contains(text, `read the request with agenthail_requests {"sessionId":"<target>"} (answer with agenthail_answer)`) || strings.Contains(text, "agenthail requests") {
 		t.Fatalf("the hosted lead is not told to use the tools for prompts:\n%s", text)
+	}
+}
+
+func TestAConversationTheClaudeHostOpenedWithoutItsAgenthailServerIsTaughtTheCLI(t *testing.T) {
+	withoutSessionContextLimit(t)
+	card := func(t *testing.T, tools string) string {
+		app, _, _ := cardFixture(t)
+		if _, err := app.Registry.IssueSessionCredential("planner-conversation", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		output := app.sessionContext(strings.NewReader(`{"session_id":"planner-conversation","hook_event_name":"SessionStart","source":"resume","agenthail_tools":"`+tools+`"}`), surface.KindClaude, 4242, time.Now())
+		hook, _ := output["hookSpecificOutput"].(map[string]any)
+		text, _ := hook["additionalContext"].(string)
+		return text
+	}
+	if absent := card(t, "absent"); !strings.Contains(absent, `agenthail send <@alias|session-id> "<message>"`) || strings.Contains(absent, "agenthail_") {
+		t.Fatalf("a conversation without its agenthail server is taught tools it does not have:\n%s", absent)
+	}
+	if attached := card(t, "attached"); !strings.Contains(attached, `agenthail_end_turn {"headline":"<one line>"}`) {
+		t.Fatalf("a conversation with its agenthail server is not taught its tools:\n%s", attached)
 	}
 }

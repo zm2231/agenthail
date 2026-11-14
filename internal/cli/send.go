@@ -92,8 +92,13 @@ func (a *App) cmdSend(args []string) error {
 	if coordinated {
 		scope = daemon.ScopeRequest{Action: "lead-send", Project: spec.ProjectID, Mode: sendMode(args)}
 	}
-	if _, err := a.agentScope(ctx, scope); err != nil {
+	allowed, err := a.agentScope(ctx, scope)
+	if err != nil {
 		return err
+	}
+	scopeProjectID := ""
+	if allowed != nil {
+		scopeProjectID = allowed.ScopeProjectID
 	}
 	source, err := a.sourceSessionID(ctx, fromLabel)
 	if err != nil {
@@ -199,6 +204,9 @@ func (a *App) cmdSend(args []string) error {
 		receipt, err = dispatcher.DeliverWithoutQueue(ctx, surf, sess, message, "", options)
 	} else {
 		receipt, err = dispatcher.DeliverWithOptions(ctx, surf, sess, message, "", options)
+	}
+	if errors.Is(err, surface.ErrOpenIsTheDaemons) {
+		receipt, err = a.sendThroughDaemon(ctx, sess, message, options, scopeProjectID, hasFlag(args, "--no-queue"))
 	}
 	if err != nil {
 		if syntheticNotion && errors.Is(err, delivery.ErrTargetBusy) {

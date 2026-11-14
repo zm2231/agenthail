@@ -177,7 +177,7 @@ func TestCodexContextUsageUsesLatestContextSnapshot(t *testing.T) {
 		`{"timestamp":"2026-07-16T04:30:11Z","type":"compacted","payload":{"window_number":3,"window_id":"019f6930-7747-7c63-9442-3c742e0589f0"}}`,
 		codexTokenRecord("2026-07-16T04:30:13Z", 80000, 980000),
 	)
-	adapter := NewCodex("")
+	adapter := inDaemon(NewCodex(""))
 	session := &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Transcript: path}
 	usage, err := adapter.ContextUsage(context.Background(), session)
 	if err != nil {
@@ -191,7 +191,7 @@ func TestCodexContextUsageUsesLatestContextSnapshot(t *testing.T) {
 func TestCodexContextUsageResetsWhenTranscriptIsReplacedAtSamePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "codex.jsonl")
 	writeTestTranscript(t, path, codexTokenRecord("2026-07-16T04:29:00Z", 100, 100))
-	adapter := NewCodex("")
+	adapter := inDaemon(NewCodex(""))
 	session := &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Transcript: path}
 	usage, err := adapter.ContextUsage(context.Background(), session)
 	if err != nil || usage == nil || usage.UsedTokens != 100 {
@@ -218,7 +218,7 @@ func TestCodexContextUsageTracksRapidCompactions(t *testing.T) {
 		`{"timestamp":"2026-07-16T04:32:00Z","type":"compacted","payload":{"window_number":2,"window_id":"019f6931-d4c0-7000-8000-000000000000"}}`,
 		codexTokenRecord("2026-07-16T04:32:01Z", 40000, 1040000),
 	)
-	adapter := NewCodex("")
+	adapter := inDaemon(NewCodex(""))
 	usage, err := adapter.ContextUsage(context.Background(), &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Transcript: path})
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +240,7 @@ func TestCodexContextUsageIgnoresPartialRecordUntilComplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	file.Close()
-	adapter := NewCodex("")
+	adapter := inDaemon(NewCodex(""))
 	session := &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Transcript: path}
 	usage, err := adapter.ContextUsage(context.Background(), session)
 	if err != nil {

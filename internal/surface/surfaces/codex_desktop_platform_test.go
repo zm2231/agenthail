@@ -19,12 +19,12 @@ func TestCodexProbesTheDefaultDesktopPortOnlyWhereDesktopRuns(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 
 	codexDesktopRunsHere = true
-	if got := NewCodex("").desktopURL; got != "ws://127.0.0.1:9231" {
+	if got := inDaemon(NewCodex("")).desktopURL; got != "ws://127.0.0.1:9231" {
 		t.Fatalf("where Desktop runs the default endpoint is %q", got)
 	}
 
 	codexDesktopRunsHere = false
-	if err := NewCodex("").DesktopReady(context.Background()); err == nil || !strings.Contains(err.Error(), "does not run on") {
+	if err := inDaemon(NewCodex("")).DesktopReady(context.Background()); err == nil || !strings.Contains(err.Error(), "does not run on") {
 		t.Fatalf("without a configured port: %v", err)
 	}
 	desktop := codextest.StartDesktop(t, func(method string) string {
@@ -37,7 +37,7 @@ func TestCodexProbesTheDefaultDesktopPortOnlyWhereDesktopRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := NewCodex(endpoint.Port()).DesktopReady(context.Background()); err != nil || desktop.Lookups() != 1 {
+	if err := inDaemon(NewCodex(endpoint.Port())).DesktopReady(context.Background()); err != nil || desktop.Lookups() != 1 {
 		t.Fatalf("a configured port: err=%v lookups=%d", err, desktop.Lookups())
 	}
 }
@@ -62,7 +62,7 @@ func TestOnlyALocalDesktopOnAMacIsRepairedByLaunchingCodex(t *testing.T) {
 	} {
 		t.Setenv("HOME", test.home)
 		codexDesktopRunsHere = test.runsHere
-		codex := NewCodex(test.endpoint)
+		codex := inDaemon(NewCodex(test.endpoint))
 		problem, remediation := codex.desktopProblem()
 		if problem != test.want || (problem == surface.RuntimeDesktopUnreachable) != strings.Contains(remediation, codex.desktopURL+" reachable") {
 			t.Errorf("runsHere=%v endpoint=%q: problem=%s remediation=%q", test.runsHere, test.endpoint, problem, remediation)
@@ -70,7 +70,7 @@ func TestOnlyALocalDesktopOnAMacIsRepairedByLaunchingCodex(t *testing.T) {
 	}
 	t.Setenv("HOME", t.TempDir())
 	codexDesktopRunsHere = true
-	if problem, remediation := NewCodex("").desktopProblem(); problem != surface.RuntimeDesktopUnreachable || remediation != codexDesktopOptIn {
+	if problem, remediation := inDaemon(NewCodex("")).desktopProblem(); problem != surface.RuntimeDesktopUnreachable || remediation != codexDesktopOptIn {
 		t.Errorf("a Codex home of its own on a Mac: problem=%s remediation=%q", problem, remediation)
 	}
 }

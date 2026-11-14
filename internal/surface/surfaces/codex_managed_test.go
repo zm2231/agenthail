@@ -151,7 +151,7 @@ func TestCodexSearchFallsBackToManagedRuntime(t *testing.T) {
 	})
 	server = httptest.NewServer(handler)
 	defer server.Close()
-	codex := NewCodex("")
+	codex := inDaemon(NewCodex(""))
 	codex.desktopURL = server.URL
 	results, err := codex.SearchSessions(context.Background(), "managed", 10)
 	if err != nil || len(results) != 1 || results[0].Session.Transport != codexTransportManaged {
@@ -163,7 +163,7 @@ func TestCodexSearchFallsBackToManagedRuntime(t *testing.T) {
 }
 
 func TestCodexRejectsMutationsForPlainTerminalSession(t *testing.T) {
-	codex := NewCodex("http://127.0.0.1:1")
+	codex := inDaemon(NewCodex("http://127.0.0.1:1"))
 	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "cli", Transport: codexTransportReadOnly}
 	_, err := codex.Send(context.Background(), session, "do not deliver")
 	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) {
@@ -225,7 +225,7 @@ func TestCodexManagedRuntimeStatusReportsDurability(t *testing.T) {
 }
 
 func TestCodexRuntimeStatusPrefersReachableDesktopBridge(t *testing.T) {
-	status := NewCodex(startRendererDesktopBridge(t)).RuntimeStatus(context.Background())
+	status := inDaemon(NewCodex(startRendererDesktopBridge(t))).RuntimeStatus(context.Background())
 	if !status.Reachable || !status.Durable || status.Backend != "desktop" || status.Name != "Codex Desktop bridge" {
 		t.Fatalf("status=%+v", status)
 	}
@@ -237,7 +237,7 @@ func TestCodexRuntimeStatusPrefersReachableDesktopBridge(t *testing.T) {
 func TestCodexEnsureRuntimeNamesMissingCodex(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	isolateCodexInstalls(t, false)
-	err := NewCodex("").EnsureRuntime(context.Background())
+	err := inDaemon(NewCodex("")).EnsureRuntime(context.Background())
 	if !errors.Is(err, ErrCodexMissing) || !strings.Contains(err.Error(), CodexInstallCommand) {
 		t.Fatalf("err=%v", err)
 	}
@@ -247,7 +247,7 @@ func isolatedManagedRuntime(t *testing.T) *Codex {
 	t.Helper()
 	server := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(server.Close)
-	codex := NewCodex(server.URL)
+	codex := inDaemon(NewCodex(server.URL))
 	codex.managed = true
 	return codex
 }

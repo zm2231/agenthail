@@ -76,7 +76,7 @@ func TestAHostSessionTurnSettingsChangeModelEffortAndModeNow(t *testing.T) {
 }
 
 func TestAClaudeSessionWithoutTheHostOrRemoteControlHasNoTurnSettings(t *testing.T) {
-	c := NewClaude(nil, t.TempDir())
+	c := inDaemon(NewClaude(nil, t.TempDir()))
 	c.DisableRemoteControl()
 	sess := &surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: os.Getpid()}
 	settings, err := c.TurnSettings(context.Background(), sess)

@@ -30,7 +30,7 @@ func watchedCodex(t *testing.T, threadID string) *Codex {
 
 func watchedCodexWaking(t *testing.T, threadID string, changed func()) *Codex {
 	t.Helper()
-	codex := NewCodex("1")
+	codex := inDaemon(NewCodex("1"))
 	codex.noteLoaded(&codexRuntimes{managed: &managedCodexClient{}, managedLoaded: map[string]bool{threadID: true}})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
