@@ -125,7 +125,9 @@ enum SentFileState {
     }
 
     static func type(_ item: TimelineItem) -> UTType? {
-        item.attachment.flatMap { UTType(mimeType: $0.mediaType) } ?? UTType(filenameExtension: (name(item) as NSString).pathExtension)
+        let mime = item.attachment?.mediaType.split(separator: ";").first.map { $0.trimmingCharacters(in: .whitespaces) }
+        if let mime, let type = UTType(mimeType: mime), !type.isDynamic { return type }
+        return UTType(filenameExtension: (name(item) as NSString).pathExtension).flatMap { $0.isDynamic ? nil : $0 }
     }
 
     static func isPDF(_ item: TimelineItem) -> Bool {

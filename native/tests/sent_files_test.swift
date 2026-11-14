@@ -107,6 +107,10 @@ struct SentFilesTest {
         check(SentFileState.reason(gone, hostName: "build") == "No longer on build.", "a file without bytes is gone: \(SentFileState.reason(gone, hostName: "build") ?? "")")
         check(SentFileState.reason(huge, hostName: "build")?.hasPrefix("Too large to open here") == true, "a file over 50 MB says so")
         check(SentFileState.icon(markdown) == "doc.plaintext" && !SentFileState.isPDF(markdown), "markdown reads as text")
+        let sniffed = item(#"{"id":"r1-4-file","truncated":false,"kind":"file","role":"assistant","title":"notes.md","text":"","files":[{"name":"notes.md","path":"/srv/notes.md","bytes":29}],"attachment":{"id":"f4","mediaType":"text/plain; charset=utf-8","bytes":29,"name":"notes.md"}}"#)
+        check(SentFileState.icon(sniffed) == "doc.plaintext" && SentFileState.detail(sniffed).contains(" · "), "a media type with parameters still names its kind: \(SentFileState.icon(sniffed)) \(SentFileState.detail(sniffed))")
+        let unknown = item(#"{"id":"r1-5-file","truncated":false,"kind":"file","role":"assistant","title":"blob.zzq","text":"","files":[{"name":"blob.zzq","path":"/srv/blob.zzq","bytes":9}],"attachment":{"id":"f5","mediaType":"application/x-zzq; v=1","bytes":9,"name":"blob.zzq"}}"#)
+        check(SentFileState.icon(unknown) == "doc" && SentFileState.detail(unknown) == "9 bytes", "an unknown kind shows only its size: \(SentFileState.detail(unknown))")
         check(SentFileState.caption(file) == "Here is the report" && SentFileState.caption(gone) == nil, "the caption is on the first file only")
 
         let image = item(#"{"id":"r2-0","truncated":false,"kind":"attachment","role":"assistant","title":"Image","text":"The chart","callId":"toolu_2","attachment":{"id":"i1","mediaType":"image/png","width":10,"height":10}}"#)
