@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	remoteExtensionPortBase  = 7620
+	remoteExtensionPortBase  = defaultRemoteExtensionPortBase
 	remoteExtensionPortCount = 200
 )
 

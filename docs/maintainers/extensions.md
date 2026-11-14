@@ -149,6 +149,13 @@ like a mount's. The extensions view gives each page as `{port, entry,
 published}`, the shape of a mount, so the dashboard and the apps build both
 URLs the same way and refuse an unpublished one over https.
 
+`AGENTHAIL_EXTENSION_PORT_BASE` moves this pool and
+`AGENTHAIL_REMOTE_EXTENSION_PORT_BASE` moves the pool for paired hosts'
+entries (7620 to 7819, below). Each pool keeps its 200 ports. The daemon reads
+both when it starts and falls back to the default, with a log line, for a
+value that is not a number, does not fit between 1024 and 65535, covers the
+dashboard's port, or overlaps the other pool.
+
 The port serves only its own extension:
 
 | Request | |
@@ -186,6 +193,40 @@ a bearer token with every request a page makes. An app posts its own token to
   `read` for GET and HEAD and `control` otherwise. The dashboard's port never
   takes it: an API path answers 401, and the dashboard serves no `/x/` paths.
   The mount never passes it to the app.
+
+## Extensions on paired hosts
+
+The Mac app holds a credential only for its own daemon, so that daemon opens
+a paired host's pages and mounts for it.
+
+- `GET /api/v1/extensions?host=<id or name>` reads the host's list with the
+  pairing and gives each page and mount a port of this daemon's own, on
+  `127.0.0.1` from the second pool (7620 to 7819). It is kept in
+  `~/.agenthail/extensions-data/remote-ports.json` under
+  `<host>/<extension>` or `<host>/<extension>/mount/<name>`. `published` is
+  always false there. An entry the host does not publish on its tailnet name
+  comes back with no port and `Not published on <host>.`
+- A port keeps its number while the host still lists the entry, including
+  while the host is unreachable. It is freed when a read of the host's list
+  no longer has the entry, or when the host is unpaired.
+- Each port admits requests as an extension port does: loopback names only,
+  and this daemon's `agenthail_web` cookie or a bearer, with `read` for GET
+  and HEAD and `control` otherwise. It drops every cookie and the
+  `Authorization` header the browser sent, adds a web session the daemon
+  minted on the host with the pairing token (renewed an hour before it
+  expires, and minted again once when the host answers 401), and forwards to
+  `https://<host's tailnet name>:<host's port>`, pinned to the host's tailnet
+  address the way the pairing is. Streams and websockets pass through.
+- Cookies the host's app sets stay in a jar for that port alone and go back
+  only to it; the browser never sees them, since every port shares the
+  `127.0.0.1` cookie site.
+- History and Undo reach the host with `?host=`
+  (`GET /api/v1/extensions/history`, `POST
+  /api/v1/extensions/history/<rev>/undo`). Building runs on the host itself.
+- A host's `extension.changed` and `extension.badge` events do not travel
+  over the pairing, so the Mac app rereads a paired host's list every 30
+  seconds while the Apps hub is open or one of that host's entries is
+  pinned.
 
 ## Entries in the apps
 

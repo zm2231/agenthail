@@ -355,6 +355,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return fmt.Errorf("record the daemon's Claude config root, which every process needs to read the daemon's Claude conversations: %w", err)
 	}
 	d.logStarted()
+	d.configureExtensionPorts()
 	if recovered, err := d.Registry.RecoverInflight(time.Now().Add(-time.Minute)); err != nil {
 		d.log.Printf("warn: recover inflight queue: %s", err)
 	} else if recovered > 0 {

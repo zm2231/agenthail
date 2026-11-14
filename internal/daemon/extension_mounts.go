@@ -23,7 +23,7 @@ import (
 const extensionMountSyncEvery = 10 * time.Second
 
 var (
-	extensionPortBase  = 7420
+	extensionPortBase  = defaultExtensionPortBase
 	extensionPortCount = 200
 )
 

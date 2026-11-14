@@ -98,6 +98,7 @@ type remoteExtensionFixture struct {
 	record        registry.PairedHost
 	board, notes  *remoteApp
 	listing       atomic.Pointer[string]
+	undone        atomic.Pointer[string]
 	session       webSessionView
 }
 
@@ -116,6 +117,13 @@ func newRemoteExtensionFixture(t *testing.T) *remoteExtensionFixture {
 		{"id":"quiet","label":"Quiet","state":"loaded","page":{"port":7999,"entry":"/"}}]}`, f.board.port, f.notes.port))
 	inner := f.remote.handler
 	f.remote.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/undo") && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ahd_") {
+			path := r.URL.Path
+			f.undone.Store(&path)
+			w.Header().Set(hosts.ResponseHeader, "1")
+			writeDashboardJSON(w, http.StatusOK, map[string]any{"undone": []string{}, "removed": []string{}})
+			return
+		}
 		if r.URL.Path == "/api/v1/extensions" && r.Method == http.MethodGet && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ahd_") {
 			w.Header().Set(hosts.ResponseHeader, "1")
 			w.Header().Set("Content-Type", "application/json")
@@ -356,7 +364,7 @@ func TestAFullRemotePoolRefusesTheEntryAndKeepsTheOthers(t *testing.T) {
 	}
 }
 
-func TestOnlyReadingHistoryReachesAPairedHost(t *testing.T) {
+func TestHistoryAndUndoReachAPairedHostButBuildingDoesNot(t *testing.T) {
 	f := newRemoteExtensionFixture(t)
 	for _, call := range []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/extensions/build?host=vps"},
@@ -368,6 +376,12 @@ func TestOnlyReadingHistoryReachesAPairedHost(t *testing.T) {
 	}
 	if response := f.local.request(t, http.MethodGet, "/api/v1/extensions/history?host=vps", nil); response.Code == http.StatusNotFound && strings.Contains(response.Body.String(), "host_not_found") {
 		t.Fatalf("history was not routed to the host: %s", response.Body)
+	}
+	if response := f.local.request(t, http.MethodPost, "/api/v1/extensions/history/abc123/undo?host=vps", nil); response.Code != http.StatusOK {
+		t.Fatalf("undo on the host answered %d %s", response.Code, response.Body)
+	}
+	if got := f.undone.Load(); got == nil || *got != "/api/v1/extensions/history/abc123/undo" {
+		t.Fatalf("the host was asked to undo %v", got)
 	}
 }
 
