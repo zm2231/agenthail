@@ -3,17 +3,100 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
+	"github.com/zm2231/agenthail/internal/claudemcp"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/mcpstdio"
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
-const mcpUsage = "usage: agenthail mcp stdio"
+const mcpUsage = "usage: agenthail mcp stdio|install|uninstall|status"
 
 func (a *App) cmdMCP(args []string) error {
-	if len(args) != 1 || args[0] != "stdio" {
+	if len(args) != 1 {
 		return errors.New(mcpUsage)
 	}
-	return mcpstdio.Run(context.Background(), daemon.MCPSocketPath(), a.Version, os.Stdin, os.Stdout)
+	switch args[0] {
+	case "stdio":
+		return mcpstdio.Run(context.Background(), daemon.MCPSocketPath(), a.Version, os.Stdin, os.Stdout)
+	case "install", "uninstall", "status":
+		return claudeMCPAt(args[0])
+	}
+	return errors.New(mcpUsage)
+}
+
+type claudeMCPConfig struct {
+	root, path string
+}
+
+func claudeMCPConfigs() ([]claudeMCPConfig, error) {
+	home, _ := os.UserHomeDir()
+	roots, err := surface.ClaudeConfigRoots(home)
+	if err != nil {
+		return nil, err
+	}
+	configs := make([]claudeMCPConfig, len(roots))
+	for i, root := range roots {
+		configs[i] = claudeMCPConfig{root: root, path: surface.ClaudeGlobalConfigPath(home, root)}
+	}
+	return configs, nil
+}
+
+// claudeMCPAt acts on every root, so one root's broken config does not keep
+// the others from their tools.
+func claudeMCPAt(action string) error {
+	configs, err := claudeMCPConfigs()
+	if err != nil {
+		return err
+	}
+	executable := relayExecutable()
+	if executable == "" && action != "uninstall" {
+		return errors.New("run this from the installed agenthail binary; Claude runs the binary that wrote its MCP server")
+	}
+	var failed []error
+	for _, config := range configs {
+		var line string
+		switch action {
+		case "install":
+			var changed bool
+			if changed, err = claudemcp.InstallAt(config.path, executable); err == nil {
+				line = map[bool]string{true: "installed", false: "already installed"}[changed]
+			}
+		case "uninstall":
+			var changed bool
+			if changed, err = claudemcp.UninstallAt(config.path); err == nil {
+				line = map[bool]string{true: "removed", false: "not installed"}[changed]
+			}
+		case "status":
+			if line, err = claudemcp.StateAt(config.path, executable); line == claudemcp.Outdated || line == claudemcp.Missing || line == claudemcp.Dangling {
+				line += "; run: agenthail mcp install"
+			}
+		}
+		if err != nil {
+			failed = append(failed, err)
+			continue
+		}
+		fmt.Printf("%s: agenthail MCP server %s\n", config.path, line)
+	}
+	return errors.Join(failed...)
+}
+
+// Homebrew deletes a version's Cellar directory on upgrade; its opt link
+// follows the installed version.
+func relayExecutable() string {
+	executable := surfaces.AgenthailExecutable()
+	marker := strings.Index(executable, "/Cellar/agenthail/")
+	if marker <= 0 {
+		return executable
+	}
+	linked := filepath.Join(executable[:marker], "opt", "agenthail", "bin", "agenthail")
+	if _, err := os.Stat(linked); err == nil {
+		return linked
+	}
+	return executable
 }

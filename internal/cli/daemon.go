@@ -238,11 +238,23 @@ func dashboardAnswers(listen string) bool {
 }
 
 func (a *App) daemonInstallService() error {
-	return a.service().Install()
+	if err := a.service().Install(); err != nil {
+		return err
+	}
+	if err := claudeMCPAt("install"); err != nil {
+		fmt.Printf("Claude sessions started outside Agenthail lack its tools until this is fixed and agenthail mcp install runs: %s\n", err)
+	}
+	return nil
 }
 
 func (a *App) daemonUninstallService() error {
-	return a.service().Uninstall()
+	if err := a.service().Uninstall(); err != nil {
+		return err
+	}
+	if err := claudeMCPAt("uninstall"); err != nil {
+		fmt.Printf("Claude may show a failed agenthail MCP server until it is removed with agenthail mcp uninstall: %s\n", err)
+	}
+	return nil
 }
 
 func humanSize(n int64) string {
