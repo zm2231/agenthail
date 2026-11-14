@@ -52,7 +52,7 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 	scan := relayScan{}
 	for _, watchedSession := range watched {
 		gone, isTask := taskChildren[watchedSession.ID]
-		if watchedSession.Surface == surface.KindClaude && !claudeRefreshed && !isTask {
+		if watchedSession.Surface == surface.KindClaude && !claudeRefreshed && !isTask && !d.onlyClosesATurn(watchedSession, queueCounts[watchedSession.ID]) {
 			continue
 		}
 		session, sessionErr := d.Registry.Session(watchedSession.ID)
@@ -424,5 +424,14 @@ func completionStale(observation *surface.TurnObservation, now time.Time) bool {
 }
 
 func turnCannotRun(session *surface.Session, observation *surface.TurnObservation) bool {
-	return observation.Status == surface.StatusNotLoaded || observation.Status == surface.StatusOffline || claudeProcessExited(session)
+	return observation.Unheld || claudeProcessExited(session)
+}
+
+// Without a fresh listing a Claude session's metadata may be stale, so only a turn with nothing queued or relayed is closed.
+func (d *Daemon) onlyClosesATurn(watched registry.WatchedSession, queued int) bool {
+	if !watched.Armed || queued > 0 {
+		return false
+	}
+	relays, err := d.activeRelaysFrom(watched.ID)
+	return err == nil && len(relays) == 0
 }

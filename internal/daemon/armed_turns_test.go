@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,6 +19,8 @@ type armedTurn struct {
 	commits        bool
 	notifies       bool
 	completion     string
+	staysOpen      bool
+	listFails      bool
 }
 
 func runArmedTurn(t *testing.T, turn armedTurn) {
@@ -40,6 +43,9 @@ func runArmedTurn(t *testing.T, turn armedTurn) {
 	}
 	if !watched(t, r, builder.ID) {
 		t.Fatal("a turn the daemon started is not watched")
+	}
+	if turn.listFails {
+		f.fake.listErr = errors.New("the sessions folder can't be read")
 	}
 	if !turn.firstSeenEnded {
 		f.fake.observations[builder.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}
@@ -66,11 +72,11 @@ func runArmedTurn(t *testing.T, turn armedTurn) {
 		}
 	}
 	state, _, err := r.RuntimeState(builder.ID)
-	if err != nil || state.CompletedTurnID != turn.completion || state.NotificationArmed || state.HeldCompletionTurnID != "" {
-		t.Fatalf("the turn was left open: %+v %v", state, err)
+	if err != nil || state.CompletedTurnID != turn.completion || state.NotificationArmed != turn.staysOpen || state.HeldCompletionTurnID != "" {
+		t.Fatalf("the turn's state is wrong: %+v %v", state, err)
 	}
-	if watched(t, r, builder.ID) {
-		t.Fatal("a session whose turn ended is still watched")
+	if watched(t, r, builder.ID) != turn.staysOpen {
+		t.Fatalf("watched=%v, want %v", !turn.staysOpen, turn.staysOpen)
 	}
 	if turn.notifies {
 		expectNotification(t, received, "turn-1")
@@ -112,9 +118,17 @@ func TestALongEndedTurnWithBackgroundWorkIsNotHeldToNotifyLater(t *testing.T) {
 }
 
 func TestAnOpenTurnOnAThreadNoRuntimeHoldsIsClosedWithoutNotifying(t *testing.T) {
-	runArmedTurn(t, armedTurn{kind: surface.KindCodex, runtime: surface.RuntimeCodexAppServer, end: &surface.TurnObservation{Status: surface.StatusNotLoaded}})
+	runArmedTurn(t, armedTurn{kind: surface.KindCodex, runtime: surface.RuntimeCodexAppServer, end: &surface.TurnObservation{Status: surface.StatusNotLoaded, Unheld: true}})
+}
+
+func TestAnOpenTurnOnAThreadOneRuntimeCannotSeeStaysOpen(t *testing.T) {
+	runArmedTurn(t, armedTurn{kind: surface.KindCodex, runtime: surface.RuntimeCodexAppServer, end: &surface.TurnObservation{Status: surface.StatusNotLoaded}, staysOpen: true})
 }
 
 func TestAnOpenTurnWhoseProcessExitedIsClosedWithoutNotifying(t *testing.T) {
 	runArmedTurn(t, armedTurn{kind: surface.KindClaude, runtime: surface.RuntimeClaudeHost, pid: exitedPID(t), firstSeenEnded: true, end: &surface.TurnObservation{Status: surface.StatusUnknown}})
+}
+
+func TestATurnEndsEvenWhileClaudeSessionsCannotBeListed(t *testing.T) {
+	runArmedTurn(t, armedTurn{kind: surface.KindClaude, runtime: surface.RuntimeClaudeHost, listFails: true, end: ended(time.Now()), commits: true, notifies: true, completion: "turn-1"})
 }

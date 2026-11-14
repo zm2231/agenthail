@@ -40,6 +40,7 @@ type daemonSurface struct {
 	sendErr        error
 	turnID         string
 	observeErr     error
+	listErr        error
 	observeCalls   atomic.Int32
 	transcripts    map[string]string
 	limitReads     atomic.Int32
@@ -139,6 +140,9 @@ func (f *daemonSurface) RuntimeKinds() []surface.RuntimeKind {
 }
 func (f *daemonSurface) List(context.Context) ([]surface.Session, error) {
 	f.listCalls.Add(1)
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	result := make([]surface.Session, 0, len(f.sessions))
 	for _, session := range f.sessions {
 		result = append(result, f.carried(session))
