@@ -1046,6 +1046,13 @@ final class AgenthailModel {
         }
     }
 
+    func setProjectTools(_ project: ProjectState, on: Bool) async -> ProjectChange {
+        await projectChange {
+            try await $0.projectSetting(projectID: project.id, setting: "mcp", value: on ? "on" : "off")
+            return ProjectMenu.toolsChanged(project.displayName, on: on)
+        }
+    }
+
     func clearLead(of project: ProjectState) async -> ProjectChange {
         await projectChange {
             try await $0.clearLead(projectID: project.id)

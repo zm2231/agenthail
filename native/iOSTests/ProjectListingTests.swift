@@ -76,6 +76,34 @@ final class ProjectListingTests: XCTestCase {
         let folder = ProjectState(id: "folder:notes", displayName: "notes", checkouts: [Self.checkout(Self.local, "folder:notes", "/notes")])
         XCTAssertEqual(Self.merge([("hlaptop", [folder]), ("hserver", [folder])]).order, ["hlaptop::folder:notes", "hserver::folder:notes"])
     }
+
+    func testTheToolsToggleFollowsTheHostThatOwnsAFolderAndOnlyWhenThePhoneReachesItDirectly() throws {
+        let serverHost = SessionHost(id: "hserver", name: "server", state: "connected")
+        var throughLaptop = ProjectState(id: "hserver::implicit:/srv/notes", displayName: "notes", checkouts: [Self.checkout(serverHost, "hserver::implicit:/srv/notes", "/srv/notes", added: false)])
+        throughLaptop.mcp = "on"
+        var ownRow = ProjectState(id: "implicit:/srv/notes", displayName: "notes", checkouts: [Self.checkout(Self.local, "implicit:/srv/notes", "/srv/notes", added: false)])
+        ownRow.mcp = "off"
+
+        let both = try XCTUnwrap(Self.merge([("hlaptop", [throughLaptop]), ("hserver", [ownRow])]).projects["hserver::implicit:/srv/notes"])
+        XCTAssertEqual(both.state.toolsOff, true, "the folder's setting is read from the host that has it, not from a peer's mirror")
+        let route = try XCTUnwrap(ProjectToolsRoute.target(both) { ["hlaptop", "hserver"].contains($0) }, "a folder of a host the phone reaches directly can be set")
+        XCTAssertEqual(route.host, "hserver")
+        XCTAssertEqual(route.projectID, "implicit:/srv/notes", "the owner gets its own id, unqualified")
+        XCTAssertTrue(ProjectMenu.items(for: both.state, toolsSettable: true).contains(.tools(off: true)))
+
+        XCTAssertNil(ProjectToolsRoute.target(both) { $0 == "hlaptop" }, "a folder whose host is reached only through another can't be set from here")
+        let onlyLaptop = try XCTUnwrap(Self.merge([("hlaptop", [throughLaptop])], reachable: ["hlaptop"]).projects["hserver::implicit:/srv/notes"])
+        XCTAssertNil(ProjectToolsRoute.target(onlyLaptop) { $0 == "hlaptop" })
+        XCTAssertNil(onlyLaptop.state.toolsOff, "without the owner's own row the phone shows no setting")
+
+        var laptopRepo = ProjectState(id: Self.repo, displayName: "widget", checkouts: [Self.checkout(Self.local, Self.repo, "/Users/a/widget")])
+        laptopRepo.mcp = "on"
+        var serverRepo = ProjectState(id: Self.repo, displayName: "widget", checkouts: [Self.checkout(Self.local, Self.repo, "/srv/widget")])
+        serverRepo.mcp = "on"
+        let repo = try XCTUnwrap(Self.merge([("hlaptop", [laptopRepo]), ("hserver", [serverRepo])]).projects[Self.repo])
+        XCTAssertEqual(ProjectToolsRoute.target(repo) { $0 == "hserver" }.map { [$0.host, $0.projectID] }, ["hserver", Self.repo], "a repository can be set on any host that holds it and the phone reaches")
+        XCTAssertNil(ProjectToolsRoute.target(repo) { _ in false })
+    }
 }
 
 final class ProjectRoutingTests: XCTestCase {

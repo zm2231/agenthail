@@ -887,6 +887,19 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         }
     }
 
+    func projectToolsRoute(_ project: ListedProject) -> (host: String, projectID: String)? {
+        ProjectToolsRoute.target(project) { host in self.connections[host] != nil && self.catalog.target(forHost: host)?.takesSettings == true }
+    }
+
+    func setProjectTools(_ project: ListedProject, on: Bool) async -> ProjectChange {
+        await projectChange(refreshing: nil) {
+            guard let route = self.projectToolsRoute(project) else { throw AgenthailAPIError.unavailable("The computer that has \(project.state.displayName) can't be reached.") }
+            let (api, _) = try self.reach(route.host)
+            try await api.projectSetting(projectID: route.projectID, setting: "mcp", value: on ? "on" : "off")
+            return ProjectMenu.toolsChanged(project.state.displayName, on: on)
+        }
+    }
+
     func clearLead(of project: ListedProject) async -> ProjectChange {
         let owners = project.state.leads.map { ProjectRouting.owner($0.host, of: project) }
         return await projectChange(refreshing: nil) {
