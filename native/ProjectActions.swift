@@ -30,8 +30,10 @@ struct ProjectState: Decodable, Hashable, Identifiable {
     var archived: Bool? = nil
     var activity: ProjectActivity? = nil
     var linked: [Ref]? = nil
+    var mcp: String? = nil
 
     var leads: [Lead] { coordinators ?? [] }
+    var toolsOff: Bool? { mcp.map { $0 == "off" } }
 }
 
 struct ProjectActivity: Decodable, Hashable {
@@ -57,11 +59,18 @@ enum ProjectMenuItem: Hashable {
     case lead(change: Bool)
     case clearLead
     case remove(projectID: String, label: String)
+    case tools(off: Bool)
+
+    static let toolsHelp = "Claude sessions Agenthail did not start, such as Claude in a terminal"
+
+    static func toolsLabel(off: Bool) -> String {
+        off ? "Give Terminal Sessions the Agenthail Tools" : "Keep the Agenthail Tools from Terminal Sessions"
+    }
 }
 
 enum ProjectMenu {
     // A checkout is named by its host, never by its folder: menus must not reveal paths.
-    static func items(for project: ProjectState) -> [ProjectMenuItem] {
+    static func items(for project: ProjectState, toolsSettable: Bool) -> [ProjectMenuItem] {
         let checkouts = project.checkouts
         let several = Set(checkouts.map(\.host.id)).count > 1
         let labels = HostNames.labels(checkouts.map(\.host))
@@ -77,10 +86,15 @@ enum ProjectMenu {
             items.append(.lead(change: !project.leads.isEmpty))
             if project.leads.count == 1 { items.append(.clearLead) }
         }
+        if toolsSettable, let off = project.toolsOff { items.append(.tools(off: off)) }
         for checkout in checkouts where checkout.added == true {
             items.append(.remove(projectID: checkout.projectId, label: "Remove" + place(checkout)))
         }
         return items
+    }
+
+    static func toolsChanged(_ name: String, on: Bool) -> String {
+        on ? "Terminal sessions in \(name) get the Agenthail tools." : "Terminal sessions in \(name) no longer get the Agenthail tools."
     }
 
     static func host(of checkout: ProjectState.Checkout) -> String? {

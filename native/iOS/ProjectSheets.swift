@@ -19,7 +19,7 @@ struct IOSProjectMenuItems: View {
             Button("Message…", systemImage: "paperplane") { messaging = project }
                 .accessibilityIdentifier("message-project-" + project.id)
         }
-        ForEach(ProjectMenu.items(for: project.state), id: \.self) { item in
+        ForEach(ProjectMenu.items(for: project.state, toolsSettable: model.projectToolsRoute(project) != nil), id: \.self) { item in
             switch item {
             case .rename:
                 Button("Rename…", systemImage: "pencil") { sheet = .rename(project.state) }
@@ -40,6 +40,12 @@ struct IOSProjectMenuItems: View {
                 Button(label, systemImage: "minus.circle", role: .destructive) {
                     Task { model.settle(await model.removeProject(projectID, of: project)) }
                 }
+            case .tools(let off):
+                Button(ProjectMenuItem.toolsLabel(off: off), systemImage: off ? "wrench.and.screwdriver" : "wrench.and.screwdriver.fill") {
+                    Task { model.settle(await model.setProjectTools(project, on: off)) }
+                }
+                .accessibilityHint(ProjectMenuItem.toolsHelp)
+                .accessibilityIdentifier("project-tools-" + project.id)
             }
         }
     }

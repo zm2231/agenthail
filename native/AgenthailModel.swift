@@ -63,6 +63,7 @@ final class AgenthailModel {
     private(set) var heldByGrace = false
     private static let connectionLog = Logger(subsystem: "com.agenthail.app", category: "connection")
     var operationError: String?
+    let projectNotice = TransientNotice()
     var pendingForks: Set<String> = []
     var movesSent: Set<String> = []
     var moveNotices = SessionMoveNotices()
@@ -1046,6 +1047,13 @@ final class AgenthailModel {
         }
     }
 
+    func setProjectTools(_ project: ProjectState, on: Bool) async -> ProjectChange {
+        await projectChange {
+            try await $0.projectSetting(projectID: project.id, setting: "mcp", value: on ? "on" : "off")
+            return ProjectMenu.toolsChanged(project.displayName, on: on)
+        }
+    }
+
     func clearLead(of project: ProjectState) async -> ProjectChange {
         await projectChange {
             try await $0.clearLead(projectID: project.id)
@@ -1071,6 +1079,7 @@ final class AgenthailModel {
         guard let api else { return .failed(AgenthailAPIError.disconnectedGuidance) }
         let change = await ProjectChange.run { try await body(api) }
         _ = await refresh(fresh: true)
+        change.announce(in: projectNotice)
         return change
     }
 

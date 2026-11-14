@@ -1,6 +1,31 @@
 @testable import AgenthailHelpers
 import Foundation
 
+final class ProjectSettingStub: URLProtocol {
+    nonisolated(unsafe) static var path: String?
+    nonisolated(unsafe) static var body: Data?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        ProjectSettingStub.path = request.url?.path
+        if let stream = request.httpBodyStream {
+            stream.open()
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable { let n = stream.read(&buffer, maxLength: buffer.count); if n <= 0 { break }; data.append(buffer, count: n) }
+            stream.close()
+            ProjectSettingStub.body = data
+        } else {
+            ProjectSettingStub.body = request.httpBody
+        }
+        let answer = Data(#"{"ok":true,"setting":{"project":"repo:web","name":"mcp","value":"off"}}"#.utf8)
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: answer)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 @main
 struct ProjectActionsTest {
     static func main() async {
@@ -22,7 +47,7 @@ struct ProjectActionsTest {
         let projects = snapshot.projects ?? []
         expect(projects.count == 3 && projects[0].checkouts.count == 2 && projects[0].leads.first?.name == "lead", "the snapshot carries projects with their checkouts and leads")
 
-        expect(ProjectMenu.items(for: projects[0]) == [
+        expect(ProjectMenu.items(for: projects[0], toolsSettable: true) == [
             .rename,
             .newConversation(checkout: 0, label: "New conversation on laptop"),
             .newConversation(checkout: 1, label: "New conversation on server"),
@@ -30,13 +55,13 @@ struct ProjectActionsTest {
             .clearLead,
             .remove(projectID: "repo:web", label: "Remove on laptop"),
         ], "a project on several hosts names each checkout by its host, and only added checkouts can be removed")
-        expect(ProjectMenu.items(for: projects[1]) == [
+        expect(ProjectMenu.items(for: projects[1], toolsSettable: true) == [
             .rename,
             .newConversation(checkout: 0, label: "New conversation"),
             .lead(change: false),
             .remove(projectID: "folder:notes", label: "Remove"),
         ], "a project on this machine alone names no host")
-        expect(ProjectMenu.items(for: projects[2]).isEmpty, "an archived project that was never added offers nothing")
+        expect(ProjectMenu.items(for: projects[2], toolsSettable: true).isEmpty, "an archived project that was never added offers nothing")
         expect(ProjectMenu.hosts(of: projects[0]) == ["server"] && ProjectMenu.hosts(of: projects[1]).isEmpty, "a project header names every other host with a checkout")
         var twins = projects[0]
         twins.checkouts = [
@@ -44,13 +69,32 @@ struct ProjectActionsTest {
             ProjectState.Checkout(host: SessionHost(id: "h-office", name: "build.office", state: "connected"), projectId: "h-office::repo:web", rootPath: "/srv/web", added: true),
         ]
         expect(ProjectMenu.hosts(of: twins) == ["build.home", "build.office"], "hosts that share a short name keep their full names")
-        expect(ProjectMenu.items(for: twins).contains(.remove(projectID: "h-office::repo:web", label: "Remove on build.office")), "menus tell apart hosts that share a short name")
+        expect(ProjectMenu.items(for: twins, toolsSettable: true).contains(.remove(projectID: "h-office::repo:web", label: "Remove on build.office")), "menus tell apart hosts that share a short name")
         twins.checkouts = [
             ProjectState.Checkout(host: SessionHost(id: "h-a", name: "build", state: "connected"), projectId: "h-a::repo:web", rootPath: "/srv/web", added: true),
             ProjectState.Checkout(host: SessionHost(id: "h-b", name: "build", state: "connected"), projectId: "h-b::repo:web", rootPath: "/srv/web", added: true),
         ]
         expect(ProjectMenu.hosts(of: twins) == ["build (h-a)", "build (h-b)"], "hosts that share a full name add their id")
-        expect(ProjectMenu.items(for: twins).contains(.remove(projectID: "h-b::repo:web", label: "Remove on build (h-b)")), "menus tell apart hosts that share a full name")
+        expect(ProjectMenu.items(for: twins, toolsSettable: true).contains(.remove(projectID: "h-b::repo:web", label: "Remove on build (h-b)")), "menus tell apart hosts that share a full name")
+        var withTools = projects[1]
+        withTools.mcp = "on"
+        let toolItems = ProjectMenu.items(for: withTools, toolsSettable: true)
+        expect(toolItems.firstIndex(of: .tools(off: false)).map { $0 + 1 == toolItems.firstIndex(of: .remove(projectID: "folder:notes", label: "Remove")) } == true, "a project with the setting offers to keep the tools from terminal sessions, just above Remove: \(toolItems)")
+        withTools.mcp = "off"
+        expect(ProjectMenu.items(for: withTools, toolsSettable: true).contains(.tools(off: true)) && ProjectMenuItem.toolsLabel(off: true) == "Give Terminal Sessions the Agenthail Tools" && ProjectMenuItem.toolsLabel(off: false) == "Keep the Agenthail Tools from Terminal Sessions", "a project with the tools off offers to give them back")
+        expect(!ProjectMenu.items(for: withTools, toolsSettable: false).contains(.tools(off: true)), "a project this client can't set offers no toggle")
+        expect(!ProjectMenu.items(for: projects[1], toolsSettable: true).contains { if case .tools = $0 { return true } else { return false } }, "a host that doesn't report the setting offers no toggle")
+        expect(ProjectMenu.toolsChanged("web", on: false) == "Terminal sessions in web no longer get the Agenthail tools.", "the result names the project")
+        let decoded = try! JSONDecoder().decode(ProjectState.self, from: Data(#"{"id":"repo:web","displayName":"web","checkouts":[],"mcp":"off"}"#.utf8))
+        expect(decoded.toolsOff == true, "a snapshot row's mcp decodes")
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ProjectSettingStub.self]
+        let api = AgenthailAPI(baseURL: URL(string: "http://daemon.invalid")!, token: "t", session: URLSession(configuration: config))
+        try? await api.projectSetting(projectID: "repo:web", setting: "mcp", value: "off")
+        let body = ProjectSettingStub.body.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] }
+        expect(ProjectSettingStub.path == "/api/v1/actions" && body == ["action": "project-setting", "projectId": "repo:web", "setting": "mcp", "value": "off"], "the toggle posts the project-setting action: \(String(describing: ProjectSettingStub.path)) \(String(describing: body))")
+
         expect(ProjectMenu.host(of: projects[0].checkouts[0]) == nil && ProjectMenu.host(of: projects[0].checkouts[1]) == "h-server", "an action on a remote checkout names its host")
 
         let options = try! JSONDecoder().decode(SessionCreationOptions.self, from: Data(#"""

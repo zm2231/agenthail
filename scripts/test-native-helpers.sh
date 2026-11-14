@@ -30,6 +30,7 @@ SOURCES=(
   ExtensionEntries.swift
   ExtensionWeb.swift
   SentFiles.swift
+  TransientNotice.swift
   ClaudeCompactModels.swift
   KeptDelivery.swift
   InboxMessage.swift

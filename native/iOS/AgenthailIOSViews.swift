@@ -18,6 +18,7 @@ struct AgenthailIOSRoot: View {
         } message: {
             Text(model.operationError ?? "")
         }
+        .transientNotice(model.projectNotice)
         .moveNoticeAlert(model)
         .confirmationDialog("\(model.forgetCandidate?.name ?? "This computer") could not be reached", isPresented: Binding(get: { model.forgetCandidate != nil }, set: { if !$0 { model.forgetCandidate = nil } }), titleVisibility: .visible) {
             Button("Forget it on this iPhone", role: .destructive) { if let host = model.forgetCandidate { model.forgetHost(host.id) } }

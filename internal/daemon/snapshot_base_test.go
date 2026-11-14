@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -173,5 +174,45 @@ func TestAPairedHostMirrorStillGetsTheFullCatalogWhenItAsksForNoSessions(t *test
 	}
 	if _, ok := body["sessions"]; !ok {
 		t.Fatal("a mirror request was answered with the base")
+	}
+}
+
+func TestTheBaseSnapshotCarriesEachProjectsToolsSetting(t *testing.T) {
+	_, _, _, _, handler, _ := baseFixture(t)
+	read := func(tag string) (*httptest.ResponseRecorder, map[string]json.RawMessage, []struct {
+		ID  string `json:"id"`
+		MCP string `json:"mcp"`
+	}) {
+		t.Helper()
+		response := getSnapshot(t, handler, "/api/v1/snapshot?sessions=none", tag)
+		var body map[string]json.RawMessage
+		var projects []struct {
+			ID  string `json:"id"`
+			MCP string `json:"mcp"`
+		}
+		if response.Code == http.StatusOK {
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(body["projects"], &projects); err != nil || len(projects) == 0 {
+				t.Fatalf("projects=%s err=%v", body["projects"], err)
+			}
+		}
+		return response, body, projects
+	}
+	first, _, projects := read("")
+	if projects[0].MCP != registry.ProjectMCPOn {
+		t.Fatalf("a project without a setting reads %q, want on", projects[0].MCP)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(`{"action":"project-setting","projectId":"`+projects[0].ID+`","setting":"mcp","value":"off"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	set := httptest.NewRecorder()
+	handler.ServeHTTP(set, request)
+	if set.Code != http.StatusOK {
+		t.Fatalf("project-setting status=%d body=%s", set.Code, set.Body.String())
+	}
+	changed, _, projects := read(first.Header().Get("ETag"))
+	if changed.Code != http.StatusOK || projects[0].MCP != registry.ProjectMCPOff {
+		t.Fatalf("after turning the tools off the base reads status=%d projects=%+v", changed.Code, projects)
 	}
 }
