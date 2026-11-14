@@ -36,12 +36,12 @@ func (d *Daemon) registerExtensionRoutes(mux *http.ServeMux, dashboard *dashboar
 		if r.Method != http.MethodGet {
 			scope = "settings"
 		}
-		d.apiV1Guard(dashboard, scope, d.apiExtensionsHandler)(w, r)
+		d.apiV1Guard(dashboard, scope, d.localExtensionsOr(d.apiExtensionsHandler, d.remoteExtensionsList))(w, r)
 	})
-	mux.HandleFunc("GET /api/v1/extensions/history", d.apiV1Guard(dashboard, "read", d.apiExtensionHistoryHandler))
-	mux.HandleFunc("GET /api/v1/extensions/history/{rev}", d.apiV1Guard(dashboard, "read", d.apiExtensionChangeHandler))
-	mux.HandleFunc("POST /api/v1/extensions/history/{rev}/undo", d.apiV1Guard(dashboard, "control", d.apiExtensionUndoHandler))
-	mux.HandleFunc("POST /api/v1/extensions/build", d.apiV1Guard(dashboard, "control", d.apiExtensionBuildHandler))
+	mux.HandleFunc("GET /api/v1/extensions/history", d.apiV1Guard(dashboard, "read", d.hostRouted("", d.apiExtensionHistoryHandler)))
+	mux.HandleFunc("GET /api/v1/extensions/history/{rev}", d.apiV1Guard(dashboard, "read", d.hostRouted("", d.apiExtensionChangeHandler)))
+	mux.HandleFunc("POST /api/v1/extensions/history/{rev}/undo", d.apiV1Guard(dashboard, "control", d.hostRouted("", d.apiExtensionUndoHandler)))
+	mux.HandleFunc("POST /api/v1/extensions/build", d.apiV1Guard(dashboard, "control", d.localExtensionsOr(d.apiExtensionBuildHandler, nil)))
 	mux.HandleFunc("POST /api/v1/extensions/{id}/call", d.apiV1Guard(dashboard, "control", d.apiExtensionCallHandler))
 }
 

@@ -14,6 +14,7 @@ import (
 	"net/http/httptrace"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -118,6 +119,8 @@ func (e StatusError) Error() string {
 // version, and stop again as soon as a Version call fails.
 type Client struct {
 	endpoint *url.URL
+	address  string
+	tls      *tls.Config
 	token    string
 	hostID   string
 	http     *http.Client
@@ -163,10 +166,32 @@ func NewClient(endpoint, address, token string, options ClientOptions) (*Client,
 		MaxIdleConnsPerHost: 4,
 	}
 	base := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host}
-	return &Client{endpoint: base, token: token, hostID: options.HostID, http: &http.Client{Transport: transport, Timeout: 30 * time.Second}, stream: &http.Client{Transport: transport}}, nil
+	return &Client{endpoint: base, address: address, tls: transport.TLSClientConfig, token: token, hostID: options.HostID, http: &http.Client{Transport: transport, Timeout: 30 * time.Second}, stream: &http.Client{Transport: transport}}, nil
 }
 
 func (c *Client) Endpoint() string { return c.endpoint.String() }
+
+// PortTarget is pinned like the client but sends no token.
+func (c *Client) PortTarget(port int) (*url.URL, *http.Transport, error) {
+	if !c.verified.Load() {
+		return nil, nil, c.refused()
+	}
+	if port <= 0 || port > 65535 {
+		return nil, nil, fmt.Errorf("port %d is out of range", port)
+	}
+	target := net.JoinHostPort(c.address, strconv.Itoa(port))
+	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, target)
+		},
+		TLSClientConfig:     c.tls.Clone(),
+		TLSHandshakeTimeout: 5 * time.Second,
+		IdleConnTimeout:     90 * time.Second,
+		MaxIdleConnsPerHost: 4,
+	}
+	return &url.URL{Scheme: "https", Host: net.JoinHostPort(c.endpoint.Hostname(), strconv.Itoa(port))}, transport, nil
+}
 
 func (c *Client) url(path string, query url.Values) string {
 	target := *c.endpoint

@@ -143,6 +143,7 @@ type Daemon struct {
 	identityMu               sync.RWMutex
 	identity                 registry.HostIdentity
 	federation               *federation
+	remoteExtensions         *remoteExtensions
 	uploads                  *uploads.Store
 	limitResumes             *limitResumer
 	goalSweep                *goalSweeper
@@ -219,6 +220,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		catalogNudge:      make(chan struct{}, 1),
 		observerNudge:     make(chan struct{}, 1),
 		federation:        newFederation(),
+		remoteExtensions:  newRemoteExtensions(),
 		uploads:           uploads.New(uploadsDir(reg)),
 		background:        newBackgroundWork(),
 		triggers:          newTriggerService(),
