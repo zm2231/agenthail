@@ -104,6 +104,20 @@ final class ProjectListingTests: XCTestCase {
         XCTAssertEqual(ProjectToolsRoute.target(repo) { $0 == "hserver" }.map { [$0.host, $0.projectID] }, ["hserver", Self.repo], "a repository can be set on any host that holds it and the phone reaches")
         XCTAssertNil(ProjectToolsRoute.target(repo) { _ in false })
     }
+
+    @MainActor
+    func testAFinishedProjectChangeShowsItsMessageAndAFailureStaysAnError() {
+        let model = AgenthailIOSModel(autoConnect: false)
+        model.operationError = "stale"
+        model.settle(.done("Terminal sessions in notes no longer get the Agenthail tools."))
+        XCTAssertNil(model.operationError)
+        XCTAssertEqual(model.projectNotice.text, "Terminal sessions in notes no longer get the Agenthail tools.")
+        model.settle(.failed("serverb can't be reached."))
+        XCTAssertEqual(model.operationError, "serverb can't be reached.")
+        XCTAssertNil(model.projectNotice.text, "a failure is shown as an error, never hidden behind a notice")
+        model.settle(.done(""))
+        XCTAssertNil(model.projectNotice.text, "an empty message shows nothing")
+    }
 }
 
 final class ProjectRoutingTests: XCTestCase {

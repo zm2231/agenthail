@@ -63,6 +63,7 @@ final class AgenthailModel {
     private(set) var heldByGrace = false
     private static let connectionLog = Logger(subsystem: "com.agenthail.app", category: "connection")
     var operationError: String?
+    let projectNotice = TransientNotice()
     var pendingForks: Set<String> = []
     var movesSent: Set<String> = []
     var moveNotices = SessionMoveNotices()

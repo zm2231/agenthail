@@ -105,6 +105,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private(set) var connectionError: String?
     private(set) var reconnecting = false
     var operationError: String?
+    let projectNotice = TransientNotice()
     var movesSent: Set<String> = []
     var moveNotices = SessionMoveNotices()
     var pairing = false
@@ -969,10 +970,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func settle(_ change: ProjectChange) {
-        switch change {
-        case .done: operationError = nil
-        case .confirmReplace(let message), .failed(let message): operationError = message
-        }
+        operationError = change.settle(notice: projectNotice)
     }
 
     func creationHost(for checkout: ProjectState.Checkout, of project: ListedProject) -> String {
