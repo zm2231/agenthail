@@ -129,7 +129,20 @@ struct ExtensionPageScreen: View {
         let entry = model.extensionEntry(entryID)
         Group {
             if let entry, let url = entry.url {
-                ExtensionPageView(controller: ExtensionPages.controller(for: entry), url: url, signIn: model.extensionCatalogs[entry.hostID]?.signIn)
+                let controller = ExtensionPages.controller(for: entry)
+                ExtensionPageView(controller: controller, url: url, signIn: model.extensionCatalogs[entry.hostID]?.signIn)
+                    .overlay {
+                        if case .failed(let message) = controller.phase {
+                            ContentUnavailableView {
+                                Label(entry.label, systemImage: "exclamationmark.triangle")
+                            } description: {
+                                Text(message)
+                            } actions: {
+                                Button("Reload") { controller.reload() }
+                            }
+                            .background(.background)
+                        }
+                    }
                     .ignoresSafeArea(.container, edges: fullScreen ? .all : [.bottom, .horizontal])
                     .overlay(alignment: .topTrailing) {
                         if fullScreen {
@@ -176,6 +189,7 @@ private struct ExtensionPageView: UIViewRepresentable {
     let signIn: ExtensionSignIn?
 
     func makeUIView(context: Context) -> UIView {
+        controller.openOutside = { UIApplication.shared.open($0) }
         let host = UIView()
         attach(to: host)
         return host

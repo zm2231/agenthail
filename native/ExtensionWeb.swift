@@ -3,14 +3,22 @@ import Foundation
 import Observation
 import WebKit
 
-actor ExtensionSignIn {
+protocol ExtensionSessionSource: Sendable {
+    func session(fresh: Bool) async throws -> ExtensionWebSession
+}
+
+actor ExtensionSignIn: ExtensionSessionSource {
     static let renewBefore: TimeInterval = 60 * 60
     private let api: AgenthailAPI
     private var held: ExtensionWebSession?
 
     init(api: AgenthailAPI) { self.api = api }
 
-    func session(fresh: Bool = false, now: Date = Date()) async throws -> ExtensionWebSession {
+    func session(fresh: Bool) async throws -> ExtensionWebSession {
+        try await session(fresh: fresh, now: Date())
+    }
+
+    func session(fresh: Bool, now: Date) async throws -> ExtensionWebSession {
         if !fresh, let held, held.expiresAt.timeIntervalSince(now) > Self.renewBefore { return held }
         let minted = try await api.extensionWebSession()
         held = minted
@@ -48,9 +56,33 @@ enum ExtensionWebStores {
     }
 }
 
+enum ExtensionNavigation {
+    enum Decision: Equatable {
+        case allow
+        case openOutside
+        case refuse
+    }
+
+    // The web session cookie is scoped to a host, not a port, so another port on the page's host never loads in it.
+    static func decide(_ target: URL?, page: URL, mainFrame: Bool) -> Decision {
+        guard let target, let scheme = target.scheme?.lowercased() else { return .refuse }
+        if ["about", "data", "blob"].contains(scheme) { return .allow }
+        guard scheme == "http" || scheme == "https" else { return .refuse }
+        if origin(target) == origin(page) { return .allow }
+        if target.host?.lowercased() == page.host?.lowercased() { return .refuse }
+        return mainFrame ? .openOutside : .allow
+    }
+
+    static func origin(_ url: URL) -> String {
+        let scheme = url.scheme?.lowercased() ?? ""
+        let port = url.port ?? (scheme == "https" ? 443 : scheme == "http" ? 80 : 0)
+        return "\(scheme)://\(url.host?.lowercased() ?? ""):\(port)"
+    }
+}
+
 @MainActor
 @Observable
-final class ExtensionPageController: NSObject, WKNavigationDelegate {
+final class ExtensionPageController: NSObject, WKNavigationDelegate, WKUIDelegate {
     enum Phase: Equatable {
         case signingIn
         case loading
@@ -61,10 +93,14 @@ final class ExtensionPageController: NSObject, WKNavigationDelegate {
     let entryID: String
     private(set) var phase: Phase = .signingIn
     let webView: WKWebView
-    @ObservationIgnored private var url: URL?
-    @ObservationIgnored private var signIn: ExtensionSignIn?
+    @ObservationIgnored private(set) var target: URL?
+    @ObservationIgnored private(set) var loadsStarted = 0
+    @ObservationIgnored private var source: (any ExtensionSessionSource)?
     @ObservationIgnored private var retried = false
+    @ObservationIgnored private var stopped = false
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
     @ObservationIgnored private var renewTask: Task<Void, Never>?
+    @ObservationIgnored var openOutside: (URL) -> Void = { _ in }
 
     init(entryID: String, hostID: String) {
         self.entryID = entryID
@@ -73,42 +109,53 @@ final class ExtensionPageController: NSObject, WKNavigationDelegate {
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
     }
 
-    func open(_ url: URL, signIn: ExtensionSignIn?) {
-        guard self.url != url || phase != .shown else { return }
-        self.url = url
-        self.signIn = signIn
-        retried = false
-        Task { await load(fresh: false) }
+    func open(_ url: URL, signIn: (any ExtensionSessionSource)?) {
+        source = signIn
+        guard url != target, !stopped else { return }
+        target = url
+        start(fresh: false)
     }
 
     func reload() {
-        guard url != nil else { return }
-        retried = false
-        Task { await load(fresh: false) }
+        guard target != nil, !stopped else { return }
+        start(fresh: false)
     }
 
     func stop() {
+        stopped = true
+        loadTask?.cancel()
         renewTask?.cancel()
         webView.stopLoading()
     }
 
+    private func start(fresh: Bool) {
+        retried = fresh
+        loadTask?.cancel()
+        loadTask = Task { [weak self] in await self?.load(fresh: fresh) }
+    }
+
+    private func live(_ url: URL) -> Bool { !Task.isCancelled && !stopped && target == url }
+
     private func load(fresh: Bool) async {
-        guard let url else { return }
+        guard let url = target else { return }
         phase = .signingIn
         do {
-            if let signIn {
-                let session = try await signIn.session(fresh: fresh)
+            if let source {
+                let session = try await source.session(fresh: fresh)
+                guard live(url) else { return }
                 try await setCookie(session, for: url)
+                guard live(url) else { return }
                 scheduleRenewal(at: session.expiresAt, for: url)
             }
-            guard self.url == url else { return }
             phase = .loading
+            loadsStarted += 1
             webView.load(URLRequest(url: url))
         } catch {
-            phase = .failed(error.localizedDescription)
+            if live(url) { phase = .failed(error.localizedDescription) }
         }
     }
 
@@ -122,18 +169,38 @@ final class ExtensionPageController: NSObject, WKNavigationDelegate {
         let wait = max(60, expiry.timeIntervalSinceNow - ExtensionSignIn.renewBefore)
         renewTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(wait))
-            guard !Task.isCancelled, let self, let signIn = self.signIn else { return }
-            guard let session = try? await signIn.session(fresh: true) else { return }
+            guard let self, self.live(url), let source = self.source else { return }
+            guard let session = try? await source.session(fresh: true), self.live(url) else { return }
             try? await self.setCookie(session, for: url)
             self.scheduleRenewal(at: session.expiresAt, for: url)
         }
     }
 
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        guard let page = target else { return .cancel }
+        switch ExtensionNavigation.decide(navigationAction.request.url, page: page, mainFrame: navigationAction.targetFrame?.isMainFrame ?? true) {
+        case .allow: return .allow
+        case .openOutside:
+            if let url = navigationAction.request.url { openOutside(url) }
+            return .cancel
+        case .refuse: return .cancel
+        }
+    }
+
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        guard let page = target, let url = navigationAction.request.url else { return nil }
+        switch ExtensionNavigation.decide(url, page: page, mainFrame: true) {
+        case .allow: webView.load(navigationAction.request)
+        case .openOutside: openOutside(url)
+        case .refuse: break
+        }
+        return nil
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
         guard navigationResponse.isForMainFrame, let response = navigationResponse.response as? HTTPURLResponse, response.statusCode == 401 else { return .allow }
         if !retried {
-            retried = true
-            Task { await load(fresh: true) }
+            start(fresh: true)
             return .cancel
         }
         phase = .failed("Agenthail could not sign this page in. Check that this device may read on its host.")

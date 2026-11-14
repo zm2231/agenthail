@@ -144,7 +144,20 @@ struct ExtensionPagePane: View {
         Group {
             if let entry = catalog.entry(entryID) {
                 if let url = entry.url {
-                    ExtensionPageHost(controller: ExtensionPages.controller(for: entry), url: url, signIn: catalog.signIn)
+                    let controller = ExtensionPages.controller(for: entry)
+                    ExtensionPageHost(controller: controller, url: url, signIn: catalog.signIn)
+                        .overlay {
+                            if case .failed(let message) = controller.phase {
+                                ContentUnavailableView {
+                                    Label(entry.label, systemImage: "exclamationmark.triangle")
+                                } description: {
+                                    Text(message)
+                                } actions: {
+                                    Button("Reload") { controller.reload() }
+                                }
+                                .background(DesktopPalette.window)
+                            }
+                        }
                         .overlay(alignment: .topTrailing) { controls(entry) }
                 } else {
                     gone(entry.label, entry.unavailable ?? "This page can't open right now.")
@@ -216,6 +229,7 @@ private struct ExtensionPageHost: NSViewRepresentable {
     let signIn: ExtensionSignIn?
 
     func makeNSView(context: Context) -> NSView {
+        controller.openOutside = { NSWorkspace.shared.open($0) }
         let host = NSView()
         attach(to: host)
         return host
