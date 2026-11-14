@@ -77,3 +77,76 @@ func TestDoctorShowsEachPhonesConnectionDropsAsInformation(t *testing.T) {
 		t.Fatalf("a loss right after returning to the app counted as steady use: %+v", health.Warnings)
 	}
 }
+
+func TestDoctorNamesTheCauseOfEachStreamDropFromTheDaemonsSideOfTheStream(t *testing.T) {
+	reg := doctorPushRegistry(t)
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	self, err := reg.HostIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	device := pairPushDevice(t, reg, "iPhone")
+	at := func(minutes int) time.Time { return now.Add(time.Duration(-minutes) * time.Minute) }
+	drop := func(id string, started time.Time, network, failure string) registry.ConnectionDrop {
+		return registry.ConnectionDrop{ID: id, Host: self.ID, Path: "stream", StartedAt: started, RecoveredAt: started.Add(2 * time.Second), RecoveredBy: "stream probe",
+			FirstError: failure, LastError: failure, Attempts: 1, Shown: "held", Network: network, VPN: true}
+	}
+	relayed := drop("relay001", at(10), "wifi", "URLError.-1001")
+	relayed.Via, relayed.Host = self.ID, "h00000000bbbb"
+	drops := []registry.ConnectionDrop{
+		drop("quiet001", at(60), "wifi", "URLError.-1001"),
+		drop("trans001", at(50), "wifi", "URLError.-1001"),
+		drop("trans002", at(45), "wifi", "URLError.-1001"),
+		drop("half0001", at(40), "cellular", "URLError.-1001"),
+		drop("reset001", at(30), "cellular", "URLError.-1005"),
+		drop("stop0001", at(25), "cellular", "URLError.-1005"),
+		drop("none0001", at(20), "", "URLError.-1001"),
+		relayed,
+	}
+	if _, err := reg.RecordConnectionDrops(device, drops); err != nil {
+		t.Fatal(err)
+	}
+	streams := []registry.DeviceStream{
+		{OpenedAt: at(70), ClosedAt: at(60).Add(time.Second), LastFlushAt: at(60).Add(-40 * time.Second), Ended: registry.StreamEndedClientClosed, TailnetPath: "direct"},
+		{OpenedAt: at(55), ClosedAt: at(50).Add(2 * time.Second), LastFlushAt: at(50).Add(-5 * time.Second), Ended: registry.StreamEndedClientClosed, TailnetPath: "direct"},
+		{OpenedAt: at(49), ClosedAt: at(45).Add(-time.Second), LastFlushAt: at(45).Add(-10 * time.Second), Ended: registry.StreamEndedClientClosed, TailnetPath: "direct"},
+		{OpenedAt: at(44), ClosedAt: at(40).Add(70 * time.Second), LastFlushAt: at(40).Add(45 * time.Second), Ended: registry.StreamEndedWriteDeadline, TailnetPath: "relay:nyc"},
+		{OpenedAt: at(39), ClosedAt: at(30).Add(-time.Second), LastFlushAt: at(30).Add(-8 * time.Second), Ended: registry.StreamEndedWriteFailed, TailnetPath: "relay:nyc"},
+		{OpenedAt: at(29), ClosedAt: at(25).Add(-2 * time.Second), LastFlushAt: at(25).Add(-3 * time.Second), Ended: registry.StreamEndedDaemonStopped, TailnetPath: "direct"},
+	}
+	for _, stream := range streams {
+		stream.Route = "events"
+		if err := reg.RecordDeviceStream(device, stream); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := registry.DeviceStream{Route: "session-stream", OpenedAt: at(21), ClosedAt: at(19), LastFlushAt: at(20), Ended: registry.StreamEndedClientClosed, TailnetPath: "direct"}
+	if err := reg.RecordDeviceStream(device, session); err != nil {
+		t.Fatal(err)
+	}
+
+	health, err := connectionHealthOf(reg, now)
+	if err != nil || len(health.Devices) != 1 {
+		t.Fatalf("health=%+v err=%v", health, err)
+	}
+	want := []dropCauseCount{
+		{Cause: dropCauseTransit, Network: "wifi", TailnetPath: "direct", Count: 2},
+		{Cause: dropCauseStopped, Network: "cellular", TailnetPath: "direct", Count: 1},
+		{Cause: dropCauseQuiet, Network: "wifi", TailnetPath: "direct", Count: 1},
+		{Cause: dropCauseHalfOpen, Network: "cellular", TailnetPath: "relay:nyc", Count: 1},
+		{Cause: dropCauseNoRecord, Network: dropNetworkUnknown, Count: 1},
+		{Cause: dropCauseReset, Network: "cellular", TailnetPath: "relay:nyc", Count: 1},
+	}
+	if got := health.Devices[0].Causes; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("causes=%+v\nwant   %+v", got, want)
+	}
+	if len(health.Warnings) != 1 || !strings.Contains(health.Warnings[0], "1 of iPhone's stream drops came after this computer sent it nothing for over 25 s; that is an Agenthail bug") {
+		t.Fatalf("a quiet daemon was not a warning: %+v", health.Warnings)
+	}
+	text := health.String()
+	for _, want := range []string{"2 lost in transit on wifi (direct)", "1 half-open on cellular (relay nyc)", "1 no daemon record on unknown network,"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("doctor text lacks %q:\n%s", want, text)
+		}
+	}
+}

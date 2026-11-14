@@ -45,6 +45,7 @@ type Daemon struct {
 	coordinatorNow       func() time.Time
 	Registry             *registry.Registry
 	webSessions          webSessions
+	tailnetPaths         tailnetPathCache
 	sessionFiles         sessionFileLists
 	claudeConfigRootsMu  sync.Mutex
 	claudeConfigRootsAt  time.Time

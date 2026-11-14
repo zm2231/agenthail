@@ -28,7 +28,7 @@ const (
 
 var notSessionViewInputs = map[string]string{
 	"session_journal": journalTables, "session_journal_bodies": journalTables, "session_journal_body_tail": journalTables, "session_journal_state": journalTables,
-	"browser_push_subscriptions": deviceTables, "device_connection_drops": deviceTables, "device_pairings": deviceTables, "device_push_targets": deviceTables,
+	"browser_push_subscriptions": deviceTables, "device_connection_drops": deviceTables, "device_streams": deviceTables, "device_pairings": deviceTables, "device_push_targets": deviceTables,
 	"paired_devices": deviceTables, "push_outcomes": deviceTables, "push_sends": deviceTables, "signin_bindings": deviceTables, "signin_off": deviceTables,
 	"signin_profiles": deviceTables, "session_credentials": deviceTables,
 	"channel_members": routingTables, "channels": routingTables, "remote_channels": routingTables, "routes": routingTables, "relay_deliveries": routingTables, "relay_events": routingTables,
