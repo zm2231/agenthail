@@ -1079,6 +1079,7 @@ final class AgenthailModel {
         guard let api else { return .failed(AgenthailAPIError.disconnectedGuidance) }
         let change = await ProjectChange.run { try await body(api) }
         _ = await refresh(fresh: true)
+        change.announce(in: projectNotice)
         return change
     }
 

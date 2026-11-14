@@ -970,7 +970,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func settle(_ change: ProjectChange) {
-        operationError = change.settle(notice: projectNotice)
+        operationError = change.error
     }
 
     func creationHost(for checkout: ProjectState.Checkout, of project: ListedProject) -> String {
@@ -980,6 +980,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private func projectChange(refreshing hostID: String?, _ body: () async throws -> String) async -> ProjectChange {
         let change = await ProjectChange.run(body)
         if let hostID, connections[hostID] != nil { await refresh(host: hostID) } else { _ = await refresh(fresh: true) }
+        change.announce(in: projectNotice)
         return change
     }
 

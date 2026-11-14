@@ -16,13 +16,16 @@ struct TransientNoticeView: View {
                     .floatingGlass(DesktopPalette.raised, in: Capsule())
                     .padding(.top, TitleBarStrip.height + DesktopSpace.s)
                     .onTapGesture { notice.dismiss() }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint("Dismisses this message")
+                    .accessibilityAction { notice.dismiss() }
                     .accessibilityIdentifier("project-notice")
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.snappy, value: notice.text)
-        .onChange(of: notice.text) { _, text in
-            guard let text else { return }
+        .onChange(of: notice.shown) {
+            guard let text = notice.text else { return }
             NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
         }
     }

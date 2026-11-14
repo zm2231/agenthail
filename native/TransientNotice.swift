@@ -7,7 +7,7 @@ final class TransientNotice {
     static let duration: Duration = .seconds(4)
 
     private(set) var text: String?
-    @ObservationIgnored private var shown = 0
+    private(set) var shown = 0
 
     func show(_ text: String, for duration: Duration = TransientNotice.duration) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -29,15 +29,15 @@ final class TransientNotice {
 }
 
 extension ProjectChange {
-    @MainActor
-    func settle(notice: TransientNotice) -> String? {
+    var error: String? {
         switch self {
-        case .done(let message):
-            notice.show(message)
-            return nil
-        case .confirmReplace(let message), .failed(let message):
-            notice.dismiss()
-            return message
+        case .done: nil
+        case .confirmReplace(let message), .failed(let message): message
         }
+    }
+
+    @MainActor
+    func announce(in notice: TransientNotice) {
+        if case .done(let message) = self { notice.show(message) } else { notice.dismiss() }
     }
 }

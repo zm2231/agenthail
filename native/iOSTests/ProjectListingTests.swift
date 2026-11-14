@@ -106,22 +106,24 @@ final class ProjectListingTests: XCTestCase {
     }
 
     @MainActor
-    func testAFinishedProjectChangeShowsItsMessageAndAFailureStaysAnError() {
+    func testAFinishedProjectChangeClearsTheErrorAndAFailureStaysAnError() {
         let model = AgenthailIOSModel(autoConnect: false)
         model.operationError = "stale"
         model.settle(.done("Terminal sessions in notes no longer get the Agenthail tools."))
         XCTAssertNil(model.operationError)
-        XCTAssertEqual(model.projectNotice.text, "Terminal sessions in notes no longer get the Agenthail tools.")
         model.settle(.failed("serverb can't be reached."))
         XCTAssertEqual(model.operationError, "serverb can't be reached.")
-        XCTAssertNil(model.projectNotice.text, "a failure is shown as an error, never hidden behind a notice")
-        model.settle(.done(""))
-        XCTAssertNil(model.projectNotice.text, "an empty message shows nothing")
     }
 }
 
 final class ProjectRoutingTests: XCTestCase {
     private static let repo = "repo:github.com/acme/widget"
+
+    @MainActor
+    static func assertShows(_ change: ProjectChange, in model: AgenthailIOSModel, file: StaticString = #filePath, line: UInt = #line) {
+        guard case .done(let message) = change, !message.isEmpty else { return XCTFail("expected a finished change with a message, got \(change)", file: file, line: line) }
+        XCTAssertEqual(model.projectNotice.text, message, "a finished change leaves its message on screen, also from a form that closes", file: file, line: line)
+    }
 
     @MainActor
     private func pairedModel() throws -> AgenthailIOSModel {
@@ -149,13 +151,18 @@ final class ProjectRoutingTests: XCTestCase {
         XCTAssertNil(model.operationError)
         XCTAssertEqual(ProjectActionProtocol.state.take().map { "\($0.host) \($0.action) \($0.projectID)" }, ["server.invalid project-remove \(Self.repo)"], "remove reaches only the checkout's computer, by its own id")
 
-        model.settle(await model.renameProject(project, to: "Widget"))
+        XCTAssertEqual(model.projectNotice.text, "Project removed.", "a finished change shows its message")
+        let renamed = await model.renameProject(project, to: "Widget")
         XCTAssertEqual(Set(ProjectActionProtocol.state.take().map { "\($0.host) \($0.action)" }), ["laptop.invalid project-rename", "server.invalid project-rename"])
+        Self.assertShows(renamed, in: model)
 
-        model.settle(await model.clearLead(of: project))
+        let cleared = await model.clearLead(of: project)
+        model.settle(cleared)
         XCTAssertEqual(Set(ProjectActionProtocol.state.take().map { "\($0.host) \($0.action)" }), ["laptop.invalid coordinator-clear", "server.invalid coordinator-clear"])
+        Self.assertShows(cleared, in: model)
 
-        _ = await model.startLead(of: project, in: server, surface: "codex", name: "", replace: false)
+        let lead = await model.startLead(of: project, in: server, surface: "codex", name: "", replace: false)
+        Self.assertShows(lead, in: model)
         let started = ProjectActionProtocol.state.take()
         XCTAssertEqual(started.map { "\($0.host) \($0.action)" }, ["server.invalid coordinator-new"])
         XCTAssertNil(started.first?.remoteHost, "a directly paired computer is asked without a host")

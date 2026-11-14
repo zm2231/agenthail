@@ -2,6 +2,8 @@ import SwiftUI
 import UIKit
 
 struct TransientNoticeView: View {
+    static let navigationBar: CGFloat = 56
+
     let notice: TransientNotice
 
     var body: some View {
@@ -14,15 +16,18 @@ struct TransientNoticeView: View {
                     .padding(.vertical, 10)
                     .background(.regularMaterial, in: Capsule())
                     .padding(.horizontal, 24)
-                    .padding(.top, 4)
+                    .padding(.top, Self.navigationBar)
                     .onTapGesture { notice.dismiss() }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint("Dismisses this message")
+                    .accessibilityAction { notice.dismiss() }
                     .accessibilityIdentifier("project-notice")
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.snappy, value: notice.text)
-        .onChange(of: notice.text) { _, text in
-            if let text { UIAccessibility.post(notification: .announcement, argument: text) }
+        .onChange(of: notice.shown) {
+            if let text = notice.text { UIAccessibility.post(notification: .announcement, argument: text) }
         }
     }
 }

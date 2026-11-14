@@ -324,10 +324,9 @@ final class SessionPane: Identifiable {
 
     func settle(_ change: ProjectChange, replace: @escaping () async -> ProjectChange) {
         if case .confirmReplace(let message) = change {
-            model.projectNotice.dismiss()
             projectConfirmation = ProjectConfirmation(message: message, action: "Replace") { await replace() }
         } else {
-            model.operationError = change.settle(notice: model.projectNotice)
+            model.operationError = change.error
         }
     }
 
