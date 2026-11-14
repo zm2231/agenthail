@@ -107,6 +107,40 @@ because two histories cannot be merged. Nothing moves; `agenthail doctor`
 and the ledger board of either key name the history that stayed behind, and
 the refusal clears when the folder names its old remote again.
 
+## Project settings
+
+A project setting is a named value every host holding the project agrees on.
+The one setting today is `mcp` (`on`, the default, or `off`), which keeps the
+Agenthail tools from the project's sessions that Agenthail did not start (see
+[mcp.md](mcp.md)).
+
+- `project-setting` (`agenthail project mcp <project> on|off`) is a
+  `POST /api/v1/actions` action, so every front end sends the same body:
+
+  ```json
+  {"action": "project-setting", "projectId": "repo:github.com/example/app", "setting": "mcp", "value": "off"}
+  ```
+
+  `projectId` is a project row's `id`. The reply is
+  `{"ok": true, "setting": {"project": "...", "name": "mcp", "value": "off"}}`.
+  It is refused with `400 invalid_request` when `projectId` is missing, when
+  the setting has no such value, or when the id is a folder of another host
+  (`<host>::implicit:...`), which only that host can set; and with
+  `409 project_linked` when the project is linked into another, since a linked
+  project follows its survivor's settings and the setting goes there.
+- A client reads the current value from the snapshot's project rows: each row
+  in `projects` carries `mcp`, `on` or `off`. The snapshot's `projectSettings`
+  list is what paired hosts adopt and holds only keyed projects' records.
+- Settings are stored in `project_settings`, one record per project and
+  setting, so two hosts changing different settings never overwrite each other.
+  Of two records for one setting the later `changedAt` wins, the origin host id
+  breaking a tie, and a host writing a record dates it past the one it replaces.
+- A keyed project's settings reach every paired host the way links do: the
+  snapshot carries `projectSettings`, the `project.setting` catalog event
+  carries each change, and a host adopts a record newer than its own. A
+  setting of a host's own folder stays on that host. A project move carries
+  the old key's settings to the new key, except one the new key already has.
+
 ## Linked projects
 
 A link joins one project into another, so a fork and its upstream, or a

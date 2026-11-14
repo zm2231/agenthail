@@ -144,6 +144,9 @@ const implicitMenu = menu({ id: "h1::implicit:/srv/api", displayName: "api", che
 assert.doesNotMatch(implicitMenu, /Rename|Remove|Clear lead/, "a project added nowhere has no name of its own, nothing to remove, and a conflict is changed rather than cleared");
 assert.match(implicitMenu, /New conversation on server<.*>Change lead…</s, "a project only on a paired host names that host");
 assert.match(menu({ id: "p-notes", displayName: "notes", checkouts: [{ host: laptop, projectId: "p-notes", rootPath: "/work/notes", added: true }] }), /data-checkout="0">New conversation<.*>Set lead…</s, "a project only on this machine names no host");
+assert.match(sharedMenu, /data-project-action="project-setting" data-project-id="repo:github\.com\/example\/widget" data-setting="mcp" data-value="off"[^>]*>Keep the Agenthail tools from terminal sessions</, "a project with no setting offers to keep the tools from its terminal sessions");
+assert.match(menu({ ...shared, mcp: "off" }), /data-value="on"[^>]*>Give terminal sessions the Agenthail tools</, "a project with the tools off offers them back");
+assert.doesNotMatch(implicitMenu, /project-setting/, "another host's folder is set on that host");
 const archivedMenu = menu({ id: "p-old", displayName: "old", archived: true, checkouts: [{ host: laptop, projectId: "p-old", rootPath: "/work/old", added: true, archived: true }] });
 assert.doesNotMatch(archivedMenu, /New conversation|lead/, "an archived project starts nothing and changes no lead");
 assert.match(archivedMenu, />Rename…<.*>Remove</s);

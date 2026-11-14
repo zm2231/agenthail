@@ -158,6 +158,8 @@ type dashboardProject struct {
 	// LinkHeld is why this host keeps the project apart although a link joins it into another.
 	LinkHeld    string              `json:"linkHeld,omitempty"`
 	SameHistory []CatalogProjectRef `json:"sameHistory,omitempty"`
+	// MCP is "off" when terminal sessions of the project get no Agenthail tools.
+	MCP string `json:"mcp"`
 }
 
 // dashboardProjectCoordinator is one host's coordinator of a project.
@@ -440,6 +442,8 @@ func (d *Daemon) doProjectAction(ctx context.Context, _ principal, request proje
 		return d.doProjectLink(request)
 	case "project-unlink":
 		return d.doProjectUnlink(request)
+	case "project-setting":
+		return d.doProjectSetting(request)
 	case "project-remove", "project-archive", "project-unarchive", "project-rename":
 	default:
 		return actionResult{}, invalidRequest("unknown project action")
@@ -547,6 +551,8 @@ type projectRequest struct {
 	Path      string
 	Title     string
 	Survivor  string
+	Setting   string
+	Value     string
 }
 
 // localProjectCheckouts lists this host's projects a project id names: the

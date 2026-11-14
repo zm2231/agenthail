@@ -338,3 +338,45 @@ func TestAnMCPSocketPathTooLongForThePlatformIsRefusedSayingWhatToChange(t *test
 		t.Fatalf("the refusal does not name the path and what to change: %v", err)
 	}
 }
+
+func TestAProjectWithTheToolsOffGivesItsTerminalSessionsNoneUntilTurnedBackOn(t *testing.T) {
+	d, reg, root, _ := mcpSocketDaemon(t)
+	folder := t.TempDir()
+	if _, _, err := d.addProject(context.Background(), folder, "notes"); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RegisterSession(surface.Session{ID: "claude-one", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Cwd: folder}); err != nil {
+		t.Fatal(err)
+	}
+	parent := &relayedSession{record: filepath.Join(root, "sessions", strconv.Itoa(os.Getppid())+".json")}
+	parent.writeFor(t, os.Getppid(), "claude-one", true)
+	if names := listedToolNames(t, socketClient(t)); !slices.Contains(names, "agenthail_send") {
+		t.Fatalf("before the setting the session lists %v", names)
+	}
+	session, err := reg.Session("claude-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := d.sessionProject(*session)
+	if err != nil || project == nil {
+		t.Fatalf("project = %v, %v", project, err)
+	}
+	set := func(value string) {
+		t.Helper()
+		if _, err := d.doProjectAction(context.Background(), principal{}, projectRequest{Action: "project-setting", ProjectID: project.ID, Setting: registry.ProjectSettingMCP, Value: value}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(registry.ProjectMCPOff)
+	client := socketClient(t)
+	if names := listedToolNames(t, client); len(names) != 0 {
+		t.Fatalf("with the project's tools off the session lists %v", names)
+	}
+	if result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: "agenthail_whoami"}); err == nil && !result.IsError {
+		t.Fatalf("with the project's tools off the session called a tool: %+v", result)
+	}
+	set(registry.ProjectMCPOn)
+	if names := listedToolNames(t, client); !slices.Contains(names, "agenthail_send") {
+		t.Fatalf("with the tools back on the session lists %v", names)
+	}
+}

@@ -101,6 +101,9 @@ func (d *Daemon) socketCaller(ctx context.Context) *mcpCaller {
 		d.log.Printf("MCP socket: reading the permissions of %s failed: %s", d.resolveDisplay(sessionID), err)
 		return nil
 	}
+	if d.projectToolsOff(caller.project) {
+		return nil
+	}
 	return caller
 }
 

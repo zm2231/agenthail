@@ -17,6 +17,7 @@ const projectUsage = `usage: agenthail project list [--all] [--json]
        agenthail project <archive|unarchive> <name|id|path> [--json]
        agenthail project link <joined: name|id|path> <into: name|id|path> [--json]
        agenthail project unlink <name|id|path> [--json]
+       agenthail project mcp <name|id|path> on|off [--json]
 
 A project is a folder you add, and it may be a folder inside a repository. A
 session belongs to the deepest added project that holds its folder, reading a
@@ -32,7 +33,12 @@ the second project's. A link between two repositories with remotes holds on
 every paired host; a link naming a folder without one holds on this host. A
 project that already has a lead or a ledger board of its own cannot be joined
 into another; link the other way round. Unlinking makes it a project of its
-own again.`
+own again.
+
+mcp off keeps the Agenthail tools from the project's Claude sessions that
+Agenthail did not start, such as Claude in a plain terminal; sessions
+Agenthail starts keep them. Like a link, it holds on every paired host for a
+repository with a remote and on this host for a folder without one.`
 
 type projectHost struct {
 	ID    string `json:"id"`
@@ -140,7 +146,7 @@ func (a *App) cmdProject(args []string) error {
 	}
 	defer cancel()
 	if positional[0] != "list" && positional[0] != "ls" {
-		if err := a.operatorScope(ctx, "Adding, removing, renaming or archiving a project"); err != nil {
+		if err := a.operatorScope(ctx, "Adding, removing, renaming, archiving or setting a project"); err != nil {
 			return err
 		}
 	}
@@ -185,6 +191,8 @@ func (a *App) cmdProject(args []string) error {
 		return nil
 	case "link", "unlink":
 		return a.cmdProjectLink(ctx, client, positional, jsonOut)
+	case "mcp":
+		return a.cmdProjectMCP(ctx, client, positional, jsonOut)
 	case "add":
 		if len(positional) != 2 {
 			return fmt.Errorf("%s", projectUsage)

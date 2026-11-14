@@ -125,6 +125,11 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if state.ProjectMoves, err = d.sharedProjectMoves(); err != nil {
 		return dashboardState{}, fmt.Errorf("read project moves: %w", err)
 	}
+	settings, err := d.Registry.ProjectSettings()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read project settings: %w", err)
+	}
+	state.ProjectSettings = sharedProjectSettings(settings)
 	if page != nil {
 		state.catalogPageApplied = true
 		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query + "\x00" + pageRequest[0].ParentID
@@ -306,6 +311,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			return dashboardState{}, fmt.Errorf("read project links: %w", err)
 		}
 		state.Projects = catalogProjects(state.Sessions, projectRecords, coordinators, links, view.archive.Projects, d.localHost(), d.coordinatorHostRef)
+		setProjectMCP(state.Projects, settings)
 	}
 	if err := d.addLeadReplacements(&state); err != nil {
 		return dashboardState{}, err
