@@ -338,3 +338,17 @@ func ClaudeSessionConfigRoot(roots []ClaudeConfigRoot, transcript string) *Sessi
 	}
 	return view
 }
+
+func ClaudeSessionRoots(session Session) []string {
+	home, _ := os.UserHomeDir()
+	roots, err := ClaudeConfigRoots(home)
+	if err != nil {
+		return nil
+	}
+	for _, root := range roots {
+		if session.Transcript != "" && strings.HasPrefix(session.Transcript, filepath.Join(root, "projects")+string(filepath.Separator)) {
+			return []string{root}
+		}
+	}
+	return roots
+}

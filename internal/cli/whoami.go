@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/agentcard"
+	"github.com/zm2231/agenthail/internal/agenttools"
 	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/sessiontools"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -146,29 +146,25 @@ func (a *App) cardSources() agentcard.Sources {
 			hearer, _, _ := a.coordinator().PromptHearer(session.ID, projectID, where)
 			return hearer
 		},
-		MCP: func(session surface.Session) bool {
-			_, live, err := a.registry().LiveCredentialHash(session.ID, time.Now())
-			return err == nil && live
-		},
+		MCP: a.sessionTools,
 	}
 }
 
-func claudeSessionRoots(session surface.Session) []string {
-	home, _ := os.UserHomeDir()
-	roots, err := surface.ClaudeConfigRoots(home)
-	if err != nil {
-		return nil
-	}
-	for _, root := range roots {
-		if session.Transcript != "" && strings.HasPrefix(session.Transcript, filepath.Join(root, "projects")+string(filepath.Separator)) {
-			return []string{root}
+func (a *App) sessionTools(ctx context.Context, session surface.Session) agenttools.Access {
+	return sessiontools.Of(a.registry(), session, func() (string, error) {
+		if session.Cwd == "" {
+			return "", nil
 		}
-	}
-	return roots
+		project, err := a.pathProject(ctx, session.Cwd)
+		if err != nil || project == nil {
+			return "", err
+		}
+		return project.ID, nil
+	})
 }
 
 func claudeInboundHeld(session surface.Session) string {
-	for _, root := range claudeSessionRoots(session) {
+	for _, root := range surface.ClaudeSessionRoots(session) {
 		if held := surface.ReadClaudeInbound(root, session.Cwd).HoldsLeadMessages(root); held != "" {
 			return held
 		}
@@ -180,7 +176,7 @@ func claudeInboundHeld(session surface.Session) string {
 // config root a terminal Claude session lives in, or in every root when its
 // transcript does not say which.
 func claudePromptsHeld(session surface.Session) bool {
-	roots := claudeSessionRoots(session)
+	roots := surface.ClaudeSessionRoots(session)
 	if len(roots) == 0 {
 		return false
 	}

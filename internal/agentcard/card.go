@@ -61,6 +61,7 @@ type Card struct {
 	InboundHeld string              `json:"inboundHeld,omitempty"`
 	Ask         *Ask                `json:"ask,omitempty"`
 	MCP         bool                `json:"mcp,omitempty"`
+	EndsTurns   bool                `json:"endsTurns,omitempty"`
 	Commands    []Command           `json:"commands,omitempty"`
 }
 
@@ -68,8 +69,7 @@ func Unresolved(reason string) Card { return Card{Reason: reason} }
 
 // Project returns nil for a folder outside every project. PromptsHeld
 // reports whether Agenthail holds a terminal Claude session's prompts. MCP
-// reports whether the session holds a live credential for Agenthail's MCP
-// server, and so has its tools.
+// says how the session reaches Agenthail's tools.
 type Sources struct {
 	Registry     *registry.Registry
 	Project      func(ctx context.Context, cwd string) (*Project, error)
@@ -77,7 +77,7 @@ type Sources struct {
 	PromptsHeld  func(surface.Session) bool
 	InboundHeld  func(surface.Session) string
 	PromptHearer func(ctx context.Context, session surface.Session) string
-	MCP          func(surface.Session) bool
+	MCP          func(ctx context.Context, session surface.Session) agenttools.Access
 }
 
 func (s Sources) For(ctx context.Context, session surface.Session) (Card, error) {
@@ -112,7 +112,10 @@ func (s Sources) For(ctx context.Context, session surface.Session) (Card, error)
 	if card.Lead != nil && card.Lead.Self && session.RuntimeKind == surface.RuntimeClaudeCLI && s.InboundHeld != nil {
 		card.InboundHeld = s.InboundHeld(session)
 	}
-	card.MCP = s.MCP != nil && session.Surface != surface.KindNotion && s.MCP(session)
+	if s.MCP != nil && session.Surface != surface.KindNotion {
+		tools := s.MCP(ctx, session)
+		card.MCP, card.EndsTurns = tools != agenttools.NoTools, tools == agenttools.GivenTools
+	}
 	card.ReportTo = reportTo(card)
 	card.Commands = commands(card)
 	return card, nil
@@ -253,7 +256,13 @@ func commands(card Card) []Command {
 	if card.Surface == surface.KindNotion {
 		return nil
 	}
-	in := agenttools.CardInput{ReportTo: card.ReportTo, MCP: card.MCP}
+	in := agenttools.CardInput{ReportTo: card.ReportTo}
+	switch {
+	case card.EndsTurns:
+		in.Tools = agenttools.GivenTools
+	case card.MCP:
+		in.Tools = agenttools.OwnTools
+	}
 	if card.Project != nil {
 		in.Project = card.Project.ID
 	}

@@ -5,6 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 // CodexRelayServerName is the stdio relay install puts in the person's Codex
@@ -126,4 +131,30 @@ func CodexRelayState(ctx context.Context, home CodexHome, executable string) (st
 		return "", err
 	}
 	return codexRelayState(user, executable), nil
+}
+
+// HoldsThread compares with symlinks resolved, since Codex may report a
+// rollout under the resolved form of a CODEX_HOME that passes through a link.
+func (h CodexHome) HoldsThread(session surface.Session) bool {
+	path := h.transcriptPath(&session)
+	if path == "" {
+		return false
+	}
+	rel, err := filepath.Rel(resolvedCodexPath(h.Codex), resolvedCodexPath(path))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// CodexRelayConfigured reads config.toml itself rather than through Codex,
+// since a hook that runs at every prompt cannot start an app-server.
+func CodexRelayConfigured(home CodexHome) bool {
+	var user map[string]any
+	if _, err := toml.DecodeFile(filepath.Join(home.Codex, "config.toml"), &user); err != nil {
+		return false
+	}
+	server := codexRelayServer(user)
+	if enabled, set := server["enabled"].(bool); set && !enabled {
+		return false
+	}
+	state := codexRelayState(user, "")
+	return state == CodexRelayInstalled || state == CodexRelayOutdated
 }
