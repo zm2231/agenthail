@@ -169,17 +169,6 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch request.Action {
-		case "keep":
-			if d.extensions == nil {
-				writeAPIError(w, http.StatusServiceUnavailable, "unavailable", errExtensionsOff.Error())
-				return
-			}
-			if err := d.keepExtensionChange(request.Rev, principalFromRequest(r)); err != nil {
-				writeActionResult(w, actionResult{}, err)
-				return
-			}
-			writeDashboardJSON(w, http.StatusOK, map[string]any{"kept": request.Rev})
-			return
 		case "undo":
 			undone, err := d.undoExtensionChange(r.Context(), request.Rev)
 			if err != nil {
@@ -294,17 +283,20 @@ func (d *Daemon) apiExtensionHistoryHandler(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	pending := d.pendingExtensionRevs()
 	listed := make([]extensionChangeView, 0, len(changes))
 	for _, change := range changes {
-		listed = append(listed, extensionChangeView{Change: change, Pending: pending[change.Rev]})
+		listed = append(listed, d.extensionChangeView(history, change))
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"changes": listed})
 }
 
 type extensionChangeView struct {
 	extension.Change
-	Pending bool `json:"pending,omitempty"`
+	Checks []string `json:"checks,omitempty"`
+}
+
+func (d *Daemon) extensionChangeView(history *extension.History, change extension.Change) extensionChangeView {
+	return extensionChangeView{Change: change, Checks: d.extensionChecks(history, change)}
 }
 
 const extensionPatchLimit = 256 << 10
@@ -330,7 +322,7 @@ func (d *Daemon) apiExtensionChangeHandler(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"change": extensionChangeView{Change: changes[0], Pending: d.pendingExtensionRevs()[changes[0].Rev]}, "patch": patch, "truncated": truncated})
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"change": d.extensionChangeView(history, changes[0]), "patch": patch, "truncated": truncated})
 }
 
 func (d *Daemon) extensionSourcesHandler(w http.ResponseWriter, r *http.Request) {

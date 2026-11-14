@@ -134,6 +134,7 @@ func (d *Daemon) superviseExtensions(ctx context.Context) {
 	if err := d.seedExtensionWorkspace(true); err != nil {
 		d.logExtensionHistory(err)
 	}
+	d.withdrawExtensionChangeAsks()
 	turns := make(chan struct{})
 	go func() {
 		defer close(turns)

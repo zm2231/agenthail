@@ -95,17 +95,16 @@ func TestACallMarksAChangeVerifiedOnlyForTheVersionItRan(t *testing.T) {
 
 	writeExtension(t, workspace, "notes", `{"label": "Notes"}`)
 	f.turn(t, "to", "turn-1")
-	ask, open := openChangeAsk(t, reg, "to")
-	if !open || !strings.Contains(ask.Questions[0].Question, "notes not verified") {
-		t.Fatalf("an unchecked change was worded %q", ask.Questions[0].Question)
+	asksNothing(t, reg, "to")
+	if checks := f.newestChecks(t); !strings.Contains(checks, "notes not verified") {
+		t.Fatalf("an unchecked change shows %q", checks)
 	}
 
 	if status, result := f.call(t, "notes", map[string]any{"action": "ping", "sessionId": "to"}); status != http.StatusOK || string(result.Result) != `"pong"` {
 		t.Fatalf("calling ping answered %d %+v", status, result)
 	}
-	ask, _ = openChangeAsk(t, reg, "to")
-	if !strings.Contains(ask.Questions[0].Question, "notes verified: ping ran ok") {
-		t.Fatalf("a successful call against the committed version left %q", ask.Questions[0].Question)
+	if checks := f.newestChecks(t); !strings.Contains(checks, "notes verified: ping ran ok") {
+		t.Fatalf("a successful call against the committed version left %q", checks)
 	}
 
 	server := filepath.Join(workspace, "notes", "server.ts")
@@ -113,16 +112,14 @@ func TestACallMarksAChangeVerifiedOnlyForTheVersionItRan(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.turn(t, "to", "turn-2")
-	ask, _ = openChangeAsk(t, reg, "to")
-	if !strings.Contains(ask.Questions[0].Question, "notes not verified") {
-		t.Fatalf("a later version kept the earlier call's check: %q", ask.Questions[0].Question)
+	if checks := f.newestChecks(t); !strings.Contains(checks, "notes not verified") {
+		t.Fatalf("a later version kept the earlier call's check: %q", checks)
 	}
 	if status, _ := f.call(t, "notes", map[string]any{"action": "missing"}); status != http.StatusNotFound {
 		t.Fatalf("calling a missing action answered %d", status)
 	}
-	ask, _ = openChangeAsk(t, reg, "to")
-	if !strings.Contains(ask.Questions[0].Question, "notes not verified") {
-		t.Fatalf("a failed call checked the change: %q", ask.Questions[0].Question)
+	if checks := f.newestChecks(t); !strings.Contains(checks, "notes not verified") {
+		t.Fatalf("a failed call checked the change: %q", checks)
 	}
 
 	if err := os.WriteFile(server, []byte(strings.Replace(tableServer, "'pong'", "'edited after the turn'", 1)), 0o600); err != nil {
@@ -132,9 +129,8 @@ func TestACallMarksAChangeVerifiedOnlyForTheVersionItRan(t *testing.T) {
 	if status != http.StatusOK || !result.Reloaded || string(result.Result) != `"edited after the turn"` {
 		t.Fatalf("a call after an edit did not run the edit: %d %+v", status, result)
 	}
-	ask, _ = openChangeAsk(t, reg, "to")
-	if !strings.Contains(ask.Questions[0].Question, "notes not verified") {
-		t.Fatalf("a call against an unrecorded edit checked the recorded change: %q", ask.Questions[0].Question)
+	if checks := f.newestChecks(t); !strings.Contains(checks, "notes not verified") {
+		t.Fatalf("a call against an unrecorded edit checked the recorded change: %q", checks)
 	}
 
 	status, result = f.call(t, "fixture", map[string]any{"action": "caller", "sessionId": "to"})
@@ -146,6 +142,18 @@ func TestACallMarksAChangeVerifiedOnlyForTheVersionItRan(t *testing.T) {
 	if status != http.StatusOK || json.Unmarshal(result.Result, &caller) != nil || caller.Kind != "person" {
 		t.Fatalf("a call from the person reached the extension as %d %s", status, result.Result)
 	}
+}
+
+func (f *extensionFixture) newestChecks(t *testing.T) string {
+	t.Helper()
+	response, body := f.request(t, http.MethodGet, "/api/v1/extensions/history", "secret", nil)
+	var listed struct {
+		Changes []extensionChangeView `json:"changes"`
+	}
+	if response.StatusCode != http.StatusOK || json.Unmarshal(body, &listed) != nil || len(listed.Changes) == 0 {
+		t.Fatalf("history answered %d %s", response.StatusCode, body)
+	}
+	return strings.Join(listed.Changes[0].Checks, "; ")
 }
 
 func openGrantAsks(t *testing.T, reg *registry.Registry, sessionID string) []registry.Ask {
@@ -186,10 +194,8 @@ func TestApprovingFromASessionAsksThePersonAndGrantsOnlyWhatTheyWereShown(t *tes
 	}
 	actingForThePerson := sessionPrincipal("from")
 	actingForThePerson.ForPerson = true
-	for _, ask := range []registry.Ask{asks[0], mustOpenChangeAsk(t, reg, "to")} {
-		if _, err := f.d.answerAsk(context.Background(), nil, session, ask.ID, surface.Response{Choices: []string{ask.Questions[0].Options[0].ID}}, actingForThePerson, "", ""); !strings.Contains(fmt.Sprint(err), "only the person") {
-			t.Fatalf("a session acting for the person answered %s: %v", ask.Origin, err)
-		}
+	if _, err := f.d.answerAsk(context.Background(), nil, session, asks[0].ID, surface.Response{Choices: []string{asks[0].Questions[0].Options[0].ID}}, actingForThePerson, "", ""); !strings.Contains(fmt.Sprint(err), "only the person") {
+		t.Fatalf("a session acting for the person answered the grant: %v", err)
 	}
 	if len(openGrantAsks(t, reg, "to")) != 1 {
 		t.Fatal("a refused answer closed the grant ask")
@@ -224,13 +230,13 @@ func TestApprovingFromASessionAsksThePersonAndGrantsOnlyWhatTheyWereShown(t *tes
 	}
 }
 
-func mustOpenChangeAsk(t *testing.T, reg *registry.Registry, sessionID string) registry.Ask {
+func (f *extensionFixture) answer(t *testing.T, ask registry.Ask, choice string) int {
 	t.Helper()
-	ask, open := openChangeAsk(t, reg, sessionID)
-	if !open {
-		t.Fatalf("%s has no open change ask", sessionID)
+	response, body := f.request(t, http.MethodPost, "/api/v1/actions", "secret", json.RawMessage(answerBody(ask, choice)))
+	if response.StatusCode != http.StatusOK {
+		t.Logf("answer %s: %s", choice, body)
 	}
-	return ask
+	return response.StatusCode
 }
 
 func TestARunThatAReloadOverlapsIsNotRecordedAsACheck(t *testing.T) {
@@ -271,7 +277,7 @@ func TestARunThatAReloadOverlapsIsNotRecordedAsACheck(t *testing.T) {
 	}
 }
 
-func TestEachPendingChangeIsKeptOnItsOwnAndShowsWhatItChanged(t *testing.T) {
+func TestEachChangeShowsWhatItChangedAndIsUndoneOnItsOwn(t *testing.T) {
 	f := startExtensionFixture(t)
 	reg := f.d.Registry
 	workspace := extension.Workspace(f.home)
@@ -284,7 +290,7 @@ func TestEachPendingChangeIsKeptOnItsOwnAndShowsWhatItChanged(t *testing.T) {
 	var listed struct {
 		Changes []extensionChangeView `json:"changes"`
 	}
-	if response.StatusCode != http.StatusOK || json.Unmarshal(body, &listed) != nil || len(listed.Changes) < 2 || !listed.Changes[0].Pending || !listed.Changes[1].Pending {
+	if response.StatusCode != http.StatusOK || json.Unmarshal(body, &listed) != nil || len(listed.Changes) < 2 {
 		t.Fatalf("history listed %d %s", response.StatusCode, body)
 	}
 	jots, notes := listed.Changes[0], listed.Changes[1]
@@ -297,33 +303,18 @@ func TestEachPendingChangeIsKeptOnItsOwnAndShowsWhatItChanged(t *testing.T) {
 		t.Fatalf("the notes change showed %d %s", response.StatusCode, body)
 	}
 
-	if response, body := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "keep", "rev": notes.Rev}); response.StatusCode != http.StatusOK {
-		t.Fatalf("keeping one change answered %d %s", response.StatusCode, body)
-	}
-	ask := mustOpenChangeAsk(t, reg, "to")
-	if strings.Contains(ask.Title, "turns") || !strings.Contains(ask.Questions[0].Question, "created jots") {
-		t.Fatalf("after keeping notes the ask reads %q / %q", ask.Title, ask.Questions[0].Question)
-	}
-	if response, _ := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "keep", "rev": notes.Rev}); response.StatusCode != http.StatusBadRequest {
-		t.Fatalf("keeping a kept change again answered %d", response.StatusCode)
-	}
+	asksNothing(t, reg, "to")
 	if root := f.changes(t); !root[len(root)-1].Root || root[0].Root {
 		t.Fatalf("history marks the root as %v and the newest as %v", root[len(root)-1].Root, root[0].Root)
 	}
 	if status, body := f.undo(t, jots.Rev); status != http.StatusOK {
 		t.Fatalf("undoing jots answered %d %s", status, body)
 	}
-	if response, _ := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "keep", "rev": jots.Rev}); response.StatusCode != http.StatusBadRequest {
-		t.Fatalf("keeping an undone change answered %d", response.StatusCode)
+	if _, err := os.Stat(filepath.Join(workspace, "jots")); !os.IsNotExist(err) {
+		t.Fatalf("jots survived its undo: %v", err)
 	}
-	if _, open := openChangeAsk(t, reg, "to"); open {
-		t.Fatal("the ask stayed open with nothing left in it")
-	}
-	if closed, found, _ := reg.Ask(ask.ID); !found || closed.Answer.Answers[closed.Questions[0].Question] != extensionUndo {
-		t.Fatalf("the ask whose last change was undone closed as %+v", closed.Answer)
-	}
-	if _, body := f.request(t, http.MethodGet, "/api/v1/extensions/history", "secret", nil); strings.Contains(string(body), `"pending":true`) {
-		t.Fatalf("kept changes are still listed as pending: %s", body)
+	if _, err := os.Stat(filepath.Join(workspace, "notes")); err != nil {
+		t.Fatalf("undoing jots touched notes: %v", err)
 	}
 }
 
@@ -356,41 +347,3 @@ func TestAStandalonePageHearsOnlyChangesAfterItLoadedAndOnlyItsOwn(t *testing.T)
 	}
 }
 
-func TestUndoLastAndKeepingTheNewestChangeAgreeWithTheFolderWhicheverComesFirst(t *testing.T) {
-	f := startExtensionFixture(t)
-	reg := f.d.Registry
-	workspace := extension.Workspace(f.home)
-	writeExtension(t, workspace, "notes", `{"label": "Notes"}`)
-	f.turn(t, "to", "turn-1")
-	writeExtension(t, workspace, "jots", `{"label": "Jots"}`)
-	f.turn(t, "to", "turn-2")
-	ask := mustOpenChangeAsk(t, reg, "to")
-	jots := f.changes(t)[0]
-
-	kept := make(chan int, 1)
-	undone := make(chan int, 1)
-	go func() {
-		response, _ := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "keep", "rev": jots.Rev})
-		kept <- response.StatusCode
-	}()
-	go func() { undone <- f.answer(t, ask, extensionUndo) }()
-	keepStatus, undoStatus := <-kept, <-undone
-	f.d.background.wait()
-	if undoStatus != http.StatusOK {
-		t.Fatalf("Undo last answered %d", undoStatus)
-	}
-	_, jotsErr := os.Stat(filepath.Join(workspace, "jots"))
-	_, notesErr := os.Stat(filepath.Join(workspace, "notes"))
-	switch keepStatus {
-	case http.StatusOK:
-		if jotsErr != nil || !os.IsNotExist(notesErr) {
-			t.Fatalf("Keep came first, so Undo last should have undone notes: jots=%v notes=%v", jotsErr, notesErr)
-		}
-	case http.StatusBadRequest:
-		if !os.IsNotExist(jotsErr) || notesErr != nil {
-			t.Fatalf("Undo came first, so jots should be gone and notes kept: jots=%v notes=%v", jotsErr, notesErr)
-		}
-	default:
-		t.Fatalf("Keep answered %d", keepStatus)
-	}
-}

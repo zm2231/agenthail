@@ -5,8 +5,8 @@ Agenthail loads each one into the person's dashboard. Agenthail writes this
 file and the recipes; a newer Agenthail may replace them.
 
 You are a normal Agenthail session. Use any tool you need: read the real data
-source, install packages, run commands. What you write is shown to the person
-after every turn, and they keep it or undo it.
+source, install packages, run commands. What you write takes effect when your
+turn ends, and the person can undo any turn from its history.
 
 ## Layout
 
@@ -143,9 +143,9 @@ person, and clear it when it doesn't.
 
 ## What the person sees
 
-After each of your turns, Agenthail records what changed here and asks the
-person to keep or undo it, with whether a successful `call` or `run` checked
-that exact version. Undoing the turn that created an extension removes its
+After each of your turns, Agenthail records what changed here and reloads it;
+nothing waits on the person. The change's history entry says whether a
+successful `call` or `run` checked that exact version. Undoing the turn that created an extension removes its
 folder and its tables. `agenthail extensions history` lists the changes.
 
 ## Recipes

@@ -56,18 +56,17 @@ func storeTables(t *testing.T, home string) []string {
 	return names
 }
 
-func openChangeAsk(t *testing.T, reg *registry.Registry, sessionID string) (registry.Ask, bool) {
+func asksNothing(t *testing.T, reg *registry.Registry, sessionID string) {
 	t.Helper()
 	asks, err := reg.SessionAsks(sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, ask := range asks {
-		if ask.Origin == registry.AskOriginExtensionChange && ask.State == registry.AskOpen {
-			return ask, true
+		if ask.State == registry.AskOpen {
+			t.Fatalf("a change to extensions left %s waiting on the person: %+v", sessionID, ask)
 		}
 	}
-	return registry.Ask{}, false
 }
 
 func (f *extensionFixture) handle(t *testing.T, events ...extensionTurnEvent) {
@@ -116,15 +115,6 @@ func (f *extensionFixture) historyOf(t *testing.T, id string) []extension.Change
 	return view.Changes
 }
 
-func (f *extensionFixture) answer(t *testing.T, ask registry.Ask, choice string) int {
-	t.Helper()
-	response, body := f.request(t, http.MethodPost, "/api/v1/actions", "secret", json.RawMessage(answerBody(ask, choice)))
-	if response.StatusCode != http.StatusOK {
-		t.Logf("answer %s: %s", choice, body)
-	}
-	return response.StatusCode
-}
-
 func (f *extensionFixture) undo(t *testing.T, rev string) (int, []byte) {
 	t.Helper()
 	response, body := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "undo", "rev": rev})
@@ -155,17 +145,12 @@ func TestUndoingTheTurnThatCreatedAnExtensionRemovesItsTablesAndPortsWhileALater
 	if ports, _ := extension.ReadMountPorts(f.home); ports["notes/app"].Port == 0 {
 		t.Fatalf("the approved mount got no port: %v", ports)
 	}
-	ask, open := openChangeAsk(t, reg, "to")
-	if !open || !strings.Contains(ask.Title, "changed extensions") || !strings.Contains(ask.Questions[0].Question, "created notes") {
-		t.Fatalf("the first turn raised %+v (open=%v)", ask, open)
-	}
+	asksNothing(t, reg, "to")
 
 	writeExtension(t, workspace, "notes-extra", `{"label": "Notes extra"}`)
 	f.turn(t, "to", "turn-2")
-	rolled, open := openChangeAsk(t, reg, "to")
-	if !open || rolled.ID != ask.ID || !strings.Contains(rolled.Title, "2 turns") {
-		t.Fatalf("the second turn did not roll into the same ask: %+v", rolled)
-	}
+	extra := f.changes(t)[0]
+	asksNothing(t, reg, "to")
 	tables := storeTables(t, f.home)
 	if !slices.Contains(tables, "notes_items") || !slices.Contains(tables, "notes_extra_items") {
 		t.Fatalf("the extensions did not make their tables: %v", tables)
@@ -187,16 +172,8 @@ func TestUndoingTheTurnThatCreatedAnExtensionRemovesItsTablesAndPortsWhileALater
 	if grant, _ := f.d.extensions.approvals.Granted("notes"); grant.Mounts != nil {
 		t.Fatalf("the undone extension kept its approval: %+v", grant)
 	}
-	reworded, open := openChangeAsk(t, reg, "to")
-	if !open || reworded.ID != ask.ID || strings.Contains(reworded.Title, "2 turns") {
-		t.Fatalf("the ask still lists the undone turn: %+v", reworded)
-	}
-
-	if response := f.answer(t, reworded, extensionUndo); response != http.StatusOK {
-		t.Fatalf("Undo last answered %d", response)
-	}
-	if _, open := openChangeAsk(t, reg, "to"); open {
-		t.Fatal("the ask stayed open with nothing left to keep or undo")
+	if status, body := f.undo(t, extra.Rev); status != http.StatusOK {
+		t.Fatalf("undoing notes-extra's creation answered %d %s", status, body)
 	}
 	if slices.Contains(storeTables(t, f.home), "notes_extra_items") {
 		t.Fatal("undoing notes-extra's creation left its table")
@@ -245,16 +222,7 @@ func TestAChangeCannotBeUndoneUnderALaterOneAndHandEditsAreNotPinnedOnATurn(t *t
 		t.Fatal(err)
 	}
 
-	ask, open := openChangeAsk(t, reg, "to")
-	if !open {
-		t.Fatal("no ask for the two turns")
-	}
-	if response := f.answer(t, ask, extensionKeep); response != http.StatusOK {
-		t.Fatalf("Keep all answered %d", response)
-	}
-	if _, open := openChangeAsk(t, reg, "to"); open {
-		t.Fatal("the ask stayed open after Keep all")
-	}
+	asksNothing(t, reg, "to")
 
 	write("<p>by hand</p>\n")
 	f.start(t, "from")
@@ -263,9 +231,7 @@ func TestAChangeCannotBeUndoneUnderALaterOneAndHandEditsAreNotPinnedOnATurn(t *t
 	if latest.Author != extension.Person || latest.SessionID != "" {
 		t.Fatalf("an edit made before the turn was recorded as %+v", latest)
 	}
-	if _, open := openChangeAsk(t, reg, "from"); open {
-		t.Fatal("a turn that changed nothing raised an ask")
-	}
+	asksNothing(t, reg, "from")
 }
 
 func TestTurnsAreRecordedInOrderAndATurnRunningElsewhereKeepsEditsFromBeingTakenForThePersons(t *testing.T) {
@@ -299,19 +265,26 @@ func TestTurnsAreRecordedInOrderAndATurnRunningElsewhereKeepsEditsFromBeingTaken
 	if shared.SessionID != "to" || !slices.Equal(shared.AlsoRunning, []string{"from", "third"}) {
 		t.Fatalf("the change made while others were mid-turn was recorded as %+v", shared)
 	}
-	ask, open := openChangeAsk(t, reg, "to")
-	if !open || !strings.Contains(ask.Questions[0].Question, "Also mid-turn") {
-		t.Fatalf("the ask does not say others were mid-turn: %+v", ask)
-	}
+	asksNothing(t, reg, "to")
+}
 
-	if _, err := reg.ClaimAsk(ask.ID, registry.AskAnswer{Answers: map[string]string{ask.Questions[0].Question: extensionKeep}}, registry.AskToPerson, "person", time.Now()); err != nil {
+func TestChangeAsksLeftFromBeforeAreWithdrawnSoNothingWaitsOnThePerson(t *testing.T) {
+	f := startExtensionFixture(t)
+	reg := f.d.Registry
+	left, err := reg.RaiseAsk(registry.Ask{SessionID: "to", Origin: registry.AskOriginExtensionChange, Title: "to changed extensions", Questions: []registry.AskQuestion{{Question: "Keep this change?", Options: []registry.AskOption{{ID: "keep", Label: "Keep"}, {ID: "undo", Label: "Undo"}}}}, RoutedTo: registry.AskToPerson}, time.Now())
+	if err != nil {
 		t.Fatal(err)
 	}
-	write("<p>after the ask closed</p>\n")
-	f.turn(t, "to", "turn-3")
-	next, open := openChangeAsk(t, reg, "to")
-	if !open || next.ID == ask.ID || strings.Contains(next.Title, "turns") {
-		t.Fatalf("a turn recorded after its ask closed raised %+v (open=%v)", next, open)
+	grant, err := reg.RaiseAsk(registry.Ask{SessionID: "to", Origin: registry.AskOriginExtensionGrant, Title: "approve notes", Questions: []registry.AskQuestion{{Question: "Approve?", Options: []registry.AskOption{{ID: "approve", Label: "Approve"}, {ID: "decline", Label: "Decline"}}}}, RoutedTo: registry.AskToPerson}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.d.withdrawExtensionChangeAsks()
+	if ask, _, _ := reg.Ask(left.ID); ask.State != registry.AskWithdrawn {
+		t.Fatalf("a change ask from before stayed %s", ask.State)
+	}
+	if ask, _, _ := reg.Ask(grant.ID); ask.State != registry.AskOpen {
+		t.Fatalf("an approval the person still has to give was %s", ask.State)
 	}
 }
 
