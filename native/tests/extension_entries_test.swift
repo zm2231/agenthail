@@ -6,7 +6,7 @@ struct ExtensionEntriesTest {
     @MainActor
     static func main() async {
         let list = ExtensionsList(host: "running", hostError: nil, extensions: [
-            ExtensionSummary(id: "board", label: "Board", state: "loaded", page: ExtensionPage(port: 7430, entry: "/", published: true), app: ExtensionAppOffer(label: "Team board", icon: "chart.bar", order: 2), badge: "3", mounts: [
+            ExtensionSummary(id: "board", label: "Board", description: "Who is working on what", state: "loaded", page: ExtensionPage(port: 7430, entry: "/", published: true), app: ExtensionAppOffer(label: "Team board", icon: "chart.bar", order: 2), badge: "3", mounts: [
                 ExtensionMount(name: "console", label: "Console", port: 7421, entry: "/admin.html", state: "serving", published: true, app: ExtensionAppOffer(icon: "terminal", order: -1)),
                 ExtensionMount(name: "local", label: "Local only", port: 7422, entry: "/", state: "serving", published: false),
                 ExtensionMount(name: "waiting", label: "Waiting", entry: "/", state: "pending"),
@@ -18,7 +18,10 @@ struct ExtensionEntriesTest {
         let page = local.first { $0.id == "h1/board/page" }
         check(page?.url?.absoluteString == "http://127.0.0.1:7430/", "a loaded page opens on its own port, got \(String(describing: page?.url))")
         check(page?.label == "Team board" && page?.icon == "chart.bar" && page?.order == 2 && page?.offered == true && page?.badge == "3", "the page carries what it offers: \(String(describing: page))")
+        check(page?.detail == "Who is working on what", "a page's detail is its description, got \(String(describing: page?.detail))")
+        check(local.first { $0.id == "h1/quiet/page" }?.detail == nil, "a page without a description shows no detail")
         let console = local.first { $0.id == "h1/board/mount/console" }
+        check(console?.detail == "Board", "a mount's detail names its extension")
         check(console?.url?.absoluteString == "http://127.0.0.1:7421/admin.html", "a serving mount opens on its own port, got \(String(describing: console?.url))")
         check(console?.label == "Console" && console?.icon == "terminal", "a mount offer without a label keeps the mount's label")
         check(local.first { $0.id == "h1/board/mount/local" }?.url != nil, "over http an unpublished mount still opens")

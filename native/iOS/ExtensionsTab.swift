@@ -46,7 +46,7 @@ struct ExtensionsHub: View {
             }
         }
         .listStyle(.insetGrouped)
-        .phoneBackdrop(.list)
+        .phoneBackdrop(.pane)
         .navigationTitle("Apps")
         .navigationDestination(for: ExtensionRoute.self) { route in
             ExtensionPageScreen(model: model, entryID: route.entryID)
@@ -79,10 +79,12 @@ struct ExtensionsHub: View {
                     .frame(width: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.label)
-                    Text(entry.unavailable ?? (entry.kind == .page ? entry.extensionLabel : "\(entry.extensionLabel) · app"))
-                        .font(.footnote)
-                        .foregroundStyle(PhonePalette.muted)
-                        .lineLimit(2)
+                    if let detail = entry.unavailable ?? entry.detail {
+                        Text(detail)
+                            .font(.footnote)
+                            .foregroundStyle(PhonePalette.muted)
+                            .lineLimit(2)
+                    }
                 }
                 Spacer()
                 if let badge = entry.badge {

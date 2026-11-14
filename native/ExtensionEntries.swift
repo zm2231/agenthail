@@ -13,6 +13,7 @@ struct ExtensionEntry: Identifiable, Equatable, Sendable {
     let extensionLabel: String
     let kind: Kind
     let label: String
+    let detail: String?
     let icon: String
     let order: Int
     let offered: Bool
@@ -42,14 +43,16 @@ enum ExtensionEntries {
                     : (nil, summary.error ?? "This extension is \(summary.state).")
                 entries.append(ExtensionEntry(
                     hostID: hostID, hostName: hostName, extensionID: summary.id, extensionLabel: summary.label, kind: .page,
-                    label: label(summary.app, or: summary.label), icon: icon(summary.app), order: summary.app?.order ?? 0,
+                    label: label(summary.app, or: summary.label), detail: distinct(summary.description, from: label(summary.app, or: summary.label)),
+                    icon: icon(summary.app), order: summary.app?.order ?? 0,
                     offered: summary.app != nil, badge: shown(summary.badge), url: url, unavailable: unavailable))
             }
             for mount in summary.mounts ?? [] {
                 let (url, unavailable) = mountTarget(mount, origin: origin, hostName: hostName)
                 entries.append(ExtensionEntry(
                     hostID: hostID, hostName: hostName, extensionID: summary.id, extensionLabel: summary.label, kind: .mount(mount.name),
-                    label: label(mount.app, or: mount.label), icon: icon(mount.app), order: mount.app?.order ?? 0,
+                    label: label(mount.app, or: mount.label), detail: distinct(summary.label, from: label(mount.app, or: mount.label)),
+                    icon: icon(mount.app), order: mount.app?.order ?? 0,
                     offered: mount.app != nil, badge: shown(mount.badge), url: url, unavailable: unavailable))
             }
         }
@@ -92,6 +95,11 @@ enum ExtensionEntries {
     private static func icon(_ offer: ExtensionAppOffer?) -> String {
         let icon = offer?.icon ?? ""
         return icon.isEmpty ? ExtensionEntry.fallbackIcon : icon
+    }
+
+    private static func distinct(_ detail: String?, from label: String) -> String? {
+        let detail = detail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return detail.isEmpty || detail.caseInsensitiveCompare(label) == .orderedSame ? nil : detail
     }
 
     private static func shown(_ badge: String?) -> String? {

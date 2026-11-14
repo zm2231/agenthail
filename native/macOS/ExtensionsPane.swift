@@ -92,10 +92,12 @@ private struct ExtensionCard: View {
                                 .foregroundStyle(DesktopPalette.attention)
                         }
                     }
-                    Text(entry.unavailable ?? (entry.kind == .page ? entry.extensionLabel : "\(entry.extensionLabel) · app"))
-                        .font(.system(size: DesktopType.meta))
-                        .foregroundStyle(DesktopPalette.text2)
-                        .lineLimit(2)
+                    if let detail = entry.unavailable ?? entry.detail {
+                        Text(detail)
+                            .font(.system(size: DesktopType.meta))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .lineLimit(2)
+                    }
                 }
                 Spacer(minLength: 0)
             }
