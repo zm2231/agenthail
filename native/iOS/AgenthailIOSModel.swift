@@ -105,6 +105,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private(set) var connectionError: String?
     private(set) var reconnecting = false
     var operationError: String?
+    let projectNotice = TransientNotice()
     var movesSent: Set<String> = []
     var moveNotices = SessionMoveNotices()
     var pairing = false
@@ -887,6 +888,19 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         }
     }
 
+    func projectToolsRoute(_ project: ListedProject) -> (host: String, projectID: String)? {
+        ProjectToolsRoute.target(project) { host in self.connections[host] != nil && self.catalog.target(forHost: host)?.takesSettings == true }
+    }
+
+    func setProjectTools(_ project: ListedProject, on: Bool) async -> ProjectChange {
+        await projectChange(refreshing: nil) {
+            guard let route = self.projectToolsRoute(project) else { throw AgenthailAPIError.unavailable("The computer that has \(project.state.displayName) can't be reached.") }
+            let (api, _) = try self.reach(route.host)
+            try await api.projectSetting(projectID: route.projectID, setting: "mcp", value: on ? "on" : "off")
+            return ProjectMenu.toolsChanged(project.state.displayName, on: on)
+        }
+    }
+
     func clearLead(of project: ListedProject) async -> ProjectChange {
         let owners = project.state.leads.map { ProjectRouting.owner($0.host, of: project) }
         return await projectChange(refreshing: nil) {
@@ -956,10 +970,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func settle(_ change: ProjectChange) {
-        switch change {
-        case .done: operationError = nil
-        case .confirmReplace(let message), .failed(let message): operationError = message
-        }
+        operationError = change.error
     }
 
     func creationHost(for checkout: ProjectState.Checkout, of project: ListedProject) -> String {
@@ -969,6 +980,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private func projectChange(refreshing hostID: String?, _ body: () async throws -> String) async -> ProjectChange {
         let change = await ProjectChange.run(body)
         if let hostID, connections[hostID] != nil { await refresh(host: hostID) } else { _ = await refresh(fresh: true) }
+        change.announce(in: projectNotice)
         return change
     }
 

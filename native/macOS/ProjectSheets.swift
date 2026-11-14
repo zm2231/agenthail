@@ -6,7 +6,7 @@ struct ProjectMenuButtons: View {
     let project: ProjectState
 
     var body: some View {
-        ForEach(ProjectMenu.items(for: project), id: \.self) { item in
+        ForEach(ProjectMenu.items(for: project, toolsSettable: !project.id.contains("::")), id: \.self) { item in
             switch item {
             case .rename:
                 Button("Rename…") { pane.projectSheet = .rename(project) }
@@ -25,6 +25,9 @@ struct ProjectMenuButtons: View {
                 }
             case .remove(let projectID, let label):
                 Button(label) { pane.changeProject { _ in await model.removeProject(projectID) } }
+            case .tools(let off):
+                Button(ProjectMenuItem.toolsLabel(off: off)) { pane.changeProject { _ in await model.setProjectTools(project, on: off) } }
+                    .help(ProjectMenuItem.toolsHelp)
             }
         }
     }

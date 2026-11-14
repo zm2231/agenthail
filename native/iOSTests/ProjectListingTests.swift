@@ -76,10 +76,54 @@ final class ProjectListingTests: XCTestCase {
         let folder = ProjectState(id: "folder:notes", displayName: "notes", checkouts: [Self.checkout(Self.local, "folder:notes", "/notes")])
         XCTAssertEqual(Self.merge([("hlaptop", [folder]), ("hserver", [folder])]).order, ["hlaptop::folder:notes", "hserver::folder:notes"])
     }
+
+    func testTheToolsToggleFollowsTheHostThatOwnsAFolderAndOnlyWhenThePhoneReachesItDirectly() throws {
+        let serverHost = SessionHost(id: "hserver", name: "server", state: "connected")
+        var throughLaptop = ProjectState(id: "hserver::implicit:/srv/notes", displayName: "notes", checkouts: [Self.checkout(serverHost, "hserver::implicit:/srv/notes", "/srv/notes", added: false)])
+        throughLaptop.mcp = "on"
+        var ownRow = ProjectState(id: "implicit:/srv/notes", displayName: "notes", checkouts: [Self.checkout(Self.local, "implicit:/srv/notes", "/srv/notes", added: false)])
+        ownRow.mcp = "off"
+
+        let both = try XCTUnwrap(Self.merge([("hlaptop", [throughLaptop]), ("hserver", [ownRow])]).projects["hserver::implicit:/srv/notes"])
+        XCTAssertEqual(both.state.toolsOff, true, "the folder's setting is read from the host that has it, not from a peer's mirror")
+        let route = try XCTUnwrap(ProjectToolsRoute.target(both) { ["hlaptop", "hserver"].contains($0) }, "a folder of a host the phone reaches directly can be set")
+        XCTAssertEqual(route.host, "hserver")
+        XCTAssertEqual(route.projectID, "implicit:/srv/notes", "the owner gets its own id, unqualified")
+        XCTAssertTrue(ProjectMenu.items(for: both.state, toolsSettable: true).contains(.tools(off: true)))
+
+        XCTAssertNil(ProjectToolsRoute.target(both) { $0 == "hlaptop" }, "a folder whose host is reached only through another can't be set from here")
+        let onlyLaptop = try XCTUnwrap(Self.merge([("hlaptop", [throughLaptop])], reachable: ["hlaptop"]).projects["hserver::implicit:/srv/notes"])
+        XCTAssertNil(ProjectToolsRoute.target(onlyLaptop) { $0 == "hlaptop" })
+        XCTAssertNil(onlyLaptop.state.toolsOff, "without the owner's own row the phone shows no setting")
+
+        var laptopRepo = ProjectState(id: Self.repo, displayName: "widget", checkouts: [Self.checkout(Self.local, Self.repo, "/Users/a/widget")])
+        laptopRepo.mcp = "on"
+        var serverRepo = ProjectState(id: Self.repo, displayName: "widget", checkouts: [Self.checkout(Self.local, Self.repo, "/srv/widget")])
+        serverRepo.mcp = "on"
+        let repo = try XCTUnwrap(Self.merge([("hlaptop", [laptopRepo]), ("hserver", [serverRepo])]).projects[Self.repo])
+        XCTAssertEqual(ProjectToolsRoute.target(repo) { $0 == "hserver" }.map { [$0.host, $0.projectID] }, ["hserver", Self.repo], "a repository can be set on any host that holds it and the phone reaches")
+        XCTAssertNil(ProjectToolsRoute.target(repo) { _ in false })
+    }
+
+    @MainActor
+    func testAFinishedProjectChangeClearsTheErrorAndAFailureStaysAnError() {
+        let model = AgenthailIOSModel(autoConnect: false)
+        model.operationError = "stale"
+        model.settle(.done("Terminal sessions in notes no longer get the Agenthail tools."))
+        XCTAssertNil(model.operationError)
+        model.settle(.failed("serverb can't be reached."))
+        XCTAssertEqual(model.operationError, "serverb can't be reached.")
+    }
 }
 
 final class ProjectRoutingTests: XCTestCase {
     private static let repo = "repo:github.com/acme/widget"
+
+    @MainActor
+    static func assertShows(_ change: ProjectChange, in model: AgenthailIOSModel, file: StaticString = #filePath, line: UInt = #line) {
+        guard case .done(let message) = change, !message.isEmpty else { return XCTFail("expected a finished change with a message, got \(change)", file: file, line: line) }
+        XCTAssertEqual(model.projectNotice.text, message, "a finished change leaves its message on screen, also from a form that closes", file: file, line: line)
+    }
 
     @MainActor
     private func pairedModel() throws -> AgenthailIOSModel {
@@ -107,16 +151,29 @@ final class ProjectRoutingTests: XCTestCase {
         XCTAssertNil(model.operationError)
         XCTAssertEqual(ProjectActionProtocol.state.take().map { "\($0.host) \($0.action) \($0.projectID)" }, ["server.invalid project-remove \(Self.repo)"], "remove reaches only the checkout's computer, by its own id")
 
-        model.settle(await model.renameProject(project, to: "Widget"))
+        XCTAssertEqual(model.projectNotice.text, "Project removed.", "a finished change shows its message")
+        let renamed = await model.renameProject(project, to: "Widget")
         XCTAssertEqual(Set(ProjectActionProtocol.state.take().map { "\($0.host) \($0.action)" }), ["laptop.invalid project-rename", "server.invalid project-rename"])
+        Self.assertShows(renamed, in: model)
 
-        model.settle(await model.clearLead(of: project))
+        let cleared = await model.clearLead(of: project)
+        model.settle(cleared)
         XCTAssertEqual(Set(ProjectActionProtocol.state.take().map { "\($0.host) \($0.action)" }), ["laptop.invalid coordinator-clear", "server.invalid coordinator-clear"])
+        Self.assertShows(cleared, in: model)
 
-        _ = await model.startLead(of: project, in: server, surface: "codex", name: "", replace: false)
+        let lead = await model.startLead(of: project, in: server, surface: "codex", name: "", replace: false)
+        Self.assertShows(lead, in: model)
         let started = ProjectActionProtocol.state.take()
         XCTAssertEqual(started.map { "\($0.host) \($0.action)" }, ["server.invalid coordinator-new"])
         XCTAssertNil(started.first?.remoteHost, "a directly paired computer is asked without a host")
+
+        XCTAssertNotNil(model.projectNotice.text, "a notice from the last change is still up")
+        ProjectActionProtocol.state.refuse("server.invalid")
+        let refused = await model.removeProject(server.projectId, of: project)
+        model.settle(refused)
+        XCTAssertNotNil(model.operationError, "a refused change shows its error: \(refused)")
+        XCTAssertEqual(model.operationError, refused.error)
+        XCTAssertNil(model.projectNotice.text, "a refused change takes the earlier notice down and shows none")
     }
 
     @MainActor

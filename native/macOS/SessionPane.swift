@@ -323,13 +323,10 @@ final class SessionPane: Identifiable {
     }
 
     func settle(_ change: ProjectChange, replace: @escaping () async -> ProjectChange) {
-        switch change {
-        case .done:
-            model.operationError = nil
-        case .confirmReplace(let message):
+        if case .confirmReplace(let message) = change {
             projectConfirmation = ProjectConfirmation(message: message, action: "Replace") { await replace() }
-        case .failed(let message):
-            model.operationError = message
+        } else {
+            model.operationError = change.error
         }
     }
 

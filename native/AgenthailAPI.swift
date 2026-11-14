@@ -778,6 +778,10 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await projectRequest(["action": action, "projectId": projectID])
     }
 
+    func projectSetting(projectID: String, setting: String, value: String) async throws {
+        let _: EmptyResponse = try await projectRequest(["action": "project-setting", "projectId": projectID, "setting": setting, "value": value])
+    }
+
     func addProject(path: String, title: String? = nil, host: String? = nil) async throws -> (project: ProjectIdentity?, created: Bool) {
         var body: [String: Any] = ["action": "project-add", "path": path]
         if let title, !title.isEmpty { body["title"] = title }

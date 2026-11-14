@@ -50,6 +50,7 @@ enum ProjectListing {
         var leads: [String: Placed<ProjectState.Lead>] = [:]
         var leadOrder: [String] = []
         var linked: [ProjectState.Ref] = []
+        var settings: [String: String] = [:]
 
         init(state: ProjectState, primary: String) {
             self.state = state
@@ -58,6 +59,7 @@ enum ProjectListing {
 
         mutating func add(_ project: ProjectState, from server: String) {
             if !servers.contains(server) { servers.append(server) }
+            if let mcp = project.mcp { settings[server] = mcp }
             let addsName = project.checkouts.contains { $0.added == true && $0.host.state == "local" }
             if !named && addsName {
                 named = true
@@ -109,13 +111,27 @@ enum ProjectListing {
                 rank(left.host?.id ?? primary, left.host?.name ?? "") < rank(right.host?.id ?? primary, right.host?.name ?? "")
             }
             let archived = merged.isEmpty ? state.archived : merged.allSatisfy { $0.archived == true }
+            let shared = state.id.hasPrefix(HostCatalog.repositoryPrefix)
+            let mcp = shared ? settings[primary] ?? servers.lazy.compactMap { settings[$0] }.first : settings[HostCatalog.owner(of: state.id) ?? primary]
             let project = ProjectState(id: state.id, displayName: state.displayName, checkouts: merged, coordinators: mergedLeads,
-                                       archived: archived, activity: state.activity, linked: linked.isEmpty ? state.linked : linked)
+                                       archived: archived, activity: state.activity, linked: linked.isEmpty ? state.linked : linked, mcp: mcp)
             return ListedProject(state: project, hostID: primary, servers: servers)
         }
     }
 
     private static func local(_ projectID: String, of owner: String) -> String { ProjectRouting.local(projectID, of: owner) }
+}
+
+enum ProjectToolsRoute {
+    // A folder's setting lives on the host that has it; a repository's on every host that holds it.
+    static func target(_ project: ListedProject, takesSettings: (String) -> Bool) -> (host: String, projectID: String)? {
+        let id = project.state.id
+        if id.hasPrefix(HostCatalog.repositoryPrefix) {
+            return ([project.hostID] + project.servers).first(where: takesSettings).map { ($0, id) }
+        }
+        let owner = HostCatalog.owner(of: id) ?? project.hostID
+        return takesSettings(owner) ? (owner, ProjectRouting.local(id, of: owner)) : nil
+    }
 }
 
 enum ProjectRouting {
