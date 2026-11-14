@@ -37,6 +37,14 @@ function element(tag, props = {}, children = []) {
   return node;
 }
 
+// A rebuilt node loses a click aimed at the one it replaced, so each part is
+// rebuilt only when what it shows changed.
+function show(node, key, build) {
+  if (node.dataset.shown === key) return;
+  node.dataset.shown = key;
+  node.replaceChildren(...build());
+}
+
 function button(text, onClick, className = "soft-button") {
   const node = element("button", { type: "button", className, textContent: text });
   node.addEventListener("click", onClick);
@@ -106,15 +114,16 @@ function hasProblem(ext) {
 }
 
 function renderRail(rows) {
-  const rail = $("#extensions-list");
-  rail.replaceChildren();
   const view = state.view;
-  if (!view) {
-    rail.append(element("p", { className: "extensions-rail-note", textContent: "Reading extensions." }));
-    return;
-  }
-  if (view.host !== "running") rail.append(element("p", { className: "extensions-rail-note extension-error", textContent: `The extension host is ${view.host}${view.hostError ? `: ${view.hostError}` : "."}` }));
-  if (!rows.length) rail.append(element("p", { className: "extensions-rail-note", textContent: "No extensions yet. Each one is a folder in ~/.agenthail/extensions." }));
+  const key = JSON.stringify([view && [view.host, view.hostError], rows.map((row) => [row.key, row.title, row.detail, row.badge, row.status, hasProblem(row.ext)]), state.selected]);
+  show($("#extensions-list"), key, () => railItems(view, rows));
+}
+
+function railItems(view, rows) {
+  if (!view) return [element("p", { className: "extensions-rail-note", textContent: "Reading extensions." })];
+  const items = [];
+  if (view.host !== "running") items.push(element("p", { className: "extensions-rail-note extension-error", textContent: `The extension host is ${view.host}${view.hostError ? `: ${view.hostError}` : "."}` }));
+  if (!rows.length) items.push(element("p", { className: "extensions-rail-note", textContent: "No extensions yet. Each one is a folder in ~/.agenthail/extensions." }));
   for (const row of rows) {
     const marks = [element("span", { className: `status-pill ${statusClass(row.status)}`, textContent: row.status })];
     if (row.badge) marks.unshift(element("span", { className: "extension-badge", textContent: row.badge }));
@@ -130,8 +139,13 @@ function renderRail(rows) {
       state.selected = row.key;
       render();
     });
-    rail.append(item);
+    items.push(item);
   }
+  return items;
+}
+
+function problemsKey(ext) {
+  return [ext.id, ext.error, ext.page?.error, ext.pendingCapabilities, (ext.mounts ?? []).map((mount) => [mount.name, mount.label, mount.upstream, mount.state, mount.error, mount.signin, mount.key]), Object.entries(ext.jobs ?? {}).map(([name, job]) => [name, job.lastError]), ext.lastEventError];
 }
 
 function renderStage(row) {
@@ -146,18 +160,24 @@ function renderStage(row) {
   }
   frame.hidden = !src;
   if (!row) return;
-  const tools = [];
-  if (src) tools.push(element("a", { className: "soft-button", href: src, target: "_blank", rel: "noopener", textContent: "Open in new tab" }));
-  tools.push(button(state.history ? "Hide history" : "History", toggleHistory));
-  if (src) tools.push(button(state.fullscreen ? "Exit fullscreen" : "Fullscreen", () => setFullscreen(!state.fullscreen)));
-  $("#extensions-toolbar").replaceChildren(
-    element("div", { className: "extensions-toolbar-title" }, [element("h2", { textContent: row.title }), element("span", { className: `status-pill ${statusClass(row.status)}`, textContent: row.status })]),
-    element("div", { className: "extensions-toolbar-actions" }, tools),
-  );
-  const notices = problems(row.ext);
-  if (!src) notices.push(element("p", { className: "extension-quiet", textContent: emptyStage(row) }));
-  $("#extensions-notices").replaceChildren(...notices);
-  $("#extensions-notices").hidden = !notices.length;
+  show($("#extensions-toolbar"), JSON.stringify([row.key, row.title, row.status, src, Boolean(state.history), state.fullscreen]), () => {
+    const tools = [];
+    if (src) tools.push(element("a", { className: "soft-button", href: src, target: "_blank", rel: "noopener", textContent: "Open in new tab" }));
+    tools.push(button(state.history ? "Hide history" : "History", toggleHistory));
+    if (src) tools.push(button(state.fullscreen ? "Exit fullscreen" : "Fullscreen", () => setFullscreen(!state.fullscreen)));
+    return [
+      element("div", { className: "extensions-toolbar-title" }, [element("h2", { textContent: row.title }), element("span", { className: `status-pill ${statusClass(row.status)}`, textContent: row.status })]),
+      element("div", { className: "extensions-toolbar-actions" }, tools),
+    ];
+  });
+  const quiet = src ? "" : emptyStage(row);
+  const notices = $("#extensions-notices");
+  show(notices, JSON.stringify([problemsKey(row.ext), quiet]), () => {
+    const lines = problems(row.ext);
+    if (quiet) lines.push(element("p", { className: "extension-quiet", textContent: quiet }));
+    return lines;
+  });
+  notices.hidden = !notices.childElementCount;
   renderHistory();
 }
 
@@ -229,9 +249,14 @@ function renderHistory() {
   const history = state.history;
   drawer.hidden = !history;
   if (!history) return;
+  const label = state.view?.extensions.find((ext) => ext.id === history.id)?.label ?? history.id;
+  const changes = history.changes instanceof Error ? history.changes.message : history.changes?.map((change) => [change.rev, change.title, change.time, change.pending, change.root]);
+  show(drawer, JSON.stringify([history.id, label, changes ?? null, [...state.patches.keys()]]), () => historyItems(history, label));
+}
+
+function historyItems(history, label) {
   const close = button("×", toggleHistory, "icon-button");
   close.setAttribute("aria-label", "Close history");
-  const label = state.view?.extensions.find((ext) => ext.id === history.id)?.label ?? history.id;
   const items = [element("header", {}, [element("h2", { textContent: `History of ${label}` }), close])];
   if (history.changes === null) items.push(element("p", { className: "extension-quiet", textContent: "Reading changes." }));
   else if (history.changes instanceof Error) items.push(element("p", { className: "extension-error", textContent: history.changes.message }));
@@ -251,7 +276,7 @@ function renderHistory() {
       items.push(card);
     }
   }
-  drawer.replaceChildren(...items);
+  return items;
 }
 
 function selectedRow() {
