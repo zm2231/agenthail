@@ -8,7 +8,7 @@ struct SpooledAttachment: Codable, Equatable {
 }
 
 /// What typed or sent text must outlive the app, with the bytes of attachments not yet on their computer.
-struct ComposerStore {
+struct ComposerStore: Sendable {
     struct Saved: Codable, Equatable {
         struct Send: Codable, Equatable {
             let id: UUID

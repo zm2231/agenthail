@@ -2111,7 +2111,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                 attach(restored, to: session)
             }
         }
-        let unspool: (SpooledAttachment) -> ComposerAttachment? = { [composerStore] in composerStore?.unspool($0) }
+        let unspool: @Sendable (SpooledAttachment) -> ComposerAttachment? = { [composerStore] in composerStore?.unspool($0) }
         var lost = saved.attachmentNames
         func unspooled(_ records: [SpooledAttachment], for session: String) -> [ComposerAttachment] {
             records.compactMap { record in
