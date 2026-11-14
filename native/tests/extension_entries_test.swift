@@ -117,6 +117,16 @@ struct ExtensionEntriesTest {
         check(CatalogStub.hits == ["first.invalid/api/v1/extensions?host=h%202%26x"] && paired.list?.extensions.first?.id == "board", "a paired host's catalog asks this host for that host's list, got \(CatalogStub.hits)")
         check(AgenthailAPI.onHost("/api/v1/extensions/history?limit=5", "h2") == "/api/v1/extensions/history?limit=5&host=h2" && AgenthailAPI.onHost("/x", nil) == "/x", "the host joins an existing query")
 
+        CatalogStub.hits = []
+        _ = try? await first.buildExtension("a board")
+        _ = try? await first.buildExtension("a board", host: paired.hostRef)
+        check(CatalogStub.hits == ["POST first.invalid/api/v1/extensions/build", "POST first.invalid/api/v1/extensions/build?host=h%202%26x"], "a build here posts as before and a build on a paired host names it, got \(CatalogStub.hits)")
+        let here = ExtensionBuildTarget(ExtensionCatalog(hostID: "h1", hostName: "studio", api: first))
+        let there = ExtensionBuildTarget(paired)
+        check(here.host == nil && here.title == "New Extension" && there.host == "h 2&x" && there.title == "New Extension on build", "the sheet says which computer builds: \(here.title) / \(there.title)")
+        check(ExtensionBuildTarget.unavailable(paired) == nil, "a host that listed its extensions can build")
+        check(ExtensionBuildTarget.unavailable(ExtensionCatalog(hostID: "h3", hostName: "far", api: first, hostRef: "h3")) == "Waiting for far to list its extensions.", "a host that hasn't listed yet can't build yet")
+
         check(ExtensionCatalog.refreshes(for: "extension.badge") && ExtensionCatalog.refreshes(for: "extension.changed") && !ExtensionCatalog.refreshes(for: "session.updated"), "the list rereads on extension events only")
         print("ok")
     }

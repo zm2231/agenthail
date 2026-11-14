@@ -94,12 +94,18 @@ func cookieValue(cookie *http.Cookie, err error) string {
 	return cookie.Value
 }
 
+type remoteBuild struct {
+	body map[string]string
+	key  string
+}
+
 type remoteExtensionFixture struct {
 	local, remote *federationNode
 	record        registry.PairedHost
 	board, notes  *remoteApp
 	listing       atomic.Pointer[string]
 	undone        atomic.Pointer[string]
+	built         atomic.Pointer[remoteBuild]
 	session       webSessionView
 }
 
@@ -123,6 +129,18 @@ func newRemoteExtensionFixture(t *testing.T) *remoteExtensionFixture {
 			f.undone.Store(&path)
 			w.Header().Set(hosts.ResponseHeader, "1")
 			writeDashboardJSON(w, http.StatusOK, map[string]any{"undone": []string{}, "removed": []string{}})
+			return
+		}
+		if r.URL.Path == "/api/v1/extensions/build" && r.Method == http.MethodPost && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ahd_") {
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			f.built.Store(&remoteBuild{body: body, key: r.Header.Get(actionIdempotencyHeader)})
+			w.Header().Set(hosts.ResponseHeader, "1")
+			if body["message"] == "refuse" {
+				writeAPIError(w, http.StatusConflict, "extensions_off", "Extensions are off on this host.")
+				return
+			}
+			writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "session": map[string]any{"id": "s-built", "surface": "claude"}})
 			return
 		}
 		if r.URL.Path == "/api/v1/extensions" && r.Method == http.MethodGet && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ahd_") {
@@ -365,15 +383,10 @@ func TestAFullRemotePoolRefusesTheEntryAndKeepsTheOthers(t *testing.T) {
 	}
 }
 
-func TestHistoryAndUndoReachAPairedHostButBuildingDoesNot(t *testing.T) {
+func TestHistoryUndoAndBuildingReachAPairedHost(t *testing.T) {
 	f := newRemoteExtensionFixture(t)
-	for _, call := range []struct{ method, path string }{
-		{http.MethodPost, "/api/v1/extensions/build?host=vps"},
-		{http.MethodPost, "/api/v1/extensions?host=vps"},
-	} {
-		if response := f.local.request(t, call.method, call.path, map[string]string{"action": "undo", "rev": "abc", "message": "x"}); response.Code != http.StatusForbidden {
-			t.Fatalf("%s %s answered %d %s", call.method, call.path, response.Code, response.Body)
-		}
+	if response := f.local.request(t, http.MethodPost, "/api/v1/extensions?host=vps", map[string]string{"action": "reload"}); response.Code != http.StatusForbidden {
+		t.Fatalf("changing a paired host's extension settings answered %d %s", response.Code, response.Body)
 	}
 	if response := f.local.request(t, http.MethodGet, "/api/v1/extensions/history?host=vps", nil); response.Code == http.StatusNotFound && strings.Contains(response.Body.String(), "host_not_found") {
 		t.Fatalf("history was not routed to the host: %s", response.Body)
@@ -383,6 +396,35 @@ func TestHistoryAndUndoReachAPairedHostButBuildingDoesNot(t *testing.T) {
 	}
 	if got := f.undone.Load(); got == nil || *got != "/api/v1/extensions/history/abc123/undo" {
 		t.Fatalf("the host was asked to undo %v", got)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/extensions/build?host=vps", strings.NewReader(`{"message":"a board of open pull requests","surface":"claude"}`))
+	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(actionIdempotencyHeader, "build-once")
+	response := httptest.NewRecorder()
+	f.local.handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("building on the paired host answered %d %s", response.Code, response.Body)
+	}
+	built := f.built.Load()
+	if built == nil || built.body["message"] != "a board of open pull requests" || built.body["surface"] != "claude" || built.key != "build-once" {
+		t.Fatalf("the host was asked to build %+v", built)
+	}
+	var started struct {
+		Session struct {
+			ID string `json:"id"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &started); err != nil || started.Session.ID != f.record.ID+"::s-built" {
+		t.Fatalf("the builder's session came back as %q (%v): %s", started.Session.ID, err, response.Body)
+	}
+
+	if refused := f.local.request(t, http.MethodPost, "/api/v1/extensions/build?host=vps", map[string]string{"message": "refuse"}); refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), "Extensions are off on this host.") {
+		t.Fatalf("the host's refusal came back as %d %s", refused.Code, refused.Body)
+	}
+	if unknown := f.local.request(t, http.MethodPost, "/api/v1/extensions/build?host=nowhere", map[string]string{"message": "x"}); unknown.Code != http.StatusNotFound || !strings.Contains(unknown.Body.String(), "host_not_found") {
+		t.Fatalf("an unknown host answered %d %s", unknown.Code, unknown.Body)
 	}
 }
 

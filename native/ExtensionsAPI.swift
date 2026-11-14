@@ -28,8 +28,8 @@ extension AgenthailAPI {
         return "/api/v1/extensions/history/\(segment)/undo"
     }
 
-    func buildExtension(_ message: String) async throws -> ExtensionBuildStarted {
-        try await extensionsRequest("/api/v1/extensions/build", method: "POST", body: ["message": message], idempotencyKey: UUID().uuidString)
+    func buildExtension(_ message: String, host: String? = nil) async throws -> ExtensionBuildStarted {
+        try await extensionsRequest(Self.onHost("/api/v1/extensions/build", host), method: "POST", body: ["message": message], idempotencyKey: UUID().uuidString)
     }
 
     private func extensionsRequest<T: Decodable>(_ path: String, method: String, body: [String: String]?, idempotencyKey: String? = nil) async throws -> T {
