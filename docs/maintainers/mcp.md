@@ -67,7 +67,7 @@ The lifetime is the start timeout plus its naming margin (50 s) for starts the d
 
 ## Sessions named by their process
 
-A session Agenthail did not start, such as Claude in a plain terminal, gets the tools from a stdio server, `agenthail mcp stdio`, which holds no credential. It relays each call to the daemon's socket `~/.agenthail/mcp.sock` (the directory 0700, the socket 0600), where the same tools are served the same way as at `/mcp`: the same SDK, stateless, JSON responses.
+A session Agenthail did not start, such as Claude in a plain terminal, gets the tools from a stdio server, `agenthail mcp stdio`, which holds no credential. It relays each call to the daemon's socket `~/.agenthail/mcp.sock` (the directory 0700, the socket 0600; a home whose socket path exceeds the platform's limit, 103 bytes on macOS and 107 on Linux, is refused with a daemon log line and an `agenthail doctor` entry naming what to change), where the same tools are served the same way as at `/mcp`: the same SDK, stateless, JSON responses.
 
 The daemon names the caller from the kernel, never from anything the relay sends:
 

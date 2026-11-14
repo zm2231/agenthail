@@ -14,6 +14,8 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/nodehost"
 )
 
 var DebugProfiles = []string{"heap", "allocs", "goroutine"}
@@ -46,6 +48,9 @@ func (d *Daemon) startDebugSocket() (func(), error) {
 // listenUserSocket listens at path for the daemon's user alone. It runs under
 // the daemon lock, so a socket left at path belongs to a daemon that is gone.
 func listenUserSocket(path string) (net.Listener, error) {
+	if err := nodehost.CheckSocketPath(path); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}

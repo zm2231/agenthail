@@ -11,6 +11,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/nodehost"
 	"github.com/zm2231/agenthail/internal/permissions"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
@@ -142,6 +143,11 @@ func (a *App) cmdDoctor(args []string) error {
 	if claudeRootsErr != nil {
 		failures++
 	}
+	mcpSocket := map[string]string{"path": daemon.MCPSocketPath()}
+	if err := nodehost.CheckSocketPath(mcpSocket["path"]); err != nil {
+		mcpSocket["problem"] = err.Error()
+		failures++
+	}
 	claudeHookStates := map[string]string{}
 	claudeInbound := map[string]surface.ClaudeInbound{}
 	for _, root := range claudeRoots {
@@ -250,7 +256,7 @@ func (a *App) cmdDoctor(args []string) error {
 	install := a.installMethod(runtime.GOOS)
 	simulators := doctorSimulators(ctx)
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(notCarried) == 0 && notCarriedErr == nil && len(hostProblems) == 0, "projectLinks": projectNotes, "projectHistoryNotCarried": notCarried, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeCrossSessionInbound": claudeInbound, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(notCarried) == 0 && notCarriedErr == nil && len(hostProblems) == 0, "projectLinks": projectNotes, "projectHistoryNotCarried": notCarried, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "mcpSocket": mcpSocket, "claudeCrossSessionInbound": claudeInbound, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
 			report["ledgerPromptHooksError"] = hookErr.Error()
 		}
@@ -335,6 +341,9 @@ func (a *App) cmdDoctor(args []string) error {
 			if held := claudeInbound[root].HoldsLeadMessages(root); held != "" {
 				fmt.Printf("  cross-session messages: %s\n", held)
 			}
+		}
+		if problem := mcpSocket["problem"]; problem != "" {
+			fmt.Printf("MCP socket: unavailable, so Claude sessions started outside Agenthail get no Agenthail tools: %s\n", problem)
 		}
 		for _, problem := range hookProblems {
 			fmt.Println(problem)

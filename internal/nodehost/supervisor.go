@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -114,7 +113,7 @@ func (s *Supervisor) runOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := checkSocketPath(s.Socket, runtime.GOOS); err != nil {
+	if err := CheckSocketPath(s.Socket); err != nil {
 		return fmt.Errorf("start the %s: %w", s.Name, err)
 	}
 	for _, dir := range []string{s.StateDir, filepath.Dir(s.Socket)} {

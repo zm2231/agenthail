@@ -1,9 +1,16 @@
 package nodehost
 
-import "fmt"
+import (
+	"fmt"
+	"runtime"
+)
 
 // sun_path holds the socket path and its terminating NUL.
 var sunPathBytes = map[string]int{"darwin": 104, "freebsd": 104, "openbsd": 104, "netbsd": 104, "linux": 108}
+
+func CheckSocketPath(path string) error {
+	return checkSocketPath(path, runtime.GOOS)
+}
 
 func checkSocketPath(path, goos string) error {
 	limit, ok := sunPathBytes[goos]

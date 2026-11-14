@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -146,8 +147,25 @@ func (s *relayedSession) toolCount(t *testing.T) int {
 	return len(listed.Tools)
 }
 
+// shortSocketHome keeps ~/.agenthail/mcp.sock inside macOS's 104-byte
+// socket path limit, which a test binary's temporary home can exceed.
+func shortSocketHome(t *testing.T) {
+	t.Helper()
+	base := ""
+	if runtime.GOOS == "darwin" {
+		base = "/tmp"
+	}
+	home, err := os.MkdirTemp(base, "ah")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	t.Setenv("HOME", home)
+}
+
 func mcpSocketDaemon(t *testing.T) (*Daemon, *registry.Registry, string, func()) {
 	t.Helper()
+	shortSocketHome(t)
 	root := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", root)
 	reg, err := registry.Open(registrytest.Path(t))
@@ -287,6 +305,7 @@ func TestASessionNamedByItsProcessGetsExtensionToolsToo(t *testing.T) {
 	f.awaitAllLoaded(t, "wide")
 	f.approve(t, "wide")
 	f.d.Surfaces = append(f.d.Surfaces, processOwner{daemonSurface: f.fake, pid: os.Getppid(), id: "from"})
+	shortSocketHome(t)
 	stop, err := f.d.startMCPSocket()
 	if err != nil {
 		t.Fatal(err)
@@ -295,5 +314,27 @@ func TestASessionNamedByItsProcessGetsExtensionToolsToo(t *testing.T) {
 	names := listedToolNames(t, socketClient(t))
 	if !slices.Contains(names, "ext_wide_peek") || !slices.Contains(names, "agenthail_send") {
 		t.Fatalf("a session named by its process lists %v", names)
+	}
+}
+
+func TestAnMCPSocketPathTooLongForThePlatformIsRefusedSayingWhatToChange(t *testing.T) {
+	home := filepath.Join(t.TempDir(), strings.Repeat("h", 120))
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	reg, err := registry.Open(registrytest.Path(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reg.Close() })
+	d := newTestDaemon(t, reg, nil)
+	stop, err := d.startMCPSocket()
+	if err == nil {
+		stop()
+		t.Fatal("the daemon listened on a socket path the platform cannot hold")
+	}
+	if !strings.Contains(err.Error(), MCPSocketPath()) || !strings.Contains(err.Error(), "shorter home directory") {
+		t.Fatalf("the refusal does not name the path and what to change: %v", err)
 	}
 }
