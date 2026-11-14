@@ -7,7 +7,7 @@ final class CatalogStub: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let url = request.url!
-        CatalogStub.hits.append("\(url.host ?? "")\(url.path)")
+        CatalogStub.hits.append((request.httpMethod == "POST" ? "POST " : "") + "\(url.host ?? "")\(url.path)")
         let body = Data(#"{"host":"running","extensions":[{"id":"board","label":"Board","state":"loaded"}]}"#.utf8)
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: body)
@@ -102,6 +102,11 @@ struct ExtensionEntriesTest {
         shown.attach(second, hostID: "h1", hostName: "one")
         await catalogSettles(shown)
         check(CatalogStub.hits == ["second.invalid/api/v1/extensions"] && shown.list != nil, "a shown catalog refetches once from its new connection, got \(CatalogStub.hits)")
+        CatalogStub.hits = []
+        let undone: Bool
+        do { try await first.undoExtensionChange("abc123"); undone = true } catch { undone = false }
+        check(undone && CatalogStub.hits == ["POST first.invalid/api/v1/extensions/history/abc123/undo"], "undo posts to the change's own route, got \(CatalogStub.hits)")
+        check(AgenthailAPI.undoPath("a/b?c") == "/api/v1/extensions/history/a%2Fb%3Fc/undo", "a revision stays one path segment, got \(AgenthailAPI.undoPath("a/b?c"))")
 
         check(ExtensionCatalog.refreshes(for: "extension.badge") && ExtensionCatalog.refreshes(for: "extension.changed") && !ExtensionCatalog.refreshes(for: "session.updated"), "the list rereads on extension events only")
         print("ok")
