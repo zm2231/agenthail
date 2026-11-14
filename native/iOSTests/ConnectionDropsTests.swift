@@ -155,8 +155,14 @@ final class StreamDropElapsedTests: XCTestCase {
         XCTAssertNil(drop.elapsedMs, "a stream that never connected has no up time")
     }
 
-    private func streamDrop(connects: Bool) async throws -> ConnectionDrop {
-        StreamUpProtocol.state.reset(connects: connects)
+    func testAReconnectDoesNotCarryTheOldStreamsUpTime() async throws {
+        let drop = try await streamDrop(connects: true, reconnect: true)
+        XCTAssertEqual(drop.path, "stream")
+        XCTAssertNil(drop.elapsedMs, "the new stream never connected but took the old one's up time")
+    }
+
+    private func streamDrop(connects: Bool, reconnect: Bool = false) async throws -> ConnectionDrop {
+        StreamUpProtocol.state.reset(connects: connects, holds: reconnect)
         let suite = "connection-drops-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -165,6 +171,13 @@ final class StreamDropElapsedTests: XCTestCase {
         let connection = HostConnection(credential: credential, session: FixtureScope.open(self).session([StreamUpProtocol.self]), drops: drops)
         defer { connection.stop() }
         connection.connect()
+        if reconnect {
+            for _ in 0..<250 where !StreamUpProtocol.state.held { try await Task.sleep(for: .milliseconds(20)) }
+            XCTAssertTrue(StreamUpProtocol.state.held, "the first stream never connected")
+            try await Task.sleep(for: .milliseconds(300))
+            StreamUpProtocol.state.refuseStreams()
+            connection.connect()
+        }
         for _ in 0..<250 where drops.log.open.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
         return try XCTUnwrap(drops.log.open.values.first { $0.path == "stream" }, "no stream drop was recorded")
     }
@@ -174,10 +187,16 @@ private final class StreamUpProtocol: URLProtocol, @unchecked Sendable {
     final class State: @unchecked Sendable {
         private let lock = NSLock()
         private var connectsValue = true
+        private var holdsValue = false
+        private var heldValue = false
         private var droppedValue = false
         var connects: Bool { lock.withLock { connectsValue } }
+        var holds: Bool { lock.withLock { holdsValue } }
+        var held: Bool { lock.withLock { heldValue } }
         var dropped: Bool { lock.withLock { droppedValue } }
-        func reset(connects: Bool) { lock.withLock { connectsValue = connects; droppedValue = false } }
+        func reset(connects: Bool, holds: Bool) { lock.withLock { connectsValue = connects; holdsValue = holds; heldValue = false; droppedValue = false } }
+        func hold() { lock.withLock { heldValue = true } }
+        func refuseStreams() { lock.withLock { connectsValue = false; holdsValue = false } }
         func drop() { lock.withLock { droppedValue = true } }
     }
     static let state = State()
@@ -204,6 +223,10 @@ private final class StreamUpProtocol: URLProtocol, @unchecked Sendable {
                 return
             }
             respond(200, ": connected\n\n", finish: false)
+            if Self.state.holds {
+                Self.state.hold()
+                return
+            }
             later(0.5) {
                 Self.state.drop()
                 self.client?.urlProtocolDidFinishLoading(self)
