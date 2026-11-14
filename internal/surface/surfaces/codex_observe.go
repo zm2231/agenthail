@@ -142,6 +142,9 @@ func codexNewestTurn(ctx context.Context, conn codexClient, threadID string) (ma
 
 const codexQuietAfter = 5 * time.Minute
 
+// Real turns ran under 45 minutes; one open far longer was left by a terminal that crashed.
+const codexAbandonedTurnAfter = 2 * time.Hour
+
 // A plain codex terminal is no runtime the daemon can ask, but it keeps writing the rollout.
 func (c *Codex) unheld(ctx context.Context, runtimes *codexRuntimes, sess *surface.Session, now time.Time) bool {
 	if len(runtimes.loadFailures) > 0 {
@@ -162,13 +165,13 @@ func (c *Codex) unheld(ctx context.Context, runtimes *codexRuntimes, sess *surfa
 		return false
 	}
 	info, err := os.Stat(path)
-	if err != nil || now.Sub(info.ModTime()) <= codexQuietAfter || codexTurnOpen(path, info) {
+	if err != nil || now.Sub(info.ModTime()) <= codexQuietAfter || codexTurnOpen(path, info, now) {
 		return false
 	}
 	return !surface.BackgroundRunning(c.transcriptBackground(ctx, path, info))
 }
 
-func codexTurnOpen(path string, info os.FileInfo) bool {
+func codexTurnOpen(path string, info os.FileInfo, now time.Time) bool {
 	file, err := os.Open(path)
 	if err != nil {
 		return true
@@ -176,12 +179,12 @@ func codexTurnOpen(path string, info os.FileInfo) bool {
 	defer file.Close()
 	open := false
 	scanJSONLBackward(file, info.Size(), info.Size(), func(line []byte, _ int64) bool {
-		record, _, ok := parseCodexLiveTurnRecord(line)
+		record, at, ok := parseCodexLiveTurnRecord(line)
 		if !ok {
 			return true
 		}
 		started, ended := codexLifecycle(record)
-		open = started
+		open = started && (at.IsZero() || now.Sub(at) <= codexAbandonedTurnAfter)
 		return !started && !ended
 	})
 	return open

@@ -76,7 +76,7 @@ func TestAThreadCountsAsUnheldOnlyWhenEveryRuntimeAgreesAndItIsQuiet(t *testing.
 	}
 }
 
-func TestAQuietThreadWithWorkStillOpenInItsRolloutIsNotUnheld(t *testing.T) {
+func TestAQuietThreadWithWorkStillOpenInItsRolloutIsNotUnheldUnlessItWasAbandoned(t *testing.T) {
 	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "codex"))
 	bridge := startDesktopBridge(t, func(method string) string {
 		switch method {
@@ -87,18 +87,20 @@ func TestAQuietThreadWithWorkStillOpenInItsRolloutIsNotUnheld(t *testing.T) {
 		}
 		return ""
 	})
+	recent := time.Now().UTC().Add(-30 * time.Minute).Format("2006-01-02T15")
 	lines := codexBackgroundRollout()
 	cases := []struct {
 		name    string
 		rollout []string
 		want    bool
 	}{
+		{"a turn left open by a terminal that crashed long ago", lines[:2], true},
 		{"a turn still running a command", lines[:2], false},
 		{"an ended turn whose command still runs", lines[:4], false},
 		{"an ended turn whose command finished", lines, true},
 	}
 	event := func(typ string) string {
-		return `{"timestamp":"2026-10-26T10:00:00Z","type":"event_msg","payload":{"type":"` + typ + `","turn_id":"turn-1"}}`
+		return `{"timestamp":"` + recent + `:00:00Z","type":"event_msg","payload":{"type":"` + typ + `","turn_id":"turn-1"}}`
 	}
 	for _, start := range []string{"task_started", "turn_started"} {
 		cases = append(cases, struct {
@@ -114,8 +116,12 @@ func TestAQuietThreadWithWorkStillOpenInItsRolloutIsNotUnheld(t *testing.T) {
 			}{start + " closed by " + end, []string{event(start), event(end)}, true})
 		}
 	}
-	for _, tc := range cases {
-		rollout := timelineFixture(t, strings.Join(tc.rollout, "\n")+"\n")
+	for i, tc := range cases {
+		body := strings.Join(tc.rollout, "\n") + "\n"
+		if i > 0 {
+			body = strings.ReplaceAll(body, "2026-10-26T10", recent)
+		}
+		rollout := timelineFixture(t, body)
 		old := time.Now().Add(-time.Hour)
 		if err := os.Chtimes(rollout, old, old); err != nil {
 			t.Fatal(err)
