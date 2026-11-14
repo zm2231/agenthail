@@ -29,11 +29,11 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
         return .newData
     }
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .sound, .badge]
     }
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let userInfo = response.notification.request.content.userInfo
         guard let sessionID = userInfo["sessionId"] as? String, !sessionID.isEmpty,
               let host = userInfo["host"] as? String, !host.isEmpty else { return }
