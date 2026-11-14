@@ -115,6 +115,9 @@ final class AgenthailModel {
         didSet { if api !== oldValue { syncExtensionCatalog() } }
     }
     let extensionCatalog = ExtensionCatalog()
+    private(set) var pairedExtensionCatalogs: [ExtensionCatalog] = []
+    @ObservationIgnored var extensionsHubsShown = 0
+    @ObservationIgnored private var pairedExtensionsPoll: Task<Void, Never>?
     let interface = InterfaceStore()
     let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
@@ -147,7 +150,7 @@ final class AgenthailModel {
 
     private(set) var hasSnapshot = false
     private(set) var daemon: DaemonState? {
-        didSet { if daemon?.host != oldValue?.host { syncExtensionCatalog() } }
+        didSet { if daemon?.host != oldValue?.host || daemon?.hosts != oldValue?.hosts { syncExtensionCatalog() } }
     }
     private(set) var queue: [QueueState] = []
     private(set) var history: [HistoryState] = []
@@ -1437,9 +1440,39 @@ final class AgenthailModel {
         }
     }
 
+    var extensionCatalogs: [ExtensionCatalog] { [extensionCatalog] + pairedExtensionCatalogs }
+
+    func extensionCatalog(forEntry id: String) -> ExtensionCatalog? {
+        extensionCatalogs.first { !$0.hostID.isEmpty && id.hasPrefix($0.hostID + "/") }
+    }
+
     private func syncExtensionCatalog() {
         guard let host = daemon?.host else { return }
         if extensionCatalog.attach(api, hostID: host.id, hostName: host.name) && ExtensionPins.shared.pins(host: host.id) && !extensionCatalog.loading { extensionCatalog.refresh() }
+        let paired = (daemon?.hosts ?? []).sorted { ($0.name.localizedLowercase, $0.id) < ($1.name.localizedLowercase, $1.id) }
+        let existing = Dictionary(pairedExtensionCatalogs.map { ($0.hostID, $0) }, uniquingKeysWith: { first, _ in first })
+        let catalogs = paired.map { remote in
+            let catalog = existing[remote.id] ?? ExtensionCatalog(hostID: remote.id, hostName: remote.name, hostRef: remote.id)
+            let replaced = catalog.attach(api, hostID: remote.id, hostName: remote.name)
+            if remote.state == "connected" && (replaced || catalog.list == nil || catalog.error != nil) && ExtensionPins.shared.pins(host: remote.id) && !catalog.loading { catalog.refresh() }
+            return catalog
+        }
+        if catalogs.map(\.hostID) != pairedExtensionCatalogs.map(\.hostID) { pairedExtensionCatalogs = catalogs }
+        if pairedExtensionsPoll == nil && !catalogs.isEmpty {
+            pairedExtensionsPoll = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(30))
+                    self?.pollPairedExtensions()
+                }
+            }
+        }
+    }
+
+    private func pollPairedExtensions() {
+        let connected = Set((daemon?.hosts ?? []).filter { $0.state == "connected" }.map(\.id))
+        for catalog in pairedExtensionCatalogs where connected.contains(catalog.hostID) && !catalog.loading && (extensionsHubsShown > 0 || ExtensionPins.shared.pins(host: catalog.hostID)) {
+            catalog.refresh()
+        }
     }
 
     private func eventStreamConnected() {

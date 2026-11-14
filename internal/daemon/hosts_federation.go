@@ -271,6 +271,7 @@ func (d *Daemon) stopFederation() {
 	}
 	d.federation.mu.Unlock()
 	d.federation.wg.Wait()
+	d.remoteExtensions.close()
 }
 
 func (d *Daemon) attachHost(record registry.PairedHost) error {

@@ -13,7 +13,7 @@ struct SidebarTiles: View {
             if let session = project.leads.first.flatMap(ProjectContents.leadSessionID).flatMap(model.session) { leads[project.id] = ProjectTiles.Lead(session) }
         }
         let count = TileGrid.columns(width: width)
-        let pinned = ExtensionEntries.pinned(model.extensionCatalog.entries, pins: ExtensionPins.shared.ids)
+        let pinned = ExtensionEntries.pinned(model.extensionCatalogs.flatMap(\.entries), pins: ExtensionPins.shared.ids)
         let tiles = TileGrid.fill(columns: count, fixed: 3 + pinned.count) { ProjectTiles.order(model.projects, limit: $0, waiting: counts, leads: leads) }
         let owner = model.daemon?.host?.id ?? ""
         let columns = Array(repeating: GridItem(.flexible(), spacing: TileGrid.spacing, alignment: .top), count: count)

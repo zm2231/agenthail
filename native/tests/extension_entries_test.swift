@@ -7,7 +7,7 @@ final class CatalogStub: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let url = request.url!
-        CatalogStub.hits.append((request.httpMethod == "POST" ? "POST " : "") + "\(url.host ?? "")\(url.path)")
+        CatalogStub.hits.append((request.httpMethod == "POST" ? "POST " : "") + "\(url.host ?? "")\(url.path)" + (url.query.map { "?" + $0 } ?? ""))
         let body = Data(#"{"host":"running","extensions":[{"id":"board","label":"Board","state":"loaded"}]}"#.utf8)
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: body)
@@ -107,6 +107,15 @@ struct ExtensionEntriesTest {
         do { try await first.undoExtensionChange("abc123"); undone = true } catch { undone = false }
         check(undone && CatalogStub.hits == ["POST first.invalid/api/v1/extensions/history/abc123/undo"], "undo posts to the change's own route, got \(CatalogStub.hits)")
         check(AgenthailAPI.undoPath("a/b?c") == "/api/v1/extensions/history/a%2Fb%3Fc/undo", "a revision stays one path segment, got \(AgenthailAPI.undoPath("a/b?c"))")
+        CatalogStub.hits = []
+        do { try await first.undoExtensionChange("abc123", host: "h2") } catch {}
+        check(CatalogStub.hits == ["POST first.invalid/api/v1/extensions/history/abc123/undo?host=h2"], "undo on a paired host names it, got \(CatalogStub.hits)")
+        CatalogStub.hits = []
+        let paired = ExtensionCatalog(hostID: "h 2", hostName: "build", api: first, hostRef: "h 2&x")
+        paired.refresh()
+        await catalogSettles(paired)
+        check(CatalogStub.hits == ["first.invalid/api/v1/extensions?host=h%202%26x"] && paired.list?.extensions.first?.id == "board", "a paired host's catalog asks this host for that host's list, got \(CatalogStub.hits)")
+        check(AgenthailAPI.onHost("/api/v1/extensions/history?limit=5", "h2") == "/api/v1/extensions/history?limit=5&host=h2" && AgenthailAPI.onHost("/x", nil) == "/x", "the host joins an existing query")
 
         check(ExtensionCatalog.refreshes(for: "extension.badge") && ExtensionCatalog.refreshes(for: "extension.changed") && !ExtensionCatalog.refreshes(for: "session.updated"), "the list rereads on extension events only")
         print("ok")

@@ -143,6 +143,7 @@ type Daemon struct {
 	identityMu               sync.RWMutex
 	identity                 registry.HostIdentity
 	federation               *federation
+	remoteExtensions         *remoteExtensions
 	uploads                  *uploads.Store
 	limitResumes             *limitResumer
 	goalSweep                *goalSweeper
@@ -219,6 +220,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		catalogNudge:      make(chan struct{}, 1),
 		observerNudge:     make(chan struct{}, 1),
 		federation:        newFederation(),
+		remoteExtensions:  newRemoteExtensions(),
 		uploads:           uploads.New(uploadsDir(reg)),
 		background:        newBackgroundWork(),
 		triggers:          newTriggerService(),
@@ -353,6 +355,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return fmt.Errorf("record the daemon's Claude config root, which every process needs to read the daemon's Claude conversations: %w", err)
 	}
 	d.logStarted()
+	d.configureExtensionPorts()
 	if recovered, err := d.Registry.RecoverInflight(time.Now().Add(-time.Minute)); err != nil {
 		d.log.Printf("warn: recover inflight queue: %s", err)
 	} else if recovered > 0 {
