@@ -13,6 +13,9 @@ import (
 
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 const tableServer = `
@@ -268,23 +271,53 @@ func TestTurnsAreRecordedInOrderAndATurnRunningElsewhereKeepsEditsFromBeingTaken
 	asksNothing(t, reg, "to")
 }
 
-func TestChangeAsksLeftFromBeforeAreWithdrawnSoNothingWaitsOnThePerson(t *testing.T) {
+func raiseLeftoverAsks(t *testing.T, reg *registry.Registry) (change, grant registry.Ask) {
+	t.Helper()
+	change, err := reg.RaiseAsk(registry.Ask{SessionID: "to", Origin: registry.AskOriginExtensionChange, Title: "to changed extensions", Questions: []registry.AskQuestion{{Question: "Keep this change?", Options: []registry.AskOption{{ID: "keep", Label: "Keep"}, {ID: "undo", Label: "Undo"}}}}, RoutedTo: registry.AskToPerson}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err = reg.RaiseAsk(registry.Ask{SessionID: "to", Origin: registry.AskOriginExtensionGrant, Title: "approve notes", Questions: []registry.AskQuestion{{Question: "Approve?", Options: []registry.AskOption{{ID: "approve", Label: "Approve"}, {ID: "decline", Label: "Decline"}}}}, RoutedTo: registry.AskToPerson}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return change, grant
+}
+
+func askState(t *testing.T, reg *registry.Registry, id string) string {
+	t.Helper()
+	ask, _, err := reg.Ask(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ask.State
+}
+
+func TestChangeAsksLeftFromBeforeAreWithdrawnWhenTheDaemonStartsEvenWithExtensionsOff(t *testing.T) {
+	store, err := registry.Open(registrytest.Path(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if err := store.RegisterSession(surface.Session{ID: "to", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	change, grant := raiseLeftoverAsks(t, store)
+	runDaemon(t, store)
+	testkit.Eventually(t, "the change ask withdrawn at start", 5*time.Second, func() bool { return askState(t, store, change.ID) == registry.AskWithdrawn })
+	if state := askState(t, store, grant.ID); state != registry.AskOpen {
+		t.Fatalf("an approval the person still has to give was %s", state)
+	}
+}
+
+func TestAnsweringAChangeAskLeftFromBeforeIsStaleAndWithdrawsIt(t *testing.T) {
 	f := startExtensionFixture(t)
-	reg := f.d.Registry
-	left, err := reg.RaiseAsk(registry.Ask{SessionID: "to", Origin: registry.AskOriginExtensionChange, Title: "to changed extensions", Questions: []registry.AskQuestion{{Question: "Keep this change?", Options: []registry.AskOption{{ID: "keep", Label: "Keep"}, {ID: "undo", Label: "Undo"}}}}, RoutedTo: registry.AskToPerson}, time.Now())
-	if err != nil {
-		t.Fatal(err)
+	change, _ := raiseLeftoverAsks(t, f.d.Registry)
+	if status := f.answer(t, change, "keep"); status != http.StatusConflict {
+		t.Fatalf("keeping a change ask left from before answered %d, want 409", status)
 	}
-	grant, err := reg.RaiseAsk(registry.Ask{SessionID: "to", Origin: registry.AskOriginExtensionGrant, Title: "approve notes", Questions: []registry.AskQuestion{{Question: "Approve?", Options: []registry.AskOption{{ID: "approve", Label: "Approve"}, {ID: "decline", Label: "Decline"}}}}, RoutedTo: registry.AskToPerson}, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.d.withdrawExtensionChangeAsks()
-	if ask, _, _ := reg.Ask(left.ID); ask.State != registry.AskWithdrawn {
-		t.Fatalf("a change ask from before stayed %s", ask.State)
-	}
-	if ask, _, _ := reg.Ask(grant.ID); ask.State != registry.AskOpen {
-		t.Fatalf("an approval the person still has to give was %s", ask.State)
+	if state := askState(t, f.d.Registry, change.ID); state != registry.AskWithdrawn {
+		t.Fatalf("the answered change ask is %s", state)
 	}
 }
 

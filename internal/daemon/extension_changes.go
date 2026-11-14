@@ -192,18 +192,21 @@ func (d *Daemon) withdrawExtensionChangeAsks() {
 		return
 	}
 	for _, ask := range open {
-		if ask.Origin != registry.AskOriginExtensionChange {
-			continue
-		}
-		if withdrawn, err := d.Registry.WithdrawAsk(ask.ID, time.Now()); err != nil {
-			d.log.Printf("extensions: withdraw %s: %s", ask.ID, err)
-		} else if withdrawn {
-			d.withdrawAsk(ask.ID)
-			d.publishAsk(ask.SessionID)
+		if ask.Origin == registry.AskOriginExtensionChange {
+			d.withdrawExtensionChangeAsk(ask)
 		}
 	}
 	if d.extensions != nil {
 		_ = os.Remove(filepath.Join(extension.DataDir(d.extensions.home), "changes.json"))
+	}
+}
+
+func (d *Daemon) withdrawExtensionChangeAsk(ask registry.Ask) {
+	if withdrawn, err := d.Registry.WithdrawAsk(ask.ID, time.Now()); err != nil {
+		d.log.Printf("extensions: withdraw %s: %s", ask.ID, err)
+	} else if withdrawn {
+		d.withdrawAsk(ask.ID)
+		d.publishAsk(ask.SessionID)
 	}
 }
 
