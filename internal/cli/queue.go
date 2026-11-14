@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
@@ -52,7 +53,9 @@ func (a *App) cmdQueue(args []string) error {
 			if row.Status == "pending" {
 				fmt.Printf("      queued %s; %s\n", relTime(queuedTime(row.QueuedAt)), queueHoldLabel(row.HeldBy))
 			}
-			if row.LastError != "" {
+			if row.DeferredSinceMS > 0 && (row.Status == "pending" || row.Status == "inflight") {
+				fmt.Printf("      deferred %d times since %s: %s\n", row.Deferrals, relTime(time.UnixMilli(row.DeferredSinceMS)), row.LastError)
+			} else if row.LastError != "" {
 				fmt.Printf("      last error: %s\n", row.LastError)
 			}
 		}

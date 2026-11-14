@@ -741,15 +741,18 @@ func TestQueuePreservesLongMessageAndOptions(t *testing.T) {
 	}
 }
 
-func TestQueueClaimIsConcurrentAndFIFOAcrossBackoff(t *testing.T) {
+func TestQueueClaimIsConcurrentAndInSenderOrderAcrossBackoff(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
-	if err := r.QueueMessage("s", "first"); err != nil {
-		t.Fatal(err)
+	queue := func(message, sender string) {
+		t.Helper()
+		if _, err := r.QueueMessageWithOptions("s", message, "", surface.SendOptions{SourceSessionID: sender}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := r.QueueMessage("s", "second"); err != nil {
-		t.Fatal(err)
-	}
+	queue("first", "a")
+	queue("second", "a")
+	queue("other", "b")
 	now := time.Now()
 	var wg sync.WaitGroup
 	claimed := make(chan *QueuedMessage, 10)
@@ -781,8 +784,18 @@ func TestQueueClaimIsConcurrentAndFIFOAcrossBackoff(t *testing.T) {
 	if err := r.NackMessage(first.ID, sql.ErrConnDone, now, 3); err != nil {
 		t.Fatal(err)
 	}
+	other, err := r.ClaimNextMessage("s", now)
+	if err != nil || other == nil || other.Message != "other" {
+		t.Fatalf("claimed=%+v err=%v, want another sender's row past the backed-off first", other, err)
+	}
+	if err := r.AckMessage(other.ID); err != nil {
+		t.Fatal(err)
+	}
 	if item, err := r.ClaimNextMessage("s", now); err != nil || item != nil {
-		t.Fatalf("second overtook backed-off first: item=%+v err=%v", item, err)
+		t.Fatalf("second overtook its sender's backed-off first: item=%+v err=%v", item, err)
+	}
+	if item, err := r.ClaimNextMessage("s", now.Add(time.Hour)); err != nil || item == nil || item.Message != "first" {
+		t.Fatalf("claimed=%+v err=%v, want first once its backoff ends", item, err)
 	}
 }
 
@@ -1336,7 +1349,7 @@ func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 	}
 	queue := func(message, busyDelivery string) int64 {
 		t.Helper()
-		id, err := r.QueueMessageWithOptions("target", message, "", surface.SendOptions{BusyDelivery: busyDelivery})
+		id, err := r.QueueMessageWithOptions("target", message, "", surface.SendOptions{BusyDelivery: busyDelivery, SourceSessionID: "lead"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1720,5 +1733,68 @@ func TestHistoryRowsNameTheirQueueOperation(t *testing.T) {
 				t.Fatalf("%s: entry %+v has operation %q, want %q", name, entry, entry.Operation, want[entry.QueueID])
 			}
 		}
+	}
+}
+
+func TestAHeldRowHoldsOnlyItsOwnSendersLaterRows(t *testing.T) {
+	r := openTestRegistry(t)
+	registerCatalogSession(t, r, surface.Session{ID: "target", Surface: surface.KindClaude, Transport: "uds", RuntimeKind: surface.RuntimeClaudeHost})
+	if err := r.SaveRuntimeState("target", surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	queue := func(message, sender, busyDelivery string) int64 {
+		t.Helper()
+		id, err := r.QueueMessageWithOptions("target", message, "", surface.SendOptions{SourceSessionID: sender, BusyDelivery: busyDelivery})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	held := func(id int64) QueueHold {
+		t.Helper()
+		item, err := r.QueueItem(id, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return item.HeldBy
+	}
+	now := time.Now()
+	stuck, stuckNext := queue("from an offline sender", "sim", "queue"), queue("its follow-up", "sim", "")
+	other, unsent, alsoUnsent := queue("from the lead", "lead", "queue"), queue("daemon notice", "", ""), queue("daemon notice two", "", "")
+	first, err := r.ClaimNextMessage("target", now)
+	if err != nil || first == nil || first.ID != stuck {
+		t.Fatalf("claimed=%+v err=%v, want the oldest due row first", first, err)
+	}
+	if err := r.DeferMessage(stuck, errors.New("sender is offline"), now); err != nil {
+		t.Fatal(err)
+	}
+	if held(stuck) != QueueHeldRetrying || held(stuckNext) != QueueHeldBehind || held(other) != "" || held(unsent) != QueueHeldBehind {
+		t.Fatalf("held: stuck=%q next=%q other=%q unsent=%q, want retrying, behind, nothing, behind", held(stuck), held(stuckNext), held(other), held(unsent))
+	}
+	for _, want := range []int64{other, unsent} {
+		item, err := r.ClaimNextMessage("target", now)
+		if err != nil || item == nil || item.ID != want {
+			t.Fatalf("claimed=%+v err=%v, want %d past the held row", item, err, want)
+		}
+		if err := r.DeferMessage(item.ID, errors.New("target restarting"), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if item, err := r.ClaimNextMessage("target", now); err != nil || item == nil || item.ID != alsoUnsent {
+		t.Fatalf("claimed=%+v err=%v, want a row with no sender past another held one", item, err)
+	}
+	if err := r.AckMessage(alsoUnsent); err != nil {
+		t.Fatal(err)
+	}
+	if item, err := r.ClaimNextMessage("target", now); err != nil || item != nil {
+		t.Fatalf("claimed=%+v err=%v, want nothing while every due row waits on its sender", item, err)
+	}
+
+	later := now.Add(time.Hour)
+	if item, err := r.ClaimNextPeerMessage("target", later); err != nil || item != nil {
+		t.Fatalf("claimed=%+v err=%v, want the peer claim to leave a due row that waits for idle first", item, err)
+	}
+	if item, err := r.ClaimNextMessage("target", later); err != nil || item == nil || item.ID != stuck {
+		t.Fatalf("claimed=%+v err=%v, want the held row first once it is due", item, err)
 	}
 }

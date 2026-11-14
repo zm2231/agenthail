@@ -32,7 +32,12 @@ const (
 	deliveryHeld    = "held"
 	deliveryDead    = "dead"
 	deliveryRefused = "refused"
+	deliveryLate    = "late"
 )
+
+const deliveryLateAfter = 15 * time.Minute
+
+const queueLateRow = `status IN ('pending','inflight') AND refused=0 AND deferred_since_ms>0 AND deferred_since_ms<=?2`
 
 func ParseDeliveryRef(ref string) (DeliveryRef, bool) {
 	parts := strings.Split(ref, ":")
@@ -46,7 +51,7 @@ func ParseDeliveryRef(ref string) (DeliveryRef, bool) {
 	switch {
 	case parts[0] == "intent" && len(parts) == 4 && (parts[3] == deliveryFailed || parts[3] == deliveryHeld):
 		return DeliveryRef{IntentID: id, Kind: parts[3]}, true
-	case parts[0] == "queue" && (parts[2] == deliveryDead && len(parts) == 3 || parts[2] == deliveryRefused && len(parts) == 4 || parts[2] == DeliveryShared && len(parts) == 5):
+	case parts[0] == "queue" && ((parts[2] == deliveryDead || parts[2] == deliveryLate) && len(parts) == 3 || parts[2] == deliveryRefused && len(parts) == 4 || parts[2] == DeliveryShared && len(parts) == 5):
 		return DeliveryRef{QueueID: id, Kind: parts[2]}, true
 	}
 	return DeliveryRef{}, false
@@ -158,12 +163,12 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT mq.id,mq.session_id,mq.source_session_id,COALESCE(di.relayed,0),mq.message,mq.refusal,mq.refused_now,mq.reason,mq.holders_json
-		FROM (SELECT id,session_id,source_session_id,message,refusal,`+queueRefusedRow+` AS refused_now,`+deliveryReason+` AS reason,holders_json
-			FROM message_queue WHERE status='dead' AND dead_at_ms>? OR `+queueRefusedRow+`) mq
+	rows, err = tx.QueryContext(ctx, `SELECT mq.id,mq.session_id,mq.source_session_id,COALESCE(di.relayed,0),mq.message,mq.refusal,mq.refused_now,mq.late,mq.reason,mq.holders_json
+		FROM (SELECT id,session_id,CASE WHEN EXISTS(SELECT 1 FROM sessions s WHERE s.id=message_queue.source_session_id) THEN source_session_id ELSE '' END AS source_session_id,message,refusal,`+queueRefusedRow+` AS refused_now,`+queueLateRow+` AS late,`+deliveryReason+` AS reason,holders_json
+			FROM message_queue WHERE status='dead' AND dead_at_ms>?1 OR `+queueRefusedRow+` OR `+queueLateRow+`) mq
 		LEFT JOIN delivery_intents di ON di.queue_id=mq.id
 		WHERE COALESCE(di.status,'') NOT IN ('failed','held')
-		ORDER BY mq.id`, now.Add(-deadReviewWindow).UnixMilli())
+		ORDER BY mq.id`, now.Add(-deadReviewWindow).UnixMilli(), now.Add(-deliveryLateAfter).UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -171,8 +176,8 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 	for rows.Next() {
 		var id, refusal int64
 		var target, sender, message, reason, rawHolders string
-		var relayed, refused bool
-		if err := rows.Scan(&id, &target, &sender, &relayed, &message, &refusal, &refused, &reason, &rawHolders); err != nil {
+		var relayed, refused, late bool
+		if err := rows.Scan(&id, &target, &sender, &relayed, &message, &refusal, &refused, &late, &reason, &rawHolders); err != nil {
 			return nil, err
 		}
 		var holders []surface.Holder
@@ -187,6 +192,10 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 			problem.ref = fmt.Sprintf("queue:%d:%s:%d", id, deliveryRefused, refusal)
 			problem.title = "Target refused to start"
 			problem.question = deliveryQuestion(message, reason, DeliveryCancel, DeliveryDismiss)
+		} else if late {
+			problem.ref = fmt.Sprintf("queue:%d:%s", id, deliveryLate)
+			problem.title = "Message not delivered yet"
+			problem.question = deliveryQuestion(message, reason, DeliveryCancel, DeliveryDismiss)
 		} else {
 			problem.ref = fmt.Sprintf("queue:%d:%s", id, deliveryDead)
 			problem.title = "Message not confirmed"
@@ -199,12 +208,13 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 
 const deliveryAsksInPlay = `SELECT EXISTS(SELECT 1 FROM delivery_intents WHERE status='held')
 	OR EXISTS(SELECT 1 FROM delivery_intents WHERE status='failed' AND updated_at>=datetime('now','-1 day'))
-	OR EXISTS(SELECT 1 FROM message_queue WHERE status='dead' AND dead_at_ms>?)
+	OR EXISTS(SELECT 1 FROM message_queue WHERE status='dead' AND dead_at_ms>?1)
 	OR EXISTS(SELECT 1 FROM message_queue WHERE ` + queueRefusedRow + `)
+	OR EXISTS(SELECT 1 FROM message_queue WHERE ` + queueLateRow + `)
 	OR EXISTS(SELECT 1 FROM asks WHERE origin='delivery' AND state='open')`
 
 func (r *Registry) SyncDeliveryAsks(now time.Time) error {
-	if open, err := r.readExists(deliveryAsksInPlay, now.Add(-deadReviewWindow).UnixMilli()); err != nil || !open {
+	if open, err := r.readExists(deliveryAsksInPlay, now.Add(-deadReviewWindow).UnixMilli(), now.Add(-deliveryLateAfter).UnixMilli()); err != nil || !open {
 		return err
 	}
 	tx, err := r.db.Begin()
@@ -235,7 +245,7 @@ func (r *Registry) deliveryWrite(write func(*sql.Tx) error) error {
 
 func syncDeliveryAsksTx(tx *sql.Tx, now time.Time) error {
 	var inPlay bool
-	if err := tx.QueryRow(deliveryAsksInPlay, now.Add(-deadReviewWindow).UnixMilli()).Scan(&inPlay); err != nil || !inPlay {
+	if err := tx.QueryRow(deliveryAsksInPlay, now.Add(-deadReviewWindow).UnixMilli(), now.Add(-deliveryLateAfter).UnixMilli()).Scan(&inPlay); err != nil || !inPlay {
 		return err
 	}
 	ctx := context.Background()

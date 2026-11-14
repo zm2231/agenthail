@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -41,6 +42,7 @@ type scriptedAgent struct {
 	mu         sync.Mutex
 	sessions   map[string]*scriptedSession
 	sendErr    map[string]error
+	senderErr  map[string]error
 	observeErr map[string]error
 	attempts   map[string]int
 	refuse     map[string]bool
@@ -49,7 +51,7 @@ type scriptedAgent struct {
 }
 
 func newScriptedAgent(ids ...string) *scriptedAgent {
-	agent := &scriptedAgent{sessions: map[string]*scriptedSession{}, sendErr: map[string]error{}, observeErr: map[string]error{}, attempts: map[string]int{}, refuse: map[string]bool{}}
+	agent := &scriptedAgent{sessions: map[string]*scriptedSession{}, sendErr: map[string]error{}, senderErr: map[string]error{}, observeErr: map[string]error{}, attempts: map[string]int{}, refuse: map[string]bool{}}
 	for _, id := range ids {
 		agent.sessions[id] = &scriptedSession{status: surface.StatusIdle}
 	}
@@ -82,6 +84,16 @@ func (a *scriptedAgent) failSends(id string, err error) {
 		return
 	}
 	a.sendErr[id] = err
+}
+
+func (a *scriptedAgent) failSendsFrom(sender string, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err == nil {
+		delete(a.senderErr, sender)
+		return
+	}
+	a.senderErr[sender] = err
 }
 
 // refuseSends makes the provider report the target busy at send time even
@@ -190,6 +202,9 @@ func (a *scriptedAgent) accept(sessionID, message string, options surface.SendOp
 	if err := a.sendErr[sessionID]; errors.Is(err, errEmptyResult) {
 		return nil, nil
 	} else if err != nil {
+		return nil, err
+	}
+	if err := a.senderErr[options.SourceSessionID]; err != nil {
 		return nil, err
 	}
 	state, ok := a.sessions[sessionID]
@@ -604,6 +619,37 @@ func TestUnavailableTargetKeepsQueuedMessageAndDeliversOnceAfterRecovery(t *test
 		t.Fatalf("delivered=%+v", got)
 	}
 	h.awaitQueueItem(id, "the delivery recorded", delivered)
+}
+
+func TestAMessageItsSenderCannotSendHoldsOnlyThatSendersLaterMessages(t *testing.T) {
+	agent := newScriptedAgent("sim", "lead", "target")
+	agent.setStatus("target", surface.StatusBusy)
+	h := startRunningDaemon(t, agent)
+	const backoff = 200 * time.Millisecond
+	h.store.SetRetryBackoff(backoff)
+	send := func(sender, message string) int64 {
+		return queueID(t, h.receipt(map[string]any{"action": "send", "sessionId": "target", "sourceSessionId": sender, "message": message, "busyDelivery": "queue"}))
+	}
+	stuck, followUp := send("sim", "first from sim"), send("sim", "second from sim")
+	fromLead := send("lead", "from the lead")
+	agent.failSendsFrom("sim", surface.DeliveryUnavailable(errors.New("register Claude peer: sender is offline")))
+	agent.setStatus("target", surface.StatusIdle)
+	h.awaitQueueItem(fromLead, "the lead's message delivered past the held one", delivered)
+	if item := h.queueItem(stuck); item.Historical || item.Status != "pending" || item.LastError == "" {
+		t.Fatalf("held message=%+v, want it pending with its deferral", item)
+	}
+	if item := h.queueItem(followUp); item.Historical {
+		t.Fatalf("the held sender's later message went first: %+v", item)
+	}
+	agent.failSendsFrom("sim", nil)
+	h.awaitQueueItem(followUp, "the held sender's messages delivered once it can send", delivered)
+	var order []string
+	for _, message := range agent.deliveredTo("target") {
+		order = append(order, message.text)
+	}
+	if want := []string{"from the lead", "first from sim", "second from sim"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("delivered=%q, want %q", order, want)
+	}
 }
 
 func TestQueuedMessageWaitsThroughObservationOutageAndDeliversOnce(t *testing.T) {

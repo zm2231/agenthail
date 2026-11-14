@@ -218,7 +218,8 @@ question is answered and delivers other messages when the turn ends. Queue rows
 report `heldBy`: `waiting`, `busy`, `offline`, `unknown`, `refused`,
 `retrying`, `notLoaded` (an unloaded conversation that only Codex Desktop can
 load), `hostUnreachable` (a send a paired host has not received), or `behind`
-when an earlier message to the same session is still open. `offline` covers a
+when an earlier message to the same session waits ahead of it: one from the
+same sender that is still open, or any that is in flight or due. `offline` covers a
 target discovery no longer reports; a closed Claude session is the exception,
 since the daemon resumes it to deliver its queue. `refused` means the
 target refused to start, such as Claude failing to resume the conversation in
@@ -226,8 +227,18 @@ the Claude host. The row's last error carries Claude's message, and each refusal
 raises one delivery ask: an agent sender is asked first, otherwise the person
 (see `asks.md#delivery-problems`). The message stays
 queued and is delivered on the first attempt after the cause is fixed. Empty means
-the next scan claims that message: a drain takes only a session's earliest open
-message, or its earliest steer while a turn runs and the target can steer.
+the next scan claims that message.
+
+A session's queue is ordered per sender. A drain takes one message at a time,
+never while another is in flight: the earliest that is due and has no earlier
+open message from its sender, or, while a turn runs and the target can steer,
+the earliest such steer. A message waiting to retry therefore holds only its
+own sender's later messages, and messages that are due keep their order. A
+message with no sender, such as a daemon notice, holds nothing behind it.
+`queue list` shows a deferred message's deferral count, how long ago the first
+deferral was and the last reason. A message still deferred 15 minutes after its
+first deferral raises one delivery ask (see `asks.md#delivery-problems`) and
+stays queued.
 
 ## Claude sessions
 

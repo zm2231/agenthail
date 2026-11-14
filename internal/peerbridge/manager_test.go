@@ -449,6 +449,20 @@ func TestManagerReplyRelayLifecycle(t *testing.T) {
 	}
 }
 
+func TestASenderWhoseProcessEndedStillSendsButIsNotAdvertised(t *testing.T) {
+	f := newPeerFixture(t)
+	if err := f.reg.RegisterSession(surface.Session{ID: "ended", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "ended", Status: surface.StatusOffline}); err != nil {
+		t.Fatal(err)
+	}
+	if failures := f.manager.Advertise(f.ctx, []surface.Session{{ID: "ended", Status: surface.StatusOffline}}); failures["ended"] == nil || len(f.records()) != 0 {
+		t.Fatalf("failures=%v records=%+v, want an offline session left unadvertised", failures, f.records())
+	}
+	if err := f.manager.Ensure(f.ctx, "ended"); err != nil {
+		t.Fatalf("a sender whose process ended could not send: %v", err)
+	}
+	f.worker("ended")
+}
+
 func TestOversizedSendIsTerminalBeforeManagerDial(t *testing.T) {
 	_, err := Send(context.Background(), t.TempDir(), "source", "/tmp/target.sock", strings.Repeat("x", 64<<10))
 	if !surface.IsDeliveryTerminal(err) || surface.DeliveryTerminalReason(err) != surface.DeliveryInvalidRequest {
