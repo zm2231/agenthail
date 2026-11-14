@@ -309,7 +309,7 @@ struct ExtensionHistorySheet: View {
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
-            Text(host == nil ? "Changes are kept as they are made. Undo any change here." : "Changes on \(hostName) are kept as they are made. Undo them on \(hostName) itself.")
+            Text(host == nil ? "Changes are kept as they are made. Undo any change here." : "Changes on \(hostName). Undo any change here.")
                 .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.text2)
             if let failure {
@@ -329,13 +329,8 @@ struct ExtensionHistorySheet: View {
                         }
                         Spacer()
                         if change.root != true {
-                            if host == nil {
-                                Button("Undo") { Task { await undo(change) } }
-                                    .disabled(undoing != nil)
-                            } else {
-                                Button("Undo on \(hostName)") {}
-                                    .disabled(true)
-                            }
+                            Button("Undo") { Task { await undo(change) } }
+                                .disabled(undoing != nil)
                         }
                     }
                 }
@@ -364,7 +359,7 @@ struct ExtensionHistorySheet: View {
         undoing = change.rev
         defer { undoing = nil }
         do {
-            try await api.undoExtensionChange(change.rev)
+            try await api.undoExtensionChange(change.rev, host: host)
             failure = nil
             await load()
         } catch {

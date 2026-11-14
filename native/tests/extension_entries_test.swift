@@ -108,6 +108,9 @@ struct ExtensionEntriesTest {
         check(undone && CatalogStub.hits == ["POST first.invalid/api/v1/extensions/history/abc123/undo"], "undo posts to the change's own route, got \(CatalogStub.hits)")
         check(AgenthailAPI.undoPath("a/b?c") == "/api/v1/extensions/history/a%2Fb%3Fc/undo", "a revision stays one path segment, got \(AgenthailAPI.undoPath("a/b?c"))")
         CatalogStub.hits = []
+        do { try await first.undoExtensionChange("abc123", host: "h2") } catch {}
+        check(CatalogStub.hits == ["POST first.invalid/api/v1/extensions/history/abc123/undo?host=h2"], "undo on a paired host names it, got \(CatalogStub.hits)")
+        CatalogStub.hits = []
         let paired = ExtensionCatalog(hostID: "h 2", hostName: "build", api: first, hostRef: "h 2&x")
         paired.refresh()
         await catalogSettles(paired)

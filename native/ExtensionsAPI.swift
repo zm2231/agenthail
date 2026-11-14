@@ -19,8 +19,8 @@ extension AgenthailAPI {
         return path + (path.contains("?") ? "&" : "?") + "host=" + value
     }
 
-    func undoExtensionChange(_ rev: String) async throws {
-        let _: ExtensionsUndone = try await extensionsRequest(Self.undoPath(rev), method: "POST", body: nil)
+    func undoExtensionChange(_ rev: String, host: String? = nil) async throws {
+        let _: ExtensionsUndone = try await extensionsRequest(Self.onHost(Self.undoPath(rev), host), method: "POST", body: nil)
     }
 
     static func undoPath(_ rev: String) -> String {
