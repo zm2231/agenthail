@@ -253,8 +253,9 @@ export function bindConversationEvents() {
           await action(viewControl.dataset.archiveAction);
           toast(viewControl.dataset.archiveAction === "session-archive" ? "Conversation archived." : "Conversation unarchived.");
         } else if (viewControl.dataset.projectAction) {
-          await action(viewControl.dataset.projectAction, { projectId: viewControl.dataset.projectId }, crypto.randomUUID(), "");
-          toast({ "project-archive": "Project archived.", "project-unarchive": "Project unarchived.", "project-remove": "Project removed." }[viewControl.dataset.projectAction]);
+          const setting = viewControl.dataset.setting ? { setting: viewControl.dataset.setting, value: viewControl.dataset.value } : {};
+          await action(viewControl.dataset.projectAction, { projectId: viewControl.dataset.projectId, ...setting }, crypto.randomUUID(), "");
+          toast({ "project-archive": "Project archived.", "project-unarchive": "Project unarchived.", "project-remove": "Project removed.", "project-setting": viewControl.dataset.value === "off" ? "Terminal sessions in this project no longer get the Agenthail tools." : "Terminal sessions in this project get the Agenthail tools." }[viewControl.dataset.projectAction]);
         } else {
           const result = await action("project-add", { path: viewControl.dataset.projectAdd, ...(viewControl.dataset.projectHost ? { host: viewControl.dataset.projectHost } : {}) }, crypto.randomUUID(), "");
           toast(result.created === false ? `${result.project?.displayName || "This folder"} is already a project.` : `Added project ${result.project?.displayName || ""}.`);

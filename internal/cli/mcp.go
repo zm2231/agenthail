@@ -32,7 +32,13 @@ func (a *App) cmdMCP(args []string) error {
 
 type claudeMCPConfig struct {
 	root, path string
+	off        bool
 }
+
+const (
+	claudeMCPOff          = "off"
+	claudeMCPOffInstalled = "off but installed"
+)
 
 func claudeMCPConfigs() ([]claudeMCPConfig, error) {
 	home, _ := os.UserHomeDir()
@@ -42,7 +48,11 @@ func claudeMCPConfigs() ([]claudeMCPConfig, error) {
 	}
 	configs := make([]claudeMCPConfig, len(roots))
 	for i, root := range roots {
-		configs[i] = claudeMCPConfig{root: root, path: surface.ClaudeGlobalConfigPath(home, root)}
+		off, err := surface.ClaudeRootMCPOff(home, root)
+		if err != nil {
+			return nil, err
+		}
+		configs[i] = claudeMCPConfig{root: root, path: surface.ClaudeGlobalConfigPath(home, root), off: off}
 	}
 	return configs, nil
 }
@@ -55,16 +65,21 @@ func claudeMCPAt(action string) error {
 		return err
 	}
 	executable := relayExecutable()
-	if executable == "" && action != "uninstall" {
-		return errors.New("run this from the installed agenthail binary; Claude runs the binary that wrote its MCP server")
-	}
 	var failed []error
 	for _, config := range configs {
+		if executable == "" && action != "uninstall" && !config.off {
+			failed = append(failed, fmt.Errorf("%s: run this from the installed agenthail binary; Claude runs the binary that wrote its MCP server", config.path))
+			continue
+		}
 		var line string
 		switch action {
 		case "install":
 			var changed bool
-			if changed, err = claudemcp.InstallAt(config.path, executable); err == nil {
+			if config.off {
+				if changed, err = claudemcp.UninstallAt(config.path); err == nil {
+					line = map[bool]string{true: "removed, since claudeConfigDirs turns it off for this root", false: "off for this root in claudeConfigDirs"}[changed]
+				}
+			} else if changed, err = claudemcp.InstallAt(config.path, executable); err == nil {
 				line = map[bool]string{true: "installed", false: "already installed"}[changed]
 			}
 		case "uninstall":
@@ -73,7 +88,7 @@ func claudeMCPAt(action string) error {
 				line = map[bool]string{true: "removed", false: "not installed"}[changed]
 			}
 		case "status":
-			if line, err = claudemcp.StateAt(config.path, executable); line == claudemcp.Outdated || line == claudemcp.Missing || line == claudemcp.Dangling {
+			if line, err = claudeMCPState(config, executable); line == claudemcp.Outdated || line == claudemcp.Missing || line == claudemcp.Dangling || line == claudeMCPOffInstalled {
 				line += "; run: agenthail mcp install"
 			}
 		}
@@ -84,6 +99,17 @@ func claudeMCPAt(action string) error {
 		fmt.Printf("%s: agenthail MCP server %s\n", config.path, line)
 	}
 	return errors.Join(failed...)
+}
+
+func claudeMCPState(config claudeMCPConfig, executable string) (string, error) {
+	state, err := claudemcp.StateAt(config.path, executable)
+	if err != nil || !config.off {
+		return state, err
+	}
+	if state == claudemcp.Missing || state == claudemcp.Taken {
+		return claudeMCPOff, nil
+	}
+	return claudeMCPOffInstalled, nil
 }
 
 // Homebrew deletes a version's Cellar directory on upgrade; its opt link

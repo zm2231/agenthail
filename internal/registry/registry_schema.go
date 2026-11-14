@@ -795,4 +795,12 @@ CREATE TABLE IF NOT EXISTS notification_withdrawals (
 	ask_id TEXT PRIMARY KEY,
 	seq INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS project_settings (
+	project_id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	value TEXT NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL,
+	PRIMARY KEY (project_id, name)
+);
 `

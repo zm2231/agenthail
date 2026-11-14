@@ -544,6 +544,7 @@ type remoteSnapshot struct {
 	OwnDecisions string                      `json:"ownDecisionsRev"`
 	ProjectLinks []registry.ProjectLink      `json:"projectLinks"`
 	ProjectMoves []registry.ProjectMove      `json:"projectMoves"`
+	Settings     []registry.ProjectSetting   `json:"projectSettings"`
 	MovedOut     []registry.MovedSession     `json:"movedSessions"`
 }
 
@@ -657,6 +658,9 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 		return 0, localMirror(err)
 	}
 	if err := d.adoptProjectLinks(snapshot.ProjectLinks); err != nil {
+		return 0, localMirror(err)
+	}
+	if err := d.adoptProjectSettings(snapshot.Settings); err != nil {
 		return 0, localMirror(err)
 	}
 	for _, moved := range snapshot.MovedOut {
@@ -791,6 +795,12 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 			return err
 		}
 		return d.adoptProjectLinks([]registry.ProjectLink{link})
+	case "project.setting":
+		var setting registry.ProjectSetting
+		if err := json.Unmarshal(envelope.Data, &setting); err != nil {
+			return err
+		}
+		return d.adoptProjectSettings([]registry.ProjectSetting{setting})
 	case "project.moved":
 		var move registry.ProjectMove
 		if err := json.Unmarshal(envelope.Data, &move); err != nil {

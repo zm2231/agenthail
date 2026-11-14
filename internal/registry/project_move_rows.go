@@ -50,6 +50,9 @@ func applyProjectMoveTx(tx *sql.Tx, move ProjectMove) (ProjectMoveOutcome, error
 	if err := moveProjectLinksTx(tx, move); err != nil {
 		return outcome, err
 	}
+	if err := moveProjectSettingsTx(tx, move); err != nil {
+		return outcome, err
+	}
 	for _, statement := range []string{
 		`UPDATE project_moves SET to_key='', changed_at_ms=?3, origin_host=?4 WHERE from_key=?2`,
 		`UPDATE project_moves SET to_key=?2, changed_at_ms=?3, origin_host=?4 WHERE to_key=?1 AND from_key!=?2`,

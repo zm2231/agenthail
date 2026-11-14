@@ -135,6 +135,23 @@ func TestProjectRenameNamesTheProjectOnEveryHost(t *testing.T) {
 	}
 }
 
+func TestProjectMCPSetsTheProjectsToolsAndSaysWhereItHolds(t *testing.T) {
+	app, _, _, api := federatedCLIFixture(t, true)
+	api.snapshot = projectsSnapshot
+	api.response = `{"ok":true,"setting":{"project":"repo:github.com/example/widget","name":"mcp","value":"off"}}`
+	output, err := captureStdout(t, func() error { return app.Run([]string{"project", "mcp", "/work/widget", "off"}) })
+	if err != nil || !strings.Contains(output, "widget: Claude sessions started outside Agenthail get no Agenthail tools, on every paired host") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 1 || actions[0]["action"] != "project-setting" || actions[0]["projectId"] != "repo:github.com/example/widget" || actions[0]["setting"] != "mcp" || actions[0]["value"] != "off" {
+		t.Fatalf("actions=%v", actions)
+	}
+	if err := app.Run([]string{"project", "mcp", "/work/widget", "maybe"}); err == nil || !strings.Contains(err.Error(), "project mcp") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestProjectLinkNamesAJoinedProjectByItsOwnName(t *testing.T) {
 	app, _, _, api := federatedCLIFixture(t, true)
 	laptop := `{"id":"local","name":"laptop","state":"local"}`

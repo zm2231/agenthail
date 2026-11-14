@@ -91,6 +91,11 @@ This binds a session to its own process: one session's server cannot act as anot
 
 A session Agenthail starts gets its `/mcp` server by name too (`setMcpServers`), and that replaces the user-scope entry of the same name, so a hosted session loads one `agenthail` server, not two.
 
+Two settings turn the tools off for sessions named by their process; sessions Agenthail starts keep theirs:
+
+- **A Claude root:** a `claudeConfigDirs` entry with `"mcp": false` (`{"path": "/Users/me/.claude", "mcp": false}`; the default root can be named this way too). Install, including `agenthail daemon install`, removes install's entry from that root instead of writing it, and `agenthail mcp status` and `doctor` report the root as `off`, or `off but installed` until the next install takes the entry out. Removing an entry needs no installed binary, so this works from any agenthail.
+- **A project:** the project setting `mcp`, `on` or `off` (`agenthail project mcp <project> on|off`, the `project-setting` action, or the dashboard project menu). The socket serves a session of a project set `off` the server with no tools, read at every request, so a change applies at the session's next call. The setting syncs like a link (see [projects.md](projects.md#project-settings)).
+
 ## Permissions are computed at each call
 
 `mcpAuth` resolves the bearer to its session, then reads what that session may do from durable state on every request:

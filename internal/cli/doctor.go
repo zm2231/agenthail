@@ -158,7 +158,11 @@ func (a *App) cmdDoctor(args []string) error {
 			state = claudehooks.Missing
 		}
 		claudeHookStates[root] = state
-		if state, err = claudemcp.StateAt(surface.ClaudeGlobalConfigPath(home, root), relayExecutable()); err != nil {
+		off, err := surface.ClaudeRootMCPOff(home, root)
+		if err == nil {
+			state, err = claudeMCPState(claudeMCPConfig{root: root, path: surface.ClaudeGlobalConfigPath(home, root), off: off}, relayExecutable())
+		}
+		if err != nil {
 			state = "unknown: " + err.Error()
 		}
 		claudeMCPStates[root] = state
@@ -341,7 +345,9 @@ func (a *App) cmdDoctor(args []string) error {
 				fmt.Printf("  hooks: outdated; terminal prompts may not reach Agenthail, and terminal sessions may not be told who they are, until you run: agenthail hooks install\n")
 			}
 			switch state := claudeMCPStates[root]; state {
-			case claudemcp.Installed:
+			case claudemcp.Installed, claudeMCPOff:
+			case claudeMCPOffInstalled:
+				fmt.Printf("  agenthail MCP server: claudeConfigDirs turns it off for this root, but its entry is still there; run: agenthail mcp install\n")
 			case claudemcp.Missing, claudemcp.Outdated:
 				fmt.Printf("  agenthail MCP server: %s; sessions started outside Agenthail don't have its tools until you run: agenthail mcp install\n", state)
 			case claudemcp.Dangling:

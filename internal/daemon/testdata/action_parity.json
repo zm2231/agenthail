@@ -1295,6 +1295,42 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a project name is 1 to 120 characters\"}}\n"
   },
+  "api/action project-setting an unknown value": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"mcp can be [on off]\"}}\n"
+  },
+  "api/action project-setting mcp off": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"setting\":{\"name\":\"mcp\",\"project\":\"repo:example.com/upstream\",\"value\":\"off\"}}\n"
+  },
+  "api/action project-setting without an id": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId is required\"}}\n"
+  },
   "api/action project-unarchive": {
     "status": 404,
     "header": {
@@ -3826,6 +3862,42 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a project name is 1 to 120 characters\"}}\n"
+  },
+  "api/v1/actions project-setting an unknown value": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"mcp can be [on off]\"}}\n"
+  },
+  "api/v1/actions project-setting mcp off": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"setting\":{\"name\":\"mcp\",\"project\":\"repo:example.com/upstream\",\"value\":\"off\"}}\n"
+  },
+  "api/v1/actions project-setting without an id": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId is required\"}}\n"
   },
   "api/v1/actions project-unarchive": {
     "status": 404,

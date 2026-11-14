@@ -1,4 +1,4 @@
--- schemaVersion 98
+-- schemaVersion 99
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -613,6 +613,16 @@ CREATE TABLE project_moves_waiting (
 	changed_at_ms INTEGER NOT NULL,
 	origin_host TEXT NOT NULL,
 	workspace_root TEXT NOT NULL DEFAULT ''
+);
+
+-- table project_settings
+CREATE TABLE project_settings (
+	project_id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	value TEXT NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL,
+	PRIMARY KEY (project_id, name)
 );
 
 -- table projects

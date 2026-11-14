@@ -119,6 +119,7 @@ func configuredClaudeRoots(home string) ([]string, error) {
 type claudeRootEntry struct {
 	Path  string `json:"path"`
 	Proxy string `json:"proxy,omitempty"`
+	MCP   *bool  `json:"mcp,omitempty"`
 }
 
 func (e *claudeRootEntry) UnmarshalJSON(data []byte) error {
@@ -140,7 +141,7 @@ func configuredClaudeRootEntries(home string) ([]claudeRootEntry, error) {
 	}
 	var entries []claudeRootEntry
 	if err := json.Unmarshal(raw, &entries); err != nil || entries == nil {
-		return nil, fmt.Errorf("Agenthail config %s: claudeConfigDirs must be a list of absolute paths or {\"path\", \"proxy\"} entries", AgenthailConfigPath(home))
+		return nil, fmt.Errorf("Agenthail config %s: claudeConfigDirs must be a list of absolute paths or {\"path\", \"proxy\", \"mcp\"} entries", AgenthailConfigPath(home))
 	}
 	return entries, nil
 }
@@ -189,6 +190,19 @@ func claudeRootIdentity(root string) string {
 		return resolved
 	}
 	return root
+}
+
+func ClaudeRootMCPOff(home, root string) (bool, error) {
+	entries, err := configuredClaudeRootEntries(home)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.MCP != nil && !*entry.MCP && filepath.IsAbs(entry.Path) && SameClaudeRoot(entry.Path, root) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func SameClaudeRoot(a, b string) bool {

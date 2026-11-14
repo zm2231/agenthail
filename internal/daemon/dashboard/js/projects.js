@@ -31,6 +31,10 @@ export function projectMenu(project) {
     items.push(`<button type="button" data-project-lead="${id}">${(project.coordinators || []).length ? "Change lead…" : "Set lead…"}</button>`);
     if ((project.coordinators || []).length === 1) items.push(`<button type="button" data-project-clear-lead="${id}">Clear lead</button>`);
   }
+  if (!project.id.includes("::")) {
+    const off = project.mcp === "off";
+    items.push(`<button type="button" data-project-action="project-setting" data-project-id="${id}" data-setting="mcp" data-value="${off ? "on" : "off"}" title="Claude sessions Agenthail did not start, such as Claude in a terminal">${off ? "Give terminal sessions the Agenthail tools" : "Keep the Agenthail tools from terminal sessions"}</button>`);
+  }
   checkouts.forEach((checkout) => {
     if (checkout.added) items.push(`<button type="button" data-project-action="project-remove" data-project-id="${escape(checkout.projectId)}">Remove${escape(where(checkout))}</button>`);
   });
