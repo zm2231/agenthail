@@ -30,6 +30,7 @@ type sessionJournalPayload struct {
 	TurnID           string                   `json:"turnId,omitempty"`
 	MessageID        string                   `json:"messageId,omitempty"`
 	PromptID         string                   `json:"promptId,omitempty"`
+	TurnStart        bool                     `json:"turnStart,omitempty"`
 	CallID           string                   `json:"callId,omitempty"`
 	Final            bool                     `json:"final,omitempty"`
 	TS               string                   `json:"ts"`
@@ -99,7 +100,7 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJourn
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, PromptID: event.PromptID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Phase: event.Phase, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Commands: commandsOf(event.Commands), Unavailable: unavailableOf(event.Commands), Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: s.manager.publishedTurn(s.session.ID, event.Turn), text: text}, bodyKey
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, PromptID: event.PromptID, TurnStart: event.TurnStart, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Phase: event.Phase, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Commands: commandsOf(event.Commands), Unavailable: unavailableOf(event.Commands), Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: s.manager.publishedTurn(s.session.ID, event.Turn), text: text}, bodyKey
 }
 
 // publishedTurn is the turn as clients see it: a compaction this daemon's

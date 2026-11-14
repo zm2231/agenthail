@@ -122,8 +122,8 @@ func (a *App) cmdSend(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	if surface.RouteFor(surf, sess, "") == surface.RoutePeer && (wantStream || wantReply) {
-		return fmt.Errorf("Claude peer message IDs cannot be correlated with transcript turns; use 'last' or native SendMessage replies")
+	if surface.RouteFor(surf, sess, "") == surface.RoutePeer && !hostRunsClaude(sess) && (wantStream || wantReply) {
+		return errTerminalPeerTurns
 	}
 
 	if wantStream && !surf.Capabilities().Stream {
@@ -260,13 +260,17 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 
-	if (wantStream || wantReply) && !followsJournal && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || surface.RouteFor(surf, sess, options.Author).TransportOnly()) {
+	if (wantStream || wantReply) && !followsJournal && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || surface.RouteFor(surf, sess, options.Author).TransportOnly() && !hostRunsClaude(sess)) {
 		fmt.Fprintf(os.Stderr, "the closed session was resumed as %s, whose turns this send cannot follow; read the reply with 'agenthail last %s'\n", sess.ID, target)
 		wantStream, wantReply = false, false
 	}
+	follow := followTurn(receipt.TurnID)
+	if surface.RouteFor(surf, sess, options.Author) == surface.RoutePeer {
+		follow = followMessage(receipt.TurnID, deliverySettled(a.registry(), receipt.DeliveryID))
+	}
 	if wantStream {
 		if useDaemonStream {
-			return consumeDaemonStreamOutput(ctx, daemonStream, receipt.TurnID, timeout)
+			return consumeDaemonStreamOutput(ctx, daemonStream, follow, timeout)
 		}
 		return streamDirectOutput(ctx, surf, sess, receipt.TurnID, timeout)
 	}
@@ -274,7 +278,7 @@ func (a *App) cmdSend(args []string) error {
 	if wantReply {
 		var reply *surface.ReplyResult
 		if useDaemonStream {
-			reply, err = consumeSessionReply(ctx, daemonStream, receipt.TurnID)
+			reply, err = consumeSessionReply(ctx, daemonStream, follow)
 		} else {
 			reply, err = waitForReply(ctx, surf, sess, baseline, receipt.TurnID, timeout)
 		}
@@ -290,7 +294,10 @@ func (a *App) cmdSend(args []string) error {
 			_ = a.registry().RecordHistory(registry.HistoryEntry{Kind: "reply", SessionID: sess.ID, CompletionID: receipt.TurnID, Result: text})
 		}
 		if jsonOut {
-			return emit(map[string]any{"delivery": receipt, "reply": reply})
+			return emit(map[string]any{"delivery": receipt, "reply": reply, "joinedRunningTurn": follow.joined})
+		}
+		if follow.joined {
+			fmt.Println(joinedRunningTurnNote)
 		}
 		if reply != nil && reply.Text != "" {
 			fmt.Println(reply.Text)
@@ -301,6 +308,8 @@ func (a *App) cmdSend(args []string) error {
 		return emit(receipt)
 	} else if receipt.Evidence == surface.EvidenceTransportAccepted {
 		fmt.Printf("accepted by Claude socket (message %s); receiver policy and model completion are pending\n", receipt.TurnID)
+	} else if follow.messageID != "" && follow.turnID != "" {
+		fmt.Printf("sent (message %s, turn %s)\n", receipt.TurnID, follow.turnID)
 	} else {
 		fmt.Printf("sent (turn %s)\n", receipt.TurnID)
 	}

@@ -219,6 +219,11 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, scopeProject
 	}
 	var stream sessionstream.Subscription
 	if wantStream || wantReply {
+		if a.registry() != nil {
+			if mirrored, err := a.registry().Session(remote.ID); err == nil && mirrored.Surface == surface.KindClaude && mirrored.Transport == "uds" && !hostRunsClaude(mirrored) {
+				return errTerminalPeerTurns
+			}
+		}
 		stream, err = a.prepareDaemonSessionStream(ctx, nil, remote.Session())
 		if err != nil {
 			return err
@@ -256,17 +261,24 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, scopeProject
 		}
 		return nil
 	}
+	follow := followTurn(receipt.TurnID)
+	if receipt.DeliveredAs == surface.PersonNote {
+		follow = followMessage(receipt.TurnID, nil)
+	}
 	if wantStream {
-		return consumeDaemonStreamOutput(ctx, stream, receipt.TurnID, timeout)
+		return consumeDaemonStreamOutput(ctx, stream, follow, timeout)
 	}
 	if wantReply {
-		reply, err := consumeSessionReply(ctx, stream, receipt.TurnID)
+		reply, err := consumeSessionReply(ctx, stream, follow)
 		if err != nil {
 			return err
 		}
 		receipt.Evidence = surface.EvidenceReplyObserved
 		if jsonOut {
-			return emit(map[string]any{"delivery": receipt, "reply": reply})
+			return emit(map[string]any{"delivery": receipt, "reply": reply, "joinedRunningTurn": follow.joined})
+		}
+		if follow.joined {
+			fmt.Println(joinedRunningTurnNote)
 		}
 		if reply != nil && reply.Text != "" {
 			fmt.Println(reply.Text)
