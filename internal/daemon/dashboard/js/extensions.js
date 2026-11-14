@@ -224,23 +224,30 @@ async function togglePatch(rev) {
   if (state.patches.has(rev)) {
     state.patches.delete(rev);
   } else {
-    const response = await fetch(`/api/v1/extensions/history/${encodeURIComponent(rev)}`, { credentials: "same-origin" });
-    if (!response.ok) {
-      toast((await responseError(response)).message);
+    let shown;
+    try {
+      const response = await fetch(`/api/v1/extensions/history/${encodeURIComponent(rev)}`, { credentials: "same-origin" });
+      if (!response.ok) throw await responseError(response);
+      shown = await response.json();
+    } catch (error) {
+      toast(error.message);
       return;
     }
-    const shown = await response.json();
     state.patches.set(rev, shown.patch + (shown.truncated ? "\n[cut: the change is larger than this view]" : ""));
   }
   renderHistory();
 }
 
 async function undoChange(rev) {
-  const response = await fetch(`/api/v1/extensions/history/${encodeURIComponent(rev)}/undo`, {
-    method: "POST",
-    credentials: "same-origin",
-  });
-  if (!response.ok) toast((await responseError(response)).message);
+  try {
+    const response = await fetch(`/api/v1/extensions/history/${encodeURIComponent(rev)}/undo`, {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    if (!response.ok) throw await responseError(response);
+  } catch (error) {
+    toast(error.message);
+  }
   await loadExtensions();
 }
 
