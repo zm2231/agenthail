@@ -335,17 +335,10 @@ func editCodexHooks(ctx context.Context, home CodexHome, client *codexStdioClien
 func writeCodexUserConfig(ctx context.Context, client *codexStdioClient, build func(user map[string]any) ([]map[string]any, error)) (bool, error) {
 	var err error
 	for range 3 {
-		var response map[string]any
-		if response, err = client.Request(ctx, "config/read", map[string]any{"includeLayers": true}, 30*time.Second); err != nil {
-			return false, err
-		}
 		var user map[string]any
-		version := ""
-		for _, layer := range gjson.Get(codexJSON(response), "result.layers").Array() {
-			if layer.Get("name.type").String() == "user" {
-				_ = json.Unmarshal([]byte(layer.Get("config").Raw), &user)
-				version = layer.Get("version").String()
-			}
+		var version string
+		if user, version, err = readCodexUserConfig(ctx, client); err != nil {
+			return false, err
 		}
 		var edits []map[string]any
 		if edits, err = build(user); err != nil || len(edits) == 0 {
@@ -359,6 +352,20 @@ func writeCodexUserConfig(ctx context.Context, client *codexStdioClient, build f
 		}
 	}
 	return false, err
+}
+
+func readCodexUserConfig(ctx context.Context, client *codexStdioClient) (user map[string]any, version string, err error) {
+	response, err := client.Request(ctx, "config/read", map[string]any{"includeLayers": true}, 30*time.Second)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, layer := range gjson.Get(codexJSON(response), "result.layers").Array() {
+		if layer.Get("name.type").String() == "user" {
+			_ = json.Unmarshal([]byte(layer.Get("config").Raw), &user)
+			version = layer.Get("version").String()
+		}
+	}
+	return user, version, nil
 }
 
 func editCodexHooksFile(data []byte, commands map[string]string) ([]byte, error) {

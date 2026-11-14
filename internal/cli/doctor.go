@@ -180,6 +180,16 @@ func (a *App) cmdDoctor(args []string) error {
 		codexHooks, _ = surfaces.CodexContextState(callCtx, surfaces.CodexHomeFromEnv(), executable)
 		cancel()
 	}
+	codexMCP := ""
+	if off, err := surface.CodexMCPOff(home); err != nil {
+		codexMCP = "unknown: " + err.Error()
+	} else {
+		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		if codexMCP, err = codexMCPState(callCtx, surfaces.CodexHomeFromEnv(), off, relayExecutable()); err != nil {
+			codexMCP = "unknown: " + err.Error()
+		}
+		cancel()
+	}
 	claudeConfigRoots, _ := a.claudeConfigRoots(ctx)
 	service := a.service()
 	serviceProblems := service.Problems()
@@ -265,7 +275,7 @@ func (a *App) cmdDoctor(args []string) error {
 	install := a.installMethod(runtime.GOOS)
 	simulators := doctorSimulators(ctx)
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(notCarried) == 0 && notCarriedErr == nil && len(hostProblems) == 0, "projectLinks": projectNotes, "projectHistoryNotCarried": notCarried, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "mcpSocket": mcpSocket, "claudeMCP": claudeMCPStates, "claudeCrossSessionInbound": claudeInbound, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(notCarried) == 0 && notCarriedErr == nil && len(hostProblems) == 0, "projectLinks": projectNotes, "projectHistoryNotCarried": notCarried, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "mcpSocket": mcpSocket, "claudeMCP": claudeMCPStates, "claudeCrossSessionInbound": claudeInbound, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "codexMCP": codexMCP, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
 			report["ledgerPromptHooksError"] = hookErr.Error()
 		}
@@ -434,6 +444,19 @@ func (a *App) cmdDoctor(args []string) error {
 			fmt.Printf("codex hooks: Codex hook not trusted yet: run agenthail hooks install codex or trust it in Codex\n")
 		case surfaces.CodexHooksNoNudge:
 			fmt.Printf("codex hooks: %s; update Codex, then run: agenthail hooks install codex\n", surfaces.CodexHooksNoNudge)
+		}
+		switch codexMCP {
+		case "", surfaces.CodexRelayInstalled, claudeMCPOff:
+		case claudeMCPOffInstalled:
+			fmt.Printf("codex MCP server: codexMCP turns it off, but its entry is still there; run: agenthail mcp install\n")
+		case surfaces.CodexRelayMissing, surfaces.CodexRelayOutdated:
+			fmt.Printf("codex MCP server: %s; Codex sessions started outside Agenthail don't have its tools until you run: agenthail mcp install\n", codexMCP)
+		case surfaces.CodexRelayDangling:
+			fmt.Printf("codex MCP server: its command no longer exists, so Codex shows a failed server at every start; run agenthail mcp install, or agenthail mcp uninstall if Agenthail is gone\n")
+		case surfaces.CodexRelayTaken:
+			fmt.Printf("codex MCP server: another server is named %s in the Codex config; rename it, then run: agenthail mcp install\n", surfaces.CodexRelayServerName)
+		default:
+			fmt.Printf("codex MCP server: %s\n", codexMCP)
 		}
 		fmt.Printf("install: %s\n", install)
 		if line := simulatorsLine(simulators); line != "" {
