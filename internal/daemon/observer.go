@@ -234,7 +234,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	held, released := heldCompletion(previous, observation, completionChanged)
 	terminalCompletion := completionChanged && observation.ActiveTurnID == "" && !surface.BackgroundRunning(observation.BackgroundTasks) || released
 	completed := terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && observation.Reply != nil && observation.Reply.Done
-	if completed && !session.Delegated() {
+	if completed && !session.Delegated() && !completionStale(observation, time.Now()) {
 		notificationOutcome = turnOutcomeFinished
 		if observation.Reply.Error != "" {
 			notificationOutcome = turnOutcomeFailed
@@ -411,3 +411,9 @@ func notificationSurfaceName(kind surface.SurfaceKind) string {
 }
 
 func (d *Daemon) adapters() surface.Adapters { return surface.Adapters(d.Surfaces) }
+
+const staleCompletionAge = 5 * time.Minute
+
+func completionStale(observation *surface.TurnObservation, now time.Time) bool {
+	return !observation.CompletedAt.IsZero() && now.Sub(observation.CompletedAt) > staleCompletionAge
+}
