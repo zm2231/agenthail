@@ -14,6 +14,7 @@ final class DecisionFeed {
     @ObservationIgnored private var dropped = false
     @ObservationIgnored private var fetched = DecisionInbox()
     @ObservationIgnored private var answered: Set<String> = []
+    @ObservationIgnored private(set) var running: Task<Void, Never>?
 
     init(key: @escaping () -> String, load: @escaping () async -> DecisionInbox) {
         self.key = key
@@ -31,7 +32,7 @@ final class DecisionFeed {
         }
         loadingKey = wanted
         again = false
-        Task { await run(wanted) }
+        running = Task { await run(wanted) }
     }
 
     func reload() {

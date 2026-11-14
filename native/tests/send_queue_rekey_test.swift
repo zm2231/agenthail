@@ -28,7 +28,7 @@ struct SendQueueRekeyTest {
         rekeys.record(["old": "new"])
         queue.carry(rekeys)
         released.insert("B")
-        try? await Task.sleep(for: .milliseconds(300))
+        check(await wait { completed["B"] == 1 }, "the send that did not move completes first")
         released.insert("A")
         check(await wait { queue.pending.isEmpty }, "every send is answered: \(queue.pending)")
         check(!overlapped, "a moved send is never delivered by two workers at once")

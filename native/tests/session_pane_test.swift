@@ -326,7 +326,8 @@ struct SessionPaneTest {
         let lateStreamPane = lateStreamModel.mainPane!
         lateStreamPane.select("R")
         for _ in 0..<60 where lateStreamRequests.isEmpty { try? await Task.sleep(for: .milliseconds(50)) }
-        try? await Task.sleep(for: .milliseconds(300))
+        let lateDetailDeadline = Date().addingTimeInterval(5)
+        while lateStreamPane.detail == nil || lateStreamPane.pageReadsInFlight > 0, Date() < lateDetailDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         check(lateStreamRequests.count == 1, "a session without a stream yet is asked once: \(lateStreamRequests)")
         let gainedStream = String(decoding: try! JSONEncoder().encode(newSession(stream: true)), as: UTF8.self)
         let upserted = "{\"stream\":\"catalog\",\"seq\":2,\"type\":\"session.upserted\",\"data\":{\"session\":\(gainedStream)}}"
@@ -490,9 +491,7 @@ struct SessionPaneTest {
         for _ in 0..<60 where queueModel.draft(for: "Q").text == "draft" { try? await Task.sleep(for: .milliseconds(50)) }
         check(queueModel.draft(for: "Q").text == "first\n\nsecond\n\ndraft" && cancels.count == 2 && cancels[0].contains("\"queueId\":1"), "queued messages come back ahead of the draft, oldest first: \(queueModel.draft(for: "Q").text.debugDescription)")
         queueModel.draft(for: "Q").text = ""
-        queueModel.takeBackQueued([queued(4, "after"), queued(3, "on its way")], sessionID: "Q")
-        for _ in 0..<60 where queueModel.operationError == nil { try? await Task.sleep(for: .milliseconds(50)) }
-        try? await Task.sleep(for: .milliseconds(200))
+        check(await finished(queueModel.takeBackQueued([queued(4, "after"), queued(3, "on its way")], sessionID: "Q")), "the take-back finishes")
         check(queueModel.draft(for: "Q").text == "" && cancels.count == 3 && queueModel.operationError?.contains("already delivering") == true, "a message that can't be cancelled stays queued, and later ones stay behind it: \(queueModel.draft(for: "Q").text.debugDescription) \(cancels.count)")
         queueModel.operationError = nil
         queueModel.takeBackQueued([queued(5, "row text")], sessionID: "Q")
@@ -502,8 +501,7 @@ struct SessionPaneTest {
         let cancelsBeforeSteer = cancels.count
         var attachedRow = queued(6, "with a file")
         attachedRow.attachments = [QueueAttachment(id: "up-3", name: "a.png", mediaType: "image/png", bytes: 1)]
-        queueModel.steerQueued(attachedRow, capabilities: Capabilities(steer: true))
-        try? await Task.sleep(for: .milliseconds(300))
+        check(await finished(queueModel.steerQueued(attachedRow, capabilities: Capabilities(steer: true))), "a refused steer finishes")
         check(cancels.count == cancelsBeforeSteer, "an older computer's queued attachments are never cancelled to steer them")
         var takesImages = Capabilities(steer: true)
         takesImages.steerImages = true
@@ -641,7 +639,7 @@ struct SessionPaneTest {
         streamingPane.select("D")
         let rowsDeadline = Date().addingTimeInterval(5)
         while streamingPane.timelineItems.map(\.id) != ["a", "c"], Date() < rowsDeadline { try? await Task.sleep(for: .milliseconds(20)) }
-        try? await Task.sleep(for: .milliseconds(600))
+        check(await settled(streamingPane), "the pane settles after streamed rows")
         check(pageRequests == 1, "streamed rows apply without reading the page again: \(pageRequests) page reads, rows \(streamingPane.timelineItems.map(\.id))")
         check(streamingPane.streamedRows.isEmpty, "rows applied with no page read in flight are not kept: \(streamingPane.streamedRows.count)")
         check(!shownTimelines.shown.contains(["a", "b", "c"]), "rows that arrive together render once: \(shownTimelines.shown)")
@@ -655,7 +653,7 @@ struct SessionPaneTest {
         let lateDeadline = Date().addingTimeInterval(5)
         while streamingPane.timelineItems.last?.id != "e", Date() < lateDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         streamingServer.release(StubServer.reply("200 OK", turnPageJSON))
-        try? await Task.sleep(for: .milliseconds(600))
+        check(await settled(streamingPane), "the pane settles after the turn's page lands")
         check(pageRequests == 2, "a streamed turn reloads the page once, when it finishes, not per row: \(pageRequests) page reads")
         check(streamingPane.timelineItems.map(\.id) == ["a", "c", "d", "e"] && streamingPane.timelineItems[0].text == "a2", "a row streamed while the reload was in flight survives it, in the order a reload would show: \(streamingPane.timelineItems.map(\.id))")
         check(streamingPane.streamedRows.isEmpty, "the rows kept for a page read are dropped once it lands: \(streamingPane.streamedRows.count)")
@@ -676,7 +674,8 @@ struct SessionPaneTest {
         let updateDeadline = Date().addingTimeInterval(5)
         while streamingPane.timelineItems.first?.text != "a3", Date() < updateDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         streamingServer.release(StubServer.reply("200 OK", pageAt(106, [("a", "a3"), ("c", "c1"), ("e", "e1")])))
-        try? await Task.sleep(for: .milliseconds(300))
+        let newerDeadline = Date().addingTimeInterval(5)
+        while streamingPane.pageReadsInFlight > 1, Date() < newerDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         streamingServer.release(StubServer.reply("200 OK", pageAt(105, [("a", "a2"), ("c", "c1"), ("e", "e1")])))
         let landedDeadline = Date().addingTimeInterval(5)
         while streamingPane.pageReadsInFlight > 0, Date() < landedDeadline { try? await Task.sleep(for: .milliseconds(20)) }
@@ -687,7 +686,7 @@ struct SessionPaneTest {
         streamingServer.push(frame(107, row(107, "c", text: "c2")), to: "session-stream")
         let feedDeadline = Date().addingTimeInterval(5)
         while streamingPane.timelineItems.first(where: { $0.id == "c" })?.text != "c2", Date() < feedDeadline { try? await Task.sleep(for: .milliseconds(10)) }
-        try? await Task.sleep(for: SessionPane.streamPublishInterval * 2)
+        check(await settled(streamingPane), "the pane settles after publishing the streamed row")
         let paneChanges = paneWatch.count
         timelineWatch.stop()
         check(streamingPane.timelineItems.first(where: { $0.id == "c" })?.text == "c2", "a streamed row reaches the transcript: \(streamingPane.timelineItems.map { "\($0.id)=\($0.text)" })")
@@ -706,7 +705,7 @@ struct SessionPaneTest {
         while streamingPane.unpublishedDetail == nil, Date() < pendingDeadline { try? await Task.sleep(for: .milliseconds(5)) }
         streamingModel.snapshot = listing([])
         streamingPane.reconcile()
-        try? await Task.sleep(for: SessionPane.streamPublishInterval * 3)
+        check(await settled(streamingPane), "the pane settles after its session is removed")
         check(streamingPane.removedSession?.id == "D" && streamingPane.timelineItems.map(\.id) == shownBeforeRemoval, "a removed session does not publish a row it held back: \(streamingPane.timelineItems.map(\.id))")
         let pagesBeforeReturn = pageRequests
         streamingModel.snapshot = listing([streamedSession])
@@ -723,7 +722,7 @@ struct SessionPaneTest {
         let failure = StubServer.reply("500 Internal Server Error", #"{"error":{"message":"gone"}}"#)
         streamingServer.release(failure, to: "/api/v1/session?")
         streamingServer.release(failure, to: "/api/v1/requests?")
-        try? await Task.sleep(for: .milliseconds(1500))
+        check(await settled(streamingPane), "the pane settles after its reads fail")
         check(pagesBeforeFailure > pagesBeforeReturn && requestReads == 1, "reads were open when the session was removed: pages \(pagesBeforeReturn)->\(pagesBeforeFailure), requests \(requestReads)")
         check(streamingPane.detailLoadError == nil && !streamingPane.detailStale && pageRequests == pagesBeforeFailure, "a read that fails after removal neither reports nor retries: error \(streamingPane.detailLoadError ?? "nil"), stale \(streamingPane.detailStale), pages \(pageRequests)")
         check(streamingPane.requestError == nil && streamingPane.requests == nil, "a request read that fails after removal is not shown: \(streamingPane.requestError ?? "nil")")
@@ -742,7 +741,8 @@ struct SessionPaneTest {
         let freshReadDeadline = Date().addingTimeInterval(5)
         while streamingPane.requests == nil || requestReads < 4, Date() < freshReadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         streamingServer.release(StubServer.reply("200 OK", #"{"permissionMode":"plan","requests":[]}"#), to: "/api/v1/requests?")
-        try? await Task.sleep(for: .milliseconds(300))
+        let oldReadDeadline = Date().addingTimeInterval(5)
+        while streamingPane.requestReadsInFlight > 0, Date() < oldReadDeadline { try? await Task.sleep(for: .milliseconds(20)) }
         check(requestReads == 4 && streamingPane.requests?.permissionMode == "default", "a request read from before the session left does not replace the one after it came back: \(streamingPane.requests?.permissionMode ?? "nil"), reads \(requestReads)")
         streamingModel.closePane(streamingPane)
         streamingServer.stop()
@@ -823,7 +823,7 @@ struct SessionPaneTest {
         while warmRequests[beforeGap...].filter({ $0.contains("/api/v1/session-stream?") && $0.contains("id=W1") }).count < 2, Date() < gapDeadline {
             try? await Task.sleep(for: .milliseconds(20))
         }
-        try? await Task.sleep(for: .milliseconds(300))
+        check(await settled(warmPane), "the pane settles after a cursor gap")
         let gapped = Array(warmRequests[beforeGap...])
         check(gapped.filter { $0.contains("/api/v1/session?") && $0.contains("id=W1") }.count == 1, "a cursor the journal no longer holds falls back to exactly one page read: \(gapped)")
         check(gapped.last { $0.contains("/api/v1/session-stream?") }?.contains("after=100") == true, "the stream restarts from the page's journal position: \(gapped)")
@@ -910,6 +910,11 @@ struct SessionPaneTest {
             connections.forEach { $0.cancel() }
             listener.cancel()
         }
+    }
+
+    @MainActor
+    private static func settled(_ pane: SessionPane) async -> Bool {
+        await finished(Task { await pane.settle() })
     }
 
     private static func check(_ condition: Bool, _ message: String) {

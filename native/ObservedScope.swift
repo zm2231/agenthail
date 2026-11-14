@@ -23,6 +23,10 @@ final class ObservedScope {
         }
     }
 
+    var rereadsPending: Bool { reader.rereadsPending }
+
+    func settleReads() async { await reader.settleReads() }
+
     private var observed: ScopeReader {
         _ = revision
         return reader

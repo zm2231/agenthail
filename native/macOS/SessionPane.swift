@@ -82,6 +82,7 @@ final class SessionPane: Identifiable {
     /// a page read before some of them arrived can be brought up to date.
     @ObservationIgnored private(set) var streamedRows: [SessionStreamEvent] = []
     @ObservationIgnored private(set) var pageReadsInFlight = 0
+    @ObservationIgnored private(set) var requestReadsInFlight = 0
     @ObservationIgnored private var requestGeneration = 0
     /// Streamed rows apply here as they arrive and reach `detail` at most once
     /// per `streamPublishInterval`, so a burst of rows renders once.
@@ -928,6 +929,16 @@ final class SessionPane: Identifiable {
         model.store.update(id) { $0.detail = merged }
     }
 
+    func settle() async {
+        while true {
+            let open = Set([detailLoadTask, detailReloadTask, olderTask, metadataTask, publishTask].compactMap { $0 })
+            for task in open { await task.value }
+            await Task.yield()
+            let now = Set([detailLoadTask, detailReloadTask, olderTask, metadataTask, publishTask].compactMap { $0 })
+            if now.isSubset(of: open), pageReadsInFlight == 0, requestReadsInFlight == 0 { return }
+        }
+    }
+
     func syncRequests(for session: SessionState) async {
         if retiredAsks.settles(session) { retiredAsks.settle(session) }
         guard RequestSync.lists(session) else {
@@ -945,6 +956,8 @@ final class SessionPane: Identifiable {
 
     private func fetchRequests(_ id: String, key: String?) async {
         guard let api = model.api else { return }
+        requestReadsInFlight += 1
+        defer { requestReadsInFlight -= 1 }
         requestGeneration &+= 1
         let generation = requestGeneration
         do {
