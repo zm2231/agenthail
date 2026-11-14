@@ -253,6 +253,7 @@ SOURCES=(
   macOS/WindowButtonBand.swift
   macOS/WorkingSpinner.swift
   tests/support/PaneChanges.swift
+  tests/support/Signal.swift
 )
 
 # Helper tests run on a person's Mac: a window ordered on screen appears on their display.

@@ -1201,9 +1201,10 @@ final class AgenthailModel {
         QueueSteer.waiting(queue.filter { $0.sessionId == sessionID })
     }
 
-    func steerQueued(_ item: QueueState, capabilities: Capabilities) {
-        guard let api, QueueSteer.refusal(item, capabilities: capabilities) == nil else { return }
-        Task {
+    @discardableResult
+    func steerQueued(_ item: QueueState, capabilities: Capabilities) -> Task<Void, Never>? {
+        guard let api, QueueSteer.refusal(item, capabilities: capabilities) == nil else { return nil }
+        return Task {
             let cancelled: CancelledQueueItem
             do {
                 cancelled = try await api.cancelQueued(item)
@@ -1241,9 +1242,10 @@ final class AgenthailModel {
 
     /// Cancels queued messages oldest first and puts each one that was still
     /// waiting back ahead of the draft; a message already on its way stays queued.
-    func takeBackQueued(_ items: [QueueState], sessionID: String) {
-        guard let api else { return }
-        Task {
+    @discardableResult
+    func takeBackQueued(_ items: [QueueState], sessionID: String) -> Task<Void, Never>? {
+        guard let api else { return nil }
+        return Task {
             var taken: [String] = []
             var attachments: [QueueAttachment] = []
             operationError = nil

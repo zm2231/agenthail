@@ -50,8 +50,11 @@ struct SnapshotBudgetTest {
         check(readySleeps.count == 0, "a wait whose condition holds returns at once, slept \(readySleeps.count) times")
 
         let cancelledAt = ContinuousClock.now
-        let task = Task { @MainActor in await SnapshotBudget(deadlineMs: 20_000).wait { false } }
-        try await Task.sleep(for: .milliseconds(100))
+        let (cancellable, cancellableSleeps) = counting(SnapshotBudget(deadlineMs: 20_000))
+        let task = Task { @MainActor in await cancellable.wait { false } }
+        let begun = ContinuousClock.now
+        while cancellableSleeps.count == 0, ContinuousClock.now - begun < .seconds(5) { await Task.yield() }
+        check(cancellableSleeps.count > 0, "the wait began sleeping")
         task.cancel()
         await task.value
         check(ContinuousClock.now - cancelledAt < .seconds(10), "a closed request stops waiting when its work is cancelled rather than at its 18-second deadline, took \(ContinuousClock.now - cancelledAt)")

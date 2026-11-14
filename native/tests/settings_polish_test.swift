@@ -91,10 +91,11 @@ struct SettingsPolishTest {
         let racingPort = await racing.ready()
         let racingModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(racingPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
         racingModel.createPairing(interval: .milliseconds(10))
+        let slowWatch = racingModel.pairingWatch
         for _ in 0..<40 where posts < 1 { try? await Task.sleep(for: .milliseconds(10)) }
         racingModel.createPairing(interval: .milliseconds(10))
         for _ in 0..<100 where racingModel.pairing == nil { try? await Task.sleep(for: .milliseconds(10)) }
-        try? await Task.sleep(for: .milliseconds(500))
+        check(await finished(slowWatch), "the slow first pairing request returns")
         check(posts == 2 && racingModel.pairing?.id == "fast", "a slow first code never replaces the one asked for after it: \(posts) \(racingModel.pairing?.id ?? "none")")
         racingModel.cancelPairing()
         racing.stop()

@@ -20,6 +20,7 @@ final class ScopeReader {
 
     func searchPending(_ query: String) -> Bool { !query.isEmpty && foundQuery != query }
     private var reads: [ScopeRequest: Task<Void, Never>] = [:]
+    private var launched: [UUID: Task<Void, Never>] = [:]
     private var searchGeneration: UInt64 = 0
     private lazy var rereads = makeRereads()
     private let source: Source
@@ -49,8 +50,11 @@ final class ScopeReader {
         if let running = reads[request] { return await running.value }
         guard source.active(), source.reachable(), let read = pages.next(request), let api = source.api() else { return }
         let task = Task { await fetch(request, read: read, api: api) }
+        let id = UUID()
         reads[request] = task
+        launched[id] = task
         await task.value
+        launched[id] = nil
         if reads[request] == task { reads[request] = nil }
     }
 
@@ -112,6 +116,12 @@ final class ScopeReader {
     }
 
     func rereadAll() { rereads.request() }
+
+    var rereadsPending: Bool { rereads.pending }
+
+    func settleReads() async {
+        while let next = launched.values.first { await next.value; await Task.yield() }
+    }
 
     private func makeRereads() -> Coalescer {
         Coalescer(delay: .milliseconds(300)) { [weak self] in await self?.rereadListings() }

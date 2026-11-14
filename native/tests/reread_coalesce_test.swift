@@ -88,8 +88,9 @@ struct RereadCoalesceTest {
         }
 
         coalescer.request()
+        let waiting = coalescer.task
         coalescer.cancel()
-        try? await Task.sleep(for: .milliseconds(300))
+        check(await finished(waiting), "a run cancelled while waiting never stopped")
         check(runs.started == 0 && !coalescer.pending, "a cancel while waiting ran the work: \(runs.started)")
         coalescer.request()
         check(await settle { runs.finished == 1 }, "a request after a cancel while waiting starts fresh")
@@ -103,10 +104,9 @@ struct RereadCoalesceTest {
         check(await settle { runs.started == 3 }, "a request after a cancel mid-work starts fresh: \(runs.started)")
         check(coalescer.pending, "the cancelled run cleared the fresh run's state")
         coalescer.request()
-        try? await Task.sleep(for: .milliseconds(250))
         runs.held = false
         check(await settle { runs.finished >= 3 }, "the cancelled and the fresh run both finish")
-        try? await Task.sleep(for: .milliseconds(400))
+        check(await settle { runs.finished == runs.started && !coalescer.pending }, "the coalescer settles after the read news asked for")
         check(runs.started == 4 && runs.finished == 4 && !coalescer.pending, "news during the fresh run reads exactly once more: started \(runs.started), finished \(runs.finished), pending \(coalescer.pending)")
         check(runs.most == 1, "the cancelled run cleared the fresh run's state, so \(runs.most) runs overlapped")
     }
@@ -126,8 +126,7 @@ struct RereadCoalesceTest {
         model.applyCatalogEvents([queued(6)])
         model.applyCatalogEvents([queued(7)])
         model.applyCatalogEvents([queued(8)])
-        check(await settle { RereadDaemon.rereads() > before }, "news rereads the listing")
-        try? await Task.sleep(for: .milliseconds(1500))
+        check(await settle { RereadDaemon.rereads() > before && !model.reader.rereadsPending }, "news rereads the listing")
         check(RereadDaemon.rereads() == before + 1, "one burst of news reread All \(RereadDaemon.rereads() - before) times")
 
         let gate = DispatchSemaphore(value: 0)
@@ -138,8 +137,7 @@ struct RereadCoalesceTest {
         model.applyCatalogEvents([queued(10)])
         RereadDaemon.lock.withLock { RereadDaemon.held = nil }
         gate.signal()
-        check(await settle { RereadDaemon.rereads() >= started + 2 }, "news after a reread started reads again")
-        try? await Task.sleep(for: .milliseconds(1500))
+        check(await settle { RereadDaemon.rereads() >= started + 2 && !model.reader.rereadsPending }, "news after a reread started reads again")
         check(RereadDaemon.rereads() == started + 2, "news after a reread started reread All \(RereadDaemon.rereads() - started) times, not twice")
         print("ok")
     }

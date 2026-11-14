@@ -128,8 +128,9 @@ struct MacPagingTest {
         check(await settle { ids().contains("older") }, "All reads its first page")
         check(model.listHasMore, "All knows another page waits")
         PagingDaemon.slowPages = ["p2"]
-        let shown = Task { await model.listMore() }
-        try? await Task.sleep(for: .milliseconds(50))
+        let listed = Signal()
+        let shown = Task { await model.listMore(); listed.fire() }
+        check(await settle { listed.count > 0 || PagingDaemon.lock.withLock { PagingDaemon.requests.contains { $0.contains("cursor=p2") } } }, "the next page was asked for")
         shown.cancel()
         await model.listMore()
         PagingDaemon.slowPages = []
@@ -183,7 +184,7 @@ struct MacPagingTest {
         check(await settle { model.pages.found.map(\.id) == ["live", "zeta"] }, "a search lists the daemon's rows")
         check(model.paletteSessions("ze").map(\.id) == ["live", "zeta"], "the palette keeps the daemon's order, title matches included: \(model.paletteSessions("ze").map(\.id))")
         let abandoned = Task { await model.reader.search("slow", in: ScopeRequest(scope: "all")) }
-        try? await Task.sleep(for: .milliseconds(50))
+        check(await settle { PagingDaemon.lock.withLock { PagingDaemon.requests.contains { $0.contains("q=slow") } } }, "the search was asked for")
         abandoned.cancel()
         await abandoned.value
         check(model.pages.found.isEmpty && model.reader.foundView == nil && !model.reader.searchPending("slow"), "a cancelled search leaves no earlier query's rows: \(model.pages.found.map(\.id))")
@@ -199,12 +200,12 @@ struct MacPagingTest {
         PagingDaemon.slowPages = ["first"]
         let asked = PagingDaemon.lock.withLock { PagingDaemon.requests.count }
         model.sessionFilter = .all
-        try? await Task.sleep(for: .milliseconds(50))
+        check(await settle { PagingDaemon.lock.withLock { PagingDaemon.requests.dropFirst(asked).contains { $0.contains("scope=all") && !$0.contains("cursor") && !$0.contains("q=") } } }, "the first page was asked for")
         PagingDaemon.firstAll = ["returned"]
         model.sessionFilter = .archived
         model.sessionFilter = .all
         check(await settle { ids().contains("returned") }, "a list left while its first page was in flight reads its own first page when it comes back: \(ids())")
-        try? await Task.sleep(for: .milliseconds(400))
+        await model.reader.settleReads()
         let firstPages = PagingDaemon.lock.withLock { PagingDaemon.requests.dropFirst(asked).filter { $0.contains("scope=all") && !$0.contains("cursor") && !$0.contains("q=") } }
         check(!ids().contains("left") && firstPages.count == 2, "coming back does not wait on the read it left: \(ids()) \(firstPages)")
         PagingDaemon.slowPages = []
@@ -226,7 +227,7 @@ struct MacPagingTest {
         model.sessionFilter = .archived
         model.sessionFilter = .all
         check(await settle { ids().contains("fresh") }, "All read again after leaving and returning reads its own first page: \(ids()) \(PagingDaemon.requests.suffix(8)) \(model.pages.listings.mapValues { $0.rows.map(\.id) })")
-        try? await Task.sleep(for: .milliseconds(100))
+        await model.reader.settleReads()
         check(!ids().contains("stale") && model.listHasMore, "a page that arrived for a list that was left does not land in the list read again: \(ids())")
         PagingDaemon.firstAll = ["live", "older"]
         model.sessionFilter = .recent
@@ -238,7 +239,7 @@ struct MacPagingTest {
         check(Set(published.last!.map(\.id)) == ["live", "older", "oldest", "zeta", "shelved"], "the walk covers every session, archived too: \(published.last!.map(\.id))")
         let walks = PagingDaemon.requests.filter { $0.contains("scope=archived") }.count
         _ = await model.refresh()
-        try? await Task.sleep(for: .milliseconds(100))
+        _ = await settle { model.spotlightCatalog?.walking != true }
         check(PagingDaemon.requests.filter { $0.contains("scope=archived") }.count == walks, "a refresh in the same epoch does not walk again")
         model.spotlightCatalog?.apply(upserted: [], removed: ["oldest"])
         check(!published.last!.contains { $0.id == "oldest" }, "a removal from the catalog leaves Spotlight")

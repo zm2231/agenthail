@@ -31,12 +31,11 @@ struct SettingsRequestsTest {
         check(await waitForRefresh(), "the window change's refresh sends all of its requests: \(RecordingProtocol.requests.map { "\($0.method) \($0.path)" })")
         RecordingProtocol.reset()
         model.setCodexRecentHours(5)
-        try? await Task.sleep(for: .milliseconds(200))
         check(RecordingProtocol.requests.isEmpty, "choosing the current window sends nothing: \(RecordingProtocol.requests.map { "\($0.method) \($0.path)" })")
 
-        RecordingProtocol.reset()
         model.performOperation(action: "relay-add", fromID: "@research", toID: "@builder", pattern: "READY", once: true)
         let relay = await waitFor { $0.path == "/api/v1/actions" }
+        check(!RecordingProtocol.requests.contains { $0.path == "/api/v1/settings" }, "choosing the current window sends nothing later either: \(RecordingProtocol.requests.map { "\($0.method) \($0.path)" })")
         check(relay?.body["once"] as? Bool == true && relay?.body["fromId"] as? String == "@research" && relay?.body["pattern"] as? String == "READY", "a one-time handoff sends once: \(String(describing: relay?.body))")
 
         RecordingProtocol.reset()

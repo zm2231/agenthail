@@ -29,9 +29,8 @@ struct OutboxTest {
         StubDaemon.reset { message, _ in message == "refused" ? .refuse : .answer }
         model.send("refused", to: "S")
         check(await wait { model.localSends["S"]?.first(where: { $0.text == "refused" })?.failure != nil }, "a refusal is shown on the row")
-        try? await Task.sleep(for: .milliseconds(1500))
+        check(await wait { store.load().saved.sends.isEmpty }, "a refused send is not kept for retry")
         check(StubDaemon.sends(of: "refused").count == 1, "a refused send is never retried by itself: \(StubDaemon.sends(of: "refused").count)")
-        check(store.load().saved.sends.isEmpty, "a refused send is not kept for retry")
 
         StubDaemon.reset { message, attempt in message == "host unsure" && attempt == 1 ? .unknown : .answer }
         model.send("host unsure", to: "S")
@@ -77,7 +76,6 @@ struct OutboxTest {
         if let overdue { relaunched.putBackSend(overdue, in: "T") }
         check(relaunched.localSends["T"] == nil && relaunched.draft(for: "T").text == "overdue", "Put back returns the text to the composer and drops the row")
         check(await wait { !relaunchStore.load().saved.sends.contains { $0.sessionID == "T" } }, "a put-back send leaves the saved file")
-        try? await Task.sleep(for: .milliseconds(300))
         check(StubDaemon.sends(of: "overdue").isEmpty, "Put back sends nothing")
 
         let spoolStore = ComposerStore(file: folder.appendingPathComponent("spooled.json"))

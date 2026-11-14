@@ -4,7 +4,7 @@ import Foundation
 final class Coalescer {
     private let delay: Duration
     private let work: @MainActor () async -> Void
-    private var task: Task<Void, Never>?
+    private(set) var task: Task<Void, Never>?
     private var generation = 0
     private var running = false
     private var again = false
