@@ -195,19 +195,43 @@ final class SessionPane: Identifiable {
     var displayedSession: SessionState? { shownProjectID == nil ? selectedSession ?? removedSession : nil }
 
     private(set) var scope = PaneScope.all {
-        didSet { if scope != oldValue { model.dropUnusedScopes() } }
+        didSet {
+            if scope != oldValue { model.dropUnusedScopes() }
+            if shownExtensionEntryID == nil { pageFills = false }
+        }
     }
+    var pageFills = false
+    var sidebarShown: Bool { sidebarDocks && !pageFills }
     @ObservationIgnored private var scopeArchived = false
     var selectedDecisionID: String?
 
     var showsInbox: Bool { scope == .inbox }
-    private var holdsPage: Bool { shownProjectID != nil || showsInbox }
+    private var holdsPage: Bool { shownProjectID != nil || scope.holdsPage }
 
     func showInbox() {
         guard !closed else { return }
         clearSelection()
         shownProjectID = nil
         scope = .inbox
+    }
+
+    var shownExtensionEntryID: String? {
+        if case .extensionEntry(let id) = scope { return id }
+        return nil
+    }
+
+    func showExtensions() {
+        guard !closed else { return }
+        clearSelection()
+        shownProjectID = nil
+        scope = .extensions
+    }
+
+    func showExtension(_ entryID: String) {
+        guard !closed else { return }
+        clearSelection()
+        shownProjectID = nil
+        scope = .extensionEntry(entryID)
     }
 
     func showScope(project id: String) {
@@ -277,7 +301,7 @@ final class SessionPane: Identifiable {
     /// Shows New Session: with tabs, in its own tab, opened once.
     func openNewSession(message: String? = nil) {
         guard !closed else { return }
-        if scope == .inbox { scope = .all }
+        if scope.holdsPage { scope = .all }
         shownProjectID = nil
         let fresh = newSession == nil
         if fresh { newSession = NewSessionDraft(model: model, selected: selectedSession) }
@@ -438,7 +462,7 @@ final class SessionPane: Identifiable {
     private func show(_ id: String) {
         guard !closed else { return }
         shownProjectID = nil
-        if scope == .inbox || (scope.projectID != nil && model.session(id)?.project?.id != scope.projectID) { scope = .all }
+        if scope.holdsPage || (scope.projectID != nil && model.session(id)?.project?.id != scope.projectID) { scope = .all }
         guard id != selectedSessionID || detail == nil else { return }
         if id != selectedSessionID { keptTranscripts.freeze(self) }
         removedSession = nil

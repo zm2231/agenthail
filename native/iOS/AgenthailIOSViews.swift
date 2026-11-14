@@ -111,29 +111,44 @@ struct PairingForm: View {
 struct MainTabs: View {
     var model: AgenthailIOSModel
     @Environment(\.scenePhase) private var scenePhase
-    @State private var selection = 0
+    @State private var selection = MainTab.sessions
 
     var body: some View {
 #if DEBUG
         let _ = BodyRuns.hit("MainTabs")
 #endif
+        let pinned = ExtensionEntries.pinned(model.extensionEntries, pins: ExtensionPins.shared.ids)
         TabView(selection: $selection) {
             ConversationFlow(model: model)
                 .solidTabBar()
                 .tabItem { Label("Sessions", systemImage: "bubble.left.and.bubble.right") }
-                .tag(0)
+                .tag(MainTab.sessions)
             NavigationStack { QueueListView(model: model) }
                 .solidTabBar()
                 .tabItem { Label("Inbox", systemImage: "tray") }
                 .badge(model.inboxStops.count)
-                .tag(1)
+                .tag(MainTab.inbox)
+            ForEach(pinned) { entry in
+                NavigationStack { ExtensionPageScreen(model: model, entryID: entry.id) }
+                    .solidTabBar()
+                    .tabItem { Label { Text(entry.label) } icon: { ExtensionSymbol(name: entry.icon) } }
+                    .badge(entry.badge.map { Text($0) })
+                    .tag(MainTab.extensionEntry(entry.id))
+            }
+            NavigationStack { ExtensionsHub(model: model) }
+                .solidTabBar()
+                .tabItem { Label("Apps", systemImage: ExtensionEntry.fallbackIcon) }
+                .tag(MainTab.extensions)
             NavigationStack { SettingsView(model: model) }
                 .solidTabBar()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
-                .tag(2)
+                .tag(MainTab.settings)
+        }
+        .onChange(of: pinned.map(\.id)) { _, ids in
+            if case .extensionEntry(let id) = selection, !ids.contains(id) { selection = .extensions }
         }
         .onChange(of: model.requestedSessionID) { _, sessionID in
-            if sessionID != nil { selection = 0 }
+            if sessionID != nil { selection = .sessions }
         }
         .task(id: model.decisionsKey) {
             try? await Task.sleep(for: .milliseconds(300))
@@ -145,9 +160,17 @@ struct MainTabs: View {
         .onReceive(NotificationCenter.default.publisher(for: .agenthailNotificationOpened)) { notification in
             guard let sessionID = notification.object as? String else { return }
             model.openSession(sessionID)
-            selection = 0
+            selection = .sessions
         }
     }
+}
+
+enum MainTab: Hashable {
+    case sessions
+    case inbox
+    case extensions
+    case extensionEntry(String)
+    case settings
 }
 
 struct ConversationFlow: View {
