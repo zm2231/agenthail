@@ -52,7 +52,7 @@ func TestEachChangeIsTitledByWhoMadeItAndWhatItDid(t *testing.T) {
 	f := startExtensionFixture(t)
 	changeOwnPage(t, f, "green", "turn-0")
 	turn := f.changes(t)[0]
-	if response, body := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]any{"action": "undo", "rev": turn.Rev}); response.StatusCode != http.StatusOK {
+	if response, body := f.request(t, http.MethodPost, "/api/v1/extensions/history/"+turn.Rev+"/undo", "secret", nil); response.StatusCode != http.StatusOK {
 		t.Fatalf("undo answered %d %s", response.StatusCode, body)
 	}
 

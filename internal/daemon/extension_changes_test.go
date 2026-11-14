@@ -120,7 +120,7 @@ func (f *extensionFixture) historyOf(t *testing.T, id string) []extension.Change
 
 func (f *extensionFixture) undo(t *testing.T, rev string) (int, []byte) {
 	t.Helper()
-	response, body := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "undo", "rev": rev})
+	response, body := f.request(t, http.MethodPost, "/api/v1/extensions/history/"+rev+"/undo", "secret", nil)
 	return response.StatusCode, body
 }
 
@@ -180,6 +180,31 @@ func TestUndoingTheTurnThatCreatedAnExtensionRemovesItsTablesAndPortsWhileALater
 	}
 	if slices.Contains(storeTables(t, f.home), "notes_extra_items") {
 		t.Fatal("undoing notes-extra's creation left its table")
+	}
+}
+
+func TestAPairedDeviceThatMayOnlyControlCanUndoAChangeButNotReloadOrApprove(t *testing.T) {
+	f := startExtensionFixture(t)
+	workspace := extension.Workspace(f.home)
+	writeExtension(t, workspace, "notes", `{"label": "Notes", "mounts": [{"name": "app", "label": "App", "upstream": "http://127.0.0.1:9"}]}`)
+	f.turn(t, "to", "turn-1")
+	created := f.changes(t)[0]
+	control := deviceToken(t, f.d.Registry, "Phone", "control")
+
+	for _, body := range []map[string]string{{"action": "reload"}, {"action": "approve", "id": "notes"}} {
+		if response, answer := f.request(t, http.MethodPost, "/api/v1/extensions", control, body); response.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("a control-only device sent %v and got %d %s", body, response.StatusCode, answer)
+		}
+	}
+	if grant, _ := f.d.extensions.approvals.Granted("notes"); grant.Mounts != nil {
+		t.Fatalf("a control-only device approved notes: %+v", grant)
+	}
+
+	if response, body := f.request(t, http.MethodPost, "/api/v1/extensions/history/"+created.Rev+"/undo", control, nil); response.StatusCode != http.StatusOK {
+		t.Fatalf("a control-only device's undo answered %d %s", response.StatusCode, body)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "notes")); !os.IsNotExist(err) {
+		t.Fatalf("the undone extension is still there: %v", err)
 	}
 }
 

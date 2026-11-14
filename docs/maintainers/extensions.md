@@ -483,8 +483,9 @@ state, whether it is on the tailnet and where its key is kept (`read` scope).
 `POST /api/v1/extensions` with `{"action": "reload"}`, `{"action": "approve",
 "id": "<id>"}` or `{"action": "key", "id": "<id>", "mount": "<mount>", "key":
 {"file": "<path>"}}` (or `env`, `keychain`, `command`, or `null` to forget it)
-changes it (`settings` scope). `{"action": "undo", "rev": "<rev>"}` undoes a
-change. `POST /api/v1/extensions/build` with `{"message": "<text>", "surface":
+changes it (`settings` scope). `POST /api/v1/extensions/history/<rev>/undo`
+undoes a change (`control` scope, so a paired device can roll one back) and
+answers `{undone, removed}`. `POST /api/v1/extensions/build` with `{"message": "<text>", "surface":
 "claude"}` starts the builder (`control` scope) and answers as `session-create`.
 `POST /api/v1/extensions/<id>/call` with `{"action": "<name>", "input": {...}}`
 or `{"job": "<name>"}` runs it (`control` scope) and answers `{result, ran,

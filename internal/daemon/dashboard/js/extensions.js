@@ -235,12 +235,12 @@ async function togglePatch(rev) {
   renderHistory();
 }
 
-async function changeAction(body) {
-  try {
-    await postExtensions(body);
-  } catch (error) {
-    toast(error.message);
-  }
+async function undoChange(rev) {
+  const response = await fetch(`/api/v1/extensions/history/${encodeURIComponent(rev)}/undo`, {
+    method: "POST",
+    credentials: "same-origin",
+  });
+  if (!response.ok) toast((await responseError(response)).message);
   await loadExtensions();
 }
 
@@ -264,7 +264,7 @@ function historyItems(history, label) {
   else {
     for (const change of history.changes) {
       const buttons = [button(state.patches.has(change.rev) ? "Hide" : "Show", () => togglePatch(change.rev))];
-      if (!change.root) buttons.push(button("Undo", () => changeAction({ action: "undo", rev: change.rev })));
+      if (!change.root) buttons.push(button("Undo", () => undoChange(change.rev)));
       const when = new Date(change.time).toLocaleString();
       const card = element("section", { className: "extension-change" }, [
         element("p", { className: "extension-change-title", textContent: change.title }),

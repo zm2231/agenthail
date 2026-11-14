@@ -121,7 +121,7 @@ func (a *App) cmdExtensions(args []string) error {
 			return printExtensionHistory(data)
 		}
 	case sub == "undo" && len(positional) == 2:
-		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "undo", "rev": positional[1]}, nil)
+		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions/history/"+url.PathEscape(positional[1])+"/undo", nil, nil, nil)
 		if err == nil && !asJSON {
 			return printExtensionUndo(data)
 		}
