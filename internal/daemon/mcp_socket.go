@@ -47,6 +47,7 @@ type socketAnswer struct {
 	caller  *mcpCaller
 	tools   bool
 	refusal *mcpRefusal
+	status  int
 }
 
 type mcpSocketAnswerKey struct{}
@@ -109,7 +110,14 @@ func (d *Daemon) mcpSocketHandler() http.Handler {
 		return full
 	}, mcpStreamOptions)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, mcp.DefaultMaxRequestBodyBytes)
+		}
 		answer := d.socketCaller(r)
+		if answer.status != 0 {
+			http.Error(w, http.StatusText(answer.status), answer.status)
+			return
+		}
 		ctx := context.WithValue(r.Context(), mcpSocketAnswerKey{}, answer)
 		if answer.caller != nil {
 			ctx = context.WithValue(ctx, mcpCallerKey{}, answer.caller)
@@ -169,12 +177,18 @@ func (d *Daemon) codexParentThreads(pid int) []string {
 // are listed to any Codex child and each call acts as the thread it names,
 // once the Codex process is shown to hold that thread.
 func (d *Daemon) codexCaller(r *http.Request, loaded []string) socketAnswer {
-	method, thread := mcpRequestThread(r)
-	if method != "tools/call" {
-		return socketAnswer{tools: true}
-	}
 	refused := func(code, message string) socketAnswer {
 		return socketAnswer{tools: true, refusal: &mcpRefusal{Code: code, Message: message}}
+	}
+	method, thread, err := mcpRequestThread(r)
+	if errors.As(err, new(*http.MaxBytesError)) {
+		return socketAnswer{status: http.StatusRequestEntityTooLarge}
+	}
+	if err != nil {
+		return refused("invalid_request", "A Codex server's request must be one JSON-RPC message.")
+	}
+	if method != "tools/call" {
+		return socketAnswer{tools: true}
 	}
 	if thread == "" {
 		return refused("unauthenticated", "This Codex process named no thread for the call, so Agenthail cannot tell which session is calling.")
@@ -198,15 +212,16 @@ func (d *Daemon) codexCaller(r *http.Request, loaded []string) socketAnswer {
 }
 
 // mcpRequestThread reads the JSON-RPC method and the thread Codex puts in a
-// tool call's _meta, leaving the body for the MCP handler.
-func mcpRequestThread(r *http.Request) (method, thread string) {
+// tool call's _meta, leaving the body for the MCP handler. A body that is not
+// one JSON object, such as a batch, is an error.
+func mcpRequestThread(r *http.Request) (method, thread string, err error) {
 	if r.Method != http.MethodPost || r.Body == nil {
-		return "", ""
+		return "", "", nil
 	}
 	body, err := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	if err != nil {
-		return "", ""
+		return "", "", err
 	}
 	var message struct {
 		Method string `json:"method"`
@@ -216,10 +231,10 @@ func mcpRequestThread(r *http.Request) (method, thread string) {
 			} `json:"_meta"`
 		} `json:"params"`
 	}
-	if json.Unmarshal(body, &message) != nil {
-		return "", ""
+	if err := json.Unmarshal(body, &message); err != nil {
+		return "", "", err
 	}
-	return message.Method, message.Params.Meta.ThreadID
+	return message.Method, message.Params.Meta.ThreadID, nil
 }
 
 func (d *Daemon) processSession(pid int) string {

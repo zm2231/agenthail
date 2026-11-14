@@ -91,8 +91,8 @@ jobs:
         shell: bash
         run: |
           go test ./internal/peerproc/ -run '^(TestTheKernelNamesTheProcessOnTheOtherEndAndItsParent|TestTheKernelListsTheFilesAnotherProcessHoldsOpen)$' -count=1 -v | tee "$RUNNER_TEMP/peer.log"
-          go test ./internal/daemon/ -run '^(TestASessionsOwnStdioServerActsAsTheSessionItsProcessHoldsNow|TestAProcessThatIsNoSessionGetsNoTools|TestASessionStartedWhileTheDaemonIsDownGetsItsToolsWhenItComesUp|TestACodexToolCallActsAsTheThreadItNamesOnlyWhileItsCodexProcessHoldsIt)$' -count=1 -v | tee -a "$RUNNER_TEMP/peer.log"
-          test "$(grep -c -- '^--- PASS: ' "$RUNNER_TEMP/peer.log")" -eq 6
+          go test ./internal/daemon/ -run '^(TestASessionsOwnStdioServerActsAsTheSessionItsProcessHoldsNow|TestAProcessThatIsNoSessionGetsNoTools|TestASessionStartedWhileTheDaemonIsDownGetsItsToolsWhenItComesUp|TestACodexToolCallActsAsTheThreadItNamesOnlyWhileItsCodexProcessHoldsIt|TestACodexChildCannotOversizeOrBatchItsRequests)$' -count=1 -v | tee -a "$RUNNER_TEMP/peer.log"
+          test "$(grep -c -- '^--- PASS: ' "$RUNNER_TEMP/peer.log")" -eq 7
       - name: Real Codex app-server tests
         # The tests above skip these when codex is not installed; here each must pass.
         shell: bash

@@ -1,11 +1,17 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,5 +175,88 @@ func TestACodexToolCallActsAsTheThreadItNamesOnlyWhileItsCodexProcessHoldsIt(t *
 	}
 	if id, refused := codexWhoami(t, relay, "thread-c"); refused != "tools_off" {
 		t.Fatalf("with the project's tools off a Codex thread acted as %q (refused %q)", id, refused)
+	}
+}
+
+func TestMCPSocketPostHelper(t *testing.T) {
+	path := os.Getenv("AGENTHAIL_TEST_POST_BODY")
+	if path == "" {
+		return
+	}
+	var body io.Reader
+	if prefix, endless := strings.CutPrefix(path, "endless:"); endless {
+		body = io.MultiReader(strings.NewReader(prefix), endlessPadding{})
+	} else if file, err := os.Open(path); err == nil {
+		body = file
+	} else {
+		os.Exit(2)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://agenthail/mcp", io.NopCloser(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	socket := os.Getenv("AGENTHAIL_TEST_RELAY_SOCKET")
+	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}}
+	response, err := client.Do(request)
+	if err != nil {
+		fmt.Print("0\n" + err.Error())
+		os.Exit(0)
+	}
+	answer, _ := io.ReadAll(response.Body)
+	fmt.Printf("%d\n%s", response.StatusCode, answer)
+	os.Exit(0)
+}
+
+type endlessPadding struct{}
+
+func (endlessPadding) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'a'
+	}
+	return len(p), nil
+}
+
+func postFromCodexChild(t *testing.T, body []byte) (int, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "body")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return postPathFromCodexChild(t, path)
+}
+
+func postPathFromCodexChild(t *testing.T, path string) (int, string) {
+	t.Helper()
+	process := exec.Command(os.Args[0], "-test.run=^TestMCPSocketPostHelper$")
+	process.Env = append(os.Environ(), "AGENTHAIL_TEST_POST_BODY="+path, "AGENTHAIL_TEST_RELAY_SOCKET="+MCPSocketPath())
+	out, err := process.Output()
+	if err != nil {
+		t.Fatalf("post helper: %v", err)
+	}
+	status, answer, _ := strings.Cut(string(out), "\n")
+	var code int
+	_, _ = fmt.Sscan(status, &code)
+	return code, answer
+}
+
+func TestACodexChildCannotOversizeOrBatchItsRequests(t *testing.T) {
+	_, reg, codex := codexSocketDaemon(t)
+	registerCodex(t, reg, "thread-a", t.TempDir())
+	codex.load(t, "thread-a")
+	call := func(arguments string) string {
+		return `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agenthail_whoami","arguments":` + arguments + `,"_meta":{"threadId":"thread-a"}}}`
+	}
+
+	if status, answer := postPathFromCodexChild(t, `endless:{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agenthail_whoami","_meta":{"threadId":"thread-a"},"arguments":{"pad":"`); status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("a call whose body never ends got %d: %.200s", status, answer)
+	}
+	if status, answer := postFromCodexChild(t, []byte("["+call("{}")+"]")); strings.Contains(answer, "still starting") || !strings.Contains(answer, "invalid_request") {
+		t.Fatalf("a batched call got %d: %.400s", status, answer)
+	}
+	if status, answer := postFromCodexChild(t, []byte(call("{}"))); status != http.StatusOK || !bytes.Contains([]byte(answer), []byte(`"sessionId":"thread-a"`)) {
+		t.Fatalf("a call after them got %d: %.400s", status, answer)
 	}
 }
