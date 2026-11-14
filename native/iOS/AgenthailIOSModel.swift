@@ -2148,7 +2148,9 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         composerSave = nil
         guard let composerStore else { return }
         var unwritten: [ComposerAttachment] = []
+        var live: Set<UUID> = []
         let spool: (ComposerAttachment) -> SpooledAttachment? = { attachment in
+            live.insert(attachment.id)
             let record = composerStore.spool(attachment)
             if record == nil { unwritten.append(attachment) }
             return record
@@ -2174,21 +2176,18 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         saved.spooledStashes = spooledStashes.isEmpty ? nil : spooledStashes
         saved.attachmentNames = names
         composerStore.save(saved)
+        spoolTried.formIntersection(live)
         writeSpool(unwritten.filter { spoolTried.insert($0.id).inserted }, to: composerStore)
     }
 
     private func writeSpool(_ attachments: [ComposerAttachment], to store: ComposerStore) {
         guard !attachments.isEmpty else { return }
-        Task { [weak self] in
-            await store.write(attachments)
-            self?.saveComposerState()
-        }
+        Task { [weak self] in await store.write(attachments) { self?.saveComposerState() } }
     }
 
     private func keepAttachments(of send: PendingSend) async {
         guard let composerStore else { return }
-        await composerStore.write(send.attachments)
-        saveComposerState()
+        await composerStore.write(send.attachments) { saveComposerState() }
     }
 
     private func announceLostAttachments(for sessionID: String) {

@@ -83,7 +83,7 @@ struct OutboxTest {
         let spoolStore = ComposerStore(file: folder.appendingPathComponent("spooled.json"))
         let sendFile = ComposerAttachment(name: "spooled.txt", data: Data("kept".utf8), mediaType: "text/plain")
         let draftFile = ComposerAttachment(name: "draft.txt", data: Data("draft".utf8), mediaType: "text/plain")
-        await spoolStore.write([sendFile, draftFile])
+        await spoolStore.write([sendFile, draftFile]) {}
         let pending = PendingSend(sessionID: "P", message: "spooled", attachments: [sendFile], idempotencyKey: "k-spooled")
         var spooledSave = ComposerStore.Saved(sends: [ComposerStore.Saved.Send(pending, spool: spoolStore.spool)])
         spooledSave.spooledDrafts = ["D": [spoolStore.spool(draftFile)!]]

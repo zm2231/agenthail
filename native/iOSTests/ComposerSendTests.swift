@@ -476,6 +476,38 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertNotNil(store.load().saved.sends.first?.attachments, "the upload began before a kill could have resumed it")
     }
 
+    func testADraftAttachmentKilledBeforeItsBytesLandIsNamedNotSilentlyLost() async throws {
+        var store = temporaryStore()
+        let write = store.writeSpool
+        store.writeSpool = { data, target in
+            Thread.sleep(forTimeInterval: 1)
+            try write(data, target)
+        }
+        let (model, session) = try makeModel(store: store)
+        model.composerAttachments = [ComposerAttachment(name: "late.txt", data: Data("late".utf8), mediaType: "text/plain")]
+        model.saveComposerState()
+
+        let reopened = AgenthailIOSModel(api: makeAPI(), composerStore: ComposerStore(file: store.file))
+        await reopened.loadSession(session.id)
+        XCTAssertEqual(reopened.composerAttachments, [])
+        XCTAssertTrue(reopened.attachmentProblem?.contains("late.txt") == true, "\(String(describing: reopened.attachmentProblem))")
+        withExtendedLifetime(model) {}
+    }
+
+    func testAFileThatLandsDuringAnotherSaveIsNotPruned() async throws {
+        var store = temporaryStore()
+        let write = store.writeSpool
+        let other = ComposerStore(file: store.file)
+        store.writeSpool = { data, target in
+            try write(data, target)
+            other.save(ComposerStore.Saved())
+        }
+        let attachment = ComposerAttachment(name: "raced.txt", data: Data("raced".utf8), mediaType: "text/plain")
+        var recorded: SpooledAttachment?
+        await store.write([attachment]) { recorded = store.spool(attachment) }
+        XCTAssertEqual(recorded.flatMap(store.unspool)?.data, Data("raced".utf8), "a save that ran while the file landed deleted it")
+    }
+
     func testRestoringKeepsTheTextOfASendThatCannotResumeInTheFirstSave() async throws {
         let store = temporaryStore()
         ComposerSendProtocol.state.script([.offline, .offline, .offline])

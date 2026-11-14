@@ -102,9 +102,13 @@ struct ComposerStore {
         return FileManager.default.fileExists(atPath: spoolFile(attachment.id).path) ? record : nil
     }
 
-    func write(_ attachments: [ComposerAttachment]) async {
+    @MainActor
+    func write(_ attachments: [ComposerAttachment], then record: () -> Void) async {
         let missing = attachments.filter { $0.uploaded == nil && !FileManager.default.fileExists(atPath: spoolFile($0.id).path) }
-        guard !missing.isEmpty else { return }
+        guard !missing.isEmpty else { return record() }
+        let targets = Set(missing.map { spoolFile($0.id).path })
+        SpoolWrites.shared.begin(targets)
+        defer { SpoolWrites.shared.end(targets) }
         let folder = spoolFolder
         let write = writeSpool
         await Task.detached(priority: .userInitiated) {
@@ -115,6 +119,7 @@ struct ComposerStore {
             try? location.setResourceValues(values)
             for attachment in missing { try? write(attachment.data, folder.appendingPathComponent(attachment.id.uuidString)) }
         }.value
+        record()
     }
 
     func unspool(_ record: SpooledAttachment) -> ComposerAttachment? {
@@ -131,7 +136,7 @@ struct ComposerStore {
         for name in names {
             let location = spoolFolder.appendingPathComponent(name)
             if let id = UUID(uuidString: name) {
-                if !kept.contains(id) { try? FileManager.default.removeItem(at: location) }
+                if !kept.contains(id), !SpoolWrites.shared.holds(location.path) { try? FileManager.default.removeItem(at: location) }
             } else if name.hasSuffix(".partial") {
                 let modified = (try? location.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
                 if now.timeIntervalSince(modified) > Self.partialLifetime { try? FileManager.default.removeItem(at: location) }
@@ -159,4 +164,23 @@ extension ComposerStore.Saved.Send {
         }
         return PendingSend(id: id, sessionID: sessionID, message: message, attachments: attachments, idempotencyKey: idempotencyKey, uploaded: uploading ? nil : uploaded ?? [], wire: wire, unconfirmed: true, sentAt: sentAt ?? .distantPast, busyDelivery: busyDelivery, turnOptions: turnOptions)
     }
+}
+
+final class SpoolWrites: @unchecked Sendable {
+    static let shared = SpoolWrites()
+    private let lock = NSLock()
+    private var running: [String: Int] = [:]
+
+    func begin(_ paths: Set<String>) { lock.withLock { for path in paths { running[path, default: 0] += 1 } } }
+
+    func end(_ paths: Set<String>) {
+        lock.withLock {
+            for path in paths {
+                let count = (running[path] ?? 1) - 1
+                running[path] = count > 0 ? count : nil
+            }
+        }
+    }
+
+    func holds(_ path: String) -> Bool { lock.withLock { running[path] != nil } }
 }

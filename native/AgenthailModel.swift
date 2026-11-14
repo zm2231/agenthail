@@ -966,8 +966,7 @@ final class AgenthailModel {
         outbox.changed = { [unowned self] in saveComposer() }
         outbox.keep = { [weak self] send in
             guard let self, let composerStore else { return }
-            await composerStore.write(send.attachments)
-            saveComposer()
+            await composerStore.write(send.attachments) { self.saveComposer() }
         }
     }
 
@@ -1008,18 +1007,18 @@ final class AgenthailModel {
         composerSave = nil
         guard let composerStore else { return }
         var unwritten: [ComposerAttachment] = []
+        var live: Set<UUID> = []
         let spool: (ComposerAttachment) -> SpooledAttachment? = { attachment in
+            live.insert(attachment.id)
             let record = composerStore.spool(attachment)
             if record == nil { unwritten.append(attachment) }
             return record
         }
         composerStore.save(DraftArchive.saved(drafts, sends: outbox.saved(spool: spool), spool: spool))
+        spoolTried.formIntersection(live)
         let fresh = unwritten.filter { spoolTried.insert($0.id).inserted }
         guard !fresh.isEmpty else { return }
-        Task { [weak self] in
-            await composerStore.write(fresh)
-            self?.saveComposer()
-        }
+        Task { [weak self] in await composerStore.write(fresh) { self?.saveComposer() } }
     }
 
     private(set) var modelCatalog: [String: [ModelOption]] = [:]
