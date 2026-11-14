@@ -21,7 +21,7 @@ func codexBackgroundRollout() []string {
 }
 
 func loadedCodex(threadID string) *Codex {
-	c := NewCodex("")
+	c := inDaemon(NewCodex(""))
 	c.noteLoaded(&codexRuntimes{desktop: &desktopCodexClient{}, desktopLoaded: map[string]bool{threadID: true}})
 	return c
 }
@@ -70,7 +70,7 @@ func TestACommandLeftRunningIsTheThreadsBackgroundWorkUntilItCompletes(t *testin
 
 func TestAThreadNoRuntimeHasLoadedRunsNoBackgroundWork(t *testing.T) {
 	path := timelineFixture(t, strings.Join(codexBackgroundRollout()[:4], "\n")+"\n")
-	if background := codexBackgroundAt(t, NewCodex(""), "thread", path); background != nil {
+	if background := codexBackgroundAt(t, inDaemon(NewCodex("")), "thread", path); background != nil {
 		t.Fatalf("never loaded background=%+v", background)
 	}
 	c := loadedCodex("thread")

@@ -34,7 +34,9 @@ var errLaunchOnlyStarts = errors.New("a terminal launch only starts its thread")
 
 func (c launchMCPCredentials) Rotate(string) (string, error) { return "", errLaunchOnlyStarts }
 
-func (c launchMCPCredentials) Unattached(threadID string, err error) {
+func (c launchMCPCredentials) Unattached(threadID string, err error) { launchUnattached(threadID, err) }
+
+func launchUnattached(threadID string, err error) {
 	fmt.Fprintf(os.Stderr, "agenthail: %s starts without the agenthail MCP server: %s\n", threadID, err)
 }
 
@@ -43,6 +45,7 @@ func (a *App) managedCodexForLaunch(home surfaces.CodexHome, launchID string) (*
 	if launchID == "" {
 		return codex, nil
 	}
+	codex.OpensConversations(launchUnattached)
 	credential, err := surface.TakeManagedCodexLaunchCredential(launchID)
 	if err != nil || credential == nil {
 		return codex, err

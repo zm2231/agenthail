@@ -17,6 +17,7 @@ type stopHookInput struct {
 	AgentID              string `json:"agent_id"`
 	TurnID               string `json:"turn_id"`
 	LastAssistantMessage string `json:"last_assistant_message"`
+	AgenthailTools       string `json:"agenthail_tools"`
 }
 
 const (
@@ -56,6 +57,7 @@ func (a *App) turnStop(input io.Reader, now time.Time) map[string]any {
 	if err != nil {
 		return nil
 	}
+	tools = tools && hook.AgenthailTools != hostToolsAbsent
 	var reasons []string
 	if tools {
 		if ended, err := store.TurnEnded(session.ID, hook.TurnID); err == nil && !ended {

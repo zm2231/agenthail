@@ -150,16 +150,23 @@ class Session {
     this.commands = null;
     this.terminalCommands = new Set();
     this.mcpToken = '';
+    this.agenthail = 'absent';
     this.opening = Promise.resolve();
     this.attaching = Promise.resolve();
   }
 
   attachAgenthail(mcp) {
     const attached = this.attaching.catch(() => {}).then(async () => {
-      const result = await this.query.setMcpServers(agenthailServer(mcp));
-      const failed = result?.errors?.[AGENTHAIL_MCP];
-      if (failed) throw new HostError('mcp_failed', `the agenthail MCP server did not connect: ${failed}`);
+      try {
+        const result = await this.query.setMcpServers(agenthailServer(mcp));
+        const failed = result?.errors?.[AGENTHAIL_MCP];
+        if (failed) throw new HostError('mcp_failed', `the agenthail MCP server did not connect: ${failed}`);
+      } catch (error) {
+        this.agenthail = 'absent';
+        throw error;
+      }
       this.mcpToken = mcp.token;
+      this.agenthail = 'attached';
     });
     this.attaching = attached;
     return attached;
@@ -594,6 +601,8 @@ async function open(params) {
     ...(s.window !== 'default' ? { autoCompactWindow: compactWindowSetting(s.window) } : {}),
   };
   s.checker = params.checker?.run ?? '';
+  // Claude runs SessionStart before the server is attached, so a conversation opened with it counts as having it.
+  if (params.mcp) s.agenthail = 'attached';
   let opened;
   s.opening = new Promise((resolve, reject) => (opened = { resolve, reject }));
   s.opening.catch(() => {});
@@ -1049,7 +1058,7 @@ function sessionContextHooks(s) {
         resolve({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context } });
       });
       child.stdin.on('error', () => {});
-      child.stdin.end(JSON.stringify(withMessageUUID(s, input)));
+      child.stdin.end(JSON.stringify(withAgenthailTools(s, withMessageUUID(s, input))));
     });
   // agenthail hook stop decides whether to hold the stop once: to end the turn with the tools, or to raise an ask the reply only spoke.
   const stop = (input, _toolUseID, { signal }) => {
@@ -1064,10 +1073,15 @@ function sessionContextHooks(s) {
         resolve({ decision: 'block', reason: output.reason });
       });
       child.stdin.on('error', () => {});
-      child.stdin.end(JSON.stringify(input));
+      child.stdin.end(JSON.stringify(withAgenthailTools(s, input)));
     });
   };
   return { SessionStart: [{ hooks: [run] }], UserPromptSubmit: [{ hooks: [run] }], Stop: [{ hooks: [stop] }] };
+}
+
+// The hooks teach and hold a conversation by the tools it has, which only the host knows.
+function withAgenthailTools(s, input) {
+  return { ...input, agenthail_tools: s.agenthail };
 }
 
 // Claude names a prompt by its own id, so the host says which message it took.

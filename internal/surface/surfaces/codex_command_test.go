@@ -60,7 +60,7 @@ func TestCodexRefusesAComposerCommandBeforeAnyTurnStarts(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Transport: codexTransportDesktop, Source: "vscode"}
 	bridge := idleDesktopBridge(t)
-	codex := NewCodex(bridge.URL)
+	codex := inDaemon(NewCodex(bridge.URL))
 	for _, message := range []string{"/l5-probe", "/l5-probe with arguments", "/status"} {
 		_, err := codex.SendWithOptions(context.Background(), session, message, surface.SendOptions{})
 		assertComposerCommandRefused(t, err, strings.Fields(message)[0][1:])
@@ -73,7 +73,7 @@ func TestCodexRefusesAComposerCommandBeforeAnyTurnStarts(t *testing.T) {
 
 	for _, message := range []string{"/tmp/build.log shows the failure", " /status as words", "/", "$l5-probe", "run /l5-probe"} {
 		bridge := idleDesktopBridge(t)
-		sent, err := NewCodex(bridge.URL).SendWithOptions(context.Background(), session, message, surface.SendOptions{})
+		sent, err := inDaemon(NewCodex(bridge.URL)).SendWithOptions(context.Background(), session, message, surface.SendOptions{})
 		if err != nil || sent == nil || !sent.Accepted {
 			t.Fatalf("prompt %q: sent=%+v err=%v", message, sent, err)
 		}
@@ -88,7 +88,7 @@ func TestCodexStartsAConversationWhoseFirstMessageOnlyLooksLikeACommand(t *testi
 	t.Setenv("HOME", t.TempDir())
 	for _, message := range []string{" /status", "\u00a0/status", "/tmp/build.log shows the failure"} {
 		bridge := idleDesktopBridge(t)
-		_, sent, err := NewCodex(bridge.URL).StartSession(context.Background(), surface.SessionStartOptions{Message: message, Cwd: "/tmp/project"})
+		_, sent, err := inDaemon(NewCodex(bridge.URL)).StartSession(context.Background(), surface.SessionStartOptions{Message: message, Cwd: "/tmp/project"})
 		if err != nil || sent == nil || !sent.Accepted {
 			t.Fatalf("first message %q: sent=%+v err=%v", message, sent, err)
 		}
@@ -100,7 +100,7 @@ func TestCodexStartsAConversationWhoseFirstMessageOnlyLooksLikeACommand(t *testi
 
 func TestCodexRefusesAComposerCommandAsASteer(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	codex := NewCodex(busyDesktopBridge(t))
+	codex := inDaemon(NewCodex(busyDesktopBridge(t)))
 	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Transport: codexTransportDesktop, Source: "vscode"}
 	assertComposerCommandRefused(t, codex.Steer(context.Background(), session, "/l5-probe"), "l5-probe")
 	if err := codex.Steer(context.Background(), session, "/tmp/build.log too"); err != nil {

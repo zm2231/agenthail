@@ -53,8 +53,8 @@ func (p *claudePosts) count(message string) int {
 }
 
 // exitedClaude is an exited Claude conversation registered in the CLI, with a
-// running Claude host that resumes it and a peer manager that takes the
-// agent messages the CLI sends.
+// running daemon whose Claude host resumes it and a peer manager that takes
+// the agent messages the CLI sends.
 type exitedClaude struct {
 	app     *App
 	r       *registry.Registry
@@ -65,6 +65,14 @@ type exitedClaude struct {
 }
 
 func exitedClaudeApp(t *testing.T) exitedClaude {
+	t.Helper()
+	e := exitedClaudeWithoutDaemon(t)
+	t.Setenv("HOME", t.TempDir())
+	startTestDaemon(t, e.app, e.r, e.fixture.Home)
+	return e
+}
+
+func exitedClaudeWithoutDaemon(t *testing.T) exitedClaude {
 	t.Helper()
 	fixture := claudetest.New(t)
 	host := claudehosttest.New(t, fixture.Home)

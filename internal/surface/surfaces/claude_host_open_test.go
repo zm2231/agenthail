@@ -16,7 +16,7 @@ func TestAStartedClaudeHostConversationCarriesItsClaimedCredential(t *testing.T)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	credentials := &fakeCredentials{}
 	c.SetMCPCredentials(credentials)
 	session, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Cwd: host.Cwd, Message: "hello"})
@@ -42,7 +42,7 @@ func TestACheckerOpensWithoutTheAgenthailServer(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	credentials := &fakeCredentials{}
 	c.SetMCPCredentials(credentials)
 	run := uuid.NewString()

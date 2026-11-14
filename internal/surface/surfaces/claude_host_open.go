@@ -10,13 +10,20 @@ import (
 
 // The only caller of the host's open: every conversation it opens, except a sandboxed checker, carries its agenthail credential.
 func (c *Claude) hostOpen(ctx context.Context, request claudehost.OpenRequest) (claudehost.Session, error) {
-	credentials := c.mcpCredentials()
-	if credentials == nil || request.Checker != nil {
+	if request.Checker != nil {
 		return c.host.client.Open(ctx, request)
+	}
+	credentials, err := c.opening()
+	if err != nil {
+		return claudehost.Session{}, err
 	}
 	id := request.Resume
 	if id == "" {
 		id = request.SessionID
+	}
+	if credentials == nil {
+		c.openedWithoutMCP(id, errMCPServerNotRunning)
+		return c.host.client.Open(ctx, request)
 	}
 	token, err := claudeHostToken(ctx, credentials, id, request.Resume != "")
 	if err != nil {

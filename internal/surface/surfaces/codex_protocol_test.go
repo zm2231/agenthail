@@ -47,7 +47,7 @@ func TestCodexStartSessionPrefersDesktopOwner(t *testing.T) {
 		}
 		return ""
 	})
-	session, sent, err := NewCodex(bridge.URL).StartSession(context.Background(), surface.SessionStartOptions{Message: "Build the release", Cwd: "/tmp/project", Model: "gpt-5.6-sol", ApprovalPolicy: "on-request"})
+	session, sent, err := inDaemon(NewCodex(bridge.URL)).StartSession(context.Background(), surface.SessionStartOptions{Message: "Build the release", Cwd: "/tmp/project", Model: "gpt-5.6-sol", ApprovalPolicy: "on-request"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestCodexDesktopDiscoveryNeverBootstrapsManagedRuntime(t *testing.T) {
 	installStandaloneCodex(t, codexHome, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 1\n")
 	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
 	t.Setenv("CODEX_HOME", codexHome)
-	if _, err := NewCodex(startRendererDesktopBridge(t)).List(context.Background()); err != nil {
+	if _, err := inDaemon(NewCodex(startRendererDesktopBridge(t))).List(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if output, _ := os.ReadFile(logPath); len(output) != 0 {
@@ -86,7 +86,7 @@ func TestCodexResolveExactNameUsesHistorySearch(t *testing.T) {
 		}
 		return ""
 	})
-	session, err := NewCodex(bridge.URL).Resolve(context.Background(), "Q")
+	session, err := inDaemon(NewCodex(bridge.URL)).Resolve(context.Background(), "Q")
 	if err != nil || session == nil || session.ID != "thread-1" || session.Transport != codexTransportDesktop || countMethod(bridge.Methods(), "thread/search") != 1 {
 		t.Fatalf("session=%+v methods=%v err=%v", session, bridge.Methods(), err)
 	}
@@ -103,7 +103,7 @@ func TestCodexResolveIDReadsThreadWithoutListing(t *testing.T) {
 		}
 		return ""
 	})
-	session, err := NewCodex(bridge.URL).Resolve(context.Background(), id)
+	session, err := inDaemon(NewCodex(bridge.URL)).Resolve(context.Background(), id)
 	methods := bridge.Methods()
 	if err != nil || session == nil || session.ID != id || session.Transport != codexTransportDesktop || countMethod(methods, "thread/read") != 1 || countMethod(methods, "thread/list") != 0 {
 		t.Fatalf("session=%+v methods=%v err=%v", session, methods, err)
@@ -121,7 +121,7 @@ func countMethod(methods []string, method string) int {
 }
 
 func TestCodexEnsureWritableRefreshesDesktopSourceTransport(t *testing.T) {
-	codex := NewCodex(startRendererDesktopBridge(t))
+	codex := inDaemon(NewCodex(startRendererDesktopBridge(t)))
 	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "agenthail", Transport: codexTransportReadOnly}
 	if err := codex.EnsureWritable(context.Background(), session); err != nil {
 		t.Fatal(err)
@@ -180,7 +180,7 @@ func TestCodexDesktopSendNeverResumesLoadedThreadAndLoadsUnloadedThreadOnce(t *t
 				return ""
 			})
 			session := test.session
-			sent, err := NewCodex(bridge.URL).SendWithOptions(context.Background(), &session, "deliver queued work", surface.SendOptions{TurnOptions: surface.TurnOptions{ServiceTier: "fast"}})
+			sent, err := inDaemon(NewCodex(bridge.URL)).SendWithOptions(context.Background(), &session, "deliver queued work", surface.SendOptions{TurnOptions: surface.TurnOptions{ServiceTier: "fast"}})
 			if err != nil || sent == nil || !sent.Accepted || sent.UUID != "turn" {
 				t.Fatalf("sent=%+v err=%v", sent, err)
 			}
@@ -208,7 +208,7 @@ func TestCodexDesktopSendNeverResumesLoadedThreadAndLoadsUnloadedThreadOnce(t *t
 
 func TestCodexObserveReadsThroughDesktopWhenTheDaemonIsStopped(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
-	codex := NewCodex(startRendererDesktopBridge(t))
+	codex := inDaemon(NewCodex(startRendererDesktopBridge(t)))
 	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Source: "agenthail", Transport: codexTransportManaged}
 	observation, err := codex.Observe(context.Background(), session)
 	if err != nil || observation == nil || observation.Status != surface.StatusIdle {
@@ -223,7 +223,7 @@ func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
 		}
 		return ""
 	})
-	session, err := NewCodex(bridge.URL).Resolve(context.Background(), "duplicate")
+	session, err := inDaemon(NewCodex(bridge.URL)).Resolve(context.Background(), "duplicate")
 	if err == nil || session != nil || !strings.Contains(err.Error(), "thread-1") || !strings.Contains(err.Error(), "thread-2") {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
@@ -237,7 +237,7 @@ func TestTheVoiceOperatorThreadStartsWithEveryAgenthailVoiceTool(t *testing.T) {
 		}
 		return ""
 	})
-	voice := &CodexVoice{Codex: NewCodex(bridge.URL)}
+	voice := &CodexVoice{Codex: inDaemon(NewCodex(bridge.URL))}
 	if session, err := voice.Create(context.Background(), "/tmp/project", "operate"); err != nil || session.ID != "operator" {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}

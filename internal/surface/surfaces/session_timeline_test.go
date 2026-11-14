@@ -559,7 +559,7 @@ func TestCodexStreamServesACommandSeenWithoutItsCallAsAToolRow(t *testing.T) {
 	path := timelineFixture(t, record)
 	session := &surface.Session{ID: "observed-item-completed", Transcript: path, TranscriptOffsetSet: true}
 	var events []surface.StreamEvent
-	err := NewCodex("").Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+	err := inDaemon(NewCodex("")).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
 		if event.Kind == "commands" {
 			return
 		}

@@ -96,7 +96,7 @@ func TestClaudeSessionInThePrimaryConfigRootIsStoppedAndResumedWithoutNamingIt(t
 			fixture.Root = surface.ClaudeConfigDir(fixture.Home)
 			host := claudehosttest.New(t, fixture.Home)
 			host.Start(t)
-			c := NewClaude(nil, fixture.Home)
+			c := inDaemon(NewClaude(nil, fixture.Home))
 			fixture.Transcript(fixtureConversation, fixture.Home)
 			fixture.Record(fixtureConversation, fixture.Home, "")
 			ctx := context.Background()
@@ -139,7 +139,7 @@ func TestClaudeConversationInTwoConfigRootsIsRefused(t *testing.T) {
 	fixture.AddRoot("claude-work")
 	fixture.Transcript(fixtureConversation, fixture.Home)
 	fixture.Record(fixtureConversation, fixture.Home, "session_fixture")
-	c := NewClaude(nil, fixture.Home)
+	c := inDaemon(NewClaude(nil, fixture.Home))
 	ctx := context.Background()
 	session := &surface.Session{ID: fixtureConversation, Surface: surface.KindClaude, Bridge: "session_fixture", PID: fixture.PID}
 	ambiguous := func(err error) bool {
@@ -187,7 +187,7 @@ func TestClaudeHostedConversationInTwoConfigRootsIsRefused(t *testing.T) {
 	host := claudehosttest.New(t, "")
 	claudetest.New(t)
 	host.Start(t)
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	ctx := context.Background()
 	session, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
 	if err != nil {
@@ -242,7 +242,7 @@ func TestClaudeBadAgenthailConfigFailsDiscovery(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(home, ".agenthail", "config.json"), []byte(config), 0600); err != nil {
 				t.Fatal(err)
 			}
-			sessions, err := NewClaude(nil, home).List(context.Background())
+			sessions, err := inDaemon(NewClaude(nil, home)).List(context.Background())
 			if err == nil || !strings.Contains(err.Error(), filepath.Join(home, ".agenthail", "config.json")) {
 				t.Fatalf("sessions=%v err=%v", sessions, err)
 			}
@@ -256,7 +256,7 @@ func TestResumingAConversationNoRecordNamesRefusesOneInTwoConfigRoots(t *testing
 	fixture.Transcript(fixtureConversation, fixture.Home)
 	fixture.AddRoot("claude-work")
 	fixture.Transcript(fixtureConversation, fixture.Home)
-	c := NewClaude(nil, fixture.Home)
+	c := inDaemon(NewClaude(nil, fixture.Home))
 	if _, err := c.resumeAs(context.Background(), fixtureConversation, fixture.Home, claudehost.OpenRequest{}); err == nil || !strings.Contains(err.Error(), "more than one Claude config directory") {
 		t.Fatalf("err=%v", err)
 	}

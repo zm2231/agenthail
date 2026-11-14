@@ -255,6 +255,35 @@ process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input
     [...sent, undefined],
     'each person message names the uuid Claude took; a peer message names none',
   );
+  assert.ok(ran.every((r) => r.input.agenthail_tools === 'absent'), 'a session opened without the agenthail server says it has no agenthail tools');
+  c.close();
+});
+
+test('the hooks of a session whose agenthail server failed to attach say it has no agenthail tools', async () => {
+  const f = fixture();
+  const calls = path.join(f.root, 'agenthail-calls.jsonl');
+  const agenthail = path.join(f.root, 'agenthail');
+  fs.writeFileSync(
+    agenthail,
+    `#!${process.execPath}
+const fs = require('node:fs');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), input }) + '\\n');
+process.stdout.write('{}');
+`,
+    { mode: 0o755 },
+  );
+  await startHost(f, { agenthail, env: { FAKE_CLAUDE_MCP_SET_ERROR: 'connection refused' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  const opened = await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url: 'http://127.0.0.1:7412/mcp', token: 'ahs_first' } });
+  assert.match(opened.mcpError, /connection refused/);
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'hello', origin: { kind: 'human' } });
+  await c.event(turnResult(id, uuid));
+  const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.input.hook_event_name !== 'SessionStart');
+  assert.deepEqual(ran.map((r) => [r.input.hook_event_name, r.input.agenthail_tools]), [['UserPromptSubmit', 'absent'], ['Stop', 'absent']]);
   c.close();
 });
 
@@ -291,6 +320,7 @@ process.stdout.write(process.argv[3] === 'stop' ? JSON.stringify({ decision: 'bl
   assert.equal(ran.length, 2, 'the stop hook asks agenthail only for a turn that may still need its end');
   assert.deepEqual(ran[0].args, ['hook', 'stop', '--surface', 'claude']);
   assert.equal(ran[0].input.session_id, id);
+  assert.ok(ran.every((r) => r.input.agenthail_tools === 'attached'), 'the stop hook hears that the session has its agenthail tools');
   c.close();
 });
 

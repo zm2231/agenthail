@@ -304,7 +304,7 @@ func TestAVoiceOperatorUsesDesktopOnlyWhileDesktopHasItLoaded(t *testing.T) {
 		return `{"result":{}}`
 	})
 	startManagedCodex(t, nil)
-	codex := NewCodex(desktop.URL)
+	codex := inDaemon(NewCodex(desktop.URL))
 	codex.managed = true
 	v := &CodexVoice{Codex: codex}
 	session := &surface.Session{ID: operator, Surface: surface.KindCodex}

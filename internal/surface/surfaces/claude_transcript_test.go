@@ -308,7 +308,7 @@ func TestAStreamWindowThatHasAlreadyRunOutStillReadsOnce(t *testing.T) {
 			return NewClaude(nil, t.TempDir()).Stream(context.Background(), claudeSession, "", onEvent, 0)
 		},
 		"codex": func(onEvent func(surface.StreamEvent)) error {
-			return NewCodex("").Stream(context.Background(), codexSession, "", onEvent, 0)
+			return inDaemon(NewCodex("")).Stream(context.Background(), codexSession, "", onEvent, 0)
 		},
 	} {
 		var texts []string

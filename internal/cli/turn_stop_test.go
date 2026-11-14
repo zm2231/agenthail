@@ -30,6 +30,12 @@ func TestATurnThatStopsWithoutAnEndIsAskedOnceToEndIt(t *testing.T) {
 	if reason, _ := output["reason"].(string); output["decision"] != "block" || !strings.Contains(reason, agenttools.EndTurn) {
 		t.Fatalf("a turn without an end stopped: %v", output)
 	}
+	if output := stop(`,"agenthail_tools":"absent"`); output != nil {
+		t.Fatalf("a conversation the Claude host opened without its agenthail server was asked to use its tools: %v", output)
+	}
+	if output := stop(`,"agenthail_tools":"attached"`); output["decision"] != "block" {
+		t.Fatalf("a conversation the Claude host opened with its agenthail server stopped: %v", output)
+	}
 	for _, extra := range []string{`,"stop_hook_active":true`, `,"agent_id":"sub-1"`} {
 		if output := stop(extra); output != nil {
 			t.Fatalf("stop with %s was blocked: %v", extra, output)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -13,9 +14,11 @@ type adopterSurface struct {
 	*cliSurface
 	busy    map[string]string
 	adopted []string
+	waits   []time.Duration
 }
 
 func (a *adopterSurface) AdoptSession(_ context.Context, sess *surface.Session, request surface.AdoptRequest) (*surface.AdoptResult, error) {
+	a.waits = append(a.waits, request.Wait)
 	if reason := a.busy[sess.ID]; reason != "" {
 		return nil, surface.DeliveryTerminal(&surface.AdoptBusyError{Session: sess.ID, Reason: reason}, surface.DeliveryInvalidRequest)
 	}
@@ -41,6 +44,11 @@ func TestThreadAdoptOpensASessionInTheHostAndReRegistersIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	app.catalogDaemonRunning = func() bool { return false }
+	if err := app.Run([]string{"thread", "adopt", "c1", "--stop-terminal"}); err == nil || !strings.Contains(err.Error(), "agenthail daemon start") || len(adopter.adopted) != 0 {
+		t.Fatalf("err=%v adopted=%v, want the terminal left running and the daemon-start hint", err, adopter.adopted)
+	}
+	serveAppDaemon(t, app, store, []surface.Surface{adopter})
 	if err := app.Run([]string{"thread", "adopt", "c1"}); err == nil || !strings.Contains(err.Error(), "--stop-terminal") {
 		t.Fatalf("a terminal session was adopted without consent: %v", err)
 	}
@@ -52,8 +60,8 @@ func TestThreadAdoptOpensASessionInTheHostAndReRegistersIt(t *testing.T) {
 	if err != nil || stored.RuntimeKind != surface.RuntimeClaudeHost {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
-	if err := app.Run([]string{"thread", "adopt", "busy1", "--stop-terminal"}); err == nil || !strings.Contains(err.Error(), "a turn is running") {
-		t.Fatalf("busy adoption: %v", err)
+	if err := app.Run([]string{"thread", "adopt", "busy1", "--stop-terminal", "--wait", "90s"}); err == nil || !strings.Contains(err.Error(), "a turn is running") || adopter.waits[len(adopter.waits)-1] != 90*time.Second {
+		t.Fatalf("busy adoption: err=%v waits=%v, want the refusal after waiting 90s", err, adopter.waits)
 	}
 	for _, args := range [][]string{{"thread", "adopt"}, {"thread", "adopt", "c1", "--root", "spare"}, {"thread", "adopt", "c1", "--wait", "soon"}, {"thread", "adopt", "c1", "--stop-terminal", "--wait"}, {"thread", "adopt", "c1", "--stop-terminal", "--timeout"}, {"thread", "adopt", "c1", "--wait", "--stop-terminal"}} {
 		if err := app.Run(args); err == nil {

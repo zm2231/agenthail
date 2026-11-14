@@ -25,7 +25,7 @@ func TestCodexModelReadUsesMetadataWithoutResuming(t *testing.T) {
 				}
 				return ""
 			})
-			model, err := NewCodex(bridge.URL).Model(context.Background(), &surface.Session{ID: "thread", Transport: codexTransportDesktop}, "")
+			model, err := inDaemon(NewCodex(bridge.URL)).Model(context.Background(), &surface.Session{ID: "thread", Transport: codexTransportDesktop}, "")
 			if test.model == "" {
 				if err == nil {
 					t.Fatalf("missing model metadata was reported as %q", model)

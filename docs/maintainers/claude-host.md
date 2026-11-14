@@ -436,7 +436,10 @@ Every session also gets a `Stop` callback that runs
 that ends without `agenthail_end_turn`, or a lead's reply that asks the person
 without an ask, is held once; it skips the command for the stop after a block,
 a subagent's stop, and while a background task that is not ambient runs
-([work record](work-record.md), [asks](asks.md)).
+([work record](work-record.md), [asks](asks.md)). Both commands get the hook
+input with `agenthail_tools` added: `attached` once the conversation has the
+`agenthail` server, `absent` when it was opened without one or its attach
+failed ([MCP](mcp.md)).
 Where Claude records a conversation's system prompt (the SDK's `snapshot`,
 which the SDK notes is still rolling out and does not apply to every
 provider), it resends the prompt it recorded on every later request and resume

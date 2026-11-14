@@ -23,12 +23,19 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
+// inDaemon is c as the daemon runs it, the one process that starts, forks
+// and loads conversations.
+func inDaemon[T interface{ OpensConversations(func(string, error)) }](c T) T {
+	c.OpensConversations(func(string, error) {})
+	return c
+}
+
 func hostedClaude(t *testing.T) (*Claude, *claudehosttest.Fixture) {
 	t.Helper()
 	fixture := claudehosttest.New(t, "")
 	// Resuming reads Claude's background job catalog through the claude binary.
 	claudetest.New(t)
-	return NewClaude(nil, fixture.Home), fixture
+	return inDaemon(NewClaude(nil, fixture.Home)), fixture
 }
 
 func listedSession(t *testing.T, c *Claude, id string) *surface.Session {
@@ -358,7 +365,7 @@ func TestAHostSessionIsOpenWhileTheHostListsIt(t *testing.T) {
 
 func TestWithoutAHostOnlyARecordedProcessThatStillRunsCountsAsHosted(t *testing.T) {
 	home := t.TempDir()
-	c := NewClaude(nil, home)
+	c := inDaemon(NewClaude(nil, home))
 	live := os.Getpid()
 	started, err := procstart.Lstart(context.Background(), live)
 	if err != nil {

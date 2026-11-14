@@ -565,6 +565,11 @@ func IsDeliveryUnavailable(err error) bool {
 // cannot accept a message yet; the message waits in the queue until it can.
 var ErrDeliveryHeld = errors.New("target is running but not reachable yet")
 
+// ErrOpenIsTheDaemons refuses starting, forking or loading a conversation in
+// any process but the daemon, the only one that can attach the conversation's
+// agenthail MCP server.
+var ErrOpenIsTheDaemons = errors.New("only the Agenthail daemon opens a conversation, so that it runs with its agenthail tools")
+
 // ErrRouteChanged is a send that found its route gone before delivering
 // anything. The session it was given now names the route to take, which the
 // caller publishes before sending again.

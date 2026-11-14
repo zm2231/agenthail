@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -123,5 +125,22 @@ func TestOnlyTerminalCodexLaunchesCarryALaunchCredential(t *testing.T) {
 		if mcp, err := credentials.terminalLaunch(tc.launcher, tc.agent); err != nil || mcp != nil {
 			t.Fatalf("%s %s carried %+v err=%v", tc.launcher, tc.agent, mcp, err)
 		}
+	}
+}
+
+func TestATerminalLaunchFromADaemonWithoutAnMCPServerIsLogged(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	d.Surfaces = []surface.Surface{fake}
+	launcher := &launcherFixture{id: surface.LauncherTMUX, agents: []surface.SurfaceKind{surface.KindCodex}, result: surface.LaunchResult{Location: &surface.Location{Session: "agenthail-1"}}, launchErr: surface.LaunchAcceptedError{Launcher: surface.LauncherTMUX, Err: errors.New("outcome is unresolved")}}
+	d.SetLaunchers([]surface.Launcher{launcher})
+	var logged bytes.Buffer
+	d.log = log.New(&logged, "", 0)
+	cwd := t.TempDir()
+	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", fmt.Sprintf(`{"action":"session-create","surface":"codex","launcher":%q,"message":"hello","cwd":%q}`, surface.LauncherTMUX, cwd))
+	if w.Code != http.StatusAccepted || len(launcher.requests) != 1 || launcher.requests[0].MCP != nil {
+		t.Fatalf("status=%d body=%s requests=%+v, want one launch without a credential", w.Code, w.Body, launcher.requests)
+	}
+	if line := logged.String(); !strings.Contains(line, surface.LauncherTMUX) || !strings.Contains(line, cwd) || !strings.Contains(line, "without the agenthail MCP server") {
+		t.Fatalf("log=%q, want the bare launch named", line)
 	}
 }

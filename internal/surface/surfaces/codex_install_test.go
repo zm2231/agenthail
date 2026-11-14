@@ -99,7 +99,7 @@ func TestCodexRuntimeStatusNamesWhatEachInstallStateIsMissing(t *testing.T) {
 			}
 			codex := isolatedManagedRuntime(t)
 			if test.bridge {
-				codex = NewCodex(startRendererDesktopBridge(t))
+				codex = inDaemon(NewCodex(startRendererDesktopBridge(t)))
 				codex.managed = true
 			}
 			status := codex.RuntimeStatus(context.Background())

@@ -106,3 +106,21 @@ func TestATerminalLaunchWithoutACredentialStartsPlain(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestALaunchWithoutItsCredentialStillStartsItsThread(t *testing.T) {
+	fake := codextest.Start(t, func(method string, _ map[string]any) map[string]any {
+		if method == "thread/start" {
+			return map[string]any{"cwd": "/tmp/project", "thread": map[string]any{"id": "thread-launched", "source": "appServer"}}
+		}
+		return nil
+	})
+	app, _ := cliFixture(t, &cliSurface{kind: surface.KindCodex})
+	codex, err := app.managedCodexForLaunch(surfaces.CodexHomeFromEnv(), "agenthail-launch-without-credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := codex.PrepareManagedTerminalSession(context.Background(), "/tmp/project", "")
+	if err != nil || session.ID != "thread-launched" || len(fake.Calls("thread/start")) != 1 {
+		t.Fatalf("session=%+v err=%v, want the launch to start its thread", session, err)
+	}
+}
