@@ -116,7 +116,7 @@ func TestAStreamResumingInsideACallServesThePagesRows(t *testing.T) {
 	for at, item := range items {
 		index[item.ID] = at
 	}
-	err = NewCodex("").Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+	err = inDaemon(NewCodex("")).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
 		if event.Kind == "commands" {
 			return
 		}

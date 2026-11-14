@@ -109,6 +109,8 @@ func TestBranchInALiveProcessKeepsTheAliasOnTheOriginalConversation(t *testing.T
 	host := claudehosttest.New(t, fixture.Home)
 	host.Start(t)
 	peers := claudetest.ListenPeerManager(t, fixture.Home)
+	t.Setenv("HOME", t.TempDir())
+	startTestDaemon(t, app, r, fixture.Home)
 	if sender := sendFrom(t, app, r, branchConversation, "@worker", "to the original"); sender != branchConversation || peers.Count("to the original") != 1 {
 		t.Fatalf("send to @worker: sender=%q peer=%d", sender, peers.Count("to the original"))
 	}

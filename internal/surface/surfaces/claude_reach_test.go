@@ -62,7 +62,7 @@ func hostResume(t *testing.T) (*claudetest.Fixture, *claudehosttest.Fixture, *Cl
 	fixture := claudetest.New(t)
 	host := claudehosttest.New(t, fixture.Home)
 	host.Start(t)
-	return fixture, host, NewClaude(nil, fixture.Home)
+	return fixture, host, inDaemon(NewClaude(nil, fixture.Home))
 }
 
 // A person's turn to a host session runs only while Claude is idle, so of two
@@ -140,7 +140,7 @@ func TestClaudeSendHoldsForLiveProcessWithoutMessaging(t *testing.T) {
 
 func TestClaudeObserveExitedSessionIsAtRestOnlyWithoutLiveProcess(t *testing.T) {
 	fixture := claudetest.New(t)
-	c := NewClaude(nil, fixture.Home)
+	c := inDaemon(NewClaude(nil, fixture.Home))
 	session := exitedSession(fixture)
 	observation, err := c.Observe(context.Background(), &session)
 	if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" || observation.CompletedTurnID != "fixture-message" {
@@ -166,7 +166,7 @@ func TestClaudeResumeThatClaudeRefusesSaysWhy(t *testing.T) {
 func TestClaudeResumeWithoutTheHostIsHeld(t *testing.T) {
 	fixture := claudetest.New(t)
 	session := exitedSession(fixture)
-	_, err := NewClaude(nil, fixture.Home).Send(context.Background(), &session, "hello")
+	_, err := inDaemon(NewClaude(nil, fixture.Home)).Send(context.Background(), &session, "hello")
 	if !surface.IsDeliveryHeld(err) {
 		t.Fatalf("err=%v, want held until the host runs", err)
 	}
@@ -199,7 +199,7 @@ func samePath(t *testing.T, a, b string) bool {
 
 func TestClaudeResumeLockExcludesAnotherProcess(t *testing.T) {
 	if home := os.Getenv("AGENTHAIL_HOLD_RESUME_LOCK"); home != "" {
-		unlock, err := NewClaude(nil, home).lockConversation(context.Background(), fixtureConversation)
+		unlock, err := inDaemon(NewClaude(nil, home)).lockConversation(context.Background(), fixtureConversation)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -226,7 +226,7 @@ func TestClaudeResumeLockExcludesAnotherProcess(t *testing.T) {
 	if line, err := bufio.NewReader(output).ReadString('\n'); err != nil || line != "locked\n" {
 		t.Fatalf("holder line=%q err=%v", line, err)
 	}
-	c := NewClaude(nil, home)
+	c := inDaemon(NewClaude(nil, home))
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	if _, err := c.lockConversation(ctx, fixtureConversation); err == nil {

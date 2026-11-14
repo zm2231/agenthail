@@ -158,7 +158,7 @@ func TestCodexAttachmentStaysFetchableAfterTranscriptGrows(t *testing.T) {
 	}
 	id := firstAttachmentID(t, path, "codex")
 	testkit.AppendLines(t, path, strings.Repeat(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"later"}]}}`+"\n", 40000))
-	attachment, data, err := NewCodex("").ReadAttachment(context.Background(), &surface.Session{ID: "thread-indexed", Transcript: path}, id)
+	attachment, data, err := inDaemon(NewCodex("")).ReadAttachment(context.Background(), &surface.Session{ID: "thread-indexed", Transcript: path}, id)
 	if err != nil || attachment == nil || attachment.ID != id || !bytes.Equal(data, mustAttachmentData(t)) {
 		t.Fatalf("attachment=%+v bytes=%d err=%v", attachment, len(data), err)
 	}
@@ -200,7 +200,7 @@ func TestCodexImageSiblingsKeepDistinctFetchableIdentitiesAcrossSeedAndStream(t 
 		if item.Attachment.MediaType != "image/png" || item.Attachment.Width != 1 || item.Attachment.Height != 1 {
 			t.Fatalf("attachment metadata=%+v", item.Attachment)
 		}
-		attachment, data, err := NewCodex("").ReadAttachment(context.Background(), &surface.Session{ID: "siblings", Transcript: path}, item.Attachment.ID)
+		attachment, data, err := inDaemon(NewCodex("")).ReadAttachment(context.Background(), &surface.Session{ID: "siblings", Transcript: path}, item.Attachment.ID)
 		if err != nil || attachment.ID != item.Attachment.ID || !bytes.Equal(data, mustAttachmentData(t)) {
 			t.Fatalf("fetch attachment=%+v bytes=%d err=%v", attachment, len(data), err)
 		}
@@ -305,7 +305,7 @@ func TestCodexTranscriptNormalizesInterruptionWrapperAndTypedToolOutput(t *testi
 	if len(imageItems) != 2 || imageItems[0].Text != "screenshot" || imageItems[1].Kind != "attachment" || imageItems[1].Attachment == nil {
 		t.Fatalf("tool output image=%+v", imageItems)
 	}
-	if _, data, err := NewCodex("").ReadAttachment(context.Background(), &surface.Session{ID: "tool-image", Transcript: path}, imageItems[1].Attachment.ID); err != nil || !bytes.Equal(data, mustAttachmentData(t)) {
+	if _, data, err := inDaemon(NewCodex("")).ReadAttachment(context.Background(), &surface.Session{ID: "tool-image", Transcript: path}, imageItems[1].Attachment.ID); err != nil || !bytes.Equal(data, mustAttachmentData(t)) {
 		t.Fatalf("tool output image fetch bytes=%d err=%v", len(data), err)
 	}
 	mixed := byCall["call_mixed"]

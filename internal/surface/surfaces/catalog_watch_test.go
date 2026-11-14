@@ -35,7 +35,7 @@ func TestCodexWatchesTheNewestDayAndEveryFolderAboveIt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessions, "2026", "10", "zz-not-a-folder"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	dirs := func() string { return strings.Join(NewCodex("").CatalogWatchDirs(), ",") }
+	dirs := func() string { return strings.Join(inDaemon(NewCodex("")).CatalogWatchDirs(), ",") }
 	want := strings.Join([]string{sessions, filepath.Join(sessions, "2026"), filepath.Join(sessions, "2026", "10"), filepath.Join(sessions, "2026", "10", "23")}, ",")
 	if got := dirs(); got != want {
 		t.Fatalf("dirs=%s want %s", got, want)

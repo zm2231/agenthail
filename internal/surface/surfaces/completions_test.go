@@ -142,7 +142,7 @@ func (c *completionPages) Request(_ context.Context, method string, params map[s
 
 func TestCodexCompletionReplayPagesTurnsAndItemsWithoutCollapsing(t *testing.T) {
 	client := &completionPages{}
-	batch, err := NewCodex("").readCompletions(context.Background(), client, "thread", `"0"`)
+	batch, err := inDaemon(NewCodex("")).readCompletions(context.Background(), client, "thread", `"0"`)
 	if err != nil || len(batch.Events) != 7 || batch.Cursor != `"7"` {
 		t.Fatalf("batch=%+v err=%v", batch, err)
 	}
@@ -156,13 +156,13 @@ func TestCodexCompletionReplayPagesTurnsAndItemsWithoutCollapsing(t *testing.T) 
 		fail         bool
 	}{{"missing boundary", `"missing"`, false}, {"partial read", `"0"`, true}} {
 		t.Run(test.name, func(t *testing.T) {
-			batch, err := NewCodex("").readCompletions(context.Background(), &completionPages{fail: test.fail}, "thread", test.cursor)
+			batch, err := inDaemon(NewCodex("")).readCompletions(context.Background(), &completionPages{fail: test.fail}, "thread", test.cursor)
 			if err == nil || batch.Cursor != "" || len(batch.Events) != 0 {
 				t.Fatalf("partial capture accepted: %+v %v", batch, err)
 			}
 		})
 	}
-	baseline, err := NewCodex("").readCompletions(context.Background(), &completionPages{}, "thread", "")
+	baseline, err := inDaemon(NewCodex("")).readCompletions(context.Background(), &completionPages{}, "thread", "")
 	if err != nil || len(baseline.Events) != 0 || !strings.Contains(baseline.Cursor, "7") {
 		t.Fatalf("baseline=%+v err=%v", baseline, err)
 	}

@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	registrypkg "github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -480,6 +481,30 @@ func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 	response := serveDashboardRequest(dashboardRouter(newTestDaemon(t, registry, []surface.Surface{fake})), http.MethodPost, "/api/action", `{"action":"compact","sessionId":"claude"}`)
 	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 1 || !strings.Contains(response.Body.String(), `"evidence":"queued"`) || fake.compactCalls.Load() != 0 {
 		t.Fatalf("status=%d queue=%d body=%s", response.Code, registry.QueueCount(session.ID), response.Body.String())
+	}
+}
+
+func TestASendThatMayNotQueueIsRefusedByABusyTarget(t *testing.T) {
+	_, registry, _, _, _ := daemonFixture(t)
+	session := surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claude", Status: surface.StatusBusy}
+	if err := registry.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	fake := &daemonSurface{
+		kind:         surface.KindClaude,
+		sessions:     map[string]surface.Session{session.ID: session},
+		observations: map[string]*surface.TurnObservation{session.ID: {Status: surface.StatusBusy, ActiveTurnID: "turn"}},
+		rejectBusy:   true,
+		accepted:     true,
+	}
+	router := dashboardRouter(newTestDaemon(t, registry, []surface.Surface{fake}))
+	response := serveDashboardRequest(router, http.MethodPost, "/api/action", `{"action":"send","sessionId":"claude","message":"now or never","noQueue":true}`)
+	if response.Code == http.StatusOK || !strings.Contains(response.Body.String(), delivery.ErrTargetBusy.Error()) || registry.QueueCount(session.ID) != 0 {
+		t.Fatalf("status=%d queue=%d body=%s, want a busy refusal and nothing queued", response.Code, registry.QueueCount(session.ID), response.Body.String())
+	}
+	response = serveDashboardRequest(router, http.MethodPost, "/api/action", `{"action":"send","sessionId":"claude","message":"when it can"}`)
+	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 1 {
+		t.Fatalf("status=%d queue=%d body=%s, want the send queued", response.Code, registry.QueueCount(session.ID), response.Body.String())
 	}
 }
 

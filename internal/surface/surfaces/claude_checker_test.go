@@ -13,7 +13,7 @@ func TestAStartedCheckerRunsInTheHostSandboxAndCannotBeChanged(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	ctx := context.Background()
 	run := uuid.NewString()
 	session, err := c.StartChecker(ctx, surface.CheckerStart{Run: run, Token: "run-secret", Cwd: host.Cwd, Message: "check these words"})

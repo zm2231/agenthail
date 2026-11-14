@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -239,13 +240,19 @@ func TestAReattachThatCannotTakeIsReported(t *testing.T) {
 	}
 }
 
-func TestWithoutCredentialsThreadRequestsPassThrough(t *testing.T) {
+func TestADaemonWithoutCredentialsStartsAThreadBareAndReportsItAndNoOtherProcessStartsOne(t *testing.T) {
 	client := &scriptedThreadClient{}
-	_, err := (&Codex{}).codexThreadRequest(context.Background(), client, codexThreadStart, nil, map[string]any{"cwd": "/w"}, time.Second)
-	if err != nil || bearerOf(client.calls[0].params) != "" {
-		t.Fatalf("err=%v, a call without credentials carried a bearer", err)
+	var unattached []string
+	daemon := &Codex{}
+	daemon.OpensConversations(func(id string, _ error) { unattached = append(unattached, id) })
+	if _, err := daemon.codexThreadRequest(context.Background(), client, codexThreadStart, nil, map[string]any{"cwd": "/w"}, time.Second); err != nil || len(client.calls) != 1 || bearerOf(client.calls[0].params) != "" {
+		t.Fatalf("err=%v calls=%v, want one start without a bearer", err, client.calls)
 	}
-	if _, err := (&Codex{}).codexThreadRequest(context.Background(), client, "thread/read", nil, nil, time.Second); err != nil {
-		t.Fatalf("pass-through refused: %v", err)
+	if len(unattached) != 1 || unattached[0] != "new-thread" {
+		t.Fatalf("unattached=%v, want the new thread reported", unattached)
+	}
+	other := &scriptedThreadClient{}
+	if _, err := (&Codex{}).codexThreadRequest(context.Background(), other, codexThreadStart, nil, map[string]any{"cwd": "/w"}, time.Second); !errors.Is(err, surface.ErrOpenIsTheDaemons) || len(other.calls) != 0 {
+		t.Fatalf("err=%v calls=%v, want the start refused before Codex is asked", err, other.calls)
 	}
 }

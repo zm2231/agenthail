@@ -40,7 +40,7 @@ func TestARealCodexThreadListsItsBackgroundTerminalUntilItExits(t *testing.T) {
 	realManagedCodexWith(t, backgroundShellModel{command: "sleep 6"})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	codex := NewCodex("1")
+	codex := inDaemon(NewCodex("1"))
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

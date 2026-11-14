@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -78,7 +79,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		}
 	}
 	if request.Action == "session-adopt" {
-		return d.doSessionAdopt(ctx, adapter, session, surface.AdoptRequest{StopTerminal: request.StopTerminal})
+		return d.doSessionAdopt(ctx, adapter, session, surface.AdoptRequest{StopTerminal: request.StopTerminal, Wait: time.Duration(request.WaitMS) * time.Millisecond})
 	}
 	if request.Action == "session-fork" || request.Action == "native-queue" || strings.HasPrefix(request.Action, "session-lifecycle-") {
 		return d.doSessionOperation(ctx, adapter, session, request.Action, request.Fork, strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"), strings.TrimSpace(request.SourceSessionID), request.NativeQueue)
@@ -119,7 +120,12 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 			return d.doHostRelay(ctx, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops)
 		}
 		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, PersonName: request.PersonName, Uploads: attached}
-		receipt, actionErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, request.Message, "", options)
+		sender := coordinator.Sender{Service: d.coordinator()}
+		deliver := sender.DeliverWithOptions
+		if request.NoQueue {
+			deliver = sender.DeliverWithoutQueue
+		}
+		receipt, actionErr := deliver(ctx, adapter, session, request.Message, "", options)
 		if actionErr != nil {
 			return actionResult{}, d.sendFailed(http.StatusBadGateway, "bad_gateway", actionErr)
 		}

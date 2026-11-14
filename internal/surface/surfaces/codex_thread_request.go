@@ -37,9 +37,18 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 		defer c.subscriptions.shared(threadID)()
 		return c.resumeFollower(ctx, client, session, params, wait)
 	}
-	credentials := c.mcpCredentials()
+	credentials, err := c.opening()
+	if err != nil {
+		return nil, err
+	}
 	if credentials == nil {
-		return client.Request(ctx, method, params, wait)
+		response, err := client.Request(ctx, method, params, wait)
+		if err == nil {
+			result, _ := response["result"].(map[string]any)
+			thread, _ := result["thread"].(map[string]any)
+			c.openedWithoutMCP(str(thread, "id"), errMCPServerNotRunning)
+		}
+		return response, err
 	}
 	switch method {
 	case codexThreadStart, codexThreadFork:
@@ -102,14 +111,22 @@ func (c *Codex) joinOrResumeThread(ctx context.Context, client codexClient, sess
 }
 
 func (c *Codex) resumeThread(ctx context.Context, client codexClient, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
-	params, err := c.withOverrides(session, params)
+	credentials, err := c.opening()
 	if err != nil {
 		return nil, err
 	}
-	if credentials := c.mcpCredentials(); credentials != nil {
+	params, err = c.withOverrides(session, params)
+	if err != nil {
+		return nil, err
+	}
+	if credentials != nil {
 		return c.resumeWithCredential(ctx, client, credentials, session, params, wait)
 	}
-	return client.Request(ctx, codexThreadResume, params, wait)
+	response, err := client.Request(ctx, codexThreadResume, params, wait)
+	if err == nil {
+		c.openedWithoutMCP(session.ID, errMCPServerNotRunning)
+	}
+	return response, err
 }
 
 func (c *Codex) withOverrides(session *surface.Session, params map[string]any) (map[string]any, error) {

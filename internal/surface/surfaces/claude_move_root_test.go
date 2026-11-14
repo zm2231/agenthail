@@ -30,7 +30,7 @@ func newRootMoveFixture(t *testing.T) rootMoveFixture {
 	host.Start(t)
 	second := filepath.Join(host.Home, ".work", ".claude")
 	configureClaudeRoots(t, host.Home, second)
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	session, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
 	if err != nil {
 		t.Fatal(err)

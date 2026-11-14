@@ -26,7 +26,7 @@ func TestANewCodexThreadIsRecordedBeforeItsFirstTurnStarts(t *testing.T) {
 		sentBeforeReady = bridge.Methods()
 		return nil
 	})
-	if _, _, err := NewCodex(bridge.URL).StartSession(ctx, surface.SessionStartOptions{Message: "Build the release", Cwd: "/tmp/project"}); err != nil {
+	if _, _, err := inDaemon(NewCodex(bridge.URL)).StartSession(ctx, surface.SessionStartOptions{Message: "Build the release", Cwd: "/tmp/project"}); err != nil {
 		t.Fatal(err)
 	}
 	if readyID != "desktop-new" || !slices.Contains(sentBeforeReady, "thread/start") || slices.Contains(sentBeforeReady, "turn/start") {

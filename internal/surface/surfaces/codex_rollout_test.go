@@ -122,7 +122,7 @@ func TestAContinuationReportsTheItemsItRevertedFromTheTrustedRollout(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	codex := NewCodexIn(home, "http://127.0.0.1:1")
+	codex := inDaemon(NewCodexIn(home, "http://127.0.0.1:1"))
 	session := surface.Session{ID: continuedThread, Surface: surface.KindCodex, Transcript: continued}
 	dropped, continues, err := codex.TranscriptContinuation(context.Background(), &session, "", transcriptFileIdentity(info))
 	if err != nil || !continues {
@@ -151,7 +151,7 @@ func TestACompressedTrustedRolloutIsMatchedByItsPath(t *testing.T) {
 	if err := os.Remove(original); err != nil {
 		t.Fatal(err)
 	}
-	codex := NewCodexIn(home, "http://127.0.0.1:1")
+	codex := inDaemon(NewCodexIn(home, "http://127.0.0.1:1"))
 	session := surface.Session{ID: continuedThread, Surface: surface.KindCodex, Transcript: continued}
 	dropped, continues, err := codex.TranscriptContinuation(context.Background(), &session, original, "0:0")
 	if err != nil || !continues {
@@ -179,7 +179,7 @@ func TestARolloutThatDoesNotContinueTheTrustedOneIsNotAContinuation(t *testing.T
 	if err := os.WriteFile(unrelated, []byte(fmt.Sprintf(`{"type":"session_meta","payload":{"id":%q,"history_mode":"paginated"}}`, continuedThread)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	codex := NewCodexIn(home, "http://127.0.0.1:1")
+	codex := inDaemon(NewCodexIn(home, "http://127.0.0.1:1"))
 	session := surface.Session{ID: continuedThread, Surface: surface.KindCodex, Transcript: unrelated}
 	if _, continues, err := codex.TranscriptContinuation(context.Background(), &session, original, transcriptFileIdentity(info)); err != nil || continues {
 		t.Fatalf("continues=%v err=%v, want a rollout without history_base rejected", continues, err)
@@ -219,7 +219,7 @@ func TestTwoRevertsReadAsOneHistoryAndReportOnlyTheTrustedRolloutsRevertedTurn(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	codex := NewCodexIn(home, "http://127.0.0.1:1")
+	codex := inDaemon(NewCodexIn(home, "http://127.0.0.1:1"))
 	session := surface.Session{ID: continuedThread, Surface: surface.KindCodex, Transcript: latest}
 	dropped, continues, err := codex.TranscriptContinuation(context.Background(), &session, "", transcriptFileIdentity(info))
 	if err != nil || !continues {

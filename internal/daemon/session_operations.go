@@ -112,7 +112,7 @@ func (d *Daemon) doSessionAdopt(ctx context.Context, adapter surface.Surface, se
 	if !ok {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "session_adopt_unsupported", fmt.Sprintf("%s sessions cannot be opened in Agenthail", session.Surface))
 	}
-	ctx, cancel := context.WithTimeout(ctx, sessionAdoptTimeout)
+	ctx, cancel := context.WithTimeout(ctx, sessionAdoptTimeout+request.Wait)
 	defer cancel()
 	result, err := adopter.AdoptSession(ctx, session, request)
 	if err != nil {

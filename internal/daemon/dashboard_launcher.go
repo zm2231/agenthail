@@ -222,6 +222,8 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 			return actionResult{}, d.unstartedSession(request.Message, fmt.Errorf("issue the session's MCP credential: %w", err))
 		}
 		launchRequest.MCP = mcp
+	} else {
+		d.log.Printf("mcp: a %s %s launch in %s starts without the agenthail MCP server: the daemon runs none", request.Launcher, launchRequest.Surface, cwd)
 	}
 	var readyErr error
 	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {

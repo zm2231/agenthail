@@ -100,7 +100,11 @@ func (c *daemonMCPCredentials) Rotate(sessionID string) (string, error) {
 }
 
 func (c *daemonMCPCredentials) Unattached(sessionID string, err error) {
-	c.d.log.Printf("mcp: %s has no agenthail MCP server: %s", c.d.resolveDisplay(sessionID), err)
+	c.d.openedWithoutMCP(sessionID, err)
+}
+
+func (d *Daemon) openedWithoutMCP(sessionID string, err error) {
+	d.log.Printf("mcp: %s has no agenthail MCP server: %s", d.resolveDisplay(sessionID), err)
 }
 
 func (d *Daemon) attachMCPCredentials(listen string) {

@@ -19,7 +19,7 @@ func TestAHostedClaudeSessionReportsTheWindowClaudeRunsItsModelWith(t *testing.T
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	ctx := context.Background()
 	session, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
 	if err != nil {
@@ -39,7 +39,7 @@ func TestAHostedClaudeSessionReportsTheWindowClaudeRunsItsModelWith(t *testing.T
 
 	terminal := *session
 	terminal.RuntimeKind = surface.RuntimeClaudeCLI
-	if usage, err := NewClaude(nil, host.Home).ContextUsage(ctx, &terminal); err != nil || usage == nil || usage.ContextWindow != 0 || usage.ContextWindowSource != ClaudeContextWindowSourceUnknown {
+	if usage, err := inDaemon(NewClaude(nil, host.Home)).ContextUsage(ctx, &terminal); err != nil || usage == nil || usage.ContextWindow != 0 || usage.ContextWindowSource != ClaudeContextWindowSourceUnknown {
 		t.Fatalf("a session the host does not run took its window: usage=%+v err=%v", usage, err)
 	}
 
@@ -87,7 +87,7 @@ func TestAHostThatDoesNotAnswerDelaysOnlyTheSessionsItRuns(t *testing.T) {
 		writeTestTranscript(t, path, `{"type":"assistant","timestamp":"2026-10-20T10:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":990,"output_tokens":5}}}`)
 		return path
 	}
-	c := NewClaude(nil, home)
+	c := inDaemon(NewClaude(nil, home))
 	hosted := &surface.Session{ID: "hosted", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: os.Getpid(), Transcript: transcript("hosted")}
 	terminal := &surface.Session{ID: "terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: transcript("terminal")}
 	hostedDone := make(chan struct{})
@@ -124,7 +124,7 @@ func TestAHostedClaudeSessionReportsWhenClaudeCompactsIt(t *testing.T) {
 	if _, err := surface.WriteClaudeCompactSettings(host.Home, surface.ClaudeConfigDir(host.Home), surface.ClaudeCompactChange{Window: "300000"}); err != nil {
 		t.Fatal(err)
 	}
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	ctx := context.Background()
 	session, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestAHostedClaudeSessionReportsWhenClaudeCompactsIt(t *testing.T) {
 	}
 	terminal := *session
 	terminal.RuntimeKind = surface.RuntimeClaudeCLI
-	if usage, err := NewClaude(nil, host.Home).ContextUsage(ctx, &terminal); err != nil || usage == nil || usage.AutoCompact != nil {
+	if usage, err := inDaemon(NewClaude(nil, host.Home)).ContextUsage(ctx, &terminal); err != nil || usage == nil || usage.AutoCompact != nil {
 		t.Fatalf("a session the host does not run reported autocompact: usage=%+v err=%v", usage, err)
 	}
 }

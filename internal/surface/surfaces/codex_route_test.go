@@ -203,7 +203,7 @@ func TestCodexUnknownLoadedStateFailsClosedForWrites(t *testing.T) {
 			var desktop *codextest.Desktop
 			if test.desktop != nil {
 				desktop = startDesktopBridge(t, test.desktop)
-				codex = NewCodex(desktop.URL)
+				codex = inDaemon(NewCodex(desktop.URL))
 			}
 			session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: codexTransportManaged}
 			_, err := codex.Send(context.Background(), session, "hello")

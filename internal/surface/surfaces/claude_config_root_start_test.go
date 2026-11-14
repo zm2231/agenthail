@@ -35,7 +35,7 @@ func TestClaudeHostedCreationRunsUnderTheChosenRoot(t *testing.T) {
 	host.Start(t)
 	second := filepath.Join(host.Home, ".work", ".claude")
 	configureClaudeRoots(t, host.Home, second)
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	ctx := context.Background()
 
 	session, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, ConfigRoot: "work"})
@@ -78,7 +78,7 @@ fi
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
-	session, _, err := NewClaude(nil, home).BackgroundStarter().StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: home, ConfigRoot: second})
+	session, _, err := inDaemon(NewClaude(nil, home)).BackgroundStarter().StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: home, ConfigRoot: second})
 	if err != nil || session == nil || session.ID != "real-session-id" {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
@@ -106,7 +106,7 @@ func TestClaudeCreationInAConfiguredRootThatDoesNotExistIsRefused(t *testing.T) 
 	if err := os.RemoveAll(gone); err != nil {
 		t.Fatal(err)
 	}
-	c := NewClaude(nil, host.Home)
+	c := inDaemon(NewClaude(nil, host.Home))
 	session, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, ConfigRoot: "gone"})
 	var missing surface.ClaudeRootMissingError
 	if !errors.As(err, &missing) || !surface.IsDeliveryTerminal(err) {

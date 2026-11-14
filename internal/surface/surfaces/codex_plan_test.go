@@ -26,7 +26,7 @@ func TestCodexPlanReadsUpdatePlanFromCodeModeAndFunctionCalls(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"type":"session_meta","payload":{}}`+"\n"+first), 0600); err != nil {
 		t.Fatal(err)
 	}
-	codex := NewCodex("")
+	codex := inDaemon(NewCodex(""))
 	read := func() *surface.Plan {
 		info, err := os.Stat(path)
 		if err != nil {
@@ -69,7 +69,7 @@ func TestJSLiteralJSONAcceptsOnlyPlainLiterals(t *testing.T) {
 
 func TestCodexPlanForgetsRolloutsNoListingReads(t *testing.T) {
 	dir := t.TempDir()
-	codex := NewCodex("")
+	codex := inDaemon(NewCodex(""))
 	paths := []string{filepath.Join(dir, "kept.jsonl"), filepath.Join(dir, "gone.jsonl")}
 	for _, path := range paths {
 		if err := os.WriteFile(path, []byte(codexExecLine(t, `await tools.update_plan({plan:[{step:"Ship",status:"pending"}]});`)), 0600); err != nil {
