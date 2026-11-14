@@ -28,7 +28,7 @@ struct TurnOptionsTest {
         let body = #"{"action":"send","sessionId":"S","message":"queued before the upgrade","author":"person"}"#
         let saved = #"{"drafts":{},"stashes":{},"sends":[{"id":"6F1B8B2E-3B0B-4C38-9E3E-0F6E5D1C2A10","sessionID":"S","message":"queued before the upgrade","idempotencyKey":"k-saved","uploaded":[],"wire":{"body":"\#(Data(body.utf8).base64EncodedString())","key":"k-saved"},"hadAttachments":false,"sentAt":784000000,"busyDelivery":null,"files":[]}],"attachmentNames":{}}"#
         let decoded = try JSONDecoder().decode(ComposerStore.Saved.self, from: Data(saved.utf8))
-        let resumed = decoded.sends.first?.resumable
+        let resumed = decoded.sends.first?.resumable(unspool: { _ in nil })
         check(resumed?.idempotencyKey == "k-saved" && resumed?.wire?.key == "k-saved", "a send saved by the current build keeps its key")
         check(resumed?.wire?.body == Data(body.utf8), "a send saved by the current build replays the exact bytes it first sent")
         check(resumed?.turnOptions == nil, "a send saved without turn options resumes without any")
@@ -41,8 +41,8 @@ struct TurnOptionsTest {
         check(object?["serviceTier"] as? String == "fast", "the service tier is sent")
         check((object?["outputSchema"] as? [String: Any])?["type"] as? String == "object", "the schema is sent as a JSON object")
         let send = PendingSend(sessionID: "S", message: "hi", attachments: [], turnOptions: options)
-        let record = try JSONDecoder().decode(ComposerStore.Saved.Send.self, from: JSONEncoder().encode(ComposerStore.Saved.Send(send)))
-        check(record.turnOptions == options && record.resumable?.turnOptions == options, "turn options survive a save and a relaunch")
+        let record = try JSONDecoder().decode(ComposerStore.Saved.Send.self, from: JSONEncoder().encode(ComposerStore.Saved.Send(send, spool: { _ in nil })))
+        check(record.turnOptions == options && record.resumable(unspool: { _ in nil })?.turnOptions == options, "turn options survive a save and a relaunch")
         check(PendingSend(sessionID: "S", message: "hi", attachments: [], turnOptions: MessageTurnOptions()).turnOptions == nil, "empty turn options aren't kept")
     }
 

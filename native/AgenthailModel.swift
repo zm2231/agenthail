@@ -975,8 +975,8 @@ final class AgenthailModel {
         }
         var notices: [String] = []
         if loaded.unreadable { notices.append("Your saved drafts couldn't be read. The file was set aside.") }
-        if let lost = DraftArchive.restore(loaded.saved, into: draft(for:)) { notices.append(lost) }
-        for send in outbox.restore(loaded.saved.sends) {
+        if let lost = DraftArchive.restore(loaded.saved, unspool: composerStore.unspool, into: draft(for:)) { notices.append(lost) }
+        for send in outbox.restore(loaded.saved.sends, unspool: composerStore.unspool) {
             draft(for: send.sessionID).restore(send.message)
             notices.append("Not sent: Agenthail closed before its attachment uploaded. The text is back in the composer; add the attachment again.")
         }
@@ -998,7 +998,8 @@ final class AgenthailModel {
     func saveComposer() {
         composerSave?.cancel()
         composerSave = nil
-        composerStore?.save(DraftArchive.saved(drafts, sends: outbox.saved))
+        guard let composerStore else { return }
+        composerStore.save(DraftArchive.saved(drafts, sends: outbox.saved(spool: composerStore.spool), spool: composerStore.spool))
     }
 
     private(set) var modelCatalog: [String: [ModelOption]] = [:]

@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 // The bytes travel to the daemon that owns the session; a local path would
 // mean nothing to a session on a paired host.
 struct ComposerAttachment: Identifiable, Hashable, Sendable {
-    let id = UUID()
+    let id: UUID
     let name: String
     let data: Data
     let mediaType: String
@@ -15,14 +15,20 @@ struct ComposerAttachment: Identifiable, Hashable, Sendable {
     var byteCount: Int64 { uploaded?.bytes ?? Int64(data.count) }
 
     // An attachment taken back from the queue is still on its computer, so it has no bytes here.
-    init(uploaded: UploadedAttachment) {
+    init(uploaded: UploadedAttachment) { self.init(id: UUID(), uploaded: uploaded) }
+
+    init(name: String, data: Data, mediaType: String) { self.init(id: UUID(), name: name, data: data, mediaType: mediaType) }
+
+    init(id: UUID, uploaded: UploadedAttachment) {
+        self.id = id
         name = uploaded.name
         data = Data()
         mediaType = uploaded.mediaType
         self.uploaded = uploaded
     }
 
-    init(name: String, data: Data, mediaType: String) {
+    init(id: UUID, name: String, data: Data, mediaType: String) {
+        self.id = id
         self.name = name
         self.data = data
         self.mediaType = mediaType

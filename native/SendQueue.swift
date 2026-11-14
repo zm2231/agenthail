@@ -59,6 +59,24 @@ final class SendQueue {
         changed?()
     }
 
+    // Each upload is recorded as it lands, so a relaunch uploads only what is left.
+    func upload(_ send: PendingSend, with upload: (ComposerAttachment) async throws -> UploadedAttachment) async throws -> [UploadedAttachment] {
+        let current = pending.values.joined().first { $0.id == send.id } ?? send
+        var stored: [UploadedAttachment] = []
+        for (index, attachment) in current.attachments.enumerated() {
+            if let uploaded = attachment.uploaded {
+                stored.append(uploaded)
+                continue
+            }
+            let uploaded = try await upload(attachment)
+            update(send) { if $0.attachments.indices.contains(index) { $0.attachments[index].uploaded = uploaded } }
+            changed?()
+            stored.append(uploaded)
+        }
+        setUploaded(stored, for: send)
+        return stored
+    }
+
     func setWire(_ wire: ActionWire, for send: PendingSend) {
         update(send) { $0.wire = wire }
         changed?()

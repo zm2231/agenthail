@@ -78,6 +78,22 @@ struct OutboxTest {
         check(await wait { !relaunchStore.load().saved.sends.contains { $0.sessionID == "T" } }, "a put-back send leaves the saved file")
         try? await Task.sleep(for: .milliseconds(300))
         check(StubDaemon.sends(of: "overdue").isEmpty, "Put back sends nothing")
+
+        let spoolStore = ComposerStore(file: folder.appendingPathComponent("spooled.json"))
+        let pending = PendingSend(sessionID: "P", message: "spooled", attachments: [ComposerAttachment(name: "spooled.txt", data: Data("kept".utf8), mediaType: "text/plain")], idempotencyKey: "k-spooled")
+        var spooledSave = ComposerStore.Saved(sends: [ComposerStore.Saved.Send(pending, spool: spoolStore.spool)])
+        spooledSave.spooledDrafts = ["D": [spoolStore.spool(ComposerAttachment(name: "draft.txt", data: Data("draft".utf8), mediaType: "text/plain"))!]]
+        spoolStore.save(spooledSave)
+        StubDaemon.reset { _, _ in .answer }
+        let respooled = AgenthailModel(connecting: false, api: api, composerStore: spoolStore)
+        check(respooled.draft(for: "D").attachments.map(\.data) == [Data("draft".utf8)], "a draft's attachment comes back with its bytes after a relaunch")
+        check(await wait(seconds: 3) { respooled.localSends["P"]?.first?.status != nil }, "a send killed before its upload finished is delivered after a relaunch: \(String(describing: respooled.localSends["P"]))")
+        let spooledSends = StubDaemon.sends(of: "spooled")
+        let spooledBody = spooledSends.first.flatMap { try? JSONSerialization.jsonObject(with: $0.body) as? [String: Any] }
+        check(spooledSends.count == 1 && spooledSends.first?.key == "k-spooled" && spooledBody?["attachments"] as? [String] == ["up-spooled"], "it goes once, under its saved key, with its file uploaded from the spool: \(String(describing: spooledBody))")
+        respooled.draft(for: "D").attachments = []
+        respooled.saveComposer()
+        check(((try? FileManager.default.contentsOfDirectory(atPath: spoolStore.spoolFolder.path)) ?? []).isEmpty, "a delivered message's and a removed draft attachment's bytes leave the spool")
         print("ok")
     }
 
@@ -136,6 +152,10 @@ final class StubDaemon: URLProtocol {
                 body.append(buffer, count: count)
             }
             stream.close()
+        }
+        if request.url?.path == "/api/v1/uploads" {
+            reply(200, #"{"upload":{"id":"up-spooled","name":"spooled.txt","mediaType":"text/plain","bytes":4}}"#)
+            return
         }
         let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
         guard request.url?.path == "/api/v1/actions", let message = object["message"] as? String else {

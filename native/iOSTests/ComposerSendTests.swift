@@ -365,6 +365,143 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertEqual(model.composer, "With a file")
     }
 
+    func testASendKilledWhileItsAttachmentUploadsResumesWithItsBytesAndKey() async throws {
+        let store = temporaryStore()
+        ComposerSendProtocol.state.scriptUploads([.offline, .offline, .offline])
+        var first: AgenthailIOSModel? = try makeModel(store: store).model
+        let session = try makeSession()
+        first?.composerAttachments = [ComposerAttachment(name: "notes.txt", data: Data("hello".utf8), mediaType: "text/plain")]
+        first?.composer = "With a file"
+        first?.send(to: session)
+        try await waitUntil { ComposerSendProtocol.state.uploads.count >= 1 }
+        first = nil
+        let saved = try XCTUnwrap(store.load().saved.sends.first)
+        let record = try XCTUnwrap(saved.attachments?.first)
+        XCTAssertEqual(store.unspool(record)?.data, Data("hello".utf8), "the attachment's bytes outlive the app")
+
+        ComposerSendProtocol.state.reset()
+        ComposerSendProtocol.state.scriptUploads([.stored("up-a")])
+        ComposerSendProtocol.state.script([.answer(200, sentReceipt)])
+        let second = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        second.selectedSessionID = session.id
+        try await waitUntil(seconds: 5) { second.pendingSends.isEmpty && ComposerSendProtocol.state.attempts.count == 1 }
+        XCTAssertEqual(ComposerSendProtocol.state.uploads, ["notes.txt"])
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.first?.key, saved.idempotencyKey)
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.first?.body["attachments"] as? [String], ["up-a"])
+        XCTAssertNil(second.failedSends[session.id])
+        XCTAssertEqual(try spooledFiles(store), [], "a sent message's attachment leaves the spool")
+    }
+
+    func testAKilledSendUploadsOnlyTheAttachmentsItHadNotUploaded() async throws {
+        let store = temporaryStore()
+        ComposerSendProtocol.state.scriptUploads([.stored("up-1"), .offline, .offline, .offline])
+        var first: AgenthailIOSModel? = try makeModel(store: store).model
+        let session = try makeSession()
+        first?.composerAttachments = [ComposerAttachment(name: "one.txt", data: Data("one".utf8), mediaType: "text/plain"), ComposerAttachment(name: "two.txt", data: Data("two".utf8), mediaType: "text/plain")]
+        first?.composer = "Two files"
+        first?.send(to: session)
+        try await waitUntil { ComposerSendProtocol.state.uploads.count >= 2 }
+        first = nil
+
+        ComposerSendProtocol.state.reset()
+        ComposerSendProtocol.state.scriptUploads([.stored("up-2")])
+        ComposerSendProtocol.state.script([.answer(200, sentReceipt)])
+        let second = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        try await waitUntil(seconds: 5) { second.pendingSends.isEmpty && ComposerSendProtocol.state.attempts.count == 1 }
+        XCTAssertEqual(ComposerSendProtocol.state.uploads, ["two.txt"], "an attachment already on the computer is not uploaded again")
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.first?.body["attachments"] as? [String], ["up-1", "up-2"])
+    }
+
+    func testASendKilledAfterItWentOutIsResentOnceAsTheSameRequest() async throws {
+        let store = temporaryStore()
+        ComposerSendProtocol.state.scriptUploads([.stored("up-a")])
+        ComposerSendProtocol.state.script([.lostResponse, .offline, .offline, .offline])
+        var first: AgenthailIOSModel? = try makeModel(store: store).model
+        let session = try makeSession()
+        first?.composerAttachments = [ComposerAttachment(name: "notes.txt", data: Data("hello".utf8), mediaType: "text/plain")]
+        first?.composer = "Went out"
+        first?.send(to: session)
+        try await waitUntil { ComposerSendProtocol.state.attempts.count >= 1 }
+        let raw = try XCTUnwrap(ComposerSendProtocol.state.attempts.first?.raw)
+        first = nil
+
+        ComposerSendProtocol.state.reset()
+        ComposerSendProtocol.state.script([.answer(200, sentReceipt)])
+        let second = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        try await waitUntil(seconds: 5) { second.pendingSends.isEmpty && ComposerSendProtocol.state.attempts.count == 1 }
+        XCTAssertEqual(ComposerSendProtocol.state.uploads, [], "an uploaded attachment is not uploaded again")
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.first?.raw, raw, "the resent message is the same request, so the computer keeps one")
+    }
+
+    func testAKilledSendWhoseSpooledAttachmentIsMissingComesBackAsADraft() async throws {
+        let store = temporaryStore()
+        let missing = SpooledAttachment(id: UUID(), name: "gone.txt", mediaType: "text/plain")
+        store.save(.init(sends: [.init(id: UUID(), sessionID: "computer::codex-flow", message: "With a file", idempotencyKey: "k", uploaded: nil, wire: nil, hadAttachments: true, attachments: [missing])]))
+        let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        XCTAssertTrue(model.pendingSends.isEmpty)
+        XCTAssertNotNil(model.failedSends["computer::codex-flow"])
+        await model.loadSession("computer::codex-flow")
+        XCTAssertEqual(model.composer, "With a file")
+    }
+
+    func testADraftAttachmentSurvivesTheAppBeingKilledAndLeavesTheSpoolWhenRemoved() async throws {
+        let store = temporaryStore()
+        let (model, session) = try makeModel(store: store)
+        model.composerAttachments = [ComposerAttachment(name: "draft.txt", data: Data("draft".utf8), mediaType: "text/plain")]
+        model.saveComposerState()
+
+        let reopened = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        await reopened.loadSession(session.id)
+        XCTAssertEqual(reopened.composerAttachments.map(\.data), [Data("draft".utf8)])
+        XCTAssertNil(reopened.attachmentProblem)
+        reopened.composerAttachments = []
+        reopened.saveComposerState()
+        XCTAssertEqual(try spooledFiles(store), [])
+    }
+
+    func testFilesNoSavedMessageOrDraftNamesAreRemoved() async throws {
+        let store = temporaryStore()
+        try FileManager.default.createDirectory(at: store.spoolFolder, withIntermediateDirectories: true)
+        try Data("left over".utf8).write(to: store.spoolFolder.appendingPathComponent(UUID().uuidString))
+        let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        model.saveComposerState()
+        XCTAssertEqual(try spooledFiles(store), [])
+    }
+
+    func testASendStillGoesWhenItsAttachmentCannotBeKeptOnDisk() async throws {
+        var store = temporaryStore()
+        store.writeSpool = { _, _ in throw CocoaError(.fileWriteOutOfSpace) }
+        ComposerSendProtocol.state.scriptUploads([.stored("up-a")])
+        ComposerSendProtocol.state.script([.answer(200, sentReceipt)])
+        let (model, session) = try makeModel(store: store)
+        model.composerAttachments = [ComposerAttachment(name: "notes.txt", data: Data("hello".utf8), mediaType: "text/plain")]
+        model.composer = "Disk full"
+        model.send(to: session)
+        try await waitUntil(seconds: 5) { model.pendingSends.isEmpty && ComposerSendProtocol.state.attempts.count == 1 }
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.first?.body["attachments"] as? [String], ["up-a"])
+    }
+
+    func testASendWhoseAttachmentCouldNotBeKeptComesBackAsADraftAfterAKill() async throws {
+        var store = temporaryStore()
+        store.writeSpool = { _, _ in throw CocoaError(.fileWriteOutOfSpace) }
+        ComposerSendProtocol.state.scriptUploads([.offline, .offline, .offline])
+        var first: AgenthailIOSModel? = try makeModel(store: store).model
+        let session = try makeSession()
+        first?.composerAttachments = [ComposerAttachment(name: "notes.txt", data: Data("hello".utf8), mediaType: "text/plain")]
+        first?.composer = "Disk full"
+        first?.send(to: session)
+        try await waitUntil { ComposerSendProtocol.state.uploads.count >= 1 }
+        first = nil
+
+        ComposerSendProtocol.state.reset()
+        let second = AgenthailIOSModel(api: makeAPI(), composerStore: ComposerStore(file: store.file))
+        XCTAssertTrue(second.pendingSends.isEmpty)
+        XCTAssertNotNil(second.failedSends[session.id])
+        await second.loadSession(session.id)
+        XCTAssertEqual(second.composer, "Disk full")
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.count, 0)
+    }
+
     func testARekeyWhileWaitingRetriesTheSameRequest() async throws {
         ComposerSendProtocol.state.script([.lostResponse, .answer(200, sentReceipt)])
         let (model, session) = try makeModel()
@@ -582,8 +719,9 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertNil(model.operationError)
     }
 
-    func testAttachmentsLostWithTheAppAreNamedOnReturn() async throws {
-        let store = temporaryStore()
+    func testAnAttachmentThatCouldNotBeKeptIsNamedOnReturn() async throws {
+        var store = temporaryStore()
+        store.writeSpool = { _, _ in throw CocoaError(.fileWriteOutOfSpace) }
         let (model, session) = try makeModel(store: store)
         model.composer = "With a file"
         model.composerAttachments = [ComposerAttachment(name: "plan.pdf", data: Data([1]), mediaType: "application/pdf")]
@@ -596,18 +734,22 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertTrue(reopened.attachmentProblem?.contains("plan.pdf") == true, "\(String(describing: reopened.attachmentProblem))")
     }
 
-    func testAStashedAttachmentLostWithTheAppIsNamedOnReturn() async throws {
-        let store = temporaryStore()
-        let (model, session) = try makeModel(store: store)
-        model.composer = "Stashed"
-        model.composerAttachments = [ComposerAttachment(name: "stashed.png", data: Data([1]), mediaType: "image/png")]
-        model.toggleStash()
-        model.saveComposerState()
+    func testAStashedAttachmentSurvivesTheAppOrIsNamedWhenItCouldNotBeKept() async throws {
+        for keeps in [true, false] {
+            var store = temporaryStore()
+            if !keeps { store.writeSpool = { _, _ in throw CocoaError(.fileWriteOutOfSpace) } }
+            let (model, session) = try makeModel(store: store)
+            model.composer = "Stashed"
+            model.composerAttachments = [ComposerAttachment(name: "stashed.png", data: Data([1]), mediaType: "image/png")]
+            model.toggleStash()
+            model.saveComposerState()
 
-        let reopened = AgenthailIOSModel(api: makeAPI(), composerStore: store)
-        XCTAssertEqual(reopened.stashes[session.id]?.text, "Stashed")
-        await reopened.loadSession(session.id)
-        XCTAssertTrue(reopened.attachmentProblem?.contains("stashed.png") == true, "\(String(describing: reopened.attachmentProblem))")
+            let reopened = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+            XCTAssertEqual(reopened.stashes[session.id]?.text, "Stashed")
+            XCTAssertEqual(reopened.stashes[session.id]?.attachments.map(\.data), keeps ? [Data([1])] : [])
+            await reopened.loadSession(session.id)
+            XCTAssertEqual(reopened.attachmentProblem?.contains("stashed.png") == true, !keeps, "\(String(describing: reopened.attachmentProblem))")
+        }
     }
 
     func testAMessageFollowsItsSessionToANewID() async throws {
@@ -830,7 +972,7 @@ final class ComposerSendTests: XCTestCase {
     func testAnOldSavedSendComesBackStoppedAndKeepsItsSentTime() async throws {
         let store = temporaryStore()
         let sent = Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow)
-        store.save(ComposerStore.Saved(sends: [.init(PendingSend(sessionID: "computer::demo", message: "Days old", attachments: [],sentAt: sent))]))
+        store.save(ComposerStore.Saved(sends: [.init(PendingSend(sessionID: "computer::demo", message: "Days old", attachments: [],sentAt: sent), spool: { _ in nil })]))
         XCTAssertEqual(store.load().saved.sends.first?.sentAt?.timeIntervalSince1970 ?? 0, sent.timeIntervalSince1970, accuracy: 0.01)
 
         let before = ComposerSendProtocol.state.attempts.count
@@ -841,7 +983,7 @@ final class ComposerSendTests: XCTestCase {
 
         let older = ComposerStore.Saved.Send(id: UUID(), sessionID: "s", message: "m",idempotencyKey: "k", uploaded: nil, wire: nil, hadAttachments: false)
         let decoded = try JSONDecoder().decode(ComposerStore.Saved.Send.self, from: JSONEncoder().encode(older))
-        XCTAssertEqual(decoded.resumable?.sentAt, .distantPast, "a send saved with no time never arrives late by itself")
+        XCTAssertEqual(decoded.resumable(unspool: { _ in nil })?.sentAt, .distantPast, "a send saved with no time never arrives late by itself")
     }
 
     func testAReleasedQueueStopsRetrying() async throws {
@@ -865,6 +1007,11 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertEqual(SendOutcome.of(AgenthailAPIError.invalidResponse), .unconfirmed)
         XCTAssertEqual(SendOutcome.of(AgenthailAPIError.request(409, "ended")), .refused("ended"))
         XCTAssertEqual(SendOutcome.of(AgenthailAPIError.request(502, "down")), .refused("down"))
+    }
+
+    private func spooledFiles(_ store: ComposerStore) throws -> [String] {
+        guard FileManager.default.fileExists(atPath: store.spoolFolder.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(atPath: store.spoolFolder.path)
     }
 
     private func temporaryStore() -> ComposerStore {
@@ -922,6 +1069,11 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
         case offline
     }
 
+    enum UploadStep {
+        case stored(String)
+        case offline
+    }
+
     struct Attempt {
         let key: String?
         let raw: Data
@@ -932,11 +1084,22 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
         private let lock = NSLock()
         private var steps: [Step] = []
         private var recorded: [Attempt] = []
+        private var uploadSteps: [UploadStep] = []
+        private var uploadNames: [String] = []
 
         var attempts: [Attempt] { lock.withLock { recorded } }
+        var uploads: [String] { lock.withLock { uploadNames } }
 
-        func reset() { lock.withLock { steps = []; recorded = [] } }
+        func reset() { lock.withLock { steps = []; recorded = []; uploadSteps = []; uploadNames = [] } }
         func script(_ steps: [Step]) { lock.withLock { self.steps = steps } }
+        func scriptUploads(_ steps: [UploadStep]) { lock.withLock { uploadSteps = steps } }
+
+        func nextUpload(_ name: String) -> UploadStep {
+            lock.withLock {
+                uploadNames.append(name)
+                return uploadSteps.isEmpty ? .offline : uploadSteps.removeFirst()
+            }
+        }
 
         func next(_ attempt: Attempt) -> Step {
             lock.withLock {
@@ -955,10 +1118,19 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
     override func startLoading() { served(answer) }
 
     private func answer() {
+        if request.url?.path == "/api/v1/uploads" { return answerUpload() }
         guard request.url?.path == "/api/v1/actions" else { return respond(200, "{}") }
         switch Self.state.next(Attempt(key: request.value(forHTTPHeaderField: "Idempotency-Key"), raw: requestBody() ?? Data())) {
         case .answer(let status, let text): respond(status, text)
         case .lostResponse: client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+        case .offline: client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+        }
+    }
+
+    private func answerUpload() {
+        let name = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "name" }?.value ?? ""
+        switch Self.state.nextUpload(name) {
+        case .stored(let id): respond(200, #"{"upload":{"id":"\#(id)","name":"\#(name)","mediaType":"text/plain","bytes":5}}"#)
         case .offline: client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
         }
     }

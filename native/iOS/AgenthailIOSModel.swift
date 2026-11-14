@@ -1907,8 +1907,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             let (api, route) = try resolve(send.sessionID)
             var uploaded = send.uploaded
             if uploaded == nil {
-                let stored = try await api.upload(send.attachments, sessionID: route.sessionID)
-                sendQueue.setUploaded(stored, for: send)
+                let stored = try await sendQueue.upload(send) { try await api.upload($0, sessionID: route.sessionID) }
                 uploaded = stored.map(\.id)
             }
             let wire = try send.wire ?? api.instructionWire(sessionID: route.sessionID, message: send.message, author: "person", attachments: uploaded ?? [], idempotencyKey: send.idempotencyKey)
@@ -2095,26 +2094,39 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                 addToDraft(text, for: session)
             }
         }
-        for (session, uploads) in saved.uploadedAttachments ?? [:] {
-            let restored = uploads.map(ComposerAttachment.init(uploaded:))
+        func attach(_ restored: [ComposerAttachment], to session: String) {
             if session == selectedSessionID {
                 composerAttachments = ComposerAttachments.adding(restored, to: composerAttachments).attachments
             } else {
                 attachmentDrafts[session] = ComposerAttachments.adding(restored, to: attachmentDrafts[session] ?? []).attachments
             }
         }
-        for (session, uploads) in saved.stashedUploads ?? [:] {
-            let restored = uploads.map(ComposerAttachment.init(uploaded:))
+        func addToStash(_ restored: [ComposerAttachment], for session: String) {
             if var stash = stashes[session] {
                 stash.attachments = ComposerAttachments.adding(restored, to: stash.attachments).attachments
                 stashes[session] = stash
             } else {
-                attachmentDrafts[session] = ComposerAttachments.adding(restored, to: attachmentDrafts[session] ?? []).attachments
+                attach(restored, to: session)
             }
         }
-        lostAttachments.merge(saved.attachmentNames) { $0 + $1 }
-        sendQueue.restore(saved.sends.compactMap(\.resumable))
-        for record in saved.sends where record.resumable == nil {
+        let unspool: (SpooledAttachment) -> ComposerAttachment? = { [composerStore] in composerStore?.unspool($0) }
+        var lost = saved.attachmentNames
+        func unspooled(_ records: [SpooledAttachment], for session: String) -> [ComposerAttachment] {
+            records.compactMap { record in
+                if let attachment = unspool(record) { return attachment }
+                lost[session, default: []].append(record.name)
+                return nil
+            }
+        }
+        for (session, uploads) in saved.uploadedAttachments ?? [:] { attach(uploads.map(ComposerAttachment.init(uploaded:)), to: session) }
+        for (session, records) in saved.spooledDrafts ?? [:] { attach(unspooled(records, for: session), to: session) }
+        for (session, uploads) in saved.stashedUploads ?? [:] { addToStash(uploads.map(ComposerAttachment.init(uploaded:)), for: session) }
+        for (session, records) in saved.spooledStashes ?? [:] { addToStash(unspooled(records, for: session), for: session) }
+        lostAttachments.merge(lost) { $0 + $1 }
+        let resumable = saved.sends.compactMap { $0.resumable(unspool: unspool) }
+        let resumed = Set(resumable.map(\.id))
+        sendQueue.restore(resumable)
+        for record in saved.sends where !resumed.contains(record.id) {
             addToDraft(record.message, for: record.sessionID)
             failedSends[record.sessionID] = "Not sent: the app closed before its attachment uploaded. Add it again."
         }
@@ -2133,27 +2145,27 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         composerSave?.cancel()
         composerSave = nil
         guard let composerStore else { return }
-        var saved = ComposerStore.Saved(drafts: drafts, stashes: stashes.mapValues(\.text), sends: sendQueue.pending.values.flatMap { $0 }.map(ComposerStore.Saved.Send.init))
+        var saved = ComposerStore.Saved(drafts: drafts, stashes: stashes.mapValues(\.text), sends: sendQueue.pending.values.flatMap { $0 }.map { ComposerStore.Saved.Send($0, spool: composerStore.spool) })
         if let selectedSessionID { saved.drafts[selectedSessionID] = composer }
         saved.drafts = saved.drafts.filter { !$0.value.isEmpty }
-        saved.attachmentNames = attachmentNamesToSave()
-        var uploaded = attachmentDrafts.filter { $0.key != selectedSessionID }
-        if let selectedSessionID { uploaded[selectedSessionID] = composerAttachments }
-        saved.uploadedAttachments = uploaded.mapValues { $0.compactMap(\.uploaded) }.filter { !$0.value.isEmpty }
-        saved.stashedUploads = stashes.mapValues { $0.attachments.compactMap(\.uploaded) }.filter { !$0.value.isEmpty }
-        composerStore.save(saved)
-    }
-
-    private func attachmentNamesToSave() -> [String: [String]] {
         var names = lostAttachments
-        func add(_ attachments: [ComposerAttachment], for session: String) {
-            let lost = attachments.filter { $0.uploaded == nil }
-            if !lost.isEmpty { names[session, default: []].append(contentsOf: lost.map(\.name)) }
+        func spooled(_ attachments: [ComposerAttachment], for session: String) -> [SpooledAttachment] {
+            attachments.filter { $0.uploaded == nil }.compactMap { attachment in
+                if let record = composerStore.spool(attachment) { return record }
+                names[session, default: []].append(attachment.name)
+                return nil
+            }
         }
-        for (session, attachments) in attachmentDrafts where session != selectedSessionID { add(attachments, for: session) }
-        for (session, stash) in stashes { add(stash.attachments, for: session) }
-        if let selectedSessionID { add(composerAttachments, for: selectedSessionID) }
-        return names
+        var drafted = attachmentDrafts.filter { $0.key != selectedSessionID }
+        if let selectedSessionID { drafted[selectedSessionID] = composerAttachments }
+        saved.uploadedAttachments = drafted.mapValues { $0.compactMap(\.uploaded) }.filter { !$0.value.isEmpty }
+        saved.stashedUploads = stashes.mapValues { $0.attachments.compactMap(\.uploaded) }.filter { !$0.value.isEmpty }
+        let spooledDrafts = drafted.reduce(into: [String: [SpooledAttachment]]()) { $0[$1.key] = spooled($1.value, for: $1.key) }.filter { !$0.value.isEmpty }
+        let spooledStashes = stashes.reduce(into: [String: [SpooledAttachment]]()) { $0[$1.key] = spooled($1.value.attachments, for: $1.key) }.filter { !$0.value.isEmpty }
+        saved.spooledDrafts = spooledDrafts.isEmpty ? nil : spooledDrafts
+        saved.spooledStashes = spooledStashes.isEmpty ? nil : spooledStashes
+        saved.attachmentNames = names
+        composerStore.save(saved)
     }
 
     private func announceLostAttachments(for sessionID: String) {

@@ -18,7 +18,7 @@ struct PendingSend: Identifiable, Equatable {
     let id: UUID
     var sessionID: String
     let message: String
-    let attachments: [ComposerAttachment]
+    var attachments: [ComposerAttachment]
     let idempotencyKey: String
     var uploaded: [String]?
     var files: [UploadedAttachment]?
