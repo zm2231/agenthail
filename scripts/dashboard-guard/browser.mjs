@@ -16,13 +16,22 @@ export async function launch() {
     executablePath,
     userDataDir: profile,
     headless: "shell",
-    protocolTimeout: 120_000,
+    protocolTimeout: 0,
     args: ["--no-first-run", "--no-default-browser-check", "--disable-gpu-compositing", "--force-color-profile=srgb", "--font-render-hinting=none"],
   });
   return {
     browser,
     async close() {
       await browser.close();
+      fs.rmSync(profile, { recursive: true, force: true });
+    },
+    abandon() {
+      const pid = browser.process()?.pid;
+      if (pid) {
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {}
+      }
       fs.rmSync(profile, { recursive: true, force: true });
     },
   };

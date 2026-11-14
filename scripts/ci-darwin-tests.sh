@@ -27,7 +27,7 @@ for ((shard = 0; shard < shards; shard++)); do
 	set -- "$@" "internal/daemon shard $shard" "cd internal/daemon && '$bin' -test.run \"\$(cat '$work/shard-$shard')\" -test.count=1 -test.timeout 25m"
 done
 set -- "$@" "dashboard readability guard" \
-	"cd internal/daemon && AGENTHAIL_BROWSER_GUARD=1 AGENTHAIL_BROWSER_CACHE='${GUARD_CACHE:?}' '$bin' -test.run '^TestDashboardTextIsReadableOverEveryBackground\$' -test.count=1 -test.v"
+	"cd internal/daemon && AGENTHAIL_BROWSER_GUARD=1 AGENTHAIL_BROWSER_CACHE='${GUARD_CACHE:?}' '$bin' -test.run '^TestDashboardTextIsReadableOverEveryBackground\$' -test.count=1 -test.timeout 25m -test.v"
 if [ "${FULL:-}" = true ]; then
 	set -- "$@" "native helper tests" "scripts/test-native-helpers.sh"
 fi

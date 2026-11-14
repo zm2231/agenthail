@@ -65,7 +65,7 @@ struct DesktopWindow: View {
 
     private var contentGaps: Edge.Set {
         var gaps: Edge.Set = []
-        if pane.sidebarDocks { gaps.insert(.leading) }
+        if pane.sidebarShown { gaps.insert(.leading) }
         if pane.inspectorDocks && pane.inspectorVisible && pane.displayedSession != nil { gaps.insert(.trailing) }
         return gaps
     }
@@ -74,10 +74,10 @@ struct DesktopWindow: View {
         // The sidebar collapses to a column of no width rather than through
         // the split view's visibility: hiding and showing a column there
         // resizes the window to keep the conversation's width.
-        let sidebar = pane.sidebarDocks ? DesktopColumns.sidebar : (min: 0, ideal: 0, max: 0)
+        let sidebar = pane.sidebarShown ? DesktopColumns.sidebar : (min: 0, ideal: 0, max: 0)
         NavigationSplitView {
             Group {
-                if pane.sidebarDocks {
+                if pane.sidebarShown {
                     SessionSidebar(model: model, pane: pane, holdsWindowButtons: true)
                         .belowWindowChrome()
                         .ignoresSafeArea(.container, edges: .top)
@@ -88,8 +88,8 @@ struct DesktopWindow: View {
             .toolbar(removing: .sidebarToggle)
             .navigationSplitViewColumnWidth(min: sidebar.min, ideal: sidebar.ideal, max: sidebar.max)
         } detail: {
-            ConversationPane(model: model, pane: pane, gaps: contentGaps, holdsWindowButtons: !pane.sidebarDocks, showsSidebarToggle: !pane.sidebarDocks)
-                .conversationColumn(sidebarDocks: pane.sidebarDocks)
+            ConversationPane(model: model, pane: pane, gaps: contentGaps, holdsWindowButtons: !pane.sidebarShown, showsSidebarToggle: !pane.sidebarShown)
+                .conversationColumn(sidebarDocks: pane.sidebarShown)
                 .opacity(model.isConnected || !model.hasSnapshot ? 1 : 0.6)
                 .hidesSplitDividers()
                 .belowWindowChrome()
@@ -113,7 +113,7 @@ struct DesktopWindow: View {
                 }
         }
         .overlay(alignment: .leading) {
-            if !pane.sidebarDocks && pane.sidebarOverlay {
+            if !pane.sidebarShown && pane.sidebarOverlay {
                 ZStack(alignment: .leading) {
                     Color.black.opacity(0.001)
                         .onTapGesture { pane.closeSidebarOverlay() }
@@ -140,7 +140,7 @@ private struct WindowChromeLayout<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        let tabs = pane.tabsEnabled
+        let tabs = pane.tabsEnabled && !pane.pageFills
         VStack(spacing: 0) {
             content
                 .environment(\.windowChromeTop, tabs ? TitleBarStrip.height : 0)
@@ -157,7 +157,9 @@ private struct WindowChromeLayout<Content: View>: View {
                             .transition(.opacity)
                     }
                 }
-            StatusStrip(model: model, pane: pane, interface: interface)
+            if !pane.pageFills {
+                StatusStrip(model: model, pane: pane, interface: interface)
+            }
         }
     }
 }
@@ -668,6 +670,13 @@ struct ConversationPane: View {
                 .solidContentPane(gaps: gaps)
         } else if pane.showsInbox {
             DecisionInboxPane(model: model, pane: pane)
+                .contentTitleBand(band, toggle: showsSidebarToggle ? pane : nil)
+                .solidContentPane(gaps: gaps)
+        } else if let entryID = pane.shownExtensionEntryID {
+            ExtensionPagePane(model: model, pane: pane, entryID: entryID)
+                .solidContentPane(gaps: pane.pageFills ? [] : gaps)
+        } else if pane.scope == .extensions {
+            ExtensionsPane(model: model, pane: pane)
                 .contentTitleBand(band, toggle: showsSidebarToggle ? pane : nil)
                 .solidContentPane(gaps: gaps)
         } else if let session = pane.displayedSession {

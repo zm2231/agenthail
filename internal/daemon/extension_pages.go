@@ -41,8 +41,12 @@ func (d *Daemon) pageHandler(served *servedMount) http.Handler {
 // A page on another site that rebinds its hostname to 127.0.0.1 is refused
 // before any credential is checked.
 func (d *Daemon) extensionPortHandler(next func(http.ResponseWriter, *http.Request, *dashboardServer)) http.Handler {
+	return d.portFrontDoor(func(host string) bool { return d.extensions.mounts.allowedHost(host) }, next)
+}
+
+func (d *Daemon) portFrontDoor(allowedHost func(string) bool, next func(http.ResponseWriter, *http.Request, *dashboardServer)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !d.extensions.mounts.allowedHost(r.Host) {
+		if !allowedHost(r.Host) {
 			writeAPIError(w, http.StatusMisdirectedRequest, "misdirected", "This port answers only for this machine's own names.")
 			return
 		}

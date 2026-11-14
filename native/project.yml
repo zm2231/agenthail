@@ -41,6 +41,10 @@ targets:
       - path: SessionTurnSettings.swift
       - path: PersonMessageNote.swift
       - path: AgenthailAPI.swift
+      - path: ExtensionsAPI.swift
+      - path: ExtensionModels.swift
+      - path: ExtensionEntries.swift
+      - path: ExtensionWeb.swift
       - path: ClaudeCompactModels.swift
       - path: KeptDelivery.swift
       - path: QueueSteer.swift

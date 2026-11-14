@@ -121,7 +121,7 @@ func (a *App) cmdExtensions(args []string) error {
 			return printExtensionHistory(data)
 		}
 	case sub == "undo" && len(positional) == 2:
-		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions", nil, map[string]any{"action": "undo", "rev": positional[1]}, nil)
+		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions/history/"+url.PathEscape(positional[1])+"/undo", nil, nil, nil)
 		if err == nil && !asJSON {
 			return printExtensionUndo(data)
 		}
@@ -355,6 +355,6 @@ func (a *App) buildExtension(ctx context.Context, client *daemonAPIClient, messa
 		return errors.New("the builder did not start")
 	}
 	fmt.Printf("[extensions] started %s:%s in ~/.agenthail/extensions; talk to it with agenthail send %s:%s \"...\"\n", view.Session.Surface, view.Session.ID, view.Session.Surface, view.Session.ID)
-	fmt.Println("[extensions] each of its turns asks you to keep or undo what it changed")
+	fmt.Println("[extensions] its changes take effect as it makes them; undo one with agenthail extensions undo <rev>")
 	return nil
 }

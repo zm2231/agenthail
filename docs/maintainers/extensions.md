@@ -149,6 +149,13 @@ like a mount's. The extensions view gives each page as `{port, entry,
 published}`, the shape of a mount, so the dashboard and the apps build both
 URLs the same way and refuse an unpublished one over https.
 
+`AGENTHAIL_EXTENSION_PORT_BASE` moves this pool and
+`AGENTHAIL_REMOTE_EXTENSION_PORT_BASE` moves the pool for paired hosts'
+entries (7620 to 7819, below). Each pool keeps its 200 ports. The daemon reads
+both when it starts and falls back to the default, with a log line, for a
+value that is not a number, does not fit between 1024 and 65535, covers the
+dashboard's port, or overlaps the other pool.
+
 The port serves only its own extension:
 
 | Request | |
@@ -186,6 +193,43 @@ a bearer token with every request a page makes. An app posts its own token to
   `read` for GET and HEAD and `control` otherwise. The dashboard's port never
   takes it: an API path answers 401, and the dashboard serves no `/x/` paths.
   The mount never passes it to the app.
+
+## Extensions on paired hosts
+
+The Mac app holds a credential only for its own daemon, so that daemon opens
+a paired host's pages and mounts for it.
+
+- `GET /api/v1/extensions?host=<id or name>` reads the host's list with the
+  pairing and gives each page and mount a port of this daemon's own, on
+  `127.0.0.1` from the second pool (7620 to 7819). It is kept in
+  `~/.agenthail/extensions-data/remote-ports.json` under
+  `<host>/<extension>` or `<host>/<extension>/mount/<name>`. `published` is
+  always false there. An entry the host does not publish on its tailnet name
+  comes back with no port and `Not published on <host>.`
+- A port keeps its number while the host still lists the entry, including
+  while the host is unreachable. It is freed when a read of the host's list
+  no longer has the entry, or when the host is unpaired.
+- Each port admits requests as an extension port does: loopback names only,
+  and this daemon's `agenthail_web` cookie or a bearer, with `read` for GET
+  and HEAD and `control` otherwise. It drops every cookie and the
+  `Authorization` header the browser sent, adds a web session the daemon
+  minted on the host with the pairing token (renewed an hour before it
+  expires, and minted again once when the host answers 401), and forwards to
+  `https://<host's tailnet name>:<host's port>`, pinned to the host's tailnet
+  address the way the pairing is, and only while the host's last version
+  probe vouched for it. Streams and websockets pass through; an open
+  websocket ends within a second of that lapsing, of the host being paired
+  again, or of it being unpaired.
+- Cookies the host's app sets stay in a jar for that port alone and go back
+  only to it; the browser never sees them, since every port shares the
+  `127.0.0.1` cookie site.
+- History and Undo reach the host with `?host=`
+  (`GET /api/v1/extensions/history`, `POST
+  /api/v1/extensions/history/<rev>/undo`). Building runs on the host itself.
+- A host's `extension.changed` and `extension.badge` events do not travel
+  over the pairing, so the Mac app rereads a paired host's list every 30
+  seconds while the Apps hub is open or one of that host's entries is
+  pinned.
 
 ## Entries in the apps
 
@@ -366,7 +410,7 @@ is down it holds what it has not delivered (up to 1024 events) and retries
 every second, so events published while the host restarts are delivered once
 it is back.
 
-## History, Keep and Undo
+## History and Undo
 
 `~/.agenthail/extensions/` is a git repository the daemon owns, so whatever an
 agent changes there can be shown and undone. Git runs with no user or system
@@ -383,7 +427,7 @@ ignored.
 - When a turn starts and no other session is mid-turn, anything changed since
   the last commit is committed as `person`, `Edited by hand`. While another
   turn runs those edits may be its own, so they wait for the next turn's
-  commit and its ask instead.
+  commit instead.
 - The first commit holds what the folder held when the daemon first saw it; a
   folder a turn created starts empty, so its files are that turn's.
 - After a turn's commit, and after an undo, the daemon assigns mount ports,
@@ -395,18 +439,12 @@ ignored.
   `/_ah.js`, which the daemon serves with its event cursor at that moment, so
   the page hears only changes made after it loaded, and only its own; it
   reloads too when the stream reports it missed events.
-- A session's first change raises an ask of origin `extension-change` to the
-  person: `<session> changed extensions`, with `Keep` and `Undo`. Later turns
-  of that session reword the same ask instead of raising another, and push
-  nothing new: `<session> changed extensions in 3 turns`, `Keep all` and
-  `Undo last`. Keep closes the ask. Undo last undoes the newest pending turn
-  and rewords the ask, or closes it when no turn is left. Each extension's
-  History on the Extensions tab lists the latest 30 changes that touched it
-  with Show (the patch), Undo, and Keep for each change still waiting, so one
-  change can be kept or undone on its own. Only the person
-  answers; every session, including one that may act for the person
-  elsewhere, is refused with `403 forbidden`. What is pending is kept
-  in `~/.agenthail/extensions-data/changes.json`.
+- A change takes effect when it is committed; nothing asks the person to keep
+  it or waits on them. Each extension's History on the Extensions tab lists
+  the latest 30 changes that touched it with Show (the patch), Undo, and what
+  the checks below found, so any one change can be undone on its own. Asks of
+  origin `extension-change` that older versions raised are withdrawn once when
+  the daemon starts.
 - Undo reverts one commit as a new commit by `person`. A revert that meets a
   later change to the same lines is abandoned with `409 conflict` and the
   folder is left as it was. Edits not yet committed may belong to a turn still
@@ -428,7 +466,7 @@ working directory and the surface's own permission mode, so it asks only what
 the person's other sessions ask. Its first message is "Build or change an
 Agenthail extension in this folder. Read AGENTS.md first." followed by the
 person's text. The person keeps talking to it to iterate, and each of its turns
-is a Keep/Undo change. Run from inside a session, `build` is refused.
+is a change in the history that the person can undo. Run from inside a session, `build` is refused.
 
 The daemon writes `AGENTS.md`, `CLAUDE.md` (`@AGENTS.md`) and `recipes/*.md`
 into the folder from copies built into the binary, when the daemon starts with
@@ -449,14 +487,12 @@ that session.
 Each run is recorded in `~/.agenthail/extensions-data/calls.json`, the newest
 20 per extension: action or job, ok or the error, time, who ran it and the git
 tree hash of the extension's folder that was loaded (hashed through a scratch
-index, so nothing is staged). The Keep/Undo ask says `<id> verified: <name> ran
+index, so nothing is staged). A change's `checks` in the history say `<id> verified: <name> ran
 ok at 23:01 against this version` only when a successful run's hash equals the
 folder's tree in the change's commit, and `<id> not verified` otherwise. A
 run is recorded without a hash, and so checks nothing, when the folder changed
 while the host loaded it or the extensions reloaded while it ran. A
-successful run rewords open asks at once. The ask also says `<id> needs your
-approval: ...` while capabilities or mounts the folder declares are not
-approved.
+successful run updates those checks at once.
 
 ### Approval stays the person's
 
@@ -466,7 +502,7 @@ pushed to their devices: `Approve` or `Decline`, with what would be granted, or
 which key place and upstream. The same request while its ask is open raises no
 second ask. Approving applies exactly what the ask showed: if
 `extension.json` or the mount's upstream changed since, the answer is refused
-with `409` and nothing is granted. Only the person answers, as for Keep and Undo. A key place too
+with `409` and nothing is granted. Only the person answers; every session, including one that may act for the person elsewhere, is refused with `403 forbidden`. A key place too
 long to show in an ask is refused outright; the person names it from their own
 shell. Pending requests are kept in `~/.agenthail/extensions-data/grants.json`.
 This keeps an agent from approving by habit; it is not a wall, since an agent
@@ -491,21 +527,21 @@ state, whether it is on the tailnet and where its key is kept (`read` scope).
 `POST /api/v1/extensions` with `{"action": "reload"}`, `{"action": "approve",
 "id": "<id>"}` or `{"action": "key", "id": "<id>", "mount": "<mount>", "key":
 {"file": "<path>"}}` (or `env`, `keychain`, `command`, or `null` to forget it)
-changes it (`settings` scope). `{"action": "undo", "rev": "<rev>"}` undoes a
-change. `POST /api/v1/extensions/build` with `{"message": "<text>", "surface":
+changes it (`settings` scope). `POST /api/v1/extensions/history/<rev>/undo`
+undoes a change (`control` scope, so a paired device can roll one back) and
+answers `{undone, removed}`. `POST /api/v1/extensions/build` with `{"message": "<text>", "surface":
 "claude"}` starts the builder (`control` scope) and answers as `session-create`.
 `POST /api/v1/extensions/<id>/call` with `{"action": "<name>", "input": {...}}`
 or `{"job": "<name>"}` runs it (`control` scope) and answers `{result, ran,
 tree, reloaded}`; `"sessionId"` runs it as that session, accepted only from
 this machine. `approve` and `key` with `"sessionId"` raise the person's ask
-instead. `{"action": "keep", "rev": "<rev>"}` keeps one change still waiting in a
-Keep/Undo ask: the ask drops it, and closes as kept when none is left.
-`GET /api/v1/extensions/history/<rev>` returns the change and its `patch`, cut
-at 256 KiB with `truncated` set. `GET /api/v1/extensions/history?limit=50`
-lists the changes (`read` scope), each with `rev`, `author`, `time`,
-`message`, `title` (who made it and what it did, as the dashboard and CLI show
-it), `sessionId`, `turnId` and, per extension, `created`, `removed` and the
-files `added`, `updated` and `deleted`, `pending` while the change waits in a
-Keep/Undo ask, and `root` for the first commit, which can't be undone. With
-`&id=<id>` it lists only the changes that touched that extension, each still
-with every file it changed, since undo reverts all of them.
+instead. `GET /api/v1/extensions/history/<rev>` returns the change and its
+`patch`, cut at 256 KiB with `truncated` set.
+`GET /api/v1/extensions/history?limit=50` lists the changes (`read` scope),
+each with `rev`, `author`, `time`, `message`, `title` (who made it and what it
+did, as the dashboard and CLI show it), `sessionId`, `turnId` and, per
+extension, `created`, `removed` and the files `added`, `updated` and
+`deleted`, `checks` (the lines above about whether a run verified it), and
+`root` for the first commit, which can't be undone and has no checks. With `&id=<id>` it lists
+only the changes that touched that extension, each still with every file it
+changed, since undo reverts all of them.

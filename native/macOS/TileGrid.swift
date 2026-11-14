@@ -10,9 +10,9 @@ enum TileGrid {
         max(minimumColumns, Int((max(width, 0) + spacing) / (minimumWidth + spacing)))
     }
 
-    static func fill(columns: Int, order: (Int) -> ProjectTiles) -> ProjectTiles {
-        let slots = rows * columns - 2
+    static func fill(columns: Int, fixed: Int = 2, order: (Int) -> ProjectTiles) -> ProjectTiles {
+        let slots = max(0, rows * columns - fixed)
         let all = order(slots)
-        return all.more.isEmpty ? all : order(slots - 1)
+        return all.more.isEmpty ? all : order(max(0, slots - 1))
     }
 }

@@ -36,11 +36,12 @@ func (d *Daemon) registerExtensionRoutes(mux *http.ServeMux, dashboard *dashboar
 		if r.Method != http.MethodGet {
 			scope = "settings"
 		}
-		d.apiV1Guard(dashboard, scope, d.apiExtensionsHandler)(w, r)
+		d.apiV1Guard(dashboard, scope, d.localExtensionsOr(d.apiExtensionsHandler, d.remoteExtensionsList))(w, r)
 	})
-	mux.HandleFunc("GET /api/v1/extensions/history", d.apiV1Guard(dashboard, "read", d.apiExtensionHistoryHandler))
-	mux.HandleFunc("GET /api/v1/extensions/history/{rev}", d.apiV1Guard(dashboard, "read", d.apiExtensionChangeHandler))
-	mux.HandleFunc("POST /api/v1/extensions/build", d.apiV1Guard(dashboard, "control", d.apiExtensionBuildHandler))
+	mux.HandleFunc("GET /api/v1/extensions/history", d.apiV1Guard(dashboard, "read", d.hostRouted("", d.apiExtensionHistoryHandler)))
+	mux.HandleFunc("GET /api/v1/extensions/history/{rev}", d.apiV1Guard(dashboard, "read", d.hostRouted("", d.apiExtensionChangeHandler)))
+	mux.HandleFunc("POST /api/v1/extensions/history/{rev}/undo", d.apiV1Guard(dashboard, "control", d.hostRouted("", d.apiExtensionUndoHandler)))
+	mux.HandleFunc("POST /api/v1/extensions/build", d.apiV1Guard(dashboard, "control", d.localExtensionsOr(d.apiExtensionBuildHandler, nil)))
 	mux.HandleFunc("POST /api/v1/extensions/{id}/call", d.apiV1Guard(dashboard, "control", d.apiExtensionCallHandler))
 }
 
@@ -157,7 +158,6 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 			ID        string            `json:"id"`
 			Mount     string            `json:"mount"`
 			Key       *proxyacct.KeyRef `json:"key"`
-			Rev       string            `json:"rev"`
 			SessionID string            `json:"sessionId"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil {
@@ -169,25 +169,6 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch request.Action {
-		case "keep":
-			if d.extensions == nil {
-				writeAPIError(w, http.StatusServiceUnavailable, "unavailable", errExtensionsOff.Error())
-				return
-			}
-			if err := d.keepExtensionChange(request.Rev, principalFromRequest(r)); err != nil {
-				writeActionResult(w, actionResult{}, err)
-				return
-			}
-			writeDashboardJSON(w, http.StatusOK, map[string]any{"kept": request.Rev})
-			return
-		case "undo":
-			undone, err := d.undoExtensionChange(r.Context(), request.Rev)
-			if err != nil {
-				writeActionResult(w, actionResult{}, err)
-				return
-			}
-			writeDashboardJSON(w, http.StatusOK, map[string]any{"undone": undone.Reverted, "removed": undone.Removed})
-			return
 		case "reload", "mounts":
 		case "approve":
 			if err := d.approveExtension(request.ID); err != nil {
@@ -200,7 +181,7 @@ func (d *Daemon) apiExtensionsHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		default:
-			writeAPIError(w, http.StatusBadRequest, "invalid", "Unknown action "+request.Action+"; use reload, approve, key or undo.")
+			writeAPIError(w, http.StatusBadRequest, "invalid", "Unknown action "+request.Action+"; use reload, approve or key.")
 			return
 		}
 		if err := d.syncExtensionMounts(); err != nil {
@@ -294,17 +275,23 @@ func (d *Daemon) apiExtensionHistoryHandler(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	pending := d.pendingExtensionRevs()
 	listed := make([]extensionChangeView, 0, len(changes))
 	for _, change := range changes {
-		listed = append(listed, extensionChangeView{Change: change, Pending: pending[change.Rev]})
+		listed = append(listed, d.extensionChangeView(history, change))
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"changes": listed})
 }
 
 type extensionChangeView struct {
 	extension.Change
-	Pending bool `json:"pending,omitempty"`
+	Checks []string `json:"checks,omitempty"`
+}
+
+func (d *Daemon) extensionChangeView(history *extension.History, change extension.Change) extensionChangeView {
+	if change.Root {
+		return extensionChangeView{Change: change}
+	}
+	return extensionChangeView{Change: change, Checks: d.extensionChecks(history, change)}
 }
 
 const extensionPatchLimit = 256 << 10
@@ -330,7 +317,16 @@ func (d *Daemon) apiExtensionChangeHandler(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"change": extensionChangeView{Change: changes[0], Pending: d.pendingExtensionRevs()[changes[0].Rev]}, "patch": patch, "truncated": truncated})
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"change": d.extensionChangeView(history, changes[0]), "patch": patch, "truncated": truncated})
+}
+
+func (d *Daemon) apiExtensionUndoHandler(w http.ResponseWriter, r *http.Request) {
+	undone, err := d.undoExtensionChange(r.Context(), r.PathValue("rev"))
+	if err != nil {
+		writeActionResult(w, actionResult{}, err)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"undone": undone.Reverted, "removed": undone.Removed})
 }
 
 func (d *Daemon) extensionSourcesHandler(w http.ResponseWriter, r *http.Request) {

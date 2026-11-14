@@ -13,11 +13,16 @@ struct SidebarTiles: View {
             if let session = project.leads.first.flatMap(ProjectContents.leadSessionID).flatMap(model.session) { leads[project.id] = ProjectTiles.Lead(session) }
         }
         let count = TileGrid.columns(width: width)
-        let tiles = TileGrid.fill(columns: count) { ProjectTiles.order(model.projects, limit: $0, waiting: counts, leads: leads) }
+        let pinned = ExtensionEntries.pinned(model.extensionCatalogs.flatMap(\.entries), pins: ExtensionPins.shared.ids)
+        let tiles = TileGrid.fill(columns: count, fixed: 3 + pinned.count) { ProjectTiles.order(model.projects, limit: $0, waiting: counts, leads: leads) }
         let owner = model.daemon?.host?.id ?? ""
         let columns = Array(repeating: GridItem(.flexible(), spacing: TileGrid.spacing, alignment: .top), count: count)
         LazyVGrid(columns: columns, alignment: .leading, spacing: TileGrid.spacing) {
             tile("Inbox", mark: .symbol("tray"), count: model.needsYouCount, selected: pane.scope == .inbox, id: "sidebar-tile-inbox", action: pane.showInbox)
+            tile("Apps", mark: .symbol(ExtensionEntry.fallbackIcon), count: 0, selected: pane.scope == .extensions, id: "sidebar-tile-extensions", action: pane.showExtensions)
+            ForEach(pinned) { entry in
+                tile(entry.label, mark: .symbol(entry.icon), count: 0, badge: entry.badge, selected: pane.scope == .extensionEntry(entry.id), id: "sidebar-tile-extension-" + entry.id) { pane.showExtension(entry.id) }
+            }
             ForEach(tiles.shown) { project in
                 tile(project.displayName, mark: .letter(ProjectTiles.letter(project.displayName), project: ProjectTiles.colourID(project.id, owner: owner)), count: counts[project.id] ?? 0,
                      selected: pane.scope == .project(project.id), id: "sidebar-tile-project-" + project.id) { pane.showScope(project: project.id) }
@@ -63,21 +68,21 @@ struct SidebarTiles: View {
         }
     }
 
-    private func tile(_ title: String, mark: Mark, count: Int, selected: Bool, id: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { face(title, mark: mark, count: count, selected: selected) }
+    private func tile(_ title: String, mark: Mark, count: Int, badge: String? = nil, selected: Bool, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { face(title, mark: mark, count: count, badge: badge, selected: selected) }
             .buttonStyle(.plain)
             .help(title)
             .accessibilityIdentifier(id)
             .accessibilityLabel(title)
-            .accessibilityValue(count > 0 ? "\(count) waiting" : "")
+            .accessibilityValue(count > 0 ? "\(count) waiting" : badge ?? "")
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    private func face(_ title: String, mark: Mark, count: Int, selected: Bool) -> some View {
+    private func face(_ title: String, mark: Mark, count: Int, badge: String? = nil, selected: Bool) -> some View {
         VStack(spacing: 3) {
             Group {
                 switch mark {
-                case .symbol(let name): Image(systemName: name).font(.system(size: DesktopType.body, weight: .medium))
+                case .symbol(let name): ExtensionIcon(name: name).font(.system(size: DesktopType.body, weight: .medium))
                 case .letter(let letter, _): Text(letter).font(.system(size: DesktopType.body, weight: .semibold))
                 }
             }
@@ -85,8 +90,8 @@ struct SidebarTiles: View {
             .frame(width: 28, height: 28)
             .background(mark.colours.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
             .overlay(alignment: .topTrailing) {
-                if count > 0 {
-                    Text("\(count)")
+                if let shown = count > 0 ? "\(count)" : badge {
+                    Text(shown)
                         .font(.system(size: DesktopType.caption, weight: .semibold))
                         .monospacedDigit()
                         .foregroundStyle(DesktopPalette.attention)

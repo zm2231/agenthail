@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -40,6 +41,13 @@ func TestDashboardTextIsReadableOverEveryBackground(t *testing.T) {
 	}
 	guard := exec.CommandContext(t.Context(), "node", filepath.Join("..", "..", "scripts", "dashboard-guard", "guard.mjs"))
 	guard.Env = append(os.Environ(), "AGENTHAIL_GUARD_DASHBOARDS="+string(dashboards))
+	// A test that runs out of time panics without cancelling its context, so
+	// the guard is told to end itself, and its browser, a minute earlier.
+	if deadline, ok := t.Deadline(); ok {
+		guard.Env = append(guard.Env, fmt.Sprintf("AGENTHAIL_GUARD_DEADLINE=%d", deadline.Add(-time.Minute).UnixMilli()))
+	}
+	guard.Cancel = func() error { return guard.Process.Signal(os.Interrupt) }
+	guard.WaitDelay = 10 * time.Second
 	guard.Stdout = os.Stdout
 	guard.Stderr = os.Stderr
 	if err := guard.Run(); err != nil {

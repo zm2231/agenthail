@@ -176,7 +176,7 @@ func (h *History) Log(limit int, rev string, ids ...string) ([]Change, error) {
 	return changes, nil
 }
 
-func (c Change) Summary() string {
+func (c Change) summary() string {
 	if len(c.Extensions) == 0 {
 		return "changed files outside any extension"
 	}
@@ -220,7 +220,7 @@ func (c Change) title() string {
 		}
 		return who + " undid a change to " + strings.Join(ids, ", ")
 	}
-	return who + " " + c.Summary()
+	return who + " " + c.summary()
 }
 
 func fileChanges(lines string) []FileChanges {
