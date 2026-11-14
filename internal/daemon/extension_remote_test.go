@@ -433,3 +433,37 @@ func TestAPairedPageStopsReachingAHostThatFailsVerification(t *testing.T) {
 		t.Fatalf("the page answered %d once the host was verified again", response.StatusCode)
 	}
 }
+
+func TestAnOpenPairedWebsocketEndsWhenTheHostFailsVerification(t *testing.T) {
+	previous := remoteUpgradeCheckEvery
+	remoteUpgradeCheckEvery = 20 * time.Millisecond
+	t.Cleanup(func() { remoteUpgradeCheckEvery = previous })
+	f := newRemoteExtensionFixture(t)
+	_, mountPort := f.ports(t)
+	header := http.Header{"Cookie": {webSessionCookieName + "=" + f.session.Value}, "Origin": {fmt.Sprintf("http://127.0.0.1:%d", mountPort)}}
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://127.0.0.1:%d/ws", mountPort), header)
+	if err != nil {
+		t.Fatalf("the mount's websocket did not open: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	if _, data, err := conn.ReadMessage(); err != nil || string(data) != "notes:ping" {
+		t.Fatalf("the websocket answered %q %v", data, err)
+	}
+	f.remote.gate.proxyDown.Store(true)
+	host, ok := f.local.daemon.pairedHost(f.record.ID)
+	if !ok {
+		t.Fatal("the host is not paired")
+	}
+	if _, err := host.client.Version(context.Background()); err == nil {
+		t.Fatal("the version probe answered while the host was down")
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("an open websocket kept running after the host failed verification")
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatal("the websocket was still open five seconds after verification lapsed")
+	}
+}

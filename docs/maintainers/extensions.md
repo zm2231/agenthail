@@ -216,7 +216,10 @@ a paired host's pages and mounts for it.
   minted on the host with the pairing token (renewed an hour before it
   expires, and minted again once when the host answers 401), and forwards to
   `https://<host's tailnet name>:<host's port>`, pinned to the host's tailnet
-  address the way the pairing is. Streams and websockets pass through.
+  address the way the pairing is, and only while the host's last version
+  probe vouched for it. Streams and websockets pass through; an open
+  websocket ends within a second of that lapsing, of the host being paired
+  again, or of it being unpaired.
 - Cookies the host's app sets stay in a jar for that port alone and go back
   only to it; the browser never sees them, since every port shares the
   `127.0.0.1` cookie site.

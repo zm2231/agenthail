@@ -30,6 +30,8 @@ var (
 	remoteExtensionPortCount = 200
 )
 
+var remoteUpgradeCheckEvery = time.Second
+
 const (
 	remoteSessionRenewBefore = time.Hour
 	remoteRetryBodyLimit     = extensionActionBodyLimit
@@ -342,6 +344,12 @@ func (d *Daemon) forwardRemoteExtension(w http.ResponseWriter, r *http.Request, 
 		writeHostReadError(w, host, err)
 		return
 	}
+	if r.Header.Get("Upgrade") != "" {
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		go d.endUpgradeWhenUnverified(ctx, cancel, f.hostID, host.client)
+		r = r.WithContext(ctx)
+	}
 	local := "http://" + r.Host
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -388,6 +396,23 @@ func (d *Daemon) forwardRemoteExtension(w http.ResponseWriter, r *http.Request, 
 		ErrorLog: d.log,
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+func (d *Daemon) endUpgradeWhenUnverified(ctx context.Context, cancel context.CancelFunc, hostID string, client *hosts.Client) {
+	ticker := time.NewTicker(remoteUpgradeCheckEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		current, ok := d.pairedHost(hostID)
+		if !ok || current.client != client || client.Verified() != nil {
+			cancel()
+			return
+		}
+	}
 }
 
 type remoteSigninError struct {
