@@ -11,11 +11,12 @@ final class Outbox {
     @ObservationIgnored var returnToComposer: (LocalSend, String) -> Void = { _, _ in }
     @ObservationIgnored var changed: () -> Void = {}
     @ObservationIgnored var notice: (String?) -> Void = { _ in }
+    @ObservationIgnored var keep: (PendingSend) async -> Void = { _ in }
     @ObservationIgnored private var completions: [UUID: (Bool) -> Void] = [:]
     @ObservationIgnored private var kept: [UUID: KeptDelivery] = [:]
 
-    var saved: [ComposerStore.Saved.Send] {
-        queue.pending.values.joined().map(ComposerStore.Saved.Send.init)
+    func saved(spool: (ComposerAttachment) -> SpooledAttachment?) -> [ComposerStore.Saved.Send] {
+        queue.pending.values.joined().map { ComposerStore.Saved.Send($0, spool: spool) }
     }
 
     init() {
@@ -117,14 +118,16 @@ final class Outbox {
         queue.wake()
     }
 
-    func restore(_ saved: [ComposerStore.Saved.Send]) -> [ComposerStore.Saved.Send] {
-        let resumable = saved.compactMap(\.resumable)
+    // The sends that cannot resume go back to the composer before restoring saves, so a kill in between loses neither.
+    func restore(_ saved: [ComposerStore.Saved.Send], unspool: (SpooledAttachment) -> ComposerAttachment?, lost: ([ComposerStore.Saved.Send]) -> Void) {
+        let resumable = saved.compactMap { $0.resumable(unspool: unspool) }
+        let resumed = Set(resumable.map(\.id))
+        lost(saved.filter { !resumed.contains($0.id) })
         for (session, sends) in Dictionary(grouping: resumable, by: \.sessionID) {
             let restored = sends.map { LocalSend(id: $0.id, text: $0.message, attachments: $0.attachments, uploaded: $0.files, sentAt: $0.sentAt, status: nil, busyDelivery: $0.busyDelivery, unconfirmed: true, turnOptions: $0.turnOptions) }
             rows[session] = restored + (rows[session] ?? [])
         }
         queue.restore(resumable)
-        return saved.filter { $0.resumable == nil }
     }
 
     private func deliver(_ send: PendingSend) async -> SendOutcome {
@@ -133,8 +136,9 @@ final class Outbox {
         do {
             var uploaded = send.uploaded
             if uploaded == nil {
-                let stored = try await api.upload(send.attachments, sessionID: resolve(send.sessionID))
-                queue.setUploaded(stored, for: send)
+                let session = resolve(send.sessionID)
+                await keep(send)
+                let stored = try await queue.upload(send) { try await api.upload($0, sessionID: session) }
                 update(send.id, in: send.sessionID) { $0.uploaded = stored }
                 uploaded = stored.map(\.id)
             }
