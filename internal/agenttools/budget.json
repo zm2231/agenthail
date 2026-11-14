@@ -3,5 +3,6 @@
   "alwaysLoadToolBytes": 6992,
   "alwaysLoadTools": ["agenthail_ask", "agenthail_create", "agenthail_end_turn", "agenthail_pr", "agenthail_result", "agenthail_send", "agenthail_wait"],
   "cliCardBytes": 1774,
+  "ownToolCardBytes": 1856,
   "mcpCardBytes": 1937
 }

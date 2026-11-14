@@ -7,10 +7,21 @@ type Line struct {
 	Line string
 }
 
+// Access is how a session reaches Agenthail's tools. A session on the
+// server Agenthail gave it ends its turns with EndTurn; one whose own config
+// starts the relay is driven by the person, and is not asked to.
+type Access int
+
+const (
+	NoTools Access = iota
+	OwnTools
+	GivenTools
+)
+
 type CardInput struct {
 	ReportTo string
 	Project  string
-	MCP      bool
+	Tools    Access
 }
 
 type cardLine struct {
@@ -29,7 +40,7 @@ var cardLines = []cardLine{
 		when: func(in CardInput) bool { return in.ReportTo != "" },
 		arg:  func(in CardInput) string { return in.ReportTo },
 	},
-	{use: "end every turn, after your reply", mcp: EndTurn + ` {"headline":"<one line>"}`},
+	{use: "end every turn, after your reply", mcp: EndTurn + ` {"headline":"<one line>"}`, when: func(in CardInput) bool { return in.Tools == GivenTools }},
 	{use: "put a decision to the person or your lead", cli: `agenthail ask "<title>" --option <label> --option <label>`, mcp: Ask + ` {"title":"<one line>","questions":[{"question":"<question>","options":[{"label":"<label>"}]}]}`},
 	{use: "message another session", cli: `agenthail send <@alias|session-id> "<message>"`, mcp: `agenthail_send {"target":"<@alias|session-id>","message":"<message>"}`},
 	{use: "find sessions and their aliases", cli: "agenthail list --json", mcp: "agenthail_sessions"},
@@ -53,7 +64,7 @@ func CardLines(in CardInput) []Line {
 			continue
 		}
 		form := line.cli
-		if in.MCP {
+		if in.Tools != NoTools {
 			form = line.mcp
 		}
 		if form == "" {
