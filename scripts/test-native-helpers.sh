@@ -25,6 +25,10 @@ JOBS="${AGENTHAIL_TEST_JOBS:-$(sysctl -n hw.ncpu)}"
 
 SOURCES=(
   AgenthailAPI.swift
+  ExtensionsAPI.swift
+  ExtensionModels.swift
+  ExtensionEntries.swift
+  ExtensionWeb.swift
   ClaudeCompactModels.swift
   KeptDelivery.swift
   InboxMessage.swift

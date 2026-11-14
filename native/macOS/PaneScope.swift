@@ -8,7 +8,18 @@ struct ListPageKey: Hashable {
 enum PaneScope: Equatable {
     case all
     case inbox
+    case extensions
+    case extensionEntry(String)
     case project(String)
+
+    var showsExtensions: Bool {
+        switch self {
+        case .extensions, .extensionEntry: true
+        default: false
+        }
+    }
+
+    var holdsPage: Bool { self == .inbox || showsExtensions }
 
     var projectID: String? {
         if case .project(let id) = self { return id }

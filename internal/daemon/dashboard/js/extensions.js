@@ -224,20 +224,27 @@ async function togglePatch(rev) {
   if (state.patches.has(rev)) {
     state.patches.delete(rev);
   } else {
-    const response = await fetch(`/api/v1/extensions/history/${encodeURIComponent(rev)}`, { credentials: "same-origin" });
-    if (!response.ok) {
-      toast((await responseError(response)).message);
+    let shown;
+    try {
+      const response = await fetch(`/api/v1/extensions/history/${encodeURIComponent(rev)}`, { credentials: "same-origin" });
+      if (!response.ok) throw await responseError(response);
+      shown = await response.json();
+    } catch (error) {
+      toast(error.message);
       return;
     }
-    const shown = await response.json();
     state.patches.set(rev, shown.patch + (shown.truncated ? "\n[cut: the change is larger than this view]" : ""));
   }
   renderHistory();
 }
 
-async function changeAction(body) {
+async function undoChange(rev) {
   try {
-    await postExtensions(body);
+    const response = await fetch(`/api/v1/extensions/history/${encodeURIComponent(rev)}/undo`, {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    if (!response.ok) throw await responseError(response);
   } catch (error) {
     toast(error.message);
   }
@@ -250,7 +257,7 @@ function renderHistory() {
   drawer.hidden = !history;
   if (!history) return;
   const label = state.view?.extensions.find((ext) => ext.id === history.id)?.label ?? history.id;
-  const changes = history.changes instanceof Error ? history.changes.message : history.changes?.map((change) => [change.rev, change.title, change.time, change.pending, change.root]);
+  const changes = history.changes instanceof Error ? history.changes.message : history.changes?.map((change) => [change.rev, change.title, change.time, change.checks, change.root]);
   show(drawer, JSON.stringify([history.id, label, changes ?? null, [...state.patches.keys()]]), () => historyItems(history, label));
 }
 
@@ -264,12 +271,11 @@ function historyItems(history, label) {
   else {
     for (const change of history.changes) {
       const buttons = [button(state.patches.has(change.rev) ? "Hide" : "Show", () => togglePatch(change.rev))];
-      if (change.pending) buttons.push(button("Keep", () => changeAction({ action: "keep", rev: change.rev })));
-      if (!change.root) buttons.push(button("Undo", () => changeAction({ action: "undo", rev: change.rev })));
+      if (!change.root) buttons.push(button("Undo", () => undoChange(change.rev)));
       const when = new Date(change.time).toLocaleString();
       const card = element("section", { className: "extension-change" }, [
         element("p", { className: "extension-change-title", textContent: change.title }),
-        element("p", { className: "extension-quiet", textContent: `${when}${change.pending ? " · waiting for you" : ""}` }),
+        element("p", { className: "extension-quiet", textContent: [when, ...(change.checks ?? [])].join(" · ") }),
         element("div", { className: "extension-change-actions" }, buttons),
       ]);
       if (state.patches.has(change.rev)) card.append(element("pre", { className: "extension-change-patch", textContent: state.patches.get(change.rev) }));
@@ -361,7 +367,7 @@ async function build(form) {
     delete form.dataset.key;
     form.reset();
     $("#extensions-new-dialog").close();
-    toast("The builder started. Each turn asks you to keep or undo what it changed.");
+    toast("The builder started. Its changes take effect as it makes them; undo any of them from the extension's History.");
     await load(true);
     if (created.session?.id) await selectSession(created.session.id, true);
   } catch (error) {

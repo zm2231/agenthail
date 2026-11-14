@@ -377,6 +377,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer close(browserDone)
 		d.superviseBrowserHost(ctx)
 	}()
+	d.withdrawExtensionChangeAsks()
 	extensionsDone := make(chan struct{})
 	go func() {
 		defer close(extensionsDone)

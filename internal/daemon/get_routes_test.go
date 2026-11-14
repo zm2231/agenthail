@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/atomicfile"
 	"github.com/zm2231/agenthail/internal/extension"
 )
 
@@ -198,7 +199,7 @@ func readDaemonState(t *testing.T, f *extensionFixture) daemonState {
 	files := map[string]string{}
 	for _, root := range []string{os.Getenv("HOME"), f.home} {
 		_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil || entry.IsDir() || strings.HasSuffix(path, ".log") || strings.Contains(path, "-wal") || strings.Contains(path, "-shm") || strings.HasSuffix(path, ".sock") {
+			if err != nil || entry.IsDir() || atomicfile.IsTemp(path) || strings.HasSuffix(path, ".log") || strings.Contains(path, "-wal") || strings.Contains(path, "-shm") || strings.HasSuffix(path, ".sock") {
 				return nil
 			}
 			data, err := os.ReadFile(path)

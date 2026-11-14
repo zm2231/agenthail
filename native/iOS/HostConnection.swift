@@ -12,6 +12,7 @@ protocol HostConnectionDelegate: AnyObject {
     func hostRefreshed(_ host: HostConnection) async
     func hostConnected(_ host: HostConnection)
     func hostAppearanceChanged(_ host: HostConnection)
+    func hostExtensionsChanged(_ host: HostConnection)
 }
 
 @MainActor
@@ -367,6 +368,7 @@ final class HostConnection {
         lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
         if let entity = event.entityId { delegate?.host(self, receivedEventFor: entity) }
         if event.type == "ui.changed" { delegate?.hostAppearanceChanged(self) }
+        if ExtensionCatalog.refreshes(for: event.type) { delegate?.hostExtensionsChanged(self) }
         guard SnapshotRefreshPolicy.refreshes(for: event.type) else { return }
         eventRefreshTask?.cancel()
         eventRefreshTask = Task { [weak self] in

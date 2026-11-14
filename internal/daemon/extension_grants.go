@@ -237,3 +237,11 @@ func (d *Daemon) applyExtensionGrant(grant extensionGrant) error {
 	}
 	return errors.New("unknown grant " + grant.Kind)
 }
+
+func clipText(text string, limit int) string {
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit-1]) + "…"
+}
