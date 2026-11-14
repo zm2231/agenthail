@@ -72,12 +72,31 @@ func (d *Daemon) replayHostHeldAction(ctx context.Context, host *pairedHost, ite
 		unconfirmed()
 	case answer.status == http.StatusOK || answer.status == http.StatusConflict && reply.Error.Code == "conflict":
 		d.settleHostHeldAction(host, item, registry.HostActionDone, string(answer.payload))
+	case movedTo(answer) != "":
+		d.redirectHostHeldAction(host, item, movedTo(answer), reply.Error.Message)
 	default:
 		message := reply.Error.Message
 		if message == "" {
 			message = fmt.Sprintf("answered %d", answer.status)
 		}
 		d.settleHostHeldAction(host, item, registry.HostActionDead, fmt.Sprintf("host %s refused %s: %s", host.record.Name, item.Label, message))
+	}
+}
+
+func (d *Daemon) redirectHostHeldAction(host *pairedHost, item registry.HostHeldAction, to, refusal string) {
+	next, found := d.pairedHost(to)
+	if !found || next == host || strings.HasSuffix(item.Key, movedActionKeySuffix) {
+		d.settleHostHeldAction(host, item, registry.HostActionDead, fmt.Sprintf("host %s refused %s: %s", host.record.Name, item.Label, refusal))
+		return
+	}
+	sum := sha256.Sum256([]byte(item.Key))
+	key := "h-" + hex.EncodeToString(sum[:16]) + ":" + next.record.ID + movedActionKeySuffix
+	if _, err := d.Registry.HoldHostAction(next.record.ID, key, item.Label, item.Request, false); err != nil {
+		d.logRuntimeError("host "+host.record.Name+" held action", err)
+		return
+	}
+	if err := d.Registry.SettleHostHeldAction(item.ID, registry.HostActionDone, "moved to host "+next.record.Name); err != nil {
+		d.logRuntimeError("host "+host.record.Name+" held action", err)
 	}
 }
 
@@ -122,6 +141,8 @@ func (d *Daemon) tellHeldActionSender(host *pairedHost, item registry.HostHeldAc
 		d.logRuntimeError("host "+host.record.Name+" held action", err)
 	}
 }
+
+const movedActionKeySuffix = ":moved"
 
 func hostActionKey(base, hostID string) string {
 	key := base + ":" + hostID

@@ -114,6 +114,24 @@ A Codex coordinator starts without a name or permission mode, which Codex thread
 
 Context growth is left to the agent's own compaction.
 
+## Brief
+
+A brief asks a project's lead to catch the person up. The lead is asked to cover everything since the person last wrote to it or to one of the project's sessions, and to write from primary records (transcripts and turns, delivery history, pull requests and CI, asks and the ledger), marking anything it inferred.
+
+- **Since** is the creation time of the person's latest delivery (sender `agenthail-person`, not failed) to the lead or to a session of the project, read on the lead's host. Deliveries to the project's sessions on other hosts are recorded there and are not counted, and neither is text typed straight into a terminal. A brief the person asks for is itself such a delivery, so the next brief starts from it. With no such delivery the brief covers the last 24 hours and the request says so.
+- **Who asks.** The Mac and iPhone apps and the dashboard ask as the person. `agenthail brief [<project>] [--from <session>] [--json]` asks as its caller, like `agenthail send`, with the project of the current folder by default. The MCP tool `agenthail_brief {project?}` is for the person's voice operator (`control.all`); other agents write to their lead with `agenthail_send`. The lead itself is refused.
+- The request reaches the lead like any message: queued while it is busy, starting its conversation when it has none, and through its host when it runs on a paired one. The brief is the lead's reply turn.
+
+### API
+
+`POST /api/v1/projects/{id}/brief`, with the `control` capability and an optional `Idempotency-Key`, takes no body. `{id}` is a project id or name, path-escaped since ids hold `/`; `host::id` names a paired host's project. A session principal is refused with 403 `person_only`. It runs the action `{"action":"coordinator-brief","project":id,"author":"person"}`, which `/api/v1/actions` also takes, with `name` instead of `project` for a coordinator on the host that runs it, and `sourceSessionId` instead of `author` for a session that asks. Errors are those of `coordinator-send`: 409 `no_lead` when the project has no lead or two, 400 `invalid_request` for a message or for the lead asking. The reply:
+
+```json
+{"ok": true, "ref": "@lead-agenthail", "result": {"status": "sent", "evidence": "transport_accepted", "sessionId": "…", "deliveryId": 12}, "started": false, "since": {"at": "2026-11-14T15:02:19Z", "fallback": false}}
+```
+
+`result` is the delivery receipt of `coordinator-send`. `since.at` is the start of the window and `since.fallback` is true when it is the 24-hour default. `since` is absent when the lead's host is unreachable and holds the request; it is computed when that host takes it.
+
 ## Stuck sessions
 
 A session that stops where an agent could help is told to one agent: its project's coordinator, or, when the project has none, its coordinator has never started a conversation, or the stuck session is the coordinator, the session that started it (`session_origins`). With neither, only the person hears. The person is notified in every case.

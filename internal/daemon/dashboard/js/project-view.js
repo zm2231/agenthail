@@ -19,6 +19,13 @@ export function sessionRunning(session) {
 
 const sessionWorking = (session) => session.status === "busy";
 
+export function briefToast(result) {
+  const since = result?.since;
+  if (!since) return `Asked ${result?.ref || "the lead"} to catch you up.`;
+  if (since.fallback) return `Asked ${result.ref} to catch you up on the last 24 hours.`;
+  return `Asked ${result.ref} to catch you up since ${new Date(since.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.`;
+}
+
 export function leadNote(lead) {
   return lead?.sessionId ? "not running · the next message picks it up" : "starts with the first message sent to it";
 }
@@ -120,5 +127,5 @@ export function renderProjectView(project) {
     card(contents.now.count ? `Now · ${contents.now.count}` : "Now", nowRows(contents.now), showEarlier ? "" : `<button class="link-button" type="button" data-project-earlier="${id}">Show earlier</button>`),
     showEarlier ? card("Earlier", rows(contents.earlier, "No earlier sessions")) : "",
   ].join("");
-  return `<header class="project-view-header"><h1>${escape(project.displayName)}</h1><span class="project-note">${count} ${count === 1 ? "session" : "sessions"}${computers > 1 ? ` on ${computers} computers` : ""}</span><div class="project-actions"><button class="soft-button" type="button" data-project-lead="${id}">${contents.lead ? "Change lead…" : "New lead…"}</button>${firstCheckout >= 0 ? `<button class="primary-button" type="button" data-project-start="${id}" data-checkout="${firstCheckout}">New session</button>` : ""}</div></header><div class="project-view-columns"><div class="project-view-main">${left}</div><div class="project-view-side">${leadCard(project, contents)}${folders(project)}</div></div>`;
+  return `<header class="project-view-header"><h1>${escape(project.displayName)}</h1><span class="project-note">${count} ${count === 1 ? "session" : "sessions"}${computers > 1 ? ` on ${computers} computers` : ""}</span><div class="project-actions">${contents.lead ? `<button class="soft-button" type="button" data-project-brief="${id}">Catch me up</button>` : ""}<button class="soft-button" type="button" data-project-lead="${id}">${contents.lead ? "Change lead…" : "New lead…"}</button>${firstCheckout >= 0 ? `<button class="primary-button" type="button" data-project-start="${id}" data-checkout="${firstCheckout}">New session</button>` : ""}</div></header><div class="project-view-columns"><div class="project-view-main">${left}</div><div class="project-view-side">${leadCard(project, contents)}${folders(project)}</div></div>`;
 }

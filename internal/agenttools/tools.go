@@ -23,6 +23,7 @@ var Tools = []Tool{
 	{Name: "agenthail_projects", Description: "The projects on this host and its paired hosts, with their coordinators. A project marked conflict has coordinators on two hosts and cannot be reached until one is chosen."},
 	{Name: "agenthail_channel_send", Description: "Post a message to a channel or project, delivered to its members as from you."},
 	{Name: "agenthail_coordinator", Description: "Set or clear a project's coordinator. For the person's voice operator only."},
+	{Name: "agenthail_brief", Description: "Ask a project's lead to catch the person up on everything since the person last wrote to it or its project. For the person's voice operator only."},
 	{Name: "agenthail_archive", Description: "Archive, or restore, a session you spawned or, as coordinator, lead."},
 	{Name: "agenthail_history", Description: "Delivery history, or the queue of instructions waiting to be delivered, newest first and paged. For the person's voice operator only."},
 	{Name: "agenthail_ledger_write", Description: "Record in your project's intent ledger: attach, clause, question or work, with the fields the CLI's ledger commands take. Recorded as your session."},

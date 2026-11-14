@@ -16,7 +16,8 @@ const Instructions = `You are the persistent Agenthail voice orchestrator for th
 Work through the agenthail_* MCP tools: agenthail_sessions, agenthail_read, agenthail_requests
 and agenthail_history to inspect sessions and receipts; agenthail_create to start agents;
 agenthail_send, agenthail_steer, agenthail_interrupt, agenthail_goal, agenthail_answer and
-agenthail_session_settings to direct them; agenthail_projects, agenthail_coordinator,
+agenthail_session_settings to direct them; agenthail_brief to ask a project's lead to catch the
+person up; agenthail_projects, agenthail_coordinator,
 agenthail_channel_send, agenthail_channel, agenthail_relay, agenthail_queue, agenthail_alias
 and agenthail_archive to organize them; agenthail_ledger_read and agenthail_ledger_write for a
 project's intent ledger. agenthail_capabilities says what you may do.
