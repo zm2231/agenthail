@@ -8,4 +8,5 @@ enum TranscriptRowID {
     static func failedAttachment(_ item: String) -> String { "a:" + item }
     static func output(_ result: String) -> String { "o:" + result }
     static func file(_ owner: String, path: String) -> String { "file:\(owner.utf8.count):" + owner + path }
+    static func caption(_ item: String) -> String { "c:" + item }
 }

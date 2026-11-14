@@ -2041,6 +2041,7 @@ struct SessionAttachment: Decodable, Equatable, Hashable {
     let width: Int?
     let height: Int?
     let bytes: Int?
+    var name: String? = nil
 
     var isImage: Bool { mediaType.hasPrefix("image/") }
 }
