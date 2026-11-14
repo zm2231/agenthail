@@ -302,28 +302,19 @@ html:not([data-panes]) #extensions-view {
   }
 
   .extensions-rail {
-    flex-direction: row;
-    align-items: stretch;
     height: auto;
-  }
-
-  .extensions-rail-actions {
-    grid-template-columns: auto;
-    align-content: center;
-  }
-
-  .extensions-rail-actions button {
-    padding: 7px 10px;
   }
 
   .extensions-rows {
     flex-direction: row;
     overflow-x: auto;
     overflow-y: hidden;
+    scroll-snap-type: x mandatory;
   }
 
   .extension-row {
     flex: none;
+    scroll-snap-align: start;
     width: auto;
     min-width: 10rem;
     max-width: 16rem;
