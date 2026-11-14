@@ -18,13 +18,14 @@ final class HostDropTests: XCTestCase {
         return model
     }
 
-    private func states(of model: AgenthailIOSModel, for duration: Duration) async throws -> [String] {
+    private func states(of model: AgenthailIOSModel, for duration: Duration, until last: String? = nil) async throws -> [String] {
         var seen: [String] = []
         let clock = ContinuousClock()
         let end = clock.now + duration
         while clock.now < end {
             let state = model.snapshot?.sessions.first?.host?.state ?? "none"
             if seen.last != state { seen.append(state) }
+            if state == last { break }
             try await Task.sleep(for: .milliseconds(10))
         }
         return seen
@@ -138,10 +139,11 @@ final class HostDropTests: XCTestCase {
     func testARefusedProbeMarksTheComputerUnreachableAtOnce() async throws {
         let model = try await connectedModel()
         defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        let grace = try XCTUnwrap(model.connection("hdrop")).grace.window
         HostDropProtocol.state.setUnauthorized(true)
         HostDropProtocol.state.dropStreams()
-        let seen = try await states(of: model, for: .milliseconds(800))
-        XCTAssertEqual(seen, ["connected", "unreachable"], "a 401 is not a network blip")
+        let seen = try await states(of: model, for: .seconds(grace / 3), until: "unreachable")
+        XCTAssertEqual(seen, ["connected", "unreachable"], "a 401 is not a network blip, so it is shown well inside the \(Int(grace)) s grace")
     }
 
     func testRepeatedResumesDoNotKeepADownComputerShownConnected() async throws {
