@@ -584,18 +584,15 @@
       </section>
 
       <section class="view hidden" id="extensions-view" data-view-panel="extensions">
-        <header class="page-heading" data-pane="content">
-          <div>
-            <h1>Extensions.</h1>
-            <p class="lede">Pages and background jobs you add in ~/.agenthail/extensions.</p>
-          </div>
-          <div class="extensions-heading-actions">
-            <button class="soft-button" id="extensions-reload" type="button">Reload</button>
-            <button class="primary-button" id="extensions-new" type="button">New extension</button>
-          </div>
-        </header>
+        <h1 class="sr-only">Extensions</h1>
         <div class="extensions-layout">
-          <nav class="extensions-rail" id="extensions-list" data-pane="sidebar" aria-label="Extension pages"></nav>
+          <nav class="extensions-rail" data-pane="sidebar" aria-label="Extensions">
+            <div class="extensions-rail-actions">
+              <button class="primary-button" id="extensions-new" type="button">New extension</button>
+              <button class="soft-button" id="extensions-reload" type="button">Reload</button>
+            </div>
+            <div class="extensions-rows" id="extensions-list"></div>
+          </nav>
           <section class="extensions-stage" id="extensions-stage" data-pane="content" aria-label="Extension page" hidden>
             <header class="extensions-toolbar" id="extensions-toolbar"></header>
             <div class="extensions-notices" id="extensions-notices" hidden></div>

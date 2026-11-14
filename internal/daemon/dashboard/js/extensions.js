@@ -7,16 +7,6 @@ import { SharedEventSource } from "./shared-stream.js";
 
 const state = { selected: "", view: null, head: "", fullscreen: false, history: null, patches: new Map() };
 
-function describeChange(change) {
-  const parts = (change.extensions ?? []).map((files) => {
-    const count = (files.added?.length ?? 0) + (files.updated?.length ?? 0) + (files.deleted?.length ?? 0);
-    if (files.created) return `created ${files.id}`;
-    if (files.removed) return `removed ${files.id}`;
-    return `changed ${count} ${count === 1 ? "file" : "files"} in ${files.id}`;
-  });
-  return parts.join(", ") || "no extension files";
-}
-
 async function readChanges(query) {
   const response = await fetch(`/api/v1/extensions/history?${new URLSearchParams(query)}`, { credentials: "same-origin" });
   if (!response.ok) throw await responseError(response);
@@ -73,13 +63,13 @@ function launcherRows(view, where = location) {
     const own = [];
     if (ext.page) {
       const status = ext.state === "loaded" ? portState(ext.page, where) : ext.state;
-      own.push({ key: `page:${ext.id}`, ext, title: ext.app?.label || ext.label, detail: ext.id, badge: ext.badge ?? "", order: ext.app?.order ?? 0, status, src: status === "open" ? mountURL(ext.page, where) : "" });
+      own.push({ key: `page:${ext.id}`, ext, title: ext.app?.label || ext.label, detail: ext.description ?? "", badge: ext.badge ?? "", order: ext.app?.order ?? 0, status, src: status === "open" ? mountURL(ext.page, where) : "" });
     }
     for (const mount of ext.mounts ?? []) {
       const status = mount.state === "serving" ? portState(mount, where) : mount.state;
-      own.push({ key: `mount:${ext.id}/${mount.name}`, ext, title: mount.app?.label || mount.label, detail: `${ext.label} · ${mount.name}`, badge: mount.badge ?? "", order: mount.app?.order ?? 0, status, src: status === "open" ? mountURL(mount, where) : "" });
+      own.push({ key: `mount:${ext.id}/${mount.name}`, ext, title: mount.app?.label || mount.label, detail: ext.label, badge: mount.badge ?? "", order: mount.app?.order ?? 0, status, src: status === "open" ? mountURL(mount, where) : "" });
     }
-    if (!own.length) own.push({ key: `ext:${ext.id}`, ext, title: ext.label, detail: ext.jobs ? `${ext.id} · runs in the background` : ext.id, badge: ext.badge ?? "", order: ext.app?.order ?? 0, status: ext.state, src: "" });
+    if (!own.length) own.push({ key: `ext:${ext.id}`, ext, title: ext.label, detail: ext.description ?? "", badge: ext.badge ?? "", order: ext.app?.order ?? 0, status: ext.state, src: "" });
     rows.push(...own);
   }
   return rows.sort((a, b) => a.order - b.order);
@@ -130,7 +120,7 @@ function renderRail(rows) {
     if (row.badge) marks.unshift(element("span", { className: "extension-badge", textContent: row.badge }));
     if (hasProblem(row.ext)) marks.unshift(element("span", { className: "extension-alert", title: "Needs attention", textContent: "!" }));
     const item = element("button", { type: "button", className: `extension-row${row.key === state.selected ? " active" : ""}` }, [
-      element("span", { className: "extension-row-text" }, [element("strong", { textContent: row.title }), element("small", { textContent: row.detail })]),
+      element("span", { className: "extension-row-text" }, [element("strong", { textContent: row.title }), ...(row.detail ? [element("small", { textContent: row.detail })] : [])]),
       element("span", { className: "extension-row-marks" }, marks),
     ]);
     item.dataset.key = row.key;
@@ -172,7 +162,7 @@ function renderStage(row) {
 }
 
 function emptyStage(row) {
-  if (row.key.startsWith("ext:")) return row.ext.description || "This extension has no page. Its jobs and actions run in the background.";
+  if (row.key.startsWith("ext:")) return "This extension has no page. Its jobs and actions run in the background.";
   if (row.status === "not on tailnet") return "This page is not published on the tailnet yet; it opens from this machine.";
   if (row.status === "no port") return "This page has no port yet.";
   return `This page is ${row.status}.`;
@@ -253,8 +243,8 @@ function renderHistory() {
       if (!change.root) buttons.push(button("Undo", () => changeAction({ action: "undo", rev: change.rev })));
       const when = new Date(change.time).toLocaleString();
       const card = element("section", { className: "extension-change" }, [
-        element("p", { className: "extension-change-title", textContent: `${change.author}: ${change.message}` }),
-        element("p", { className: "extension-quiet", textContent: `${describeChange(change)} · ${when}${change.pending ? " · waiting for you" : ""}` }),
+        element("p", { className: "extension-change-title", textContent: change.title }),
+        element("p", { className: "extension-quiet", textContent: `${when}${change.pending ? " · waiting for you" : ""}` }),
         element("div", { className: "extension-change-actions" }, buttons),
       ]);
       if (state.patches.has(change.rev)) card.append(element("pre", { className: "extension-change-patch", textContent: state.patches.get(change.rev) }));
@@ -266,6 +256,15 @@ function renderHistory() {
 
 function selectedRow() {
   return launcherRows(state.view).find((row) => row.key === state.selected);
+}
+
+function fitStage() {
+  const stage = $("#extensions-stage");
+  const layout = stage?.closest(".extensions-layout");
+  if (!layout || !stage.offsetParent || state.fullscreen) return;
+  const gap = Number.parseFloat(getComputedStyle(layout).getPropertyValue("--pane-gap"));
+  const bottom = Number.isFinite(gap) ? gap : 16;
+  layout.style.setProperty("--extensions-fit", `${Math.floor(window.innerHeight - stage.getBoundingClientRect().top - window.scrollY - bottom)}px`);
 }
 
 function render() {
@@ -282,6 +281,7 @@ function render() {
   }
   renderRail(rows);
   renderStage(row);
+  fitStage();
 }
 
 async function act(body) {
@@ -358,6 +358,7 @@ export function bindExtensions() {
     event.preventDefault();
     build(event.currentTarget);
   });
+  window.addEventListener("resize", fitStage);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && state.fullscreen && !$("#extensions-new-dialog")?.open) setFullscreen(false);
   });

@@ -48,6 +48,29 @@ func TestTheHistoryOfOneExtensionListsTheChangesThatTouchedItWhole(t *testing.T)
 	}
 }
 
+func TestEachChangeIsTitledByWhoMadeItAndWhatItDid(t *testing.T) {
+	f := startExtensionFixture(t)
+	changeOwnPage(t, f, "green", "turn-0")
+	turn := f.changes(t)[0]
+	if response, body := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]any{"action": "undo", "rev": turn.Rev}); response.StatusCode != http.StatusOK {
+		t.Fatalf("undo answered %d %s", response.StatusCode, body)
+	}
+
+	changes := f.changes(t)
+	if len(changes) < 3 {
+		t.Fatalf("history = %+v, want the undo, the turn and the start", changes)
+	}
+	if want := "You undid a change to fixture"; changes[0].Title != want {
+		t.Fatalf("the undo is titled %q, want %q", changes[0].Title, want)
+	}
+	if want := turn.Author + " changed 1 file in fixture"; changes[1].Title != want || turn.Author == "" {
+		t.Fatalf("the turn is titled %q, want %q", changes[1].Title, want)
+	}
+	if start := changes[len(changes)-1]; !strings.HasPrefix(start.Title, "Agenthail created fixture (") {
+		t.Fatalf("the start is titled %q", start.Title)
+	}
+}
+
 func clickIn(t *testing.T, agent *mcp.ClientSession, tab, selector, name string) {
 	t.Helper()
 	snapshot := browse(t, agent, map[string]any{"action": "snapshot", "tab": tab, "selector": selector, "interactive": true})["snapshot"].(string)

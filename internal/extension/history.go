@@ -37,6 +37,7 @@ type Change struct {
 	Author    string    `json:"author"`
 	Time      time.Time `json:"time"`
 	Message   string    `json:"message"`
+	Title     string    `json:"title"`
 	SessionID string    `json:"sessionId,omitempty"`
 	TurnID    string    `json:"turnId,omitempty"`
 	// AlsoRunning lists sessions that were mid-turn when the change was
@@ -85,7 +86,7 @@ func OpenHistory(home string, existing bool) (*History, error) {
 	if err := h.repo.Stage(paths...); err != nil {
 		return nil, err
 	}
-	if _, err := h.repo.CommitStaged("agenthail", "Start the extensions history"); err != nil {
+	if _, err := h.repo.CommitStaged(gitstore.Agenthail, "Start the extensions history"); err != nil {
 		return nil, err
 	}
 	return h, nil
@@ -169,9 +170,57 @@ func (h *History) Log(limit int, rev string, ids ...string) ([]Change, error) {
 		}
 		change.Root = strings.TrimSpace(fields[7]) == ""
 		change.Extensions = fileChanges(files)
+		change.Title = change.title()
 		changes = append(changes, change)
 	}
 	return changes, nil
+}
+
+func (c Change) Summary() string {
+	if len(c.Extensions) == 0 {
+		return "changed files outside any extension"
+	}
+	var parts []string
+	for _, files := range c.Extensions {
+		count := len(files.Added) + len(files.Updated) + len(files.Deleted)
+		switch {
+		case files.Created:
+			parts = append(parts, fmt.Sprintf("created %s (%s)", files.ID, fileCount(count)))
+		case files.Removed:
+			parts = append(parts, "removed "+files.ID)
+		default:
+			parts = append(parts, fmt.Sprintf("changed %s in %s", fileCount(count), files.ID))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func fileCount(n int) string {
+	if n == 1 {
+		return "1 file"
+	}
+	return fmt.Sprintf("%d files", n)
+}
+
+func (c Change) title() string {
+	who := c.Author
+	switch who {
+	case Person:
+		who = "You"
+	case gitstore.Agenthail:
+		who = "Agenthail"
+	}
+	if strings.HasPrefix(c.Message, gitstore.UndoPrefix) {
+		ids := make([]string, 0, len(c.Extensions))
+		for _, files := range c.Extensions {
+			ids = append(ids, files.ID)
+		}
+		if len(ids) == 0 {
+			return who + " undid a change"
+		}
+		return who + " undid a change to " + strings.Join(ids, ", ")
+	}
+	return who + " " + c.Summary()
 }
 
 func fileChanges(lines string) []FileChanges {
@@ -237,10 +286,10 @@ func (h *History) FolderTrees() (map[string]string, error) {
 	os.Remove(name)
 	defer os.Remove(name)
 	env := []string{"GIT_INDEX_FILE=" + name}
-	if _, err := h.repo.GitWith("agenthail", env, "add", "-A"); err != nil {
+	if _, err := h.repo.GitWith(gitstore.Agenthail, env, "add", "-A"); err != nil {
 		return nil, err
 	}
-	tree, err := h.repo.GitWith("agenthail", env, "write-tree")
+	tree, err := h.repo.GitWith(gitstore.Agenthail, env, "write-tree")
 	if err != nil {
 		return nil, err
 	}

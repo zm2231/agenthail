@@ -241,9 +241,8 @@ func describeExtensions(view extensionsListView) string {
 
 type extensionChangeView struct {
 	Rev        string    `json:"rev"`
-	Author     string    `json:"author"`
 	Time       time.Time `json:"time"`
-	Message    string    `json:"message"`
+	Title      string    `json:"title"`
 	Extensions []struct {
 		ID      string   `json:"id"`
 		Created bool     `json:"created"`
@@ -265,7 +264,7 @@ func printExtensionHistory(data []byte) error {
 		fmt.Println("[extensions] no history yet")
 	}
 	for _, change := range view.Changes {
-		fmt.Printf("%s  %s  %s: %s\n", change.Rev, change.Time.Local().Format(time.DateTime), change.Author, change.Message)
+		fmt.Printf("%s  %s  %s\n", change.Rev, change.Time.Local().Format(time.DateTime), change.Title)
 		for _, files := range change.Extensions {
 			what := "changed"
 			switch {
@@ -297,7 +296,7 @@ func printExtensionUndo(data []byte) error {
 	if err := json.Unmarshal(data, &view); err != nil {
 		return err
 	}
-	fmt.Printf("[extensions] undid %s (%s)\n", view.Undone.Rev, view.Undone.Message)
+	fmt.Printf("[extensions] undid %s (%s)\n", view.Undone.Rev, view.Undone.Title)
 	if len(view.Removed) > 0 {
 		fmt.Printf("[extensions] removed %s with its tables and approvals\n", strings.Join(view.Removed, ", "))
 	}

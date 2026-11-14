@@ -501,9 +501,11 @@ this machine. `approve` and `key` with `"sessionId"` raise the person's ask
 instead. `{"action": "keep", "rev": "<rev>"}` keeps one change still waiting in a
 Keep/Undo ask: the ask drops it, and closes as kept when none is left.
 `GET /api/v1/extensions/history/<rev>` returns the change and its `patch`, cut
-at 256 KiB with `truncated` set. `GET /api/v1/extensions/history?limit=50` lists the changes (`read`
-scope), with `&id=<id>` only those that touched that extension, each still
-with every file it changed since undo reverts all of them: each with `rev`, `author`, `time`, `message`, `sessionId`, `turnId`
-and, per extension, `created`, `removed` and the files `added`, `updated` and
-`deleted`, `pending` while the change waits in a Keep/Undo ask, and `root`
-for the first commit, which can't be undone.
+at 256 KiB with `truncated` set. `GET /api/v1/extensions/history?limit=50`
+lists the changes (`read` scope), each with `rev`, `author`, `time`,
+`message`, `title` (who made it and what it did, as the dashboard and CLI show
+it), `sessionId`, `turnId` and, per extension, `created`, `removed` and the
+files `added`, `updated` and `deleted`, `pending` while the change waits in a
+Keep/Undo ask, and `root` for the first commit, which can't be undone. With
+`&id=<id>` it lists only the changes that touched that extension, each still
+with every file it changed, since undo reverts all of them.

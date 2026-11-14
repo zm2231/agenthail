@@ -319,7 +319,7 @@ func (d *Daemon) extensionChangeAsk(sessionID string, revs []string) (string, []
 		}
 		if len(changes) > 0 {
 			last = changes[0]
-			summaries = append(summaries, describeExtensionChange(last))
+			summaries = append(summaries, last.Summary())
 		}
 	}
 	if len(summaries) == 0 {
@@ -357,27 +357,6 @@ func (d *Daemon) namesOf(sessionIDs []string) string {
 	}
 	return strings.Join(names, ", ")
 }
-
-func describeExtensionChange(change extension.Change) string {
-	if len(change.Extensions) == 0 {
-		return "no extension files"
-	}
-	var parts []string
-	for _, files := range change.Extensions {
-		count := len(files.Added) + len(files.Updated) + len(files.Deleted)
-		switch {
-		case files.Created:
-			parts = append(parts, fmt.Sprintf("created %s (%s)", files.ID, fileCount(count)))
-		case files.Removed:
-			parts = append(parts, "removed "+files.ID)
-		default:
-			parts = append(parts, fmt.Sprintf("changed %s in %s", fileCount(count), files.ID))
-		}
-	}
-	return strings.Join(parts, ", ")
-}
-
-func fileCount(n int) string { return fmt.Sprintf("%d %s", n, plural(n, "file", "files")) }
 
 func clipText(text string, limit int) string {
 	runes := []rune(text)

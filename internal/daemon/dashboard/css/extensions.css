@@ -1,15 +1,9 @@
-#extensions-view .page-heading {
-  margin-bottom: 24px;
-}
-
-.extensions-heading-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+html:not([data-panes]) #extensions-view {
+  padding-top: 16px;
 }
 
 .extensions-layout {
-  --extensions-height: max(28rem, calc(100vh - 15rem));
+  --extensions-height: max(24rem, var(--extensions-fit, calc(100vh - 8rem)));
   display: grid;
   grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
   gap: var(--pane-gap, 16px);
@@ -19,12 +13,26 @@
 .extensions-rail {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   height: var(--extensions-height);
-  overflow-y: auto;
   padding: 8px;
   border-radius: var(--radius);
   background: var(--panel);
+}
+
+.extensions-rail-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+
+.extensions-rows {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .extensions-rail-note {
@@ -295,13 +303,30 @@
 
   .extensions-rail {
     flex-direction: row;
+    align-items: stretch;
     height: auto;
+  }
+
+  .extensions-rail-actions {
+    grid-template-columns: auto;
+    align-content: center;
+  }
+
+  .extensions-rail-actions button {
+    padding: 7px 10px;
+  }
+
+  .extensions-rows {
+    flex-direction: row;
     overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .extension-row {
+    flex: none;
     width: auto;
-    min-width: 12rem;
+    min-width: 10rem;
+    max-width: 16rem;
   }
 
   .extensions-frame:not([hidden]) + .extensions-history {

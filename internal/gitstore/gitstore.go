@@ -18,8 +18,10 @@ import (
 )
 
 const (
-	Timeout  = 20 * time.Second
-	lockFile = ".lock"
+	Timeout    = 20 * time.Second
+	lockFile   = ".lock"
+	Agenthail  = "agenthail"
+	UndoPrefix = "Undo "
 )
 
 // ErrConflict means a revert met a later change to the same lines and was
@@ -142,7 +144,7 @@ func (r *Repo) RevertLocked(rev, author string) (string, error) {
 		_, _ = r.Git("reset", "-q", "--merge", "HEAD")
 		return reverted, fmt.Errorf("can't undo %q cleanly: %w", reverted, ErrConflict)
 	}
-	if _, err := r.GitAs(author, "commit", "-q", "--allow-empty", "-m", "Undo "+reverted); err != nil {
+	if _, err := r.GitAs(author, "commit", "-q", "--allow-empty", "-m", UndoPrefix+reverted); err != nil {
 		return reverted, err
 	}
 	return reverted, nil
@@ -175,7 +177,7 @@ func (r *Repo) Lock() (func(), error) {
 }
 
 func (r *Repo) Git(args ...string) (string, error) {
-	return r.GitAs("agenthail", args...)
+	return r.GitAs(Agenthail, args...)
 }
 
 func (r *Repo) GitAs(author string, args ...string) (string, error) {
