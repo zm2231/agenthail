@@ -49,13 +49,11 @@ func codexLifecycle(record codexLiveTurnRecord) (started, ended bool) {
 	if record.Type != "event_msg" {
 		return false, false
 	}
-	switch record.Payload.Type {
-	case "task_started":
+	if codexStartsTurn(record.Payload.Type) {
 		return true, false
-	case "task_complete", "task_cancelled", "task_canceled", "task_aborted", "turn_aborted":
-		return false, true
 	}
-	return false, false
+	_, ended = codexTurnEnd(map[string]any{"type": record.Payload.Type})
+	return false, ended
 }
 
 func (t *codexLiveTurn) apply(line []byte) {

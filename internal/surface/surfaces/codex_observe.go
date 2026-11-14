@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -10,10 +11,13 @@ import (
 )
 
 func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
-	conn, err := c.openReader(ctx, sess)
-	if err != nil {
-		return nil, err
+	runtimes := c.openRuntimes(ctx)
+	conn := runtimes.reader(sess.ID)
+	if conn == nil {
+		return nil, runtimes.unavailable()
 	}
+	unheld := c.unheld(ctx, runtimes, sess, time.Now())
+	runtimes.release(conn)
 	defer conn.Close()
 	thread, err := c.readObservationThread(ctx, conn, sess.ID)
 	if err != nil {
@@ -39,6 +43,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 		observation = codexObservation(thread)
 	}
 	observation = dropUnconfirmedTurn(thread, observation)
+	observation.Unheld = unheld && observation.Status != surface.StatusBusy
 	observation.WaitingOn = c.preciseWait(ctx, conn, sess, observation.WaitingOn)
 	if path := c.home.transcriptPath(sess); path != "" {
 		if info, err := os.Stat(path); err == nil {
@@ -133,4 +138,54 @@ func codexNewestTurn(ctx context.Context, conn codexClient, threadID string) (ma
 	}
 	newest, _ := turns[0].(map[string]any)
 	return newest, nil
+}
+
+const codexQuietAfter = 5 * time.Minute
+
+// Real turns ran under 45 minutes; one open far longer was left by a terminal that crashed.
+const codexAbandonedTurnAfter = 2 * time.Hour
+
+// A plain codex terminal is no runtime the daemon can ask, but it keeps writing the rollout.
+func (c *Codex) unheld(ctx context.Context, runtimes *codexRuntimes, sess *surface.Session, now time.Time) bool {
+	if len(runtimes.loadFailures) > 0 {
+		return false
+	}
+	if c.desktopURL != "" && (runtimes.desktop == nil || runtimes.desktopLoaded == nil || runtimes.desktopLoaded[sess.ID]) {
+		return false
+	}
+	if runtimes.managed == nil {
+		if _, err := os.Stat(c.home.socketPath()); !errors.Is(err, os.ErrNotExist) {
+			return false
+		}
+	} else if runtimes.managedLoaded == nil || runtimes.managedLoaded[sess.ID] {
+		return false
+	}
+	path := c.home.transcriptPath(sess)
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || now.Sub(info.ModTime()) <= codexQuietAfter || codexTurnOpen(path, info, now) {
+		return false
+	}
+	return !surface.BackgroundRunning(c.transcriptBackground(ctx, path, info))
+}
+
+func codexTurnOpen(path string, info os.FileInfo, now time.Time) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return true
+	}
+	defer file.Close()
+	open := false
+	scanJSONLBackward(file, info.Size(), info.Size(), func(line []byte, _ int64) bool {
+		record, at, ok := parseCodexLiveTurnRecord(line)
+		if !ok {
+			return true
+		}
+		started, ended := codexLifecycle(record)
+		open = started && (at.IsZero() || now.Sub(at) <= codexAbandonedTurnAfter)
+		return !started && !ended
+	})
+	return open
 }

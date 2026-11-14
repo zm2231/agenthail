@@ -38,13 +38,14 @@ type Call struct {
 }
 
 type Turn struct {
-	ID        string
-	Status    string
-	User      string
-	Assistant string
-	Model     string
-	Effort    string
-	Mode      string
+	ID          string
+	Status      string
+	User        string
+	Assistant   string
+	Model       string
+	Effort      string
+	Mode        string
+	CompletedAt time.Time
 }
 
 type Thread struct {
@@ -579,6 +580,7 @@ func (d *Daemon) CompleteTurn(threadID, reply string) {
 	if turn := d.activeTurn(threadID); turn != nil {
 		turn.Status = "completed"
 		turn.Assistant = reply
+		turn.CompletedAt = time.Now()
 	}
 }
 
@@ -860,7 +862,11 @@ func turnJSON(turn Turn, loaded bool) map[string]any {
 	}
 	value := map[string]any{"id": turn.ID, "status": turn.Status, "items": items, "completedAt": nil}
 	if turn.Status != "inProgress" && (turn.Status != "interrupted" || loaded) {
-		value["completedAt"] = 1
+		ended := turn.CompletedAt
+		if ended.IsZero() {
+			ended = time.Now()
+		}
+		value["completedAt"] = ended.Unix()
 	}
 	return value
 }

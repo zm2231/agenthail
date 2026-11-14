@@ -1002,8 +1002,12 @@ type TurnObservation struct {
 	// sessions on one account share its limits.
 	UsageAccount string `json:"usageAccount,omitempty"`
 	// SettledAt is when the last turn ended without an error.
-	SettledAt time.Time    `json:"settledAt,omitzero"`
-	Reply     *ReplyResult `json:"reply,omitempty"`
+	SettledAt time.Time `json:"settledAt,omitzero"`
+	// CompletedAt is when the turn CompletedTurnID names ended; zero when the surface doesn't say.
+	CompletedAt time.Time `json:"completedAt,omitzero"`
+	// Unheld reports that no runtime that could run the session holds it and it has been quiet, so no turn of it is running.
+	Unheld bool         `json:"-"`
+	Reply  *ReplyResult `json:"reply,omitempty"`
 }
 
 // UsageLimitReader reads what a session's transcript alone says about its

@@ -37,8 +37,11 @@ func newCodexTurnMeter() *codexTurnMeter {
 
 func codexRecordStartsTurn(record map[string]any) bool {
 	payload, _ := record["payload"].(map[string]any)
-	typ := str(payload, "type")
-	return str(record, "type") == "event_msg" && (typ == "task_started" || typ == "turn_started")
+	return str(record, "type") == "event_msg" && codexStartsTurn(str(payload, "type"))
+}
+
+func codexStartsTurn(typ string) bool {
+	return typ == "task_started" || typ == "turn_started"
 }
 
 func codexRecordEndsTurn(record map[string]any) (string, bool) {

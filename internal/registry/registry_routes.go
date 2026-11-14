@@ -86,17 +86,19 @@ func (r *Registry) MoveRelayRoutes(from, to string) error {
 type WatchedSession struct {
 	ID      string
 	Surface surface.SurfaceKind
+	Armed   bool
 }
 
 func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
 	rows, err := r.read.Query(`
-		SELECT DISTINCT s.id,s.surface
+		SELECT DISTINCT s.id,s.surface,EXISTS(SELECT 1 FROM session_runtime r WHERE r.session_id=s.id AND r.notification_armed=1)
 		FROM sessions s
 		WHERE s.host_id='' AND s.id IN (
 			SELECT from_session FROM routes WHERE active=1
 			UNION SELECT to_session FROM routes WHERE active=1
 			UNION SELECT session_id FROM message_queue WHERE status IN ('pending','inflight')
 			UNION SELECT session_id FROM session_runtime WHERE held_completion_turn_id<>''
+			UNION SELECT session_id FROM session_runtime WHERE notification_armed=1
 			UNION SELECT child_session_id FROM tasks WHERE state='running'
 		)
 		ORDER BY s.surface,s.id`)
@@ -106,7 +108,7 @@ func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
 	return appendRows(nil, rows, func(row rowScanner) (WatchedSession, error) {
 		var session WatchedSession
 		var kind string
-		err := row.Scan(&session.ID, &kind)
+		err := row.Scan(&session.ID, &kind, &session.Armed)
 		session.Surface = surface.SurfaceKind(kind)
 		return session, err
 	})

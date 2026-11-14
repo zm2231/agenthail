@@ -20,6 +20,7 @@ type codexTurn struct {
 	Error          string
 	Unsettled      bool
 	Stop           *surface.TurnStop
+	CompletedAt    time.Time
 }
 
 type codexAssistantItem struct {
@@ -105,7 +106,7 @@ func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID strin
 	for index, rawTurn := range turns {
 		entry, _ := rawTurn.(map[string]any)
 		status, done, turnError := codexTurnState(entry["status"])
-		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry)}
+		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry), CompletedAt: codexUnixTime(entry["completedAt"])}
 		items, _ := entry["items"].([]any)
 		if len(items) == 0 && turn.ID != "" && hydrate[index] {
 			page, pageErr := c.listThreadItems(ctx, conn, thread.ID, turn.ID)
@@ -177,7 +178,7 @@ func (c *Codex) threadFromTurns(ctx context.Context, conn codexClient, threadID 
 	for index, rawTurn := range turns {
 		entry, _ := rawTurn.(map[string]any)
 		status, done, turnError := codexTurnState(entry["status"])
-		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry)}
+		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry), CompletedAt: codexUnixTime(entry["completedAt"])}
 		items, _ := entry["items"].([]any)
 		if len(items) == 0 && turn.ID != "" && hydrate[index] {
 			page, pageErr := c.listThreadItems(ctx, conn, thread.ID, turn.ID)
@@ -363,6 +364,7 @@ func codexObservation(thread *codexThread) *surface.TurnObservation {
 			continue
 		}
 		observation.CompletedTurnID = turn.ID
+		observation.CompletedAt = turn.CompletedAt
 		observation.Reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: true, Error: turn.Error}
 		break
 	}
