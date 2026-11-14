@@ -6,7 +6,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+const tempSuffix = ".atomic"
+
+func IsTemp(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasPrefix(base, ".") && strings.HasSuffix(base, tempSuffix)
+}
 
 func Write(path string, data []byte, perm fs.FileMode) error {
 	return write(path, bytes.NewReader(data), perm, false)
@@ -23,7 +31,7 @@ func WriteFrom(path string, r io.Reader, perm fs.FileMode) error {
 }
 
 func write(path string, r io.Reader, perm fs.FileMode, sync bool) error {
-	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*"+tempSuffix)
 	if err != nil {
 		return err
 	}
