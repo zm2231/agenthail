@@ -29,6 +29,7 @@ SOURCES=(
   ExtensionModels.swift
   ExtensionEntries.swift
   ExtensionWeb.swift
+  SentFiles.swift
   ClaudeCompactModels.swift
   KeptDelivery.swift
   InboxMessage.swift

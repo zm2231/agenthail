@@ -84,6 +84,8 @@ struct TranscriptBlockView: View, @MainActor Equatable {
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
         case .image(let attachment):
             AttachmentImageView(attachment: attachment)
+        case .sentFile(let item):
+            SentFileCard(item: item)
         case .unknown(let title, let kind, let text):
             UnknownTimelineCard(title: title, kind: kind, text: text)
         case .instructions(let text):
