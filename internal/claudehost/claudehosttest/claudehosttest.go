@@ -567,3 +567,19 @@ func tail(data []byte, limit int) []byte {
 }
 
 func Alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil }
+
+// Leaving is the leaving generation host lists for the session, as the daemon
+// reads it before a release.
+func Leaving(t *testing.T, host claudehost.Client, sessionID string) int {
+	t.Helper()
+	listing, err := host.Own(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range listing.Sessions {
+		if session.SessionID == sessionID {
+			return session.Leaving
+		}
+	}
+	return 0
+}

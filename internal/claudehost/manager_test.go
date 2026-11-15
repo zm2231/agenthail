@@ -225,7 +225,7 @@ func listed(t *testing.T, client claudehost.Client, sessionID string, requests i
 func releaseOnRetiringHost(t *testing.T, client claudehost.Client, sessionID string) {
 	t.Helper()
 	for _, host := range client.Retiring() {
-		err := host.Release(context.Background(), sessionID)
+		err := host.Release(context.Background(), sessionID, claudehosttest.Leaving(t, host, sessionID))
 		if err == nil {
 			return
 		}

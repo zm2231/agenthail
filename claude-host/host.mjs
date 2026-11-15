@@ -36,10 +36,11 @@ const HUMAN_KEPT = 64;
 const CLOSE_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS) || 5_000;
 const KILL_WAIT_MS = 2_000;
 const SUBSCRIBER_FLUSH_MS = 5_000;
-// How long a retiring host waits for a session's background tasks to end
-// before it closes the session at its next idle point anyway. A task a worker
-// keeps restarting never ends, and the session would hold this host and its
-// runtime for good.
+// How long after a session's last activity a host closes it at its next
+// idle point without the daemon's release: its prompt cache has expired by
+// then, so no idle compaction is left to wait for. A retiring host also stops
+// waiting for its background tasks then; a task a worker keeps restarting
+// never ends, and the session would hold this host and its runtime for good.
 const DRAIN_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS) || 60 * 60_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERMISSION_MODES = new Set(['default', 'manual', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']);
@@ -89,7 +90,7 @@ const events = [];
 const subscribers = new Set();
 let seq = 0;
 let draining = false;
-let graceOver = false;
+let retiredAt = 0;
 // Replies not yet written; a retiring host writes them before it exits.
 let replying = 0;
 let exiting = false;
@@ -136,7 +137,11 @@ class Session {
     this.done = null;
     this.stateEvents = false;
     this.guessesIdle = false;
+    this.quiet = true;
     this.released = false;
+    this.leaving = 0;
+    this.activeAt = Date.now();
+    this.graceTimer = null;
     this.tasks = [];
     this.taskSince = new Map();
     this.owed = new Set();
@@ -233,6 +238,7 @@ class Session {
   // waits on, so those requests end here rather than stay listed unanswerable.
   end() {
     this.ended = true;
+    clearTimeout(this.graceTimer);
     this.endRequests();
     this.wake?.();
   }
@@ -279,16 +285,19 @@ class Session {
   setState(state) {
     if (this.state === state) return;
     this.state = state;
+    if (state !== 'idle') this.unrelease();
+    this.activeAt = Date.now();
+    this.armGrace();
     emit(this.id, 'state', { state });
     this.retireIfDone();
   }
 
-  // A retiring host closes a session only once Claude is idle with no open
-  // request, no background task and no turn owed, since closing ends the
-  // process and every task it runs, and only once the daemon has released it
-  // or the drain grace is over: the daemon keeps a session whose prompt cache
-  // it can still compact. The next message resumes the conversation on the new
-  // host.
+  // A host leaves a session, retiring or to apply a new compact window, only
+  // once Claude is idle with no open request, no background task and no turn
+  // owed, since closing ends the process and every task it runs, and only once
+  // the daemon has released it or the session's grace is over: the daemon
+  // keeps a session whose prompt cache it can still compact. The next message
+  // resumes the conversation, on the new host when this one retires.
   // A Claude that ended a turn without reporting its states leaves idle a
   // guess that a turn it started itself may still be running, so such a
   // session retires only as a turn result arrives.
@@ -298,16 +307,41 @@ class Session {
     return this.state === 'idle' && this.pending.size === 0 && this.tasks.length === 0 && this.owed.size === 0;
   }
 
-  // Once the drain grace is over, live background tasks no longer keep the
-  // session; it still retires only idle with no open request and no turn owed.
+  // A release holds for what the daemon saw when it decided. New work or a
+  // new compact window starts a new leaving generation, which the daemon
+  // decides again: one it releases with an older generation is refused.
+  unrelease() {
+    this.released = false;
+    this.leaving++;
+  }
+
+  // The grace runs from the session's last activity, and on a retiring host
+  // from the retire at the earliest.
+  graceOver() {
+    return Date.now() - Math.max(this.activeAt, retiredAt) >= DRAIN_GRACE_MS;
+  }
+
+  armGrace() {
+    clearTimeout(this.graceTimer);
+    this.graceTimer = null;
+    if (this.ended || (!draining && this.pendingWindow === undefined)) return;
+    const left = Math.max(this.activeAt, retiredAt) + DRAIN_GRACE_MS - Date.now();
+    this.graceTimer = setTimeout(() => this.retireIfDone(), Math.max(left, 0) + 10);
+    this.graceTimer.unref();
+  }
+
+  // Once a retiring host's grace for the session is over, live background
+  // tasks no longer keep it; it still retires only idle with no open request
+  // and no turn owed.
   retirable() {
     if (this.settled()) return true;
-    return graceOver && this.state === 'idle' && this.pending.size === 0 && this.owed.size === 0;
+    return this.graceOver() && this.state === 'idle' && this.pending.size === 0 && this.owed.size === 0;
   }
 
   retireIfDone({ turnEnded = false } = {}) {
-    if (this.guessesIdle && !turnEnded) return;
-    const leaving = draining ? (this.released || graceOver) && this.retirable() : this.pendingWindow !== undefined && this.settled();
+    if (this.guessesIdle && !turnEnded && !this.quiet) return;
+    const free = this.released || this.graceOver();
+    const leaving = draining ? free && this.retirable() : this.pendingWindow !== undefined && free && this.settled();
     if (this.ended || !this.query || !leaving) return;
     if (this.measuring) {
       this.measuring.then(() => this.retireIfDone({ turnEnded }));
@@ -375,6 +409,7 @@ class Session {
       autoCompactEnabled: this.autoCompactEnabled ?? null,
       autoCompactWindow: this.window ?? 'default',
       pendingAutoCompactWindow: this.pendingWindow ?? null,
+      leaving: this.leaving,
       requests: [...this.pending.values()].map((p) => p.request),
       tasks: this.describeTasks(),
       taskTurnOwed: this.taskTurnOwed(),
@@ -466,7 +501,9 @@ const methods = {
     }
     const s = unsandboxed(sessionId);
     s.pendingWindow = window === s.window ? undefined : window;
+    s.unrelease();
     s.remember();
+    s.armGrace();
     s.retireIfDone();
     return s.describe();
   },
@@ -511,10 +548,13 @@ const methods = {
     killSession(s);
     return {};
   },
-  // release lets a retiring host close the session at its next idle point.
-  release: ({ sessionId }) => {
-    if (!draining) throw new HostError('not_draining', 'only a retiring host releases its sessions');
+  // release lets the host close a session it keeps for the daemon, retiring
+  // or waiting to apply a new compact window, at the session's next idle
+  // point. leaving is the session's leaving generation the daemon decided on.
+  release: ({ sessionId, leaving }) => {
     const s = session(sessionId);
+    if (!draining && s.pendingWindow === undefined) throw new HostError('not_leaving', 'the host keeps this session; only one it retires or reopens for a new compact window is released');
+    if (leaving !== s.leaving) throw new HostError('stale', `the release was decided at leaving generation ${leaving}, and the session has since worked or changed its compact window (now ${s.leaving})`);
     s.released = true;
     s.retireIfDone();
     return {};
@@ -1131,6 +1171,7 @@ async function run(s, exit) {
   try {
     for await (const message of s.query) {
       for (const uuid of message.user_message_uuids ?? []) s.owed.delete(uuid);
+      if (message.type !== 'system') s.quiet = message.type === 'result';
       if (message.type === 'result') s.measureAfter(message);
       if (message.type === 'system' && (message.subtype === 'init' || message.subtype === 'status') && PERMISSION_MODES.has(message.permissionMode) && message.permissionMode !== s.permissionMode) {
         s.permissionMode = message.permissionMode;
@@ -1168,6 +1209,13 @@ async function run(s, exit) {
           if (!owedTask) s.emitTasks();
         }
       } else if (message.type === 'result' && !s.stateEvents && s.inbox.length === 0) {
+        // A result while the host thought Claude idle is a turn Claude
+        // started itself, which the daemon has not decided on yet.
+        if (s.state === 'idle') {
+          s.unrelease();
+          s.activeAt = Date.now();
+          s.armGrace();
+        }
         s.guessesIdle = true;
         s.interruptOwed = false;
         s.turnStarted();
@@ -1484,10 +1532,8 @@ async function retire() {
   });
   fs.chmodSync(socket, 0o600);
   draining = true;
-  setTimeout(() => {
-    graceOver = true;
-    for (const s of [...sessions.values()]) s.retireIfDone();
-  }, DRAIN_GRACE_MS).unref();
+  retiredAt = Date.now();
+  for (const s of sessions.values()) s.armGrace();
   server.close();
   try {
     fs.unlinkSync(args.socket);

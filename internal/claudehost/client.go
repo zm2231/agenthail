@@ -110,6 +110,7 @@ type Session struct {
 	AutoCompactEnabled       *bool        `json:"autoCompactEnabled"`
 	AutoCompactWindow        string       `json:"autoCompactWindow"`
 	PendingAutoCompactWindow *string      `json:"pendingAutoCompactWindow"`
+	Leaving                  int          `json:"leaving"`
 	Requests                 []Request    `json:"requests"`
 	// Tasks are the live background tasks Claude last reported. A host that
 	// predates them leaves it nil.
@@ -657,10 +658,13 @@ func (c Client) Own(ctx context.Context) (Listing, error) {
 	return out, c.call(ctx, "list", struct{}{}, &out)
 }
 
-// Release lets the retiring host on Socket close a session it keeps, at the
-// session's next idle point. A host only releases while it retires.
-func (c Client) Release(ctx context.Context, sessionID string) error {
-	return c.call(ctx, "release", map[string]string{"sessionId": sessionID}, nil)
+// Release lets the host on Socket close a session it keeps for the daemon, at
+// the session's next idle point: one it runs while it retires, or one it
+// reopens for a new compact window. leaving is the session's leaving
+// generation the release was decided on; the host refuses it with stale once
+// the session has worked or changed its compact window since.
+func (c Client) Release(ctx context.Context, sessionID string, leaving int) error {
+	return c.call(ctx, "release", map[string]any{"sessionId": sessionID, "leaving": leaving}, nil)
 }
 
 type request struct {
