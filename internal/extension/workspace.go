@@ -170,8 +170,10 @@ func readManifest(file string) (Manifest, error) {
 	return manifest, nil
 }
 
+func ValidMountName(name string) bool { return idPattern.MatchString(name) }
+
 func (m *Mount) normalize() error {
-	if !idPattern.MatchString(m.Name) {
+	if !ValidMountName(m.Name) {
 		return errors.New("a name is a lowercase letter followed by up to 39 lowercase letters, digits or dashes")
 	}
 	m.Label = strings.TrimSpace(m.Label)

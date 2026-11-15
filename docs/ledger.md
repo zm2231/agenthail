@@ -348,7 +348,7 @@ GET /ledger?project=<project id>           # what it shows, as JSON, with an ETa
 GET /events?project=<project id>           # ledger.changed for that project only
 ```
 
-The project id is the one the project list uses (a repository project's key or an added project's id); the daemon finds its ledger the way sessions in that project do. A project with no ledger yet reads as an empty list. Like an extension page, the port answers only for this machine's own names, and asks for `read` scope.
+The project id is the one the project list uses (a repository project's key or an added project's id); the daemon finds its ledger the way sessions in that project do. A project with no ledger yet reads as an empty list. Like an extension page, the port answers only for this machine's own names, and asks for `read` scope. `GET /api/v1/extensions?host=<paired host>` gives a paired host's Work page a local port of this daemon's, as it does that host's extension pages, so a Mac can show the Work tab of a project on a server.
 
 ## Doctor
 

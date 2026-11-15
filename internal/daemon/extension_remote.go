@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -187,16 +188,31 @@ func (d *Daemon) shareRemoteExtensions(host *pairedHost, view extensionsView) (e
 		return f.port, ""
 	}
 	unpublished := "Not published on " + name + "."
+	sharePage := func(id string, page pageState) pageState {
+		failure := page.Error
+		if failure == "" && !page.Published {
+			failure = unpublished
+		}
+		page.Port, page.Error = share(remotePageKey(hostID, id), page.Port, page.Published && page.Port > 0 && page.Error == "", failure)
+		page.Published = false
+		return page
+	}
+	ids := map[string]bool{}
+	view.Extensions = slices.DeleteFunc(view.Extensions, func(item extensionView) bool {
+		taken := !extension.ValidID(item.ID) || ids[item.ID]
+		ids[item.ID] = true
+		return taken
+	})
 	for i := range view.Extensions {
 		item := &view.Extensions[i]
+		names := map[string]bool{}
+		item.Mounts = slices.DeleteFunc(item.Mounts, func(mount mountState) bool {
+			taken := !extension.ValidMountName(mount.Name) || names[mount.Name]
+			names[mount.Name] = true
+			return taken
+		})
 		if item.Page != nil {
-			page := *item.Page
-			failure := page.Error
-			if failure == "" && !page.Published {
-				failure = unpublished
-			}
-			page.Port, page.Error = share(remotePageKey(hostID, item.ID), page.Port, page.Published && page.Port > 0 && page.Error == "", failure)
-			page.Published = false
+			page := sharePage(item.ID, *item.Page)
 			item.Page = &page
 		}
 		for j := range item.Mounts {
@@ -213,6 +229,13 @@ func (d *Daemon) shareRemoteExtensions(host *pairedHost, view extensionsView) (e
 			}
 		}
 	}
+	builtIn := make(map[string]pageState, len(view.BuiltIn))
+	for id, page := range view.BuiltIn {
+		if _, known := builtinPageFor(id); known {
+			builtIn[id] = sharePage(id, page)
+		}
+	}
+	view.BuiltIn = builtIn
 	for key := range r.ports {
 		if strings.HasPrefix(key, hostID+"/") && !listed[key] {
 			r.dropLocked(key)

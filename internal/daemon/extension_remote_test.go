@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -511,5 +512,65 @@ func TestAnOpenPairedWebsocketEndsWhenTheHostFailsVerification(t *testing.T) {
 		t.Fatal("an open websocket kept running after the host failed verification")
 	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
 		t.Fatal("the websocket was still open five seconds after verification lapsed")
+	}
+}
+
+func TestAPairedHostsWorkPageOpensThroughItsOwnLocalPort(t *testing.T) {
+	f := newRemoteExtensionFixture(t)
+	f.list(fmt.Sprintf(`{"host":"running","extensions":[
+		{"id":"board","label":"Board","state":"loaded","page":{"port":%d,"entry":"/","published":true}}],
+		"builtIn":{"ledger":{"port":%d,"entry":"/","published":true}}}`, f.board.port, f.notes.port))
+	view := f.view(t)
+	work, ok := view.BuiltIn[extension.Ledger]
+	if !ok || len(view.Extensions) != 1 || view.Extensions[0].Page == nil {
+		t.Fatalf("the list is %+v", view)
+	}
+	if work.Port == 0 || work.Port == f.notes.port || work.Port == view.Extensions[0].Page.Port || work.Published || work.Error != "" {
+		t.Fatalf("the Work page must get its own local port: %+v", work)
+	}
+	response := f.get(t, work.Port, "/", true)
+	if body := readAll(t, response); response.StatusCode != http.StatusOK || !strings.HasPrefix(body, "page notes") {
+		t.Fatalf("the Work page answered %d %q", response.StatusCode, body)
+	}
+
+	f.list(`{"host":"running","extensions":[],"builtIn":{"ledger":{"port":7998,"entry":"/"}}}`)
+	if work := f.view(t).BuiltIn[extension.Ledger]; work.Port != 0 || work.Error != "Not published on vps." {
+		t.Fatalf("an unpublished Work page must say so: %+v", work)
+	}
+
+	f.list(`{"host":"running","extensions":[]}`)
+	if view := f.view(t); view.BuiltIn == nil || len(view.BuiltIn) != 0 {
+		t.Fatalf("a host listing no built-in pages must read as none: %+v", view.BuiltIn)
+	}
+	if _, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", work.Port)); err == nil {
+		t.Fatal("a dropped Work page's port still listens")
+	}
+}
+
+func TestAPairedHostCannotPointOneEntrysPortAtAnother(t *testing.T) {
+	f := newRemoteExtensionFixture(t)
+	f.list(fmt.Sprintf(`{"host":"running","extensions":[
+		{"id":"board","label":"Board","state":"loaded","page":{"port":%[1]d,"entry":"/","published":true}},
+		{"id":"notes","label":"Notes","state":"loaded","mounts":[
+			{"name":"app","label":"App","port":%[2]d,"entry":"/","state":"serving","published":true},
+			{"name":"x/../app","label":"Sly","port":%[1]d,"entry":"/","state":"serving","published":true},
+			{"name":"app","label":"Again","port":%[1]d,"entry":"/","state":"serving","published":true}]},
+		{"id":"notes/mount/app","label":"Sly","state":"loaded","page":{"port":%[1]d,"entry":"/","published":true}},
+		{"id":"board","label":"Again","state":"loaded","page":{"port":%[2]d,"entry":"/","published":true}}],
+		"builtIn":{"ledger":{"port":%[2]d,"entry":"/","published":true},
+			"board":{"port":%[2]d,"entry":"/","published":true},
+			"notes/mount/app":{"port":%[1]d,"entry":"/","published":true}}}`, f.board.port, f.notes.port))
+	for range 2 {
+		view := f.view(t)
+		if len(view.Extensions) != 2 || len(view.Extensions[1].Mounts) != 1 || len(view.BuiltIn) != 1 {
+			t.Fatalf("entries named outside the id rules, or named twice, must be left out: %+v", view)
+		}
+		page, mount := view.Extensions[0].Page.Port, view.Extensions[1].Mounts[0].Port
+		if body := readAll(t, f.get(t, page, "/", true)); !strings.HasPrefix(body, "page board") {
+			t.Fatalf("the board page reached %q", body)
+		}
+		if body := readAll(t, f.get(t, mount, "/", true)); !strings.HasPrefix(body, "page notes") {
+			t.Fatalf("the notes mount reached %q", body)
+		}
 	}
 }
