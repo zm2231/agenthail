@@ -51,7 +51,6 @@ struct ProjectScreen: View {
     @State private var messaging: ListedProject?
     @State private var showingEarlier = false
     @State private var answering: DecisionItem?
-    @State private var tab = ProjectTab.overview
 
     private var project: ListedProject? { model.projects[projectID] }
 
@@ -85,22 +84,7 @@ struct ProjectScreen: View {
         let rows = model.inboxStops.rows(in: projectID, of: model.qualifiedProjects, projectOf: model.projectOfSession())
         let waiting = DecisionInbox(decisions: rows.compactMap { if case .decision(let item) = $0 { item } else { nil } })
         let stops = rows.filter { if case .decision = $0 { false } else { true } }
-        return Group {
-            if tab == .work {
-                PhoneProjectWork(model: model, project: project)
-            } else {
-                overview(project, contents, stops: stops, waiting: waiting)
-            }
-        }
-        .safeAreaInset(edge: .top) {
-            Picker("Show", selection: $tab) {
-                ForEach(ProjectTab.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.bottom, 6)
-            .accessibilityIdentifier("project-tab")
-        }
+        return overview(project, contents, stops: stops, waiting: waiting)
         .navigationTitle(project.state.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -141,7 +125,10 @@ struct ProjectScreen: View {
             if !waiting.isEmpty {
                 DecisionSections(model: model, inbox: waiting, open: openSession) { answering = $0 }
             }
-            if contents.now.count > 0 { nowSection(contents.now) }
+            if contents.now.count > 0 {
+                nowSection(contents.now)
+                workSection(project)
+            }
             Section("Lead") {
                 leadCard(project, contents)
                 if let leads = ProjectContents.leadsLine(project) {
@@ -150,7 +137,10 @@ struct ProjectScreen: View {
                         .accessibilityIdentifier("project-leads")
                 }
             }
-            if contents.now.count == 0 { nowSection(contents.now) }
+            if contents.now.count == 0 {
+                nowSection(contents.now)
+                workSection(project)
+            }
             if showingEarlier {
                 Section("Earlier") {
                     ForEach(contents.earlier) { row($0) }
@@ -184,6 +174,13 @@ struct ProjectScreen: View {
             Button { messaging = project } label: { Text("Message…").frame(maxWidth: fill ? .infinity : nil) }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("project-message")
+        }
+    }
+
+    private func workSection(_ project: ListedProject) -> some View {
+        Section("Work") {
+            PhoneProjectWork(model: model, project: project)
+                .listRowInsets(EdgeInsets())
         }
     }
 

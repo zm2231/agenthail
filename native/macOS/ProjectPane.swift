@@ -57,26 +57,9 @@ struct ProjectPane: View {
     var pane: SessionPane
     let project: ProjectState
     @State private var showingEarlier = false
-    @State private var tab = ProjectTab.overview
 
     var body: some View {
         let contents = ProjectContents.build(project, sessions: model.inDaemonOrder(model.knownSessions), localName: model.daemon?.host?.name)
-        Group {
-            if tab == .work {
-                VStack(alignment: .leading, spacing: DesktopSpace.l) {
-                    header(contents)
-                        .padding([.horizontal, .top], DesktopSpace.xl)
-                    ProjectWorkPane(model: model, project: project)
-                }
-            } else {
-                overview(contents)
-            }
-        }
-        .scrimText()
-        .backdropSurface(DesktopPalette.window)
-    }
-
-    private func overview(_ contents: ProjectContents) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesktopSpace.l) {
                 header(contents)
@@ -96,6 +79,7 @@ struct ProjectPane: View {
                                 rows(group.sessions)
                             }
                         }
+                        card("Work") { ProjectWorkPane(model: model, project: project) }
                         if showingEarlier {
                             card("Earlier") {
                                 if contents.earlier.isEmpty && !model.hasEarlier(project.id) { empty("No earlier sessions") }
@@ -119,6 +103,8 @@ struct ProjectPane: View {
             }
             .padding(DesktopSpace.xl)
         }
+        .scrimText()
+        .backdropSurface(DesktopPalette.window)
     }
 
     private func header(_ contents: ProjectContents) -> some View {
@@ -131,13 +117,6 @@ struct ProjectPane: View {
             if let chip = ProjectHeaderFacts.leadChip(project.leads) {
                 ProjectLeadChipView(chip: chip) { pane.select($0) }
             }
-            Picker("Show", selection: $tab) {
-                ForEach(ProjectTab.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .accessibilityIdentifier("project-tab")
             Spacer()
             if project.archived != true {
                 ProjectBroadcastButton(project: project) { message, key in

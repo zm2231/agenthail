@@ -50,13 +50,7 @@ enum ProjectWork {
         return .shown(url)
     }
 
+    static let placeholderHeight: CGFloat = 120
+
     static func controllerID(_ place: Place) -> String { "work/\(place.hostID)/\(place.projectID)" }
-}
-
-enum ProjectTab: String, CaseIterable, Identifiable {
-    case overview
-    case work
-
-    var id: String { rawValue }
-    var title: String { self == .overview ? "Overview" : "Work" }
 }
