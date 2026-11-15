@@ -918,6 +918,7 @@ struct TranscriptView: View {
     private static let bottomPadding: CGFloat = 12
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
+    @AppStorage(TranscriptFocus.defaultsKey) private var focus = false
 
     private struct TailInputs: Equatable {
         let session: String
@@ -932,7 +933,7 @@ struct TranscriptView: View {
     }
 
     var body: some View {
-        let blocks = TranscriptBlock.build(pane.timelineItems, foldAgents: !expandAgents)
+        let blocks = TranscriptBlock.build(focus ? TranscriptFocus.kept(pane.timelineItems) : pane.timelineItems, foldAgents: !expandAgents)
         let canResend = pane.removedSession?.id != session.id && session.capabilities.send && !session.isReadOnly
         let layout = DesktopColumns.transcript(pane: paneWidth)
         let ids = blocks.map(\.id)

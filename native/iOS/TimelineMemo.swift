@@ -5,6 +5,7 @@ final class TimelineMemo {
     private var latest: [TimelineItem] = []
     private var older: [TimelineItem] = []
     private var fold = true
+    private var focus = false
     private var merged: [TimelineItem] = []
     private var grouped: [TimelineGroup]?
     private var primed = false
@@ -20,11 +21,12 @@ final class TimelineMemo {
         return merged
     }
 
-    func groups(latest: [TimelineItem], older: [TimelineItem], foldAgents: Bool) -> [TimelineGroup] {
+    func groups(latest: [TimelineItem], older: [TimelineItem], foldAgents: Bool, focus: Bool = false) -> [TimelineGroup] {
         let items = items(latest: latest, older: older)
-        if let grouped, fold == foldAgents { return grouped }
+        if let grouped, fold == foldAgents, self.focus == focus { return grouped }
         fold = foldAgents
-        let made = TimelineGroup.make(items, foldAgents: foldAgents)
+        self.focus = focus
+        let made = TimelineGroup.make(focus ? TranscriptFocus.kept(items) : items, foldAgents: foldAgents)
         grouped = made
         return made
     }
