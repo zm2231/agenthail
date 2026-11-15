@@ -834,13 +834,13 @@ final class AgenthailAPI: @unchecked Sendable {
         try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
-    func streamEvents(after: UInt64, onConnected: @escaping @Sendable () async -> Void, onEvent: @escaping @Sendable (AgenthailEvent) async -> Void) async throws {
+    func streamEvents(after: UInt64, onConnected: @escaping @Sendable () async -> Void, onLine: @escaping @Sendable () -> Void = {}, onEvent: @escaping @Sendable (AgenthailEvent) async -> Void) async throws {
         var request = authorizedRequest(path: "/api/v1/events")
         request.setValue(String(after), forHTTPHeaderField: "Last-Event-ID")
         let (bytes, response) = try await session.bytes(for: request)
         try await validateStream(response: response, bytes: bytes)
         await onConnected()
-        try await Self.readEvents(bytes, as: AgenthailEvent.self) { event in
+        try await Self.readEvents(bytes, as: AgenthailEvent.self, onLine: onLine) { event in
             await onEvent(event)
             return true
         }
@@ -954,15 +954,17 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 
     // Lines are split here because AsyncBytes.lines drops the blank lines that end server-sent events.
-    private static func readEvents<Event: Decodable>(_ bytes: URLSession.AsyncBytes, as type: Event.Type, onEvent: (Event) async -> Bool) async throws {
+    private static func readEvents<Event: Decodable>(_ bytes: URLSession.AsyncBytes, as type: Event.Type, onLine: () -> Void = {}, onEvent: (Event) async -> Bool) async throws {
         var parser = ServerSentEventParser()
         var line: [UInt8] = []
         for try await byte in bytes {
             guard byte == UInt8(ascii: "\n") else {
+                if line.isEmpty { onLine() }
                 line.append(byte)
                 continue
             }
             if Task.isCancelled { return }
+            onLine()
             if line.last == UInt8(ascii: "\r") { line.removeLast() }
             if let data = parser.consume(String(decoding: line, as: UTF8.self)), let event = try? JSONDecoder().decode(type, from: Data(data.utf8)) {
                 guard await onEvent(event) else { return }

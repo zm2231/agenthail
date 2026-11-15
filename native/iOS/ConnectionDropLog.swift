@@ -36,6 +36,7 @@ struct ConnectionDropLog: Codable, Equatable {
     static let kept = 50
     static let maxAge: TimeInterval = 7 * 24 * 60 * 60
     static let steadyAfter: TimeInterval = 10 * 60
+    static let longestElapsed: TimeInterval = 30 * 24 * 60 * 60
 
     private(set) var open: [String: ConnectionDrop] = [:]
     private(set) var closed: [ConnectionDrop] = []
@@ -55,7 +56,7 @@ struct ConnectionDropLog: Codable, Equatable {
         }
         let sinceForeground = activeSince.map { now.timeIntervalSince($0) }.flatMap { $0 >= 0 && $0 < Self.steadyAfter ? Int($0 * 1000) : nil }
         open[key] = ConnectionDrop(id: id(), host: host, via: via, path: path, startedAt: now, recoveredAt: nil, recoveredBy: nil, firstError: error, lastError: error,
-                                   elapsedMs: elapsed.map { Int(max(0, $0) * 1000) }, attempts: 1, shown: shown, sinceForegroundMs: sinceForeground,
+                                   elapsedMs: elapsed.map { Int(min(max(0, $0), Self.longestElapsed) * 1000) }, attempts: 1, shown: shown, sinceForegroundMs: sinceForeground,
                                    wentBackground: false, network: network?.interface, vpn: network?.vpn ?? false,
                                    expensive: network?.expensive ?? false, constrained: network?.constrained ?? false)
     }

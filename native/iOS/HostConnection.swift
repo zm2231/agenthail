@@ -248,10 +248,15 @@ final class HostConnection {
         eventTask = Task {
             let backoff = EventRetryBackoff()
             while !Task.isCancelled, !stopped {
+                let heard = StreamHeard()
                 do {
                     try await api.streamEvents(
                         after: lastEventID,
-                        onConnected: { [weak self] in await self?.eventStreamConnected() },
+                        onConnected: { [weak self] in
+                            heard.mark()
+                            await self?.eventStreamConnected()
+                        },
+                        onLine: { heard.mark() },
                         onEvent: { [weak self] event in
                             backoff.reset()
                             await self?.receive(event)
@@ -262,7 +267,7 @@ final class HostConnection {
                     if streamOpen { grace.contact() }
                     streamOpen = false
                     Self.log.notice("\(self.id, privacy: .public) event stream ended: \(error.localizedDescription, privacy: .public)")
-                    drops?.failed(host: id, path: "stream", error: ConnectionDropLog.code(error), elapsed: nil, shown: shownReachable ? .held : .offline)
+                    drops?.failed(host: id, path: "stream", error: ConnectionDropLog.code(error), elapsed: heard.silence(), shown: shownReachable ? .held : .offline)
                     reconnecting = true
                     let probed = Date()
                     do {
@@ -452,5 +457,21 @@ final class HostConnection {
             }
             delegate?.hostDidChange(self)
         }
+    }
+}
+
+final class StreamHeard: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last: ContinuousClock.Instant?
+    private let clock: ContinuousClock
+
+    init(clock: ContinuousClock = ContinuousClock()) { self.clock = clock }
+
+    func mark() { lock.withLock { last = clock.now } }
+
+    func silence() -> TimeInterval? {
+        guard let last = lock.withLock({ last }) else { return nil }
+        let quiet = last.duration(to: clock.now).components
+        return Double(quiet.seconds) + Double(quiet.attoseconds) / 1e18
     }
 }
