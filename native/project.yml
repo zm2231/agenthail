@@ -45,6 +45,7 @@ targets:
       - path: ExtensionModels.swift
       - path: ExtensionEntries.swift
       - path: ExtensionWeb.swift
+      - path: ProjectWork.swift
       - path: SentFiles.swift
       - path: TransientNotice.swift
       - path: ClaudeCompactModels.swift

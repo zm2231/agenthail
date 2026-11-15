@@ -51,6 +51,7 @@ struct ProjectScreen: View {
     @State private var messaging: ListedProject?
     @State private var showingEarlier = false
     @State private var answering: DecisionItem?
+    @State private var tab = ProjectTab.overview
 
     private var project: ListedProject? { model.projects[projectID] }
 
@@ -84,7 +85,43 @@ struct ProjectScreen: View {
         let rows = model.inboxStops.rows(in: projectID, of: model.qualifiedProjects, projectOf: model.projectOfSession())
         let waiting = DecisionInbox(decisions: rows.compactMap { if case .decision(let item) = $0 { item } else { nil } })
         let stops = rows.filter { if case .decision = $0 { false } else { true } }
-        return List {
+        return Group {
+            if tab == .work {
+                PhoneProjectWork(model: model, project: project)
+            } else {
+                overview(project, contents, stops: stops, waiting: waiting)
+            }
+        }
+        .safeAreaInset(edge: .top) {
+            Picker("Show", selection: $tab) {
+                ForEach(ProjectTab.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.bottom, 6)
+            .accessibilityIdentifier("project-tab")
+        }
+        .navigationTitle(project.state.displayName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 0) {
+                    Text(project.state.displayName).font(.headline)
+                    if computers > 1 { Text("\(computers) computers").font(.caption).foregroundStyle(PhonePalette.muted) }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    IOSProjectMenuItems(model: model, project: project, sheet: $sheet, confirmation: $confirmation, place: $place, messaging: $messaging)
+                } label: {
+                    Label("Project settings", systemImage: "ellipsis.circle")
+                }
+            }
+        }
+    }
+
+    private func overview(_ project: ListedProject, _ contents: ProjectContents, stops: [InboxStop], waiting: DecisionInbox) -> some View {
+        List {
             if !stops.isEmpty {
                 Section("\(DecisionGroup.stopped.title) · \(stops.count)") {
                     ForEach(stops) { stop in
@@ -136,23 +173,6 @@ struct ProjectScreen: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(project.state.displayName)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 0) {
-                    Text(project.state.displayName).font(.headline)
-                    if computers > 1 { Text("\(computers) computers").font(.caption).foregroundStyle(PhonePalette.muted) }
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    IOSProjectMenuItems(model: model, project: project, sheet: $sheet, confirmation: $confirmation, place: $place, messaging: $messaging)
-                } label: {
-                    Label("Project settings", systemImage: "ellipsis.circle")
-                }
-            }
-        }
     }
 
     @ViewBuilder private func projectActions(_ project: ListedProject, _ contents: ProjectContents, fill: Bool) -> some View {

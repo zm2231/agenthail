@@ -35,6 +35,7 @@ let package = Package(
                 "ExtensionModels.swift",
                 "ExtensionEntries.swift",
                 "ExtensionWeb.swift",
+                "ProjectWork.swift",
                 "SentFiles.swift",
                 "TransientNotice.swift",
                 "ClaudeCompactModels.swift",
