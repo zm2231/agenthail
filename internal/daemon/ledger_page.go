@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"embed"
+	"encoding/json"
 	"io/fs"
 	"net/http"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/apitime"
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sse"
@@ -79,10 +81,43 @@ func (d *Daemon) ledgerPage() http.Handler {
 	return mux
 }
 
-// The page names a project by the id the dashboard and apps list it under,
-// and reads the ledger sessions in that project write to.
+// The page takes any id the dashboard and apps list a project under: the
+// project's own id, or a checkout's local id, bare or qualified by its host.
+// It reads the ledger the sessions in that project write to.
 func (d *Daemon) ledgerPageTarget(projectID string) (string, error) {
-	return LedgerKey(d.Registry, &CatalogProject{ID: projectID, Key: projectID})
+	if host, local, qualified := hosts.Split(projectID); qualified && host == d.hostIdentity().ID {
+		projectID = local
+	}
+	found, err := d.ledgerPageProject(projectID)
+	if err != nil {
+		return "", err
+	}
+	return LedgerKey(d.Registry, found)
+}
+
+func (d *Daemon) ledgerPageProject(projectID string) (*CatalogProject, error) {
+	links, err := loadProjectLinks(d.Registry)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := d.Registry.CatalogCheckoutProject(projectID)
+	if err != nil {
+		return nil, err
+	}
+	var found CatalogProject
+	if len(raw) > 0 && json.Unmarshal(raw, &found) == nil && found.ID != "" {
+		return links.apply(&found), nil
+	}
+	coordinators, err := d.Registry.LocalCoordinators()
+	if err != nil {
+		return nil, err
+	}
+	for _, spec := range coordinators {
+		if lead := coordinatorCatalogProject(spec); lead.LocalID == projectID {
+			return links.apply(lead), nil
+		}
+	}
+	return &CatalogProject{ID: projectID, Key: projectID}, nil
 }
 
 // A project with nothing recorded yet reads as an empty ledger, not an error.

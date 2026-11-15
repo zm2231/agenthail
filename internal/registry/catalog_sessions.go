@@ -716,6 +716,16 @@ func (r *Registry) CatalogSessionProject(sessionID string) (json.RawMessage, err
 	return project, err
 }
 
+// A paired host's checkout is stored under its host-qualified local id.
+func (r *Registry) CatalogCheckoutProject(localID string) (json.RawMessage, error) {
+	var project []byte
+	err := r.read.QueryRow(`SELECT host_project FROM catalog_sessions WHERE json_extract(host_project,'$.localId')=? ORDER BY observed_at DESC LIMIT 1`, localID).Scan(&project)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return project, err
+}
+
 // CatalogLocalProjects reads each distinct project this host's sessions
 // recorded under projectID, matched by its id or its local id.
 func (r *Registry) CatalogLocalProjects(projectID string) ([]json.RawMessage, error) {
