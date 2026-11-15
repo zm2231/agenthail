@@ -150,3 +150,26 @@ func TestDoctorNamesTheCauseOfEachStreamDropFromTheDaemonsSideOfTheStream(t *tes
 		}
 	}
 }
+
+func TestDoctorTimesAStreamDropFromTheLastByteTheStreamHeard(t *testing.T) {
+	reg := doctorPushRegistry(t)
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	self, err := reg.HostIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	device := pairPushDevice(t, reg, "iPhone")
+	silence := int64(32000)
+	drop := registry.ConnectionDrop{ID: "quiet001", Host: self.ID, Path: "stream", StartedAt: now.Add(-time.Minute), RecoveredAt: now.Add(-time.Minute + 2*time.Second), RecoveredBy: "stream probe",
+		FirstError: "URLError.-1005", LastError: "URLError.-1005", ElapsedMs: &silence, Attempts: 1, Shown: "held"}
+	if _, err := reg.RecordConnectionDrops(device, []registry.ConnectionDrop{drop}); err != nil {
+		t.Fatal(err)
+	}
+	health, err := connectionHealthOf(reg, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := health.String(); !strings.Contains(text, "URLError.-1005 32.0 s after last hearing from this computer") {
+		t.Fatalf("a stream drop's time must read as silence, not as how long the stream lasted:\n%s", text)
+	}
+}
