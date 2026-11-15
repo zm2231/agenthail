@@ -200,12 +200,16 @@ The Mac app holds a credential only for its own daemon, so that daemon opens
 a paired host's pages and mounts for it.
 
 - `GET /api/v1/extensions?host=<id or name>` reads the host's list with the
-  pairing and gives each page and mount a port of this daemon's own, on
+  pairing and gives each page and mount, and each built-in page under
+  `builtIn` such as the Work page, a port of this daemon's own, on
   `127.0.0.1` from the second pool (7620 to 7819). It is kept in
   `~/.agenthail/extensions-data/remote-ports.json` under
-  `<host>/<extension>` or `<host>/<extension>/mount/<name>`. `published` is
+  `<host>/<extension>`, `<host>/<extension>/mount/<name>` or
+  `<host>/<built-in id>`. `published` is
   always false there. An entry the host does not publish on its tailnet name
-  comes back with no port and `Not published on <host>.`
+  comes back with no port and `Not published on <host>.` An extension or
+  mount whose name breaks the id rules or repeats an earlier one, or a built-in page this daemon does
+  not have, is left out, so no entry can take another's port.
 - A port keeps its number while the host still lists the entry, including
   while the host is unreachable. It is freed when a read of the host's list
   no longer has the entry, or when the host is unpaired.
