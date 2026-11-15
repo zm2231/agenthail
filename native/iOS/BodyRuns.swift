@@ -34,6 +34,32 @@ enum BodyRuns {
         seen[key] = value
     }
 
+    private static var lastEnvironment: [String: String] = [:]
+
+    static func environmentChanged(_ description: String) {
+        guard enabled else { return }
+        hit("env.runs")
+        let entries = environmentEntries(description)
+        if entries.isEmpty { hit("env.unparsed") }
+        if !lastEnvironment.isEmpty {
+            for key in Set(entries.keys).union(lastEnvironment.keys) where entries[key] != lastEnvironment[key] { hit("env." + key) }
+        }
+        lastEnvironment = entries
+    }
+
+    static func environmentEntries(_ description: String) -> [String: String] {
+        guard let pattern = try? NSRegularExpression(pattern: #"\(([^\s()"]+) "((?:[^"\\]|\\.)*)""#) else { return [:] }
+        let text = description as NSString
+        let matches = pattern.matches(in: description, range: NSRange(location: 0, length: text.length))
+        var entries: [String: String] = [:]
+        for match in matches {
+            let key = text.substring(with: match.range(at: 1)).map { $0.isLetter || $0.isNumber ? String($0) : "_" }.joined()
+            guard entries[key] == nil else { continue }
+            entries[key] = text.substring(with: match.range(at: 2))
+        }
+        return entries
+    }
+
     static func compared(_ name: String, _ fields: KeyValuePairs<String, Bool>) {
         guard enabled else { return }
         hit("eq." + name)
@@ -116,6 +142,12 @@ extension View {
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in BodyRuns.hit("kb.show") }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in BodyRuns.hit("kb.hide") }
             .background(ScreenTraitsProbe())
+            .background {
+                if BodyRuns.enabled {
+                    EnvironmentDiffProbe()
+                    TraitChangeProbe()
+                }
+            }
     }
 }
 
@@ -142,6 +174,38 @@ private struct ScreenTraitsProbe: View {
         let _ = BodyRuns.changed("screen.trait.focused", "root", focused)
         Color.clear
     }
+}
+// Reads the whole environment, so it runs on every change and names the entries that changed.
+private struct EnvironmentDiffProbe: View {
+    @Environment(\.self) private var environment
+
+    var body: some View {
+        let _ = BodyRuns.environmentChanged(String(describing: environment))
+        Color.clear
+    }
+}
+
+private struct TraitChangeProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        let traits: [(String, UITrait)] = [
+            ("style", UITraitUserInterfaceStyle.self), ("level", UITraitUserInterfaceLevel.self), ("active", UITraitActiveAppearance.self),
+            ("hSize", UITraitHorizontalSizeClass.self), ("vSize", UITraitVerticalSizeClass.self), ("scale", UITraitDisplayScale.self),
+            ("contentSize", UITraitPreferredContentSizeCategory.self), ("contrast", UITraitAccessibilityContrast.self),
+            ("legibility", UITraitLegibilityWeight.self), ("direction", UITraitLayoutDirection.self), ("gamut", UITraitDisplayGamut.self),
+            ("dynamicRange", UITraitImageDynamicRange.self), ("capture", UITraitSceneCaptureState.self),
+            ("toolbarSize", UITraitToolbarItemPresentationSize.self), ("idiom", UITraitUserInterfaceIdiom.self),
+        ]
+        for (name, trait) in traits {
+            view.registerForTraitChanges([trait]) { (_: UIView, _: UITraitCollection) in
+                MainActor.assumeIsolated { BodyRuns.hit("trait." + name) }
+            }
+        }
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
 }
 #else
 import SwiftUI
