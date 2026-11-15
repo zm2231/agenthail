@@ -5,13 +5,10 @@ struct ProjectWorkPane: View {
     let project: ProjectState
 
     var body: some View {
-        let here = model.daemon?.host?.id ?? ""
-        let place = ProjectWork.place(project, preferring: here)
+        let place = ProjectWork.place(project, preferring: model.daemon?.host?.id ?? "")
         let catalog = model.extensionCatalogs.first { $0.hostID == place.hostID }
         Group {
-            if place.hostID != here {
-                unavailable("This project's work list is on \(catalog?.hostName ?? "another computer"). Open it in Agenthail there; this Mac shows only its own.", retry: nil)
-            } else if let catalog, let api = catalog.api {
+            if let catalog, let api = catalog.api {
                 switch catalog.list == nil && catalog.error != nil ? .unavailable(catalog.error ?? "") : ProjectWork.page(catalog.list, projectID: place.projectID, origin: api.origin, hostName: catalog.hostName) {
                 case .reading:
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
