@@ -42,8 +42,7 @@ enum ProjectWork {
         guard let base, var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
             return .unavailable(unavailable ?? "The work list can't open right now.")
         }
-        var allowed = CharacterSet.urlQueryAllowed
-        allowed.remove(charactersIn: "&=+#")
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~:/")
         let value = projectID.addingPercentEncoding(withAllowedCharacters: allowed) ?? projectID
         parts.percentEncodedQuery = [parts.percentEncodedQuery, "project=" + value].compactMap { $0 }.joined(separator: "&")
         guard let url = parts.url else { return .unavailable("This address is not valid.") }

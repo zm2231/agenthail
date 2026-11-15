@@ -53,6 +53,10 @@ struct ProjectWorkTest {
         let served = list(#"{"host":"running","extensions":[],"builtIn":{"ledger":{"port":7480,"entry":"/","published":false}}}"#)
         check(ProjectWork.page(served, projectID: "repo:github.com/acme/a+b&c=d#e", origin: origin, hostName: "studio") == .shown(URL(string: "http://127.0.0.1:7480/?project=repo:github.com/acme/a%2Bb%26c%3Dd%23e")!), "the page opens on its own port with the project escaped: \(ProjectWork.page(served, projectID: "repo:github.com/acme/a+b&c=d#e", origin: origin, hostName: "studio"))")
 
+        let odd = ProjectWork.page(served, projectID: "implicit:/work/a%26b;c d", origin: origin, hostName: "studio")
+        check(odd == .shown(URL(string: "http://127.0.0.1:7480/?project=implicit:/work/a%2526b%3Bc%20d")!), "percent, semicolon and space are escaped: \(odd)")
+        check(URLComponents(string: "http://127.0.0.1:7480/?project=implicit:/work/a%2526b%3Bc%20d")?.queryItems?.first?.value == "implicit:/work/a%26b;c d", "the escaped id decodes back to the same id")
+
         let tailnet = URL(string: "https://studio.example.ts.net:7412")!
         check(ProjectWork.page(served, projectID: "p", origin: tailnet, hostName: "studio") == .unavailable("studio doesn't publish this on the tailnet."), "an unpublished page is not opened over https")
         let published = list(#"{"host":"running","extensions":[],"builtIn":{"ledger":{"port":7480,"entry":"/","published":true}}}"#)
