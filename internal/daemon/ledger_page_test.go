@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,9 @@ import (
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/nodehost"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sse"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func ledgerPageDaemon(t *testing.T) (*Daemon, ledgerProject, http.Handler, string) {
@@ -311,5 +314,31 @@ func TestTheWorkPageIsServedOnItsOwnPortAndNotListedAsAnApp(t *testing.T) {
 	}
 	if response, _ := requestTo(t, base, http.MethodGet, "/", "", nil); response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("the page answered %d without credentials", response.StatusCode)
+	}
+}
+
+func TestTheWorkPageOfARepositoryOpensFromAnyCheckoutTheAppsListItUnder(t *testing.T) {
+	d, _, _, base := ledgerPageDaemon(t)
+	const key = "repo:github.com/acme/gadget"
+	record := func(id, hostID, localID string) {
+		t.Helper()
+		project := fmt.Sprintf(`{"id":%q,"localId":%q,"displayName":"gadget","rootPath":"/work/gadget","kind":"git","key":%q}`, key, localID, key)
+		session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: "/work/gadget", Status: surface.StatusIdle, LastActive: time.Now()}
+		if _, _, err := d.Registry.RecordCatalogSession(registry.CatalogSessionState{Session: session, HostID: hostID, Project: []byte(project), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record("here", "", "implicit:/work/gadget")
+	record("there", "peer-host", "peer-host::implicit:/srv/gadget")
+	item := work(t, d.ledgerStore(), ledger.WorkRequest{ProjectKey: key, SessionID: "here", Action: ledger.WorkAdd, Text: "Ship the gadget"})
+
+	for _, project := range []string{key, "implicit:/work/gadget", d.hostIdentity().ID + "::implicit:/work/gadget", "peer-host::implicit:/srv/gadget"} {
+		response, view := ledgerPageRead(t, base, url.QueryEscape(project), "test-token", "")
+		if response.StatusCode != http.StatusOK || view.Key != key || len(view.Work[string(ledger.WorkOpen)]) != 1 || view.Work[string(ledger.WorkOpen)][0].ID != item.ID {
+			t.Fatalf("the work page for %s answered %d with %s: %+v", project, response.StatusCode, view.Key, view.Work)
+		}
+	}
+	if response, view := ledgerPageRead(t, base, url.QueryEscape("implicit:/work/elsewhere"), "test-token", ""); response.StatusCode != http.StatusOK || view.Key != "" {
+		t.Fatalf("a checkout no session was seen in read %q", view.Key)
 	}
 }
