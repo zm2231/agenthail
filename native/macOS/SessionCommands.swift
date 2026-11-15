@@ -7,6 +7,7 @@ struct SessionCommands: Commands {
     @FocusedValue(SessionPane.self) private var pane
     @Environment(\.openWindow) private var openWindow
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
+    @AppStorage(TranscriptFocus.defaultsKey) private var focus = false
     @AppStorage(SessionListLayout.groupsKey) private var groupsByProject = true
 
     private var session: SessionState? { pane?.displayedSession }
@@ -103,6 +104,7 @@ struct SessionCommands: Commands {
                 .disabled(pane == nil)
             Toggle("Expand Agent Messages", isOn: $expandAgents)
                 .keyboardShortcut(shortcuts.keyboardShortcut(.expandAgentMessages))
+            Toggle("Focus on Messages", isOn: $focus)
             Button("Refresh") { model.refreshNow(pane) }
                 .keyboardShortcut(shortcuts.keyboardShortcut(.refresh))
                 .disabled(model.api == nil)

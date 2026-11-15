@@ -25,4 +25,12 @@ final class TimelineMemoTests: XCTestCase {
         XCTAssertEqual(memo.items(latest: [item("z")], older: [item("y")]).map(\.id), ["y", "z"])
         XCTAssertEqual(memo.groups(latest: [item("z")], older: [item("y")], foldAgents: false).flatMap(\.items).map(\.id), ["y", "z"], "groups kept rows after the items changed")
     }
+
+    func testFocusDropsToolActivityAndFollowsTheSetting() {
+        let memo = TimelineMemo()
+        let call = TimelineItem(id: "call", kind: "toolCall", role: nil, title: "Bash", text: "ls", timestamp: nil, callId: "k", status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        let rows = [item("a"), call, item("b")]
+        XCTAssertEqual(memo.groups(latest: rows, older: [], foldAgents: true, focus: true).flatMap(\.items).map(\.id), ["a", "b"])
+        XCTAssertEqual(memo.groups(latest: rows, older: [], foldAgents: true, focus: false).flatMap(\.items).map(\.id), ["a", "call", "b"], "groups ignored turning focus off")
+    }
 }

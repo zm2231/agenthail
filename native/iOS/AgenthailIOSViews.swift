@@ -512,6 +512,7 @@ struct SessionScreen: View {
     @State private var showingVoice = false
     @State private var activityOnly = false
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
+    @AppStorage(TranscriptFocus.defaultsKey) private var focus = false
     @State private var followingLatest = true
     @State private var edge = TranscriptEdge()
     @State private var queueTail = QueueTail()
@@ -537,7 +538,7 @@ struct SessionScreen: View {
         memo.items(latest: detail?.timeline?.items ?? [], older: model.olderActivity)
     }
     private var groups: [TimelineGroup] {
-        memo.groups(latest: detail?.timeline?.items ?? [], older: model.olderActivity, foldAgents: !expandAgents)
+        memo.groups(latest: detail?.timeline?.items ?? [], older: model.olderActivity, foldAgents: !expandAgents, focus: focus)
     }
 
     static func showsActivity(timeline: SessionTimeline, itemCount: Int, activityCursor: Int64?, exchangeCount: Int) -> Bool {
@@ -663,6 +664,10 @@ struct SessionScreen: View {
                     }
                 }
                 if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
+                else if focus, !activityOnly, groups.isEmpty {
+                    Text("No messages yet. Focus hides tool activity.").font(.footnote).foregroundStyle(PhonePalette.muted)
+                        .accessibilityIdentifier("focus-empty")
+                }
 #if DEBUG
                 if let space = PreviewStream.trailingSpace { Color.clear.frame(height: space) }
 #endif
@@ -858,6 +863,9 @@ struct SessionScreen: View {
                         Text("Chat").tag(false)
                         Text("All events").tag(true)
                     }
+                    Toggle("Focus on messages", systemImage: "bubble.left.and.text.bubble.right", isOn: $focus)
+                        .disabled(activityOnly)
+                        .accessibilityIdentifier("session-focus")
                     Toggle("Expand agent messages", systemImage: "text.bubble", isOn: $expandAgents)
                     IOSPinButton(model: model, session: liveSession)
                     if model.canCallByVoice(session) {

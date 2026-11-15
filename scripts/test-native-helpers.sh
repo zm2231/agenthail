@@ -116,6 +116,7 @@ SOURCES=(
   TranscriptScrimRows.swift
   TranscriptTail.swift
   TranscriptRowID.swift
+  TranscriptFocus.swift
   AgentMessage.swift
   ClampedText.swift
   TurnClock.swift
