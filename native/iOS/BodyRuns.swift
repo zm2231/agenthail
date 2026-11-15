@@ -142,8 +142,12 @@ extension View {
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in BodyRuns.hit("kb.show") }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in BodyRuns.hit("kb.hide") }
             .background(ScreenTraitsProbe())
-            .background(EnvironmentDiffProbe())
-            .background(TraitChangeProbe())
+            .background {
+                if BodyRuns.enabled {
+                    EnvironmentDiffProbe()
+                    TraitChangeProbe()
+                }
+            }
     }
 }
 
