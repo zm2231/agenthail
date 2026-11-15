@@ -329,3 +329,103 @@ func TestAHostFromBeforeReleaseIsReleasedOnceAndLeavesAsItAlwaysDid(t *testing.T
 		return !claudehosttest.Alive(old.PID) && !claudehosttest.Alive(opened.PID)
 	})
 }
+
+// The drain grace stands in for the hour of a prompt cache, so a grace of
+// seconds here is the hour, and working past it is the session working on
+// for most of an hour after the update.
+func TestAKeptSessionThatWorksPastTheDrainGraceStillCompactsBeforeItsRetiringHostLeaves(t *testing.T) {
+	t.Setenv("AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS", "3000")
+	x := newRetiringFixture(t)
+	now := time.Now()
+	kept := x.open(250_000, now.Add(-10*time.Minute))
+	x.update()
+	read := map[string]idleTranscript{}
+	x.d.compactIdle(x.ctx, now, read)
+
+	session := kept.session
+	for i := range 5 {
+		if _, err := x.d.dispatcher().DeliverWithOptions(x.ctx, x.claude, &session, fmt.Sprintf("work %d", i), "", surface.SendOptions{Author: surface.AuthorPerson}); err != nil {
+			t.Fatal(err)
+		}
+		testkit.Eventually(t, "the turn", 15*time.Second, func() bool { return len(x.f.Turns(t, kept.session.ID)) == i+2 })
+		testkit.Eventually(t, "the turn to end", 15*time.Second, func() bool { return hostState(t, x.client, kept.session.ID) == "idle" })
+		time.Sleep(time.Second)
+	}
+	if !claudehosttest.Alive(kept.pid) {
+		t.Fatal("the retiring host closed a kept session that kept working past the drain grace")
+	}
+	x.request(kept.session, 250_000, now)
+	x.compactDue(now.Add(51*time.Minute), read, kept)
+	if compact := x.compactTurn(kept); compact.PID != kept.pid {
+		t.Fatalf("the idle compact ran in Claude %d, want the kept Claude %d on the retiring host", compact.PID, kept.pid)
+	}
+	testkit.Eventually(t, "the compact to end", 15*time.Second, func() bool { return hostState(t, x.client, kept.session.ID) == "idle" })
+	x.d.compactIdle(x.ctx, now.Add(52*time.Minute), read)
+	x.gone("the retiring host to leave once its session has compacted", kept.host, kept.pid)
+}
+
+func TestARetiringHostClosesAKeptSessionOnceItsGraceHasPassedSinceItsLastTurn(t *testing.T) {
+	t.Setenv("AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS", "2000")
+	x := newRetiringFixture(t)
+	now := time.Now()
+	kept := x.open(250_000, now.Add(-10*time.Minute))
+	x.update()
+	x.d.compactIdle(x.ctx, now, map[string]idleTranscript{})
+	x.gone("the retiring host to close the session nobody released once its grace passed", kept.host, kept.pid)
+}
+
+func TestANewCompactWindowWaitsForTheIdleCompactionOfAWarmSessionBeforeItReopens(t *testing.T) {
+	x := newRetiringFixture(t)
+	now := time.Now()
+	warm := x.open(250_000, now.Add(-10*time.Minute))
+	small := x.open(50_000, now.Add(-10*time.Minute))
+	for _, s := range []retiringSession{warm, small} {
+		if _, err := x.client.SetAutoCompactWindow(x.ctx, s.session.ID, "150000"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := map[string]idleTranscript{}
+	x.d.compactIdle(x.ctx, now, read)
+	x.gone("the small session to close for its new window", small.pid)
+	time.Sleep(time.Second)
+	if !claudehosttest.Alive(warm.pid) {
+		t.Fatal("the host closed a warm session for its new compact window before its idle compaction")
+	}
+	if logged := x.log.String(); !strings.Contains(logged, "open before its new compact window applies for its idle compaction") {
+		t.Fatalf("log = %q, want the warm session kept", logged)
+	}
+
+	x.compactDue(now.Add(41*time.Minute), read, warm)
+	if compact := x.compactTurn(warm); compact.PID != warm.pid {
+		t.Fatalf("the idle compact ran in Claude %d, want the open Claude %d", compact.PID, warm.pid)
+	}
+	testkit.Eventually(t, "the compact to end", 15*time.Second, func() bool { return hostState(t, x.client, warm.session.ID) == "idle" })
+	x.d.compactIdle(x.ctx, now.Add(42*time.Minute), read)
+	x.gone("the session to close for its new window once it has compacted", warm.pid)
+	if !claudehosttest.Alive(warm.host) {
+		t.Fatal("the current host exited")
+	}
+}
+
+func TestAnotherCompactWindowChosenAfterTheReleaseIsReleasedAgain(t *testing.T) {
+	x := newRetiringFixture(t)
+	now := time.Now()
+	small := x.open(50_000, now.Add(-10*time.Minute))
+	if _, err := x.client.Send(x.ctx, claudehost.SendRequest{SessionID: small.session.ID, UUID: uuid.NewString(), Text: "SLOW 3000"}); err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the slow turn to start", 15*time.Second, func() bool { return hostState(t, x.client, small.session.ID) == "busy" })
+	read := map[string]idleTranscript{}
+	if _, err := x.client.SetAutoCompactWindow(x.ctx, small.session.ID, "150000"); err != nil {
+		t.Fatal(err)
+	}
+	x.d.compactIdle(x.ctx, now, read)
+	if _, err := x.client.SetAutoCompactWindow(x.ctx, small.session.ID, "200000"); err != nil {
+		t.Fatal(err)
+	}
+	x.d.compactIdle(x.ctx, now, read)
+	x.gone("the session to close for its second window once its turn ends", small.pid)
+	if got := strings.Count(x.log.String(), "releasing "); got != 2 {
+		t.Fatalf("log = %q, want a release for each window", x.log.String())
+	}
+}

@@ -88,7 +88,7 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 			refused[claudeTranscriptRoot(session.Transcript)] = true
 		}
 	}
-	retiring := d.retiringClaudeSessions(ctx)
+	retiring := d.leavingClaudeSessions(ctx)
 	settings := map[string]surface.IdleCompaction{}
 	seen, listed, decided := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for i := range sessions {

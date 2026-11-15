@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -110,6 +111,9 @@ func TestASessionsOwnCompactWindowStaysPendingUntilItsNextMessage(t *testing.T) 
 	}
 	if err := c.SetCompactSetting(ctx, sess, surface.CompactSettingSessionWindow, "150000"); err != nil {
 		t.Fatal(err)
+	}
+	if err := client.Release(ctx, id, claudehosttest.Leaving(t, client, id)); err != nil {
+		t.Fatalf("the daemon's release of the session = %v", err)
 	}
 	testkit.Eventually(t, "the idle session to close for its new window", 10*time.Second, func() bool {
 		_, open := c.host.session(ctx, id, sess.PID)

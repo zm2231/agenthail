@@ -198,6 +198,9 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 			if err == nil && key == surface.CompactSettingWindow && session.Surface == surface.KindClaude {
 				d.publishEvent("settings.updated", "", map[string]string{"source": "claude-compact-settings"})
 			}
+			if err == nil && key == surface.CompactSettingSessionWindow {
+				d.wakeIdleCompaction()
+			}
 		} else {
 			provider, ok := adapter.(surface.TurnSettingsProvider)
 			if !ok {

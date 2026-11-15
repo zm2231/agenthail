@@ -61,11 +61,20 @@ for the root, and if nothing would refuse the compact. The compact is queued
 on the new daemon and reaches the old host through the client's session
 routing. After the compaction, once the cache hour has passed, or right away
 for a session that does not qualify, the daemon sends `release`. The host then
-closes the session at its next idle point. A person's message to a kept
+closes the session at its next idle point. A release holds only for what the
+daemon saw: `list` gives each session a `leaving` generation, which new work
+or a new compact window advances, and `release` names the generation it was
+decided on. The host refuses an older one with `stale` and keeps the session
+until the daemon decides again, as it does on the host's next state report. A person's message to a kept
 session runs in its Claude on the old host. Each decision is logged once per
 request, kept or released, with the reason. Past the drain grace (60 minutes)
-the host closes each session at its next idle point without waiting for a
-release, whether or not background tasks still run. Claude owes a turn for work
+since the retire and since the session's last activity, whichever is later,
+the host closes the session at its next idle point without waiting for a
+release, whether or not background tasks still run. The grace stands for the
+cache hour: a session that keeps working after the retire keeps its grace
+ahead of it, so its idle compaction still runs on the retiring host. The same
+release and grace hold for a session the current host closes to apply a new
+compact window. Claude owes a turn for work
 it was handed while idle: a background task that ended, unless the live set
 marked it `ambient` (not activity, so no turn follows), which Claude reports
 before it starts the turn telling the model, and a message the host passed it
@@ -225,7 +234,9 @@ would see neither a turn Claude starts itself (another agent's message) nor a
 prompt it waits on. Claude also sends `background_tasks_changed`, the whole
 set of live background tasks, on every change. A Claude that sends a turn
 result without state events is logged once. For it, idle is read from turn
-results, and its sessions retire only as a turn ends.
+results. Its session closes as a turn ends, or at a release or the end of its
+grace when Claude has sent nothing since its last result. A result the host did
+not expect is a turn Claude started itself, and starts a new leaving generation.
 
 The daemon follows the host's events and asks for a catalog pass when a request
 opens or resolves. Each open request is a permission ask whose `ref` is the

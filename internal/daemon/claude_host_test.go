@@ -961,7 +961,7 @@ func TestTheDaemonFollowsARetiringHostWhoseOldestEventsAreGone(t *testing.T) {
 		t.Fatal("the answered request on the retiring host asked for no catalog pass")
 	}
 
-	if err := retiring[0].Release(ctx, id); err != nil {
+	if err := retiring[0].Release(ctx, id, claudehosttest.Leaving(t, retiring[0], id)); err != nil {
 		t.Fatalf("release the session from the retiring host = %v", err)
 	}
 	cancelled, stop := context.WithCancel(ctx)

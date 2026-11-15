@@ -64,7 +64,7 @@ class Client {
     this.events = [];
     this.eventWaiters = [];
     this.conn = net.createConnection(socket);
-    readline.createInterface({ input: this.conn }).on('line', (line) => {
+    this.lines = readline.createInterface({ input: this.conn }).on('line', (line) => {
       const message = JSON.parse(line);
       if (message.event) {
         this.events.push(message.event);
@@ -809,19 +809,23 @@ const lastSettings = (f) => {
   return value ? JSON.parse(value) : {};
 };
 
-test('a compact window for an idle session closes it now, and the next host opens it with the window', async () => {
+test('a compact window for an idle session closes it once the daemon releases it, and the next host opens it with the window', async () => {
   const f = fixture();
   const first = await startHost(f);
   const c = new Client(f.socket);
   await c.call('subscribe', { after: 0 });
   const id = randomUUID();
   await c.call('open', { sessionId: id, cwd: f.cwd });
+  await assert.rejects(c.call('release', { sessionId: id }), { code: 'not_leaving' }, 'a session with no new window is not released');
   await assert.rejects(c.call('setAutoCompactWindow', { sessionId: id, window: '5000' }), { code: 'invalid' });
   const pending = await c.call('setAutoCompactWindow', { sessionId: id, window: '150000' });
   assert.equal(pending.autoCompactWindow, 'default');
   assert.equal(pending.pendingAutoCompactWindow, '150000', 'the window is pending until the session reopens');
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal((await c.call('list')).sessions.some((s) => s.sessionId === id), true, 'the session stays open while the daemon may still compact it');
+  await c.call('release', { sessionId: id, leaving: leaving(await c.call('list'), id) });
   await c.event((e) => e.sessionId === id && e.kind === 'exited');
-  assert.equal((await c.call('list')).sessions.some((s) => s.sessionId === id), false, 'the idle session is closed at once');
+  assert.equal((await c.call('list')).sessions.some((s) => s.sessionId === id), false, 'the released idle session is closed');
   first.kill('SIGKILL');
   await first.exited;
   c.close();
@@ -853,9 +857,9 @@ test('a closed session with no kept settings takes a pending compact window and 
   c.close();
 });
 
-test('a compact window for a working session waits for its turn to end', async () => {
+test('a compact window for a working session waits for its turn to end, and its grace closes it unreleased', async () => {
   const f = fixture();
-  await startHost(f);
+  await startHost(f, { env: { AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS: '1500' } });
   const c = new Client(f.socket);
   await c.call('subscribe', { after: 0 });
   const id = randomUUID();
@@ -876,6 +880,7 @@ test('a reopen that fails keeps the old compact window and says so', async () =>
   const id = randomUUID();
   await c.call('open', { sessionId: id, cwd: f.cwd });
   await c.call('setAutoCompactWindow', { sessionId: id, window: '150000' });
+  await c.call('release', { sessionId: id, leaving: leaving(await c.call('list'), id) });
   await c.event((e) => e.sessionId === id && e.kind === 'exited');
   first.kill('SIGKILL');
   await first.exited;
@@ -1113,12 +1118,28 @@ test('a Claude that exits with an error before it starts refuses the open with i
 
 const retiringSocket = (f, host) => f.socket.replace(/\.sock$/, `.${host.pid}.sock`);
 
+// releaseOnce releases each session at the leaving generation it lists now.
+async function releaseOnce(r, ids, settle) {
+  const { sessions } = await r.call('list');
+  for (const sessionId of ids) {
+    const listed = sessions.find((s) => s.sessionId === sessionId);
+    if (listed) await settle(r.call('release', { sessionId, leaving: listed.leaving }));
+  }
+}
+
 // release lets a retiring host close sessions, the way the daemon does for one
-// it does not keep.
+// it does not keep. New work cancels a release, and the daemon decides again
+// as the host reports it, so this releases each again until the host exits.
 async function release(f, host, ...ids) {
   const r = new Client(retiringSocket(f, host));
-  for (const sessionId of ids) await r.call('release', { sessionId });
-  r.close();
+  r.conn.on('error', () => {});
+  r.lines.on('error', () => {});
+  await releaseOnce(r, ids, (call) => call);
+  const again = setInterval(() => releaseOnce(r, ids, (call) => call.catch(() => {})).catch(() => {}), 100);
+  host.exited.finally(() => {
+    clearInterval(again);
+    r.close();
+  });
 }
 
 // takeLock reports whether another host could start now: a second host is
@@ -1227,12 +1248,17 @@ test('drain retires the host: it gives up the socket and lock and serves its ses
   await assert.rejects(r.call('open', { sessionId: randomUUID(), cwd: f.cwd }), { code: 'draining' });
   await sleep(300);
   assert.ok(alive(idleSession.pid), 'an idle session stays until it is released');
-  await release(f, host, idle, busy);
+  await release(f, host, idle);
+  await releaseOnce(r, [busy], (call) => call);
   for (let i = 0; i < 100 && alive(idleSession.pid); i++) await sleep(50);
   assert.ok(!alive(idleSession.pid), 'a released idle session closes at once');
   const late = randomUUID();
   assert.deepEqual(await r.call('send', { sessionId: busy, uuid: late, text: 'late' }), { accepted: true, duplicate: false });
   await r.call('interrupt', { sessionId: busy });
+  for (let i = 0; i < 200 && transcript(f, busy).length < 2; i++) await sleep(50);
+  await sleep(300);
+  assert.ok(alive(host.pid), 'new work cancels the release');
+  await release(f, host, busy);
   assert.equal(await host.exited, 0);
   assert.deepEqual(transcript(f, busy).map((l) => l.reply), ['interrupted', 'echo:late']);
   assert.ok(!fs.existsSync(retiringSocket(f, host)));
@@ -1240,13 +1266,37 @@ test('drain retires the host: it gives up the socket and lock and serves its ses
   r.close();
 });
 
-test('only a retiring host releases a session', async () => {
+const leaving = (listing, id) => listing.sessions.find((s) => s.sessionId === id).leaving;
+
+test('a release decided before new work or another compact window is refused as stale', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('setAutoCompactWindow', { sessionId: id, window: '150000' });
+  const first = leaving(await c.call('list'), id);
+  await c.call('setAutoCompactWindow', { sessionId: id, window: '200000' });
+  await assert.rejects(c.call('release', { sessionId: id, leaving: first }), { code: 'stale' }, 'a release for the earlier window');
+  const second = leaving(await c.call('list'), id);
+  await c.call('send', { sessionId: id, uuid: randomUUID(), text: 'more work', origin: { kind: 'human' } });
+  await c.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'idle', 15000);
+  await assert.rejects(c.call('release', { sessionId: id, leaving: second }), { code: 'stale' }, 'a release decided before the work');
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal((await c.call('list')).sessions.some((s) => s.sessionId === id), true, 'a stale release closes nothing');
+  await c.call('release', { sessionId: id, leaving: leaving(await c.call('list'), id) });
+  await c.event((e) => e.sessionId === id && e.kind === 'exited');
+  c.close();
+});
+
+test('a host releases only a session it keeps for the daemon', async () => {
   const f = fixture();
   await startHost(f);
   const c = new Client(f.socket);
   const id = randomUUID();
   await c.call('open', { sessionId: id, cwd: f.cwd });
-  await assert.rejects(c.call('release', { sessionId: id }), { code: 'not_draining' });
+  await assert.rejects(c.call('release', { sessionId: id }), { code: 'not_leaving' });
   c.close();
 });
 
@@ -1361,6 +1411,31 @@ async function retiresAfterTheNotificationTurn(env) {
 }
 
 test('a retiring host closes a session only after the turn that reports its finished background task', () => retiresAfterTheNotificationTurn({}));
+
+test('a turn Claude starts itself cancels an earlier release, even from a Claude without state events', async () => {
+  const f = fixture();
+  const host = await startHost(f, { env: { FAKE_CLAUDE_NO_STATE_EVENTS: '1', FAKE_CLAUDE_NOTIFY_AFTER_MS: '600' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'BACKGROUND 800' });
+  await c.event(turnResult(id, uuid));
+  await c.call('drain');
+  const r = new Client(retiringSocket(f, host));
+  await r.call('subscribe', { after: 0 });
+  const before = leaving(await r.call('list'), id);
+  await releaseOnce(r, [id], (call) => call);
+  await r.event((e) => e.sessionId === id && e.kind === 'sdk' && e.message.type === 'result' && e.message.result.startsWith('notified:'), 5000);
+  await sleep(500);
+  assert.ok(alive(pid), 'the release from before the turn closes nothing');
+  assert.ok(leaving(await r.call('list'), id) > before, 'the turn starts a new leaving generation');
+  await release(f, host, id);
+  assert.equal(await host.exited, 0);
+  c.close();
+  r.close();
+});
 
 test('a retiring host waits for that turn when the task leaves the live set before its notification', () => retiresAfterTheNotificationTurn({ FAKE_CLAUDE_LEVEL_FIRST: '1' }));
 
