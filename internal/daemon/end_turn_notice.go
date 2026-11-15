@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -16,11 +17,56 @@ type dashboardEndTurn struct {
 	EndedAt  time.Time `json:"endedAt"`
 }
 
+const (
+	headlineShownRunes = 80
+	nextShownRunes     = 160
+)
+
 func endTurnRow(end *registry.TurnEnd) *dashboardEndTurn {
 	if end == nil {
 		return nil
 	}
-	return &dashboardEndTurn{Headline: end.Headline, Next: end.Next, EndedAt: end.EndedAt}
+	var next []string
+	for _, item := range end.Next {
+		next = append(next, shownLine(item, nextShownRunes))
+	}
+	return &dashboardEndTurn{Headline: shownLine(end.Headline, headlineShownRunes), Next: next, EndedAt: end.EndedAt}
+}
+
+func shownLine(text string, limit int) string {
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	cut := string(runes[:limit-1])
+	if space := strings.LastIndexByte(cut, ' '); space > len(cut)/2 {
+		cut = cut[:space]
+	}
+	return strings.TrimRight(cut, " ,;:.-") + "…"
+}
+
+// A push passes through the relay and Apple, so it names the session by alias and never by its title, which is often the person's own words.
+func pushSubject(kind surface.SurfaceKind, alias string, project *CatalogProject) string {
+	who := notificationSurfaceName(kind)
+	if alias != "" {
+		who = "@" + alias
+	}
+	if project != nil && project.DisplayName != "" {
+		who += " in " + project.DisplayName
+	}
+	return who
+}
+
+func (d *Daemon) sessionPushSubject(session *surface.Session) string {
+	alias, err := d.Registry.ReverseAlias(session.ID)
+	if err != nil {
+		d.log.Printf("read the alias of %s: %s", session.ID, err)
+	}
+	project, err := d.sessionProject(*session)
+	if err != nil {
+		d.log.Printf("read the project of %s: %s", session.ID, err)
+	}
+	return pushSubject(session.Surface, alias, project)
 }
 
 type dashboardAsk struct {
@@ -65,8 +111,9 @@ func (d *Daemon) endTurnNotifications(session *surface.Session, completedTurnID,
 		d.log.Printf("read turn end %s: %s", d.resolveDisplay(session.ID), err)
 	}
 	if found {
-		notice.desktop = fmt.Sprintf("%s done: %s", d.resolveDisplay(session.ID), end.Headline)
-		notice.mobile = fmt.Sprintf("%s done%s: %s", notificationSurfaceName(session.Surface), d.onHost(), end.Headline)
+		headline := shownLine(end.Headline, headlineShownRunes)
+		notice.desktop = fmt.Sprintf("%s done: %s", d.resolveDisplay(session.ID), headline)
+		notice.mobile = fmt.Sprintf("%s done%s: %s", d.sessionPushSubject(session), d.onHost(), headline)
 	}
 	return notice
 }

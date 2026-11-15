@@ -248,7 +248,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 			notificationOutcome = turnOutcomeFailed
 		}
 		desktopNotificationMessage = fmt.Sprintf("%s %s", d.resolveDisplay(session.ID), notificationOutcome)
-		mobileNotificationMessage = fmt.Sprintf("%s %s%s", notificationSurfaceName(session.Surface), notificationOutcome, d.onHost())
+		mobileNotificationMessage = fmt.Sprintf("%s %s%s", d.sessionPushSubject(session), notificationOutcome, d.onHost())
 	}
 	if terminalCompletion || previous.NotificationArmed && !completionChanged && turnCannotRun(session, observation) {
 		if err := d.Registry.ClearCompletionNotification(session.ID); err != nil {

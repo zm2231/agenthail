@@ -10,7 +10,7 @@ type Tool struct {
 const (
 	EndTurn      = "agenthail_end_turn"
 	Ask          = "agenthail_ask"
-	EndTurnNudge = "[agenthail] This turn has no end yet. Call " + EndTurn + " now with a one-line headline. Don't repeat your reply."
+	EndTurnNudge = "[agenthail] This turn has no end yet. Call " + EndTurn + " now with a one-line headline for the person. Don't repeat your reply."
 )
 
 var Tools = []Tool{
@@ -28,7 +28,7 @@ var Tools = []Tool{
 	{Name: "agenthail_history", Description: "Delivery history, or the queue of instructions waiting to be delivered, newest first and paged. For the person's voice operator only."},
 	{Name: "agenthail_ledger_write", Description: "Record in your project's intent ledger: attach, clause, question or work, with the fields the CLI's ledger commands take. Recorded as your session."},
 	{Name: "agenthail_create", AlwaysLoad: true, Description: "Start a Claude or Codex session with a first message. It is bounded by your own ceiling: no higher permission mode and no folder outside yours. Sessions nest at most 3 deep, with at most 8 running at once per spawner."},
-	{Name: EndTurn, AlwaysLoad: true, Description: "Call this last in every turn, after your reply. headline is the line shown in the person's list and notification. A refused call does not end the turn; fix it and call again."},
+	{Name: EndTurn, AlwaysLoad: true, Description: "Call this last in every turn, after your reply. headline is what the person reads in their list and notifications without having followed your work: the outcome in plain words, and what it waits on if anything. No ids, PR or round numbers, or commit hashes. Calling it again in the same turn replaces the headline."},
 	{Name: Ask, AlwaysLoad: true, Description: "Put a decision to the person, or to your lead or spawner when an agent started you: they see it in Needs you and answer from any device, and the answer arrives as your next message. Raise it before you end your turn; don't also ask in your reply."},
 	{Name: "agenthail_report", Description: "If your spawner started you as a task, tell it you are done or failed, and the result it should read. The first report settles the task; you can keep working."},
 	{Name: "agenthail_result", AlwaysLoad: true, Description: "A task's state and result, by taskId or child target, for its parent or anyone who can read the child. Long text is clipped to fit."},

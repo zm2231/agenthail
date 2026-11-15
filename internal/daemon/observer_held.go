@@ -52,7 +52,7 @@ func (d *Daemon) releaseUnobservedHold(ctx context.Context, adapter surface.Surf
 		turnID := previous.HeldCompletionTurnID
 		var noticed *turnCompletedNotice
 		if !session.Delegated() {
-			notice := d.endTurnNotifications(session, turnID, fmt.Sprintf("%s finished", d.resolveDisplay(session.ID)), fmt.Sprintf("%s finished%s", notificationSurfaceName(session.Surface), d.onHost()))
+			notice := d.endTurnNotifications(session, turnID, fmt.Sprintf("%s finished", d.resolveDisplay(session.ID)), fmt.Sprintf("%s finished%s", d.sessionPushSubject(session), d.onHost()))
 			noticed = &notice
 		}
 		d.recordCompletion(session, turnID, false, noticed)

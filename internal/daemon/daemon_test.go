@@ -624,10 +624,19 @@ func TestQueuedRelaySuccessDoesNotCreateDeliveryProblem(t *testing.T) {
 	}
 }
 
-func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
+func TestAPhonePushNamesTheSessionByAliasAndProjectAndNeverByItsTitle(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	d, r, fake, from, _ := daemonFixture(t)
-	if err := r.SetAlias("private-project-title", from.ID); err != nil {
+	root := t.TempDir()
+	if err := r.AddProject(registry.ProjectRecord{ID: "project-widget", WorkspaceRoot: root, Title: "widget", Added: true, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	from.Name, from.Cwd = "private-project-title", root
+	fake.sessions[from.ID] = from
+	if err := r.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("builder", from.ID); err != nil {
 		t.Fatal(err)
 	}
 	pairing, err := r.CreateDevicePairing("Phone", []string{"read"}, time.Minute)
@@ -668,7 +677,7 @@ func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	d.observeSession(t.Context(), fake, &from)
 	select {
 	case payload := <-received:
-		if payload["message"] != "Codex agent finished" || strings.Contains(payload["message"], "private-project-title") {
+		if payload["message"] != "@builder in widget finished" || strings.Contains(payload["message"], "private-project-title") {
 			t.Fatalf("payload=%+v", payload)
 		}
 		if payload["sessionId"] != from.ID {

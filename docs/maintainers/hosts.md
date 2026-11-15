@@ -414,7 +414,9 @@ that finished while the host was unreachable, or while this daemon was down,
 never notifies here, and a first-seen row never notifies.
 
 The notification names the app, the host and the status: "Codex agent
-finished on server" on this computer's desktop and paired phones. An ask
+finished on server" on this computer's desktop. A paired phone's push names
+the session by its alias when it has one, and its project, as in "@builder in
+widget finished on server". An ask
 carries the host's request id: the desktop notification gets the ask's
 buttons from the mirrored `endTurn`, the phone fetches the request from this
 daemon, and an answer here is routed to the host like any other action.
