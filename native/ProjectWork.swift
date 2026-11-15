@@ -35,8 +35,9 @@ enum ProjectWork {
 
     static func page(_ list: ExtensionsList?, projectID: String, origin: URL, hostName: String) -> Page {
         guard let list else { return .reading }
-        guard let page = list.builtIn?[pageID] else {
-            return .unavailable(list.host == "off" ? "Extensions are off on \(hostName), and the work list is served with them." : "\(hostName) doesn't serve the work list yet. Update Agenthail there.")
+        guard let builtIn = list.builtIn else { return .unavailable("\(hostName) doesn't serve the work list yet. Update Agenthail there.") }
+        guard let page = builtIn[pageID] else {
+            return .unavailable(list.host == "off" ? "Extensions are off on \(hostName), and the work list is served with them." : "\(hostName) hasn't served its work list yet. If this lasts, update Agenthail there.")
         }
         let (base, unavailable) = ExtensionEntries.target(port: page.port, entry: page.entry, published: page.published, error: page.error, origin: origin, hostName: hostName)
         guard let base, var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else {

@@ -30,7 +30,7 @@ struct ProjectWorkPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: place) {
-            if let catalog, catalog.list == nil, !catalog.loading { catalog.refresh() }
+            if let catalog, !catalog.loading { catalog.refresh() }
         }
     }
 
