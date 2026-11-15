@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/hosts"
@@ -351,7 +352,7 @@ func TestAnAskTheAgentCanFixIsRefused(t *testing.T) {
 			t.Errorf("%s: refusal %q, want invalid", name, code)
 		}
 	}
-	for name, args := range map[string]map[string]any{"a blank headline": {"headline": " "}, "four next items": {"headline": "h", "next": []any{"a", "b", "c", "d"}}} {
+	for name, args := range map[string]map[string]any{"a blank headline": {"headline": " "}, "a headline of spaces and newlines": {"headline": " \n "}} {
 		if code := refusalCode(t, f.person, "agenthail_end_turn", args); code != "invalid" {
 			t.Errorf("end turn with %s: refusal %q, want invalid", name, code)
 		}
@@ -569,5 +570,27 @@ func TestAnAgentAskIsAnsweredByTheIDsOfItsOptions(t *testing.T) {
 	want := "1. Deploy it now? Wait\n2. Which region first? eu and us"
 	if len(f.fake.sent) != 1 || f.fake.sent[0] != want {
 		t.Fatalf("sent %q, want %q", f.fake.sent, want)
+	}
+}
+
+func TestALongHeadlineIsCutWhereShownAndALaterEndOfTheSameTurnReplacesIt(t *testing.T) {
+	f := newAskFixture(t)
+	long := strings.Repeat("the deploy went out ", 6) + "and the error rate held"
+	f.turn(t, f.from, "turn-1", func() {
+		if _, refused := callMCP(t, f.person, "agenthail_end_turn", map[string]any{"headline": "First try"}); refused {
+			t.Fatal("the first end was refused")
+		}
+		next := []any{"a", "b", "c", "d"}
+		if out, refused := callMCP(t, f.person, "agenthail_end_turn", map[string]any{"headline": long + "\nsecond line", "next": next}); refused {
+			t.Fatalf("a second, long end of the turn was refused: %v", out)
+		}
+	})
+	end := viewRow(t, f.d, f.from.ID).EndTurn
+	if end == nil || utf8.RuneCountInString(end.Headline) > 80 || !strings.HasSuffix(end.Headline, "…") || !strings.HasPrefix(long, strings.TrimSuffix(end.Headline, "…")) || len(end.Next) != 3 {
+		t.Fatalf("the row's end of turn: %+v", end)
+	}
+	f.alert(t, " done: "+end.Headline)
+	if first := f.desktop.matching("First try"); len(first) != 0 {
+		t.Fatalf("the replaced headline was announced: %+v", first)
 	}
 }

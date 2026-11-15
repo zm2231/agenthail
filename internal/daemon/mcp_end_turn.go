@@ -2,8 +2,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -12,12 +10,13 @@ import (
 )
 
 type mcpEndTurnInput struct {
-	Headline string   `json:"headline" jsonschema:"One line, at most 80 characters."`
-	Next     []string `json:"next,omitempty" jsonschema:"At most 3 follow-ups."`
+	Headline string   `json:"headline" jsonschema:"One line for the person; a long one is cut where it is shown."`
+	Next     []string `json:"next,omitempty" jsonschema:"Up to 3 follow-ups."`
 }
 
 func (d *Daemon) mcpEndTurn(ctx context.Context, caller *mcpCaller, input mcpEndTurnInput) (any, error) {
-	if refusal := validEndTurn(input); refusal != nil {
+	headline, next, refusal := endTurnLines(input)
+	if refusal != nil {
 		return nil, refusal
 	}
 	session := caller.session
@@ -25,10 +24,8 @@ func (d *Daemon) mcpEndTurn(ctx context.Context, caller *mcpCaller, input mcpEnd
 	if err != nil {
 		return nil, err
 	}
-	end := registry.TurnEnd{SessionID: session.ID, Headline: strings.TrimSpace(input.Headline), Next: input.Next, Source: registry.TurnSourceTool}
-	if _, err := d.Registry.EndTurn(end, runtime.ActiveTurnID, time.Now()); errors.Is(err, registry.ErrTurnAlreadyEnded) {
-		return nil, refuse("already_ended", "You already ended this turn. Stop here; the next turn can end again.")
-	} else if err != nil {
+	end := registry.TurnEnd{SessionID: session.ID, Headline: headline, Next: next, Source: registry.TurnSourceTool}
+	if _, err := d.Registry.EndTurn(end, runtime.ActiveTurnID, time.Now()); err != nil {
 		return nil, err
 	}
 	d.requestCatalogDiscovery()
@@ -40,30 +37,27 @@ func (d *Daemon) mcpEndTurn(ctx context.Context, caller *mcpCaller, input mcpEnd
 	return result, nil
 }
 
-func validEndTurn(input mcpEndTurnInput) *mcpRefusal {
-	tooLong := func(field, value string, limit int) *mcpRefusal {
-		if utf8.RuneCountInString(value) > limit {
-			return refuse("invalid", fmt.Sprintf("%s is at most %d characters.", field, limit))
-		}
-		return nil
+const endTurnStoredRunes = 1000
+
+func endTurnLines(input mcpEndTurnInput) (string, []string, *mcpRefusal) {
+	headline := clipRunes(oneLine(input.Headline), endTurnStoredRunes)
+	if headline == "" {
+		return "", nil, refuse("invalid", "headline is required.")
 	}
-	headline := strings.TrimSpace(input.Headline)
-	if headline == "" || strings.ContainsAny(headline, "\r\n") {
-		return refuse("invalid", "headline is one line and required.")
-	}
-	if refusal := tooLong("headline", headline, 80); refusal != nil {
-		return refusal
-	}
-	if len(input.Next) > 3 {
-		return refuse("invalid", "at most 3 next items.")
-	}
-	for _, next := range input.Next {
-		if strings.TrimSpace(next) == "" {
-			return refuse("invalid", "a next item is empty.")
-		}
-		if refusal := tooLong("a next item", next, 160); refusal != nil {
-			return refusal
+	var next []string
+	for _, item := range input.Next {
+		if item = clipRunes(oneLine(item), endTurnStoredRunes); item != "" && len(next) < 3 {
+			next = append(next, item)
 		}
 	}
-	return nil
+	return headline, next, nil
+}
+
+func oneLine(text string) string { return strings.Join(strings.Fields(text), " ") }
+
+func clipRunes(text string, limit int) string {
+	if utf8.RuneCountInString(text) <= limit {
+		return text
+	}
+	return string([]rune(text)[:limit])
 }

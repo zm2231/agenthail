@@ -19,8 +19,6 @@ type TurnEnd struct {
 	Source          string
 }
 
-var ErrTurnAlreadyEnded = errors.New("this turn has already ended")
-
 const (
 	TurnSourceTool   = "tool"
 	TurnSourceNudged = "nudged"
@@ -42,7 +40,7 @@ func (r *Registry) OpenTurn(sessionID string, at time.Time) error {
 	return tx.Commit()
 }
 
-// A turn has started since the last end when one was opened, the last one completed, or the runtime names another active turn.
+// A turn has started since the last end when one was opened, the last one completed, or the runtime names another active turn; a later end of the same turn replaces the earlier one.
 func (r *Registry) EndTurn(end TurnEnd, activeTurnID string, at time.Time) (TurnEnd, error) {
 	next, err := json.Marshal(end.Next)
 	if err != nil {
@@ -65,8 +63,6 @@ func (r *Registry) EndTurn(end TurnEnd, activeTurnID string, at time.Time) (Turn
 		if _, err := tx.Exec(`INSERT INTO turn_ends(session_id,started_at_ms) VALUES(?,?)`, end.SessionID, started); err != nil {
 			return TurnEnd{}, err
 		}
-	case ended > 0:
-		return TurnEnd{}, ErrTurnAlreadyEnded
 	}
 	if _, err := tx.Exec(`UPDATE turn_ends SET ended_at_ms=?,turn_id=?,headline=?,next_json=?,source=CASE WHEN source=? THEN source ELSE ? END WHERE session_id=? AND started_at_ms=?`,
 		at.UnixMilli(), activeTurnID, end.Headline, string(next), TurnSourceNudged, end.Source, end.SessionID, started); err != nil {

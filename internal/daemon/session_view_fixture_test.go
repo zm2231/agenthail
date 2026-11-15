@@ -326,7 +326,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 				}
 				return
 			}
-			if _, err := reg.EndTurn(registry.TurnEnd{SessionID: id, Headline: fmt.Sprint("done ", rng.Intn(3)), Source: registry.TurnSourceTool}, "", f.clock); err != nil && !errors.Is(err, registry.ErrTurnAlreadyEnded) {
+			if _, err := reg.EndTurn(registry.TurnEnd{SessionID: id, Headline: fmt.Sprint("done ", rng.Intn(3)), Source: registry.TurnSourceTool}, "", f.clock); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -447,7 +447,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 		if _, err := reg.PinSession("s0", f.clock); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := reg.EndTurn(registry.TurnEnd{SessionID: "s0", Headline: "filled", Source: registry.TurnSourceTool}, "", f.clock); err != nil && !errors.Is(err, registry.ErrTurnAlreadyEnded) {
+		if _, err := reg.EndTurn(registry.TurnEnd{SessionID: "s0", Headline: "filled", Source: registry.TurnSourceTool}, "", f.clock); err != nil {
 			t.Fatal(err)
 		}
 		if err := reg.SaveRuntimeState("s0", surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "fill"}); err != nil {

@@ -77,7 +77,7 @@ func (d *Daemon) notifyMirroredCompletion(host *pairedHost, rawID string, row da
 		status = "failed"
 	}
 	message := fmt.Sprintf("%s %s on %s", notificationSurfaceName(row.Surface), status, host.record.Name)
-	notification := mobileNotification{Title: "Agenthail", Message: message, SessionID: row.ID, TurnID: completion.TurnID, EventType: "turn.completed", DedupeKey: completionDedupeKey(host.record.ID, rawID, completion.TurnID)}
+	notification := mobileNotification{Title: "Agenthail", Message: fmt.Sprintf("%s %s on %s", pushSubject(row.Surface, row.Alias, row.Project), status, host.record.Name), SessionID: row.ID, TurnID: completion.TurnID, EventType: "turn.completed", DedupeKey: completionDedupeKey(host.record.ID, rawID, completion.TurnID)}
 	d.background.start(func(ctx context.Context) {
 		if err := d.notifyDesktop("Agenthail", message, row.ID, "", "", nil); err != nil {
 			d.log.Printf("desktop notification: %s", err)

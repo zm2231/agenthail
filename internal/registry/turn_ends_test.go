@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"errors"
 	"testing"
 	"time"
 
@@ -17,7 +16,7 @@ func currentHeadline(t *testing.T, r *Registry, id string) string {
 	return ends[id].Headline
 }
 
-func TestATurnEndsOnceAndStandsUntilTheNextTurn(t *testing.T) {
+func TestATurnsLastEndStandsUntilTheNextTurn(t *testing.T) {
 	r := coordinatorRegistry(t, "worker")
 	now := time.Now()
 	if err := r.OpenTurn("worker", now); err != nil {
@@ -27,14 +26,16 @@ func TestATurnEndsOnceAndStandsUntilTheNextTurn(t *testing.T) {
 		t.Fatal("a second copy of the start hook failed:", err)
 	}
 	end := TurnEnd{SessionID: "worker", Headline: "Deploy?", Source: "tool"}
-	if _, err := r.EndTurn(end, "", now.Add(time.Second)); err != nil {
+	first := end
+	first.Headline = "Deploy soon"
+	if _, err := r.EndTurn(first, "", now.Add(500*time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.EndTurn(end, "", now.Add(2*time.Second)); !errors.Is(err, ErrTurnAlreadyEnded) {
-		t.Fatalf("a second end in one turn: %v", err)
+	if _, err := r.EndTurn(end, "", now.Add(time.Second)); err != nil {
+		t.Fatal("a second end in one turn was refused:", err)
 	}
 	if got := currentHeadline(t, r, "worker"); got != "Deploy?" {
-		t.Fatalf("current end %q", got)
+		t.Fatalf("the second end of the turn did not replace the first: %q", got)
 	}
 	if err := r.BindTurnCompletion("worker", "reply-1"); err != nil {
 		t.Fatal(err)
@@ -71,8 +72,12 @@ func TestWithoutAStartHookANewTurnIsToldByItsCompletionOrItsRuntimeTurn(t *testi
 	if _, err := r.EndTurn(end, "turn-1", now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.EndTurn(end, "turn-1", now.Add(time.Second)); !errors.Is(err, ErrTurnAlreadyEnded) {
-		t.Fatalf("a second end of turn-1: %v", err)
+	end.Headline = "one again"
+	if _, err := r.EndTurn(end, "turn-1", now.Add(time.Second)); err != nil {
+		t.Fatal("a second end of turn-1 was refused:", err)
+	}
+	if got := currentHeadline(t, r, "thread"); got != "one again" {
+		t.Fatalf("the second end of turn-1 did not replace the first: %q", got)
 	}
 	end.Headline = "two"
 	if _, err := r.EndTurn(end, "turn-2", now.Add(2*time.Second)); err != nil {
