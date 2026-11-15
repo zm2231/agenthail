@@ -69,6 +69,8 @@ struct ProjectWorkTest {
         check(ProjectWork.page(off, projectID: "p", origin: origin, hostName: "studio") == .unavailable("Extensions are off on studio, and the work list is served with them."), "extensions off says why")
         let older = list(#"{"host":"running","extensions":[]}"#)
         check(ProjectWork.page(older, projectID: "p", origin: origin, hostName: "studio") == .unavailable("studio doesn't serve the work list yet. Update Agenthail there."), "an older computer says to update")
+        let starting = list(#"{"host":"running","extensions":[],"builtIn":{}}"#)
+        check(ProjectWork.page(starting, projectID: "p", origin: origin, hostName: "studio") == .unavailable("studio is still starting its work list. Try again in a moment."), "a daemon that hasn't served the page yet is starting, not old")
 
         check(ProjectWork.controllerID(.init(hostID: "h1", projectID: "p")) != ProjectWork.controllerID(.init(hostID: "h1", projectID: "q")), "each project keeps its own page")
         print("project_work_test: PASS")
