@@ -215,7 +215,9 @@ func describeDrop(drop registry.ConnectionDrop) string {
 		parts[1] += " to " + drop.Host + " directly"
 	}
 	failure := drop.FirstError
-	if drop.ElapsedMs != nil {
+	if drop.ElapsedMs != nil && drop.Path == "stream" {
+		failure += fmt.Sprintf(" %.1f s after last hearing from %s", float64(*drop.ElapsedMs)/1000, drop.Host)
+	} else if drop.ElapsedMs != nil {
 		failure += fmt.Sprintf(" after %.1f s", float64(*drop.ElapsedMs)/1000)
 	}
 	parts = append(parts, failure)
