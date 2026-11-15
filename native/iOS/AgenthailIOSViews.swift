@@ -664,6 +664,10 @@ struct SessionScreen: View {
                     }
                 }
                 if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
+                else if focus, !activityOnly, groups.isEmpty {
+                    Text("No messages yet. Focus hides tool activity.").font(.footnote).foregroundStyle(PhonePalette.muted)
+                        .accessibilityIdentifier("focus-empty")
+                }
 #if DEBUG
                 if let space = PreviewStream.trailingSpace { Color.clear.frame(height: space) }
 #endif
