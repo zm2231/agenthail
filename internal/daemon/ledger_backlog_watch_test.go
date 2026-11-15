@@ -169,7 +169,7 @@ func TestABacklogItemTurningReadyPublishesALedgerChange(t *testing.T) {
 	revisit := time.Now().Add(time.Hour)
 	parkedWork(t, mac, "after the release", ledger.Park{Kind: ledger.ParkLater, Why: "after the release", Revisit: revisit})
 	hub := mac.daemon.ledgerChanges()
-	id, wake, cancel := hub.subscribe()
+	id, wake, cancel := hub.subscribe("")
 	defer cancel()
 	mac.daemon.sweepLedgerBacklog(t.Context(), time.Now())
 	drain := func() map[string]string {

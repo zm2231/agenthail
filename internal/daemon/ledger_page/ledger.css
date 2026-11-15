@@ -1,0 +1,52 @@
+:root {
+  color-scheme: dark light;
+  --paper: oklch(14% 0.012 45);
+  --raised: oklch(20% 0.014 45);
+  --ink: oklch(95% 0.008 70);
+  --muted: oklch(73% 0.012 55);
+  --quiet: oklch(64% 0.012 55);
+  --rule: oklch(29% 0.014 45);
+  --accent: oklch(72% 0.16 45);
+  --warn: oklch(80% 0.12 95);
+  --bad: oklch(68% 0.18 25);
+  --good: oklch(75% 0.13 155);
+  --font: "Avenir Next", Avenir, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --paper: oklch(97.5% 0.006 70);
+    --raised: oklch(95.5% 0.008 60);
+    --ink: oklch(22% 0.012 45);
+    --muted: oklch(41% 0.012 50);
+    --quiet: oklch(47% 0.012 50);
+    --rule: oklch(87% 0.01 55);
+    --accent: oklch(52% 0.17 38);
+    --warn: oklch(50% 0.11 80);
+    --bad: oklch(50% 0.19 25);
+    --good: oklch(48% 0.12 155);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.45 var(--font); }
+main { max-width: 900px; margin: 0 auto; padding: 16px; }
+section { margin: 0 0 22px; }
+h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+h2 .count { color: var(--quiet); font-weight: 500; }
+ol { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+li { padding: 10px 2px; border-bottom: 1px solid var(--rule); }
+.title { font-weight: 600; overflow-wrap: anywhere; }
+.what { margin-top: 2px; color: var(--muted); overflow-wrap: anywhere; }
+.for { margin-top: 4px; color: var(--quiet); font-size: 13px; overflow-wrap: anywhere; }
+.for q { font-style: italic; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; color: var(--quiet); font-size: 13px; }
+.meta .holder { color: var(--accent); }
+.priority { font-variant-numeric: tabular-nums; }
+.priority.p0, .priority.p1 { color: var(--bad); }
+.blocked .note, .parked .note { color: var(--warn); }
+.done .note { color: var(--muted); }
+.waiting li { border-left: 3px solid var(--accent); padding-left: 10px; }
+.recommend { margin-top: 4px; color: var(--muted); font-size: 13px; }
+.note { color: var(--muted); }
+.more { margin-top: 8px; padding: 6px 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--raised); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.error { color: var(--bad); }
+@media (max-width: 520px) { main { padding: 12px; } body { font-size: 14px; } }

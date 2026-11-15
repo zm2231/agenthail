@@ -343,6 +343,16 @@ func (b *Board) Utterances() []UtteranceView {
 	return result
 }
 
+func (b *Board) Clause(id string) (Clause, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	c := b.clauses[id]
+	if c == nil {
+		return Clause{}, false
+	}
+	return *c, true
+}
+
 func (b *Board) ClausesOwnedBy(sessionID string) []Clause {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

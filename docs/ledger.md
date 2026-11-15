@@ -336,6 +336,20 @@ GET /api/v1/ledger/events                                   # ledger.changed, on
   - After that, it sends one event per changed project at most once a second, however many events were written meanwhile. A client that reads slowly gets the newest version of each project it missed, and is never dropped.
   - A client that reconnects should refetch what it shows.
 
+## The Work page
+
+Each project's view in the dashboard has a Work section: the project's ledger as the person reads it, without the ledger's own terms. It lists what is waiting on the person (open questions, and work parked on a question for them), then work in progress, in review, blocked, up next and set aside, each with its title, the first line of its description, the words of the person's it serves, and who holds it by alias. Below that, the last 20 items done in 30 days, with who checked each. Answering stays in Needs you. The page is read-only and follows the ledger's changes as they land.
+
+The daemon builds the page in and serves it on its own local port, the way an extension's page is served, so the apps can show the same page inside a project. `GET /api/v1/extensions` names that port under `builtIn.ledger` (`port`, `entry`, `published`); it is not listed among the extensions, and no extension folder can be named `ledger`. On that port:
+
+```
+GET /?project=<project id>                 # the page
+GET /ledger?project=<project id>           # what it shows, as JSON, with an ETag
+GET /events?project=<project id>           # ledger.changed for that project only
+```
+
+The project id is the one the project list uses (a repository project's key or an added project's id); the daemon finds its ledger the way sessions in that project do. A project with no ledger yet reads as an empty list. Like an extension page, the port answers only for this machine's own names, and asks for `read` scope.
+
 ## Doctor
 
 `agenthail doctor` reports on the ledger:

@@ -465,20 +465,26 @@ type extensionView struct {
 }
 
 type extensionsView struct {
-	Host       string          `json:"host"`
-	HostError  string          `json:"hostError,omitempty"`
-	Extensions []extensionView `json:"extensions"`
+	Host       string               `json:"host"`
+	HostError  string               `json:"hostError,omitempty"`
+	Extensions []extensionView      `json:"extensions"`
+	BuiltIn    map[string]pageState `json:"builtIn"`
 }
 
 func (d *Daemon) extensionsView() extensionsView {
 	r := d.extensions
 	if r == nil {
-		return extensionsView{Host: "off", Extensions: []extensionView{}}
+		return extensionsView{Host: "off", Extensions: []extensionView{}, BuiltIn: map[string]pageState{}}
 	}
 	mounts, pages, labels := r.mounts.view()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	view := extensionsView{Host: "running", Extensions: []extensionView{}}
+	view := extensionsView{Host: "running", Extensions: []extensionView{}, BuiltIn: map[string]pageState{}}
+	for _, page := range builtinPages {
+		if state, ok := pages[page.id]; ok {
+			view.BuiltIn[page.id] = state
+		}
+	}
 	if !r.up {
 		view.Host, view.HostError = "unavailable", r.hostErr
 	}

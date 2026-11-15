@@ -204,7 +204,7 @@ func (d *Daemon) apiLedgerEventsHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	hub := d.ledgerChanges()
-	id, wake, cancel := hub.subscribe()
+	id, wake, cancel := hub.subscribe("")
 	defer cancel()
 	keys, err := d.ledgerStore().ProjectKeys()
 	if err != nil {

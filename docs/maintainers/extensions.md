@@ -476,7 +476,8 @@ the folder present and before a build starts. A file is written when it is
 missing or when the built-in copy differs from the one last written (recorded
 in `~/.agenthail/extensions-data/seeded.json`), so the person's own edit lasts
 until a newer Agenthail changes that file. Each write is committed as
-`agenthail`. `recipes` is not a valid extension id.
+`agenthail`. `recipes` is not a valid extension id, and neither is `ledger`, the
+Work page the daemon builds in (see [the ledger docs](../ledger.md#the-work-page)).
 
 ### Verified from what ran
 

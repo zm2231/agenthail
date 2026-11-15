@@ -76,8 +76,13 @@ type Extension struct {
 	Err      error
 }
 
-// The seeded recipes folder sits beside the extensions, so its name is taken.
-func ValidID(id string) bool { return idPattern.MatchString(id) && id != recipesDir }
+const Ledger = "ledger"
+
+// The seeded recipes folder sits beside the extensions and the built-in pages
+// share their ports, so those names are taken.
+func ValidID(id string) bool {
+	return idPattern.MatchString(id) && id != recipesDir && id != Ledger
+}
 
 func Discover(workspace string) ([]Extension, error) {
 	entries, err := os.ReadDir(workspace)

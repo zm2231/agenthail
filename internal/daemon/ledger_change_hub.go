@@ -20,8 +20,13 @@ type ledgerChangeHub struct {
 }
 
 type ledgerSubscriber struct {
+	only   string
 	wake   chan struct{}
 	unread map[string]string
+}
+
+func (sub *ledgerSubscriber) wants(key string) bool {
+	return sub.only == "" || sub.only == key
 }
 
 func newLedgerChangeHub(wait time.Duration, version func(string) (string, error), logf func(string, ...any)) *ledgerChangeHub {
@@ -41,7 +46,10 @@ func (h *ledgerChangeHub) changed(key string) {
 func (h *ledgerChangeHub) publish(key string) {
 	h.mu.Lock()
 	delete(h.pending, key)
-	listening := len(h.subscribers) > 0
+	listening := false
+	for _, sub := range h.subscribers {
+		listening = listening || sub.wants(key)
+	}
 	h.mu.Unlock()
 	if !listening {
 		return
@@ -54,6 +62,9 @@ func (h *ledgerChangeHub) publish(key string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, sub := range h.subscribers {
+		if !sub.wants(key) {
+			continue
+		}
 		sub.unread[key] = version
 		select {
 		case sub.wake <- struct{}{}:
@@ -62,11 +73,11 @@ func (h *ledgerChangeHub) publish(key string) {
 	}
 }
 
-func (h *ledgerChangeHub) subscribe() (uint64, <-chan struct{}, func()) {
+func (h *ledgerChangeHub) subscribe(only string) (uint64, <-chan struct{}, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.nextID++
-	id, sub := h.nextID, &ledgerSubscriber{wake: make(chan struct{}, 1), unread: map[string]string{}}
+	id, sub := h.nextID, &ledgerSubscriber{only: only, wake: make(chan struct{}, 1), unread: map[string]string{}}
 	h.subscribers[id] = sub
 	return id, sub.wake, func() {
 		h.mu.Lock()

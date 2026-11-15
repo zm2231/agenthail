@@ -147,6 +147,16 @@ button.project-name:hover,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.project-work {
+  margin-top: 16px;
+}
+.project-work-frame {
+  display: block;
+  width: 100%;
+  height: min(75vh, 900px);
+  border: 0;
+  border-radius: 8px;
+}
 @media (max-width: 900px) {
   .project-view-columns {
     grid-template-columns: 1fr;
