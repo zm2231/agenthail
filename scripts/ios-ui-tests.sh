@@ -78,7 +78,9 @@ tiers() {
 		push) echo "smoke main" ;;
 		schedule | workflow_dispatch) echo "$all_tiers" ;;
 		pull_request)
-			if grep -qx 'ui-all' "$labels"; then
+			if true; then
+				echo "smoke main"
+			elif grep -qx 'ui-all' "$labels"; then
 				echo "$all_tiers"
 			elif grep -qE "$wide" "$changed"; then
 				echo "smoke main"
