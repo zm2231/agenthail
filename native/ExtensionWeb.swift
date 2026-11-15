@@ -101,16 +101,36 @@ final class ExtensionPageController: NSObject, WKNavigationDelegate, WKUIDelegat
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     @ObservationIgnored private var renewTask: Task<Void, Never>?
     @ObservationIgnored var openOutside: (URL) -> Void = { _ in }
+    private(set) var contentHeight: CGFloat?
+    @ObservationIgnored private var followsHeight = false
 
     init(entryID: String, hostID: String) {
         self.entryID = entryID
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = ExtensionWebStores.store(forHost: hostID)
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = FollowingWebView(frame: .zero, configuration: configuration)
         super.init()
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
+    }
+
+    func followContentHeight() {
+        guard !followsHeight else { return }
+        followsHeight = true
+        let content = webView.configuration.userContentController
+        content.add(ContentHeightReceiver(self), name: ContentHeightReceiver.name)
+        content.addUserScript(WKUserScript(source: ContentHeightReceiver.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+#if os(iOS)
+        webView.scrollView.isScrollEnabled = false
+#else
+        (webView as? FollowingWebView)?.passesScroll = true
+#endif
+    }
+
+    fileprivate func measured(_ height: CGFloat) {
+        let height = max(height, 1)
+        if contentHeight != height { contentHeight = height }
     }
 
     func open(_ url: URL, signIn: (any ExtensionSessionSource)?) {
@@ -224,6 +244,34 @@ final class ExtensionPageController: NSObject, WKNavigationDelegate, WKUIDelegat
         if failure.code == NSURLErrorCancelled || (failure.domain == "WebKitErrorDomain" && failure.code == 102) { return }
         if case .failed = phase { return }
         phase = .failed(error.localizedDescription)
+    }
+}
+
+private final class FollowingWebView: WKWebView {
+    var passesScroll = false
+#if os(macOS)
+    override func scrollWheel(with event: NSEvent) {
+        if passesScroll, let next = nextResponder { next.scrollWheel(with: event) } else { super.scrollWheel(with: event) }
+    }
+#endif
+}
+
+private final class ContentHeightReceiver: NSObject, WKScriptMessageHandler {
+    static let name = "agenthailContentHeight"
+    static let script = """
+    (() => {
+      const post = () => window.webkit.messageHandlers.\(name).postMessage(Math.ceil(document.body.getBoundingClientRect().height));
+      new ResizeObserver(post).observe(document.body);
+      post();
+    })();
+    """
+    private weak var controller: ExtensionPageController?
+
+    init(_ controller: ExtensionPageController) { self.controller = controller }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let height = (message.body as? NSNumber)?.doubleValue, height.isFinite else { return }
+        MainActor.assumeIsolated { controller?.measured(CGFloat(height)) }
     }
 }
 

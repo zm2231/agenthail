@@ -11,16 +11,17 @@ struct ProjectWorkPane: View {
             if let catalog, let api = catalog.api {
                 switch catalog.list == nil && catalog.error != nil ? .unavailable(catalog.error ?? "") : ProjectWork.page(catalog.list, projectID: place.projectID, origin: api.origin, hostName: catalog.hostName) {
                 case .reading:
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 60)
                 case .shown(let url):
                     let controller = ExtensionPages.controller(id: ProjectWork.controllerID(place), hostID: place.hostID)
-                    ExtensionPageHost(controller: controller, url: url, signIn: catalog.signIn)
-                        .overlay {
-                            if case .failed(let message) = controller.phase {
-                                unavailable(message) { controller.reload() }
-                            }
-                        }
-                        .accessibilityIdentifier("project-work-page")
+                    if case .failed(let message) = controller.phase {
+                        unavailable(message) { controller.reload() }
+                    } else {
+                        ExtensionPageHost(controller: controller, url: url, signIn: catalog.signIn)
+                            .frame(height: controller.contentHeight ?? ProjectWork.placeholderHeight)
+                            .onAppear { controller.followContentHeight() }
+                            .accessibilityIdentifier("project-work-page")
+                    }
                 case .unavailable(let message):
                     unavailable(message) { catalog.refresh() }
                 }
@@ -28,18 +29,16 @@ struct ProjectWorkPane: View {
                 unavailable("This Mac can't reach the computer that holds this project's work list.", retry: nil)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: place) {
             if let catalog, !catalog.loading { catalog.refresh() }
         }
     }
 
     private func unavailable(_ message: String, retry: (() -> Void)?) -> some View {
-        ContentUnavailableView {
-            Label("Work", systemImage: "checklist")
-        } description: {
-            Text(message)
-        } actions: {
+        HStack(alignment: .firstTextBaseline) {
+            Text(message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
             if let retry { Button("Try Again", action: retry) }
         }
         .accessibilityIdentifier("project-work-unavailable")
