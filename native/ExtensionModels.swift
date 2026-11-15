@@ -41,6 +41,7 @@ struct ExtensionsList: Codable, Equatable, Sendable {
     var host: String
     var hostError: String?
     var extensions: [ExtensionSummary]
+    var builtIn: [String: ExtensionPage]? = nil
 }
 
 struct ExtensionWebSession: Codable, Equatable, Sendable {

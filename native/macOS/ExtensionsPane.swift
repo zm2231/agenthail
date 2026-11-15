@@ -266,7 +266,7 @@ struct ExtensionPagePane: View {
     }
 }
 
-private struct ExtensionPageHost: NSViewRepresentable {
+struct ExtensionPageHost: NSViewRepresentable {
     let controller: ExtensionPageController
     let url: URL
     let signIn: ExtensionSignIn?

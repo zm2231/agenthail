@@ -234,11 +234,15 @@ enum ExtensionPages {
     private static var recent: [String] = []
 
     static func controller(for entry: ExtensionEntry) -> ExtensionPageController {
-        recent.removeAll { $0 == entry.id }
-        recent.append(entry.id)
-        if let controller = controllers[entry.id] { return controller }
-        let controller = ExtensionPageController(entryID: entry.id, hostID: entry.hostID)
-        controllers[entry.id] = controller
+        controller(id: entry.id, hostID: entry.hostID)
+    }
+
+    static func controller(id: String, hostID: String) -> ExtensionPageController {
+        recent.removeAll { $0 == id }
+        recent.append(id)
+        if let controller = controllers[id] { return controller }
+        let controller = ExtensionPageController(entryID: id, hostID: hostID)
+        controllers[id] = controller
         while recent.count > kept {
             let dropped = recent.removeFirst()
             controllers.removeValue(forKey: dropped)?.stop()
