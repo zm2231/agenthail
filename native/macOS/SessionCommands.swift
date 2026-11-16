@@ -99,6 +99,9 @@ struct SessionCommands: Commands {
             Toggle("Show Archived", isOn: Binding(get: { model.showsArchived }, set: { model.showsArchived = $0 }))
                 .disabled(model.sessionFilter != .all)
             Divider()
+            Button(pane?.sidebarOnScreen == false ? "Show Sidebar" : "Hide Sidebar") { pane?.toggleSidebar() }
+                .keyboardShortcut(shortcuts.keyboardShortcut(.toggleSidebar))
+                .disabled(pane == nil)
             Button(pane?.inspectorShown == true ? "Hide Inspector" : "Show Inspector") { pane?.toggleInspector() }
                 .keyboardShortcut(shortcuts.keyboardShortcut(.toggleInspector))
                 .disabled(pane == nil)

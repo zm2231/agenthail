@@ -31,18 +31,18 @@ private struct BelowWindowChrome: ViewModifier {
     }
 }
 
-/// Shows the sidebar over the conversation when the window is too narrow
-/// to dock it.
 struct SidebarToggle: View {
     var pane: SessionPane
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     var body: some View {
         Button { pane.toggleSidebar() } label: { Image(systemName: "sidebar.left") }
             .buttonStyle(.plain)
             .foregroundStyle(pane.sidebarOverlay ? DesktopPalette.text : DesktopPalette.text2)
             .font(.system(size: DesktopType.body))
-            .help(pane.sidebarOverlay ? "Hide sidebar" : "Show sidebar")
+            .help(shortcuts.help(pane.sidebarOverlay ? "Hide sidebar" : "Show sidebar", .toggleSidebar))
             .accessibilityLabel(pane.sidebarOverlay ? "Hide sidebar" : "Show sidebar")
+            .accessibilityIdentifier("sidebar-toggle")
     }
 }
 
@@ -60,7 +60,7 @@ struct TitleBarStrip: View {
     var body: some View {
         let needsYou = model.needsYouCount
         HStack(spacing: DesktopSpace.s) {
-            if !pane.sidebarDocks { SidebarToggle(pane: pane) }
+            if !pane.sidebarShown { SidebarToggle(pane: pane) }
             GeometryReader { geometry in
                 let tabs = pane.tabs.tabs
                 let fits = max(Int(geometry.size.width / Self.minimumTab), 1)

@@ -75,8 +75,10 @@ struct DesktopWindow: View {
         // The sidebar collapses to a column of no width rather than through
         // the split view's visibility: hiding and showing a column there
         // resizes the window to keep the conversation's width.
+        // The split view's own collapse, a drag past the sidebar's minimum,
+        // is kept as the person hiding it.
         let sidebar = pane.sidebarShown ? DesktopColumns.sidebar : (min: 0, ideal: 0, max: 0)
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: Binding(get: { .all }, set: { if $0 == .detailOnly && pane.sidebarShown { pane.setSidebarHidden(true) } })) {
             Group {
                 if pane.sidebarShown {
                     SessionSidebar(model: model, pane: pane, holdsWindowButtons: true)

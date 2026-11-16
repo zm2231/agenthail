@@ -50,6 +50,7 @@ final class SessionPane: Identifiable {
     private(set) var inspectorOverlay = false
     private(set) var sidebarDocks = true
     private(set) var sidebarOverlay = false
+    private(set) var sidebarHidden = false
     @ObservationIgnored private var fitted = false
     var renamingSession: SessionState?
     var movingSession: SessionState?
@@ -117,9 +118,17 @@ final class SessionPane: Identifiable {
         if inspectorDocks { inspectorVisible.toggle() } else { inspectorOverlay.toggle() }
     }
 
+    var sidebarOnScreen: Bool { sidebarShown || sidebarOverlay }
+
     func toggleSidebar() {
-        guard !sidebarDocks else { return }
-        sidebarOverlay.toggle()
+        if sidebarDocks && !pageFills { setSidebarHidden(!sidebarHidden) } else { sidebarOverlay.toggle() }
+    }
+
+    func setSidebarHidden(_ hidden: Bool) {
+        guard hidden != sidebarHidden else { return }
+        sidebarHidden = hidden
+        sidebarOverlay = false
+        if restoresSelection { UserDefaults.standard.set(hidden, forKey: Self.sidebarHiddenKey) }
     }
 
     func closeSidebarOverlay() {
@@ -160,6 +169,7 @@ final class SessionPane: Identifiable {
         if restoresSelection {
             inspectorDocks = UserDefaults.standard.object(forKey: Self.inspectorDocksKey) as? Bool ?? true
             sidebarDocks = UserDefaults.standard.object(forKey: Self.sidebarDocksKey) as? Bool ?? true
+            sidebarHidden = UserDefaults.standard.bool(forKey: Self.sidebarHiddenKey)
         }
         observeDraft()
     }
@@ -179,6 +189,7 @@ final class SessionPane: Identifiable {
     /// force a window that closed narrow to open wide.
     static let inspectorDocksKey = "inspectorDocks"
     static let sidebarDocksKey = "sidebarDocks"
+    static let sidebarHiddenKey = "sidebarHidden"
 
     var tabsEnabled: Bool { restoresSelection && model.interface.config.tabs }
 
@@ -202,7 +213,7 @@ final class SessionPane: Identifiable {
         }
     }
     var pageFills = false
-    var sidebarShown: Bool { sidebarDocks && !pageFills }
+    var sidebarShown: Bool { sidebarDocks && !sidebarHidden && !pageFills }
     @ObservationIgnored private var scopeArchived = false
     var selectedDecisionID: String?
 
