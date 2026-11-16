@@ -510,6 +510,7 @@ struct SessionScreen: View {
     private var liveSession: SessionState { model.session(session.id) ?? session }
     @State private var showingInfo = false
     @State private var showingVoice = false
+    @State private var shownRequest: String?
     @State private var activityOnly = false
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
     @AppStorage(TranscriptFocus.defaultsKey) private var focus = false
@@ -793,7 +794,12 @@ struct SessionScreen: View {
                         .id(waiting.id)
                         .padding(.horizontal)
                         .padding(.top, 6)
-                } else if let detail, !detail.readOnly, let request = model.sessionRequests?.offered(pendingAsk: liveSession.pendingAskID, retired: model.retiredAsks.retired(in: liveSession.id)).first {
+                } else if let detail, !detail.readOnly, let offered = model.sessionRequests?.offered(pendingAsk: liveSession.pendingAskID, open: liveSession.pendingAsks, retired: model.retiredAsks.retired(in: liveSession.id)), let request = offered.first(where: { $0.id == shownRequest }) ?? offered.first {
+                    if offered.count > 1, let index = offered.firstIndex(of: request) {
+                        RequestSwitcher(index: index, count: offered.count) { shownRequest = offered[$0].id }
+                            .padding(.horizontal)
+                            .padding(.top, 6)
+                    }
                     RequestCard(request: request, answering: model.answeringRequest != nil, accent: AnyShapeStyle(PhonePalette.accentText),
                                 respond: { decision in Task { await model.respond(to: request, sessionID: session.id, decision: decision) } },
                                 leadNow: request.replacedBy.map { model.leadName($0, requestFrom: session.id) },

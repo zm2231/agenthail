@@ -33,14 +33,35 @@ struct RequestSyncKeyTest {
         expect(listed.offered(pendingAsk: "ask-000000000002").map(\.id) == ["a1"], "a retired ask is never offered")
         expect(listed.offered(pendingAsk: "ask-447a922cae82", retired: "ask-447a922cae82").map(\.id) == ["a1"], "an ask answered here is not offered while the row catches up")
 
+        let older = SessionRequest(id: "ask-447a922cae82", kind: "ask", tool: "")
+        let later = SessionRequest(id: "ask-b684039d968c", kind: "ask", tool: "")
+        let third = SessionRequest(id: "ask-c0ffee000003", kind: "ask", tool: "")
+        let both = SessionRequests(permissionMode: "", requests: [approval, older, later])
+        let twoOpen = session(respond: false, ask: ask("ask-447a922cae82", open: ["ask-447a922cae82", "ask-b684039d968c"]))
+        expect(twoOpen.pendingAsks == ["ask-447a922cae82", "ask-b684039d968c"], "the row's open asks decode: \(String(describing: twoOpen.pendingAsks))")
+        expect(both.offered(pendingAsk: twoOpen.pendingAskID, open: twoOpen.pendingAsks).map(\.id) == ["a1", "ask-447a922cae82", "ask-b684039d968c"], "every open ask is offered, not only the row's oldest")
+        expect(both.offered(pendingAsk: twoOpen.pendingAskID, open: twoOpen.pendingAsks, retired: "ask-b684039d968c").map(\.id) == ["a1", "ask-447a922cae82"], "a newer ask answered here is not offered again")
+        expect(both.offered(pendingAsk: waiting.pendingAskID, open: waiting.pendingAsks).map(\.id) == ["a1", "ask-447a922cae82"], "a row from an older daemon offers only its own ask")
+
+        let answeredElsewhere = session(respond: false, ask: ask("ask-447a922cae82", open: ["ask-447a922cae82"]))
+        expect(RequestSync.cacheKey(answeredElsewhere) != RequestSync.cacheKey(twoOpen), "a newer ask answered elsewhere rereads the requests")
+        expect(both.offered(pendingAsk: answeredElsewhere.pendingAskID, open: answeredElsewhere.pendingAsks).map(\.id) == ["a1", "ask-447a922cae82"], "and is not offered from the read before it")
+        let threeOpen = session(respond: false, ask: ask("ask-447a922cae82", open: ["ask-447a922cae82", "ask-b684039d968c", "ask-c0ffee000003"]))
+        expect(RequestSync.cacheKey(threeOpen) != RequestSync.cacheKey(twoOpen), "a third ask arriving rereads the requests")
+        let all = SessionRequests(permissionMode: "", requests: [older, later, third])
+        expect(all.offered(pendingAsk: threeOpen.pendingAskID, open: threeOpen.pendingAsks).count == 3, "and it is offered")
+        let sameMillisecond = session(respond: false, ask: ask("ask-b684039d968c", open: ["ask-b684039d968c"]))
+        expect(both.offered(pendingAsk: sameMillisecond.pendingAskID, open: sameMillisecond.pendingAsks).map(\.id) == ["a1", "ask-b684039d968c"], "an ask the row no longer lists is never offered from a stale read, whatever its time")
+        expect(answered.pendingAsks == nil && session(respond: false, ask: ask("ask-447a922cae82", answered: true, open: ["ask-447a922cae82"])).pendingAsks == nil, "an answered row ask lists nothing")
+
         var retired = RetiredAsks()
         retired.retire("ask-447a922cae82", in: "s1")
         expect(!retired.settles(waiting) && retired.retired(in: "s1") == "ask-447a922cae82", "the entry holds while the row still names the ask")
         expect(retired.retired(in: "other") == nil, "an entry belongs to its session")
         expect(!retired.settles(answered), "the entry holds once answered, until the turn moves on")
-        var moved = retired
-        moved.settle(newer)
-        expect(moved.retired(in: "s1") == nil && listed.offered(pendingAsk: "ask-447a922cae82", retired: moved.retired(in: "s1")).count == 2, "a new ask drops the entry, so it cannot hide anything")
+        var settled = retired
+        settled.settle(newer)
+        expect(settled.retired(in: "s1") == nil && listed.offered(pendingAsk: "ask-447a922cae82", retired: settled.retired(in: "s1")).count == 2, "a new ask drops the entry, so it cannot hide anything")
         var resumed = retired
         resumed.settle(session())
         expect(resumed.retired(in: "s1") == nil, "a turn that opens drops the entry")
@@ -61,9 +82,10 @@ struct RequestSyncKeyTest {
         print("request sync key tests passed")
     }
 
-    static func ask(_ id: String, to routedTo: String = "person", answered: Bool = false) -> String {
+    static func ask(_ id: String, to routedTo: String = "person", answered: Bool = false, open: [String]? = nil) -> String {
         let answeredAt = answered ? #","answeredAt":"2026-11-10T06:30:02.5Z""# : ""
-        return #"{"id":""# + id + #"","title":"Ready to ship","routedTo":""# + routedTo + #"","askedAt":"2026-11-10T06:26:27.31Z""# + answeredAt + "}"
+        let listed = open.map { #","open":["# + $0.map { "\"\($0)\"" }.joined(separator: ",") + "]" } ?? ""
+        return #"{"id":""# + id + #"","title":"Ready to ship","routedTo":""# + routedTo + #"","askedAt":"2026-11-10T06:26:27.31Z""# + answeredAt + listed + "}"
     }
 
     static func session(readOnly: Bool = false, respond: Bool = true, ask: String? = nil, endTurn: String? = nil) -> SessionState {

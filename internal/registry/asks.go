@@ -84,6 +84,7 @@ type Ask struct {
 	Answerable  bool
 	AnnouncedAt time.Time
 	Deadline    time.Time
+	Open        []string
 }
 
 func newAskID() (string, error) {
@@ -204,10 +205,10 @@ func (r *Registry) RouteAsk(id, to, why string, at time.Time) (bool, error) {
 	return true, tx.Commit()
 }
 
-// A session's row shows its oldest open ask, else its newest answered one until the session starts another turn.
+// A session's row shows its oldest open ask for the person, else its oldest open ask, else its newest answered one until the session starts another turn.
 const rowAsk = `SELECT a.id FROM asks a WHERE a.session_id=s.session_id AND a.origin IN ('agent','delivery','ledger') AND (a.state='open'
  OR a.state='answered' AND a.answered_at_ms>=COALESCE((SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=a.session_id),0))
- ORDER BY a.state='open' DESC, CASE WHEN a.state='open' THEN a.created_at_ms ELSE -a.answered_at_ms END, a.id LIMIT 1`
+ ORDER BY a.state='open' DESC, a.state='open' AND a.routed_to='person' DESC, CASE WHEN a.state='open' THEN a.created_at_ms ELSE -a.answered_at_ms END, a.id LIMIT 1`
 
 func rowAsks(ctx context.Context, q askQuerier) (map[string]Ask, error) {
 	asks, err := queryAsks(ctx, q, `WHERE id IN (SELECT (`+rowAsk+`) FROM (SELECT DISTINCT session_id FROM asks) s)`)
@@ -218,7 +219,34 @@ func rowAsks(ctx context.Context, q askQuerier) (map[string]Ask, error) {
 	for _, ask := range asks {
 		out[ask.SessionID] = ask
 	}
+	open, err := openPersonAsks(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	for id, ask := range out {
+		if ask.State == AskOpen && ask.RoutedTo == AskToPerson {
+			ask.Open = open[id]
+			out[id] = ask
+		}
+	}
 	return out, nil
+}
+
+func openPersonAsks(ctx context.Context, q askQuerier) (map[string][]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT session_id,id FROM asks WHERE state=? AND routed_to=? AND origin IN ('agent','delivery','ledger') ORDER BY session_id,created_at_ms,id`, AskOpen, AskToPerson)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	for rows.Next() {
+		var session, id string
+		if err := rows.Scan(&session, &id); err != nil {
+			return nil, err
+		}
+		out[session] = append(out[session], id)
+	}
+	return out, rows.Err()
 }
 
 func (r *Registry) RowAsks() (map[string]Ask, error) {

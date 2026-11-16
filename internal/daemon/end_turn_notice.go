@@ -76,13 +76,14 @@ type dashboardAsk struct {
 	AskedAt    time.Time `json:"askedAt"`
 	AnsweredAt time.Time `json:"answeredAt,omitzero"`
 	Deadline   time.Time `json:"deadline,omitzero"`
+	Open       []string  `json:"open,omitempty"`
 }
 
 func askRow(ask *registry.Ask) *dashboardAsk {
 	if ask == nil {
 		return nil
 	}
-	return &dashboardAsk{ID: ask.ID, Title: ask.Title, RoutedTo: ask.RoutedTo, AskedAt: ask.CreatedAt, AnsweredAt: ask.AnsweredAt, Deadline: ask.Deadline}
+	return &dashboardAsk{ID: ask.ID, Title: ask.Title, RoutedTo: ask.RoutedTo, AskedAt: ask.CreatedAt, AnsweredAt: ask.AnsweredAt, Deadline: ask.Deadline, Open: ask.Open}
 }
 
 func (ask *dashboardAsk) asksPerson() bool {

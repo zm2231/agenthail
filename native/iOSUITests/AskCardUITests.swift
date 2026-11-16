@@ -28,6 +28,25 @@ final class AskCardUITests: XCTestCase {
         attach(app, "dark after accept")
     }
 
+    func testANewerAskShowsWithoutAnsweringTheOlderOne() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-ask", "--preview-two-asks", "--preview-theme", "light"]
+        app.launch()
+        let first = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "@builder asks: Ready to ship")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 10), "the older ask shows first")
+        let next = app.buttons["request-next"]
+        XCTAssertTrue(next.waitForExistence(timeout: 5) && next.isEnabled, "a second open ask can be reached")
+        XCTAssertTrue(app.staticTexts["1 of 2 waiting on you"].exists, "the bar counts both asks")
+        attach(app, "light first of two asks")
+        next.tap()
+        let second = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "@builder asks: Sign in to the store")).firstMatch
+        XCTAssertTrue(second.waitForExistence(timeout: 5), "the newer ask shows without answering the older one")
+        XCTAssertTrue(app.staticTexts["2 of 2 waiting on you"].exists && !app.buttons["request-next"].isEnabled, "the newer ask is the last")
+        attach(app, "light second of two asks")
+        app.buttons["request-previous"].tap()
+        XCTAssertTrue(first.waitForExistence(timeout: 5), "the older ask is still there")
+    }
+
     private func answer(theme: String) {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-ask", "--preview-theme", theme]

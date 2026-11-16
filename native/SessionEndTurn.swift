@@ -11,6 +11,7 @@ struct SessionAsk: Codable, Hashable {
     var routedTo: String
     var askedAt: String? = nil
     var answeredAt: String? = nil
+    var open: [String]? = nil
 
     var waitsOnPerson: Bool { !id.isEmpty && routedTo == "person" && (answeredAt ?? "").isEmpty }
 }
@@ -20,12 +21,16 @@ extension SessionState {
         guard let ask, ask.waitsOnPerson else { return nil }
         return ask.id
     }
+
+    var pendingAsks: [String]? { pendingAskID == nil ? nil : ask?.open }
 }
 
 extension SessionRequests {
-    // A read can still list an ask that the row, or an answer just sent, already retired.
-    func offered(pendingAsk: String?, retired: String? = nil) -> [SessionRequest] {
-        requests.filter { !$0.isAsk || ($0.id == pendingAsk && $0.id != retired) }
+    // A read can still list an ask that the row, or an answer just sent, already retired; a row from an older daemon names only its oldest.
+    func offered(pendingAsk: String?, open: [String]? = nil, retired: String? = nil) -> [SessionRequest] {
+        guard let pendingAsk else { return requests.filter { !$0.isAsk } }
+        let waiting = Set(open ?? [pendingAsk])
+        return requests.filter { !$0.isAsk || (waiting.contains($0.id) && $0.id != retired) }
     }
 }
 
@@ -86,7 +91,7 @@ enum RequestSync {
     }
 
     static func cacheKey(_ session: SessionState) -> String {
-        "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.pendingAskID ?? "")"
+        "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.pendingAskID ?? "")|\((session.pendingAsks ?? []).joined(separator: ","))"
     }
 
     static func viewKey(_ session: SessionState) -> String {

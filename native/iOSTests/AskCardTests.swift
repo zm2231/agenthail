@@ -34,6 +34,16 @@ final class AskCardTests: XCTestCase {
         XCTAssertTrue(requests.offered(pendingAsk: "ask-000000000001", retired: "ask-000000000001").isEmpty, "an ask answered here is not offered while the row catches up")
     }
 
+    func testEveryOpenAskIsOfferedNotOnlyTheRowsOldest() throws {
+        let json = #"{"permissionMode":"","requests":[{"id":"ask-000000000001","kind":"ask","tool":"","title":"Ship the fix","alwaysAllow":false},{"id":"ask-000000000002","kind":"ask","tool":"","title":"Sign in","alwaysAllow":false}]}"#
+        let requests = try JSONDecoder().decode(SessionRequests.self, from: Data(json.utf8))
+        let both = try row(ask: #"{"id":"ask-000000000001","title":"Ship the fix","routedTo":"person","askedAt":"2026-11-06T04:52:30Z","open":["ask-000000000001","ask-000000000002"]}"#)
+        XCTAssertEqual(requests.offered(pendingAsk: both.pendingAskID, open: both.pendingAsks).map(\.id), ["ask-000000000001", "ask-000000000002"])
+        let one = try row(ask: #"{"id":"ask-000000000001","title":"Ship the fix","routedTo":"person","askedAt":"2026-11-06T04:52:30Z","open":["ask-000000000001"]}"#)
+        XCTAssertEqual(requests.offered(pendingAsk: one.pendingAskID, open: one.pendingAsks).map(\.id), ["ask-000000000001"], "an ask answered elsewhere is not offered")
+        XCTAssertNotEqual(RequestSync.cacheKey(both), RequestSync.cacheKey(one), "and the requests are read again")
+    }
+
     func testPagerWaitsForSubmitAndSendsTheNote() throws {
         let question = SessionRequest.Question(question: "Deploy it now?", header: "", multiSelect: false, options: [.init(id: "o0", label: "Deploy", description: ""), .init(id: "o1", label: "Wait", description: "")])
         var pager = QuestionPager(questions: [question], ask: true)

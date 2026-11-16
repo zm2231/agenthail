@@ -710,7 +710,7 @@ struct ConversationPane: View {
                                     .frame(maxWidth: DesktopColumns.reading)
                                     .padding(.horizontal, DesktopColumns.gutter)
                                     .padding(.top, DesktopSpace.s)
-                            } else if let requests = pane.requests?.offered(pendingAsk: session.pendingAskID, retired: pane.retiredAsks.retired(in: session.id)), !requests.isEmpty, !session.isReadOnly {
+                            } else if let requests = pane.requests?.offered(pendingAsk: session.pendingAskID, open: session.pendingAsks, retired: pane.retiredAsks.retired(in: session.id)), !requests.isEmpty, !session.isReadOnly {
                                 ForEach(requests) { request in
                                     RequestCard(request: request, answering: pane.answeringRequest != nil, accent: AnyShapeStyle(DesktopPalette.accentText),
                                                 respond: { decision in Task { await pane.respond(to: request, decision: decision) } },
