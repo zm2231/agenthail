@@ -31,6 +31,7 @@ A test that runs a host whose packages are missing fails at once and names the `
 - [Code mode: tool calls written as scripts, detection and presentation](code-mode.md)
 - [Push notification service](push-relay.md)
 - [Completion triggers: a command or file touch when a turn finishes](completion-triggers.md)
+- [Turn judge: how each turn ended, and what it still waits on](turn-judge.md)
 - [Mobile session fidelity audit](mobile-session-ux.md)
 - [Desktop parity: web dashboard vs Mac app](desktop-parity.md)
 - [Subagents: identity, families, targets, and cost](subagents.md)

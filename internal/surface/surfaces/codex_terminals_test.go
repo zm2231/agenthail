@@ -339,3 +339,24 @@ func TestAListingAskedBeforeAThreadReloadedDoesNotEraseItsNewTerminals(t *testin
 		return surface.BackgroundRunning(background) && background.Source == surface.BackgroundSourceRuntime && len(background.Tasks) == 1 && background.Tasks[0].ID == "11"
 	})
 }
+
+func TestAManagedCodexThreadWithoutATranscriptStillReportsItsListedTerminals(t *testing.T) {
+	fastTerminalPolls(t)
+	var running atomic.Bool
+	running.Store(true)
+	daemon := startManagedCodex(t, terminalsReply(&running))
+	daemon.AddThread(codextest.Thread{ID: managedThreadID})
+	daemon.Load(managedThreadID)
+	if path := daemon.RolloutPath(managedThreadID); path != "" {
+		t.Fatalf("the thread has a transcript at %s", path)
+	}
+	codex := watchedCodex(t, managedThreadID)
+	testkit.Eventually(t, "the observation to carry the listed terminal", 5*time.Second, func() bool {
+		observation, err := codex.Observe(context.Background(), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex})
+		if err != nil || observation == nil {
+			return false
+		}
+		background := observation.BackgroundTasks
+		return surface.BackgroundRunning(background) && background.Source == surface.BackgroundSourceRuntime && len(background.Tasks) == 1 && background.Tasks[0].ID == "7"
+	})
+}

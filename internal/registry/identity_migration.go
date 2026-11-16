@@ -206,6 +206,7 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"asks", `UPDATE asks SET session_id=?2 WHERE session_id=?1`, false},
 		{"asks", `UPDATE asks SET routed_to=?2 WHERE routed_to=?1`, false},
 		{"approvals", `UPDATE approvals SET session_id=?2 WHERE session_id=?1`, false},
+		{"turn_judgments", `UPDATE OR IGNORE turn_judgments SET session_id=?2 WHERE session_id=?1`, false},
 		{"session_credentials", `UPDATE OR IGNORE session_credentials SET session_id=?2 WHERE session_id=?1`, false},
 		{"session_credentials", `UPDATE OR IGNORE session_credentials SET claimed_session_id=?2 WHERE claimed_session_id=?1`, false},
 		{"session_runtime", `UPDATE session_runtime SET session_id=?2 WHERE session_id=?1`, hasRuntime},

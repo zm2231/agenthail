@@ -6,13 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/goalsort"
+	"github.com/zm2231/agenthail/internal/systemone"
 )
 
 func TestTheRequestBodyMatchesTheMeasuredSetup(t *testing.T) {
@@ -69,7 +68,7 @@ func stub(t *testing.T, handler http.HandlerFunc) goalsort.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return goalsort.Client{Config: goalsort.Config{URL: server.URL + "/", Model: "d1-3b"}, HTTP: server.Client()}
+	return goalsort.Client{Config: systemone.Config{URL: server.URL + "/", Model: "d1-3b"}, HTTP: server.Client()}
 }
 
 func TestAskPostsToSystemOneAndReadsTheGoalAnswer(t *testing.T) {
@@ -94,6 +93,9 @@ func TestAnUnusableAnswerIsAnError(t *testing.T) {
 		"not json":     func(w http.ResponseWriter) { io.WriteString(w, "<html>") },
 		"no choice":    func(w http.ResponseWriter) { io.WriteString(w, `{"answers":{}}`) },
 		"bad score":    func(w http.ResponseWriter) { io.WriteString(w, `{"answers":{"goal":{"choice":"new","confidence":7}}}`) },
+		"bad probability": func(w http.ResponseWriter) {
+			io.WriteString(w, `{"answers":{"goal":{"choice":"new","confidence":0.8,"probabilities":{"new":2}}}}`)
+		},
 	} {
 		client := stub(t, func(w http.ResponseWriter, r *http.Request) { reply(w) })
 		if answer, err := client.Ask(context.Background(), goalsort.Question{Message: "x"}); err == nil {
@@ -119,37 +121,5 @@ func TestASlowSorterIsCutOffAtTheDeadline(t *testing.T) {
 	}
 	if waited := time.Since(start); waited > 5*time.Second {
 		t.Fatalf("waited %s past the deadline", waited)
-	}
-}
-
-func writeConfig(t *testing.T, home, body string) {
-	t.Helper()
-	dir := filepath.Join(home, ".agenthail")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestTheSorterIsOffUntilConfiguredAndRefusesAMalformedKey(t *testing.T) {
-	home := t.TempDir()
-	if _, ok, err := goalsort.LoadConfig(home); ok || err != nil {
-		t.Fatalf("no config file: ok=%v err=%v", ok, err)
-	}
-	writeConfig(t, home, `{"other": true}`)
-	if _, ok, err := goalsort.LoadConfig(home); ok || err != nil {
-		t.Fatalf("no sorter key: ok=%v err=%v", ok, err)
-	}
-	writeConfig(t, home, `{"ledgerSorter": {"url": " http://127.0.0.1:8100 ", "model": "d1-3b"}}`)
-	if config, ok, err := goalsort.LoadConfig(home); !ok || err != nil || config != (goalsort.Config{URL: "http://127.0.0.1:8100", Model: "d1-3b"}) {
-		t.Fatalf("configured: %+v ok=%v err=%v", config, ok, err)
-	}
-	for _, bad := range []string{`{"ledgerSorter": "on"}`, `{"ledgerSorter": {"url": "127.0.0.1:8100", "model": "d1-3b"}}`, `{"ledgerSorter": {"url": "http://127.0.0.1:8100"}}`} {
-		writeConfig(t, home, bad)
-		if _, ok, err := goalsort.LoadConfig(home); ok || err == nil || !strings.Contains(err.Error(), "ledgerSorter must be") {
-			t.Fatalf("%s: ok=%v err=%v", bad, ok, err)
-		}
 	}
 }

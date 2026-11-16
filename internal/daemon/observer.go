@@ -268,6 +268,9 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 		if err := d.Registry.BindTurnCompletion(session.ID, observation.CompletedTurnID); err != nil {
 			d.log.Printf("bind turn completion %s: %s", d.resolveDisplay(session.ID), err)
 		}
+		if !stale && observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
+			d.queueTurnJudgment(session, observation.CompletedTurnID, observation.Reply.Text, observation.BackgroundTasks)
+		}
 	}
 	notice := turnCompletedNotice{desktop: desktopNotificationMessage, mobile: mobileNotificationMessage, outcome: notificationOutcome}
 	if notice.desktop != "" && observation.Reply.Error == "" {

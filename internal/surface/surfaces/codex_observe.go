@@ -45,12 +45,15 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 	observation = dropUnconfirmedTurn(thread, observation)
 	observation.Unheld = unheld && observation.Status != surface.StatusBusy
 	observation.WaitingOn = c.preciseWait(ctx, conn, sess, observation.WaitingOn)
-	if path := c.home.transcriptPath(sess); path != "" {
-		if info, err := os.Stat(path); err == nil {
+	path := c.home.transcriptPath(sess)
+	var info os.FileInfo
+	if path != "" {
+		if stat, err := os.Stat(path); err == nil {
+			info = stat
 			observation.Plan = c.plan(ctx, path, info)
-			observation.BackgroundTasks = c.codexBackground(ctx, sess.ID, path, info)
 		}
 	}
+	observation.BackgroundTasks = c.codexBackground(ctx, sess.ID, path, info)
 	return observation, nil
 }
 

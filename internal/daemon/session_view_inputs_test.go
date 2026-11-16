@@ -44,6 +44,7 @@ var notSessionViewInputs = map[string]string{
 	"project_settings":   "a project's settings reach the dashboard's project rows and the MCP socket, which reads them at each request; no session view shows them",
 	"host_held_actions":  "a held channel leg belongs to a paired host, not a session; it reaches a session view only as the host's deliveries",
 	"approvals":          "only answering an approval and its audit read the stored action; a session view shows the approval as its row in asks",
+	"turn_judgments":     "only GET /api/v1/turn-judgments reads recorded judgments; nothing a session view shows comes from them",
 }
 
 // Dropping session_archive or projects from the registry's presentation inputs

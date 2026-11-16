@@ -1,4 +1,4 @@
--- schemaVersion 103
+-- schemaVersion 105
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -145,6 +145,9 @@ CREATE INDEX tasks_running ON tasks(child_session_id) WHERE state='running';
 
 -- index trigger_runs_state
 CREATE INDEX trigger_runs_state ON trigger_runs(state, trigger_name, id);
+
+-- index turn_judgments_ended
+CREATE INDEX turn_judgments_ended ON turn_judgments(ended_at_ms);
 
 -- index work_records_session
 CREATE UNIQUE INDEX work_records_session ON work_records(session_id) WHERE session_id<>'';
@@ -1056,6 +1059,26 @@ CREATE TABLE turn_ends (
 	next_json TEXT NOT NULL DEFAULT 'null',
 	source TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, started_at_ms)
+);
+
+-- table turn_judgments
+CREATE TABLE turn_judgments (
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	turn_id TEXT NOT NULL,
+	ended_at_ms INTEGER NOT NULL,
+	judged_at_ms INTEGER NOT NULL DEFAULT 0,
+	model TEXT NOT NULL DEFAULT '',
+	ms INTEGER NOT NULL DEFAULT 0,
+	promise REAL NOT NULL DEFAULT 0,
+	needs REAL NOT NULL DEFAULT 0,
+	needs_tail REAL NOT NULL DEFAULT 0,
+	state TEXT NOT NULL DEFAULT '',
+	state_json TEXT NOT NULL DEFAULT '',
+	ending TEXT NOT NULL DEFAULT '',
+	headline TEXT NOT NULL DEFAULT '',
+	facts_json TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY(session_id, turn_id)
 );
 
 -- table work_records

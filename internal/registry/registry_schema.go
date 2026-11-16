@@ -728,6 +728,25 @@ CREATE TABLE IF NOT EXISTS approvals (
 	result TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS approvals_payload ON approvals(session_id, payload_sha256);
+CREATE TABLE IF NOT EXISTS turn_judgments (
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	turn_id TEXT NOT NULL,
+	ended_at_ms INTEGER NOT NULL,
+	judged_at_ms INTEGER NOT NULL DEFAULT 0,
+	model TEXT NOT NULL DEFAULT '',
+	ms INTEGER NOT NULL DEFAULT 0,
+	promise REAL NOT NULL DEFAULT 0,
+	needs REAL NOT NULL DEFAULT 0,
+	needs_tail REAL NOT NULL DEFAULT 0,
+	state TEXT NOT NULL DEFAULT '',
+	state_json TEXT NOT NULL DEFAULT '',
+	ending TEXT NOT NULL DEFAULT '',
+	headline TEXT NOT NULL DEFAULT '',
+	facts_json TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY(session_id, turn_id)
+);
+CREATE INDEX IF NOT EXISTS turn_judgments_ended ON turn_judgments(ended_at_ms);
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL,
