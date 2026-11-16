@@ -25,6 +25,7 @@ enum AskPreview {
     nonisolated static func apply(_ snapshot: inout [String: Any]) {
         var sessions = snapshot["sessions"] as! [[String: Any]]
         var ask: [String: Any] = ["id": requestID, "title": "Ready to ship", "routedTo": "person", "askedAt": "2026-09-12T04:03:00Z"]
+        if !second.isEmpty { ask["open"] = [requestID, "ask-b684039d968c"] }
         if answered { ask["answeredAt"] = "2026-09-12T04:05:00Z" } else { sessions[0]["attention"] = ["kind": "ask", "reason": "Ready to ship"] }
         sessions[0]["ask"] = ask
         sessions[0]["endTurn"] = ["headline": "Ready to ship", "endedAt": "2026-09-12T04:03:00Z"]

@@ -84,6 +84,7 @@ type Ask struct {
 	Answerable  bool
 	AnnouncedAt time.Time
 	Deadline    time.Time
+	Open        []string
 }
 
 func newAskID() (string, error) {
@@ -218,7 +219,34 @@ func rowAsks(ctx context.Context, q askQuerier) (map[string]Ask, error) {
 	for _, ask := range asks {
 		out[ask.SessionID] = ask
 	}
+	open, err := openPersonAsks(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	for id, ask := range out {
+		if ask.State == AskOpen && ask.RoutedTo == AskToPerson {
+			ask.Open = open[id]
+			out[id] = ask
+		}
+	}
 	return out, nil
+}
+
+func openPersonAsks(ctx context.Context, q askQuerier) (map[string][]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT session_id,id FROM asks WHERE state=? AND routed_to=? AND origin<>? ORDER BY session_id,created_at_ms,id`, AskOpen, AskToPerson, AskOriginPermission)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	for rows.Next() {
+		var session, id string
+		if err := rows.Scan(&session, &id); err != nil {
+			return nil, err
+		}
+		out[session] = append(out[session], id)
+	}
+	return out, rows.Err()
 }
 
 func (r *Registry) RowAsks() (map[string]Ask, error) {

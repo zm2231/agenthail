@@ -35,12 +35,13 @@ final class AskCardTests: XCTestCase {
     }
 
     func testEveryOpenAskIsOfferedNotOnlyTheRowsOldest() throws {
-        let json = #"{"permissionMode":"","requests":[{"id":"ask-000000000001","kind":"ask","tool":"","title":"Ship the fix","alwaysAllow":false,"createdAt":"2026-11-06T04:52:30Z"},{"id":"ask-000000000002","kind":"ask","tool":"","title":"Sign in","alwaysAllow":false,"createdAt":"2026-11-06T06:25:00.5Z"}]}"#
+        let json = #"{"permissionMode":"","requests":[{"id":"ask-000000000001","kind":"ask","tool":"","title":"Ship the fix","alwaysAllow":false},{"id":"ask-000000000002","kind":"ask","tool":"","title":"Sign in","alwaysAllow":false}]}"#
         let requests = try JSONDecoder().decode(SessionRequests.self, from: Data(json.utf8))
-        let oldest = try row(ask: #"{"id":"ask-000000000001","title":"Ship the fix","routedTo":"person","askedAt":"2026-11-06T04:52:30Z"}"#)
-        XCTAssertEqual(requests.offered(pendingAsk: oldest.pendingAskID, askedAt: oldest.pendingAskedAt).map(\.id), ["ask-000000000001", "ask-000000000002"])
-        let moved = try row(ask: #"{"id":"ask-000000000002","title":"Sign in","routedTo":"person","askedAt":"2026-11-06T06:25:00.5Z"}"#)
-        XCTAssertEqual(requests.offered(pendingAsk: moved.pendingAskID, askedAt: moved.pendingAskedAt).map(\.id), ["ask-000000000002"], "an ask older than the row's is answered")
+        let both = try row(ask: #"{"id":"ask-000000000001","title":"Ship the fix","routedTo":"person","askedAt":"2026-11-06T04:52:30Z","open":["ask-000000000001","ask-000000000002"]}"#)
+        XCTAssertEqual(requests.offered(pendingAsk: both.pendingAskID, open: both.pendingAsks).map(\.id), ["ask-000000000001", "ask-000000000002"])
+        let one = try row(ask: #"{"id":"ask-000000000001","title":"Ship the fix","routedTo":"person","askedAt":"2026-11-06T04:52:30Z","open":["ask-000000000001"]}"#)
+        XCTAssertEqual(requests.offered(pendingAsk: one.pendingAskID, open: one.pendingAsks).map(\.id), ["ask-000000000001"], "an ask answered elsewhere is not offered")
+        XCTAssertNotEqual(RequestSync.cacheKey(both), RequestSync.cacheKey(one), "and the requests are read again")
     }
 
     func testPagerWaitsForSubmitAndSendsTheNote() throws {

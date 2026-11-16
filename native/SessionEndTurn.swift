@@ -11,6 +11,7 @@ struct SessionAsk: Codable, Hashable {
     var routedTo: String
     var askedAt: String? = nil
     var answeredAt: String? = nil
+    var open: [String]? = nil
 
     var waitsOnPerson: Bool { !id.isEmpty && routedTo == "person" && (answeredAt ?? "").isEmpty }
 }
@@ -21,21 +22,15 @@ extension SessionState {
         return ask.id
     }
 
-    var pendingAskedAt: String? { pendingAskID == nil ? nil : ask?.askedAt }
+    var pendingAsks: [String]? { pendingAskID == nil ? nil : ask?.open }
 }
 
 extension SessionRequests {
-    // The row names the oldest open ask, so a listed ask older than it was already answered by a read that lags.
-    func offered(pendingAsk: String?, askedAt: String? = nil, retired: String? = nil) -> [SessionRequest] {
+    // A read can still list an ask that the row, or an answer just sent, already retired; a row from an older daemon names only its oldest.
+    func offered(pendingAsk: String?, open: [String]? = nil, retired: String? = nil) -> [SessionRequest] {
         guard let pendingAsk else { return requests.filter { !$0.isAsk } }
-        let oldest = askedAt.flatMap(TimestampParser.date)
-        return requests.filter { request in
-            guard request.isAsk else { return true }
-            guard request.id != retired else { return false }
-            if request.id == pendingAsk { return true }
-            guard let oldest, let created = request.createdAt.flatMap(TimestampParser.date) else { return false }
-            return created >= oldest
-        }
+        let waiting = Set(open ?? [pendingAsk])
+        return requests.filter { !$0.isAsk || (waiting.contains($0.id) && $0.id != retired) }
     }
 }
 
@@ -96,7 +91,7 @@ enum RequestSync {
     }
 
     static func cacheKey(_ session: SessionState) -> String {
-        "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.pendingAskID ?? "")"
+        "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.pendingAskID ?? "")|\((session.pendingAsks ?? []).joined(separator: ","))"
     }
 
     static func viewKey(_ session: SessionState) -> String {

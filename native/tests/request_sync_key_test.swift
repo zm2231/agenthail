@@ -33,19 +33,26 @@ struct RequestSyncKeyTest {
         expect(listed.offered(pendingAsk: "ask-000000000002").map(\.id) == ["a1"], "a retired ask is never offered")
         expect(listed.offered(pendingAsk: "ask-447a922cae82", retired: "ask-447a922cae82").map(\.id) == ["a1"], "an ask answered here is not offered while the row catches up")
 
-        var older = SessionRequest(id: "ask-447a922cae82", kind: "ask", tool: "")
-        older.createdAt = "2026-11-10T06:26:27.31Z"
-        var later = SessionRequest(id: "ask-b684039d968c", kind: "ask", tool: "")
-        later.createdAt = "2026-11-10T07:25:00Z"
+        let older = SessionRequest(id: "ask-447a922cae82", kind: "ask", tool: "")
+        let later = SessionRequest(id: "ask-b684039d968c", kind: "ask", tool: "")
+        let third = SessionRequest(id: "ask-c0ffee000003", kind: "ask", tool: "")
         let both = SessionRequests(permissionMode: "", requests: [approval, older, later])
-        expect(both.offered(pendingAsk: waiting.pendingAskID, askedAt: waiting.pendingAskedAt).map(\.id) == ["a1", "ask-447a922cae82", "ask-b684039d968c"], "every open ask is offered, oldest first, not only the row's")
-        expect(both.offered(pendingAsk: waiting.pendingAskID, askedAt: waiting.pendingAskedAt, retired: "ask-b684039d968c").map(\.id) == ["a1", "ask-447a922cae82"], "a newer ask answered here is not offered again")
-        let moved = session(respond: false, ask: #"{"id":"ask-b684039d968c","title":"Sign in","routedTo":"person","askedAt":"2026-11-10T07:25:00Z"}"#)
-        expect(both.offered(pendingAsk: moved.pendingAskID, askedAt: moved.pendingAskedAt).map(\.id) == ["a1", "ask-b684039d968c"], "an ask older than the row's was answered and is never offered from a stale read")
-        expect(both.offered(pendingAsk: answered.pendingAskID, askedAt: answered.pendingAskedAt).map(\.id) == ["a1"], "with no open ask on the row, no ask is offered")
-        expect(answered.pendingAskedAt == nil && waiting.pendingAskedAt == "2026-11-10T06:26:27.31Z", "only a waiting ask gives its time")
-        let undated = SessionRequests(permissionMode: "", requests: [older, SessionRequest(id: "ask-000000000009", kind: "ask", tool: "")])
-        expect(undated.offered(pendingAsk: waiting.pendingAskID, askedAt: waiting.pendingAskedAt).map(\.id) == ["ask-447a922cae82"], "an ask without a time is offered only when the row names it")
+        let twoOpen = session(respond: false, ask: ask("ask-447a922cae82", open: ["ask-447a922cae82", "ask-b684039d968c"]))
+        expect(twoOpen.pendingAsks == ["ask-447a922cae82", "ask-b684039d968c"], "the row's open asks decode: \(String(describing: twoOpen.pendingAsks))")
+        expect(both.offered(pendingAsk: twoOpen.pendingAskID, open: twoOpen.pendingAsks).map(\.id) == ["a1", "ask-447a922cae82", "ask-b684039d968c"], "every open ask is offered, not only the row's oldest")
+        expect(both.offered(pendingAsk: twoOpen.pendingAskID, open: twoOpen.pendingAsks, retired: "ask-b684039d968c").map(\.id) == ["a1", "ask-447a922cae82"], "a newer ask answered here is not offered again")
+        expect(both.offered(pendingAsk: waiting.pendingAskID, open: waiting.pendingAsks).map(\.id) == ["a1", "ask-447a922cae82"], "a row from an older daemon offers only its own ask")
+
+        let answeredElsewhere = session(respond: false, ask: ask("ask-447a922cae82", open: ["ask-447a922cae82"]))
+        expect(RequestSync.cacheKey(answeredElsewhere) != RequestSync.cacheKey(twoOpen), "a newer ask answered elsewhere rereads the requests")
+        expect(both.offered(pendingAsk: answeredElsewhere.pendingAskID, open: answeredElsewhere.pendingAsks).map(\.id) == ["a1", "ask-447a922cae82"], "and is not offered from the read before it")
+        let threeOpen = session(respond: false, ask: ask("ask-447a922cae82", open: ["ask-447a922cae82", "ask-b684039d968c", "ask-c0ffee000003"]))
+        expect(RequestSync.cacheKey(threeOpen) != RequestSync.cacheKey(twoOpen), "a third ask arriving rereads the requests")
+        let all = SessionRequests(permissionMode: "", requests: [older, later, third])
+        expect(all.offered(pendingAsk: threeOpen.pendingAskID, open: threeOpen.pendingAsks).count == 3, "and it is offered")
+        let sameMillisecond = session(respond: false, ask: ask("ask-b684039d968c", open: ["ask-b684039d968c"]))
+        expect(both.offered(pendingAsk: sameMillisecond.pendingAskID, open: sameMillisecond.pendingAsks).map(\.id) == ["a1", "ask-b684039d968c"], "an ask the row no longer lists is never offered from a stale read, whatever its time")
+        expect(answered.pendingAsks == nil && session(respond: false, ask: ask("ask-447a922cae82", answered: true, open: ["ask-447a922cae82"])).pendingAsks == nil, "an answered row ask lists nothing")
 
         var retired = RetiredAsks()
         retired.retire("ask-447a922cae82", in: "s1")
@@ -75,9 +82,10 @@ struct RequestSyncKeyTest {
         print("request sync key tests passed")
     }
 
-    static func ask(_ id: String, to routedTo: String = "person", answered: Bool = false) -> String {
+    static func ask(_ id: String, to routedTo: String = "person", answered: Bool = false, open: [String]? = nil) -> String {
         let answeredAt = answered ? #","answeredAt":"2026-11-10T06:30:02.5Z""# : ""
-        return #"{"id":""# + id + #"","title":"Ready to ship","routedTo":""# + routedTo + #"","askedAt":"2026-11-10T06:26:27.31Z""# + answeredAt + "}"
+        let listed = open.map { #","open":["# + $0.map { "\"\($0)\"" }.joined(separator: ",") + "]" } ?? ""
+        return #"{"id":""# + id + #"","title":"Ready to ship","routedTo":""# + routedTo + #"","askedAt":"2026-11-10T06:26:27.31Z""# + answeredAt + listed + "}"
     }
 
     static func session(readOnly: Bool = false, respond: Bool = true, ask: String? = nil, endTurn: String? = nil) -> SessionState {

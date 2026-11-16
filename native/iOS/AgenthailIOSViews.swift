@@ -794,7 +794,7 @@ struct SessionScreen: View {
                         .id(waiting.id)
                         .padding(.horizontal)
                         .padding(.top, 6)
-                } else if let detail, !detail.readOnly, let offered = model.sessionRequests?.offered(pendingAsk: liveSession.pendingAskID, askedAt: liveSession.pendingAskedAt, retired: model.retiredAsks.retired(in: liveSession.id)), let request = offered.first(where: { $0.id == shownRequest }) ?? offered.first {
+                } else if let detail, !detail.readOnly, let offered = model.sessionRequests?.offered(pendingAsk: liveSession.pendingAskID, open: liveSession.pendingAsks, retired: model.retiredAsks.retired(in: liveSession.id)), let request = offered.first(where: { $0.id == shownRequest }) ?? offered.first {
                     if offered.count > 1, let index = offered.firstIndex(of: request) {
                         RequestSwitcher(index: index, count: offered.count) { shownRequest = offered[$0].id }
                             .padding(.horizontal)
