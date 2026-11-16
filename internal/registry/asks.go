@@ -233,7 +233,7 @@ func rowAsks(ctx context.Context, q askQuerier) (map[string]Ask, error) {
 }
 
 func openPersonAsks(ctx context.Context, q askQuerier) (map[string][]string, error) {
-	rows, err := q.QueryContext(ctx, `SELECT session_id,id FROM asks WHERE state=? AND routed_to=? AND origin<>? ORDER BY session_id,created_at_ms,id`, AskOpen, AskToPerson, AskOriginPermission)
+	rows, err := q.QueryContext(ctx, `SELECT session_id,id FROM asks WHERE state=? AND routed_to=? AND origin IN ('agent','delivery','ledger') ORDER BY session_id,created_at_ms,id`, AskOpen, AskToPerson)
 	if err != nil {
 		return nil, err
 	}

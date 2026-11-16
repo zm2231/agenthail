@@ -21,6 +21,8 @@ func TestTheRowListsEveryOpenAskForThePersonOldestFirst(t *testing.T) {
 	login := raise("asker", "Sign in", AskToPerson, AskOriginAgent, at.Add(3*time.Hour))
 	raise("asker", "For the lead", "lead", AskOriginAgent, at.Add(time.Hour))
 	raise("other", "Elsewhere", AskToPerson, AskOriginAgent, at)
+	raise("asker", "Allow the tool", AskToPerson, AskOriginPermission, at.Add(time.Hour))
+	raise("asker", "Grant the extension", AskToPerson, AskOriginExtensionGrant, at.Add(2*time.Hour))
 
 	rows, err := r.RowAsks()
 	if err != nil {
