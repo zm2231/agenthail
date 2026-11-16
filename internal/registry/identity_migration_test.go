@@ -184,6 +184,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 	exec(`INSERT INTO turn_ends(session_id,started_at_ms) VALUES(?,1)`, rekeyedBridge)
 	exec(`INSERT INTO asks(id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,created_at_ms) VALUES('ask-1',?,'agent','Ship?','[]',?,1,'[]','open',1)`, rekeyedBridge, rekeyedBridge)
 	exec(`INSERT INTO approvals(ask_id,session_id,api,payload,payload_sha256,description,reason,created_at_ms,expires_at_ms) VALUES('ask-2',?,'action','{}','h','Archive project widget','',1,2)`, rekeyedBridge)
+	exec(`INSERT INTO turn_judgments(session_id,turn_id,ended_at_ms) VALUES(?,'turn-1',1)`, rekeyedBridge)
 	exec(`INSERT INTO session_credentials(session_id,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES(?,'hash',1,2,3)`, rekeyedBridge)
 	exec(`INSERT INTO session_credentials(pending_ref,claimed_session_id,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES('ref',?,'pending-hash',1,2,3)`, rekeyedBridge)
 	exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,'agent',?)`, rekeyedBridge, collidedBridge)

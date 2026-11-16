@@ -150,6 +150,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/queue", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.mobileQueueHandler))))
 	mux.HandleFunc("/api/v1/triggers", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.apiTriggersHandler)))
 	mux.HandleFunc("/api/v1/inbox", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.inboxHandler))))
+	mux.HandleFunc("/api/v1/turn-judgments", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.turnJudgmentsHandler))))
 	mux.HandleFunc("/api/v1/history", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.dashboardHistoryHandler))))
 	mux.HandleFunc("/api/v1/prompts", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.promptsHandler))))
 	mux.HandleFunc("/api/v1/session-files", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.sessionFilesHandler))))

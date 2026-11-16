@@ -12,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/goalsort"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/systemone"
 )
 
 const (
@@ -169,7 +170,7 @@ func (d *Daemon) sortWaiting(ctx context.Context) {
 
 // releaseHeld reports whether every held message it asked about was answered; after a failed ask the owed ones
 // wait for the retry rather than being asked again at once.
-func (d *Daemon) releaseHeld(ctx context.Context, config goalsort.Config) bool {
+func (d *Daemon) releaseHeld(ctx context.Context, config systemone.Config) bool {
 	for _, job := range d.sorter.heldJobs() {
 		if ctx.Err() != nil {
 			return false
@@ -195,7 +196,7 @@ func (d *Daemon) sortOwed(ctx context.Context) {
 	}
 }
 
-func (d *Daemon) sortOwedWith(ctx context.Context, config goalsort.Config) {
+func (d *Daemon) sortOwedWith(ctx context.Context, config systemone.Config) {
 	floor := d.sorter.now().Add(-sorterRecovery)
 	for _, job := range d.sorter.owedJobs() {
 		if ctx.Err() != nil {
@@ -241,7 +242,7 @@ func (d *Daemon) heldBehind(job sortJob) (time.Time, bool) {
 	return until, !until.IsZero()
 }
 
-func (d *Daemon) sortAndSettle(ctx context.Context, config goalsort.Config, job sortJob) bool {
+func (d *Daemon) sortAndSettle(ctx context.Context, config systemone.Config, job sortJob) bool {
 	if err := d.sortOne(ctx, config, job); err != nil {
 		d.sorter.failed(d, job, err)
 		return false
@@ -251,12 +252,12 @@ func (d *Daemon) sortAndSettle(ctx context.Context, config goalsort.Config, job 
 	return true
 }
 
-func (d *Daemon) sorterConfig() (goalsort.Config, bool) {
+func (d *Daemon) sorterConfig() (systemone.Config, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return goalsort.Config{}, false
+		return systemone.Config{}, false
 	}
-	config, ok, err := goalsort.LoadConfig(home)
+	config, ok, err := systemone.LoadConfig(home, goalsort.ConfigKey)
 	s := d.sorter
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -271,7 +272,7 @@ func (d *Daemon) sorterConfig() (goalsort.Config, bool) {
 	return config, ok
 }
 
-func (d *Daemon) sortOne(ctx context.Context, config goalsort.Config, job sortJob) error {
+func (d *Daemon) sortOne(ctx context.Context, config systemone.Config, job sortJob) error {
 	store := d.ledgerStore()
 	input, ok, err := store.SortInputFor(job.key, job.utteranceID)
 	if err != nil {
@@ -405,7 +406,7 @@ func (d *Daemon) sorterHealth() *ledger.SorterHealth {
 	if err != nil {
 		return nil
 	}
-	config, ok, err := goalsort.LoadConfig(home)
+	config, ok, err := systemone.LoadConfig(home, goalsort.ConfigKey)
 	if err != nil {
 		return &ledger.SorterHealth{Error: err.Error()}
 	}

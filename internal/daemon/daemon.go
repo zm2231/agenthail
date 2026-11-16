@@ -113,6 +113,7 @@ type Daemon struct {
 	backlog           backlogWatch
 	ledgerClaims      ledgerClaims
 	sorter            *ledgerSorter
+	judge             *turnJudge
 	contexts          *messageContexts
 	checks            checkerRunner
 	g2                *g2Counter
@@ -232,6 +233,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		github:            github.GH{},
 		g2:                newG2Counter(time.Now()),
 		sorter:            newLedgerSorter(),
+		judge:             newTurnJudge(),
 		contexts:          newMessageContexts(),
 	}
 	if reg != nil {
@@ -407,6 +409,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runAskSweeps(ctx)
 	recovered, _ := d.startMessageContexts(ctx)
 	d.startLedgerSorter(ctx, recovered)
+	d.startTurnJudge(ctx)
 	go d.runDecisionsRevision(ctx)
 	d.background.start(d.runJournalSweeps)
 	d.proxyUsageSets(time.Now())
