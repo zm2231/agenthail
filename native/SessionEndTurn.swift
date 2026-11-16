@@ -20,12 +20,22 @@ extension SessionState {
         guard let ask, ask.waitsOnPerson else { return nil }
         return ask.id
     }
+
+    var pendingAskedAt: String? { pendingAskID == nil ? nil : ask?.askedAt }
 }
 
 extension SessionRequests {
-    // A read can still list an ask that the row, or an answer just sent, already retired.
-    func offered(pendingAsk: String?, retired: String? = nil) -> [SessionRequest] {
-        requests.filter { !$0.isAsk || ($0.id == pendingAsk && $0.id != retired) }
+    // The row names the oldest open ask, so a listed ask older than it was already answered by a read that lags.
+    func offered(pendingAsk: String?, askedAt: String? = nil, retired: String? = nil) -> [SessionRequest] {
+        guard let pendingAsk else { return requests.filter { !$0.isAsk } }
+        let oldest = askedAt.flatMap(TimestampParser.date)
+        return requests.filter { request in
+            guard request.isAsk else { return true }
+            guard request.id != retired else { return false }
+            if request.id == pendingAsk { return true }
+            guard let oldest, let created = request.createdAt.flatMap(TimestampParser.date) else { return false }
+            return created >= oldest
+        }
     }
 }
 

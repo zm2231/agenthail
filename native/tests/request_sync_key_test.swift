@@ -33,14 +33,28 @@ struct RequestSyncKeyTest {
         expect(listed.offered(pendingAsk: "ask-000000000002").map(\.id) == ["a1"], "a retired ask is never offered")
         expect(listed.offered(pendingAsk: "ask-447a922cae82", retired: "ask-447a922cae82").map(\.id) == ["a1"], "an ask answered here is not offered while the row catches up")
 
+        var older = SessionRequest(id: "ask-447a922cae82", kind: "ask", tool: "")
+        older.createdAt = "2026-11-10T06:26:27.31Z"
+        var later = SessionRequest(id: "ask-b684039d968c", kind: "ask", tool: "")
+        later.createdAt = "2026-11-10T07:25:00Z"
+        let both = SessionRequests(permissionMode: "", requests: [approval, older, later])
+        expect(both.offered(pendingAsk: waiting.pendingAskID, askedAt: waiting.pendingAskedAt).map(\.id) == ["a1", "ask-447a922cae82", "ask-b684039d968c"], "every open ask is offered, oldest first, not only the row's")
+        expect(both.offered(pendingAsk: waiting.pendingAskID, askedAt: waiting.pendingAskedAt, retired: "ask-b684039d968c").map(\.id) == ["a1", "ask-447a922cae82"], "a newer ask answered here is not offered again")
+        let moved = session(respond: false, ask: #"{"id":"ask-b684039d968c","title":"Sign in","routedTo":"person","askedAt":"2026-11-10T07:25:00Z"}"#)
+        expect(both.offered(pendingAsk: moved.pendingAskID, askedAt: moved.pendingAskedAt).map(\.id) == ["a1", "ask-b684039d968c"], "an ask older than the row's was answered and is never offered from a stale read")
+        expect(both.offered(pendingAsk: answered.pendingAskID, askedAt: answered.pendingAskedAt).map(\.id) == ["a1"], "with no open ask on the row, no ask is offered")
+        expect(answered.pendingAskedAt == nil && waiting.pendingAskedAt == "2026-11-10T06:26:27.31Z", "only a waiting ask gives its time")
+        let undated = SessionRequests(permissionMode: "", requests: [older, SessionRequest(id: "ask-000000000009", kind: "ask", tool: "")])
+        expect(undated.offered(pendingAsk: waiting.pendingAskID, askedAt: waiting.pendingAskedAt).map(\.id) == ["ask-447a922cae82"], "an ask without a time is offered only when the row names it")
+
         var retired = RetiredAsks()
         retired.retire("ask-447a922cae82", in: "s1")
         expect(!retired.settles(waiting) && retired.retired(in: "s1") == "ask-447a922cae82", "the entry holds while the row still names the ask")
         expect(retired.retired(in: "other") == nil, "an entry belongs to its session")
         expect(!retired.settles(answered), "the entry holds once answered, until the turn moves on")
-        var moved = retired
-        moved.settle(newer)
-        expect(moved.retired(in: "s1") == nil && listed.offered(pendingAsk: "ask-447a922cae82", retired: moved.retired(in: "s1")).count == 2, "a new ask drops the entry, so it cannot hide anything")
+        var settled = retired
+        settled.settle(newer)
+        expect(settled.retired(in: "s1") == nil && listed.offered(pendingAsk: "ask-447a922cae82", retired: settled.retired(in: "s1")).count == 2, "a new ask drops the entry, so it cannot hide anything")
         var resumed = retired
         resumed.settle(session())
         expect(resumed.retired(in: "s1") == nil, "a turn that opens drops the entry")

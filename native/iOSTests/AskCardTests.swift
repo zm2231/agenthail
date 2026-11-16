@@ -34,6 +34,15 @@ final class AskCardTests: XCTestCase {
         XCTAssertTrue(requests.offered(pendingAsk: "ask-000000000001", retired: "ask-000000000001").isEmpty, "an ask answered here is not offered while the row catches up")
     }
 
+    func testEveryOpenAskIsOfferedNotOnlyTheRowsOldest() throws {
+        let json = #"{"permissionMode":"","requests":[{"id":"ask-000000000001","kind":"ask","tool":"","title":"Ship the fix","alwaysAllow":false,"createdAt":"2026-11-06T04:52:30Z"},{"id":"ask-000000000002","kind":"ask","tool":"","title":"Sign in","alwaysAllow":false,"createdAt":"2026-11-06T06:25:00.5Z"}]}"#
+        let requests = try JSONDecoder().decode(SessionRequests.self, from: Data(json.utf8))
+        let oldest = try row(ask: #"{"id":"ask-000000000001","title":"Ship the fix","routedTo":"person","askedAt":"2026-11-06T04:52:30Z"}"#)
+        XCTAssertEqual(requests.offered(pendingAsk: oldest.pendingAskID, askedAt: oldest.pendingAskedAt).map(\.id), ["ask-000000000001", "ask-000000000002"])
+        let moved = try row(ask: #"{"id":"ask-000000000002","title":"Sign in","routedTo":"person","askedAt":"2026-11-06T06:25:00.5Z"}"#)
+        XCTAssertEqual(requests.offered(pendingAsk: moved.pendingAskID, askedAt: moved.pendingAskedAt).map(\.id), ["ask-000000000002"], "an ask older than the row's is answered")
+    }
+
     func testPagerWaitsForSubmitAndSendsTheNote() throws {
         let question = SessionRequest.Question(question: "Deploy it now?", header: "", multiSelect: false, options: [.init(id: "o0", label: "Deploy", description: ""), .init(id: "o1", label: "Wait", description: "")])
         var pager = QuestionPager(questions: [question], ask: true)
