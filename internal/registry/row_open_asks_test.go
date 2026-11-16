@@ -52,3 +52,26 @@ func TestTheRowListsEveryOpenAskForThePersonOldestFirst(t *testing.T) {
 		t.Fatalf("with no open ask for the person the row %s lists open %v", row.ID, row.Open)
 	}
 }
+
+func TestAnAskReroutedAwayLeavesTheNewerOneForThePersonOnTheRow(t *testing.T) {
+	r := coordinatorRegistry(t, "asker")
+	at := time.Date(2026, 11, 15, 22, 5, 0, 0, time.UTC)
+	var ids []string
+	for i, title := range []string{"Ship the resolver fix", "Sign in"} {
+		ask, err := r.RaiseAsk(Ask{SessionID: "asker", Origin: AskOriginAgent, Title: title, RoutedTo: AskToPerson, Questions: []AskQuestion{{Question: title}}}, at.Add(time.Duration(i)*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, ask.ID)
+	}
+	if moved, err := r.RouteAsk(ids[0], "lead", "escalated", at.Add(2*time.Hour)); err != nil || !moved {
+		t.Fatalf("route the older ask to the lead: %v %v", moved, err)
+	}
+	rows, err := r.RowAsks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row := rows["asker"]; row.ID != ids[1] || row.RoutedTo != AskToPerson || !slices.Equal(row.Open, []string{ids[1]}) {
+		t.Fatalf("the row names %s routed to %q with open %v, want the person's %s", row.ID, row.RoutedTo, row.Open, ids[1])
+	}
+}
