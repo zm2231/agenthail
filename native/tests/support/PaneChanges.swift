@@ -21,12 +21,12 @@ final class PaneChanges {
         }
     }
 
-    static let trackedCount = 38
+    static let trackedCount = 39
 
     static func readAll(_ p: SessionPane) {
         _ = (p.selectedSessionID, p.tabs, p.newSession, p.shownProjectID, p.archivedTab, p.archivedTabError, p.detail)
         _ = (p.detailStale, p.detailRefreshFailed, p.removedSession, p.olderItems, p.olderCursor, p.loadingOlder, p.olderError)
-        _ = (p.inspectorVisible, p.inspectorDocks, p.inspectorOverlay, p.sidebarDocks, p.sidebarOverlay)
+        _ = (p.inspectorVisible, p.inspectorDocks, p.inspectorOverlay, p.sidebarDocks, p.sidebarOverlay, p.sidebarHidden)
         _ = (p.renamingSession, p.movingSession, p.adoptingSession, p.projectSheet, p.messagingProject, p.projectConfirmation, p.forking, p.controlPending)
         _ = (p.requests, p.answeringRequest, p.retiredAsks, p.requestError, p.composerDraft, p.draftIsEmpty)
         _ = (p.detailLoadError, p.modelCatalogNeeded, p.scope, p.selectedDecisionID, p.pageFills)

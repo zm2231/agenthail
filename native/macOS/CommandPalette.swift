@@ -43,6 +43,7 @@ struct CommandPalette: View {
     private var actionEntries: [Entry] {
         var actions = [
             Entry(id: "new", icon: "square.and.pencil", title: "New session", detail: "", shortcut: shortcuts.label(.newSession)) { model.openNewSession() },
+            Entry(id: "sidebar", icon: "sidebar.left", title: pane.sidebarOnScreen ? "Hide sidebar" : "Show sidebar", detail: "", shortcut: shortcuts.label(.toggleSidebar)) { pane.toggleSidebar() },
             Entry(id: "inspector", icon: "sidebar.right", title: pane.inspectorShown ? "Hide inspector" : "Show inspector", detail: "", shortcut: shortcuts.label(.toggleInspector)) { pane.toggleInspector() },
         ]
         if let session = pane.selectedSession {

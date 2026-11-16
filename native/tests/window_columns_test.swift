@@ -14,14 +14,14 @@ struct Columns: View {
 
     var body: some View {
         let docked = widest ? (min: DesktopColumns.sidebar.max, ideal: DesktopColumns.sidebar.max, max: DesktopColumns.sidebar.max) : DesktopColumns.sidebar
-        let sidebar = pane.sidebarDocks ? docked : (min: 0, ideal: 0, max: 0)
-        NavigationSplitView {
+        let sidebar = pane.sidebarShown ? docked : (min: 0, ideal: 0, max: 0)
+        NavigationSplitView(columnVisibility: Binding(get: { .all }, set: { if $0 == .detailOnly && pane.sidebarShown { pane.setSidebarHidden(true) } })) {
             Color.red
                 .navigationSplitViewColumnWidth(min: sidebar.min, ideal: sidebar.ideal, max: sidebar.max)
         } detail: {
             Color.gray
                 .frame(minWidth: 200)
-                .conversationColumn(sidebarDocks: pane.sidebarDocks)
+                .conversationColumn(sidebarDocks: pane.sidebarShown)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { measured.detail = $0 }
                 .navigationSplitViewColumnWidth(min: DesktopColumns.detail.min, ideal: DesktopColumns.detail.ideal)
                 .inspector(isPresented: .constant(pane.inspectorDocks && pane.inspectorVisible)) {
@@ -68,7 +68,9 @@ struct WindowColumnsTest {
         pane.fitWindow(width: 1400)
         check(pane.inspectorDocks && !pane.inspectorOverlay && pane.inspectorShown, "widening docks the inspector again and drops the overlay")
         pane.toggleSidebar()
-        check(!pane.sidebarOverlay, "a docked sidebar has no overlay to toggle")
+        check(pane.sidebarHidden && !pane.sidebarShown && !pane.sidebarOnScreen && !pane.sidebarOverlay, "toggling a docked sidebar hides it rather than overlaying it")
+        pane.toggleSidebar()
+        check(!pane.sidebarHidden && pane.sidebarShown, "toggling again brings the docked sidebar back")
         pane.fitWindow(width: 800)
         check(pane.sidebarDocks, "the sidebar stays docked while only the inspector has collapsed")
         pane.fitWindow(width: 600)
@@ -80,6 +82,22 @@ struct WindowColumnsTest {
         pane.toggleSidebar()
         pane.fitWindow(width: 900)
         check(pane.sidebarDocks && !pane.sidebarOverlay, "widening docks the sidebar again and drops its overlay")
+        pane.toggleSidebar()
+        pane.fitWindow(width: 600)
+        check(pane.sidebarHidden && !pane.sidebarShown, "a hidden sidebar stays the person's choice when the window narrows")
+        pane.toggleSidebar()
+        check(pane.sidebarOverlay && pane.sidebarOnScreen, "a narrow window still shows a hidden sidebar over the conversation on request")
+        pane.fitWindow(width: 900)
+        check(pane.sidebarHidden && !pane.sidebarShown && !pane.sidebarOverlay, "widening keeps it hidden and drops the overlay")
+        pane.toggleSidebar()
+        check(pane.sidebarShown, "and the toggle docks it again")
+        pane.pageFills = true
+        check(!pane.sidebarShown && !pane.sidebarOnScreen, "a page that fills the window takes the sidebar's place")
+        pane.toggleSidebar()
+        check(pane.sidebarOverlay && !pane.sidebarHidden, "toggling over a filling page shows the sidebar over it without hiding the docked one")
+        pane.toggleSidebar()
+        pane.pageFills = false
+        check(pane.sidebarShown && !pane.sidebarOverlay, "leaving the filling page brings the docked sidebar back")
 
         let live = SessionPane(model: AgenthailModel(connecting: false), restoresSelection: false)
         let measured = Measured()
@@ -112,6 +130,25 @@ struct WindowColumnsTest {
         check(measured.detail.minX >= -0.5 && measured.detail.maxX <= floor + 0.5, "the conversation fills the narrowest window, got \(measured.detail)")
         let wide = resize(1200)
         check(wide == 1200 && live.inspectorDocks && live.sidebarDocks, "widening to 1200 pt docks both columns again")
+
+        let shownWidth = resize(1200)
+        func splitView(_ view: NSView) -> NSSplitView? {
+            if let split = view as? NSSplitView, split.arrangedSubviews.count >= 2 { return split }
+            return view.subviews.lazy.compactMap(splitView).first
+        }
+        func settle() { for _ in 0..<6 { hosting.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.1)) } }
+        if let split = splitView(hosting) {
+            split.setPosition(0, ofDividerAt: 0)
+            settle()
+            check(live.sidebarHidden && !live.sidebarShown, "dragging the sidebar closed records it as hidden by the person")
+            check(window.contentLayoutRect.width == shownWidth, "hiding the sidebar keeps the window's width, got \(window.contentLayoutRect.width)")
+            live.toggleSidebar()
+            settle()
+            check(live.sidebarShown && split.arrangedSubviews[0].frame.width >= DesktopColumns.sidebar.min - 0.5, "the toggle brings the dragged-closed sidebar back at its width, got \(split.arrangedSubviews[0].frame.width)")
+            check(window.contentLayoutRect.width == shownWidth, "showing it again keeps the window's width, got \(window.contentLayoutRect.width)")
+        } else {
+            check(false, "the split view is found")
+        }
 
         let wideSidebar = SessionPane(model: AgenthailModel(connecting: false), restoresSelection: false)
         let wideHosting = NSHostingView(rootView: Columns(pane: wideSidebar, measured: Measured(), widest: true))
@@ -149,6 +186,17 @@ struct WindowColumnsTest {
         check(UserDefaults.standard.bool(forKey: SessionPane.inspectorDocksKey) && UserDefaults.standard.bool(forKey: SessionPane.sidebarDocksKey), "docking again is remembered")
         UserDefaults.standard.removeObject(forKey: SessionPane.inspectorDocksKey)
         UserDefaults.standard.removeObject(forKey: SessionPane.sidebarDocksKey)
+
+        let hiding = SessionPane(model: AgenthailModel(connecting: false), restoresSelection: true)
+        hiding.fitWindow(width: 1400)
+        hiding.toggleSidebar()
+        let relaunched = SessionPane(model: AgenthailModel(connecting: false), restoresSelection: true)
+        check(relaunched.sidebarHidden && !relaunched.sidebarShown, "a sidebar the person hid stays hidden after relaunch")
+        relaunched.toggleSidebar()
+        check(!SessionPane(model: AgenthailModel(connecting: false), restoresSelection: true).sidebarHidden, "and showing it again is remembered")
+        UserDefaults.standard.removeObject(forKey: SessionPane.sidebarHiddenKey)
+        UserDefaults.standard.removeObject(forKey: SessionPane.sidebarDocksKey)
+        UserDefaults.standard.removeObject(forKey: SessionPane.inspectorDocksKey)
 
         if failures > 0 { exit(1) }
         print("window columns: the inspector, then the sidebar, collapse before they pin the window, and come back when there is room")
