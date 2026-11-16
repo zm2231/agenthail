@@ -77,9 +77,24 @@ func TestAnAgentsWriteOutsideItsReachIsRefusedWithTheRuleBeforeAnythingIsSent(t 
 		t.Fatalf("a refused write reached the session: sent=%q steered=%q", fake.sent, fake.steered)
 	}
 	asked := server.requests()
-	if len(asked) != 3 || asked[0].SessionID != "worker" || asked[0].Action != "control" || asked[0].Target != "target" || asked[2].Action != "send" || asked[2].Mode != "queue" {
+	if len(asked) != 3 || asked[0].SessionID != "worker" || asked[0].Action != "control" || asked[0].Target != "target" || payloadOf(t, asked[0])["action"] != "steer" || asked[2].Action != "send" {
 		t.Fatalf("scope requests=%+v", asked)
 	}
+	if body := payloadOf(t, asked[2]); body["busyDelivery"] != "queue" || body["noQueue"] != false || body["message"] != "hello" {
+		t.Fatalf("the send asked about %v", body)
+	}
+}
+
+func payloadOf(t *testing.T, request daemon.ScopeRequest) map[string]any {
+	t.Helper()
+	if request.Payload == nil {
+		return nil
+	}
+	var body map[string]any
+	if err := json.Unmarshal(request.Payload.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	return body
 }
 
 func TestEveryAgentWriteAsksBeforeItActs(t *testing.T) {
@@ -90,12 +105,13 @@ func TestEveryAgentWriteAsksBeforeItActs(t *testing.T) {
 		command []string
 		action  string
 		mode    string
+		noQueue any
 	}{
-		{[]string{"send", "codex:target", "hello", "--no-queue"}, "send", "now"},
-		{[]string{"thread", "clean", "codex:target"}, "control", ""},
-		{[]string{"thread", "adopt", "codex:target"}, "control", ""},
-		{[]string{"ledger", "work", "add", "a task", "--project", "repo:github.com/example/other"}, "ledger", ""},
-		{[]string{"queue", "codex:target", "hello"}, "send", "queue"},
+		{[]string{"send", "codex:target", "hello", "--no-queue"}, "send", "", true},
+		{[]string{"thread", "clean", "codex:target"}, "control", "", nil},
+		{[]string{"thread", "adopt", "codex:target"}, "control", "", nil},
+		{[]string{"ledger", "work", "add", "a task", "--project", "repo:github.com/example/other"}, "ledger", "", nil},
+		{[]string{"queue", "codex:target", "hello"}, "send", "queue", nil},
 	}
 	for _, c := range cases {
 		before := len(server.requests())
@@ -103,7 +119,7 @@ func TestEveryAgentWriteAsksBeforeItActs(t *testing.T) {
 			t.Fatalf("%v: err=%v", c.command, err)
 		}
 		asked := server.requests()
-		if len(asked) != before+1 || asked[before].Action != c.action || asked[before].Mode != c.mode {
+		if len(asked) != before+1 || asked[before].Action != c.action || asked[before].Mode != c.mode || payloadOf(t, asked[before])["noQueue"] != c.noQueue {
 			t.Fatalf("%v: scope requests=%+v", c.command, asked[before:])
 		}
 	}

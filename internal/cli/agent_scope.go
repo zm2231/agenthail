@@ -101,6 +101,27 @@ func (a *App) personAction(ctx context.Context, api string, payload map[string]a
 	return nil
 }
 
+// payloadScope checks a send or control from the body it would run, so a
+// cross-project refusal can be asked of the person with --ask-person.
+func (a *App) payloadScope(ctx context.Context, action string, payload map[string]any) (*daemon.ScopeReply, error) {
+	if !agentEnvironment() {
+		return nil, nil
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	target, _ := payload["sessionId"].(string)
+	reply, err := a.agentScope(ctx, daemon.ScopeRequest{Action: action, Target: target, Payload: &daemon.PersonAction{API: daemon.PersonActionAPI, Body: body}, AskPerson: a.askPerson, Reason: a.askReason})
+	if err != nil {
+		return nil, err
+	}
+	if reply != nil && reply.AskID != "" {
+		return nil, &askedPerson{askID: reply.AskID}
+	}
+	return reply, nil
+}
+
 func (a *App) agentCreate(ctx context.Context, payload map[string]any) ([]byte, int, error) {
 	caller, err := a.sourceSessionID(ctx, "")
 	if err != nil {

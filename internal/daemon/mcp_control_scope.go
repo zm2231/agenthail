@@ -86,7 +86,7 @@ func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref st
 		}
 		return session, nil
 	}
-	return nil, scopeRefusal(session.ID, "not_spawned_or_led", "That session is not in your project; reach another project through its coordinator, by sending with project.")
+	return nil, crossProject(scopeRefusal(session.ID, "not_spawned_or_led", "That session is not in your project; reach another project through its coordinator, by sending with project."))
 }
 
 const mcpDownOnly = "Control flows down only: you may send a queued message to your spawner or your project's coordinator, but not steer, interrupt, answer, change its goal or settings, or send now."

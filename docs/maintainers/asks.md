@@ -90,6 +90,7 @@ An agent refused an action that is the person's (`detail.rule: person_only`, `de
 - Asking again with the same body while one is open returns the open ask instead of a second.
 - It offers `allow` (Allow once) and `deny` (Deny), `optionsOnly`. Only the person answers it: any session, one acting for the person included, is refused with `403 forbidden`.
 - Allow runs the stored body once, with the answering person's reach: an action through the same path as `POST /api/v1/actions`, a setting through `/api/v1/settings`. The asking session gets one message: `[agenthail] The person allowed: <description>. It ran: <status> <body>`, or `It failed:` with the error. A second answer is `409 stale`. Deny runs nothing and sends `[agenthail] The person denied: <description>.`
+- A send, steer, interrupt, archive or unarchive refused because its target is in another project ([mcp.md](mcp.md#control-scope)) is asked for the same way. The daemon rebuilds the body from that action's fields alone: the target, the message, `busyDelivery` for a send, and the asking session as `sourceSessionId`. Whatever else the request carried is dropped, and the scope is checked again from the rebuilt body. Run with the person's reach, an allowed message is still the agent's: its sender is the asking session, not the person.
 - An approval is answered within 24 hours or expires (`state` `expired`); the agent is told it was not done.
 - An allowed body the daemon had not run when it stopped is never run later: at start it is recorded `not_run` and the agent is told to ask again.
 

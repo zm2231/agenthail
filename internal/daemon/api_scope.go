@@ -160,6 +160,9 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request ScopeReq
 	mode := strings.TrimSpace(request.Mode)
 	switch request.Action {
 	case "send", "control":
+		if request.Payload != nil {
+			return d.controlPayloadScope(r.Context(), caller, request)
+		}
 		if strings.TrimSpace(request.Target) == caller.session.ID {
 			return ScopeReply{TargetID: caller.session.ID}, nil
 		}

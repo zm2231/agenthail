@@ -12,6 +12,7 @@ type mcpSendInput struct {
 	Project string `json:"project,omitempty" jsonschema:"A project name or id, as agenthail_projects lists it, to reach its coordinator (starting its conversation if it has none)."`
 	Message string `json:"message"`
 	Mode    string `json:"mode,omitempty" jsonschema:"queue (default): delivered when the session is idle. now: steers a busy session where it can, otherwise queues; only for sessions you control."`
+	mcpAskPerson
 }
 
 func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendInput) (any, error) {
@@ -31,13 +32,13 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 	if strings.TrimSpace(input.Project) != "" {
 		return d.mcpSendToLead(ctx, caller, input)
 	}
-	target, err := d.mcpControlTarget(ctx, caller, input.Target, mode == "queue")
-	if err != nil {
-		return nil, err
-	}
 	busyDelivery := "queue"
 	if mode == "now" {
 		busyDelivery = "steer"
+	}
+	target, err := d.mcpControlTarget(ctx, caller, input.Target, mode == "queue")
+	if err != nil {
+		return d.mcpAskOnRefusal(ctx, caller, err, input.mcpAskPerson, dashboardActionRequest{Action: "send", Message: input.Message, BusyDelivery: busyDelivery})
 	}
 	scope, err := d.remoteSendScope(caller, target)
 	if err != nil {

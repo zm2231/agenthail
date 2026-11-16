@@ -77,7 +77,7 @@ func (a *App) cmdSend(args []string) error {
 		return err
 	}
 	if remote != nil {
-		scope, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "send", Target: remote.ID, Mode: sendMode(args)})
+		scope, err := a.payloadScope(ctx, "send", map[string]any{"action": "send", "sessionId": remote.ID, "message": message, "busyDelivery": "queue", "noQueue": hasFlag(args, "--no-queue")})
 		if err != nil {
 			return err
 		}
@@ -88,11 +88,12 @@ func (a *App) cmdSend(args []string) error {
 		return a.sendRemote(ctx, remote, scopeProjectID, message, args, timeout)
 	}
 	spec, coordinated := coord.Of(sess.ID)
-	scope := daemon.ScopeRequest{Action: "send", Target: sess.ID, Mode: sendMode(args)}
+	var allowed *daemon.ScopeReply
 	if coordinated {
-		scope = daemon.ScopeRequest{Action: "lead-send", Project: spec.ProjectID, Mode: sendMode(args)}
+		allowed, err = a.agentScope(ctx, daemon.ScopeRequest{Action: "lead-send", Project: spec.ProjectID, Mode: sendMode(args)})
+	} else {
+		allowed, err = a.payloadScope(ctx, "send", map[string]any{"action": "send", "sessionId": sess.ID, "message": message, "busyDelivery": "queue", "noQueue": hasFlag(args, "--no-queue")})
 	}
-	allowed, err := a.agentScope(ctx, scope)
 	if err != nil {
 		return err
 	}
