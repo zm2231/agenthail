@@ -141,11 +141,11 @@ sends its spawner and its project's coordinator queued messages; it reaches
 another project's coordinator with a queued send to its name or `project`;
 it posts only to, and writes only the ledger of, its own project; and `thread create` starts a
 session no wider than itself, on its own host, with `--root` only its own Claude
-root unless it is its project's coordinator. Managing queue items, relays
-and channels is for the person, except that a project's coordinator may manage
-those whose sessions, or whose channel, are all its own project's; choosing
-coordinators and `limit-resume on|off` stay the person's. A write outside that reach is
-refused before anything is sent, with the rule and how to get it done:
+root unless it is its project's coordinator. Project changes, coordinators,
+`limit-resume on|off`, relays, channels and queue items are the person's,
+except what a project's coordinator may do in its own project (see Projects).
+A write outside that reach is refused before anything is sent, with the rule
+and how to get it done:
 
 ```text
 refused (out_of_scope, rule different_project): Another project's coordinator takes only a queued message from you.
@@ -156,6 +156,22 @@ The daemon checks the reach, so these writes refuse while it is stopped.
 variables set, nothing is limited. This keeps agents from reaching too far by
 mistake; it is not a security boundary, since every session runs as the
 person's user.
+
+### Asking the person to allow a refused action
+
+A refusal that says an action "is for the person" can be asked for. Run the
+same command again with `--ask-person` and say why:
+
+```bash
+agenthail project archive widget --ask-person --reason "the release shipped and nobody works in it now"
+```
+
+The person gets a request, Allow once or Deny, on the row, in Requests and on
+their phone. Nothing runs until they answer. Their answer, and what the action
+returned if they allowed it, arrives as your next message. An allowed request
+runs exactly the command you asked for, once; an unanswered one expires after a
+day. Asking again for the same command while one is open does not ask twice.
+Never tell the person to run a command themselves; ask this way instead.
 
 ## Surface Contract
 
@@ -527,6 +543,28 @@ gone. Do not set or clear the coordinator unless the person asks.
 When you dispatch work to another agent, ask it to end its final message with a
 completion report (below). When you finish work someone dispatched to you, end
 your final message, and your report to `@lead`, with one.
+
+## Projects
+
+```bash
+agenthail project list [--all] [--json]
+agenthail project add <path> [--name <title>]
+agenthail project rename <name|id|path> <new name>
+agenthail project link <joined> <into>
+agenthail project unlink <name|id|path>
+agenthail project remove|archive|unarchive <name|id|path>
+agenthail project mcp <name|id|path> on|off
+```
+
+A project's coordinator may, in its own project: rename it, link another
+project or folder into it, unlink a project linked into it, and add a folder
+on this host that is in no project yet. It may also add and remove relays
+whose two ends are its project's sessions, and cancel queued messages whose
+target and sender are. Everything else here is the person's: linking a
+project into another, removing, archiving or unarchiving one, turning its
+tools off, choosing coordinators, channels, and `limit-resume on|off`. Any
+other agent is refused all of it. When refused, ask the person with
+`--ask-person` (above).
 
 ## Completion Report
 

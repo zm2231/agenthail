@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -19,14 +18,20 @@ func (a *App) cmdLimitResume(args []string) error {
 	}
 	switch {
 	case (positional[0] == "on" || positional[0] == "off") && len(positional) == 1:
-		if err := a.operatorScope(context.Background(), "Resuming every session a usage limit stopped"); err != nil {
+		enabled := positional[0] == "on"
+		payload := map[string]any{"action": "resume-after-limit", "resumeAfterLimit": enabled}
+		ctx, cancel, err := a.deadlineContext(a.DefaultTimeout)
+		if err != nil {
+			return err
+		}
+		defer cancel()
+		if err := a.personAction(ctx, daemon.PersonActionSettings, payload); err != nil {
 			return err
 		}
 		config, err := daemon.LoadDashboardConfig()
 		if err != nil {
 			return err
 		}
-		enabled := positional[0] == "on"
 		config.ResumeAfterLimit = &enabled
 		if err := daemon.SaveDashboardConfig(config); err != nil {
 			return err

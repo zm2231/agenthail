@@ -15,7 +15,7 @@ func (d *Daemon) doQueueClear(_ context.Context, _ principal, request dashboardA
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve session: %s", err))
 	}
-	canceled, err := d.Registry.CancelMessagesForSession(sessionID)
+	canceled, err := d.Registry.CancelMessagesForSession(sessionID, request.Senders)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}

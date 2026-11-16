@@ -63,7 +63,7 @@ func TestMessagesCanceledForASessionAreNotPendingInTheInbox(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if n, err := r.CancelMessagesForSession("target"); err != nil || n != 2 {
+	if n, err := r.CancelMessagesForSession("target", nil); err != nil || n != 2 {
 		t.Fatalf("canceled=%d err=%v", n, err)
 	}
 	for _, message := range []string{"first", "second"} {

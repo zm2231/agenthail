@@ -25,7 +25,7 @@ func (a *App) cmdProjectMCP(ctx context.Context, client *daemonAPIClient, positi
 			Value   string `json:"value"`
 		} `json:"setting"`
 	}
-	if err := projectAction(ctx, client, map[string]any{"action": "project-setting", "projectId": target.ID, "setting": "mcp", "value": positional[2]}, &answer); err != nil {
+	if err := a.gatedProjectAction(ctx, client, map[string]any{"action": "project-setting", "projectId": target.ID, "setting": "mcp", "value": positional[2]}, &answer); err != nil {
 		return err
 	}
 	if jsonOut {

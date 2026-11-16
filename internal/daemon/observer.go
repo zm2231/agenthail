@@ -63,7 +63,7 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 		if noRoute := surface.NoReplyRoute(session); noRoute != nil {
 			// No session reads this queue, so nothing queued here is ever
 			// delivered; the sends behind it stay listed as problems.
-			if canceled, err := d.Registry.CancelMessagesForSession(session.ID); err != nil {
+			if canceled, err := d.Registry.CancelMessagesForSession(session.ID, nil); err != nil {
 				d.log.Printf("cancel undeliverable queue of %s: %s", d.resolveDisplay(session.ID), err)
 			} else if canceled > 0 {
 				d.log.Printf("canceled %d queued messages for %s: %s", canceled, d.resolveDisplay(session.ID), noRoute)

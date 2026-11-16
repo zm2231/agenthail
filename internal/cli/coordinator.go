@@ -45,11 +45,6 @@ func (a *App) cmdCoordinator(args []string) error {
 	if len(positional) == 0 {
 		return a.coordinatorShow(flagVal(args, "--cwd"), hasFlag(args, "--json"))
 	}
-	if positional[0] == "set" || positional[0] == "new" || positional[0] == "clear" {
-		if err := a.operatorScope(context.Background(), "Choosing a project's coordinator"); err != nil {
-			return err
-		}
-	}
 	switch positional[0] {
 	case "list":
 		if len(positional) != 1 {
@@ -402,6 +397,9 @@ func (a *App) runCoordinatorChange(ctx context.Context, payload map[string]any, 
 	if err != nil {
 		return err
 	}
+	if err := a.personAction(ctx, daemon.PersonActionAPI, payload); err != nil {
+		return err
+	}
 	answer, err := coordinatorAction(ctx, client, payload)
 	if err != nil {
 		return err
@@ -440,6 +438,9 @@ func (a *App) coordinatorClear(path string, jsonOut bool) error {
 	payload := map[string]any{"action": "coordinator-clear", "projectId": found.ID}
 	if session := a.callerSession(); session != nil {
 		payload["sourceSessionId"] = session.ID
+	}
+	if err := a.personAction(ctx, daemon.PersonActionAPI, payload); err != nil {
+		return err
 	}
 	answer, err := coordinatorAction(ctx, client, payload)
 	if err != nil {

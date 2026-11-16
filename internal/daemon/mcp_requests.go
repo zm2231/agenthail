@@ -70,17 +70,22 @@ func (d *Daemon) mcpSessionRequests(ctx context.Context, caller *mcpCaller, ref,
 	if err != nil {
 		return nil, err
 	}
-	requests, mode, err := d.openRequests(ctx, session)
+	open, err := d.openRequests(ctx, session)
 	if err != nil {
 		return nil, err
 	}
+	requests, mode := open.requests, open.permissionMode
 	slices.SortFunc(requests, func(a, b openRequestView) int {
 		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), strings.Compare(a.ID, b.ID))
 	})
 	if requestID != "" {
 		for _, request := range requests {
 			if request.ID == requestID {
-				return map[string]any{"sessionId": session.ID, "permissionMode": mode, "request": requestView(request, mcpItemTextLimit)}, nil
+				reply := map[string]any{"sessionId": session.ID, "permissionMode": mode, "request": requestView(request, mcpItemTextLimit)}
+				if open.providerError != "" {
+					reply["providerError"] = open.providerError
+				}
+				return reply, nil
 			}
 		}
 		return nil, refuse("not_found", fmt.Sprintf("Request %s is not open on this session.", requestID))
@@ -100,7 +105,11 @@ func (d *Daemon) mcpSessionRequests(ctx context.Context, caller *mcpCaller, ref,
 		used += len(encoded)
 		views = append(views, view)
 	}
-	return map[string]any{"sessionId": session.ID, "permissionMode": mode, "requests": views, "total": len(requests), "truncated": len(views) < len(requests)}, nil
+	reply := map[string]any{"sessionId": session.ID, "permissionMode": mode, "requests": views, "total": len(requests), "truncated": len(views) < len(requests)}
+	if open.providerError != "" {
+		reply["providerError"] = open.providerError
+	}
+	return reply, nil
 }
 
 func requestView(request openRequestView, promptLimit int) mcpRequestView {

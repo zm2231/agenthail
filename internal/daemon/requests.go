@@ -25,38 +25,52 @@ func (d *Daemon) requestsHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
 		return
 	}
-	requests, mode, err := d.openRequests(r.Context(), session)
+	open, err := d.openRequests(r.Context(), session)
 	if err != nil {
 		writeActionResult(w, actionResult{}, err)
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"sessionId": session.ID, "permissionMode": mode, "requests": requests})
+	body := map[string]any{"sessionId": session.ID, "permissionMode": open.permissionMode, "requests": open.requests}
+	if open.providerError != "" {
+		body["providerError"] = open.providerError
+	}
+	writeDashboardJSON(w, http.StatusOK, body)
 }
 
-func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]openRequestView, string, error) {
+type openRequests struct {
+	requests       []openRequestView
+	permissionMode string
+	providerError  string
+}
+
+// A provider that cannot be read leaves its own requests out, never the asks
+// Agenthail holds: an approval or a delivery problem shows while its session
+// is offline.
+func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) (openRequests, error) {
 	adapter, err := d.adapters().For(session)
 	if err != nil {
-		return nil, "", actionFailed(http.StatusConflict, "conflict", "surface is not configured")
+		return openRequests{}, actionFailed(http.StatusConflict, "conflict", "surface is not configured")
 	}
 	responder, answers := sessionResponder(adapter, session)
 	var state surface.RequestState
+	providerError := ""
 	if answers {
 		ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 		defer cancel()
 		if state, err = responder.Requests(ctx, session); err != nil {
-			return nil, "", actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
+			providerError, state = err.Error(), surface.RequestState{}
 		}
 	}
 	asks, err := d.Registry.SessionAsks(session.ID)
 	if err != nil {
-		return nil, "", actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
+		return openRequests{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
-	if answers && !asksCover(asks, state.Requests) {
+	if answers && providerError == "" && !asksCover(asks, state.Requests) {
 		if _, err := d.observeTurn(ctx, adapter, session); err != nil {
 			d.log.Printf("observe %s for its requests: %s", d.resolveDisplay(session.ID), err)
 		}
 		if asks, err = d.Registry.SessionAsks(session.ID); err != nil {
-			return nil, "", actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
+			return openRequests{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 		}
 	}
 	permission := map[string]string{}
@@ -71,7 +85,7 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]
 		}
 	}
 	if !answers && len(asking) == 0 {
-		return nil, "", actionFailed(http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
+		return openRequests{}, actionFailed(http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
 	}
 	replacedBy, _ := d.coordinator().ReplacedBy(session.ID)
 	requests := make([]openRequestView, 0, len(state.Requests)+len(asking))
@@ -87,7 +101,7 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]
 	for _, ask := range asking {
 		requests = append(requests, openRequestView{Request: ask, Prompt: ask.Prompt(), Actions: ask.Actions()})
 	}
-	return requests, state.PermissionMode, nil
+	return openRequests{requests: requests, permissionMode: state.PermissionMode, providerError: providerError}, nil
 }
 
 // asksCover reports whether every request the provider lists has its ask; one

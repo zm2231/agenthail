@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"fmt"
-	"github.com/zm2231/agenthail/internal/broadcast"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/broadcast"
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/hosts"
@@ -108,11 +110,6 @@ func (a *App) cmdChannel(args []string) error {
 		return fmt.Errorf("usage: agenthail channel <create|add|rm|rename|list|send> ...")
 	}
 	ctx := context.Background()
-	if args[0] != "list" && args[0] != "send" && args[0] != "broadcast" && len(args) > 1 {
-		if err := a.projectOperatorScope(ctx, "Managing a channel beyond your own project's", args[1]); err != nil {
-			return err
-		}
-	}
 	switch args[0] {
 	case "create":
 		if len(args) != 2 {
@@ -120,6 +117,9 @@ func (a *App) cmdChannel(args []string) error {
 		}
 		name := strings.TrimPrefix(args[1], "#")
 		if err := broadcast.ValidateChannelName(a.registry(), name); err != nil {
+			return err
+		}
+		if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "channel-create", "channel": name}); err != nil {
 			return err
 		}
 		id, err := a.registry().CreateChannel(name)
@@ -136,6 +136,9 @@ func (a *App) cmdChannel(args []string) error {
 		if err := broadcast.ValidateChannelName(a.registry(), newName); err != nil {
 			return err
 		}
+		if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "channel-rename", "channel": name, "newChannel": newName}); err != nil {
+			return err
+		}
 		if err := a.registry().RenameChannel(name, newName); err != nil {
 			return err
 		}
@@ -150,6 +153,9 @@ func (a *App) cmdChannel(args []string) error {
 		if err != nil {
 			return err
 		}
+		if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "channel-add", "channel": channelName, "targetId": member}); err != nil {
+			return err
+		}
 		if err := a.registry().AddToChannel(channelName, member); err != nil {
 			return err
 		}
@@ -161,6 +167,9 @@ func (a *App) cmdChannel(args []string) error {
 		}
 		channelName := strings.TrimPrefix(args[1], "#")
 		if args[2] == "--all" || args[2] == "-a" {
+			if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "channel-delete", "channel": channelName}); err != nil {
+				return err
+			}
 			if err := a.registry().DeleteChannel(channelName); err != nil {
 				return err
 			}
@@ -169,6 +178,9 @@ func (a *App) cmdChannel(args []string) error {
 		}
 		member, label, err := a.channelMember(ctx, args[2], false)
 		if err != nil {
+			return err
+		}
+		if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "channel-remove", "channel": channelName, "targetId": member}); err != nil {
 			return err
 		}
 		if err := a.registry().RemoveFromChannel(channelName, member); err != nil {
@@ -221,7 +233,6 @@ func (a *App) cmdRelay(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: agenthail relay <add|list|rm> ...")
 	}
-	const relayOperation = "Routing replies between sessions beyond your own project"
 	switch args[0] {
 	case "add":
 		positional := stripFlags(args)
@@ -246,7 +257,7 @@ func (a *App) cmdRelay(args []string) error {
 		if err != nil {
 			return fmt.Errorf("to-target: %w", err)
 		}
-		if err := a.projectOperatorScope(ctx, relayOperation, "", relayEnd(fromSess, fromRemote), relayEnd(toSess, toRemote)); err != nil {
+		if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "relay-add", "fromId": relayEnd(fromSess, fromRemote), "toId": relayEnd(toSess, toRemote), "pattern": pattern, "once": once, "handoff": handoff}); err != nil {
 			return err
 		}
 		if fromRemote != nil || toRemote != nil {
@@ -330,23 +341,34 @@ func (a *App) cmdRelay(args []string) error {
 		if len(args) != 2 {
 			return fmt.Errorf("usage: agenthail relay rm <id|host::id>")
 		}
-		if hostRef, relay, qualified := hosts.Split(args[1]); qualified {
-			if err := a.operatorScope(context.Background(), "Removing another host's relay"); err != nil {
-				return err
-			}
-			return a.removeHostRelay(hostRef, relay)
+		hostRef, relay, qualified := hosts.Split(args[1])
+		if !qualified {
+			relay = args[1]
 		}
-		id, err := strconv.ParseInt(args[1], 10, 64)
+		id, err := strconv.ParseInt(strings.TrimPrefix(relay, "#"), 10, 64)
 		if err != nil || id <= 0 {
 			return fmt.Errorf("invalid relay id %q", args[1])
 		}
-		if err := a.relayRemoveScope(id, relayOperation); err != nil {
+		payload := map[string]any{"action": "relay-remove", "relayId": id}
+		if qualified {
+			payload["host"] = hostRef
+		}
+		ctx := context.Background()
+		if err := a.personAction(ctx, daemon.PersonActionAPI, payload); err != nil {
 			return err
 		}
-		if err := a.registry().RemoveRoute(id); err != nil {
+		client, err := a.daemonAPI()
+		if err != nil {
 			return err
 		}
-		fmt.Printf("removed relay #%d\n", id)
+		data, status, err := client.action(ctx, payload)
+		if err != nil {
+			return err
+		}
+		if status != http.StatusOK {
+			return actionError(data)
+		}
+		fmt.Printf("removed relay %s\n", args[1])
 		return nil
 	default:
 		return fmt.Errorf("unknown relay subcommand '%s'", args[0])

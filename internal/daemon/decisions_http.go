@@ -113,7 +113,9 @@ func (d *Daemon) readDecisionRequests(ctx context.Context, rows []dashboardSessi
 			if session, err := d.Registry.Session(id); err != nil {
 				answer.err = err
 			} else {
-				answer.requests, _, answer.err = d.openRequests(ctx, session)
+				var open openRequests
+				open, answer.err = d.openRequests(ctx, session)
+				answer.requests = open.requests
 			}
 			mu.Lock()
 			read[id] = answer

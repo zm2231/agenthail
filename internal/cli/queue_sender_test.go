@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -74,7 +75,7 @@ func TestARemoteQueueCarriesTheAgentThatQueuedIt(t *testing.T) {
 	}
 }
 
-func TestRemovingAQueuedMessageAsksForTheReachOfItsSenderAsWellAsItsTarget(t *testing.T) {
+func TestRemovingAQueuedMessageAsksForTheReachOfTheCancelItSends(t *testing.T) {
 	server := &scopeServer{accepted: `{"targetId":"target"}`}
 	app, _ := scopedFixture(t, server)
 	t.Setenv("AGENTHAIL_SESSION_ID", "worker")
@@ -85,7 +86,7 @@ func TestRemovingAQueuedMessageAsksForTheReachOfItsSenderAsWellAsItsTarget(t *te
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
-	server.refusal = `{"scope":true,"error":{"code":"capability_missing","message":"Managing the delivery queue beyond your own project is for the person and the voice operator, or a project's coordinator within its own project; ask your coordinator to have it done."}}`
+	server.refusal = `{"scope":true,"error":{"code":"capability_missing","message":"Cancel queued message #1 is for the person."}}`
 	if err := app.Registry.RegisterSession(surface.Session{ID: "lead", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
@@ -95,8 +96,9 @@ func TestRemovingAQueuedMessageAsksForTheReachOfItsSenderAsWellAsItsTarget(t *te
 	}
 	asked := server.requests()
 	removal := asked[len(asked)-1]
-	if removal.SessionID != "lead" || removal.Action != "operator" || len(removal.Sessions) != 2 || removal.Sessions[0] != "target" || removal.Sessions[1] != "worker" {
-		t.Fatalf("the removal asked for %+v, want the reach of both the target and the agent that queued it", removal)
+	want := fmt.Sprintf(`{"action":"queue-cancel","queueId":%d}`, rows[0].ID)
+	if removal.SessionID != "lead" || removal.Action != "operator" || removal.Payload == nil || removal.Payload.API != "action" || string(removal.Payload.Body) != want {
+		t.Fatalf("the removal asked for %+v, want the reach for the cancel it would send, %s", removal, want)
 	}
 	if rows, err := app.Registry.ListQueue(false, app.adapters()); err != nil || len(rows) != 1 || rows[0].Status != "pending" {
 		t.Fatalf("a refused removal changed the queue: %+v %v", rows, err)

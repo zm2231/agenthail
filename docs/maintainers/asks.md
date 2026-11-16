@@ -81,6 +81,18 @@ A question in the intent ledger (`agenthail ledger question`) is an ask of origi
 - A voice answer is the person's transcribed speech, so when the voice path answers ledger asks it must reach the ledger as a person capture, not as a session's words. The 403 is for agent sessions only.
 - At the deadline, a default that applies itself expires the ask (`state` `expired`), and the asking session gets one message naming the default. A default that would narrow the work, and an `outward` question, leave the ask open with the person; nothing is announced again.
 
+## Approvals
+
+An agent refused an action that is the person's (`detail.rule: person_only`, `detail.approvable: true`, [mcp.md](mcp.md#the-cli-from-an-agents-shell)) asks for it by sending the same request again with `askPerson: true` and a `reason`; the CLI does this when the command is run again with `--ask-person [--reason "..."]`. That raises an ask of origin `approval` on the asking session's row, routed to the person only (`approvals.go`, `person_actions.go`).
+
+- The `approvals` table keeps the exact body the command would have sent (`api` `action` or `settings`), its sha256, the daemon's own description of it, the agent's reason, and when it was decided, by whom, and what running it returned. Rows outlive the session, as the record of what was allowed.
+- The title is `<name> asks: <description>`, where `<name>` is what the asking session's row shows: `@` and its alias, else its title, never its id, and the one question is the description and `. Why: <reason>`. The description is the daemon's wording of the body, never the agent's, so an agent cannot label one action as another; a body the daemon cannot describe cannot be asked for (`400 invalid`).
+- Asking again with the same body while one is open returns the open ask instead of a second.
+- It offers `allow` (Allow once) and `deny` (Deny), `optionsOnly`. Only the person answers it: any session, one acting for the person included, is refused with `403 forbidden`.
+- Allow runs the stored body once, with the answering person's reach: an action through the same path as `POST /api/v1/actions`, a setting through `/api/v1/settings`. The asking session gets one message: `[agenthail] The person allowed: <description>. It ran: <status> <body>`, or `It failed:` with the error. A second answer is `409 stale`. Deny runs nothing and sends `[agenthail] The person denied: <description>.`
+- An approval is answered within 24 hours or expires (`state` `expired`); the agent is told it was not done.
+- An allowed body the daemon had not run when it stopped is never run later: at start it is recorded `not_run` and the agent is told to ask again.
+
 ## The Stop reminder
 
 `agenthail hook stop` (Claude host, Codex, and terminal Claude through `agenthail hooks install`) holds a stop once when the session is a lead (a project coordinator or the spawner of a running session), the turn's `last_assistant_message` has a line outside fenced code that ends in `?`, and the session raised no ask since its turn opened. The reason tells it to raise the question as an ask. A session holding Agenthail's tools is also asked, in the same hold, to call `agenthail_end_turn` when it has not. Terminal Claude's settings hook carries `--terminal` and does nothing under the Claude host, which runs its own.
@@ -132,6 +144,7 @@ Fetch the card when `ask.routedTo` is `person`, `answeredAt` is absent and the s
 - `suggested` is the index of the recommended option; mark it. `description` is the option's `does`.
 - `links` open outside the app.
 - `actions` exist only for a single-question ask: an option button each when it has 4 or fewer options, plus `reply`.
+- When the session's provider cannot be read (its Codex is not running, its terminal stopped), the reply is still `200`: it lists every ask Agenthail holds for the session, no provider requests, and the provider's error in `providerError`. An approval or a delivery problem is usually raised for a session that is offline, so it must show then. `agenthail_requests` carries the same field.
 - The decisions inbox (`/api/v1/decisions`) lists the same request under the session's `ask` item.
 - Work parked on the person's decision is its own item there: `kind: "parked"`, `group: "waiting"`, `answerable: false`, with the work item's id in `workItem` and the session that parked it in `sessionId`. Clients key items by `sessionId` and `workItem` together, because one session can have both its own item and parked ones.
 
@@ -168,6 +181,7 @@ By kind of request:
 | Provider question | the option ids from `/api/v1/requests` (every option carries one), typed answers in `answers`; every question needs an answer. `{"choices": ["deny"]}` declines it |
 | Agent ask | as a provider question, but questions may be left unanswered as long as something is answered or a note written |
 | Ledger question | `{"choices": ["recommended"]}` or `["default"]`, or the person's words in `answers`, with an optional note in `message`; `deny` is refused (400) |
+| Refused action | `{"choices": ["allow"]}` or `["deny"]`; it has `optionsOnly: true` and only the person answers it (403 for any session) |
 | Delivery problem | one of its option ids; it has `optionsOnly: true`, so it takes no typed answer, note or content (400) and lists no `reply` action; the card shows neither Other nor Note |
 | MCP server input | `{"choices": ["allow"], "content": {<field values>}}` (the content is unchanged), `{"choices": ["allow"]}` for a link or an empty form, or `{"choices": ["deny"]}` |
 

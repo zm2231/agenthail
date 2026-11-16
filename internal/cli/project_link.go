@@ -47,7 +47,7 @@ func (a *App) cmdProjectLink(ctx context.Context, client *daemonAPIClient, posit
 		payload = map[string]any{"action": "project-link", "projectId": joined.ID, "survivor": survivor.ID}
 	}
 	var answer projectLinkAnswer
-	if err := projectAction(ctx, client, payload, &answer); err != nil {
+	if err := a.gatedProjectAction(ctx, client, payload, &answer); err != nil {
 		return err
 	}
 	if jsonOut {

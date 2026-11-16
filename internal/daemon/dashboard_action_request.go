@@ -36,6 +36,7 @@ type dashboardActionRequest struct {
 	Value           string                     `json:"value"`
 	BusyDelivery    string                     `json:"busyDelivery"`
 	QueueID         int64                      `json:"queueId"`
+	Senders         []string                   `json:"senders"`
 	Channel         string                     `json:"channel"`
 	NewChannel      string                     `json:"newChannel"`
 	TargetID        string                     `json:"targetId"`

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +43,8 @@ type App struct {
 	daemonSessionStreamReader func() (sessionStreamReader, error)
 	daemonAPIOverride         func() (*daemonAPIClient, error)
 	scopeOverride             func(daemon.ScopeRequest) (*daemon.ScopeReply, error)
+	askPerson                 bool
+	askReason                 string
 	deadlineClock             func() time.Time
 }
 
@@ -120,7 +124,15 @@ func (a *App) Run(args []string) (err error) {
 		return nil
 	}
 	cmd := args[0]
-	rest := args[1:]
+	var rest []string
+	rest, a.askPerson, a.askReason = askPersonFlags(args[1:])
+	defer func() {
+		var asked *askedPerson
+		if errors.As(err, &asked) {
+			fmt.Printf("Asked the person to allow this (%s). Their answer, and the result if they allow it, arrives as your next message.\n", asked.askID)
+			err = nil
+		}
+	}()
 	if cmd == "codex" {
 		return a.cmdCodex(rest)
 	}
@@ -255,4 +267,28 @@ func (a *App) Run(args []string) (err error) {
 	default:
 		return fmt.Errorf("unknown command '%s' (try 'help')", cmd)
 	}
+}
+
+func askPersonFlags(args []string) ([]string, bool, string) {
+	if !slices.Contains(args, "--ask-person") {
+		return args, false, ""
+	}
+	rest := make([]string, 0, len(args))
+	ask, reason := false, ""
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--":
+			return append(rest, args[i:]...), ask, reason
+		case args[i] == "--ask-person":
+			ask = true
+		case args[i] == "--reason" && i+1 < len(args):
+			reason = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], "--reason="):
+			reason = strings.TrimPrefix(args[i], "--reason=")
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+	return rest, ask, reason
 }

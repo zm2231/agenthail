@@ -1147,7 +1147,7 @@ func TestCancelMessagesRecordsAuditEntries(t *testing.T) {
 	if err := r.QueueMessage("writer", "two"); err != nil {
 		t.Fatal(err)
 	}
-	count, err := r.CancelMessagesForSession("writer")
+	count, err := r.CancelMessagesForSession("writer", nil)
 	if err != nil || count != 2 {
 		t.Fatalf("count=%d err=%v", count, err)
 	}
