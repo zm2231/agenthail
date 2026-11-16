@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/daemon"
 )
 
 const projectUsage = `usage: agenthail project list [--all] [--json]
@@ -145,11 +147,6 @@ func (a *App) cmdProject(args []string) error {
 		return err
 	}
 	defer cancel()
-	if positional[0] != "list" && positional[0] != "ls" {
-		if err := a.operatorScope(ctx, "Adding, removing, renaming, archiving or setting a project"); err != nil {
-			return err
-		}
-	}
 	client, err := a.daemonAPI()
 	if err != nil {
 		return err
@@ -214,7 +211,7 @@ func (a *App) cmdProject(args []string) error {
 			} `json:"project"`
 			Created bool `json:"created"`
 		}
-		if err := projectAction(ctx, client, payload, &answer); err != nil {
+		if err := a.gatedProjectAction(ctx, client, payload, &answer); err != nil {
 			return err
 		}
 		if jsonOut {
@@ -239,7 +236,7 @@ func (a *App) cmdProject(args []string) error {
 			return err
 		}
 		var answer map[string]any
-		if err := projectAction(ctx, client, map[string]any{"action": "project-remove", "projectId": checkout.ProjectID}, &answer); err != nil {
+		if err := a.gatedProjectAction(ctx, client, map[string]any{"action": "project-remove", "projectId": checkout.ProjectID}, &answer); err != nil {
 			return err
 		}
 		if jsonOut {
@@ -260,7 +257,7 @@ func (a *App) cmdProject(args []string) error {
 			return err
 		}
 		var answer map[string]any
-		if err := projectAction(ctx, client, map[string]any{"action": "project-rename", "projectId": project.ID, "title": positional[2]}, &answer); err != nil {
+		if err := a.gatedProjectAction(ctx, client, map[string]any{"action": "project-rename", "projectId": project.ID, "title": positional[2]}, &answer); err != nil {
 			return err
 		}
 		if jsonOut {
@@ -285,7 +282,7 @@ func (a *App) cmdProject(args []string) error {
 		if checkout, found := project.checkoutNamed(positional[1]); found {
 			target = checkout.ProjectID
 		}
-		if err := projectAction(ctx, client, map[string]any{"action": "project-" + positional[0], "projectId": target}, &answer); err != nil {
+		if err := a.gatedProjectAction(ctx, client, map[string]any{"action": "project-" + positional[0], "projectId": target}, &answer); err != nil {
 			return err
 		}
 		if jsonOut {
@@ -337,6 +334,13 @@ func resolveProject(projects []projectRow, selector string) (projectRow, error) 
 		labels = append(labels, fmt.Sprintf("%s on %s (%s)", project.rootPath(), project.hostNames(), project.ID))
 	}
 	return projectRow{}, fmt.Errorf("project %q is ambiguous: %s; use its id", selector, strings.Join(labels, ", "))
+}
+
+func (a *App) gatedProjectAction(ctx context.Context, client *daemonAPIClient, payload map[string]any, answer any) error {
+	if err := a.personAction(ctx, daemon.PersonActionAPI, payload); err != nil {
+		return err
+	}
+	return projectAction(ctx, client, payload, answer)
 }
 
 func projectAction(ctx context.Context, client *daemonAPIClient, payload map[string]any, answer any) error {

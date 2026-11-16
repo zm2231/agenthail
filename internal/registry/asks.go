@@ -206,7 +206,7 @@ func (r *Registry) RouteAsk(id, to, why string, at time.Time) (bool, error) {
 }
 
 // A session's row shows its oldest open ask for the person, else its oldest open ask, else its newest answered one until the session starts another turn.
-const rowAsk = `SELECT a.id FROM asks a WHERE a.session_id=s.session_id AND a.origin IN ('agent','delivery','ledger') AND (a.state='open'
+const rowAsk = `SELECT a.id FROM asks a WHERE a.session_id=s.session_id AND a.origin IN ('agent','delivery','ledger','approval') AND (a.state='open'
  OR a.state='answered' AND a.answered_at_ms>=COALESCE((SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=a.session_id),0))
  ORDER BY a.state='open' DESC, a.state='open' AND a.routed_to='person' DESC, CASE WHEN a.state='open' THEN a.created_at_ms ELSE -a.answered_at_ms END, a.id LIMIT 1`
 
@@ -233,7 +233,7 @@ func rowAsks(ctx context.Context, q askQuerier) (map[string]Ask, error) {
 }
 
 func openPersonAsks(ctx context.Context, q askQuerier) (map[string][]string, error) {
-	rows, err := q.QueryContext(ctx, `SELECT session_id,id FROM asks WHERE state=? AND routed_to=? AND origin IN ('agent','delivery','ledger') ORDER BY session_id,created_at_ms,id`, AskOpen, AskToPerson)
+	rows, err := q.QueryContext(ctx, `SELECT session_id,id FROM asks WHERE state=? AND routed_to=? AND origin IN ('agent','delivery','ledger','approval') ORDER BY session_id,created_at_ms,id`, AskOpen, AskToPerson)
 	if err != nil {
 		return nil, err
 	}

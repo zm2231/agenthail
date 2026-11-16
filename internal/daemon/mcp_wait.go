@@ -239,7 +239,8 @@ func (d *Daemon) taskRequests(ctx context.Context, task registry.Task, session *
 			key:  "r:" + task.Child + ":" + id, waiting: waiting,
 		}
 	}
-	requests, _, err := d.openRequests(ctx, session)
+	open, err := d.openRequests(ctx, session)
+	requests := open.requests
 	if err != nil || len(requests) == 0 {
 		return []mcpWaitItem{item(waiting.ID, string(waiting.Kind))}
 	}

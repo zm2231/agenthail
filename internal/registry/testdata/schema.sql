@@ -1,7 +1,10 @@
--- schemaVersion 102
+-- schemaVersion 103
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
+
+-- index approvals_payload
+CREATE INDEX approvals_payload ON approvals(session_id, payload_sha256);
 
 -- index asks_open
 CREATE INDEX asks_open ON asks(routed_to) WHERE state='open';
@@ -167,6 +170,24 @@ CREATE TABLE alias_reservations (
 CREATE TABLE aliases (
 	name TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table approvals
+CREATE TABLE approvals (
+	ask_id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	api TEXT NOT NULL CHECK (api IN ('action','settings')),
+	payload TEXT NOT NULL,
+	payload_sha256 TEXT NOT NULL,
+	description TEXT NOT NULL,
+	reason TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL,
+	expires_at_ms INTEGER NOT NULL,
+	decided_by TEXT NOT NULL DEFAULT '',
+	decided_at_ms INTEGER NOT NULL DEFAULT 0,
+	ran_at_ms INTEGER NOT NULL DEFAULT 0,
+	status TEXT NOT NULL DEFAULT '',
+	result TEXT NOT NULL DEFAULT ''
 );
 
 -- table asks

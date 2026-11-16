@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
+	"slices"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/daemon"
@@ -63,65 +63,42 @@ func (a *App) controlScopeOf(ctx context.Context, target string) error {
 	return err
 }
 
-func (a *App) operatorScope(ctx context.Context, operation string) error {
-	_, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "operator", Operation: operation})
-	return err
+var gatedActions = []string{
+	"project-add", "project-remove", "project-rename", "project-archive", "project-unarchive", "project-link", "project-unlink", "project-setting",
+	"coordinator-set", "coordinator-new", "coordinator-clear",
+	"resume-after-limit",
+	"relay-add", "relay-remove",
+	"channel-create", "channel-delete", "channel-rename", "channel-add", "channel-remove",
+	"queue-cancel", "queue-clear",
 }
 
-func (a *App) projectOperatorScope(ctx context.Context, operation, channel string, sessions ...string) error {
-	_, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "operator", Operation: operation, Channel: channel, Sessions: sessions})
-	return err
+type askedPerson struct {
+	askID string
 }
 
-func (a *App) queueManageScope(ctx context.Context, op, ref string) error {
+func (e *askedPerson) Error() string {
+	return "asked the person to allow this (" + e.askID + ")"
+}
+
+func (a *App) personAction(ctx context.Context, api string, payload map[string]any) error {
 	if !agentEnvironment() {
 		return nil
 	}
-	var sessions []string
-	if op == "clear" {
-		id, err := a.queueSessionID(ctx, ref)
-		if err != nil {
-			return err
-		}
-		sessions = []string{id}
-	} else if id, err := strconv.ParseInt(ref, 10, 64); err == nil && id > 0 {
-		item, err := a.registry().QueueItem(id, a.adapters())
-		if err != nil {
-			return err
-		}
-		sessions = []string{item.SessionID}
-		if item.SourceSessionID != "" {
-			sessions = append(sessions, item.SourceSessionID)
-		}
+	if action, _ := payload["action"].(string); !slices.Contains(gatedActions, action) {
+		return fmt.Errorf("%s is not a gated action", action)
 	}
-	return a.projectOperatorScope(ctx, "Managing the delivery queue beyond your own project", "", sessions...)
-}
-
-func relayEnd(sess *surface.Session, remote *remoteTarget) string {
-	if remote != nil {
-		return remote.ID
-	}
-	if sess != nil {
-		return sess.ID
-	}
-	return ""
-}
-
-func (a *App) relayRemoveScope(id int64, operation string) error {
-	if !agentEnvironment() {
-		return nil
-	}
-	routes, err := a.registry().ListRoutes()
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	var sessions []string
-	for _, route := range routes {
-		if route.ID == id {
-			sessions = []string{route.FromSession, route.ToSession}
-		}
+	reply, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "operator", Payload: &daemon.PersonAction{API: api, Body: body}, AskPerson: a.askPerson, Reason: a.askReason})
+	if err != nil {
+		return err
 	}
-	return a.projectOperatorScope(context.Background(), operation, "", sessions...)
+	if reply != nil && reply.AskID != "" {
+		return &askedPerson{askID: reply.AskID}
+	}
+	return nil
 }
 
 func (a *App) agentCreate(ctx context.Context, payload map[string]any) ([]byte, int, error) {
@@ -206,4 +183,14 @@ func scopeRefusalOf(body []byte) *agentScopeRefusal {
 	}
 	rule, _ := refused.Detail["rule"].(string)
 	return &agentScopeRefusal{Code: refused.Error.Code, Message: refused.Error.Message, Rule: rule}
+}
+
+func relayEnd(sess *surface.Session, remote *remoteTarget) string {
+	if remote != nil {
+		return remote.ID
+	}
+	if sess != nil {
+		return sess.ID
+	}
+	return ""
 }

@@ -94,10 +94,8 @@ func TestEveryAgentWriteAsksBeforeItActs(t *testing.T) {
 		{[]string{"send", "codex:target", "hello", "--no-queue"}, "send", "now"},
 		{[]string{"thread", "clean", "codex:target"}, "control", ""},
 		{[]string{"thread", "adopt", "codex:target"}, "control", ""},
-		{[]string{"project", "rename", "widget", "gadget"}, "operator", ""},
 		{[]string{"ledger", "work", "add", "a task", "--project", "repo:github.com/example/other"}, "ledger", ""},
 		{[]string{"queue", "codex:target", "hello"}, "send", "queue"},
-		{[]string{"project", "mcp", "widget", "off"}, "operator", ""},
 	}
 	for _, c := range cases {
 		before := len(server.requests())
@@ -109,8 +107,8 @@ func TestEveryAgentWriteAsksBeforeItActs(t *testing.T) {
 			t.Fatalf("%v: scope requests=%+v", c.command, asked[before:])
 		}
 	}
-	if asked := server.requests(); asked[4].Project != "repo:github.com/example/other" {
-		t.Fatalf("the ledger write asked for %q", asked[4].Project)
+	if asked := server.requests(); asked[3].Project != "repo:github.com/example/other" {
+		t.Fatalf("the ledger write asked for %q", asked[3].Project)
 	}
 	if len(fake.sent) != 0 || len(fake.steered) != 0 {
 		t.Fatalf("a refused write reached the session: sent=%q", fake.sent)

@@ -61,11 +61,6 @@ func (a *App) cmdQueue(args []string) error {
 		}
 		return nil
 	}
-	if len(args) == 2 && (args[0] == "rm" || args[0] == "cancel" || args[0] == "clear") {
-		if err := a.queueManageScope(context.Background(), args[0], args[1]); err != nil {
-			return err
-		}
-	}
 	if len(args) > 0 && (args[0] == "rm" || args[0] == "cancel") {
 		if len(args) != 2 {
 			return fmt.Errorf("usage: agenthail queue rm <id>")
@@ -76,6 +71,9 @@ func (a *App) cmdQueue(args []string) error {
 		}
 		if item, err := a.registry().QueueItem(id, a.adapters()); err == nil && item.Status == "dead" {
 			return fmt.Errorf("queue item #%d failed; answer its ask instead: agenthail ask list", id)
+		}
+		if err := a.personAction(context.Background(), daemon.PersonActionAPI, map[string]any{"action": "queue-cancel", "queueId": id}); err != nil {
+			return err
 		}
 		if _, err := a.registry().CancelMessage(id); err != nil {
 			return err
@@ -91,7 +89,19 @@ func (a *App) cmdQueue(args []string) error {
 		if err != nil {
 			return err
 		}
-		count, err := a.registry().CancelMessagesForSession(sessionID)
+		payload := map[string]any{"action": "queue-clear", "sessionId": sessionID}
+		var senders []string
+		if agentEnvironment() {
+			if senders, err = a.registry().PendingSenders(sessionID); err != nil {
+				return err
+			}
+			senders = append([]string{}, senders...)
+			payload["senders"] = senders
+		}
+		if err := a.personAction(context.Background(), daemon.PersonActionAPI, payload); err != nil {
+			return err
+		}
+		count, err := a.registry().CancelMessagesForSession(sessionID, senders)
 		if err != nil {
 			return err
 		}

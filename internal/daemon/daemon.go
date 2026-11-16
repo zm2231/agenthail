@@ -403,6 +403,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runPRSweeps(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
+	d.settleUnranApprovals()
 	go d.runAskSweeps(ctx)
 	recovered, _ := d.startMessageContexts(ctx)
 	d.startLedgerSorter(ctx, recovered)

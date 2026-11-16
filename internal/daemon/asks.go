@@ -136,7 +136,7 @@ func askRequest(ask registry.Ask) surface.Request {
 		}
 		questions = append(questions, question)
 	}
-	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery || ask.Origin == registry.AskOriginExtensionGrant, CreatedAt: ask.CreatedAt, Deadline: ask.Deadline}.WithOptionIDs()
+	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery || ask.Origin == registry.AskOriginExtensionGrant || ask.Origin == registry.AskOriginApproval, CreatedAt: ask.CreatedAt, Deadline: ask.Deadline}.WithOptionIDs()
 }
 
 // askHearer is who an ask goes to first: its project's lead, else its
@@ -307,6 +307,7 @@ func (d *Daemon) runAskSweeps(ctx context.Context) {
 
 func (d *Daemon) sweepAsks(now time.Time) {
 	d.sendWithdraws()
+	d.expireApprovals(now)
 	open, err := d.Registry.OpenAsks()
 	if err != nil {
 		d.log.Printf("read open asks: %s", err)
@@ -522,6 +523,8 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 		return d.answerLedger(ctx, ask, response, p)
 	case registry.AskOriginExtensionGrant:
 		return d.answerExtensionGrant(ctx, ask, response, p, by)
+	case registry.AskOriginApproval:
+		return d.answerApproval(ctx, ask, response, p, by)
 	case registry.AskOriginExtensionChange:
 		d.withdrawExtensionChangeAsk(ask)
 		return actionResult{}, staleRequest()

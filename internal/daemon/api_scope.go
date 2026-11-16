@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -24,8 +25,9 @@ type ScopeRequest struct {
 	Surface        string          `json:"surface,omitempty"`
 	PermissionMode string          `json:"permissionMode,omitempty"`
 	Cwd            string          `json:"cwd,omitempty"`
-	Operation      string          `json:"operation,omitempty"`
-	Sessions       []string        `json:"sessions,omitempty"`
+	Payload        *PersonAction   `json:"payload,omitempty"`
+	AskPerson      bool            `json:"askPerson,omitempty"`
+	Reason         string          `json:"reason,omitempty"`
 	Create         json.RawMessage `json:"create,omitempty"`
 }
 
@@ -33,6 +35,7 @@ type ScopeReply struct {
 	TargetID       string `json:"targetId,omitempty"`
 	ProjectID      string `json:"projectId,omitempty"`
 	ScopeProjectID string `json:"scopeProjectId,omitempty"`
+	AskID          string `json:"askId,omitempty"`
 }
 
 func (d *Daemon) registerScopeAPI(mux *http.ServeMux, dashboard *dashboardServer) {
@@ -198,36 +201,21 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request ScopeReq
 		}
 		return ScopeReply{ProjectID: own}, nil
 	case "operator":
-		if caller.has("control.all") || d.leadsAllOf(caller, request) {
-			return ScopeReply{}, nil
+		if request.Payload == nil {
+			return ScopeReply{}, refuse("invalid", "operator needs the payload the command sends.")
 		}
-		who := "the person and the voice operator"
-		if len(request.Sessions) > 0 || strings.TrimSpace(request.Channel) != "" {
-			who += ", or a project's coordinator within its own project"
+		err := d.personActionScope(r.Context(), caller, *request.Payload)
+		var refusal *mcpRefusal
+		if err == nil || !request.AskPerson || !errors.As(err, &refusal) || refusal.Detail["approvable"] != true {
+			return ScopeReply{}, err
 		}
-		return ScopeReply{}, refuse("capability_missing", strings.TrimSpace(request.Operation)+" is for "+who+"; ask your coordinator to have it done.")
+		ask, err := d.askPersonToAllow(r.Context(), caller, *request.Payload, request.Reason)
+		if err != nil {
+			return ScopeReply{}, err
+		}
+		return ScopeReply{AskID: ask.ID}, nil
 	}
 	return ScopeReply{}, refuse("invalid", "action is send, control, lead-send, channel-send, create, ledger or operator.")
-}
-
-func (d *Daemon) leadsAllOf(caller *mcpCaller, request ScopeRequest) bool {
-	if !caller.has("control.project") || caller.project == nil || !d.mcpIsProjectLead(caller, caller.session.ID) {
-		return false
-	}
-	if channel := strings.TrimSpace(request.Channel); channel != "" {
-		target, err := broadcast.Resolve(d.Registry, channel)
-		return err == nil && target.ProjectID == caller.project.ID && len(request.Sessions) == 0
-	}
-	if len(request.Sessions) == 0 {
-		return false
-	}
-	for _, id := range request.Sessions {
-		session, err := d.Registry.Session(id)
-		if err != nil || !d.sameProject(caller, *session) {
-			return false
-		}
-	}
-	return true
 }
 
 func writeScopeRefusal(w http.ResponseWriter, refusal *mcpRefusal) {

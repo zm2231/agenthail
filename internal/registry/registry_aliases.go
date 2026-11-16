@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface"
 	_ "modernc.org/sqlite"
 )
@@ -229,4 +230,14 @@ func (r *Registry) RemoveAlias(name string) error {
 		return fmt.Errorf("alias %q does not exist", name)
 	}
 	return tx.Commit()
+}
+
+// A paired host's session alias lives only in that host's catalog row.
+func (r *Registry) SessionLabel(sessionID string) (alias, name string, err error) {
+	if _, local, qualified := hosts.Split(sessionID); qualified {
+		sessionID = local
+	}
+	err = r.read.QueryRow(`SELECT COALESCE((SELECT a.name FROM aliases a WHERE a.session_id=s.id),json_extract(cs.projection_fingerprint,'$.alias'),''),s.name
+		FROM sessions s LEFT JOIN catalog_sessions cs ON cs.session_id=s.id WHERE s.id=?`, sessionID).Scan(&alias, &name)
+	return alias, name, err
 }

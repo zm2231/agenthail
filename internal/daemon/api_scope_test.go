@@ -100,14 +100,18 @@ func TestTheScopeEndpointDecidesAsTheSessionsMCPToolsDo(t *testing.T) {
 		{"a member posting to its project", ScopeRequest{SessionID: worker.ID, Action: "channel-send", Channel: "#widget"}, http.StatusOK, "", ""},
 		{"another project's agent posting", ScopeRequest{SessionID: outsider.ID, Action: "channel-send", Channel: "#widget"}, http.StatusForbidden, "out_of_scope", "different_project"},
 		{"another project's agent posting by this host's qualified name", ScopeRequest{SessionID: outsider.ID, Action: "channel-send", Channel: d.hostIdentity().Name + "::#widget"}, http.StatusForbidden, "out_of_scope", "different_project"},
-		{"an agent managing the queue", ScopeRequest{SessionID: worker.ID, Action: "operator", Operation: "Managing the queue"}, http.StatusForbidden, "capability_missing", ""},
-		{"a worker managing its own project's queue items", ScopeRequest{SessionID: worker.ID, Action: "operator", Sessions: []string{worker.ID, lead.ID}}, http.StatusForbidden, "capability_missing", ""},
-		{"the coordinator managing its project's queue items", ScopeRequest{SessionID: lead.ID, Action: "operator", Sessions: []string{worker.ID, lead.ID}}, http.StatusOK, "", ""},
-		{"the coordinator managing an item from another project", ScopeRequest{SessionID: lead.ID, Action: "operator", Sessions: []string{worker.ID, outsider.ID}}, http.StatusForbidden, "capability_missing", ""},
-		{"the coordinator managing an unknown item", ScopeRequest{SessionID: lead.ID, Action: "operator", Sessions: []string{"ghost"}}, http.StatusForbidden, "capability_missing", ""},
-		{"the coordinator doing something global", ScopeRequest{SessionID: lead.ID, Action: "operator", Operation: "Choosing a coordinator"}, http.StatusForbidden, "capability_missing", ""},
-		{"the coordinator managing its project's channel", ScopeRequest{SessionID: lead.ID, Action: "operator", Channel: "#widget"}, http.StatusOK, "", ""},
-		{"the coordinator managing another project's channel", ScopeRequest{SessionID: lead.ID, Action: "operator", Channel: "#gadget"}, http.StatusForbidden, "capability_missing", ""},
+		{"an agent clearing a queue", ScopeRequest{SessionID: worker.ID, Action: "operator", Payload: scopePayload("action", `{"action":"queue-clear","sessionId":"`+worker.ID+`"}`)}, http.StatusForbidden, "capability_missing", "person_only"},
+		{"a worker relaying within its own project", ScopeRequest{SessionID: worker.ID, Action: "operator", Payload: scopePayload("action", `{"action":"relay-add","fromId":"`+worker.ID+`","toId":"`+lead.ID+`"}`)}, http.StatusForbidden, "capability_missing", "person_only"},
+		{"the coordinator relaying within its project", ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: scopePayload("action", `{"action":"relay-add","fromId":"`+worker.ID+`","toId":"`+lead.ID+`"}`)}, http.StatusOK, "", ""},
+		{"the coordinator relaying from another project", ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: scopePayload("action", `{"action":"relay-add","fromId":"`+outsider.ID+`","toId":"`+worker.ID+`"}`)}, http.StatusForbidden, "capability_missing", "person_only"},
+		{"the coordinator relaying an unknown session", ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: scopePayload("action", `{"action":"relay-add","fromId":"ghost","toId":"`+worker.ID+`"}`)}, http.StatusForbidden, "capability_missing", "person_only"},
+		{"the coordinator choosing a coordinator", ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: scopePayload("action", `{"action":"coordinator-clear","projectId":"widget"}`)}, http.StatusForbidden, "capability_missing", "person_only"},
+		{"the coordinator adding to a channel named for its project", ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: scopePayload("action", `{"action":"channel-add","channel":"#widget","targetId":"`+worker.ID+`"}`)}, http.StatusForbidden, "capability_missing", "person_only"},
+		{"the coordinator adding to a channel addressed by its project's id", ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: scopePayload("action", `{"action":"channel-add","channel":"#`+project.ID+`","targetId":"`+worker.ID+`"}`)}, http.StatusForbidden, "capability_missing", "person_only"},
+		{"the coordinator renaming its project's channel", ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: scopePayload("action", `{"action":"channel-rename","channel":"#widget","newChannel":"widgets"}`)}, http.StatusForbidden, "capability_missing", "person_only"},
+		{"the coordinator renaming another project's channel", ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: scopePayload("action", `{"action":"channel-rename","channel":"#gadget","newChannel":"gadgets"}`)}, http.StatusForbidden, "capability_missing", "person_only"},
+		{"an action that cannot be asked for", ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: scopePayload("action", `{"action":"session-archive","sessionId":"`+worker.ID+`"}`)}, http.StatusBadRequest, "invalid", ""},
+		{"an operator check without its payload", ScopeRequest{SessionID: lead.ID, Action: "operator"}, http.StatusBadRequest, "invalid", ""},
 		{"an unknown session", ScopeRequest{SessionID: "ghost", Action: "control", Target: worker.ID}, http.StatusNotFound, "not_found", ""},
 		{"an unknown action", ScopeRequest{SessionID: worker.ID, Action: "fly"}, http.StatusBadRequest, "invalid", ""},
 	}
@@ -141,4 +145,8 @@ func TestTheScopeEndpointDecidesAsTheSessionsMCPToolsDo(t *testing.T) {
 	if refused := askScope(t, d, ScopeRequest{SessionID: worker.ID, Action: "control", Target: lead.ID}, "192.0.2.1:4000"); refused.status != http.StatusForbidden || refused.code != "remote_refused" {
 		t.Fatalf("a request from another machine: %+v", refused)
 	}
+}
+
+func scopePayload(api, body string) *PersonAction {
+	return &PersonAction{API: api, Body: json.RawMessage(body)}
 }

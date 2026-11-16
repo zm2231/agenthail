@@ -88,14 +88,14 @@ func (d *Daemon) ledgerPageTarget(projectID string) (string, error) {
 	if host, local, qualified := hosts.Split(projectID); qualified && host == d.hostIdentity().ID {
 		projectID = local
 	}
-	found, err := d.ledgerPageProject(projectID)
+	found, err := d.catalogProjectOf(projectID)
 	if err != nil {
 		return "", err
 	}
 	return LedgerKey(d.Registry, found)
 }
 
-func (d *Daemon) ledgerPageProject(projectID string) (*CatalogProject, error) {
+func (d *Daemon) catalogProjectOf(projectID string) (*CatalogProject, error) {
 	links, err := loadProjectLinks(d.Registry)
 	if err != nil {
 		return nil, err

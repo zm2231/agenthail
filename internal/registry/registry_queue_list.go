@@ -2,6 +2,7 @@ package registry
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -257,13 +258,33 @@ func (r *Registry) CancelMessage(id int64) (CanceledMessage, error) {
 	return canceled, nil
 }
 
-func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
+func (r *Registry) PendingSenders(sessionID string) ([]string, error) {
+	rows, err := r.read.Query(`SELECT DISTINCT source_session_id FROM message_queue WHERE session_id=? AND status='pending' ORDER BY source_session_id`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return appendRows(nil, rows, func(row rowScanner) (string, error) {
+		var source string
+		err := row.Scan(&source)
+		return source, err
+	})
+}
+
+// Nil senders cancels every pending message; otherwise only those the named
+// senders queued ("" for none), decided in the same write as the cancel.
+func (r *Registry) CancelMessagesForSession(sessionID string, senders []string) (int64, error) {
+	only, err := json.Marshal(senders)
+	if err != nil {
+		return 0, err
+	}
+	all := senders == nil
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT id,message FROM message_queue WHERE session_id=? AND status='pending'`, sessionID)
+	const from = ` AND (? OR source_session_id IN (SELECT value FROM json_each(?)))`
+	rows, err := tx.Query(`SELECT id,message FROM message_queue WHERE session_id=? AND status='pending'`+from, sessionID, all, string(only))
 	if err != nil {
 		return 0, err
 	}
@@ -276,7 +297,7 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE session_id=? AND status='pending'`, sessionID)
+	res, err := tx.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE session_id=? AND status='pending'`+from, sessionID, all, string(only))
 	if err != nil {
 		return 0, err
 	}

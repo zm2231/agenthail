@@ -711,6 +711,23 @@ CREATE TABLE IF NOT EXISTS asks (
 );
 CREATE INDEX IF NOT EXISTS asks_open ON asks(routed_to) WHERE state='open';
 CREATE INDEX IF NOT EXISTS asks_session ON asks(session_id, created_at_ms);
+CREATE TABLE IF NOT EXISTS approvals (
+	ask_id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	api TEXT NOT NULL CHECK (api IN ('action','settings')),
+	payload TEXT NOT NULL,
+	payload_sha256 TEXT NOT NULL,
+	description TEXT NOT NULL,
+	reason TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL,
+	expires_at_ms INTEGER NOT NULL,
+	decided_by TEXT NOT NULL DEFAULT '',
+	decided_at_ms INTEGER NOT NULL DEFAULT 0,
+	ran_at_ms INTEGER NOT NULL DEFAULT 0,
+	status TEXT NOT NULL DEFAULT '',
+	result TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS approvals_payload ON approvals(session_id, payload_sha256);
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL,

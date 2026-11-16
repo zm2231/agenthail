@@ -321,7 +321,7 @@ func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	beforeCancel := page()
-	if count, err := r.CancelMessagesForSession(session.ID); err != nil || count != 1 {
+	if count, err := r.CancelMessagesForSession(session.ID, nil); err != nil || count != 1 {
 		t.Fatalf("canceled=%d err=%v", count, err)
 	}
 	swept := page()

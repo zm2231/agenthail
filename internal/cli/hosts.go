@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -725,22 +724,6 @@ func (a *App) addHostRelay(ctx context.Context, from *surface.Session, fromRemot
 		toLabel = toRemote.Label()
 	}
 	fmt.Printf("relay on %s: %s -> %s (pattern /%s/, %s)\n", where, fromLabel, toLabel, pattern, handoff)
-	return nil
-}
-
-func (a *App) removeHostRelay(hostRef, relay string) error {
-	id, err := strconv.ParseInt(strings.TrimPrefix(relay, "#"), 10, 64)
-	if err != nil || id <= 0 {
-		return fmt.Errorf("invalid relay id %q", relay)
-	}
-	client, err := a.daemonAPI()
-	if err != nil {
-		return err
-	}
-	if _, _, err := client.action(context.Background(), map[string]any{"action": "relay-remove", "relayId": id, "host": hostRef}); err != nil {
-		return err
-	}
-	fmt.Printf("removed relay %s%s%d\n", hostRef, hosts.Separator, id)
 	return nil
 }
 
