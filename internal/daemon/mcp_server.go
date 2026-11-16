@@ -17,12 +17,13 @@ const mcpOutputLimit = 16 << 10
 var mcpProtocolVersions = []string{"2026-07-28", "2025-11-25", "2025-06-18"}
 
 type mcpRefusal struct {
-	Code      string         `json:"code"`
-	Message   string         `json:"message"`
-	Retryable bool           `json:"retryable"`
-	Detail    map[string]any `json:"detail,omitempty"`
-	target    string
-	audited   bool
+	Code         string         `json:"code"`
+	Message      string         `json:"message"`
+	Retryable    bool           `json:"retryable"`
+	Detail       map[string]any `json:"detail,omitempty"`
+	target       string
+	audited      bool
+	crossProject bool
 }
 
 func (r *mcpRefusal) Error() string { return r.Code + ": " + r.Message }

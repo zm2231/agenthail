@@ -173,6 +173,15 @@ runs exactly the command you asked for, once; an unanswered one expires after a
 day. Asking again for the same command while one is open does not ask twice.
 Never tell the person to run a command themselves; ask this way instead.
 
+The same goes for a send, steer, interrupt, archive or unarchive refused
+because the session is in another project: run it again with
+`--ask-person --reason "..."`,
+or call `agenthail_send`, `agenthail_steer`, `agenthail_interrupt` or
+`agenthail_archive` (with `restore` to unarchive) again with `askPerson: true`
+and a `reason`. An allowed
+message still arrives as yours. For a plain message to another project, sending
+to its coordinator with `project` needs no one's permission.
+
 ## Surface Contract
 
 | Operation | Claude | Codex | Notion |

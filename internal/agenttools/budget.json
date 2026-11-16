@@ -1,6 +1,6 @@
 {
-  "mcpToolListBytes": 28534,
-  "alwaysLoadToolBytes": 7159,
+  "mcpToolListBytes": 29550,
+  "alwaysLoadToolBytes": 7413,
   "alwaysLoadTools": ["agenthail_ask", "agenthail_create", "agenthail_end_turn", "agenthail_pr", "agenthail_result", "agenthail_send", "agenthail_wait"],
   "cliCardBytes": 1774,
   "ownToolCardBytes": 1856,

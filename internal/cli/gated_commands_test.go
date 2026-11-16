@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -38,6 +39,7 @@ func newGatedFixture(t *testing.T) gatedFixture {
 		"widget-lead":  session("widget-lead", widget, surface.StatusBusy),
 		"gadget-lead":  session("gadget-lead", gadget, surface.StatusBusy),
 		"widget-other": session("widget-other", widget, surface.StatusBusy),
+		"gadget-other": session("gadget-other", gadget, surface.StatusBusy),
 	}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: sessions, caps: surface.Capabilities{Send: true, Steer: true, Interrupt: true}}
 	app, r := cliFixture(t, fake)
@@ -207,6 +209,54 @@ func TestARefusedAgentAsksThePersonByRunningTheSameCommandAgain(t *testing.T) {
 		}
 	}
 }
+
+func TestAnAgentAsksThePersonToSendOrControlAnotherProjectsSession(t *testing.T) {
+	f := newGatedFixture(t)
+	t.Setenv("AGENTHAIL_SESSION_ID", "worker")
+	if err := f.app.Run([]string{"interrupt", "gadget-other"}); err == nil || !strings.Contains(err.Error(), "--ask-person") {
+		t.Fatalf("interrupting another project's session answered %v, want a refusal that says how to ask", err)
+	}
+	commands := []struct {
+		args     []string
+		question string
+		body     map[string]any
+	}{
+		{[]string{"interrupt", "gadget-other"}, "Interrupt gadget-other's turn", map[string]any{"action": "interrupt", "sessionId": "gadget-other"}},
+		{[]string{"steer", "gadget-other", "stop the deploy"}, `Steer gadget-other's turn with this message: "stop the deploy"`, map[string]any{"action": "steer", "sessionId": "gadget-other", "message": "stop the deploy", "sourceSessionId": "worker"}},
+		{[]string{"send", "gadget-other", "the API moved to v2"}, `Send gadget-other this message: "the API moved to v2"`, map[string]any{"action": "send", "sessionId": "gadget-other", "message": "the API moved to v2", "sourceSessionId": "worker", "busyDelivery": "queue"}},
+		{[]string{"thread", "archive", "gadget-other"}, "Archive session gadget-other", map[string]any{"action": "session-archive", "sessionId": "gadget-other"}},
+	}
+	for _, command := range commands {
+		output, err := captureStdout(t, func() error {
+			return f.app.Run(append(command.args, "--ask-person", "--reason", "their release depends on it"))
+		})
+		if err != nil || !strings.Contains(output, "Asked the person to allow this") {
+			t.Fatalf("%v answered %q (%v)", command.args, output, err)
+		}
+		askID := askedID.FindStringSubmatch(output)
+		if askID == nil {
+			t.Fatalf("%v answered %q, naming no ask", command.args, output)
+		}
+		found, ok, err := f.r.Approval(askID[1])
+		if err != nil || !ok || found.Description != command.question || found.Reason != "their release depends on it" {
+			t.Fatalf("%v raised %+v (%v), want %q", command.args, found, err, command.question)
+		}
+		var stored map[string]any
+		if err := json.Unmarshal(found.Payload, &stored); err != nil {
+			t.Fatal(err)
+		}
+		for key, value := range command.body {
+			if stored[key] != value {
+				t.Fatalf("%v stored %s=%v, want %v", command.args, key, stored[key], value)
+			}
+		}
+	}
+	if archived, _ := f.r.SessionArchived("gadget-other"); archived {
+		t.Fatal("asking the person archived the session")
+	}
+}
+
+var askedID = regexp.MustCompile(`allow this \((ask-[0-9a-f]+)\)`)
 
 var personToTerminal = regexp.MustCompile(`(?i)\b(ask|tell|have|get)\s+(the person|the user|them|your user)\s+to\s+(run|type|open)|\b(person|user)\s+(must|should|can|needs to)\s+run\b|\brun\b[^.]{0,80}\bin\s+(a|their|your)\s+terminal\b|\bin\s+(a|their|your)\s+terminal,?\s+run\b|ask your coordinator to have it done`)
 

@@ -382,7 +382,12 @@ func (a *App) threadSessionAction(target string, payload map[string]any) (map[st
 	if err != nil {
 		return nil, err
 	}
-	if err := a.controlScope(ctx, session, remote); err != nil {
+	if action, _ := payload["action"].(string); action == "session-archive" || action == "session-unarchive" {
+		_, err = a.payloadScope(ctx, "control", map[string]any{"action": action, "sessionId": relayEnd(session, remote)})
+	} else {
+		err = a.controlScope(ctx, session, remote)
+	}
+	if err != nil {
 		return nil, err
 	}
 	if remote != nil {

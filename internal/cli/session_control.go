@@ -277,7 +277,7 @@ func (a *App) cmdInterrupt(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := a.controlScope(ctx, sess, remote); err != nil {
+	if _, err := a.payloadScope(ctx, "control", map[string]any{"action": "interrupt", "sessionId": relayEnd(sess, remote)}); err != nil {
 		return err
 	}
 	if remote != nil {
@@ -310,19 +310,19 @@ func (a *App) cmdSteer(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := a.controlScope(ctx, sess, remote); err != nil {
-		return err
-	}
-	sourceID, err := a.sourceSessionID(ctx, "")
-	if err != nil {
-		return err
-	}
 	message, err := messageText(strings.Join(positional[1:], " "))
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("message is empty")
+	}
+	if _, err := a.payloadScope(ctx, "control", map[string]any{"action": "steer", "sessionId": relayEnd(sess, remote), "message": message}); err != nil {
+		return err
+	}
+	sourceID, err := a.sourceSessionID(ctx, "")
+	if err != nil {
+		return err
 	}
 	if remote != nil {
 		return a.steerRemote(ctx, remote, sourceID, message, hasFlag(args, "--json"))

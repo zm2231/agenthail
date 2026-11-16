@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,9 @@ func (d *Daemon) personActionScope(ctx context.Context, caller *mcpCaller, actio
 	request, err := action.decode()
 	if err != nil {
 		return err
+	}
+	if slices.Contains(controlApprovalActions, request.Action) {
+		return refuse("invalid", "the action "+request.Action+" is checked as a send or control, not as the person's.")
 	}
 	description, err := d.describePersonAction(action.API, request)
 	if err != nil {
@@ -168,10 +172,11 @@ func (d *Daemon) describePersonAction(api string, request personActionRequest) (
 	}
 	project := func(id string) string { return projectIDName(strings.TrimSpace(id), records) }
 	session := func(ref string) string {
-		if id, err := d.Registry.ResolveTarget(strings.TrimSpace(ref)); err == nil {
-			return d.resolveDisplay(id)
+		ref = strings.TrimSpace(ref)
+		if id, err := d.Registry.ResolveTarget(ref); err == nil {
+			ref = id
 		}
-		return strings.TrimSpace(ref)
+		return d.rowNameOr(ref, ref)
 	}
 	onHost := ""
 	if request.Host != "" {
@@ -219,6 +224,19 @@ func (d *Daemon) describePersonAction(api string, request personActionRequest) (
 		return fmt.Sprintf("Add %s to %s", session(request.TargetID), channel), nil
 	case "channel-remove":
 		return fmt.Sprintf("Remove %s from %s", session(request.TargetID), channel), nil
+	case "send":
+		if request.BusyDelivery == "steer" {
+			return fmt.Sprintf("Send %s this message now, steering its turn if it is busy: %q", session(request.SessionID), clipText(request.Message, 400)), nil
+		}
+		return fmt.Sprintf("Send %s this message: %q", session(request.SessionID), clipText(request.Message, 400)), nil
+	case "steer":
+		return fmt.Sprintf("Steer %s's turn with this message: %q", session(request.SessionID), clipText(request.Message, 400)), nil
+	case "interrupt":
+		return "Interrupt " + session(request.SessionID) + "'s turn", nil
+	case "session-archive":
+		return "Archive session " + session(request.SessionID), nil
+	case "session-unarchive":
+		return "Unarchive session " + session(request.SessionID), nil
 	case "queue-cancel":
 		return "Cancel queued message #" + strconv.FormatInt(request.QueueID, 10), nil
 	case "queue-clear":
@@ -239,6 +257,10 @@ func (d *Daemon) describePersonAction(api string, request personActionRequest) (
 }
 
 func (d *Daemon) rowName(sessionID string) string {
+	return d.rowNameOr(sessionID, "An agent")
+}
+
+func (d *Daemon) rowNameOr(sessionID, unknown string) string {
 	alias, name, err := d.Registry.SessionLabel(sessionID)
 	switch {
 	case err == nil && alias != "":
@@ -246,7 +268,7 @@ func (d *Daemon) rowName(sessionID string) string {
 	case err == nil && strings.TrimSpace(name) != "":
 		return strings.TrimSpace(name)
 	}
-	return "An agent"
+	return unknown
 }
 
 func (d *Daemon) askPersonToAllow(ctx context.Context, caller *mcpCaller, action PersonAction, reason string) (registry.Ask, error) {
