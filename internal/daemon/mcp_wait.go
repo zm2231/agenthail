@@ -38,6 +38,7 @@ type mcpWaitItem struct {
 	Kind       string          `json:"kind,omitempty"`
 	Tool       string          `json:"tool,omitempty"`
 	Prompt     string          `json:"prompt,omitempty"`
+	Detail     string          `json:"detail,omitempty"`
 	Clipped    bool            `json:"clipped,omitempty"`
 	Ceiling    json.RawMessage `json:"ceiling,omitempty"`
 	GoalStatus string          `json:"goalStatus,omitempty"`
@@ -248,7 +249,7 @@ func (d *Daemon) taskRequests(ctx context.Context, task registry.Task, session *
 	for _, request := range requests {
 		view := requestView(request, mcpItemTextLimit)
 		row := item(view.ID, view.Kind)
-		row.Tool, row.Prompt, row.Clipped = view.Tool, view.Prompt, view.Clipped
+		row.Tool, row.Prompt, row.Detail, row.Clipped = view.Tool, view.Prompt, view.Detail, view.Clipped
 		items = append(items, row)
 	}
 	return items

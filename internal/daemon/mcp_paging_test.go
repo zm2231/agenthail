@@ -232,7 +232,7 @@ func TestMCPRequestsShowTheCommandAndEditEachRequestAsksFor(t *testing.T) {
 	}
 }
 
-func TestMCPRequestsListMarksAClippedCommand(t *testing.T) {
+func TestMCPRequestsMarkAClippedCommand(t *testing.T) {
 	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestMCPRequestsListMarksAClippedCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	base.sessions[worker.ID] = worker
-	command := "echo " + strings.Repeat("é", 200)
+	command := "echo " + strings.Repeat("é", 1500)
 	encoded, _ := json.Marshal(map[string]any{"command": command})
 	responder.open = []surface.Request{{ID: "run", Kind: surface.WaitingApproval, Tool: "Bash", Input: encoded, CreatedAt: time.Now()}}
 	d.syncWaits(worker, &surface.Waiting{Kind: surface.WaitingApproval, ID: "run", Answerable: true, Open: []string{"run"}})
@@ -261,6 +261,17 @@ func TestMCPRequestsListMarksAClippedCommand(t *testing.T) {
 	detail := fmt.Sprint(row["detail"])
 	if row["clipped"] != true || !utf8.ValidString(detail) || len(detail) > mcpPromptFloor || !strings.HasPrefix(command, detail) {
 		t.Fatalf("a long command must be cut on a character and marked clipped: %v", row)
+	}
+	one, refused := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": worker.ID, "requestId": row["requestId"]})
+	full, _ := one["request"].(map[string]any)
+	detail = fmt.Sprint(full["detail"])
+	if refused || full["clipped"] != true || !utf8.ValidString(detail) || len(detail) > mcpDetailLimit || len(detail) < mcpDetailLimit-utf8.UTFMax || !strings.HasPrefix(command, detail) {
+		t.Fatalf("one request must show the command up to %d bytes, marked clipped: %v", mcpDetailLimit, one)
+	}
+	listedOne, _ := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": worker.ID})
+	requests, _ := listedOne["requests"].([]any)
+	if len(requests) != 1 || fmt.Sprint(requests[0].(map[string]any)["detail"]) != detail || requests[0].(map[string]any)["clipped"] != true {
+		t.Fatalf("a session's requests must cut the command as the one request does: %v", listedOne)
 	}
 }
 
