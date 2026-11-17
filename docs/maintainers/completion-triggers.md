@@ -114,7 +114,7 @@ A completion that matches a trigger is written to a new `trigger_runs` table at 
 - For a completion that also notifies, the write happens in the same SQLite transaction as the turn notice (`Registry.RecordCompletion`), so a completion recorded for notifications is also recorded for triggers.
 - A delegated session records no notice, so only its runs are written, at the same point.
 
-Like the notification, a completion counts only if this daemon saw the turn start or had it armed (`completionNotificationEligible`). A turn that finished while the daemon was down is still caught on the next scan, because the saved runtime state differs from what that scan observes.
+Like the notification, a completion counts only if this daemon had the turn armed (`completionNotificationEligible`): it saw the turn start while watching the session for sends, deliveries or tasks, or a send armed it. A turn the session started itself is watched to its end but not armed, so it fires nothing. A turn that finished while the daemon was down is still caught on the next scan, because the saved runtime state differs from what that scan observes.
 
 Rows are keyed `(trigger, dedupe_key)` and inserted with `INSERT OR IGNORE`. A completion seen twice, for example observed again after a restart or released from a hold, runs a trigger once.
 

@@ -194,7 +194,7 @@ func TestACompletionHeldForBackgroundWorkStaysQuietWhileTheAskIsOpen(t *testing.
 	f := newAskFixture(t)
 	id, _ := f.raise(t, f.person, deployAsk)["askId"].(string)
 	f.alert(t, " needs you: Deploy the fix?")
-	if err := f.r.BindTurnCompletion(f.from.ID, "turn-1"); err != nil {
+	if err := f.r.BindTurnCompletion(f.from.ID, "turn-1", time.Time{}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.r.SaveRuntimeState(f.from.ID, surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1"}); err != nil {

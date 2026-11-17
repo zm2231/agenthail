@@ -26,7 +26,7 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 	}
 	needsClaudeRefresh := false
 	for _, session := range watched {
-		if session.Surface == surface.KindClaude {
+		if session.Surface == surface.KindClaude && !session.OpenTurnOnly {
 			needsClaudeRefresh = true
 			break
 		}
@@ -85,7 +85,7 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 		// no PID left to tell whether its process exited.
 		inactive := claudeProcessExited(session) || relayTargetInactive(session)
 		resumes := session.Surface == surface.KindClaude || session.Surface == surface.KindCodex
-		if !isTask && !watchedSession.Armed && inactive && (!resumes || queueCounts[session.ID] == 0) {
+		if !isTask && !watchedSession.Armed && !watchedSession.OpenTurnOnly && inactive && (!resumes || queueCounts[session.ID] == 0) {
 			d.syncRelaysObserved(ctx, scan, adapter, session, observeOnce(adapter, session, observeAdapter))
 			continue
 		}
@@ -95,7 +95,7 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			}
 			continue
 		}
-		d.observeInScan(ctx, scan, adapter, session)
+		d.observeInScan(ctx, scan, adapter, session, !watchedSession.OpenTurnOnly)
 		if gone {
 			d.settleGoneTask(session)
 		}
@@ -160,10 +160,11 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 }
 
 func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, session *surface.Session) {
-	d.observeInScan(ctx, nil, adapter, session)
+	d.observeInScan(ctx, nil, adapter, session, true)
 }
 
-func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surface.Surface, session *surface.Session) {
+// A session watched only to see its turn end is not armed when seen busy, so a turn it started itself pushes nothing.
+func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surface.Surface, session *surface.Session, arm bool) {
 	observed := observeOnce(adapter, session, d.observeTurn)
 	observation, err := observed.get(ctx)
 	unobserved := err != nil && d.readUnobservedBackground(ctx, adapter, session)
@@ -256,7 +257,9 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 		}
 	}
 	if found && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
-		d.armCompletionNotification(session.ID)
+		if arm {
+			d.armCompletionNotification(session.ID)
+		}
 		d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnStart, sessionID: session.ID})
 	}
 	d.settleTaskFromObservation(ctx, adapter, session, observation)
@@ -264,8 +267,9 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 		d.log.Printf("save runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
-	if completionChanged {
-		if err := d.Registry.BindTurnCompletion(session.ID, observation.CompletedTurnID); err != nil {
+	firstSeen := !found && observation.CompletedTurnID != "" && !observation.CompletedAt.IsZero() && !completionStale(observation, time.Now())
+	if completionChanged || firstSeen {
+		if err := d.Registry.BindTurnCompletion(session.ID, observation.CompletedTurnID, observation.CompletedAt, completionPrecision(session)); err != nil {
 			d.log.Printf("bind turn completion %s: %s", d.resolveDisplay(session.ID), err)
 		}
 		if !stale && observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
@@ -425,6 +429,13 @@ func (d *Daemon) adapters() surface.Adapters { return surface.Adapters(d.Surface
 
 const staleCompletionAge = 5 * time.Minute
 
+func completionPrecision(session *surface.Session) time.Duration {
+	if session.Surface == surface.KindCodex {
+		return time.Second
+	}
+	return 0
+}
+
 func completionStale(observation *surface.TurnObservation, now time.Time) bool {
 	return !observation.CompletedAt.IsZero() && now.Sub(observation.CompletedAt) > staleCompletionAge
 }
@@ -435,7 +446,7 @@ func turnCannotRun(session *surface.Session, observation *surface.TurnObservatio
 
 // Without a fresh listing a Claude session's metadata may be stale, so only a turn with nothing queued or relayed is closed.
 func (d *Daemon) onlyClosesATurn(watched registry.WatchedSession, queued int) bool {
-	if !watched.Armed || queued > 0 {
+	if !watched.Armed && !watched.OpenTurnOnly || queued > 0 {
 		return false
 	}
 	relays, err := d.activeRelaysFrom(watched.ID)
