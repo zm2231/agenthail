@@ -121,7 +121,7 @@ func newRemoteExtensionFixture(t *testing.T) *remoteExtensionFixture {
 	f.board, f.notes = startRemoteApp(t, f.remote, "board"), startRemoteApp(t, f.remote, "notes")
 	f.list(fmt.Sprintf(`{"host":"running","extensions":[
 		{"id":"board","label":"Board","state":"loaded","page":{"port":%d,"entry":"/","published":true}},
-		{"id":"notes","label":"Notes","state":"loaded","mounts":[{"name":"app","label":"App","port":%d,"entry":"/","state":"serving","published":true}]},
+		{"id":"notes","label":"Notes","state":"loaded","mounts":[{"name":"app","label":"App","port":%d,"entry":"/","state":"serving","published":true}],"approvalAsk":{"id":"ask-1","sessionId":"builder"}},
 		{"id":"quiet","label":"Quiet","state":"loaded","page":{"port":7999,"entry":"/"}}]}`, f.board.port, f.notes.port))
 	inner := f.remote.handler
 	f.remote.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -189,6 +189,9 @@ func (f *remoteExtensionFixture) ports(t *testing.T) (int, int) {
 	}
 	if quiet.Port != 0 || quiet.Error != "Not published on vps." {
 		t.Fatalf("an unpublished page must say so: %+v", quiet)
+	}
+	if ask := view.Extensions[1].ApprovalAsk; ask == nil || ask.ID != "ask-1" || ask.SessionID != f.record.ID+hosts.Separator+"builder" {
+		t.Fatalf("a paired host's approval ask must name its session under that host: %+v", ask)
 	}
 	return page.Port, mount.Port
 }

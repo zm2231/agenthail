@@ -29,8 +29,8 @@ struct ExtensionEntriesTest {
             ExtensionSummary(id: "board", label: "Board", description: "Who is working on what", state: "loaded", page: ExtensionPage(port: 7430, entry: "/", published: true), app: ExtensionAppOffer(label: "Team board", icon: "chart.bar", order: 2), badge: "3", mounts: [
                 ExtensionMount(name: "console", label: "Console", port: 7421, entry: "/admin.html", state: "serving", published: true, app: ExtensionAppOffer(icon: "terminal", order: -1)),
                 ExtensionMount(name: "local", label: "Local only", port: 7422, entry: "/", state: "serving", published: false),
-                ExtensionMount(name: "waiting", label: "Waiting", entry: "/", state: "pending"),
-            ]),
+                ExtensionMount(name: "waiting", label: "Waiting", entry: "/", state: "pending", upstream: "https://api.example.com"),
+            ], approvalAsk: ExtensionApprovalAsk(id: "ask-1", sessionId: "builder")),
             ExtensionSummary(id: "broken", label: "Broken", state: "failed", error: "load failed: boom", page: ExtensionPage(port: 7431, entry: "/")),
             ExtensionSummary(id: "quiet", label: "Quiet", description: " quiet ", state: "loaded", page: ExtensionPage(port: 7432, entry: "/", published: false)),
         ])
@@ -47,7 +47,9 @@ struct ExtensionEntriesTest {
         check(console?.label == "Console" && console?.icon == "terminal", "a mount offer without a label keeps the mount's label")
         check(local.first { $0.id == "h1/board/mount/local" }?.url != nil, "over http an unpublished mount still opens")
         let waiting = local.first { $0.id == "h1/board/mount/waiting" }
-        check(waiting?.url == nil && waiting?.unavailable?.contains("approval on studio") == true, "a pending mount says it waits for approval, got \(String(describing: waiting?.unavailable))")
+        check(waiting?.url == nil && waiting?.unavailable == "Needs your OK to open.", "a pending mount says it needs the person's OK, got \(String(describing: waiting?.unavailable))")
+        check(waiting?.awaitsApproval == true && waiting?.approvalSession == "builder", "a pending mount opens the session that asked for approval: \(String(describing: waiting?.approvalSession))")
+        check(local.first { $0.id == "h1/board/mount/console" }.map { !$0.awaitsApproval && $0.approvalSession == nil } == true, "a serving mount needs no approval")
         let broken = local.first { $0.id == "h1/broken/page" }
         check(broken?.url == nil && broken?.unavailable == "load failed: boom" && broken?.icon == ExtensionEntry.fallbackIcon && broken?.offered == false, "a failed page shows its error and no link")
         check(local.map(\.extensionID) == ["board", "board", "board", "board", "broken", "quiet"] && local.first?.kind == .page, "the hub groups by extension, page first, got \(local.map(\.id))")
@@ -127,6 +129,25 @@ struct ExtensionEntriesTest {
         check(ExtensionBuildTarget.unavailable(paired) == nil, "a host that listed its extensions can build")
         check(ExtensionBuildTarget.unavailable(ExtensionCatalog(hostID: "h3", hostName: "far", api: first, hostRef: "h3")) == "Waiting for far to list its extensions.", "a host that hasn't listed yet can't build yet")
 
+        typealias State = ExtensionSections.State
+        let empty = State(apps: false, failed: false, pending: false)
+        let pending = State(apps: false, failed: false, pending: true)
+        let apps = State(apps: true, failed: false, pending: false)
+        check(ExtensionSections.shown([empty, pending]) == [0, 1], "an empty Mac and a paired host still listing both show")
+        check(ExtensionSections.shown([empty]) == [0], "a single empty catalog shows its empty state")
+        check(ExtensionSections.shown([empty, empty]) == [0], "with every catalog empty only this Mac shows")
+        check(ExtensionSections.shown([empty, apps]) == [1], "an empty Mac hides when another computer has apps")
+        check(ExtensionSections.shown([apps, empty, State(apps: false, failed: true, pending: false)]) == [0, 2], "an empty paired host hides and a failed one shows")
+        func asking(_ id: String, ask: String?, open: [String]? = nil) -> SessionState {
+            var row = SessionState(id: id, surface: "claude", name: id, alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+            row.ask = ask.map { SessionAsk(id: $0, title: "builder asks you to approve board", routedTo: "person", open: open) }
+            return row
+        }
+        check(ExtensionCatalog.asksChanged(from: [asking("builder", ask: "older", open: ["older"])], to: [asking("builder", ask: "older", open: ["older", "grant"])]), "a grant ask behind an older ask rereads the Apps lists")
+        check(ExtensionCatalog.asksChanged(from: [asking("builder", ask: "older", open: ["older", "grant"])], to: [asking("builder", ask: "older", open: ["older"])]), "a grant ask closed behind an older ask rereads the Apps lists")
+        check(ExtensionCatalog.asksChanged(from: [asking("builder", ask: nil)], to: [asking("builder", ask: "ask-1")]), "a new ask rereads the Apps lists")
+        check(ExtensionCatalog.asksChanged(from: [asking("builder", ask: "ask-1")], to: [asking("builder", ask: nil)]), "an answered ask rereads the Apps lists")
+        check(!ExtensionCatalog.asksChanged(from: [asking("builder", ask: "ask-1")], to: [asking("builder", ask: "ask-1"), asking("other", ask: nil)]), "other changes leave the Apps lists alone")
         check(ExtensionCatalog.refreshes(for: "extension.badge") && ExtensionCatalog.refreshes(for: "extension.changed") && !ExtensionCatalog.refreshes(for: "session.updated"), "the list rereads on extension events only")
         print("ok")
     }

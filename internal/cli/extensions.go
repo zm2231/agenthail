@@ -92,9 +92,9 @@ func (a *App) cmdExtensions(args []string) error {
 		}
 		return a.buildExtension(ctx, client, strings.Join(positional[1:], " "), flagVal(args, "--agent"), asJSON)
 	case sub == "call" && len(positional) == 3:
-		input := json.RawMessage(flagVal(args, "--input"))
-		if len(input) > 0 && !json.Valid(input) {
-			return errors.New("--input must be JSON")
+		input, inputErr := extensionCallInput(flagVal(args, "--input"))
+		if inputErr != nil {
+			return inputErr
 		}
 		data, _, err = client.call(ctx, http.MethodPost, "/api/v1/extensions/"+url.PathEscape(positional[1])+"/call", nil, map[string]any{"action": positional[2], "input": input, "sessionId": caller}, nil)
 		if err == nil && !asJSON {
@@ -357,4 +357,15 @@ func (a *App) buildExtension(ctx context.Context, client *daemonAPIClient, messa
 	fmt.Printf("[extensions] started %s:%s in ~/.agenthail/extensions; talk to it with agenthail send %s:%s \"...\"\n", view.Session.Surface, view.Session.ID, view.Session.Surface, view.Session.ID)
 	fmt.Println("[extensions] its changes take effect as it makes them; undo one with agenthail extensions undo <rev>")
 	return nil
+}
+
+func extensionCallInput(raw string) (json.RawMessage, error) {
+	if strings.TrimSpace(raw) == "" {
+		return json.RawMessage("{}"), nil
+	}
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return nil, fmt.Errorf("--input must be JSON, like --input '{\"day\":\"today\"}': %v", err)
+	}
+	return json.RawMessage(raw), nil
 }

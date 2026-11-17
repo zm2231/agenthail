@@ -10,41 +10,26 @@ struct ExtensionsPane: View {
     private var pins: ExtensionPins { .shared }
 
     var body: some View {
-        let catalog = model.extensionCatalog
+        let shown = Self.sections(model.extensionCatalogs)
+        let all = model.extensionCatalogs
         ScrollView {
             VStack(alignment: .leading, spacing: DesktopSpace.l) {
                 HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Apps")
-                            .font(.system(size: DesktopType.display, weight: .semibold))
-                            .foregroundStyle(DesktopPalette.text)
-                        Text(catalog.hostName.isEmpty ? "Extensions on this computer" : "Extensions on \(catalog.hostName)")
-                            .font(.system(size: DesktopType.secondary))
-                            .foregroundStyle(DesktopPalette.text2)
-                    }
+                    Text("Apps")
+                        .font(.system(size: DesktopType.display, weight: .semibold))
+                        .foregroundStyle(DesktopPalette.text)
                     Spacer()
-                    Button("History") { history = HistoryTarget(catalog) }
-                        .accessibilityIdentifier("extensions-history")
-                    Button("New Extension…") { building = ExtensionBuildTarget(catalog) }
-                        .accessibilityIdentifier("extensions-new")
+                    hostMenu("History", catalogs: all, id: "extensions-history") { history = HistoryTarget($0) }
+                    hostMenu("New App…", catalogs: all, id: "extensions-new", blocked: ExtensionBuildTarget.unavailable) { building = ExtensionBuildTarget($0) }
                 }
-                entries(catalog, empty: "No extensions yet. Use New Extension to describe one.")
-                ForEach(model.pairedExtensionCatalogs, id: \.hostID) { paired in
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Extensions on \(paired.hostName)")
+                ForEach(shown, id: \.hostID) { catalog in
+                    if shown.count > 1 {
+                        Text(catalog === model.extensionCatalog ? "On this Mac" : "On \(catalog.hostName)")
                             .font(.system(size: DesktopType.title, weight: .semibold))
                             .foregroundStyle(DesktopPalette.text)
-                        Spacer()
-                        Button("History") { history = HistoryTarget(paired) }
-                            .accessibilityIdentifier("extensions-history-" + paired.hostID)
-                        let blocked = ExtensionBuildTarget.unavailable(paired)
-                        Button("Build on \(paired.hostName)…") { building = ExtensionBuildTarget(paired) }
-                            .disabled(blocked != nil)
-                            .help(blocked ?? "Start a builder session on \(paired.hostName). It works in that computer's extensions folder.")
-                            .accessibilityIdentifier("extensions-build-" + paired.hostID)
+                            .padding(.top, DesktopSpace.m)
                     }
-                    .padding(.top, DesktopSpace.m)
-                    entries(paired, empty: "No extensions on \(paired.hostName).")
+                    entries(catalog, empty: catalog === model.extensionCatalog ? "No apps on this Mac yet. Use New App to describe one." : "No apps on \(catalog.hostName).")
                 }
             }
             .padding(DesktopSpace.xxl)
@@ -61,6 +46,31 @@ struct ExtensionsPane: View {
                 pane.select(sessionID)
                 model.extensionCatalogs.first { $0.hostID == target.id }?.refresh()
             }
+        }
+    }
+
+    static func sections(_ catalogs: [ExtensionCatalog]) -> [ExtensionCatalog] {
+        let states = catalogs.map { ExtensionSections.State(apps: !$0.entries.isEmpty, failed: $0.error != nil, pending: $0.list == nil) }
+        return ExtensionSections.shown(states).map { catalogs[$0] }
+    }
+
+    @ViewBuilder
+    private func hostMenu(_ title: String, catalogs: [ExtensionCatalog], id: String, blocked: @escaping (ExtensionCatalog) -> String? = { _ in nil }, action: @escaping (ExtensionCatalog) -> Void) -> some View {
+        if catalogs.count == 1, let only = catalogs.first {
+            Button(title) { action(only) }
+                .disabled(blocked(only) != nil)
+                .help(blocked(only) ?? "")
+                .accessibilityIdentifier(id)
+        } else {
+            Menu(title) {
+                ForEach(catalogs, id: \.hostID) { catalog in
+                    Button(catalog === model.extensionCatalog ? "On This Mac" : "On \(catalog.hostName)") { action(catalog) }
+                        .disabled(blocked(catalog) != nil)
+                        .help(blocked(catalog) ?? "")
+                }
+            }
+            .fixedSize()
+            .accessibilityIdentifier(id)
         }
     }
 
@@ -81,7 +91,11 @@ struct ExtensionsPane: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: DesktopSpace.m, alignment: .top)], alignment: .leading, spacing: DesktopSpace.m) {
                 ForEach(catalog.entries) { entry in
                     ExtensionCard(entry: entry, pinned: pins.isPinned(entry)) {
-                        pane.showExtension(entry.id)
+                        if let session = entry.approvalSession {
+                            pane.select(session)
+                        } else {
+                            pane.showExtension(entry.id)
+                        }
                     } togglePin: {
                         pins.toggle(entry)
                     }
@@ -111,10 +125,22 @@ private struct ExtensionCard: View {
     let open: () -> Void
     let togglePin: () -> Void
 
+    static func icon(_ entry: ExtensionEntry) -> String {
+        guard entry.icon == ExtensionEntry.fallbackIcon else { return entry.icon }
+        if case .mount = entry.kind { return "globe" }
+        return "square.grid.2x2"
+    }
+
+    static func subtitle(_ entry: ExtensionEntry) -> String {
+        if let unavailable = entry.unavailable { return unavailable }
+        if case .mount = entry.kind { return "Web app, part of \(entry.extensionLabel)" }
+        return entry.detail ?? entry.extensionLabel
+    }
+
     var body: some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: DesktopSpace.m) {
-                ExtensionIcon(name: entry.icon)
+                ExtensionIcon(name: Self.icon(entry))
                     .font(.system(size: DesktopType.title, weight: .medium))
                     .foregroundStyle(DesktopPalette.text)
                     .frame(width: 34, height: 34)
@@ -132,12 +158,14 @@ private struct ExtensionCard: View {
                                 .foregroundStyle(DesktopPalette.attention)
                         }
                     }
-                    if let detail = entry.unavailable ?? entry.detail {
-                        Text(detail)
-                            .font(.system(size: DesktopType.meta))
-                            .foregroundStyle(DesktopPalette.text2)
-                            .lineLimit(2)
-                    }
+                    Text(Self.subtitle(entry))
+                        .font(.system(size: DesktopType.meta))
+                        .foregroundStyle(entry.awaitsApproval ? DesktopPalette.attention : DesktopPalette.text2)
+                        .lineLimit(2, reservesSpace: true)
+                    Text("on \(entry.hostName)")
+                        .font(.system(size: DesktopType.caption))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
@@ -145,10 +173,9 @@ private struct ExtensionCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(DesktopPalette.side, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
             .contentShape(Rectangle())
-            .opacity(entry.url == nil ? 0.6 : 1)
         }
         .buttonStyle(.plain)
-        .disabled(entry.url == nil)
+        .help(entry.approvalSession == nil ? "" : "Open the request to approve \(entry.extensionLabel)")
         .accessibilityIdentifier("extension-entry-" + entry.id)
         .overlay(alignment: .topTrailing) {
             Button(action: togglePin) {
@@ -187,22 +214,34 @@ struct ExtensionPagePane: View {
             if let entry = catalog.entry(entryID) {
                 if let url = entry.url {
                     let controller = ExtensionPages.controller(for: entry)
-                    ExtensionPageHost(controller: controller, url: url, signIn: catalog.signIn)
-                        .overlay {
-                            if case .failed(let message) = controller.phase {
-                                ContentUnavailableView {
-                                    Label(entry.label, systemImage: "exclamationmark.triangle")
-                                } description: {
-                                    Text(message)
-                                } actions: {
-                                    Button("Reload") { controller.reload() }
+                    VStack(spacing: 0) {
+                        if !pane.pageFills { titleBand(entry, controller: controller) }
+                        ExtensionPageHost(controller: controller, url: url, signIn: catalog.signIn)
+                            .overlay {
+                                if case .failed(let message) = controller.phase {
+                                    ContentUnavailableView {
+                                        Label(entry.label, systemImage: "exclamationmark.triangle")
+                                    } description: {
+                                        Text(message)
+                                    } actions: {
+                                        Button("Reload") { controller.reload() }
+                                    }
+                                    .background(DesktopPalette.window)
                                 }
-                                .background(DesktopPalette.window)
                             }
-                        }
-                        .overlay(alignment: .topTrailing) { controls(entry) }
+                            .overlay(alignment: .topTrailing) {
+                                if pane.pageFills {
+                                    HStack(spacing: DesktopSpace.s) {
+                                        ExtensionSlowNote(phase: controller.phase, since: controller.waitingSince)
+                                        controls(entry)
+                                    }
+                                }
+                            }
+                    }
                 } else {
-                    gone(entry.label, entry.unavailable ?? "This page can't open right now.")
+                    gone(entry.label, entry.awaitsApproval && entry.approvalSession == nil
+                        ? "It needs your OK to open, and nothing has asked for it yet. On \(entry.hostName), approve it with agenthail extensions approve \(entry.extensionID)."
+                        : entry.unavailable ?? "This page can't open right now.")
                 }
             } else if catalog.list == nil {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -223,6 +262,25 @@ struct ExtensionPagePane: View {
                     .accessibilityHidden(true)
             }
         }
+    }
+
+    private func titleBand(_ entry: ExtensionEntry, controller: ExtensionPageController) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: DesktopSpace.s) {
+            Text(entry.label)
+                .font(.system(size: DesktopType.title, weight: .semibold))
+                .foregroundStyle(DesktopPalette.text)
+            Text("on \(entry.hostName)")
+                .font(.system(size: DesktopType.secondary))
+                .foregroundStyle(DesktopPalette.text2)
+            ExtensionSlowNote(phase: controller.phase, since: controller.waitingSince)
+            Spacer(minLength: DesktopSpace.s)
+            controls(entry)
+        }
+        .lineLimit(1)
+        .padding(.leading, DesktopSpace.l)
+        .frame(height: 44)
+        .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
+        .accessibilityIdentifier("extension-title")
     }
 
     private func controls(_ entry: ExtensionEntry) -> some View {
@@ -417,6 +475,34 @@ struct NewExtensionSheet: View {
             if let id = created.session?.id { started(id) }
         } catch {
             failure = error.localizedDescription
+        }
+    }
+}
+
+private struct ExtensionSlowNote: View {
+    let phase: ExtensionPageController.Phase
+    let since: Date?
+    @State private var slow = false
+
+    private var waiting: Bool { phase.waiting }
+
+    var body: some View {
+        Group {
+            if waiting && slow {
+                HStack(spacing: DesktopSpace.xs) {
+                    ProgressView().controlSize(.mini)
+                    Text(phase == .signingIn ? "Still signing in…" : "Still loading…")
+                }
+                .font(.system(size: DesktopType.secondary))
+                .foregroundStyle(DesktopPalette.text2)
+            }
+        }
+        .task(id: waiting) {
+            slow = false
+            guard waiting else { return }
+            let remaining = 3 - Date().timeIntervalSince(since ?? Date())
+            if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+            if !Task.isCancelled { slow = true }
         }
     }
 }

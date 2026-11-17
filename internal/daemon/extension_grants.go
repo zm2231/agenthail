@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -150,6 +151,34 @@ func (d *Daemon) askPersonToGrant(sessionID, kind, id, mountName string, key *pr
 	}
 	d.publishAsk(session.ID)
 	return actionFailed(http.StatusForbidden, "ask_the_person", "Only the person can do this. They were asked on their devices ("+ask.ID+"); it applies when they approve.")
+}
+
+func (d *Daemon) openApprovalAsks() map[string]extensionApprovalAsk {
+	asks := map[string]extensionApprovalAsk{}
+	g := d.extensions.grants
+	g.mu.Lock()
+	grants, err := g.read()
+	g.mu.Unlock()
+	if err != nil {
+		return asks
+	}
+	oldest := map[string]time.Time{}
+	for _, askID := range slices.Sorted(maps.Keys(grants)) {
+		grant := grants[askID]
+		if grant.Kind != extensionGrantYes {
+			continue
+		}
+		ask, found, err := d.Registry.Ask(askID)
+		if err != nil || !found || ask.State != registry.AskOpen {
+			continue
+		}
+		if at, held := oldest[grant.ID]; held && !ask.CreatedAt.Before(at) {
+			continue
+		}
+		oldest[grant.ID] = ask.CreatedAt
+		asks[grant.ID] = extensionApprovalAsk{ID: askID, SessionID: grant.SessionID}
+	}
+	return asks
 }
 
 // No session answers for the person here, not even one that may act for

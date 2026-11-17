@@ -28,6 +28,7 @@ func (d *Daemon) pageHandler(served *servedMount) http.Handler {
 		})
 	}
 	route("GET /_ah.js", d.extensionSDKHandler)
+	route("GET /x/_ah.js", d.extensionSDKHandler)
 	route("POST /a/{action}", d.extensionActionHandler)
 	route("GET /s", d.extensionSourcesHandler)
 	route("GET /events", d.extensionEventsHandler)

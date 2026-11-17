@@ -43,7 +43,7 @@ the API and may return a cleanup function, called before the next reload.
 | `ah.on(type, handler)` | Receives daemon events of `type`, or every event for `'*'`: `{id, type, timestamp, entityId, data}`, the same as `/api/v1/events`. Only an extension that holds `read.all` receives events. |
 | `ah.call(tool, args)` | Calls an Agenthail tool as the extension (below) and returns its result, or throws an error with `code` and `message`. A write gets a fresh `clientRequestId` unless one is given. |
 | `ah.tool({name, description, inputSchema, run})` | Offers a tool to agent sessions (below). |
-| `ah.fetch(mount, path, init)` | Requests `path` on the upstream of one of the extension's approved mounts, with the mount's key (below). `init` takes `method`, `headers` and `body`; a body that is not a string is sent as JSON. Returns `{status, ok, headers, text(), json(), bytes()}`, or throws an error with `code` and `message`. |
+| `ah.fetch(mount, path, init)` | Requests `path` on the upstream of one of the extension's approved mounts, with the mount's key (below). `init` takes `method`, `headers`, `body` and `signal`; a body that is not a string is sent as JSON. The request stops when `signal` fires (throwing code `aborted`), and after 45 s in any case (code `timeout`), so pass a source's `signal` to stop with its collection. Returns `{status, ok, headers, text(), json(), bytes()}`, or throws an error with `code` and `message`. |
 | `ah.badge(value, {mount})` | Sets the badge the apps show on the extension's entry, or with `mount` on that mount's entry. `value` is a whole number (0 clears it, above 9999 shows `9999+`), text of up to 8 characters, or `null` to clear it. Returns the badge as shown, or throws an error with `code` and `message`. The daemon keeps the latest value at once and publishes `extension.badge` `{id}` at most once every 2 seconds per extension, the last change always included. |
 | `ah.db` | The shared SQLite store (`node:sqlite` `DatabaseSync`, WAL), `~/.agenthail/extensions-data/store.db` |
 | `ah.table(name)` | `<id>_<name>` with dashes as underscores: the name an extension's own tables use |
@@ -333,10 +333,12 @@ script is how the placeholder gets into the app: while a key is named, the
 daemon adds `<script src="/_agenthail/signin.js">` to the app's HTML pages when
 the dashboard frames them or the person opens them directly, and serves the
 extension's script there. A script for an app that keeps its key in local
-storage can be one line:
+storage can be one line. It replaces any saved value that isn't the
+placeholder, because Agenthail's web views keep each page's storage, so a key
+saved there earlier would otherwise be sent forever:
 
 ```js
-if (!localStorage.getItem('apiKey')) localStorage.setItem('apiKey', 'agenthail-key');
+if (localStorage.getItem('apiKey') !== 'agenthail-key') localStorage.setItem('apiKey', 'agenthail-key');
 ```
 
 The extension's server reaches the app with `ah.fetch`, and the daemon makes

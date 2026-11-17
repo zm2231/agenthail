@@ -296,6 +296,14 @@ func TestAnExtensionServesItsPageOnItsOwnOriginOnlyToAuthorizedClientsAndNeverIt
 			t.Fatalf("%s answered %d", path, response.StatusCode)
 		}
 	}
+	sdk, want := f.page(t, http.MethodGet, "/_ah.js", "secret", nil)
+	alias, got := f.page(t, http.MethodGet, "/x/_ah.js", "secret", nil)
+	if sdk.StatusCode != http.StatusOK || alias.StatusCode != http.StatusOK || !strings.HasPrefix(alias.Header.Get("Content-Type"), sdk.Header.Get("Content-Type")) || !bytes.Equal(withoutCursor(got), withoutCursor(want)) {
+		t.Fatalf("a page that imports the SDK from /x/_ah.js got %d %.120q, want %d %.120q", alias.StatusCode, got, sdk.StatusCode, want)
+	}
+	if response, _ := f.page(t, http.MethodGet, "/x/_ah.js", "", nil); response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("/x/_ah.js without credentials answered %d", response.StatusCode)
+	}
 	for _, path := range []string{"/x/fixture/", "/x/_ah.js", "/x/fixture/s"} {
 		if _, body := f.request(t, http.MethodGet, path, "secret", nil); strings.Contains(string(body), "/_ah.js") || strings.Contains(string(body), `"sources"`) || strings.Contains(string(body), "changesAfter") {
 			t.Fatalf("the dashboard's origin still serves %s: %.200s", path, body)
@@ -613,4 +621,9 @@ func TestAnExtensionHostThatKeepsCrashingIsLoggedOnceAndAgainWhenItRecovers(t *t
 	if lines := failures(); len(lines) != 1 {
 		t.Fatalf("failures logged after recovery: %q", lines)
 	}
+}
+
+func withoutCursor(sdk []byte) []byte {
+	_, rest, _ := bytes.Cut(sdk, []byte("\n"))
+	return rest
 }

@@ -88,10 +88,17 @@ final class ExtensionPageController: NSObject, WKNavigationDelegate, WKUIDelegat
         case loading
         case shown
         case failed(String)
+
+        var waiting: Bool { self == .signingIn || self == .loading }
     }
 
     let entryID: String
-    private(set) var phase: Phase = .signingIn
+    private(set) var phase: Phase = .signingIn {
+        didSet {
+            if !phase.waiting { waitingSince = nil } else if !oldValue.waiting || waitingSince == nil { waitingSince = Date() }
+        }
+    }
+    @ObservationIgnored private(set) var waitingSince: Date? = Date()
     let webView: WKWebView
     @ObservationIgnored private(set) var target: URL?
     @ObservationIgnored private(set) var loadsStarted = 0

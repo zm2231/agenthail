@@ -105,12 +105,12 @@ END;`
 
 const catalogRetiredRecency = 24 * time.Hour
 
-const catalogNeededSessions = `SELECT session_id FROM message_queue WHERE status IN ('pending','inflight')
+var catalogNeededSessions = `SELECT session_id FROM message_queue WHERE status IN ('pending','inflight')
 	UNION SELECT a.session_id FROM coordinators c JOIN aliases a ON a.name=c.name WHERE c.host_id=''
 	UNION SELECT session_id FROM limit_resumes WHERE state!='released'
-	UNION SELECT session_id FROM asks WHERE origin='delivery' AND state='open'`
+	UNION ` + openPersonAskSessions
 
-const catalogUnretiredSessions = `SELECT session_id FROM catalog_sessions INDEXED BY catalog_sessions_unretired WHERE retired=0
+var catalogUnretiredSessions = `SELECT session_id FROM catalog_sessions INDEXED BY catalog_sessions_unretired WHERE retired=0
 	UNION ALL SELECT session_id FROM catalog_sessions WHERE +retired=1 AND session_id IN (` + catalogNeededSessions + `)`
 
 func sessionEnded(session surface.Session) bool {
@@ -126,7 +126,7 @@ func sessionEnded(session surface.Session) bool {
 // catalogRetireQuery looks each unretired row's session up by id. Its test
 // holds the plan to that: a session subquery that is not keyed by the row's
 // id runs once per row and scans every session each time.
-const catalogRetireQuery = `UPDATE catalog_sessions INDEXED BY catalog_sessions_unretired SET retired=1 WHERE retired=0 AND current=0
+var catalogRetireQuery = `UPDATE catalog_sessions INDEXED BY catalog_sessions_unretired SET retired=1 WHERE retired=0 AND current=0
 	AND EXISTS (SELECT 1 FROM sessions s WHERE s.id=catalog_sessions.session_id AND s.ended=1 AND s.pinned_at_ms=0 AND s.last_active_ms<?
 		AND (s.host_id<>'' OR (s.surface=? AND (catalog_sessions.misses=0 OR catalog_sessions.misses>=?)))
 		AND CASE WHEN s.parent_session_id='' THEN s.source NOT IN ('subAgent','exec')

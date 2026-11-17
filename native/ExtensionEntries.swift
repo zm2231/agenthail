@@ -20,6 +20,8 @@ struct ExtensionEntry: Identifiable, Equatable, Sendable {
     let badge: String?
     let url: URL?
     let unavailable: String?
+    var awaitsApproval = false
+    var approvalSession: String? = nil
 
     static let fallbackIcon = "puzzlepiece.extension"
 
@@ -53,14 +55,20 @@ enum ExtensionEntries {
                     hostID: hostID, hostName: hostName, extensionID: summary.id, extensionLabel: summary.label, kind: .mount(mount.name),
                     label: label(mount.app, or: mount.label), detail: distinct(summary.label, from: label(mount.app, or: mount.label)),
                     icon: icon(mount.app), order: mount.app?.order ?? 0,
-                    offered: mount.app != nil, badge: shown(mount.badge), url: url, unavailable: unavailable))
+                    offered: mount.app != nil, badge: shown(mount.badge), url: url, unavailable: unavailable,
+                    awaitsApproval: awaitsApproval(mount),
+                    approvalSession: awaitsApproval(mount) ? summary.approvalAsk.flatMap { $0.sessionId.isEmpty ? nil : $0.sessionId } : nil))
             }
         }
         return entries.sorted(by: hubOrder)
     }
 
+    static func awaitsApproval(_ mount: ExtensionMount) -> Bool {
+        mount.state == "pending" && (mount.error ?? "").isEmpty
+    }
+
     static func mountTarget(_ mount: ExtensionMount, origin: URL, hostName: String) -> (URL?, String?) {
-        if mount.state == "pending" && (mount.error ?? "").isEmpty { return (nil, "Waiting for approval on \(hostName).") }
+        if awaitsApproval(mount) { return (nil, "Needs your OK to open.") }
         guard mount.state == "serving" || !(mount.error ?? "").isEmpty else { return (nil, "This mount is \(mount.state).") }
         return target(port: mount.port, entry: mount.entry, published: mount.published, error: mount.error, origin: origin, hostName: hostName)
     }
@@ -130,6 +138,22 @@ final class ExtensionPins {
     func toggle(_ entry: ExtensionEntry) {
         if ids.contains(entry.id) { ids.remove(entry.id) } else { ids.insert(entry.id) }
         defaults.set(ids.sorted(), forKey: Self.key)
+    }
+}
+
+enum ExtensionSections {
+    struct State: Equatable {
+        let apps: Bool
+        let failed: Bool
+        let pending: Bool
+    }
+
+    static func shown(_ states: [State]) -> [Int] {
+        let anyApps = states.contains(where: \.apps)
+        return states.indices.filter { index in
+            let state = states[index]
+            return state.apps || state.failed || state.pending || (index == 0 && !anyApps)
+        }
     }
 }
 
@@ -212,6 +236,14 @@ final class ExtensionCatalog {
             again = false
             refresh()
         }
+    }
+
+    static func asksChanged(from previous: [SessionState], to current: [SessionState]) -> Bool {
+        openAsks(previous) != openAsks(current)
+    }
+
+    private static func openAsks(_ sessions: [SessionState]) -> Set<String> {
+        Set(sessions.flatMap { session in session.pendingAsks ?? session.pendingAskID.map { [$0] } ?? [] })
     }
 
     static func refreshes(for eventType: String) -> Bool {

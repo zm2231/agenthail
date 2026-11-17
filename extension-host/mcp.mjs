@@ -40,6 +40,8 @@ export async function callTool({ url, token }, name, args) {
   return result.structuredContent ?? {};
 }
 
+export const mountFetchDeadlineMs = 45_000;
+
 export async function fetchMount({ fetchURL, token }, mount, path, init = {}) {
   const headers = { ...(init.headers ?? {}) };
   let body = init.body;
@@ -47,12 +49,22 @@ export async function fetchMount({ fetchURL, token }, mount, path, init = {}) {
     body = JSON.stringify(body);
     if (!Object.keys(headers).some(name => name.toLowerCase() === 'content-type')) headers['content-type'] = 'application/json';
   }
-  const response = await fetch(fetchURL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({ mount, path, method: init.method ?? 'GET', headers, body: body ?? '' }),
-  });
-  const text = await response.text();
+  const deadline = AbortSignal.timeout(mountFetchDeadlineMs);
+  const signal = init.signal ? AbortSignal.any([init.signal, deadline]) : deadline;
+  let response, text;
+  try {
+    response = await fetch(fetchURL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ mount, path, method: init.method ?? 'GET', headers, body: body ?? '' }),
+      signal,
+    });
+    text = await response.text();
+  } catch (error) {
+    if (!signal.aborted) throw error;
+    const timedOut = deadline.aborted && !init.signal?.aborted;
+    throw new CallError({ code: timedOut ? 'timeout' : 'aborted', message: timedOut ? `${mount} did not answer within ${mountFetchDeadlineMs / 1000} s` : `the fetch from ${mount} was stopped` });
+  }
   if (!response.ok) throw refusalFrom(response.status, text);
   const reply = JSON.parse(text);
   const content = reply.bodyBase64 !== undefined ? Buffer.from(reply.bodyBase64, 'base64') : Buffer.from(reply.body ?? '', 'utf8');

@@ -21,14 +21,15 @@ and adds it to each request.
 
    ```ts
    export default function (ah) {
-     ah.source({ name: 'invoices', everySeconds: 300, collect: async () => {
-       const response = await ah.fetch('api', '/v1/invoices?limit=20');
+     ah.source({ name: 'invoices', everySeconds: 300, collect: async ({ signal }) => {
+       const response = await ah.fetch('api', '/v1/invoices?limit=20', { signal });
        if (!response.ok) throw new Error(`the API answered ${response.status}`);
        return response.json();
      } });
    }
    ```
 
+   Passing `signal` stops the request when Agenthail stops the collection.
    The page shows it with `source('invoices', ...)` from the template in
    `data-page.md`.
 
@@ -46,10 +47,12 @@ and adds it to each request.
 6. For an app the page opens through the mount that keeps its key in the
    browser, add `"signin": "assets/signin.js"` to the mount and make the
    script store the placeholder `agenthail-key` where the app looks for its
-   key, for example:
+   key, replacing whatever is saved there. Agenthail's web views keep each
+   page's storage, so a key saved there earlier would otherwise be sent
+   forever. For example:
 
    ```js
-   if (!localStorage.getItem('apiKey')) localStorage.setItem('apiKey', 'agenthail-key');
+   if (localStorage.getItem('apiKey') !== 'agenthail-key') localStorage.setItem('apiKey', 'agenthail-key');
    ```
 
 7. Once the person has approved it and named the key, verify:

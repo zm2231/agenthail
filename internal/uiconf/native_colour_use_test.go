@@ -41,7 +41,7 @@ var statusColours = map[string]statusColour{
 			"macOS/DecisionInboxPane.swift":     {2, "a decision holding up other sessions, and the request waiting in the card"},
 			"macOS/DecisionList.swift":          {1, "a decision holding up other sessions, on its row"},
 			"macOS/SidebarTiles.swift":          {1, "the count of decisions waiting on the person, on the Inbox tile, and an extension's badge, which marks what waits for the person"},
-			"macOS/ExtensionsPane.swift":        {1, "an extension's badge, which marks what waits for the person"},
+			"macOS/ExtensionsPane.swift":        {2, "an extension's badge and an app waiting for the person's approval, both marking what waits for the person"},
 			"iOS/PhoneProjectTiles.swift":       {1, "the count of decisions waiting on the person, on a project tile"},
 			"iOS/HolderPicker.swift":            {1, "a terminal must be picked before sending"},
 			"iOS/QueueTailRows.swift":           {1, "a message that was not delivered"},

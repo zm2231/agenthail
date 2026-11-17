@@ -16,6 +16,7 @@ struct ExtensionMount: Codable, Equatable, Sendable {
     var published: Bool?
     var app: ExtensionAppOffer?
     var badge: String?
+    var upstream: String?
 }
 
 struct ExtensionPage: Codable, Equatable, Sendable {
@@ -35,6 +36,12 @@ struct ExtensionSummary: Codable, Equatable, Sendable, Identifiable {
     var app: ExtensionAppOffer?
     var badge: String?
     var mounts: [ExtensionMount]?
+    var approvalAsk: ExtensionApprovalAsk?
+}
+
+struct ExtensionApprovalAsk: Codable, Equatable, Sendable {
+    let id: String
+    let sessionId: String
 }
 
 struct ExtensionsList: Codable, Equatable, Sendable {
