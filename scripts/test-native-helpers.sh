@@ -213,6 +213,7 @@ SOURCES=(
   macOS/SessionSidebarHeader.swift
   macOS/SessionTabs.swift
   macOS/UsageFocus.swift
+  macOS/InspectorSettingText.swift
   macOS/ShortcutStore.swift
   macOS/SlashCommand.swift
   macOS/SnapshotBudget.swift

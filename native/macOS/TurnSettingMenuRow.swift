@@ -11,22 +11,34 @@ struct TurnSettingMenuRow: View {
 
     var body: some View {
         GridRow {
-            Text(title ?? setting.chipName).foregroundStyle(DesktopPalette.text2)
+            Text(title ?? InspectorSettingText.title(setting))
+                .foregroundStyle(DesktopPalette.text2)
+                .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 2) {
-                Menu(setting.valueLabel) {
+                Menu {
                     Picker(setting.chipName, selection: selection) {
                         ForEach(choices, id: \.id) { option in
-                            Text(option.label).tag(option.id)
+                            Text(InspectorSettingText.label(option, in: setting)).tag(option.id)
                         }
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(InspectorSettingText.value(setting))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: DesktopType.caption - 2, weight: .semibold))
+                    }
+                    .foregroundStyle(disabled ? DesktopPalette.text2 : DesktopPalette.accentText)
+                    .contentShape(Rectangle())
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
                 .fixedSize()
                 .disabled(disabled)
-                .accessibilityLabel(setting.chipAccessibilityLabel)
-                if let note = setting.appliesNote {
+                .accessibilityLabel("\(title ?? InspectorSettingText.title(setting)), \(InspectorSettingText.value(setting))")
+                if let note = InspectorSettingText.note(setting) {
                     Text(note)
                         .font(.system(size: DesktopType.meta))
                         .foregroundStyle(DesktopPalette.text2)
