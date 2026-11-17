@@ -4,6 +4,20 @@ const shortList = 25;
 const expanded = new Set();
 let etag = "";
 let view = null;
+let titles = new Map();
+
+const priorityWords = { P0: "Urgent", P1: "High priority" };
+
+function plain(text) {
+  if (!text) return text;
+  return text.replace(/\b[A-Za-z0-9][A-Za-z0-9-]*-W\d+\b/g, (id) => (titles.has(id) ? `“${titles.get(id)}”` : id));
+}
+
+function learnTitles() {
+  titles = new Map();
+  const rows = [...Object.values(view.work).flat(), ...view.done, ...view.waiting.map((wait) => wait.work).filter(Boolean)];
+  for (const row of rows) if (row.id && row.title) titles.set(row.id, row.title);
+}
 let reading = false;
 let again = false;
 
@@ -46,28 +60,28 @@ function day(value) {
 function itemLines(row, extra = []) {
   const item = node("li");
   item.dataset.id = row.id;
-  item.append(node("div", "title", row.title));
-  if (row.what) item.append(node("div", "what", row.what));
+  item.title = row.id;
+  item.append(node("div", "title", plain(row.title)));
+  if (row.what) item.append(node("div", "what", plain(row.what)));
   if (row.for) {
     const purpose = node("div", "for", "For: ");
-    purpose.append(node("q", "", row.for));
+    purpose.append(node("q", "", plain(row.for)));
     item.append(purpose);
   }
   for (const line of extra) if (line) item.append(line);
   const meta = node("div", "meta");
   if (row.holder) meta.append(node("span", "holder", row.holder));
-  if (row.priority) meta.append(node("span", `priority ${row.priority.toLowerCase()}`, row.priority));
+  if (priorityWords[row.priority]) meta.append(node("span", `priority ${row.priority.toLowerCase()}`, priorityWords[row.priority]));
   if (row.type && row.type !== "task") meta.append(node("span", "type", row.type));
   if (row.since) meta.append(node("span", "since", ago(row.since)));
-  meta.append(node("span", "id", row.id));
-  item.append(meta);
+  if (meta.childElementCount) item.append(meta);
   return item;
 }
 
 function rowFor(state, row) {
-  if (state === "blocked") return itemLines(row, [row.note && node("div", "note", `Blocked: ${row.note}`)]);
+  if (state === "blocked") return itemLines(row, [row.note && node("div", "note", `Blocked: ${plain(row.note)}`)]);
   if (state === "parked" && row.parked) {
-    const why = [parkedAs[row.parked.kind] || "Set aside", row.parked.why].filter(Boolean).join(": ");
+    const why = [parkedAs[row.parked.kind] || "Set aside", plain(row.parked.why)].filter(Boolean).join(": ");
     const revisit = row.parked.revisit ? ` (look again ${day(row.parked.revisit)})` : "";
     return itemLines(row, [node("div", "note", why + revisit)]);
   }
@@ -105,23 +119,24 @@ function waitingRow(wait) {
   const asked = [wait.from && `Asked by ${wait.from}`, wait.deadline && `answer by ${day(wait.deadline)}`].filter(Boolean).join(", ");
   if (asked) lines.push(node("div", "for", asked));
   if (wait.work) {
-    return itemLines({ ...wait.work, holder: "" }, [node("div", "note", wait.question), ...lines]);
+    return itemLines({ ...wait.work, holder: "" }, [node("div", "note", plain(wait.question)), ...lines]);
   }
   const item = node("li");
   item.dataset.id = wait.id;
-  item.append(node("div", "title", wait.question), ...lines);
+  item.append(node("div", "title", plain(wait.question)), ...lines);
   return item;
 }
 
 function doneRow(row) {
   return itemLines({ ...row, since: "" }, [
-    row.note && node("div", "note", row.note),
+    row.note && node("div", "note", plain(row.note)),
     node("div", "for", [`Done ${ago(row.since)}`, row.reviewer && `checked by ${row.reviewer}`].filter(Boolean).join(", ")),
   ]);
 }
 
 function render() {
   if (!view) return;
+  learnTitles();
   const parts = [];
   if (view.waiting.length) {
     const block = section("waiting", "Waiting on you", view.waiting, waitingRow);
