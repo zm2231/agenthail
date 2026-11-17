@@ -3,7 +3,13 @@ import AppKit
 final class ComposerNSTextView: NSTextView {
     static let font = NSFont.systemFont(ofSize: DesktopType.prose)
 
-    var placeholder = ""
+    var placeholder = "" {
+        didSet {
+            guard placeholder != oldValue else { return }
+            setAccessibilityPlaceholderValue(placeholder)
+            needsDisplay = true
+        }
+    }
     var command: ((StoredShortcut) -> ComposerCommand?)?
     var onCommand: ((ComposerCommand) -> Bool)?
     var onUpFromFirstLine: (() -> Bool)?

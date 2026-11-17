@@ -196,7 +196,34 @@ struct ComposerTextViewTest {
         check(ComposerReturn.continuation(in: "", caret: 0) == nil, "an empty draft has no continuation")
 
         outsideTextEndsComposition()
+        placeholderRedrawsForNextSession()
         print("composer text view: ok")
+    }
+
+    @MainActor
+    static func placeholderRedrawsForNextSession() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        let textView = ComposerNSTextView.make()
+        window.contentView = textView
+        textView.placeholder = "Message @closed-tab"
+        textView.load("")
+        func drawn() {
+            for _ in 0..<3 {
+                window.display()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            }
+            window.display()
+        }
+        drawn()
+        check(!window.viewsNeedDisplay, "the composer has drawn its placeholder")
+
+        textView.placeholder = "Message @next-tab"
+        textView.load("")
+        check(window.viewsNeedDisplay, "an empty composer redraws when the next session's placeholder replaces the closed tab's")
+        check(textView.accessibilityPlaceholderValue() == "Message @next-tab", "the spoken placeholder names the next session: \(String(describing: textView.accessibilityPlaceholderValue()))")
+        drawn()
+        textView.placeholder = "Message @next-tab"
+        check(!window.viewsNeedDisplay, "setting the same placeholder again draws nothing")
     }
 
     @MainActor
