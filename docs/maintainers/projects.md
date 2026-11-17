@@ -141,6 +141,36 @@ Agenthail tools from the project's sessions that Agenthail did not start (see
   setting of a host's own folder stays on that host. A project move carries
   the old key's settings to the new key, except one the new key already has.
 
+## Tile order
+
+The person's order of the project tiles, and which are pinned, is kept by a
+daemon so every app showing that daemon's projects shows the same row. It lives
+on the computer each app talks to first: the Mac app's own computer, the
+phone's first paired computer, and the computer serving the web dashboard. A
+paired host's daemon keeps its own order for its own dashboard; orders are not
+shared between hosts.
+
+- The snapshot (the base snapshot too) carries
+  `"tileOrder": {"order": [...], "pinned": [...], "revision": 3}`. `order` and
+  `pinned` are project ids as that daemon names them; a paired host's folder
+  is `<host>::implicit:...`. Ids the daemon does not know are kept. Revision
+  `0` with empty lists means no app has written one yet.
+- `PUT /api/v1/projects/tiles` with `{"order": [...], "pinned": [...], "revision": 3}`
+  replaces both lists when `revision` is the current one, needs the `control`
+  scope, and answers `{"tileOrder": {...}}` with the next revision. Against an
+  older revision it answers `409 conflict` with the current `tileOrder`; the
+  app makes the person's change again on that order and sends it once more.
+  `revision` is required. A write publishes `state.changed` with
+  `"source": "tiles"`, and `GET` returns the current order.
+- Each app keeps the last order it read and applies a change at once. A change
+  made while the daemon cannot be reached is sent when it answers again, and
+  the later write wins. The first app to find no order sends its own: the Mac
+  its existing order, any other app the activity ranking it shows. The phone
+  names its first computer's own folders `<host>::<id>`, as it does
+  everywhere, and sends them back in the computer's names.
+- Moving a project to a new key keeps its tile's place and pin under the new key.
+- The order is stored in `project_tiles`.
+
 ## Linked projects
 
 A link joins one project into another, so a fork and its upstream, or a
