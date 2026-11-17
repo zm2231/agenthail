@@ -5,16 +5,15 @@ import { orderedSessions } from "./session-order.js";
 import { backgroundWaiting, presenceLabel, presenceTone } from "./presence.js";
 import { displayName } from "./session-labels.js";
 import { refreshDecisions, renderInbox } from "./inbox.js";
-import { currentStops } from "./decision-card.js";
-import { overviewLine, overviewWorking, workingNow } from "./overview-counts.js";
+import { workingNow } from "./overview-counts.js";
+import { renderOverviewLine } from "./overview-line.js";
 
 export { renderLeadReplacements } from "./inbox.js";
 
 export function renderOverview() {
   const { surfaces, sessions } = app.state;
-  const working = overviewWorking(app.sessionOrder?.current?.view?.summary, sessions);
   $("#daemon-status").textContent = app.state.daemon?.running ? "Connected" : "Not running";
-  $("#daemon-detail").textContent = overviewLine({ daemon: app.state.daemon, surfaces, sessions, working, needsYou: currentStops().count });
+  renderOverviewLine();
   $("#surface-cards").innerHTML =
     surfaces
       .map((surface) => {

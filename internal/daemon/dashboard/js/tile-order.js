@@ -39,32 +39,37 @@ async function put({ order, pinned, revision }) {
 
 const same = (a, b) => JSON.stringify([a.order, [...a.pinned].sort()]) === JSON.stringify([b.order, [...b.pinned].sort()]);
 
-async function send(change) {
+let pending = [];
+
+function replayed(base) {
+  return pending.reduce((arrangement, change) => ({ ...arrangement, ...applyTileChange(arrangement, change, arrange(arrangement)) }), base);
+}
+
+async function send() {
   if (!heard || sending) return;
   sending = true;
-  let replay = change;
   let retried = false;
   try {
     for (;;) {
       const sent = saved;
+      const included = pending.length;
       const reply = await put(sent);
       if (reply.saved) {
-        if (!same(saved, sent)) {
-          saved = { ...saved, revision: reply.saved.revision };
-          replay = null;
-          continue;
-        }
-        save({ ...saved, revision: reply.saved.revision, unsent: false });
+        pending = pending.slice(included);
+        saved = { ...saved, revision: reply.saved.revision };
+        if (!same(saved, sent)) continue;
+        save({ ...saved, unsent: false });
         return;
       }
       const current = reply.stale;
-      if (retried) {
+      if (retried || !saved.unsent) {
+        pending = [];
         save({ order: current.order, pinned: current.pinned, revision: current.revision, unsent: false });
         return;
       }
       retried = true;
       const base = { order: current.order, pinned: current.pinned };
-      save({ ...(replay ? applyTileChange(base, replay, arrange(base)) : saved), revision: current.revision, unsent: true });
+      save({ ...(pending.length ? replayed(base) : saved), revision: current.revision, unsent: true });
     }
   } catch {
   } finally {
@@ -90,7 +95,7 @@ export function adoptTileOrder(remote) {
   if (sending || (!saved.unsent && remote.revision < saved.revision)) return;
   if (saved.unsent || (remote.revision === 0 && saved.order.length)) {
     saved = { ...saved, revision: remote.revision };
-    send(null);
+    send();
   } else if (remote.revision !== saved.revision || !same(remote, saved)) {
     save({ order: remote.order || [], pinned: remote.pinned || [], revision: remote.revision, unsent: false });
   }
@@ -99,12 +104,13 @@ export function adoptTileOrder(remote) {
 export function seedTileOrder(ids) {
   if (saved.order.length || !ids.length) return;
   save({ ...saved, order: ids });
-  if (heard && saved.revision === 0) send(null);
+  if (heard && saved.revision === 0) send();
 }
 
 export function changeTiles(change, arranged) {
   const next = applyTileChange(saved, change, arranged);
   if (same(next, saved)) return Promise.resolve();
+  pending.push(change);
   save({ ...next, revision: saved.revision, unsent: true });
-  return send(change);
+  return send();
 }

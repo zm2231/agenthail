@@ -61,6 +61,7 @@ final class TileOrderStore {
     @ObservationIgnored private var revision: Int64
     @ObservationIgnored private var unsent: Bool
     @ObservationIgnored private var sending = false
+    @ObservationIgnored private var pending: [TileChange] = []
     @ObservationIgnored private var heard = false
     @ObservationIgnored private var write: (@Sendable (TileOrderState) async throws -> TileWrite)?
     @ObservationIgnored private var ids = IDs()
@@ -95,14 +96,15 @@ final class TileOrderStore {
     func seed(_ ids: [String]) {
         guard arrangement.order.isEmpty, !ids.isEmpty else { return }
         save(TileArrangement(order: ids, pinned: arrangement.pinned), unsent: unsent)
-        if heard && revision == 0 { send(replaying: nil) }
+        if heard && revision == 0 { send() }
     }
 
     func change(_ change: TileChange, arranged: [String]) {
         let next = arrangement.applying(change, arranged: arranged)
         guard next != arrangement else { return }
+        pending.append(change)
         save(next, unsent: true)
-        send(replaying: change)
+        send()
     }
 
     func adopt(_ remote: TileOrderState?, ids: IDs = IDs(), write: @escaping @Sendable (TileOrderState) async throws -> TileWrite) {
@@ -113,36 +115,35 @@ final class TileOrderStore {
         guard !sending, unsent || remote.revision >= revision else { return }
         if unsent || remote.revision == 0 && !arrangement.order.isEmpty {
             revision = remote.revision
-            send(replaying: nil)
+            send()
         } else if remote.revision != revision || inward(remote) != arrangement {
             take(remote)
         }
     }
 
-    private func send(replaying change: TileChange?) {
+    private func send() {
         guard heard, let write, !sending else { return }
         sending = true
         Task {
-            var replay = change
             var retried = false
             while true {
                 let sent = arrangement
+                let included = pending.count
                 do {
                     switch try await write(outward(sent)) {
                     case .saved(let saved):
+                        pending.removeFirst(min(included, pending.count))
                         revision = saved.revision
-                        guard arrangement == sent else {
-                            replay = nil
-                            continue
-                        }
+                        guard arrangement == sent else { continue }
                         save(arrangement, unsent: false)
-                    case .stale(let current) where retried:
+                    case .stale(let current) where retried || !unsent:
+                        pending = []
                         take(current)
                     case .stale(let current):
                         retried = true
-                        let base = inward(current)
                         revision = current.revision
-                        save(replay.map { base.applying($0, arranged: arrange(base)) } ?? arrangement, unsent: true)
+                        let base = inward(current)
+                        save(pending.isEmpty ? arrangement : pending.reduce(base) { $0.applying($1, arranged: arrange($0)) }, unsent: true)
                         continue
                     }
                 } catch {}

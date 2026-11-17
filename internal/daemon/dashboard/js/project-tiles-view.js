@@ -49,12 +49,14 @@ export function renderTiles() {
   const menu = more.length
     ? `<label class="project-tile${moreSelected ? " active" : ""}" title="${more.length} more ${more.length === 1 ? "project" : "projects"}"><span class="tile-mark">…${moreCount ? `<span class="tile-badge">${moreCount}</span>` : ""}</span><span class="tile-name">+${more.length}</span><select data-scope-more aria-label="More projects"><option value="">More projects</option>${options}</select></label>`
     : "";
-  const focused = row.contains(document.activeElement) ? document.activeElement.dataset.scope : undefined;
+  const held = globalThis.document?.activeElement;
+  const active = held && row.contains?.(held) ? held : null;
+  const focused = active?.matches("[data-scope-more]") ? "select[data-scope-more]" : active?.dataset.scope !== undefined ? `button[data-scope="${CSS.escape(active.dataset.scope)}"]` : null;
   row.innerHTML = tile("inbox", "▤", "Inbox", stops.count, scope === "inbox")
     + shown.map((project) => tile(project.id, escape(tileLetter(project.displayName || project.id)), project.displayName || project.id, counts[project.id] || 0, scope === project.id, projectColour(projectColourID(project.id, owner)), true)).join("")
     + menu
     + tile("all", "≡", "All", 0, scope === "all");
-  if (focused) row.querySelector(`button[data-scope="${CSS.escape(focused)}"]`)?.focus();
+  if (focused) (row.querySelector(focused) || row.querySelector("select[data-scope-more]"))?.focus();
 }
 
 export function setScope(scope) {

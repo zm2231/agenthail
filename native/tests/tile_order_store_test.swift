@@ -22,9 +22,11 @@ struct TileArrangementVectors: Decodable {
 actor FakeDaemon {
     var state = TileOrderState(order: [], pinned: [], revision: 0)
     var offline = false
+    var held = false
     var writes: [TileOrderState] = []
 
-    func put(_ sent: TileOrderState) throws -> TileWrite {
+    func put(_ sent: TileOrderState) async throws -> TileWrite {
+        while held { try await Task.sleep(nanoseconds: 2_000_000) }
         if offline { throw URLError(.notConnectedToInternet) }
         writes.append(sent)
         guard sent.revision == state.revision else { return .stale(state) }
@@ -34,6 +36,7 @@ actor FakeDaemon {
 
     func set(_ next: TileOrderState) { state = next }
     func go(offline: Bool) { self.offline = offline }
+    func hold(_ held: Bool) { self.held = held }
 }
 
 @main
@@ -136,6 +139,38 @@ struct TileOrderStoreTest {
             let sent = try await settle { await daemon.state.revision == 2 }
             let named = await daemon.state
             check(sent && named.order == ["implicit:/work", "other::implicit:/srv", "repo:github.com/example/app"], "and sends them back in the computer's own names: \(named)")
+        }
+
+        try await withStore { defaults, suite in
+            defaults.set(["c", "a", "b"], forKey: "projectTileOrder")
+            let daemon = FakeDaemon()
+            await daemon.set(TileOrderState(order: ["b", "c", "a"], pinned: ["a"], revision: 1))
+            let store = TileOrderStore(defaults: defaults, key: suite, legacy: (order: "projectTileOrder", pinned: "projectTilePins"))
+            store.adopt(TileOrderState(order: [], pinned: [], revision: 0)) { try await daemon.put($0) }
+            _ = try await settle { await daemon.writes.count == 1 }
+            _ = try await settle { store.arrangement.order == ["b", "c", "a"] }
+            let after = await daemon.state
+            let writes = await daemon.writes.count
+            check(after.revision == 1 && writes == 1, "a seed that lost to another app's writes nothing more: \(after) after \(writes) writes")
+            check(store.arrangement == TileArrangement(order: ["b", "c", "a"], pinned: ["a"]), "and takes the order that won: \(store.arrangement)")
+        }
+
+        try await withStore { defaults, suite in
+            let daemon = FakeDaemon()
+            await daemon.set(TileOrderState(order: ["a", "b", "c"], pinned: [], revision: 5))
+            let store = TileOrderStore(defaults: defaults, key: suite)
+            _ = store.tiles(projects, limit: 3)
+            store.adopt(await daemon.state) { try await daemon.put($0) }
+            await daemon.hold(true)
+            store.change(.pin("c"), arranged: ["a", "b", "c"])
+            store.change(.move("b", before: "a"), arranged: ["c", "a", "b"])
+            check(store.arrangement == TileArrangement(order: ["c", "b", "a"], pinned: ["c"]), "both edits show at once: \(store.arrangement)")
+            await daemon.set(TileOrderState(order: ["a", "c", "b"], pinned: [], revision: 6))
+            await daemon.hold(false)
+            let landed = try await settle { await daemon.state.revision == 7 }
+            let final = await daemon.state
+            check(landed && final.order == ["c", "b", "a"] && final.pinned == ["c"], "both edits are made again on the order another app wrote meanwhile: \(final)")
+            check(store.arrangement == TileArrangement(order: ["c", "b", "a"], pinned: ["c"]), "and shown: \(store.arrangement)")
         }
 
         print("tile order store: ok")

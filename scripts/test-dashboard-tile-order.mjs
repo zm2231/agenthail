@@ -10,6 +10,7 @@ function storage(initial = {}) {
 function daemon(state) {
   const server = { state, writes: [] };
   server.fetch = async (path, { method, body }) => {
+    while (server.held) await new Promise((resolve) => setTimeout(resolve, 2));
     assert.equal(path, "/api/v1/projects/tiles");
     assert.equal(method, "PUT");
     const sent = JSON.parse(body);
@@ -79,6 +80,32 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   await settle();
   assert.deepEqual(plain(server.state.pinned), ["c"], "it is sent when the daemon answers, and the later write wins");
   assert.equal(server.state.revision, 4);
+}
+
+{
+  const server = daemon({ order: ["b", "c", "a"], pinned: ["a"], revision: 1 });
+  const page = await store({ "agenthail.tileOrder": JSON.stringify({ order: ["c", "a", "b"], pinned: [], revision: 0 }) }, server);
+  page.adoptTileOrder({ order: [], pinned: [], revision: 0 });
+  for (let i = 0; i < 5; i++) await settle();
+  assert.equal(server.writes.length, 1, "a seed that lost to another app writes nothing more");
+  assert.equal(server.state.revision, 1);
+  assert.deepEqual(plain([page.tileOrder().order, page.tileOrder().pinned]), [["b", "c", "a"], ["a"]], "and takes the order that won");
+}
+
+{
+  const server = daemon({ order: ["a", "b", "c"], pinned: [], revision: 5 });
+  const page = await store({}, server);
+  page.adoptTileOrder(server.state);
+  page.tilesArrangedBy(({ order, pinned }) => [...order.filter((id) => pinned.includes(id)), ...order.filter((id) => !pinned.includes(id))]);
+  server.held = true;
+  const first = page.changeTiles({ kind: "pin", id: "c" }, ["a", "b", "c"]);
+  page.changeTiles({ kind: "move", id: "b", target: "a" }, ["c", "a", "b"]);
+  assert.deepEqual(plain([page.tileOrder().order, page.tileOrder().pinned]), [["c", "b", "a"], ["c"]], "both edits show at once");
+  server.state = { order: ["a", "c", "b"], pinned: [], revision: 6 };
+  server.held = false;
+  await first;
+  assert.deepEqual(plain(server.state), { order: ["c", "b", "a"], pinned: ["c"], revision: 7 }, "both edits are made again on the order another app wrote meanwhile");
+  assert.deepEqual(plain([page.tileOrder().order, page.tileOrder().pinned]), [["c", "b", "a"], ["c"]], "and shown");
 }
 
 console.log("dashboard tile order tests passed");
