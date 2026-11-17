@@ -72,9 +72,6 @@ struct SessionCommands: Commands {
                 Button("Previous Tab") { pane.stepTab(-1) }
                     .keyboardShortcut(shortcuts.keyboardShortcut(.previousTab))
                     .disabled(pane.tabs.tabs.count < 2)
-                Button("Keep Tab Open") { if let id = pane.tabs.preview { pane.keepTab(id) } }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(.keepTab))
-                    .disabled(pane.tabs.preview == nil || pane.tabs.preview != pane.tabs.active)
             }
             Divider()
             Button("Talk to Orchestrator…") { openVoice("") }

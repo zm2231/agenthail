@@ -15,13 +15,24 @@ final class NewSessionDraft: ObservableObject {
     @Published private(set) var submitted: String?
     @Published private(set) var canStartAgain = false
     private var held: [String] = []
+    private var filled: SessionLaunchForm
 
     init(model: AgenthailModel, selected: SessionState?) {
         self.model = model
         origin = selected
         let hosts = CreationHostPicker(daemon: model.daemon, selectedSession: selected)
         self.hosts = hosts
-        form = SessionLaunchForm(host: hosts.hostQuery)
+        let form = SessionLaunchForm(host: hosts.hostQuery)
+        self.form = form
+        filled = form
+    }
+
+    var untouched: Bool { form == filled && held.isEmpty && !starting }
+
+    private func fill(_ change: (inout SessionLaunchForm) -> Void) {
+        let wasUntouched = form == filled
+        change(&form)
+        if wasUntouched { filled = form }
     }
 
     var launchers: [LauncherOption] {
@@ -71,7 +82,8 @@ final class NewSessionDraft: ObservableObject {
 
     func daemonChanged() {
         hosts.update(daemon: model.daemon)
-        if form.host != hosts.hostQuery { form.switchHost(to: hosts.hostQuery, folder: "") }
+        let host = hosts.hostQuery
+        if form.host != host { fill { $0.switchHost(to: host, folder: "") } }
     }
 
     func selectHost(_ id: String) {
@@ -81,10 +93,14 @@ final class NewSessionDraft: ObservableObject {
         error = nil
     }
 
-    func place(host: String?, folder: String) {
+    func place(host: String?, folder: String, byDefault: Bool = false) {
         _ = hosts.select(host ?? "")
-        form.switchHost(to: hosts.hostQuery, folder: folder)
-        form.folder = folder
+        let query = hosts.hostQuery
+        let change: (inout SessionLaunchForm) -> Void = { form in
+            form.switchHost(to: query, folder: folder)
+            form.folder = folder
+        }
+        if byDefault { fill(change) } else { change(&form) }
         modelError = nil
         error = nil
     }
@@ -95,8 +111,12 @@ final class NewSessionDraft: ObservableObject {
             let options = try await model.creationOptions(host: hosts.hostQuery)
             try Task.checkCancellation()
             hosts.receive(options: options, for: generation)
-            if !agents.contains(form.agent), let first = agents.first { form.switchAgent(to: first) }
-            if form.folder.isEmpty { form.folder = hosts.defaultFolder(selected: origin) }
+            let agents = agents
+            let folder = hosts.defaultFolder(selected: origin)
+            fill { form in
+                if !agents.contains(form.agent), let first = agents.first { form.switchAgent(to: first) }
+                if form.folder.isEmpty { form.folder = folder }
+            }
             async let pick: Void = loadRootPick(options, for: generation)
             await loadRootUsage(options, for: generation)
             await pick

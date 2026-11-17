@@ -54,9 +54,11 @@ type SessionViewProject struct {
 	active             bool
 }
 
+// A family waiting on the person counts as needing them, never as working.
 type SessionViewSummary struct {
 	QueuedMessages    int `json:"queuedMessages"`
 	AttentionFamilies int `json:"attentionFamilies"`
+	WorkingFamilies   int `json:"workingFamilies"`
 }
 
 type SessionViewSurface struct {

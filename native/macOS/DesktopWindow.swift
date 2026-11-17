@@ -237,7 +237,7 @@ struct SessionSidebar: View {
                     }
                     }
                     if (showsFlat ? tree.flat.isEmpty : scopedProjects(tree).isEmpty && projectsWithoutSessions(tree).isEmpty) && !hasMore {
-                        Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
+                        Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is working." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
                             .font(.system(size: DesktopType.body))
                             .foregroundStyle(DesktopPalette.text2)
                             .padding(.horizontal, DesktopSpace.s)

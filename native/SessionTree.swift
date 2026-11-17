@@ -1,7 +1,7 @@
 import Foundation
 
 enum SessionFilter: String, CaseIterable, Identifiable {
-    case running = "Running"
+    case running = "Working"
     case recent = "Recent"
     case all = "All"
     case archived = "Archived"

@@ -20,8 +20,7 @@ struct SidebarRowActions {
 
     private var current: SessionState { model.session(shown.id) ?? shown }
 
-    func select(keep: Bool) { pane.select(shown.id, keep: keep) }
-    func keepTab() { pane.keepTab(shown.id) }
+    func select() { pane.select(shown.id) }
     func rename() { pane.renamingSession = current }
     func adopt() { pane.adoptingSession = current }
     func move() { pane.movingSession = current }

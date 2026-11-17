@@ -13,7 +13,7 @@ struct SidebarSessionRow: View, @MainActor Equatable {
     var body: some View {
         let session = state.session
         Button {
-            actions.select(keep: NSEvent.modifierFlags.contains(.command))
+            actions.select()
         } label: {
             SessionRowView(session: session, title: state.title, family: state.family, needsYou: state.needsYou, finishedUnseen: state.finishedUnseen)
                 .padding(.vertical, DesktopSpace.xs)
@@ -24,7 +24,6 @@ struct SidebarSessionRow: View, @MainActor Equatable {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .simultaneousGesture(TapGesture(count: 2).onEnded { actions.keepTab() })
         .accessibilityAddTraits(state.selected ? .isSelected : [])
         .contextMenu {
             Button("Open in New Window") { openWindow(id: "session", value: session.id) }

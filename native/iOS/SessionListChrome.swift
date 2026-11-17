@@ -131,7 +131,7 @@ struct SessionScopeChips: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(filter.rawValue), \(count)")
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("scope-" + filter.rawValue.lowercased())
+        .accessibilityIdentifier("scope-" + String(describing: filter))
     }
 }
 

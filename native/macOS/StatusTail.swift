@@ -22,7 +22,7 @@ struct StatusTail: View {
     }
 
     private var itemsState: StatusItemsState {
-        let shown = items.filter { $0 != "usage" }
+        let shown = items.filter { $0 != "usage" && ($0 != "needs-you" || !pane.sidebarOnScreen) }
         return StatusItemsState(
             items: shown,
             short: density == .icons,

@@ -213,7 +213,7 @@ final class AgenthailModel {
         subagentIDs = knownSessions.reduce(into: [:]) { ids, row in
             if let parent = row.subagent?.parentId { ids[parent, default: []].append(row.id) }
         }
-        workingCount = knownSessions.filter { $0.archived != true && SessionDisplayKind.of($0) == .working }.count
+        workingCount = currentView?.summary?.workingFamilies ?? knownSessions.filter { $0.archived != true && SessionDisplayKind.of($0) == .working }.count
         sessionAttention = SessionAttention.of(knownSessions)
         let rows = Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let shown = orderHold.shown(list: listView, current: currentView, rows: rows)
@@ -468,6 +468,8 @@ final class AgenthailModel {
         }
     }
 
+    func hasDraft(_ sessionID: String) -> Bool { drafts[sessionID]?.isEmpty == false }
+
     func draft(for sessionID: String) -> ComposerDraft {
         if let draft = drafts[sessionID] { return draft }
         let draft = ComposerDraft()
@@ -572,7 +574,7 @@ final class AgenthailModel {
         if started {
             mainPane.showStarted(session.id)
         } else {
-            (pane ?? mainPane).select(session.id, keep: true)
+            (pane ?? mainPane).select(session.id)
         }
     }
 
