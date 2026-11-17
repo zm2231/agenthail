@@ -23,7 +23,7 @@ struct AccentContrastTest {
             }
             for target in [4.5, 7] {
                 let pair = AccentContrast.prominent(accent, target: target)
-                precondition(AccentContrast.contrast(pair.ink, pair.fill) >= target, "\(name) prominent label at \(target)")
+                precondition(AccentContrast.contrast(pair.ink, RGB(hex: pair.fill.hex)) >= target, "\(name) prominent label at \(target)")
             }
             let foreground = AccentContrast.foreground(on: accent)
             precondition(AccentContrast.contrast(foreground, accent) >= 3, "\(name) foreground")
@@ -32,9 +32,9 @@ struct AccentContrastTest {
         precondition(AccentContrast.readable(blue, on: dark, dark: true, target: 4.5) != blue || AccentContrast.contrast(blue, RGB(hex: 0x232427)) >= 4.5)
         let alreadyReadable = RGB(hex: 0x1A4FA0)
         precondition(AccentContrast.readable(alreadyReadable, on: light, dark: false, target: 4.5) == alreadyReadable, "readable accents stay unchanged")
-        for hex: UInt32 in [0x005FC6, 0x4C9DFF, 0x777777, 0x2E9E8A] {
+        for hex: UInt32 in [0x005FC6, 0x4C9DFF, 0x777777, 0x2E9E8A, 0x4D8B29] {
             let pair = AccentContrast.prominent(RGB(hex: hex), target: 7)
-            precondition(AccentContrast.contrast(pair.ink, pair.fill) >= 7, "the default and mid accents reach 7 with increased contrast")
+            precondition(AccentContrast.contrast(pair.ink, RGB(hex: pair.fill.hex)) >= 7, "the default and mid accents reach 7 with increased contrast")
         }
         precondition(AccentContrast.prominent(RGB(hex: 0x4C9DFF), target: 4.5).fill == RGB(hex: 0x4C9DFF), "a fill already readable stays unchanged")
         precondition(RGB(hex: 0x4C9DFF).hex == 0x4C9DFF)

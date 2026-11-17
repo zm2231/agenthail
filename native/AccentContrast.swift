@@ -58,6 +58,13 @@ enum AccentContrast {
 
     static func prominent(_ accent: RGB, target: Double) -> (fill: RGB, ink: RGB) {
         let ink = foreground(on: accent)
-        return (readable(accent, on: [ink], dark: ink == .black, target: target), ink)
+        let toward = ink == .black ? RGB.white : RGB.black
+        var fill = accent
+        var amount = 0.0
+        while amount < 1, contrast(ink, fill) < target {
+            amount = min(1, amount + 0.05)
+            fill = RGB(hex: accent.mixed(with: toward, by: amount).hex)
+        }
+        return (fill, ink)
     }
 }
