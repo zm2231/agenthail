@@ -5,6 +5,7 @@ struct SidebarTiles: View {
 
     var model: AgenthailModel
     var pane: SessionPane
+    var tileOrder = ProjectTileOrder.shared
 
     var body: some View {
         let stops = model.inboxStops
@@ -14,7 +15,8 @@ struct SidebarTiles: View {
         }
         let count = TileGrid.columns(width: width)
         let pinned = ExtensionEntries.pinned(model.extensionCatalogs.flatMap(\.entries), pins: ExtensionPins.shared.ids)
-        let tiles = TileGrid.fill(columns: count, fixed: 3 + pinned.count) { ProjectTiles.order(model.projects, limit: $0, waiting: counts, leads: leads) }
+        let tiles = TileGrid.fill(columns: count, fixed: 3 + pinned.count) { tileOrder.tiles(model.projects, limit: $0) }
+        let arranged = (tiles.shown + tiles.more).map(\.id)
         let owner = model.daemon?.host?.id ?? ""
         let columns = Array(repeating: GridItem(.flexible(), spacing: TileGrid.spacing, alignment: .top), count: count)
         LazyVGrid(columns: columns, alignment: .leading, spacing: TileGrid.spacing) {
@@ -26,15 +28,32 @@ struct SidebarTiles: View {
             ForEach(tiles.shown) { project in
                 tile(project.displayName, mark: .letter(ProjectTiles.letter(project.displayName), project: ProjectTiles.colourID(project.id, owner: owner)), count: counts[project.id] ?? 0,
                      selected: pane.scope == .project(project.id), id: "sidebar-tile-project-" + project.id) { pane.showScope(project: project.id) }
+                    .draggable(project.id)
+                    .dropDestination(for: String.self) { dropped, _ in
+                        guard let id = dropped.first, arranged.contains(id) else { return false }
+                        tileOrder.move(id, before: project.id, arranged: arranged)
+                        return true
+                    }
+                    .contextMenu {
+                        Button(tileOrder.isPinned(project.id) ? "Unpin" : "Pin to Front") { tileOrder.togglePin(project.id, arranged: arranged) }
+                        Button("Move Earlier") { tileOrder.step(project.id, by: -1, arranged: arranged) }
+                        Button("Move Later") { tileOrder.step(project.id, by: 1, arranged: arranged) }
+                    }
             }
             if !tiles.more.isEmpty {
                 Menu {
                     ForEach(tiles.more) { project in
-                        Button(project.archived == true ? "\(project.displayName) (archived)" : project.displayName) { pane.showScope(project: project.id) }
+                        Button { pane.showScope(project: project.id) } label: {
+                            Text(project.displayName)
+                            Text(moreDetail(project, waiting: counts[project.id] ?? 0))
+                        }
+                        .accessibilityLabel(project.displayName)
+                        .accessibilityValue(moreDetail(project, waiting: counts[project.id] ?? 0))
                     }
                 } label: {
                     face("+\(tiles.more.count)", mark: .symbol("ellipsis"), count: tiles.more.reduce(0) { $0 + (counts[$1.id] ?? 0) },
                          selected: tiles.more.contains { pane.scope == .project($0.id) })
+                        .accessibilityHidden(true)
                 }
                 .menuStyle(.button)
                 .menuIndicator(.hidden)
@@ -46,8 +65,22 @@ struct SidebarTiles: View {
             tile("All", mark: .symbol("square.stack"), count: 0, selected: pane.scope == .all, id: "sidebar-tile-all", action: pane.showAll)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .task(id: model.projects.isEmpty) {
+            guard !model.projects.isEmpty else { return }
+            let seen = ProjectTiles.order(model.projects, limit: model.projects.count, waiting: counts, leads: leads)
+            tileOrder.seed((seen.shown + seen.more).map(\.id))
+        }
         .padding(.horizontal, DesktopSpace.s)
         .padding(.bottom, DesktopSpace.xs)
+    }
+
+    private func moreDetail(_ project: ProjectState, waiting: Int) -> String {
+        var parts: [String] = []
+        if project.archived == true { parts.append("Archived") }
+        if waiting > 0 { parts.append("\(waiting) need\(waiting == 1 ? "s" : "") you") }
+        let sessions = project.activity?.sessionCount ?? 0
+        if sessions > 0 { parts.append(sessions == 1 ? "1 session" : "\(sessions) sessions") }
+        return parts.isEmpty ? "No sessions" : parts.joined(separator: " · ")
     }
 
     private func moreTitle(_ count: Int) -> String {

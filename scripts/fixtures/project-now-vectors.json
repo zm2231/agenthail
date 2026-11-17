@@ -279,7 +279,7 @@
         },
         {
           "id": "checkout-detached",
-          "title": "0123456",
+          "title": "widget",
           "sessions": [
             "detached"
           ]

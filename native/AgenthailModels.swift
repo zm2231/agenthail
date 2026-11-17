@@ -841,19 +841,24 @@ struct SessionActivity: Codable, Hashable {
     /// How long a working turn stays quiet before its row says so.
     static let quietAfter: TimeInterval = 10 * 60
 
-    /// "no activity for 12 min · running Bash since 10:02" once the turn has
+    /// "idle 12m · Bash" once the turn has
     /// been quiet for quietAfter, or nil before.
     func quietNote(now: Date) -> String? {
         guard let raw = lastProgressAt ?? busySince, let last = SessionTree.parseTimestamp(raw) else { return nil }
         let quiet = now.timeIntervalSince(last)
         guard quiet >= Self.quietAfter else { return nil }
-        var parts = ["no activity for " + Self.duration(quiet)]
+        var parts = ["idle " + Self.shortDuration(quiet)]
         if noProcess == true {
             parts.append("no Claude process")
         } else if let tool {
-            parts.append("running " + tool.name + (tool.startedAt.flatMap(SessionTree.parseTimestamp).map { " since " + $0.formatted(date: .omitted, time: .shortened) } ?? ""))
+            parts.append(tool.name)
         }
         return parts.joined(separator: " · ")
+    }
+
+    static func shortDuration(_ interval: TimeInterval) -> String {
+        let minutes = Int(interval / 60)
+        return minutes >= 60 ? "\(minutes / 60)h" : "\(minutes)m"
     }
 
     static func duration(_ interval: TimeInterval) -> String {

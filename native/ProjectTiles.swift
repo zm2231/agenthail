@@ -59,6 +59,27 @@ struct ProjectTiles: Equatable {
         return ProjectTiles(shown: shown, more: rest)
     }
 
+    static func arranged(_ projects: [ProjectState], limit: Int, order: [String], pinned: Set<String>) -> ProjectTiles {
+        let place = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        let sorted = projects.sorted { lhs, rhs in
+            let (leftPin, rightPin) = (pinned.contains(lhs.id), pinned.contains(rhs.id))
+            if leftPin != rightPin { return leftPin }
+            let (left, right) = (place[lhs.id] ?? Int.max, place[rhs.id] ?? Int.max)
+            if left != right { return left < right }
+            return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
+        }
+        let shown = Array(sorted.filter { $0.archived != true }.prefix(max(0, limit)))
+        let held = Set(shown.map(\.id))
+        return ProjectTiles(shown: shown, more: sorted.filter { !held.contains($0.id) })
+    }
+
+    static func moving(_ id: String, before target: String, in order: [String]) -> [String] {
+        guard id != target, order.contains(target) else { return order }
+        var next = order.filter { $0 != id }
+        next.insert(id, at: next.firstIndex(of: target) ?? next.count)
+        return next
+    }
+
     static func colourID(_ projectID: String, owner hostID: String) -> String {
         hostID.isEmpty || projectID.isEmpty || projectID.contains("::") || projectID.hasPrefix("repo:") ? projectID : hostID + "::" + projectID
     }

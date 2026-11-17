@@ -34,7 +34,6 @@ const key = (session) => session.checkout?.id ?? `${session.host?.id || ""}|${se
 function place(session) {
   const checkout = session.checkout;
   if (checkout?.branch) return checkout.branch;
-  if (checkout?.detachedHead) return checkout.detachedHead.slice(0, 7);
   const path = checkout?.path ?? session.cwd ?? "";
   return path ? path.split("/").filter(Boolean).pop() || "/" : "No folder";
 }

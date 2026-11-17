@@ -226,7 +226,7 @@ struct SessionSidebar: View {
                         .equatable()
                     }
                     ForEach(projectsWithoutSessions(tree)) { project in
-                        ProjectHeaderView(name: project.displayName, hosts: ProjectMenu.hosts(of: project), branch: nil, dirty: false, archived: false)
+                        ProjectHeaderView(name: project.displayName, hosts: ProjectMenu.hosts(of: project), archived: false)
                             .opensProject(project.id, model: model, pane: pane)
                             .contextMenu {
                                 Button("Archive Project") { model.setProjectArchived(project.id, true) }
@@ -419,8 +419,6 @@ struct SidebarCaption: View {
 struct ProjectHeaderView: View {
     let name: String
     var hosts: [String] = []
-    var branch: String? = nil
-    var dirty = false
     var archived = false
     var sessionCount = 0
 
@@ -438,17 +436,6 @@ struct ProjectHeaderView: View {
                 .lineLimit(1)
             ForEach(hosts, id: \.self) { host in
                 HostBadge(name: host)
-            }
-            if let branch {
-                Text(branch)
-                    .font(.system(size: DesktopType.caption, design: .monospaced))
-                    .foregroundStyle(DesktopPalette.text2)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            if dirty {
-                Circle().fill(DesktopPalette.muted).frame(width: 5, height: 5)
-                    .accessibilityLabel("Uncommitted changes")
             }
             if sessionCount > 0 {
                 Spacer(minLength: 4)
@@ -485,19 +472,15 @@ struct HostBadge: View {
 
 struct CheckoutRowView: View {
     let checkout: SessionTree.Checkout
-    var host: String? = nil
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: DesktopType.caption))
-            Text(checkout.label)
+            Text(checkout.shownLabel)
                 .font(.system(size: DesktopType.caption, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if let host {
-                HostBadge(name: host)
-            }
             if checkout.dirty {
                 Circle().fill(DesktopPalette.muted).frame(width: 5, height: 5)
                     .accessibilityLabel("Uncommitted changes")
@@ -525,11 +508,7 @@ struct SessionRowView: View {
             StatusIndicator(session: session, needsYou: needsYou, finishedUnseen: finishedUnseen)
             VStack(alignment: .leading, spacing: 2) {
                 titleLine(kind: kind)
-                if kind == .working, session.move == nil {
-                    WorkingRowNote(session: session)
-                } else if !(saysWaiting && kind == .waiting), let note = SessionRowNote.text(session) {
-                    noteText(note, kind: kind)
-                }
+                detailLine(kind: kind)
             }
         }
         .font(.system(size: DesktopType.body))
@@ -540,10 +519,13 @@ struct SessionRowView: View {
     }
 
     private func titleLine(kind: SessionDisplayKind) -> some View {
-        HStack(alignment: .center, spacing: 9) {
-            Text(title ?? session.title)
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            let name = title ?? session.title
+            Text(name)
                 .lineLimit(1)
+                .truncationMode(name.hasPrefix("@") ? .middle : .tail)
                 .foregroundStyle(kind != .unavailable && (session.open || kind == .working) ? DesktopPalette.text : DesktopPalette.text2)
+                .layoutPriority(1)
             if session.isPinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: DesktopType.caption))
@@ -557,17 +539,56 @@ struct SessionRowView: View {
                     .lineLimit(1)
                     .accessibilityHidden(true)
             }
-            if let host = session.shortRemoteHostName {
-                HostBadge(name: host, unavailable: kind == .unavailable)
-                    .help(session.unavailableReason ?? "On \(session.remoteHostName ?? host)")
-            }
             Spacer(minLength: 4)
+            RowAge(session: session)
+                .fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private func detailLine(kind: SessionDisplayKind) -> some View {
+        let note = kind == .working && session.move == nil ? nil : saysWaiting && kind == .waiting ? nil : SessionRowNote.text(session)
+        if kind == .working && session.move == nil || note != nil || hasBadges {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Group {
+                    if kind == .working, session.move == nil {
+                        WorkingRowNote(session: session)
+                    } else if let note {
+                        noteText(note, kind: kind)
+                    }
+                }
+                .frame(minWidth: 90, alignment: .leading)
+                Spacer(minLength: 4)
+                ViewThatFits(in: .horizontal) {
+                    badges(kind: kind, hostName: true)
+                    badges(kind: kind, hostName: false)
+                }
+            }
+        }
+    }
+
+    private var hasBadges: Bool {
+        session.shortRemoteHostName != nil || (family?.workingSubagents ?? 0) > 0 || (family?.workers?.count ?? 0) > 0 || session.livePlan != nil
+            || session.queueCount > 0 || session.archived == true || !session.sharedHolders.isEmpty
+    }
+
+    private func badges(kind: SessionDisplayKind, hostName: Bool) -> some View {
+        HStack(spacing: 6) {
+            if let host = session.shortRemoteHostName {
+                Group {
+                    if hostName {
+                        HostBadge(name: host, unavailable: kind == .unavailable)
+                    } else {
+                        Image(systemName: kind == .unavailable ? "wifi.slash" : "server.rack").foregroundStyle(DesktopPalette.text2)
+                    }
+                }
+                .help(session.unavailableReason ?? "On \(session.remoteHostName ?? host)")
+            }
             if let family, family.workingSubagents > 0 {
                 HStack(spacing: 3) {
                     Image(systemName: "person.2")
                     Text("\(family.workingSubagents)")
                 }
-                .font(.system(size: DesktopType.caption))
                 .foregroundStyle(DesktopPalette.working)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFamilies.subagentSummary(family))
@@ -577,7 +598,6 @@ struct SessionRowView: View {
                     Image(systemName: "person.3")
                     Text("\(workers.count)")
                 }
-                .font(.system(size: DesktopType.caption).monospacedDigit())
                 .foregroundStyle(workers.needsYou > 0 ? DesktopPalette.attention : workers.working > 0 ? DesktopPalette.working : DesktopPalette.text2)
                 .help(SessionFamilies.workerSummary(workers))
                 .accessibilityElement(children: .ignore)
@@ -588,7 +608,6 @@ struct SessionRowView: View {
                     Image(systemName: "checklist")
                     Text(plan.badge)
                 }
-                .font(.system(size: DesktopType.caption).monospacedDigit())
                 .foregroundStyle(DesktopPalette.text2)
                 .help(plan.detail)
                 .accessibilityElement(children: .ignore)
@@ -596,12 +615,10 @@ struct SessionRowView: View {
             }
             if session.queueCount > 0 {
                 Text(SessionFacts.queuedLabel(session.queueCount))
-                    .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
             }
             if session.archived == true {
                 Text("Archived")
-                    .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
@@ -612,14 +629,15 @@ struct SessionRowView: View {
                     Image(systemName: "terminal")
                     Text("\(session.sharedHolders.count)")
                 }
-                .font(.system(size: DesktopType.caption))
                 .foregroundStyle(DesktopPalette.text2)
                 .help(SessionFacts.holdersHelp(session.sharedHolders))
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFacts.holdersLabel(session.sharedHolders.count))
             }
-            RowAge(session: session)
         }
+        .font(.system(size: DesktopType.caption).monospacedDigit())
+        .lineLimit(1)
+        .fixedSize()
     }
 
     private func noteText(_ note: String, kind: SessionDisplayKind) -> some View {

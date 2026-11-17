@@ -284,7 +284,7 @@ pid nor a live session record for the conversation, so nothing is running it.
 The status pass republishes a row for its activity only when the turn, the
 tool or `noProcess` changed, or `lastProgressAt` moved by a minute or more
 (`surface.ActivityProgressStep`). After ten minutes without progress the Mac,
-iOS and web clients add `no activity for 12 min · running Bash since 10:02`
+iOS and web clients add `idle 12m · Bash`
 (or `· no Claude process`) to Working, as plain secondary text.
 
 A Codex session carries the same `activity`, read from its rollout by the
