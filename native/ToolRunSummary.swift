@@ -81,8 +81,13 @@ enum ToolRunSummary {
         return minutes % 60 == 0 ? "\(minutes / 60)h" : "\(minutes / 60)h \(minutes % 60)m"
     }
 
+    static let asksThePerson: Set<String> = ["AskUserQuestion"]
+
+    /// A question still waiting on the person stays in view, so its run does not fold until it is answered.
     static func folds(_ entries: [ToolRunEntry]) -> Bool {
-        entries.filter { if case .call = $0 { return true } else { return false } }.count > foldAfter
+        let calls = entries.compactMap { if case .call(let call, let results) = $0 { return (call, results) } else { return nil } }
+        if calls.contains(where: { asksThePerson.contains($0.0.title) && $0.1.isEmpty }) { return false }
+        return calls.count > foldAfter
     }
 
     static func outputPreview(_ text: String) -> String {

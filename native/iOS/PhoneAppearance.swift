@@ -514,11 +514,14 @@ struct PhoneTextScale: ViewModifier {
     let steps: Int
     @Environment(\.dynamicTypeSize) private var system
 
+    static let unchanged = DynamicTypeSize.xSmall ... DynamicTypeSize.accessibility5
+
     func body(content: Content) -> some View {
-        content
-            .dynamicTypeSize(Self.shifted(system, by: min(steps, Self.chromeSteps)))
+        let chrome = Self.shifted(system, by: min(steps, Self.chromeSteps))
+        return content
+            .dynamicTypeSize(chrome == system ? Self.unchanged : chrome ... chrome)
             .environment(\.readingTypeSize, Self.shifted(system, by: steps))
-            .environment(\.chromeTypeSize, Self.shifted(system, by: min(steps, Self.chromeSteps)))
+            .environment(\.chromeTypeSize, chrome)
     }
 
     static func steps(_ scale: Double) -> Int {
@@ -535,10 +538,12 @@ struct PhoneTextScale: ViewModifier {
 private struct ReadingTypeSize: ViewModifier {
     @Environment(\.readingTypeSize) private var reading
     @Environment(\.chromeTypeSize) private var chrome
+    @Environment(\.dynamicTypeSize) private var current
     let forReading: Bool
 
     func body(content: Content) -> some View {
-        content.dynamicTypeSize(forReading ? reading : chrome)
+        let size = forReading ? reading : chrome
+        return content.dynamicTypeSize(size == current ? PhoneTextScale.unchanged : size ... size)
     }
 }
 

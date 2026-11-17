@@ -59,6 +59,10 @@ struct ToolPresentationTest {
         }
         check(!ToolRunSummary.folds(ToolRunSummary.entries((0..<2).map(call))), "two calls stay as lines")
         check(ToolRunSummary.folds(ToolRunSummary.entries((0..<3).map(call))), "a third call folds the run into one line")
+        let ask = TimelineItem(id: "ask", kind: "toolCall", role: nil, title: "AskUserQuestion", text: "{}", timestamp: nil, callId: "ask", status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        check(!ToolRunSummary.folds(ToolRunSummary.entries((0..<3).map(call) + [ask])), "a run holding an unanswered question stays in view")
+        let answer = TimelineItem(id: "answer", kind: "toolResult", role: nil, title: "", text: "Release", timestamp: nil, callId: "ask", status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        check(ToolRunSummary.folds(ToolRunSummary.entries((0..<3).map(call) + [ask, answer])), "once answered, the run folds")
         func timed(_ index: Int, _ at: String) -> TimelineItem {
             var item = call(index)
             item.timestamp = at

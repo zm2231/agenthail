@@ -15,7 +15,7 @@ struct TimelineGroup: Identifiable, Equatable {
     var errorCount: Int { items.filter(ToolRunSummary.isFailure).count }
     var isSend: Bool { items.first?.agent?.isSend == true }
     var isActivity: Bool { foldLabel == nil && !isSend && items.allSatisfy { ["toolCall", "toolResult", "reasoning"].contains($0.kind) } }
-    var folds: Bool { callCount > ToolRunSummary.foldAfter }
+    var folds: Bool { ToolRunSummary.folds(ToolRunSummary.entries(items)) }
 
     /// An agent's reply, with the duration of the turn it ended when the host recorded one.
     var isReply: Bool {
