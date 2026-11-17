@@ -123,6 +123,7 @@ func (c *Claude) NeedsWake(ctx context.Context, sess *surface.Session) bool {
 func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool {
 	if sess.HolderPID > 0 {
 		sess.PID = sess.HolderPID
+		sess.PIDIdentity, _ = processIdentity(sess.PID)
 	}
 	if !claudeProcessAlive(sess.PID) {
 		return false
@@ -185,6 +186,7 @@ func (c *Claude) conversation(ctx context.Context, id string, pin claudePin) (cl
 // conversation, and whether any live process holds it. pin, when set, names
 // the holder; a conversation several processes hold is refused without one.
 func (c *Claude) conversationProcess(ctx context.Context, id string, pin claudePin) (*surface.Session, bool, error) {
+	readAt := time.Now()
 	roots, records, err := c.records()
 	if err != nil {
 		return nil, false, err
@@ -208,7 +210,7 @@ func (c *Claude) conversationProcess(ctx context.Context, id string, pin claudeP
 	if len(holders) == 0 {
 		return nil, false, nil
 	}
-	process, ok := c.process(ctx, claudeSessionRecord{root: holderRoot(records, holders[0]), fields: holders[0]}, c.transcripts.pass(roots))
+	process, ok := c.process(ctx, claudeSessionRecord{root: holderRoot(records, holders[0]), fields: holders[0], readAt: readAt}, c.transcripts.pass(roots))
 	if !ok {
 		return nil, true, nil
 	}
@@ -331,7 +333,7 @@ func adoptClaudeProcess(sess, process *surface.Session) {
 	}
 	sess.RuntimeKind = process.RuntimeKind
 	sess.Bridge = process.Bridge
-	sess.PID = process.PID
+	sess.PID, sess.PIDIdentity = process.PID, process.PIDIdentity
 	sess.Status = process.Status
 	sess.Cwd = process.Cwd
 	sess.Transcript = process.Transcript

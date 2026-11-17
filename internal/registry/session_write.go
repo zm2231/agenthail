@@ -22,6 +22,7 @@ var sessionWriteColumns = []sessionWriteColumn{
 	{"name", "excluded.name", func(s surface.Session) any { return s.Name }},
 	{"cwd", "excluded.cwd", func(s surface.Session) any { return s.Cwd }},
 	{"pid", "excluded.pid", func(s surface.Session) any { return s.PID }},
+	{"pid_identity", `CASE WHEN excluded.pid_identity='' AND excluded.pid=sessions.pid THEN sessions.pid_identity ELSE excluded.pid_identity END`, func(s surface.Session) any { return s.PIDIdentity }},
 	{"status", "excluded.status", func(s surface.Session) any { return string(s.Status) }},
 	{"ended", "excluded.ended", func(s surface.Session) any { return b2i(sessionEnded(s)) }},
 	{"transcript", "excluded.transcript", func(s surface.Session) any { return s.Transcript }},
@@ -60,7 +61,9 @@ func buildSessionWriteSQL() (upsert, unchanged string) {
 	}
 	upsert = `INSERT INTO sessions (id,` + strings.Join(names, ",") + `,updated_at) VALUES (?` + strings.Repeat(",?", len(names)) + `,datetime('now'))
 		ON CONFLICT(id) DO UPDATE SET ` + strings.Join(sets, ",") + `,updated_at=datetime('now')`
-	unchanged = `SELECT ` + strings.Join(same, " AND ") + ` FROM sessions, (SELECT ? AS id,` + strings.Join(bound, ",") + `) AS excluded WHERE sessions.id=excluded.id`
+	// A listing that calls a hosted process a terminal one is never
+	// unchanged, so its write reaches the transaction that refuses it.
+	unchanged = `SELECT ` + strings.Join(same, " AND ") + ` AND NOT ` + sessionKeepsHostedSQL + ` FROM sessions, (SELECT ? AS id,` + strings.Join(bound, ",") + `) AS excluded WHERE sessions.id=excluded.id`
 	return upsert, unchanged
 }
 

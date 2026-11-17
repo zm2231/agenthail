@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -19,6 +20,7 @@ import (
 type claudeSessionRecord struct {
 	root   string
 	fields map[string]any
+	readAt time.Time
 }
 
 // records returns the config roots and the session records of Claude
@@ -44,6 +46,7 @@ func (c *Claude) records() ([]string, []claudeSessionRecord, error) {
 			if !strings.HasSuffix(e.Name(), ".json") {
 				continue
 			}
+			readAt := time.Now()
 			raw, err := os.ReadFile(filepath.Join(sessionsDir, e.Name()))
 			if err != nil {
 				continue
@@ -55,7 +58,7 @@ func (c *Claude) records() ([]string, []claudeSessionRecord, error) {
 			if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeRecordLive(m) {
 				continue
 			}
-			out = append(out, claudeSessionRecord{root: root, fields: m})
+			out = append(out, claudeSessionRecord{root: root, fields: m, readAt: readAt})
 		}
 	}
 	return roots, out, nil

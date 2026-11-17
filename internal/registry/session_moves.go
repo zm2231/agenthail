@@ -523,7 +523,7 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 	if err := dropMovedRelaysTx(tx, move.Conversation); err != nil {
 		return nil, false, err
 	}
-	if _, err := tx.Exec(`UPDATE sessions SET host_id=?,pid=0,transcript='',has_local=0,bridge='',pinned_at_ms=0,updated_at=datetime('now') WHERE id=? AND host_id=''`, move.PeerHost, move.Conversation); err != nil {
+	if _, err := tx.Exec(`UPDATE sessions SET host_id=?,pid=0,pid_identity='',transcript='',has_local=0,bridge='',pinned_at_ms=0,updated_at=datetime('now') WHERE id=? AND host_id=''`, move.PeerHost, move.Conversation); err != nil {
 		return nil, false, err
 	}
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id=?`, move.Conversation); err != nil {

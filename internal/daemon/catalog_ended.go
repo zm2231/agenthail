@@ -224,7 +224,7 @@ func (d *Daemon) restoreEndedSession(item catalogRestore, publish func(ended, re
 		return true
 	}
 	ended := *session
-	ended.Status, ended.PID, ended.Bridge = surface.StatusOffline, 0, ""
+	ended.Status, ended.PID, ended.PIDIdentity, ended.Bridge = surface.StatusOffline, 0, "", ""
 	if item.changed.After(ended.LastActive) {
 		ended.LastActive = item.changed
 	}

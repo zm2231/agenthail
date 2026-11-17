@@ -14,6 +14,7 @@ func (c *Claude) RuntimeRunning(sess *surface.Session) bool {
 	}
 	held := *sess
 	held.PID = sess.HolderPID
+	held.PIDIdentity, _ = processIdentity(held.PID)
 	_, live := c.liveRecord(held)
 	return live
 }

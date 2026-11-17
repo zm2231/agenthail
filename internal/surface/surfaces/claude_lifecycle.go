@@ -168,6 +168,9 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 		ConfigDir: root,
 	})
 	session := &surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: opened.PID, Name: options.Name, Cwd: options.Cwd, Status: surface.StatusIdle, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
+	if opened.PID > 0 {
+		session.PIDIdentity, _ = processIdentity(opened.PID)
+	}
 	if err != nil {
 		failure := claudeHostDeliveryError(fmt.Errorf("Claude creation: %w", err))
 		if surface.IsDeliveryOutcomeUnknown(failure) {
