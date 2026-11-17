@@ -1,4 +1,4 @@
--- schemaVersion 106
+-- schemaVersion 107
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -1075,6 +1075,7 @@ CREATE TABLE turn_judgments (
 	ended_at_ms INTEGER NOT NULL,
 	judged_at_ms INTEGER NOT NULL DEFAULT 0,
 	model TEXT NOT NULL DEFAULT '',
+	promise_model TEXT NOT NULL DEFAULT '',
 	ms INTEGER NOT NULL DEFAULT 0,
 	promise REAL NOT NULL DEFAULT 0,
 	needs REAL NOT NULL DEFAULT 0,

@@ -12,6 +12,14 @@ It is off until `~/.agenthail/config.json` names a System One endpoint:
 
 The block has the same shape as `ledgerSorter`, and both go through `internal/systemone`. A malformed block keeps the judge off, and `GET /api/v1/turn-judgments` reports the error in `judge.error`.
 
+`promiseModel` names a different model for the promise question alone, at the same `url`:
+
+```json
+{"turnJudge": {"url": "http://192.0.2.10:8100", "model": "d1-3b", "promiseModel": "d1-3b-promise"}}
+```
+
+This is how a model tuned for the promise question is served without changing the other answers, which were measured on `model`. Without it, both calls go to `model`. A `promiseModel` that is present but blank, null or not a string keeps the judge off, with the error in `judge.error`.
+
 ## What is judged
 
 When the observer sees a session's turn complete with a finished reply, it records one judgment for that turn. It skips stale completions, such as one read again after a restart, and failed turns. The reply goes to the model in two parts:
@@ -49,7 +57,7 @@ Measured on a Linux build host against the endpoint: one call takes about 0.5 se
 
 ## Reading the records
 
-`GET /api/v1/turn-judgments` (read scope) returns `judge`, the endpoint's health (`model`, `since`, `error`, `failures`, `dropped`; null when the judge is off), and `judgments`, newest first. `sessionId` filters to one session, and `limit` takes 1 to 1000 (default 50). Each judgment has the turn, `endedAt`, `judgedAt`, `model`, `ms`, the four answers with the state's probabilities, the `ending` that was asked about, the `headline`, the `facts` and any `error`.
+`GET /api/v1/turn-judgments` (read scope) returns `judge`, the endpoint's health (`model`, `promiseModel`, `since`, `error`, `failures`, `dropped`; null when the judge is off), and `judgments`, newest first. `sessionId` filters to one session, and `limit` takes 1 to 1000 (default 50). Each judgment has the turn, `endedAt`, `judgedAt`, `model`, the `promiseModel` that answered `promise`, `ms`, the four answers with the state's probabilities, the `ending` that was asked about, the `headline`, the `facts` and any `error`.
 
 ## Later layers
 

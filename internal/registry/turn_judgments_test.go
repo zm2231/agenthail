@@ -46,7 +46,7 @@ func TestATurnJudgmentIsKeptPerTurnAndOldOnesAreDropped(t *testing.T) {
 	at := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
 	record := func(turn string, ended time.Time, promise float64) {
 		t.Helper()
-		if err := r.RecordTurnJudgment(TurnJudgment{SessionID: "worker", TurnID: turn, EndedAt: ended, Promise: promise, StateP: map[string]float64{"done": 0.9}, Facts: TurnFacts{BackgroundRunning: true, BackgroundSource: "host", BackgroundTasks: 1}}); err != nil {
+		if err := r.RecordTurnJudgment(TurnJudgment{SessionID: "worker", TurnID: turn, EndedAt: ended, Model: "d1-3b", PromiseModel: "d1-3b-promise", Promise: promise, StateP: map[string]float64{"done": 0.9}, Facts: TurnFacts{BackgroundRunning: true, BackgroundSource: "host", BackgroundTasks: 1}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -62,7 +62,7 @@ func TestATurnJudgmentIsKeptPerTurnAndOldOnesAreDropped(t *testing.T) {
 	if len(got) != 2 || got[0].TurnID != "t2" || got[1].TurnID != "t1" || got[1].Promise != 0.7 {
 		t.Fatalf("judgments = %+v, want t2 then t1 with its latest promise, and the 31-day-old one gone", got)
 	}
-	if got[1].StateP["done"] != 0.9 || !got[1].Facts.BackgroundRunning || got[1].Facts.BackgroundSource != "host" || !got[1].JudgedAt.IsZero() {
+	if got[1].StateP["done"] != 0.9 || !got[1].Facts.BackgroundRunning || got[1].Facts.BackgroundSource != "host" || got[1].PromiseModel != "d1-3b-promise" || !got[1].JudgedAt.IsZero() {
 		t.Fatalf("t1 read back as %+v", got[1])
 	}
 }

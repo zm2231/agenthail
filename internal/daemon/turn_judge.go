@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"regexp"
@@ -68,23 +70,50 @@ type turnJudge struct {
 }
 
 type turnJudgeHealth struct {
-	Model    string    `json:"model,omitempty"`
-	Since    time.Time `json:"since,omitzero"`
-	Error    string    `json:"error,omitempty"`
-	Failures int       `json:"failures"`
-	Dropped  int       `json:"dropped"`
+	Model        string    `json:"model,omitempty"`
+	PromiseModel string    `json:"promiseModel,omitempty"`
+	Since        time.Time `json:"since,omitzero"`
+	Error        string    `json:"error,omitempty"`
+	Failures     int       `json:"failures"`
+	Dropped      int       `json:"dropped"`
 }
 
 func newTurnJudge() *turnJudge {
 	return &turnJudge{jobs: make(chan judgeJob, turnJudgeQueue)}
 }
 
-func turnJudgeConfig() (systemone.Config, bool, error) {
+type turnJudgeConfig struct {
+	systemone.Config
+	promise systemone.Config
+}
+
+func loadTurnJudgeConfig() (turnJudgeConfig, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return systemone.Config{}, false, err
+		return turnJudgeConfig{}, false, err
 	}
-	return systemone.LoadConfig(home, turnJudgeConfigKey)
+	config, ok, err := systemone.LoadConfig(home, turnJudgeConfigKey)
+	if err != nil || !ok {
+		return turnJudgeConfig{}, ok, err
+	}
+	all, err := surface.ReadAgenthailConfig(home)
+	if err != nil {
+		return turnJudgeConfig{}, false, err
+	}
+	var fields map[string]json.RawMessage
+	promise := config
+	err = json.Unmarshal(all[turnJudgeConfigKey], &fields)
+	if raw, set := fields["promiseModel"]; err == nil && set {
+		var name string
+		if string(raw) == "null" || json.Unmarshal(raw, &name) != nil {
+			name = ""
+		}
+		promise.Model = strings.TrimSpace(name)
+	}
+	if err != nil || promise.Model == "" {
+		return turnJudgeConfig{}, false, fmt.Errorf("the Agenthail config %s: %s.promiseModel must name a model", surface.AgenthailConfigPath(home), turnJudgeConfigKey)
+	}
+	return turnJudgeConfig{Config: config, promise: promise}, true, nil
 }
 
 // The facts are read when the turn ends, since the judgment may land later and the work it waits on may have moved on.
@@ -93,7 +122,7 @@ func (d *Daemon) queueTurnJudgment(session *surface.Session, turnID, reply strin
 	if j == nil || turnID == "" || strings.TrimSpace(reply) == "" {
 		return
 	}
-	if _, ok, err := turnJudgeConfig(); err != nil || !ok {
+	if _, ok, err := loadTurnJudgeConfig(); err != nil || !ok {
 		return
 	}
 	facts, err := d.Registry.TurnEndFacts(session.ID)
@@ -136,20 +165,19 @@ func (d *Daemon) startTurnJudge(ctx context.Context) {
 
 func (d *Daemon) judgeTurn(ctx context.Context, job judgeJob) {
 	judgment := job.judgment
-	config, ok, err := turnJudgeConfig()
+	config, ok, err := loadTurnJudgeConfig()
 	if err != nil || !ok {
 		return
 	}
-	judgment.Model = config.Model
+	judgment.Model, judgment.PromiseModel = config.Model, config.promise.Model
 	callCtx, cancel := context.WithTimeout(ctx, turnJudgeDeadline)
 	defer cancel()
 	asked := time.Now()
-	client := systemone.Client{Config: config, HTTP: d.judge.http}
 	// The model reads the whole state, and the full reply buries a promise made at the end.
-	promise, err := client.Ask(callCtx, judgeState{Reply: judgment.Ending}, promiseQuestions)
+	promise, err := systemone.Client{Config: config.promise, HTTP: d.judge.http}.Ask(callCtx, judgeState{Reply: judgment.Ending}, promiseQuestions)
 	var answers map[string]systemone.Answer
 	if err == nil {
-		answers, err = client.Ask(callCtx, judgeState{Reply: judgment.Ending, FullReply: job.reply}, judgeQuestions)
+		answers, err = systemone.Client{Config: config.Config, HTTP: d.judge.http}.Ask(callCtx, judgeState{Reply: judgment.Ending, FullReply: job.reply}, judgeQuestions)
 	}
 	judgment.JudgedAt, judgment.Ms = time.Now().UTC(), time.Since(asked).Milliseconds()
 	if err != nil {
@@ -193,7 +221,7 @@ func (d *Daemon) turnJudgeHealth() *turnJudgeHealth {
 	if d.judge == nil {
 		return nil
 	}
-	config, ok, err := turnJudgeConfig()
+	config, ok, err := loadTurnJudgeConfig()
 	if err != nil {
 		return &turnJudgeHealth{Error: err.Error()}
 	}
@@ -202,7 +230,7 @@ func (d *Daemon) turnJudgeHealth() *turnJudgeHealth {
 	}
 	d.judge.mu.Lock()
 	defer d.judge.mu.Unlock()
-	return &turnJudgeHealth{Model: config.Model, Since: d.judge.since, Error: d.judge.lastError, Failures: d.judge.failures, Dropped: d.judge.dropped}
+	return &turnJudgeHealth{Model: config.Model, PromiseModel: config.promise.Model, Since: d.judge.since, Error: d.judge.lastError, Failures: d.judge.failures, Dropped: d.judge.dropped}
 }
 
 func replyEnding(reply string, count int) string {

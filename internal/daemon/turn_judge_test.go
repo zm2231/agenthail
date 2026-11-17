@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 )
 
 type judgeCall struct {
+	model     string
 	state     map[string]string
 	questions []string
 }
@@ -32,12 +34,13 @@ type judgeStub struct {
 
 func (s *judgeStub) serve(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		Model     string                     `json:"model"`
 		State     map[string]string          `json:"state"`
 		Questions map[string]json.RawMessage `json:"questions"`
 	}
 	data, _ := io.ReadAll(r.Body)
 	_ = json.Unmarshal(data, &body)
-	call := judgeCall{state: body.State}
+	call := judgeCall{model: body.Model, state: body.State}
 	for name := range body.Questions {
 		call.questions = append(call.questions, name)
 	}
@@ -65,7 +68,7 @@ func (s *judgeStub) asked() []judgeCall {
 	return append([]judgeCall(nil), s.calls...)
 }
 
-func judgeFixture(t *testing.T, stub *judgeStub) (*Daemon, *registry.Registry, *daemonSurface, surface.Session) {
+func judgeFixture(t *testing.T, stub *judgeStub, extra string) (*Daemon, *registry.Registry, *daemonSurface, surface.Session) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -74,7 +77,7 @@ func judgeFixture(t *testing.T, stub *judgeStub) (*Daemon, *registry.Registry, *
 	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".agenthail", "config.json"), []byte(fmt.Sprintf(`{"turnJudge": {"url": %q, "model": "d1-3b"}}`, server.URL)), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, ".agenthail", "config.json"), []byte(fmt.Sprintf(`{"turnJudge": {"url": %q, "model": "d1-3b"%s}}`, server.URL, extra)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	d, r, fake, from, _ := daemonFixture(t)
@@ -106,7 +109,7 @@ func readJudgments(t *testing.T, d *Daemon, sessionID string) turnJudgmentsPage 
 
 func TestAFinishedTurnIsJudgedOnItsEndingWithWhatItWaitsOn(t *testing.T) {
 	stub := &judgeStub{}
-	d, r, fake, from := judgeFixture(t, stub)
+	d, r, fake, from := judgeFixture(t, stub, "")
 	if _, err := r.RaiseAsk(registry.Ask{SessionID: from.ID, Origin: registry.AskOriginAgent, Title: "Ship?", Questions: []registry.AskQuestion{{Question: "Ship?", Options: []registry.AskOption{{ID: "o0", Label: "Yes"}}}}, RoutedTo: registry.AskToPerson}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +123,7 @@ func TestAFinishedTurnIsJudgedOnItsEndingWithWhatItWaitsOn(t *testing.T) {
 
 	page := readJudgments(t, d, from.ID)
 	j := page.Judgments[0]
-	if j.TurnID != "turn-1" || j.Model != "d1-3b" || j.Promise != 0.62 || j.Needs != 0.08 || j.NeedsTail != 0.05 || j.State != "continuing" || j.StateP["continuing"] != 0.7 || j.Error != "" {
+	if j.TurnID != "turn-1" || j.Model != "d1-3b" || j.PromiseModel != "d1-3b" || j.Promise != 0.62 || j.Needs != 0.08 || j.NeedsTail != 0.05 || j.State != "continuing" || j.StateP["continuing"] != 0.7 || j.Error != "" {
 		t.Fatalf("judgment = %+v", j)
 	}
 	if want := (registry.TurnFacts{BackgroundRunning: true, BackgroundSource: surface.BackgroundSourceHost, BackgroundTasks: 1, OpenAsks: 1}); j.Facts != want {
@@ -128,8 +131,8 @@ func TestAFinishedTurnIsJudgedOnItsEndingWithWhatItWaitsOn(t *testing.T) {
 	}
 	ending := "Next: - I'll trace the flaky test now."
 	want := []judgeCall{
-		{state: map[string]string{"reply": ending}, questions: []string{"promise"}},
-		{state: map[string]string{"reply": ending, "full_reply": reply}, questions: []string{"needs", "needs_tail", "state"}},
+		{model: "d1-3b", state: map[string]string{"reply": ending}, questions: []string{"promise"}},
+		{model: "d1-3b", state: map[string]string{"reply": ending, "full_reply": reply}, questions: []string{"needs", "needs_tail", "state"}},
 	}
 	if asked := stub.asked(); !reflect.DeepEqual(asked, want) {
 		t.Fatalf("the judge was asked %+v, want the promise on the ending alone, then the rest with the whole reply", asked)
@@ -141,7 +144,7 @@ func TestAFinishedTurnIsJudgedOnItsEndingWithWhatItWaitsOn(t *testing.T) {
 
 func TestATurnTheJudgeCannotAnswerIsStillRecordedWithItsFacts(t *testing.T) {
 	stub := &judgeStub{down: true}
-	d, _, fake, from := judgeFixture(t, stub)
+	d, _, fake, from := judgeFixture(t, stub, "")
 	finishJudgedTurn(d, fake, &from, "turn-1", "Done. I'll push it next.", nil)
 	eventually(t, "the failed judgment", func() bool {
 		page := readJudgments(t, d, from.ID)
@@ -151,7 +154,7 @@ func TestATurnTheJudgeCannotAnswerIsStillRecordedWithItsFacts(t *testing.T) {
 
 func TestAJudgmentWhoseSecondCallFailsKeepsNoAnswers(t *testing.T) {
 	stub := &judgeStub{secondDown: true}
-	d, _, fake, from := judgeFixture(t, stub)
+	d, _, fake, from := judgeFixture(t, stub, "")
 	finishJudgedTurn(d, fake, &from, "turn-1", "Done. I'll push it next.", nil)
 	eventually(t, "the failed judgment", func() bool {
 		page := readJudgments(t, d, from.ID)
@@ -159,6 +162,41 @@ func TestAJudgmentWhoseSecondCallFailsKeepsNoAnswers(t *testing.T) {
 	})
 	if j := readJudgments(t, d, from.ID).Judgments[0]; j.Promise != 0 || j.State != "" {
 		t.Fatalf("a judgment whose second call failed kept answers: %+v", j)
+	}
+}
+
+func TestThePromiseQuestionGoesToTheModelNamedForIt(t *testing.T) {
+	stub := &judgeStub{}
+	d, _, fake, from := judgeFixture(t, stub, `, "promiseModel": " d1-3b-promise "`)
+	finishJudgedTurn(d, fake, &from, "turn-1", "The parser is fixed. I'm starting the review now.", nil)
+	eventually(t, "the judgment", func() bool {
+		page := readJudgments(t, d, from.ID)
+		return len(page.Judgments) == 1 && !page.Judgments[0].JudgedAt.IsZero()
+	})
+	asked := stub.asked()
+	if len(asked) != 2 || asked[0].model != "d1-3b-promise" || !reflect.DeepEqual(asked[0].questions, []string{"promise"}) || asked[1].model != "d1-3b" {
+		t.Fatalf("the judge was asked %+v, want the promise of d1-3b-promise and the rest of d1-3b", asked)
+	}
+	page := readJudgments(t, d, from.ID)
+	if j := page.Judgments[0]; j.Model != "d1-3b" || j.PromiseModel != "d1-3b-promise" || j.Promise != 0.62 || j.State != "continuing" {
+		t.Fatalf("judgment = %+v", j)
+	}
+	if page.Judge == nil || page.Judge.Model != "d1-3b" || page.Judge.PromiseModel != "d1-3b-promise" {
+		t.Fatalf("judge = %+v", page.Judge)
+	}
+}
+
+func TestAPromiseModelThatNamesNoModelKeepsTheJudgeOffAndSaysWhy(t *testing.T) {
+	for name, value := range map[string]string{"blank": `" "`, "not a string": `5`, "null": `null`} {
+		t.Run(name, func(t *testing.T) {
+			stub := &judgeStub{}
+			d, _, fake, from := judgeFixture(t, stub, `, "promiseModel": `+value)
+			finishJudgedTurn(d, fake, &from, "turn-1", "Done. I'll push it next.", nil)
+			page := readJudgments(t, d, from.ID)
+			if len(page.Judgments) != 0 || len(stub.asked()) != 0 || page.Judge == nil || !strings.Contains(page.Judge.Error, "promiseModel must name a model") {
+				t.Fatalf("promiseModel %s judged %+v with judge %+v", value, page.Judgments, page.Judge)
+			}
+		})
 	}
 }
 
