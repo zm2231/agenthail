@@ -1,4 +1,4 @@
-import { applyTileChange } from "./project-tiles.js";
+import { applyTileChange, resolveTileChange } from "./project-tiles.js";
 
 const storageKey = "agenthail.tileOrder";
 const empty = { order: [], pinned: [], revision: 0, unsent: false };
@@ -112,7 +112,9 @@ export function seedTileOrder(ids) {
   if (heard && saved.revision === 0) send();
 }
 
-export function changeTiles(change, arranged) {
+export function changeTiles(requested, arranged) {
+  const change = resolveTileChange(saved, requested, arranged);
+  if (!change) return Promise.resolve();
   const next = applyTileChange(saved, change, arranged);
   if (same(next, saved)) return Promise.resolve();
   pending.push(change);

@@ -127,21 +127,26 @@ export function movingTile(id, target, order) {
   return next;
 }
 
-export function applyTileChange({ order = [], pinned = [] }, change, arranged) {
-  const all = [...arranged, ...order.filter((id) => !arranged.includes(id))];
+export function resolveTileChange({ pinned = [] }, change, arranged) {
+  if (change.kind !== "step") return change;
   const pins = new Set(pinned);
-  const toggled = (id) => {
-    const next = new Set(pins);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return [...next].sort();
-  };
-  if (change.kind === "pin") return { order: all, pinned: toggled(change.id) };
-  if (change.kind === "move") {
-    return { order: movingTile(change.id, change.target, all), pinned: pins.has(change.target) !== pins.has(change.id) ? toggled(change.id) : [...pins].sort() };
-  }
   const group = arranged.filter((id) => pins.has(id) === pins.has(change.id));
   const index = group.indexOf(change.id);
   const other = group[index + change.by];
-  if (index < 0 || other === undefined) return { order, pinned: [...pins].sort() };
-  return { order: change.by < 0 ? movingTile(change.id, other, all) : movingTile(other, change.id, all), pinned: [...pins].sort() };
+  if (index < 0 || other === undefined) return null;
+  return change.by < 0 ? { kind: "move", id: change.id, target: other } : { kind: "move", id: other, target: change.id };
+}
+
+export function applyTileChange({ order = [], pinned = [] }, change, arranged) {
+  const resolved = resolveTileChange({ pinned }, change, arranged);
+  if (!resolved) return { order, pinned: [...pinned].sort() };
+  const all = [...arranged, ...order.filter((id) => !arranged.includes(id))];
+  const pins = new Set(pinned);
+  const pinning = (id, on) => {
+    const next = new Set(pins);
+    if (on) next.add(id); else next.delete(id);
+    return [...next].sort();
+  };
+  if (resolved.kind === "pin") return { order: all, pinned: pinning(resolved.id, resolved.on) };
+  return { order: movingTile(resolved.id, resolved.target, all), pinned: pinning(resolved.id, pins.has(resolved.target)) };
 }

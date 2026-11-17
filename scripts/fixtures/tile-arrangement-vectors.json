@@ -11,7 +11,7 @@
       "projects": [{"id": "a"}, {"id": "b"}, {"id": "c", "archived": true}],
       "limit": 2, "order": ["c", "a", "b"], "pinned": ["b"],
       "shown": ["b", "a"], "more": ["c"],
-      "change": {"kind": "pin", "id": "a"},
+      "change": {"kind": "pin", "id": "a", "on": true},
       "after": {"order": ["b", "a", "c"], "pinned": ["a", "b"]}
     },
     {

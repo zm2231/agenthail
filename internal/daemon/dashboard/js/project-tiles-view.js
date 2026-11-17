@@ -125,7 +125,7 @@ export function bindTiles() {
       const id = chosen.closest(".tile-menu").dataset.tileId;
       closeTileMenu();
       const kind = chosen.dataset.tileChange;
-      arrangeTile(id, kind === "pin" ? { kind: "pin" } : { kind: "step", by: kind === "earlier" ? -1 : 1 });
+      arrangeTile(id, kind === "pin" ? { kind: "pin", on: !tileOrder().pinned.includes(id) } : { kind: "step", by: kind === "earlier" ? -1 : 1 });
       return;
     }
     if (!event.target.closest(".tile-menu")) closeTileMenu();

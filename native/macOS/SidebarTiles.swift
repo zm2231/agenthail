@@ -35,7 +35,7 @@ struct SidebarTiles: View {
                         return true
                     }
                     .contextMenu {
-                        Button(tileOrder.isPinned(project.id) ? "Unpin" : "Pin to Front") { tileOrder.change(.pin(project.id), arranged: arranged) }
+                        Button(tileOrder.isPinned(project.id) ? "Unpin" : "Pin to Front") { tileOrder.change(.pin(project.id, !tileOrder.isPinned(project.id)), arranged: arranged) }
                         Button("Move Earlier") { tileOrder.change(.step(project.id, by: -1), arranged: arranged) }
                         Button("Move Later") { tileOrder.change(.step(project.id, by: 1), arranged: arranged) }
                     }

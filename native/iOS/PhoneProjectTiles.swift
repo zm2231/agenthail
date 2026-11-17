@@ -68,7 +68,7 @@ struct PhoneProjectTiles: View {
     private func arrange(_ id: String, arranged: [String]) -> some View {
         if let order = model.tileOrder {
             let pinned = order.isPinned(id)
-            Button(pinned ? "Unpin" : "Pin to Front", systemImage: pinned ? "pin.slash" : "pin") { order.change(.pin(id), arranged: arranged) }
+            Button(pinned ? "Unpin" : "Pin to Front", systemImage: pinned ? "pin.slash" : "pin") { order.change(.pin(id, !pinned), arranged: arranged) }
             if order.moves(.step(id, by: -1), arranged: arranged) {
                 Button("Move Earlier", systemImage: "arrow.left") { order.change(.step(id, by: -1), arranged: arranged) }
             }

@@ -19,6 +19,10 @@ function daemon(state) {
     const reply = (status, value) => ({ status, ok: status < 300, json: async () => value });
     if (sent.revision !== server.state.revision) return reply(409, { error: { code: "conflict" }, tileOrder: server.state });
     server.state = { order: sent.order, pinned: sent.pinned, revision: server.state.revision + 1 };
+    if (server.lose) {
+      server.lose = false;
+      throw new TypeError("Failed to fetch");
+    }
     return reply(200, { tileOrder: server.state });
   };
   return server;
@@ -69,7 +73,7 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   const context = { localStorage: local, fetch: (...args) => server.fetch(...args) };
   await dashboardModules(["tile-order"], context);
   context.adoptTileOrder(server.state);
-  await context.changeTiles({ kind: "pin", id: "c" }, ["a", "b", "c"]);
+  await context.changeTiles({ kind: "pin", id: "c", on: true }, ["a", "b", "c"]);
   assert.deepEqual(plain(context.tileOrder().pinned), ["c"], "a change made offline shows at once");
   const reopened = await store(Object.fromEntries(local.items), server);
   assert.deepEqual(plain(reopened.tileOrder().pinned), ["c"], "and is kept across reloads");
@@ -98,7 +102,7 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   page.adoptTileOrder(server.state);
   page.tilesArrangedBy(({ order, pinned }) => [...order.filter((id) => pinned.includes(id)), ...order.filter((id) => !pinned.includes(id))]);
   server.held = true;
-  const first = page.changeTiles({ kind: "pin", id: "c" }, ["a", "b", "c"]);
+  const first = page.changeTiles({ kind: "pin", id: "c", on: true }, ["a", "b", "c"]);
   page.changeTiles({ kind: "move", id: "b", target: "a" }, ["c", "a", "b"]);
   assert.deepEqual(plain([page.tileOrder().order, page.tileOrder().pinned]), [["c", "b", "a"], ["c"]], "both edits show at once");
   server.state = { order: ["a", "c", "b"], pinned: [], revision: 6 };
@@ -115,20 +119,39 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   const first = { localStorage: local, fetch: (...args) => server.fetch(...args) };
   await dashboardModules(["tile-order"], first);
   first.adoptTileOrder(server.state);
-  await first.changeTiles({ kind: "pin", id: "a" }, ["a", "b", "c"]);
+  await first.changeTiles({ kind: "pin", id: "a", on: true }, ["a", "b", "c"]);
   const reopened = await store(Object.fromEntries(local.items), server);
   reopened.tilesArrangedBy(({ order, pinned }) => [...order.filter((id) => pinned.includes(id)), ...order.filter((id) => !pinned.includes(id))]);
   server.offline = false;
   server.held = true;
   server.state = { order: ["a", "b", "c"], pinned: [], revision: 3 };
   reopened.adoptTileOrder(server.state);
-  const sending = reopened.changeTiles({ kind: "pin", id: "b" }, ["a", "b", "c"]);
+  const sending = reopened.changeTiles({ kind: "pin", id: "b", on: true }, ["a", "b", "c"]);
   server.state = { order: ["c", "b", "a"], pinned: [], revision: 4 };
   server.held = false;
   for (let i = 0; i < 50 && server.state.revision < 5; i++) await new Promise((resolve) => setTimeout(resolve, 2));
   await sending;
   assert.deepEqual(plain(server.state.pinned), ["a", "b"], "a pin made offline and one made after reopening both survive a refused write");
   assert.deepEqual(plain(reopened.tileOrder().pinned), ["a", "b"], "and both show");
+}
+
+{
+  const server = daemon({ order: ["a", "b", "c"], pinned: [], revision: 1 });
+  const page = await store({}, server);
+  page.adoptTileOrder(server.state);
+  page.tilesArrangedBy(({ order, pinned }) => [...order.filter((id) => pinned.includes(id)), ...order.filter((id) => !pinned.includes(id))]);
+  server.lose = true;
+  await page.changeTiles({ kind: "pin", id: "a", on: true }, ["a", "b", "c"]);
+  assert.deepEqual(plain(server.state.pinned), ["a"], "the daemon kept the pin though its answer was lost");
+  server.held = true;
+  page.adoptTileOrder(server.state);
+  const resending = page.changeTiles({ kind: "step", id: "c", by: -1 }, ["a", "b", "c"]);
+  server.state = { order: ["b", "a", "c"], pinned: ["a"], revision: server.state.revision + 1 };
+  server.held = false;
+  await resending;
+  for (let i = 0; i < 50 && page.tileOrder().unsent; i++) await settle();
+  assert.deepEqual(plain(server.state.pinned), ["a"], "making a pin the daemon already kept again leaves it pinned");
+  assert.deepEqual(plain(page.tileOrder().pinned), ["a"], "and shown pinned");
 }
 
 console.log("dashboard tile order tests passed");

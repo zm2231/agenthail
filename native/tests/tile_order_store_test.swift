@@ -3,7 +3,7 @@ import Foundation
 
 struct TileArrangementVectors: Decodable {
     struct Project: Decodable { let id: String; var archived: Bool? = nil }
-    struct Change: Decodable { let kind: String; let id: String; var target: String? = nil; var by: Int? = nil }
+    struct Change: Decodable { let kind: String; let id: String; var target: String? = nil; var by: Int? = nil; var on: Bool? = nil }
     struct After: Decodable { let order: [String]; let pinned: [String] }
     struct Case: Decodable {
         let name: String
@@ -23,6 +23,7 @@ actor FakeDaemon {
     var state = TileOrderState(order: [], pinned: [], revision: 0)
     var offline = false
     var held = false
+    var lose = false
     var writes: [TileOrderState] = []
 
     func put(_ sent: TileOrderState) async throws -> TileWrite {
@@ -31,12 +32,17 @@ actor FakeDaemon {
         writes.append(sent)
         guard sent.revision == state.revision else { return .stale(state) }
         state = TileOrderState(order: sent.order, pinned: sent.pinned, revision: state.revision + 1)
+        if lose {
+            lose = false
+            throw URLError(.networkConnectionLost)
+        }
         return .saved(state)
     }
 
     func set(_ next: TileOrderState) { state = next }
     func go(offline: Bool) { self.offline = offline }
     func hold(_ held: Bool) { self.held = held }
+    func loseNextAnswer() { lose = true }
 }
 
 @main
@@ -54,7 +60,7 @@ struct TileOrderStoreTest {
             check(tiles.shown.map(\.id) == vector.shown && tiles.more.map(\.id) == vector.more, "\(vector.name): \(tiles.shown.map(\.id)) \(tiles.more.map(\.id))")
             guard let change = vector.change, let after = vector.after else { continue }
             let made: TileChange = switch change.kind {
-            case "pin": .pin(change.id)
+            case "pin": .pin(change.id, change.on ?? true)
             case "move": .move(change.id, before: change.target ?? "")
             default: .step(change.id, by: change.by ?? 0)
             }
@@ -112,7 +118,7 @@ struct TileOrderStoreTest {
             await daemon.go(offline: true)
             let store = TileOrderStore(defaults: defaults, key: suite)
             store.adopt(await daemon.state) { try await daemon.put($0) }
-            store.change(.pin("c"), arranged: ["a", "b", "c"])
+            store.change(.pin("c", true), arranged: ["a", "b", "c"])
             _ = try await settle { false }
             check(store.arrangement.pinned == ["c"], "a change made offline shows at once")
             let reopened = TileOrderStore(defaults: defaults, key: suite)
@@ -162,7 +168,7 @@ struct TileOrderStoreTest {
             _ = store.tiles(projects, limit: 3)
             store.adopt(await daemon.state) { try await daemon.put($0) }
             await daemon.hold(true)
-            store.change(.pin("c"), arranged: ["a", "b", "c"])
+            store.change(.pin("c", true), arranged: ["a", "b", "c"])
             store.change(.move("b", before: "a"), arranged: ["c", "a", "b"])
             check(store.arrangement == TileArrangement(order: ["c", "b", "a"], pinned: ["c"]), "both edits show at once: \(store.arrangement)")
             await daemon.set(TileOrderState(order: ["a", "c", "b"], pinned: [], revision: 6))
@@ -179,7 +185,7 @@ struct TileOrderStoreTest {
             await daemon.go(offline: true)
             let first = TileOrderStore(defaults: defaults, key: suite)
             first.adopt(await daemon.state) { try await daemon.put($0) }
-            first.change(.pin("a"), arranged: ["a", "b", "c"])
+            first.change(.pin("a", true), arranged: ["a", "b", "c"])
             _ = try await settle { false }
             let reopened = TileOrderStore(defaults: defaults, key: suite)
             _ = reopened.tiles(projects, limit: 3)
@@ -187,13 +193,34 @@ struct TileOrderStoreTest {
             await daemon.hold(true)
             await daemon.set(TileOrderState(order: ["a", "b", "c"], pinned: [], revision: 3))
             reopened.adopt(await daemon.state) { try await daemon.put($0) }
-            reopened.change(.pin("b"), arranged: ["a", "b", "c"])
+            reopened.change(.pin("b", true), arranged: ["a", "b", "c"])
             await daemon.set(TileOrderState(order: ["c", "b", "a"], pinned: [], revision: 4))
             await daemon.hold(false)
             let landed = try await settle { await daemon.state.revision == 5 }
             let final = await daemon.state
             check(landed && final.pinned == ["a", "b"], "a pin made offline and one made after reopening both survive a refused write: \(final)")
             check(reopened.arrangement.pinned == ["a", "b"], "and both show: \(reopened.arrangement)")
+        }
+
+        try await withStore { defaults, suite in
+            let daemon = FakeDaemon()
+            await daemon.set(TileOrderState(order: ["a", "b", "c"], pinned: [], revision: 1))
+            let store = TileOrderStore(defaults: defaults, key: suite)
+            _ = store.tiles(projects, limit: 3)
+            store.adopt(await daemon.state) { try await daemon.put($0) }
+            await daemon.loseNextAnswer()
+            store.change(.pin("a", true), arranged: ["a", "b", "c"])
+            _ = try await settle { await daemon.state.revision == 2 }
+            _ = try await settle { false }
+            await daemon.hold(true)
+            store.adopt(await daemon.state) { try await daemon.put($0) }
+            store.change(.step("c", by: -1), arranged: ["a", "b", "c"])
+            let advanced = await daemon.state
+            await daemon.set(TileOrderState(order: ["b", "a", "c"], pinned: ["a"], revision: advanced.revision + 1))
+            await daemon.hold(false)
+            _ = try await settle { false }
+            let final = await daemon.state
+            check(final.pinned == ["a"] && store.arrangement.pinned == ["a"], "making a pin the daemon already kept again leaves it pinned: \(final) \(store.arrangement)")
         }
 
         print("tile order store: ok")

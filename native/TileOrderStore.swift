@@ -13,7 +13,7 @@ enum TileWrite: Equatable, Sendable {
 }
 
 enum TileChange: Codable, Equatable {
-    case pin(String)
+    case pin(String, Bool)
     case move(String, before: String)
     case step(String, by: Int)
 }
@@ -25,24 +25,25 @@ struct TileArrangement: Equatable {
     func applying(_ change: TileChange, arranged: [String]) -> TileArrangement {
         let all = arranged + order.filter { !arranged.contains($0) }
         var next = self
-        switch change {
-        case .pin(let id):
-            next.togglePin(id)
+        switch resolving(change, arranged: arranged) {
+        case .pin(let id, let on)?:
+            if on { next.pinned.insert(id) } else { next.pinned.remove(id) }
             next.order = all
-        case .move(let id, let target):
-            if pinned.contains(target) != pinned.contains(id) { next.togglePin(id) }
+        case .move(let id, let target)?:
+            if pinned.contains(target) { next.pinned.insert(id) } else { next.pinned.remove(id) }
             next.order = ProjectTiles.moving(id, before: target, in: all)
-        case .step(let id, let offset):
-            let group = arranged.filter { pinned.contains($0) == pinned.contains(id) }
-            guard let index = group.firstIndex(of: id), group.indices.contains(index + offset) else { return self }
-            let other = group[index + offset]
-            next.order = offset < 0 ? ProjectTiles.moving(id, before: other, in: all) : ProjectTiles.moving(other, before: id, in: all)
+        case .step?, nil:
+            return self
         }
         return next
     }
 
-    private mutating func togglePin(_ id: String) {
-        if pinned.contains(id) { pinned.remove(id) } else { pinned.insert(id) }
+    func resolving(_ change: TileChange, arranged: [String]) -> TileChange? {
+        guard case .step(let id, let offset) = change else { return change }
+        let group = arranged.filter { pinned.contains($0) == pinned.contains(id) }
+        guard let index = group.firstIndex(of: id), group.indices.contains(index + offset) else { return nil }
+        let other = group[index + offset]
+        return offset < 0 ? .move(id, before: other) : .move(other, before: id)
     }
 }
 
@@ -101,6 +102,7 @@ final class TileOrderStore {
     }
 
     func change(_ change: TileChange, arranged: [String]) {
+        guard let change = arrangement.resolving(change, arranged: arranged) else { return }
         let next = arrangement.applying(change, arranged: arranged)
         guard next != arrangement else { return }
         pending.append(change)
