@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"math"
-	"slices"
 	"sync"
 	"time"
 
@@ -159,7 +158,9 @@ func (d *Daemon) recordUnseenConversations(kind surface.SurfaceKind, keeper surf
 	return err
 }
 
-func (d *Daemon) restoreEndedSessions(kind surface.SurfaceKind, keeper surface.EndedConversations, seen map[string]struct{}, publish func(surface.Session)) {
+// A restore that lost to another write goes back on the backlog, so the next
+// pass restores the session from what that write left.
+func (d *Daemon) restoreEndedSessions(kind surface.SurfaceKind, keeper surface.EndedConversations, seen map[string]struct{}, publish func(ended, read surface.Session) bool) {
 	leads, err := d.Registry.LeadSessionsWithoutCatalogRow(string(kind))
 	if err != nil {
 		d.log.Printf("catalog leads without a row: %s", err)
@@ -176,41 +177,45 @@ func (d *Daemon) restoreEndedSessions(kind surface.SurfaceKind, keeper surface.E
 	}
 	deadline := time.Now().Add(catalogRestoreBudget)
 	batch := d.catalogEnded.takeBacklog(kind, catalogRestoreBatch)
+	var retry []catalogRestore
 	for index, item := range batch {
 		if time.Now().After(deadline) {
-			d.catalogEnded.setBacklog(kind, append(slices.Clone(batch[index:]), d.catalogEnded.takeBacklog(kind, math.MaxInt)...))
-			return
+			retry = append(retry, batch[index:]...)
+			break
 		}
-		if _, live := seen[item.id]; !live {
-			d.restoreEndedSession(item, publish)
+		if _, live := seen[item.id]; !live && !d.restoreEndedSession(item, publish) {
+			retry = append(retry, item)
 		}
+	}
+	if len(retry) > 0 {
+		d.catalogEnded.setBacklog(kind, append(retry, d.catalogEnded.takeBacklog(kind, math.MaxInt)...))
 	}
 }
 
-func (d *Daemon) restoreEndedSession(item catalogRestore, publish func(surface.Session)) {
+func (d *Daemon) restoreEndedSession(item catalogRestore, publish func(ended, read surface.Session) bool) bool {
 	if _, found, err := d.Registry.CatalogProjectionFingerprint(item.id); err != nil || found {
-		return
+		return true
 	}
 	session, err := d.Registry.Session(item.id)
 	if err != nil {
-		return
+		return true
 	}
 	ended := *session
 	ended.Status, ended.PID, ended.Bridge = surface.StatusOffline, 0, ""
 	if item.changed.After(ended.LastActive) {
 		ended.LastActive = item.changed
 	}
-	publish(ended)
+	return publish(ended, *session)
 }
 
-func (d *Daemon) discoverEndedSessions(ctx context.Context, adapter surface.Surface, keeper surface.EndedConversations, seen, hidden map[string]struct{}, observedAt time.Time, publish func(surface.Session, catalogIdentity)) error {
+func (d *Daemon) discoverEndedSessions(ctx context.Context, adapter surface.Surface, keeper surface.EndedConversations, seen, hidden map[string]struct{}, observedAt time.Time, publish func(ended surface.Session, read *surface.Session, identity catalogIdentity) bool) error {
 	if err := d.recordEndedDiscovery(adapter.Name(), keeper, seen, hidden, observedAt); err != nil {
 		return err
 	}
-	d.restoreEndedSessions(adapter.Name(), keeper, seen, func(session surface.Session) {
+	d.restoreEndedSessions(adapter.Name(), keeper, seen, func(session, read surface.Session) bool {
 		identityCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
-		publish(session, d.catalogIdentities.identity(identityCtx, session, observedAt, func() *CatalogProject { return d.storedCatalogProject(session.ID) }))
+		return publish(session, &read, d.catalogIdentities.identity(identityCtx, session, observedAt, func() *CatalogProject { return d.storedCatalogProject(session.ID) }))
 	})
 	return nil
 }

@@ -76,3 +76,23 @@ func registerSessionRowTx(tx *sql.Tx, s surface.Session) error {
 	}
 	return nil
 }
+
+func markRestoredEndedTx(tx *sql.Tx, ended, read surface.Session) error {
+	lastActive := int64(0)
+	if !ended.LastActive.IsZero() {
+		lastActive = ended.LastActive.UnixMilli()
+	}
+	result, err := tx.Exec(`UPDATE sessions SET status=?,ended=?,pid=0,bridge='',last_active_ms=?,updated_at=datetime('now')
+		WHERE id=? AND runtime_kind=? AND transport=? AND pid=? AND bridge=? AND status=?`,
+		string(ended.Status), b2i(sessionEnded(ended)), lastActive,
+		read.ID, string(read.RuntimeKind), read.Transport, read.PID, read.Bridge, string(read.Status))
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil {
+		return err
+	} else if rows == 0 {
+		return ErrCatalogRestoreChanged
+	}
+	return nil
+}

@@ -236,3 +236,36 @@ func TestTheCurrentViewCountsHistoryWithoutListingIt(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestARegistrationThatLandsWhileAPassRestoresTheSessionIsKept(t *testing.T) {
+	d, r, _ := endedFixture(t)
+	ended := claudeRow("worker")
+	if err := r.RegisterSession(ended); err != nil {
+		t.Fatal(err)
+	}
+	hosted := ended
+	hosted.RuntimeKind, hosted.PID, hosted.Bridge, hosted.Status = surface.RuntimeClaudeHost, 0, "", surface.StatusIdle
+	registered := false
+	d.catalogSelected = func(id string) {
+		if id == ended.ID && !registered {
+			registered = true
+			if err := r.RegisterSession(hosted); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	d.discoverCatalog(context.Background())
+	if !registered {
+		t.Fatal("the pass did not restore the session")
+	}
+	if stored, err := r.Session(ended.ID); err != nil || stored.RuntimeKind != surface.RuntimeClaudeHost {
+		t.Fatalf("stored=%+v err=%v, want the registration made during the restore", stored, err)
+	}
+	d.discoverCatalog(context.Background())
+	if !catalogHasRow(t, r, ended.ID) {
+		t.Fatal("a session whose restore lost to a registration has no row after the next pass")
+	}
+	if stored, err := r.Session(ended.ID); err != nil || stored.RuntimeKind != surface.RuntimeClaudeHost || stored.Status != surface.StatusOffline {
+		t.Fatalf("stored=%+v err=%v, want the hosted runtime kept and the session marked ended", stored, err)
+	}
+}
