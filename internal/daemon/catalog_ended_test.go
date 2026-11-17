@@ -93,7 +93,7 @@ func TestAnEndedClaudeSessionStaysInHistoryAndItsTranscriptIsCheckedAtMostHourly
 	if !catalogHasRow(t, r, session.ID) {
 		t.Fatal("a kept row was removed before its hourly check")
 	}
-	d.catalogEnded.rechecked[surface.KindClaude] = time.Now().Add(-catalogEndedRecheck)
+	d.catalogEnded.due[surface.KindClaude] = time.Now()
 	d.discoverCatalog(context.Background())
 	if catalogHasRow(t, r, session.ID) {
 		t.Fatal("the hourly check kept a conversation whose transcript is gone")
@@ -151,7 +151,7 @@ func TestASessionThatLostItsRowComesBackWhileItsTranscriptIsThereHoweverOld(t *t
 		t.Fatal(err)
 	}
 	adapter.changed = old.LastActive
-	d.catalogEnded.rechecked[surface.KindClaude] = time.Now().Add(-catalogEndedRecheck)
+	d.catalogEnded.due[surface.KindClaude] = time.Now()
 	d.discoverCatalog(context.Background())
 	d.discoverCatalog(context.Background())
 	if !catalogHasRow(t, r, "old") {
@@ -267,5 +267,83 @@ func TestARegistrationThatLandsWhileAPassRestoresTheSessionIsKept(t *testing.T) 
 	}
 	if stored, err := r.Session(ended.ID); err != nil || stored.RuntimeKind != surface.RuntimeClaudeHost || stored.Status != surface.StatusOffline {
 		t.Fatalf("stored=%+v err=%v, want the hosted runtime kept and the session marked ended", stored, err)
+	}
+}
+
+func TestTakingFromAFreshEndedCatalogTakesNothing(t *testing.T) {
+	ended := newCatalogEnded()
+	if batch := ended.takeBacklog(surface.KindClaude, catalogRestoreBatch); batch != nil {
+		t.Fatalf("a fresh backlog gave %+v", batch)
+	}
+	if ids := ended.takeHidden(surface.KindClaude, catalogHideBatch); ids != nil {
+		t.Fatalf("a fresh hidden list gave %+v", ids)
+	}
+}
+
+func TestAPassWhoseRecheckIsNotDueBeforeAnyBacklogWasSetRestoresNothing(t *testing.T) {
+	d, r, adapter := endedFixture(t)
+	session := claudeRow("worker")
+	adapter.sessions[session.ID] = session
+	d.catalogEnded.due[surface.KindClaude] = time.Now().Add(catalogEndedRecheck)
+	d.discoverCatalog(context.Background())
+	if !catalogHasRow(t, r, session.ID) {
+		t.Fatal("the live session has no row")
+	}
+}
+
+func TestARecheckThatFailsIsRetriedOnTheNextPass(t *testing.T) {
+	d, _, adapter := endedFixture(t)
+	adapter.unseen = []surface.Session{{ID: "no-transcript", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}}
+	d.discoverCatalog(context.Background())
+	if len(adapter.asked) != 1 {
+		t.Fatalf("the first pass read unseen conversations %d times", len(adapter.asked))
+	}
+	adapter.unseen = []surface.Session{claudeRow("found-later")}
+	d.discoverCatalog(context.Background())
+	if len(adapter.asked) != 2 {
+		t.Fatal("a recheck that failed waited for the next hourly recheck")
+	}
+	d.discoverCatalog(context.Background())
+	if len(adapter.asked) != 2 {
+		t.Fatal("a recheck that finished ran again on the next pass")
+	}
+}
+
+func TestARecheckThatKeepsFailingBacksOffInsteadOfRunningEveryPass(t *testing.T) {
+	d, _, adapter := endedFixture(t)
+	adapter.unseen = []surface.Session{{ID: "no-transcript", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}}
+	for range 4 {
+		d.discoverCatalog(context.Background())
+	}
+	if len(adapter.asked) != 2 {
+		t.Fatalf("a recheck that keeps failing ran on %d of 4 back-to-back passes, want the first and the retry", len(adapter.asked))
+	}
+}
+
+func TestAFailedRecheckWaitsLongerEachTimeUpToTheHourAndResetsOnSuccess(t *testing.T) {
+	ended := newCatalogEnded()
+	at := time.Now()
+	waits := []time.Duration{0}
+	for wait := catalogDiscoveryInterval; wait < catalogEndedRecheck; wait *= 2 {
+		waits = append(waits, wait)
+	}
+	waits = append(waits, catalogEndedRecheck, catalogEndedRecheck)
+	for _, wait := range waits {
+		ended.recheckFailed(surface.KindClaude, at)
+		if wait > 0 && ended.recheckDue(surface.KindClaude, at.Add(wait-time.Second)) {
+			t.Fatalf("a failed recheck was due before its %s wait", wait)
+		}
+		if !ended.recheckDue(surface.KindClaude, at.Add(wait)) {
+			t.Fatalf("a failed recheck was not due after its %s wait", wait)
+		}
+		at = at.Add(wait)
+	}
+	ended.markRechecked(surface.KindClaude, at)
+	if ended.recheckDue(surface.KindClaude, at.Add(catalogEndedRecheck-time.Second)) || !ended.recheckDue(surface.KindClaude, at.Add(catalogEndedRecheck)) {
+		t.Fatal("a recheck that finished is not next due in an hour")
+	}
+	ended.recheckFailed(surface.KindClaude, at)
+	if !ended.recheckDue(surface.KindClaude, at) {
+		t.Fatal("the first failure after a success did not retry on the next pass")
 	}
 }

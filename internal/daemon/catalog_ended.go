@@ -24,18 +24,20 @@ type catalogRestore struct {
 }
 
 type catalogEnded struct {
-	mu        sync.Mutex
-	rechecked map[surface.SurfaceKind]time.Time
-	backlog   map[surface.SurfaceKind][]catalogRestore
-	hidden    map[surface.SurfaceKind][]string
+	mu      sync.Mutex
+	due     map[surface.SurfaceKind]time.Time
+	retry   map[surface.SurfaceKind]time.Duration
+	backlog map[surface.SurfaceKind][]catalogRestore
+	hidden  map[surface.SurfaceKind][]string
+}
+
+func newCatalogEnded() *catalogEnded {
+	return &catalogEnded{due: map[surface.SurfaceKind]time.Time{}, retry: map[surface.SurfaceKind]time.Duration{}, backlog: map[surface.SurfaceKind][]catalogRestore{}, hidden: map[surface.SurfaceKind][]string{}}
 }
 
 func (e *catalogEnded) setHidden(kind surface.SurfaceKind, ids []string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.hidden == nil {
-		e.hidden = map[surface.SurfaceKind][]string{}
-	}
 	e.hidden[kind] = ids
 }
 
@@ -54,22 +56,31 @@ func (e *catalogEnded) takeHidden(kind surface.SurfaceKind, limit int) []string 
 func (e *catalogEnded) recheckDue(kind surface.SurfaceKind, now time.Time) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.rechecked == nil {
-		e.rechecked = map[surface.SurfaceKind]time.Time{}
-	}
-	if at, found := e.rechecked[kind]; found && now.Sub(at) < catalogEndedRecheck {
-		return false
-	}
-	e.rechecked[kind] = now
-	return true
+	due, found := e.due[kind]
+	return !found || !now.Before(due)
+}
+
+func (e *catalogEnded) markRechecked(kind surface.SurfaceKind, at time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.due[kind] = at.Add(catalogEndedRecheck)
+	delete(e.retry, kind)
+}
+
+// A failed recheck runs again on the next pass, then after a wait that
+// doubles from one pass interval up to the hour, so one that fails every time
+// does not stat every kept transcript on every pass.
+func (e *catalogEnded) recheckFailed(kind surface.SurfaceKind, at time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	wait := e.retry[kind]
+	e.due[kind] = at.Add(wait)
+	e.retry[kind] = min(max(2*wait, catalogDiscoveryInterval), catalogEndedRecheck)
 }
 
 func (e *catalogEnded) setBacklog(kind surface.SurfaceKind, items []catalogRestore) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.backlog == nil {
-		e.backlog = map[surface.SurfaceKind][]catalogRestore{}
-	}
 	e.backlog[kind] = items
 }
 
@@ -77,13 +88,16 @@ func (e *catalogEnded) takeBacklog(kind surface.SurfaceKind, limit int) []catalo
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	items := e.backlog[kind]
+	if len(items) == 0 {
+		return nil
+	}
 	limit = min(limit, len(items))
 	e.backlog[kind] = items[limit:]
 	return items[:limit]
 }
 
 // Kept rows are statted only on a recheck, so a pass costs the same however many there are.
-func (d *Daemon) recordEndedDiscovery(kind surface.SurfaceKind, keeper surface.EndedConversations, seen, hidden map[string]struct{}, observedAt time.Time) error {
+func (d *Daemon) recordEndedDiscovery(kind surface.SurfaceKind, keeper surface.EndedConversations, seen, hidden map[string]struct{}, observedAt time.Time) (err error) {
 	remove := d.catalogEnded.takeHidden(kind, catalogHideBatch)
 	for id := range hidden {
 		remove = append(remove, id)
@@ -92,6 +106,15 @@ func (d *Daemon) recordEndedDiscovery(kind surface.SurfaceKind, keeper surface.E
 		return err
 	}
 	recheck := d.catalogEnded.recheckDue(kind, observedAt)
+	if recheck {
+		defer func() {
+			if err != nil {
+				d.catalogEnded.recheckFailed(kind, time.Now())
+			} else {
+				d.catalogEnded.markRechecked(kind, time.Now())
+			}
+		}()
+	}
 	candidates, err := d.Registry.CatalogOmissionCandidates(string(kind), catalogOmissionThreshold, recheck)
 	if err != nil {
 		return err
