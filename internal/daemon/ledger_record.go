@@ -72,19 +72,26 @@ func (d *Daemon) recordPersonWordsOnce(session surface.Session, u ledger.Utteran
 
 // sessionProject uses the catalog's cached identity so per-prompt capture does not run git on the stream callback.
 func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error) {
-	records, err := d.Registry.ListProjects()
+	identity, err := d.sessionIdentity(session)
 	if err != nil {
 		return nil, err
 	}
-	d.catalogIdentities.setProjects(records)
-	if err := d.refreshProjectLinks(); err != nil {
-		return nil, err
-	}
-	identity := d.catalogIdentities.identity(context.Background(), session, time.Now(), func() *CatalogProject { return nil })
 	if identity.Project == nil && identity.Problem != "" {
 		return nil, fmt.Errorf("resolve the project of %s: %s", session.Cwd, identity.Problem)
 	}
 	return identity.Project, nil
+}
+
+func (d *Daemon) sessionIdentity(session surface.Session) (catalogIdentity, error) {
+	records, err := d.Registry.ListProjects()
+	if err != nil {
+		return catalogIdentity{}, err
+	}
+	d.catalogIdentities.setProjects(records)
+	if err := d.refreshProjectLinks(); err != nil {
+		return catalogIdentity{}, err
+	}
+	return d.catalogIdentities.identity(context.Background(), session, time.Now(), func() *CatalogProject { return nil }), nil
 }
 
 func (d *Daemon) backfillPrompt(session surface.Session, payload sessionJournalPayload) {

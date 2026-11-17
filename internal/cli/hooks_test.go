@@ -438,6 +438,53 @@ func TestInstallBringsAHookWrittenWithoutExecUpToDate(t *testing.T) {
 	}
 }
 
+func TestInstallAndUninstallRemoveAnAgenthailHookNoLongerWritten(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	settings := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0700); err != nil {
+		t.Fatal(err)
+	}
+	retired := `exec '/usr/local/bin/agenthail' hook stop --surface claude --terminal`
+	written := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"notify-done"},{"type":"command","command":` + strconv.Quote(retired) + `,"timeout":10}]}]}}`
+	app, _ := cliFixture(t, &cliSurface{kind: "claude"})
+	run := func(args ...string) string {
+		t.Helper()
+		output, err := captureStdout(t, func() error { return app.Run(args) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(output)
+	}
+	stops := func() string {
+		t.Helper()
+		data, err := os.ReadFile(settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return gjson.GetBytes(data, "hooks.Stop.#.hooks.#.command").Raw
+	}
+	for _, action := range []string{"install", "uninstall"} {
+		if err := os.WriteFile(settings, []byte(written), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if action == "install" {
+			if got := run("hooks", "status"); got != settings+": outdated; run: agenthail hooks install" {
+				t.Fatalf("status with a retired hook = %q", got)
+			}
+		}
+		run("hooks", action)
+		if got := stops(); got != `[["notify-done"]]` {
+			t.Fatalf("hooks %s left the Stop hooks %s", action, got)
+		}
+	}
+	run("hooks", "install")
+	if got := run("hooks", "status"); got != settings+": installed" {
+		t.Fatalf("status after install = %q", got)
+	}
+}
+
 func TestInstallMovesAgenthailsHookOutOfAMatcherThatNarrowsIt(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -590,4 +637,32 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestAStopHookAnEarlierInstallWroteEndsQuietlyAndHoldsNothing(t *testing.T) {
+	app, _, _ := cardFixture(t)
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+	for _, args := range [][]string{
+		{"hook", "stop", "--surface", "claude", "--terminal"},
+		{"hook", "stop", "--surface", "claude"},
+		{"hook", "stop", "--surface", "codex"},
+	} {
+		stdin, err := os.CreateTemp(t.TempDir(), "hook-input")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stdin.WriteString(`{"session_id":"planner-conversation","hook_event_name":"Stop","turn_id":"turn-1","last_assistant_message":"Should I deploy it?"}`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stdin.Seek(0, 0); err != nil {
+			t.Fatal(err)
+		}
+		previous := os.Stdin
+		os.Stdin = stdin
+		output, err := captureStdout(t, func() error { return app.Run(args) })
+		os.Stdin = previous
+		if err != nil || output != "" {
+			t.Fatalf("%v: output %q err %v", args, output, err)
+		}
+	}
 }

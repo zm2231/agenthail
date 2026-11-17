@@ -8,11 +8,8 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
-
-	"github.com/zm2231/agenthail/internal/agenttools"
 )
 
 const maxClaudeTranscriptRecordBytes = 32 * 1024 * 1024
@@ -22,19 +19,17 @@ var ansiEscapeRe = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 type claudeTurn struct {
 	UserID string
 	// Inputs are what the turn read: its own UserID and each message Claude
-	// queued into it while it ran, or for a turn answering the end-turn nudge,
-	// the inputs of the turn it continues.
-	Inputs       []string
-	MessageID    string
-	User         string
-	Assistant    string
-	Model        string
-	StartedAt    time.Time
-	TerminalAt   time.Time
-	Done         bool
-	Closing      bool
-	Interrupted  bool
-	AnswersNudge bool
+	// queued into it while it ran.
+	Inputs      []string
+	MessageID   string
+	User        string
+	Assistant   string
+	Model       string
+	StartedAt   time.Time
+	TerminalAt  time.Time
+	Done        bool
+	Closing     bool
+	Interrupted bool
 	// APIError is the message Claude Code wrote in place of a reply the API
 	// refused; UsageLimited marks a refusal by a usage limit, which lifts at
 	// UsageResetsAt when Claude said when, and Refused one by the API's
@@ -284,16 +279,11 @@ func foldClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 			}
 			endClaudeTurn(&turns[n-1], turns[n-1].LastAt)
 		}
-		nudge := record.IsMeta && isClaudeStopHookFeedback(strings.TrimSpace(text)) && strings.Contains(text, agenttools.EndTurnNudge)
 		id := record.UUID
 		if record.Origin.MsgID != "" {
 			id = record.Origin.MsgID
 		}
-		turn := claudeTurn{UserID: id, Inputs: []string{id}, User: strings.TrimSpace(text), StartedAt: startedAt, AnswersNudge: nudge}
-		if n := len(turns); nudge && n > 0 && claudeTurnCompleted(turns[n-1]) && len(turns[n-1].Inputs) > 0 {
-			turn.Inputs = slices.Clone(turns[n-1].Inputs)
-		}
-		return append(turns, turn)
+		return append(turns, claudeTurn{UserID: id, Inputs: []string{id}, User: strings.TrimSpace(text), StartedAt: startedAt})
 	case "attachment":
 		if id := claudeQueuedInput(record); id != "" && len(turns) > 0 && !turns[len(turns)-1].Done {
 			turns[len(turns)-1].Inputs = append(turns[len(turns)-1].Inputs, id)
@@ -358,10 +348,6 @@ func foldClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 
 func claudeRecordEndsTurn(record claudeRecord) bool {
 	return record.Type == "system" && (record.Subtype == "turn_duration" || claudeStopHooksEndTurn(record.Subtype, record.IsSidechain, record.PreventedContinuation, len(record.HookErrors)))
-}
-
-func claudeTurnCompleted(turn claudeTurn) bool {
-	return turn.Done && !turn.Interrupted && turn.MessageID != "" && claudeTurnError(turn) == ""
 }
 
 func endClaudeTurn(turn *claudeTurn, at time.Time) {

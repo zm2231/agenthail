@@ -27,14 +27,14 @@ var (
 	Prompt       = Hook{Event: "PermissionRequest", Args: "hook permission-request", Matcher: "*", Timeout: 86400}
 	Start        = Hook{Event: "SessionStart", Args: "hook session-context", Timeout: 10}
 	PromptSubmit = Hook{Event: "UserPromptSubmit", Args: "hook session-context", Timeout: 10}
-	Stop         = Hook{Event: "Stop", Args: "hook stop --surface claude --terminal", Timeout: 10}
-	All          = []Hook{Prompt, Start, PromptSubmit, Stop}
+	All          = []Hook{Prompt, Start, PromptSubmit}
 )
 
 // The states of Agenthail's hooks in a settings file. An outdated hook is
 // one install wrote before it ran hooks with exec, with another timeout, or
-// under a matcher that narrows it; a file with some of the hooks is outdated
-// too. Install brings it up to date.
+// under a matcher that narrows it; a file with some of the hooks, or with an
+// agenthail hook that is none of them, is outdated too. Install brings it up
+// to date.
 const (
 	Missing   = "missing"
 	Outdated  = "outdated"
@@ -65,12 +65,39 @@ func (h Hook) Owns(command string) bool {
 	return filepath.IsAbs(path) && filepath.Base(path) == "agenthail"
 }
 
+func anAgenthailHook(command string) bool {
+	command = strings.TrimPrefix(command, execPrefix)
+	end := strings.LastIndex(command, "' hook ")
+	if end < 1 || command[0] != '\'' {
+		return false
+	}
+	path := strings.ReplaceAll(command[1:end], `'\''`, "'")
+	return filepath.IsAbs(path) && filepath.Base(path) == "agenthail"
+}
+
+// stray reports whether an agenthail hook command under event is one that
+// no hook in All owns, such as a hook a later agenthail no longer writes.
+func stray(event, command string) bool {
+	if !anAgenthailHook(command) {
+		return false
+	}
+	for _, h := range All {
+		if h.Event == event && h.Owns(command) {
+			return false
+		}
+	}
+	return true
+}
+
 func InstallAt(path, executable string) (bool, error) {
 	data, mode, err := surface.ReadClaudeSettingsFile(path)
 	if err != nil {
 		return false, err
 	}
-	updated := data
+	updated, err := removeStray(data)
+	if err != nil {
+		return false, err
+	}
 	for _, h := range All {
 		if updated, err = h.install(updated, h.Command(executable)); err != nil {
 			return false, err
@@ -127,7 +154,10 @@ func UninstallAt(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	updated := data
+	updated, err := removeStray(data)
+	if err != nil {
+		return false, err
+	}
 	for _, h := range All {
 		if updated, err = h.remove(updated, func(gjson.Result) bool { return true }); err != nil {
 			return false, err
@@ -139,14 +169,45 @@ func UninstallAt(path string) (bool, error) {
 	return true, surface.WriteClaudeSettingsFile(path, updated, mode)
 }
 
+// RetireAt removes only the agenthail hooks no hook in All owns, such as a
+// Stop hook an earlier install wrote, and installs nothing.
+func RetireAt(path string) (bool, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return false, nil
+	}
+	data, mode, err := surface.ReadClaudeSettingsFile(path)
+	if err != nil {
+		return false, err
+	}
+	updated, err := removeStray(data)
+	if err != nil || string(updated) == string(data) {
+		return false, err
+	}
+	return true, surface.WriteClaudeSettingsFile(path, updated, mode)
+}
+
 func matchesAll(entry gjson.Result) bool {
 	matcher := entry.Get("matcher").String()
 	return matcher == "" || matcher == "*"
 }
 
 func (h Hook) remove(data []byte, from func(entry gjson.Result) bool) ([]byte, error) {
+	return removeHooks(data, h.Event, from, h.Owns)
+}
+
+func removeStray(data []byte) ([]byte, error) {
 	var err error
-	entries := gjson.GetBytes(data, "hooks."+h.Event).Array()
+	for event := range gjson.GetBytes(data, "hooks").Map() {
+		if data, err = removeHooks(data, event, func(gjson.Result) bool { return true }, func(command string) bool { return stray(event, command) }); err != nil {
+			return nil, err
+		}
+	}
+	return data, nil
+}
+
+func removeHooks(data []byte, event string, from func(entry gjson.Result) bool, owns func(command string) bool) ([]byte, error) {
+	var err error
+	entries := gjson.GetBytes(data, "hooks."+event).Array()
 	for i := len(entries) - 1; i >= 0; i-- {
 		if !from(entries[i]) {
 			continue
@@ -154,16 +215,16 @@ func (h Hook) remove(data []byte, from func(entry gjson.Result) bool) ([]byte, e
 		hooks := entries[i].Get("hooks").Array()
 		kept := 0
 		for j := len(hooks) - 1; j >= 0; j-- {
-			if !h.Owns(hooks[j].Get("command").String()) {
+			if !owns(hooks[j].Get("command").String()) {
 				kept++
 				continue
 			}
-			if data, err = sjson.DeleteBytes(data, fmt.Sprintf("hooks.%s.%d.hooks.%d", h.Event, i, j)); err != nil {
+			if data, err = sjson.DeleteBytes(data, fmt.Sprintf("hooks.%s.%d.hooks.%d", event, i, j)); err != nil {
 				return nil, err
 			}
 		}
 		if kept == 0 && len(hooks) > 0 {
-			if data, err = sjson.DeleteBytes(data, fmt.Sprintf("hooks.%s.%d", h.Event, i)); err != nil {
+			if data, err = sjson.DeleteBytes(data, fmt.Sprintf("hooks.%s.%d", event, i)); err != nil {
 				return nil, err
 			}
 		}
@@ -178,6 +239,15 @@ func AllStateAt(path string) (string, error) {
 	}
 	if err != nil {
 		return "", err
+	}
+	for event, entries := range gjson.GetBytes(data, "hooks").Map() {
+		for _, entry := range entries.Array() {
+			for _, hook := range entry.Get("hooks").Array() {
+				if stray(event, hook.Get("command").String()) {
+					return Outdated, nil
+				}
+			}
+		}
 	}
 	states := map[string]int{}
 	for _, h := range All {

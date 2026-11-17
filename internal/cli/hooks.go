@@ -77,29 +77,13 @@ func (a *App) cmdHook(args []string) error {
 		}
 		return nil
 	}
+	// Agenthail no longer installs a Stop hook, but settings an earlier install wrote run this until the daemon or hooks install removes them, so it reads its input and does nothing.
 	if len(args) > 0 && args[0] == "stop" {
-		terminal := len(args) == 4 && args[3] == "--terminal" && args[2] == string(surface.KindClaude)
-		if len(args) != 3 && !terminal || args[1] != "--surface" || (args[2] != string(surface.KindClaude) && args[2] != string(surface.KindCodex)) {
-			return errors.New("usage: agenthail hook stop --surface claude|codex [--terminal]")
-		}
-		// The Claude host runs its own Stop hook, which knows its background work; the settings copy speaks only for terminal Claude.
-		if terminal && os.Getenv("CLAUDE_CODE_ENTRYPOINT") != "cli" {
-			return nil
-		}
-		done := make(chan map[string]any, 1)
-		input := os.Stdin
-		go func() { done <- a.turnStop(input, time.Now()) }()
-		select {
-		case output := <-done:
-			if output != nil {
-				_ = emit(output)
-			}
-		case <-claudeSessionContextExpired():
-		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(os.Stdin, claudeHookInputLimit))
 		return nil
 	}
 	if len(args) != 1 || args[0] != "permission-request" {
-		return errors.New("usage: agenthail hook permission-request|session-context|stop")
+		return errors.New("usage: agenthail hook permission-request|session-context")
 	}
 	if os.Getenv("CLAUDE_CODE_ENTRYPOINT") != "cli" {
 		return nil

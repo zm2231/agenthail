@@ -442,12 +442,7 @@ with no hook installed ([agent card](agent-card.md#telling-a-claude-session-its-
 The callback returns only the command's `additionalContext`, and nothing on any
 failure or after 8s. The claim is keyed by the Claude pid, the same key the
 installed hook uses as Claude's child, so a session that has both is told once.
-Every session also gets a `Stop` callback that runs
-`agenthail hook stop --surface claude` and passes on only its block, so a turn
-that ends without `agenthail_end_turn`, or a lead's reply that asks the person
-without an ask, is held once; it skips the command for the stop after a block,
-a subagent's stop, and while a background task that is not ambient runs
-([work record](work-record.md), [asks](asks.md)). Both commands get the hook
+The command gets the hook
 input with `agenthail_tools` added: `attached` once the conversation has the
 `agenthail` server, `absent` when it was opened without one or its attach
 failed ([MCP](mcp.md)).

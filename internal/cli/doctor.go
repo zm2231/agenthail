@@ -350,9 +350,9 @@ func (a *App) cmdDoctor(args []string) error {
 			}
 			switch claudeHookStates[root] {
 			case claudehooks.Missing:
-				fmt.Printf("  hooks: missing; terminal prompts can't be answered from Agenthail, and terminal sessions aren't told who they are, until you run: agenthail hooks install\n")
+				fmt.Printf("  hooks: missing; terminal prompts can't be answered from Agenthail, terminal sessions aren't told who they are, and turns you type in a terminal push Needs you to your devices, until you run: agenthail hooks install\n")
 			case claudehooks.Outdated:
-				fmt.Printf("  hooks: outdated; terminal prompts may not reach Agenthail, and terminal sessions may not be told who they are, until you run: agenthail hooks install\n")
+				fmt.Printf("  hooks: outdated; terminal prompts may not reach Agenthail, terminal sessions may not be told who they are, and turns you type in a terminal may push Needs you to your devices, until you run: agenthail hooks install\n")
 			}
 			switch state := claudeMCPStates[root]; state {
 			case claudemcp.Installed, claudeMCPOff:
@@ -437,13 +437,11 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		switch codexHooks {
 		case surfaces.CodexHooksMissing:
-			fmt.Printf("codex hooks: missing; Codex sessions, including the ones Agenthail starts, aren't told who they are until you run: agenthail hooks install codex\n")
+			fmt.Printf("codex hooks: missing; Codex sessions, including the ones Agenthail starts, aren't told who they are, and turns you type into Codex push Needs you to your devices, until you run: agenthail hooks install codex\n")
 		case surfaces.CodexHooksOutdated:
-			fmt.Printf("codex hooks: outdated; Codex sessions may not be told who they are until you run: agenthail hooks install codex\n")
+			fmt.Printf("codex hooks: outdated; Codex sessions may not be told who they are, and turns you type into Codex may push Needs you to your devices, until you run: agenthail hooks install codex\n")
 		case surfaces.CodexHooksUntrusted:
 			fmt.Printf("codex hooks: Codex hook not trusted yet: run agenthail hooks install codex or trust it in Codex\n")
-		case surfaces.CodexHooksNoNudge:
-			fmt.Printf("codex hooks: %s; update Codex, then run: agenthail hooks install codex\n", surfaces.CodexHooksNoNudge)
 		}
 		switch codexMCP {
 		case "", surfaces.CodexRelayInstalled, claudeMCPOff:

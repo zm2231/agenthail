@@ -21,6 +21,7 @@ type claudeHookInput struct {
 	Source    string `json:"source"`
 	Prompt    string `json:"prompt"`
 	PromptID  string `json:"prompt_id"`
+	TurnID    string `json:"turn_id"`
 	// Set by the Claude host to the uuid of the message Claude took.
 	MessageUUID string `json:"agenthail_message_uuid"`
 	// Set by the Claude host to whether the conversation has its agenthail MCP server.
@@ -93,6 +94,9 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 		case change == registry.ContextChanged:
 			text = agentcard.RenderChange(card)
 		}
+	}
+	if hook.PromptID == "" {
+		hook.PromptID = hook.TurnID
 	}
 	if hook.Event == claudehooks.PromptSubmit.Event && hook.Prompt != "" && hook.PromptID != "" && session.Cwd != "" {
 		ledgerContext = a.captureTerminalUtterance(ctx, session, hook)

@@ -29,7 +29,9 @@ type judgeStub struct {
 	mu         sync.Mutex
 	down       bool
 	secondDown bool
-	calls      []judgeCall
+	// state is the situation the judge answers; continuing when empty.
+	state string
+	calls []judgeCall
 }
 
 func (s *judgeStub) serve(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +51,11 @@ func (s *judgeStub) serve(w http.ResponseWriter, r *http.Request) {
 	s.calls = append(s.calls, call)
 	_, promise := body.Questions["promise"]
 	down := s.down || s.secondDown && !promise
+	state := s.state
 	s.mu.Unlock()
+	if state == "" {
+		state = turnContinuing
+	}
 	if down {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -58,8 +64,8 @@ func (s *judgeStub) serve(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"answers":{"promise":{"type":"noul","noul":0.62}}}`)
 		return
 	}
-	io.WriteString(w, `{"answers":{"needs":{"type":"noul","noul":0.08},"needs_tail":{"type":"noul","noul":0.05},
-		"state":{"choice":"continuing","confidence":0.7,"probabilities":{"done":0.1,"waiting_person":0.1,"waiting_work":0.1,"continuing":0.7}}}}`)
+	fmt.Fprintf(w, `{"answers":{"needs":{"type":"noul","noul":0.08},"needs_tail":{"type":"noul","noul":0.05},
+		"state":{"choice":%q,"confidence":0.7,"probabilities":{"done":0.1,"waiting_person":0.1,"waiting_work":0.1,"continuing":0.7}}}}`, state)
 }
 
 func (s *judgeStub) asked() []judgeCall {
@@ -219,5 +225,48 @@ func TestTheEndingLeavesOutCodeAndAClosingBlockOfLinks(t *testing.T) {
 		if got := replyEnding(reply, 2); got != want {
 			t.Fatalf("replyEnding(%q) = %q, want %q", reply, got, want)
 		}
+	}
+}
+
+func TestATerminalClaudeTurnKeepsItsHeadlineAndJudgmentWithNoStopHook(t *testing.T) {
+	stub := &judgeStub{state: turnDone}
+	d, r, fake, _ := judgeFixture(t, stub, "")
+	terminal := surface.Session{ID: "terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}
+	if err := r.RecordObservedSession(terminal); err != nil {
+		t.Fatal(err)
+	}
+	fake.sessions[terminal.ID] = terminal
+	tools := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, terminal))
+
+	observe := func(observation *surface.TurnObservation) {
+		fake.observations[terminal.ID] = observation
+		d.observeSession(d.background.ctx, fake, &terminal)
+	}
+	observe(&surface.TurnObservation{Status: surface.StatusIdle})
+	submitPrompt(t, d, terminal.ID, "typed-1", "fix the parser")
+	observe(&surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"})
+	if _, refused := callMCP(t, tools, "agenthail_end_turn", map[string]any{"headline": "Fixed the parser"}); refused {
+		t.Fatal("end_turn was refused")
+	}
+	observe(&surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1", Reply: &surface.ReplyResult{Text: "Fixed the parser.", Done: true}})
+
+	var judged registry.TurnJudgment
+	eventually(t, "the terminal turn's judgment", func() bool {
+		for _, j := range readJudgments(t, d, terminal.ID).Judgments {
+			if j.TurnID == "turn-1" && !j.JudgedAt.IsZero() {
+				judged = j
+				return true
+			}
+		}
+		return false
+	})
+	if judged.Headline != "Fixed the parser" || judged.State != turnDone || !judged.Facts.Typed {
+		t.Fatalf("the terminal turn was judged as %+v", judged)
+	}
+	if end, ok, err := r.CompletedTurnEnd(terminal.ID, "turn-1"); err != nil || !ok || end.Headline != "Fixed the parser" {
+		t.Fatalf("the turn's end is %+v ok=%v err=%v", end, ok, err)
+	}
+	if row := viewRow(t, d, terminal.ID); row.EndTurn == nil || row.EndTurn.Headline != "Fixed the parser" || row.TurnState == nil || row.TurnState.State != turnDone {
+		t.Fatalf("the terminal row reads endTurn=%+v turnState=%+v", row.EndTurn, row.TurnState)
 	}
 }

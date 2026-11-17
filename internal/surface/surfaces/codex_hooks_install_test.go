@@ -5,11 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const testAgenthail = "/usr/local/bin/agenthail"
@@ -18,9 +20,6 @@ func isolatedCodexHome(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("codex"); err != nil {
 		t.Skip("codex is not installed")
-	}
-	if out, err := exec.Command("codex", "--version").Output(); err != nil || !codexAtLeast(strings.TrimPrefix(strings.TrimSpace(string(out)), "codex-cli "), CodexStopHookVersion) {
-		t.Skipf("codex %q is older than %s, which these tests install for", out, CodexStopHookVersion)
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", t.TempDir())
@@ -62,7 +61,7 @@ func TestHooksInstallCodexKeepsThePersonsConfigAndIsUndoneByUninstall(t *testing
 	}
 	requireCodexState(t, home, CodexHooksInstalled)
 	written, _ := os.ReadFile(config)
-	if !strings.Contains(string(written), "# my settings") || !strings.Contains(string(written), `command = "notify"`) || strings.Count(string(written), "hook session-context --surface codex") != 2 || strings.Count(string(written), "hook stop --surface codex") != 1 || strings.Count(string(written), "trusted_hash") != 3 {
+	if !strings.Contains(string(written), "# my settings") || !strings.Contains(string(written), `command = "notify"`) || strings.Count(string(written), "hook session-context --surface codex") != 2 || strings.Count(string(written), "trusted_hash") != 2 {
 		t.Fatalf("config after install:\n%s", written)
 	}
 	if _, err := os.Stat(filepath.Join(home, "hooks.json")); !os.IsNotExist(err) {
@@ -105,9 +104,6 @@ func TestHooksInstallCodexWritesIntoAHooksFileThePersonAlreadyUses(t *testing.T)
 	if start := gjson.GetBytes(data, "hooks.SessionStart").Array(); len(start) != 2 || start[0].Raw != gjson.Get(mine, "0").Raw || !ownsCodexContextHook(start[1].Get("hooks.0.command").String()) {
 		t.Fatalf("hooks.json after install: %s", data)
 	}
-	if !ownsCodexContextHook(gjson.GetBytes(data, "hooks.Stop.0.hooks.0.command").String()) {
-		t.Fatalf("hooks.json after install has no Stop hook: %s", data)
-	}
 	if config, _ := os.ReadFile(filepath.Join(home, "config.toml")); strings.Contains(string(config), " --surface codex") {
 		t.Fatalf("install put hooks in config.toml beside hooks.json:\n%s", config)
 	}
@@ -133,40 +129,39 @@ func TestHooksInstallCodexWritesIntoAHooksFileThePersonAlreadyUses(t *testing.T)
 	requireCodexState(t, home, CodexHooksMissing)
 }
 
-func TestACodexTooOldToContinueABlockedTurnGetsNoStopHookUntilItIsUpdated(t *testing.T) {
-	home := isolatedCodexHome(t)
-	real, _ := exec.LookPath("codex")
-	bin := t.TempDir()
-	older := "#!/bin/sh\n'" + real + "' \"$@\" | sed -u 's#\"userAgent\":\"\\([^/\"]*\\)/[0-9.]*#\"userAgent\":\"\\1/0.162.0#'\n"
-	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte(older), 0700); err != nil {
-		t.Fatal(err)
-	}
-	path := os.Getenv("PATH")
-	t.Setenv("PATH", bin+":"+path)
-	if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
-		t.Fatal(err)
-	}
-	requireCodexState(t, home, CodexHooksNoNudge)
-	config, _ := os.ReadFile(filepath.Join(home, "config.toml"))
-	if strings.Contains(string(config), "hook stop") || strings.Count(string(config), "hook session-context --surface codex") != 2 {
-		t.Fatalf("config after install on an older Codex:\n%s", config)
-	}
-
-	t.Setenv("PATH", path)
-	requireCodexState(t, home, CodexHooksOutdated)
-	if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
-		t.Fatal(err)
-	}
-	requireCodexState(t, home, CodexHooksInstalled)
-
-	t.Setenv("PATH", bin+":"+path)
-	requireCodexState(t, home, CodexHooksOutdated)
-	if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
-		t.Fatal(err)
-	}
-	requireCodexState(t, home, CodexHooksNoNudge)
-	if config, _ := os.ReadFile(filepath.Join(home, "config.toml")); strings.Contains(string(config), "hook stop") {
-		t.Fatalf("install on a downgraded Codex left the Stop hook:\n%s", config)
+func TestInstallAndUninstallRemoveAnAgenthailCodexHookNoLongerWritten(t *testing.T) {
+	retired := `exec '` + testAgenthail + `' hook stop --surface codex`
+	for _, file := range []string{"config.toml", "hooks.json"} {
+		for _, action := range []string{"install", "uninstall"} {
+			home := isolatedCodexHome(t)
+			path := filepath.Join(home, file)
+			written := "[hooks]\nStop = [{ hooks = [{ type = \"command\", command = \"notify\" }, { type = \"command\", command = " + strconv.Quote(retired) + ", timeout = 10 }] }]\n"
+			if file == "hooks.json" {
+				written = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"notify"},{"type":"command","command":` + strconv.Quote(retired) + `,"timeout":10}]}]}}`
+			}
+			if err := os.WriteFile(path, []byte(written), 0600); err != nil {
+				t.Fatal(err)
+			}
+			requireCodexState(t, home, CodexHooksOutdated)
+			var err error
+			if action == "install" {
+				_, err = InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail)
+			} else {
+				_, err = UninstallCodexContext(codexContext(t), CodexHome{Codex: home})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := os.ReadFile(path)
+			if strings.Contains(string(data), "hook stop") || !strings.Contains(string(data), "notify") {
+				t.Fatalf("%s after %s in %s:\n%s", file, action, home, data)
+			}
+			want := CodexHooksInstalled
+			if action == "uninstall" {
+				want = CodexHooksMissing
+			}
+			requireCodexState(t, home, want)
+		}
 	}
 }
 
@@ -233,5 +228,79 @@ func TestCodexHooksStateReturnsByItsDeadlineWhenCodexWillNotExit(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 3*time.Second {
 		t.Fatalf("the state check took %s past its 2s deadline", elapsed)
+	}
+}
+
+func TestRetiringCodexHooksRemovesOnlyAHookAgenthailNoLongerWritesAndKeepsTrust(t *testing.T) {
+	retired := `exec '` + testAgenthail + `' hook stop --surface codex`
+	home := isolatedCodexHome(t)
+	hooks := filepath.Join(home, "hooks.json")
+	if err := os.WriteFile(hooks, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"notify"}]}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(hooks)
+	data, err := sjson.SetBytes(data, "hooks.Stop.0.hooks.-1", map[string]any{"type": "command", "command": retired, "timeout": 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hooks, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requireCodexState(t, home, CodexHooksOutdated)
+	if changed, err := RetireCodexHooks(codexContext(t), CodexHome{Codex: home}); err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	data, _ = os.ReadFile(hooks)
+	if got := gjson.GetBytes(data, "hooks.Stop.#.hooks.#.command").Raw; got != `[["notify"]]` {
+		t.Fatalf("hooks.json Stop after retiring: %s", got)
+	}
+	requireCodexState(t, home, CodexHooksInstalled)
+
+	home = isolatedCodexHome(t)
+	config := filepath.Join(home, "config.toml")
+	if err := os.WriteFile(config, []byte("model = \"x\"\n\n[hooks]\nStop = [{ hooks = [{ type = \"command\", command = \"notify\" }, { type = \"command\", command = "+strconv.Quote(retired)+", timeout = 10 }] }]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := RetireCodexHooks(codexContext(t), CodexHome{Codex: home}); err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if written, _ := os.ReadFile(config); strings.Contains(string(written), "hook stop") || !strings.Contains(string(written), `command = "notify"`) || !strings.Contains(string(written), `model = "x"`) {
+		t.Fatalf("config.toml after retiring:\n%s", written)
+	}
+
+	home = isolatedCodexHome(t)
+	hooks = filepath.Join(home, "hooks.json")
+	if err := os.WriteFile(hooks, []byte(`{"hooks":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallCodexContext(codexContext(t), CodexHome{Codex: home}, testAgenthail); err != nil {
+		t.Fatal(err)
+	}
+	installed, _ := os.ReadFile(hooks)
+	config = filepath.Join(home, "config.toml")
+	trusted, _ := os.ReadFile(config)
+	if err := os.WriteFile(config, append([]byte("[hooks]\nStop = [{ hooks = [{ type = \"command\", command = \"notify\" }, { type = \"command\", command = "+strconv.Quote(retired)+", timeout = 10 }] }]\n\n"), trusted...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := RetireCodexHooks(codexContext(t), CodexHome{Codex: home}); err != nil || !changed {
+		t.Fatalf("a stray hook in config.toml beside hooks.json: changed=%v err=%v", changed, err)
+	}
+	if written, _ := os.ReadFile(config); strings.Contains(string(written), "hook stop") || !strings.Contains(string(written), `command = "notify"`) {
+		t.Fatalf("config.toml beside hooks.json after retiring:\n%s", written)
+	}
+	if after, _ := os.ReadFile(hooks); string(after) != string(installed) {
+		t.Fatalf("retiring changed hooks.json:\n%s\nwas:\n%s", after, installed)
+	}
+	requireCodexState(t, home, CodexHooksInstalled)
+
+	if err := os.WriteFile(filepath.Join(home, "hooks.json"), []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"exec '/usr/local/bin/agenthail-wrapper' hook stop --surface codex"},{"type":"command","command":"echo \"/agenthail' hook stop --surface codex\""}]}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	if changed, err := RetireCodexHooks(codexContext(t), CodexHome{Codex: home}); err != nil || changed {
+		t.Fatalf("a Codex home with nothing to retire started Codex: changed=%v err=%v", changed, err)
 	}
 }

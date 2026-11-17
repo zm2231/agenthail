@@ -1100,26 +1100,10 @@ function sessionContextHooks(s) {
       child.stdin.on('error', () => {});
       child.stdin.end(JSON.stringify(withAgenthailTools(s, withMessageUUID(s, input))));
     });
-  // agenthail hook stop decides whether to hold the stop once: to end the turn with the tools, or to raise an ask the reply only spoke.
-  const stop = (input, _toolUseID, { signal }) => {
-    if (input.stop_hook_active || input.agent_id || s.tasks.some((task) => !task.ambient)) return Promise.resolve({});
-    return new Promise((resolve) => {
-      const child = execFile(args.agenthail, ['hook', 'stop', '--surface', 'claude'], { signal, timeout: 8_000, maxBuffer: 1 << 16 }, (error, stdout) => {
-        let output;
-        try {
-          output = JSON.parse(stdout);
-        } catch {}
-        if (error || output?.decision !== 'block' || typeof output.reason !== 'string') return resolve({});
-        resolve({ decision: 'block', reason: output.reason });
-      });
-      child.stdin.on('error', () => {});
-      child.stdin.end(JSON.stringify(withAgenthailTools(s, input)));
-    });
-  };
-  return { SessionStart: [{ hooks: [run] }], UserPromptSubmit: [{ hooks: [run] }], Stop: [{ hooks: [stop] }] };
+  return { SessionStart: [{ hooks: [run] }], UserPromptSubmit: [{ hooks: [run] }] };
 }
 
-// The hooks teach and hold a conversation by the tools it has, which only the host knows.
+// The hooks teach a conversation by the tools it has, which only the host knows.
 function withAgenthailTools(s, input) {
   return { ...input, agenthail_tools: s.agenthail };
 }
