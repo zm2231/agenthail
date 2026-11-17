@@ -119,9 +119,40 @@ func (r *Registry) MarkTurnNudged(sessionID string, at time.Time) error {
 	return tx.Commit()
 }
 
-func (r *Registry) BindTurnCompletion(sessionID, completedTurnID string) error {
-	_, err := r.db.Exec(`UPDATE turn_ends SET completed_turn_id=? WHERE session_id=? AND completed_turn_id='' AND started_at_ms=(SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=?)`, completedTurnID, sessionID, sessionID)
-	return err
+// BindTurnCompletion gives a completion to the newest turn opened by the time it completed, so a completion seen only after the next turn opened stays with its own turn. A surface that states the time only to the precision given (Codex: whole seconds) may name a time before its own turn opened; then the oldest unbound turn opened within that precision takes it. A zero completedAt means the surface didn't say, and the newest turn takes it.
+func (r *Registry) BindTurnCompletion(sessionID, completedTurnID string, completedAt time.Time, precision time.Duration) error {
+	if completedAt.IsZero() {
+		_, err := r.db.Exec(`UPDATE turn_ends SET completed_turn_id=? WHERE session_id=? AND completed_turn_id='' AND started_at_ms=(SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=?)`, completedTurnID, sessionID, sessionID)
+		return err
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	at := completedAt.UnixMilli()
+	var started int64
+	var bound string
+	err = tx.QueryRow(`SELECT started_at_ms,completed_turn_id FROM turn_ends WHERE session_id=? AND started_at_ms<=? ORDER BY started_at_ms DESC LIMIT 1`, sessionID, at).Scan(&started, &bound)
+	switch {
+	case err == nil && bound == completedTurnID:
+		return nil
+	case err == nil && bound == "":
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return err
+	case precision <= time.Millisecond:
+		return nil
+	default:
+		var within sql.NullInt64
+		if err := tx.QueryRow(`SELECT MIN(started_at_ms) FROM turn_ends WHERE session_id=? AND completed_turn_id='' AND started_at_ms>? AND started_at_ms<?`, sessionID, at, at+precision.Milliseconds()).Scan(&within); err != nil || !within.Valid {
+			return err
+		}
+		started = within.Int64
+	}
+	if _, err := tx.Exec(`UPDATE turn_ends SET completed_turn_id=? WHERE session_id=? AND started_at_ms=? AND completed_turn_id=''`, completedTurnID, sessionID, started); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Registry) CompletedTurnEnd(sessionID, completedTurnID string) (TurnEnd, bool, error) {

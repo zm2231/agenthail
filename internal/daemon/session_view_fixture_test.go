@@ -321,7 +321,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 				}
 				return
 			case 1:
-				if err := reg.BindTurnCompletion(id, fmt.Sprint("turn-", rng.Intn(3))); err != nil {
+				if err := reg.BindTurnCompletion(id, fmt.Sprint("turn-", rng.Intn(3)), time.Time{}, 0); err != nil {
 					t.Fatal(err)
 				}
 				return
@@ -453,7 +453,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 		if err := reg.SaveRuntimeState("s0", surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "fill"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := reg.BindTurnCompletion("s0", "fill"); err != nil {
+		if err := reg.BindTurnCompletion("s0", "fill", time.Time{}, 0); err != nil {
 			t.Fatal(err)
 		}
 		filled := registry.WorkRecord{WorktreePath: filepath.Join(cwd, ".worktrees", "filled"), RepoRoot: cwd, Branch: "task/filled", BaseRef: "main", BaseCommit: "base"}

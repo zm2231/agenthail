@@ -37,7 +37,7 @@ func TestATurnsLastEndStandsUntilTheNextTurn(t *testing.T) {
 	if got := currentHeadline(t, r, "worker"); got != "Deploy?" {
 		t.Fatalf("the second end of the turn did not replace the first: %q", got)
 	}
-	if err := r.BindTurnCompletion("worker", "reply-1"); err != nil {
+	if err := r.BindTurnCompletion("worker", "reply-1", time.Time{}, 0); err != nil {
 		t.Fatal(err)
 	}
 	bound, found, err := r.CompletedTurnEnd("worker", "reply-1")
@@ -83,7 +83,7 @@ func TestWithoutAStartHookANewTurnIsToldByItsCompletionOrItsRuntimeTurn(t *testi
 	if _, err := r.EndTurn(end, "turn-2", now.Add(2*time.Second)); err != nil {
 		t.Fatal("a different runtime turn was refused:", err)
 	}
-	if err := r.BindTurnCompletion("thread", "turn-2"); err != nil {
+	if err := r.BindTurnCompletion("thread", "turn-2", time.Time{}, 0); err != nil {
 		t.Fatal(err)
 	}
 	end.Headline = "three"
@@ -93,7 +93,7 @@ func TestWithoutAStartHookANewTurnIsToldByItsCompletionOrItsRuntimeTurn(t *testi
 	if err := r.SaveRuntimeState("thread", surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-9"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.BindTurnCompletion("thread", "turn-8"); err != nil {
+	if err := r.BindTurnCompletion("thread", "turn-8", time.Time{}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := currentHeadline(t, r, "thread"); got != "" {
@@ -126,7 +126,7 @@ func TestAnEndGivenAfterTheNudgeIsRecordedAsNudged(t *testing.T) {
 		if ended, _ := r.TurnEnded("worker", "turn-2"); ended {
 			t.Fatalf("opened=%v: another turn reads as ended", opened)
 		}
-		if err := r.BindTurnCompletion("worker", "reply-1"); err != nil {
+		if err := r.BindTurnCompletion("worker", "reply-1", time.Time{}, 0); err != nil {
 			t.Fatal(err)
 		}
 		now = now.Add(time.Minute)

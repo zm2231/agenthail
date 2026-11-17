@@ -88,29 +88,43 @@ type WatchedSession struct {
 	ID      string
 	Surface surface.SurfaceKind
 	Armed   bool
+	// OpenTurnOnly is a session watched only to see its newest turn end, so seeing it busy does not arm a push.
+	OpenTurnOnly bool
 }
 
+// TurnEndWatch is how long a turn opened with no completion seen keeps its session watched.
+const TurnEndWatch = 24 * time.Hour
+
+const watchedForWork = `
+	SELECT from_session FROM routes WHERE active=1
+	UNION SELECT to_session FROM routes WHERE active=1
+	UNION SELECT session_id FROM message_queue WHERE status IN ('pending','inflight')
+	UNION SELECT session_id FROM session_runtime WHERE held_completion_turn_id<>''
+	UNION SELECT session_id FROM session_runtime WHERE notification_armed=1
+	UNION SELECT child_session_id FROM tasks WHERE state='running'
+	UNION SELECT target_session_id FROM delivery_intents WHERE ` + awaitingTurnRow + ` AND accepted_at_ms>=?`
+
+const watchedForTurnEnd = `
+	SELECT l.id FROM sessions l
+	WHERE l.host_id='' AND (SELECT te.completed_turn_id='' AND te.started_at_ms>=? FROM turn_ends te WHERE te.session_id=l.id ORDER BY te.started_at_ms DESC LIMIT 1)`
+
 func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
+	now := time.Now()
+	work := awaitingTurnArgs(now)
+	args := append(append(append([]any{}, work...), work...), now.Add(-TurnEndWatch).UnixMilli())
 	rows, err := r.read.Query(`
-		SELECT DISTINCT s.id,s.surface,EXISTS(SELECT 1 FROM session_runtime r WHERE r.session_id=s.id AND r.notification_armed=1)
+		SELECT s.id,s.surface,EXISTS(SELECT 1 FROM session_runtime r WHERE r.session_id=s.id AND r.notification_armed=1),
+			s.id NOT IN (`+watchedForWork+`)
 		FROM sessions s
-		WHERE s.host_id='' AND s.id IN (
-			SELECT from_session FROM routes WHERE active=1
-			UNION SELECT to_session FROM routes WHERE active=1
-			UNION SELECT session_id FROM message_queue WHERE status IN ('pending','inflight')
-			UNION SELECT session_id FROM session_runtime WHERE held_completion_turn_id<>''
-			UNION SELECT session_id FROM session_runtime WHERE notification_armed=1
-			UNION SELECT child_session_id FROM tasks WHERE state='running'
-			UNION SELECT target_session_id FROM delivery_intents WHERE `+awaitingTurnRow+` AND accepted_at_ms>=?
-		)
-		ORDER BY s.surface,s.id`, awaitingTurnArgs(time.Now())...)
+		WHERE s.host_id='' AND s.id IN (`+watchedForWork+` UNION `+watchedForTurnEnd+`)
+		ORDER BY s.surface,s.id`, args...)
 	if err != nil {
 		return nil, err
 	}
 	return appendRows(nil, rows, func(row rowScanner) (WatchedSession, error) {
 		var session WatchedSession
 		var kind string
-		err := row.Scan(&session.ID, &kind, &session.Armed)
+		err := row.Scan(&session.ID, &kind, &session.Armed, &session.OpenTurnOnly)
 		session.Surface = surface.SurfaceKind(kind)
 		return session, err
 	})
