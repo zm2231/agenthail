@@ -24,10 +24,11 @@ struct TranscriptBlock: Identifiable, Equatable {
     /// How long the turn this reply ended took, from the host's turn duration record.
     var finished: String? = nil
 
-    static func build(_ items: [TimelineItem], foldAgents: Bool = true) -> [TranscriptBlock] {
+    static func build(_ items: [TimelineItem], foldAgents: Bool = true, focus: Bool = false) -> [TranscriptBlock] {
         var blocks: [TranscriptBlock] = []
         var tools: [TimelineItem] = []
         var sends: [String: Int] = [:]
+        var asks = TranscriptFocus.AskRuns()
         func flushTools() {
             guard let first = tools.first else { return }
             blocks.append(TranscriptBlock(id: TranscriptRowID.tools(first.id), kind: .tools(tools)))
@@ -99,6 +100,7 @@ struct TranscriptBlock: Identifiable, Equatable {
             case "context", "goal", "done", "phase":
                 continue
             case let kind where toolKinds.contains(kind):
+                if asks.breaks(before: item), focus { flushTools() }
                 tools.append(item)
             default:
                 flushTools()

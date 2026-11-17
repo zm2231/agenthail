@@ -869,7 +869,7 @@ struct SessionScreen: View {
                         Text("Chat").tag(false)
                         Text("All events").tag(true)
                     }
-                    Toggle("Focus on messages", systemImage: "bubble.left.and.text.bubble.right", isOn: $focus)
+                    Toggle("Focus", systemImage: "bubble.left.and.text.bubble.right", isOn: $focus)
                         .disabled(activityOnly)
                         .accessibilityIdentifier("session-focus")
                     Toggle("Expand agent messages", systemImage: "text.bubble", isOn: $expandAgents)

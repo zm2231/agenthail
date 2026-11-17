@@ -75,7 +75,7 @@ struct RequestCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("request-reason")
                     }
-                    if let input = request.input, !input.isEmpty, input != "{}" {
+                    if let input = request.detail ?? request.input, !input.isEmpty, input != "{}" {
                         Text(input).font(.caption.monospaced()).lineLimit(6).textSelection(.enabled)
                             .padding(8).frame(maxWidth: .infinity, alignment: .leading)
                             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))

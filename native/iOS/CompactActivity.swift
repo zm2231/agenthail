@@ -10,12 +10,13 @@ struct TimelineGroup: Identifiable, Equatable {
     var items: [TimelineItem]
     var foldLabel: String? = nil
     var foldSenders = ""
+    var focus = false
     var firstItemID: String { items.first?.id ?? "" }
     var callCount: Int { items.filter { $0.kind == "toolCall" }.count }
     var errorCount: Int { items.filter(ToolRunSummary.isFailure).count }
     var isSend: Bool { items.first?.agent?.isSend == true }
     var isActivity: Bool { foldLabel == nil && !isSend && items.allSatisfy { ["toolCall", "toolResult", "reasoning"].contains($0.kind) } }
-    var folds: Bool { ToolRunSummary.folds(ToolRunSummary.entries(items)) }
+    var folds: Bool { ToolRunSummary.folds(ToolRunSummary.entries(items), focus: focus) }
 
     /// An agent's reply, with the duration of the turn it ended when the host recorded one.
     var isReply: Bool {
@@ -35,9 +36,10 @@ struct TimelineGroup: Identifiable, Equatable {
         })
     }
 
-    static func make(_ items: [TimelineItem], foldAgents: Bool = true) -> [TimelineGroup] {
+    static func make(_ items: [TimelineItem], foldAgents: Bool = true, focus: Bool = false) -> [TimelineGroup] {
         var groups: [TimelineGroup] = []
         var sends: [String: Int] = [:]
+        var asks = TranscriptFocus.AskRuns()
         for item in items {
             if item.agent?.isSend == true {
                 if groups.last?.isSend != true { groups.append(TimelineGroup(id: TranscriptRowID.group(item.id), items: [])) }
@@ -50,9 +52,10 @@ struct TimelineGroup: Identifiable, Equatable {
                 continue
             }
             let activity = ["toolCall", "toolResult", "reasoning"].contains(item.kind)
-            if activity, groups.last?.isActivity == true { groups[groups.count - 1].items.append(item) }
+            let breaks = activity && asks.breaks(before: item) && focus
+            if activity, !breaks, groups.last?.isActivity == true { groups[groups.count - 1].items.append(item) }
             else if isTurnDuration(item), let last = groups.last, last.isReply, last.items.count == 1 { groups[groups.count - 1].items.append(item) }
-            else { groups.append(TimelineGroup(id: TranscriptRowID.group(item.id), items: [item])) }
+            else { groups.append(TimelineGroup(id: TranscriptRowID.group(item.id), items: [item], focus: focus && activity)) }
         }
         return foldAgents ? AgentFoldGroups.folded(groups) : groups
     }
@@ -119,7 +122,7 @@ struct CompactActivityGroup: View, @MainActor Equatable {
             VStack(alignment: .leading, spacing: 0) {
                 if group.folds {
                     Button { onInspect(); set(!open) } label: {
-                        ToolLineLabel(verb: ToolRunSummary.worked(group.items), object: ToolRunSummary.label(group.items), isCode: false, failed: false, failures: group.errorCount, trailing: open ? "chevron.down" : "chevron.right")
+                        ToolLineLabel(verb: group.focus ? ToolRunSummary.focusLine(group.items) : ToolRunSummary.worked(group.items), object: group.focus ? "" : ToolRunSummary.label(group.items), isCode: false, failed: false, failures: group.errorCount, trailing: open ? "chevron.down" : "chevron.right")
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("activity-" + group.firstItemID)

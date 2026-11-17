@@ -26,7 +26,7 @@ final class TimelineMemo {
         if let grouped, fold == foldAgents, self.focus == focus { return grouped }
         fold = foldAgents
         self.focus = focus
-        let made = TimelineGroup.make(TranscriptFocus.shown(focus ? TranscriptFocus.kept(items) : items), foldAgents: foldAgents)
+        let made = TimelineGroup.make(TranscriptFocus.shown(focus ? TranscriptFocus.focused(items) : items), foldAgents: foldAgents && !focus, focus: focus)
         grouped = made
         return made
     }

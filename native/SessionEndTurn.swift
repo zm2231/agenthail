@@ -5,6 +5,17 @@ struct SessionEndTurn: Codable, Hashable {
     var endedAt: String? = nil
 }
 
+/// How the daemon reads the session's last turn. Absent until a turn is judged; then the row's status stands.
+struct SessionTurnState: Codable, Hashable {
+    var state: String
+    var reason: String? = nil
+    var source: String? = nil
+    var turnId: String? = nil
+    var pushed: Bool? = nil
+
+    var waitsOnPerson: Bool { state == "waiting_person" }
+}
+
 struct SessionAsk: Codable, Hashable {
     var id: String
     var title: String

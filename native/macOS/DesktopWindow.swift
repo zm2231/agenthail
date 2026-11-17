@@ -884,6 +884,7 @@ struct ConversationHeader: View {
                     .foregroundStyle(DesktopPalette.accentText)
                     .help("Bring this session's terminal to the front")
             }
+            FocusSwitch()
             if let onCall {
                 Button(action: onCall) {
                     Image(systemName: "waveform")
@@ -946,7 +947,7 @@ struct TranscriptView: View {
     }
 
     var body: some View {
-        let blocks = TranscriptBlock.build(TranscriptFocus.shown(focus ? TranscriptFocus.kept(pane.timelineItems) : pane.timelineItems), foldAgents: !expandAgents)
+        let blocks = TranscriptBlock.build(TranscriptFocus.shown(focus ? TranscriptFocus.focused(pane.timelineItems) : pane.timelineItems), foldAgents: !expandAgents && !focus, focus: focus)
         let canResend = pane.removedSession?.id != session.id && session.capabilities.send && !session.isReadOnly
         let layout = DesktopColumns.transcript(pane: paneWidth)
         let ids = blocks.map(\.id)
@@ -1047,6 +1048,7 @@ struct TranscriptView: View {
             .environment(\.toolCallStates, ToolCallStates(items: pane.timelineItems, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.transcriptOverhang, layout.overhang)
             .environment(\.expandAgentMessages, expandAgents)
+            .environment(\.focusWork, focus)
         }
         .clipped()
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
