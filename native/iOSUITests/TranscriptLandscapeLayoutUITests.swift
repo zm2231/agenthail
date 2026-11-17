@@ -108,7 +108,7 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
 
     func testPortraitKeepsItsLayoutAndRestsBelowTheHeaderAtTheTop() throws {
         let app = open(landscape: false)
-        XCTAssertTrue(app.descendants(matching: .any)["composer-effort"].exists, "portrait keeps the chip row")
+        XCTAssertTrue(app.descendants(matching: .any)["composer-model-picker"].exists, "portrait keeps the chip row")
         XCTAssertFalse(app.descendants(matching: .any)["composer-turn-settings"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["queue-tail-reason-26"].waitForExistence(timeout: 10), "portrait keeps the reason on the row")
         try assertFirstRowRestsBelowTheHeader(app, "in portrait")

@@ -20,17 +20,17 @@ struct SentFileCard: View {
         Button { Task { await fetch { preview = $0 } } } label: {
             HStack(spacing: DesktopSpace.m) {
                 Image(systemName: SentFileState.icon(item))
-                    .font(.system(size: DesktopType.title))
+                    .font(.system(size: ReadingType.title))
                     .foregroundStyle(DesktopPalette.text2)
                     .frame(width: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
-                        .font(.system(size: DesktopType.body, weight: .medium))
+                        .font(.system(size: ReadingType.body, weight: .medium))
                         .foregroundStyle(DesktopPalette.text)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Text(copied ? "Path copied" : reason ?? failure ?? SentFileState.detail(item))
-                        .font(.system(size: DesktopType.meta))
+                        .font(.system(size: ReadingType.meta))
                         .foregroundStyle(DesktopPalette.text2)
                         .lineLimit(2)
                 }
@@ -60,7 +60,7 @@ struct SentFileCard: View {
             if reason != nil && !path.isEmpty {
                 Button("Copy Path", action: copyPath)
                     .buttonStyle(.link)
-                    .font(.system(size: DesktopType.meta))
+                    .font(.system(size: ReadingType.meta))
                     .padding(DesktopSpace.s)
             }
         }

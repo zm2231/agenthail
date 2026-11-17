@@ -29,6 +29,9 @@ func ParseOutgoingSend(tool, input string) (OutgoingSend, bool) {
 	if tool == "SendMessage" {
 		return sendMessageCall(fields)
 	}
+	if IsAgenthailTool(tool, "agenthail_send") {
+		return agenthailSendCall(fields)
+	}
 	if !shellToolNames[tool] {
 		return OutgoingSend{}, false
 	}
@@ -47,6 +50,23 @@ func sendMessageCall(fields map[string]any) (OutgoingSend, bool) {
 	}
 	summary, _ := fields["summary"].(string)
 	return outgoingSend(target, summary, body), true
+}
+
+func IsAgenthailTool(tool, name string) bool {
+	return tool == name || strings.HasPrefix(tool, "mcp__") && strings.HasSuffix(tool, "__"+name)
+}
+
+func agenthailSendCall(fields map[string]any) (OutgoingSend, bool) {
+	body, _ := fields["message"].(string)
+	target, _ := fields["target"].(string)
+	if strings.TrimSpace(target) == "" {
+		project, _ := fields["project"].(string)
+		if strings.TrimSpace(project) == "" {
+			return OutgoingSend{}, false
+		}
+		target = strings.TrimSpace(project) + " coordinator"
+	}
+	return outgoingSend(target, "", body), true
 }
 
 func outgoingSend(target, summary, body string) OutgoingSend {

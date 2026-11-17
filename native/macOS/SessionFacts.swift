@@ -51,9 +51,25 @@ enum SessionFacts {
         session.queueCount > 0 ? [queuedLabel(session.queueCount)] : []
     }
 
-    static func configFolderLabel(_ root: SessionConfigRoot?) -> String? {
-        guard let root, !root.name.isEmpty, root.name != "default" || root.signedInAs?.isEmpty == false else { return nil }
-        return "config folder \(root.summary)"
+    static func loadFailure(_ error: String) -> String {
+        let trimmed = error.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        let reason: String
+        if trimmed.isEmpty {
+            reason = "Agenthail couldn't read it"
+        } else if trimmed.localizedCaseInsensitiveContains("not found") {
+            reason = "Agenthail hasn't found its history on this computer"
+        } else {
+            reason = trimmed.prefix(1).uppercased() + trimmed.dropFirst()
+        }
+        return reason + ". Trying again."
+    }
+
+    static func headerDetail(_ session: SessionState) -> String? {
+        let trimmed = session.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let named = trimmed.isEmpty || trimmed == session.id || UUID(uuidString: trimmed) != nil ? nil : SessionNames.display(trimmed)
+        let name = session.subagent == nil && session.alias?.isEmpty == false && named != session.alias ? named : nil
+        let parts = [name, session.project?.displayName].compactMap { $0?.isEmpty == false ? $0 : nil }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     static func exchangeLabel(_ count: Int) -> String {

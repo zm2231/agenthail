@@ -27,3 +27,18 @@ func TestARemovedKeyNamesItsReplacement(t *testing.T) {
 		}
 	}
 }
+
+func TestARetiredKeyIsAcceptedQuietly(t *testing.T) {
+	parsed := Parse("scrim.feather = 40\nscrim.feather@mac = 80\ncontrast.target = 5\n")
+	if len(parsed.Problems) != 0 {
+		t.Fatalf("a retired key warned: %+v", parsed.Problems)
+	}
+	if _, err := ParseAssignment("scrim.feather = 40"); err == nil || !strings.Contains(err.Error(), "retired") {
+		t.Errorf("setting a retired key: %v", err)
+	}
+	for key := range retiredKeys {
+		if _, still := Lookup(key); still {
+			t.Errorf("%s is listed as retired but is still a key", key)
+		}
+	}
+}

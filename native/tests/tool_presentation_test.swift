@@ -57,8 +57,22 @@ struct ToolPresentationTest {
         func call(_ index: Int) -> TimelineItem {
             TimelineItem(id: "c\(index)", kind: "toolCall", role: nil, title: "Bash", text: "{}", timestamp: nil, callId: "c\(index)", status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
         }
-        check(!ToolRunSummary.folds(ToolRunSummary.entries((0..<6).map(call))), "six calls stay as lines")
-        check(ToolRunSummary.folds(ToolRunSummary.entries((0..<7).map(call))), "seven calls fold into one summary line")
+        check(!ToolRunSummary.folds(ToolRunSummary.entries((0..<2).map(call))), "two calls stay as lines")
+        check(ToolRunSummary.folds(ToolRunSummary.entries((0..<3).map(call))), "a third call folds the run into one line")
+        let ask = TimelineItem(id: "ask", kind: "toolCall", role: nil, title: "AskUserQuestion", text: "{}", timestamp: nil, callId: "ask", status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        check(!ToolRunSummary.folds(ToolRunSummary.entries((0..<3).map(call) + [ask])), "a run holding an unanswered question stays in view")
+        let answer = TimelineItem(id: "answer", kind: "toolResult", role: nil, title: "", text: "Release", timestamp: nil, callId: "ask", status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        check(ToolRunSummary.folds(ToolRunSummary.entries((0..<3).map(call) + [ask, answer])), "once answered, the run folds")
+        func timed(_ index: Int, _ at: String) -> TimelineItem {
+            var item = call(index)
+            item.timestamp = at
+            return item
+        }
+        let run = (0..<13).map { timed($0, "2026-11-16T10:0\($0 % 6):00Z") } + [timed(13, "2026-11-16T10:06:10Z")]
+        check(ToolRunSummary.worked(run) == "Worked for 6m · 14 steps", "a run says how long it worked and how many steps: \(ToolRunSummary.worked(run))")
+        check(ToolRunSummary.worked((0..<3).map(call)) == "3 steps", "without times a run counts its steps")
+        check(ToolRunSummary.worked([timed(0, "2026-11-16T10:00:00Z"), timed(1, "2026-11-16T10:00:40Z")]) == "Worked for 40s · 2 steps", "under a minute reads in seconds")
+        check(ToolRunSummary.span(3600 + 12 * 60) == "1h 12m" && ToolRunSummary.span(7200) == "2h", "hours read with their minutes")
 
         let memory = TranscriptRowMemory()
         let first = TranscriptRows(memory: memory, session: "s1")

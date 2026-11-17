@@ -28,11 +28,11 @@ struct DiffView: View {
             if entries.count > shown {
                 Button("Show \(min(Self.page, entries.count - shown)) more lines") { show(shown + Self.page) }
                     .buttonStyle(.link)
-                    .font(.system(size: DesktopType.caption))
+                    .font(.system(size: ReadingType.caption))
                     .padding(DesktopSpace.s)
             }
         }
-        .font(.system(size: DesktopType.meta, design: .monospaced))
+        .font(.system(size: ReadingType.meta, design: .monospaced))
         .textSelection(.enabled)
         .padding(.vertical, DesktopSpace.xs)
         .frame(maxWidth: .infinity, alignment: .leading)

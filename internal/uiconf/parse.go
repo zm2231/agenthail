@@ -96,6 +96,9 @@ func Parse(text string) Parsed {
 			continue
 		}
 		key, ok := Lookup(l.key)
+		if !ok && retiredKeys[l.key] {
+			continue
+		}
 		if !ok {
 			parsed.Problems = append(parsed.Problems, Problem{Line: number, Key: l.key, Message: unknownKey(l.key)})
 			continue

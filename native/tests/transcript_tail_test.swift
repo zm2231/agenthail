@@ -94,6 +94,49 @@ struct TranscriptTailTest {
         var empty = TranscriptTail()
         empty.update([], in: "a", rows: [:], visible: visible, following: true)
         expect(empty.split(ids, in: "a") == open, "an empty transcript holds no boundary, so its first rows open by the rule")
+
+        var covering = TranscriptTail()
+        covering.update(ids, in: "a", rows: [:], visible: visible, following: true)
+        let end = CGRect(x: 0, y: 9_350, width: 600, height: 650)
+        var steps = 0
+        while covering.cover(ids, in: "a", rows: rows(0..<100), visible: end) { steps += 1 }
+        expect(covering.split(ids, in: "a") == 93 && steps == 4, "at the end the eager rows grow until they reach the top of the view, got \(covering.split(ids, in: "a")) after \(steps)")
+        expect(!covering.cover(ids, in: "b", rows: rows(0..<100), visible: end), "another transcript's view does not grow this tail")
+
+        var capped = TranscriptTail()
+        capped.update(ids, in: "a", rows: [:], visible: visible, following: true)
+        let tallEnd = CGRect(x: 0, y: 5_000, width: 600, height: 5_000)
+        while capped.cover(ids, in: "a", rows: rows(0..<100), visible: tallEnd) {}
+        expect(capped.split(ids, in: "a") == 100 - TranscriptTail.cap, "the eager rows stop at the cap however tall the view, got \(capped.split(ids, in: "a"))")
+
+        var away = TranscriptTail()
+        away.update(ids, in: "a", rows: [:], visible: visible, following: true)
+        let top = CGRect(x: 0, y: 0, width: 600, height: 650)
+        expect(!away.cover(ids, in: "a", rows: rows(0..<100), visible: top), "a view that does not reach the newest row leaves the tail alone")
+        expect(!away.cover(ids, in: "a", rows: [:], visible: end), "unmeasured rows leave the tail alone")
+
+        let view = CGRect(x: 0, y: 1_000, width: 600, height: 600)
+        expect(!TranscriptTail.latestHidden(CGRect(x: 0, y: 1_400, width: 600, height: 150), in: view, following: false), "the newest row in view hides the button whatever the follow state")
+        expect(TranscriptTail.latestHidden(CGRect(x: 0, y: 2_400, width: 600, height: 150), in: view, following: true), "the newest row below the view shows the button while following")
+        expect(!TranscriptTail.latestHidden(CGRect(x: 0, y: 1_500, width: 600, height: 150), in: view, following: true), "a row settling just past the view's end stays within the slack")
+        expect(!TranscriptTail.latestHidden(nil, in: view, following: true) && TranscriptTail.latestHidden(nil, in: view, following: false), "an unmeasured newest row falls back to the follow state")
+
+        var rescale = TranscriptRescale()
+        expect(!rescale.settle(at: 0), "no rescale has nothing to settle")
+        rescale.stack(CGRect(x: 0, y: 15, width: 600, height: 9_000), at: 0)
+        rescale.begin(at: 10)
+        rescale.stack(CGRect(x: 0, y: 4_900, width: 600, height: 14_000), at: 10.05)
+        expect(!rescale.settle(at: 10.1), "a stack that moved within the quiet time is not settled")
+        rescale.stack(CGRect(x: 0, y: 4_900, width: 600, height: 14_000), at: 10.12)
+        expect(!rescale.settle(at: 10.14), "an unchanged frame does not restart the quiet time but needs it to pass")
+        expect(rescale.settle(at: 10.16) && !rescale.active, "a stack unchanged for the quiet time settles")
+        rescale.begin(at: 20)
+        for step in 1...40 { rescale.stack(CGRect(x: 0, y: CGFloat(step), width: 600, height: 9_000), at: 20 + Double(step) * 0.08) }
+        expect(!rescale.settle(at: 22.9), "a stack still moving stays unsettled under the cap")
+        expect(rescale.settle(at: 23), "the cap settles a stack that keeps moving")
+        rescale.begin(at: 30)
+        rescale.begin(at: 32)
+        expect(!rescale.settle(at: 32.05) && rescale.settle(at: 32.1), "another size step restarts the window")
     }
 
     static func expect(_ condition: Bool, _ message: String) {

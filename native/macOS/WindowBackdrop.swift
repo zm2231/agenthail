@@ -78,7 +78,7 @@ final class WindowBackdrop: ObservableObject {
         if self.solid != solid { self.solid = solid }
         let floating = solid ? 1 : DesktopGlass.floatingOpacity(config, dark: dark, increaseContrast: workspace.accessibilityDisplayShouldIncreaseContrast)
         if composerOpacity != floating { composerOpacity = floating }
-        let feather = CGFloat(config.scrimFeather)
+        let feather = CGFloat(BackdropSpec.feather)
         if self.feather != feather { self.feather = feather }
         let tint = solid ? 1 : CGFloat(config.paneOpacity)
         let tints: [PaneRole: CGFloat] = [.sidebar: tint, .content: tint, .chrome: tint]
@@ -151,8 +151,12 @@ final class WindowBackdrop: ObservableObject {
         [
             .sidebar: BackdropSpec.PaneStyle(minimum: Float(tints[.sidebar] ?? 0), strength: Float(config.backgroundOpacity)),
             .content: BackdropSpec.PaneStyle(minimum: Float(tints[.content] ?? 0), strength: Float(config.backgroundSessionOpacity)),
+            .reading: BackdropSpec.PaneStyle(minimum: Float(tints[.content] ?? 0), strength: Float(config.backgroundSessionOpacity),
+                                             blur: readable ? max(CGFloat(config.glassBlur), BackdropSpec.readingBlurFloor) : CGFloat(config.glassBlur), even: true),
         ]
     }
+
+    private var readable: Bool { config.readability || NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast }
 
     private func spec() -> BackdropSpec? {
         guard windowSize.width > 0, windowSize.height > 0, let wallpaper = Self.wallpaper(config.background(dark: dark), images: wallpapers) else { return nil }
@@ -187,7 +191,7 @@ final class WindowBackdrop: ObservableObject {
             blur: CGFloat(config.glassBlur),
             paneTint: Self.rgb(paneTint),
             scrimTint: scrimTint,
-            feather: Float(config.scrimFeather),
+            feather: Float(BackdropSpec.feather),
             target: workspace.accessibilityDisplayShouldIncreaseContrast ? 7 : Float(config.contrastTarget),
             polarity: dark ? .dark : .light,
             ground: Self.rgb(ground),

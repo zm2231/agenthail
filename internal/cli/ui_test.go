@@ -140,7 +140,7 @@ func TestUIShowDefaultsNeedsNoRepository(t *testing.T) {
 	app, _ := cliFixture(t, &cliSurface{kind: surface.KindCodex})
 	app.UIDir = filepath.Join(t.TempDir(), "never-created")
 	out, err := runUI(t, app, "show-defaults", "--docs")
-	if err != nil || !strings.Contains(out, "scrim.feather") {
+	if err != nil || !strings.Contains(out, "scrim.tint") {
 		t.Fatalf("show-defaults: %v\n%s", err, out)
 	}
 	for _, name := range uiconf.ArtNames {

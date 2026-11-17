@@ -66,6 +66,40 @@ final class PhoneAppearance: ObservableObject {
 
     static var deviceKind: String { UIDevice.current.userInterfaceIdiom == .pad ? "tablet" : "phone" }
 
+    @Published private var chosenTextScale: Double?
+    @Published private(set) var textScaleProblem: String?
+    private var textScaleWrite: Task<Void, Never>?
+
+    var textScale: Double { chosenTextScale ?? config.textScale }
+
+    func setTextScale(_ scale: Double, api: AgenthailAPI?) {
+        chosenTextScale = scale
+        textScaleProblem = nil
+        textScaleWrite?.cancel()
+        guard let api else {
+            textScaleProblem = "Not saved: no computer is connected."
+            textScaleWrite = nil
+            return
+        }
+        textScaleWrite = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, !Task.isCancelled else { return }
+            let percent = Int((scale * 100).rounded())
+            let change = UIChange(action: "set", set: ["text.scale@device:\(UIDevice.current.name) = \(Double(percent) / 100)"], message: "Text size \(percent)%")
+            do {
+                _ = try await api.changeUI(change, device: UIDevice.current.name, kind: Self.deviceKind)
+                guard !Task.isCancelled else { return }
+                self.textScaleWrite = nil
+                self.load(from: api)
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.textScaleWrite = nil
+                self.chosenTextScale = nil
+                self.textScaleProblem = "Text size wasn't saved. \(AgenthailAPIError.userMessage(error))"
+            }
+        }
+    }
+
     var active: Bool {
         config.glass && (wallpaperSpec(dark: true) != nil || wallpaperSpec(dark: false) != nil)
     }
@@ -108,6 +142,7 @@ final class PhoneAppearance: ObservableObject {
                     forgetRenders()
                     save(loaded, wallpapers: fetched)
                 }
+                if textScaleWrite == nil { chosenTextScale = nil }
                 problem = nil
             } catch {
                 if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
@@ -293,7 +328,7 @@ final class PhoneAppearance: ObservableObject {
             blur: CGFloat(config.glassBlur),
             paneTint: paneTint,
             scrimTint: scrimTint,
-            feather: Float(config.scrimFeather),
+            feather: Float(BackdropSpec.feather),
             target: key.target,
             polarity: dark ? .dark : .light,
             ground: ground,
@@ -464,5 +499,84 @@ struct AppearanceScope<Content: View>: View {
             .environment(\.textColors, TextColors(appearance.config))
             .tint(PhonePalette.accentText)
             .preferredColorScheme(appearance.colorScheme)
+            .modifier(PhoneTextScale(steps: PhoneTextScale.steps(appearance.textScale)))
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var readingTypeSize: DynamicTypeSize = .large
+    @Entry var chromeTypeSize: DynamicTypeSize = .large
+}
+
+/// Controls and status grow at most one Dynamic Type step; the transcript takes the whole Text size through readingTypeSize.
+struct PhoneTextScale: ViewModifier {
+    static let chromeSteps = 1
+    let steps: Int
+    @Environment(\.dynamicTypeSize) private var system
+
+    static let unchanged = DynamicTypeSize.xSmall ... DynamicTypeSize.accessibility5
+
+    func body(content: Content) -> some View {
+        let chrome = Self.shifted(system, by: min(steps, Self.chromeSteps))
+        return content
+            .dynamicTypeSize(chrome == system ? Self.unchanged : chrome ... chrome)
+            .environment(\.readingTypeSize, Self.shifted(system, by: steps))
+            .environment(\.chromeTypeSize, chrome)
+    }
+
+    static func steps(_ scale: Double) -> Int {
+        Int(((scale - 1) / 0.1).rounded())
+    }
+
+    static func shifted(_ size: DynamicTypeSize, by steps: Int) -> DynamicTypeSize {
+        let all = DynamicTypeSize.allCases
+        guard let index = all.firstIndex(of: size) else { return size }
+        return all[min(max(index + steps, 0), all.count - 1)]
+    }
+}
+
+private struct ReadingTypeSize: ViewModifier {
+    @Environment(\.readingTypeSize) private var reading
+    @Environment(\.chromeTypeSize) private var chrome
+    @Environment(\.dynamicTypeSize) private var current
+    let forReading: Bool
+
+    func body(content: Content) -> some View {
+        let size = forReading ? reading : chrome
+        return content.dynamicTypeSize(size == current ? PhoneTextScale.unchanged : size ... size)
+    }
+}
+
+extension View {
+    func readingTypeSize() -> some View {
+        modifier(ReadingTypeSize(forReading: true))
+    }
+
+    /// Sheets opened from the transcript would otherwise inherit its reading size.
+    func chromeTypeSize() -> some View {
+        modifier(ReadingTypeSize(forReading: false))
+    }
+}
+
+struct PhoneTextSizeSection: View {
+    var model: AgenthailIOSModel
+    @ObservedObject private var appearance: PhoneAppearance
+
+    init(model: AgenthailIOSModel) {
+        self.model = model
+        appearance = model.appearance
+    }
+
+    var body: some View {
+        Section {
+            Stepper(value: Binding(get: { appearance.textScale }, set: { model.setTextScale($0) }), in: 0.8...1.6, step: 0.1) {
+                LabeledContent("Text size", value: "\(Int((appearance.textScale * 100).rounded()))%")
+            }
+            .accessibilityIdentifier("text-size")
+        } header: {
+            Text("Text")
+        } footer: {
+            Text(appearance.textScaleProblem ?? "Adds to the text size in iOS Settings, for this iPhone only.")
+        }
     }
 }

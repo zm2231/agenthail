@@ -63,11 +63,31 @@ enum ToolRunSummary {
         return entries
     }
 
-    /// Runs longer than this fold into one summary line.
-    static let foldAfter = 6
+    static let foldAfter = 2
 
+    static func worked(_ items: [TimelineItem]) -> String {
+        let steps = items.filter(isCall).count
+        let count = steps == 1 ? "1 step" : "\(steps) steps"
+        let dates = items.compactMap { $0.timestamp.flatMap(TimestampParser.date) }
+        guard let first = dates.min(), let last = dates.max(), last > first else { return count }
+        return "Worked for \(span(last.timeIntervalSince(first))) · \(count)"
+    }
+
+    static func span(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        if total < 60 { return "\(max(total, 1))s" }
+        let minutes = total / 60
+        if minutes < 60 { return "\(minutes)m" }
+        return minutes % 60 == 0 ? "\(minutes / 60)h" : "\(minutes / 60)h \(minutes % 60)m"
+    }
+
+    static let asksThePerson: Set<String> = ["AskUserQuestion"]
+
+    /// A question still waiting on the person stays in view, so its run does not fold until it is answered.
     static func folds(_ entries: [ToolRunEntry]) -> Bool {
-        entries.filter { if case .call = $0 { return true } else { return false } }.count > foldAfter
+        let calls = entries.compactMap { if case .call(let call, let results) = $0 { return (call, results) } else { return nil } }
+        if calls.contains(where: { asksThePerson.contains($0.0.title) && $0.1.isEmpty }) { return false }
+        return calls.count > foldAfter
     }
 
     static func outputPreview(_ text: String) -> String {

@@ -43,7 +43,7 @@ struct TranscriptBlockView: View, @MainActor Equatable {
                 record
                 if let note {
                     Text(note)
-                        .font(.system(size: DesktopType.caption))
+                        .font(.system(size: ReadingType.caption))
                         .foregroundStyle(DesktopPalette.muted)
                 }
             }
@@ -63,7 +63,7 @@ struct TranscriptBlockView: View, @MainActor Equatable {
             EmptyView()
         case .annotation(let text):
             Text(text)
-                .font(.system(size: DesktopType.meta))
+                .font(.system(size: ReadingType.meta))
                 .foregroundStyle(DesktopPalette.muted)
         case .notice(let text):
             Button(action: toggle) {
@@ -75,7 +75,7 @@ struct TranscriptBlockView: View, @MainActor Equatable {
                         .layoutPriority(1)
                     Rectangle().fill(DesktopPalette.line).frame(minWidth: 18, maxWidth: .infinity, maxHeight: 1)
                 }
-                .font(.system(size: DesktopType.meta))
+                .font(.system(size: ReadingType.meta))
                 .foregroundStyle(DesktopPalette.muted)
                 .contentShape(Rectangle())
             }
@@ -95,7 +95,7 @@ struct TranscriptBlockView: View, @MainActor Equatable {
                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         Text("Instructions")
                     }
-                    .font(.system(size: DesktopType.meta))
+                    .font(.system(size: ReadingType.meta))
                     .foregroundStyle(DesktopPalette.muted)
                     .contentShape(Rectangle())
                 }
@@ -103,7 +103,7 @@ struct TranscriptBlockView: View, @MainActor Equatable {
                 .accessibilityHint("Shows what the agent was told")
                 if expanded {
                     Text(text)
-                        .font(.system(size: DesktopType.meta, design: .monospaced))
+                        .font(.system(size: ReadingType.meta, design: .monospaced))
                         .foregroundStyle(DesktopPalette.muted)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)

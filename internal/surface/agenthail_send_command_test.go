@@ -97,3 +97,24 @@ func TestParseOutgoingSendReadsSendMessage(t *testing.T) {
 		t.Fatal("non-JSON input parsed")
 	}
 }
+
+func TestParseOutgoingSendReadsTheAgenthailSendTool(t *testing.T) {
+	for _, tool := range []string{"mcp__agenthail__agenthail_send", "mcp__plugin_agenthail__agenthail_send", "agenthail_send"} {
+		got, ok := ParseOutgoingSend(tool, `{"target":"@collab","message":"Item 0 is up.\nDetails follow.","clientRequestId":"x"}`)
+		if !ok || got != (OutgoingSend{Target: "@collab", Summary: "Item 0 is up.", Body: "Item 0 is up.\nDetails follow."}) {
+			t.Fatalf("%s = %+v, %v", tool, got, ok)
+		}
+	}
+	got, ok := ParseOutgoingSend("mcp__agenthail__agenthail_send", `{"project":"agenthail","message":"Status"}`)
+	if !ok || got.Target != "agenthail coordinator" {
+		t.Fatalf("project send = %+v, %v", got, ok)
+	}
+	for _, tool := range []string{"mcp__agenthail__agenthail_sendx", "mcp__other__agenthail_send_more", "agenthail_end_turn"} {
+		if _, ok := ParseOutgoingSend(tool, `{"target":"@collab","message":"m"}`); ok {
+			t.Fatalf("%s parsed as a send", tool)
+		}
+	}
+	if _, ok := ParseOutgoingSend("mcp__agenthail__agenthail_send", `{"message":"no target"}`); ok {
+		t.Fatal("a send without a target or project parsed")
+	}
+}

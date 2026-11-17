@@ -262,3 +262,38 @@ func TestUIAPIServesTextColoursForTheAskingDevice(t *testing.T) {
 		t.Fatalf("palette.css status=%d type=%q body=%q", recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
 	}
 }
+
+func TestUISetOfOneKeyLeavesARemovedKeyAndHandEditsAlone(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	store, err := d.ui.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hand := "version = 1\nglass.sidebar.opacity@mac = 0.2\nglass.blur@mac = 0\nglass.opacity@mac = 0\n"
+	if err := os.WriteFile(store.Path(), []byte(hand), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
+	var view uiView
+	if code := api.do(http.MethodPost, "/api/v1/ui?class=mac&device=Studio", `{"action":"set","set":["text.scale@device:Studio = 1.2"],"message":"Text size 120%"}`, &view); code != http.StatusOK {
+		t.Fatalf("set status=%d", code)
+	}
+	written, err := os.ReadFile(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(written), hand) || !strings.Contains(string(written), "text.scale@device:Studio = 1.2") {
+		t.Fatalf("the set changed more than its own line:\n%s", written)
+	}
+	entries, err := store.Log(2)
+	if err != nil || len(entries) != 2 || entries[0].Message != "Text size 120%" || entries[1].Author != uiconf.Person {
+		t.Fatalf("history %+v, %v", entries, err)
+	}
+	if _, _, err := store.Undo(entries[0].Rev, "test"); err != nil {
+		t.Fatal(err)
+	}
+	undone, _ := os.ReadFile(store.Path())
+	if string(undone) != hand {
+		t.Fatalf("undoing the set did not leave the hand edit as it was:\n%s", undone)
+	}
+}

@@ -35,7 +35,8 @@ struct BackdropLayersTest {
                 let ground: BackdropRGB = dark ? BackdropRGB(0.08, 0.08, 0.1) : BackdropRGB(0.95, 0.95, 0.96)
                 let roles: [BackdropRGB] = dark ? [BackdropRGB(0.93, 0.93, 0.95), BackdropRGB(0.62, 0.63, 0.66)] : [BackdropRGB(0.08, 0.08, 0.1), BackdropRGB(0.38, 0.39, 0.42)]
                 let spec = BackdropSpec(wallpaper: .image(wallpaper), fit: "cover", texture: "none", blur: blur, paneTint: ground, polarity: polarity, ground: ground, roles: roles, size: size, scale: 1)
-                guard let layers = BackdropRenderer.layers(spec, panes: [.content: .init(minimum: 0.18, strength: 1)]) else {
+                let reading = BackdropSpec.PaneStyle(minimum: 0, strength: 1, blur: BackdropSpec.readingBlurFloor, even: true)
+                guard let layers = BackdropRenderer.layers(spec, panes: [.content: .init(minimum: 0.18, strength: 1), .reading: reading]) else {
                     print("FAIL: no layers for \(polarity) blur \(blur)")
                     failures += 1
                     continue
@@ -69,7 +70,20 @@ struct BackdropLayersTest {
                 let paneBase = pixels(pane.base!)
                 let paneWorst = worst(base: paneBase, minimum: pane.minimum, tint: layers.paneTint, scrim: pixels(pane.scrim!), flat: nil)
                 let paneFlat = worst(base: paneBase, minimum: pane.minimum, tint: layers.paneTint, scrim: [], flat: (layers.paneTint, pane.scrimPeak))
-                for (name, value) in [("open", open), ("open stale", openFlat), ("pane", paneWorst), ("pane stale", paneFlat)] where value < target {
+                let surface = layers.panes[.reading]!
+                let even = surface.even ?? 0
+                if surface.scrim != nil || even <= 0 || even > 1 {
+                    print("FAIL: \(polarity) blur \(blur) the reading surface is one even tint without a scrim, got \(even)")
+                    failures += 1
+                }
+                let readingWorst = worst(base: pixels(surface.base!), minimum: even, tint: layers.paneTint, scrim: [], flat: (layers.paneTint, 0))
+                var quiet = spec
+                quiet.readability = false
+                if let off = BackdropRenderer.layers(quiet, panes: [.reading: reading])?.panes[.reading], off.even != 0 {
+                    print("FAIL: \(polarity) blur \(blur) with readability off the reading surface keeps glass.opacity exactly, got \(String(describing: off.even))")
+                    failures += 1
+                }
+                for (name, value) in [("open", open), ("open stale", openFlat), ("pane", paneWorst), ("pane stale", paneFlat), ("reading surface", readingWorst)] where value < target {
                     print("FAIL: \(polarity) blur \(blur) \(name) worst contrast \(value) < \(target)")
                     failures += 1
                 }

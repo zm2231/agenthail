@@ -45,6 +45,10 @@ struct AppearanceSettings: View {
                     .fixedSize()
                 }
                 row("theme.accent", "Accent") { accentPicker }
+                LabeledContent("Text size") {
+                    slider("text.scale", label: "text size", range: 0.8...1.6) { InterfaceStore.textScaleChange(CGFloat($0), device: InterfaceStore.device) }
+                }
+                .help("Text size is set for this Mac only.")
             }
             Section("Background") {
                 backgroundGrid
@@ -272,14 +276,14 @@ struct AppearanceSettings: View {
         }
     }
 
-    private func slider(_ key: String, label: String, range: ClosedRange<Double>, unit: String = "") -> some View {
+    private func slider(_ key: String, label: String, range: ClosedRange<Double>, unit: String = "", change: ((Double) -> UIChange)? = nil) -> some View {
         let value = Binding<Double> {
             config.number(key, range.lowerBound)
         } set: { interface.preview(key, .number($0)) }
         return HStack {
             Slider(value: value, in: range) { editing in
                 guard !editing else { return }
-                write(draft.set(key, AppearanceDraft.format(value.wrappedValue), label: "\(label) to \(AppearanceDraft.format(value.wrappedValue))"))
+                write(change?(value.wrappedValue) ?? draft.set(key, AppearanceDraft.format(value.wrappedValue), label: "\(label) to \(AppearanceDraft.format(value.wrappedValue))"))
             }
             Text(AppearanceDraft.format(value.wrappedValue) + unit)
                 .monospacedDigit()
@@ -312,6 +316,7 @@ struct AppearanceSettings: View {
             error = "Agenthail isn't connected."
             return
         }
+        interface.supersedeTextScaleWrite(by: change)
         Task { error = await interface.change(change, api: api) }
     }
 

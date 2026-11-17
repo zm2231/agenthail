@@ -29,6 +29,7 @@ struct ContextRecordRow: View {
         .accessibilityHint("Read the full recorded instructions")
         .sheet(isPresented: $showingContent) {
             TranscriptDocument(title: title, text: item.text, markdown: true, truncated: item.truncated)
+                .chromeTypeSize()
         }
     }
 }
@@ -51,6 +52,7 @@ struct TranscriptDocument: View {
                     if markdown { SessionMarkdown(text: text) }
                     else { Text(text).font(.body).lineSpacing(4).textSelection(.enabled) }
                 }
+                .readingTypeSize()
                 .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(20)

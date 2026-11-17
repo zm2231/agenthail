@@ -15,7 +15,7 @@ struct TimelineGroup: Identifiable, Equatable {
     var errorCount: Int { items.filter(ToolRunSummary.isFailure).count }
     var isSend: Bool { items.first?.agent?.isSend == true }
     var isActivity: Bool { foldLabel == nil && !isSend && items.allSatisfy { ["toolCall", "toolResult", "reasoning"].contains($0.kind) } }
-    var folds: Bool { callCount > ToolRunSummary.foldAfter }
+    var folds: Bool { ToolRunSummary.folds(ToolRunSummary.entries(items)) }
 
     /// An agent's reply, with the duration of the turn it ended when the host recorded one.
     var isReply: Bool {
@@ -119,7 +119,7 @@ struct CompactActivityGroup: View, @MainActor Equatable {
             VStack(alignment: .leading, spacing: 0) {
                 if group.folds {
                     Button { onInspect(); set(!open) } label: {
-                        ToolLineLabel(verb: ToolRunSummary.label(group.items), object: "", isCode: false, failed: false, failures: group.errorCount, trailing: open ? "chevron.down" : "chevron.right")
+                        ToolLineLabel(verb: ToolRunSummary.worked(group.items), object: ToolRunSummary.label(group.items), isCode: false, failed: false, failures: group.errorCount, trailing: open ? "chevron.down" : "chevron.right")
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("activity-" + group.firstItemID)

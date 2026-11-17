@@ -4,8 +4,8 @@ import Foundation
 @main
 struct SessionRowLabelsTest {
     static func main() {
-        func session(name: String = "builder", status: String = "idle", queued: Int = 0) -> SessionState {
-            SessionState(id: "s1", surface: "claude", name: name, alias: nil, status: status, lastActive: nil, queueCount: queued, open: true, current: false, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        func session(name: String = "builder", alias: String? = nil, status: String = "idle", queued: Int = 0) -> SessionState {
+            SessionState(id: "s1", surface: "claude", name: name, alias: alias, status: status, lastActive: nil, queueCount: queued, open: true, current: false, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
         }
 
         expect(SessionNames.display("https://github.com/acme/widgets/pull/12 fix the build") == "acme / widgets", "a repository link reads as owner / repo, as on the dashboard")
@@ -47,10 +47,19 @@ struct SessionRowLabelsTest {
         down.unavailableReason = "host server is unreachable"
         expect(SessionRowNote.text(down) == "host server is unreachable", "unavailable shows why")
 
-        expect(SessionFacts.configFolderLabel(nil) == nil, "a session without a config folder shows none")
-        expect(SessionFacts.configFolderLabel(SessionConfigRoot(name: "default", root: "/home/a/.claude")) == nil, "the default folder without a login says nothing")
-        expect(SessionFacts.configFolderLabel(SessionConfigRoot(name: "default", root: "/home/a/.claude", signedInAs: "dev@example.com")) == "config folder default · currently signed in as dev@example.com", "a known login shows even for the default folder")
-        expect(SessionFacts.configFolderLabel(SessionConfigRoot(name: "team", root: "/home/a/.team/.claude")) == "config folder team", "another folder is named")
+        var aliased = session(name: "Rework the search index", alias: "search-worker")
+        expect(SessionFacts.headerDetail(aliased) == "Rework the search index", "an aliased session's header names what it is working on: \(String(describing: SessionFacts.headerDetail(aliased)))")
+        aliased.project = ProjectIdentity(id: "p1", displayName: "widgets", rootPath: "/src/widgets", kind: "repo")
+        expect(SessionFacts.headerDetail(aliased) == "Rework the search index · widgets", "and its project after it")
+        for name in ["search-worker", "s1", ""] {
+            var plain = session(name: name, alias: "search-worker")
+            plain.project = aliased.project
+            expect(SessionFacts.headerDetail(plain) == "widgets", "a name that repeats the alias, an id or no name is left out: \(name)")
+        }
+        expect(SessionFacts.loadFailure("not found") == "Agenthail hasn't found its history on this computer. Trying again.", "a missing session reads in plain words")
+        expect(SessionFacts.loadFailure("the daemon is not running.") == "The daemon is not running. Trying again.", "another reason keeps its words: \(SessionFacts.loadFailure("the daemon is not running."))")
+        expect(SessionFacts.loadFailure(" ") == "Agenthail couldn't read it. Trying again.", "no reason still says what happens")
+        expect(SessionFacts.headerDetail(session()) == nil, "a session titled by its name, outside a project, has no second line")
         print("ok")
     }
 

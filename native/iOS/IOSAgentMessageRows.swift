@@ -58,8 +58,9 @@ struct IOSAgentMessageRow: View {
                         if !expandAll { Text("Show less").font(.footnote.weight(.medium)).foregroundStyle(PhonePalette.accentText) }
                     } else {
                         VStack(alignment: .leading, spacing: 2) {
-                            ClampedText(text: Text(chip).fontWeight(.semibold).foregroundStyle(PhonePalette.peer) + Text("  ") + Text(agent.summary).italic().foregroundStyle(.secondary), lines: 2, truncated: $truncated)
-                                .font(.subheadline)
+                            Text(chip).font(.subheadline.weight(.semibold)).foregroundStyle(PhonePalette.peer)
+                            ClampedText(text: Text(AgentMessage.inline(previewText)).foregroundStyle(.primary), lines: 6, truncated: $truncated)
+                                .font(.body)
                                 .multilineTextAlignment(.leading)
                             if expandable {
                                 Text(files.isEmpty ? "Show more" : "Show more · \(files.count == 1 ? "1 file" : "\(files.count) files")")
@@ -92,6 +93,11 @@ struct IOSAgentMessageRow: View {
         .contextMenu {
             Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = item.text }
         }
+    }
+
+    private var previewText: String {
+        let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? agent.summary : text
     }
 
     private func toggle() {
@@ -138,15 +144,10 @@ struct IOSAgentSendRow: View {
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "arrow.turn.down.right").font(.caption).foregroundStyle(PhonePalette.muted)
-                    Text("“\(agent.summary)”").italic()
+                    (Text("To \(agent.chip): ").fontWeight(.medium) + Text(AgentMessage.inline(agent.summary)))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    Text("→ \(agent.chip)")
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .fixedSize()
                     if failed { Text("failed").font(.footnote.weight(.medium)).foregroundStyle(PhonePalette.failed) }
                     Spacer(minLength: 0)
                 }
