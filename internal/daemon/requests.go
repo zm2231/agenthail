@@ -47,6 +47,13 @@ type openRequests struct {
 // Agenthail holds: an approval or a delivery problem shows while its session
 // is offline.
 func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) (openRequests, error) {
+	return d.readOpenRequests(ctx, session, true)
+}
+
+// readOpenRequests reads them without first recording a request the
+// provider opened since its last observation unless observe is set; such a
+// request is left out until it is observed.
+func (d *Daemon) readOpenRequests(ctx context.Context, session *surface.Session, observe bool) (openRequests, error) {
 	adapter, err := d.adapters().For(session)
 	if err != nil {
 		return openRequests{}, actionFailed(http.StatusConflict, "conflict", "surface is not configured")
@@ -65,7 +72,7 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) (op
 	if err != nil {
 		return openRequests{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
-	if answers && providerError == "" && !asksCover(asks, state.Requests) {
+	if observe && answers && providerError == "" && !asksCover(asks, state.Requests) {
 		if _, err := d.observeTurn(ctx, adapter, session); err != nil {
 			d.log.Printf("observe %s for its requests: %s", d.resolveDisplay(session.ID), err)
 		}

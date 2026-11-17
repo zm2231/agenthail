@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/apitime"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 const mcpPromptFloor = 256
@@ -23,6 +25,7 @@ type mcpRequestView struct {
 	Kind        string `json:"kind"`
 	Tool        string `json:"tool,omitempty"`
 	Prompt      string `json:"prompt"`
+	Detail      string `json:"detail,omitempty"`
 	Clipped     bool   `json:"clipped,omitempty"`
 	Actions     any    `json:"actions,omitempty"`
 	AlwaysAllow bool   `json:"alwaysAllow,omitempty"`
@@ -40,14 +43,14 @@ func (d *Daemon) mcpRequests(ctx context.Context, caller *mcpCaller, input mcpRe
 	if err != nil {
 		return nil, err
 	}
-	waiting := []map[string]any{}
-	used, total := 0, 0
-	for _, session := range visible {
+	rows := []map[string]any{}
+	var reads []waitingRead
+	for i := range visible {
+		session := &visible[i]
 		state, err := d.Registry.SessionWaiting(session.ID)
 		if err != nil || state == nil {
 			continue
 		}
-		total++
 		row := map[string]any{"sessionId": session.ID, "kind": string(state.Kind), "requestId": state.ID, "answerable": state.Answerable}
 		if alias, _ := d.Registry.ReverseAlias(session.ID); alias != "" {
 			row["alias"] = alias
@@ -55,6 +58,13 @@ func (d *Daemon) mcpRequests(ctx context.Context, caller *mcpCaller, input mcpRe
 		if !state.Since.IsZero() {
 			row["since"] = state.Since.UTC().Format(time.RFC3339)
 		}
+		rows = append(rows, row)
+		reads = append(reads, waitingRead{session: &session.Session, requestID: state.ID})
+	}
+	d.describeWaiting(ctx, rows, reads)
+	waiting := []map[string]any{}
+	used := 0
+	for _, row := range rows {
 		encoded, _ := apitime.Marshal(row)
 		if used+len(encoded) > mcpPageBudget {
 			continue
@@ -62,6 +72,7 @@ func (d *Daemon) mcpRequests(ctx context.Context, caller *mcpCaller, input mcpRe
 		used += len(encoded)
 		waiting = append(waiting, row)
 	}
+	total := len(rows)
 	return map[string]any{"waiting": waiting, "total": total, "truncated": len(waiting) < total}, nil
 }
 
@@ -112,9 +123,76 @@ func (d *Daemon) mcpSessionRequests(ctx context.Context, caller *mcpCaller, ref,
 	return reply, nil
 }
 
+// waitingListReads bounds how many providers one list of waiting sessions
+// reads at once; all of them share one surfaceOperationTimeout.
+const waitingListReads = 6
+
+type waitingRead struct {
+	session   *surface.Session
+	requestID string
+}
+
+// describeWaiting adds to each row the tool, prompt and detail of the request
+// it names, read from the session's provider. A row whose provider has not
+// answered by the deadline keeps only what the registry holds.
+func (d *Daemon) describeWaiting(ctx context.Context, rows []map[string]any, reads []waitingRead) {
+	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+	defer cancel()
+	found := make([]*openRequestView, len(reads))
+	slots := make(chan struct{}, waitingListReads)
+	var wg sync.WaitGroup
+	for i, read := range reads {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-slots }()
+			if request, ok := d.openRequest(ctx, read.session, read.requestID, false); ok {
+				found[i] = &request
+			}
+		}()
+	}
+	wg.Wait()
+	for i, request := range found {
+		if request == nil {
+			continue
+		}
+		row := rows[i]
+		row["tool"], row["prompt"] = request.Tool, clipUTF8(request.Prompt, mcpPromptFloor)
+		clipped := len(row["prompt"].(string)) < len(request.Prompt)
+		if detail := request.Detail(); detail != "" {
+			row["detail"] = clipUTF8(detail, mcpPromptFloor)
+			clipped = clipped || len(row["detail"].(string)) < len(detail)
+		}
+		if clipped {
+			row["clipped"] = true
+		}
+	}
+}
+
+// openRequest is one open request of a session, or none when the session
+// does not list it, as when its requests are not answered through Agenthail.
+func (d *Daemon) openRequest(ctx context.Context, session *surface.Session, id string, observe bool) (openRequestView, bool) {
+	open, err := d.readOpenRequests(ctx, session, observe)
+	if err != nil {
+		return openRequestView{}, false
+	}
+	for _, request := range open.requests {
+		if request.ID == id {
+			return request, true
+		}
+	}
+	return openRequestView{}, false
+}
+
 func requestView(request openRequestView, promptLimit int) mcpRequestView {
-	view := mcpRequestView{ID: request.ID, Kind: string(request.Kind), Tool: request.Tool, Prompt: clipUTF8(request.Prompt, promptLimit), AlwaysAllow: request.AlwaysAllow}
-	view.Clipped = len(view.Prompt) < len(request.Prompt)
+	detail := request.Detail()
+	view := mcpRequestView{ID: request.ID, Kind: string(request.Kind), Tool: request.Tool, Prompt: clipUTF8(request.Prompt, promptLimit), Detail: clipUTF8(detail, promptLimit), AlwaysAllow: request.AlwaysAllow}
+	view.Clipped = len(view.Prompt) < len(request.Prompt) || len(view.Detail) < len(detail)
 	if len(request.Actions) > 0 {
 		view.Actions = request.Actions
 	}

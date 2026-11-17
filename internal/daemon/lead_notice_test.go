@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -98,6 +99,17 @@ func TestAWorkersPermissionPromptGoesToItsLeadOnceWithHowToAnswer(t *testing.T) 
 		if !strings.Contains(notices[0].Message, want) {
 			t.Fatalf("the notice %q does not say %q", notices[0].Message, want)
 		}
+	}
+}
+
+func TestALeadIsToldTheCommandAWorkersPromptAsksToRun(t *testing.T) {
+	f := newNoticeFixture(t)
+	f.setLead(t, "lead")
+	f.asking.open = []surface.Request{{ID: "approve-1", Kind: surface.WaitingApproval, Tool: "Bash", Input: json.RawMessage(`{"command":"docker system prune -af","description":"free disk"}`)}}
+	f.tell(t, f.d, f.worker, f.waiting)
+	notices := f.notices(t)
+	if len(notices) != 1 || !strings.Contains(notices[0].Message, "blocked on a prompt: Bash\ndocker system prune -af\n") {
+		t.Fatalf("notices=%+v", notices)
 	}
 }
 
