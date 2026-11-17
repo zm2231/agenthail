@@ -333,10 +333,12 @@ script is how the placeholder gets into the app: while a key is named, the
 daemon adds `<script src="/_agenthail/signin.js">` to the app's HTML pages when
 the dashboard frames them or the person opens them directly, and serves the
 extension's script there. A script for an app that keeps its key in local
-storage can be one line:
+storage can be one line. It replaces any saved value that isn't the
+placeholder, because Agenthail's web views keep each page's storage, so a key
+saved there earlier would otherwise be sent forever:
 
 ```js
-if (!localStorage.getItem('apiKey')) localStorage.setItem('apiKey', 'agenthail-key');
+if (localStorage.getItem('apiKey') !== 'agenthail-key') localStorage.setItem('apiKey', 'agenthail-key');
 ```
 
 The extension's server reaches the app with `ah.fetch`, and the daemon makes

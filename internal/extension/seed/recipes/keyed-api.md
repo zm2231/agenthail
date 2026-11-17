@@ -46,10 +46,12 @@ and adds it to each request.
 6. For an app the page opens through the mount that keeps its key in the
    browser, add `"signin": "assets/signin.js"` to the mount and make the
    script store the placeholder `agenthail-key` where the app looks for its
-   key, for example:
+   key, replacing whatever is saved there. Agenthail's web views keep each
+   page's storage, so a key saved there earlier would otherwise be sent
+   forever. For example:
 
    ```js
-   if (!localStorage.getItem('apiKey')) localStorage.setItem('apiKey', 'agenthail-key');
+   if (localStorage.getItem('apiKey') !== 'agenthail-key') localStorage.setItem('apiKey', 'agenthail-key');
    ```
 
 7. Once the person has approved it and named the key, verify:
