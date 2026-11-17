@@ -41,6 +41,21 @@ func (b *backgroundWork) start(work func(ctx context.Context)) bool {
 	return true
 }
 
+// run does work on the caller's goroutine as background work, so stop and
+// wait cover it; it reports false, without running work, once stopped.
+func (b *backgroundWork) run(work func(ctx context.Context)) bool {
+	b.mu.Lock()
+	if b.stopped {
+		b.mu.Unlock()
+		return false
+	}
+	b.running++
+	b.mu.Unlock()
+	defer b.finish()
+	work(b.ctx)
+	return true
+}
+
 func (b *backgroundWork) finish() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
