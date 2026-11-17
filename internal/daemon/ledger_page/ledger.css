@@ -45,6 +45,8 @@ li { padding: 10px 2px; border-bottom: 1px solid var(--rule); }
 .blocked .note, .parked .note { color: var(--warn); }
 .done .note { color: var(--muted); }
 .waiting li { border-left: 3px solid var(--accent); padding-left: 10px; }
+.ready li { border-left: 3px solid var(--good); padding-left: 10px; }
+.ready-why { color: var(--good); }
 .recommend { margin-top: 4px; color: var(--muted); font-size: 13px; }
 .note { color: var(--muted); }
 .more { margin-top: 8px; padding: 6px 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--raised); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }

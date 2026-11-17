@@ -15,7 +15,7 @@ function plain(text) {
 
 function learnTitles() {
   titles = new Map();
-  const rows = [...Object.values(view.work).flat(), ...view.done, ...view.waiting.map((wait) => wait.work).filter(Boolean)];
+  const rows = [...Object.values(view.work).flat(), ...(view.ready || []), ...view.done, ...view.waiting.map((wait) => wait.work).filter(Boolean)];
   for (const row of rows) if (row.id && row.title) titles.set(row.id, row.title);
 }
 let reading = false;
@@ -134,10 +134,16 @@ function doneRow(row) {
   ]);
 }
 
+function readyRow(row) {
+  const why = [parkedAs[row.parked.kind] || "Set aside", plain(row.parked.why)].filter(Boolean).join(": ");
+  return itemLines(row, [node("div", "ready-why", `Ready: ${plain(row.parked.ready)}`), node("div", "note", why)]);
+}
+
 function render() {
   if (!view) return;
   learnTitles();
   const parts = [];
+  if (view.ready?.length) parts.push(section("ready", "Ready to pick up", view.ready, readyRow));
   if (view.waiting.length) {
     const block = section("waiting", "Waiting on you", view.waiting, waitingRow);
     block.append(node("p", "note", "Answer these in Needs you."));
