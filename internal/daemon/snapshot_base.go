@@ -48,6 +48,7 @@ type snapshotBaseContent struct {
 	Person           dashboardPerson             `json:"person"`
 	LeadReplacements []dashboardLeadReplacement  `json:"leadReplacements"`
 	DecisionsRev     string                      `json:"decisionsRev"`
+	TileOrder        registry.TileOrder          `json:"tileOrder"`
 }
 
 // snapshotBase is the snapshot without sessions or anything derived from them,
@@ -75,7 +76,7 @@ func newSnapshotBase(state dashboardState) snapshotBase {
 		Daemon: state.Daemon, Surfaces: state.Surfaces, Projects: projects, Queue: state.Queue, Channels: state.Channels, Relays: state.Relays,
 		CodexRecentHours: state.CodexRecentHours, BusyDelivery: state.BusyDelivery,
 		Signin: state.Signin, Rekeyed: state.Rekeyed, Coordinators: state.Coordinators, Person: state.Person, LeadReplacements: state.LeadReplacements,
-		DecisionsRev: state.DecisionsRev,
+		DecisionsRev: state.DecisionsRev, TileOrder: state.TileOrder,
 	}}
 }
 
