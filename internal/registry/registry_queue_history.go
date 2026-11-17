@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	_ "modernc.org/sqlite"
@@ -25,6 +26,7 @@ type QueuedMessage struct {
 	PersonName      string
 	HolderPID       int
 	HolderStart     string
+	QueuedAt        time.Time
 }
 
 const (

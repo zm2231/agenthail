@@ -409,14 +409,19 @@ type MovedQueueItem struct {
 	RelayHops       int
 	Operation       QueueOperation
 	Uploads         string
+	QueuedAt        time.Time
 }
 
 func (r *Registry) pendingMoveQueue(tx rowQuerier, conversation string) ([]MovedQueueItem, error) {
 	return queryRows(tx, []MovedQueueItem{}, func(row rowScanner) (MovedQueueItem, error) {
 		var item MovedQueueItem
-		err := row.Scan(&item.ID, &item.Message, &item.Key, &item.SourceSessionID, &item.BusyDelivery, &item.RelayHops, &item.Operation, &item.Uploads)
+		var queuedAt string
+		err := row.Scan(&item.ID, &item.Message, &item.Key, &item.SourceSessionID, &item.BusyDelivery, &item.RelayHops, &item.Operation, &item.Uploads, &queuedAt)
+		if err == nil {
+			item.QueuedAt, err = parseSQLiteTimestamp(queuedAt)
+		}
 		return item, err
-	}, `SELECT id,message,delivery_key,source_session_id,busy_delivery,relay_hops,operation,uploads FROM message_queue WHERE session_id=? AND host_request='' AND status='pending' ORDER BY id`, conversation)
+	}, `SELECT id,message,delivery_key,source_session_id,busy_delivery,relay_hops,operation,uploads,queued_at FROM message_queue WHERE session_id=? AND host_request='' AND status='pending' ORDER BY id`, conversation)
 }
 
 // CompleteMoveOut hands a conversation the target resumed to the target, in
@@ -448,7 +453,7 @@ func (r *Registry) CompleteMoveOut(moveID string, placeholder MovePlaceholder) (
 			if key == "" {
 				key = fmt.Sprintf("move-%s-%d", moveID, item.ID)
 			}
-			request, err := r.hostSendRequest(HostSend{SessionID: move.Conversation, Message: item.Message, Key: key, SourceSessionID: item.SourceSessionID, BusyDelivery: item.BusyDelivery, RelayHops: item.RelayHops})
+			request, err := r.hostSendRequest(HostSend{SessionID: move.Conversation, Message: item.Message, Key: key, SourceSessionID: item.SourceSessionID, BusyDelivery: item.BusyDelivery, RelayHops: item.RelayHops, SentAt: item.QueuedAt})
 			if err != nil {
 				return nil, err
 			}

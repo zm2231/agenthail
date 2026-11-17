@@ -81,7 +81,11 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 	}
 	var item QueuedMessage
 	var peer bool
-	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,operation,busy_delivery,author,uploads,person_name,holder_pid,holder_start,`+fmt.Sprintf(queuePeerRow, "message_queue")+` FROM message_queue WHERE `+filter, sessionID, now.UnixMilli()).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &item.Operation, &item.BusyDelivery, &item.Author, &item.Uploads, &item.PersonName, &item.HolderPID, &item.HolderStart, &peer)
+	var queuedAt string
+	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,operation,busy_delivery,author,uploads,person_name,holder_pid,holder_start,queued_at,`+fmt.Sprintf(queuePeerRow, "message_queue")+` FROM message_queue WHERE `+filter, sessionID, now.UnixMilli()).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &item.Operation, &item.BusyDelivery, &item.Author, &item.Uploads, &item.PersonName, &item.HolderPID, &item.HolderStart, &queuedAt, &peer)
+	if err == nil {
+		item.QueuedAt, err = parseSQLiteTimestamp(queuedAt)
+	}
 	if err == sql.ErrNoRows || err == nil && busyDelivery == claimPeer && !peer {
 		return nil, nil
 	}

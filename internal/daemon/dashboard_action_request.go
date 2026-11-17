@@ -28,6 +28,7 @@ type dashboardActionRequest struct {
 	NativeQueue     surface.NativeQueueRequest `json:"nativeQueue"`
 	Action          string                     `json:"action"`
 	SourceSessionID string                     `json:"sourceSessionId"`
+	SentAt          time.Time                  `json:"sentAt,omitzero"`
 	SessionID       string                     `json:"sessionId"`
 	Message         string                     `json:"message"`
 	Alias           string                     `json:"alias"`

@@ -704,6 +704,9 @@ type SendOptions struct {
 	// SteersUploads says the dispatcher found this session's steer can carry
 	// these uploads, so the row may keep busy delivery steer.
 	SteersUploads bool `json:"-"`
+	// SentAt is when the sender sent a message that reaches this host later,
+	// as one a paired host held while this host was unreachable; zero is now.
+	SentAt time.Time `json:"-"`
 }
 
 // HoldsForQueue reports whether the send carries parts no steer can deliver,

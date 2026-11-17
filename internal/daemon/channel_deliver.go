@@ -33,7 +33,7 @@ func (d *Daemon) doChannelDeliver(ctx context.Context, _ principal, request dash
 	if !listed {
 		return d.channelReply(broadcast.Result{Target: target}, nil, nil)
 	}
-	result, err := d.channelBroadcaster(request.PersonName).Send(operationCtx, target, request.Message, label, source)
+	result, err := d.channelBroadcaster(request.PersonName, request.SentAt).Send(operationCtx, target, request.Message, label, source)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}

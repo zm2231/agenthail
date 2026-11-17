@@ -117,7 +117,8 @@ func Trace(adapter surface.Surface, session *surface.Session, author surface.Aut
 func (d Dispatcher) SendRouted(ctx context.Context, adapter surface.Surface, session *surface.Session, route surface.Route, message string, options surface.SendOptions) (*surface.SendResult, error) {
 	d.reviveCredential(session)
 	routed := *session
-	result, err := route.Send(ctx, adapter, session, message, options)
+	text := surface.WithSentAge(message, options.SentAt, time.Now())
+	result, err := route.Send(ctx, adapter, session, text, options)
 	next := surface.RouteFor(adapter, session, options.RouteAuthor())
 	if !errors.Is(err, surface.ErrRouteChanged) || next == route {
 		return result, err
@@ -129,7 +130,7 @@ func (d Dispatcher) SendRouted(ctx context.Context, adapter surface.Surface, ses
 	if err := next.Validate(adapter, options); err != nil {
 		return nil, err
 	}
-	return next.Send(ctx, adapter, session, message, options)
+	return next.Send(ctx, adapter, session, text, options)
 }
 
 func (d Dispatcher) SteerTurn(ctx context.Context, adapter surface.Surface, session *surface.Session, message string, images surface.Uploads) (*surface.ControlResult, error) {
@@ -641,7 +642,7 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 	if target == "" {
 		target = session.ID
 	}
-	steerText, steerImages, canSteer := surface.SteerParts(adapter, session, message, options)
+	steerText, steerImages, canSteer := surface.SteerParts(adapter, session, surface.WithSentAge(message, options.SentAt, time.Now()), options)
 	options.SteersUploads = canSteer && busyMode == deliverypolicy.Steer
 	steerable := busyMode == deliverypolicy.Steer && canSteer && surface.EffectiveCapabilities(adapter, session).Steer && d.MaySteer(options.SourceSessionID, options.Author, *session)
 	if steerable && observation == nil {

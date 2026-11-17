@@ -194,7 +194,7 @@ func (s Service) deliver(ctx context.Context, spec registry.CoordinatorSpec, mes
 	}
 	// A new conversation's first turn is text, so attached files are named
 	// by their stored paths.
-	composed, _ := options.Uploads.Compose(message, false)
+	composed, _ := options.Uploads.Compose(surface.WithSentAge(message, options.SentAt, time.Now()), false)
 	return s.start(ctx, spec, previous, root, reason, options.Sender(), composed, false)
 }
 

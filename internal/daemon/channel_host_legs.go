@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/broadcast"
@@ -45,7 +46,7 @@ type channelDeliverAnswer struct {
 
 // A paired host's request is answered from this host only, so it never
 // reaches a third host or travels back.
-func (d *Daemon) channelHostLegs(ctx context.Context, target broadcast.Target, message, source string, except []string) ([]broadcast.Recipient, []channelHostLeg) {
+func (d *Daemon) channelHostLegs(ctx context.Context, target broadcast.Target, message, source string, except []string, sentAt time.Time) ([]broadcast.Recipient, []channelHostLeg) {
 	if _, fromHost := requestingHost(ctx); fromHost || target.ProjectID == "" {
 		return nil, nil
 	}
@@ -62,6 +63,9 @@ func (d *Daemon) channelHostLegs(ctx context.Context, target broadcast.Target, m
 		base = "channel-" + uuid.NewString()
 	}
 	template := map[string]any{"action": "channel-deliver", "projectId": target.ProjectID, "message": message}
+	if !sentAt.IsZero() {
+		template["sentAt"] = sentAt.UTC().Format(time.RFC3339Nano)
+	}
 	if source != "" {
 		template["sourceSessionId"] = source
 		if project := d.sourceProjectID(source); project != "" {
@@ -121,6 +125,9 @@ func (d *Daemon) channelHostLeg(ctx context.Context, hostID, key string, request
 		return nil, leg
 	}
 	leg.Name = host.record.Name
+	if request["sentAt"] == nil {
+		request["sentAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 	if _, err := d.routeSource(ctx, request, host); err != nil {
 		leg.State, leg.Detail = channelLegRefused, err.Error()
 		return nil, leg

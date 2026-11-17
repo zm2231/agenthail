@@ -93,10 +93,10 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	var sendErr error
 	addressed := *session
 	var steered *surface.ControlResult
-	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author, Uploads: item.Uploads, PersonName: item.PersonName}
+	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author, Uploads: item.Uploads, PersonName: item.PersonName, SentAt: item.QueuedAt}
 	route := surface.RouteFor(adapter, session, options.RouteAuthor())
 	steers := route != surface.RoutePeer && d.Registry.Steers(item.BusyDelivery) && d.dispatcher().MaySteer(item.SourceSessionID, item.Author, *session)
-	steerText, steerImages, canSteer := surface.SteerParts(adapter, session, item.Message, options)
+	steerText, steerImages, canSteer := surface.SteerParts(adapter, session, surface.WithSentAge(item.Message, item.QueuedAt, now), options)
 	steer := steers && canSteer && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer
 	if steer {
 		steered, sendErr = d.dispatcher().SteerTurn(operationCtx, adapter, session, steerText, steerImages)
