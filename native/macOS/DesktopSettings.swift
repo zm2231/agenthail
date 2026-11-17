@@ -6,32 +6,58 @@ struct DesktopSettings: View {
     var model: AgenthailModel
     var initialTab = 0
     @State private var tab: Int?
+    @State private var devicesPage = 0
 
     var body: some View {
         TabView(selection: Binding(get: { tab ?? initialTab }, set: { tab = $0 })) {
-            OverviewSettings(model: model)
+            OverviewSettings(model: model) {
+                devicesPage = 1
+                tab = 3
+            }
                 .tabItem { Label("Overview", systemImage: "square.grid.2x2") }.tag(0)
-            GeneralSettings(model: model)
+            SettingsPages(pages: [
+                ("General", AnyView(GeneralSettings(model: model))),
+                ("Notifications", AnyView(NotificationSettings(model: model))),
+                ("Keyboard", AnyView(KeyboardSettings())),
+            ])
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(1)
             AppearanceSettings(model: model)
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }.tag(2)
-            KeyboardSettings()
-                .tabItem { Label("Keyboard", systemImage: "keyboard") }.tag(3)
-            DevicesSettings(model: model)
-                .tabItem { Label("Devices", systemImage: "iphone") }.tag(4)
-            SigninSettings(model: model)
-                .tabItem { Label("Browser Sign-in", systemImage: "key") }.tag(5)
-            NotificationSettings(model: model)
-                .tabItem { Label("Notifications", systemImage: "bell.badge") }.tag(6)
-            DeliverySettings(model: model)
-                .tabItem { Label("Delivery", systemImage: "arrow.triangle.branch") }.tag(7)
-            ActivitySettings(model: model)
-                .tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }.tag(8)
+            SettingsPages(pages: [
+                ("Devices", AnyView(DevicesSettings(model: model))),
+                ("Browser Sign-in", AnyView(SigninSettings(model: model))),
+            ], shown: $devicesPage)
+                .tabItem { Label("Devices", systemImage: "iphone") }.tag(3)
+            SettingsPages(pages: [
+                ("Waiting and handoffs", AnyView(DeliverySettings(model: model))),
+                ("Activity", AnyView(ActivitySettings(model: model))),
+            ])
+                .tabItem { Label("Delivery", systemImage: "arrow.triangle.branch") }.tag(4)
             ClaudeCompactSettings(model: model)
-                .tabItem { Label("Claude", systemImage: "rectangle.compress.vertical") }.tag(9)
+                .tabItem { Label("Claude", systemImage: "rectangle.compress.vertical") }.tag(5)
         }
         .frame(width: 700, height: 520)
         .task { await model.loadOperations() }
+    }
+}
+
+struct SettingsPages: View {
+    let pages: [(title: String, view: AnyView)]
+    var shown: Binding<Int>?
+    @State private var own = 0
+
+    var body: some View {
+        let selection = shown ?? $own
+        VStack(spacing: 0) {
+            Picker("", selection: selection) {
+                ForEach(pages.indices, id: \.self) { Text(pages[$0].title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .padding(.top, DesktopSpace.m)
+            pages[min(max(selection.wrappedValue, 0), pages.count - 1)].view
+        }
     }
 }
 
@@ -53,6 +79,7 @@ struct GeneralSettings: View {
     @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @State private var personName = ""
+    @State private var showsConnectionDetails = false
 
     var body: some View {
         Form {
@@ -61,23 +88,25 @@ struct GeneralSettings: View {
                     Text(connectionLabel)
                         .foregroundStyle(model.isConnected ? DesktopPalette.done : DesktopPalette.failed)
                 }
-                if let pid = model.daemon?.pid {
-                    LabeledContent("Process", value: String(pid))
-                }
-                if let build = model.daemonBuild {
-                    LabeledContent("Daemon build") {
-                        Text(build.label).font(.system(size: DesktopType.secondary, design: .monospaced)).textSelection(.enabled)
-                    }
-                }
                 if let notice = model.daemonBuildNotice {
                     Text(notice)
                         .font(.system(size: DesktopType.secondary))
                         .foregroundStyle(DesktopPalette.failed)
                         .textSelection(.enabled)
                 }
-                if let listen = model.settings?.dashboard.listen {
-                    LabeledContent("Local listener") {
-                        Text(listen).font(.system(size: DesktopType.secondary, design: .monospaced)).textSelection(.enabled)
+                DisclosureGroup("Details", isExpanded: $showsConnectionDetails) {
+                    if let pid = model.daemon?.pid {
+                        LabeledContent("Process", value: String(pid))
+                    }
+                    if let build = model.daemonBuild {
+                        LabeledContent("Daemon build") {
+                            Text(build.label).font(.system(size: DesktopType.secondary, design: .monospaced)).textSelection(.enabled)
+                        }
+                    }
+                    if let listen = model.settings?.dashboard.listen {
+                        LabeledContent("Local listener") {
+                            Text(listen).font(.system(size: DesktopType.secondary, design: .monospaced)).textSelection(.enabled)
+                        }
                     }
                 }
                 HStack {
@@ -177,7 +206,7 @@ struct GeneralSettings: View {
                 } header: {
                     Text("Claude Remote Control at startup")
                 } footer: {
-                    Text("New Claude sessions in a config folder with this on start Remote Control, so what you write here reaches them as your own turn. Sessions already running keep what they started with.")
+                    Text("New Claude sessions on an account with this on start Remote Control, so what you write here reaches them as your own turn. Sessions already running keep what they started with.")
                         .font(.system(size: DesktopType.secondary))
                         .foregroundStyle(DesktopPalette.text2)
                 }

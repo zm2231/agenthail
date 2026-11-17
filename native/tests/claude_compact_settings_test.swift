@@ -14,12 +14,14 @@ struct ClaudeCompactSettingsTest {
 
         check(ClaudeCompactFacts.window(main.autoCompactWindow) == "\(Int64(400000).formatted()) tokens", "a window reads in tokens")
         check(ClaudeCompactFacts.window(nil) == "Claude's default", "no window is Claude's default")
-        check(ClaudeCompactFacts.modelLines(main) == ["claude-haiku-5-5: 5000 (Claude ignores it)", "claude-opus-5-5: auto"], "per-model windows list in order: \(ClaudeCompactFacts.modelLines(main))")
+        check(ClaudeCompactFacts.modelLines(main).map { "\($0.model): \($0.window)" } == ["Haiku 5.5: 5000 (Claude ignores it)", "Opus 5.5: auto"], "per-model windows list in order, by model name: \(ClaudeCompactFacts.modelLines(main))")
+        check(ClaudeCompactFacts.modelName("claude-sonnet-4-5-20250929") == "Sonnet 4.5" && ClaudeCompactFacts.modelName("claude-opus-4") == "Opus 4" && ClaudeCompactFacts.modelName("gpt-x") == "gpt-x", "model ids read as names")
+        check(ClaudeCompactFacts.title("/u/.claude", home: "/u") == "Default" && ClaudeCompactFacts.title("/u/.forge-proxy/.claude", home: "/u") == "forge-proxy" && ClaudeCompactFacts.title("/srv/claude", home: "/u") == "claude", "a folder reads by its name")
         check(ClaudeCompactFacts.toggle(main.autoCompactEnabled) == "on" && ClaudeCompactFacts.toggle(work.idleCompaction) == "off" && ClaudeCompactFacts.toggle(main.idleCompaction) == "not set", "toggles read on, off and not set")
         check(ClaudeCompactFacts.agenthailIdle(main.agenthailIdleCompaction) == "on, from \(Int64(200000).formatted()) tokens" && ClaudeCompactFacts.agenthailIdle(work.agenthailIdleCompaction) == "off", "Agenthail idle shows its minimum when on")
         let now = TurnClock.date("2026-11-08T12:00:00Z")!
         let lines = ClaudeCompactFacts.holdLines(main, holds: holds, now: now)
-        check(lines.count == 2 && lines[0].hasPrefix("Not compacted: s2 at \(Int64(210000).formatted()) tokens, ") && lines[0].hasSuffix(": busy") && lines[1].contains("@lead"), "holds are the folder's own, newest first, named by session: \(lines)")
+        check(lines.count == 2 && lines[0].hasPrefix("s2 at \(Int64(210000).formatted()) tokens, ") && lines[0].hasSuffix(": busy") && lines[1].contains("@lead"), "holds are the folder's own, newest first, named by session: \(lines)")
         check(ClaudeCompactFacts.overrideLines(main) == ["CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000 is set where Agenthail runs and takes precedence over this file."], "env overrides are named")
 
         var draft = ClaudeCompactDraft(root: "/u/.claude")

@@ -3,21 +3,22 @@ import SwiftUI
 
 struct OverviewSettings: View {
     var model: AgenthailModel
+    var openSignIn: () -> Void = {}
 
     var body: some View {
         Form {
             if let snapshot = model.snapshot {
                 Section {
-                    Text(OverviewSummary.line(snapshot))
+                    Text(OverviewSummary.line(snapshot, working: model.workingCount, needsYou: model.needsYouCount))
                         .foregroundStyle(snapshot.daemon.stale == true ? DesktopPalette.failed : DesktopPalette.text2)
                 }
                 PermissionsSection(model: model)
-                Section("Surfaces") {
+                Section("Agent apps") {
                     let cards = SurfaceOverview.build(surfaces: snapshot.surfaces, sessions: snapshot.sessions, codexRecentHours: snapshot.codexRecentHours)
                     if cards.isEmpty {
-                        Text("No surfaces are configured.").foregroundStyle(DesktopPalette.text2)
+                        Text("No agent apps are set up.").foregroundStyle(DesktopPalette.text2)
                     }
-                    ForEach(cards) { SurfaceCard(model: model, overview: $0) }
+                    ForEach(cards) { SurfaceCard(model: model, overview: $0, openSignIn: openSignIn) }
                 }
             } else {
                 Section { ProgressView().controlSize(.small) }
@@ -95,6 +96,7 @@ private struct PermissionsSection: View {
 private struct SurfaceCard: View {
     var model: AgenthailModel
     let overview: SurfaceOverview
+    let openSignIn: () -> Void
     @State private var repairing = false
     @Environment(\.openWindow) private var openWindow
 
@@ -107,16 +109,10 @@ private struct SurfaceCard: View {
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(color)
                 Spacer()
-                if let label = overview.surface.repairLabel, overview.surface.repairAction != nil {
+                if let problem = overview.problem, let label = problem.fixLabel {
                     if repairing { ProgressView().controlSize(.small) }
-                    Button(label) {
-                        repairing = true
-                        Task {
-                            await model.repairSurface(overview.surface)
-                            repairing = false
-                        }
-                    }
-                    .disabled(repairing)
+                    Button(label) { fix(problem) }
+                        .disabled(repairing)
                 }
                 Button("Show Sessions") { showSessions() }
                     .help("Show every \(overview.name) session in the main window")
@@ -126,21 +122,39 @@ private struct SurfaceCard: View {
                 stat("Current", overview.current, note: overview.currentWindow)
                 stat("Queued", overview.queued, note: nil)
             }
-            Text(overview.detail)
-                .font(.system(size: DesktopType.secondary))
-                .foregroundStyle(overview.isQuiet ? DesktopPalette.text2 : DesktopPalette.failed)
-                .textSelection(.enabled)
-            if let availability = overview.availability {
-                Text(availability).font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
-            }
-            ForEach(overview.advice, id: \.self) { line in
-                Text(line)
+            if let problem = overview.problem {
+                Text(problem.sentence)
+                    .font(.system(size: DesktopType.secondary))
+                    .foregroundStyle(overview.isQuiet ? DesktopPalette.text2 : DesktopPalette.failed)
+                    .fixedSize(horizontal: false, vertical: true)
+                SurfaceDetails(lines: problem.details)
+            } else {
+                Text(overview.detail)
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
                     .textSelection(.enabled)
+                if let availability = overview.availability {
+                    Text(availability).font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
+                }
+                SurfaceDetails(lines: overview.advice)
             }
         }
         .padding(.vertical, DesktopSpace.xs)
+    }
+
+    private func fix(_ problem: SurfaceProblem) {
+        switch problem.fix {
+        case .browserSignIn:
+            openSignIn()
+        case .repair:
+            repairing = true
+            Task {
+                await model.repairSurface(overview.surface)
+                repairing = false
+            }
+        case nil:
+            break
+        }
     }
 
     private func showSessions() {
@@ -166,6 +180,30 @@ private struct SurfaceCard: View {
             if let note {
                 Text(note).font(.system(size: DesktopType.caption)).foregroundStyle(DesktopPalette.muted)
             }
+        }
+    }
+}
+
+private struct SurfaceDetails: View {
+    let lines: [String]
+    @State private var shown = false
+
+    var body: some View {
+        if !lines.isEmpty {
+            DisclosureGroup("Details", isExpanded: $shown) {
+                VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+                    ForEach(lines, id: \.self) { line in
+                        Text(line)
+                            .font(.system(size: DesktopType.caption, design: .monospaced))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.system(size: DesktopType.secondary))
+            .foregroundStyle(DesktopPalette.text2)
         }
     }
 }

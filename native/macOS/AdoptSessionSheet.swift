@@ -14,7 +14,7 @@ struct AdoptSessionSheet: View {
         VStack(alignment: .leading, spacing: DesktopSpace.m) {
             Text("Open \(controller.session.title) in Agenthail")
                 .font(.headline)
-            Text("Agenthail stops the process that runs the conversation once it is idle and continues it in its own host, in the same config folder.")
+            Text("Agenthail stops the process that runs the conversation once it is idle and continues it in its own host, on the same Claude account.")
                 .font(.system(size: DesktopType.secondary))
                 .foregroundStyle(DesktopPalette.text2)
                 .fixedSize(horizontal: false, vertical: true)
