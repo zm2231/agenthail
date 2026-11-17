@@ -225,12 +225,39 @@ func (d *Daemon) sweepLedgerBacklog(ctx context.Context, now time.Time) {
 	}
 }
 
-func (d *Daemon) backlogReadyLine(ctx context.Context, caller *mcpCaller, now time.Time) string {
-	spec, coordinates, err := d.Registry.CoordinatorOfSession(caller.session.ID)
+type backlogLineRequest struct {
+	SessionID string `json:"sessionId"`
+}
+
+type backlogLineResponse struct {
+	Line string `json:"line,omitempty"`
+}
+
+func (d *Daemon) apiLedgerBacklogLineHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use POST for this endpoint.")
+		return
+	}
+	var req backlogLineRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, apiRequestBodyLimit)).Decode(&req); err != nil || req.SessionID == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId is required.")
+		return
+	}
+	session, err := d.Registry.Session(req.SessionID)
+	if err != nil {
+		writeDashboardJSON(w, http.StatusOK, backlogLineResponse{})
+		return
+	}
+	project, _ := d.sessionProject(*session)
+	writeDashboardJSON(w, http.StatusOK, backlogLineResponse{Line: d.backlogReadyLine(r.Context(), session.ID, project, time.Now())})
+}
+
+func (d *Daemon) backlogReadyLine(ctx context.Context, sessionID string, project *CatalogProject, now time.Time) string {
+	spec, coordinates, err := d.Registry.CoordinatorOfSession(sessionID)
 	if err != nil || !coordinates || spec.ProjectRoot == "" {
 		return ""
 	}
-	key, err := d.coordinatedLedgerKey(ctx, caller, spec)
+	key, err := d.coordinatedLedgerKey(ctx, project, spec)
 	if err != nil || key == "" {
 		return ""
 	}
@@ -242,7 +269,7 @@ func (d *Daemon) backlogReadyLine(ctx context.Context, caller *mcpCaller, now ti
 	if err != nil {
 		return ""
 	}
-	var parts []string
+	parts := map[string]string{}
 	var fresh []string
 	for _, entry := range board.Backlog(ledger.BacklogQuery{Ready: true}, now, ledger.Readings{Usage: d.cachedLedgerUsage(now), Asks: d.ledgerAskReader()}) {
 		if told[entry.Item.ID] {
@@ -252,12 +279,20 @@ func (d *Daemon) backlogReadyLine(ctx context.Context, caller *mcpCaller, now ti
 		if entry.Item.Park.Session != "" {
 			part += ", parked by " + entry.Item.Park.Session
 		}
-		parts, fresh = append(parts, part), append(fresh, entry.Item.ID)
+		parts[entry.Item.ID], fresh = part, append(fresh, entry.Item.ID)
 	}
-	if len(fresh) == 0 || d.Registry.MarkBacklogTold(key, fresh, now) != nil {
+	if len(fresh) == 0 {
 		return ""
 	}
-	return "Backlog: " + strings.Join(parts, "; ") + "."
+	marked, err := d.Registry.MarkBacklogTold(key, fresh, now)
+	if err != nil || len(marked) == 0 {
+		return ""
+	}
+	lines := make([]string, len(marked))
+	for index, id := range marked {
+		lines[index] = parts[id]
+	}
+	return "Backlog: " + strings.Join(lines, "; ") + "."
 }
 
 func (d *Daemon) parkedDecisions(rows []dashboardSession, now time.Time) []decisionItem {
@@ -304,8 +339,8 @@ func (d *Daemon) parkedDecisionsNow(rows []dashboardSession) []decisionItem {
 	return d.parkedDecisions(rows, time.Now())
 }
 
-func (d *Daemon) coordinatedLedgerKey(ctx context.Context, caller *mcpCaller, spec registry.CoordinatorSpec) (string, error) {
-	if project := caller.project; project != nil && (project.ID == spec.ProjectID || project.LocalID == spec.ProjectID) {
+func (d *Daemon) coordinatedLedgerKey(ctx context.Context, project *CatalogProject, spec registry.CoordinatorSpec) (string, error) {
+	if project != nil && (project.ID == spec.ProjectID || project.LocalID == spec.ProjectID) {
 		return LedgerKey(d.Registry, project)
 	}
 	return ResolvePathLedgerKey(ctx, d.Registry, spec.ProjectRoot)

@@ -30,11 +30,7 @@ func (d *Daemon) mcpEndTurn(ctx context.Context, caller *mcpCaller, input mcpEnd
 	}
 	d.requestCatalogDiscovery()
 	d.publishEvent("state.changed", session.ID, map[string]string{"source": "end-turn"})
-	result := map[string]any{"ok": true}
-	if line := d.backlogReadyLine(ctx, caller, time.Now()); line != "" {
-		result["backlog"] = line
-	}
-	return result, nil
+	return map[string]any{"ok": true}, nil
 }
 
 const endTurnStoredRunes = 1000

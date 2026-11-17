@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -134,33 +135,70 @@ func TestTheCoordinatorIsToldOnceEachTimeABacklogItemBecomesReady(t *testing.T) 
 	mac, _, _ := ledgerOnTwoHosts(t)
 	revisit := time.Now().Add(time.Hour)
 	id := parkedWork(t, mac, "after the release", ledger.Park{Kind: ledger.ParkLater, Why: "after the release", Revisit: revisit})
-	lead := &mcpCaller{session: surface.Session{ID: "lead"}, project: &CatalogProject{ID: widgetKey, Key: widgetKey}}
-	worker := &mcpCaller{session: surface.Session{ID: "local-a"}, project: lead.project}
+	project := &CatalogProject{ID: widgetKey, Key: widgetKey}
 
-	if line := mac.daemon.backlogReadyLine(t.Context(), lead, time.Now()); line != "" {
+	if line := mac.daemon.backlogReadyLine(t.Context(), "lead", project, time.Now()); line != "" {
 		t.Fatalf("told %q before the revisit date", line)
 	}
 	later := revisit.Add(time.Minute)
-	if line := mac.daemon.backlogReadyLine(t.Context(), worker, later); line != "" {
+	if line := mac.daemon.backlogReadyLine(t.Context(), "local-a", project, later); line != "" {
 		t.Fatalf("a session that is not the coordinator was told %q", line)
 	}
-	result, err := mac.daemon.mcpEndTurn(t.Context(), &mcpCaller{session: surface.Session{ID: "lead"}, project: lead.project}, mcpEndTurnInput{Headline: "done"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if line, _ := result.(map[string]any)["backlog"].(string); line != "" {
-		t.Fatalf("the end of turn told %q before the revisit date", line)
-	}
-	if line := mac.daemon.backlogReadyLine(t.Context(), lead, later); line != "Backlog: "+id+" ready (later: its revisit date came), parked by local-a." {
+	if line := mac.daemon.backlogReadyLine(t.Context(), "lead", project, later); line != "Backlog: "+id+" ready (later: its revisit date came), parked by local-a." {
 		t.Fatalf("the ready line = %q", line)
 	}
-	if line := mac.daemon.backlogReadyLine(t.Context(), lead, later); line != "" {
+	if line := mac.daemon.backlogReadyLine(t.Context(), "lead", project, later); line != "" {
 		t.Fatalf("told again with no new flip: %q", line)
 	}
 
 	mac.daemon.sweepLedgerBacklog(t.Context(), time.Now())
-	if line := mac.daemon.backlogReadyLine(t.Context(), lead, later); line != "Backlog: "+id+" ready (later: its revisit date came), parked by local-a." {
+	if line := mac.daemon.backlogReadyLine(t.Context(), "lead", project, later); line != "Backlog: "+id+" ready (later: its revisit date came), parked by local-a." {
 		t.Fatalf("after it read not ready and ready again, the line = %q", line)
+	}
+}
+
+func TestALeadsPromptHookIsToldOfAReadyItemOnce(t *testing.T) {
+	mac, _, _ := ledgerOnTwoHosts(t)
+	id := parkedWork(t, mac, "after the release", ledger.Park{Kind: ledger.ParkLater, Why: "after the release", Revisit: time.Now().Add(-time.Hour)})
+	line := func(sessionID string) string {
+		t.Helper()
+		var out backlogLineResponse
+		mustLedger(t, mac, "/api/v1/ledger/backlog-line", backlogLineRequest{SessionID: sessionID}, &out)
+		return out.Line
+	}
+	if got := line("local-a"); got != "" {
+		t.Fatalf("a worker's prompt was told %q", got)
+	}
+	if got := line("lead"); got != "Backlog: "+id+" ready (later: its revisit date came), parked by local-a." {
+		t.Fatalf("the lead's prompt was told %q", got)
+	}
+	if got := line("lead"); got != "" {
+		t.Fatalf("the lead's next prompt was told again: %q", got)
+	}
+}
+
+func TestTwoPromptHooksAtOnceTellEachReadyItemOnce(t *testing.T) {
+	mac, _, _ := ledgerOnTwoHosts(t)
+	past := time.Now().Add(-time.Hour)
+	ids := []string{
+		parkedWork(t, mac, "first", ledger.Park{Kind: ledger.ParkLater, Why: "x", Revisit: past}),
+		parkedWork(t, mac, "second", ledger.Park{Kind: ledger.ParkLater, Why: "x", Revisit: past}),
+	}
+	lines := make([]string, 2)
+	var wg sync.WaitGroup
+	for i := range lines {
+		wg.Go(func() {
+			var out backlogLineResponse
+			mustLedger(t, mac, "/api/v1/ledger/backlog-line", backlogLineRequest{SessionID: "lead"}, &out)
+			lines[i] = out.Line
+		})
+	}
+	wg.Wait()
+	both := strings.Join(lines, " ")
+	for _, id := range ids {
+		if n := strings.Count(both, id+" ready"); n != 1 {
+			t.Fatalf("%s was told %d times: %q", id, n, lines)
+		}
 	}
 }
 
@@ -294,9 +332,14 @@ func TestACoordinatorIsToldOnlyItsOwnProjectsBacklog(t *testing.T) {
 		t.Fatal(err)
 	}
 	own := parkedWork(t, mac, "own work", ledger.Park{Kind: ledger.ParkLater, Why: "x", Revisit: past})
-	inOther := &mcpCaller{session: surface.Session{ID: "lead"}, project: &CatalogProject{ID: other, Key: other}}
-	line := mac.daemon.backlogReadyLine(t.Context(), inOther, time.Now())
-	if !strings.Contains(line, own+" ready") || strings.Contains(line, elsewhere.Item.ID) {
+	moveSession(t, mac, "lead", widgetRepo(t, "https://github.com/example/other.git"), time.Now())
+	mac.daemon.discoverCatalog(t.Context())
+	if project, err := mac.daemon.sessionProject(mac.fake.sessions["lead"]); err != nil || project == nil || project.ID != other {
+		t.Fatalf("the lead's checkout resolves to %+v, %v", project, err)
+	}
+	var out backlogLineResponse
+	mustLedger(t, mac, "/api/v1/ledger/backlog-line", backlogLineRequest{SessionID: "lead"}, &out)
+	if line := out.Line; !strings.Contains(line, own+" ready") || strings.Contains(line, elsewhere.Item.ID) {
 		t.Fatalf("the widget coordinator working in another checkout was told %q", line)
 	}
 	if told, err := mac.reg.BacklogTold(other); err != nil || len(told) != 0 {

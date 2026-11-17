@@ -19,13 +19,29 @@ func (r *Registry) BacklogTold(projectKey string) (map[string]bool, error) {
 	return told, rows.Err()
 }
 
-func (r *Registry) MarkBacklogTold(projectKey string, ids []string, at time.Time) error {
+// MarkBacklogTold returns the ids this call marked, so of two callers telling at once only one tells each item; on error it marks none.
+func (r *Registry) MarkBacklogTold(projectKey string, ids []string, at time.Time) ([]string, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var marked []string
 	for _, id := range ids {
-		if _, err := r.db.Exec(`INSERT OR IGNORE INTO ledger_backlog_told(project_key, item_id, told_at_ms) VALUES (?,?,?)`, projectKey, id, at.UnixMilli()); err != nil {
-			return err
+		result, err := tx.Exec(`INSERT OR IGNORE INTO ledger_backlog_told(project_key, item_id, told_at_ms) VALUES (?,?,?)`, projectKey, id, at.UnixMilli())
+		if err != nil {
+			return nil, err
+		}
+		if n, err := result.RowsAffected(); err != nil {
+			return nil, err
+		} else if n == 1 {
+			marked = append(marked, id)
 		}
 	}
-	return nil
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return marked, nil
 }
 
 func (r *Registry) KeepBacklogTold(projectKey string, ready []string) error {
