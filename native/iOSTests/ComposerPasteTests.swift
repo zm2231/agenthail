@@ -71,6 +71,23 @@ final class ComposerPasteTests: XCTestCase {
         XCTAssertEqual(view.text, expected)
     }
 
+    func testTheComposerCapCountsOnlyTheSpaceAboveADockedKeyboard() throws {
+        let view = makeTextView()
+        let window = try XCTUnwrap(view.window)
+        let open = try XCTUnwrap(view.visibleHeight)
+        func keyboard(_ frame: CGRect) {
+            NotificationCenter.default.post(name: UIResponder.keyboardWillChangeFrameNotification, object: nil, userInfo: [UIResponder.keyboardFrameEndUserInfoKey: window.convert(frame, to: window.screen.coordinateSpace)])
+        }
+        keyboard(CGRect(x: 0, y: window.bounds.maxY - 80, width: window.bounds.width, height: 80))
+        XCTAssertEqual(try XCTUnwrap(view.visibleHeight), window.bounds.maxY - 80 - window.safeAreaInsets.top, accuracy: 0.5, "a docked keyboard ends the space the composer may use")
+        keyboard(CGRect(x: 20, y: 40, width: 120, height: 60))
+        XCTAssertEqual(try XCTUnwrap(view.visibleHeight), open, accuracy: 0.5, "a floating keyboard does not")
+        keyboard(CGRect(x: window.bounds.width / 2, y: window.bounds.maxY - 80, width: window.bounds.width, height: 80))
+        XCTAssertEqual(try XCTUnwrap(view.visibleHeight), open, accuracy: 0.5, "a keyboard beside the window does not")
+        keyboard(CGRect(x: 0, y: window.bounds.maxY, width: window.bounds.width, height: 80))
+        XCTAssertEqual(try XCTUnwrap(view.visibleHeight), open, accuracy: 0.5, "a hidden keyboard gives the space back")
+    }
+
     func testPastingTextStaysText() async {
         UIPasteboard.general.string = "plain words"
         let view = makeTextView()

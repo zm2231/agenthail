@@ -41,7 +41,7 @@ struct IOSComposerTextView: UIViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, uiView view: ComposerUITextView, context _: Context) -> CGSize? {
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? view.bounds.width
         var lines = lines
-        if let windowShare, let height = view.window?.bounds.height, let font = view.font {
+        if let windowShare, let height = view.visibleHeight, let font = view.font {
             lines = lines.lowerBound...max(lines.lowerBound, Int(height * windowShare / font.lineHeight))
         }
         return CGSize(width: width, height: view.fittingHeight(width: width, lines: lines))
@@ -84,6 +84,7 @@ final class ComposerUITextView: UITextView {
         didSet { placeholderLabel.text = placeholder }
     }
     private let placeholderLabel = UILabel()
+    private var keyboardTop: CGFloat?
     private let tokenTap = UITapGestureRecognizer()
     private let tokenTapFilter = TokenTapFilter()
 
@@ -106,7 +107,24 @@ final class ComposerUITextView: UITextView {
         view.tokenTapFilter.view = view
         view.addGestureRecognizer(view.tokenTap)
         view.registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitPreferredContentSizeCategory.self]) { (view: ComposerUITextView, _) in view.refreshTokens() }
+        NotificationCenter.default.addObserver(view, selector: #selector(keyboardMoved(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
         return view
+    }
+
+    @objc private func keyboardMoved(_ note: Notification) {
+        guard let window, let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        let shown = window.convert(frame, from: window.screen.coordinateSpace)
+        let docked = shown.minY < window.bounds.maxY && shown.maxY >= window.bounds.maxY - 1 && shown.minX <= window.bounds.minX + 1 && shown.maxX >= window.bounds.maxX - 1
+        let top = docked ? shown.minY : nil
+        guard top != keyboardTop else { return }
+        keyboardTop = top
+        invalidateIntrinsicContentSize()
+    }
+
+    var visibleHeight: CGFloat? {
+        guard let window else { return nil }
+        let bottom = keyboardTop ?? window.bounds.maxY - window.safeAreaInsets.bottom
+        return max(bottom - window.safeAreaInsets.top, 0)
     }
 
     @objc private func tappedToken() {
