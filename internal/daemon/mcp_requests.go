@@ -13,7 +13,10 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const mcpPromptFloor = 256
+const (
+	mcpPromptFloor = 256
+	mcpDetailLimit = 2 << 10
+)
 
 type mcpRequestsInput struct {
 	SessionID string `json:"sessionId,omitempty" jsonschema:"one session's open requests; omit to list every visible session that is waiting"`
@@ -191,7 +194,7 @@ func (d *Daemon) openRequest(ctx context.Context, session *surface.Session, id s
 
 func requestView(request openRequestView, promptLimit int) mcpRequestView {
 	detail := request.Detail()
-	view := mcpRequestView{ID: request.ID, Kind: string(request.Kind), Tool: request.Tool, Prompt: clipUTF8(request.Prompt, promptLimit), Detail: clipUTF8(detail, promptLimit), AlwaysAllow: request.AlwaysAllow}
+	view := mcpRequestView{ID: request.ID, Kind: string(request.Kind), Tool: request.Tool, Prompt: clipUTF8(request.Prompt, promptLimit), Detail: clipUTF8(detail, min(promptLimit, mcpDetailLimit)), AlwaysAllow: request.AlwaysAllow}
 	view.Clipped = len(view.Prompt) < len(request.Prompt) || len(view.Detail) < len(detail)
 	if len(request.Actions) > 0 {
 		view.Actions = request.Actions

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -448,5 +449,31 @@ func TestAnUnhostedClaudeWaitIsCappedBelowClaudesOwnLimit(t *testing.T) {
 	}
 	if mcpWaitUnhostedClaudeSec >= 60 {
 		t.Fatal("the cap has to return before Claude's measured 60 s")
+	}
+}
+
+type requestingTaskSurface struct {
+	*taskSurface
+	open []surface.Request
+}
+
+func (s *requestingTaskSurface) Requests(context.Context, *surface.Session) (surface.RequestState, error) {
+	return surface.RequestState{PermissionMode: "default", Requests: s.open}, nil
+}
+
+func (s *requestingTaskSurface) Respond(context.Context, *surface.Session, string, surface.Decision) (string, error) {
+	return "", nil
+}
+
+func TestAWaitShowsWhatARequestAsksToDoUpToTheCap(t *testing.T) {
+	f := newTaskFixture(t)
+	command := "echo " + strings.Repeat("é", 1500)
+	input, _ := json.Marshal(map[string]string{"command": command})
+	f.d.Surfaces = []surface.Surface{&requestingTaskSurface{taskSurface: f.surface, open: []surface.Request{{ID: "prompt-1", Kind: surface.WaitingApproval, Tool: "Bash", Input: input, CreatedAt: time.Now()}}}}
+	f.see(surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "t1", WaitingOn: &surface.Waiting{Kind: surface.WaitingApproval, ID: "prompt-1", Answerable: true}})
+	item := readyOf(t, f.wait(t, map[string]any{"timeoutSec": 0}), "request")
+	detail := fmt.Sprint(item["detail"])
+	if item["clipped"] != true || !utf8.ValidString(detail) || len(detail) > mcpDetailLimit || len(detail) < mcpDetailLimit-utf8.UTFMax || !strings.HasPrefix(command, detail) {
+		t.Fatalf("the wait's request must show the command up to %d bytes, marked clipped: %v", mcpDetailLimit, item)
 	}
 }

@@ -113,6 +113,24 @@ func TestALeadIsToldTheCommandAWorkersPromptAsksToRun(t *testing.T) {
 	}
 }
 
+func TestALongCommandTakesOneLineOfTheNotice(t *testing.T) {
+	f := newNoticeFixture(t)
+	f.setLead(t, "lead")
+	command := "cat > notes.md <<'EOF'\n" + strings.Repeat("a long line of the heredoc\n", 400) + "EOF"
+	input, _ := json.Marshal(map[string]string{"command": command})
+	f.asking.open = []surface.Request{{ID: "approve-1", Kind: surface.WaitingApproval, Tool: "Bash", Input: input}}
+	f.tell(t, f.d, f.worker, f.waiting)
+	notices := f.notices(t)
+	if len(notices) != 1 {
+		t.Fatalf("notices=%+v", notices)
+	}
+	_, rest, _ := strings.Cut(notices[0].Message, "blocked on a prompt: Bash\n")
+	line, _, _ := strings.Cut(rest, "\n")
+	if !strings.HasPrefix(line, "cat > notes.md <<'EOF' ⏎ a long line") || !strings.HasSuffix(line, " …") || len(line) > noticeDetailLimit+len(" …") {
+		t.Fatalf("the command took %q, want one clipped line", line)
+	}
+}
+
 func TestALeadWithAgenthailToolsIsToldTheToolsToAnswerWith(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.setLead(t, "lead")

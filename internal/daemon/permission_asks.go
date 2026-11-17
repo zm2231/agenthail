@@ -207,7 +207,7 @@ func (d *Daemon) noticePermission(ctx context.Context, ask registry.Ask) {
 			asks += ": " + detail
 		}
 		if detail := request.Detail(); detail != "" {
-			asks += "\n" + clipUTF8(detail, noticeDetailLimit)
+			asks += "\n" + noticeLine(detail)
 		}
 	}
 	target, mcp := d.askAddress(session.ID, ask.RoutedTo)
@@ -226,7 +226,15 @@ func (d *Daemon) noticePermission(ctx context.Context, ask registry.Ask) {
 	}
 }
 
-const noticeDetailLimit = 1024
+const noticeDetailLimit = 200
+
+func noticeLine(detail string) string {
+	line := strings.Join(strings.Fields(strings.ReplaceAll(detail, "\n", " ⏎ ")), " ")
+	if clipped := clipUTF8(line, noticeDetailLimit); len(clipped) < len(line) {
+		return clipped + " …"
+	}
+	return line
+}
 
 func permissionNotice(name, target, askID, asks string, mcp bool, window time.Duration) string {
 	read := fmt.Sprintf("agenthail requests %s --json", target)
