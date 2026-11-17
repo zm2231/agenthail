@@ -66,7 +66,7 @@ func TestUISnapshotRelaysTheFirstAppImageToTheCaller(t *testing.T) {
 	image := append(append([]byte(nil), pngSignature...), []byte("pixels")...)
 	done := make(chan snapshotCall, 1)
 	go func() {
-		done <- snapshotPost(handler, "/api/v1/ui/snapshot", "application/json", []byte(`{"session":"s1","width":900,"height":600,"device":"Studio"}`))
+		done <- snapshotPost(handler, "/api/v1/ui/snapshot", "application/json", []byte(`{"session":"s1","width":900,"height":600,"device":"Studio","view":"inspector+tabs:a,b"}`))
 	}()
 	request := nextSnapshotRequest(t, stream)
 	store, err := d.ui.open()
@@ -80,7 +80,7 @@ func TestUISnapshotRelaysTheFirstAppImageToTheCaller(t *testing.T) {
 	if request.Rev == "" || request.Rev != current.Rev {
 		t.Fatalf("the request names ui.conf revision %q, want the current %q", request.Rev, current.Rev)
 	}
-	if request.ID == "" || request.Session != "s1" || request.Width != 900 || request.Height != 600 || request.Device != "Studio" || request.DeadlineMs != uiSnapshotTimeout.Milliseconds() {
+	if request.ID == "" || request.Session != "s1" || request.Width != 900 || request.Height != 600 || request.Device != "Studio" || request.View != "inspector+tabs:a,b" || request.DeadlineMs != uiSnapshotTimeout.Milliseconds() {
 		t.Fatalf("published request = %+v", request)
 	}
 
@@ -130,7 +130,8 @@ func TestUISnapshotExplainsWhenNoAppAnswers(t *testing.T) {
 func TestUISnapshotRefusesBadSizesAndOversizedImages(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	for _, body := range []string{`{"width":900}`, `{"width":-1,"height":600}`, `{"width":9000,"height":600}`, `not json`, `{} trailing`} {
+	for _, body := range []string{`{"width":900}`, `{"width":-1,"height":600}`, `{"width":9000,"height":600}`, `not json`, `{} trailing`,
+		`{"view":"inspctor"}`, `{"view":"settings:banana"}`, `{"view":"settings:6"}`, `{"view":"project:"}`, `{"view":"tabs:a,,b"}`, `{"view":"inbox:x"}`, `{"view":"inbox+apps"}`, `{"view":"inspector+inspector"}`, `{"view":"settings:0+inspector"}`, `{"view":"tabs:a+settings:1"}`} {
 		if call := snapshotPost(handler, "/api/v1/ui/snapshot", "application/json", []byte(body)); call.code != http.StatusBadRequest {
 			t.Fatalf("%s: status %d", body, call.code)
 		}
@@ -215,6 +216,14 @@ func TestUISnapshotWaitsForAChangeMadeOutsideTheDaemon(t *testing.T) {
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatal("no snapshot request was published")
+		}
+	}
+}
+
+func TestUISnapshotAcceptsEveryDocumentedView(t *testing.T) {
+	for _, view := range []string{"", "inspector", "inbox", "apps", "project:repo:github.com/acme/widget", "tabs:a,b", "settings:0", "settings:5", "inspector+tabs:a,host::b+project:p"} {
+		if problem := snapshotViewProblem(view); problem != "" {
+			t.Errorf("%q refused: %s", view, problem)
 		}
 	}
 }

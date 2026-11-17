@@ -491,7 +491,7 @@ final class AgenthailModel {
     private func trackFinishedSessions(from previous: DashboardSnapshot?) {
         guard let previous, let current = snapshot else { return }
         var next = finishedUnseen
-        next.track(previous: previous.sessions, current: current.sessions) { id in panes.contains { $0.selectedSessionID == id } }
+        next.track(previous: previous.sessions, current: current.sessions) { id in panes.contains { $0.marksSeen && $0.selectedSessionID == id } }
         if next != finishedUnseen { finishedUnseen = next }
     }
 

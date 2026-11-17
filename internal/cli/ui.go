@@ -22,7 +22,7 @@ const uiUsage = `usage:
   agenthail ui undo [<rev>]
   agenthail ui show-defaults [--docs]
   agenthail ui path
-  agenthail ui snapshot [--session <id>] [--size <W>x<H>] [--name <device>] <out.png>`
+  agenthail ui snapshot [--session <id>] [--size <W>x<H>] [--view <views>] [--name <device>] <out.png>`
 
 type uiArgs struct {
 	positional []string
@@ -32,6 +32,7 @@ type uiArgs struct {
 	limit      int
 	session    string
 	size       string
+	view       string
 	resolved   bool
 	json       bool
 	docs       bool
@@ -66,6 +67,8 @@ func parseUIArgs(args []string) (uiArgs, error) {
 			parsed.session, err = value()
 		case "--size":
 			parsed.size, err = value()
+		case "--view":
+			parsed.view, err = value()
 		case "--limit":
 			var text string
 			if text, err = value(); err == nil {

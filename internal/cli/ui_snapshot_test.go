@@ -44,11 +44,11 @@ func TestUISnapshotWritesTheAppImage(t *testing.T) {
 		_, _ = w.Write(image)
 	})
 	out := filepath.Join(t.TempDir(), "window.png")
-	output, err := runUI(t, app, "snapshot", "--session", "s1", "--size", "1440x900", "--name", "Studio", out)
+	output, err := runUI(t, app, "snapshot", "--session", "s1", "--size", "1440x900", "--view", "inspector", "--name", "Studio", out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asked["session"] != "s1" || asked["width"] != float64(1440) || asked["height"] != float64(900) || asked["device"] != "Studio" {
+	if asked["session"] != "s1" || asked["width"] != float64(1440) || asked["height"] != float64(900) || asked["device"] != "Studio" || asked["view"] != "inspector" {
 		t.Fatalf("request = %v", asked)
 	}
 	written, err := os.ReadFile(out)
