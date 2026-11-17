@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 enum AccentContrast {
     struct RGB: Equatable, Sendable {
@@ -16,10 +16,13 @@ enum AccentContrast {
             self.init(r: Double((hex >> 16) & 0xFF) / 255, g: Double((hex >> 8) & 0xFF) / 255, b: Double(hex & 0xFF) / 255)
         }
 
+        var hex: UInt32 {
+            func byte(_ value: Double) -> UInt32 { UInt32((min(max(value, 0), 1) * 255).rounded()) }
+            return byte(r) << 16 | byte(g) << 8 | byte(b)
+        }
+
         static let white = RGB(r: 1, g: 1, b: 1)
         static let black = RGB(r: 0, g: 0, b: 0)
-
-        var nsColor: NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: 1) }
 
         func mixed(with other: RGB, by amount: Double) -> RGB {
             RGB(r: r + (other.r - r) * amount, g: g + (other.g - g) * amount, b: b + (other.b - b) * amount)
@@ -53,11 +56,15 @@ enum AccentContrast {
         contrast(.white, accent) >= contrast(.black, accent) ? .white : .black
     }
 
-    static func rgb(_ color: NSColor, in appearance: NSAppearance) -> RGB {
-        var resolved = NSColor.black
-        appearance.performAsCurrentDrawingAppearance {
-            resolved = color.usingColorSpace(.sRGB) ?? .black
+    static func prominent(_ accent: RGB, target: Double) -> (fill: RGB, ink: RGB) {
+        let ink = foreground(on: accent)
+        let toward = ink == .black ? RGB.white : RGB.black
+        var fill = accent
+        var amount = 0.0
+        while amount < 1, contrast(ink, fill) < target {
+            amount = min(1, amount + 0.05)
+            fill = RGB(hex: accent.mixed(with: toward, by: amount).hex)
         }
-        return RGB(r: Double(resolved.redComponent), g: Double(resolved.greenComponent), b: Double(resolved.blueComponent))
+        return (fill, ink)
     }
 }

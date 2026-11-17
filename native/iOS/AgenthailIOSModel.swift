@@ -208,6 +208,8 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     @ObservationIgnored private var connections: [String: HostConnection] = [:]
     private var hostOrder: [String] = []
     private(set) var extensionCatalogs: [String: ExtensionCatalog] = [:]
+    private(set) var tileOrder: TileOrderStore?
+    @ObservationIgnored private var tileStores: [String: TileOrderStore] = [:]
     @ObservationIgnored private var catalog = HostCatalog()
     private var routing = HostCatalog.Routing()
     private(set) var isPaired = false
@@ -431,6 +433,24 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         refetchMovedSubagents()
     }
 
+    private static func previewTileDefaults() -> UserDefaults {
+        let suite = "agenthail.preview.tiles"
+        UserDefaults.standard.removePersistentDomain(forName: suite)
+        return UserDefaults(suiteName: suite) ?? .standard
+    }
+
+    private func syncTileOrder(_ first: HostConnection?) {
+        guard let first else { return }
+        let host = first.id
+        let store = tileStores[host] ?? TileOrderStore(defaults: first.isPreview ? Self.previewTileDefaults() : .standard, key: "projectTiles." + host)
+        tileStores[host] = store
+        if tileOrder !== store { tileOrder = store }
+        let prefix = host + HostCatalog.separator
+        let ids = TileOrderStore.IDs(inward: { HostCatalog.qualify(host, $0) }, outward: { $0.hasPrefix(prefix) ? String($0.dropFirst(prefix.count)) : $0 })
+        let api = first.api
+        store.adopt(first.reachable ? first.snapshot?.tileOrder : nil, ids: ids) { try await api.putTileOrder($0) }
+    }
+
     private func deriveParts(_ ordered: [HostConnection]) {
         let sessions = snapshot?.sessions ?? []
         routing = catalog.routing
@@ -439,6 +459,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         let readers = ordered.filter(\.reachable).map(\.api)
         if !usageReaders.elementsEqual(readers, by: ===) { usageReaders = readers }
         readListing()
+        syncTileOrder(ordered.first)
         let reached = catalog.hosts.map { host in "\(host.id):\(host.state):\(catalog.target(forHost: host.id).map { "\($0.hostID)>\($0.remote ?? "")" } ?? "none")" }
         decisionsKey = (ordered.map { "\($0.id):\($0.shownReachable):\($0.snapshot?.decisionsRev ?? "older")" } + reached).joined(separator: ",")
         queue = snapshot?.queue ?? []

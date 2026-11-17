@@ -3,7 +3,7 @@ import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 
-const elements = { panel: {}, list: {} };
+const elements = { panel: {}, list: {}, detail: {} };
 const app = {
   state: {
     daemon: { host: { name: "laptop" }, hosts: [{ id: "server", name: "server", state: "connected" }, { id: "gone", name: "gone", state: "unreachable" }] },
@@ -15,7 +15,7 @@ const app = {
 };
 const context = vm.createContext({
   app,
-  $: (selector) => (selector.endsWith("panel") ? elements.panel : elements.list),
+  $: (selector) => (selector === "#daemon-detail" ? elements.detail : selector.endsWith("panel") ? elements.panel : elements.list),
   escape: (value) => String(value).replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
   timeAgo: () => "just now",
   displayName: (session) => session.name,
@@ -93,8 +93,12 @@ app.state.catalogSeq = 99;
 await vm.runInContext("refreshDecisions(countingLoader)", context);
 assert.equal(loads, 1, "a catalog change that moves no decision does not ask again");
 app.state.decisionsRev = "r2";
+app.state.daemon.running = true;
+app.state.surfaces = [];
+elements.detail.textContent = "";
 await vm.runInContext("refreshDecisions(countingLoader)", context);
 assert.equal(loads, 2, "a decisions change asks again, including a remote wait ending outside the loaded rows");
+assert.match(elements.detail.textContent, /needs? you/, `the overview counts the decisions as soon as they load: ${elements.detail.textContent}`);
 
 const stale = { decisions: [{ group: "waiting", sessionId: "stale-session", kind: "request", reason: "already answered elsewhere", answerable: true, requests: [{ id: "old", kind: "approval", tool: "Bash", prompt: "old prompt" }] }], leadHandling: [], unreachable: [], outdated: [] };
 const fresh = { decisions: [], leadHandling: [], unreachable: [], outdated: [] };

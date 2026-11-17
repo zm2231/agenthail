@@ -123,6 +123,7 @@ jobs:
           node scripts/test-dashboard-decisions.mjs
           node scripts/test-dashboard-question-pager.mjs
           node scripts/test-dashboard-activity.mjs
+          node scripts/test-dashboard-overview.mjs
           node scripts/test-dashboard-plan.mjs
           node scripts/test-dashboard-ui.mjs
           node scripts/test-dashboard-usage.mjs
@@ -141,6 +142,7 @@ jobs:
           node scripts/test-dashboard-live-order.mjs
           node scripts/test-dashboard-project-now.mjs
           node scripts/test-dashboard-project-tiles.mjs
+          node scripts/test-dashboard-tile-order.mjs
           node scripts/test-dashboard-decision-card.mjs
           node scripts/test-dashboard-push-worker.mjs
           node scripts/test-dashboard-session-scope.mjs

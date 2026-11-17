@@ -1466,6 +1466,7 @@ struct DashboardSnapshot: Decodable {
     var leadReplacements: [LeadReplacement]? = nil
     /// What this host's decisions are built from; an older host sends none.
     var decisionsRev: String? = nil
+    var tileOrder: TileOrderState? = nil
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
         daemon == other.daemon &&
@@ -1482,7 +1483,8 @@ struct DashboardSnapshot: Decodable {
             person == other.person &&
             projects == other.projects &&
             leadReplacements == other.leadReplacements &&
-            decisionsRev == other.decisionsRev
+            decisionsRev == other.decisionsRev &&
+            tileOrder == other.tileOrder
     }
 
     // Sessions and surfaces change only through catalog events, so an older snapshot keeps the client's.

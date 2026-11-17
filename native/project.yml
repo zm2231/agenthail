@@ -77,6 +77,8 @@ targets:
       - path: SessionSelection.swift
       - path: ProjectActions.swift
       - path: ProjectTiles.swift
+      - path: TileOrderStore.swift
+      - path: AccentContrast.swift
       - path: ProjectContents.swift
       - path: ProjectNow.swift
       - path: ScopePages.swift

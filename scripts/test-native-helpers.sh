@@ -78,6 +78,8 @@ SOURCES=(
   SessionSelection.swift
   ProjectActions.swift
   ProjectTiles.swift
+  TileOrderStore.swift
+  AccentContrast.swift
   ProjectContents.swift
   ProjectNow.swift
   ScopePages.swift
@@ -136,7 +138,7 @@ SOURCES=(
   VoiceAudioBridge.swift
   VoiceCallDiagnostics.swift
   VoiceOperatorModel.swift
-  macOS/AccentContrast.swift
+  macOS/AccentContrastAppKit.swift
   RelativeAge.swift
   RelayFacts.swift
   macOS/DesktopStyle.swift

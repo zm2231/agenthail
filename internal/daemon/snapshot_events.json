@@ -1,6 +1,6 @@
 [
   {"event": "stream.reset", "cache": false, "reread": true, "why": "written by the events stream when a cursor expires; clients missed events and reread everything"},
-  {"event": "state.changed", "cache": true, "reread": true, "why": "queue, attention, delivery problems, relays, channels, coordinators and lead replacements"},
+  {"event": "state.changed", "cache": true, "reread": true, "why": "queue, attention, delivery problems, relays, channels, coordinators, lead replacements and the tile order"},
   {"event": "settings.updated", "cache": true, "reread": true, "why": "busy delivery, Codex recent hours and the person's name"},
   {"event": "signin.changed", "cache": true, "reread": true, "why": "browser sign-in status in the base snapshot"},
   {"event": "host.paired", "cache": true, "reread": true, "why": "the daemon's paired host list"},

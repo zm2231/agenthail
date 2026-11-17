@@ -125,6 +125,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/version", d.apiV1Guard(dashboard, "read", d.apiVersionHandler))
 	mux.HandleFunc("/api/v1/snapshot", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) })))
 	mux.HandleFunc("POST /api/v1/projects/{id}/brief", d.apiV1Guard(dashboard, "control", d.apiProjectBriefHandler))
+	mux.HandleFunc(projectTilesPath, d.apiV1Guard(dashboard, "control", d.projectTilesHandler))
 	mux.HandleFunc("/api/v1/projects/activity", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(func(w http.ResponseWriter, r *http.Request) { d.projectActivityHandler(dashboard, w, r) })))
 	mux.HandleFunc("/api/v1/events", d.apiV1Guard(dashboard, "read", d.recordDeviceStream("events", d.apiEventsHandler)))
 	mux.HandleFunc("/api/v1/catalog-events", d.apiV1Guard(dashboard, "read", d.recordDeviceStream("catalog-events", d.apiCatalogStreamHandler)))

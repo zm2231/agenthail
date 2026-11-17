@@ -130,6 +130,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		return dashboardState{}, fmt.Errorf("read project settings: %w", err)
 	}
 	state.ProjectSettings = sharedProjectSettings(settings)
+	if state.TileOrder, err = d.Registry.TileOrder(); err != nil {
+		return dashboardState{}, fmt.Errorf("read the tile order: %w", err)
+	}
 	if page != nil {
 		state.catalogPageApplied = true
 		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query + "\x00" + pageRequest[0].ParentID

@@ -872,4 +872,10 @@ CREATE TABLE IF NOT EXISTS project_settings (
 	origin_host TEXT NOT NULL,
 	PRIMARY KEY (project_id, name)
 );
+CREATE TABLE IF NOT EXISTS project_tiles (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	order_json TEXT NOT NULL,
+	pinned_json TEXT NOT NULL,
+	revision INTEGER NOT NULL
+);
 `

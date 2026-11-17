@@ -1,4 +1,4 @@
--- schemaVersion 112
+-- schemaVersion 113
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -689,6 +689,14 @@ CREATE TABLE project_settings (
 	changed_at_ms INTEGER NOT NULL,
 	origin_host TEXT NOT NULL,
 	PRIMARY KEY (project_id, name)
+);
+
+-- table project_tiles
+CREATE TABLE project_tiles (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	order_json TEXT NOT NULL,
+	pinned_json TEXT NOT NULL,
+	revision INTEGER NOT NULL
 );
 
 -- table projects

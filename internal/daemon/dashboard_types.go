@@ -116,6 +116,7 @@ type dashboardState struct {
 	ProjectLinks       []registry.ProjectLink      `json:"projectLinks"`
 	ProjectMoves       []registry.ProjectMove      `json:"projectMoves"`
 	ProjectSettings    []registry.ProjectSetting   `json:"projectSettings"`
+	TileOrder          registry.TileOrder          `json:"tileOrder"`
 	MovedSessions      []registry.MovedSession     `json:"movedSessions,omitempty"`
 	LeadReplacements   []dashboardLeadReplacement  `json:"leadReplacements"`
 	Person             dashboardPerson             `json:"person"`
