@@ -194,7 +194,10 @@ func (d *Daemon) judgeTurn(ctx context.Context, job judgeJob) {
 func (d *Daemon) recordTurnJudgment(judgment registry.TurnJudgment) {
 	if err := d.Registry.RecordTurnJudgment(judgment); err != nil {
 		d.log.Printf("turn judge: record %s turn %s: %s", d.resolveDisplay(judgment.SessionID), judgment.TurnID, err)
+		return
 	}
+	d.requestCatalogDiscovery()
+	d.publishEvent("state.changed", judgment.SessionID, map[string]string{"source": "turn-judgment"})
 }
 
 func (j *turnJudge) failed(d *Daemon, err error) {

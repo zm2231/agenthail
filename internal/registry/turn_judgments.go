@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"time"
 )
@@ -14,6 +16,10 @@ type TurnFacts struct {
 	OpenAsks          int    `json:"openAsks"`
 	ChildrenWorking   int    `json:"childrenWorking"`
 	AwaitedRelays     int    `json:"awaitedRelays"`
+	// AskedOf holds where each open ask is routed: a session id or AskToPerson.
+	AskedOf  []string `json:"askedOf,omitempty"`
+	Awaiting []string `json:"awaiting,omitempty"`
+	Children []string `json:"children,omitempty"`
 }
 
 func (f TurnFacts) Pending() bool {
@@ -41,17 +47,17 @@ type TurnJudgment struct {
 
 func (r *Registry) TurnEndFacts(sessionID string) (TurnFacts, error) {
 	var facts TurnFacts
-	if err := r.read.QueryRow(`SELECT COUNT(*) FROM asks WHERE session_id=? AND state=?`, sessionID, AskOpen).Scan(&facts.OpenAsks); err != nil {
+	var err error
+	if facts.AskedOf, err = queryRows(r.read, nil, scanString, `SELECT routed_to FROM asks WHERE session_id=? AND state=? ORDER BY created_at_ms,id`, sessionID, AskOpen); err != nil {
 		return TurnFacts{}, err
 	}
-	working, err := r.RunningChildren(sessionID)
-	if err != nil {
+	if facts.Children, err = r.RunningChildren(sessionID); err != nil {
 		return TurnFacts{}, err
 	}
-	facts.ChildrenWorking = working
-	if err := r.read.QueryRow(`SELECT COUNT(*) FROM routes r JOIN sessions s ON s.id=r.from_session WHERE r.to_session=? AND r.active=1 AND r.once_only=1 AND `+liveLocalSession, sessionID).Scan(&facts.AwaitedRelays); err != nil {
+	if facts.Awaiting, err = queryRows(r.read, nil, scanString, `SELECT DISTINCT r.from_session FROM routes r JOIN sessions s ON s.id=r.from_session WHERE r.to_session=? AND r.active=1 AND r.once_only=1 AND `+liveLocalSession+` ORDER BY r.from_session`, sessionID); err != nil {
 		return TurnFacts{}, err
 	}
+	facts.OpenAsks, facts.ChildrenWorking, facts.AwaitedRelays = len(facts.AskedOf), len(facts.Children), len(facts.Awaiting)
 	return facts, nil
 }
 
@@ -82,18 +88,46 @@ func (r *Registry) RecordTurnJudgment(j TurnJudgment) error {
 	return tx.Commit()
 }
 
+const turnJudgmentColumns = `j.session_id, j.turn_id, j.ended_at_ms, j.judged_at_ms, j.model, j.promise_model, j.ms, j.promise, j.needs, j.needs_tail, j.state, j.state_json, j.ending, j.headline, j.facts_json, j.error`
+
+func scanTurnJudgment(row rowScanner) (TurnJudgment, error) {
+	var j TurnJudgment
+	var ended, judged int64
+	var stateP, facts string
+	if err := row.Scan(&j.SessionID, &j.TurnID, &ended, &judged, &j.Model, &j.PromiseModel, &j.Ms, &j.Promise, &j.Needs, &j.NeedsTail, &j.State, &stateP, &j.Ending, &j.Headline, &facts, &j.Error); err != nil {
+		return TurnJudgment{}, err
+	}
+	j.EndedAt, j.JudgedAt = time.UnixMilli(ended).UTC(), unixMilliOrZero(judged)
+	_ = json.Unmarshal([]byte(stateP), &j.StateP)
+	_ = json.Unmarshal([]byte(facts), &j.Facts)
+	return j, nil
+}
+
 func (r *Registry) TurnJudgments(sessionID string, limit int) ([]TurnJudgment, error) {
-	return queryRows(r.read, nil, func(row rowScanner) (TurnJudgment, error) {
-		var j TurnJudgment
-		var ended, judged int64
-		var stateP, facts string
-		if err := row.Scan(&j.SessionID, &j.TurnID, &ended, &judged, &j.Model, &j.PromiseModel, &j.Ms, &j.Promise, &j.Needs, &j.NeedsTail, &j.State, &stateP, &j.Ending, &j.Headline, &facts, &j.Error); err != nil {
-			return TurnJudgment{}, err
+	return queryRows(r.read, nil, scanTurnJudgment, `SELECT `+turnJudgmentColumns+`
+		FROM turn_judgments j WHERE ?='' OR j.session_id=? ORDER BY j.ended_at_ms DESC, j.rowid DESC LIMIT ?`, sessionID, sessionID, limit)
+}
+
+func (r *Registry) CurrentTurnJudgments() (map[string]TurnJudgment, error) {
+	return currentTurnJudgments(context.Background(), r.read)
+}
+
+func currentTurnJudgments(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}) (map[string]TurnJudgment, error) {
+	rows, err := q.QueryContext(ctx, `SELECT `+turnJudgmentColumns+`
+		FROM turn_judgments j JOIN session_runtime rt ON rt.session_id=j.session_id AND rt.completed_turn_id=j.turn_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]TurnJudgment{}
+	for rows.Next() {
+		judgment, err := scanTurnJudgment(rows)
+		if err != nil {
+			return nil, err
 		}
-		j.EndedAt, j.JudgedAt = time.UnixMilli(ended).UTC(), unixMilliOrZero(judged)
-		_ = json.Unmarshal([]byte(stateP), &j.StateP)
-		_ = json.Unmarshal([]byte(facts), &j.Facts)
-		return j, nil
-	}, `SELECT session_id, turn_id, ended_at_ms, judged_at_ms, model, promise_model, ms, promise, needs, needs_tail, state, state_json, ending, headline, facts_json, error
-		FROM turn_judgments WHERE ?='' OR session_id=? ORDER BY ended_at_ms DESC, rowid DESC LIMIT ?`, sessionID, sessionID, limit)
+		out[judgment.SessionID] = judgment
+	}
+	return out, rows.Err()
 }

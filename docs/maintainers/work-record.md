@@ -141,7 +141,7 @@ The `pr` action (`{action: "pr", sessionId, op, pr, repo}`) backs both, and repl
 This work owns the data, the API fields and the actions (`session-pin`, `session-unpin`, `respond` for an ask, `pr`), and the end-of-turn card's content. The sidebar rows, the details and work panel layout and the window frame belong to the client redesign, which binds to these fields as they land and reviews the card's look.
 
 - **Composer card** (Mac, iOS, web): the headline, then the asks through the existing `QuestionPager` and `question-pager.js` with the suggested option marked, an optional note, then one Send that posts `respond`. In the app an ask is never sent on one tap, so the note can go with it; a notification button answers a single ask with 4 or fewer options in one tap. It uses the redesign's tokens and row grammar.
-- **Row fields**: `endTurn.headline` for the row subtitle, `ask` attention for the Needs you band, and `pinnedAt`. Placement and controls are the redesign's.
+- **Row fields**: `endTurn.headline` for the row subtitle, `turnState` for the row's label ([turn-judge.md](turn-judge.md#the-row)), `ask` attention for the Needs you band, and `pinnedAt`. Placement and controls are the redesign's.
 - **Work fields**: branch, worktree path, kept-cleanup reason, each PR with its state, review and check summary, `work.files` and `work.commits`. The panel is the redesign's.
 - **Push**: needs you and done text from the headline; ask buttons through the request path above.
 

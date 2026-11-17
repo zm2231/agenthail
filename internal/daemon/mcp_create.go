@@ -78,8 +78,8 @@ func (d *Daemon) mcpChildrenRefusal(caller *mcpCaller) error {
 	if err != nil {
 		return err
 	}
-	if running >= mcpChildrenLimit {
-		return &mcpRefusal{Code: "children_limit", Message: fmt.Sprintf("You already have %d sessions running; wait for one to finish.", running), Retryable: true, Detail: map[string]any{"limit": mcpChildrenLimit}}
+	if len(running) >= mcpChildrenLimit {
+		return &mcpRefusal{Code: "children_limit", Message: fmt.Sprintf("You already have %d sessions running; wait for one to finish.", len(running)), Retryable: true, Detail: map[string]any{"limit": mcpChildrenLimit}}
 	}
 	return nil
 }

@@ -1,6 +1,6 @@
 # Turn judge
 
-The turn judge reads how each turn ended and records what it finds. A local model answers four questions about the reply, and the daemon stores the answers next to what it knows itself about the work still going on. The judge is built in layers. Only the first layer exists so far: judgments are recorded and change nothing else. The thresholds for later layers are set from these records.
+The turn judge reads how each turn ended and records what it finds. A local model answers four questions about the reply, and the daemon stores the answers next to what it knows itself about the work still going on. The judge is built in layers. The first records judgments, and the second shows each turn's state on its session row. The thresholds for later layers are set from these records.
 
 ## Turning it on
 
@@ -43,11 +43,24 @@ The model reads everything in a call's state, so the questions go in two calls. 
 The facts are read when the turn ends, not when the answer arrives, because the work a turn waits on may have finished by then:
 
 - `backgroundRunning`, `backgroundSource`, `backgroundTasks`: the session's background tasks as the observer saw them. `backgroundSource` is empty when no task was listed. For a hosted Claude session the source is `host`: the Claude host keeps the set of live tasks from the SDK's `background_tasks_changed` messages. Codex tasks come from the app server's list of background terminals, or from the transcript when that list can't be read.
-- `openAsks`: the session's open asks, of any origin.
-- `childrenWorking`: sessions it started that are busy or whose task is running.
-- `awaitedRelays`: active one-time relays into the session from a live session, that is, replies it is waiting for.
+- `openAsks`, `askedOf`: the session's open asks, of any origin, and where each is routed: a session id, or `person`.
+- `childrenWorking`, `children`: sessions it started that are busy or whose task is running, by id.
+- `awaitedRelays`, `awaiting`: active one-time relays into the session from a live session, that is, replies it is waiting for, by the sending session's id.
 
 A turn with any of these will be woken again by that work, so it cannot leave a promise unkept. The judgment also keeps the turn's `end_turn` headline, if the agent gave one.
+
+## The row
+
+Each session row in the session view, the snapshot and the catalog stream carries `turnState {state, reason, source}` for its last completed turn, and the row's label says it. The state comes from the first of these that applies:
+
+1. An open ask to the person: `waiting_person` from `facts`.
+2. The judgment's facts, from `facts`: a worker awaiting its project's lead waits on `@lead`; any other awaited session, or a running child, is named by alias, else "a session", with "and N others" for more; running background tasks read "background work". All are `waiting_work`.
+3. The judge's state, from `judge`. A worker in a project with a lead never waits on the person: the lead is who it answers to, so `waiting_person` reads `waiting_work` on `@lead`. A judgment with an error gives no state.
+4. An `end_turn` for the turn: `done`, from `endTurn`.
+
+Otherwise the row has no `turnState` and keeps its usual label. The labels are "Done", "Needs you", "Said it would continue", and "Waiting on <reason>". Only the label changes: the row stays `idle`, and a judged "Needs you" adds no attention, Inbox card or count. An Inbox item for it is layer 4.
+
+A judgment that lands after the turn completes republishes the row, so a paired viewer shows the host's state. The viewer never judges a mirrored session itself.
 
 ## Load
 
@@ -62,6 +75,6 @@ Measured on a Linux build host against the endpoint: one call takes about 0.5 se
 ## Later layers
 
 1. Judgments are recorded. This exists.
-2. State and headline drive the row, the status dot and the push. They arrive asynchronously: the completion notification waits at most 2 seconds for the judgment and then goes out without it, and the row fills in when the judgment lands. `end_turn` becomes optional; an explicit headline still wins, but the state, the unkept promise and the needs answer always come from the judge. The lead's panel lists the project's ready backlog items, which the coordinator is already told of in its prompt context (see [the ledger](../ledger.md)).
+2. State and headline drive the row, the status dot and the push. The state on the row exists; the rest does not yet. They arrive asynchronously: the completion notification waits at most 2 seconds for the judgment and then goes out without it, and the row fills in when the judgment lands. `end_turn` becomes optional; an explicit headline still wins, but the state, the unkept promise and the needs answer always come from the judge. The lead's panel lists the project's ready backlog items, which the coordinator is already told of in its prompt context (see [the ledger](../ledger.md)).
 3. The unkept hold. A turn is held only when nothing is pending, no ask is open, and the promise score is high. The judge is called synchronously from the Stop hook only when the facts already say nothing is pending, which is a small minority of turns. The hook passes its `last_assistant_message`: the transcript is written only after a tool returns, so a check made during the turn cannot read the reply from it. A hosted Claude session's host already knows whether the turn wrote a reply from the SDK's assistant messages, and could report it next to the tasks. Codex holds through its Stop hook; a turn with no hook gets a follow-up message instead.
 4. The needs item: a judged question to the person raises an Inbox item with its own ask origin, added to every origin filter.

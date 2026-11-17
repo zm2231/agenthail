@@ -295,12 +295,12 @@ func TestReadingASettledResultClearsWake(t *testing.T) {
 func TestIdleUnsettledTasksCountTowardTheChildrenLimit(t *testing.T) {
 	f := newTaskFixture(t)
 	running, err := f.r.RunningChildren(f.task.Parent)
-	if err != nil || running != 1 {
-		t.Fatalf("an idle child with an open task holds a slot: running=%d err=%v", running, err)
+	if err != nil || len(running) != 1 {
+		t.Fatalf("an idle child with an open task holds a slot: running=%v err=%v", running, err)
 	}
 	f.turn("t1", done("text"))
-	if running, err = f.r.RunningChildren(f.task.Parent); err != nil || running != 0 {
-		t.Fatalf("a settled task frees it: running=%d err=%v", running, err)
+	if running, err = f.r.RunningChildren(f.task.Parent); err != nil || len(running) != 0 {
+		t.Fatalf("a settled task frees it: running=%v err=%v", running, err)
 	}
 	for index := range mcpChildrenLimit {
 		child := surface.Session{ID: fmt.Sprintf("child-%d", index), Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}

@@ -29,6 +29,8 @@ type catalogViewState struct {
 	turnEnds  map[string]registry.TurnEnd
 	asks      map[string]registry.Ask
 	notices   map[string]registry.TurnNotice
+	judgments map[string]registry.TurnJudgment
+	leads     leadDirectory
 }
 
 func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
@@ -62,7 +64,15 @@ func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
 	if err != nil {
 		return catalogViewState{}, fmt.Errorf("read turn notices: %w", err)
 	}
-	return catalogViewState{archive: archive, attention: attention, marks: marks, turnEnds: turnEnds, asks: asks, notices: notices}, nil
+	judgments, err := d.Registry.CurrentTurnJudgments()
+	if err != nil {
+		return catalogViewState{}, fmt.Errorf("read turn judgments: %w", err)
+	}
+	leads, err := d.loadLeadDirectory()
+	if err != nil {
+		return catalogViewState{}, fmt.Errorf("read project leads: %w", err)
+	}
+	return catalogViewState{archive: archive, attention: attention, marks: marks, turnEnds: turnEnds, asks: asks, notices: notices, judgments: judgments, leads: leads}, nil
 }
 
 // settleArchiveActivity unarchives each archived session that shows activity
@@ -125,6 +135,11 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 	if notice, ok := view.notices[row.ID]; ok {
 		row.TurnCompletion = turnCompletionRow(notice)
 	}
+	var judgment *registry.TurnJudgment
+	if current, ok := view.judgments[row.ID]; ok {
+		judgment = &current
+	}
+	row.TurnState = turnStateOf(row, judgment, view.leads)
 }
 
 // catalogViewArchive reports whether the view archives the row, and whether
