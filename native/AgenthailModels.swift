@@ -1265,6 +1265,7 @@ struct ProjectIdentity: Codable, Hashable {
     let kind: String
     var archived: Bool? = nil
     var added: Bool? = nil
+    var key: String? = nil
 }
 
 struct CheckoutIdentity: Codable, Hashable {

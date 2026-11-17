@@ -1997,8 +1997,18 @@ struct QueueDock: View {
 }
 
 enum InspectorTab: String, CaseIterable, Identifiable {
+    case now = "Now"
     case details = "Details"
     case delivery = "Delivery"
+
+    static let nowOffKey = "inspectorNowOff"
+
+    static func tabs(lead: Bool) -> [InspectorTab] { lead ? allCases : [.details, .delivery] }
+
+    static func shown(chosen: InspectorTab?, lead: Bool, nowOff: Bool) -> InspectorTab {
+        let tab = chosen ?? (lead && !nowOff ? .now : .details)
+        return tab == .now && !lead ? .details : tab
+    }
 
     var id: String { rawValue }
 }
@@ -2006,13 +2016,19 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 struct SessionInspector: View {
     var model: AgenthailModel
     var pane: SessionPane
-    @State private var tab: InspectorTab = .details
+    @State private var chosen: InspectorTab?
+    @AppStorage(InspectorTab.nowOffKey) private var nowOff = false
 
     var body: some View {
+        let lead = pane.displayedSession.map { !LeadCrew.crew(of: $0.id, in: model.sessionTree).isEmpty } ?? false
+        let tab = InspectorTab.shown(chosen: chosen, lead: lead, nowOff: nowOff)
         VStack(spacing: 0) {
             HStack(spacing: DesktopSpace.l) {
-                ForEach(InspectorTab.allCases) { candidate in
-                    Button(candidate.rawValue) { tab = candidate }
+                ForEach(InspectorTab.tabs(lead: lead)) { candidate in
+                    Button(candidate.rawValue) {
+                        chosen = candidate
+                        if lead { nowOff = candidate != .now }
+                    }
                         .buttonStyle(.plain)
                         .fontWeight(tab == candidate ? .semibold : .regular)
                         .foregroundStyle(tab == candidate ? DesktopPalette.text : DesktopPalette.text2)
@@ -2029,6 +2045,7 @@ struct SessionInspector: View {
                 ScrollView {
                     Group {
                         switch tab {
+                        case .now: HappeningNow(model: model, pane: pane, session: session)
                         case .details: DetailsTab(model: model, pane: pane, session: session)
                         case .delivery: DeliveryTab(model: model, session: session)
                         }

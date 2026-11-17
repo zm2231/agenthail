@@ -142,6 +142,8 @@ targets:
       - path: PastedText.swift
       - path: TranscriptRowID.swift
       - path: TranscriptFocus.swift
+      - path: LeadCrew.swift
+      - path: LedgerReady.swift
       - path: AgentMessage.swift
       - path: ClampedText.swift
       - path: TurnClock.swift
