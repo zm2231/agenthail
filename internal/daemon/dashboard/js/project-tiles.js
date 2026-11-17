@@ -127,7 +127,7 @@ export function movingTile(id, target, order) {
   return next;
 }
 
-export function resolveTileChange({ pinned = [] }, change, arranged) {
+function resolveTileChange({ pinned = [] }, change, arranged) {
   if (change.kind !== "step") return change;
   const pins = new Set(pinned);
   const group = arranged.filter((id) => pins.has(id) === pins.has(change.id));

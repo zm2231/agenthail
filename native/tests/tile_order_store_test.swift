@@ -103,10 +103,10 @@ struct TileOrderStoreTest {
             let replayed = try await settle { await daemon.state.revision == 6 }
             check(replayed, "a move against an older order is sent again")
             let moved = await daemon.state.order
-            check(moved == ["c", "a", "b"], "the move is made again on the order that replaced it: \(moved)")
-            check(store.arrangement.order == ["c", "a", "b"], "and shown: \(store.arrangement.order)")
+            check(moved == ["a", "b", "c"], "on top of the order that replaced it, and the later write wins: \(moved)")
+            check(store.arrangement.order == ["a", "b", "c"], "and stays shown: \(store.arrangement.order)")
             let before = await daemon.writes.count
-            store.change(.step("c", by: -1), arranged: ["c", "a", "b"])
+            store.change(.step("a", by: -1), arranged: ["a", "b", "c"])
             _ = try await settle { false }
             let after = await daemon.writes.count
             check(after == before, "a move that changes nothing writes nothing")
@@ -175,7 +175,7 @@ struct TileOrderStoreTest {
             await daemon.hold(false)
             let landed = try await settle { await daemon.state.revision == 7 }
             let final = await daemon.state
-            check(landed && final.order == ["c", "b", "a"] && final.pinned == ["c"], "both edits are made again on the order another app wrote meanwhile: \(final)")
+            check(landed && final.order == ["c", "b", "a"] && final.pinned == ["c"], "both edits are sent again on top of the order another app wrote meanwhile: \(final)")
             check(store.arrangement == TileArrangement(order: ["c", "b", "a"], pinned: ["c"]), "and shown: \(store.arrangement)")
         }
 

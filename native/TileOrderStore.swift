@@ -12,7 +12,7 @@ enum TileWrite: Equatable, Sendable {
     case stale(TileOrderState)
 }
 
-enum TileChange: Codable, Equatable {
+enum TileChange: Equatable {
     case pin(String, Bool)
     case move(String, before: String)
     case step(String, by: Int)
@@ -62,11 +62,9 @@ final class TileOrderStore {
     @ObservationIgnored private var revision: Int64
     @ObservationIgnored private var unsent: Bool
     @ObservationIgnored private var sending = false
-    @ObservationIgnored private var pending: [TileChange] = []
     @ObservationIgnored private var heard = false
     @ObservationIgnored private var write: (@Sendable (TileOrderState) async throws -> TileWrite)?
     @ObservationIgnored private var ids = IDs()
-    @ObservationIgnored private var arrange: (TileArrangement) -> [String] = { $0.order }
 
     init(defaults: UserDefaults = .standard, key: String, legacy: (order: String, pinned: String)? = nil) {
         self.defaults = defaults
@@ -78,15 +76,10 @@ final class TileOrderStore {
         arrangement = TileArrangement(order: defaults.stringArray(forKey: key + ".order") ?? [], pinned: Set(defaults.stringArray(forKey: key + ".pinned") ?? []))
         revision = (defaults.object(forKey: key + ".revision") as? NSNumber)?.int64Value ?? 0
         unsent = defaults.bool(forKey: key + ".unsent")
-        pending = defaults.data(forKey: key + ".pending").flatMap { try? JSONDecoder().decode([TileChange].self, from: $0) } ?? []
     }
 
     func tiles(_ projects: [ProjectState], limit: Int) -> ProjectTiles {
-        arrange = { arrangement in
-            let tiles = ProjectTiles.arranged(projects, limit: limit, order: arrangement.order, pinned: arrangement.pinned)
-            return (tiles.shown + tiles.more).map(\.id)
-        }
-        return ProjectTiles.arranged(projects, limit: limit, order: arrangement.order, pinned: arrangement.pinned)
+        ProjectTiles.arranged(projects, limit: limit, order: arrangement.order, pinned: arrangement.pinned)
     }
 
     func isPinned(_ id: String) -> Bool { arrangement.pinned.contains(id) }
@@ -102,10 +95,8 @@ final class TileOrderStore {
     }
 
     func change(_ change: TileChange, arranged: [String]) {
-        guard let change = arrangement.resolving(change, arranged: arranged) else { return }
         let next = arrangement.applying(change, arranged: arranged)
         guard next != arrangement else { return }
-        pending.append(change)
         save(next, unsent: true)
         send()
     }
@@ -131,23 +122,18 @@ final class TileOrderStore {
             var retried = false
             while true {
                 let sent = arrangement
-                let included = pending.count
                 do {
                     switch try await write(outward(sent)) {
                     case .saved(let saved):
-                        pending.removeFirst(min(included, pending.count))
                         revision = saved.revision
-                        persist()
                         guard arrangement == sent else { continue }
                         save(arrangement, unsent: false)
                     case .stale(let current) where retried || !unsent:
-                        pending = []
                         take(current)
                     case .stale(let current):
                         retried = true
                         revision = current.revision
-                        let base = inward(current)
-                        save(pending.isEmpty ? arrangement : pending.reduce(base) { $0.applying($1, arranged: arrange($0)) }, unsent: true)
+                        persist()
                         continue
                     }
                 } catch {}
@@ -181,6 +167,5 @@ final class TileOrderStore {
         defaults.set(arrangement.pinned.sorted(), forKey: key + ".pinned")
         defaults.set(NSNumber(value: revision), forKey: key + ".revision")
         defaults.set(unsent, forKey: key + ".unsent")
-        defaults.set(try? JSONEncoder().encode(pending), forKey: key + ".pending")
     }
 }

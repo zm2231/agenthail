@@ -2,7 +2,7 @@ import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape } from "./format.js";
 import { arrangeTiles, fillTiles, orderTiles, tileColumns, tileLetter, tileLeads, projectColour, projectColourID } from "./project-tiles.js";
-import { changeTiles, onTileOrderChange, seedTileOrder, tileOrder, tilesArrangedBy } from "./tile-order.js";
+import { changeTiles, onTileOrderChange, seedTileOrder, tileOrder } from "./tile-order.js";
 import { currentStops } from "./decision-card.js";
 import { stopsByProject } from "./inbox-stops.js";
 import { openProject, leaveProject } from "./project-pane.js";
@@ -35,10 +35,6 @@ export function renderTiles() {
     seedTileOrder([...seen.shown, ...seen.more].map((project) => project.id));
   }
   const byOrder = ({ order, pinned }) => fillTiles(shownColumns, (limit) => arrangeTiles(projects, limit, order, pinned));
-  tilesArrangedBy((arrangement) => {
-    const tiles = byOrder(arrangement);
-    return [...tiles.shown, ...tiles.more].map((project) => project.id);
-  });
   const { shown, more } = tileOrder().order.length ? byOrder(tileOrder()) : fillTiles(shownColumns, (limit) => orderTiles(projects, limit, { waiting: counts, leads }));
   arranged = [...shown, ...more].map((project) => project.id);
   const scope = app.scope || "all";

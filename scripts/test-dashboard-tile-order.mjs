@@ -56,13 +56,12 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   page.adoptTileOrder(server.state);
   assert.deepEqual(plain(page.tileOrder().order), ["b", "a", "c"], "a page with only the ranking takes the daemon's order");
   assert.equal(server.writes.length, 0, "and writes nothing");
-  page.tilesArrangedBy((arrangement) => arrangement.order);
   server.state = { order: ["c", "b", "a"], pinned: [], revision: 5 };
   await page.changeTiles({ kind: "move", id: "a", target: "b" }, ["b", "a", "c"]);
-  assert.deepEqual(plain(server.state), { order: ["c", "a", "b"], pinned: [], revision: 6 }, "a move against an older order is made again on the one that replaced it");
-  assert.deepEqual(plain(page.tileOrder().order), ["c", "a", "b"], "and shown");
+  assert.deepEqual(plain(server.state), { order: ["a", "b", "c"], pinned: [], revision: 6 }, "a move against an older order is sent again on top of it, and the later write wins");
+  assert.deepEqual(plain(page.tileOrder().order), ["a", "b", "c"], "and stays shown");
   const writes = server.writes.length;
-  await page.changeTiles({ kind: "step", id: "c", by: -1 }, ["c", "a", "b"]);
+  await page.changeTiles({ kind: "step", id: "a", by: -1 }, ["a", "b", "c"]);
   assert.equal(server.writes.length, writes, "a move that changes nothing writes nothing");
 }
 
@@ -100,7 +99,6 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   const server = daemon({ order: ["a", "b", "c"], pinned: [], revision: 5 });
   const page = await store({}, server);
   page.adoptTileOrder(server.state);
-  page.tilesArrangedBy(({ order, pinned }) => [...order.filter((id) => pinned.includes(id)), ...order.filter((id) => !pinned.includes(id))]);
   server.held = true;
   const first = page.changeTiles({ kind: "pin", id: "c", on: true }, ["a", "b", "c"]);
   page.changeTiles({ kind: "move", id: "b", target: "a" }, ["c", "a", "b"]);
@@ -108,7 +106,7 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   server.state = { order: ["a", "c", "b"], pinned: [], revision: 6 };
   server.held = false;
   await first;
-  assert.deepEqual(plain(server.state), { order: ["c", "b", "a"], pinned: ["c"], revision: 7 }, "both edits are made again on the order another app wrote meanwhile");
+  assert.deepEqual(plain(server.state), { order: ["c", "b", "a"], pinned: ["c"], revision: 7 }, "both edits are sent again on top of the order another app wrote meanwhile");
   assert.deepEqual(plain([page.tileOrder().order, page.tileOrder().pinned]), [["c", "b", "a"], ["c"]], "and shown");
 }
 
@@ -121,7 +119,6 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   first.adoptTileOrder(server.state);
   await first.changeTiles({ kind: "pin", id: "a", on: true }, ["a", "b", "c"]);
   const reopened = await store(Object.fromEntries(local.items), server);
-  reopened.tilesArrangedBy(({ order, pinned }) => [...order.filter((id) => pinned.includes(id)), ...order.filter((id) => !pinned.includes(id))]);
   server.offline = false;
   server.held = true;
   server.state = { order: ["a", "b", "c"], pinned: [], revision: 3 };
@@ -139,7 +136,6 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   const server = daemon({ order: ["a", "b", "c"], pinned: [], revision: 1 });
   const page = await store({}, server);
   page.adoptTileOrder(server.state);
-  page.tilesArrangedBy(({ order, pinned }) => [...order.filter((id) => pinned.includes(id)), ...order.filter((id) => !pinned.includes(id))]);
   server.lose = true;
   await page.changeTiles({ kind: "pin", id: "a", on: true }, ["a", "b", "c"]);
   assert.deepEqual(plain(server.state.pinned), ["a"], "the daemon kept the pin though its answer was lost");
@@ -152,6 +148,28 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   for (let i = 0; i < 50 && page.tileOrder().unsent; i++) await settle();
   assert.deepEqual(plain(server.state.pinned), ["a"], "making a pin the daemon already kept again leaves it pinned");
   assert.deepEqual(plain(page.tileOrder().pinned), ["a"], "and shown pinned");
+}
+
+{
+  const server = daemon({ order: ["a", "b", "c", "d"], pinned: [], revision: 1 });
+  server.offline = true;
+  const page = await store({}, server);
+  page.adoptTileOrder(server.state);
+  await page.changeTiles({ kind: "move", id: "a", target: "c" }, ["a", "b", "c", "d"]);
+  await page.changeTiles({ kind: "move", id: "c", target: "b" }, ["b", "a", "c", "d"]);
+  assert.deepEqual(plain(page.tileOrder().order), ["c", "b", "a", "d"]);
+  server.offline = false;
+  server.lose = true;
+  page.adoptTileOrder(server.state);
+  for (let i = 0; i < 50 && server.state.revision < 2; i++) await settle();
+  assert.deepEqual(plain(server.state.order), ["c", "b", "a", "d"], "the daemon kept both moves though its answer was lost");
+  server.held = true;
+  page.adoptTileOrder(server.state);
+  server.state = { ...server.state, revision: server.state.revision + 1 };
+  server.held = false;
+  for (let i = 0; i < 50 && page.tileOrder().unsent; i++) await settle();
+  assert.deepEqual(plain(server.state.order), ["c", "b", "a", "d"], "sending moves the daemon already kept again leaves the order as it was");
+  assert.deepEqual(plain(page.tileOrder().order), ["c", "b", "a", "d"]);
 }
 
 console.log("dashboard tile order tests passed");

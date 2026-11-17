@@ -158,14 +158,18 @@ shared between hosts.
 - `PUT /api/v1/projects/tiles` with `{"order": [...], "pinned": [...], "revision": 3}`
   replaces both lists when `revision` is the current one, needs the `control`
   scope, and answers `{"tileOrder": {...}}` with the next revision. Against an
-  older revision it answers `409 conflict` with the current `tileOrder`; the
-  app makes the person's change again on that order and sends it once more.
-  `revision` is required. A write publishes `state.changed` with
+  older revision it answers `409 conflict` with the current `tileOrder`. An
+  app holding a change the person made sends its whole order again once,
+  against that revision, so the later write wins; a second 409 makes it take
+  the daemon's order. `revision` is required. A write publishes `state.changed` with
   `"source": "tiles"`, and `GET` returns the current order.
 - Each app keeps the last order it read and applies a change at once. A change
   made while the daemon cannot be reached is sent when it answers again, and
   the later write wins. The first app to find no order sends its own: the Mac
-  its existing order, any other app the activity ranking it shows. The phone
+  its existing order, any other app the activity ranking it shows. An app
+  whose first order is refused because another app wrote one first takes
+  that one instead. A pin is sent as the whole pinned list, so sending an
+  order again after a lost answer never undoes a change. The phone
   names its first computer's own folders `<host>::<id>`, as it does
   everywhere, and sends them back in the computer's names.
 - Moving a project to a new key keeps its tile's place and pin under the new key.
