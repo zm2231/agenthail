@@ -171,6 +171,24 @@ func TestTheWorkPageShowsAProjectsWorkByStateWithWhoHoldsItAndWhatItIsFor(t *tes
 	}
 }
 
+func TestTheWorkPageListsSetAsideWorkThatIsReadyToPickUpFirst(t *testing.T) {
+	d, p, _, base := ledgerPageDaemon(t)
+	p.session(t, d.Registry, "s1")
+	store := d.ledgerStore()
+	due := work(t, store, ledger.WorkRequest{ProjectKey: p.key, SessionID: "s1", Action: ledger.WorkAdd, Text: "Retry the export"})
+	work(t, store, ledger.WorkRequest{ProjectKey: p.key, SessionID: "s1", Action: ledger.WorkPark, ItemID: due.ID, Park: &ledger.Park{Kind: ledger.ParkLater, Why: "after the freeze", Revisit: time.Now().Add(-time.Hour)}})
+	waiting := work(t, store, ledger.WorkRequest{ProjectKey: p.key, SessionID: "s1", Action: ledger.WorkAdd, Text: "Rename the tables"})
+	work(t, store, ledger.WorkRequest{ProjectKey: p.key, SessionID: "s1", Action: ledger.WorkPark, ItemID: waiting.ID, Park: &ledger.Park{Kind: ledger.ParkLater, Why: "next quarter", Revisit: time.Now().Add(72 * time.Hour)}})
+
+	_, view := ledgerPageRead(t, base, "proj-widget", "test-token", "")
+	if len(view.Ready) != 1 || view.Ready[0].ID != due.ID || view.Ready[0].Parked == nil || view.Ready[0].Parked.Ready != "its revisit date came" || view.Ready[0].Parked.Why != "after the freeze" {
+		t.Fatalf("ready to pick up: %+v", view.Ready)
+	}
+	if parked := view.Work[string(ledger.WorkParked)]; len(parked) != 1 || parked[0].ID != waiting.ID || parked[0].Parked.Ready != "" {
+		t.Fatalf("set aside: %+v", parked)
+	}
+}
+
 func TestTheWorkPageShowsOnlyItsOwnProjectAndAnEmptyListForOneWithNoWork(t *testing.T) {
 	d, p, _, base := ledgerPageDaemon(t)
 	other := addLedgerProject(t, d.Registry, "proj-other", "repo:github.com/acme/other")

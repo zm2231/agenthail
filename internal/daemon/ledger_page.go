@@ -32,6 +32,7 @@ type ledgerPageView struct {
 	Project string                     `json:"project"`
 	Key     string                     `json:"key,omitempty"`
 	Work    map[string][]ledgerPageRow `json:"work"`
+	Ready   []ledgerPageRow            `json:"ready"`
 	Waiting []ledgerPageWait           `json:"waiting"`
 	Done    []ledgerPageRow            `json:"done"`
 }
@@ -54,6 +55,7 @@ type ledgerPageParked struct {
 	Kind    string    `json:"kind"`
 	Why     string    `json:"why,omitempty"`
 	Revisit time.Time `json:"revisit,omitzero"`
+	Ready   string    `json:"ready,omitempty"`
 }
 
 type ledgerPageWait struct {
@@ -144,7 +146,7 @@ func (d *Daemon) ledgerPageDataHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "ledger_unavailable", err.Error())
 		return
 	}
-	view := ledgerPageView{Project: projectID, Key: key, Work: map[string][]ledgerPageRow{}, Waiting: []ledgerPageWait{}, Done: []ledgerPageRow{}}
+	view := ledgerPageView{Project: projectID, Key: key, Work: map[string][]ledgerPageRow{}, Ready: []ledgerPageRow{}, Waiting: []ledgerPageWait{}, Done: []ledgerPageRow{}}
 	for _, state := range ledgerPageStates {
 		view.Work[string(state)] = []ledgerPageRow{}
 	}
@@ -191,6 +193,10 @@ func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now t
 		}
 		return out
 	}
+	ready := map[string]string{}
+	for _, entry := range board.Backlog(ledger.BacklogQuery{Ready: true}, now, ledger.Readings{Usage: d.cachedLedgerUsage(now), Asks: d.ledgerAskReader()}) {
+		ready[entry.Item.ID] = entry.Why
+	}
 	var done []ledgerPageRow
 	for _, item := range board.WorkItems() {
 		switch item.State {
@@ -207,6 +213,11 @@ func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now t
 			r := row(item)
 			if item.Park == nil {
 				view.Work[string(item.State)] = append(view.Work[string(item.State)], r)
+				continue
+			}
+			if why, ok := ready[item.ID]; ok {
+				r.Parked = &ledgerPageParked{Kind: string(item.Park.Kind), Why: firstLine(item.Park.Why), Revisit: item.Park.Revisit, Ready: why}
+				view.Ready = append(view.Ready, r)
 				continue
 			}
 			if item.Park.Kind == ledger.ParkPerson && item.Park.Person != nil {
@@ -226,6 +237,7 @@ func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now t
 		}
 		slices.SortStableFunc(rows, newestFirst)
 	}
+	slices.SortStableFunc(view.Ready, func(a, b ledgerPageRow) int { return ledger.CompareIDs(a.ID, b.ID) })
 	slices.SortStableFunc(done, newestFirst)
 	view.Done = append(view.Done, done[:min(len(done), ledgerPageDone)]...)
 	for _, question := range board.Questions() {
