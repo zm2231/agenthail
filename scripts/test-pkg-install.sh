@@ -191,11 +191,18 @@ done
 test -s "$dashboard_token"
 test "$(shasum -a 256 "$dashboard_token" | awk '{print $1}')" != "$old_token_hash"
 dashboard_port="$(jq -r '.listen | split(":") | last' "$HOME/.agenthail/dashboard.json")"
+# Between reconnect steps the app can briefly hold no connection, so it must stay connected.
+held=0
 for _ in {1..30}; do
-	lsof -nP -a -p "$menu_pid" -iTCP:"$dashboard_port" -sTCP:ESTABLISHED >/dev/null 2>&1 && break
+	if lsof -nP -a -p "$menu_pid" -iTCP:"$dashboard_port" -sTCP:ESTABLISHED >/dev/null 2>&1; then
+		held=$((held + 1))
+		[ "$held" -ge 3 ] && break
+	else
+		held=0
+	fi
 	sleep 1
 done
-lsof -nP -a -p "$menu_pid" -iTCP:"$dashboard_port" -sTCP:ESTABLISHED >/dev/null
+test "$held" -ge 3
 assert_supervised_daemon
 first_pid="$(cat "$HOME/.agenthail/daemon.pid")"
 test "$(cat "$HOME/.agenthail/daemon.pid")" = "$first_pid"
