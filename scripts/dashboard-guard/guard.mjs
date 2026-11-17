@@ -2,14 +2,16 @@ import path from "node:path";
 import { launch } from "./browser.mjs";
 import { brightLuminance, decode, QUANTIZATION, worstContrast } from "./contrast.mjs";
 import { collectText, HIDE_TEXT } from "./text.mjs";
-import { openView, settle, VIEWS } from "./views.mjs";
+import { onStep, openView, settle, step, VIEWS } from "./views.mjs";
 
 const themes = JSON.parse(process.env.AGENTHAIL_GUARD_DASHBOARDS);
 const shots = process.env.AGENTHAIL_GUARD_SHOTS;
 const CANDIDATES = ["art: field", "art: tide", "art: aurora", "art: dawn", "gradient: dusk", "gradient: slate", "gradient: forest", "gradient: ember", "gradient: violet", "gradient: mono"];
 const SIZES = { wide: [1440, 900], phone: [390, 844] };
 const STALL_LIMIT_MS = 3 * 60_000;
-const progress = new Map(Object.keys(themes).map((theme) => [theme, { last: Date.now(), longest: 0, doing: "starting" }]));
+const progress = new Map(Object.keys(themes).map((theme) => [theme, { last: Date.now(), longest: 0, doing: "starting", pages: {} }]));
+const steps = new Map();
+onStep((page, name) => steps.set(page, name));
 
 function working(theme, label) {
   const now = Date.now();
@@ -38,16 +40,16 @@ async function signedIn(browser, dashboard) {
 
 async function brightest(page, dashboard, theme) {
   let best = null;
-  await page.setViewport({ width: SIZES.wide[0], height: SIZES.wide[1] });
+  await step(page, "brightest viewport", () => page.setViewport({ width: SIZES.wide[0], height: SIZES.wide[1] }));
   for (const background of CANDIDATES) {
     working(theme, `brightest ${background}`);
-    await setUI(dashboard, [`theme = ${theme}`, `background = ${background}`]);
-    await page.goto("about:blank");
-    await page.goto(`${dashboard.url}/#overview`, { waitUntil: "load" });
+    await step(page, "brightest set ui", () => setUI(dashboard, [`theme = ${theme}`, `background = ${background}`]));
+    await step(page, "brightest blank", () => page.goto("about:blank"));
+    await step(page, "brightest load", () => page.goto(`${dashboard.url}/#overview`, { waitUntil: "load" }));
     await settle(page);
-    const hidden = await page.addStyleTag({ content: ".shell { visibility: hidden !important; }" });
-    const bright = brightLuminance(decode(await page.screenshot()));
-    await hidden.evaluate((node) => node.remove());
+    const hidden = await step(page, "brightest hide shell", () => page.addStyleTag({ content: ".shell { visibility: hidden !important; }" }));
+    const bright = brightLuminance(decode(await step(page, "brightest screenshot", () => page.screenshot())));
+    await step(page, "brightest show shell", () => hidden.evaluate((node) => node.remove()));
     if (!best || bright > best.bright) best = { background, bright };
   }
   return best.background;
@@ -56,13 +58,13 @@ async function brightest(page, dashboard, theme) {
 async function capture(page) {
   let moved = "";
   for (let attempt = 0; attempt < 3; attempt++) {
-    const texts = await page.evaluate(collectText);
-    const shown = decode(await page.screenshot());
-    const hidden = await page.addStyleTag({ content: HIDE_TEXT });
-    const ground = decode(await page.screenshot());
-    await hidden.evaluate((node) => node.remove());
+    const texts = await step(page, "check text", () => page.evaluate(collectText));
+    const shown = decode(await step(page, "check screenshot", () => page.screenshot()));
+    const hidden = await step(page, "check hide text", () => page.addStyleTag({ content: HIDE_TEXT }));
+    const ground = decode(await step(page, "check ground", () => page.screenshot()));
+    await step(page, "check show text", () => hidden.evaluate((node) => node.remove()));
     await settle(page);
-    const after = await page.evaluate(collectText);
+    const after = await step(page, "check text again", () => page.evaluate(collectText));
     const index = texts.findIndex((entry, i) => JSON.stringify(entry) !== JSON.stringify(after[i]));
     if (index === -1 && texts.length === after.length) return { texts, ground, shown };
     moved = index === -1 ? `${texts.length} texts became ${after.length}` : `${JSON.stringify(texts[index])} became ${JSON.stringify(after[index])}`;
@@ -81,15 +83,15 @@ async function check(page, label, target) {
     const { worst, at, over } = worstContrast(entry, ground, 1, shown);
     if (worst < target - QUANTIZATION) failures.push(`${label}: "${entry.text}" (${entry.where}) reads at ${worst.toFixed(2)}:1 at ${at} as rgb(${entry.colour.slice(0, 3).map((v) => Math.round(v * 255)).join(" ")} / ${(entry.colour[3] * entry.opacity).toFixed(2)}) over ${over}, below ${target}:1`);
   }
-  if (failures.length) failures.push(`${label}: root style ${await page.evaluate(() => document.documentElement.getAttribute("style"))}`);
+  if (failures.length) failures.push(`${label}: root style ${await step(page, "check root style", () => page.evaluate(() => document.documentElement.getAttribute("style")))}`);
   return failures;
 }
 
 async function checkView(page, label, target) {
   const failures = await check(page, `${label} top`, target);
-  const scrolls = await page.evaluate(() => document.documentElement.scrollHeight > innerHeight + 1);
+  const scrolls = await step(page, "check scroll height", () => page.evaluate(() => document.documentElement.scrollHeight > innerHeight + 1));
   if (!scrolls) return failures;
-  await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+  await step(page, "check scroll", () => page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight)));
   await settle(page);
   return failures.concat(await check(page, `${label} bottom`, target));
 }
@@ -101,58 +103,64 @@ function roleOverrides() {
 
 async function themeSurvivesHiddenText(page, dashboard, label) {
   await openView(page, dashboard, { hash: "overview", dashboard: "full" });
-  const before = await page.evaluate(roleOverrides);
-  const hidden = await page.addStyleTag({ content: HIDE_TEXT });
-  const passStarted = await page.evaluate(() => {
-    dispatchEvent(new Event("resize"));
-    return !document.documentElement.hasAttribute("data-ui-settled");
-  });
+  const before = await step(page, "theme pass roles", () => page.evaluate(roleOverrides));
+  const hidden = await step(page, "theme pass hide text", () => page.addStyleTag({ content: HIDE_TEXT }));
+  const passStarted = await step(page, "theme pass resize", () =>
+    page.evaluate(() => {
+      dispatchEvent(new Event("resize"));
+      return !document.documentElement.hasAttribute("data-ui-settled");
+    }),
+  );
   if (!passStarted) {
-    await hidden.evaluate((node) => node.remove());
+    await step(page, "theme pass show text", () => hidden.evaluate((node) => node.remove()));
     return [`${label}: a resize started no theme pass`];
   }
   await settle(page);
-  await hidden.evaluate((node) => node.remove());
+  await step(page, "theme pass show text", () => hidden.evaluate((node) => node.remove()));
   await settle(page);
-  const after = await page.evaluate(roleOverrides);
+  const after = await step(page, "theme pass roles again", () => page.evaluate(roleOverrides));
   return before === after ? [] : [`${label}: a theme pass while text was hidden solved text colours as "${after}", not "${before}"`];
 }
 
 async function guardTheme(browser, theme, dashboards) {
   const failures = [];
   const pages = {};
-  for (const [key, dashboard] of Object.entries(dashboards)) pages[key] = await signedIn(browser, dashboard);
+  progress.get(theme).pages = pages;
+  for (const [key, dashboard] of Object.entries(dashboards)) {
+    working(theme, `sign in ${key}`);
+    pages[key] = await signedIn(browser, dashboard);
+  }
   const backgrounds = [...new Set(["art: field", await brightest(pages.full, dashboards.full, theme)])];
   console.log(`${theme} backgrounds: ${backgrounds.join(", ")}`);
   const solved = new Map();
   for (const background of backgrounds) {
-    for (const dashboard of Object.values(dashboards)) await setUI(dashboard, [`theme = ${theme}`, `background = ${background}`]);
+    for (const [key, dashboard] of Object.entries(dashboards)) await step(pages[key], "set ui", () => setUI(dashboard, [`theme = ${theme}`, `background = ${background}`]));
     for (const contrast of ["no-preference", "more"]) {
       const target = contrast === "more" ? 7 : 4.5;
-      await pages.full.setViewport({ width: SIZES.wide[0], height: SIZES.wide[1] });
-      await pages.full.emulateMediaFeatures([{ name: "prefers-contrast", value: contrast }]);
+      await step(pages.full, "viewport", () => pages.full.setViewport({ width: SIZES.wide[0], height: SIZES.wide[1] }));
+      await step(pages.full, "contrast", () => pages.full.emulateMediaFeatures([{ name: "prefers-contrast", value: contrast }]));
       working(theme, `${theme} ${background} ${contrast === "more" ? "more contrast " : ""}theme pass`);
       failures.push(...(await themeSurvivesHiddenText(pages.full, dashboards.full, `${theme} ${background} ${contrast === "more" ? "more contrast " : ""}theme pass`)));
       for (const [width, height] of Object.values(SIZES)) {
         for (const view of VIEWS) {
           if (view.wideOnly && width < SIZES.wide[0]) continue;
           const page = pages[view.dashboard];
-          await page.setViewport({ width, height });
-          await page.emulateMediaFeatures([{ name: "prefers-contrast", value: contrast }]);
+          await step(page, "viewport", () => page.setViewport({ width, height }));
+          await step(page, "contrast", () => page.emulateMediaFeatures([{ name: "prefers-contrast", value: contrast }]));
           const label = `${theme} ${background} ${contrast === "more" ? "more contrast " : ""}${width}x${height} ${view.name}`;
           working(theme, label);
           try {
             await openView(page, dashboards[view.dashboard], view);
-            const roles = await page.evaluate(roleOverrides);
+            const roles = await step(page, "roles", () => page.evaluate(roleOverrides));
             const key = `${background} ${contrast}`;
             if (!solved.has(key)) solved.set(key, roles);
             else if (solved.get(key) !== roles) failures.push(`${label}: text colours solved as "${roles}", not "${solved.get(key)}" as on other views`);
             failures.push(...(await checkView(page, label, target)));
           } catch (error) {
-            if (shots) await page.screenshot({ path: path.join(shots, `failed-${label.replace(/\W+/g, "-")}.png`) }).catch(() => {});
+            if (shots) await step(page, "failure screenshot", () => page.screenshot({ path: path.join(shots, `failed-${label.replace(/\W+/g, "-")}.png`) })).catch(() => {});
             throw new Error(`${label}: ${error.message}`);
           }
-          if (shots) await page.screenshot({ path: path.join(shots, `${label.replace(/\W+/g, "-")}.png`) });
+          if (shots) await step(page, "save screenshot", () => page.screenshot({ path: path.join(shots, `${label.replace(/\W+/g, "-")}.png`) }));
         }
       }
     }
@@ -171,11 +179,23 @@ if (deadline) {
     process.exit(1);
   }, Math.max(deadline - Date.now(), 0)).unref();
 }
-setInterval(() => {
+const pageState = (page) =>
+  Promise.race([
+    page.evaluate(() => {
+      const html = document.documentElement;
+      return JSON.stringify({ url: location.href, ready: document.readyState, uiSettled: html.hasAttribute("data-ui-settled"), toastHidden: document.querySelector("#toast")?.hidden ?? null });
+    }),
+    new Promise((resolve) => setTimeout(() => resolve("did not answer in 5 s"), 5000)),
+  ]).catch((error) => `unreadable: ${error.message}`);
+
+let stopping = false;
+setInterval(async () => {
   const now = Date.now();
   const stalled = [...progress].find(([, mine]) => mine.doing !== "done" && now - mine.last > STALL_LIMIT_MS);
-  if (!stalled) return;
+  if (!stalled || stopping) return;
+  stopping = true;
   console.log(`readability guard: ${stalled[0]} finished nothing in ${STALL_LIMIT_MS / 1000} s, stuck on ${stalled[1].doing}`);
+  for (const [key, page] of Object.entries(stalled[1].pages)) console.log(`readability guard: ${stalled[0]} ${key} page at ${steps.get(page) ?? "no step"}, ${await pageState(page)}`);
   abandon();
   process.exit(1);
 }, 1000).unref();
