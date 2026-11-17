@@ -53,7 +53,7 @@ func withSessionInProject(t *testing.T, d *Daemon, r *registry.Registry) {
 		t.Fatal(err)
 	}
 	session.Cwd, _ = canonicalCatalogPath(parityFolder("project"))
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 }

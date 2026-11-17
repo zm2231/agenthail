@@ -12,7 +12,7 @@ import (
 
 func TestThreadSettingsShowsWhereEachSettingCameFromAndWhatIsUnknown(t *testing.T) {
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SetAlias("builder", "s1"); err != nil {

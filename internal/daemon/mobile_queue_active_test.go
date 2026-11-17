@@ -31,7 +31,7 @@ func getMobileQueue(t *testing.T, handler http.Handler, query string) mobileQueu
 
 func TestMobileQueueListsOnlyActiveItems(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
-	if err := registry.RegisterSession(surface.Session{ID: "history", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+	if err := registry.RecordObservedSession(surface.Session{ID: "history", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 		t.Fatal(err)
 	}
 	deadID := queueDeadForMobileTest(t, registry, "dead message")

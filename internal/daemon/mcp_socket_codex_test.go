@@ -60,7 +60,7 @@ func (p *codexProcess) unload(thread string) {
 
 func registerCodex(t *testing.T, reg *registry.Registry, id, cwd string) {
 	t.Helper()
-	if err := reg.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: cwd}); err != nil {
+	if err := reg.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: cwd}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -94,7 +94,7 @@ func openIdempotencyFixture(t *testing.T, path string, adapter surface.Surface) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = r.Close() })
-	if err := r.RegisterSession(surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
 		t.Fatal(err)
 	}
 	return r, dashboardRouter(newTestDaemon(t, r, []surface.Surface{adapter}))

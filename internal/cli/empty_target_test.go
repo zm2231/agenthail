@@ -34,7 +34,7 @@ func TestThreadCreateFromAnEmptySurfaceTargetStartsNothing(t *testing.T) {
 		delivery:   &surface.SendResult{UUID: "turn-new", Accepted: true},
 	}
 	app := threadFixture(t, starter)
-	if err := app.Registry.RegisterSession(surface.Session{ID: "only-claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
+	if err := app.Registry.RecordObservedSession(surface.Session{ID: "only-claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	output, err := captureStdout(t, func() error {
@@ -50,7 +50,7 @@ func TestThisHostsNameWithAnEmptyTargetNamesNoSession(t *testing.T) {
 	app, r := cliFixture(t, fake)
 	only := surface.Session{ID: "only-codex", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
 	fake.sessions[only.ID] = only
-	if err := r.RegisterSession(only); err != nil {
+	if err := r.RecordObservedSession(only); err != nil {
 		t.Fatal(err)
 	}
 	self, err := r.HostIdentity()

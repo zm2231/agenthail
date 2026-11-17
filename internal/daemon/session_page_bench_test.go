@@ -19,7 +19,7 @@ func BenchmarkJournalPageAssembly(b *testing.B) {
 				b.Fatal(err)
 			}
 			defer r.Close()
-			if err := r.RegisterSession(surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+			if err := r.RecordObservedSession(surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 				b.Fatal(err)
 			}
 			entries := make([]registry.SessionJournalEntry, 0, 2048)

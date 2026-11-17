@@ -123,7 +123,7 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 			return 0, false
 		}
 		for _, session := range sessions {
-			if registerErr := d.Registry.RegisterSession(session); registerErr != nil {
+			if registerErr := d.Registry.RecordObservedSession(session); registerErr != nil {
 				d.log.Printf("register active Claude session: %s", registerErr)
 				return 0, false
 			}
@@ -165,6 +165,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 
 // A session watched only to see its turn end is not armed when seen busy, so a turn it started itself pushes nothing.
 func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surface.Surface, session *surface.Session, arm bool) {
+	read := *session
 	observed := observeOnce(adapter, session, d.observeTurn)
 	observation, err := observed.get(ctx)
 	unobserved := err != nil && d.readUnobservedBackground(ctx, adapter, session)
@@ -199,7 +200,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	session.Activity = observation.Activity
 	session.Plan = observation.Plan
 	if session.Source != source || session.Transport != transport {
-		if err := d.Registry.RegisterSession(*session); err != nil {
+		if err := d.Registry.UpdateSession(*session, registry.LearnedSessionUpdate(read, *session)); err != nil {
 			d.log.Printf("persist refreshed session %s: %s", d.resolveDisplay(session.ID), err)
 			return
 		}

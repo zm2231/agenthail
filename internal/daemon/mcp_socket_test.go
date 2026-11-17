@@ -186,7 +186,7 @@ func mcpSocketDaemon(t *testing.T, more ...surface.Surface) (*Daemon, *registry.
 
 func registerClaude(t *testing.T, reg *registry.Registry, id string) {
 	t.Helper()
-	if err := reg.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Cwd: t.TempDir()}); err != nil {
+	if err := reg.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Cwd: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -367,7 +367,7 @@ func TestAProjectWithTheToolsOffGivesItsTerminalSessionsNoneUntilTurnedBackOn(t 
 	if _, _, err := d.addProject(context.Background(), folder, "notes"); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.RegisterSession(surface.Session{ID: "claude-one", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Cwd: folder}); err != nil {
+	if err := reg.RecordObservedSession(surface.Session{ID: "claude-one", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Cwd: folder}); err != nil {
 		t.Fatal(err)
 	}
 	parent := &relayedSession{record: filepath.Join(root, "sessions", strconv.Itoa(os.Getppid())+".json")}

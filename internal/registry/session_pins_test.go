@@ -62,7 +62,7 @@ func TestUpgradeKeepsPinsAndDropsTheKeepersState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := old.RegisterSession(surface.Session{ID: "pinned", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}); err != nil {
+	if err := old.RecordObservedSession(surface.Session{ID: "pinned", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}); err != nil {
 		t.Fatal(err)
 	}
 	pinnedAt := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)

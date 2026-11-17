@@ -24,7 +24,7 @@ func busyHostSession(t *testing.T) (*claudehosttest.Fixture, claudehost.Client, 
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})

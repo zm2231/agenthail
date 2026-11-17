@@ -146,7 +146,7 @@ func TestReplacingAPeerCoordinatorIsRefusedWhileItsHostIsUnreachable(t *testing.
 		mirrored, _ := laptop.reg.ProjectCoordinators(project)
 		return len(mirrored) == 1 && mirrored[0].HostID == record.ID
 	})
-	if err := laptop.reg.RegisterSession(surface.Session{ID: "laptop-other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: laptop.fake.sessions["laptop-a"].Cwd, Status: surface.StatusIdle}); err != nil {
+	if err := laptop.reg.RecordObservedSession(surface.Session{ID: "laptop-other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: laptop.fake.sessions["laptop-a"].Cwd, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	if err := laptop.reg.SetAlias("taken-lead", "laptop-other"); err != nil {

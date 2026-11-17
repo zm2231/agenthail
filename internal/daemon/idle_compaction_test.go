@@ -57,7 +57,7 @@ func TestAnIdleLargeSessionIsCompactedOnceBeforeItsCacheExpires(t *testing.T) {
 		if change != nil {
 			change(&session)
 		}
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		raw, _ := json.Marshal(session)
@@ -169,7 +169,7 @@ func TestEachHeldIdleCompactionIsReportedOnceWhenMoreAreHeldThanTheListKeeps(t *
 			t.Fatal(err)
 		}
 		session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusBusy, Transcript: transcript}
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		fake.sessions[id] = session

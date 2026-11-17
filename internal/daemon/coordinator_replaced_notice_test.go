@@ -91,7 +91,7 @@ func TestAQueuedMessageThatReplacesTheLeadTellsTheAgentThatSentIt(t *testing.T) 
 	notices := &desktopNotices{}
 	notices.capture(f)
 	const worker = "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d"
-	if err := f.r.RegisterSession(surface.Session{ID: worker, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID - 1, Status: surface.StatusIdle, Cwd: f.host.Cwd}); err != nil {
+	if err := f.r.RecordObservedSession(surface.Session{ID: worker, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID - 1, Status: surface.StatusIdle, Cwd: f.host.Cwd}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.r.QueueMessageWithOptions(goneCoordinator, "report from the worker", "", surface.SendOptions{SourceSessionID: worker}); err != nil {
@@ -145,7 +145,7 @@ func TestAQueuedMessageWithNoSenderIsReplacedByTheDaemonAndTellsNoAgent(t *testi
 func TestADaemonRestartedAfterThePushDoesNotTellThePersonAgain(t *testing.T) {
 	f := newCoordinatorFixture(t)
 	const next = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a"
-	if err := f.r.RegisterSession(surface.Session{ID: next, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID - 2, Status: surface.StatusIdle, Cwd: f.host.Cwd}); err != nil {
+	if err := f.r.RecordObservedSession(surface.Session{ID: next, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID - 2, Status: surface.StatusIdle, Cwd: f.host.Cwd}); err != nil {
 		t.Fatal(err)
 	}
 	spec, err := f.r.Coordinator("project-fixture")
@@ -180,7 +180,7 @@ func TestADaemonRestartedAfterThePushDoesNotTellThePersonAgain(t *testing.T) {
 func TestASenderThatNoLongerExistsDoesNotHoldTheAnnouncement(t *testing.T) {
 	f := newCoordinatorFixture(t)
 	const next = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a"
-	if err := f.r.RegisterSession(surface.Session{ID: next, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID - 2, Status: surface.StatusIdle, Cwd: f.host.Cwd}); err != nil {
+	if err := f.r.RecordObservedSession(surface.Session{ID: next, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID - 2, Status: surface.StatusIdle, Cwd: f.host.Cwd}); err != nil {
 		t.Fatal(err)
 	}
 	spec, err := f.r.Coordinator("project-fixture")

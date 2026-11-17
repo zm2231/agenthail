@@ -64,7 +64,7 @@ func TestRetryingADeadHostSendTouchesItsChangeSignalAndALocalOneDoesNot(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "local-thread", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "local-thread", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	local, err := r.QueueMessageWithKey("local-thread", "local", "key-local")

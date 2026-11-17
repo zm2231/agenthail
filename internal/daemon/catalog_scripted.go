@@ -27,7 +27,7 @@ func (d *Daemon) splitHiddenScripted(sessions []surface.Session) ([]surface.Sess
 }
 
 func (d *Daemon) keepHiddenSession(session surface.Session) {
-	if err := d.Registry.RegisterSession(session); err != nil {
+	if err := d.Registry.RecordObservedSession(session); err != nil {
 		d.log.Printf("catalog: register scripted run %s: %s", session.ID, err)
 		return
 	}

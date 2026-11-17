@@ -22,7 +22,7 @@ func TestRelayCLIConditionPersistsAndAppearsInBothOutputs(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, caps: surface.Capabilities{Send: true, Goal: true}, sessions: map[string]surface.Session{"from": from, "to": to}}
 	app, r := cliFixture(t, fake)
 	for _, s := range []surface.Session{from, to} {
-		if err := r.RegisterSession(s); err != nil {
+		if err := r.RecordObservedSession(s); err != nil {
 			t.Fatal(err)
 		}
 	}

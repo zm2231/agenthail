@@ -41,7 +41,7 @@ func takeArrived(t *testing.T, r *Registry, alias string, carry MoveCarry) {
 
 func otherSession(t *testing.T, r *Registry, id string) {
 	t.Helper()
-	if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -114,7 +114,7 @@ func TestARelayToASessionThatMovedOnDuringTheMoveIsTakenOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	const target = "relay-target"
-	if err := r.RegisterSession(surface.Session{ID: target, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 9, Transcript: "/tmp/target.jsonl", HasLocal: true}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: target, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 9, Transcript: "/tmp/target.jsonl", HasLocal: true}); err != nil {
 		t.Fatal(err)
 	}
 	relay := MovedRelay{ID: 5, ToSession: target, ToHost: identity.ID, Pattern: ".*", Handoff: HandoffTurnFinished}

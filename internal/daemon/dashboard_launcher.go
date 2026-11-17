@@ -101,8 +101,12 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 		extra["worktree"] = workResult(*work)
 	}
 	var readyErr error
+	var recorded *surface.Session
 	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
 		readyErr = d.Registry.RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+		if readyErr == nil {
+			recorded = &started
+		}
 		return readyErr
 	})
 	session, sent, startErr := starter.StartSession(ctx, options)
@@ -124,7 +128,7 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 		return actionResult{}, createStorageFailure(session, fmt.Sprintf("session was created, but could not be recorded before its first turn, which was not sent: %s; do not retry automatically", readyErr), nil)
 	}
 	session.Runtime = &surface.Runtime{Launcher: defaultLauncherForSurface(surface.SurfaceKind(request.Surface)), Focusable: false}
-	if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
+	if registerErr := d.Registry.RecordLearnedSession(recorded, *session); registerErr != nil {
 		return actionResult{}, createStorageFailure(session, fmt.Sprintf("session was created, but local registration failed: %s; do not retry automatically", registerErr), nil)
 	}
 	if aliasErr := d.Registry.BindReservedAlias(reservation, session.ID); aliasErr != nil {
@@ -226,8 +230,12 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 		d.log.Printf("mcp: a %s %s launch in %s starts without the agenthail MCP server: the daemon runs none", request.Launcher, launchRequest.Surface, cwd)
 	}
 	var readyErr error
+	var recorded *surface.Session
 	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
 		readyErr = d.Registry.RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+		if readyErr == nil {
+			recorded = &started
+		}
 		return readyErr
 	})
 	launchResult, launchErr := launcher.Launch(ctx, launchRequest)
@@ -262,7 +270,7 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 		session.Name = request.Name
 	}
 	session.Runtime = &surface.Runtime{Launcher: request.Launcher, Location: location, Focusable: location != nil}
-	if err := d.Registry.RegisterSession(*session); err != nil {
+	if err := d.Registry.RecordLearnedSession(recorded, *session); err != nil {
 		return d.acceptedLaunch(request.Launcher, location, fmt.Sprintf("register session: %s", err), untracked(alias)), nil
 	}
 	if err := d.Registry.BindReservedAlias(reservation, session.ID); err != nil {

@@ -35,7 +35,7 @@ func (f noticeFixture) touch(t *testing.T, at time.Time) {
 		session := f.fake.sessions[id]
 		session.LastActive = at
 		f.fake.sessions[id] = session
-		if err := f.reg.RegisterSession(session); err != nil {
+		if err := f.reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -46,7 +46,7 @@ func (f noticeFixture) setWorkerStatus(t *testing.T, status surface.SessionStatu
 	worker := f.fake.sessions["worker"]
 	worker.Status = status
 	f.fake.sessions["worker"] = worker
-	if err := f.reg.RegisterSession(worker); err != nil {
+	if err := f.reg.RecordObservedSession(worker); err != nil {
 		t.Fatal(err)
 	}
 	f.d.discoverCatalog(context.Background())
@@ -100,7 +100,7 @@ func TestANoticeThatFailsToQueueIsQueuedOnTheNextSweep(t *testing.T) {
 	loner := f.worker
 	loner.ID = "loner"
 	f.fake.sessions[loner.ID] = loner
-	if err := f.reg.RegisterSession(loner); err != nil {
+	if err := f.reg.RecordObservedSession(loner); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.reg.RecordSessionOrigin(registry.OriginOf(loner.ID, "late-spawner")); err != nil {
@@ -122,7 +122,7 @@ func TestANoticeThatFailsToQueueIsQueuedOnTheNextSweep(t *testing.T) {
 	}
 	spawner := f.fake.sessions["spawner"]
 	spawner.ID = "late-spawner"
-	if err := f.reg.RegisterSession(spawner); err != nil {
+	if err := f.reg.RecordObservedSession(spawner); err != nil {
 		t.Fatal(err)
 	}
 	f.d.sweepStoppedGoals(context.Background(), now.Add(goalSweepEvery))

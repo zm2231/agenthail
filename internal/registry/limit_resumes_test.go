@@ -10,7 +10,7 @@ import (
 func TestALimitStopHoldsTheQueueUntilItIsReleased(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "limited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.QueueMessageWithKey(session.ID, "next step", ""); err != nil {
@@ -54,7 +54,7 @@ func TestALimitStopHoldsTheQueueUntilItIsReleased(t *testing.T) {
 func TestANewRefusalStartsANewStopAndAClearedStopIsGone(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "limited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	first := surface.LimitStop{TurnID: "u1", RefusedAt: time.Unix(1000, 0)}
@@ -95,7 +95,7 @@ func TestANewRefusalStartsANewStopAndAClearedStopIsGone(t *testing.T) {
 func TestACanceledResumeIsKeptForItsTurn(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "limited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	stop := surface.LimitStop{TurnID: "u1", RefusedAt: time.Unix(1000, 0)}
@@ -122,7 +122,7 @@ func TestACanceledResumeIsKeptForItsTurn(t *testing.T) {
 func TestALaterResetOnAnAccountMovesEveryWaitingSessionOnIt(t *testing.T) {
 	r := openTestRegistry(t)
 	for _, id := range []string{"first", "second", "elsewhere"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -154,7 +154,7 @@ func TestReleasingAStopQueuesTheNoticeOnlyWhenNothingElseIs(t *testing.T) {
 	r := openTestRegistry(t)
 	for _, id := range []string{"idle", "busy"} {
 		session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		if err := r.RecordLimitStop(session, "/roots/work", surface.LimitStop{TurnID: "u1", RefusedAt: time.Unix(1000, 0)}); err != nil {

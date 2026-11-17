@@ -222,7 +222,7 @@ func TestATerminalSessionInAnotherConfigRootIsAnsweredQuestionAfterQuestionAcros
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	if err := store.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: transcript}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: transcript}); err != nil {
 		t.Fatal(err)
 	}
 	asker := newTerminalAsker(t, process, transcript, id)

@@ -15,7 +15,7 @@ import (
 func TestALeadReplacedByAnotherSessionHandsItsRelaysToTheNewLead(t *testing.T) {
 	d, reg, _, _, _, cwd := baseFixture(t)
 	for _, id := range []string{"worker", "reviewer"} {
-		if err := reg.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: cwd}); err != nil {
+		if err := reg.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: cwd}); err != nil {
 			t.Fatal(err)
 		}
 	}

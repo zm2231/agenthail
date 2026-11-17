@@ -204,7 +204,7 @@ func TestDeferMessageNeverDeadLettersPreDeliveryFailures(t *testing.T) {
 func register(t *testing.T, r *Registry, ids ...string) {
 	t.Helper()
 	for _, id := range ids {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -221,7 +221,7 @@ func TestAddToChannelRejectsMissingChannel(t *testing.T) {
 func TestSetAliasKeepsOneNamePerSession(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "session-alias", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Alias test"}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetAlias("first", session.ID); err != nil {
@@ -245,7 +245,7 @@ func TestSetAliasKeepsOneNamePerSession(t *testing.T) {
 func TestReserveGeneratedAliasKeepsExistingHandleAndNeverSteals(t *testing.T) {
 	r := openTestRegistry(t)
 	for _, id := range []string{"one", "two"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -270,7 +270,7 @@ func TestReserveGeneratedAliasKeepsExistingHandleAndNeverSteals(t *testing.T) {
 func TestSessionReturnsCompleteRegisteredSnapshot(t *testing.T) {
 	r := openTestRegistry(t)
 	want := surface.Session{ID: "full", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "writer", Cwd: "/tmp/project", PID: 42, Status: surface.StatusBusy, Transcript: "/tmp/thread.jsonl", HasLocal: true, Source: "vscode", Transport: "desktop", ConfiguredModel: "claude-opus-5-5[1m]", LastActive: time.UnixMilli(1784424580603), Runtime: &surface.Runtime{Launcher: surface.LauncherClaudeBG}}
-	if err := r.RegisterSession(want); err != nil {
+	if err := r.RecordObservedSession(want); err != nil {
 		t.Fatal(err)
 	}
 	got, err := r.Session(want.ID)
@@ -285,13 +285,13 @@ func TestSessionReturnsCompleteRegisteredSnapshot(t *testing.T) {
 func TestRegisterSessionUpdatesManagedCodexTransportFromDesktopDiscovery(t *testing.T) {
 	r := openTestRegistry(t)
 	managed := surface.Session{ID: "managed", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "Started here", Status: surface.StatusBusy, Source: "agenthail", Transport: "managed"}
-	if err := r.RegisterSession(managed); err != nil {
+	if err := r.RecordObservedSession(managed); err != nil {
 		t.Fatal(err)
 	}
 	discovered := managed
 	discovered.Source = "vscode"
 	discovered.Transport = "readOnly"
-	if err := r.RegisterSession(discovered); err != nil {
+	if err := r.RecordObservedSession(discovered); err != nil {
 		t.Fatal(err)
 	}
 	got, err := r.Session(managed.ID)
@@ -303,7 +303,7 @@ func TestRegisterSessionUpdatesManagedCodexTransportFromDesktopDiscovery(t *test
 	discovered.Status = surface.SessionStatus("notLoaded")
 	discovered.Source = "vscode"
 	discovered.Transport = "desktop"
-	if err := r.RegisterSession(discovered); err != nil {
+	if err := r.RecordObservedSession(discovered); err != nil {
 		t.Fatal(err)
 	}
 	got, err = r.Session(managed.ID)
@@ -314,12 +314,12 @@ func TestRegisterSessionUpdatesManagedCodexTransportFromDesktopDiscovery(t *test
 		t.Fatalf("session=%+v", got)
 	}
 	desktop := surface.Session{ID: "desktop", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "vscode", Transport: "desktop"}
-	if err := r.RegisterSession(desktop); err != nil {
+	if err := r.RecordObservedSession(desktop); err != nil {
 		t.Fatal(err)
 	}
 	desktop.Source = "agenthail"
 	desktop.Transport = "managed"
-	if err := r.RegisterSession(desktop); err != nil {
+	if err := r.RecordObservedSession(desktop); err != nil {
 		t.Fatal(err)
 	}
 	got, err = r.Session(desktop.ID)
@@ -346,7 +346,7 @@ func TestResolveSurfaceTargetMatchesOnlyThatSurface(t *testing.T) {
 		{ID: "019f-codex", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "release notes"},
 		{ID: "019f-claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "release notes"},
 	} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -364,7 +364,7 @@ func TestResolveSurfaceTargetMatchesOnlyThatSurface(t *testing.T) {
 	if _, err := r.ResolveTarget("019f"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("unscoped resolution must stay ambiguous across surfaces: %v", err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "019f-codex-2", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "019f-codex-2", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.ResolveSurfaceTarget(surface.KindCodex, "019f"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
@@ -392,7 +392,7 @@ func TestResolveTargetAcceptsHandleSpelling(t *testing.T) {
 func TestSearchSessionsMatchesStoredNameCwdAndAlias(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "old", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Quarterly planning", Cwd: "/work/agenthail"}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetAlias("planner", session.ID); err != nil {
@@ -999,7 +999,7 @@ func TestQueueCancelRemovesPendingDelivery(t *testing.T) {
 
 func TestSteerClaimSkipsOlderExplicitQueueWithoutReorderingIt(t *testing.T) {
 	r := openTestRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusBusy}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusBusy}); err != nil {
 		t.Fatal(err)
 	}
 	queueID, err := r.QueueMessageWithOptions("target", "explicit queue", "", surface.SendOptions{BusyDelivery: "queue"})
@@ -1025,7 +1025,7 @@ func TestSteerClaimSkipsOlderExplicitQueueWithoutReorderingIt(t *testing.T) {
 
 func TestSteerQueueNormalizesOptionsAndExcludesThemFromSteerClaims(t *testing.T) {
 	r := openTestRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusBusy}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusBusy}); err != nil {
 		t.Fatal(err)
 	}
 	id, err := r.QueueRelayMessageWithOptions("target", "optioned steer", "relay:options", 1, surface.SendOptions{Model: "model-a", BusyDelivery: "steer", TurnOptions: surface.TurnOptions{ServiceTier: "fast"}})
@@ -1096,7 +1096,7 @@ func TestListHistoryPageUsesStableCursor(t *testing.T) {
 
 func TestListHistoryPageFiltersAcrossAllRows(t *testing.T) {
 	r := openTestRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: "named-session", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Release Writer"}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "named-session", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Release Writer"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetAlias("writer", "named-session"); err != nil {
@@ -1212,7 +1212,7 @@ func TestReadsDoNotWaitForAWriterBlockedOnAnotherProcess(t *testing.T) {
 	}
 	writeDone := make(chan error, 1)
 	go func() {
-		writeDone <- r.RegisterSession(surface.Session{ID: "waiting-writer", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop})
+		writeDone <- r.RecordObservedSession(surface.Session{ID: "waiting-writer", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop})
 	}()
 	for deadline := time.Now().Add(2 * time.Second); r.db.raw.Stats().InUse == 0; {
 		if time.Now().After(deadline) {
@@ -1443,7 +1443,7 @@ func TestQueueHoldReadsADepartedTargetOffline(t *testing.T) {
 		{surface.Session{ID: "departed-claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: 4242, Status: surface.StatusBusy}, ""},
 	}
 	for _, target := range targets {
-		if err := r.RegisterSession(target.session); err != nil {
+		if err := r.RecordObservedSession(target.session); err != nil {
 			t.Fatal(err)
 		}
 		if err := r.SaveRuntimeState(target.session.ID, surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}); err != nil {
@@ -1462,7 +1462,7 @@ func TestQueueHoldReadsADepartedTargetOffline(t *testing.T) {
 func TestARefusedDeferralHoldsTheMessageAndAsksOncePerRefusal(t *testing.T) {
 	r := openTestRegistry(t)
 	for _, id := range []string{"sender", "target"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 4242}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 4242}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1522,7 +1522,7 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		t.Helper()
 		r := openTestRegistry(t)
 		for _, id := range []string{"sender", "target"} {
-			if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 4242}); err != nil {
+			if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 4242}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1599,7 +1599,7 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 	t.Run("a relayed refusal asks the person", func(t *testing.T) {
 		r := openTestRegistry(t)
 		for _, id := range []string{"sender", "target"} {
-			if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+			if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1663,7 +1663,7 @@ func refusalAskOpen(t *testing.T, r *Registry, id int64) bool {
 func TestControlOperationsWaitForIdleAndAreNeverSteered(t *testing.T) {
 	r := openTestRegistry(t)
 	r.SetBusyPolicy(func() deliverypolicy.Mode { return deliverypolicy.Steer })
-	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy}); err != nil {
 		t.Fatal(err)
 	}
 	goalID, err := r.QueueGoal("target", "/goal tests pass")

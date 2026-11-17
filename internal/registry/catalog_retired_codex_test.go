@@ -65,7 +65,7 @@ func TestAnEndedCodexThreadRetiresWithItsSubagentsAndComesBackWithThemWhenLoaded
 
 	loaded := family[0]
 	loaded.Status, loaded.Ended = surface.StatusIdle, false
-	if err := r.RegisterSession(loaded); err != nil {
+	if err := r.RecordObservedSession(loaded); err != nil {
 		t.Fatal(err)
 	}
 	for _, session := range family {
@@ -121,7 +121,7 @@ func TestAnUpgradeCountsEverySessionThatWentOfflineAsEnded(t *testing.T) {
 		{ID: "gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusOffline},
 		{ID: "live", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle},
 	} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -150,7 +150,7 @@ func TestARetiredSubagentMovedUnderAnotherParentComesBack(t *testing.T) {
 	if !isRetired(t, r, "child") || isRetired(t, r, "other") {
 		t.Fatal("fixture: the child should retire under its ended root and the held thread should not")
 	}
-	if err := r.RegisterSession(codexThread("child", "other", "other", 1, true)); err != nil {
+	if err := r.RecordObservedSession(codexThread("child", "other", "other", 1, true)); err != nil {
 		t.Fatal(err)
 	}
 	if isRetired(t, r, "child") {
@@ -169,7 +169,7 @@ func TestAManagedThreadDiscoveryStillListsStaysRetiredAcrossPasses(t *testing.T)
 	r := openTestRegistry(t)
 	created := codexThread("managed", "", "", 0, true)
 	created.Source, created.Transport, created.RuntimeKind = "agenthail", "managed", surface.RuntimeCodexAppServer
-	if err := r.RegisterSession(created); err != nil {
+	if err := r.RecordObservedSession(created); err != nil {
 		t.Fatal(err)
 	}
 	discovered := created

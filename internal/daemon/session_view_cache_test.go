@@ -60,7 +60,7 @@ func TestASessionViewBuiltAcrossALeadChangeIsNotReused(t *testing.T) {
 	}
 	old := surface.Session{ID: "old", Name: "old", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: cwd, LastActive: time.Now().Add(-72 * time.Hour)}
 	fake.sessions[old.ID] = old
-	if err := reg.RegisterSession(old); err != nil {
+	if err := reg.RecordObservedSession(old); err != nil {
 		t.Fatal(err)
 	}
 	d.discoverCatalog(ctx)

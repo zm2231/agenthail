@@ -43,7 +43,7 @@ func TestAHeldMessageWhoseDropIsNeverReportedFailsPastClaudesDeadline(t *testing
 				{ID: "sender", Name: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusIdle},
 				{ID: "target", Name: "probe", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", Cwd: filepath.Join(home, "work"), Status: surface.StatusIdle},
 			} {
-				if err := r.RegisterSession(session); err != nil {
+				if err := r.RecordObservedSession(session); err != nil {
 					t.Fatal(err)
 				}
 			}

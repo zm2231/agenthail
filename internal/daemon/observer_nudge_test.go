@@ -54,7 +54,7 @@ func TestAQueuedMessageIsDeliveredWhenTheStatusPassSeesTheTargetGoIdle(t *testin
 		t.Fatal(err)
 	}
 	for id := range agent.sessions {
-		if err := store.RegisterSession(agent.session(id)); err != nil {
+		if err := store.RecordObservedSession(agent.session(id)); err != nil {
 			t.Fatal(err)
 		}
 	}

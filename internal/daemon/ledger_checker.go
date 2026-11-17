@@ -162,7 +162,7 @@ func (d *Daemon) launchChecker(ctx context.Context, run, token string, input led
 	if err != nil {
 		return err
 	}
-	if err := d.Registry.RegisterSession(*session); err != nil {
+	if err := d.Registry.RecordObservedSession(*session); err != nil {
 		return err
 	}
 	return d.Registry.RecordSessionOrigin(registry.SessionOrigin{SessionID: run, Via: registry.OriginDaemon})

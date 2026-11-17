@@ -14,7 +14,7 @@ import (
 func channelledMoveRegistry(t *testing.T) *Registry {
 	t.Helper()
 	r := moveRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: "second", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "second", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"builders", "reviewers"} {

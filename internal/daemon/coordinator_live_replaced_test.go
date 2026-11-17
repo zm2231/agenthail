@@ -29,7 +29,7 @@ func replacedLiveLead(t *testing.T, f *coordinatorFixture) string {
 	if _, err := f.r.HandOverCoordinator(spec, live, goneCoordinator, registry.CoordinatorHandover{ChangedBy: "daemon", Reason: "gone: test"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.r.RegisterSession(surface.Session{ID: fixtureWorker, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusIdle}); err != nil {
+	if err := f.r.RecordObservedSession(surface.Session{ID: fixtureWorker, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	return live

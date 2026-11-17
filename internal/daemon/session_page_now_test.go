@@ -49,7 +49,7 @@ func TestACatchUpThatOutlastsThePageWaitArrivesOverTheStreamInTranscriptOrder(t 
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path, Cwd: fixture.Home}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	const catchUpDelay = 1500 * time.Millisecond
@@ -156,7 +156,7 @@ func TestAJournalAwaitingRederivationIsRebuiltBeforeItsPage(t *testing.T) {
 	fake.kind = surface.KindClaude
 	fake.caps.Stream = true
 	from.Surface, from.RuntimeKind, from.Transport, from.Transcript = surface.KindClaude, surface.RuntimeClaudeCLI, "", "/transcript.jsonl"
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	earlierDerivationJournal(t, r, from.ID)

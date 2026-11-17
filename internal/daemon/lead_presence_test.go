@@ -19,7 +19,7 @@ func TestAProjectLeadStaysCurrentHoweverLongItIsIdle(t *testing.T) {
 		session := fake.sessions[id]
 		session.LastActive = time.Now().Add(-5 * 24 * time.Hour)
 		fake.sessions[id] = session
-		if err := reg.RegisterSession(session); err != nil {
+		if err := reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -76,7 +76,7 @@ func TestSettingAndReplacingALeadPublishesBothRowsAndMovesTheBaseTag(t *testing.
 		session := fake.sessions[id]
 		session.LastActive = time.Now().Add(-5 * 24 * time.Hour)
 		fake.sessions[id] = session
-		if err := reg.RegisterSession(session); err != nil {
+		if err := reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -160,7 +160,7 @@ func assertLeadPublishedBeforeAnswer(t *testing.T, route string) {
 		session := fake.sessions[id]
 		session.LastActive = time.Now().Add(-5 * 24 * time.Hour)
 		fake.sessions[id] = session
-		if err := reg.RegisterSession(session); err != nil {
+		if err := reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -207,7 +207,7 @@ func TestALeadNamedOutsideTheDaemonIsPublishedOnTheNextStatusTick(t *testing.T) 
 	session := fake.sessions["to"]
 	session.LastActive = time.Now().Add(-5 * 24 * time.Hour)
 	fake.sessions["to"] = session
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d.discoverCatalog(context.Background())

@@ -18,7 +18,7 @@ func registerFamily(t *testing.T, r *Registry) {
 		{ID: "grandchild-cy", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Leaf", Cwd: "/repo/app", Subagent: &surface.Subagent{ParentID: "child-ada", RootID: "root-thread", Depth: 2, Nickname: "Cy"}},
 	}
 	for _, session := range sessions {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -38,7 +38,7 @@ func TestRegistryPersistsSubagentIdentity(t *testing.T) {
 	if !reflect.DeepEqual(got.Subagent, want) {
 		t.Fatalf("subagent = %+v, want %+v", got.Subagent, want)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "grandchild-cy", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Leaf"}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "grandchild-cy", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Leaf"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err = r.Session("grandchild-cy")

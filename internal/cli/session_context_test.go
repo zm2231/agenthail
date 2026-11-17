@@ -59,7 +59,7 @@ func TestAClaudeSessionIsToldItsCardOncePerStartAndOncePerChange(t *testing.T) {
 	withoutSessionContextLimit(t)
 	fake := &cliSurface{kind: surface.KindClaude}
 	app, store := cliFixture(t, fake)
-	if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SetAlias("builder", "s1"); err != nil {
@@ -75,7 +75,7 @@ func TestAClaudeSessionIsToldItsCardOncePerStartAndOncePerChange(t *testing.T) {
 	if printed := hooks(prompt); len(printed) != 0 {
 		t.Fatalf("a prompt after the start printed %q, want nothing", printed)
 	}
-	if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 	if printed := hooks(prompt); len(printed) != 0 {
@@ -116,7 +116,7 @@ func TestAClaudeSessionIsToldItsCardOncePerStartAndOncePerChange(t *testing.T) {
 func TestAClaudeSessionFirstSeenAtAPromptGetsItsCardAndAnUnknownOneNothing(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindClaude}
 	_, store := cliFixture(t, fake)
-	if err := store.RegisterSession(surface.Session{ID: "s2", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "s2", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 	hooks := rootHooks(t, store, fake, 2)
@@ -134,7 +134,7 @@ func TestTheCodexContextHookTellsARegisteredThreadWhoItIsAndLeavesAnyOtherAlone(
 	withoutSessionContextLimit(t)
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"unknown-thread": {ID: "unknown-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: t.TempDir()}}}
 	app, store := cliFixture(t, fake)
-	if err := store.RegisterSession(surface.Session{ID: "known-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: t.TempDir()}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "known-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 	hook := func(thread string) string {
@@ -174,7 +174,7 @@ func TestTheCodexContextHookTellsARegisteredThreadWhoItIsAndLeavesAnyOtherAlone(
 func TestTheSessionContextHookPrintsNothingOnceItsLimitPasses(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindClaude}
 	app, store := cliFixture(t, fake)
-	if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 	expired := make(chan time.Time)
@@ -204,7 +204,7 @@ func TestTheSessionContextHookNeverMigratesTheRegistry(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
+		if err := store.RecordObservedSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
 			t.Fatal(err)
 		}
 		store.Close()

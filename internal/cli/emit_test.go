@@ -25,7 +25,7 @@ func TestJSONOutputUsesTheAPITimestampFormat(t *testing.T) {
 	target := surface.Session{ID: "target", Name: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusBusy, LastActive: time.Now()}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{target.ID: target}, listed: []surface.Session{target}}
 	app, r := cliFixture(t, fake)
-	if err := r.RegisterSession(target); err != nil {
+	if err := r.RecordObservedSession(target); err != nil {
 		t.Fatal(err)
 	}
 	before := time.Now().UTC().Truncate(time.Second)

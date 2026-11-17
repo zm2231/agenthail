@@ -140,7 +140,7 @@ func TestADelegatedSessionFiresOnlyTriggersThatOptIn(t *testing.T) {
 	d, r, fake, from, _ := daemonFixture(t)
 	from.Source = "exec"
 	fake.sessions[from.ID] = from
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()

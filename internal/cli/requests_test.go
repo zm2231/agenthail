@@ -41,7 +41,7 @@ func hostedClaudeApp(t *testing.T) (*App, *registry.Registry, *claudehosttest.Fi
 		}
 		return false
 	})
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetAlias("worker", id); err != nil {

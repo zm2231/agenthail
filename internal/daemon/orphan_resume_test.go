@@ -93,7 +93,7 @@ func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
 	t.Cleanup(func() { _ = r.Close() })
 	fixture.r = r
 	fixture.session = surface.Session{ID: orphanConversation, Bridge: "session_orphan", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "orphan", PID: orphanPID, Status: surface.StatusBusy, Transport: transport, Cwd: fixture.claude.Home, HasLocal: true, Transcript: fixture.claude.Transcript(orphanConversation, fixture.claude.Home)}
-	if err := r.RegisterSession(fixture.session); err != nil {
+	if err := r.RecordObservedSession(fixture.session); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetAlias("orphan", fixture.session.ID); err != nil {
@@ -259,7 +259,7 @@ func TestRelayToExitedClaudeSessionResumesAndDeliversOnce(t *testing.T) {
 	f := newOrphanFixture(t)
 	manager := claudetest.ListenPeerManager(t, f.claude.Home)
 	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-	if err := f.r.RegisterSession(from); err != nil {
+	if err := f.r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.r.AddRoute(from.ID, f.session.ID, ".*"); err != nil {
@@ -282,7 +282,7 @@ func TestQueuedMessageToAResumeClaudeRefusesIsHeldWithItsReasonAndAnnouncedOnce(
 	f := newOrphanFixture(t)
 	f.host.Refuse(t, orphanConversation, "Error: Settings file not found: /fixture/settings.json")
 	sender := surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-	if err := f.r.RegisterSession(sender); err != nil {
+	if err := f.r.RecordObservedSession(sender); err != nil {
 		t.Fatal(err)
 	}
 	id, _, err := f.r.QueueDeliveryWithIntent(f.session.ID, "hello", "refused-1", surface.SendOptions{SourceSessionID: sender.ID})
@@ -334,7 +334,7 @@ func TestQueuedMessageToARetiredExitedClaudeSessionResumesAndDeliversOnce(t *tes
 	manager := claudetest.ListenPeerManager(t, f.claude.Home)
 	f.retire(t)
 	sender := surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-	if err := f.r.RegisterSession(sender); err != nil {
+	if err := f.r.RecordObservedSession(sender); err != nil {
 		t.Fatal(err)
 	}
 	id, _, err := f.r.QueueDeliveryWithIntent(f.session.ID, "hello", "retired-1", surface.SendOptions{SourceSessionID: sender.ID})
@@ -357,7 +357,7 @@ func TestRelayToARetiredExitedClaudeSessionResumesAndDeliversOnce(t *testing.T) 
 	manager := claudetest.ListenPeerManager(t, f.claude.Home)
 	f.retire(t)
 	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-	if err := f.r.RegisterSession(from); err != nil {
+	if err := f.r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.r.AddRoute(from.ID, f.session.ID, ".*"); err != nil {

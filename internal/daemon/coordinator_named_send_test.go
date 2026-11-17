@@ -31,7 +31,7 @@ func TestASendToAGoneLeadStartsOneAndMovesWhatTheOldLeadHeld(t *testing.T) {
 		t.Fatal(err)
 	}
 	const worker = "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d"
-	if err := f.r.RegisterSession(surface.Session{ID: worker, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID, Status: surface.StatusIdle, Cwd: f.host.Cwd}); err != nil {
+	if err := f.r.RecordObservedSession(surface.Session{ID: worker, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID, Status: surface.StatusIdle, Cwd: f.host.Cwd}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.r.CreateChannel("team"); err != nil {

@@ -237,7 +237,7 @@ func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testin
 	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.ID = "claude-session"
 	from.Transcript = "/projects/encoded-cwd/transcript-1.jsonl"
-	if err := registry.RegisterSession(from); err != nil {
+	if err := registry.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	fake := &dashboardClaudeRunSurface{
@@ -299,7 +299,7 @@ func TestDashboardSessionResolvesExactAlias(t *testing.T) {
 func TestDashboardSessionReadDoesNotNegotiateWritableAccess(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
 	session := surface.Session{ID: "history", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}
-	if err := registry.RegisterSession(session); err != nil {
+	if err := registry.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &accessDaemonSurface{daemonSurface: fake}
@@ -447,7 +447,7 @@ func TestDashboardSearchReturnsSavedResultsWhenCodexSearchFails(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindCodex
 	fake.searchErr = errors.New("app-server timeout")
-	if err := registry.RegisterSession(surface.Session{ID: "saved", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "saved project"}); err != nil {
+	if err := registry.RecordObservedSession(surface.Session{ID: "saved", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "saved project"}); err != nil {
 		t.Fatal(err)
 	}
 	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/search?surface=codex&q=project", "")
@@ -467,7 +467,7 @@ func TestDashboardSearchReturnsSavedResultsWhenCodexSearchFails(t *testing.T) {
 func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 	_, registry, _, _, _ := daemonFixture(t)
 	session := surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claude", Status: surface.StatusBusy}
-	if err := registry.RegisterSession(session); err != nil {
+	if err := registry.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	fake := &daemonSurface{
@@ -487,7 +487,7 @@ func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 func TestASendThatMayNotQueueIsRefusedByABusyTarget(t *testing.T) {
 	_, registry, _, _, _ := daemonFixture(t)
 	session := surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claude", Status: surface.StatusBusy}
-	if err := registry.RegisterSession(session); err != nil {
+	if err := registry.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	fake := &daemonSurface{
@@ -511,7 +511,7 @@ func TestASendThatMayNotQueueIsRefusedByABusyTarget(t *testing.T) {
 func TestDashboardSteerReturnsDeliveryEvidence(t *testing.T) {
 	_, registry, _, _, _ := daemonFixture(t)
 	session := surface.Session{ID: "codex", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "codex", Status: surface.StatusBusy, Transport: "desktop"}
-	if err := registry.RegisterSession(session); err != nil {
+	if err := registry.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	fake := &daemonSurface{
@@ -1042,7 +1042,7 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 	handler := dashboardRouter(daemon)
 	target.Source = "cli"
 	target.Transport = "readOnly"
-	if err := registry.RegisterSession(target); err != nil {
+	if err := registry.RecordObservedSession(target); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := registry.CreateChannel("reviewers"); err != nil {

@@ -53,7 +53,7 @@ func TestASettledPresenceRowStillPublishesAnArchiveAndASessionChange(t *testing.
 	}
 	busy := fake.sessions["from"]
 	busy.Status = surface.StatusBusy
-	if err := r.RegisterSession(busy); err != nil {
+	if err := r.RecordObservedSession(busy); err != nil {
 		t.Fatal(err)
 	}
 	d.publishCatalogPresence()

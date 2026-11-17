@@ -367,7 +367,7 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 	}
 	from.Surface, from.Transcript = surface.KindClaude, transcript
 	from.RuntimeKind = surface.RuntimeClaudeCLI
-	if err := registry.RegisterSession(from); err != nil {
+	if err := registry.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	claude := surfaces.NewClaude(nil, t.TempDir())
@@ -409,7 +409,7 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 		t.Fatal(err)
 	}
 	from.Transcript = overPath
-	if err := registry.RegisterSession(from); err != nil {
+	if err := registry.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(oversize)

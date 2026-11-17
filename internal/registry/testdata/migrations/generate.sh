@@ -46,7 +46,7 @@ func TestWriteMigrationFixture(t *testing.T) {
 		{ID: "sender", Surface: surface.KindCodex, Name: "Sender"},
 		{ID: "target", Surface: surface.KindCodex, Name: "Target", Cwd: "/work/target"},
 	} {
-		must(t, r.RegisterSession(s))
+		must(t, r.RecordObservedSession(s))
 	}
 	must(t, r.SetAlias("builder", "target"))
 	_, err = r.AddRoute("sender", "target", ".*")

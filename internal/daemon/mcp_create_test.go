@@ -99,7 +99,7 @@ func TestAPersonStartedSessionIsUnboundedAndStoresNoCeiling(t *testing.T) {
 func registerChain(t *testing.T, r *registry.Registry, ids ...string) {
 	t.Helper()
 	for index, id := range ids {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}); err != nil {
 			t.Fatal(err)
 		}
 		creator := ""
@@ -128,7 +128,7 @@ func registerBusyChildren(t *testing.T, r *registry.Registry, spawner string, co
 	t.Helper()
 	for index := range count {
 		child := fmt.Sprintf("busy-%d", index)
-		if err := r.RegisterSession(surface.Session{ID: child, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: child, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}); err != nil {
 			t.Fatal(err)
 		}
 		if err := r.RecordSessionOrigin(registry.OriginOf(child, spawner)); err != nil {
@@ -164,7 +164,7 @@ func TestASpawnerRunsAtMostEightChildrenAtOnce(t *testing.T) {
 	registerChain(t, f.registry, "spawner")
 	for index := range mcpChildrenLimit {
 		child := fmt.Sprintf("busy-%d", index)
-		if err := f.registry.RegisterSession(surface.Session{ID: child, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}); err != nil {
+		if err := f.registry.RecordObservedSession(surface.Session{ID: child, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}); err != nil {
 			t.Fatal(err)
 		}
 		if err := f.registry.RecordSessionOrigin(registry.OriginOf(child, "spawner")); err != nil {

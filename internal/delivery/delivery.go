@@ -786,7 +786,12 @@ func (d Dispatcher) RegisterReached(addressed, reached *surface.Session) error {
 	if d.Registry == nil || (addressed.ID == reached.ID && surface.SameRoute(*addressed, *reached)) {
 		return nil
 	}
-	err := d.Registry.RegisterSession(*reached)
+	var err error
+	if addressed.ID == reached.ID {
+		err = d.Registry.UpdateSession(*reached, registry.LearnedSessionUpdate(*addressed, *reached))
+	} else {
+		err = d.Registry.RecordObservedSession(*reached)
+	}
 	if err == nil && d.RouteChanged != nil {
 		d.RouteChanged(*reached)
 	}

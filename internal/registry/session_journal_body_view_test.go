@@ -10,7 +10,7 @@ import (
 func TestABodyViewKeepsItsStampWhileTheTailGrowsAndChangesItOnARewrite(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "view", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	retention := SessionJournalRetention{Count: 100, Bytes: 1 << 20}

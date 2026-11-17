@@ -41,7 +41,7 @@ func unloadedCodexThread(t *testing.T) unloadedCodex {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusIdle, Cwd: cwd}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusIdle, Cwd: cwd}); err != nil {
 		t.Fatal(err)
 	}
 	app := &App{Registry: r, Surfaces: []SurfaceEntry{{Name: "codex", Surface: surfaces.NewCodex("1")}}, DefaultTimeout: 10 * time.Second, catalogDaemonRunning: func() bool { return false }}

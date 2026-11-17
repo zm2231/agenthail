@@ -44,7 +44,7 @@ func TestAForkPastItsDeadlineFreesItsNameOnceTheRegistryIsFree(t *testing.T) {
 	forker := &deadlineForker{cliSurface: &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"source": source}}}
 	app, _ := cliFixture(t, forker.cliSurface)
 	app.Surfaces[0].Surface = forker
-	if err := app.Registry.RegisterSession(source); err != nil {
+	if err := app.Registry.RecordObservedSession(source); err != nil {
 		t.Fatal(err)
 	}
 	forker.during = func() { lockPastTheDeadline(t, app) }

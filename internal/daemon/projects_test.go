@@ -29,7 +29,7 @@ func projectsFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface,
 	to.Cwd, to.LastActive = worktree, idle
 	for _, session := range []surface.Session{from, to} {
 		fake.sessions[session.ID] = session
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -180,7 +180,7 @@ func TestAddingAFolderProjectClaimsItsSessions(t *testing.T) {
 	}
 	scratch := surface.Session{ID: "scratch", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: filepath.Join(folder, "week-2"), LastActive: time.Now().UTC()}
 	fake.sessions[scratch.ID] = scratch
-	if err := r.RegisterSession(scratch); err != nil {
+	if err := r.RecordObservedSession(scratch); err != nil {
 		t.Fatal(err)
 	}
 	d.discoverCatalog(context.Background())
@@ -235,7 +235,7 @@ func TestAWorktreeSessionLandsInTheDeepestAddedProject(t *testing.T) {
 		session := fake.sessions[id]
 		session.Cwd = cwd
 		fake.sessions[id] = session
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -364,7 +364,7 @@ func moveSessions(t *testing.T, node *federationNode, cwd string) {
 	for id, session := range node.fake.sessions {
 		session.Cwd = cwd
 		node.fake.sessions[id] = session
-		if err := node.reg.RegisterSession(session); err != nil {
+		if err := node.reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -478,7 +478,7 @@ func TestTheCatalogAndPathResolutionAgreeRightAfterOriginChanges(t *testing.T) {
 	from := fake.sessions["from"]
 	from.Cwd = filepath.Join(repo, "src", "lib")
 	fake.sessions["from"] = from
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	d.discoverCatalog(context.Background())
@@ -506,7 +506,7 @@ func TestEveryProjectSurfaceNamesItsCoordinatorsOnEveryHost(t *testing.T) {
 	from.Cwd, to.Cwd = repo, repo
 	for _, session := range []surface.Session{from, to} {
 		fake.sessions[session.ID] = session
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -626,7 +626,7 @@ func TestAnAddedProjectsCoordinatorStaysOneProjectAfterTheOriginChanges(t *testi
 	from := fake.sessions["from"]
 	from.Cwd = linked
 	fake.sessions[from.ID] = from
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	if response := runDashboardAction(t, d, `{"action":"project-add","path":"`+linked+`"}`); response.Code != http.StatusOK {

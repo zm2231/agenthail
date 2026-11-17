@@ -76,7 +76,7 @@ func TestAFirstObservationAlreadyIdleSettles(t *testing.T) {
 func TestATurnThatEndedBeforeTheTaskRowExistedSettles(t *testing.T) {
 	f := newTaskFixture(t)
 	early := surface.Session{ID: "early", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-	if err := f.r.RegisterSession(early); err != nil {
+	if err := f.r.RecordObservedSession(early); err != nil {
 		t.Fatal(err)
 	}
 	observation := surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "early-turn", Reply: done("already over")}
@@ -109,7 +109,7 @@ func claudeTaskChild(t *testing.T, f *taskFixture, pid int) (surface.Session, *d
 	child := surface.Session{ID: "claude-child", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, PID: pid}
 	claude := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{child.ID: child}, observations: map[string]*surface.TurnObservation{}}
 	f.d.Surfaces = append(f.d.Surfaces, claude)
-	if err := f.r.RegisterSession(child); err != nil {
+	if err := f.r.RecordObservedSession(child); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.r.RecordSessionOrigin(registry.OriginOf(child.ID, f.task.Parent)); err != nil {
@@ -321,7 +321,7 @@ func TestAChildWhoseOwnerDiedStaysOpenAndHoldsNoSlot(t *testing.T) {
 	}
 	wantSlots(t, f, 0)
 	f.session.Status = surface.StatusBusy
-	if err := f.r.RegisterSession(f.session); err != nil {
+	if err := f.r.RecordObservedSession(f.session); err != nil {
 		t.Fatal(err)
 	}
 	wantSlots(t, f, 0)

@@ -343,7 +343,7 @@ func TestFederationStopsReplayingHeldSendsOnceTheHostIsIncompatible(t *testing.T
 func TestFederationMirrorKeepsEachSessionsRuntime(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	appServer := surface.Session{ID: "remote-c", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Settings: &surface.ObservedSettings{Model: "gpt-remote"}, Name: "work remote-c", Status: surface.StatusIdle, Source: "agenthail", Transport: "managed", LastActive: time.Now()}
-	if err := remote.reg.RegisterSession(appServer); err != nil {
+	if err := remote.reg.RecordObservedSession(appServer); err != nil {
 		t.Fatal(err)
 	}
 	remote.fake.mu.Lock()

@@ -10,7 +10,7 @@ import (
 func TestNamedTargetDoesNotMatchAnotherSessionsName(t *testing.T) {
 	e := exitedClaudeApp(t)
 	lazyRegistry(e.app)
-	if err := e.r.RegisterSession(surface.Session{ID: "session_named", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claudeprobe-a3", Status: surface.StatusIdle}); err != nil {
+	if err := e.r.RecordObservedSession(surface.Session{ID: "session_named", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claudeprobe-a3", Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	err := e.app.Run([]string{"send", "@probe-a", "hello"})
@@ -22,7 +22,7 @@ func TestNamedTargetDoesNotMatchAnotherSessionsName(t *testing.T) {
 func TestNamedTargetIsExactForEveryCommandThatTakesOne(t *testing.T) {
 	e := exitedClaudeApp(t)
 	lazyRegistry(e.app)
-	if err := e.r.RegisterSession(surface.Session{ID: "session_named", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claudeprobe-a3", Status: surface.StatusIdle}); err != nil {
+	if err := e.r.RecordObservedSession(surface.Session{ID: "session_named", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claudeprobe-a3", Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{

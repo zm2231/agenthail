@@ -25,7 +25,7 @@ func TestSessionAdoptActionOpensAClaudeSessionInTheHostAndReRegistersIt(t *testi
 	t.Setenv("HOME", fixture.Home)
 	const conversation = "3f1d2c4b-5a6e-4f70-8a91-b2c3d4e5f607"
 	transcript := fixture.Transcript(conversation, fixture.Home)
-	if err := registry.RegisterSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: fixture.Home, Transcript: transcript}); err != nil {
+	if err := registry.RecordObservedSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: fixture.Home, Transcript: transcript}); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})
@@ -131,7 +131,7 @@ func TestAnExitedSessionWhoseFileDiscoveryMissedIsOfferedAndAdopted(t *testing.T
 	t.Setenv("HOME", fixture.Home)
 	const conversation = "7b3fad2e-5c4a-4f9b-8e18-d2c3b4a5f6e7"
 	transcript := fixture.Transcript(conversation, fixture.Home)
-	if err := registry.RegisterSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: fixture.Home, Transcript: transcript, Status: surface.StatusOffline}); err != nil {
+	if err := registry.RecordObservedSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: fixture.Home, Transcript: transcript, Status: surface.StatusOffline}); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})

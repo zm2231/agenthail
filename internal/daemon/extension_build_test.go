@@ -188,7 +188,7 @@ func TestApprovingFromASessionAsksThePersonAndGrantsOnlyWhatTheyWereShown(t *tes
 	if view := extensionNamed(f.d.extensionsView(), "notes"); view.ApprovalAsk == nil || view.ApprovalAsk.ID != asks[0].ID || view.ApprovalAsk.SessionID != "to" {
 		t.Fatalf("the extensions list does not name the approval ask: %+v", view.ApprovalAsk)
 	}
-	if err := reg.RegisterSession(surface.Session{ID: "later", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
+	if err := reg.RecordObservedSession(surface.Session{ID: "later", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	if response, body := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "approve", "id": "notes", "sessionId": "later"}); response.StatusCode != http.StatusForbidden {

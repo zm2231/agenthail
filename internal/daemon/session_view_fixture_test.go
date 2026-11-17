@@ -116,7 +116,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 			session.Subagent = &surface.Subagent{ParentID: "s4", RootID: "s4"}
 		}
 		fake.sessions[session.ID] = session
-		if err := reg.RegisterSession(session); err != nil {
+		if err := reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -231,7 +231,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 			changed.Status = []surface.SessionStatus{surface.StatusIdle, surface.StatusBusy}[rng.Intn(2)]
 			changed.LastActive = f.clock.Add(-time.Duration(rng.Intn(48)) * time.Hour)
 			fake.sessions[id] = changed
-			if err := reg.RegisterSession(changed); err != nil {
+			if err := reg.RecordObservedSession(changed); err != nil {
 				t.Fatal(err)
 			}
 			d.discoverCatalog(f.ctx)
@@ -260,7 +260,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 			changed := fake.sessions[session(rng)]
 			changed.Status = []surface.SessionStatus{surface.StatusIdle, surface.StatusBusy}[rng.Intn(2)]
 			changed.LastActive = f.clock.Add(-time.Duration(rng.Intn(48)) * time.Hour)
-			if err := reg.RegisterSession(changed); err != nil {
+			if err := reg.RecordObservedSession(changed); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -506,14 +506,14 @@ func newViewFixture(t *testing.T) *viewFixture {
 		for _, id := range []string{"lead-was", "lead-only"} {
 			idle := surface.Session{ID: id, Name: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: cwd, LastActive: f.clock.Add(-72 * time.Hour)}
 			fake.sessions[id] = idle
-			if err := reg.RegisterSession(idle); err != nil {
+			if err := reg.RecordObservedSession(idle); err != nil {
 				t.Fatal(err)
 			}
 		}
 		for _, ended := range []bool{false, true} {
 			old := surface.Session{ID: fmt.Sprint("old-ended-", ended), Name: "old", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusNotLoaded, Ended: ended, Cwd: cwd, LastActive: f.clock.Add(-96 * time.Hour)}
 			fake.sessions[old.ID] = old
-			if err := reg.RegisterSession(old); err != nil {
+			if err := reg.RecordObservedSession(old); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -526,7 +526,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 		}
 		inGone := surface.Session{ID: "old-ended-gone", Name: "old", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusNotLoaded, Ended: true, Cwd: gone.WorkspaceRoot, LastActive: f.clock.Add(-96 * time.Hour)}
 		fake.sessions[inGone.ID] = inGone
-		if err := reg.RegisterSession(inGone); err != nil {
+		if err := reg.RecordObservedSession(inGone); err != nil {
 			t.Fatal(err)
 		}
 		d.discoverCatalog(f.ctx)

@@ -221,7 +221,7 @@ func TestTheUnchangedCheckSeesEveryChangeRegisteringWouldWrite(t *testing.T) {
 	} {
 		t.Run(change.name, func(t *testing.T) {
 			r := openTestRegistry(t)
-			if err := r.RegisterSession(base); err != nil {
+			if err := r.RecordObservedSession(base); err != nil {
 				t.Fatal(err)
 			}
 			if same := matches(t, r, base); !same {
@@ -232,7 +232,7 @@ func TestTheUnchangedCheckSeesEveryChangeRegisteringWouldWrite(t *testing.T) {
 			if matches(t, r, changed) {
 				t.Fatalf("the unchanged check misses a %s change registering would write", change.name)
 			}
-			if err := r.RegisterSession(changed); err != nil {
+			if err := r.RecordObservedSession(changed); err != nil {
 				t.Fatal(err)
 			}
 			if !matches(t, r, changed) {

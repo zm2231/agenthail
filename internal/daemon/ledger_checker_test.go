@@ -304,7 +304,7 @@ func TestARestartFinishesAnInterruptedCheckByItsRecordedSession(t *testing.T) {
 	if _, err := f.project.store.StartCheck(f.project.key, goal, recorded, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.r.RegisterSession(surface.Session{ID: recorded, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}); err != nil {
+	if err := f.r.RecordObservedSession(surface.Session{ID: recorded, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	f.d.sweepLedgerChecks(t.Context(), time.Now())

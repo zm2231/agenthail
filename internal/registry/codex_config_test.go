@@ -8,7 +8,7 @@ import (
 
 func TestACodexThreadKeepsItsConfigOverrides(t *testing.T) {
 	r := openTestRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusIdle}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	if empty, err := r.CodexConfigOverrides("thread"); err != nil || len(empty) != 0 {

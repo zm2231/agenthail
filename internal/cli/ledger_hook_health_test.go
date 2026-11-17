@@ -75,13 +75,13 @@ func TestDoctorAndBoardNameAMissingPromptHookOnceTheLedgerCaptures(t *testing.T)
 		t.Fatalf("a root with no session of the enabled project failed doctor: %v", err)
 	}
 
-	if err := store.RegisterSession(surface.Session{ID: "terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir, Status: surface.StatusIdle, Transcript: filepath.Join(root, "projects", "p", "terminal.jsonl"), LastActive: time.Now().Add(-24 * time.Hour)}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir, Status: surface.StatusIdle, Transcript: filepath.Join(root, "projects", "p", "terminal.jsonl"), LastActive: time.Now().Add(-24 * time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	elsewhere := t.TempDir()
 	for i := range 501 {
 		id := fmt.Sprintf("newer-%03d", i)
-		if err := store.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: elsewhere, Status: surface.StatusIdle, Transcript: filepath.Join(root, "projects", "q", id+".jsonl"), LastActive: time.Now()}); err != nil {
+		if err := store.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: elsewhere, Status: surface.StatusIdle, Transcript: filepath.Join(root, "projects", "q", id+".jsonl"), LastActive: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -126,7 +126,7 @@ func TestACoordinatorAloneMakesThePromptHookMatter(t *testing.T) {
 		t.Fatalf("problems %+v err %v", problems, err)
 	}
 	transcript := filepath.Join(home, ".claude", "projects", "p", "coord-session.jsonl")
-	if err := store.RegisterSession(surface.Session{ID: "coord-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir, Status: surface.StatusIdle, Transcript: transcript}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "coord-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir, Status: surface.StatusIdle, Transcript: transcript}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SetCoordinator(registry.CoordinatorSpec{ProjectID: "proj-c", ProjectRoot: dir, Name: "coord", Surface: "claude", Cwd: dir}, registry.CoordinatorChange{SessionID: "coord-session"}); err != nil {
@@ -156,7 +156,7 @@ func TestAnUnresolvedFolderKeepsTheProblemAndFailsDoctor(t *testing.T) {
 		t.Fatal(err)
 	}
 	unknown := t.TempDir()
-	if err := store.RegisterSession(surface.Session{ID: "unknown-folder", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: unknown, Status: surface.StatusIdle, Transcript: filepath.Join(root, "projects", "u", "unknown-folder.jsonl")}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "unknown-folder", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: unknown, Status: surface.StatusIdle, Transcript: filepath.Join(root, "projects", "u", "unknown-folder.jsonl")}); err != nil {
 		t.Fatal(err)
 	}
 	resolve := resolveSessionProject

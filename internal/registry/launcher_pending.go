@@ -80,9 +80,9 @@ func (r *Registry) DropPendingLaunch(item PendingLaunch) error {
 	return tx.Commit()
 }
 
-// RegisterSessionAndDeletePending registers the session without a name when
+// RecordObservedSessionAndDeletePending registers the session without a name when
 // another writer took the launch's name after its reservation lapsed.
-func (r *Registry) RegisterSessionAndDeletePending(s surface.Session, item PendingLaunch) (named bool, err error) {
+func (r *Registry) RecordObservedSessionAndDeletePending(s surface.Session, item PendingLaunch) (named bool, err error) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return false, err

@@ -109,7 +109,7 @@ func TestDispatcherAcceptedAndQueued(t *testing.T) {
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Build agent"}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	dispatcher := Dispatcher{Registry: r}
@@ -134,7 +134,7 @@ func TestDispatcherReturnsSubmittedForAmbiguousDeliveryWithoutClaimingAcceptance
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	unknown := surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)
@@ -149,7 +149,7 @@ func TestDispatcherReturnsSubmittedForAmbiguousDeliveryWithoutClaimingAcceptance
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			session := &surface.Session{ID: "target-" + strings.ReplaceAll(tc.name, " ", "-"), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Claude target"}
-			if err := r.RegisterSession(*session); err != nil {
+			if err := r.RecordObservedSession(*session); err != nil {
 				t.Fatal(err)
 			}
 			receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), tc.adapter, session, "do not duplicate", "", surface.SendOptions{SourceSessionID: "sender"})
@@ -183,7 +183,7 @@ func TestDispatcherUnknownWithoutExplicitSenderUsesDurableOperatorAttribution(t 
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Claude target"}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), &fakeSurface{err: surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)}, session, "maybe", "")
@@ -203,7 +203,7 @@ func TestDispatcherReportsTransportAcceptanceAsSentNotDelivered(t *testing.T) {
 	}
 	defer r.Close()
 	for _, id := range []string{"sender", "target"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -231,7 +231,7 @@ func TestDispatcherBaselinesFirstAcceptedDelivery(t *testing.T) {
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "s", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &fakeSurface{kind: surface.KindNotion, observe: &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "previous"}, result: &surface.SendResult{UUID: "turn", Accepted: true}}
@@ -251,7 +251,7 @@ func TestDispatcherRejectsBusyTargetWhenQueueDisabled(t *testing.T) {
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := (Dispatcher{Registry: r}).DeliverWithoutQueue(
@@ -309,7 +309,7 @@ func TestDispatcherSteerRefusesUnwritableSessionWithoutDurableIntent(t *testing.
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "read-only", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := unwritableSurface{&fakeSurface{capabilities: surface.Capabilities{Steer: true}}}
@@ -337,7 +337,7 @@ func TestDispatcherReceiptNeverClaimsMoreThanTheDurableIntent(t *testing.T) {
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "thread", Name: "thread", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &fakeSurface{kind: surface.KindNotion, observe: &surface.TurnObservation{Status: surface.StatusUnknown}, result: &surface.SendResult{UUID: "shared-key", Accepted: true}}
@@ -364,7 +364,7 @@ func TestDispatcherSteersBusyTargetWhenPolicyRequestsIt(t *testing.T) {
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "busy", Name: "builder", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &fakeSurface{result: &surface.SendResult{Accepted: false}, capabilities: surface.Capabilities{Steer: true}}
@@ -385,7 +385,7 @@ func TestDispatcherBusySteerUnknownKeepsSubmittedIntent(t *testing.T) {
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "busy-unknown", Name: "builder", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	unknown := surface.DeliveryOutcomeUnknown(errors.New("steer acknowledgement lost"))
@@ -410,7 +410,7 @@ func TestDispatcherDefiniteSendFailureFailsPreEffectIntent(t *testing.T) {
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "failed-send", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &fakeSurface{err: errors.New("target rejected input")}
@@ -450,7 +450,7 @@ func TestDispatcherDeliveryUnavailableLeavesNoProblemOrNotice(t *testing.T) {
 			}
 			defer r.Close()
 			session := &surface.Session{ID: "unavailable", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
-			if err := r.RegisterSession(*session); err != nil {
+			if err := r.RecordObservedSession(*session); err != nil {
 				t.Fatal(err)
 			}
 			if receipt, err := tc.run(Dispatcher{Registry: r}, tc.fake, session); !surface.IsDeliveryUnavailable(err) {
@@ -480,7 +480,7 @@ func TestDispatcherPersistsBeforeSendAndRetainsIDAcrossCrashBoundary(t *testing.
 		t.Fatal(err)
 	}
 	session := &surface.Session{ID: "send-crash", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	var seenID int64
@@ -523,7 +523,7 @@ func TestDispatcherQueueStorageFailureDiscardsSubmittedIntent(t *testing.T) {
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "queue-storage-failure", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	db, err := sql.Open("sqlite", path)
@@ -550,7 +550,7 @@ func TestDispatcherDoesNotCallProviderWhenIntentPersistenceFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := &surface.Session{ID: "storage-failure", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Close(); err != nil {
@@ -579,7 +579,7 @@ func TestDispatcherSteerPreservesContextSourceInIntent(t *testing.T) {
 	}
 	defer r.Close()
 	for _, id := range []string{"steer-source", "steer-target"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -612,7 +612,7 @@ func TestAnAgentSteersOnlyASessionItOverseesAndNeverPastItsSocket(t *testing.T) 
 	}
 	defer r.Close()
 	for _, id := range []string{"lead", "worker", "socket-worker"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -639,7 +639,7 @@ func TestDispatcherQueuesSteerPolicyWhenOptionsNeedPreserving(t *testing.T) {
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "busy-options", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &fakeSurface{result: &surface.SendResult{Accepted: false}, capabilities: surface.Capabilities{Steer: true}}
@@ -664,7 +664,7 @@ func TestDispatcherPreflightsBusyClaudePeerBeforeTransportAcceptance(t *testing.
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "session_peer", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Status: surface.StatusBusy}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &fakeSurface{kind: surface.KindClaude, observe: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"}, result: &surface.SendResult{Accepted: true}}
@@ -683,7 +683,7 @@ func TestDispatcherCompactUsesTypedSurfaceOperation(t *testing.T) {
 	claudeSession := &surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy}
 	codexSession := &surface.Session{ID: "codex", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
 	for _, session := range []*surface.Session{claudeSession, codexSession} {
-		if err := r.RegisterSession(*session); err != nil {
+		if err := r.RecordObservedSession(*session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -719,7 +719,7 @@ func TestDispatcherSendsEachIntentUnderItsOwnUUID(t *testing.T) {
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "builder", Status: surface.StatusBusy}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	dispatcher := Dispatcher{Registry: r}
@@ -757,7 +757,7 @@ func TestDispatcherPersistsBeforeSteerAndTransitionsSameID(t *testing.T) {
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "steer-callback", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	var seenID int64
@@ -794,7 +794,7 @@ func TestPeerMessageToABusyOrWaitingClaudeSessionGoesOverTheSocket(t *testing.T)
 			t.Fatal(err)
 		}
 		for _, id := range []string{"sender", "session_peer"} {
-			if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+			if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -177,7 +177,7 @@ func TestAnUpgradedRegistryKeepsItsLeadHistoryAndRecordsAMovedLead(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := old.RegisterSession(surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, HasLocal: true}); err != nil {
+	if err := old.RecordObservedSession(surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, HasLocal: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := old.SetCoordinator(CoordinatorSpec{ProjectID: leadProject, ProjectRoot: "/work/widget", Name: leadName, Surface: "claude", Cwd: "/work/widget"}, CoordinatorChange{SessionID: moveConversation, ChangedBy: "fixture"}); err != nil {

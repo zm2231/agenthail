@@ -45,7 +45,7 @@ func TestPersonSendCapturesUtterance(t *testing.T) {
 		Transport:   "desktop",
 		Cwd:         projectDir,
 	}
-	if err := r.RegisterSession(target); err != nil {
+	if err := r.RecordObservedSession(target); err != nil {
 		t.Fatal(err)
 	}
 
@@ -122,7 +122,7 @@ func TestPersonSendSkipsDisabledLedger(t *testing.T) {
 		Transport:   "desktop",
 		Cwd:         projectDir,
 	}
-	if err := r.RegisterSession(target); err != nil {
+	if err := r.RecordObservedSession(target); err != nil {
 		t.Fatal(err)
 	}
 
@@ -184,7 +184,7 @@ func TestPersonSendCapturesNestedProject(t *testing.T) {
 		ID: "nested-target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop,
 		Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: innerDir,
 	}
-	if err := r.RegisterSession(target); err != nil {
+	if err := r.RecordObservedSession(target); err != nil {
 		t.Fatal(err)
 	}
 
@@ -234,7 +234,7 @@ func TestPersonSendSkipsNoProject(t *testing.T) {
 		ID: "orphan", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop,
 		Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: t.TempDir(),
 	}
-	if err := r.RegisterSession(target); err != nil {
+	if err := r.RecordObservedSession(target); err != nil {
 		t.Fatal(err)
 	}
 

@@ -106,7 +106,7 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 			return fmt.Errorf("fork returned no session")
 		}
 		if a.registry() != nil {
-			if err := a.registry().RegisterSession(*fork); err != nil {
+			if err := a.registry().RecordObservedSession(*fork); err != nil {
 				return err
 			}
 			if err := a.registry().BindReservedAlias(name, fork.ID); err != nil {

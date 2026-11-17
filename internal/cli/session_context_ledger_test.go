@@ -24,7 +24,7 @@ func ledgerHookFixture(t *testing.T, captured, attach bool) (*App, func() []capt
 	t.Helper()
 	withoutSessionContextLimit(t)
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	if err := store.RegisterSession(surface.Session{
+	if err := store.RecordObservedSession(surface.Session{
 		ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI,
 		Cwd: t.TempDir(), Status: surface.StatusIdle,
 	}); err != nil {

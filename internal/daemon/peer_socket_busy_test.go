@@ -37,7 +37,7 @@ func busyClaude(t *testing.T, socket bool) (*registry.Registry, *claudetest.Fixt
 	}
 	t.Cleanup(func() { store.Close() })
 	session := surface.Session{ID: busyConversation, Bridge: "session_busy", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Transport: transport, Status: surface.StatusBusy, HasLocal: true, Transcript: transcript}
-	if err := store.RegisterSession(session); err != nil {
+	if err := store.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	return store, process, session
@@ -50,7 +50,7 @@ func TestRelayToABusyClaudeSessionRidesItsPeerSocketAtOnce(t *testing.T) {
 	}
 	manager := claudetest.ListenPeerManager(t, process.Home)
 	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-	if err := store.RegisterSession(from); err != nil {
+	if err := store.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.AddRoute(from.ID, session.ID, ".*"); err != nil {
@@ -99,7 +99,7 @@ func TestRelayToABusyCodexSessionFollowsTheLivePolicy(t *testing.T) {
 			fake.caps = surface.Capabilities{Send: true, Steer: true}
 			fake.rejectBusy = true
 			to.Status = surface.StatusBusy
-			if err := r.RegisterSession(to); err != nil {
+			if err := r.RecordObservedSession(to); err != nil {
 				t.Fatal(err)
 			}
 			fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"}
@@ -131,7 +131,7 @@ func TestARelayFromASessionThatDoesNotOverseeItsTargetNeverSteersIt(t *testing.T
 	fake.caps = surface.Capabilities{Send: true, Steer: true}
 	fake.rejectBusy = true
 	to.Status = surface.StatusBusy
-	if err := r.RegisterSession(to); err != nil {
+	if err := r.RecordObservedSession(to); err != nil {
 		t.Fatal(err)
 	}
 	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"}

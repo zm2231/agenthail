@@ -85,7 +85,7 @@ func TestAnIdleCodexThreadMovesToAPairedHostAndRunsThere(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := source.idle(t, started.ID, "the first turn to end")
-	if err := source.reg.RegisterSession(*session); err != nil {
+	if err := source.reg.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	if err := source.reg.SetAlias("builder", session.ID); err != nil {

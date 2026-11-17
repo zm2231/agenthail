@@ -18,7 +18,7 @@ func closedInHost(t *testing.T, e exitedClaude) {
 	t.Helper()
 	closed := e.session
 	closed.RuntimeKind, closed.Bridge, closed.PID, closed.Status = surface.RuntimeClaudeHost, "", 0, surface.StatusIdle
-	if err := e.r.RegisterSession(closed); err != nil {
+	if err := e.r.RecordObservedSession(closed); err != nil {
 		t.Fatal(err)
 	}
 }

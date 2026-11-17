@@ -44,7 +44,7 @@ func TestASendQueuedForAnUnloadedDesktopThreadWithNoTurnsLoadsItAndIsDelivered(t
 		return ""
 	})
 	_, r, _, _, _ := daemonFixture(t)
-	if err := r.RegisterSession(surface.Session{ID: thread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusNotLoaded, Source: "vscode", Transport: "desktop"}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: thread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusNotLoaded, Source: "vscode", Transport: "desktop"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.QueueMessage(thread, "deliver after Desktop loads it"); err != nil {

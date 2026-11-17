@@ -23,7 +23,7 @@ func TestACodexJournalFromAnOlderMappingIsReadAgainFromItsTranscript(t *testing.
 		t.Fatal(err)
 	}
 	from.Source, from.Transport, from.Transcript, from.HasLocal = "vscode", "desktop", transcript, true
-	if err := reg.RegisterSession(from); err != nil {
+	if err := reg.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	adapter := surfaces.NewCodex("http://127.0.0.1:1")

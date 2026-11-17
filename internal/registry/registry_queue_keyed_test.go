@@ -10,7 +10,7 @@ import (
 func TestCancelingByKeyOnlyWithdrawsAPendingItemAndRecordsWhy(t *testing.T) {
 	r := openTestRegistry(t)
 	for _, id := range []string{"pending", "inflight", "delivered"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := r.QueueMessageWithKey(id, "notice for "+id, "key-"+id); err != nil {

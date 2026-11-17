@@ -259,7 +259,7 @@ func TestOnlyTheParentOrAReaderOfTheChildSeesAResult(t *testing.T) {
 	f := newTaskFixture(t)
 	f.turn("t1", done("private"))
 	stranger := surface.Session{ID: "stranger", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: "/elsewhere"}
-	if err := f.r.RegisterSession(stranger); err != nil {
+	if err := f.r.RecordObservedSession(stranger); err != nil {
 		t.Fatal(err)
 	}
 	session := mcpSession(t, mcpServer(t, f.d), issueMCPToken(t, f.d, stranger))
@@ -304,7 +304,7 @@ func TestIdleUnsettledTasksCountTowardTheChildrenLimit(t *testing.T) {
 	}
 	for index := range mcpChildrenLimit {
 		child := surface.Session{ID: fmt.Sprintf("child-%d", index), Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
-		if err := f.r.RegisterSession(child); err != nil {
+		if err := f.r.RecordObservedSession(child); err != nil {
 			t.Fatal(err)
 		}
 		if err := f.r.RecordSessionOrigin(registry.OriginOf(child.ID, f.task.Parent)); err != nil {

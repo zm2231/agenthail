@@ -16,11 +16,11 @@ func TestAPersonDeliveryIsProvisionalAndQueuesNothingToTheSession(t *testing.T) 
 		t.Fatal(err)
 	}
 	codex := surface.Session{ID: "codex-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: p.dir, Status: surface.StatusIdle}
-	if err := r.RegisterSession(codex); err != nil {
+	if err := r.RecordObservedSession(codex); err != nil {
 		t.Fatal(err)
 	}
 	lead := surface.Session{ID: "codex-lead", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: p.dir, Status: surface.StatusIdle}
-	if err := r.RegisterSession(lead); err != nil {
+	if err := r.RecordObservedSession(lead); err != nil {
 		t.Fatal(err)
 	}
 	makeCoordinator(t, r, p, lead.ID)

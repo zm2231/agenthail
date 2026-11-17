@@ -89,7 +89,7 @@ func TestARegistryFromBeforeSnoozeKeepsItsPinsAndGainsSnooze(t *testing.T) {
 	}
 	at := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	for _, id := range []string{"pinned", "plain"} {
-		if err := old.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}); err != nil {
+		if err := old.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}); err != nil {
 			t.Fatal(err)
 		}
 	}

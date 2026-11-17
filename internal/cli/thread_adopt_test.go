@@ -40,7 +40,7 @@ func TestThreadAdoptOpensASessionInTheHostAndReRegistersIt(t *testing.T) {
 	for _, id := range []string{"c1", "busy1"} {
 		session := surface.Session{ID: id, Name: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
 		fake.sessions[id] = session
-		if err := store.RegisterSession(session); err != nil {
+		if err := store.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

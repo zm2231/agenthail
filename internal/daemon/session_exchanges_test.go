@@ -158,7 +158,7 @@ func transcriptItems() []surface.TimelineItem {
 func TestSourceStartRederivesAnEarlierJournalOnce(t *testing.T) {
 	d, r, fake, from, _ := daemonFixture(t)
 	from.Surface, from.RuntimeKind, from.Transport, from.Transcript = surface.KindClaude, surface.RuntimeClaudeCLI, "", "/transcript.jsonl"
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	earlierDerivationJournal(t, r, from.ID)
@@ -208,7 +208,7 @@ func TestSourceStartRederivesAnEarlierJournalOnce(t *testing.T) {
 func TestSessionStreamCursorRecoversAcrossARederivedJournal(t *testing.T) {
 	d, r, fake, from, _ := daemonFixture(t)
 	from.Surface, from.RuntimeKind, from.Transport, from.Transcript = surface.KindClaude, surface.RuntimeClaudeCLI, "", "/transcript.jsonl"
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	earlierDerivationJournal(t, r, from.ID)

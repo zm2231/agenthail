@@ -11,7 +11,7 @@ import (
 func relayedMoveRegistry(t *testing.T) (*Registry, int64) {
 	t.Helper()
 	r := moveRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: "listener", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "listener", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
 	id, err := r.AddRelayRoute(moveConversation, "listener", ".*", false, "")
@@ -64,7 +64,7 @@ func TestAMoveIsRefusedWhenItsRelaysChangeAfterItDeclaredThem(t *testing.T) {
 		t.Fatalf("a relay the move carries refused it: %q", reason)
 	}
 	declared := carryOf(t, r)
-	if err := r.RegisterSession(surface.Session{ID: "second", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "second", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.AddRelayRoute(moveConversation, "second", ".*", false, ""); err != nil {
@@ -88,7 +88,7 @@ func TestAMoveRefusesACompletionCapturedAfterItDeclaredItsRelays(t *testing.T) {
 
 func TestTheRelaysOfAMovingSessionCannotChange(t *testing.T) {
 	r, id := relayedMoveRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: "second", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "second", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), carryOf(t, r), ""); err != nil {

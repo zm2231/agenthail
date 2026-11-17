@@ -373,8 +373,12 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	}
 	settle := s.Dispatcher.CapturePersonStart(sender, messageUUID, first, message)
 	var readyErr error
+	var recorded *surface.Session
 	ready := func(started surface.Session) error {
 		readyErr = s.Registry.RecordStartingSession(started, registry.AliasReservation{}, registry.SessionOrigin{SessionID: started.ID, Via: registry.OriginCoordinator})
+		if readyErr == nil {
+			recorded = &started
+		}
 		return readyErr
 	}
 	session, sent, startErr := starter.StartSession(surface.WithSessionReady(surface.WithSourceSessionID(surface.WithMessageUUID(ctx, messageUUID), sender), ready), options)
@@ -397,7 +401,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	if s.LeadsChanged != nil {
 		defer s.LeadsChanged()
 	}
-	if err := s.Registry.RegisterSession(*session); err != nil {
+	if err := s.Registry.RecordLearnedSession(recorded, *session); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be registered: %w", session.ID, err))
 	}
 	if err := s.Registry.RecordSessionOrigin(registry.SessionOrigin{SessionID: session.ID, Via: registry.OriginCoordinator}); err != nil {

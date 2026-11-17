@@ -18,7 +18,7 @@ func TestOnlyACoordinatorsPromptCarriesItsBacklogLine(t *testing.T) {
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	cwd := t.TempDir()
 	for _, id := range []string{"lead", "worker"} {
-		if err := store.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: cwd, Status: surface.StatusIdle}); err != nil {
+		if err := store.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: cwd, Status: surface.StatusIdle}); err != nil {
 			t.Fatal(err)
 		}
 	}

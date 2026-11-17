@@ -117,7 +117,7 @@ func (f pickFixture) setDefault(name string) int {
 func (f pickFixture) claudeSessionIn(id, root string) string {
 	f.t.Helper()
 	session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transcript: filepath.Join(root, "projects", "-repo", id+".jsonl")}
-	if err := f.daemon.Registry.RegisterSession(session); err != nil {
+	if err := f.daemon.Registry.RecordObservedSession(session); err != nil {
 		f.t.Fatal(err)
 	}
 	return id

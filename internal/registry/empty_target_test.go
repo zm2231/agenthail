@@ -8,7 +8,7 @@ import (
 
 func TestAnEmptyTargetNamesNoSessionEvenWhenOnlyOneExists(t *testing.T) {
 	r := openTestRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: "only-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "only-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	for _, target := range []string{"", "  ", "@"} {

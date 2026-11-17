@@ -282,7 +282,7 @@ func TestAnAskTheHearerPassesOnSitsOnOrCannotHearReachesThePerson(t *testing.T) 
 	unheard, _ := f.raise(t, f.worker, map[string]any{"title": "Which host?", "questions": []any{map[string]any{"question": "Host?", "options": []any{map[string]any{"label": "a"}}}}})["askId"].(string)
 	ended := f.from
 	ended.Ended = true
-	if err := f.r.RegisterSession(ended); err != nil {
+	if err := f.r.RecordObservedSession(ended); err != nil {
 		t.Fatal(err)
 	}
 	f.d.sweepAsks(time.Now())
@@ -301,7 +301,7 @@ func TestEverySessionInAProjectAsksItsLeadWhoeverStartedIt(t *testing.T) {
 	for id, via := range map[string]registry.OriginVia{"by-person": registry.OriginPerson, "by-voice": registry.OriginVoice} {
 		session := f.worker
 		session.ID = id
-		if err := f.reg.RegisterSession(session); err != nil {
+		if err := f.reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		f.fake.sessions[id] = session

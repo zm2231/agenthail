@@ -44,7 +44,7 @@ func busyRemoteControlClaude(t *testing.T, onPost func(payload map[string]any)) 
 	}
 	t.Cleanup(func() { store.Close() })
 	session := surface.Session{ID: "conversation-control", Bridge: "session_control", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Status: surface.StatusBusy, HasLocal: true, Transcript: transcript}
-	if err := store.RegisterSession(session); err != nil {
+	if err := store.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	posts := &remoteControlPosts{}
@@ -147,7 +147,7 @@ func TestARemoteControlSteerWhoseTurnEndsFirstIsSentAsTheNextTurn(t *testing.T) 
 	}
 	t.Cleanup(func() { store.Close() })
 	session := surface.Session{ID: "conversation-race", Bridge: "session_race", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Status: surface.StatusBusy, HasLocal: true, Transcript: transcript}
-	if err := store.RegisterSession(session); err != nil {
+	if err := store.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	var once sync.Once

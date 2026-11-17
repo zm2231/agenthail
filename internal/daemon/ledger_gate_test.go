@@ -43,7 +43,7 @@ func gateFixtureIn(t *testing.T, via registry.OriginVia, runtime surface.Runtime
 		}
 	}
 	s := surface.Session{ID: "worker", Surface: surface.KindClaude, RuntimeKind: runtime, Cwd: p.dir, Status: surface.StatusIdle}
-	if err := r.RegisterSession(s); err != nil {
+	if err := r.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	fake.sessions[s.ID] = s

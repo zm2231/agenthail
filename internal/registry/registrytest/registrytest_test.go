@@ -40,7 +40,7 @@ func TestEachCopyIsItsOwnRegistryWithItsOwnHostIDAndEpoch(t *testing.T) {
 	if firstHost.ID == "" || firstHost.ID == secondHost.ID {
 		t.Fatalf("host ids %q and %q, want two different ones", firstHost.ID, secondHost.ID)
 	}
-	if err := first.RegisterSession(surface.Session{ID: "only-here", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
+	if err := first.RecordObservedSession(surface.Session{ID: "only-here", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := second.Session("only-here"); err == nil {

@@ -230,7 +230,7 @@ func TestTextAndLinksFitTheResultAndAScreenshotIsSavedOnlyInsideTheSessionsFolde
 		t.Fatal(err)
 	}
 	session.Cwd = work
-	if err := f.d.Registry.RegisterSession(*session); err != nil {
+	if err := f.d.Registry.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	tab := browse(t, f.parent, map[string]any{"action": "open", "url": f.page + "/long"})["tab"].(string)

@@ -104,7 +104,7 @@ func TestThreadCreateStartsInTheCreatorsRootElseTheDefault(t *testing.T) {
 	keys := claudeRootsHome(t)
 	home, _ := os.UserHomeDir()
 	agent := surface.Session{ID: "agent-primary", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transcript: filepath.Join(home, ".claude", "projects", "-repo", "agent-primary.jsonl")}
-	if err := app.registry().RegisterSession(agent); err != nil {
+	if err := app.registry().RecordObservedSession(agent); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"roots", "default", "claude"}) }); err != nil {

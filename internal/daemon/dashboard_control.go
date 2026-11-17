@@ -6,14 +6,16 @@ import (
 	"strconv"
 
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (d *Daemon) ensureDashboardWritable(ctx context.Context, adapter surface.Surface, session *surface.Session) error {
+	read := *session
 	if err := delivery.EnsureDeliverable(ctx, d.Registry, adapter, session); err != nil {
 		return err
 	}
-	if err := d.Registry.RegisterSession(*session); err != nil {
+	if err := d.Registry.UpdateSession(*session, registry.LearnedSessionUpdate(read, *session)); err != nil {
 		return err
 	}
 	return nil

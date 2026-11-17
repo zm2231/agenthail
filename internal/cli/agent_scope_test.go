@@ -55,7 +55,7 @@ func scopedFixture(t *testing.T, server *scopeServer) (*App, *cliSurface) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": target, "worker": worker}, caps: surface.Capabilities{Send: true, Steer: true, Interrupt: true}}
 	app, r := cliFixture(t, fake)
 	for _, session := range []surface.Session{target, worker} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -173,7 +173,7 @@ func TestAThreadAnAgentStartsTakesItsCeiling(t *testing.T) {
 		ready:      true,
 	}
 	app := threadFixture(t, starter)
-	if err := app.Registry.RegisterSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: cwd}); err != nil {
+	if err := app.Registry.RecordObservedSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: cwd}); err != nil {
 		t.Fatal(err)
 	}
 	server := &scopeServer{accepted: `{"ok":true,"session":{"id":"thread-child","surface":"codex","cwd":"` + cwd + `"},"result":{"uuid":"turn-1","accepted":true}}`}
@@ -229,7 +229,7 @@ func daemonAt(t *testing.T, app *App, server *scopeServer) {
 
 func TestAnAgentStartsSessionsOnlyOnItsOwnHost(t *testing.T) {
 	app := threadFixture(t, &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}})
-	if err := app.Registry.RegisterSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+	if err := app.Registry.RecordObservedSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_SESSION_ID", "worker")

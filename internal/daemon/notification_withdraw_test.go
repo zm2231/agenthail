@@ -19,7 +19,7 @@ func TestANotificationWithdrawnWhileTheDaemonStopsLeavesTheDevicesWhenItStartsAg
 	}
 	t.Cleanup(func() { store.Close() })
 	session := surface.Session{ID: "asking-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}
-	if err := store.RegisterSession(session); err != nil {
+	if err := store.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	pushes := newPushRecorder(t, store)

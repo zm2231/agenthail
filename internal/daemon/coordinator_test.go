@@ -45,7 +45,7 @@ func newCoordinatorFixture(t *testing.T) *coordinatorFixture {
 	t.Cleanup(func() { _ = r.Close() })
 	f.r = r
 	gone := surface.Session{ID: goneCoordinator, Bridge: "session_gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID, Status: surface.StatusIdle, Cwd: f.host.Cwd}
-	if err := r.RegisterSession(gone); err != nil {
+	if err := r.RecordObservedSession(gone); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-fixture", ProjectRoot: f.host.Cwd, Name: "fixture-lead", Surface: string(surface.KindClaude), Cwd: f.host.Cwd, Instructions: "You coordinate fixture workers."}, registry.CoordinatorChange{SessionID: goneCoordinator}); err != nil {
@@ -200,7 +200,7 @@ func TestAPISendToACoordinatorClaudeCannotReportOnWaitsInTheQueue(t *testing.T) 
 
 func TestSendsToAConversationARestartReplacedReachTheCoordinator(t *testing.T) {
 	f := newCoordinatorFixture(t)
-	if err := f.r.RegisterSession(surface.Session{ID: "fixture-sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusIdle}); err != nil {
+	if err := f.r.RecordObservedSession(surface.Session{ID: "fixture-sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	_, pending, err := f.r.QueueDeliveryWithIntent(goneCoordinator, "queued before the restart", "", surface.SendOptions{SourceSessionID: "fixture-sender"})

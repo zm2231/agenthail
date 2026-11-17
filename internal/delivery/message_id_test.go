@@ -38,7 +38,7 @@ func TestEveryIntentBackedReceiptCarriesItsIntentsUUID(t *testing.T) {
 			}
 			defer r.Close()
 			session := &surface.Session{ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}
-			if err := r.RegisterSession(*session); err != nil {
+			if err := r.RecordObservedSession(*session); err != nil {
 				t.Fatal(err)
 			}
 			receipt, err := tc.deliver(Dispatcher{Registry: r}, tc.adapter, session)

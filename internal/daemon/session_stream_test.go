@@ -88,7 +88,7 @@ func TestAPISessionStreamRejectsClaudeWithoutLiveStream(t *testing.T) {
 	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.Transport = "uds"
 	fake.kind = surface.KindClaude
-	if err := reg.RegisterSession(from); err != nil {
+	if err := reg.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &sourceCountingSurface{

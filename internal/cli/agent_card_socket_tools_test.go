@@ -76,7 +76,7 @@ func TestAPersonsCodexThreadWhoseConfigStartsTheRelayIsTaughtTheTools(t *testing
 	app, _, cwd := cardFixture(t)
 	codexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", codexHome)
-	if err := app.Registry.RegisterSession(surface.Session{ID: "persons-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: cwd}); err != nil {
+	if err := app.Registry.RecordObservedSession(surface.Session{ID: "persons-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: cwd}); err != nil {
 		t.Fatal(err)
 	}
 	command := relayCommand(t)

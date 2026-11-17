@@ -34,7 +34,7 @@ func TestAStoppingDaemonStopsACatchUpAndTheNextStartFinishesIt(t *testing.T) {
 	if err := os.WriteFile(path, []byte(claudeTurns(conversation, 1, 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path, Cwd: fixture.Home}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path, Cwd: fixture.Home}); err != nil {
 		t.Fatal(err)
 	}
 	claude := surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)
@@ -124,7 +124,7 @@ func (s *stoppingRederive) TranscriptItems(ctx context.Context, session *surface
 func TestARederiveTheDaemonStopsDuringLeavesTheJournalForTheNextStart(t *testing.T) {
 	_, r, fake, from, _ := daemonFixture(t)
 	from.Surface, from.RuntimeKind, from.Transport, from.Transcript = surface.KindClaude, surface.RuntimeClaudeCLI, "", "/transcript.jsonl"
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	earlierDerivationJournal(t, r, from.ID)

@@ -153,7 +153,7 @@ func TestVoiceDelegationToAHostSessionIsAPersonsTurnAndSpeaksTheReply(t *testing
 	claude := f.daemon.adapters()[0].(*surfaces.Claude)
 	hosted := hostedSession(t, claude, orphanConversation)
 	hosted.Name = "orphan"
-	if err := f.r.RegisterSession(hosted); err != nil {
+	if err := f.r.RecordObservedSession(hosted); err != nil {
 		t.Fatal(err)
 	}
 	f.session = hosted
@@ -172,7 +172,7 @@ func TestVoiceDelegationToLiveSocketOnlySessionDeliversInsteadOfRejecting(t *tes
 	f.claude.Record(orphanConversation, f.claude.Home, "")
 	manager := claudetest.ListenPeerManager(t, f.claude.Home)
 	f.session = surface.Session{ID: orphanConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "orphan", PID: f.claude.PID, Status: surface.StatusIdle, Transport: "uds", Cwd: f.claude.Home, Transcript: f.session.Transcript}
-	if err := f.r.RegisterSession(f.session); err != nil {
+	if err := f.r.RecordObservedSession(f.session); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.r.SetAlias("orphan", f.session.ID); err != nil {

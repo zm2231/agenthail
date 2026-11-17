@@ -123,7 +123,7 @@ func TestLastResolvesAnExitedSessionByItsName(t *testing.T) {
 	provider := &cliReadSurface{cliSurface: &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, resolveErr: surface.ErrSessionNotFound, caps: surface.Capabilities{Reply: true}}}
 	app, r := cliFixture(t, provider.cliSurface)
 	app.Surfaces[0].Surface = provider
-	if err := r.RegisterSession(surface.Session{ID: "11111111-2222-3333-4444-555555555555", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "pairing-fixture", Status: surface.StatusIdle}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "11111111-2222-3333-4444-555555555555", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "pairing-fixture", Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	app.catalogDaemonRunning = func() bool { return true }

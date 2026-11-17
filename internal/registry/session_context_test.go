@@ -14,7 +14,7 @@ func TestARegistryAtSchema29RecordsWhatASessionWasTold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.db.Exec(`DROP TABLE session_context`); err != nil {

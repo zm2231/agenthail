@@ -154,7 +154,7 @@ func TestARetiredRowComesBackWhenItRunsOrBecomesCurrent(t *testing.T) {
 	recordEndedRow(t, r, surface.Session{ID: "resumed"}, `{"id":"resumed","current":false}`)
 	recordEndedRow(t, r, surface.Session{ID: "promoted"}, `{"id":"promoted","current":false}`)
 	endedPasses(t, r, 2)
-	if err := r.RegisterSession(surface.Session{ID: "resumed", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "resumed", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy}); err != nil {
 		t.Fatal(err)
 	}
 	if isRetired(t, r, "resumed") {
@@ -448,7 +448,7 @@ func TestTheRetiredCountsFollowARetiredSessionsStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	session.Status = surface.StatusIdle
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	if !isRetired(t, r, "ended") {

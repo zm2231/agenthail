@@ -69,11 +69,11 @@ func TestNativeVoiceHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, session := range sessions {
-		if err := reg.RegisterSession(session); err != nil {
+		if err := reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := reg.RegisterSession(*saved.State.Session); err != nil {
+	if err := reg.RecordObservedSession(*saved.State.Session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, reg, []surface.Surface{codex})

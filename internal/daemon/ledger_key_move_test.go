@@ -33,7 +33,7 @@ func newRemoteMoveFixture(t *testing.T, added bool) remoteMoveFixture {
 	session := surface.Session{ID: "worker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: repo, Status: surface.StatusIdle}
 	fake := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{session.ID: session}, observations: map[string]*surface.TurnObservation{}, accepted: true}
 	d := newTestDaemon(t, r, []surface.Surface{fake})
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if added {

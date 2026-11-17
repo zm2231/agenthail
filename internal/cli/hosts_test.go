@@ -130,7 +130,7 @@ func TestHostQualifiedSendRoutesThroughDaemon(t *testing.T) {
 func TestTargetOnTwoHostsIsAmbiguous(t *testing.T) {
 	app, reg, fake, api := federatedCLIFixture(t, true)
 	fake.sessions["local-1"] = surface.Session{ID: "local-1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "local work"}
-	if err := reg.RegisterSession(fake.sessions["local-1"]); err != nil {
+	if err := reg.RecordObservedSession(fake.sessions["local-1"]); err != nil {
 		t.Fatal(err)
 	}
 	if err := reg.SetAlias("builder", "local-1"); err != nil {
@@ -251,7 +251,7 @@ func TestRemoteSessionCommandsRouteThroughDaemon(t *testing.T) {
 	if output := run("identify", "vps::@builder", "builder2"); !strings.Contains(output, "vps::@builder2") {
 		t.Fatalf("identify output=%q", output)
 	}
-	if err := app.Registry.RegisterSession(surface.Session{ID: "local-1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+	if err := app.Registry.RecordObservedSession(surface.Session{ID: "local-1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
 	run("thread", "fork", "vps::@builder", "--model", "gpt-next", "--alias", "branch", "--from", "local-1")
@@ -331,7 +331,7 @@ func TestHeldSendForRemoteSessionIsLocalQueueData(t *testing.T) {
 func TestStoppedDaemonStillRefusesAmbiguityFromMirror(t *testing.T) {
 	app, reg, fake, _ := federatedCLIFixture(t, false)
 	fake.sessions["local-1"] = surface.Session{ID: "local-1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "local work"}
-	if err := reg.RegisterSession(fake.sessions["local-1"]); err != nil {
+	if err := reg.RecordObservedSession(fake.sessions["local-1"]); err != nil {
 		t.Fatal(err)
 	}
 	if err := reg.SetAlias("builder", "local-1"); err != nil {
@@ -393,7 +393,7 @@ func TestHostFlagsStayScopedToTheirCommands(t *testing.T) {
 func TestAnExitedLocalNameLeavesAPairedHostsMatch(t *testing.T) {
 	app, reg, fake, api := federatedCLIFixture(t, true)
 	fake.resolveErr = surface.ErrSessionNotFound
-	if err := reg.RegisterSession(surface.Session{ID: "local-exited", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "builder"}); err != nil {
+	if err := reg.RecordObservedSession(surface.Session{ID: "local-exited", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "builder"}); err != nil {
 		t.Fatal(err)
 	}
 	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "builder", "to vps"}) })
@@ -419,7 +419,7 @@ func TestAnExitedLocalNameLeavesAPairedHostsMatch(t *testing.T) {
 func TestSendReachesTheSessionNamedInAPeerMessagesFromSession(t *testing.T) {
 	app, reg, fake, api := federatedCLIFixture(t, true)
 	fake.sessions["local-1"] = surface.Session{ID: "local-1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "local work"}
-	if err := reg.RegisterSession(fake.sessions["local-1"]); err != nil {
+	if err := reg.RecordObservedSession(fake.sessions["local-1"]); err != nil {
 		t.Fatal(err)
 	}
 	api.matches["remote-1"] = []remoteTarget{vpsBuilder}

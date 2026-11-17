@@ -15,7 +15,7 @@ func TestLimitResumeListsStopsAndTurnsTheSettingOff(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	session := surface.Session{ID: "limited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	resetsAt := time.Date(2026, 10, 23, 15, 0, 0, 0, time.UTC)

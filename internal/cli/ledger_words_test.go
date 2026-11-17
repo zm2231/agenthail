@@ -19,7 +19,7 @@ func TestLedgerWordsPrintsWhatWasTypedQuotedAndTheTurnsAround(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
-	if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()

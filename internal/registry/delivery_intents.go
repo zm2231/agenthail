@@ -39,7 +39,22 @@ func (r *Registry) EnsureExtensionSender(id, label string) (string, error) {
 	} else if err != nil && err != sql.ErrNoRows {
 		return "", err
 	}
-	return sender.ID, r.RegisterSession(sender)
+	return sender.ID, r.recordNamedSender(sender)
+}
+
+// recordNamedSender creates a sender's row, or writes only its name to the
+// row it has.
+func (r *Registry) recordNamedSender(sender surface.Session) error {
+	existing, err := r.Session(sender.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return r.RecordObservedSession(sender)
+	}
+	if err != nil {
+		return err
+	}
+	named := *existing
+	named.Name = sender.Name
+	return r.UpdateSession(named, LearnedSessionUpdate(*existing, named))
 }
 
 // EnsureSender records the person or the Agenthail CLI the first time either
@@ -54,7 +69,7 @@ func (r *Registry) EnsureSender(id string) error {
 	} else if err != sql.ErrNoRows {
 		return err
 	}
-	return r.RegisterSession(sender)
+	return r.RecordObservedSession(sender)
 }
 
 // PersonName is what sessions call the person: the name set with agenthail
@@ -124,7 +139,7 @@ func (r *Registry) EnsureUnrepliableSender(hostID, sessionID, name string) (stri
 		name = string(runes[:80])
 	}
 	sender := surface.UnrepliableSender(hostID, sessionID, name)
-	return sender.ID, r.RegisterSession(sender)
+	return sender.ID, r.recordNamedSender(sender)
 }
 
 const (

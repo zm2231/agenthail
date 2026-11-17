@@ -156,12 +156,13 @@ func (a *App) cmdModel(args []string) error {
 		}
 	}
 	if controller, ok := surf.(surface.Controller); ok && name != "" {
+		read := *sess
 		result, controlErr := controller.Control(ctx, sess, surface.ControlRequest{Action: "model", Value: name})
 		if controlErr == nil {
 			a.recordHistory(registry.HistoryEntry{Kind: "model", SessionID: sess.ID, Message: name, Result: "changed by " + daemon.CLIActor})
 		}
 		if controlErr == nil && a.registry() != nil {
-			if err := a.registry().RegisterSession(*sess); err != nil {
+			if err := a.registry().UpdateSession(*sess, registry.EditedSessionUpdate(read, *sess)); err != nil {
 				return fmt.Errorf("persist Claude model state: %w", err)
 			}
 		}

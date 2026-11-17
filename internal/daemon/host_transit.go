@@ -47,7 +47,20 @@ func (d *Daemon) coordinatorMovedRefusal(name, hostID string) error {
 	return &actionError{Status: http.StatusConflict, Code: movedCode, Message: fmt.Sprintf("coordinator @%s moved to host %s; send it there", name, hostName), Extra: map[string]any{movedToHostField: hostID}}
 }
 
+// sessionMovedError is the moved refusal for a session a paired host now
+// serves, or nil.
+func sessionMovedError(err error) error {
+	var owned registry.SessionOwnedError
+	if errors.As(err, &owned) && owned.HostID != "" {
+		return registry.MovedError(owned)
+	}
+	return nil
+}
+
 func (d *Daemon) movedAnswer(err error) error {
+	if owned := sessionMovedError(err); owned != nil {
+		err = owned
+	}
 	var moved registry.MovedError
 	if !errors.As(err, &moved) {
 		return err

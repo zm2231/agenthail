@@ -63,7 +63,7 @@ func promptTexts(prompts []promptItem) string {
 
 func TestPromptsAreWhatAPersonTypedNewestFirst(t *testing.T) {
 	d, r, _, session, _ := daemonFixture(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	long := strings.Repeat("long prompt ", 50)
@@ -105,7 +105,7 @@ func TestPromptsAreWhatAPersonTypedNewestFirst(t *testing.T) {
 
 func TestPromptsBoundTheirQueryAndTheirScan(t *testing.T) {
 	d, r, _, session, _ := daemonFixture(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	handler := dashboardRouter(d)

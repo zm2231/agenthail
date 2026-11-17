@@ -14,7 +14,7 @@ func TestARegistryAtSchema27RecordsWhoStartedASession(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range []surface.Session{{ID: "planner", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, {ID: "worker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}} {
-		if err := r.RegisterSession(s); err != nil {
+		if err := r.RecordObservedSession(s); err != nil {
 			t.Fatal(err)
 		}
 	}

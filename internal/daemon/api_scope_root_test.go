@@ -34,7 +34,7 @@ func TestAnAgentKeepsItsClaudeRootAndItsCoordinatorPlacesAny(t *testing.T) {
 	for _, session := range []surface.Session{worker, lead} {
 		session.LastActive = time.Now()
 		fake.sessions[session.ID] = session
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

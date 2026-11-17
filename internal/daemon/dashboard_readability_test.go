@@ -124,13 +124,13 @@ func seedReadabilityFixture(t *testing.T, store *registry.Registry, fake *follow
 		t.Fatal(err)
 	}
 	for _, session := range sessions {
-		if err := store.RegisterSession(session); err != nil {
+		if err := store.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		fake.sessions[session.ID] = session
 	}
 	lead := registry.CoordinatorSpec{ProjectID: "p-agenthail", ProjectRoot: "/work/agenthail", Name: "release-lead", Surface: string(surface.KindCodex), Cwd: "/work/agenthail"}
-	if err := store.RegisterSession(surface.Session{ID: "lead-before", Name: "lead-before", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: "/work/agenthail", LastActive: now.Add(-48 * time.Hour)}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "lead-before", Name: "lead-before", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: "/work/agenthail", LastActive: now.Add(-48 * time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SetCoordinator(lead, registry.CoordinatorChange{SessionID: "lead-before", ChangedBy: "fixture"}); err != nil {

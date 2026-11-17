@@ -407,7 +407,7 @@ func TestASessionFirstSeenWithAFinishedTurnDoesNotNotify(t *testing.T) {
 	session.ID, session.Name = "remote-new", "work remote-new"
 	host.fake.sessions[session.ID] = session
 	host.fake.mu.Unlock()
-	if err := host.reg.RegisterSession(session); err != nil {
+	if err := host.reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 

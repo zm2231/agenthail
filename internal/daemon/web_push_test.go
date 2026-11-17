@@ -296,7 +296,7 @@ func TestABrowserIsOfferedAnAsksOptionsButNotItsReply(t *testing.T) {
 	service := newTestPushService(t, browser)
 	reg, _ := subscribedTestBrowser(t, service.server.URL+"/push/secret-capability", browser)
 	d := newTestDaemon(t, reg, nil)
-	if err := reg.RegisterSession(surface.Session{ID: "asker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle}); err != nil {
+	if err := reg.RecordObservedSession(surface.Session{ID: "asker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	ask, err := reg.RaiseAsk(registry.Ask{SessionID: "asker", Origin: registry.AskOriginAgent, Title: "Ship it?", RoutedTo: registry.AskToPerson, Questions: []registry.AskQuestion{{Question: "Ship it?", Options: []registry.AskOption{{ID: "o0", Label: "Ship"}, {ID: "o1", Label: "Wait"}}}}}, time.Now())

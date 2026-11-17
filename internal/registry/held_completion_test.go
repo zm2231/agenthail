@@ -28,7 +28,7 @@ func TestAnUpgradedRegistryHoldsACompletionAndWatchesItsSessionUntilReleased(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := old.RegisterSession(surface.Session{ID: "codex", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+	if err := old.RecordObservedSession(surface.Session{ID: "codex", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
 	if err := old.SaveRuntimeState("codex", surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1"}); err != nil {

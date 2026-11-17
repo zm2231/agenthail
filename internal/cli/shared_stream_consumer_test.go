@@ -138,7 +138,7 @@ func TestSendReplyToNewNotionThreadNeverStealsTakenAlias(t *testing.T) {
 		sendResult: &surface.SendResult{UUID: "notion-thread", Accepted: true},
 	}
 	app, registry := cliFixture(t, fake)
-	if err := registry.RegisterSession(surface.Session{ID: "existing", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}); err != nil {
+	if err := registry.RecordObservedSession(surface.Session{ID: "existing", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.SetAlias("launch-notes", "existing"); err != nil {

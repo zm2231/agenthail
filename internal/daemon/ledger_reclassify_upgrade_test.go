@@ -15,7 +15,7 @@ import (
 func TestASessionWithNoHookCaptureSkipsTheRederive(t *testing.T) {
 	d, r, _ := ledgerDaemon(t)
 	s := surface.Session{ID: "quiet", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle, Transcript: "/transcript.jsonl"}
-	if err := r.RegisterSession(s); err != nil {
+	if err := r.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	payload, _ := json.Marshal(sessionJournalPayload{ItemID: "100-aaaaaa-0", Op: "upsert", Version: 1, ProviderKey: "timeline:100-aaaaaa-0", Kind: "message", Role: "user", Body: "hello"})
@@ -51,7 +51,7 @@ func TestRederivesWaitForASlot(t *testing.T) {
 	r := openLedgerRegistry(t)
 	manager := newTestSourceManager(t, r)
 	s := surface.Session{ID: "waiting", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: "/transcript.jsonl"}
-	if err := r.RegisterSession(s); err != nil {
+	if err := r.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	for range journalRederives {
@@ -74,7 +74,7 @@ func TestRederivingAnOlderJournalReclassifiesAnEarlierHookCapture(t *testing.T) 
 		t.Fatal(err)
 	}
 	s := surface.Session{ID: "upgraded", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: p.dir, Status: surface.StatusIdle, Transcript: "/transcript.jsonl"}
-	if err := r.RegisterSession(s); err != nil {
+	if err := r.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	for _, prompt := range []ledgerCaptureRequest{{SessionID: s.ID, PromptID: "wake-old", Prompt: "Check the verdict; continue the loop."}, {SessionID: s.ID, PromptID: "typed-old", Prompt: "ship it"}} {

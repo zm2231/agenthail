@@ -18,7 +18,7 @@ func TestAReplyStreamedPastTheInlineBodyReadsBackWhole(t *testing.T) {
 	}
 	t.Cleanup(func() { r.Close() })
 	session := surface.Session{ID: "long-reply", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, r), session: session, epoch: "long", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
