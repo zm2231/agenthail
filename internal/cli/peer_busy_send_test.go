@@ -27,7 +27,7 @@ func TestSendToABusyClaudeSessionRidesItsPeerSocketWithTheSender(t *testing.T) {
 	fixture.RecordStatus(originalConversation, fixture.Home, liveBridge, "busy", "", time.Now())
 	peers := claudetest.ListenPeerManager(t, fixture.Home)
 	sender := surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-	if err := r.RegisterSession(sender); err != nil {
+	if err := r.RecordObservedSession(sender); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_SESSION_ID", sender.ID)
@@ -108,7 +108,7 @@ func TestASteerABusyClaudeSessionsAgentMayNotSendIsQueued(t *testing.T) {
 	fixture.RecordStatus(originalConversation, fixture.Home, liveBridge, "busy", "", time.Now())
 	peers := claudetest.ListenPeerManager(t, fixture.Home)
 	worker := surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, Source: "vscode", Transport: "desktop"}
-	if err := r.RegisterSession(worker); err != nil {
+	if err := r.RecordObservedSession(worker); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_SESSION_ID", worker.ID)

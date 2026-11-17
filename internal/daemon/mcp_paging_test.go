@@ -103,7 +103,7 @@ func TestMCPSessionTraversalReturnsEveryStandingSessionOnce(t *testing.T) {
 		}
 		moved, _ := r.Session("page-4")
 		moved.LastActive = time.Now().Add(time.Hour)
-		if err := r.RegisterSession(*moved); err != nil {
+		if err := r.RecordObservedSession(*moved); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := r.WriteDB().Exec(`DELETE FROM sessions WHERE id IN ('page-3','page-4')`); err != nil {
@@ -136,7 +136,7 @@ func TestMCPRequestsReturnEveryOpenRequestInOneCall(t *testing.T) {
 	responder := &requestingSurface{daemonSurface: base}
 	d := newTestDaemon(t, r, []surface.Surface{responder})
 	worker := surface.Session{ID: "asker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}
-	if err := r.RegisterSession(worker); err != nil {
+	if err := r.RecordObservedSession(worker); err != nil {
 		t.Fatal(err)
 	}
 	base.sessions[worker.ID] = worker

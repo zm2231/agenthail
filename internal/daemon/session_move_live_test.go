@@ -70,7 +70,7 @@ func TestALiveClaudeConversationKeepsItsHistoryAndTasksAcrossAMove(t *testing.T)
 	}
 	session := hostedSession(t, source.claude, started.ID)
 	clis = append(clis, session.PID)
-	if err := source.reg.RegisterSession(session); err != nil {
+	if err := source.reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("source: %s", awaitAssistantText(t, source.host.Home, session.ID, "STORED-7Q"))

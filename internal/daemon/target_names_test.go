@@ -16,7 +16,7 @@ func TestResolveNamedTargetMatchesOnlyThatName(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler, token := dashboardRouter(d), pairedControlToken(t, r)
-	if err := r.RegisterSession(surface.Session{ID: "session_named", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claudeprobe-a3", Status: surface.StatusIdle}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "session_named", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claudeprobe-a3", Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	for target, want := range map[string]int{"@probe-a": 0, "@chief": 1} {
@@ -39,7 +39,7 @@ func TestResolveTellsAPairedHostWhichMatchesTheTargetIdentifies(t *testing.T) {
 	claude := surface.Session{ID: "claude-live", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "voice hotfix", Cwd: "/work/voice", PID: 4242, Transcript: "/home/fixture/.claude/projects/work/0d1e2f3a-conversation.jsonl", Status: surface.StatusIdle}
 	child := surface.Session{ID: "child-ada", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "subAgent", Transport: "desktop", Subagent: &surface.Subagent{ParentID: "to", RootID: "to", Depth: 1, Nickname: "Ada"}}
 	for _, session := range []surface.Session{claude, child} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

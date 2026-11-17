@@ -92,7 +92,7 @@ func newCheckpointFixture(t *testing.T) *checkpointFixture {
 	}
 	t.Cleanup(func() { r.Close() })
 	session := surface.Session{ID: checkpointConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	f := &checkpointFixture{registry: r, session: session, adapter: &catchUpClaude{Claude: surfaces.NewClaude(nil, fixture.Home)}}
@@ -269,7 +269,7 @@ func TestALiveSourceLeavesItsCheckpointWhereItsStreamStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path, Cwd: fixture.Home}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}

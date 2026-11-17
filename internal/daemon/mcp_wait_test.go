@@ -400,7 +400,7 @@ func TestAWaitOnManyLargeResultsFitsAndReturnsTheRestNext(t *testing.T) {
 	ids := []string{}
 	for index := range mcpWaitMaxTasks {
 		child := surface.Session{ID: fmt.Sprintf("big-%d", index), Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-		if err := f.r.RegisterSession(child); err != nil {
+		if err := f.r.RecordObservedSession(child); err != nil {
 			t.Fatal(err)
 		}
 		task, err := f.r.CreateTask(f.task.Parent, child.ID, "work", time.Now())

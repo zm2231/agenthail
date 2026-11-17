@@ -69,7 +69,7 @@ func TestSessionFilesFollowTheCheckoutsIgnoreRules(t *testing.T) {
 	}
 	runGit(t, repo, "add", ".gitignore", "internal", "README.md")
 	session.Cwd = filepath.Join(repo, "internal")
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	handler := dashboardRouter(d)
@@ -83,7 +83,7 @@ func TestSessionFilesFollowTheCheckoutsIgnoreRules(t *testing.T) {
 	}
 
 	session.Cwd = repo
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	_, body, _ = getSessionFiles(t, handler, "id="+url.QueryEscape(session.ID))
@@ -116,7 +116,7 @@ func TestSessionFilesWalkAPlainDirectoryWithoutLeavingIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	session.Cwd = dir
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	handler := dashboardRouter(d)
@@ -137,7 +137,7 @@ func TestSessionFilesLimitsAndRefusals(t *testing.T) {
 		writeTree(t, dir, filepath.ToSlash(filepath.Join("many", strings.Repeat("f", 1+i%5)+string(rune('a'+i%26))+time.Duration(i).String()+".txt")))
 	}
 	session.Cwd = dir
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	handler := dashboardRouter(d)
@@ -154,14 +154,14 @@ func TestSessionFilesLimitsAndRefusals(t *testing.T) {
 		t.Fatalf("missing session: %d %s", code, raw)
 	}
 	session.Cwd = ""
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if code, _, raw := getSessionFiles(t, handler, "id="+url.QueryEscape(session.ID)); code != http.StatusNotFound || !strings.Contains(raw, "no_cwd") {
 		t.Fatalf("no cwd: %d %s", code, raw)
 	}
 	session.Cwd = filepath.Join(dir, "gone")
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if code, _, raw := getSessionFiles(t, handler, "id="+url.QueryEscape(session.ID)); code != http.StatusNotFound || !strings.Contains(raw, "no_cwd") {

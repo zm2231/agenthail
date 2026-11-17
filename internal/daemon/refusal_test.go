@@ -37,7 +37,7 @@ func TestARefusalThatReturnsAfterItClearedAsksTheSenderAgain(t *testing.T) {
 			target := surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}
 			sender := surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
 			for _, session := range []surface.Session{target, sender} {
-				if err := store.RegisterSession(session); err != nil {
+				if err := store.RecordObservedSession(session); err != nil {
 					t.Fatal(err)
 				}
 			}

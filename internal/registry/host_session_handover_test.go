@@ -50,7 +50,7 @@ func TestAHostListsTheSessionsItMovedOutWithWhereTheyWent(t *testing.T) {
 	}
 	const moved, kept = "moved-out", "kept-here"
 	for _, id := range []string{moved, kept} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 9, Transcript: "/tmp/" + id + ".jsonl", HasLocal: true}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 9, Transcript: "/tmp/" + id + ".jsonl", HasLocal: true}); err != nil {
 			t.Fatal(err)
 		}
 	}

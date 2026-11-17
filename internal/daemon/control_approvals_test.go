@@ -18,7 +18,7 @@ func (f approvalFixture) outsider(t *testing.T) surface.Session {
 	gadget := widgetRepo(t, "https://github.com/example/gadget.git")
 	outsider := surface.Session{ID: "outsider", Name: "Gadget release", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: gadget, LastActive: time.Now()}
 	f.d.Surfaces[0].(*daemonSurface).sessions[outsider.ID] = outsider
-	if err := f.r.RegisterSession(outsider); err != nil {
+	if err := f.r.RecordObservedSession(outsider); err != nil {
 		t.Fatal(err)
 	}
 	f.d.discoverCatalog(context.Background())

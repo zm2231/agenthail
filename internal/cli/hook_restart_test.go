@@ -44,7 +44,7 @@ func newPromptRestart(t *testing.T) (*promptRestart, func()) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	if err := store.RegisterSession(surface.Session{ID: restartConversation, Bridge: "session_question", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: claude.PID, Status: surface.StatusBusy, HasLocal: true, Transcript: transcript}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: restartConversation, Bridge: "session_question", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: claude.PID, Status: surface.StatusBusy, HasLocal: true, Transcript: transcript}); err != nil {
 		t.Fatal(err)
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

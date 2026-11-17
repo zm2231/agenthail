@@ -76,9 +76,21 @@ func (d *Daemon) registerVoiceOperator(ctx context.Context, operator surface.Ses
 	if live == nil || live.ID != operator.ID {
 		return fmt.Errorf("verify voice operator: live session did not retain exact identity %s", operator.ID)
 	}
-	operator.Transport, operator.RuntimeKind = live.Transport, live.RuntimeKind
-	if err := d.Registry.RegisterSession(operator); err != nil {
+	stored, err := d.Registry.Session(operator.ID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		operator.Transport, operator.RuntimeKind = live.Transport, live.RuntimeKind
+		if err := d.Registry.RecordObservedSession(operator); err != nil {
+			return err
+		}
+	case err != nil:
 		return err
+	default:
+		routed := *stored
+		routed.Transport, routed.RuntimeKind = live.Transport, live.RuntimeKind
+		if err := d.Registry.UpdateSession(routed, registry.LearnedSessionUpdate(*stored, routed)); err != nil {
+			return err
+		}
 	}
 	if err := d.Registry.RecordSessionOrigin(registry.SessionOrigin{SessionID: operator.ID, Via: registry.OriginVoice}); err != nil {
 		return err

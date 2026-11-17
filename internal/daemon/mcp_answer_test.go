@@ -64,7 +64,7 @@ func newMCPAnswerFixture(t *testing.T) *mcpAnswerFixture {
 	sessions := map[string]surface.Session{}
 	for _, id := range []string{"lead", "worker"} {
 		session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle, Cwd: root}
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		base.sessions[id], sessions[id] = session, session
@@ -239,7 +239,7 @@ func TestTheVoiceOperatorAnswersAPermissionRequestForThePerson(t *testing.T) {
 		t.Fatal(err)
 	}
 	operator := surface.Session{ID: "operator", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle, Cwd: lead.Cwd}
-	if err := f.r.RegisterSession(operator); err != nil {
+	if err := f.r.RecordObservedSession(operator); err != nil {
 		t.Fatal(err)
 	}
 	f.surface.sessions["operator"] = operator

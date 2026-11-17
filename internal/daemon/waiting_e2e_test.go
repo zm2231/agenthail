@@ -271,7 +271,7 @@ func newClaudeQuestion(t *testing.T) claudeQuestion {
 	}
 	t.Cleanup(func() { store.Close() })
 	session := surface.Session{ID: "conversation-question", Bridge: "session_question", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Transport: "uds", Status: surface.StatusBusy, HasLocal: true, Transcript: transcript}
-	if err := store.RegisterSession(session); err != nil {
+	if err := store.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	pushes := newPushRecorder(t, store)
@@ -687,7 +687,7 @@ func TestQueuedPeerMessageReachesARunningOrWaitingClaudeTurnOverItsSocket(t *tes
 		}
 		manager := claudetest.ListenPeerManager(t, q.process.Home)
 		sender := surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-		if err := q.store.RegisterSession(sender); err != nil {
+		if err := q.store.RecordObservedSession(sender); err != nil {
 			t.Fatal(err)
 		}
 		peerID, _, err := q.store.QueueDeliveryWithIntent(q.session.ID, "handoff", "", surface.SendOptions{SourceSessionID: sender.ID})

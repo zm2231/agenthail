@@ -40,7 +40,7 @@ func settleIdle(t *testing.T, reg *registry.Registry, id string) {
 		t.Fatal(err)
 	}
 	session.Status = surface.StatusIdle
-	if err := reg.RegisterSession(*session); err != nil {
+	if err := reg.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -206,7 +206,7 @@ func TestAWorktreeTakenOrSettledRepublishesItsSessionsRow(t *testing.T) {
 	if err := reg.BeginWork(registry.WorkRecord{WorktreePath: path, RepoRoot: filepath.Dir(path), Branch: "ah/wt", BaseRef: "main", BaseCommit: "base"}, time.Now().Add(-2*workCreatingStale)); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.RegisterSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: path, Status: surface.StatusIdle}); err != nil {
+	if err := reg.RecordObservedSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: path, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	republished := func(step string) {
@@ -284,7 +284,7 @@ func TestACreateThatCrashedIsReconciledFromItsRecord(t *testing.T) {
 		return plan
 	}
 	adopted, orphan := begin("adopted"), begin("orphan")
-	if err := reg.RegisterSession(surface.Session{ID: "survivor", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: adopted.Cwd, Status: surface.StatusIdle}); err != nil {
+	if err := reg.RecordObservedSession(surface.Session{ID: "survivor", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: adopted.Cwd, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	unmade, err := worktree.NewPlan(context.Background(), worktree.Spec{Cwd: checkout, Name: "unmade"})
@@ -341,7 +341,7 @@ func TestAWorktreeAnotherSessionIsWorkingInIsKeptUntilItStops(t *testing.T) {
 	}
 	settleIdle(t, reg, "started")
 	path := filepath.Join(checkout, worktree.Dir, "ah-shared")
-	if err := reg.RegisterSession(surface.Session{ID: "visitor", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: path, Status: surface.StatusBusy}); err != nil {
+	if err := reg.RecordObservedSession(surface.Session{ID: "visitor", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: path, Status: surface.StatusBusy}); err != nil {
 		t.Fatal(err)
 	}
 	if code, answer := workAction(t, d, map[string]any{"action": "session-archive", "sessionId": "started"}); code != http.StatusOK {

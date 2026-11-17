@@ -39,7 +39,7 @@ func newLimitFixture(t *testing.T, ids ...string) *limitFixture {
 		if err := os.WriteFile(session.Transcript, []byte("{}\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		f.fake.sessions[id] = session
@@ -317,7 +317,7 @@ func TestASessionWhoseRowNamesNoTranscriptIsReadFromTheOneItHas(t *testing.T) {
 	session := f.fake.sessions["worker"]
 	f.fake.transcripts = map[string]string{"worker": session.Transcript}
 	session.Transcript = ""
-	if err := f.r.RegisterSession(session); err != nil {
+	if err := f.r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	refusedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
@@ -331,7 +331,7 @@ func TestASessionWhoseRowNamesNoTranscriptIsReadFromTheOneItHas(t *testing.T) {
 func TestASessionWithoutATranscriptIsNotReadEachPass(t *testing.T) {
 	f := newLimitFixture(t)
 	session := surface.Session{ID: "exited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 1 << 30, Status: surface.StatusIdle}
-	if err := f.r.RegisterSession(session); err != nil {
+	if err := f.r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	f.fake.sessions["exited"] = session

@@ -80,7 +80,7 @@ func newClassedPeerFixture(t *testing.T, senderClass func(context.Context, surfa
 	}
 	t.Cleanup(func() { _ = reg.Close() })
 	for _, id := range sessionIDs {
-		if err := reg.RegisterSession(surface.Session{ID: id, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: id, Status: surface.StatusIdle}); err != nil {
+		if err := reg.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: id, Status: surface.StatusIdle}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -442,7 +442,7 @@ func TestManagerReplyRelayLifecycle(t *testing.T) {
 		t.Fatalf("old relay socket remains after restart: %v", err)
 	}
 
-	if err := f.reg.RegisterSession(surface.Session{ID: "recent", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "recent", Status: surface.StatusOffline}); err != nil {
+	if err := f.reg.RecordObservedSession(surface.Session{ID: "recent", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "recent", Status: surface.StatusOffline}); err != nil {
 		t.Fatal(err)
 	}
 	f.manager.RetireInactive(time.Now().Add(48*time.Hour), 24*time.Hour)
@@ -456,7 +456,7 @@ func TestManagerReplyRelayLifecycle(t *testing.T) {
 
 func TestASenderWhoseProcessEndedStillSendsButIsNotAdvertised(t *testing.T) {
 	f := newPeerFixture(t)
-	if err := f.reg.RegisterSession(surface.Session{ID: "ended", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "ended", Status: surface.StatusOffline}); err != nil {
+	if err := f.reg.RecordObservedSession(surface.Session{ID: "ended", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "ended", Status: surface.StatusOffline}); err != nil {
 		t.Fatal(err)
 	}
 	if failures := f.manager.Advertise(f.ctx, []surface.Session{{ID: "ended", Status: surface.StatusOffline}}); failures["ended"] == nil || len(f.records()) != 0 {
@@ -552,7 +552,7 @@ func TestEnsureReportsWorkerStartupDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	if err := reg.RegisterSession(surface.Session{ID: "source", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}); err != nil {
+	if err := reg.RecordObservedSession(surface.Session{ID: "source", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -580,7 +580,7 @@ func TestManagerRestartReconcilesCrashArtifacts(t *testing.T) {
 	}
 	defer reg.Close()
 	session := surface.Session{ID: "source", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "source", Status: surface.StatusBusy, LastActive: time.Now()}
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

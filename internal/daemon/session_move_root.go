@@ -19,6 +19,7 @@ func (d *Daemon) moveSessionToRoot(ctx context.Context, request sessionMoveReque
 	if err != nil {
 		return sessionMoveResult{}, MoveRefusedError{Reason: fmt.Sprintf("session %s not found", request.SessionID)}
 	}
+	read := *session
 	if reason, err := d.Registry.SessionMoveRefusal(session.ID, false); err != nil {
 		return sessionMoveResult{}, err
 	} else if reason != "" {
@@ -70,7 +71,7 @@ func (d *Daemon) moveSessionToRoot(ctx context.Context, request sessionMoveReque
 		return result, err
 	}
 	if resumed != nil {
-		if err := d.Registry.RegisterSession(*resumed); err != nil {
+		if err := d.Registry.RecordLearnedSession(&read, *resumed); err != nil {
 			d.logRuntimeError("move "+manifest.ID+" register", err)
 		}
 	}

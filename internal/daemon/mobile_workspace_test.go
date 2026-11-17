@@ -14,7 +14,7 @@ func TestMobileWorkspaceSurvivesSnapshotAndSearch(t *testing.T) {
 	session.Cwd = "/work/projects/release"
 	fake.sessions[session.ID] = session
 	fake.searchResults = []surface.SessionSearchResult{{Session: session, Snippet: "release work"}}
-	if err := registry.RegisterSession(session); err != nil {
+	if err := registry.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	handler := dashboardRouter(d)

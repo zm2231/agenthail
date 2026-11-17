@@ -302,9 +302,8 @@ func (d *Daemon) denyForThePerson(ctx context.Context, session *surface.Session,
 		return conflict(err.Error())
 	}
 	if err := d.ensureDashboardWritable(ctx, adapter, session); err != nil {
-		var owned registry.SessionOwnedError
-		if errors.As(err, &owned) && owned.HostID != "" {
-			return registry.MovedError(owned)
+		if moved := sessionMovedError(err); moved != nil {
+			return moved
 		}
 		return conflict(err.Error())
 	}

@@ -60,7 +60,7 @@ func TestMirroredQueueCountsMatchAFullRecomputeAfterAnyQueueChange(t *testing.T)
 	locals := []string{"l0", "l1", "l2"}
 	for _, id := range locals {
 		session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: `{"id":"` + id + `","queueCount":0}`}, CatalogEvent{DedupeKey: id + ":upsert", Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {

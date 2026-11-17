@@ -282,10 +282,10 @@ func TestCmdSteerUsesResolvedSourceAndUnifiedReceipt(t *testing.T) {
 	}
 	app, r := cliFixture(t, fake)
 	source := surface.Session{ID: "source", Name: "Source", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "vscode", Transport: "desktop", Status: surface.StatusIdle}
-	if err := r.RegisterSession(source); err != nil {
+	if err := r.RecordObservedSession(source); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(fake.sessions["target"]); err != nil {
+	if err := r.RecordObservedSession(fake.sessions["target"]); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.RecordSessionOrigin(registry.OriginOf("target", "source")); err != nil {
@@ -317,7 +317,7 @@ func TestCmdSteerReadsMessageFromStdin(t *testing.T) {
 		caps:     surface.Capabilities{Steer: true},
 	}
 	app, r := cliFixture(t, fake)
-	if err := r.RegisterSession(fake.sessions["target"]); err != nil {
+	if err := r.RecordObservedSession(fake.sessions["target"]); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "steer.txt")
@@ -523,7 +523,7 @@ func TestQueueListFiltersByTargetMineAndWorkspaceAncestry(t *testing.T) {
 	}
 	for _, session := range sessions {
 		fake.sessions[session.ID] = session
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		projection := `{}`
@@ -664,7 +664,7 @@ func TestRelayListShowsDerivedFiringEvidence(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, r := cliFixture(t, fake)
 	register := func(id string) {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1051,7 +1051,7 @@ func TestQualifiedTargetsFallBackWithinTheirSurfaceWhileItIsUnreachable(t *testi
 	notion := &cliSurface{kind: surface.KindNotion, resolveErr: unreachable}
 	app := &App{Registry: r, Surfaces: []SurfaceEntry{{Name: "claude", Surface: claude}, {Name: "notion", Surface: notion}}, DefaultTimeout: 5 * time.Second, catalogDaemonRunning: func() bool { return false }}
 	for _, session := range []surface.Session{{ID: "shared-claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "release"}, {ID: "shared-notion", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "release"}} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1062,7 +1062,7 @@ func TestQualifiedTargetsFallBackWithinTheirSurfaceWhileItIsUnreachable(t *testi
 			t.Fatalf("%s: session=%+v err=%v", target, session, err)
 		}
 	}
-	if err := r.RegisterSession(surface.Session{ID: "shared-claude-2", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "shared-claude-2", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := app.resolveTarget(context.Background(), "claude:shared"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
@@ -1132,7 +1132,7 @@ func TestQueueShowsASessionWaitingOnTheUser(t *testing.T) {
 	asking := surface.Session{ID: "asking", Name: "asking", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusBusy, WaitingOn: waiting, LastActive: time.Now()}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{asking.ID: asking}, listed: []surface.Session{asking}}
 	app, r := cliFixture(t, fake)
-	if err := r.RegisterSession(asking); err != nil {
+	if err := r.RecordObservedSession(asking); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.SyncWaits(asking.ID, []registry.Wait{{Ref: waiting.ID, Kind: waiting.Kind}}, "", time.Now()); err != nil {

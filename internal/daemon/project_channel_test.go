@@ -31,7 +31,7 @@ func moveSession(t *testing.T, node *federationNode, id, cwd string, lastActive 
 	}
 	session.Cwd, session.LastActive = cwd, lastActive
 	node.fake.sessions[id] = session
-	if err := node.reg.RegisterSession(session); err != nil {
+	if err := node.reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -156,7 +156,7 @@ func TestAChannelNameAProjectAnswersToIsRefused(t *testing.T) {
 	to.Cwd, to.LastActive = repo, time.Now()
 	for _, session := range []surface.Session{from, to} {
 		fake.sessions[session.ID] = session
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -198,7 +198,7 @@ func TestAProjectNameSeveralProjectsShareIsRefused(t *testing.T) {
 	to.Cwd, to.LastActive = widgetRepo(t, "https://github.com/beta/widget.git"), time.Now()
 	for _, session := range []surface.Session{from, to} {
 		fake.sessions[session.ID] = session
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

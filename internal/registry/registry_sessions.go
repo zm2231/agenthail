@@ -10,7 +10,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func (r *Registry) RegisterSession(s surface.Session) error {
+func (r *Registry) RecordObservedSession(s surface.Session) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -52,47 +52,39 @@ func registerSessionRowTx(tx *sql.Tx, s surface.Session) error {
 		return err
 	}
 	if s.Runtime != nil {
-		location, err := json.Marshal(s.Runtime.Location)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,runtime_launcher,runtime_location,runtime_focusable,updated_at) VALUES(?,?,?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET runtime_launcher=excluded.runtime_launcher,runtime_location=excluded.runtime_location,runtime_focusable=excluded.runtime_focusable,updated_at=datetime('now')`, s.ID, string(s.Runtime.Launcher), location, b2i(s.Runtime.Focusable)); err != nil {
+		if err := upsertSessionRuntimeTx(tx, s); err != nil {
 			return err
 		}
 	}
-	if s.Surface == surface.KindClaude {
-		pids := make([]int, 0, 1+len(s.Holders))
-		if s.PID > 0 {
-			pids = append(pids, s.PID)
-		}
-		for _, holder := range s.Holders {
-			pids = append(pids, holder.PID)
-		}
-		for _, pid := range pids {
-			if _, err := tx.Exec(`UPDATE sessions SET pid=0,pid_identity='',bridge='',updated_at=datetime('now') WHERE surface=? AND pid=? AND id<>?`, string(surface.KindClaude), pid, s.ID); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return releaseClaudePIDsTx(tx, s)
 }
 
-func markRestoredEndedTx(tx *sql.Tx, ended, read surface.Session) error {
-	lastActive := int64(0)
-	if !ended.LastActive.IsZero() {
-		lastActive = ended.LastActive.UnixMilli()
-	}
-	result, err := tx.Exec(`UPDATE sessions SET status=?,ended=?,pid=0,pid_identity='',bridge='',last_active_ms=?,updated_at=datetime('now')
-		WHERE id=? AND runtime_kind=? AND transport=? AND pid=? AND bridge=? AND status=?`,
-		string(ended.Status), b2i(sessionEnded(ended)), lastActive,
-		read.ID, string(read.RuntimeKind), read.Transport, read.PID, read.Bridge, string(read.Status))
+func upsertSessionRuntimeTx(tx *sql.Tx, s surface.Session) error {
+	location, err := json.Marshal(s.Runtime.Location)
 	if err != nil {
 		return err
 	}
-	if rows, err := result.RowsAffected(); err != nil {
-		return err
-	} else if rows == 0 {
-		return ErrCatalogRestoreChanged
+	_, err = tx.Exec(`INSERT INTO session_runtime(session_id,runtime_launcher,runtime_location,runtime_focusable,updated_at) VALUES(?,?,?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET runtime_launcher=excluded.runtime_launcher,runtime_location=excluded.runtime_location,runtime_focusable=excluded.runtime_focusable,updated_at=datetime('now')`, s.ID, string(s.Runtime.Launcher), location, b2i(s.Runtime.Focusable))
+	return err
+}
+
+// A Claude process holds one conversation, so a row that takes its pid takes
+// it from any other row.
+func releaseClaudePIDsTx(tx *sql.Tx, s surface.Session) error {
+	if s.Surface != surface.KindClaude {
+		return nil
+	}
+	pids := make([]int, 0, 1+len(s.Holders))
+	if s.PID > 0 {
+		pids = append(pids, s.PID)
+	}
+	for _, holder := range s.Holders {
+		pids = append(pids, holder.PID)
+	}
+	for _, pid := range pids {
+		if _, err := tx.Exec(`UPDATE sessions SET pid=0,pid_identity='',bridge='',updated_at=datetime('now') WHERE surface=? AND pid=? AND id<>?`, string(surface.KindClaude), pid, s.ID); err != nil {
+			return err
+		}
 	}
 	return nil
 }

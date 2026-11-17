@@ -156,7 +156,7 @@ func TestSessionOptionsSuggestOnlyRecentSessionFoldersOutsideProjects(t *testing
 		}
 		session := surface.Session{ID: "loose-" + strings.ReplaceAll(name, "/", "-"), Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: folder, LastActive: now.Add(time.Duration(index) * time.Minute)}
 		fake.sessions[session.ID] = session
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

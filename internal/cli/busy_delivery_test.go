@@ -145,7 +145,7 @@ func TestARemoteSteerCarriesTheAgentThatSentIt(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"steer", "vps::@builder", "from the CLI"}) }); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_SESSION_ID", "worker")
@@ -197,7 +197,7 @@ func TestASteerFromAnAgentThatMayNotSteerGoesAsASend(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": idle, "worker": worker}, caps: surface.Capabilities{Send: true, Steer: true}}
 	app, r := cliFixture(t, fake)
 	for _, session := range []surface.Session{idle, worker} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

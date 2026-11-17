@@ -12,7 +12,7 @@ import (
 func registerFork(t *testing.T, r *registry.Registry, id, parent, cwd string) surface.Session {
 	t.Helper()
 	s := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: cwd, Status: surface.StatusIdle, ForkedFrom: parent}
-	if err := r.RegisterSession(s); err != nil {
+	if err := r.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	return s

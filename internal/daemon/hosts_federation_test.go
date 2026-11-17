@@ -330,7 +330,7 @@ func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
 	for _, id := range sessionIDs {
 		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work " + id, Cwd: cwd, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", LastActive: time.Now()}
 		sessions[id] = session
-		if err := reg.RegisterSession(session); err != nil {
+		if err := reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

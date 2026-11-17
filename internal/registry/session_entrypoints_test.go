@@ -16,7 +16,7 @@ func scriptedFixture(t *testing.T) *Registry {
 		if id == "in-our-host" {
 			session.RuntimeKind = surface.RuntimeClaudeHost
 		}
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: id}, CatalogEvent{DedupeKey: "fixture:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {

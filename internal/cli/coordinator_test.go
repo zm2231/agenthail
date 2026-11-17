@@ -108,7 +108,7 @@ func (c *coordinatorCLI) withGoneCoordinator(t *testing.T) *coordinatorCLI {
 
 func (c *coordinatorCLI) register(t *testing.T, session surface.Session) {
 	t.Helper()
-	if err := c.r.RegisterSession(session); err != nil {
+	if err := c.r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 }

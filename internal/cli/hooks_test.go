@@ -141,7 +141,7 @@ func TestAnswerReachesAPromptTheDaemonHoldsForATerminalSession(t *testing.T) {
 	app, reg := cliFixture(t, fake)
 	session := surface.Session{ID: "terminal-1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "terminal work"}
 	fake.sessions[session.ID] = session
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if err := reg.SetAlias("terminal", session.ID); err != nil {

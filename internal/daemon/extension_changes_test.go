@@ -324,7 +324,7 @@ func TestChangeAsksLeftFromBeforeAreWithdrawnWhenTheDaemonStartsEvenWithExtensio
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	if err := store.RegisterSession(surface.Session{ID: "to", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "to", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	change, grant := raiseLeftoverAsks(t, store)

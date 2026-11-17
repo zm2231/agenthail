@@ -3,7 +3,6 @@ package registry
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -24,16 +23,11 @@ type CatalogSessionState struct {
 	// HostQueueCount is the queue count the owning host reported for a
 	// mirrored row; the projection adds this daemon's held sends to it.
 	HostQueueCount int
-	// EndedFrom is the stored row a restore of an ended session read. The
-	// restore owns only the ended state, so the write marks the session ended
-	// while its stored runtime and transport still match this row, and writes
-	// nothing when another writer has changed them since.
-	EndedFrom *surface.Session
+	// Update, when set, writes only the fields its writer owns. Without it
+	// the write registers the whole row, as a discovery pass does from what
+	// it listed.
+	Update *SessionUpdate
 }
-
-// ErrCatalogRestoreChanged is a restore dropped because the session's stored
-// runtime or transport changed after the restore read it.
-var ErrCatalogRestoreChanged = errors.New("the session changed after the catalog read it to restore")
 
 type CatalogFreshness struct {
 	Generation uint64    `json:"generation"`
@@ -234,8 +228,10 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if err := validateQueueProjectionTx(tx, state.Session.ID, []byte(state.ProjectionFingerprint), event.Payload); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	if err := validateHostedRuntimeTx(tx, state.Session); err != nil {
-		return CatalogEvent{}, false, err
+	if state.Update == nil || state.Update.Owns&sessionRuntimeKindField != 0 {
+		if err := validateHostedRuntimeTx(tx, state.Session); err != nil {
+			return CatalogEvent{}, false, err
+		}
 	}
 	prior, err := readCatalogSessionPrior(tx, state.Session.ID)
 	if err != nil {
@@ -257,8 +253,8 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}
-	if state.EndedFrom != nil {
-		if err := markRestoredEndedTx(tx, state.Session, *state.EndedFrom); err != nil {
+	if state.Update != nil {
+		if err := updateSessionTx(tx, state.Session, *state.Update); err != nil {
 			return CatalogEvent{}, false, err
 		}
 	} else if err := registerSessionTx(tx, state.Session); err != nil {

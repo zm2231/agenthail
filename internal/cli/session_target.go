@@ -102,7 +102,7 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		}
 		isSyntheticNotion := kind == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
 		if a.registry() != nil && live && !isSyntheticNotion {
-			if err := a.registry().RegisterSession(*session); err != nil {
+			if err := a.registry().RecordObservedSession(*session); err != nil {
 				return nil, nil, fmt.Errorf("register %s session: %w", kind, err)
 			}
 		}
@@ -141,7 +141,7 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 					return nil, nil, fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
 				}
 				if live {
-					if err := a.registry().RegisterSession(*session); err != nil {
+					if err := a.registry().RecordObservedSession(*session); err != nil {
 						return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
 					}
 				}
@@ -182,7 +182,7 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 	if len(matches) == 1 {
 		candidate := matches[0]
 		if a.registry() != nil {
-			if err := a.registry().RegisterSession(*candidate.session); err != nil {
+			if err := a.registry().RecordObservedSession(*candidate.session); err != nil {
 				return nil, nil, fmt.Errorf("register %s session: %w", candidate.adapter.Name(), err)
 			}
 		}
@@ -195,12 +195,13 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 }
 
 func (a *App) ensureWritableTarget(ctx context.Context, session *surface.Session, adapter surface.Surface) error {
+	read := *session
 	if err := delivery.EnsureDeliverable(ctx, a.registry(), adapter, session); err != nil {
 		return err
 	}
 	isSyntheticNotion := session.Surface == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
 	if a.registry() != nil && !isSyntheticNotion {
-		if err := a.registry().RegisterSession(*session); err != nil {
+		if err := a.registry().UpdateSession(*session, registry.LearnedSessionUpdate(read, *session)); err != nil {
 			return fmt.Errorf("register %s session: %w", adapter.Name(), err)
 		}
 	}

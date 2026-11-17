@@ -56,7 +56,7 @@ func (d *Daemon) doSessionOperation(ctx context.Context, adapter surface.Surface
 			err = fmt.Errorf("fork returned no session")
 		}
 		if err == nil {
-			err = d.Registry.RegisterSession(*fork)
+			err = d.Registry.RecordObservedSession(*fork)
 			result = map[string]any{"session": fork}
 		}
 		if err == nil {
@@ -114,6 +114,7 @@ func (d *Daemon) doSessionAdopt(ctx context.Context, adapter surface.Surface, se
 	}
 	ctx, cancel := context.WithTimeout(ctx, sessionAdoptTimeout+request.Wait)
 	defer cancel()
+	read := *session
 	result, err := adopter.AdoptSession(ctx, session, request)
 	if err != nil {
 		var busy *surface.AdoptBusyError
@@ -139,7 +140,13 @@ func (d *Daemon) doSessionAdopt(ctx context.Context, adapter surface.Surface, se
 		return actionResult{}, &actionError{Status: status, Code: code, Message: err.Error(), Extra: extra}
 	}
 	if result.Session != nil {
-		if err := d.Registry.RegisterSession(*result.Session); err != nil {
+		record := d.Registry.RecordObservedSession
+		if result.Session.ID == read.ID {
+			record = func(adopted surface.Session) error {
+				return d.Registry.UpdateSession(adopted, registry.LearnedSessionUpdate(read, adopted))
+			}
+		}
+		if err := record(*result.Session); err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "session_adopt_unrecorded", fmt.Sprintf("session %s opened in Agenthail, but its registration failed: %s", session.ID, err))
 		}
 	}

@@ -22,7 +22,7 @@ func BenchmarkStreamingReplyAppends(b *testing.B) {
 			}
 			defer r.Close()
 			session := surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
-			if err := r.RegisterSession(session); err != nil {
+			if err := r.RecordObservedSession(session); err != nil {
 				b.Fatal(err)
 			}
 			source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(b, r), session: session, epoch: "bench", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
@@ -49,7 +49,7 @@ func BenchmarkStreamingReplyWire(b *testing.B) {
 			}
 			defer r.Close()
 			session := surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
-			if err := r.RegisterSession(session); err != nil {
+			if err := r.RecordObservedSession(session); err != nil {
 				b.Fatal(err)
 			}
 			source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(b, r), session: session, epoch: "wire", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}

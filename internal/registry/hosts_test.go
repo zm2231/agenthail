@@ -86,7 +86,7 @@ func TestHostCatalogRowsStayOwnedAndOutsideLocalResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	local := surface.Session{ID: "local-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
-	if err := r.RegisterSession(local); err != nil {
+	if err := r.RecordObservedSession(local); err != nil {
 		t.Fatal(err)
 	}
 	remote := surface.Session{ID: "remote-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "remote work", Status: surface.StatusBusy, PID: 42, Transcript: "/home/remote/t.jsonl"}
@@ -226,8 +226,8 @@ func TestLocalRegistrationRefusesHostOwnedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	takeover := surface.Session{ID: "remote-thread", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "local takeover", PID: 7, Transcript: "/tmp/local.jsonl"}
-	if err := r.RegisterSession(takeover); !errors.As(err, &SessionOwnedError{}) {
-		t.Fatalf("RegisterSession err=%v", err)
+	if err := r.RecordObservedSession(takeover); !errors.As(err, &SessionOwnedError{}) {
+		t.Fatalf("RecordObservedSession err=%v", err)
 	}
 	name, err := r.ReserveAlias("takeover", time.Now().Add(time.Hour))
 	if err != nil {
@@ -240,8 +240,8 @@ func TestLocalRegistrationRefusesHostOwnedSession(t *testing.T) {
 	if err != nil || len(launches) != 1 {
 		t.Fatalf("launches=%+v err=%v", launches, err)
 	}
-	if _, err := r.RegisterSessionAndDeletePending(takeover, launches[0]); !errors.As(err, &SessionOwnedError{}) {
-		t.Fatalf("RegisterSessionAndDeletePending err=%v", err)
+	if _, err := r.RecordObservedSessionAndDeletePending(takeover, launches[0]); !errors.As(err, &SessionOwnedError{}) {
+		t.Fatalf("RecordObservedSessionAndDeletePending err=%v", err)
 	}
 	after, err := r.Session("remote-thread")
 	if err != nil || after.Name != before.Name || after.Surface != before.Surface || after.PID != before.PID || after.Transcript != before.Transcript {
@@ -283,7 +283,7 @@ func TestLocalRegistrationTakesASessionItsHostStoppedServing(t *testing.T) {
 		t.Fatal(err)
 	}
 	local := surface.Session{ID: "remote-thread", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "here now", PID: 7, Transcript: "/tmp/local.jsonl", HasLocal: true}
-	if err := r.RegisterSession(local); err != nil {
+	if err := r.RecordObservedSession(local); err != nil {
 		t.Fatalf("a session its host no longer serves stayed blocked: %v", err)
 	}
 	if owner, err := r.SessionHost("remote-thread"); err != nil || owner != "" {

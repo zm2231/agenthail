@@ -30,7 +30,7 @@ func cardFixture(t *testing.T) (*App, *starterCLISurface, string) {
 		{ID: "planner-conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: cwd},
 		{ID: "lead-conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Cwd: cwd},
 	} {
-		if err := store.RegisterSession(session); err != nil {
+		if err := store.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

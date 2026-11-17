@@ -32,7 +32,7 @@ func newNoticeFixture(t *testing.T) noticeFixture {
 	sessions := map[string]surface.Session{}
 	for _, id := range []string{"worker", "lead", "spawner"} {
 		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: repo, LastActive: time.Now()}
-		if err := reg.RegisterSession(session); err != nil {
+		if err := reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		sessions[id] = session

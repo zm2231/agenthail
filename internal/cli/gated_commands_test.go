@@ -45,7 +45,7 @@ func newGatedFixture(t *testing.T) gatedFixture {
 	app, r := cliFixture(t, fake)
 	app.scopeOverride = nil
 	for _, s := range sessions {
-		if err := r.RegisterSession(s); err != nil {
+		if err := r.RecordObservedSession(s); err != nil {
 			t.Fatal(err)
 		}
 	}

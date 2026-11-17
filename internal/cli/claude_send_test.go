@@ -79,7 +79,7 @@ func exitedClaudeWithoutDaemon(t *testing.T) exitedClaude {
 	host.Start(t)
 	app, r := claudeCLIFixture(t, surfaces.NewClaude(nil, fixture.Home))
 	exited := surface.Session{ID: terminalConversation, Bridge: "session_terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "fixture terminal", PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(terminalConversation, fixture.Home)}
-	if err := r.RegisterSession(exited); err != nil {
+	if err := r.RecordObservedSession(exited); err != nil {
 		t.Fatal(err)
 	}
 	return exitedClaude{app: app, r: r, fixture: fixture, host: host, peers: claudetest.ListenPeerManager(t, fixture.Home), session: exited}
@@ -156,7 +156,7 @@ func TestAnIDPrefixTwoExitedSessionsShareResumesNeither(t *testing.T) {
 	e := exitedClaudeApp(t)
 	other := e.session
 	other.ID, other.Bridge, other.Name, other.Transcript = terminalConversation[:8]+"-0000-4000-8000-000000000000", "", "other terminal", ""
-	if err := e.r.RegisterSession(other); err != nil {
+	if err := e.r.RecordObservedSession(other); err != nil {
 		t.Fatal(err)
 	}
 	err := e.app.Run([]string{"send", terminalConversation[:8], "hello"})
@@ -172,7 +172,7 @@ func TestResolvingARegisteredSessionTheSurfaceCannotGiveDoesNotRefreshIt(t *test
 	for name, resolveErr := range map[string]error{"not listed": surface.ErrSessionNotFound, "surface unavailable": surface.DeliveryUnavailable(errors.New("fixture surface is down"))} {
 		t.Run(name, func(t *testing.T) {
 			app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude, resolveErr: resolveErr})
-			if err := r.RegisterSession(surface.Session{ID: "session_closed", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
+			if err := r.RecordObservedSession(surface.Session{ID: "session_closed", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
 				t.Fatal(err)
 			}
 			db, err := sql.Open("sqlite", r.Path())

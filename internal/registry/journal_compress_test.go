@@ -22,7 +22,7 @@ func journalCompressFixture(t *testing.T) (*Registry, string) {
 	t.Helper()
 	r := openTestRegistry(t)
 	session := "compress-me"
-	if err := r.RegisterSession(surface.Session{ID: session, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: session, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	return r, session

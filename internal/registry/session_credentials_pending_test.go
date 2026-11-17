@@ -29,21 +29,21 @@ func TestPendingCredentialAuthenticatesOnlyOnceItsSessionRegisters(t *testing.T)
 		t.Fatalf("claimed but unregistered credential authenticated: %v", err)
 	}
 	other := surface.Session{ID: "other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}
-	if err := r.RegisterSession(other); err != nil {
+	if err := r.RecordObservedSession(other); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.AuthenticateSessionToken(pending.Token, now); !errors.Is(err, ErrCredentialUnknown) {
 		t.Fatalf("another session's registration bound the credential: %v", err)
 	}
 	thread := surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}
-	if err := r.RegisterSession(thread); err != nil {
+	if err := r.RecordObservedSession(thread); err != nil {
 		t.Fatal(err)
 	}
 	credential, err := r.AuthenticateSessionToken(pending.Token, now)
 	if err != nil || credential.SessionID != "thread" {
 		t.Fatalf("bound credential=%+v err=%v", credential, err)
 	}
-	if err := r.RegisterSession(thread); err != nil {
+	if err := r.RecordObservedSession(thread); err != nil {
 		t.Fatal(err)
 	}
 	if again, err := r.AuthenticateSessionToken(pending.Token, now); err != nil || again.ID != credential.ID {
@@ -134,7 +134,7 @@ func TestExpiredPendingCredentialIsDeletedAndNeverBinds(t *testing.T) {
 		t.Fatalf("expired claim=%v err=%v", claimed, err)
 	}
 	for _, id := range []string{"late", "slow"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 			t.Fatal(err)
 		}
 	}

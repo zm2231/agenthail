@@ -9,19 +9,19 @@ import (
 func TestARegistrationCannotMoveAHostedProcessToTheTerminalRuntime(t *testing.T) {
 	r := openTestRegistry(t)
 	hosted := surface.Session{ID: "hosted", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: 4242, Status: surface.StatusIdle}
-	if err := r.RegisterSession(hosted); err != nil {
+	if err := r.RecordObservedSession(hosted); err != nil {
 		t.Fatal(err)
 	}
 	terminal := hosted
 	terminal.RuntimeKind = surface.RuntimeClaudeCLI
-	if err := r.RegisterSession(terminal); err != nil {
+	if err := r.RecordObservedSession(terminal); err != nil {
 		t.Fatal(err)
 	}
 	if stored, err := r.Session(hosted.ID); err != nil || stored.RuntimeKind != surface.RuntimeClaudeHost {
 		t.Fatalf("stored=%+v err=%v, want the same process kept on the host runtime", stored, err)
 	}
 	terminal.PID = 4343
-	if err := r.RegisterSession(terminal); err != nil {
+	if err := r.RecordObservedSession(terminal); err != nil {
 		t.Fatal(err)
 	}
 	if stored, err := r.Session(hosted.ID); err != nil || stored.RuntimeKind != surface.RuntimeClaudeCLI {
@@ -32,12 +32,12 @@ func TestARegistrationCannotMoveAHostedProcessToTheTerminalRuntime(t *testing.T)
 func TestATerminalProcessThatReusesAHostedProcessesPidIsRecordedAsATerminal(t *testing.T) {
 	r := openTestRegistry(t)
 	hosted := surface.Session{ID: "reused", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: 4242, PIDIdentity: "started-1", Status: surface.StatusIdle}
-	if err := r.RegisterSession(hosted); err != nil {
+	if err := r.RecordObservedSession(hosted); err != nil {
 		t.Fatal(err)
 	}
 	unread := hosted
 	unread.RuntimeKind, unread.PIDIdentity = surface.RuntimeClaudeCLI, ""
-	if err := r.RegisterSession(unread); err != nil {
+	if err := r.RecordObservedSession(unread); err != nil {
 		t.Fatal(err)
 	}
 	if stored, err := r.Session(hosted.ID); err != nil || stored.RuntimeKind != surface.RuntimeClaudeHost {
@@ -45,7 +45,7 @@ func TestATerminalProcessThatReusesAHostedProcessesPidIsRecordedAsATerminal(t *t
 	}
 	reused := hosted
 	reused.RuntimeKind, reused.PIDIdentity = surface.RuntimeClaudeCLI, "started-2"
-	if err := r.RegisterSession(reused); err != nil {
+	if err := r.RecordObservedSession(reused); err != nil {
 		t.Fatal(err)
 	}
 	if stored, err := r.Session(hosted.ID); err != nil || stored.RuntimeKind != surface.RuntimeClaudeCLI {

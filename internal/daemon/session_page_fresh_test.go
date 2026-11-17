@@ -29,7 +29,7 @@ func TestAPageThatWaitsShowsWhatTheTranscriptGainedWhileNothingFollowed(t *testi
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path, Cwd: fixture.Home}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}

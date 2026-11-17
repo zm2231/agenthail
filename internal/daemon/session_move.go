@@ -395,7 +395,7 @@ func (d *Daemon) setMoveOutState(id, conversation, state, detail string, from ..
 func (d *Daemon) publishMove(conversation string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	d.publishLive(ctx, conversation, func(*surface.Session) {})
+	d.publishLive(ctx, conversation, 0, func(*surface.Session) {})
 }
 
 func (d *Daemon) completeMoveOut(ctx context.Context, host *pairedHost, moveID string) error {

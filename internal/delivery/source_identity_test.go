@@ -39,11 +39,11 @@ func TestDispatcherAppliesSourceSessionIDToImmediateAndDeferredSend(t *testing.T
 	}
 	defer r.Close()
 	session := &surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
-	if err := r.RegisterSession(*session); err != nil {
+	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	for _, sourceID := range []string{"source-immediate", "source-deferred"} {
-		if err := r.RegisterSession(surface.Session{ID: sourceID, Surface: surface.SurfaceKind("agenthail"), RuntimeKind: surface.RuntimeOperator}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: sourceID, Surface: surface.SurfaceKind("agenthail"), RuntimeKind: surface.RuntimeOperator}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -74,7 +74,7 @@ func TestTheSurfaceIsToldHowTheTargetAddressesTheSender(t *testing.T) {
 	defer r.Close()
 	target := &surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
 	for _, session := range []surface.Session{*target, {ID: "aliased", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "aliased title"}, {ID: "titled", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "only a title"}} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

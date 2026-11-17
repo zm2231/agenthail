@@ -19,7 +19,7 @@ func TestSchema34MovesTheOperatorsMessagesToThePersonAndTheCLI(t *testing.T) {
 		{ID: "child", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "child"},
 		{ID: retiredOperatorID, Surface: "agenthail", RuntimeKind: surface.RuntimeOperator, Name: "Agenthail operator"},
 	} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

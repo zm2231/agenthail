@@ -13,7 +13,7 @@ func TestADiscoveryPassThatListsAHostedProcessAsATerminalKeepsTheOpensRegistrati
 	d, r, base, _, _ := daemonFixture(t)
 	base.kind = surface.KindClaude
 	opened := surface.Session{ID: "opened-by-host", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: 4242, Status: surface.StatusIdle, Cwd: "/fixture"}
-	if err := r.RegisterSession(opened); err != nil {
+	if err := r.RecordObservedSession(opened); err != nil {
 		t.Fatal(err)
 	}
 	base.sessions = map[string]surface.Session{opened.ID: opened}
@@ -55,7 +55,7 @@ func TestAHostOpenOfAListedTerminalProcessRebuildsItsProjectionOnTheHostRuntime(
 	}
 	hosted := listed
 	hosted.RuntimeKind = surface.RuntimeClaudeHost
-	if err := r.RegisterSession(hosted); err != nil {
+	if err := r.RecordObservedSession(hosted); err != nil {
 		t.Fatal(err)
 	}
 	d.discoverCatalog(context.Background())
@@ -84,7 +84,7 @@ func TestASendThatReachesANewHostProcessKeepsItHostedWhenAStaleListingNamesItATe
 	}
 	reached := opened
 	reached.PID, reached.PIDIdentity = 4343, "b"
-	if err := r.RegisterSession(reached); err != nil {
+	if err := r.RecordObservedSession(reached); err != nil {
 		t.Fatal(err)
 	}
 	d.publishRoute(reached)

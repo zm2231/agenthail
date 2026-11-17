@@ -469,8 +469,8 @@ Every place that treats `host_id = ''` as "this daemon's session":
   local `session.queue` event.
 - `claimCandidateFilter` and `RecoverInflight` skip held host deliveries
   (`host_request <> ''`); only the host delivery loop touches them.
-- `registerSessionTx` (behind `RegisterSession` and
-  `RegisterSessionAndDeletePending`) refuses a session another host owns.
+- `registerSessionTx` (behind `RecordObservedSession` and
+  `RecordObservedSessionAndDeletePending`) refuses a session another host owns.
 - `Dispatcher.RegisterReached`: a send, queued send or compact whose provider
   reports the session under an id a paired host owns ends as an unknown
   outcome naming that host, recorded only under the addressed session.

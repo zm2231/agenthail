@@ -70,7 +70,7 @@ func addLedgerProject(t *testing.T, r *registry.Registry, id, key string) ledger
 func (p ledgerProject) session(t *testing.T, r *registry.Registry, id string) surface.Session {
 	t.Helper()
 	s := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: p.dir, Status: surface.StatusIdle}
-	if err := r.RegisterSession(s); err != nil {
+	if err := r.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	return s

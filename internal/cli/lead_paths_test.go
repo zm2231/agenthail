@@ -23,7 +23,7 @@ func TestLeadPathAddressesTheCoordinatorsSubagents(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: sessions, caps: surface.Capabilities{Send: true, Steer: true}}
 	app, r := cliFixture(t, fake)
 	for _, id := range []string{lead, ada, euclid, decoy} {
-		if err := r.RegisterSession(sessions[id]); err != nil {
+		if err := r.RecordObservedSession(sessions[id]); err != nil {
 			t.Fatal(err)
 		}
 	}

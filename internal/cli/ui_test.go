@@ -120,7 +120,7 @@ func TestUISetImportsBackgroundImages(t *testing.T) {
 
 func TestUIChangesByAnAgentCarryItsAlias(t *testing.T) {
 	app, store := uiFixture(t)
-	if err := app.Registry.RegisterSession(surface.Session{ID: "codex-ui", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+	if err := app.Registry.RecordObservedSession(surface.Session{ID: "codex-ui", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.Registry.SetAlias("fixer", "codex-ui"); err != nil {

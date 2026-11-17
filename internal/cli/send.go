@@ -252,7 +252,7 @@ func (a *App) cmdSend(args []string) error {
 		sess.Name = syntheticNotionName
 		receipt.SessionID = sess.ID
 		if a.registry() != nil {
-			if err := a.registry().RegisterSession(*sess); err != nil {
+			if err := a.registry().RecordObservedSession(*sess); err != nil {
 				return fmt.Errorf("Notion thread %s was created but could not be registered: %w", sess.ID, err)
 			}
 			if err := a.registry().BindReservedAlias(notionName, sess.ID); err != nil {

@@ -43,7 +43,7 @@ func plainFolder(t *testing.T) string {
 func folderSession(t *testing.T, r *registry.Registry, id, cwd string) surface.Session {
 	t.Helper()
 	s := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: cwd, Status: surface.StatusIdle}
-	if err := r.RegisterSession(s); err != nil {
+	if err := r.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	return s

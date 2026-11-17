@@ -19,7 +19,7 @@ func metadataErrorsFor(t *testing.T, runsErr error, runs []surface.ClaudeRunObse
 	t.Helper()
 	_, registry, _, from, _ := daemonFixture(t)
 	from.Surface, from.RuntimeKind, from.ID = surface.KindClaude, surface.RuntimeClaudeCLI, "claude-session"
-	if err := registry.RegisterSession(from); err != nil {
+	if err := registry.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	fake := &dashboardClaudeRunSurface{
@@ -68,7 +68,7 @@ func TestAMetadataReadThatFailsSaysWhy(t *testing.T) {
 func TestACancelledMetadataRequestIsNotCalledATimeout(t *testing.T) {
 	_, registry, _, from, _ := daemonFixture(t)
 	from.Surface, from.RuntimeKind, from.ID = surface.KindClaude, surface.RuntimeClaudeCLI, "claude-session"
-	if err := registry.RegisterSession(from); err != nil {
+	if err := registry.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	fake := &dashboardClaudeRunSurface{daemonSurface: &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{from.ID: from}, accepted: true}, blockRuns: true}

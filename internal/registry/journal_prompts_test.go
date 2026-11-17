@@ -38,7 +38,7 @@ func TestJournalPromptsListsPersonMessagesFromSessionsAPersonStarted(t *testing.
 		{ID: "started-by-agent", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI},
 		{ID: "mirrored", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI},
 	} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

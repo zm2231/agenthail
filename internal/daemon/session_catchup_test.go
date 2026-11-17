@@ -118,7 +118,7 @@ func TestDashboardSessionPageShowsClaudeTurnsWrittenAfterItsSourceStopped(t *tes
 		claudeTranscriptLine(t, map[string]any{"type": "assistant", "uuid": "reply-one", "sessionId": conversation, "timestamp": first.Add(time.Second).Format(time.RFC3339Nano), "message": map[string]any{"id": "message-one", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "first answer"}}}}),
 	)
 	session := surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path, Cwd: fixture.Home}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
@@ -173,7 +173,7 @@ func TestABuiltInCommandRunBetweenTurnsIsTheSessionPagesLatestExchange(t *testin
 		claudeTranscriptLine(t, map[string]any{"type": "system", "subtype": "turn_duration", "durationMs": 9000, "sessionId": conversation, "timestamp": asked.Add(9 * time.Second).Format(time.RFC3339Nano)}),
 	)
 	session := surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path, Cwd: fixture.Home}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}

@@ -31,7 +31,7 @@ func TestThreadOperationJSONFailurePreservesUnknown(t *testing.T) {
 	app, _ := cliFixture(t, adapter.cliSurface)
 	app.Surfaces[0].Surface = adapter
 	session := surface.Session{ID: "stopped", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
-	if err := app.Registry.RegisterSession(session); err != nil {
+	if err := app.Registry.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.Registry.SetAlias("worker", session.ID); err != nil {
@@ -50,7 +50,7 @@ func TestThreadResumeRegistersTheSessionItReached(t *testing.T) {
 	app, _ := cliFixture(t, adapter.cliSurface)
 	app.Surfaces[0].Surface = adapter
 	session := surface.Session{ID: "job", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeBackground, Status: surface.StatusOffline}
-	if err := app.Registry.RegisterSession(session); err != nil {
+	if err := app.Registry.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.Registry.SetAlias("worker", session.ID); err != nil {
@@ -85,7 +85,7 @@ func TestThreadForkPassesLastTurnAndRejectsRemovedFlags(t *testing.T) {
 	adapter := &forkCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"source": source}}}
 	app, _ := cliFixture(t, adapter.cliSurface)
 	app.Surfaces[0].Surface = adapter
-	if err := app.Registry.RegisterSession(source); err != nil {
+	if err := app.Registry.RecordObservedSession(source); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.Registry.SetAlias("src", "source"); err != nil {

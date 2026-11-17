@@ -56,7 +56,7 @@ func (d *Daemon) createNotionThread(ctx context.Context, message string, name re
 	}
 	session.ID = result.UUID
 	session.LastActive = time.Now()
-	if err := d.Registry.RegisterSession(*session); err != nil {
+	if err := d.Registry.RecordObservedSession(*session); err != nil {
 		return nil, fmt.Errorf("Notion thread %s was created but could not be registered: %w", session.ID, err)
 	}
 	if err := d.Registry.BindReservedAlias(name, session.ID); err != nil {

@@ -65,7 +65,7 @@ func TestListRendersDaemonPagesAndMembers(t *testing.T) {
 func TestListRequiresDaemonContractAndNeverDiscovers(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "raw-history"}}}
 	app, store := cliFixture(t, fake)
-	if err := store.RegisterSession(surface.Session{ID: "raw-history", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "raw-history", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"list"}, {"list", "--all", "--json"}} {

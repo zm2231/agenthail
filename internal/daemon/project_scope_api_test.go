@@ -24,7 +24,7 @@ func folderScopedQueue(t *testing.T) (http.Handler, map[string]int64) {
 	queued := map[string]int64{}
 	for id, cwd := range map[string]string{"nested": "/work/root/nested", "sibling": "/work/root/sibling", "other": "/work/other"} {
 		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: cwd}
-		if err := reg.RegisterSession(session); err != nil {
+		if err := reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		projection := `{}`

@@ -530,7 +530,7 @@ func TestDiscoveryProjectsSubagentIdentityAndRollup(t *testing.T) {
 func TestDiscoveryNestsARowStoredWithoutItsParentOnceTheParentIsReported(t *testing.T) {
 	d, registry, fake, from, _ := daemonFixture(t)
 	child := surface.Session{ID: "spawned-child", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "child", Status: surface.StatusIdle, Source: "subAgent", Transport: "desktop"}
-	if err := registry.RegisterSession(child); err != nil {
+	if err := registry.RecordObservedSession(child); err != nil {
 		t.Fatal(err)
 	}
 	child.Subagent = &surface.Subagent{ParentID: from.ID, RootID: from.ID, Depth: 1}
@@ -563,7 +563,7 @@ func TestSnapshotListsTopLevelSessionsAndOnlyActiveSubagents(t *testing.T) {
 	orphan := child("orphan-child", "parent-codex-never-listed", surface.StatusBusy)
 	fake.sessions = map[string]surface.Session{lead.ID: lead, working.ID: working, resting.ID: resting, grandchild.ID: grandchild, orphan.ID: orphan}
 	d.discoverCatalog(context.Background())
-	if err := store.RegisterSession(surface.Session{ID: "parentless-subagent", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "subAgent", Transport: "desktop"}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "parentless-subagent", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "subAgent", Transport: "desktop"}); err != nil {
 		t.Fatal(err)
 	}
 

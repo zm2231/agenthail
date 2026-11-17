@@ -35,12 +35,12 @@ func TestASendQueuedForAClaudeSessionWithNoProcessLeftIsDeliveredOnce(t *testing
 			}
 			t.Cleanup(func() { r.Close() })
 			fake := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{id: {Status: surface.StatusIdle}}, accepted: true}
-			if err := r.RegisterSession(test.ended); err != nil {
+			if err := r.RecordObservedSession(test.ended); err != nil {
 				t.Fatal(err)
 			}
 			if test.reusedBy != nil {
 				fake.sessions[test.reusedBy.ID] = *test.reusedBy
-				if err := r.RegisterSession(*test.reusedBy); err != nil {
+				if err := r.RecordObservedSession(*test.reusedBy); err != nil {
 					t.Fatal(err)
 				}
 				if stored, err := r.Session(id); err != nil || stored.PID != 0 {
@@ -78,7 +78,7 @@ func TestALiveBackgroundClaudeSessionWithNoPIDYetIsStillObserved(t *testing.T) {
 	background := surface.Session{ID: "background-conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeBackground, Status: surface.StatusUnknown, Source: "agenthail"}
 	listener := surface.Session{ID: "listener", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	for _, session := range []surface.Session{background, listener} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

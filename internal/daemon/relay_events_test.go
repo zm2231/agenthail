@@ -77,13 +77,13 @@ func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
 	source.Surface = surface.KindClaude
 	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
-	if err := r.RegisterSession(source); err != nil {
+	if err := r.RecordObservedSession(source); err != nil {
 		t.Fatal(err)
 	}
 	other := to
 	other.ID = "other"
 	target.sessions[other.ID] = other
-	if err := r.RegisterSession(other); err != nil {
+	if err := r.RecordObservedSession(other); err != nil {
 		t.Fatal(err)
 	}
 	reader := surfaces.NewClaude(nil, t.TempDir())
@@ -334,7 +334,7 @@ func TestRelayPreparationLosingToAShorterCaptureStillBaselinesWhatItRead(t *test
 	source.Surface = surface.KindClaude
 	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
-	if err := r.RegisterSession(source); err != nil {
+	if err := r.RecordObservedSession(source); err != nil {
 		t.Fatal(err)
 	}
 	reader := &racingClaudeReader{Claude: surfaces.NewClaude(nil, t.TempDir())}
@@ -403,7 +403,7 @@ func TestDurableRelayClaudeRelaysReplyTextOnceAfterItsLastContentBlock(t *testin
 	source.Surface = surface.KindClaude
 	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
-	if err := r.RegisterSession(source); err != nil {
+	if err := r.RecordObservedSession(source); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.PrepareRelaySource(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source, registry.HandoffTurnFinished); err != nil {
@@ -583,7 +583,7 @@ func TestARelayScanReadsAllItsSourcesThroughOneScan(t *testing.T) {
 		{ID: "offline", Status: surface.StatusOffline},
 	} {
 		source.Surface, source.RuntimeKind, source.Source, source.Transport = surface.KindCodex, surface.RuntimeCodexDesktop, "vscode", "desktop"
-		if err := r.RegisterSession(source); err != nil {
+		if err := r.RecordObservedSession(source); err != nil {
 			t.Fatal(err)
 		}
 		base.sessions[source.ID] = source

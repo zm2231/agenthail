@@ -17,7 +17,7 @@ func TestAMessageQueuedForAnAppServerThreadWhoseRuntimeStoppedStartsItAndIsDeliv
 	lifecycle.Start(t).AddThread(codextest.Thread{ID: thread, Originator: "agenthail", Source: "agenthail"})
 	lifecycle.Crash()
 	_, r, _, _, _ := daemonFixture(t)
-	if err := r.RegisterSession(surface.Session{ID: thread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusOffline, Source: "agenthail", Transport: "managed"}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: thread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusOffline, Source: "agenthail", Transport: "managed"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.QueueMessage(thread, "deliver once Codex is back"); err != nil {
@@ -46,7 +46,7 @@ func TestAMessageQueuedForAnAppServerThreadThatIsNotLoadedLoadsItAndIsDeliveredO
 			lifecycle := codextest.InstallLifecycle(t, codextest.Home(t), nil)
 			lifecycle.Start(t).AddThread(codextest.Thread{ID: thread, Originator: "agenthail", Source: "agenthail"})
 			_, r, _, _, _ := daemonFixture(t)
-			if err := r.RegisterSession(surface.Session{ID: thread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: status, Source: "agenthail", Transport: "managed"}); err != nil {
+			if err := r.RecordObservedSession(surface.Session{ID: thread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: status, Source: "agenthail", Transport: "managed"}); err != nil {
 				t.Fatal(err)
 			}
 			if err := r.QueueMessage(thread, "deliver once it is loaded"); err != nil {

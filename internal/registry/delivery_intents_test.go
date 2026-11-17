@@ -246,7 +246,7 @@ func TestASenderNothingReadsGetsNoNoticeAndItsAsksGoToThePerson(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+			if err := r.RecordObservedSession(surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 				t.Fatal(err)
 			}
 			if err := r.SaveRuntimeState("target", surface.TurnObservation{Status: surface.StatusIdle}); err != nil {

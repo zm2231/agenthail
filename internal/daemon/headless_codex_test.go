@@ -197,7 +197,7 @@ func TestHeadlessCodexDesktopCreatedThreadStaysOnDesktop(t *testing.T) {
 	fixture := newHeadlessCodexFixture(t, desktop.URL)
 	daemon := fixture.lifecycle.Start(t)
 	daemon.AddThread(codextest.Thread{ID: desktopThread, Originator: "Codex Desktop"})
-	if err := fixture.registry.RegisterSession(surface.Session{ID: desktopThread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
+	if err := fixture.registry.RecordObservedSession(surface.Session{ID: desktopThread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
 		t.Fatal(err)
 	}
 	if code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": desktopThread, "message": "Through Desktop"}); code != http.StatusOK {
@@ -225,7 +225,7 @@ func TestHeadlessCodexDesktopCreatedThreadStaysOnDesktop(t *testing.T) {
 
 func TestDashboardRecordsWhichSessionStartedAThread(t *testing.T) {
 	fixture := newHeadlessCodexFixture(t, unreachableDesktop)
-	if err := fixture.registry.RegisterSession(surface.Session{ID: "planner-conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+	if err := fixture.registry.RecordObservedSession(surface.Session{ID: "planner-conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	if code, _ := fixture.action(t, map[string]any{"action": "session-create", "surface": "codex", "message": "Build", "cwd": t.TempDir(), "sourceSessionId": "not-a-session"}); code != http.StatusBadRequest {

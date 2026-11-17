@@ -18,4 +18,7 @@ const (
 	sessionRouteSourceSQL    = `CASE WHEN ` + sessionKeepsRouteSQL + ` THEN sessions.source WHEN excluded.source<>'' THEN excluded.source ELSE sessions.source END`
 	sessionRouteTransportSQL = `CASE WHEN ` + sessionKeepsRouteSQL + ` THEN sessions.transport WHEN excluded.transport<>'' THEN excluded.transport ELSE sessions.transport END`
 	sessionRouteRuntimeSQL   = `CASE WHEN ` + sessionKeepsRouteSQL + ` OR ` + sessionKeepsHostedSQL + ` THEN sessions.runtime_kind ELSE excluded.runtime_kind END`
+	// A write-back read before the host opened its process read another
+	// runtime, so its guard compares without the hosted rule.
+	sessionRouteRuntimeGuardSQL = `CASE WHEN ` + sessionKeepsRouteSQL + ` THEN sessions.runtime_kind ELSE excluded.runtime_kind END`
 )

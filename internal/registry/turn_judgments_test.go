@@ -9,7 +9,7 @@ import (
 
 func TestATurnEndCountsTheAsksChildrenAndRelaysThatWillWakeTheSession(t *testing.T) {
 	r := coordinatorRegistry(t, "lead", "idle-child", "other")
-	if err := r.RegisterSession(surface.Session{ID: "busy-child", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy, Cwd: "/work"}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "busy-child", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy, Cwd: "/work"}); err != nil {
 		t.Fatal(err)
 	}
 	facts, err := r.TurnEndFacts("lead")

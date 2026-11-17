@@ -43,7 +43,7 @@ func TestAWorkerCannotSteerItsLeadAndIsToldItWasSentAsAMessage(t *testing.T) {
 	d, r, fake, worker, lead := daemonFixture(t)
 	fake.caps = surface.Capabilities{Send: true, Steer: true}
 	lead.Status = surface.StatusBusy
-	if err := r.RegisterSession(lead); err != nil {
+	if err := r.RecordObservedSession(lead); err != nil {
 		t.Fatal(err)
 	}
 	fake.observations[lead.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"}
@@ -62,7 +62,7 @@ func TestAWorkerCannotSteerItsLeadAndIsToldItWasSentAsAMessage(t *testing.T) {
 	}
 	body, _ = json.Marshal(map[string]string{"action": "steer", "sessionId": worker.ID, "message": "use the safe path", "sourceSessionId": lead.ID})
 	worker.Status = surface.StatusBusy
-	if err := r.RegisterSession(worker); err != nil {
+	if err := r.RecordObservedSession(worker); err != nil {
 		t.Fatal(err)
 	}
 	fake.observations[worker.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"}
@@ -105,7 +105,7 @@ func TestAnAgentCannotPassThePersonAsAuthorThroughMCP(t *testing.T) {
 	to := f.fake.sessions["to"]
 	to.Status = surface.StatusBusy
 	f.fake.sessions["to"] = to
-	if err := f.r.RegisterSession(to); err != nil {
+	if err := f.r.RecordObservedSession(to); err != nil {
 		t.Fatal(err)
 	}
 	f.fake.observations["to"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"}
@@ -161,7 +161,7 @@ func TestALeadOnAPairedHostSteersItsWorkerThroughTheMirrorOfItsSession(t *testin
 	worker := vps.fake.sessions["vps-worker"]
 	worker.Cwd = repo
 	vps.fake.sessions["vps-worker"] = worker
-	if err := vps.reg.RegisterSession(worker); err != nil {
+	if err := vps.reg.RecordObservedSession(worker); err != nil {
 		t.Fatal(err)
 	}
 	laptop.serve(t, nil)

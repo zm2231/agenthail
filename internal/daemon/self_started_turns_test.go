@@ -21,7 +21,7 @@ func startWorker(t *testing.T, kind surface.SurfaceKind, runtime surface.Runtime
 	f.fake.kind = kind
 	worker := surface.Session{ID: "worker", Surface: kind, RuntimeKind: runtime, Status: surface.StatusIdle, Cwd: f.workdir}
 	f.fake.sessions[worker.ID] = worker
-	if err := f.d.Registry.RegisterSession(worker); err != nil {
+	if err := f.d.Registry.RecordObservedSession(worker); err != nil {
 		t.Fatal(err)
 	}
 	return f, received
@@ -128,7 +128,7 @@ func TestATurnOfAClaudeSessionWhoseProcessExitedIsStillSeenEnding(t *testing.T) 
 	worker := f.fake.sessions["worker"]
 	worker.RuntimeKind, worker.PID = surface.RuntimeClaudeCLI, exitedPID(t)
 	f.fake.sessions["worker"] = worker
-	if err := f.d.Registry.RegisterSession(worker); err != nil {
+	if err := f.d.Registry.RecordObservedSession(worker); err != nil {
 		t.Fatal(err)
 	}
 	opened := time.Now().Add(-time.Minute)

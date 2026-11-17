@@ -55,7 +55,7 @@ func TestRecordCatalogSessionRestoresRowChangedByAnotherWriter(t *testing.T) {
 	other := state.Session
 	other.Status = surface.StatusBusy
 	other.Runtime = &surface.Runtime{Launcher: surface.LauncherTMUX, Location: &surface.Location{Session: "work", Pane: "%1"}, Focusable: true}
-	if err := r.RegisterSession(other); err != nil {
+	if err := r.RecordObservedSession(other); err != nil {
 		t.Fatal(err)
 	}
 	if _, created, err := r.RecordCatalogSession(state, event); err != nil || created {
@@ -157,11 +157,11 @@ func TestDiscoveredBranchDetachesTheProcessAndLeavesTheOriginalItsAlias(t *testi
 func TestForkedFromIsSetOnce(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "conversation-b", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, ForkedFrom: "conversation-a"}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	session.ForkedFrom = ""
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if stored, err := r.Session(session.ID); err != nil || stored.ForkedFrom != "conversation-a" {

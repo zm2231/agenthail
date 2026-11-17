@@ -17,7 +17,7 @@ func TestForkAncestorsWalkTheChainWithTheLatestRegistration(t *testing.T) {
 		{ID: "y", Surface: surface.KindClaude, ForkedFrom: "x"},
 	} {
 		s.RuntimeKind = surface.RuntimeClaudeCLI
-		if err := r.RegisterSession(s); err != nil {
+		if err := r.RecordObservedSession(s); err != nil {
 			t.Fatal(err)
 		}
 	}

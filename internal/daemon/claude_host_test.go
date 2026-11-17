@@ -79,7 +79,7 @@ func TestAPersonsMessageToAHostSessionIsDeliveredUnderItsIntentUUID(t *testing.T
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
@@ -124,7 +124,7 @@ func TestAPersonCompactsAHostSessionFromTheDashboard(t *testing.T) {
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
@@ -161,7 +161,7 @@ func TestAnIdleHostSessionIsCompactedAndItsNextTurnSaysTheCompactionWasIdle(t *t
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
@@ -391,7 +391,7 @@ func updateFromAProtocol1Host(t *testing.T, prompt string) {
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
@@ -551,7 +551,7 @@ func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testin
 			claude := surfaces.NewClaude(nil, fixture.Home)
 			session := hostedSession(t, claude, id)
 			r := hostRegistry(t)
-			if err := r.RegisterSession(session); err != nil {
+			if err := r.RecordObservedSession(session); err != nil {
 				t.Fatal(err)
 			}
 			d := newTestDaemon(t, r, []surface.Surface{claude})
@@ -613,7 +613,7 @@ func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
 	senderSession, targetSession := hostedSession(t, claude, sender), hostedSession(t, claude, target)
 	r := hostRegistry(t)
 	for _, session := range []surface.Session{senderSession, targetSession} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -679,7 +679,7 @@ func TestASessionStreamOpenedOnANewHostSessionDeliversItsFirstReply(t *testing.T
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
@@ -732,7 +732,7 @@ func newHostedSourceFixture(t *testing.T) (*surfaces.Claude, surface.Session, *r
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	return claude, session, r, filepath.Join(fixture.Home, ".claude", "projects", "a-folder-claude-named", id+".jsonl")
@@ -842,7 +842,7 @@ func TestAnOpenRequestStaysAnswerableThroughHostUpdates(t *testing.T) {
 			claude := surfaces.NewClaude(nil, fixture.Home)
 			session := hostedSession(t, claude, id)
 			r := hostRegistry(t)
-			if err := r.RegisterSession(session); err != nil {
+			if err := r.RecordObservedSession(session); err != nil {
 				t.Fatal(err)
 			}
 			fixture.Peer(t, opened.PID, "TOOL")
@@ -1039,7 +1039,7 @@ func TestARetiringHostThatDoesNotAnswerHidesNoOtherHostsRequest(t *testing.T) {
 		t.Fatalf("requests beside a silent host = %+v, %v; want %s", state, err, request.ID)
 	}
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
@@ -1124,7 +1124,7 @@ func TestAnAnnouncedRequestStaysAnnouncedWhileItsHostDoesNotAnswer(t *testing.T)
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
@@ -1255,7 +1255,7 @@ func TestAHostRequestIsRecordedAsAnswerable(t *testing.T) {
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
@@ -1410,7 +1410,7 @@ func TestASessionMovedOffARetiringHostIsToldWhichBackgroundTasksStopped(t *testi
 		return false
 	})
 	r := hostRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, nil)

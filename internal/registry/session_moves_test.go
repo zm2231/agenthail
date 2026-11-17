@@ -26,7 +26,7 @@ func moveRegistry(t *testing.T) *Registry {
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Name: "moving", PID: 41, Transcript: "/tmp/t.jsonl", HasLocal: true}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	return r
@@ -94,7 +94,7 @@ func TestAMoveOutHoldsItsConversationsQueueAndHandsItToTheTarget(t *testing.T) {
 	if _, err := r.CompleteMoveOut("move-1", testPlaceholder); err != nil {
 		t.Fatalf("completing a done move again: %v", err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}); !errors.As(err, &SessionOwnedError{}) {
+	if err := r.RecordObservedSession(surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}); !errors.As(err, &SessionOwnedError{}) {
 		t.Fatalf("a local registration took back a moved session the target serves: %v", err)
 	}
 	rows, err := r.HostCatalogRows(moveTarget)
@@ -197,7 +197,7 @@ func TestAMovedInSessionTakesTheSourcesPinAndNotOneLeftHere(t *testing.T) {
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, HasLocal: true}
 	sourcePin := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	for i, pinnedAt := range []time.Time{{}, sourcePin} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := r.PinSession(moveConversation, time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)); err != nil {
@@ -255,7 +255,7 @@ func TestAMoveInTakesASessionAThirdHostNoLongerServes(t *testing.T) {
 func movedAway(t *testing.T) *Registry {
 	t.Helper()
 	r := moveRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: "peer", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Name: "peer", PID: 42, Transcript: "/tmp/p.jsonl", HasLocal: true}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "peer", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Name: "peer", PID: 42, Transcript: "/tmp/p.jsonl", HasLocal: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), MoveCarry{}, ""); err != nil {

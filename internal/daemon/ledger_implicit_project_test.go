@@ -25,7 +25,7 @@ func TestAnImplicitProjectsCapturedWordsCanBeAttached(t *testing.T) {
 	repo := widgetRepo(t, "https://github.com/example/implicit.git")
 	session := surface.Session{ID: "implicit-s1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work", Cwd: repo, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", LastActive: time.Now()}
 	fake.sessions[session.ID] = session
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	const key = "repo:github.com/example/implicit"
@@ -49,7 +49,7 @@ func TestAnImplicitProjectsCapturedWordsCanBeAttached(t *testing.T) {
 
 	outside := surface.Session{ID: "outside", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "outside", Cwd: t.TempDir(), Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", LastActive: time.Now()}
 	fake.sessions[outside.ID] = outside
-	if err := r.RegisterSession(outside); err != nil {
+	if err := r.RecordObservedSession(outside); err != nil {
 		t.Fatal(err)
 	}
 	var goal ledgerGoalResponse

@@ -11,7 +11,7 @@ import (
 
 func TestALiveScriptedRunAgenthailDidNotStartIsKeptButNotListed(t *testing.T) {
 	d, r, adapter := endedFixture(t)
-	if err := r.RegisterSession(claudeRow("agent-run")); err != nil {
+	if err := r.RecordObservedSession(claudeRow("agent-run")); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.RecordSessionOrigin(registry.OriginOf("agent-run", "")); err != nil {
@@ -81,7 +81,7 @@ func TestHiddenRowsLeaveInBatches(t *testing.T) {
 	ids := []string{}
 	for index := range catalogHideBatch + 2 {
 		session := claudeRow("batch-" + time.Duration(index).String())
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		if _, _, err := r.RecordCatalogSession(registry.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: session.ID}, registry.CatalogEvent{DedupeKey: "fixture:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {

@@ -25,7 +25,7 @@ func baseFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, *da
 		session.Cwd = cwd
 		session.LastActive = time.Now().Add(-time.Minute)
 		fake.sessions[id] = session
-		if err := reg.RegisterSession(session); err != nil {
+		if err := reg.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

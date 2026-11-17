@@ -40,7 +40,7 @@ func TestAnIdleCompactionIsRecordedOnTheNextTurnWhenThatTurnsLastReplyWasEmpty(t
 	}
 	r := hostRegistry(t)
 	session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: transcript}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if outcome, err := r.QueueIdleCompaction(id, time.Date(2026, 11, 7, 5, 54, 18, 0, time.UTC)); err != nil || outcome != registry.IdleCompactionQueued {

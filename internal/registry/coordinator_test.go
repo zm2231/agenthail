@@ -18,7 +18,7 @@ func coordinatorRegistry(t *testing.T, sessions ...string) *Registry {
 	}
 	t.Cleanup(func() { r.Close() })
 	for _, id := range sessions {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Cwd: "/work"}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Cwd: "/work"}); err != nil {
 			t.Fatal(err)
 		}
 	}

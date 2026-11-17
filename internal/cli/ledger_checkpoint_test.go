@@ -83,7 +83,7 @@ func TestWorkWritesThatAreCheckpointsShowTheProvisionalCount(t *testing.T) {
 func TestASessionStartShowsTheWordsLeftToAttach(t *testing.T) {
 	withoutSessionContextLimit(t)
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	var asked []string

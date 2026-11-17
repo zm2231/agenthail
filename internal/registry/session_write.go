@@ -12,6 +12,13 @@ type sessionWriteColumn struct {
 	value  func(surface.Session) any
 }
 
+func (c sessionWriteColumn) guarded() string {
+	if c.name == "runtime_kind" {
+		return sessionRouteRuntimeGuardSQL
+	}
+	return c.update
+}
+
 func keepStoredUnlessSet(column string) string {
 	return `CASE WHEN excluded.` + column + `<>'' THEN excluded.` + column + ` ELSE sessions.` + column + ` END`
 }
@@ -46,25 +53,60 @@ var sessionWriteColumns = []sessionWriteColumn{
 	{"agent_role", keepStoredUnlessSet("agent_role"), func(s surface.Session) any { _, _, _, _, role := subagentValues(s); return role }},
 }
 
-var sessionUpsertSQL, sessionUnchangedSQL = buildSessionWriteSQL()
+var sessionUpsertSQL, sessionUnchangedSQL, sessionExcludedSQL = buildSessionWriteSQL()
 
-func buildSessionWriteSQL() (upsert, unchanged string) {
+func buildSessionWriteSQL() (upsert, unchanged, excluded string) {
 	names := make([]string, 0, len(sessionWriteColumns))
 	sets := make([]string, 0, len(sessionWriteColumns))
-	same := make([]string, 0, len(sessionWriteColumns))
 	bound := make([]string, 0, len(sessionWriteColumns))
 	for _, column := range sessionWriteColumns {
 		names = append(names, column.name)
 		sets = append(sets, column.name+"="+column.update)
-		same = append(same, "("+column.update+") IS sessions."+column.name)
 		bound = append(bound, "? AS "+column.name)
 	}
 	upsert = `INSERT INTO sessions (id,` + strings.Join(names, ",") + `,updated_at) VALUES (?` + strings.Repeat(",?", len(names)) + `,datetime('now'))
 		ON CONFLICT(id) DO UPDATE SET ` + strings.Join(sets, ",") + `,updated_at=datetime('now')`
+	excluded = `(SELECT ? AS id,` + strings.Join(bound, ",") + `) AS excluded`
 	// A listing that calls a hosted process a terminal one is never
 	// unchanged, so its write reaches the transaction that refuses it.
-	unchanged = `SELECT ` + strings.Join(same, " AND ") + ` AND NOT ` + sessionKeepsHostedSQL + ` FROM sessions, (SELECT ? AS id,` + strings.Join(bound, ",") + `) AS excluded WHERE sessions.id=excluded.id`
-	return upsert, unchanged
+	unchanged = `SELECT ` + sessionColumnsSameSQL(sessionWriteColumns) + ` AND NOT ` + sessionKeepsHostedSQL + ` FROM sessions, ` + excluded + ` WHERE sessions.id=excluded.id`
+	return upsert, unchanged, excluded
+}
+
+func sessionColumnsSameSQL(columns []sessionWriteColumn) string {
+	compared := make([]string, 0, len(columns)+1)
+	for _, column := range columns {
+		compared = append(compared, "("+column.update+") IS sessions."+column.name)
+	}
+	if len(compared) == 0 {
+		return "1"
+	}
+	return strings.Join(compared, " AND ")
+}
+
+// ownedSessionUpdateSQL writes owns from the first bound session, bound as
+// next, and only while each guard holds what registering the second, the row
+// the writer read, would leave it, or already what this write leaves it.
+func ownedSessionUpdateSQL(owns, guards []sessionWriteColumn) string {
+	next := func(update string) string { return strings.ReplaceAll(update, "excluded.", "next.") }
+	sets := make([]string, 0, len(owns)+1)
+	for _, column := range owns {
+		sets = append(sets, column.name+"="+next(column.update))
+	}
+	sets = append(sets, `updated_at=datetime('now')`)
+	held := make([]string, 0, len(guards)+1)
+	for _, column := range guards {
+		held = append(held, ownedSessionGuardSQL(column))
+	}
+	if len(held) == 0 {
+		held = append(held, "1")
+	}
+	return `UPDATE sessions SET ` + strings.Join(sets, ",") + ` FROM ` + strings.Replace(sessionExcludedSQL, ") AS excluded", ") AS next", 1) + ` WHERE sessions.id=next.id
+		AND EXISTS (SELECT 1 FROM ` + sessionExcludedSQL + ` WHERE sessions.id=excluded.id AND ` + strings.Join(held, " AND ") + `)`
+}
+
+func ownedSessionGuardSQL(column sessionWriteColumn) string {
+	return "((" + column.guarded() + ") IS sessions." + column.name + " OR (" + strings.ReplaceAll(column.guarded(), "excluded.", "next.") + ") IS sessions." + column.name + ")"
 }
 
 func sessionWriteValues(s surface.Session) []any {

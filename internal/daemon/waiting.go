@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -44,7 +45,7 @@ func (d *Daemon) observeTurn(ctx context.Context, adapter surface.Surface, sessi
 }
 
 func (d *Daemon) publishWaiting(ctx context.Context, sessionID string, waiting *surface.Waiting) {
-	d.publishLive(ctx, sessionID, func(session *surface.Session) {
+	d.publishLive(ctx, sessionID, registry.SessionActivityFields, func(session *surface.Session) {
 		session.WaitingOn = waiting
 		if waiting != nil {
 			// A turn waiting on the person is not quiet; the next status pass
@@ -60,7 +61,7 @@ func (d *Daemon) publishWaiting(ctx context.Context, sessionID string, waiting *
 func (d *Daemon) publishRoute(reached surface.Session) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	d.publishLive(ctx, reached.ID, func(session *surface.Session) {
+	d.publishLive(ctx, reached.ID, registry.SessionProcessFields|registry.SessionTransportField, func(session *surface.Session) {
 		session.Bridge, session.Transport, session.PID, session.PIDIdentity = reached.Bridge, reached.Transport, reached.PID, reached.PIDIdentity
 	})
 }
@@ -69,7 +70,7 @@ func (d *Daemon) publishRoute(reached surface.Session) {
 // the entry the last discovery pass left for status refreshes. A session
 // without one, or whose row did not commit, waits for a discovery pass
 // instead.
-func (d *Daemon) publishLive(ctx context.Context, sessionID string, change func(*surface.Session)) {
+func (d *Daemon) publishLive(ctx context.Context, sessionID string, owns registry.SessionFields, change func(*surface.Session)) {
 	d.catalogLiveMu.Lock()
 	live := d.catalogLive[sessionID]
 	var session surface.Session
@@ -81,6 +82,7 @@ func (d *Daemon) publishLive(ctx context.Context, sessionID string, change func(
 		d.requestCatalogDiscovery()
 		return
 	}
+	read := session
 	change(&session)
 	config, err := LoadDashboardConfig()
 	if err != nil {
@@ -106,7 +108,8 @@ func (d *Daemon) publishLive(ctx context.Context, sessionID string, change func(
 		defer d.catalogLiveMu.Unlock()
 		return d.catalogLive[sessionID] == live
 	}
-	d.publishCatalogSession(ctx, live.adapter, session, nil, live.identity, live.alias, counts[sessionID], d.limitResumeRow(sessionID), live.open, config, view, time.Now().UTC(), current, func(committed bool) {
+	update := registry.OwnedSessionUpdate(read, owns)
+	d.publishCatalogSession(ctx, live.adapter, session, &update, live.identity, live.alias, counts[sessionID], d.limitResumeRow(sessionID), live.open, config, view, time.Now().UTC(), current, func(committed bool) {
 		d.catalogLiveMu.Lock()
 		defer d.catalogLiveMu.Unlock()
 		if !committed {

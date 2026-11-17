@@ -93,7 +93,7 @@ func (x *retiringFixture) open(tokens int64, requestAt time.Time) retiringSessio
 	id := uuid.NewString()
 	opened := x.f.Open(x.t, x.client, id)
 	session := hostedSession(x.t, x.claude, id)
-	if err := x.r.RegisterSession(session); err != nil {
+	if err := x.r.RecordObservedSession(session); err != nil {
 		x.t.Fatal(err)
 	}
 	if _, err := x.d.dispatcher().DeliverWithOptions(x.ctx, x.claude, &session, "hello", "", surface.SendOptions{Author: surface.AuthorPerson}); err != nil {
@@ -296,7 +296,7 @@ func TestAHostFromBeforeReleaseIsReleasedOnceAndLeavesAsItAlwaysDid(t *testing.T
 	}
 	claude := surfaces.NewClaude(nil, f.Home)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(hostedSession(t, claude, id)); err != nil {
+	if err := r.RecordObservedSession(hostedSession(t, claude, id)); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})

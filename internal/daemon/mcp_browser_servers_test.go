@@ -96,7 +96,7 @@ func servedOn(t *testing.T, out map[string]any, port int) map[string]any {
 func TestServersNamesTheSessionThatStartedEachListenerWithoutConnecting(t *testing.T) {
 	d, r, _, codex, _ := daemonFixture(t)
 	claude := surface.Session{ID: "claude-other", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}
-	if err := r.RegisterSession(claude); err != nil {
+	if err := r.RecordObservedSession(claude); err != nil {
 		t.Fatal(err)
 	}
 	server := mcpServer(t, d)

@@ -50,7 +50,7 @@ func TestASessionWhoseRepositoryStatusFailsStaysAvailableAndSendable(t *testing.
 	d, r, fake, from, _ := daemonFixture(t)
 	repo := catalogTestRepo(t)
 	from.Cwd = repo
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	fake.sessions[from.ID] = from

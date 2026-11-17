@@ -17,7 +17,7 @@ func TestDeliveryCommandsRefuseANameFragmentAndListWhatItMatched(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: sessions, caps: surface.Capabilities{Send: true, Steer: true}}
 	app, r := cliFixture(t, fake)
 	for _, session := range sessions {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

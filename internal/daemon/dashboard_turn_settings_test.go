@@ -102,7 +102,7 @@ func TestATurnSettingActionReachesTheAdapterAndNamesWhatItCannotDo(t *testing.T)
 func TestAClaudeModelTurnSettingIsKeptInTheRegistry(t *testing.T) {
 	_, registry, _, _, _ := daemonFixture(t)
 	claude := surface.Session{ID: "claude-host", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}
-	if err := registry.RegisterSession(claude); err != nil {
+	if err := registry.RecordObservedSession(claude); err != nil {
 		t.Fatal(err)
 	}
 	fake := &turnSettingsSurface{daemonSurface: &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{claude.ID: claude}, accepted: true}}

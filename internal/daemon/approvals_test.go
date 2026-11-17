@@ -35,7 +35,7 @@ func newApprovalFixture(t *testing.T) approvalFixture {
 	for _, session := range []surface.Session{worker, lead} {
 		session.LastActive = time.Now()
 		fake.sessions[session.ID] = session
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -235,7 +235,7 @@ func TestACoordinatorClearsOnlyTheQueuedMessagesItsProjectSent(t *testing.T) {
 		return askScope(t, f.d, ScopeRequest{SessionID: f.lead.ID, Action: "operator", Payload: scopePayload(PersonActionAPI, `{"action":"queue-clear","sessionId":"`+f.worker.ID+`","senders":`+senders+`}`)}, "127.0.0.1:50000").status
 	}
 	outsider := surface.Session{ID: "outsider", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: t.TempDir(), LastActive: time.Now()}
-	if err := f.r.RegisterSession(outsider); err != nil {
+	if err := f.r.RecordObservedSession(outsider); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {

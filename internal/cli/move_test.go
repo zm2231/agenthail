@@ -16,7 +16,7 @@ func TestMoveToAnotherRootReachesTheDaemon(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	session := surface.Session{ID: "limited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "limited work"}
 	app, reg := cliFixture(t, &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{session.ID: session}})
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex

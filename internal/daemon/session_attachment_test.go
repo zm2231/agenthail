@@ -47,7 +47,7 @@ func TestASentFileDownloadsSandboxedAndASentPDFOpensInline(t *testing.T) {
 		t.Fatal(err)
 	}
 	from.Surface, from.Transcript, from.RuntimeKind = surface.KindClaude, transcript, surface.RuntimeClaudeCLI
-	if err := registry.RegisterSession(from); err != nil {
+	if err := registry.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	claude := surfaces.NewClaude(nil, t.TempDir())

@@ -37,7 +37,7 @@ func TestAChannelCannotTakeAProjectsName(t *testing.T) {
 	session := surface.Session{ID: "alpha", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, LastActive: now}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"alpha": session}, caps: surface.Capabilities{Send: true}}
 	app, store := cliFixture(t, fake)
-	if err := store.RegisterSession(session); err != nil {
+	if err := store.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	project := json.RawMessage(`{"id":"repo:github.com/example/widget","localId":"implicit:/work/widget","displayName":"widget"}`)

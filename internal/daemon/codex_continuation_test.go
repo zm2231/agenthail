@@ -103,7 +103,7 @@ func TestARevertedCodexThreadCatchesUpFromItsContinuationAfterARestart(t *testin
 	}
 	defer reg.Close()
 	session := surface.Session{ID: revertedThread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: fixture.original, HasLocal: true}
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := providers.NewCodex("http://127.0.0.1:1")
@@ -119,7 +119,7 @@ func TestARevertedCodexThreadCatchesUpFromItsContinuationAfterARestart(t *testin
 	waitForSessionSourceGone(t, manager)
 
 	session.Transcript = fixture.revert(t)
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	second, err := manager.prepareStream(context.Background(), &session, adapter)
@@ -155,7 +155,7 @@ func TestARunningCodexSourceFollowsARevertIntoTheContinuation(t *testing.T) {
 	}
 	defer reg.Close()
 	session := surface.Session{ID: revertedThread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: fixture.original, HasLocal: true}
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := providers.NewCodex("http://127.0.0.1:1")
@@ -167,7 +167,7 @@ func TestARunningCodexSourceFollowsARevertIntoTheContinuation(t *testing.T) {
 	defer subscription.Cancel()
 
 	session.Transcript = fixture.revert(t)
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"first question", "first answer", "new question", "new answer"}
@@ -195,7 +195,7 @@ func TestARevertWhoseLineageCannotBeProvenReloadsFromTheNewRolloutWithANotice(t 
 	}
 	defer reg.Close()
 	session := surface.Session{ID: revertedThread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: fixture.original, HasLocal: true}
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := providers.NewCodex("http://127.0.0.1:1")
@@ -211,7 +211,7 @@ func TestARevertWhoseLineageCannotBeProvenReloadsFromTheNewRolloutWithANotice(t 
 	if err := os.Remove(fixture.original); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	second, err := manager.prepareStream(context.Background(), &session, adapter)
@@ -276,7 +276,7 @@ func TestARevertBeforeTheSeededWindowJournalsItsRetainedHistoryWithNoOlderCursor
 	}
 	defer reg.Close()
 	session := surface.Session{ID: revertedThread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: original, HasLocal: true}
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := providers.NewCodex("http://127.0.0.1:1")
@@ -292,7 +292,7 @@ func TestARevertBeforeTheSeededWindowJournalsItsRetainedHistoryWithNoOlderCursor
 	}
 
 	session.Transcript = fixture.revert(t)
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	continued, err := manager.prepareStream(context.Background(), &session, adapter)

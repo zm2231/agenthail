@@ -14,7 +14,7 @@ func TestSessionRuntimePersistsAcrossRegistryReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: "session-1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	want := &surface.Runtime{Launcher: surface.LauncherTMUX, Location: &surface.Location{Session: "agenthail", Pane: "%3"}, Focusable: true}

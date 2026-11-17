@@ -39,7 +39,7 @@ func TestMeasureSessionPresentation(t *testing.T) {
 		if i >= 8 && i < 12 {
 			session.WaitingOn = &surface.Waiting{ID: id, Kind: surface.WaitingQuestion}
 		}
-		if err := store.RegisterSession(session); err != nil {
+		if err := store.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		if i >= 572 {

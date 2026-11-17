@@ -85,9 +85,8 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		return d.doSessionOperation(ctx, adapter, session, request.Action, request.Fork, strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"), strings.TrimSpace(request.SourceSessionID), request.NativeQueue)
 	}
 	if err := d.ensureDashboardWritable(ctx, adapter, session); err != nil {
-		var owned registry.SessionOwnedError
-		if errors.As(err, &owned) && owned.HostID != "" {
-			return actionResult{}, registry.MovedError(owned)
+		if moved := sessionMovedError(err); moved != nil {
+			return actionResult{}, moved
 		}
 		return actionResult{}, conflict(err.Error())
 	}
@@ -175,17 +174,19 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		if strings.TrimSpace(request.Model) == "" {
 			return actionResult{}, invalidRequest("model is required")
 		}
+		read := *session
 		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "model", Value: request.Model})
 		if err == nil {
 			d.recordSetting(session, "model", strings.TrimSpace(request.Model), p.actor())
 		}
 		if err == nil && session.Surface == surface.KindClaude {
-			if persistErr := d.Registry.RegisterSession(*session); persistErr != nil {
+			if persistErr := d.Registry.UpdateSession(*session, registry.EditedSessionUpdate(read, *session)); persistErr != nil {
 				err = fmt.Errorf("persist Claude model state: %w", persistErr)
 			}
 		}
 	case "turn-setting":
 		key, value := strings.TrimSpace(request.Setting), strings.TrimSpace(request.Value)
+		read := *session
 		if key == "" || value == "" {
 			return actionResult{}, invalidRequest("setting and value are required")
 		}
@@ -219,7 +220,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 			result = &surface.ControlResult{SessionID: session.ID, Action: "turn-setting", Evidence: surface.EvidenceDelivered}
 		}
 		if err == nil && key == surface.TurnSettingModel && session.Surface == surface.KindClaude {
-			if persistErr := d.Registry.RegisterSession(*session); persistErr != nil {
+			if persistErr := d.Registry.UpdateSession(*session, registry.EditedSessionUpdate(read, *session)); persistErr != nil {
 				err = fmt.Errorf("persist Claude model state: %w", persistErr)
 			}
 		}
@@ -253,6 +254,9 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		return actionResult{}, invalidRequest("unsupported dashboard action")
 	}
 	if err != nil {
+		if moved := sessionMovedError(err); moved != nil {
+			return actionResult{}, moved
+		}
 		if control, ok := result.(*surface.ControlResult); ok && control != nil {
 			return actionResult{}, &actionError{Status: http.StatusBadGateway, Code: "control_failed", Message: err.Error(), Extra: map[string]any{"result": control}}
 		}

@@ -27,7 +27,7 @@ func ledgerWriteFixtureFor(t *testing.T, project registry.ProjectRecord, respond
 	if err := store.AddProject(project); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RegisterSession(s1); err != nil {
+	if err := store.RecordObservedSession(s1); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)

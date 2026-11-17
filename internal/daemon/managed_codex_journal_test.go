@@ -51,7 +51,7 @@ func managedCodexSession(t *testing.T, reg *registry.Registry, rollout string) s
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: "managed-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusBusy, Source: "agenthail", Transport: "managed", Transcript: transcript, HasLocal: true}
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	return session
@@ -150,7 +150,7 @@ func TestAManagedCodexThreadWithoutARolloutYetJournalsItsFirstTurnWhenItStarts(t
 	now := time.Now()
 	millis := fmt.Sprintf("%012x", now.UnixMilli())
 	session := surface.Session{ID: millis[:8] + "-" + millis[8:] + "-7000-8000-000000000001", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.StatusIdle, Source: "agenthail", Transport: "managed", HasLocal: true}
-	if err := reg.RegisterSession(session); err != nil {
+	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	manager := newTestSourceManager(t, reg)

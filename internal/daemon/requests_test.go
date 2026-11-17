@@ -72,7 +72,7 @@ func TestAPhoneAnswersAHostSessionsPermissionRequestOnceAndHistoryNamesIt(t *tes
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
@@ -137,7 +137,7 @@ func TestAPermissionModeChangeTakesTheCreationGuardAndIsRecordedWithWhoChangedIt
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
@@ -251,7 +251,7 @@ func TestTheDashboardOffersAHostSessionNoRemoteControlCommands(t *testing.T) {
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if caps := surface.EffectiveCapabilities(claude, &session); caps.Commands || !caps.Model {
@@ -274,7 +274,7 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	pushes := newPushRecorder(t, r)
@@ -474,7 +474,7 @@ func TestAQuestionRequestIsAnsweredByTheIDsOfItsOptions(t *testing.T) {
 	fixture.Open(t, client, id)
 	claude := surfaces.NewClaude(nil, fixture.Home)
 	r := hostRegistry(t)
-	if err := r.RegisterSession(hostedSession(t, claude, id)); err != nil {
+	if err := r.RecordObservedSession(hostedSession(t, claude, id)); err != nil {
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})

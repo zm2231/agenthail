@@ -15,7 +15,7 @@ func TestAQueuedMessageNamesTheAgentThatQueuedIt(t *testing.T) {
 		"worker": {ID: "worker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle},
 	}
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude, sessions: sessions})
-	if err := r.RegisterSession(sessions["worker"]); err != nil {
+	if err := r.RecordObservedSession(sessions["worker"]); err != nil {
 		t.Fatal(err)
 	}
 	queue := func(message string, intentID int64) (string, string) {
@@ -56,7 +56,7 @@ func TestARemoteQueueCarriesTheAgentThatQueuedIt(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"queue", "vps::@builder", "from the CLI"}) }); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_SESSION_ID", "worker")
@@ -87,7 +87,7 @@ func TestRemovingAQueuedMessageAsksForTheReachOfTheCancelItSends(t *testing.T) {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 	server.refusal = `{"scope":true,"error":{"code":"capability_missing","message":"Cancel queued message #1 is for the person."}}`
-	if err := app.Registry.RegisterSession(surface.Session{ID: "lead", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
+	if err := app.Registry.RecordObservedSession(surface.Session{ID: "lead", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_SESSION_ID", "lead")

@@ -78,7 +78,7 @@ func TestSessionSettingsSayWhereEachValueCameFromAndNameAMissingRoot(t *testing.
 	}
 	t.Cleanup(func() { r.Close() })
 	session := surface.Session{ID: "worker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle, Cwd: home, Transport: "host", ConfiguredModel: "opus", Transcript: filepath.Join(work, "projects", "p", "worker.jsonl")}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.WriteDB().Exec(`INSERT INTO session_ceilings(session_id,ceiling) VALUES('worker','{"permission":"edits","roots":["/work"]}')`); err != nil {

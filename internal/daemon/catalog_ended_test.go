@@ -103,7 +103,7 @@ func TestAnEndedClaudeSessionStaysInHistoryAndItsTranscriptIsCheckedAtMostHourly
 func TestALeadThatLostItsRowGetsItBackAsCurrent(t *testing.T) {
 	d, r, _ := endedFixture(t)
 	session := claudeRow("lead-session")
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project", ProjectRoot: "/fixture", Name: "old-lead", Surface: string(surface.KindClaude), Cwd: "/fixture"}, registry.CoordinatorChange{Replace: true, SessionID: session.ID}); err != nil {
@@ -129,7 +129,7 @@ func TestASessionThatLostItsRowComesBackWhileItsTranscriptIsThereHoweverOld(t *t
 		if id == "stale-status" {
 			session.Status = surface.StatusBusy
 		}
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -147,7 +147,7 @@ func TestASessionThatLostItsRowComesBackWhileItsTranscriptIsThereHoweverOld(t *t
 	}
 	old := claudeRow("old")
 	old.LastActive = time.Now().Add(-40 * 24 * time.Hour)
-	if err := r.RegisterSession(old); err != nil {
+	if err := r.RecordObservedSession(old); err != nil {
 		t.Fatal(err)
 	}
 	adapter.changed = old.LastActive
@@ -179,7 +179,7 @@ func viewHas(t *testing.T, d *Daemon, scope, id string) bool {
 func TestRestoringSessionsIsBoundedPerPass(t *testing.T) {
 	d, r, _ := endedFixture(t)
 	for index := range catalogRestoreBatch + 3 {
-		if err := r.RegisterSession(claudeRow("restore-" + string(rune('a'+index)))); err != nil {
+		if err := r.RecordObservedSession(claudeRow("restore-" + string(rune('a'+index)))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -240,7 +240,7 @@ func TestTheCurrentViewCountsHistoryWithoutListingIt(t *testing.T) {
 func TestARegistrationThatLandsWhileAPassRestoresTheSessionIsKept(t *testing.T) {
 	d, r, _ := endedFixture(t)
 	ended := claudeRow("worker")
-	if err := r.RegisterSession(ended); err != nil {
+	if err := r.RecordObservedSession(ended); err != nil {
 		t.Fatal(err)
 	}
 	hosted := ended
@@ -249,7 +249,7 @@ func TestARegistrationThatLandsWhileAPassRestoresTheSessionIsKept(t *testing.T) 
 	d.catalogSelected = func(id string) {
 		if id == ended.ID && !registered {
 			registered = true
-			if err := r.RegisterSession(hosted); err != nil {
+			if err := r.RecordObservedSession(hosted); err != nil {
 				t.Error(err)
 			}
 		}

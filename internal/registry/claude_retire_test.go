@@ -49,10 +49,10 @@ func TestRegisteringASharedConversationDetachesEachHolderFromItsEarlierRow(t *te
 		session.Surface, session.RuntimeKind = surface.KindClaude, surface.RuntimeClaudeCLI
 		return session
 	}
-	if err := r.RegisterSession(claude(surface.Session{ID: "started", PID: 4102, Bridge: "session_moved", Transport: "uds"})); err != nil {
+	if err := r.RecordObservedSession(claude(surface.Session{ID: "started", PID: 4102, Bridge: "session_moved", Transport: "uds"})); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(claude(surface.Session{ID: "shared", Holders: []surface.Holder{{PID: 4101}, {PID: 4102}}})); err != nil {
+	if err := r.RecordObservedSession(claude(surface.Session{ID: "shared", Holders: []surface.Holder{{PID: 4101}, {PID: 4102}}})); err != nil {
 		t.Fatal(err)
 	}
 	started, err := r.Session("started")
@@ -68,11 +68,11 @@ func TestRegisteringASharedConversationDetachesEachHolderFromItsEarlierRow(t *te
 func TestASessionAddressedToOneHolderLeavesTheConversationRowAsDiscovered(t *testing.T) {
 	r := openTestRegistry(t)
 	shared := surface.Session{ID: "shared", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Holders: []surface.Holder{{PID: 4101}, {PID: 4102}}}
-	if err := r.RegisterSession(shared); err != nil {
+	if err := r.RecordObservedSession(shared); err != nil {
 		t.Fatal(err)
 	}
 	pinned := surface.Session{ID: "shared", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 4102, HolderPID: 4102, Transport: "uds"}
-	if err := r.RegisterSession(pinned); err != nil {
+	if err := r.RecordObservedSession(pinned); err != nil {
 		t.Fatal(err)
 	}
 	if row, err := r.Session("shared"); err != nil || row.PID != 0 {
@@ -83,7 +83,7 @@ func TestASessionAddressedToOneHolderLeavesTheConversationRowAsDiscovered(t *tes
 func TestASessionAddressedToOneHolderOfAnUnlistedConversationGetsARowWithNoProcess(t *testing.T) {
 	r := openTestRegistry(t)
 	pinned := surface.Session{ID: "unlisted", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 4102, HolderPID: 4102, Transport: "uds"}
-	if err := r.RegisterSession(pinned); err != nil {
+	if err := r.RecordObservedSession(pinned); err != nil {
 		t.Fatal(err)
 	}
 	if row, err := r.Session("unlisted"); err != nil || row.PID != 0 {

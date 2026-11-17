@@ -88,7 +88,7 @@ func TestAChildsQueuedSendReachesItsSpawnerAsTheChild(t *testing.T) {
 func TestASessionCannotMessageOneOutsideItsProject(t *testing.T) {
 	f := newMCPWriteFixture(t)
 	stranger := surface.Session{ID: "stranger", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-	if err := f.r.RegisterSession(stranger); err != nil {
+	if err := f.r.RecordObservedSession(stranger); err != nil {
 		t.Fatal(err)
 	}
 	f.fake.sessions[stranger.ID] = stranger
@@ -104,7 +104,7 @@ func TestAQueuedSendReachesAPeerInTheSameProjectButCannotControlIt(t *testing.T)
 	for _, session := range []surface.Session{worker, peer} {
 		session.Cwd, session.LastActive = widget, time.Now()
 		fake.sessions[session.ID] = session
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -32,7 +32,7 @@ func runArmedTurn(t *testing.T, turn armedTurn) {
 	f.fake.kind = turn.kind
 	builder := surface.Session{ID: "builder", Surface: turn.kind, RuntimeKind: turn.runtime, Status: surface.StatusIdle, Cwd: f.workdir, PID: turn.pid}
 	f.fake.sessions[builder.ID] = builder
-	if err := r.RegisterSession(builder); err != nil {
+	if err := r.RecordObservedSession(builder); err != nil {
 		t.Fatal(err)
 	}
 	if watched(t, r, builder.ID) {

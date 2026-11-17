@@ -13,7 +13,7 @@ import (
 func credentialFixture(t *testing.T) (*Registry, string) {
 	t.Helper()
 	r := openTestRegistry(t)
-	if err := r.RegisterSession(surface.Session{ID: "worker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: "/work"}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "worker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: "/work"}); err != nil {
 		t.Fatal(err)
 	}
 	return r, "worker"

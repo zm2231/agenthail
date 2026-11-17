@@ -56,7 +56,7 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	payload := make([]map[string]any, 0, len(results))
 	for _, result := range results {
-		if err := d.Registry.RegisterSession(result.Session); err != nil {
+		if err := d.Registry.RecordObservedSession(result.Session); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("store search result: %s", err))
 			return
 		}

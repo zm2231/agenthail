@@ -70,7 +70,7 @@ func TestResumingABackgroundJobRegistersItsHostSession(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	fixture.Transcript(conversation, fixture.Home)
 	fixture.Job("fe758937", conversation, fixture.Home, "done", 0)
-	if err := registry.RegisterSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeBackground, Cwd: fixture.Home, Status: surface.StatusOffline}); err != nil {
+	if err := registry.RecordObservedSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeBackground, Cwd: fixture.Home, Status: surface.StatusOffline}); err != nil {
 		t.Fatal(err)
 	}
 	adapter := surfaces.NewClaude(nil, fixture.Home)

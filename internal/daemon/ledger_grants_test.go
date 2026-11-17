@@ -16,7 +16,7 @@ func TestAnOptedInSessionOutsideTheFolderIsCapturedFromItsGrant(t *testing.T) {
 	d, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-opt", "opt-key")
 	outside := surface.Session{ID: "outside", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle}
-	if err := r.RegisterSession(outside); err != nil {
+	if err := r.RecordObservedSession(outside); err != nil {
 		t.Fatal(err)
 	}
 	if ledgerPost(t, handler, ledgerCaptureRequest{SessionID: "outside", PromptID: "before", Prompt: "not yet in scope"}).Captured {

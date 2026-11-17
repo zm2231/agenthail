@@ -55,7 +55,7 @@ func (a *App) cmdSearch(args []string) error {
 	}
 	for _, result := range results {
 		if a.registry() != nil {
-			if err := a.registry().RegisterSession(result.Session); err != nil {
+			if err := a.registry().RecordObservedSession(result.Session); err != nil {
 				return fmt.Errorf("register Codex search result: %w", err)
 			}
 		}

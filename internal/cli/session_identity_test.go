@@ -149,7 +149,7 @@ func TestResumeInAnotherProcessKeepsTheAlias(t *testing.T) {
 func TestALaunchedSessionAndItsDiscoveredProcessAreOneRow(t *testing.T) {
 	app, r, fixture, _ := liveClaudeApp(t)
 	launched := surface.Session{ID: originalConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "launched", PID: fixture.PID, Status: surface.StatusBusy, Cwd: fixture.Home}
-	if err := r.RegisterSession(launched); err != nil {
+	if err := r.RecordObservedSession(launched); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"identify", "claude:" + originalConversation, "relay"}) }); err != nil {
@@ -191,7 +191,7 @@ func registerDiscoveredClaudeSessions(t *testing.T, app *App) {
 		t.Fatal(err)
 	}
 	for _, session := range sessions {
-		if err := app.Registry.RegisterSession(session); err != nil {
+		if err := app.Registry.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

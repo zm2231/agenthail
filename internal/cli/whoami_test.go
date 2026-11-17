@@ -17,7 +17,7 @@ func TestWhoamiUsesBoundSessionInsteadOfSharedCWD(t *testing.T) {
 		{ID: "codex-one", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: sharedCwd},
 		{ID: "codex-two", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: sharedCwd},
 	} {
-		if err := store.RegisterSession(session); err != nil {
+		if err := store.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -42,7 +42,7 @@ func TestWhoamiUsesBoundSessionInsteadOfSharedCWD(t *testing.T) {
 func TestWhoamiReportsUnboundShellWithoutGuessingFromCWD(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, store := cliFixture(t, fake)
-	if err := store.RegisterSession(surface.Session{ID: "other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/work/agenthail"}); err != nil {
+	if err := store.RecordObservedSession(surface.Session{ID: "other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/work/agenthail"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -64,7 +64,7 @@ func TestSessionFromAnotherAgenthailIsRefusedWithRemedies(t *testing.T) {
 	worker := surface.Session{ID: "worker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}
 	fake := &cliSurface{kind: surface.KindClaude, caps: surface.Capabilities{Send: true}, sessions: map[string]surface.Session{"worker": worker}}
 	app, store := cliFixture(t, fake)
-	if err := store.RegisterSession(worker); err != nil {
+	if err := store.RecordObservedSession(worker); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "foreign-conversation")

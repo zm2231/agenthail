@@ -18,7 +18,7 @@ func TestAConversationAgenthailNeverSawIsRecordedOnceAndListedAsHistory(t *testi
 	d, r, adapter := endedFixture(t)
 	named := claudeRow("known")
 	named.Name = "kept name"
-	if err := r.RegisterSession(named); err != nil {
+	if err := r.RecordObservedSession(named); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.ArchiveSession(named.ID, time.Now()); err != nil {

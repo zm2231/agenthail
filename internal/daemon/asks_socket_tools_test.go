@@ -49,7 +49,7 @@ func TestASpawnerWhoseOwnCodexStartsTheRelayIsToldItsWorkersAskInToolForm(t *tes
 			t.Fatal(err)
 		}
 		from.Transcript = rollout
-		if err := r.RegisterSession(from); err != nil {
+		if err := r.RecordObservedSession(from); err != nil {
 			t.Fatal(err)
 		}
 		f.fake.sent = nil

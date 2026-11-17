@@ -37,10 +37,10 @@ func openLeadRequest(t *testing.T, prompt string) *replacedLeadRequest {
 	claude := surfaces.NewClaude(nil, f.fixture.Home)
 	session := hostedSession(t, claude, f.id)
 	f.r = hostRegistry(t)
-	if err := f.r.RegisterSession(session); err != nil {
+	if err := f.r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.r.RegisterSession(surface.Session{ID: f.next, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Cwd: session.Cwd}); err != nil {
+	if err := f.r.RecordObservedSession(surface.Session{ID: f.next, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Cwd: session.Cwd}); err != nil {
 		t.Fatal(err)
 	}
 	f.spec = registry.CoordinatorSpec{ProjectID: "project-withdraw", ProjectRoot: session.Cwd, Name: "withdraw-lead", Surface: string(surface.KindClaude), Cwd: session.Cwd}

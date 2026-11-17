@@ -44,7 +44,7 @@ func TestCodexTranscriptReplacedBeforeCatchUpReloadsFromTheNewFileAfterRegistryR
 		t.Fatal(err)
 	}
 	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
-	if err := reg.RegisterSession(from); err != nil {
+	if err := reg.RecordObservedSession(from); err != nil {
 		reg.Close()
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestLegacySeedCheckpointNeverAcceptsReplacementAcrossRetries(t *testing.T) 
 	}
 	t.Cleanup(func() { reg.Close() })
 	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
-	if err := reg.RegisterSession(from); err != nil {
+	if err := reg.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	oldEntry, changed, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "codex:old", Payload: []byte(`{"itemId":"old","kind":"text","role":"assistant","body":"old generation"}`)}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
@@ -212,14 +212,14 @@ func (s *contextRefreshSurface) ContextUsage(_ context.Context, session *surface
 func TestSessionSourceRefreshesConfiguredModelBeforeContextEmission(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	from.ConfiguredModel = "claude-opus-5-5[1m]"
-	if err := reg.RegisterSession(from); err != nil {
+	if err := reg.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &contextRefreshSurface{daemonSurface: fake, seen: make(chan string, 1)}
 	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: adapter, epoch: "epoch", appendBodies: map[string]*streamedBody{}}
 	updated := from
 	updated.ConfiguredModel = "claude-sonnet-4"
-	if err := reg.RegisterSession(updated); err != nil {
+	if err := reg.RecordObservedSession(updated); err != nil {
 		t.Fatal(err)
 	}
 	source.append(surface.StreamEvent{ID: "context", Kind: "context", Context: &surface.ContextUsage{UsedTokens: 1}})
@@ -653,7 +653,7 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 	from.Transport = "uds"
 	from.Transcript = transcript
 	from.HasLocal = true
-	if err := reg.RegisterSession(from); err != nil {
+	if err := reg.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	adapter := providers.NewClaude(nil, t.TempDir())
@@ -763,7 +763,7 @@ func TestClaudeSessionSourceJournalsFullTimelineAcrossTransports(t *testing.T) {
 				t.Fatal(err)
 			}
 			from.Transcript = transcript
-			if err := reg.RegisterSession(from); err != nil {
+			if err := reg.RecordObservedSession(from); err != nil {
 				t.Fatal(err)
 			}
 			adapter := providers.NewClaude(nil, t.TempDir())
@@ -846,7 +846,7 @@ func TestClaudeSessionSourceJournalsInterruptedTerminalBeforeNextTurn(t *testing
 				t.Fatal(err)
 			}
 			from.Transcript = transcript
-			if err := reg.RegisterSession(from); err != nil {
+			if err := reg.RecordObservedSession(from); err != nil {
 				t.Fatal(err)
 			}
 			adapter := providers.NewClaude(nil, t.TempDir())
@@ -1301,7 +1301,7 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.Transcript = transcript
 	from.HasLocal = true
-	if err := reg.RegisterSession(from); err != nil {
+	if err := reg.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	firstManager := newTestSourceManager(t, reg)
@@ -1370,7 +1370,7 @@ func TestClaudeSessionSourceJournalsInjectedPromptOrigins(t *testing.T) {
 		t.Fatal(err)
 	}
 	from.Transcript = transcript
-	if err := reg.RegisterSession(from); err != nil {
+	if err := reg.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	manager := newTestSourceManager(t, reg)

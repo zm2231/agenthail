@@ -76,7 +76,7 @@ func TestARelayStaysHeldWhileAnOlderCodexsTranscriptShowsItsShellRunning(t *test
 	}
 	to := surface.Session{ID: "to", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	for _, session := range []surface.Session{from, to} {
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 	}

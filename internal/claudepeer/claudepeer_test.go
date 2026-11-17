@@ -32,7 +32,7 @@ func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	if err := reg.RegisterSession(s); err != nil {
+	if err := reg.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	writeDashboardPolicy(t, home, "steer")
@@ -176,7 +176,7 @@ func TestSendUsesControlSocketAndPreservesWrapper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = reg.RegisterSession(s)
+	_ = reg.RecordObservedSession(s)
 	_ = reg.Close()
 	worker, _ := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: socketDir})
 	child := exec.Command(os.Args[0], "-test.run=TestClaudePeerFakeTarget", "--")
@@ -278,7 +278,7 @@ func TestPeerQueueDedupIsScopedToRecipientAndRejectsReadOnly(t *testing.T) {
 			s.RuntimeKind = surface.RuntimeCodexDesktop
 			s.Transport = "readOnly"
 		}
-		if err := reg.RegisterSession(s); err != nil {
+		if err := reg.RecordObservedSession(s); err != nil {
 			t.Fatal(err)
 		}
 		worker, _ := startWorker(t, Config{Home: shortTempDir(t, "cp-home-"), RegistryPath: regPath, Session: s, SocketDir: shortTempDir(t, "cp-socks-")})
@@ -345,7 +345,7 @@ func TestHeartbeatRestoresRemovedRecordWithoutReplacingForeignRecord(t *testing.
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	if err := reg.RegisterSession(s); err != nil {
+	if err := reg.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: shortTempDir(t, "cp-socks-")})
@@ -881,7 +881,7 @@ func TestHeartbeatRewritesRecordOnlyWhenItChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	if err := reg.RegisterSession(s); err != nil {
+	if err := reg.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: shortTempDir(t, "cp-socks-")})
@@ -905,7 +905,7 @@ func TestHeartbeatRewritesRecordOnlyWhenItChanges(t *testing.T) {
 		t.Fatalf("unchanged record was rewritten:\nbefore %s\nafter  %s", settled, current)
 	}
 	s.Status = surface.StatusBusy
-	if err := reg.RegisterSession(s); err != nil {
+	if err := reg.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -969,7 +969,7 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 		t.Fatal(err)
 	}
 	native := surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "reviewer", Status: surface.StatusIdle}
-	if err := reg.RegisterSession(native); err != nil {
+	if err := reg.RecordObservedSession(native); err != nil {
 		t.Fatal(err)
 	}
 	home, socketDir := shortTempDir(t, "cp-home-"), shortTempDir(t, "cp-socks-")
@@ -1193,7 +1193,7 @@ func TestReceiptsDoNotWaitForASenderThatNeverCloses(t *testing.T) {
 	}
 	defer reg.Close()
 	target := surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "reviewer", Status: surface.StatusIdle}
-	if err := reg.RegisterSession(target); err != nil {
+	if err := reg.RecordObservedSession(target); err != nil {
 		t.Fatal(err)
 	}
 	socketDir := shortTempDir(t, "cp-socks-")
@@ -1227,7 +1227,7 @@ func TestPeerMessageToAClaudeSessionIsStillQueuedAndReceived(t *testing.T) {
 	}
 	defer reg.Close()
 	target := surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "reviewer", Status: surface.StatusIdle}
-	if err := reg.RegisterSession(target); err != nil {
+	if err := reg.RecordObservedSession(target); err != nil {
 		t.Fatal(err)
 	}
 	socketDir := shortTempDir(t, "cp-socks-")
@@ -1291,7 +1291,7 @@ func TestAMessageClaudeReportsExpiredIsADeliveryFailure(t *testing.T) {
 	}
 	defer reg.Close()
 	for _, s := range []surface.Session{sender, target} {
-		if err := reg.RegisterSession(s); err != nil {
+		if err := reg.RecordObservedSession(s); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1408,7 +1408,7 @@ func sendThroughWorker(t *testing.T, ctx context.Context, s surface.Session, ali
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.RegisterSession(s); err != nil {
+	if err := reg.RecordObservedSession(s); err != nil {
 		t.Fatal(err)
 	}
 	if err := reg.SetAlias(alias, s.ID); err != nil {

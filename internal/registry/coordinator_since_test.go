@@ -14,7 +14,7 @@ func TestCoordinatorSinceFollowsEachAssignmentAndHandover(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"first", "second"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: root, Status: surface.StatusIdle}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: root, Status: surface.StatusIdle}); err != nil {
 			t.Fatal(err)
 		}
 	}

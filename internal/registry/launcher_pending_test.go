@@ -25,7 +25,7 @@ func TestALaunchFoundAfterItsNameWasTakenIsRegisteredWithoutIt(t *testing.T) {
 	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Build", name, surface.Location{Workspace: "workspace-1"}, launchedAt, expires); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "owner", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "owner", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	var reserved AliasReservedError
@@ -40,7 +40,7 @@ func TestALaunchFoundAfterItsNameWasTakenIsRegisteredWithoutIt(t *testing.T) {
 	if err != nil || len(launches) != 1 {
 		t.Fatalf("launches=%+v err=%v", launches, err)
 	}
-	named, err := r.RegisterSessionAndDeletePending(surface.Session{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, launches[0])
+	named, err := r.RecordObservedSessionAndDeletePending(surface.Session{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, launches[0])
 	if err != nil || named {
 		t.Fatalf("named=%v err=%v", named, err)
 	}
@@ -76,7 +76,7 @@ func TestRegisterSessionAndDeletePendingKeepsIntentOnRegistrationFailure(t *test
 	if err != nil || len(launches) != 1 {
 		t.Fatalf("launches=%+v err=%v", launches, err)
 	}
-	if _, err := r.RegisterSessionAndDeletePending(surface.Session{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, launches[0]); err == nil {
+	if _, err := r.RecordObservedSessionAndDeletePending(surface.Session{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, launches[0]); err == nil {
 		t.Fatal("registration unexpectedly succeeded")
 	}
 	pending, err := r.PendingLaunches()

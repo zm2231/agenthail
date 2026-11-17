@@ -24,7 +24,7 @@ func pendingWithdrawIDs(t *testing.T, r *Registry) []string {
 func TestClosingAnAskThePersonMayHaveSeenQueuesItsWithdrawWhicheverWayItCloses(t *testing.T) {
 	r := openTestRegistry(t)
 	for _, id := range []string{"asker", "lead"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -60,7 +60,7 @@ func TestAPeerMessageIsDeliveredWhenTheTurnThatReadItEndsOnASessionNothingElseWa
 				{ID: "sender", Name: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle},
 				{ID: "target", Name: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: os.Getpid(), Transcript: transcript, Cwd: home, Status: surface.StatusIdle},
 			} {
-				if err := r.RegisterSession(session); err != nil {
+				if err := r.RecordObservedSession(session); err != nil {
 					t.Fatal(err)
 				}
 			}

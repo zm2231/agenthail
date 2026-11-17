@@ -21,7 +21,7 @@ func registryAtSchema(t *testing.T, path string, schema int) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if err := r.RegisterSession(surface.Session{ID: "kept", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "kept"}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "kept", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "kept"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.db.Exec(`PRAGMA user_version=` + strconv.Itoa(schema)); err != nil {
@@ -100,7 +100,7 @@ func TestABackupHoldsWhatIsStillInTheWALAndStandsAlone(t *testing.T) {
 	if err := holder.read.QueryRow(`SELECT count(*) FROM sqlite_master`).Scan(&ignored); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "in-wal", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "in-wal"}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "in-wal", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "in-wal"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.db.Exec(`PRAGMA user_version=` + strconv.Itoa(schemaVersion-1)); err != nil {

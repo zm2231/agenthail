@@ -180,7 +180,7 @@ func (f *daemonSurface) Observe(_ context.Context, session *surface.Session) (*s
 func TestScanBacksOffFailingRelayOnlySessionsAndRecovers(t *testing.T) {
 	d, registry, fake, from, to := daemonFixture(t)
 	to.Status = surface.StatusOffline
-	if err := registry.RegisterSession(to); err != nil {
+	if err := registry.RecordObservedSession(to); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := registry.AddRoute(from.ID, to.ID, ".*"); err != nil {
@@ -330,10 +330,10 @@ func daemonFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, s
 	t.Cleanup(func() { r.Close() })
 	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	to := surface.Session{ID: "to", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(to); err != nil {
+	if err := r.RecordObservedSession(to); err != nil {
 		t.Fatal(err)
 	}
 	fake := &daemonSurface{sessions: map[string]surface.Session{"from": from, "to": to}, observations: map[string]*surface.TurnObservation{}, accepted: true}
@@ -344,7 +344,7 @@ func TestObservationPersistsRefreshedCodexTransport(t *testing.T) {
 	d, r, base, _, target := daemonFixture(t)
 	target.Source = "agenthail"
 	target.Transport = "managed"
-	if err := r.RegisterSession(target); err != nil {
+	if err := r.RecordObservedSession(target); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &transportRefreshingSurface{daemonSurface: base}
@@ -369,7 +369,7 @@ func TestBusySteerRelayUsesDurableQueueUntilOutbox(t *testing.T) {
 	}
 	d, r, fake, from, to := daemonFixture(t)
 	to.Status = surface.StatusBusy
-	if err := r.RegisterSession(to); err != nil {
+	if err := r.RecordObservedSession(to); err != nil {
 		t.Fatal(err)
 	}
 	fake.caps = surface.Capabilities{Send: true, Steer: true}
@@ -423,7 +423,7 @@ func TestObservationKeepsQueueItemsBlockedWhileSteerIsPending(t *testing.T) {
 func TestRelayOutboxPreservesOptionsWhenBusySteerIsConfigured(t *testing.T) {
 	d, r, fake, _, to := daemonFixture(t)
 	to.Status = surface.StatusBusy
-	if err := r.RegisterSession(to); err != nil {
+	if err := r.RecordObservedSession(to); err != nil {
 		t.Fatal(err)
 	}
 	fake.caps = surface.Capabilities{Send: true, Steer: true}
@@ -503,10 +503,10 @@ func TestCodexCompletionReconcilesMatchingDeliveryIntent(t *testing.T) {
 	daemon, r, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindCodex
 	from.RuntimeKind = surface.RuntimeCodexDesktop
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 		t.Fatal(err)
 	}
 	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: from.ID, ProviderKey: "turn-next", Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceDelivered})
@@ -525,7 +525,7 @@ func TestCodexCompletionReconcilesMatchingDeliveryIntent(t *testing.T) {
 
 func TestFailedCodexCompletionDoesNotReconcileDeliveryIntent(t *testing.T) {
 	daemon, r, fake, from, _ := daemonFixture(t)
-	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "sender", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 		t.Fatal(err)
 	}
 	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: from.ID, ProviderKey: "turn-failed", Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceDelivered})
@@ -546,10 +546,10 @@ func TestClaudeCompletionReconcilesOnlyByInputEnvelope(t *testing.T) {
 	daemon, r, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
 	from.RuntimeKind = surface.RuntimeClaudeCLI
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: from.ID, ProviderKey: "user-envelope", Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceTransportAccepted})
@@ -633,7 +633,7 @@ func TestAPhonePushNamesTheSessionByAliasAndProjectAndNeverByItsTitle(t *testing
 	}
 	from.Name, from.Cwd = "private-project-title", root
 	fake.sessions[from.ID] = from
-	if err := r.RegisterSession(from); err != nil {
+	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetAlias("builder", from.ID); err != nil {
@@ -805,7 +805,7 @@ func TestRelayBoundsVerboseCompletionText(t *testing.T) {
 func TestRelayQueuesDurablyForClosedClaudeSession(t *testing.T) {
 	d, r, _, from, _ := daemonFixture(t)
 	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, PID: 2147483647}
-	if err := r.RegisterSession(closed); err != nil {
+	if err := r.RecordObservedSession(closed); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.AddRoute(from.ID, closed.ID, ".*"); err != nil {
@@ -824,7 +824,7 @@ func TestRelayQueuesDurablyForClosedClaudeSession(t *testing.T) {
 func TestClaudeRoutePruneRemovesOnlyInactiveRoutesFromAnExitedSource(t *testing.T) {
 	d, r, _, from, to := daemonFixture(t)
 	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, PID: 2147483647, Transcript: "/tmp/closed.jsonl"}
-	if err := r.RegisterSession(closed); err != nil {
+	if err := r.RecordObservedSession(closed); err != nil {
 		t.Fatal(err)
 	}
 	active, err := r.AddRoute(closed.ID, to.ID, ".*")
@@ -855,7 +855,7 @@ func TestRelayStopsAtHopLimit(t *testing.T) {
 	for index := 0; index <= maxRelayHops+1; index++ {
 		id := fmt.Sprintf("hop-%d", index)
 		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
-		if err := r.RegisterSession(session); err != nil {
+		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
 		}
 		fake.sessions[id] = session
@@ -898,7 +898,7 @@ func TestRelayHoldsReadOnlyCodexTerminalDestination(t *testing.T) {
 	daemon, r, _, from, to := daemonFixture(t)
 	to.Source = "cli"
 	to.Transport = "readOnly"
-	if err := r.RegisterSession(to); err != nil {
+	if err := r.RecordObservedSession(to); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
@@ -927,7 +927,7 @@ func TestScanDoesNotStartSurfaceRuntime(t *testing.T) {
 func TestScanDrainsClaudeQueueWithObservedIdleStatus(t *testing.T) {
 	daemon, r, fake, _, to := daemonFixture(t)
 	to.Status = surface.StatusBusy
-	if err := r.RegisterSession(to); err != nil {
+	if err := r.RecordObservedSession(to); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.QueueMessage(to.ID, "deliver after idle"); err != nil {
@@ -951,7 +951,7 @@ func TestScanRefreshesClaudeMetadataWithoutRoutesBeforeQueueDrain(t *testing.T) 
 	live := stale
 	live.Status = surface.StatusBusy
 	live.LastActive = liveLastActive
-	if err := r.RegisterSession(stale); err != nil {
+	if err := r.RecordObservedSession(stale); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.QueueMessage(stale.ID, "wait for completion"); err != nil {
@@ -978,7 +978,7 @@ func TestScanRefreshesClaudeMetadataWithoutRoutesBeforeQueueDrain(t *testing.T) 
 func TestScanDoesNotDrainClaudeQueueWhenMetadataRefreshFails(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
 	session := surface.Session{ID: "claude-stale", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, LastActive: time.Now().Add(-time.Hour)}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.QueueMessage(session.ID, "wait for a safe refresh"); err != nil {
@@ -1062,7 +1062,7 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	fixture := claudetest.New(t)
 	fixture.Record("conversation-compact", fixture.Home, "session_compact")
 	session := surface.Session{ID: "conversation-compact", Bridge: "session_compact", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: fixture.PID, Status: surface.StatusIdle, Transcript: path}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	id, err := r.QueueCompact(session.ID)
@@ -1168,7 +1168,7 @@ func TestRelayIsPersistedWhileDestinationIsUnavailable(t *testing.T) {
 
 func TestRelayToUnavailableSurfaceRemainsQueuedWithoutNotifyingSource(t *testing.T) {
 	d, r, _, from, to := daemonFixture(t)
-	if err := r.RegisterSession(surface.Session{ID: to.ID, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Status: surface.StatusIdle}); err != nil {
+	if err := r.RecordObservedSession(surface.Session{ID: to.ID, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {

@@ -57,7 +57,7 @@ func goalCommandFixture(t *testing.T, status surface.SessionStatus) (*Daemon, *r
 	t.Helper()
 	daemon, r, fake, _, _ := daemonFixture(t)
 	session := surface.Session{ID: "claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "claude", Status: status}
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	fake.kind = surface.KindClaude
@@ -89,7 +89,7 @@ func TestDashboardHoldsAClaudeGoalUntilTheSessionIsIdle(t *testing.T) {
 func TestDashboardRefusesAGoalTheSessionCannotRunWithItsReason(t *testing.T) {
 	daemon, r, adapter, session := goalCommandFixture(t, surface.StatusIdle)
 	session.Transport = "uds"
-	if err := r.RegisterSession(session); err != nil {
+	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
 	adapter.sessions[session.ID] = session

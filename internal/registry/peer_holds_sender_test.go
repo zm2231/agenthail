@@ -41,7 +41,7 @@ func TestAHoldReportedWithoutTheDeliveryIdHoldsOnlyTheOneMessageItCanBe(t *testi
 	open := func(t *testing.T) *Registry {
 		r := openTestRegistry(t)
 		register(t, r, "sender")
-		if err := r.RegisterSession(surface.Session{ID: "target", Name: "probe", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds"}); err != nil {
+		if err := r.RecordObservedSession(surface.Session{ID: "target", Name: "probe", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds"}); err != nil {
 			t.Fatal(err)
 		}
 		return r

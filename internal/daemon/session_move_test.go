@@ -152,7 +152,7 @@ func startMovable(t *testing.T, node *moveNode) *surface.Session {
 		return i >= 0 && listing.Sessions[i].State == "idle"
 	})
 	listed := hostedSession(t, node.claude, session.ID)
-	if err := node.reg.RegisterSession(listed); err != nil {
+	if err := node.reg.RecordObservedSession(listed); err != nil {
 		t.Fatal(err)
 	}
 	return &listed
@@ -189,7 +189,7 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := source.reg.RegisterSession(surface.Session{ID: "planner-conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+	if err := source.reg.RecordObservedSession(surface.Session{ID: "planner-conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	if err := source.reg.RecordSessionOrigin(registry.OriginOf(session.ID, "planner-conversation")); err != nil {
