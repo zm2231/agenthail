@@ -23,6 +23,7 @@ import { rereadSoon } from "./order-refresh.js";
 import { friendlyError, toast } from "./feedback.js";
 import { refreshShownProject } from "./project-pane.js";
 import { dropMissingScope, renderTiles } from "./project-tiles-view.js";
+import { adoptTileOrder } from "./tile-order.js";
 
 export function renderAll() {
   try {
@@ -36,6 +37,7 @@ export function renderAll() {
   renderStartSurfaceOptions();
   dropMissingScope();
   renderSessions();
+  adoptTileOrder(app.state.tileOrder);
   renderTiles();
   refreshShownProject();
   renderOperations();

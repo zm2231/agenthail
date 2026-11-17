@@ -3237,3 +3237,7 @@ a.attached-file {
   margin-right: 6px;
   color: var(--quiet);
 }
+.tile-menu {
+  position: fixed;
+  right: auto;
+}

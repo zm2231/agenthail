@@ -102,6 +102,17 @@ for (const vector of stopVectors.cases) {
   assert.equal(JSON.stringify(stopsByProject(stops, vector.projects, (id) => vector.sessions[id])), JSON.stringify(vector.counts), `${vector.name}: counts`);
   assert.equal(stops.count, vector.total, `${vector.name}: total`);
 }
+const arrangement = JSON.parse(readFileSync(new URL("./fixtures/tile-arrangement-vectors.json", import.meta.url), "utf8"));
+const arrangeTiles = vm.runInContext("arrangeTiles", context);
+const applyTileChange = vm.runInContext("applyTileChange", context);
+for (const vector of arrangement.cases) {
+  const listed = vector.projects.map((project) => ({ id: project.id, displayName: project.id, archived: project.archived }));
+  const tiles = arrangeTiles(listed, vector.limit, vector.order, vector.pinned);
+  assert.deepEqual(JSON.parse(JSON.stringify([ids(tiles.shown), ids(tiles.more)])), [vector.shown, vector.more], `${vector.name}: arranged as on the Mac and phone`);
+  if (!vector.change) continue;
+  const next = applyTileChange({ order: vector.order, pinned: vector.pinned }, vector.change, [...ids(tiles.shown), ...ids(tiles.more)]);
+  assert.deepEqual(JSON.parse(JSON.stringify([next.order, next.pinned])), [vector.after.order, vector.after.pinned], `${vector.name}: after the change`);
+}
 const css = readFileSync(new URL("../internal/daemon/dashboard/tokens.css", import.meta.url), "utf8");
 for (let colour = 0; colour < colours.count; colour++) {
   assert.ok(css.includes(`.tile-mark[data-colour="${colour}"]`), `tokens.css paints project colour ${colour}`);

@@ -106,3 +106,42 @@ export function tileLetter(name) {
   const found = Array.from(String(name || "")).find((character) => /[\p{L}\p{N}]/u.test(character));
   return found ? found.toUpperCase() : "·";
 }
+
+export function arrangeTiles(projects, limit, order = [], pinned = []) {
+  const place = new Map();
+  order.forEach((id, index) => { if (!place.has(id)) place.set(id, index); });
+  const pins = new Set(pinned);
+  const sorted = [...projects].sort((a, b) =>
+    Number(pins.has(b.id)) - Number(pins.has(a.id))
+    || (place.get(a.id) ?? Infinity) - (place.get(b.id) ?? Infinity)
+    || byName(a, b));
+  const shown = sorted.filter((project) => !project.archived).slice(0, Math.max(0, limit));
+  const held = new Set(shown.map((project) => project.id));
+  return { shown, more: sorted.filter((project) => !held.has(project.id)) };
+}
+
+export function movingTile(id, target, order) {
+  if (id === target || !order.includes(target)) return order;
+  const next = order.filter((entry) => entry !== id);
+  next.splice(next.indexOf(target), 0, id);
+  return next;
+}
+
+export function applyTileChange({ order = [], pinned = [] }, change, arranged) {
+  const all = [...arranged, ...order.filter((id) => !arranged.includes(id))];
+  const pins = new Set(pinned);
+  const toggled = (id) => {
+    const next = new Set(pins);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return [...next].sort();
+  };
+  if (change.kind === "pin") return { order: all, pinned: toggled(change.id) };
+  if (change.kind === "move") {
+    return { order: movingTile(change.id, change.target, all), pinned: pins.has(change.target) !== pins.has(change.id) ? toggled(change.id) : [...pins].sort() };
+  }
+  const group = arranged.filter((id) => pins.has(id) === pins.has(change.id));
+  const index = group.indexOf(change.id);
+  const other = group[index + change.by];
+  if (index < 0 || other === undefined) return { order, pinned: [...pins].sort() };
+  return { order: change.by < 0 ? movingTile(change.id, other, all) : movingTile(other, change.id, all), pinned: [...pins].sort() };
+}
