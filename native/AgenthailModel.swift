@@ -12,6 +12,7 @@ final class AgenthailModel {
             adoptParts()
             rederive()
             trackFinishedSessions(from: oldValue)
+            refreshExtensionsOnAsks(from: oldValue)
             pruneStore()
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
@@ -1478,6 +1479,11 @@ final class AgenthailModel {
     }
 
     var extensionCatalogs: [ExtensionCatalog] { [extensionCatalog] + pairedExtensionCatalogs }
+
+    private func refreshExtensionsOnAsks(from previous: DashboardSnapshot?) {
+        guard let previous, let snapshot, ExtensionCatalog.asksChanged(from: previous.sessions, to: snapshot.sessions) else { return }
+        for catalog in extensionCatalogs where catalog.list != nil || catalog.loading { catalog.refresh() }
+    }
 
     func extensionCatalog(forEntry id: String) -> ExtensionCatalog? {
         extensionCatalogs.first { !$0.hostID.isEmpty && id.hasPrefix($0.hostID + "/") }

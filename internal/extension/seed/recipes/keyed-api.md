@@ -21,14 +21,15 @@ and adds it to each request.
 
    ```ts
    export default function (ah) {
-     ah.source({ name: 'invoices', everySeconds: 300, collect: async () => {
-       const response = await ah.fetch('api', '/v1/invoices?limit=20');
+     ah.source({ name: 'invoices', everySeconds: 300, collect: async ({ signal }) => {
+       const response = await ah.fetch('api', '/v1/invoices?limit=20', { signal });
        if (!response.ok) throw new Error(`the API answered ${response.status}`);
        return response.json();
      } });
    }
    ```
 
+   Passing `signal` stops the request when Agenthail stops the collection.
    The page shows it with `source('invoices', ...)` from the template in
    `data-page.md`.
 

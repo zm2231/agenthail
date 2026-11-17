@@ -53,6 +53,16 @@ struct ExtensionPageControllerTest {
         try? await Task.sleep(for: .milliseconds(300))
         check(controller.loadsStarted == 2, "Reload starts a load, got \(controller.loadsStarted)")
 
+        let clocked = SlowSessions()
+        let timed = ExtensionPageController(entryID: "test/clock", hostID: "test-host")
+        let since = timed.waitingSince
+        check(since != nil && timed.phase.waiting, "a new page starts waiting at once")
+        timed.open(dead, signIn: clocked)
+        try? await Task.sleep(for: .milliseconds(100))
+        check(timed.waitingSince == since, "signing in keeps the time the wait began, so a redrawn note keeps its place")
+        timed.stop()
+        await clocked.release()
+
         let stopping = SlowSessions()
         let evicted = ExtensionPageController(entryID: "test/stop", hostID: "test-host")
         evicted.open(dead, signIn: stopping)
