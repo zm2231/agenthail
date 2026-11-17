@@ -1005,15 +1005,17 @@ struct IOSComposer: View, @MainActor Equatable {
     private var compactHeight: Bool { verticalSizeClass == .compact && !dynamicTypeSize.isAccessibilitySize }
     private var attachShown: Bool { context.capabilities.attach && context.capabilities.send }
 
-    private func textView(lines: ClosedRange<Int>) -> some View {
+    private func textView(lines: ClosedRange<Int>, windowShare: CGFloat? = nil) -> some View {
         IOSComposerTextView(
             text: $draft.text,
             placeholder: steering ? "Steer this turn…" : "Message this agent…",
             label: steering ? "Instruction for the current turn" : "Message to this agent",
             lines: lines,
+            windowShare: windowShare,
             pasteAttachments: attachShown && !sending ? { model.paste($0) } : nil,
             editor: editor,
-            onCaret: { caret in updateCompletion { $0.caret = caret } }
+            onCaret: { caret in updateCompletion { $0.caret = caret } },
+            draftID: session.id
         )
     }
 
@@ -1111,7 +1113,7 @@ struct IOSComposer: View, @MainActor Equatable {
                         sendControls
                     }
                 } else {
-                    textView(lines: dynamicTypeSize.isAccessibilitySize ? 1 ... 2 : 1 ... 6)
+                    textView(lines: dynamicTypeSize.isAccessibilitySize ? 1 ... 2 : 1 ... 6, windowShare: dynamicTypeSize.isAccessibilitySize ? nil : 0.4)
                         .padding(.horizontal, 8).padding(.top, 8)
                     let row = HStack(spacing: 8) { turnControls; Spacer(minLength: 0); sendControls }
                     if dynamicTypeSize.isAccessibilitySize {

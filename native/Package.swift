@@ -130,6 +130,7 @@ let package = Package(
                 "TranscriptScrimRowLayers.swift",
                 "TranscriptScrimRows.swift",
                 "TranscriptTail.swift",
+                "PastedText.swift",
                 "TranscriptRowID.swift",
                 "TranscriptFocus.swift",
                 "AgentMessage.swift",

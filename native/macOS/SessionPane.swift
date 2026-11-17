@@ -833,7 +833,7 @@ final class SessionPane: Identifiable {
     func submit(busyDelivery: String?) {
         guard let sessionID = selectedSessionID, removedSession == nil else { return }
         if composerDraft.attachments.isEmpty, let session = selectedSession {
-            let input = SlashInput(composer, available: SlashCommand.available(capabilities: session.capabilities, working: session.isWorking, waitingOnYou: session.isWaitingOnYou))
+            let input = SlashInput(PastedTextStore.shared.expand(composer), available: SlashCommand.available(capabilities: session.capabilities, working: session.isWorking, waitingOnYou: session.isWaitingOnYou))
             if let problem = input.problem {
                 model.operationError = problem
                 return
@@ -849,7 +849,7 @@ final class SessionPane: Identifiable {
             model.operationError = problem
             return
         }
-        let text = composer
+        let text = PastedTextStore.shared.expand(composer)
         let attachments = composerDraft.attachments
         composer = ""
         composerDraft.attachments = []

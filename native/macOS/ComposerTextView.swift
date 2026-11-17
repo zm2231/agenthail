@@ -7,6 +7,7 @@ struct ComposerTextView: NSViewRepresentable {
     let placeholder: String
     var accessibilityLabel: String? = nil
     var lines: ClosedRange<Int> = 2...10
+    var windowShare: CGFloat? = nil
     var onPaste: ((PastedAttachments) -> Void)? = nil
     var onCommand: ((ComposerCommand) -> Bool)? = nil
     var onUpFromFirstLine: (() -> Bool)? = nil
@@ -24,10 +25,10 @@ struct ComposerTextView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.placeholder = placeholder
         textView.setAccessibilityLabel(accessibilityLabel ?? placeholder)
-        textView.string = text
+        textView.load(text)
         context.coordinator.sync = ComposerTextSync(text)
         context.coordinator.draftID = draftID
-        textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
         textView.command = { ComposerCommand.matching($0, in: .shared) }
         textView.onCommand = { [weak coordinator = context.coordinator] in coordinator?.parent.onCommand?($0) ?? false }
         textView.onUpFromFirstLine = { [weak coordinator = context.coordinator] in coordinator?.parent.onUpFromFirstLine?() ?? false }
@@ -74,7 +75,12 @@ struct ComposerTextView: NSViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: NSScrollView, context _: Context) -> CGSize? {
         guard let width = proposal.width, width > 0, let textView = scroll.documentView as? ComposerNSTextView else { return nil }
-        return CGSize(width: width, height: textView.fittingHeight(width: width, lines: lines))
+        return CGSize(width: width, height: textView.fittingHeight(width: width, lines: Self.lines(lines, share: windowShare, window: scroll.window?.contentLayoutRect.height)))
+    }
+
+    static func lines(_ lines: ClosedRange<Int>, share: CGFloat?, window height: CGFloat?) -> ClosedRange<Int> {
+        guard let share, let height, height > 0 else { return lines }
+        return lines.lowerBound...max(lines.lowerBound, Int(height * share / ComposerNSTextView.lineHeight))
     }
 
     @MainActor
@@ -91,7 +97,7 @@ struct ComposerTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             textView.needsDisplay = true
-            sync.viewChanged(to: textView.string) { if parent.text != $0 { parent.text = $0 } }
+            sync.viewChanged(to: (textView as? ComposerNSTextView)?.draftText ?? textView.string) { if parent.text != $0 { parent.text = $0 } }
             caretMoved(textView)
         }
 
@@ -103,7 +109,8 @@ struct ComposerTextView: NSViewRepresentable {
         // The text view also moves the caret while SwiftUI updates the view,
         // when it replaces the text, and state can't change during an update.
         private func caretMoved(_ textView: NSTextView) {
-            let caret = textView.selectedRange().location
+            let location = textView.selectedRange().location
+            let caret = (textView as? ComposerNSTextView)?.draftOffset(location) ?? location
             DispatchQueue.main.async { [self] in parent.onCaret?(caret) }
         }
 
@@ -122,8 +129,12 @@ final class ComposerEditor {
     weak var textView: NSTextView?
 
     func replace(_ range: NSRange, with text: String, caret: Int) {
-        guard let textView, NSMaxRange(range) <= (textView.string as NSString).length else { return }
+        guard let textView else { return }
+        let composer = textView as? ComposerNSTextView
+        let range = composer?.viewRange(range) ?? range
+        guard NSMaxRange(range) <= (textView.string as NSString).length else { return }
         textView.insertText(text, replacementRange: range)
+        let caret = composer.map { PastedTextStore.viewOffset(caret, tokens: $0.tokenLocations) } ?? caret
         textView.setSelectedRange(NSRange(location: min(caret, (textView.string as NSString).length), length: 0))
     }
 }
