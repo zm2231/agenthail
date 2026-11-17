@@ -5,48 +5,23 @@ import { orderedSessions } from "./session-order.js";
 import { backgroundWaiting, presenceLabel, presenceTone } from "./presence.js";
 import { displayName } from "./session-labels.js";
 import { refreshDecisions, renderInbox } from "./inbox.js";
+import { currentStops } from "./decision-card.js";
+import { overviewLine, overviewWorking, workingNow } from "./overview-counts.js";
 
 export { renderLeadReplacements } from "./inbox.js";
 
 export function renderOverview() {
   const { surfaces, sessions } = app.state;
-  const connected = surfaces.filter((surface) => surface.connected).length;
-  const working = sessions.filter(
-    (session) => session.currentReason === "working",
-  ).length;
-  const queued = sessions.reduce(
-    (total, session) => total + session.queueCount,
-    0,
-  );
-  const surfaceStatus =
-    connected === 0
-      ? "No surfaces connected"
-      : `${connected} surface${connected === 1 ? "" : "s"} connected`;
-  const activityStatus = [
-    working > 0
-      ? `${working} agent${working === 1 ? "" : "s"} working`
-      : "",
-    queued > 0
-      ? `${queued} message${queued === 1 ? "" : "s"} waiting`
-      : "",
-  ].filter(Boolean);
-  $("#daemon-status").textContent = app.state.daemon?.running
-    ? "Connected"
-    : "Not running";
-  $("#daemon-detail").textContent = app.state.daemon?.stale
-    ? `Showing cached data. ${app.state.daemon.refreshError || "Surface refresh is temporarily unavailable"}`
-    : app.state.daemon?.running
-      ? [surfaceStatus, ...activityStatus].join(" · ") || "Nothing needs delivery"
-      : "Start Agenthail to deliver work";
+  const working = overviewWorking(app.sessionOrder?.current?.view?.summary, sessions);
+  $("#daemon-status").textContent = app.state.daemon?.running ? "Connected" : "Not running";
+  $("#daemon-detail").textContent = overviewLine({ daemon: app.state.daemon, surfaces, sessions, working, needsYou: currentStops().count });
   $("#surface-cards").innerHTML =
     surfaces
       .map((surface) => {
         const owned = sessions.filter(
           (session) => session.surface === surface.name,
         );
-        const active = owned.filter(
-          (session) => session.currentReason === "working",
-        ).length;
+        const active = owned.filter(workingNow).length;
         const present = owned.filter((session) =>
           surface.name === "claude"
             ? session.open
