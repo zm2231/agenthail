@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -66,6 +68,7 @@ type uiSnapshotRequest struct {
 	Width   int    `json:"width,omitempty"`
 	Height  int    `json:"height,omitempty"`
 	Device  string `json:"device,omitempty"`
+	View    string `json:"view,omitempty"`
 }
 
 type uiSnapshotEvent struct {
@@ -87,6 +90,10 @@ func (d *Daemon) apiUISnapshotHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if (request.Width == 0) != (request.Height == 0) || request.Width < 0 || request.Height < 0 || request.Width > uiSnapshotMaxSide || request.Height > uiSnapshotMaxSide {
 		writeAPIError(w, http.StatusBadRequest, "invalid_size", "Give both width and height, each from 1 to 8192 points, or neither.")
+		return
+	}
+	if problem := snapshotViewProblem(request.View); problem != "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_view", problem)
 		return
 	}
 	var rev string
@@ -165,4 +172,57 @@ func (d *Daemon) apiUISnapshotUploadHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+const snapshotSettingsTabs = 6
+
+func snapshotViewProblem(view string) string {
+	if view == "" {
+		return ""
+	}
+	if len(view) > 2048 {
+		return "The view is longer than 2048 characters."
+	}
+	seen := map[string]bool{}
+	pages := 0
+	for _, part := range strings.Split(view, "+") {
+		name, value, hasValue := strings.Cut(part, ":")
+		if seen[name] {
+			return fmt.Sprintf("The view names %s twice.", name)
+		}
+		seen[name] = true
+		switch name {
+		case "inspector", "inbox", "apps":
+			if hasValue {
+				return fmt.Sprintf("%s takes no value.", name)
+			}
+		case "project":
+			if strings.TrimSpace(value) == "" {
+				return "project needs an id, like project:<id>."
+			}
+		case "tabs":
+			for _, id := range strings.Split(value, ",") {
+				if strings.TrimSpace(id) == "" {
+					return "tabs needs session ids separated by commas, like tabs:<id>,<id>."
+				}
+			}
+		case "settings":
+			tab, err := strconv.Atoi(value)
+			if err != nil || tab < 0 || tab >= snapshotSettingsTabs {
+				return fmt.Sprintf("settings needs a tab number from 0 to %d, like settings:0.", snapshotSettingsTabs-1)
+			}
+		default:
+			return fmt.Sprintf("Unknown view %q; use inspector, inbox, apps, project:<id>, tabs:<id>,<id> or settings:<n>, joined with +.", name)
+		}
+		if name == "project" || name == "inbox" || name == "apps" || name == "settings" {
+			pages++
+		}
+	}
+	if pages > 1 {
+		return "Choose one of project, inbox, apps or settings."
+	}
+	if seen["settings"] && len(seen) > 1 {
+		return "settings draws the Settings window on its own; take it in a separate snapshot."
+	}
+	return ""
 }

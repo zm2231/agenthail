@@ -191,7 +191,9 @@ final class SessionPane: Identifiable {
     static let sidebarDocksKey = "sidebarDocks"
     static let sidebarHiddenKey = "sidebarHidden"
 
-    var tabsEnabled: Bool { restoresSelection && model.interface.config.tabs }
+    @ObservationIgnored var snapshotTabs = false
+    @ObservationIgnored var marksSeen = true
+    var tabsEnabled: Bool { (restoresSelection || snapshotTabs) && model.interface.config.tabs }
 
     private func observeDraft() {
         draftObservation = composerDraft.$text.combineLatest(composerDraft.$attachments)
@@ -480,7 +482,7 @@ final class SessionPane: Identifiable {
         frozenOlderCursor = nil
         composerDraft = model.draft(for: id)
         selectedSessionID = id
-        model.markSeen(id)
+        if marksSeen { model.markSeen(id) }
         let warm = model.store.open(id)
         olderItems = warm?.older ?? []
         olderCursor = warm?.olderCursor

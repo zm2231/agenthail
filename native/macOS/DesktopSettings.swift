@@ -4,29 +4,31 @@ import SwiftUI
 
 struct DesktopSettings: View {
     var model: AgenthailModel
+    var initialTab = 0
+    @State private var tab: Int?
 
     var body: some View {
-        TabView {
+        TabView(selection: Binding(get: { tab ?? initialTab }, set: { tab = $0 })) {
             OverviewSettings(model: model)
-                .tabItem { Label("Overview", systemImage: "square.grid.2x2") }
+                .tabItem { Label("Overview", systemImage: "square.grid.2x2") }.tag(0)
             GeneralSettings(model: model)
-                .tabItem { Label("General", systemImage: "gearshape") }
+                .tabItem { Label("General", systemImage: "gearshape") }.tag(1)
             AppearanceSettings(model: model)
-                .tabItem { Label("Appearance", systemImage: "paintpalette") }
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }.tag(2)
             KeyboardSettings()
-                .tabItem { Label("Keyboard", systemImage: "keyboard") }
+                .tabItem { Label("Keyboard", systemImage: "keyboard") }.tag(3)
             DevicesSettings(model: model)
-                .tabItem { Label("Devices", systemImage: "iphone") }
+                .tabItem { Label("Devices", systemImage: "iphone") }.tag(4)
             SigninSettings(model: model)
-                .tabItem { Label("Browser Sign-in", systemImage: "key") }
+                .tabItem { Label("Browser Sign-in", systemImage: "key") }.tag(5)
             NotificationSettings(model: model)
-                .tabItem { Label("Notifications", systemImage: "bell.badge") }
+                .tabItem { Label("Notifications", systemImage: "bell.badge") }.tag(6)
             DeliverySettings(model: model)
-                .tabItem { Label("Delivery", systemImage: "arrow.triangle.branch") }
+                .tabItem { Label("Delivery", systemImage: "arrow.triangle.branch") }.tag(7)
             ActivitySettings(model: model)
-                .tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
+                .tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }.tag(8)
             ClaudeCompactSettings(model: model)
-                .tabItem { Label("Claude", systemImage: "rectangle.compress.vertical") }
+                .tabItem { Label("Claude", systemImage: "rectangle.compress.vertical") }.tag(9)
         }
         .frame(width: 700, height: 520)
         .task { await model.loadOperations() }

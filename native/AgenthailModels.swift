@@ -2023,6 +2023,7 @@ struct SnapshotRequest: Decodable, Equatable {
     let width: Int?
     let height: Int?
     let device: String?
+    var view: String? = nil
     var rev: String? = nil
     let deadlineMs: Int64
 }

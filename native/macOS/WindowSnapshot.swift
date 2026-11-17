@@ -67,7 +67,7 @@ enum WindowSnapshot {
 
     static func capture(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
         let size = request.width.flatMap { width in request.height.map { CGSize(width: width, height: $0) } }
-        if request.session == nil, size == nil, let window = model.mainWindow, window.isVisible, !window.isMiniaturized {
+        if request.session == nil, size == nil, (request.view ?? "").isEmpty, let window = model.mainWindow, window.isVisible, !window.isMiniaturized {
             if model.mainBackdrop?.shows(model.interface.config) == false {
                 await budget.wait { model.mainBackdrop?.shows(model.interface.config) != false }
                 await budget.pause(settle)
@@ -76,17 +76,30 @@ enum WindowSnapshot {
             if live != .failure(.empty) { return live }
         }
         let session = request.session ?? model.mainPane.selectedSessionID
-        let project = request.session == nil ? model.mainPane.shownProjectID : nil
-        return await offscreen(session: session, project: project, size: size ?? model.mainWindow?.frame.size ?? defaultSize, model: model, voice: voice, budget: budget)
+        let views = SnapshotViews(request.view)
+        let project = views.project ?? (request.session == nil ? model.mainPane.shownProjectID : nil)
+        if let tab = views.settings {
+            return await settings(tab: tab, size: size ?? defaultSize, model: model, budget: budget)
+        }
+        return await offscreen(session: session, project: project, views: views, size: size ?? model.mainWindow?.frame.size ?? defaultSize, model: model, voice: voice, budget: budget)
     }
 
-    static func offscreen(session: String?, project: String? = nil, size: CGSize, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
+    static func offscreen(session: String?, project: String? = nil, views: SnapshotViews = SnapshotViews(nil), size: CGSize, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
         guard WindowImage.system != nil else { return .failure(.unavailable) }
         let pane = model.openPane()
         defer { model.closePane(pane) }
+        pane.marksSeen = false
+        pane.snapshotTabs = !views.tabs.isEmpty
+        for tab in views.tabs { pane.select(model.resolveSessionID(tab)) }
         let resolved = session.map(model.resolveSessionID)
         if let resolved { pane.select(resolved) }
         if let project { pane.showProject(project) }
+        if views.inspector {
+            pane.fitWindow(width: size.width)
+            if !pane.inspectorShown { pane.toggleInspector() }
+        }
+        if views.inbox { pane.showInbox() }
+        if views.apps { pane.showExtensions() }
         let probe = SnapshotProbe(pane: pane)
         let window = SnapshotWindow(contentRect: CGRect(origin: SnapshotWindow.hidden, size: size), styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.titlebarAppearsTransparent = true
@@ -111,6 +124,47 @@ enum WindowSnapshot {
         return WindowImage.png(of: window)
     }
 
+    static func settings(tab: Int, size: CGSize, model: AgenthailModel, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
+        guard WindowImage.system != nil else { return .failure(.unavailable) }
+        let window = SnapshotWindow(contentRect: CGRect(origin: SnapshotWindow.hidden, size: size), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.isExcludedFromWindowsMenu = true
+        window.ignoresMouseEvents = true
+        window.contentView = NSHostingView(rootView: DesktopSettings(model: model, initialTab: tab).textColors(model.interface))
+        window.setFrame(CGRect(origin: SnapshotWindow.hidden, size: window.contentView?.fittingSize ?? size), display: false)
+        window.orderFrontRegardless()
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+        await budget.pause(.seconds(2))
+        return WindowImage.png(of: window)
+    }
+
+}
+
+struct SnapshotViews: Equatable {
+    var inspector = false
+    var inbox = false
+    var apps = false
+    var project: String?
+    var settings: Int?
+    var tabs: [String] = []
+
+    init(_ text: String?) {
+        for part in (text ?? "").split(separator: "+").map(String.init) {
+            let (name, value) = part.firstIndex(of: ":").map { (String(part[..<$0]), String(part[part.index(after: $0)...])) } ?? (part, "")
+            switch name {
+            case "inspector": inspector = true
+            case "inbox": inbox = true
+            case "apps": apps = true
+            case "project": project = value.isEmpty ? nil : value
+            case "settings": settings = Int(value) ?? 0
+            case "tabs": tabs = value.split(separator: ",").map(String.init)
+            default: break
+            }
+        }
+    }
 }
 
 final class SnapshotWindow: NSWindow {

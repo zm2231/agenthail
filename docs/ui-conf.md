@@ -123,7 +123,7 @@ agenthail ui diff [<rev>]
 agenthail ui undo [<rev>]
 agenthail ui show-defaults [--docs]
 agenthail ui path
-agenthail ui snapshot [--session <id>] [--size <W>x<H>] [--name <device>] <out.png>
+agenthail ui snapshot [--session <id>] [--size <W>x<H>] [--view <views>] [--name <device>] <out.png>
 ```
 
 - `get` prints the file; `--resolved` prints the value of every key for one device after overrides and defaults.
@@ -155,8 +155,9 @@ Apps read and change `ui.conf` through the daemon, with the same checks as `agen
 
 - With no options it captures the main window as it is now. If the main window is closed or minimized, it draws the session the main window last showed, at the main window's size or 1440x900 points if it has none.
 - `--session <id>` and `--size <W>x<H>` draw a separate copy of the main window, in points, that nobody sees. The window you are using keeps its session, size and layout. A size below the window's minimum is widened to that minimum, as the real window would be.
+- `--view <views>` draws the copy with more of the window showing, joined with `+`: `inspector` opens the inspector, `tabs:<id>,<id>` opens those sessions as tabs, `project:<id>`, `inbox` and `apps` show that page, and `settings:<n>` draws the Settings window at its nth tab, counting from 0, on its own. For example `--session <id> --view inspector+tabs:<id>,<id>`.
 - `--name <device>` picks the Mac by its name when more than one Mac app is connected. Otherwise the first app to answer is used.
 - The command waits up to 20 seconds and says so if no app answered.
 - The capture uses macOS's `CGWindowListCreateImage`. If a future macOS removes it, the command fails with a message saying so rather than saving a less faithful picture.
 
-The API behind it is `POST /api/v1/ui/snapshot` with an optional JSON body `{"session", "width", "height", "device"}`; the response is the PNG. It needs the `read` scope. A snapshot can show any session visible in the window, so anything allowed to read sessions can take one. Connected apps receive the request as a `ui.snapshot.requested` event carrying `deadlineMs`, the time the daemon will wait counted from when it sent the event, and answer with `POST /api/v1/ui/snapshot/<id>`. Requests are held only in memory for 20 seconds; when one is answered or given up, the daemon sends `ui.snapshot.closed` with the request id as `entityId`, so an app replaying events stops work on a request that has already ended.
+The API behind it is `POST /api/v1/ui/snapshot` with an optional JSON body `{"session", "width", "height", "device", "view"}`; the response is the PNG. It needs the `read` scope. A snapshot can show any session visible in the window, so anything allowed to read sessions can take one. Connected apps receive the request as a `ui.snapshot.requested` event carrying `deadlineMs`, the time the daemon will wait counted from when it sent the event, and answer with `POST /api/v1/ui/snapshot/<id>`. Requests are held only in memory for 20 seconds; when one is answered or given up, the daemon sends `ui.snapshot.closed` with the request id as `entityId`, so an app replaying events stops work on a request that has already ended.

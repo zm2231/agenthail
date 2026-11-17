@@ -27,6 +27,9 @@ func (a *App) uiSnapshot(parsed uiArgs) error {
 	if parsed.name != "" {
 		payload["device"] = parsed.name
 	}
+	if parsed.view != "" {
+		payload["view"] = parsed.view
+	}
 	if parsed.size != "" {
 		width, height, err := parseSnapshotSize(parsed.size)
 		if err != nil {
