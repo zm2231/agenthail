@@ -163,6 +163,7 @@ final class AgenthailModel {
     private(set) var codexRecentHours = 5
     private(set) var busyDelivery = FollowUpAction.queue
     private(set) var decisionsRev: String?
+    private(set) var tileOrder: TileOrderState?
 
     private func adoptParts() {
         hasSnapshot = snapshot != nil
@@ -175,6 +176,7 @@ final class AgenthailModel {
         codexRecentHours = snapshot?.codexRecentHours ?? 5
         busyDelivery = FollowUpAction(rawValue: snapshot?.busyDelivery ?? "") ?? .queue
         decisionsRev = snapshot?.decisionsRev
+        if tileOrder != snapshot?.tileOrder { tileOrder = snapshot?.tileOrder }
     }
 
     var isConnected: Bool { connectionError == nil && daemon?.running == true }

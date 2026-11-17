@@ -5,7 +5,7 @@ struct SidebarTiles: View {
 
     var model: AgenthailModel
     var pane: SessionPane
-    var tileOrder = ProjectTileOrder.shared
+    var tileOrder = TileOrderStore.mac
 
     var body: some View {
         let stops = model.inboxStops
@@ -31,13 +31,13 @@ struct SidebarTiles: View {
                     .draggable(project.id)
                     .dropDestination(for: String.self) { dropped, _ in
                         guard let id = dropped.first, arranged.contains(id) else { return false }
-                        tileOrder.move(id, before: project.id, arranged: arranged)
+                        tileOrder.change(.move(id, before: project.id), arranged: arranged)
                         return true
                     }
                     .contextMenu {
-                        Button(tileOrder.isPinned(project.id) ? "Unpin" : "Pin to Front") { tileOrder.togglePin(project.id, arranged: arranged) }
-                        Button("Move Earlier") { tileOrder.step(project.id, by: -1, arranged: arranged) }
-                        Button("Move Later") { tileOrder.step(project.id, by: 1, arranged: arranged) }
+                        Button(tileOrder.isPinned(project.id) ? "Unpin" : "Pin to Front") { tileOrder.change(.pin(project.id), arranged: arranged) }
+                        Button("Move Earlier") { tileOrder.change(.step(project.id, by: -1), arranged: arranged) }
+                        Button("Move Later") { tileOrder.change(.step(project.id, by: 1), arranged: arranged) }
                     }
             }
             if !tiles.more.isEmpty {
@@ -70,8 +70,20 @@ struct SidebarTiles: View {
             let seen = ProjectTiles.order(model.projects, limit: model.projects.count, waiting: counts, leads: leads)
             tileOrder.seed((seen.shown + seen.more).map(\.id))
         }
+        .onChange(of: TileSync(remote: model.tileOrder, api: model.api.map(ObjectIdentifier.init)), initial: true) {
+            let api = model.api
+            tileOrder.adopt(model.tileOrder) { state in
+                guard let api else { throw AgenthailAPIError.unavailable(AgenthailAPIError.disconnectedGuidance) }
+                return try await api.putTileOrder(state)
+            }
+        }
         .padding(.horizontal, DesktopSpace.s)
         .padding(.bottom, DesktopSpace.xs)
+    }
+
+    private struct TileSync: Equatable {
+        var remote: TileOrderState?
+        var api: ObjectIdentifier?
     }
 
     private func moreDetail(_ project: ProjectState, waiting: Int) -> String {

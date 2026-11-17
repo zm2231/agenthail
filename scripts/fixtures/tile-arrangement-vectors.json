@@ -1,0 +1,58 @@
+{
+  "cases": [
+    {
+      "name": "ids no project has keep no place, and projects the order lacks follow by name",
+      "projects": [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}],
+      "limit": 3, "order": ["c", "gone", "a"], "pinned": [],
+      "shown": ["c", "a", "b"], "more": ["d"]
+    },
+    {
+      "name": "pinning a tile puts it with the pinned ones and an archived project is never shown",
+      "projects": [{"id": "a"}, {"id": "b"}, {"id": "c", "archived": true}],
+      "limit": 2, "order": ["c", "a", "b"], "pinned": ["b"],
+      "shown": ["b", "a"], "more": ["c"],
+      "change": {"kind": "pin", "id": "a"},
+      "after": {"order": ["b", "a", "c"], "pinned": ["a", "b"]}
+    },
+    {
+      "name": "dropping a tile among the pinned ones pins it",
+      "projects": [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}],
+      "limit": 4, "order": ["a", "b", "c", "d"], "pinned": ["a"],
+      "shown": ["a", "b", "c", "d"], "more": [],
+      "change": {"kind": "move", "id": "d", "target": "a"},
+      "after": {"order": ["d", "a", "b", "c"], "pinned": ["a", "d"]}
+    },
+    {
+      "name": "moving earlier stays among the unpinned tiles",
+      "projects": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
+      "limit": 3, "order": ["a", "b", "c"], "pinned": ["a"],
+      "shown": ["a", "b", "c"], "more": [],
+      "change": {"kind": "step", "id": "c", "by": -1},
+      "after": {"order": ["a", "c", "b"], "pinned": ["a"]}
+    },
+    {
+      "name": "the first unpinned tile cannot move earlier past a pinned one",
+      "projects": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
+      "limit": 3, "order": ["a", "b", "c"], "pinned": ["a"],
+      "shown": ["a", "b", "c"], "more": [],
+      "change": {"kind": "step", "id": "b", "by": -1},
+      "after": {"order": ["a", "b", "c"], "pinned": ["a"]}
+    },
+    {
+      "name": "moving later swaps with the next tile",
+      "projects": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
+      "limit": 3, "order": ["a", "b", "c"], "pinned": ["a"],
+      "shown": ["a", "b", "c"], "more": [],
+      "change": {"kind": "step", "id": "b", "by": 1},
+      "after": {"order": ["a", "c", "b"], "pinned": ["a"]}
+    },
+    {
+      "name": "a move with no order yet records every tile in its shown place",
+      "projects": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
+      "limit": 2, "order": [], "pinned": [],
+      "shown": ["a", "b"], "more": ["c"],
+      "change": {"kind": "move", "id": "c", "target": "a"},
+      "after": {"order": ["c", "a", "b"], "pinned": []}
+    }
+  ]
+}

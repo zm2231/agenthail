@@ -67,6 +67,7 @@ let package = Package(
                 "SessionSelection.swift",
                 "ProjectActions.swift",
                 "ProjectTiles.swift",
+                "TileOrderStore.swift",
                 "ProjectContents.swift",
                 "ProjectNow.swift",
                 "ScopePages.swift",

@@ -287,6 +287,20 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await requestEncoded(path, method: "POST", body: change)
     }
 
+    func putTileOrder(_ state: TileOrderState) async throws -> TileWrite {
+        struct Reply: Decodable { let tileOrder: TileOrderState }
+        var request = authorizedRequest(path: "/api/v1/projects/tiles")
+        request.httpMethod = "PUT"
+        request.httpBody = try JSONEncoder().encode(state)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: request)
+        if (response as? HTTPURLResponse)?.statusCode == 409, let reply = try? JSONDecoder().decode(Reply.self, from: data) {
+            return .stale(reply.tileOrder)
+        }
+        try validate(response: response, data: data)
+        return .saved(try JSONDecoder().decode(Reply.self, from: data).tileOrder)
+    }
+
     func uiLog(limit: Int) async throws -> [UIChangeEntry] {
         let response: UIChangeLog = try await get("/api/v1/ui/log?limit=\(limit)")
         return response.entries
