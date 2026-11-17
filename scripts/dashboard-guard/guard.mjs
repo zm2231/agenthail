@@ -103,8 +103,14 @@ async function themeSurvivesHiddenText(page, dashboard, label) {
   await openView(page, dashboard, { hash: "overview", dashboard: "full" });
   const before = await page.evaluate(roleOverrides);
   const hidden = await page.addStyleTag({ content: HIDE_TEXT });
-  await page.evaluate(() => dispatchEvent(new Event("resize")));
-  await page.waitForFunction(() => !document.documentElement.hasAttribute("data-ui-settled"));
+  const passStarted = await page.evaluate(() => {
+    dispatchEvent(new Event("resize"));
+    return !document.documentElement.hasAttribute("data-ui-settled");
+  });
+  if (!passStarted) {
+    await hidden.evaluate((node) => node.remove());
+    return [`${label}: a resize started no theme pass`];
+  }
   await settle(page);
   await hidden.evaluate((node) => node.remove());
   await settle(page);
