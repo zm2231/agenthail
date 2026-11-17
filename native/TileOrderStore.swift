@@ -88,6 +88,10 @@ final class TileOrderStore {
 
     func isPinned(_ id: String) -> Bool { arrangement.pinned.contains(id) }
 
+    func moves(_ change: TileChange, arranged: [String]) -> Bool {
+        arrangement.applying(change, arranged: arranged).order != arranged + arrangement.order.filter { !arranged.contains($0) }
+    }
+
     func seed(_ ids: [String]) {
         guard arrangement.order.isEmpty, !ids.isEmpty else { return }
         save(TileArrangement(order: ids, pinned: arrangement.pinned), unsent: unsent)
@@ -104,7 +108,7 @@ final class TileOrderStore {
         self.write = write
         guard let remote else { return }
         heard = true
-        guard !sending else { return }
+        guard !sending, unsent || remote.revision >= revision else { return }
         if unsent || remote.revision == 0 && !arrangement.order.isEmpty {
             revision = remote.revision
             send(replaying: nil)

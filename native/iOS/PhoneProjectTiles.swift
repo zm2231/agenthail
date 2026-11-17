@@ -14,7 +14,10 @@ struct PhoneProjectTiles: View {
     var body: some View {
         let projects = model.qualifiedProjects
         let counts = model.inboxStops.needsYou(in: projects, projectOf: model.projectOfSession())
-        let tiles = ProjectTiles.order(projects, limit: Self.limit(sizeClass), waiting: counts, leads: model.tileLeads)
+        let ranked = ProjectTiles.order(projects, limit: Self.limit(sizeClass), waiting: counts, leads: model.tileLeads)
+        let order = model.tileOrder.flatMap { $0.arrangement.order.isEmpty ? nil : $0 }
+        let tiles = order?.tiles(projects, limit: Self.limit(sizeClass)) ?? ranked
+        let arranged = (tiles.shown + tiles.more).map(\.id)
         if !tiles.shown.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 8) {
@@ -27,6 +30,8 @@ struct PhoneProjectTiles: View {
                         .accessibilityLabel("Project \(project.displayName)")
                         .accessibilityValue(count > 0 ? "\(count) waiting" : "")
                         .accessibilityIdentifier("project-tile-" + project.id)
+                        .contextMenu { arrange(project.id, arranged: arranged) }
+                        .accessibilityActions { arrange(project.id, arranged: arranged) }
                     }
                     if !tiles.more.isEmpty {
                         Menu {
@@ -52,6 +57,24 @@ struct PhoneProjectTiles: View {
             .scrollClipDisabled()
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Projects")
+            .task(id: projects.isEmpty) {
+                let seen = ProjectTiles.order(projects, limit: projects.count, waiting: counts, leads: model.tileLeads)
+                model.tileOrder?.seed((seen.shown + seen.more).map(\.id))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func arrange(_ id: String, arranged: [String]) -> some View {
+        if let order = model.tileOrder {
+            let pinned = order.isPinned(id)
+            Button(pinned ? "Unpin" : "Pin to Front", systemImage: pinned ? "pin.slash" : "pin") { order.change(.pin(id), arranged: arranged) }
+            if order.moves(.step(id, by: -1), arranged: arranged) {
+                Button("Move Earlier", systemImage: "arrow.left") { order.change(.step(id, by: -1), arranged: arranged) }
+            }
+            if order.moves(.step(id, by: 1), arranged: arranged) {
+                Button("Move Later", systemImage: "arrow.right") { order.change(.step(id, by: 1), arranged: arranged) }
+            }
         }
     }
 

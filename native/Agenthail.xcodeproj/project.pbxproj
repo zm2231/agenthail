@@ -139,6 +139,7 @@
 		521DC4738AC75D80C8AFE17C /* IOSChannelsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA4F8268317A60DF3CBABE1D /* IOSChannelsSection.swift */; };
 		52AB9D13AC93352BC4FC52C6 /* ScopeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C23917663303D1F0107FDCCA /* ScopeReader.swift */; };
 		5416E4A1F94BCBC0A0DA72C5 /* InboxPageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE3E0E0E227ADD2EE3940C5 /* InboxPageTests.swift */; };
+		5462E5D42DA17C0E1E1826D8 /* TileOrderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF7DCE2729D2D0E6597CC3D4 /* TileOrderStore.swift */; };
 		55C8326EDD6A70F75A28FB88 /* PhoneComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 155647F24D35A824AC154886 /* PhoneComponents.swift */; };
 		562095F79BCFF043C869EF49 /* NativeVoiceAudioTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9D70AE21617F9F5BF4E19E2 /* NativeVoiceAudioTests.swift */; };
 		570353CE45DA17971255F9A9 /* ObservationProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAEF06295D6B3977E0D92864 /* ObservationProbe.swift */; };
@@ -831,6 +832,7 @@
 		FEDCC3A4ADE2706BFD0A359D /* LaunchSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchSettingsView.swift; sourceTree = "<group>"; };
 		FF3653B6C760F438BBB19E08 /* ScopePages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopePages.swift; sourceTree = "<group>"; };
 		FF5945B600867C8DF7991CFB /* HostGroupsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostGroupsUITests.swift; sourceTree = "<group>"; };
+		FF7DCE2729D2D0E6597CC3D4 /* TileOrderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TileOrderStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1179,6 +1181,7 @@
 				44354559A3BD242FB1F71E39 /* TaggedResponses.swift */,
 				293FF08862DDD7F0F2CFE623 /* TextColors.swift */,
 				9110800F97A7ED841FDCED47 /* TextDiff.swift */,
+				FF7DCE2729D2D0E6597CC3D4 /* TileOrderStore.swift */,
 				4F7A9AA7E564B9BE9256DC60 /* TimelineEventLabel.swift */,
 				8F21ADA618DF4770F00C79A8 /* TimelineMetadata.swift */,
 				04B51912943C3AB5349211FF /* ToolDiffCache.swift */,
@@ -1686,6 +1689,7 @@
 				17DD180566C794670DD02DCE /* Tailnet.swift in Sources */,
 				729F0D0B12977D6DFEF23DB8 /* TextColors.swift in Sources */,
 				FB17EBE63942E214E1183E98 /* TextDiff.swift in Sources */,
+				5462E5D42DA17C0E1E1826D8 /* TileOrderStore.swift in Sources */,
 				421571DAB11BC62847665EA6 /* TilesPreview.swift in Sources */,
 				B9FE4A4D95013C94BA6B7BD3 /* TimelineCells.swift in Sources */,
 				6B4A786AEBA5BC34039ABB98 /* TimelineEventLabel.swift in Sources */,
