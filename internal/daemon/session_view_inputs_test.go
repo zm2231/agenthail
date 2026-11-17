@@ -42,6 +42,7 @@ var notSessionViewInputs = map[string]string{
 	"session_codex_config": codexConfig, "trigger_runs": "only GET /api/v1/triggers reads trigger runs; a finished run reaches a session view as its delivery_history entry",
 	"peer_relay_sockets":  "only a Claude host's hold report reads which session a reply relay socket belongs to; the hold reaches a session view as its delivery intent",
 	"project_settings":    "a project's settings reach the dashboard's project rows and the MCP socket, which reads them at each request; no session view shows them",
+	"project_tiles":       "the person's tile order reaches only the snapshot's tileOrder, which arranges project tiles; no session view shows it",
 	"host_held_actions":   "a held channel leg belongs to a paired host, not a session; it reaches a session view only as the host's deliveries",
 	"approvals":           "only answering an approval and its audit read the stored action; a session view shows the approval as its row in asks",
 	"turn_judgments":      "only GET /api/v1/turn-judgments reads recorded judgments; nothing a session view shows comes from them",
