@@ -7,7 +7,7 @@ struct ClaudeCompactSettings: View {
     var body: some View {
         Form {
             Section {
-                Text("When Claude compacts a conversation, per Claude config folder. Claude's own settings apply to sessions started after the change. Agenthail's idle compaction compacts a large idle conversation before its cache expires, even when the account is near its limit, and applies at once.")
+                Text("When Claude compacts a conversation, for each Claude account folder. Claude's settings apply to sessions started after a change. Agenthail's idle compaction compacts a large idle conversation before its cache expires, and applies at once.")
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
@@ -16,10 +16,14 @@ struct ClaudeCompactSettings: View {
             }
             if let roots = store.roots {
                 if roots.isEmpty {
-                    Section { Text("No Claude config folders.").foregroundStyle(DesktopPalette.text2) }
+                    Section { Text("No Claude accounts.").foregroundStyle(DesktopPalette.text2) }
                 }
                 ForEach(roots) { root in
-                    Section(root.settingsPath) { ClaudeCompactRootFacts(root: root, holds: store.holds) }
+                    Section {
+                        ClaudeCompactRootFacts(root: root, holds: store.holds)
+                    } header: {
+                        Text(ClaudeCompactFacts.title(root.root)).help(root.settingsPath)
+                    }
                 }
                 if !roots.isEmpty { changeSection(roots) }
             } else if store.loadError == nil {
@@ -32,8 +36,8 @@ struct ClaudeCompactSettings: View {
 
     private func changeSection(_ roots: [ClaudeCompactRoot]) -> some View {
         Section("Change") {
-            Picker("Config folder", selection: $store.draft.root) {
-                ForEach(roots) { Text($0.root).tag($0.root) }
+            Picker("Account folder", selection: $store.draft.root) {
+                ForEach(roots) { Text(ClaudeCompactFacts.title($0.root)).tag($0.root) }
             }
             TextField("Model", text: $store.draft.model, prompt: Text("Blank for every model"))
             TextField("Window", text: $store.draft.window, prompt: Text("tokens, auto, or unset"))
@@ -72,18 +76,33 @@ private struct ClaudeCompactToggle: View {
 private struct ClaudeCompactRootFacts: View {
     let root: ClaudeCompactRoot
     let holds: [ClaudeCompactHold]
+    @State private var showsHolds = false
 
     var body: some View {
         LabeledContent("Window", value: ClaudeCompactFacts.window(root.autoCompactWindow))
-        ForEach(ClaudeCompactFacts.modelLines(root), id: \.self) { Text($0) }
+        ForEach(ClaudeCompactFacts.modelLines(root), id: \.model) { line in
+            LabeledContent(line.model, value: line.window)
+        }
         LabeledContent("Autocompact", value: ClaudeCompactFacts.toggle(root.autoCompactEnabled))
         LabeledContent("Idle compaction", value: ClaudeCompactFacts.toggle(root.idleCompaction))
         LabeledContent("Agenthail idle compaction", value: ClaudeCompactFacts.agenthailIdle(root.agenthailIdleCompaction))
-        ForEach(Array((ClaudeCompactFacts.holdLines(root, holds: holds) + ClaudeCompactFacts.overrideLines(root)).enumerated()), id: \.offset) { _, line in
+        ForEach(ClaudeCompactFacts.overrideLines(root), id: \.self) { line in
             Text(line)
                 .font(.system(size: DesktopType.secondary))
                 .foregroundStyle(DesktopPalette.text2)
                 .textSelection(.enabled)
+        }
+        let held = ClaudeCompactFacts.holdLines(root, holds: holds)
+        if !held.isEmpty {
+            DisclosureGroup("Not compacted recently · \(held.count)", isExpanded: $showsHolds) {
+                ForEach(Array(held.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         }
     }
 }
