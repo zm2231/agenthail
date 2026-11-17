@@ -14,13 +14,18 @@ struct UsageChips: View {
             if accounts.isEmpty {
                 if let problem = usage.problem { Text(problem).help(problem) }
             } else {
+                let strip = UsageProxies.strip(accounts)
+                let focus = UsageFocus.pick(strip, shown: pane.displayedSession, sessions: model.knownSessions)
                 Button { showing.toggle() } label: {
                     HStack(spacing: DesktopSpace.m) {
-                        ForEach(UsageProxies.strip(accounts)) { UsageChip(account: $0, sessions: { model.knownSessions }, bars: bars, now: context.date) }
+                        ForEach(focus.chips) { UsageChip(account: $0, sessions: { model.knownSessions }, labelled: bars, now: context.date) }
+                        if focus.others > 0 {
+                            Text("+\(focus.others)").foregroundStyle(DesktopPalette.text2)
+                        }
                     }
                 }
                 .buttonStyle(ReadableButtonStyle())
-                .help("Usage of every account")
+                .help(strip.map { UsageFocus.line($0, now: context.date) }.joined(separator: "\n"))
                 .accessibilityLabel(accounts.map { $0.spoken(now: context.date) }.joined(separator: ". "))
                 .accessibilityHint("Shows each account's limits and sessions")
                 .accessibilityIdentifier("usage-accounts")
@@ -58,15 +63,12 @@ extension UsageProblemTone {
 private struct UsageChip: View {
     let account: UsageAccount
     let sessions: () -> [SessionState]
-    let bars: Bool
+    let labelled: Bool
     let now: Date
 
     var body: some View {
         HStack(spacing: 5) {
-            Text(account.title)
-            if bars && !account.meters.isEmpty {
-                UsageMiniBars(meters: account.meters)
-            }
+            Text(labelled ? UsageFocus.name(account) : account.title)
             value
         }
     }
@@ -74,25 +76,13 @@ private struct UsageChip: View {
     @ViewBuilder
     private var value: some View {
         if let worst = account.worst {
-            Text(UsageMeterText.percent(worst.percent))
+            Text(labelled ? UsageMeterText.shortLabel(worst) + " " + UsageMeterText.percent(worst.percent) : UsageMeterText.percent(worst.percent))
                 .monospacedDigit()
                 .foregroundStyle(account.critical ? DesktopPalette.failed : DesktopPalette.text2)
         } else if let tone = account.problemTone(sessions()) {
             Image(systemName: "exclamationmark.circle").foregroundStyle(tone.desktopStyle)
         } else {
             Text("–").foregroundStyle(DesktopPalette.muted)
-        }
-    }
-}
-
-struct UsageMiniBars: View {
-    let meters: [UsageReport.Meter]
-
-    var body: some View {
-        VStack(spacing: 2) {
-            ForEach(meters.prefix(3), id: \.self) { meter in
-                UsageBar(meter: meter).frame(width: 26, height: 3)
-            }
         }
     }
 }
