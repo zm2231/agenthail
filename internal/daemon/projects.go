@@ -42,7 +42,7 @@ func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
 	}
 	attention := make(map[string]bool, len(open))
 	for _, ask := range open {
-		if ask.Origin == registry.AskOriginDelivery {
+		if registry.AskWaitsOnPerson(ask) {
 			attention[ask.SessionID] = true
 		}
 	}

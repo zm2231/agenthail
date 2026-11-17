@@ -540,6 +540,11 @@ func (d *Daemon) remoteExtensionsList(w http.ResponseWriter, r *http.Request, ho
 		writeHostReadError(w, host, err)
 		return
 	}
+	for i := range view.Extensions {
+		if ask := view.Extensions[i].ApprovalAsk; ask != nil {
+			view.Extensions[i].ApprovalAsk = &extensionApprovalAsk{ID: ask.ID, SessionID: hosts.Qualify(host.record.ID, ask.SessionID)}
+		}
+	}
 	shared, err := d.shareRemoteExtensions(host, view)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "remote_ports", err.Error())

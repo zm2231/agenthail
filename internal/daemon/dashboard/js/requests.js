@@ -24,16 +24,17 @@ export async function syncRequests() {
     panel.hidden = panel.innerHTML === "";
     return;
   }
-  const key = `${session.id}|${session.waitingOn?.id || ""}|${ask}`;
+  const key = `${session.id}|${session.waitingOn?.id || ""}|${ask}|${ask ? (session.ask.open || []).join(",") : ""}`;
   if (app.requestsKey === key) return;
   app.requestsKey = key;
   try {
     const response = await fetch(`/api/requests?sessionId=${encodeURIComponent(session.id)}`);
     if (!response.ok) throw await responseError(response);
     const state = await response.json();
-    if (app.selected?.id !== session.id) return;
+    if (app.selected?.id !== session.id || app.requestsKey !== key) return;
     app.requests = state;
   } catch (error) {
+    if (app.requestsKey !== key) return;
     app.requests = { permissionMode: app.requests?.permissionMode || "", requests: [], error: error.message };
   }
   renderRequests();

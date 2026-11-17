@@ -22,14 +22,14 @@ func TestTheRowListsEveryOpenAskForThePersonOldestFirst(t *testing.T) {
 	raise("asker", "For the lead", "lead", AskOriginAgent, at.Add(time.Hour))
 	raise("other", "Elsewhere", AskToPerson, AskOriginAgent, at)
 	raise("asker", "Allow the tool", AskToPerson, AskOriginPermission, at.Add(time.Hour))
-	raise("asker", "Grant the extension", AskToPerson, AskOriginExtensionGrant, at.Add(2*time.Hour))
+	grant := raise("asker", "Grant the extension", AskToPerson, AskOriginExtensionGrant, at.Add(2*time.Hour))
 
 	rows, err := r.RowAsks()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row := rows["asker"]; row.ID != ship.ID || !slices.Equal(row.Open, []string{ship.ID, login.ID}) {
-		t.Fatalf("the row names %s with open %v, want the oldest %s with both of the person's asks in order", row.ID, row.Open, ship.ID)
+	if row := rows["asker"]; row.ID != ship.ID || !slices.Equal(row.Open, []string{ship.ID, grant.ID, login.ID}) {
+		t.Fatalf("the row names %s with open %v, want the oldest %s with the person's asks, an extension grant among them, in order", row.ID, row.Open, ship.ID)
 	}
 
 	if claimed, err := r.ClaimAsk(login.ID, AskAnswer{Note: "done"}, "person", "test", at.Add(4*time.Hour)); err != nil || !claimed {
@@ -39,12 +39,22 @@ func TestTheRowListsEveryOpenAskForThePersonOldestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row := rows["asker"]; row.ID != ship.ID || !slices.Equal(row.Open, []string{ship.ID}) {
-		t.Fatalf("after the newer ask is answered the row has open %v, want only %s", row.Open, ship.ID)
+	if row := rows["asker"]; row.ID != ship.ID || !slices.Equal(row.Open, []string{ship.ID, grant.ID}) {
+		t.Fatalf("after the newer ask is answered the row has open %v, want %s and %s", row.Open, ship.ID, grant.ID)
 	}
 
 	if claimed, err := r.ClaimAsk(ship.ID, AskAnswer{Note: "ship"}, "person", "test", at.Add(5*time.Hour)); err != nil || !claimed {
 		t.Fatalf("answer the older ask: %v %v", claimed, err)
+	}
+	rows, err = r.RowAsks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row := rows["asker"]; row.ID != grant.ID || !slices.Equal(row.Open, []string{grant.ID}) {
+		t.Fatalf("after the older ask is answered the row names %s with open %v, want the extension grant %s", row.ID, row.Open, grant.ID)
+	}
+	if claimed, err := r.ClaimAsk(grant.ID, AskAnswer{Note: "approve"}, "person", "test", at.Add(6*time.Hour)); err != nil || !claimed {
+		t.Fatalf("answer the extension grant: %v %v", claimed, err)
 	}
 	rows, err = r.RowAsks()
 	if err != nil {

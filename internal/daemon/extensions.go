@@ -462,6 +462,12 @@ type extensionView struct {
 	Jobs         map[string]*extensionJobState `json:"jobs,omitempty"`
 	EventError   string                        `json:"lastEventError,omitempty"`
 	Mounts       []mountState                  `json:"mounts,omitempty"`
+	ApprovalAsk  *extensionApprovalAsk         `json:"approvalAsk,omitempty"`
+}
+
+type extensionApprovalAsk struct {
+	ID        string `json:"id"`
+	SessionID string `json:"sessionId"`
 }
 
 type extensionsView struct {
@@ -477,6 +483,7 @@ func (d *Daemon) extensionsView() extensionsView {
 		return extensionsView{Host: "off", Extensions: []extensionView{}, BuiltIn: map[string]pageState{}}
 	}
 	mounts, pages, labels := r.mounts.view()
+	approvalAsks := d.openApprovalAsks()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	view := extensionsView{Host: "running", Extensions: []extensionView{}, BuiltIn: map[string]pageState{}}
@@ -510,6 +517,9 @@ func (d *Daemon) extensionsView() extensionsView {
 		if page, ok := pages[loaded.ext.ID]; ok {
 			item.Page = &page
 		}
+		if ask, ok := approvalAsks[loaded.ext.ID]; ok {
+			item.ApprovalAsk = &ask
+		}
 		item.Mounts = mounts[loaded.ext.ID]
 		for i := range item.Mounts {
 			item.Mounts[i].Badge = r.badges.get(loaded.ext.ID, item.Mounts[i].Name)
@@ -525,7 +535,11 @@ func (d *Daemon) extensionsView() extensionsView {
 		view.Extensions = append(view.Extensions, item)
 	}
 	for id, list := range mounts {
-		view.Extensions = append(view.Extensions, extensionView{ID: id, Label: labels[id], State: "not loaded", Capabilities: []string{}, Actions: []string{}, Mounts: list})
+		item := extensionView{ID: id, Label: labels[id], State: "not loaded", Capabilities: []string{}, Actions: []string{}, Mounts: list}
+		if ask, ok := approvalAsks[id]; ok {
+			item.ApprovalAsk = &ask
+		}
+		view.Extensions = append(view.Extensions, item)
 	}
 	slices.SortFunc(view.Extensions, func(a, b extensionView) int {
 		if a.ID < b.ID {

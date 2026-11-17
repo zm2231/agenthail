@@ -185,6 +185,22 @@ func TestApprovingFromASessionAsksThePersonAndGrantsOnlyWhatTheyWereShown(t *tes
 	if len(asks) != 1 || !strings.Contains(asks[0].Questions[0].Question, "read.all") {
 		t.Fatalf("approve from a session raised %+v", asks)
 	}
+	if view := extensionNamed(f.d.extensionsView(), "notes"); view.ApprovalAsk == nil || view.ApprovalAsk.ID != asks[0].ID || view.ApprovalAsk.SessionID != "to" {
+		t.Fatalf("the extensions list does not name the approval ask: %+v", view.ApprovalAsk)
+	}
+	if err := reg.RegisterSession(surface.Session{ID: "later", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if response, body := f.request(t, http.MethodPost, "/api/v1/extensions", "secret", map[string]string{"action": "approve", "id": "notes", "sessionId": "later"}); response.StatusCode != http.StatusForbidden {
+		t.Fatalf("a second session's approve answered %d %s", response.StatusCode, body)
+	}
+	later := openGrantAsks(t, reg, "later")
+	if len(later) != 1 {
+		t.Fatalf("a second session's approve raised %+v", later)
+	}
+	if view := extensionNamed(f.d.extensionsView(), "notes"); view.ApprovalAsk == nil || view.ApprovalAsk.ID != asks[0].ID {
+		t.Fatalf("the list must name the oldest open ask %s, got %+v", asks[0].ID, view.ApprovalAsk)
+	}
 	if grant, _ := f.d.extensions.approvals.Granted("notes"); len(grant.Capabilities) != 0 {
 		t.Fatalf("the session's approve granted %+v before the person answered", grant)
 	}
@@ -228,6 +244,21 @@ func TestApprovingFromASessionAsksThePersonAndGrantsOnlyWhatTheyWereShown(t *tes
 	if status := f.answer(t, asks[0], extensionGrantNo); status != http.StatusOK || len(openGrantAsks(t, reg, "to")) != 0 {
 		t.Fatalf("declining answered %d", status)
 	}
+	if status := f.answer(t, later[0], extensionGrantNo); status != http.StatusOK {
+		t.Fatalf("declining the second session's ask answered %d", status)
+	}
+	if view := extensionNamed(f.d.extensionsView(), "notes"); view.ApprovalAsk != nil {
+		t.Fatalf("an answered ask is still offered: %+v", view.ApprovalAsk)
+	}
+}
+
+func extensionNamed(view extensionsView, id string) extensionView {
+	for _, item := range view.Extensions {
+		if item.ID == id {
+			return item
+		}
+	}
+	return extensionView{}
 }
 
 func (f *extensionFixture) answer(t *testing.T, ask registry.Ask, choice string) int {
