@@ -361,6 +361,11 @@ CREATE TABLE IF NOT EXISTS device_streams (
 	tailnet_path TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS device_streams_recent ON device_streams(device_id, closed_at_ms DESC);
+CREATE TABLE IF NOT EXISTS decision_dismissals (
+	session_id TEXT PRIMARY KEY,
+	state_key TEXT NOT NULL,
+	dismissed_at_ms INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS browser_push_subscriptions (
 	device_id TEXT PRIMARY KEY REFERENCES paired_devices(id) ON DELETE CASCADE,
 	endpoint TEXT NOT NULL,

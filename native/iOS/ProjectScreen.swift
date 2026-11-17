@@ -67,7 +67,7 @@ struct ProjectScreen: View {
         .sheet(item: $sheet) { sheet in IOSProjectSheetView(model: model, sheet: sheet) }
         .sheet(item: $messaging) { project in IOSProjectMessageSheet(model: model, project: project) }
         .sheet(item: $answering) { item in
-            DecisionSheet(model: model, item: item, title: model.session(item.sessionId)?.displayName ?? item.sessionId, open: { answering = nil; openSession(item.sessionId) }) {
+            DecisionSheet(model: model, item: item, title: model.sessionName(item.sessionId), open: { answering = nil; openSession(item.sessionId) }) {
                 answering = nil
                 model.decisionFeed.refresh()
             }

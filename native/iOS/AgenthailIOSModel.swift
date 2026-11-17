@@ -650,6 +650,41 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         return inbox
     }
 
+    func dismissDecision(_ item: DecisionItem) async -> String? {
+        guard decisionFeed.startDismissing(item.id) else { return nil }
+        var failure: String?
+        do {
+            for dismissal in DecisionInbox.dismissals(of: item) {
+                do {
+                    if dismissal.workItem != nil, let reporter = try inboxHosts().first(where: { $0.id == dismissal.host }) {
+                        try await reporter.api.dismissDecision(sessionID: DecisionInbox.localised(item.sessionId, own: reporter.id), workItem: dismissal.workItem, requestID: nil, host: reporter.remote ?? "")
+                    } else {
+                        let (api, route) = try resolve(item.sessionId)
+                        try await api.dismissDecision(sessionID: route.sessionID, workItem: dismissal.workItem, requestID: dismissal.requestID)
+                    }
+                } catch where DecisionInbox.settled(error) {}
+            }
+        } catch {
+            failure = AgenthailAPIError.userMessage(error)
+        }
+        decisionFeed.finishDismissing(item.id, failure: failure)
+        decisionFeed.reload()
+        return failure
+    }
+
+    func replyToParked(_ item: DecisionItem, words: String) async -> String? {
+        do {
+            let (api, route) = try resolve(item.sessionId)
+            let wire = try api.instructionWire(sessionID: route.sessionID, message: DecisionInbox.reply(words, for: item), author: "person", attachments: [], idempotencyKey: UUID().uuidString)
+            _ = try await api.send(wire)
+            decisionFeed.replied(item.id, to: sessionName(item.sessionId))
+            await refreshSession(item.sessionId)
+            return nil
+        } catch {
+            return AgenthailAPIError.userMessage(error)
+        }
+    }
+
     func answerDecision(_ request: SessionRequest, sessionID: String, decision: RequestDecision) async -> DecisionAnswer {
         guard answeringRequest == nil else { return .busy }
         answeringRequest = request.id

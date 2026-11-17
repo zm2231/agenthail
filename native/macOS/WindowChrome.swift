@@ -58,7 +58,6 @@ struct TitleBarStrip: View {
     private static let maximumTab: CGFloat = 240
 
     var body: some View {
-        let needsYou = model.needsYouCount
         HStack(spacing: DesktopSpace.s) {
             if !pane.sidebarShown { SidebarToggle(pane: pane) }
             GeometryReader { geometry in
@@ -100,9 +99,6 @@ struct TitleBarStrip: View {
                     Spacer(minLength: 0)
                 }
                 .frame(maxHeight: .infinity)
-            }
-            if needsYou > 0 {
-                NeedsYouPill(count: needsYou, open: pane.showInbox)
             }
             Button { model.paletteVisible.toggle() } label: { Image(systemName: "magnifyingglass") }
                 .buttonStyle(.plain)
@@ -254,28 +250,6 @@ struct SessionTabView: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(active ? [.isSelected, .isButton] : .isButton)
         .help(session.map { Self.title($0, id: tab.id, label: "alias-title") } ?? "")
-    }
-}
-
-private struct NeedsYouPill: View {
-    let count: Int
-    let open: () -> Void
-
-    var body: some View {
-        Button(action: open) {
-            HStack(spacing: 6) {
-                Circle().fill(DesktopPalette.attention).frame(width: 7, height: 7)
-                Text("\(count) need\(count == 1 ? "s" : "") you")
-                    .foregroundStyle(DesktopPalette.attention)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .overlay(Capsule().strokeBorder(DesktopPalette.attentionLine))
-        }
-        .buttonStyle(.plain)
-        .fixedSize()
-        .help("Open the Inbox")
-        .accessibilityLabel("\(count) need\(count == 1 ? "s" : "") you, open the Inbox")
     }
 }
 

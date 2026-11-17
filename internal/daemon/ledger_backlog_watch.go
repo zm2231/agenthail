@@ -286,7 +286,7 @@ func (d *Daemon) parkedDecisions(rows []dashboardSession, now time.Time) []decis
 			if entry.Ready || d.askState(*question) == registry.AskOpen {
 				continue
 			}
-			item := decisionItem{Group: decisionWaiting, Kind: decisionParked, WorkItem: entry.Item.ID, Reason: entry.Item.ID + " waits on you: " + question.Question}
+			item := decisionItem{Group: decisionWaiting, Kind: decisionParked, WorkItem: entry.Item.ID, WorkTitle: entry.Item.Text, Reason: question.Question}
 			if session := entry.Item.Park.Session; session != "" {
 				item.SessionID = d.publicSessionID(session)
 				item.ProjectID = projects[item.SessionID]

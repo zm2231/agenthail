@@ -7,7 +7,7 @@ enum InboxStop: Identifiable, Equatable {
     var id: String {
         switch self {
         case .replacement(let item): "replacement:\(item.hostID ?? "")/\(item.id)"
-        case .decision(let item): "decision:" + item.sessionId
+        case .decision(let item): "decision:" + item.id
         }
     }
 

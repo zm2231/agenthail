@@ -42,18 +42,31 @@ struct DecisionSections: View {
     }
 
     private func row(_ item: DecisionItem) -> some View {
-        Button {
-            if item.answerable { answer(item) } else { open(item.sessionId) }
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(place(of: item)).font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1)
-                    Spacer()
+        let headline = headline(of: item)
+        return VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    if let project = project(of: item) {
+                        Text(project).font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
                     if let since = item.sinceDate {
-                        Text(since, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.footnote).foregroundStyle(PhonePalette.muted)
+                        Text(since, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.footnote).foregroundStyle(PhonePalette.muted).fixedSize()
                     }
                 }
-                Text(headline(of: item)).font(.headline).lineLimit(2)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Button { open(item.sessionId) } label: {
+                        Text(name(of: item.sessionId)).lineLimit(1).truncationMode(.middle)
+                    }
+                        .buttonStyle(.borderless)
+                        .font(.footnote.weight(.medium))
+                        .layoutPriority(1)
+                        .accessibilityHint("Opens the session")
+                        .accessibilityIdentifier("decision-session-link")
+                    if let title = model.sessionTitle(item.sessionId) {
+                        Text(title).font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1)
+                    }
+                }
+                Text(headline).font(.headline).lineLimit(2)
                 HStack(spacing: 8) {
                     if let holds = item.holdsUp, !holds.isEmpty {
                         Text("Holds up \(holds.count)").font(.caption.weight(.semibold)).foregroundStyle(PhonePalette.attention)
@@ -61,15 +74,29 @@ struct DecisionSections: View {
                     if item.openRequests.count > 1 {
                         Text("\(item.openRequests.count) requests").font(.caption).foregroundStyle(PhonePalette.muted)
                     }
-                    Text(item.reason)
-                        .font(.caption).foregroundStyle(PhonePalette.muted).lineLimit(2)
+                    if item.isParked {
+                        if let tag = DecisionInbox.tag(item, sentTo: model.decisionFeed.replies[item.id]) {
+                            Text(tag).font(.caption.weight(.semibold)).foregroundStyle(PhonePalette.muted).lineLimit(1)
+                        }
+                    } else if item.reason != headline {
+                        Text(item.reason)
+                            .font(.caption).foregroundStyle(PhonePalette.muted).lineLimit(2)
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityHint(item.answerable ? "Opens the request to answer it" : "Opens the session")
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture { answer(item) }
+        .swipeActions(edge: .trailing) {
+            Button(DecisionInbox.notNowTitle(item)) {
+                Task { if let failure = await model.dismissDecision(item) { model.operationError = failure } }
+            }
+                .tint(PhonePalette.muted)
+                .accessibilityIdentifier("decision-not-now-\(item.id)")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { answer(item) }
         .accessibilityIdentifier("decision-\(item.id)")
     }
 
@@ -77,16 +104,15 @@ struct DecisionSections: View {
         if let request = item.openRequests.first {
             return request.isAsk ? (request.title ?? request.summary) : request.summary
         }
-        return name(of: item.sessionId)
+        return item.isParked ? item.reason : name(of: item.sessionId)
     }
 
-    private func place(of item: DecisionItem) -> String {
-        let project = item.projectId.flatMap { model.projects[$0]?.state.displayName }
-        return [project, name(of: item.sessionId)].compactMap { $0 }.joined(separator: " · ")
+    private func project(of item: DecisionItem) -> String? {
+        item.projectId.flatMap { model.projects[$0]?.state.displayName }
     }
 
     private func name(of sessionID: String) -> String {
-        model.session(sessionID)?.displayName ?? sessionID
+        model.sessionName(sessionID)
     }
 }
 
@@ -98,12 +124,26 @@ struct DecisionSheet: View {
     let done: () -> Void
     @State private var remaining: [SessionRequest] = []
     @State private var failure: String?
+    @State private var reply = ""
+    @State private var sending = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(item.reason).font(.footnote).foregroundStyle(PhonePalette.muted)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Button(action: open) { Label(title, systemImage: "arrow.up.forward.square").lineLimit(1).truncationMode(.middle) }
+                            .buttonStyle(.borderless)
+                            .font(.subheadline.weight(.semibold))
+                            .accessibilityHint("Opens the session")
+                            .accessibilityIdentifier("decision-header-session-link")
+                        if let subtitle = model.sessionTitle(item.sessionId) {
+                            Text(subtitle).font(.footnote).foregroundStyle(PhonePalette.muted)
+                        }
+                    }
+                    if !item.isParked {
+                        Text(item.reason).font(.footnote).foregroundStyle(PhonePalette.muted)
+                    }
                     if let holds = item.holdsUp, !holds.isEmpty {
                         Text("Holds up \(holds.map(name).formatted(.list(type: .and)))").font(.footnote).foregroundStyle(PhonePalette.attention)
                             .accessibilityIdentifier("decision-holds-up")
@@ -128,6 +168,12 @@ struct DecisionSheet: View {
                                 .accessibilityIdentifier("decision-accept-recommended")
                         }
                     }
+                    if item.isParked { parked }
+                    Button(DecisionInbox.notNowTitle(current)) { Task { await dismiss() } }
+                        .buttonStyle(.bordered)
+                        .disabled(sending || model.answeringRequest != nil || model.decisionFeed.dismissing.contains(item.id))
+                        .accessibilityHint("Takes this off Needs you without answering")
+                        .accessibilityIdentifier("decision-not-now")
                 }
                 .padding()
             }
@@ -165,6 +211,59 @@ struct DecisionSheet: View {
     }
 
     private func name(_ sessionID: String) -> String {
-        model.session(sessionID)?.displayName ?? sessionID
+        model.sessionName(sessionID)
+    }
+
+    private var parked: some View {
+        let work = item.coveredWork
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(item.reason).font(.body.weight(.medium))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(work.count > 1 ? "Covers \(work.count) items" : "Work item").font(.caption.weight(.semibold)).foregroundStyle(PhonePalette.muted)
+                ForEach(work, id: \.key) { entry in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.workTitle ?? entry.workItem ?? "").font(.subheadline)
+                        if entry.workTitle != nil, let id = entry.workItem {
+                            Text(id).font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .accessibilityIdentifier("decision-covered-work")
+            if let sent = model.decisionFeed.replies[item.id] {
+                Label("Sent to \(sent)", systemImage: "checkmark.circle").font(.subheadline.weight(.medium)).foregroundStyle(PhonePalette.muted)
+                    .accessibilityIdentifier("decision-reply-sent")
+            }
+            TextField("Answer \(title)", text: $reply, axis: .vertical)
+                .lineLimit(2...6)
+                .textFieldStyle(.roundedBorder)
+                .disabled(sending)
+                .accessibilityIdentifier("decision-reply")
+            Button(sending ? "Sending…" : "Send to \(title)") { Task { await sendReply() } }
+                .buttonStyle(.borderedProminent)
+                .disabled(sending || reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("decision-reply-send")
+        }
+    }
+
+    private var current: DecisionItem {
+        var shown = item
+        if item.answerable { shown.requests = remaining }
+        return shown
+    }
+
+    private func dismiss() async {
+        failure = await model.dismissDecision(current)
+        if failure == nil { done() }
+    }
+
+    private func sendReply() async {
+        let words = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty, !sending else { return }
+        sending = true
+        defer { sending = false }
+        failure = await model.replyToParked(item, words: words)
+        if failure == nil { reply = "" }
     }
 }

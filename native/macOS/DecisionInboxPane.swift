@@ -4,6 +4,7 @@ struct DecisionInboxPane: View {
     var model: AgenthailModel
     var pane: SessionPane
     @State private var answering = false
+    @State private var dismissing = false
     @State private var failure: String?
     @FocusState private var focused: Bool
     @State private var typing = TextEditingProbe()
@@ -91,11 +92,22 @@ struct DecisionInboxPane: View {
                 } else if let error = item.requestError {
                     Text(error).font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
                 }
-                if let failure {
+                if item.isParked {
+                    ParkedWorkList(item: item)
+                    ParkedReply(model: model, item: item)
+                        .id(item.id)
+                }
+                if let failure = failure ?? model.decisionFeed.dismissFailures[item.id] {
                     Text(failure).font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.failed)
                 }
-                Button("Open session") { pane.select(item.sessionId) }
-                    .accessibilityIdentifier("decision-open-session")
+                HStack(spacing: DesktopSpace.s) {
+                    Button("Open session") { pane.select(item.sessionId) }
+                        .accessibilityIdentifier("decision-open-session")
+                    Button(DecisionInbox.notNowTitle(item)) { Task { await dismiss(item, following: following) } }
+                        .disabled(dismissing || answering || model.decisionFeed.dismissing.contains(item.id))
+                        .help("Take this off Needs you without answering")
+                        .accessibilityIdentifier("decision-not-now")
+                }
             }
             .frame(maxWidth: DesktopColumns.reading, alignment: .leading)
             .padding(DesktopSpace.xl)
@@ -107,10 +119,22 @@ struct DecisionInboxPane: View {
             Text(item.group.title)
                 .font(.system(size: DesktopType.caption, weight: .semibold))
                 .foregroundStyle(DesktopPalette.text2)
-            Text(model.sessionName(item.sessionId))
-                .font(.system(size: DesktopType.display, weight: .semibold))
-                .foregroundStyle(DesktopPalette.text)
+            Button { pane.select(item.sessionId) } label: {
+                Text(model.sessionName(item.sessionId))
+                    .font(.system(size: DesktopType.display, weight: .semibold))
+                    .foregroundStyle(DesktopPalette.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .buttonStyle(.plain)
+            .onHover { inside in if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
+            .help("Open this session")
+            .accessibilityIdentifier("decision-header-session-link")
             HStack(spacing: DesktopSpace.xs) {
+                if let title = model.sessionTitle(item.sessionId) {
+                    Text(title)
+                    Text("·")
+                }
                 if let project = item.projectId.flatMap({ id in model.projects.first { $0.id == id } }) {
                     Text(project.displayName)
                 }
@@ -136,6 +160,14 @@ struct DecisionInboxPane: View {
         if !model.decisionFeed.inbox.decisions.contains(where: { $0.id == item.id }) {
             pane.selectedDecisionID = following
         }
+    }
+
+    private func dismiss(_ item: DecisionItem, following: String?) async {
+        guard !dismissing else { return }
+        dismissing = true
+        defer { dismissing = false }
+        failure = await model.dismissDecision(item)
+        if failure == nil { pane.selectedDecisionID = following }
     }
 
     private func move(_ step: Int, in entries: [InboxStop], from entry: InboxStop?) {

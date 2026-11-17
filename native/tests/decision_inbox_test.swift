@@ -56,8 +56,53 @@ struct DecisionInboxTest {
         """#.utf8))
         var withParked = DecisionInbox()
         withParked.add(parked, host: "") { $0 }
-        check(withParked.decisions.map(\.id) == ["w", "w#widget-W12"], "a parked item and its session's own request are two rows")
-        check(withParked.removing("w").decisions.map(\.id) == ["w#widget-W12"], "answering the session leaves its parked item waiting on the person")
+        check(withParked.decisions.map(\.key) == ["w", "w#widget-W12"], "a parked item and its session's own request are two rows")
+        check(withParked.removing("w").decisions.map(\.key) == ["w#widget-W12"], "answering the session leaves its parked item waiting on the person")
+        check(withParked.decisions.last?.reason == "titles only?", "an older computer's work-item prefix is dropped from the question")
+
+        let own = try! JSONDecoder().decode(DecisionsPage.self, from: Data(#"""
+        {"decisions":[
+          {"group":"waiting","sessionId":"cd55","projectId":"p","kind":"parked","workItem":"widget-W8","workTitle":"Search titles","reason":"Titles only?","since":"2026-11-08T10:00:00Z","answerable":false},
+          {"group":"waiting","sessionId":"cd55","projectId":"p","kind":"parked","workItem":"widget-W9","workTitle":"Search bodies","reason":"Titles only?","since":"2026-11-08T10:01:00Z","answerable":false},
+          {"group":"waiting","sessionId":"cd55","kind":"ask","reason":"Ship?","since":"2026-11-08T10:02:00Z","answerable":true},
+          {"group":"waiting","sessionId":"cd66","kind":"ask","reason":"Ship?","since":"2026-11-08T10:03:00Z","answerable":true}
+        ],"leadHandling":[]}
+        """#.utf8))
+        let paired = try! JSONDecoder().decode(DecisionsPage.self, from: Data(#"""
+        {"decisions":[
+          {"group":"waiting","sessionId":"mac::cd55","projectId":"mac::p","kind":"parked","workItem":"widget-W8","reason":"widget-W8 waits on you: Titles only?","since":"2026-11-08T09:00:00Z","answerable":false},
+          {"group":"waiting","sessionId":"mac::cd55","kind":"parked","workItem":"widget-W10","workTitle":"Search tags","reason":"widget-W10 waits on you: Titles only?","since":"2026-11-08T10:05:00Z","answerable":false},
+          {"group":"stopped","sessionId":"f1","kind":"stopped","reason":"r","answerable":false,"holdsUp":["mac::cd55"]}
+        ],"leadHandling":[{"sessionId":"f2","heldBy":"mac::lead","role":"worker","reason":"r"}]}
+        """#.utf8))
+        let qualifyForge: (String) -> String = { $0.contains("::") ? $0 : "forge::" + $0 }
+        for order in [[("", own), ("forge", paired)], [("forge", paired), ("", own)]] {
+            var merged = DecisionInbox()
+            for (host, page) in order { merged.add(page, host: host, own: "mac", qualify: host.isEmpty ? { $0 } : qualifyForge) }
+            let card = merged.decisions.first { $0.isParked }!
+            check(merged.decisions.filter(\.isParked).count == 1, "parked work on one question from one session is one card: \(merged.decisions.map(\.id))")
+            check(card.coveredWork.map(\.workItem) == ["widget-W8", "widget-W9", "widget-W10"], "the card covers every item once: \(card.coveredWork.map(\.workItem))")
+            check(card.coveredWork.first?.hostID == "" && card.coveredWork.first?.workTitle == "Search titles", "this computer's copy of an item wins over a paired computer's")
+            check(card.sessionId == "cd55" && card.coveredWork.allSatisfy { $0.sessionId == "cd55" }, "a session a paired computer names with this computer's id reads as local")
+            check(merged.decisions.filter { $0.kind == "ask" }.count == 2, "asks are never merged")
+            check(merged.decisions.first { $0.sessionId == "forge::f1" }?.holdsUp == ["cd55"], "held-up sessions are localised too")
+            check(merged.leadHandling.first?.heldBy == "lead", "a lead on this computer is localised")
+            check(DecisionInbox.tag(card, sentTo: nil) == "Covers 3 items" && DecisionInbox.tag(card, sentTo: "@w") == "Covers 3 items · Sent to @w", "a grouped card says what it covers and who was answered")
+            check(DecisionInbox.reply("titles", for: card) == "Answer for widget-W8, widget-W9, widget-W10: titles", "the reply names every covered item")
+        }
+        var resolved = DecisionInbox()
+        var later = own
+        later.decisions.removeAll { $0.workItem == "widget-W8" }
+        resolved.add(later, host: "", own: "mac") { $0 }
+        var before = DecisionInbox()
+        before.add(own, host: "", own: "mac") { $0 }
+        check(resolved.decisions.first(where: \.isParked)?.id == before.decisions.first(where: \.isParked)?.id, "a card keeps its identity when its first covered item leaves")
+        var mixed = DecisionInbox()
+        mixed.add(own, host: "", own: "mac") { $0 }
+        mixed.add(paired, host: "forge", own: "mac", qualify: qualifyForge)
+        let hosts = DecisionInbox.dismissals(of: mixed.decisions.first(where: \.isParked)!).map { "\($0.workItem ?? ""):\($0.host)" }
+        check(hosts == ["widget-W8:", "widget-W9:", "widget-W10:forge"], "each covered item is dismissed on the computer that reported it: \(hosts)")
+        check(DecisionInbox.localised("macx::a", own: "mac") == "macx::a" && DecisionInbox.localised("mac::a", own: "") == "mac::a", "only this computer's own prefix is dropped")
         print("decision inbox ok")
     }
 

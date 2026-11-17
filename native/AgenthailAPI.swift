@@ -766,6 +766,14 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "request-withdraw", "sessionId": sessionID, "requestId": requestID])
     }
 
+    func dismissDecision(sessionID: String, workItem: String?, requestID: String?, host: String? = nil) async throws {
+        var body: [String: Any] = ["action": "dismiss-decision", "sessionId": sessionID]
+        if let workItem { body["workItem"] = workItem }
+        if let host { body["host"] = host }
+        if let requestID { body["requestId"] = requestID }
+        let _: EmptyResponse = try await post("/api/v1/actions", body: body)
+    }
+
     func acknowledgeLeadReplacement(_ id: Int64) async throws {
         let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "lead-replacement-ack", "replacementId": id])
     }

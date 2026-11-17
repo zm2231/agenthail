@@ -54,7 +54,6 @@ var statusColours = map[string]statusColour{
 			"macOS/ProjectHeaderParts.swift":    {1, "several leads in one project, to decide"},
 			"macOS/SidebarSessionRow.swift":     {1, "a needs-you row"},
 			"macOS/StatusItems.swift":           {1, "the needs-you count"},
-			"macOS/WindowChrome.swift":          {3, "the needs-you pill"},
 		},
 	},
 	"blue": {

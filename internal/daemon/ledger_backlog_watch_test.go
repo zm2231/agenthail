@@ -82,9 +82,9 @@ func TestAPersonParkStaysInNeedsYouUntilItsAskIsAnsweredOrItIsUnparked(t *testin
 	if len(parked) != 2 {
 		t.Fatalf("Needs you lists %+v, want only %s (no ask) and %s (its ask expired)", parked, bare, lapsed)
 	}
-	for _, id := range []string{bare, lapsed} {
+	for id, title := range map[string]string{bare: "search titles", lapsed: "search notes"} {
 		item, listed := parked[id]
-		if !listed || item.Group != decisionWaiting || item.Answerable || item.SessionID != mac.daemon.publicSessionID("local-a") || !strings.HasPrefix(item.Reason, id+" waits on you: titles only") || item.Since.IsZero() {
+		if !listed || item.Group != decisionWaiting || item.Answerable || item.SessionID != mac.daemon.publicSessionID("local-a") || item.Reason != "titles only, or bodies too?" || item.WorkTitle != title || item.Since.IsZero() {
 			t.Fatalf("%s in Needs you = %+v", id, item)
 		}
 	}

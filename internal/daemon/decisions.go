@@ -27,6 +27,7 @@ type decisionItem struct {
 	RequestError string            `json:"requestError,omitempty"`
 	HoldsUp      []string          `json:"holdsUp,omitempty"`
 	WorkItem     string            `json:"workItem,omitempty"`
+	WorkTitle    string            `json:"workTitle,omitempty"`
 }
 
 type leadHandledItem struct {
@@ -49,11 +50,12 @@ type decisionHearer struct {
 }
 
 type decisionSources struct {
-	rows     []dashboardSession
-	hearer   func(dashboardSession) (decisionHearer, bool)
-	requests func([]dashboardSession) map[string]decisionRequests
-	queued   map[string][]string
-	parked   func([]dashboardSession) []decisionItem
+	rows      []dashboardSession
+	hearer    func(dashboardSession) (decisionHearer, bool)
+	requests  func([]dashboardSession) map[string]decisionRequests
+	queued    map[string][]string
+	parked    func([]dashboardSession) []decisionItem
+	dismissed map[string]string
 }
 
 type decisionRequests struct {
@@ -82,7 +84,10 @@ func buildDecisions(sources decisionSources) decisionsPage {
 			asking = append(asking, row)
 			continue
 		}
-		page.Decisions = append(page.Decisions, decisionItem{Group: decisionStopped, SessionID: row.ID, ProjectID: projectIDOf(row), Kind: row.Attention.Kind, Reason: row.Attention.Reason, Since: decisionSince(row)})
+		item := decisionItem{Group: decisionStopped, SessionID: row.ID, ProjectID: projectIDOf(row), Kind: row.Attention.Kind, Reason: row.Attention.Reason, Since: decisionSince(row)}
+		if !sources.dismissedNow(item) {
+			page.Decisions = append(page.Decisions, item)
+		}
 	}
 	read := map[string]decisionRequests{}
 	if len(asking) > 0 {
@@ -94,6 +99,9 @@ func buildDecisions(sources decisionSources) decisionsPage {
 		switch {
 		case answer.err != nil:
 			item.Group, item.RequestError = decisionStopped, answer.err.Error()
+			if sources.dismissedNow(item) {
+				continue
+			}
 		case len(answer.requests) == 0:
 			continue
 		default:

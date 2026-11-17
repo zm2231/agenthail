@@ -20,7 +20,7 @@ var workTransitions = map[WorkAction]struct {
 	WorkHandoff: {from: []WorkState{WorkInProgress, WorkBlocked}, to: WorkOpen},
 	WorkClose:   {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkInReview, WorkParked}, to: WorkClosed},
 	WorkDelete:  {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkInReview, WorkDone, WorkClosed, WorkParked}, to: WorkDeleted},
-	WorkPark:    {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked}, to: WorkParked},
+	WorkPark:    {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkParked}, to: WorkParked},
 	WorkUnpark:  {from: []WorkState{WorkParked}, to: WorkOpen},
 	WorkRestore: {from: []WorkState{WorkDeleted}, to: WorkOpen},
 }

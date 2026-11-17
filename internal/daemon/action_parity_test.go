@@ -132,6 +132,8 @@ func parityCases() []parityCase {
 		session("session-lifecycle-logs", "session-lifecycle-logs", ``),
 		session("session-lifecycle-resume", "session-lifecycle-resume", ``),
 		session("respond stale", "respond", `,"requestId":"ask-gone","decision":{"choices":["allow"]}`),
+		session("dismiss-decision stale", "dismiss-decision", `,"requestId":"ask-gone"`),
+		session("dismiss-decision no card", "dismiss-decision", ``),
 		session("respond choice", "respond", `,"requestId":"ask-r1","decision":{"choices":["o9"]}`),
 		session("respond choice stale", "respond", `,"requestId":"ask-gone","decision":{"choices":["o0"]}`),
 		session("request-withdraw from a current session", "request-withdraw", `,"requestId":"ask-r1"`),

@@ -14,6 +14,9 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 	if err := d.checkNamedSender(ctx, request); err != nil {
 		return nil, false, err
 	}
+	if reportedPark(request) {
+		return d.routeReportedPark(request)
+	}
 	var host *pairedHost
 	local := false
 	rewritten := false
@@ -65,7 +68,7 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 		}
 	}
 	action, _ := request["action"].(string)
-	if action == "respond" && d.holdsAsk(request) {
+	if (action == "respond" || action == dismissDecisionAction) && d.holdsAsk(request) {
 		sourceRewritten, err := d.routeSource(ctx, request, nil)
 		return nil, rewritten || sourceRewritten, err
 	}

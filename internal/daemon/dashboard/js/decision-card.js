@@ -100,11 +100,12 @@ export function renderDecisionPane() {
   }
   const project = item.projectId ? (app.state.projects || []).find((entry) => entry.id === item.projectId)?.displayName : "";
   const holds = item.holdsUp?.length ? `<p class="decision-holds">Holds up: ${escape(item.holdsUp.map(nameOf).join(", "))}</p>` : "";
+  const work = item.workItem ? `<p class="decision-note">${escape([item.workItem, item.workTitle].filter(Boolean).join(": "))}</p>` : "";
   const request = item.answerable ? (item.requests || [])[0] : null;
   const count = request && item.requests.length > 1 ? `<p class="decision-note">1 of ${item.requests.length}</p>` : "";
   const accept = request && recommended(request) ? `<button class="soft-button" type="button" data-decision-accept="${escape(request.id)}" title="Shift+Enter">Accept recommended</button>` : "";
   const failure = app.decisionFailure ? `<p class="decision-note" role="alert">${escape(app.decisionFailure)}</p>` : "";
-  pane.innerHTML = `<header class="decision-card-head"><p class="decision-group-name">${escape(decisionGroups.find(([key]) => key === item.group)?.[1] || "")}</p><h2>${escape(nameOf(item.sessionId))}</h2><p>${escape([project, item.since ? timeAgo(item.since) : ""].filter(Boolean).join(" · "))}</p><p>${escape(item.reason)}</p>${holds}</header>${count}${request ? renderRequest(item, request) : item.requestError ? `<p class="decision-note">${escape(item.requestError)}</p>` : ""}${failure}<div class="request-actions">${accept}<button class="soft-button" type="button" data-session="${escape(item.sessionId)}">Open session</button></div>`;
+  pane.innerHTML = `<header class="decision-card-head"><p class="decision-group-name">${escape(decisionGroups.find(([key]) => key === item.group)?.[1] || "")}</p><h2>${escape(nameOf(item.sessionId))}</h2><p>${escape([project, item.since ? timeAgo(item.since) : ""].filter(Boolean).join(" · "))}</p><p>${escape(item.reason)}</p>${work}${holds}</header>${count}${request ? renderRequest(item, request) : item.requestError ? `<p class="decision-note">${escape(item.requestError)}</p>` : ""}${failure}<div class="request-actions">${accept}<button class="soft-button" type="button" data-session="${escape(item.sessionId)}">Open session</button></div>`;
 }
 
 export function renderInboxScope() {

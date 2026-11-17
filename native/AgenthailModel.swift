@@ -186,7 +186,13 @@ final class AgenthailModel {
     func title(of session: SessionState) -> String { cells.title(of: session) }
 
     func sessionName(_ id: String) -> String {
-        cells.session(id)?.displayName ?? id
+        namedSession(id)?.displayName ?? "Unknown session"
+    }
+
+    func sessionTitle(_ id: String) -> String? { namedSession(id)?.inboxTitle }
+
+    private func namedSession(_ id: String) -> SessionState? {
+        cells.session(id) ?? cells.session(DecisionInbox.localised(id, own: snapshot?.daemon.host?.id ?? ""))
     }
     private(set) var sessionAttention: [String: SessionAttention] = [:]
     private(set) var sessionTree = SessionTree.empty

@@ -48,4 +48,55 @@ enum AskPreview {
         return (200, #"{"ok":true,"result":{"requestId":"\#(requestID)","outcome":"answered","receipt":{}}}"#)
     }
 }
+enum InboxCardsPreview {
+    nonisolated static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--preview-inbox-cards") }
+    nonisolated(unsafe) static var sent: [String] = []
+    nonisolated(unsafe) static var dismissed: Set<String> = []
+
+    nonisolated static func apply(_ snapshot: inout [String: Any]) {
+        var sessions = snapshot["sessions"] as! [[String: Any]]
+        let aliases = ["demo": "search-indexing-and-ranking-overhaul-worker", "codex-demo": "release-pipeline-lead"]
+        for index in sessions.indices {
+            if let alias = aliases[sessions[index]["id"] as? String ?? ""] { sessions[index]["alias"] = alias }
+        }
+        snapshot["sessions"] = sessions
+        snapshot["decisionsRev"] = "preview-1"
+    }
+
+    nonisolated static let question = "Should search rank by title matches only, or weigh matches in the body and comments too?"
+
+    nonisolated private static func parked(_ session: String, _ item: String, _ title: String?, _ since: String, reason: String = question) -> [String: Any] {
+        var row: [String: Any] = ["group": "waiting", "sessionId": session, "projectId": "project-fieldnotes", "kind": "parked", "workItem": item, "reason": reason, "since": since, "answerable": false]
+        if let title { row["workTitle"] = title }
+        return row
+    }
+
+    nonisolated static func decisionsJSON(host: String?) -> String {
+        let requests = (try? JSONSerialization.jsonObject(with: Data(AskPreview.requestsJSON.utf8)) as? [String: Any])?["requests"] as? [Any] ?? []
+        let decisions: [[String: Any]] = host == nil ? [
+            ["group": "holding", "sessionId": "codex-demo", "projectId": "project-fieldnotes", "kind": "ask", "reason": "Ready to ship", "since": "2026-09-12T04:03:00Z", "answerable": true, "requests": requests, "holdsUp": ["demo"]],
+            parked("demo", "fieldnotes-W8", "Rank search results by title matches before body matches", "2026-09-12T03:00:00Z"),
+            parked("demo", "fieldnotes-W9", "Show matching comment snippets under each search result", "2026-09-12T03:05:00Z"),
+            parked("demo", "fieldnotes-W10", "Weigh comment matches lower than body matches", "2026-09-12T03:10:00Z"),
+            parked("demo", "fieldnotes-W12", "Pick the default date range for the usage chart", "2026-09-12T03:20:00Z", reason: "Default the usage chart to the last 7 days or the last 30?"),
+        ] : [
+            parked("computer::demo", "fieldnotes-W8", nil, "2026-09-12T03:00:00Z", reason: "fieldnotes-W8 waits on you: " + question),
+            parked("computer::demo", "fieldnotes-W10", nil, "2026-09-12T03:10:00Z", reason: "fieldnotes-W10 waits on you: " + question),
+        ]
+        let shown = decisions.filter { !dismissed.contains($0["workItem"] as? String ?? $0["sessionId"] as? String ?? "") }
+        return String(data: try! JSONSerialization.data(withJSONObject: ["decisions": shown, "leadHandling": []]), encoding: .utf8)!
+    }
+
+    nonisolated static func send(_ action: [String: Any]) -> (status: Int, body: String) {
+        if action["action"] as? String == "dismiss-decision" {
+            if let item = action["workItem"] as? String { dismissed.insert(item) } else if let session = action["sessionId"] as? String { dismissed.insert(session) }
+            return (200, #"{"ok":true,"result":{"outcome":"dismissed"}}"#)
+        }
+        guard action["action"] as? String == "send", let message = action["message"] as? String else {
+            return (400, #"{"ok":false,"error":{"code":"invalid_request","message":"not a send"}}"#)
+        }
+        sent.append(message)
+        return (200, #"{"ok":true,"result":{"evidence":"submitted"}}"#)
+    }
+}
 #endif
