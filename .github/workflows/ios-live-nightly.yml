@@ -25,11 +25,7 @@ jobs:
       - name: Sample host load
         run: scripts/ci-host-load.sh start
       - name: Check crash reporter dialogs are off
-        run: |
-          if [ "$(defaults read com.apple.CrashReporter DialogType 2>/dev/null)" != none ]; then
-            echo "::error::Crash reporter dialogs are not turned off for this runner's user. See Crash reporter dialogs in docs/maintainers/self-hosted-ci.md."
-            exit 1
-          fi
+        run: scripts/ci-crash-dialogs.sh
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod

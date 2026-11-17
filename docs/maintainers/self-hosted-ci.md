@@ -63,7 +63,7 @@ Each runner is a separate service under the same macOS user, in `~/actions-runne
 
 When an app crashes, macOS can show a crash dialog, and the crash reporter waits for it to be closed. Nobody closes it on a runner. At the end of every UI test the test runner waits for the crash reporter, about 300 seconds each time, so a test that takes seconds takes five minutes and the `ios` job runs into its timeout. Setting the user's `com.apple.CrashReporter` `DialogType` to `none` turns the dialogs off.
 
-The self-hosted `ios` job checks this setting first and fails with a message naming the fix unless it reads `none`. The test step runs through `scripts/ios-test-stall-guard.sh`, which stops the tests and names this cause once three tests have each taken more than 200 seconds. `scripts/test-ios-test-stall-guard.sh` checks the guard against a stub test command.
+The self-hosted `ios` jobs check this setting first with `scripts/ci-crash-dialogs.sh` and fail with a message naming the fix unless it reads `none`. The read is tried three times, two seconds apart, because it has failed on a loaded host while the setting was right; a final miss prints what the read returned and its exit code. The test step runs through `scripts/ios-test-stall-guard.sh`, which stops the tests and names this cause once three tests have each taken more than 200 seconds. `scripts/test-ios-test-stall-guard.sh` checks the guard against a stub test command.
 
 ## Job isolation
 
