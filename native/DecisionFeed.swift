@@ -6,6 +6,9 @@ import Observation
 final class DecisionFeed {
     private(set) var inbox = DecisionInbox()
     private(set) var loaded = false
+    private(set) var replies: [String: String] = [:]
+    private(set) var dismissing: Set<String> = []
+    private(set) var dismissFailures: [String: String] = [:]
     @ObservationIgnored private let load: () async -> DecisionInbox
     @ObservationIgnored private let key: () -> String
     @ObservationIgnored private var shownKey: String?
@@ -47,6 +50,8 @@ final class DecisionFeed {
         if current || dropped {
             fetched = next
             answered.formIntersection(next.decisions.flatMap { item in item.openRequests.map { Self.mark(item.sessionId, $0) } })
+            let shown = Set(next.decisions.map(\.id))
+            replies = replies.filter { shown.contains($0.key) }
             publish()
             loaded = true
             shownKey = current ? wanted : nil
@@ -64,6 +69,21 @@ final class DecisionFeed {
         answered.insert(Self.mark(sessionID, request))
         publish()
         shownKey = nil
+    }
+
+    func startDismissing(_ decisionID: String) -> Bool {
+        guard dismissing.insert(decisionID).inserted else { return false }
+        dismissFailures[decisionID] = nil
+        return true
+    }
+
+    func finishDismissing(_ decisionID: String, failure: String?) {
+        dismissing.remove(decisionID)
+        dismissFailures[decisionID] = failure
+    }
+
+    func replied(_ decisionID: String, to name: String) {
+        replies[decisionID] = name
     }
 
     private static func mark(_ sessionID: String, _ request: SessionRequest) -> String { sessionID + "\u{1}" + request.id }

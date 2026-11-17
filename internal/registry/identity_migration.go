@@ -219,6 +219,8 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"session_ceilings", `INSERT OR IGNORE INTO session_ceilings(session_id,ceiling) SELECT ?2,ceiling FROM session_ceilings WHERE session_id=?1`, false},
 		{"session_codex_config", `INSERT OR IGNORE INTO session_codex_config(session_id,overrides,updated_at_ms) SELECT ?2,overrides,updated_at_ms FROM session_codex_config WHERE session_id=?1`, false},
 		{"limit_resumes", `UPDATE OR IGNORE limit_resumes SET session_id=?2 WHERE session_id=?1`, false},
+		{"decision_dismissals", `INSERT OR IGNORE INTO decision_dismissals(session_id,state_key,dismissed_at_ms) SELECT ?2,state_key,dismissed_at_ms FROM decision_dismissals WHERE session_id=?1`, false},
+		{"decision_dismissals", `DELETE FROM decision_dismissals WHERE session_id=?1`, false},
 		{"move_dropped_relays", `UPDATE move_dropped_relays SET session_id=?2 WHERE session_id=?1`, false},
 		{"move_dropped_relays", `UPDATE move_dropped_relays SET to_session=?2 WHERE to_session=?1`, false},
 		{"session_context", `INSERT OR IGNORE INTO session_context(session_id,fingerprint,start_key,delivered_at_ms) SELECT ?2,fingerprint,start_key,delivered_at_ms FROM session_context WHERE session_id=?1`, false},

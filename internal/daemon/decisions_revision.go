@@ -130,7 +130,7 @@ func (d *Daemon) ownDecisionsRevision(ctx context.Context) (string, error) {
 		return "", err
 	}
 	waiting := map[string][]string{}
-	page := buildDecisions(decisionSources{rows: rows, hearer: d.decisionHearer, queued: queued, parked: d.parkedDecisionsNow, requests: func(asking []dashboardSession) map[string]decisionRequests {
+	page := buildDecisions(decisionSources{rows: rows, hearer: d.decisionHearer, queued: queued, parked: d.parkedDecisionsNow, dismissed: d.decisionDismissals(), requests: func(asking []dashboardSession) map[string]decisionRequests {
 		read := make(map[string]decisionRequests, len(asking))
 		for _, row := range asking {
 			read[row.ID] = decisionRequests{requests: []openRequestView{{}}}

@@ -338,6 +338,7 @@ struct SessionPreview: View {
             snapshot["sessions"] = sharedSessions
         }
         if AskPreview.enabled { AskPreview.apply(&snapshot) }
+        if InboxCardsPreview.enabled { InboxCardsPreview.apply(&snapshot) }
         return String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!
     }
 
@@ -561,6 +562,11 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             body = answer.body
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-questions"): body = SessionPreview.previewQuestionsJSON
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-terminal-question"): body = SessionPreview.previewTerminalQuestionJSON
+        case "/api/v1/decisions" where InboxCardsPreview.enabled: body = InboxCardsPreview.decisionsJSON(host: requestQuery.first(where: { $0.name == "host" })?.value)
+        case "/api/v1/actions" where InboxCardsPreview.enabled:
+            let reply = InboxCardsPreview.send(sentAction)
+            status = reply.status
+            body = reply.body
         case "/api/v1/decisions" where TilesPreview.enabled: body = TilesPreview.decisionsJSON
         case "/api/v1/decisions" where AskPreview.enabled: body = AskPreview.decisionsJSON
         case "/api/v1/usage": body = UsagePreview.json()

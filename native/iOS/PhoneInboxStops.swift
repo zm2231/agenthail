@@ -12,8 +12,10 @@ extension AgenthailIOSModel {
     }
 
     func sessionName(_ sessionID: String) -> String {
-        session(sessionID)?.displayName ?? sessionID
+        session(sessionID)?.displayName ?? "Unknown session"
     }
+
+    func sessionTitle(_ sessionID: String) -> String? { session(sessionID)?.inboxTitle }
 
     func projectOfSession() -> (String) -> String? {
         let projects = sessionProjects

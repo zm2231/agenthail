@@ -181,7 +181,7 @@ struct QueueListView: View {
             }
         }
         .sheet(item: $answering) { item in
-            DecisionSheet(model: model, item: item, title: model.session(item.sessionId)?.displayName ?? item.sessionId, open: { answering = nil; open(item.sessionId) }) {
+            DecisionSheet(model: model, item: item, title: model.sessionName(item.sessionId), open: { answering = nil; open(item.sessionId) }) {
                 answering = nil
                 Task { await reload() }
             }
@@ -195,9 +195,11 @@ struct QueueListView: View {
     private func queueRow(_ item: QueueState) -> some View {
         let envelope = PeerEnvelope(item.message)
         let steering = model.queueSteer(item)
+        let unconfirmed = item.status == "dead" && !item.isHistorical && item.evidence == "unknown"
+        let review = model.shownDecisions.decision(answering: item.askId)
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(item.outcomeLabel)
+                Text(unconfirmed ? "Not confirmed" : item.outcomeLabel)
                     .font(.subheadline.weight(.semibold)).foregroundStyle(item.status == "dead" && !item.isHistorical ? PhonePalette.attention : PhonePalette.muted)
                 Spacer()
                 if let date = item.queuedDate {
@@ -219,7 +221,9 @@ struct QueueListView: View {
                     .lineLimit(2)
                     .accessibilityIdentifier("queue-attachments-\(item.listID)")
             }
-            if let reason = item.lastError, !reason.isEmpty {
+            if unconfirmed {
+                Text("Your message to \(item.target) may not have arrived. Open it to check.").font(.footnote).foregroundStyle(PhonePalette.muted)
+            } else if let reason = item.lastError, !reason.isEmpty {
                 Text(reason).font(.footnote).foregroundStyle(PhonePalette.muted)
             }
             DisclosureGroup("Instruction details") {
@@ -234,10 +238,18 @@ struct QueueListView: View {
                     .accessibilityIdentifier("queue-steer-refusal-\(item.id)")
             }
             HStack {
-                if let decision = model.shownDecisions.decision(answering: item.askId) {
+                if let decision = review {
                     Button("Answer") { answering = decision }.buttonStyle(.borderedProminent)
                         .accessibilityHint("Opens what to do with this message")
                         .accessibilityIdentifier("queue-answer-\(item.id)")
+                    Button("Not now") {
+                        Task {
+                            if let askID = item.askId, let failure = await model.dismissDecision(model.shownDecisions.only(askID, of: decision)) { error = failure }
+                            await reload()
+                        }
+                    }.buttonStyle(.bordered)
+                        .accessibilityHint("Takes this off Needs you without answering")
+                        .accessibilityIdentifier("queue-not-now-\(item.id)")
                 }
                 if let steering, steering.refusal == nil {
                     Button("Steer") { steer(item, capabilities: steering.capabilities) }.buttonStyle(.bordered)

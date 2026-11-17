@@ -1,4 +1,4 @@
--- schemaVersion 105
+-- schemaVersion 106
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -350,6 +350,13 @@ CREATE TABLE daemon_events (
 	entity_id TEXT NOT NULL DEFAULT '',
 	payload BLOB NOT NULL,
 	created_at TEXT NOT NULL
+);
+
+-- table decision_dismissals
+CREATE TABLE decision_dismissals (
+	session_id TEXT PRIMARY KEY,
+	state_key TEXT NOT NULL,
+	dismissed_at_ms INTEGER NOT NULL
 );
 
 -- table delivery_history

@@ -40,11 +40,12 @@ var notSessionViewInputs = map[string]string{
 	"session_context": sessionOnly, "session_rekeys": sessionOnly,
 	"host_queue_dirty": queueMarks, "idle_compactions": idleAttempts,
 	"session_codex_config": codexConfig, "trigger_runs": "only GET /api/v1/triggers reads trigger runs; a finished run reaches a session view as its delivery_history entry",
-	"peer_relay_sockets": "only a Claude host's hold report reads which session a reply relay socket belongs to; the hold reaches a session view as its delivery intent",
-	"project_settings":   "a project's settings reach the dashboard's project rows and the MCP socket, which reads them at each request; no session view shows them",
-	"host_held_actions":  "a held channel leg belongs to a paired host, not a session; it reaches a session view only as the host's deliveries",
-	"approvals":          "only answering an approval and its audit read the stored action; a session view shows the approval as its row in asks",
-	"turn_judgments":     "only GET /api/v1/turn-judgments reads recorded judgments; nothing a session view shows comes from them",
+	"peer_relay_sockets":  "only a Claude host's hold report reads which session a reply relay socket belongs to; the hold reaches a session view as its delivery intent",
+	"project_settings":    "a project's settings reach the dashboard's project rows and the MCP socket, which reads them at each request; no session view shows them",
+	"host_held_actions":   "a held channel leg belongs to a paired host, not a session; it reaches a session view only as the host's deliveries",
+	"approvals":           "only answering an approval and its audit read the stored action; a session view shows the approval as its row in asks",
+	"turn_judgments":      "only GET /api/v1/turn-judgments reads recorded judgments; nothing a session view shows comes from them",
+	"decision_dismissals": "the Inbox's dismissed stopped cards, read only by the decisions page; no session view shows them",
 }
 
 // Dropping session_archive or projects from the registry's presentation inputs

@@ -40,7 +40,7 @@ struct QueueTailRows: View {
                 }
                 .sheet(isPresented: Binding(get: { answering?.row == row.id }, set: { if !$0 { answering = nil } })) {
                     if let decision = answering?.decision {
-                        DecisionSheet(model: model, item: decision, title: model.session(decision.sessionId)?.displayName ?? decision.sessionId,
+                        DecisionSheet(model: model, item: decision, title: model.sessionName(decision.sessionId),
                                       open: { answering = nil; model.openSession(decision.sessionId) }) { answering = nil }
                     }
                 }

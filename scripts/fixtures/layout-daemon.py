@@ -49,6 +49,7 @@ HELD_STREAMS = set()
 STREAMS = {}
 SCOPED = {}
 GROUP_REPLIES = {}
+HOST_DECISIONS = {}
 ACTIONS_LOG = os.environ.get("AGENTHAIL_FIXTURE_ACTIONS_LOG", "")
 REQUESTS_LOG = os.environ.get("AGENTHAIL_FIXTURE_REQUESTS_LOG", "")
 
@@ -60,6 +61,15 @@ class Server(ThreadingHTTPServer):
         socketserver.TCPServer.server_bind(self)
         host, self.server_port = self.server_address[:2]
         self.server_name = str(host)
+
+
+def dismisses(action, item):
+    session = action.get("sessionId", "")
+    if item["sessionId"] != session and not session.endswith("::" + item["sessionId"]) and not item["sessionId"].endswith("::" + session):
+        return False
+    if action.get("workItem"):
+        return item.get("workItem") == action["workItem"]
+    return not item.get("workItem")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -87,6 +97,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         path, _, query = self.path.partition("?")
         body = SCOPED.get(parse_qs(query).get("scope", [""])[0]) if path == "/api/v1/snapshot" else None
+        if path == "/api/v1/decisions" and HOST_DECISIONS:
+            body = HOST_DECISIONS.get(parse_qs(query).get("host", [""])[0])
         body = body or RESPONSES.get(path)
         if body is None:
             if REQUESTS_LOG:
@@ -108,6 +120,9 @@ class Handler(BaseHTTPRequestHandler):
                 log.write(body + b"\n")
         status, reply = 200, {"ok": True, "result": {"outcome": "answered"}}
         action = json.loads(body or b"{}")
+        if action.get("action") == "dismiss-decision":
+            for page in HOST_DECISIONS.values():
+                page["decisions"] = [item for item in page["decisions"] if not dismisses(action, item)]
         if GROUP_REPLIES and action.get("action") in GROUP_REPLIES:
             status, reply = GROUP_REPLIES[action["action"]](action)
         if SESSION.get("ask") and json.loads(body or b"{}").get("requestId") == SESSION["ask"].get("id"):
@@ -156,11 +171,11 @@ if __name__ == "__main__":
         theme = sys.argv[2] if len(sys.argv) > 2 else "system"
         RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
         HELD_STREAMS.add("/api/v1/events")
-    if sys.argv[1:2] in (["ask"], ["ask-several"], ["inbox"], ["tiles"]):
+    if sys.argv[1:2] in (["ask"], ["ask-several"], ["inbox"], ["inbox-cards"], ["tiles"]):
         # An idle session with an ask open to the person, from a provider that answers nothing through Agenthail.
         SESSION["status"] = "idle"
         SESSION["capabilities"] = {**CAPABILITIES, "respond": False}
-        with open(os.path.join(os.path.dirname(__file__), ("ask" if sys.argv[1] in ("inbox", "tiles") else sys.argv[1]) + "-requests.json")) as requests:
+        with open(os.path.join(os.path.dirname(__file__), ("ask" if sys.argv[1] in ("inbox", "inbox-cards", "tiles") else sys.argv[1]) + "-requests.json")) as requests:
             RESPONSES["/api/v1/requests"] = json.load(requests)
         ask = RESPONSES["/api/v1/requests"]["requests"][0]
         SESSION["ask"] = {"id": ask["id"], "title": ask["title"], "routedTo": "person", "askedAt": NOW}
@@ -210,6 +225,50 @@ if __name__ == "__main__":
             {"id": SESSION["project"]["id"], "lastActive": NOW, "sessionCount": 1, "checkouts": [{"projectId": SESSION["project"]["id"], "sessionCount": 1}]},
             {"id": "release-notes", "sessionCount": 0, "checkouts": []},
         ]}
+    if sys.argv[1:2] == ["inbox-cards"]:
+        # Paired-computer decisions that name this Mac's sessions with this Mac's host id, older-host prefixes, one question parked on several items, and an ask with options.
+        ask = RESPONSES["/api/v1/requests"]["requests"][0]
+        own = {"id": "hmac000000001", "name": "this Mac", "state": "local"}
+        paired = {"id": "hbuild0000001", "name": "build-server", "state": "connected"}
+        project = {"id": "customer-analytics-dashboard-redesign", "displayName": "customer-analytics-dashboard-redesign", "rootPath": "/tmp/customer-analytics-dashboard-redesign", "kind": "git"}
+        SESSION.update({"alias": "release-pipeline-notarization-lead", "project": project, "cwd": project["rootPath"]})
+        parked_worker = {**SESSION, "id": "local-worker", "alias": "search-indexing-and-ranking-overhaul-worker", "name": "Rework search indexing and ranking for the analytics dashboard", "status": "idle"}
+        paired_row = {**SESSION, "id": paired["id"] + "::docs-site", "alias": "docs-site-migration", "name": "Move the docs site", "status": "idle", "host": paired,
+                      "project": {"id": "docs-site", "displayName": "docs-site", "rootPath": "/srv/docs-site", "kind": "git"}}
+        for row in (parked_worker, paired_row):
+            row.pop("ask", None)
+            row.pop("attention", None)
+        rows = [SESSION, parked_worker, paired_row]
+        snapshot = RESPONSES["/api/v1/snapshot"]
+        snapshot.update({"sessions": rows, "totalSessions": len(rows), "decisionsRev": "fixture-1"})
+        snapshot["daemon"] = {"pid": 1, "running": True, "host": own, "hosts": [paired]}
+        snapshot["projects"] = [{"id": project["id"], "displayName": project["displayName"], "kind": "git", "checkouts": [{"host": {"id": "", "name": "this Mac", "state": "local"}, "projectId": project["id"], "rootPath": project["rootPath"]}]}]
+        RESPONSES["/api/v1/projects/activity"] = {"projects": [{"id": project["id"], "lastActive": NOW, "sessionCount": 2, "checkouts": [{"projectId": project["id"], "sessionCount": 2}]}]}
+        three = {"families": 3, "sessions": 3}
+        snapshot["view"]["counts"] = {"running": {"families": 0, "sessions": 0}, "current": three, "recent": three, "all": three, "archived": {"families": 0, "sessions": 0}}
+        snapshot["view"]["projects"] = [{"id": project["id"], "name": project["displayName"], "counts": three, "collapsedFamilyIds": [r["id"] for r in rows]}]
+        snapshot["view"]["families"] = [{"id": r["id"], "rootId": r["id"], "projectId": project["id"], "checkoutId": SESSION["checkout"]["id"],
+                                         "members": [{"id": r["id"], "depth": 0, "contextOnly": False, "pinned": False}], "pinned": False, "workingSubagents": 0} for r in rows]
+        question = "Should search rank by title matches only, or weigh matches in the body and comments too?"
+        def parked(session, item, title, since, reason=question):
+            return {"group": "waiting", "sessionId": session, "projectId": project["id"], "kind": "parked", "workItem": item, "workTitle": title, "reason": reason, "since": since, "answerable": False}
+        HOST_DECISIONS[""] = {"decisions": [
+            {"group": "holding", "sessionId": SESSION["id"], "projectId": project["id"], "kind": "ask", "reason": ask["title"], "since": NOW,
+             "answerable": True, "requests": RESPONSES["/api/v1/requests"]["requests"], "holdsUp": ["local-worker"]},
+            parked("local-worker", "analytics-W8", "Rank search results by title matches before body matches", "2026-01-01T11:00:00Z"),
+            parked("local-worker", "analytics-W9", "Show matching comment snippets under each search result", "2026-01-01T11:05:00Z"),
+            parked("local-worker", "analytics-W10", "Weigh comment matches lower than body matches", "2026-01-01T11:10:00Z"),
+            parked("local-worker", "analytics-W12", "Pick the default date range for the usage chart", "2026-01-01T11:20:00Z", "Default the usage chart to the last 7 days or the last 30?"),
+        ], "leadHandling": []}
+        older = lambda item: {**item, "sessionId": own["id"] + "::" + item["sessionId"], "projectId": own["id"] + "::" + item["projectId"], "reason": item["workItem"] + " waits on you: " + item["reason"], "workTitle": None}
+        HOST_DECISIONS[paired["id"]] = {"decisions": [
+            older(parked("local-worker", "analytics-W8", "", "2026-01-01T11:00:00Z")),
+            older(parked("local-worker", "analytics-W10", "", "2026-01-01T11:10:00Z")),
+            {"group": "stopped", "sessionId": "docs-site", "kind": "usageLimit", "reason": "Usage limit until 3:00 PM", "since": "2026-01-01T11:40:00Z", "answerable": False},
+            {**parked("docs-site", "docs-W3", "Redirect the old docs URLs to the new site", "2026-01-01T11:30:00Z", "Keep the old URLs as redirects for a year, or drop them now?"), "projectId": "docs-site"},
+        ], "leadHandling": []}
+        theme = sys.argv[2] if len(sys.argv) > 2 else "system"
+        RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
     if sys.argv[1:2] == ["tiles"]:
         names = ["backend", "website", "monitor", "billing", "mobile1", "docs", "api", "search", "ledger", "android", "desktop", "payroll", "metrics", "support", "release"]
         count = int(sys.argv[2]) if len(sys.argv) > 2 else 3

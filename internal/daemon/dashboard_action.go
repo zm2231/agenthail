@@ -41,6 +41,9 @@ func (d *Daemon) dispatchAction(ctx context.Context, p principal, request dashbo
 	if strings.HasPrefix(request.Action, "coordinator-") {
 		return d.doCoordinatorAction(ctx, p, coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Project: request.Project, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message, Author: request.Author, PersonName: request.PersonName, TurnOptions: request.TurnOptions, NoQueue: request.NoQueue})
 	}
+	if request.Action == "dismiss-decision" {
+		return d.doDismissDecision(ctx, p, request)
+	}
 	if operation, typed := typedActions[request.Action]; typed {
 		return operation(d, ctx, p, request)
 	}

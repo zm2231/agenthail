@@ -611,6 +611,30 @@
     },
     "body": "{\"error\":{\"code\":\"session_not_found\",\"message\":\"no session ghost on this host\"}}\n"
   },
+  "api/action dismiss-decision no card": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"stale\",\"message\":\"this request was already answered or has expired\"}}\n"
+  },
+  "api/action dismiss-decision stale": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"stale\",\"message\":\"this request was already answered or has expired\"}}\n"
+  },
   "api/action effort": {
     "status": 200,
     "header": {
@@ -3190,6 +3214,30 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"session_not_found\",\"message\":\"no session ghost on this host\"}}\n"
+  },
+  "api/v1/actions dismiss-decision no card": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"stale\",\"message\":\"this request was already answered or has expired\"}}\n"
+  },
+  "api/v1/actions dismiss-decision stale": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"stale\",\"message\":\"this request was already answered or has expired\"}}\n"
   },
   "api/v1/actions effort": {
     "status": 200,

@@ -67,6 +67,7 @@ type dashboardActionRequest struct {
 	Survivor        string                     `json:"survivor"`
 	Attachments     []string                   `json:"attachments"`
 	RequestID       string                     `json:"requestId"`
+	WorkItem        string                     `json:"workItem"`
 	Decision        surface.Response           `json:"decision"`
 	Instructions    *string                    `json:"instructions"`
 	Replace         bool                       `json:"replace"`

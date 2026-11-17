@@ -70,6 +70,10 @@ func (r *Registry) SyncLedgerAsks(projectKey string, questions []LedgerQuestion,
 	for _, ask := range open {
 		openByRef[ask.Ref] = ask
 	}
+	dismissed, err := dismissedLedgerRefs(tx, prefix)
+	if err != nil {
+		return nil, err
+	}
 	at := time.UnixMilli(now.UnixMilli()).UTC()
 	var closed []Ask
 	for _, q := range questions {
@@ -77,7 +81,7 @@ func (r *Registry) SyncLedgerAsks(projectKey string, questions []LedgerQuestion,
 		ask, asked := openByRef[ref]
 		state := ""
 		switch {
-		case !asked && !q.Answered && !q.Defaulted:
+		case !asked && !q.Answered && !q.Defaulted && !dismissed[ref]:
 			if err := raiseLedgerAsk(tx, ref, q, at); err != nil {
 				return nil, err
 			}
@@ -96,6 +100,23 @@ func (r *Registry) SyncLedgerAsks(projectKey string, questions []LedgerQuestion,
 		closed = append(closed, ask)
 	}
 	return closed, tx.Commit()
+}
+
+func dismissedLedgerRefs(tx *sql.Tx, prefix string) (map[string]bool, error) {
+	rows, err := tx.Query(`SELECT ref FROM asks WHERE origin=? AND state=? AND answered_via=? AND substr(ref,1,?)=?`, AskOriginLedger, AskWithdrawn, AskDismissed, len(prefix), prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	dismissed := map[string]bool{}
+	for rows.Next() {
+		var ref string
+		if err := rows.Scan(&ref); err != nil {
+			return nil, err
+		}
+		dismissed[ref] = true
+	}
+	return dismissed, rows.Err()
 }
 
 func raiseLedgerAsk(tx *sql.Tx, ref string, q LedgerQuestion, at time.Time) error {

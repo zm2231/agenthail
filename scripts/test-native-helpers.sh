@@ -199,6 +199,7 @@ SOURCES=(
   DecisionFeed.swift
   InboxStops.swift
   macOS/DecisionInboxPane.swift
+  macOS/ParkedReply.swift
   macOS/TextEditingProbe.swift
   macOS/MacInboxStops.swift
   macOS/InboxStopCard.swift

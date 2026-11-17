@@ -24,6 +24,7 @@ extension AgenthailModel {
     func loadDecisions() async -> DecisionInbox {
         guard let api else { return DecisionInbox(unreachable: [snapshot?.daemon.host?.name ?? "This Mac"]) }
         let local = snapshot?.daemon.host?.name ?? "This Mac"
+        let own = snapshot?.daemon.host?.id ?? ""
         let paired = snapshot?.daemon.hosts ?? []
         var inbox = DecisionInbox()
         if snapshot != nil && decisionsRev == nil { inbox.outdated.append(local) }
@@ -40,7 +41,7 @@ extension AgenthailModel {
             }
             for await (id, name, result) in group {
                 switch result {
-                case .success(let page): inbox.add(page, host: id) { id.isEmpty || $0.contains("::") ? $0 : id + "::" + $0 }
+                case .success(let page): inbox.add(page, host: id, own: own) { id.isEmpty || $0.contains("::") ? $0 : id + "::" + $0 }
                 case .failure(AgenthailAPIError.olderHost): inbox.outdated.append(name)
                 case .failure: inbox.unreachable.append(name)
                 }
@@ -49,6 +50,24 @@ extension AgenthailModel {
         inbox.unreachable.sort()
         inbox.outdated.sort()
         return inbox
+    }
+
+    func dismissDecision(_ item: DecisionItem) async -> String? {
+        guard let api else { return "Agenthail isn't connected." }
+        guard decisionFeed.startDismissing(item.id) else { return nil }
+        var failure: String?
+        do {
+            for dismissal in DecisionInbox.dismissals(of: item) {
+                do {
+                    try await api.dismissDecision(sessionID: item.sessionId, workItem: dismissal.workItem, requestID: dismissal.requestID, host: dismissal.workItem == nil ? nil : dismissal.host)
+                } catch where DecisionInbox.settled(error) {}
+            }
+        } catch {
+            failure = AgenthailAPIError.userMessage(error)
+        }
+        decisionFeed.finishDismissing(item.id, failure: failure)
+        decisionFeed.reload()
+        return failure
     }
 
     func answerDecision(_ request: SessionRequest, sessionID: String, decision: RequestDecision) async -> DecisionAnswer {
