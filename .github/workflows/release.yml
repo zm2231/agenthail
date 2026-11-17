@@ -90,6 +90,20 @@ jobs:
     if: ${{ !cancelled() && needs.guard.outputs.run == 'true' && needs.source-proof.outputs.proven != 'true' }}
     runs-on: macos-26
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: rest
+          - suite: surfaces
+          - suite: daemon
+            shard: 0
+          - suite: daemon
+            shard: 1
+          - suite: daemon
+            shard: 2
+          - suite: daemon
+            shard: 3
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -104,18 +118,36 @@ jobs:
       - name: Cookie bridge dependencies
         working-directory: sidecar
         run: npm ci --ignore-scripts
-      - name: Node host tests
+      - name: Node host modules
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
-          npm test --prefix claude-host
           npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
+      - name: Node host tests
+        if: matrix.suite == 'rest'
+        run: |
+          npm test --prefix claude-host
           npm test --prefix browser-host
       - name: Stage the shipped Node
         run: scripts/fetch-node.sh
       - name: Test source
+        env:
+          SUITE: ${{ matrix.suite }}
+          SHARD: ${{ matrix.shard }}
         run: |
-          go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
-          go vet ./...
+          race=(-race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m)
+          case "$SUITE" in
+            rest)
+              go test $(go list ./... | grep -vxE 'github.com/zm2231/agenthail/internal/(daemon|surface/surfaces)') "${race[@]}"
+              go vet ./...
+              ;;
+            surfaces)
+              go test ./internal/surface/surfaces "${race[@]}"
+              ;;
+            daemon)
+              pattern="$(go run ./scripts/go-test-shard -seconds scripts/go-test-shard/seconds/internal-daemon.tsv "$SHARD" 4 ./internal/daemon -race)"
+              go test ./internal/daemon "${race[@]}" -run "$pattern"
+              ;;
+          esac
 
   macos-package:
     needs: guard
