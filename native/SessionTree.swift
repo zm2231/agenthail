@@ -52,6 +52,12 @@ struct SessionTree: Equatable {
         var hostLabel: String? { hosts.isEmpty ? nil : hosts.joined(separator: ", ") }
         var spansHosts: Bool { Set(checkouts.map(\.host?.id)).count > 1 }
 
+        var showsCheckouts: Bool {
+            guard checkouts.count > 1 else { return false }
+            let branches = Set(checkouts.compactMap(\.branchLabel))
+            return branches.count > 1 && branches.contains { !["main", "master"].contains($0) }
+        }
+
         func hostLabel(of checkout: Checkout) -> String? {
             checkout.host.flatMap { HostNames.labels(checkouts.compactMap(\.host))[$0.id] }
         }
@@ -93,6 +99,7 @@ struct SessionTree: Equatable {
         var families: [SessionFamily]
 
         var sessions: [SessionState] { families.map(\.root) }
+        var shownLabel: String { branchLabel ?? "no branch" }
     }
 
     let projects: [Project]
@@ -136,7 +143,6 @@ struct SessionTree: Equatable {
 
     static func branchLabel(_ session: SessionState) -> String? {
         if let branch = session.checkout?.branch, !branch.isEmpty { return branch }
-        if let head = session.checkout?.detachedHead, !head.isEmpty { return "detached at \(head.prefix(7))" }
         return nil
     }
 }

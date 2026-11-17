@@ -69,14 +69,18 @@ export const quietAfterMs = 10 * 60 * 1000;
 export function quietNote(activity, now = Date.now()) {
   const last = Date.parse(activity?.lastProgressAt || activity?.busySince || "");
   if (!last || now - last < quietAfterMs) return "";
-  const parts = [`no activity for ${quietDuration(now - last)}`];
+  const parts = [`idle ${shortQuietDuration(now - last)}`];
   if (activity.noProcess) {
     parts.push("no Claude process");
   } else if (activity.tool?.name) {
-    const started = Date.parse(activity.tool.startedAt || "");
-    parts.push(`running ${activity.tool.name}${started ? ` since ${new Date(started).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}`);
+    parts.push(activity.tool.name);
   }
   return parts.join(" · ");
+}
+
+export function shortQuietDuration(ms) {
+  const minutes = Math.floor(ms / 60000);
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
 }
 
 export function quietDuration(ms) {

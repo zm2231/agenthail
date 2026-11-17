@@ -29,7 +29,7 @@ struct SessionTreeTest {
     static func main() {
         expect(SessionTree.parseTimestamp("2026-10-04T12:00:00.000000000Z") == now, "fractional RFC3339 timestamps parse as UTC")
         expect(SessionTree.checkoutLabel(session("plain", checkout: ".worktrees/history-truth", branch: nil)) == "history-truth", "a checkout without a branch is named by its folder, not its whole path")
-        expect(SessionTree.checkoutLabel(session("detached", branch: nil, detached: "0123456789ab")) == "detached at 0123456", "a detached checkout names its commit")
+        expect(SessionTree.checkoutLabel(session("detached", branch: nil, detached: "0123456789ab")) == "main", "a detached checkout is named by its folder, not its commit")
         var root = session("root", branch: nil)
         root.checkout = CheckoutIdentity(id: "root", path: "/", branch: nil, detachedHead: nil, isMain: true, dirty: false)
         var slashed = session("slashed", branch: nil)
@@ -74,7 +74,7 @@ struct SessionTreeTest {
         expect(tree.projects[1].familyTotal == 4 && tree.projects[1].sessionCountLabel == "4 sessions", "a project's totals are the daemon's")
         expect(SessionTree.ordered(list: nil, current: order, rows: rows(sessions), attention: [:]).projects.isEmpty, "a list whose view has not arrived shows nothing rather than another order")
         let detached = SessionTree.ordered(list: view([family("wt", project: "fable", checkout: "wt")], projects: [("fable", [])]), current: nil, rows: rows([session("wt", project: "fable", checkout: "wt", branch: nil, detached: "de2fda1f716")]), attention: [:])
-        expect(detached.projects[0].checkouts[0].label == "detached at de2fda1", "detached checkout label")
+        expect(detached.projects[0].checkouts[0].label == "wt", "a detached checkout is named by its folder")
     }
 
     static func groupsCheckoutsAndHosts() {
@@ -92,6 +92,18 @@ struct SessionTreeTest {
         expect(spread.count == 1 && spread[0].checkouts.count == 3, "one repository on three hosts is one project with a checkout per host")
         expect(Set(spread[0].hosts) == ["vps", "laptop"] && spread[0].spansHosts, "the project header names every other host: \(spread[0].hosts)")
         expect(Set(spread[0].checkouts.map { spread[0].hostLabel(of: $0) }) == [nil, "vps", "laptop"], "each checkout names its own host")
+        expect(!spread[0].showsCheckouts, "the same default branch on every host shows no checkout lines")
+        var branched = spreadRows
+        branched[1].checkout = CheckoutIdentity(id: "h1::checkout-1", path: "/repo/feature", branch: "feature/tabs", detachedHead: nil, isMain: false, dirty: false)
+        let branchedTree = SessionTree.ordered(list: spreadView, current: nil, rows: rows(branched), attention: [:]).projects
+        expect(branchedTree[0].showsCheckouts && branchedTree[0].checkouts.map(\.shownLabel).contains("feature/tabs"), "a checkout on another branch shows the branches: \(branchedTree[0].checkouts.map(\.shownLabel))")
+        var detached = spreadRows
+        detached[1].checkout = CheckoutIdentity(id: "h1::checkout-1", path: "/repo/other-folder", branch: nil, detachedHead: "abc1234", isMain: false, dirty: false)
+        expect(!SessionTree.ordered(list: spreadView, current: nil, rows: rows(detached), attention: [:]).projects[0].showsCheckouts, "main beside a detached checkout shows no checkout lines")
+        var bothDetached = detached
+        bothDetached[0].checkout = CheckoutIdentity(id: "checkout-1", path: "/repo/a-folder", branch: nil, detachedHead: "def5678", isMain: false, dirty: false)
+        bothDetached[2].checkout = CheckoutIdentity(id: "h2::checkout-1", path: "/repo/b-folder", branch: nil, detachedHead: "0123abc", isMain: false, dirty: false)
+        expect(!SessionTree.ordered(list: spreadView, current: nil, rows: rows(bothDetached), attention: [:]).projects[0].showsCheckouts, "detached checkouts in different folders show no checkout lines")
         let unnamedRows = [onHost("here", nil, checkout: "x"), onHost("h1::there", vps, checkout: "y")]
         let unnamed = SessionTree.ordered(list: view(unnamedRows.map { family($0.id, project: project) }, projects: [(project, [])]), current: nil, rows: rows(unnamedRows), attention: [:]).projects
         expect(unnamed.first?.checkouts.count == 2, "the same path on two hosts stays two checkouts without a checkout id")

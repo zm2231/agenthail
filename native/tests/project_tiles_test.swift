@@ -22,6 +22,16 @@ struct ProjectTilesTest {
         let roomy = ProjectTiles.order(projects, limit: 5)
         check(roomy.shown.map(\.id) == ["newest", "middle", "old", "lead-only", "empty"], "a lead ranks with active projects, and an idle project fills a tile left over: \(roomy.shown.map(\.id))")
         check(roomy.more.map(\.id) == ["shelved"], "an archived project only appears under more")
+        let mine = ProjectTiles.arranged(projects, limit: 3, order: ["old", "middle", "newest", "shelved"], pinned: ["empty"])
+        check(mine.shown.map(\.id) == ["empty", "old", "middle"], "pinned first, then the person's order, whatever is busiest: \(mine.shown.map(\.id))")
+        check(mine.more.map(\.id) == ["newest", "shelved", "lead-only"], "the rest keep the person's order, then unplaced projects by name: \(mine.more.map(\.id))")
+        let busier = projects.map { project -> ProjectState in
+            var copy = project
+            copy.activity = ProjectActivity(id: project.id, lastActive: "2026-11-09T10:00:00Z", sessionCount: 9, checkouts: [])
+            return copy
+        }
+        check(ProjectTiles.arranged(busier, limit: 3, order: ["old", "middle", "newest"], pinned: ["empty"]).shown.map(\.id) == mine.shown.map(\.id), "activity never moves a tile")
+        check(ProjectTiles.moving("newest", before: "old", in: ["old", "middle", "newest"]) == ["newest", "old", "middle"] && ProjectTiles.moving("old", before: "gone", in: ["old", "middle"]) == ["old", "middle"], "a drop moves a tile before its target")
         check(ProjectTiles.letter("agenthail") == "A" && ProjectTiles.letter("_tools") == "T" && ProjectTiles.letter("") == "·", "a tile's letter is the name's first letter or digit")
         let vectors = try! JSONDecoder().decode(ColourVectors.self, from: Data(contentsOf: colourFixture))
         check(PaletteTokens.projects.count == vectors.count, "\(PaletteTokens.projects.count) project colours, the vectors expect \(vectors.count)")

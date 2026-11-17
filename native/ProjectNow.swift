@@ -87,7 +87,6 @@ struct ProjectNow: Equatable {
 
     private static func place(_ session: SessionState) -> String {
         if let branch = session.checkout?.branch, !branch.isEmpty { return branch }
-        if let head = session.checkout?.detachedHead, !head.isEmpty { return String(head.prefix(7)) }
         let path = session.checkout?.path ?? session.cwd ?? ""
         return path.isEmpty ? "No folder" : PathNames.last(path)
     }

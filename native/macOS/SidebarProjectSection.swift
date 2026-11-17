@@ -13,9 +13,9 @@ struct SidebarProjectSection: View, @MainActor Equatable {
 
     var body: some View {
         let project = key.project
-        let single = project.checkouts.count == 1 ? project.checkouts.first : nil
+        let branches = project.showsCheckouts
         VStack(alignment: .leading, spacing: 1) {
-            ProjectHeaderView(name: project.name, hosts: project.hosts, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.counts.sessions)
+            ProjectHeaderView(name: project.name, hosts: project.hosts, archived: project.archived, sessionCount: project.counts.sessions)
                 .opensProject(project.identity?.id, model: model, pane: pane, shown: key.isShownProject)
                 .contextMenu {
                     if let identity = project.identity {
@@ -31,8 +31,8 @@ struct SidebarProjectSection: View, @MainActor Equatable {
                     }
                 }
             ForEach(key.shown.checkouts) { checkout in
-                if single == nil {
-                    CheckoutRowView(checkout: checkout, host: project.spansHosts ? project.hostLabel(of: checkout) : nil)
+                if branches {
+                    CheckoutRowView(checkout: checkout)
                 }
                 ForEach(checkout.families) { family in
                     let familyKey = key.family(family)
