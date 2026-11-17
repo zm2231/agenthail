@@ -84,7 +84,7 @@ struct PhoneProjectTiles: View {
             }
         }
         .buttonStyle(.borderedProminent)
-        .tint(PhonePalette.accent)
+        .tint(PhonePalette.prominent)
         .controlSize(.large)
         .padding(20)
         .presentationDetents([.height(280)])

@@ -16,6 +16,11 @@ enum AccentContrast {
             self.init(r: Double((hex >> 16) & 0xFF) / 255, g: Double((hex >> 8) & 0xFF) / 255, b: Double(hex & 0xFF) / 255)
         }
 
+        var hex: UInt32 {
+            func byte(_ value: Double) -> UInt32 { UInt32((min(max(value, 0), 1) * 255).rounded()) }
+            return byte(r) << 16 | byte(g) << 8 | byte(b)
+        }
+
         static let white = RGB(r: 1, g: 1, b: 1)
         static let black = RGB(r: 0, g: 0, b: 0)
 
@@ -49,5 +54,10 @@ enum AccentContrast {
 
     static func foreground(on accent: RGB) -> RGB {
         contrast(.white, accent) >= contrast(.black, accent) ? .white : .black
+    }
+
+    static func prominent(_ accent: RGB, target: Double) -> (fill: RGB, ink: RGB) {
+        let ink = foreground(on: accent)
+        return (readable(accent, on: [ink], dark: ink == .black, target: target), ink)
     }
 }
