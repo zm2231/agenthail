@@ -159,7 +159,7 @@ func (d *Daemon) startTurnJudge(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case job := <-d.judge.jobs:
-					d.judgeTurn(ctx, job)
+					d.background.run(func(ctx context.Context) { d.judgeTurn(ctx, job) })
 				}
 			}
 		}()
