@@ -1372,7 +1372,10 @@ func TestARetiringHostThatStopsAnsweringIsLoggedOnceAndFollowedUntilItExits(t *t
 
 // A retiring host past its drain grace closes a session whose background task
 // still runs; the daemon queues the host's notice of what stopped for that
-// session, which resumes it on the current host.
+// session, which resumes it on the current host. The grace runs from the
+// retire, so a request the session waits on holds it on the retiring host
+// until the daemon follows that host; however long the new host takes to
+// start, the session cannot retire until the request is answered.
 func TestASessionMovedOffARetiringHostIsToldWhichBackgroundTasksStopped(t *testing.T) {
 	t.Setenv("AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS", "2000")
 	fixture := claudehosttest.New(t, "")
@@ -1389,6 +1392,23 @@ func TestASessionMovedOffARetiringHostIsToldWhichBackgroundTasksStopped(t *testi
 		t.Fatal(err)
 	}
 	testkit.Eventually(t, "the turn that starts the task", 15*time.Second, func() bool { return len(fixture.Turns(t, id)) == 1 })
+	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: id, UUID: uuid.NewString(), Text: "TOOL"}); err != nil {
+		t.Fatal(err)
+	}
+	var request claudehost.Request
+	testkit.Eventually(t, "the request", 15*time.Second, func() bool {
+		listing, err := client.List(ctx)
+		if err != nil {
+			return false
+		}
+		for _, session := range listing.Sessions {
+			if session.SessionID == id && len(session.Requests) == 1 {
+				request = session.Requests[0]
+				return true
+			}
+		}
+		return false
+	})
 	r := hostRegistry(t)
 	if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
@@ -1401,11 +1421,26 @@ func TestASessionMovedOffARetiringHostIsToldWhichBackgroundTasksStopped(t *testi
 	if len(retiring) != 1 {
 		t.Fatalf("retiring hosts = %v, want the old one", retiring)
 	}
+	for drained := false; !drained; {
+		select {
+		case <-d.catalogNudge:
+		default:
+			drained = true
+		}
+	}
 	followed := make(chan struct{})
 	go func() {
 		defer close(followed)
 		d.watchRetiringClaudeHost(ctx, retiring[0])
 	}()
+	select {
+	case <-d.catalogNudge:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the daemon did not follow the retiring host's events")
+	}
+	if _, err := client.Respond(ctx, id, request.RequestID, claudehost.Decision{Behavior: "allow"}); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case <-followed:
 	case <-time.After(20 * time.Second):
