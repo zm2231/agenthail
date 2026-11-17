@@ -33,4 +33,26 @@ final class ProjectTilesUITests: XCTestCase {
         screen.lifetime = .keepAlways
         add(screen)
     }
+
+    func testEachTileOpensItsOwnArrangeMenu() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-tiles"]
+        app.launch()
+        let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'project-tile-computer::'"))
+        XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 15))
+        let last = tiles.allElementsBoundByIndex.max { $0.frame.minX < $1.frame.minX }!
+        let id = last.identifier
+        let before = last.frame.minX
+        last.press(forDuration: 1.2)
+        let earlier = app.buttons["Move Earlier"].firstMatch
+        XCTAssertTrue(earlier.waitForExistence(timeout: 5), "the last tile's own menu offers to move it earlier")
+        XCTAssertTrue(app.buttons["Pin to Front"].firstMatch.exists)
+        let menu = XCTAttachment(screenshot: app.screenshot())
+        menu.name = "A tile's arrange menu"
+        menu.lifetime = .keepAlways
+        add(menu)
+        earlier.tap()
+        let moved = expectation(for: NSPredicate { _, _ in app.buttons[id].frame.minX < before }, evaluatedWith: nil)
+        wait(for: [moved], timeout: 5)
+    }
 }

@@ -6,6 +6,7 @@ struct PhoneProjectTiles: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .body) private var mark: CGFloat = 44
+    @State private var arranging: ProjectState?
 
     static func limit(_ sizeClass: UserInterfaceSizeClass?) -> Int { sizeClass == .regular ? 6 : 4 }
 
@@ -23,15 +24,16 @@ struct PhoneProjectTiles: View {
                 HStack(alignment: .top, spacing: 8) {
                     ForEach(tiles.shown, id: \.id) { project in
                         let count = counts[project.id] ?? 0
-                        Button { open(ConversationRoute.project(project.id)) } label: {
-                            face(project.displayName, count: count) { letter(project) }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Project \(project.displayName)")
-                        .accessibilityValue(count > 0 ? "\(count) waiting" : "")
-                        .accessibilityIdentifier("project-tile-" + project.id)
-                        .contextMenu { arrange(project.id, arranged: arranged) }
-                        .accessibilityActions { arrange(project.id, arranged: arranged) }
+                        face(project.displayName, count: count) { letter(project) }
+                            .onTapGesture { open(ConversationRoute.project(project.id)) }
+                            .onLongPressGesture(minimumDuration: 0.4) { if model.tileOrder != nil { arranging = project } }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityAction { open(ConversationRoute.project(project.id)) }
+                            .accessibilityLabel("Project \(project.displayName)")
+                            .accessibilityValue(count > 0 ? "\(count) waiting" : "")
+                            .accessibilityIdentifier("project-tile-" + project.id)
+                            .accessibilityActions { arrange(project.id, arranged: arranged) }
                     }
                     if !tiles.more.isEmpty {
                         Menu {
@@ -57,6 +59,9 @@ struct PhoneProjectTiles: View {
             .scrollClipDisabled()
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Projects")
+            .confirmationDialog(arranging?.displayName ?? "", isPresented: Binding(get: { arranging != nil }, set: { if !$0 { arranging = nil } }), titleVisibility: .visible, presenting: arranging) { project in
+                arrange(project.id, arranged: arranged)
+            }
             .task(id: projects.isEmpty) {
                 let seen = ProjectTiles.order(projects, limit: projects.count, waiting: counts, leads: model.tileLeads)
                 model.tileOrder?.seed((seen.shown + seen.more).map(\.id))
