@@ -482,7 +482,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 			}
 			// The entry changes with the row, under the session's waiting
 			// lock, so a status publish lands wholly before or after both.
-			d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], limits[session.ID], open, config, view, observedAt, nil, func(committed bool) {
+			d.publishCatalogSession(ctx, adapter, session, nil, identity, alias, counts[session.ID], limits[session.ID], open, config, view, observedAt, nil, func(committed bool) {
 				d.catalogLiveMu.Lock()
 				defer d.catalogLiveMu.Unlock()
 				if committed && live != nil {
@@ -496,8 +496,8 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		d.followLiveSessions(adapter.Name(), sessions, openSessions, complete)
 		var recordErr error
 		if keeper, keeps := adapter.(surface.EndedConversations); keeps && complete {
-			recordErr = d.discoverEndedSessions(ctx, adapter, keeper, seen, hidden, observedAt, func(session surface.Session, identity catalogIdentity) {
-				d.publishCatalogSession(ctx, adapter, session, identity, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, config, view, observedAt, nil, nil)
+			recordErr = d.discoverEndedSessions(ctx, adapter, keeper, seen, hidden, observedAt, func(session surface.Session, read *surface.Session, identity catalogIdentity) bool {
+				return d.publishCatalogSession(ctx, adapter, session, read, identity, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, config, view, observedAt, nil, nil)
 			})
 		} else {
 			recordErr = d.catalog.recordDiscovery(adapter.Name(), seen, observedAt, complete)
@@ -637,7 +637,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 		// discovery's change to the entry, so discovery cannot replace or
 		// drop the entry between them.
 		check := func() bool { return current(entry, func(*catalogLiveSession) {}) }
-		d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[entry.id], limits[entry.id], live.open, *config, view, time.Now().UTC(), check, func(committed bool) {
+		d.publishCatalogSession(ctx, live.adapter, refreshed, nil, live.identity, live.alias, counts[entry.id], limits[entry.id], live.open, *config, view, time.Now().UTC(), check, func(committed bool) {
 			current(entry, func(live *catalogLiveSession) {
 				if committed {
 					live.session = refreshed
@@ -655,7 +655,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 // Under the session's waiting lock, check, when set, runs before the row is
 // written and stops the write when it fails, and done, when set, runs last
 // with whether the row committed.
-func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, limitResume *dashboardLimitResume, open bool, config DashboardConfig, view catalogViewState, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
+func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, endedFrom *surface.Session, identity catalogIdentity, alias string, queueCount int, limitResume *dashboardLimitResume, open bool, config DashboardConfig, view catalogViewState, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
 	defer d.lockWaiting(session.ID)()
 	if done != nil {
 		defer func() { done(committed) }()
@@ -735,7 +735,7 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 			return false
 		}
 		key := "session.upserted:" + session.ID
-		_, _, publishErr := d.catalog.publishSession(registry.CatalogSessionState{Session: session, Project: project, Checkout: checkout, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint)}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
+		_, _, publishErr := d.catalog.publishSession(registry.CatalogSessionState{Session: session, Project: project, Checkout: checkout, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint), EndedFrom: endedFrom}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
 		if publishErr == nil {
 			if session.TurnStop != nil {
 				stopped := session
