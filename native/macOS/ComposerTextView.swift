@@ -23,7 +23,6 @@ struct ComposerTextView: NSViewRepresentable {
         let textView = ComposerNSTextView.make()
         textView.delegate = context.coordinator
         textView.placeholder = placeholder
-        textView.setAccessibilityPlaceholderValue(placeholder)
         textView.setAccessibilityLabel(accessibilityLabel ?? placeholder)
         textView.string = text
         context.coordinator.sync = ComposerTextSync(text)
@@ -55,10 +54,7 @@ struct ComposerTextView: NSViewRepresentable {
         textView.isEditable = context.environment.isEnabled
         textView.pasteAttachments = onPaste
         editor?.textView = textView
-        if textView.placeholder != placeholder {
-            textView.placeholder = placeholder
-            textView.setAccessibilityPlaceholderValue(placeholder)
-        }
+        textView.placeholder = placeholder
         textView.setAccessibilityLabel(accessibilityLabel ?? placeholder)
         textView.placeholderColor = NSColor(DesktopPalette.text2.resolve(in: context.environment))
         if context.coordinator.draftID != draftID {
