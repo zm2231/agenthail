@@ -97,16 +97,23 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	if hook.Event == claudehooks.PromptSubmit.Event && hook.Prompt != "" && hook.PromptID != "" && session.Cwd != "" {
 		ledgerContext = a.captureTerminalUtterance(ctx, session, hook)
 	}
-
-	if text == "" && ledgerContext == "" {
-		return nil
+	backlog := ""
+	if _, coordinates, err := store.CoordinatorOfSession(session.ID); hook.Event == claudehooks.PromptSubmit.Event && err == nil && coordinates {
+		backlog = a.backlogLine(ctx, session.ID)
 	}
-	combined := text
-	if ledgerContext != "" {
+
+	combined := ""
+	for _, part := range []string{text, ledgerContext, backlog} {
+		if part == "" {
+			continue
+		}
 		if combined != "" {
 			combined += "\n\n"
 		}
-		combined += ledgerContext
+		combined += part
+	}
+	if combined == "" {
+		return nil
 	}
 	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": hook.Event, "additionalContext": combined}}
 }
