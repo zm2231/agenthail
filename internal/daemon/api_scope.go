@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -175,6 +176,8 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request ScopeReq
 			reply.ScopeProjectID, err = d.remoteSendScope(caller, target)
 		}
 		return reply, err
+	case "answer":
+		return d.answerScope(r.Context(), caller, request.Target, mode)
 	case "lead-send":
 		project, refusal := d.mcpLeadScope(caller, request.Project, mode)
 		if refusal != nil {
@@ -240,4 +243,32 @@ func writeScopeRefusal(w http.ResponseWriter, refusal *mcpRefusal) {
 		extra["detail"] = refusal.Detail
 	}
 	writeAPIErrorWith(w, status, refusal.Code, refusal.Message, extra)
+}
+
+// answerScope admits the CLI's answer to a session's request: on this host
+// as any control of the session, and on a paired host to a caller that may
+// answer requests, as agenthail_answer does; that host then answers only a
+// request routed to the caller.
+func (d *Daemon) answerScope(ctx context.Context, caller *mcpCaller, ref, decision string) (ScopeReply, error) {
+	_, remote, err := d.mcpTargets(caller).Resolve(ctx, strings.TrimSpace(ref))
+	if err != nil {
+		return ScopeReply{}, mcpTargetRefusal(err)
+	}
+	if remote == nil {
+		target, err := d.mcpControlTarget(ctx, caller, ref, false)
+		if err != nil {
+			return ScopeReply{}, err
+		}
+		return ScopeReply{TargetID: target.ID}, nil
+	}
+	if !remote.Exact {
+		return ScopeReply{}, refuse("invalid", fmt.Sprintf("%s does not name one session exactly; it matched %s. Address it by @alias or session id.", ref, remote.Label()))
+	}
+	if !caller.has("requests.answer") {
+		return ScopeReply{}, refuse("capability_missing", "This session may not answer requests.")
+	}
+	if decision == "always" && !caller.has("control.all") {
+		return ScopeReply{}, (&mcpRefusal{Code: "exceeds_ceiling", Message: "Always allow adds a lasting rule that can raise the session's permission mode; allow this one request instead.", Detail: map[string]any{"axis": "permission"}}).about(remote.ID)
+	}
+	return ScopeReply{TargetID: remote.ID}, nil
 }

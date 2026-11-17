@@ -503,9 +503,15 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 	if !found || ask.SessionID != session.ID || ask.State != registry.AskOpen {
 		return actionResult{}, staleRequest()
 	}
+	if p.Kind == principalPerson && source != "" {
+		p, source = sessionPrincipal(source), ""
+	}
 	by, err := askAnswerer(ask, p, source)
 	if err != nil {
 		return actionResult{}, err
+	}
+	if p.Kind == principalHost && by != registry.AskToPerson {
+		p.Claimed = "session " + by
 	}
 	if slices.Equal(response.Choices, []string{askEscalate}) {
 		if by == registry.AskToPerson {

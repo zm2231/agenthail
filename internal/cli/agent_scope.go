@@ -58,6 +58,19 @@ func (a *App) controlScope(ctx context.Context, sess *surface.Session, remote *r
 	return a.controlScopeOf(ctx, target)
 }
 
+// answerScope checks an answer to a session's request; on a paired host the
+// owning host then answers only a request routed to this session.
+func (a *App) answerScope(ctx context.Context, sess *surface.Session, remote *remoteTarget, decision string) error {
+	target := ""
+	if remote != nil {
+		target = remote.ID
+	} else if sess != nil {
+		target = sess.ID
+	}
+	_, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "answer", Target: target, Mode: decision})
+	return err
+}
+
 func (a *App) controlScopeOf(ctx context.Context, target string) error {
 	_, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "control", Target: target})
 	return err

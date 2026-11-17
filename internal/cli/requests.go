@@ -56,11 +56,15 @@ func (a *App) cmdAnswer(args []string) error {
 		return err
 	}
 	defer cancel()
+	reply := ""
+	if len(positional) == 2 {
+		reply = positional[1]
+	}
 	sess, _, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
 	}
-	if err := a.controlScope(ctx, sess, remote); err != nil {
+	if err := a.answerScope(ctx, sess, remote, reply); err != nil {
 		return err
 	}
 	state, label, err := a.requestState(ctx, positional[0])
@@ -70,10 +74,6 @@ func (a *App) cmdAnswer(args []string) error {
 	request, err := pickRequest(state.Requests, flagVal(args, "--request"))
 	if err != nil {
 		return fmt.Errorf("%s: %w", label, err)
-	}
-	reply := ""
-	if len(positional) == 2 {
-		reply = positional[1]
 	}
 	decision, err := requestDecision(request, reply, flagVal(args, "--answers"), flagVal(args, "--reason"))
 	if err != nil {
@@ -204,8 +204,16 @@ func (a *App) respond(ctx context.Context, target, requestID string, decision su
 	if err != nil {
 		return "", err
 	}
+	payload := map[string]any{"action": "respond", "requestId": requestID, "decision": decision}
+	if agentEnvironment() {
+		caller, err := a.sourceSessionID(ctx, "")
+		if err != nil {
+			return "", err
+		}
+		payload["sourceSessionId"] = caller
+	}
 	if remote != nil {
-		data, err := a.remoteAction(ctx, remote, "answer", map[string]any{"action": "respond", "requestId": requestID, "decision": decision})
+		data, err := a.remoteAction(ctx, remote, "answer", payload)
 		if err != nil {
 			if strings.Contains(err.Error(), surface.ErrRequestStale.Error()) {
 				return "", surface.ErrRequestStale
@@ -226,15 +234,12 @@ func (a *App) respond(ctx context.Context, target, requestID string, decision su
 	if !a.daemonIsRunning() {
 		return "", errRequestsNeedDaemon
 	}
-	return a.respondThroughDaemon(ctx, sess.ID, requestID, decision)
-}
-
-func (a *App) respondThroughDaemon(ctx context.Context, sessionID, requestID string, decision surface.Response) (string, error) {
+	payload["sessionId"] = sess.ID
 	client, err := a.daemonAPI()
 	if err != nil {
 		return "", err
 	}
-	data, status, err := client.action(ctx, map[string]any{"action": "respond", "sessionId": sessionID, "requestId": requestID, "decision": decision})
+	data, status, err := client.action(ctx, payload)
 	if status == http.StatusConflict {
 		return "", surface.ErrRequestStale
 	}
@@ -247,7 +252,7 @@ func (a *App) respondThroughDaemon(ctx context.Context, sessionID, requestID str
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(data, &response); err != nil {
-		return "", fmt.Errorf("decode the answer for %s: %w", a.resolveDisplay(sessionID), err)
+		return "", fmt.Errorf("decode the answer for %s: %w", a.resolveDisplay(sess.ID), err)
 	}
 	return response.Result.Outcome, nil
 }
