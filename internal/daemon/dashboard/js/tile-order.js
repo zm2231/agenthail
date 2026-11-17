@@ -103,6 +103,8 @@ export function seedTileOrder(ids) {
 }
 
 export function changeTiles(change, arranged) {
-  save({ ...applyTileChange(saved, change, arranged), revision: saved.revision, unsent: true });
+  const next = applyTileChange(saved, change, arranged);
+  if (same(next, saved)) return Promise.resolve();
+  save({ ...next, revision: saved.revision, unsent: true });
   return send(change);
 }

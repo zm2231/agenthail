@@ -56,6 +56,9 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   await page.changeTiles({ kind: "move", id: "a", target: "b" }, ["b", "a", "c"]);
   assert.deepEqual(plain(server.state), { order: ["c", "a", "b"], pinned: [], revision: 6 }, "a move against an older order is made again on the one that replaced it");
   assert.deepEqual(plain(page.tileOrder().order), ["c", "a", "b"], "and shown");
+  const writes = server.writes.length;
+  await page.changeTiles({ kind: "step", id: "c", by: -1 }, ["c", "a", "b"]);
+  assert.equal(server.writes.length, writes, "a move that changes nothing writes nothing");
 }
 
 {

@@ -99,7 +99,9 @@ final class TileOrderStore {
     }
 
     func change(_ change: TileChange, arranged: [String]) {
-        save(arrangement.applying(change, arranged: arranged), unsent: true)
+        let next = arrangement.applying(change, arranged: arranged)
+        guard next != arrangement else { return }
+        save(next, unsent: true)
         send(replaying: change)
     }
 

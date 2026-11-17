@@ -96,6 +96,11 @@ struct TileOrderStoreTest {
             let moved = await daemon.state.order
             check(moved == ["c", "a", "b"], "the move is made again on the order that replaced it: \(moved)")
             check(store.arrangement.order == ["c", "a", "b"], "and shown: \(store.arrangement.order)")
+            let before = await daemon.writes.count
+            store.change(.step("c", by: -1), arranged: ["c", "a", "b"])
+            _ = try await settle { false }
+            let after = await daemon.writes.count
+            check(after == before, "a move that changes nothing writes nothing")
         }
 
         try await withStore { defaults, suite in
