@@ -709,6 +709,9 @@ type HostSend struct {
 	// RelayHops counts relay legs so far, so a relay loop that crosses hosts
 	// still stops at the hop limit.
 	RelayHops int
+	// SentAt is when the message was sent, so the owner queues it as that
+	// old however long this host held it.
+	SentAt time.Time
 }
 
 // QueueHostSend holds a send for its host.
@@ -751,6 +754,9 @@ func forwardSender(q catalogQuerier, request map[string]any, source string) (boo
 }
 
 func (r *Registry) hostSendRequest(send HostSend) ([]byte, error) {
+	if send.SentAt.IsZero() {
+		send.SentAt = r.now()
+	}
 	return hostSendRequest(r.read, send)
 }
 
@@ -758,6 +764,9 @@ func (r *Registry) hostSendRequest(send HostSend) ([]byte, error) {
 // transaction, since the writer pool has its one connection.
 func hostSendRequest(q catalogQuerier, send HostSend) ([]byte, error) {
 	request := map[string]any{"action": "send", "sessionId": send.SessionID, "message": send.Message}
+	if !send.SentAt.IsZero() {
+		request["sentAt"] = send.SentAt.UTC().Format(time.RFC3339Nano)
+	}
 	own, err := forwardSender(q, request, send.SourceSessionID)
 	if err != nil {
 		return nil, err

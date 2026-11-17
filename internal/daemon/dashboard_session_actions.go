@@ -116,9 +116,9 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 			if len(attached) > 0 {
 				return actionResult{}, invalidRequest("a relay leg carries no attached files")
 			}
-			return d.doHostRelay(ctx, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops)
+			return d.doHostRelay(ctx, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops, request.SentAt)
 		}
-		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, PersonName: request.PersonName, Uploads: attached}
+		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, PersonName: request.PersonName, Uploads: attached, SentAt: request.SentAt}
 		sender := coordinator.Sender{Service: d.coordinator()}
 		deliver := sender.DeliverWithOptions
 		if request.NoQueue {

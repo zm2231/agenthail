@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/coordinator"
@@ -71,9 +72,9 @@ func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboa
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		remote, legs = d.channelHostLegs(operationCtx, target, request.Message, source, request.ExceptHosts)
+		remote, legs = d.channelHostLegs(operationCtx, target, request.Message, source, request.ExceptHosts, request.SentAt)
 	}()
-	result, sendErr := d.channelBroadcaster("").Send(operationCtx, target, request.Message, label, source)
+	result, sendErr := d.channelBroadcaster("", request.SentAt).Send(operationCtx, target, request.Message, label, source)
 	<-done
 	if sendErr != nil {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", sendErr.Error())
@@ -104,9 +105,9 @@ func (d *Daemon) channelSender(request dashboardActionRequest) (string, string, 
 	return "", "the Agenthail CLI", nil
 }
 
-func (d *Daemon) channelBroadcaster(personName string) broadcast.Broadcaster {
+func (d *Daemon) channelBroadcaster(personName string, sentAt time.Time) broadcast.Broadcaster {
 	service := d.coordinator()
-	return broadcast.Broadcaster{Registry: d.Registry, Coordinators: service, Delivery: daemonBroadcastDelivery{d: d, sender: coordinator.Sender{Service: service}, personName: personName}}
+	return broadcast.Broadcaster{Registry: d.Registry, Coordinators: service, Delivery: daemonBroadcastDelivery{d: d, sender: coordinator.Sender{Service: service}, personName: personName, sentAt: sentAt}}
 }
 
 func (d *Daemon) channelReply(result broadcast.Result, legs []channelHostLeg, except []string) (actionResult, error) {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -62,6 +63,11 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 	if err := incompatibleHost(host); err != nil {
 		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, err) })
 	}
+	if action, _ := request["action"].(string); action == "send" || action == "channel-send" {
+		if _, fromHost := requestingHost(ctx); !fromHost || request["sentAt"] == nil {
+			request["sentAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+	}
 	body, _ := json.Marshal(request)
 	return d.forwardHostAction(ctx, p, key, host, request, body)
 }
@@ -72,6 +78,9 @@ func (d *Daemon) decodeAction(ctx context.Context, p principal, raw []byte, key 
 		return replyWith(func(w http.ResponseWriter) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid dashboard request: "+err.Error())
 		})
+	}
+	if _, fromHost := requestingHost(ctx); !fromHost {
+		request.SentAt = time.Time{}
 	}
 	return d.doAction(withActionKey(ctx, key), p, request)
 }

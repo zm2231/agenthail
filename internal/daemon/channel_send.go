@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/coordinator"
@@ -19,10 +20,11 @@ type daemonBroadcastDelivery struct {
 	d          *Daemon
 	sender     coordinator.Sender
 	personName string
+	sentAt     time.Time
 }
 
 func (b daemonBroadcastDelivery) options(source string) surface.SendOptions {
-	options := surface.SendOptions{SourceSessionID: source}
+	options := surface.SendOptions{SourceSessionID: source, SentAt: b.sentAt}
 	if source == surface.PersonSessionID && b.personName != "" {
 		options.Author, options.PersonName = surface.AuthorPerson, b.personName
 	}

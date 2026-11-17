@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/delivery"
@@ -59,7 +60,7 @@ func (d *Daemon) forwardHostAction(ctx context.Context, p principal, key string,
 	})
 }
 
-func (d *Daemon) doHostRelay(ctx context.Context, session *surface.Session, message, sourceID, busyDelivery string, hops int) (actionResult, error) {
+func (d *Daemon) doHostRelay(ctx context.Context, session *surface.Session, message, sourceID, busyDelivery string, hops int, sentAt time.Time) (actionResult, error) {
 	if _, err := d.boundHost(ctx); err != nil {
 		return actionResult{}, err
 	}
@@ -70,7 +71,7 @@ func (d *Daemon) doHostRelay(ctx context.Context, session *surface.Session, mess
 	if key == "" {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "a forwarded relay needs its idempotency key")
 	}
-	queueID, err := d.Registry.QueueRelayMessageWithOptions(session.ID, message, "host-relay:"+key, hops, surface.SendOptions{SourceSessionID: sourceID, BusyDelivery: busyDelivery})
+	queueID, err := d.Registry.QueueRelayMessageWithOptions(session.ID, message, "host-relay:"+key, hops, surface.SendOptions{SourceSessionID: sourceID, BusyDelivery: busyDelivery, SentAt: sentAt})
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
 	}

@@ -502,7 +502,7 @@ func TestQueuedMessageToLongBusySessionStaysPendingThenDeliversOnce(t *testing.T
 	agent.setStatus("target", surface.StatusIdle)
 	testkit.Eventually(t, "held delivery", 5*time.Second, func() bool { return len(agent.deliveredTo("target")) > 0 })
 	settle()
-	if got := agent.deliveredTo("target"); len(got) != 1 || got[0].text != "report after a long turn" {
+	if got := agent.deliveredTo("target"); len(got) != 1 || got[0].text != "(sent 3 h ago) report after a long turn" {
 		t.Fatalf("delivered=%+v", got)
 	}
 	h.awaitQueueItem(id, "the delivery recorded", delivered)

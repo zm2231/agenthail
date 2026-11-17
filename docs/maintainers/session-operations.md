@@ -240,6 +240,20 @@ deferral was and the last reason. A message still deferred 15 minutes after its
 first deferral raises one delivery ask (see `asks.md#delivery-problems`) and
 stays queued.
 
+A message delivered 10 minutes or more after it was sent says so, so its
+receiver can weigh it against what it has done since: the text starts with
+`(sent N min ago) ` (`N h` from two hours, `N days` from two days), placed after
+a `[from ...] ` envelope when the message has one (`surface.WithSentAge`). The
+send time is when the sender's daemon first took the message, carried as
+`SendOptions.SentAt` and as a queued message's `queued_at`. Every delivery
+applies it: a send, a steer, a queued message's drain and the first turn of a
+coordinator started for it. A send, relay or project channel post forwarded to
+a paired host carries it as `sentAt`, stamped when it first leaves its host
+(only a paired host's action may state it; one in any other caller's action is
+ignored), so
+one held while that host was unreachable, or a queue a move hands to a
+session's new host, keeps its original time. History keeps the message as sent.
+
 ## Claude sessions
 
 ```sh

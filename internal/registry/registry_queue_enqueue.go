@@ -150,7 +150,11 @@ func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey
 	if options.BusyDelivery == "steer" && !options.QueuesAsSteer() {
 		options.BusyDelivery = "queue"
 	}
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,person_name,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, options.BusyDelivery, options.Author, options.Uploads, options.PersonName)
+	var sentAt any
+	if !options.SentAt.IsZero() && options.SentAt.Before(now) {
+		sentAt = formatSQLiteTimestamp(options.SentAt)
+	}
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,person_name,status,queued_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',COALESCE(?,datetime('now')),datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, options.BusyDelivery, options.Author, options.Uploads, options.PersonName, sentAt)
 	if err != nil {
 		if deliveryKey == "" || !strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return enqueued{}, err
@@ -175,7 +179,7 @@ func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey
 			return enqueued{}, err
 		}
 	}
-	queued.Held, err = holdForOwnerTx(tx, id, sessionID, message, deliveryKey, options, relayHops, operation)
+	queued.Held, err = holdForOwnerTx(tx, now, id, sessionID, message, deliveryKey, options, relayHops, operation)
 	if err != nil {
 		return enqueued{}, err
 	}
@@ -240,7 +244,7 @@ func (e MovedError) Error() string {
 // holdForOwnerTx makes a message queued for a session another host owns,
 // one that moved while the send waited for it, a send held for that host, as
 // the move made the messages already queued for it.
-func holdForOwnerTx(tx *sql.Tx, id int64, sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation) (bool, error) {
+func holdForOwnerTx(tx *sql.Tx, now time.Time, id int64, sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation) (bool, error) {
 	owner, err := sessionOwnerTx(tx, sessionID)
 	if err != nil || owner == "" {
 		return false, err
@@ -252,7 +256,11 @@ func holdForOwnerTx(tx *sql.Tx, id int64, sessionID, message, deliveryKey string
 	if key == "" {
 		key = fmt.Sprintf("held-%s-%d", sessionID, id)
 	}
-	request, err := hostSendRequest(tx, HostSend{SessionID: sessionID, Message: message, Key: key, SourceSessionID: options.SourceSessionID, BusyDelivery: options.BusyDelivery, RelayHops: relayHops})
+	sentAt := now
+	if !options.SentAt.IsZero() && options.SentAt.Before(now) {
+		sentAt = options.SentAt
+	}
+	request, err := hostSendRequest(tx, HostSend{SessionID: sessionID, Message: message, Key: key, SourceSessionID: options.SourceSessionID, BusyDelivery: options.BusyDelivery, RelayHops: relayHops, SentAt: sentAt})
 	if err != nil {
 		return false, err
 	}

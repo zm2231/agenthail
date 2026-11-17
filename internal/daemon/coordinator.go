@@ -51,7 +51,7 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 		}
 		return true
 	}
-	composed, _ := item.Uploads.Compose(item.Message, false)
+	composed, _ := item.Uploads.Compose(surface.WithSentAge(item.Message, item.QueuedAt, now), false)
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
 	if messageUUID, err := d.Registry.DeliveryIntentUUIDForQueue(item.ID); err != nil {
