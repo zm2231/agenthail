@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -17,10 +18,15 @@ import (
 
 type requestingSurface struct {
 	*daemonSurface
-	open []surface.Request
+	open    []surface.Request
+	stalled map[string]bool
 }
 
-func (s *requestingSurface) Requests(context.Context, *surface.Session) (surface.RequestState, error) {
+func (s *requestingSurface) Requests(ctx context.Context, session *surface.Session) (surface.RequestState, error) {
+	if s.stalled[session.ID] {
+		<-ctx.Done()
+		return surface.RequestState{}, ctx.Err()
+	}
 	return surface.RequestState{PermissionMode: "default", Requests: s.open}, nil
 }
 
@@ -174,6 +180,128 @@ func TestMCPRequestsReturnEveryOpenRequestInOneCall(t *testing.T) {
 	}
 	if refusal, refused := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": worker.ID, "requestId": "answered"}); !refused || refusal["code"] != "not_found" {
 		t.Fatalf("missing request=%v", refusal)
+	}
+}
+
+func TestMCPRequestsShowTheCommandAndEditEachRequestAsksFor(t *testing.T) {
+	r, err := registry.Open(registrytest.Path(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	base := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}
+	responder := &requestingSurface{daemonSurface: base}
+	d := newTestDaemon(t, r, []surface.Surface{responder})
+	worker := surface.Session{ID: "asker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}
+	if err := r.RecordObservedSession(worker); err != nil {
+		t.Fatal(err)
+	}
+	base.sessions[worker.ID] = worker
+	created := time.Now().Add(-time.Minute)
+	responder.open = []surface.Request{
+		{ID: "run", Kind: surface.WaitingApproval, Tool: "Bash", Input: json.RawMessage(`{"command":"git push --force origin main","description":"push"}`), CreatedAt: created},
+		{ID: "edit", Kind: surface.WaitingApproval, Tool: "Edit", Input: json.RawMessage(`{"file_path":"/repo/main.go","old_string":"a()","new_string":"b()"}`), CreatedAt: created.Add(time.Second)},
+	}
+	d.syncWaits(worker, &surface.Waiting{Kind: surface.WaitingApproval, ID: "run", Answerable: true, Open: []string{"run", "edit"}})
+	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, worker))
+
+	listed, refused := callMCP(t, session, "agenthail_requests", nil)
+	waiting, _ := listed["waiting"].([]any)
+	if refused || len(waiting) != 1 {
+		t.Fatalf("listing=%v", listed)
+	}
+	says := map[string]string{"Bash": "git push --force origin main", "Edit": "/repo/main.go: +1 -1 lines"}
+	if row := waiting[0].(map[string]any); says[fmt.Sprint(row["tool"])] == "" || !strings.Contains(fmt.Sprint(row["detail"]), says[fmt.Sprint(row["tool"])]) {
+		t.Fatalf("the waiting row does not say what it asks to do: %v", row)
+	}
+
+	result, refused := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": worker.ID})
+	requests, _ := result["requests"].([]any)
+	if refused || len(requests) != 2 {
+		t.Fatalf("requests=%v", result)
+	}
+	for index, want := range []string{"git push --force origin main", "/repo/main.go: +1 -1 lines\n- a()\n+ b()"} {
+		if detail := fmt.Sprint(requests[index].(map[string]any)["detail"]); !strings.Contains(detail, want) {
+			t.Fatalf("request %d detail %q does not say %q", index, detail, want)
+		}
+	}
+
+	one, refused := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": worker.ID, "requestId": askIDOfRequest(t, r, worker.ID, "run")})
+	if full, _ := one["request"].(map[string]any); refused || !strings.Contains(fmt.Sprint(full["detail"]), "git push --force origin main") {
+		t.Fatalf("one request=%v", one)
+	}
+}
+
+func TestMCPRequestsListMarksAClippedCommand(t *testing.T) {
+	r, err := registry.Open(registrytest.Path(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	base := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}
+	responder := &requestingSurface{daemonSurface: base}
+	d := newTestDaemon(t, r, []surface.Surface{responder})
+	worker := surface.Session{ID: "asker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}
+	if err := r.RecordObservedSession(worker); err != nil {
+		t.Fatal(err)
+	}
+	base.sessions[worker.ID] = worker
+	command := "echo " + strings.Repeat("é", 200)
+	encoded, _ := json.Marshal(map[string]any{"command": command})
+	responder.open = []surface.Request{{ID: "run", Kind: surface.WaitingApproval, Tool: "Bash", Input: encoded, CreatedAt: time.Now()}}
+	d.syncWaits(worker, &surface.Waiting{Kind: surface.WaitingApproval, ID: "run", Answerable: true, Open: []string{"run"}})
+	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, worker))
+
+	listed, _ := callMCP(t, session, "agenthail_requests", nil)
+	waiting, _ := listed["waiting"].([]any)
+	if len(waiting) != 1 {
+		t.Fatalf("listing=%v", listed)
+	}
+	row := waiting[0].(map[string]any)
+	detail := fmt.Sprint(row["detail"])
+	if row["clipped"] != true || !utf8.ValidString(detail) || len(detail) > mcpPromptFloor || !strings.HasPrefix(command, detail) {
+		t.Fatalf("a long command must be cut on a character and marked clipped: %v", row)
+	}
+}
+
+func TestMCPRequestsListKeepsAStalledProvidersRowWithoutItsDetail(t *testing.T) {
+	r, err := registry.Open(registrytest.Path(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	base := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}
+	responder := &requestingSurface{daemonSurface: base, stalled: map[string]bool{"stuck": true}}
+	d := newTestDaemon(t, r, []surface.Surface{responder})
+	responder.open = []surface.Request{{ID: "run", Kind: surface.WaitingApproval, Tool: "Bash", Input: json.RawMessage(`{"command":"make release"}`), CreatedAt: time.Now()}}
+	var rows []map[string]any
+	var reads []waitingRead
+	for _, id := range []string{"stuck", "ready"} {
+		worker := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}
+		if err := r.RecordObservedSession(worker); err != nil {
+			t.Fatal(err)
+		}
+		base.sessions[id] = worker
+		d.syncWaits(worker, &surface.Waiting{Kind: surface.WaitingApproval, ID: "run", Answerable: true, Open: []string{"run"}})
+		state, err := r.SessionWaiting(id)
+		if err != nil || state == nil {
+			t.Fatalf("waiting %s: %v %v", id, state, err)
+		}
+		rows = append(rows, map[string]any{"sessionId": id, "requestId": state.ID})
+		reads = append(reads, waitingRead{session: &worker, requestID: state.ID})
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	d.describeWaiting(ctx, rows, reads)
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("a stalled provider held the list for %s", elapsed)
+	}
+	if _, described := rows[0]["detail"]; described || rows[0]["sessionId"] != "stuck" {
+		t.Fatalf("stalled row=%v", rows[0])
+	}
+	if rows[1]["detail"] != "make release" {
+		t.Fatalf("a provider that answered must still be described: %v", rows[1])
 	}
 }
 

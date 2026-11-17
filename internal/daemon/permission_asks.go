@@ -206,6 +206,9 @@ func (d *Daemon) noticePermission(ctx context.Context, ask registry.Ask) {
 		if detail := strings.TrimSpace(request.Description); detail != "" && detail != asks {
 			asks += ": " + detail
 		}
+		if detail := request.Detail(); detail != "" {
+			asks += "\n" + clipUTF8(detail, noticeDetailLimit)
+		}
 	}
 	target, mcp := d.askAddress(session.ID, ask.RoutedTo)
 	message := permissionNotice(d.resolveDisplay(session.ID), target, ask.ID, asks, mcp, d.permissionEscalateAfter())
@@ -222,6 +225,8 @@ func (d *Daemon) noticePermission(ctx context.Context, ask registry.Ask) {
 		d.escalateAsk(ask, registry.AskToPerson)
 	}
 }
+
+const noticeDetailLimit = 1024
 
 func permissionNotice(name, target, askID, asks string, mcp bool, window time.Duration) string {
 	read := fmt.Sprintf("agenthail requests %s --json", target)
