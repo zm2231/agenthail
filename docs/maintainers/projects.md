@@ -165,10 +165,12 @@ shared between hosts.
   `"source": "tiles"`, and `GET` returns the current order.
 - Each app keeps the last order it read and applies a change at once. A change
   made while the daemon cannot be reached is sent when it answers again, and
-  the later write wins. The first app to find no order sends its own: the Mac
-  its existing order, any other app the activity ranking it shows. An app
-  whose first order is refused because another app wrote one first takes
-  that one instead. A pin is sent as the whole pinned list, so sending an
+  the later write wins. Until the daemon holds an order, every app shows
+  its own activity ranking and writes nothing. The daemon's first order is
+  the Mac's existing one, sent when the Mac first finds none, or the first
+  change a person makes in any app, which records the order that app showed
+  with that change. A Mac whose first order is refused because another app
+  wrote one first takes that one instead. A pin is sent as the whole pinned list, so sending an
   order again after a lost answer never undoes a change. The phone
   names its first computer's own folders `<host>::<id>`, as it does
   everywhere, and sends them back in the computer's names.

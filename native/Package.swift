@@ -68,6 +68,7 @@ let package = Package(
                 "ProjectActions.swift",
                 "ProjectTiles.swift",
                 "TileOrderStore.swift",
+                "AccentContrast.swift",
                 "ProjectContents.swift",
                 "ProjectNow.swift",
                 "ScopePages.swift",

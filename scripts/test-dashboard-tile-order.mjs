@@ -40,7 +40,6 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 {
   const server = daemon({ order: [], pinned: [], revision: 0 });
   const page = await store({ "agenthail.tileOrder": JSON.stringify({ order: ["c", "a", "b"], pinned: ["b"], revision: 0 }) }, server);
-  page.seedTileOrder(["a", "b", "c"]);
   page.adoptTileOrder({ order: [], pinned: [], revision: 0 });
   await settle();
   assert.deepEqual(plain(server.state), { order: ["c", "a", "b"], pinned: ["b"], revision: 1 }, "a daemon with no order gets the page's own");
@@ -52,9 +51,8 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 {
   const server = daemon({ order: ["b", "a", "c"], pinned: [], revision: 4 });
   const page = await store({}, server);
-  page.seedTileOrder(["a", "b", "c"]);
   page.adoptTileOrder(server.state);
-  assert.deepEqual(plain(page.tileOrder().order), ["b", "a", "c"], "a page with only the ranking takes the daemon's order");
+  assert.deepEqual(plain(page.tileOrder().order), ["b", "a", "c"], "a page with no order takes the daemon's");
   assert.equal(server.writes.length, 0, "and writes nothing");
   server.state = { order: ["c", "b", "a"], pinned: [], revision: 5 };
   await page.changeTiles({ kind: "move", id: "a", target: "b" }, ["b", "a", "c"]);
@@ -170,6 +168,16 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   for (let i = 0; i < 50 && page.tileOrder().unsent; i++) await settle();
   assert.deepEqual(plain(server.state.order), ["c", "b", "a", "d"], "sending moves the daemon already kept again leaves the order as it was");
   assert.deepEqual(plain(page.tileOrder().order), ["c", "b", "a", "d"]);
+}
+
+{
+  const server = daemon({ order: [], pinned: [], revision: 0 });
+  const page = await store({}, server);
+  page.adoptTileOrder(server.state);
+  await settle();
+  assert.equal(server.writes.length, 0, "a page with no order writes none until the person arranges a tile");
+  await page.changeTiles({ kind: "move", id: "c", target: "a" }, ["a", "b", "c"]);
+  assert.deepEqual(plain(server.state), { order: ["c", "a", "b"], pinned: [], revision: 1 }, "the first change records the shown order with it");
 }
 
 console.log("dashboard tile order tests passed");

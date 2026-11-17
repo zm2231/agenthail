@@ -11,6 +11,7 @@ enum PhonePalette {
     static let diffRemoved = RoleStyle(.diffRemoved)
     static let accent = PhoneAccentStyle(use: .fill)
     static let accentText = PhoneAccentStyle(use: .text)
+    static let onAccent = PhoneAccentStyle(use: .onAccent)
     static let ground = dynamic(PaletteTokens.window)
     static let hairline = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.10) : UIColor(white: 0, alpha: 0.08) })
 

@@ -76,12 +76,11 @@ struct TileOrderStoreTest {
             let daemon = FakeDaemon()
             let store = TileOrderStore(defaults: defaults, key: suite, legacy: (order: "projectTileOrder", pinned: "projectTilePins"))
             check(store.arrangement == TileArrangement(order: ["c", "a", "b"], pinned: ["b"]), "the Mac starts from the order it kept before the daemon held one")
-            store.seed(["a", "b", "c"])
             store.adopt(TileOrderState(order: [], pinned: [], revision: 0)) { try await daemon.put($0) }
             let seeded = try await settle { await daemon.state.revision == 1 }
             check(seeded, "a daemon with no order gets the Mac's")
             let first = await daemon.state
-            check(first == TileOrderState(order: ["c", "a", "b"], pinned: ["b"], revision: 1), "the Mac's own order seeds it, not the ranking: \(first)")
+            check(first == TileOrderState(order: ["c", "a", "b"], pinned: ["b"], revision: 1), "the Mac's own order seeds it: \(first)")
             store.adopt(await daemon.state) { try await daemon.put($0) }
             let writes = await daemon.writes.count
             check(writes == 1, "the order is sent once")
@@ -91,9 +90,8 @@ struct TileOrderStoreTest {
             let daemon = FakeDaemon()
             await daemon.set(TileOrderState(order: ["b", "a", "c"], pinned: [], revision: 4))
             let store = TileOrderStore(defaults: defaults, key: suite)
-            store.seed(["a", "b", "c"])
             store.adopt(await daemon.state) { try await daemon.put($0) }
-            check(store.arrangement.order == ["b", "a", "c"], "a device with only the ranking takes the daemon's order: \(store.arrangement.order)")
+            check(store.arrangement.order == ["b", "a", "c"], "a device with no order takes the daemon's: \(store.arrangement.order)")
             let none = await daemon.writes.isEmpty
             check(none, "and writes nothing")
 
@@ -221,6 +219,19 @@ struct TileOrderStoreTest {
             _ = try await settle { false }
             let final = await daemon.state
             check(final.pinned == ["a"] && store.arrangement.pinned == ["a"], "making a pin the daemon already kept again leaves it pinned: \(final) \(store.arrangement)")
+        }
+
+        try await withStore { defaults, suite in
+            let daemon = FakeDaemon()
+            let store = TileOrderStore(defaults: defaults, key: suite)
+            store.adopt(await daemon.state) { try await daemon.put($0) }
+            _ = try await settle { false }
+            let untouched = await daemon.writes.isEmpty
+            check(untouched && store.arrangement.order.isEmpty, "a device with no order writes none until the person arranges a tile")
+            store.change(.move("c", before: "a"), arranged: ["a", "b", "c"])
+            let written = try await settle { await daemon.state.revision == 1 }
+            let first = await daemon.state
+            check(written && first.order == ["c", "a", "b"], "the first change records the shown order with it: \(first)")
         }
 
         print("tile order store: ok")

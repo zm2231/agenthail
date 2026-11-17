@@ -88,12 +88,6 @@ final class TileOrderStore {
         arrangement.applying(change, arranged: arranged).order != arranged + arrangement.order.filter { !arranged.contains($0) }
     }
 
-    func seed(_ ids: [String]) {
-        guard arrangement.order.isEmpty, !ids.isEmpty else { return }
-        save(TileArrangement(order: ids, pinned: arrangement.pinned), unsent: unsent)
-        if heard && revision == 0 { send() }
-    }
-
     func change(_ change: TileChange, arranged: [String]) {
         let next = arrangement.applying(change, arranged: arranged)
         guard next != arrangement else { return }

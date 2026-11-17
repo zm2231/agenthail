@@ -86,12 +86,6 @@ export function adoptTileOrder(remote) {
   }
 }
 
-export function seedTileOrder(ids) {
-  if (saved.order.length || !ids.length) return;
-  save({ ...saved, order: ids });
-  if (heard && saved.revision === 0) send();
-}
-
 export function changeTiles(change, arranged) {
   const next = applyTileChange(saved, change, arranged);
   if (same(next, saved)) return Promise.resolve();

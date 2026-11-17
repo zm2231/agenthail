@@ -433,10 +433,16 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         refetchMovedSubagents()
     }
 
+    private static func previewTileDefaults() -> UserDefaults {
+        let suite = "agenthail.preview.tiles"
+        UserDefaults.standard.removePersistentDomain(forName: suite)
+        return UserDefaults(suiteName: suite) ?? .standard
+    }
+
     private func syncTileOrder(_ first: HostConnection?) {
         guard let first else { return }
         let host = first.id
-        let store = tileStores[host] ?? TileOrderStore(key: "projectTiles." + host)
+        let store = tileStores[host] ?? TileOrderStore(defaults: first.isPreview ? Self.previewTileDefaults() : .standard, key: "projectTiles." + host)
         tileStores[host] = store
         if tileOrder !== store { tileOrder = store }
         let prefix = host + HostCatalog.separator

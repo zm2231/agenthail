@@ -15,7 +15,9 @@ struct SidebarTiles: View {
         }
         let count = TileGrid.columns(width: width)
         let pinned = ExtensionEntries.pinned(model.extensionCatalogs.flatMap(\.entries), pins: ExtensionPins.shared.ids)
-        let tiles = TileGrid.fill(columns: count, fixed: 3 + pinned.count) { tileOrder.tiles(model.projects, limit: $0) }
+        let tiles = TileGrid.fill(columns: count, fixed: 3 + pinned.count) { limit in
+            tileOrder.arrangement.order.isEmpty ? ProjectTiles.order(model.projects, limit: limit, waiting: counts, leads: leads) : tileOrder.tiles(model.projects, limit: limit)
+        }
         let arranged = (tiles.shown + tiles.more).map(\.id)
         let owner = model.daemon?.host?.id ?? ""
         let columns = Array(repeating: GridItem(.flexible(), spacing: TileGrid.spacing, alignment: .top), count: count)
@@ -27,7 +29,7 @@ struct SidebarTiles: View {
             }
             ForEach(tiles.shown) { project in
                 tile(project.displayName, mark: .letter(ProjectTiles.letter(project.displayName), project: ProjectTiles.colourID(project.id, owner: owner)), count: counts[project.id] ?? 0,
-                     selected: pane.scope == .project(project.id), id: "sidebar-tile-project-" + project.id) { pane.showScope(project: project.id) }
+                     pinned: tileOrder.isPinned(project.id), selected: pane.scope == .project(project.id), id: "sidebar-tile-project-" + project.id) { pane.showScope(project: project.id) }
                     .draggable(project.id)
                     .dropDestination(for: String.self) { dropped, _ in
                         guard let id = dropped.first, arranged.contains(id) else { return false }
@@ -65,11 +67,6 @@ struct SidebarTiles: View {
             tile("All", mark: .symbol("square.stack"), count: 0, selected: pane.scope == .all, id: "sidebar-tile-all", action: pane.showAll)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-        .task(id: model.projects.isEmpty) {
-            guard !model.projects.isEmpty else { return }
-            let seen = ProjectTiles.order(model.projects, limit: model.projects.count, waiting: counts, leads: leads)
-            tileOrder.seed((seen.shown + seen.more).map(\.id))
-        }
         .onChange(of: TileSync(remote: model.tileOrder, api: model.api.map(ObjectIdentifier.init)), initial: true) {
             let api = model.api
             tileOrder.adopt(model.tileOrder) { state in
@@ -113,17 +110,17 @@ struct SidebarTiles: View {
         }
     }
 
-    private func tile(_ title: String, mark: Mark, count: Int, badge: String? = nil, selected: Bool, id: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { face(title, mark: mark, count: count, badge: badge, selected: selected) }
+    private func tile(_ title: String, mark: Mark, count: Int, badge: String? = nil, pinned: Bool = false, selected: Bool, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { face(title, mark: mark, count: count, badge: badge, pinned: pinned, selected: selected) }
             .buttonStyle(.plain)
             .help(title)
             .accessibilityIdentifier(id)
             .accessibilityLabel(title)
-            .accessibilityValue(count > 0 ? "\(count) waiting" : badge ?? "")
+            .accessibilityValue([pinned ? "Pinned" : nil, count > 0 ? "\(count) waiting" : badge].compactMap { $0 }.joined(separator: ", "))
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    private func face(_ title: String, mark: Mark, count: Int, badge: String? = nil, selected: Bool) -> some View {
+    private func face(_ title: String, mark: Mark, count: Int, badge: String? = nil, pinned: Bool = false, selected: Bool) -> some View {
         VStack(spacing: 3) {
             Group {
                 switch mark {
@@ -134,6 +131,16 @@ struct SidebarTiles: View {
             .foregroundStyle(mark.colours.ink)
             .frame(width: 28, height: 28)
             .background(mark.colours.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+            .overlay(alignment: .topLeading) {
+                if pinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: DesktopType.caption - 2, weight: .semibold))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .padding(2)
+                        .background(DesktopPalette.side, in: Circle())
+                        .offset(x: -6, y: -5)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if let shown = count > 0 ? "\(count)" : badge {
                     Text(shown)

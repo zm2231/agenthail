@@ -2,7 +2,7 @@ import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape } from "./format.js";
 import { arrangeTiles, fillTiles, orderTiles, tileColumns, tileLetter, tileLeads, projectColour, projectColourID } from "./project-tiles.js";
-import { changeTiles, onTileOrderChange, seedTileOrder, tileOrder } from "./tile-order.js";
+import { changeTiles, onTileOrderChange, tileOrder } from "./tile-order.js";
 import { currentStops } from "./decision-card.js";
 import { stopsByProject } from "./inbox-stops.js";
 import { openProject, leaveProject } from "./project-pane.js";
@@ -14,11 +14,14 @@ let shownColumns = 0;
 let arranged = [];
 const tileType = "text/x-agenthail-tile";
 
-function tile(scope, mark, title, count, selected, colour, movable = false) {
-  const badge = count ? `<span class="tile-badge">${count}</span>` : "";
+const pinGlyph = '<svg viewBox="0 0 16 16" width="9" height="9" aria-hidden="true"><path fill="currentColor" d="M10.5 1.5 14.5 5.5 12.6 6.2 10.3 8.5 10.8 12 9.4 13.4 6.6 10.6 3 14.2 1.8 13 5.4 9.4 2.6 6.6 4 5.2 7.5 5.7 9.8 3.4z"/></svg>';
+
+function tile(scope, mark, title, count, selected, colour, movable = false, pinned = false) {
+  const badge = (count ? `<span class="tile-badge">${count}</span>` : "") + (pinned ? `<span class="tile-pin">${pinGlyph}</span>` : "");
+  const said = pinned ? '<span class="sr-only">, pinned</span>' : "";
   const tint = colour === undefined ? "" : ` data-colour="${colour}"`;
   const move = movable ? ` data-tile="${escape(scope)}" draggable="true" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"` : "";
-  return `<button class="project-tile${selected ? " active" : ""}" type="button" data-scope="${escape(scope)}"${move} title="${escape(title)}" aria-pressed="${selected}"><span class="tile-mark"${tint}>${mark}${badge}</span><span class="tile-name">${escape(title)}</span></button>`;
+  return `<button class="project-tile${selected ? " active" : ""}" type="button" data-scope="${escape(scope)}"${move} title="${escape(title)}" aria-pressed="${selected}"><span class="tile-mark"${tint}>${mark}${badge}</span><span class="tile-name">${escape(title)}</span>${said}</button>`;
 }
 
 export function renderTiles() {
@@ -30,13 +33,10 @@ export function renderTiles() {
   const counts = stopsByProject(stops, projects, (id) => sessions.get(id)?.project?.id);
   const leads = tileLeads(projects, app.state.sessions || []);
   shownColumns = tileColumns(row.clientWidth);
-  if (projects.length && !tileOrder().order.length) {
-    const seen = orderTiles(projects, projects.length, { waiting: counts, leads });
-    seedTileOrder([...seen.shown, ...seen.more].map((project) => project.id));
-  }
   const byOrder = ({ order, pinned }) => fillTiles(shownColumns, (limit) => arrangeTiles(projects, limit, order, pinned));
   const { shown, more } = tileOrder().order.length ? byOrder(tileOrder()) : fillTiles(shownColumns, (limit) => orderTiles(projects, limit, { waiting: counts, leads }));
   arranged = [...shown, ...more].map((project) => project.id);
+  const pinnedTiles = new Set(tileOrder().order.length ? tileOrder().pinned : []);
   const scope = app.scope || "all";
   const owner = app.state.daemon?.host?.id || "";
   const moreCount = more.reduce((sum, project) => sum + (counts[project.id] || 0), 0);
@@ -49,7 +49,7 @@ export function renderTiles() {
   const active = held && row.contains?.(held) ? held : null;
   const focused = active?.matches("[data-scope-more]") ? "select[data-scope-more]" : active?.dataset.scope !== undefined ? `button[data-scope="${CSS.escape(active.dataset.scope)}"]` : null;
   row.innerHTML = tile("inbox", "▤", "Inbox", stops.count, scope === "inbox")
-    + shown.map((project) => tile(project.id, escape(tileLetter(project.displayName || project.id)), project.displayName || project.id, counts[project.id] || 0, scope === project.id, projectColour(projectColourID(project.id, owner)), true)).join("")
+    + shown.map((project) => tile(project.id, escape(tileLetter(project.displayName || project.id)), project.displayName || project.id, counts[project.id] || 0, scope === project.id, projectColour(projectColourID(project.id, owner)), true, pinnedTiles.has(project.id))).join("")
     + menu
     + tile("all", "≡", "All", 0, scope === "all");
   if (focused) (row.querySelector(focused) || row.querySelector("select[data-scope-more]"))?.focus();

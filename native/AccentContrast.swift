@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 enum AccentContrast {
     struct RGB: Equatable, Sendable {
@@ -18,8 +18,6 @@ enum AccentContrast {
 
         static let white = RGB(r: 1, g: 1, b: 1)
         static let black = RGB(r: 0, g: 0, b: 0)
-
-        var nsColor: NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: 1) }
 
         func mixed(with other: RGB, by amount: Double) -> RGB {
             RGB(r: r + (other.r - r) * amount, g: g + (other.g - g) * amount, b: b + (other.b - b) * amount)
@@ -51,13 +49,5 @@ enum AccentContrast {
 
     static func foreground(on accent: RGB) -> RGB {
         contrast(.white, accent) >= contrast(.black, accent) ? .white : .black
-    }
-
-    static func rgb(_ color: NSColor, in appearance: NSAppearance) -> RGB {
-        var resolved = NSColor.black
-        appearance.performAsCurrentDrawingAppearance {
-            resolved = color.usingColorSpace(.sRGB) ?? .black
-        }
-        return RGB(r: Double(resolved.redComponent), g: Double(resolved.greenComponent), b: Double(resolved.blueComponent))
     }
 }

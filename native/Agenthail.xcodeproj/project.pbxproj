@@ -39,6 +39,7 @@
 		149EB3D4624823F45B729F35 /* ConnectionGrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43AE1BA12D189875A5286611 /* ConnectionGrace.swift */; };
 		157362D28B7AC746EB2557DA /* PreviewBackgroundUpserts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31049047FC0772D21C0AF7B6 /* PreviewBackgroundUpserts.swift */; };
 		16BEC587028859F8D4264925 /* PreviewVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = F837954350613F6F72854AAC /* PreviewVoice.swift */; };
+		17A040ABE243CE3BA527911E /* AccentContrast.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5F3E4A3789037CBAF5D94FF /* AccentContrast.swift */; };
 		17DD180566C794670DD02DCE /* Tailnet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7953E2A5ECE792D230EE0505 /* Tailnet.swift */; };
 		1848D31E51AC4C2EC9A08CE5 /* DiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 863060175315DE04E5E368FE /* DiffView.swift */; };
 		1897987D61BD5EB7108CF674 /* IOSCompactSettingRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDEFC9E7DDF653EB627520D5 /* IOSCompactSettingRows.swift */; };
@@ -694,6 +695,7 @@
 		A54E4F5725F3DD4AFFC28CE4 /* LiveTestHosts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTestHosts.swift; sourceTree = "<group>"; };
 		A57533554A70CCA7EB8A7D1F /* TranscriptScrimView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptScrimView.swift; sourceTree = "<group>"; };
 		A5C57463C2FACA1038600D0F /* NotificationDelegateQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDelegateQueueTests.swift; sourceTree = "<group>"; };
+		A5F3E4A3789037CBAF5D94FF /* AccentContrast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccentContrast.swift; sourceTree = "<group>"; };
 		A6042C2F46355EA034B11D0D /* TerminalQuestionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalQuestionUITests.swift; sourceTree = "<group>"; };
 		A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReadingUITests.swift; sourceTree = "<group>"; };
 		A8CB58E4596119C3F2DD95AA /* SessionListRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListRow.swift; sourceTree = "<group>"; };
@@ -1082,6 +1084,7 @@
 		7C8018B2DDC6BEB4F73F1F0B = {
 			isa = PBXGroup;
 			children = (
+				A5F3E4A3789037CBAF5D94FF /* AccentContrast.swift */,
 				5EB73667A631B4855B108997 /* AgenthailAPI.swift */,
 				C701FBB1DE5E6A7E3827B1BA /* AgenthailModels.swift */,
 				71786189529233E5B19939B0 /* AgentMessage.swift */,
@@ -1476,6 +1479,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				17A040ABE243CE3BA527911E /* AccentContrast.swift in Sources */,
 				2F77C6DC0C6786BD9FE792F1 /* AgentMessage.swift in Sources */,
 				F68975A0D32C1EA3BB0A658C /* AgenthailAPI.swift in Sources */,
 				981C510BDFF1178C1EE97792 /* AgenthailIOSApp.swift in Sources */,

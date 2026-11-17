@@ -707,6 +707,18 @@ textarea:focus-visible {
   font-size: 11px;
   font-weight: 600;
 }
+.tile-pin {
+  position: absolute;
+  top: -6px;
+  left: -7px;
+  display: grid;
+  width: 15px;
+  height: 15px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+}
 .tile-name {
   max-width: 100%;
   overflow: hidden;
