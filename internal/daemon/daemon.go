@@ -98,7 +98,7 @@ type Daemon struct {
 	events       *eventHub
 	catalog      *catalogHub
 	decisions    *decisionsRevision
-	catalogEnded catalogEnded
+	catalogEnded *catalogEnded
 	// catalogLiveMu guards catalogLive, which discovery replaces and the
 	// status pass reads from its own goroutine. It is held only for map
 	// reads and writes; a session's waiting lock orders its row and entry.
@@ -219,6 +219,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		liveSources:       map[string]surface.SurfaceKind{},
 		catalogLive:       map[string]*catalogLiveSession{},
 		catalogIdentities: newCatalogIdentityCache(),
+		catalogEnded:      newCatalogEnded(),
 		catalogNudge:      make(chan struct{}, 1),
 		observerNudge:     make(chan struct{}, 1),
 		federation:        newFederation(),

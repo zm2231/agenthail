@@ -58,7 +58,7 @@ func TestScriptedRowsListedBeforeAreRemovedOnceTheirTranscriptsAreRead(t *testin
 		}
 	}
 	adapter.entrypoints = map[string]string{"/fixture/scripted-a.jsonl": "sdk-cli", "/fixture/scripted-b.jsonl": "sdk-cli", "/fixture/terminal.jsonl": "cli"}
-	d.catalogEnded.rechecked[surface.KindClaude] = time.Now().Add(-catalogEndedRecheck)
+	d.catalogEnded.due[surface.KindClaude] = time.Now()
 	d.discoverCatalog(context.Background())
 	d.discoverCatalog(context.Background())
 	for id, listed := range map[string]bool{"scripted-a": false, "scripted-b": false, "terminal": true} {
@@ -69,7 +69,7 @@ func TestScriptedRowsListedBeforeAreRemovedOnceTheirTranscriptsAreRead(t *testin
 	if _, err := r.Session("scripted-a"); err != nil {
 		t.Fatalf("a removed run's session row went too: %v", err)
 	}
-	d.catalogEnded.rechecked[surface.KindClaude] = time.Now().Add(-catalogEndedRecheck)
+	d.catalogEnded.due[surface.KindClaude] = time.Now()
 	d.discoverCatalog(context.Background())
 	if catalogHasRow(t, r, "scripted-a") {
 		t.Fatal("the restore brought a hidden run back")
