@@ -423,6 +423,12 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "turn_judgments", "promise_model", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "turn_judgments", "pushed_at_ms", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "turn_ends", "typed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if version < 18 {
 		if err := backfillIntentUUIDs(tx); err != nil {
 			return err

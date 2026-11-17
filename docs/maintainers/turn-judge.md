@@ -46,12 +46,13 @@ The facts are read when the turn ends, not when the answer arrives, because the 
 - `openAsks`, `askedOf`: the session's open asks, of any origin, and where each is routed: a session id, or `person`.
 - `childrenWorking`, `children`: sessions it started that are busy or whose task is running, by id.
 - `awaitedRelays`, `awaiting`: active one-time relays into the session from a live session, that is, replies it is waiting for, by the sending session's id.
+- `typed`: the person typed the prompt that opened the turn into the session itself. The prompt hook reports each prompt to the daemon, which records it on the turn's `turn_ends` row as typed unless it is a message the person sent through Agenthail (the daemon holds each of those for the hook to claim), an agent's message, a task notification or a command. Codex reports the prompt under its `turn_id` when the hook gives no `prompt_id`. A session without the prompt hook never has a typed turn.
 
 A turn with any of these will be woken again by that work, so it cannot leave a promise unkept. The judgment also keeps the turn's `end_turn` headline, if the agent gave one.
 
 ## The row
 
-Each session row in the session view, the snapshot and the catalog stream carries `turnState {state, reason, source}` for its last completed turn, and the row's label says it. The state comes from the first of these that applies:
+Each session row in the session view, the snapshot and the catalog stream carries `turnState {state, reason, source, turnId, pushed}` for its last completed turn, and the row's label says it. The state comes from the first of these that applies:
 
 1. An open ask to the person: `waiting_person` from `facts`.
 2. The judgment's facts, from `facts`: a worker awaiting its project's lead waits on `@lead`; any other awaited session, or a running child, is named by alias, else "a session", with "and N others" for more; running background tasks read "background work". All are `waiting_work`.
@@ -61,6 +62,20 @@ Each session row in the session view, the snapshot and the catalog stream carrie
 Otherwise the row has no `turnState` and keeps its usual label. The labels are "Done", "Needs you", "Said it would continue", and "Waiting on <reason>". Only the label changes: the row stays `idle`, and a judged "Needs you" adds no attention, Inbox card or count. An Inbox item for it is layer 4.
 
 A judgment that lands after the turn completes republishes the row, so a paired viewer shows the host's state. The viewer never judges a mirrored session itself.
+
+## The push
+
+A turn whose row reads "Needs you" from the judge pushes "<session> needs you: <headline>" to the person's devices once, whether the person, an agent or the session itself started it. It does not push when:
+
+- the person typed the turn's prompt into the session (`typed`), since they are at it;
+- a newer turn has started or completed by the time the judgment lands;
+- the session is delegated, or a worker whose lead the state names instead;
+- the state comes from an open ask, which was announced when it reached the person;
+- the judge reads any other state.
+
+Only the prompt hook marks a turn typed. A terminal Claude without `agenthail hooks install`, or any Codex thread, Agenthail's included, without `agenthail hooks install codex`, gets no mark, so a turn the person types there pushes too; `agenthail doctor` says so for missing or outdated hooks. Claude sessions Agenthail hosts run the hook themselves.
+
+The host claims the push on the judgment (`pushed_at_ms`) in one write that also requires the judged turn to still be the session's last, with none running, and the row's ask to be the one the state was read with. The project and its lead are not in that write, so the state is read again once claimed: the claim is confirmed and pushed only if the row still needs the person, and released otherwise. Until it is confirmed the claim reads as not pushed, so no row, and no paired viewer, sees a push that may not happen. So a turn judged again never pushes twice, a new turn, ask or lead that arrives while the state is read stops the push, and the row's `turnState` carries the judged `turnId` and `pushed`. A paired viewer pushes a mirrored turn only once its host's row says `pushed`, under the host's dedupe key `sha256(host, session, turn, "needs_you")`, so the relay delivers it to a phone once. The push and the turn's finished push share the collapse id `turn-<sha256(host, session, turn)>`, so a phone shows "needs you" in place of "finished". The event type is `turn.needs_you`.
 
 ## Load
 
@@ -75,6 +90,6 @@ Measured on a Linux build host against the endpoint: one call takes about 0.5 se
 ## Later layers
 
 1. Judgments are recorded. This exists.
-2. State and headline drive the row, the status dot and the push. The state on the row exists; the rest does not yet. They arrive asynchronously: the completion notification waits at most 2 seconds for the judgment and then goes out without it, and the row fills in when the judgment lands. `end_turn` becomes optional; an explicit headline still wins, but the state, the unkept promise and the needs answer always come from the judge. The lead's panel lists the project's ready backlog items, which the coordinator is already told of in its prompt context (see [the ledger](../ledger.md)).
-3. The unkept hold. A turn is held only when nothing is pending, no ask is open, and the promise score is high. The judge is called synchronously from the Stop hook only when the facts already say nothing is pending, which is a small minority of turns. The hook passes its `last_assistant_message`: the transcript is written only after a tool returns, so a check made during the turn cannot read the reply from it. A hosted Claude session's host already knows whether the turn wrote a reply from the SDK's assistant messages, and could report it next to the tasks. Codex holds through its Stop hook; a turn with no hook gets a follow-up message instead.
+2. State and headline drive the row, the status dot and the push. The state on the row and the needs-you push exist; the rest does not yet. They arrive asynchronously: the completion notification waits at most 2 seconds for the judgment and then goes out without it, and the row fills in when the judgment lands. `end_turn` is optional: a turn that ends without it is never held or prompted again. An explicit headline still wins, but the state, the unkept promise and the needs answer always come from the judge. The lead's panel lists the project's ready backlog items, which the coordinator is already told of in its prompt context (see [the ledger](../ledger.md)).
+3. The unkept hold. A turn is held only when nothing is pending, no ask is open, and the promise score is high. It needs a Stop hook again, which Agenthail no longer installs: the judge would be called synchronously from it only when the facts already say nothing is pending, which is a small minority of turns. The hook would pass its `last_assistant_message`: the transcript is written only after a tool returns, so a check made during the turn cannot read the reply from it. A hosted Claude session's host already knows whether the turn wrote a reply from the SDK's assistant messages, and could report it next to the tasks. Codex would hold through its Stop hook; a turn with no hook would get a follow-up message instead.
 4. The needs item: a judged question to the person raises an Inbox item with its own ask origin, added to every origin filter.

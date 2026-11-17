@@ -689,6 +689,7 @@ CREATE TABLE IF NOT EXISTS turn_ends (
 	headline TEXT NOT NULL DEFAULT '',
 	next_json TEXT NOT NULL DEFAULT 'null',
 	source TEXT NOT NULL DEFAULT '',
+	typed INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session_id, started_at_ms)
 );
 CREATE TABLE IF NOT EXISTS asks (
@@ -751,6 +752,7 @@ CREATE TABLE IF NOT EXISTS turn_judgments (
 	headline TEXT NOT NULL DEFAULT '',
 	facts_json TEXT NOT NULL DEFAULT '',
 	error TEXT NOT NULL DEFAULT '',
+	pushed_at_ms INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(session_id, turn_id)
 );
 CREATE INDEX IF NOT EXISTS turn_judgments_ended ON turn_judgments(ended_at_ms);

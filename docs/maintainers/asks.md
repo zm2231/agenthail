@@ -94,9 +94,9 @@ An agent refused an action that is the person's (`detail.rule: person_only`, `de
 - An approval is answered within 24 hours or expires (`state` `expired`); the agent is told it was not done.
 - An allowed body the daemon had not run when it stopped is never run later: at start it is recorded `not_run` and the agent is told to ask again.
 
-## The Stop reminder
+## A question asked only in the reply
 
-`agenthail hook stop` (Claude host, Codex, and terminal Claude through `agenthail hooks install`) holds a stop once when the session is a lead (a project coordinator or the spawner of a running session), the turn's `last_assistant_message` has a line outside fenced code that ends in `?`, and the session raised no ask since its turn opened. The reason tells it to raise the question as an ask. A session holding Agenthail's tools is also asked, in the same hold, to call `agenthail_end_turn` when it has not. Terminal Claude's settings hook carries `--terminal` and does nothing under the Claude host, which runs its own.
+Nothing holds a turn whose reply asks the person something no ask carries. The turn judge reads that reply as waiting on the person, and the turn pushes Needs you ([turn judge](turn-judge.md#the-push)).
 
 ## Seeing an ask
 

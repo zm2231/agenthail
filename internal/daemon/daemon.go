@@ -169,6 +169,8 @@ type Daemon struct {
 	limitResumeEnabled func() bool
 	// limitResumesRead, when set, runs each time usage-limit stops are read.
 	limitResumesRead func()
+	// turnPushRead, when set, runs between claiming a judged turn's push and reading its state again.
+	turnPushRead func()
 	// liveSources names the surface of each session the catalog holds a
 	// source for because its process is live.
 	liveSources map[string]surface.SurfaceKind
@@ -366,6 +368,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return fmt.Errorf("record the daemon's Claude config root, which every process needs to read the daemon's Claude conversations: %w", err)
 	}
 	d.logStarted()
+	d.retireStrayHooksAtStart(home)
 	d.configureExtensionPorts()
 	if recovered, err := d.Registry.RecoverInflight(time.Now().Add(-time.Minute)); err != nil {
 		d.log.Printf("warn: recover inflight queue: %s", err)

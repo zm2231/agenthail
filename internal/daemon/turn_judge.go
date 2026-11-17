@@ -132,6 +132,9 @@ func (d *Daemon) queueTurnJudgment(session *surface.Session, turnID, reply strin
 	if background != nil {
 		facts.BackgroundRunning, facts.BackgroundSource, facts.BackgroundTasks = background.Running, background.Source, len(background.Tasks)
 	}
+	if facts.Typed, err = d.Registry.TurnTyped(session.ID, turnID); err != nil {
+		d.log.Printf("turn judge: read who typed the prompt of %s: %s", d.resolveDisplay(session.ID), err)
+	}
 	judgment := registry.TurnJudgment{SessionID: session.ID, TurnID: turnID, EndedAt: time.Now().UTC(), Facts: facts, Ending: replyEnding(reply, turnJudgeSentences)}
 	if end, ok, err := d.Registry.CompletedTurnEnd(session.ID, turnID); err == nil && ok {
 		judgment.Headline = end.Headline
@@ -198,6 +201,7 @@ func (d *Daemon) recordTurnJudgment(judgment registry.TurnJudgment) {
 	}
 	d.requestCatalogDiscovery()
 	d.publishEvent("state.changed", judgment.SessionID, map[string]string{"source": "turn-judgment"})
+	d.pushJudgedTurn(judgment)
 }
 
 func (j *turnJudge) failed(d *Daemon, err error) {

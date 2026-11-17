@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"github.com/zm2231/agenthail/internal/agentcard"
@@ -18,22 +20,38 @@ import (
 
 const codexContextHookTimeout = 10
 
-type codexHookEvent struct{ event, listed, hook string }
+type codexHookEvent struct{ event, listed string }
 
 var codexContextEvents = []codexHookEvent{
-	{"SessionStart", "sessionStart", "session-context"},
-	{"UserPromptSubmit", "userPromptSubmit", "session-context"},
-	{"Stop", "stop", "stop"},
+	{"SessionStart", "sessionStart"},
+	{"UserPromptSubmit", "userPromptSubmit"},
 }
 
-func codexWantedHooks(executable, version string) map[string]string {
+func codexWantedHooks(executable string) map[string]string {
 	wanted := map[string]string{}
 	for _, e := range codexContextEvents {
-		if e.hook != "stop" || codexAtLeast(version, CodexStopHookVersion) {
-			wanted[e.event] = codexHookCommand(executable, e.hook)
-		}
+		wanted[e.event] = codexHookCommand(executable, "session-context")
 	}
 	return wanted
+}
+
+// codexHookEvents are the events an edit walks: those Agenthail writes and
+// every other hook-group list the hooks name, so an agenthail hook a later
+// agenthail no longer writes goes too. hooks.state, where Codex keeps trust,
+// is a table and must never be passed in.
+func codexHookEvents(named []string) []string {
+	events := []string{}
+	seen := map[string]bool{}
+	for _, e := range codexContextEvents {
+		events, seen[e.event] = append(events, e.event), true
+	}
+	slices.Sort(named)
+	for _, event := range named {
+		if !seen[event] {
+			events, seen[event] = append(events, event), true
+		}
+	}
+	return events
 }
 
 // AgenthailExecutable is the running agenthail binary, or "" when this
@@ -55,7 +73,6 @@ const (
 	CodexHooksOutdated  = "outdated"
 	CodexHooksUntrusted = "untrusted"
 	CodexHooksInstalled = "installed"
-	CodexHooksNoNudge   = "installed; the end-of-turn nudge needs Codex " + CodexStopHookVersion + " or later"
 )
 
 const (
@@ -76,18 +93,15 @@ type codexListedHook struct {
 	CurrentHash string `json:"currentHash"`
 }
 
-// ownsCodexContextHook reports whether a Codex hook command is one of the
-// hooks Agenthail writes, for any agenthail binary.
+// ownsCodexContextHook reports whether a Codex hook command runs a hook
+// Agenthail has written for Codex, for any agenthail binary.
 func ownsCodexContextHook(command string) bool {
-	command = strings.TrimPrefix(command, "exec ")
-	quoted, found := strings.CutSuffix(command, " hook session-context --surface codex")
-	if !found {
-		quoted, found = strings.CutSuffix(command, " hook stop --surface codex")
-	}
-	if !found || len(quoted) < 2 || quoted[0] != '\'' || quoted[len(quoted)-1] != '\'' {
+	command, found := strings.CutSuffix(strings.TrimPrefix(command, "exec "), " --surface codex")
+	end := strings.LastIndex(command, "' hook ")
+	if !found || end < 1 || command[0] != '\'' {
 		return false
 	}
-	path := strings.ReplaceAll(quoted[1:len(quoted)-1], `'\''`, "'")
+	path := strings.ReplaceAll(command[1:end], `'\''`, "'")
 	return filepath.IsAbs(path) && filepath.Base(path) == "agenthail"
 }
 
@@ -138,9 +152,7 @@ func listCodexHooks(ctx context.Context, home CodexHome, client *codexStdioClien
 // the session-context hooks in the hooks file the person already uses
 // (hooks.json when the Codex home has one, else config.toml, written by
 // Codex), trusted with the hash Codex reports for them, and Agenthail's
-// standing instructions in a marked block of the home's AGENTS.md. The Stop
-// hook that asks a turn to end goes in only for a Codex that continues a
-// blocked turn.
+// standing instructions in a marked block of the home's AGENTS.md.
 func InstallCodexContext(ctx context.Context, home CodexHome, executable string) (bool, error) {
 	client, err := openCodexConfig(ctx, home)
 	if err != nil {
@@ -151,7 +163,7 @@ func InstallCodexContext(ctx context.Context, home CodexHome, executable string)
 	if err != nil {
 		return false, err
 	}
-	edited, err := editCodexHooks(ctx, home, client, codexWantedHooks(executable, client.version))
+	edited, err := editCodexHooks(ctx, home, client, codexWantedHooks(executable), ownsCodexContextHook)
 	if err != nil {
 		return false, err
 	}
@@ -186,7 +198,7 @@ func UninstallCodexContext(ctx context.Context, home CodexHome) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	edited, err := editCodexHooks(ctx, home, client, nil)
+	edited, err := editCodexHooks(ctx, home, client, nil, ownsCodexContextHook)
 	if err != nil {
 		return false, err
 	}
@@ -201,11 +213,107 @@ func UninstallCodexContext(ctx context.Context, home CodexHome) (bool, error) {
 	return changed || untrusted, err
 }
 
-// CodexContextState is installed when every hook this Codex takes runs this
-// binary, Codex trusts them and AGENTS.md has the current block, and says so
-// when the Codex is too old for the Stop hook; untrusted when only Codex's
-// trust is missing; missing when none of it is there; outdated otherwise;
-// and empty when this user has no Codex.
+func strayCodexHook(command string) bool {
+	return ownsCodexContextHook(command) && !strings.HasSuffix(command, " hook session-context --surface codex")
+}
+
+// RetireCodexHooks removes only the agenthail hooks Agenthail no longer
+// writes for Codex, such as a Stop hook an earlier install wrote, and their
+// trust, leaving every other hook where it is so Codex still trusts it. It
+// edits each of hooks.json and config.toml only when that file holds such a
+// hook, and starts Codex only when one does.
+func RetireCodexHooks(ctx context.Context, home CodexHome) (bool, error) {
+	stray := map[string]bool{}
+	for _, name := range []string{"hooks.json", "config.toml"} {
+		data, err := os.ReadFile(filepath.Join(home.Codex, name))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		var file map[string]any
+		if name == "hooks.json" {
+			err = json.Unmarshal(data, &file)
+		} else {
+			err = toml.Unmarshal(data, &file)
+		}
+		if err != nil {
+			return false, fmt.Errorf("read %s: %w", name, err)
+		}
+		stray[name] = holdsCommand(file["hooks"], strayCodexHook)
+	}
+	if !stray["hooks.json"] && !stray["config.toml"] {
+		return false, nil
+	}
+	client, err := openCodexConfig(ctx, home)
+	if err != nil {
+		return false, err
+	}
+	defer client.Close()
+	owned, err := listCodexHooks(ctx, home, client)
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	if stray["hooks.json"] {
+		if changed, _, err = editCodexHooksJSON(home, nil, strayCodexHook); err != nil {
+			return false, err
+		}
+	}
+	if stray["config.toml"] {
+		edited, err := editCodexHooksTOML(ctx, client, nil, strayCodexHook)
+		if changed = changed || edited; err != nil {
+			return changed, err
+		}
+	}
+	if !changed {
+		return false, nil
+	}
+	_, err = writeCodexUserConfig(ctx, client, func(map[string]any) ([]map[string]any, error) {
+		var untrust []map[string]any
+		for _, hook := range owned {
+			if strayCodexHook(hook.Command) {
+				untrust = append(untrust, map[string]any{"keyPath": codexHookStateKey(hook.Key), "mergeStrategy": "replace", "value": nil})
+			}
+		}
+		return untrust, nil
+	})
+	return true, err
+}
+
+func holdsCommand(value any, match func(string) bool) bool {
+	switch value := value.(type) {
+	case map[string]any:
+		for key, item := range value {
+			if command, ok := item.(string); ok && key == "command" && match(command) {
+				return true
+			}
+			if holdsCommand(item, match) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range value {
+			if holdsCommand(item, match) {
+				return true
+			}
+		}
+	case []map[string]any:
+		for _, item := range value {
+			if holdsCommand(item, match) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// CodexContextState is installed when every hook Agenthail writes runs this
+// binary, no other agenthail hook is left, Codex trusts them and AGENTS.md
+// has the current block; untrusted when only Codex's trust is missing;
+// missing when none of it is there; outdated otherwise; and empty when this
+// user has no Codex.
 func CodexContextState(ctx context.Context, home CodexHome, executable string) (string, error) {
 	if _, err := os.Stat(home.Codex); os.IsNotExist(err) {
 		return "", nil
@@ -227,7 +335,7 @@ func CodexContextState(ctx context.Context, home CodexHome, executable string) (
 	if len(owned) == 0 && !hasBlock {
 		return CodexHooksMissing, nil
 	}
-	wanted := codexWantedHooks(executable, client.version)
+	wanted := codexWantedHooks(executable)
 	listed := map[string]string{}
 	for _, e := range codexContextEvents {
 		if command := wanted[e.event]; command != "" {
@@ -247,9 +355,6 @@ func CodexContextState(ctx context.Context, home CodexHome, executable string) (
 	if !trusted {
 		return CodexHooksUntrusted, nil
 	}
-	if len(listed) < len(codexContextEvents) {
-		return CodexHooksNoNudge, nil
-	}
 	return CodexHooksInstalled, nil
 }
 
@@ -263,7 +368,7 @@ func withCodexContextHook(groups []any, command string) []any {
 
 // withoutCodexContextHook drops Agenthail's handlers, and a group they leave
 // empty, and keeps every other hook where it is.
-func withoutCodexContextHook(groups []any) []any {
+func withoutCodexContextHook(groups []any, drop func(string) bool) []any {
 	kept := []any{}
 	for _, group := range groups {
 		entry, _ := group.(map[string]any)
@@ -271,7 +376,7 @@ func withoutCodexContextHook(groups []any) []any {
 		var others []any
 		for _, handler := range handlers {
 			hook, _ := handler.(map[string]any)
-			if text, ok := hook["command"].(string); ok && ownsCodexContextHook(text) {
+			if text, ok := hook["command"].(string); ok && drop(text) {
 				continue
 			}
 			others = append(others, handler)
@@ -289,41 +394,61 @@ func withoutCodexContextHook(groups []any) []any {
 // person uses running the command commands gives that event, and in no event
 // commands leaves out: hooks.json edited by path so every other byte stays,
 // config.toml through Codex, which keeps the rest of it as written.
-func editCodexHooks(ctx context.Context, home CodexHome, client *codexStdioClient, commands map[string]string) (bool, error) {
-	path := filepath.Join(home.Codex, "hooks.json")
-	if data, err := os.ReadFile(path); err == nil {
-		updated, err := editCodexHooksFile(data, commands)
-		if err != nil {
-			return false, fmt.Errorf("edit %s: %w", path, err)
-		}
-		if string(updated) == string(data) {
-			return false, nil
-		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return false, err
-		}
-		return true, os.WriteFile(path, updated, info.Mode().Perm())
-	} else if !os.IsNotExist(err) {
-		return false, err
+func editCodexHooks(ctx context.Context, home CodexHome, client *codexStdioClient, commands map[string]string, drop func(string) bool) (bool, error) {
+	changed, found, err := editCodexHooksJSON(home, commands, drop)
+	if found || err != nil {
+		return changed, err
 	}
+	return editCodexHooksTOML(ctx, client, commands, drop)
+}
+
+func editCodexHooksJSON(home CodexHome, commands map[string]string, drop func(string) bool) (changed, found bool, err error) {
+	path := filepath.Join(home.Codex, "hooks.json")
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, true, err
+	}
+	updated, err := editCodexHooksFile(data, commands, drop)
+	if err != nil {
+		return false, true, fmt.Errorf("edit %s: %w", path, err)
+	}
+	if string(updated) == string(data) {
+		return false, true, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, true, err
+	}
+	return true, true, os.WriteFile(path, updated, info.Mode().Perm())
+}
+
+func editCodexHooksTOML(ctx context.Context, client *codexStdioClient, commands map[string]string, drop func(string) bool) (bool, error) {
 	return writeCodexUserConfig(ctx, client, func(user map[string]any) ([]map[string]any, error) {
 		hooks, _ := user["hooks"].(map[string]any)
 		var edits []map[string]any
-		for _, e := range codexContextEvents {
-			groups, _ := hooks[e.event].([]any)
-			next := withoutCodexContextHook(cloneJSON(groups))
-			if command := commands[e.event]; command != "" {
+		var named []string
+		for event, groups := range hooks {
+			if _, ok := groups.([]any); ok {
+				named = append(named, event)
+			}
+		}
+		for _, event := range codexHookEvents(named) {
+			groups, _ := hooks[event].([]any)
+			next := withoutCodexContextHook(cloneJSON(groups), drop)
+			if command := commands[event]; command != "" {
 				next = withCodexContextHook(next, command)
 			}
-			if equalJSON(groups, next) {
+			if len(groups) == 0 && len(next) == 0 || equalJSON(groups, next) {
 				continue
 			}
 			var value any = next
 			if len(next) == 0 {
 				value = nil
 			}
-			edits = append(edits, map[string]any{"keyPath": "hooks." + e.event, "mergeStrategy": "replace", "value": value})
+			edits = append(edits, map[string]any{"keyPath": "hooks." + event, "mergeStrategy": "replace", "value": value})
 		}
 		return edits, nil
 	})
@@ -368,10 +493,16 @@ func readCodexUserConfig(ctx context.Context, client *codexStdioClient) (user ma
 	return user, version, nil
 }
 
-func editCodexHooksFile(data []byte, commands map[string]string) ([]byte, error) {
-	for _, e := range codexContextEvents {
-		key := "hooks." + e.event
-		command := commands[e.event]
+func editCodexHooksFile(data []byte, commands map[string]string, drop func(string) bool) ([]byte, error) {
+	var named []string
+	for event, groups := range gjson.GetBytes(data, "hooks").Map() {
+		if groups.IsArray() {
+			named = append(named, event)
+		}
+	}
+	for _, event := range codexHookEvents(named) {
+		key := "hooks." + event
+		command := commands[event]
 		before := gjson.GetBytes(data, key)
 		updated := data
 		var err error
@@ -380,7 +511,7 @@ func editCodexHooksFile(data []byte, commands map[string]string) ([]byte, error)
 			handlers := groups[gi].Get("hooks").Array()
 			var ours []int
 			for hi, handler := range handlers {
-				if ownsCodexContextHook(handler.Get("command").String()) {
+				if drop(handler.Get("command").String()) {
 					ours = append(ours, hi)
 				}
 			}

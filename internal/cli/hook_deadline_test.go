@@ -17,7 +17,6 @@ func TestEveryHookEndsAtItsLimitWhileTheRegistryIsBusy(t *testing.T) {
 	}{
 		"session start": {[]string{"hook", "session-context", "--claude-pid", "4242"}, `{"session_id":"planner-conversation","hook_event_name":"SessionStart","source":"startup"}`},
 		"prompt submit": {[]string{"hook", "session-context", "--claude-pid", "4242"}, `{"session_id":"planner-conversation","hook_event_name":"UserPromptSubmit"}`},
-		"stop":          {[]string{"hook", "stop", "--surface", "claude"}, `{"session_id":"planner-conversation","hook_event_name":"Stop","turn_id":"turn-1"}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			app, _, _ := cardFixture(t)

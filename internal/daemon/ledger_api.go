@@ -48,18 +48,21 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId, promptId and prompt are required.")
 		return
 	}
-	if _, peer := surface.ParsePeerEnvelope(req.Prompt); peer || !surfaces.IsTypedHumanPrompt(req.Prompt) || d.notPerson.has(req.PromptID, time.Now()) {
-		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{})
-		return
-	}
 	session, err := d.Registry.Session(req.SessionID)
 	if err != nil {
 		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{})
 		return
 	}
 	now := time.Now()
+	if _, peer := surface.ParsePeerEnvelope(req.Prompt); peer || !surfaces.IsTypedHumanPrompt(req.Prompt) || d.notPerson.has(req.PromptID, now) {
+		d.markTurnTyped(session.ID, false)
+		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{})
+		return
+	}
 	ref, surfaceName, words := ledger.PromptRef(req.PromptID), "terminal", req.Prompt
-	if uuid, delivered, ok := d.delivered.claim(session.ID, req.PromptID, req.MessageUUID, req.Prompt, now); ok {
+	uuid, delivered, claimed := d.delivered.claim(session.ID, req.PromptID, req.MessageUUID, req.Prompt, now)
+	d.markTurnTyped(session.ID, !claimed)
+	if claimed {
 		ref, surfaceName, words = ledger.DeliveryRef(uuid), string(session.Surface), delivered
 		// A copy of the hook that could not name the delivery recorded the
 		// prompt under its own id first.
@@ -78,6 +81,13 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{Captured: true, ProjectKey: record.key, Ref: ref})
 	default:
 		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{Captured: true, Attach: true, ProjectKey: record.key, Ref: ref, Provisional: d.provisionalCount(record.key, session.ID)})
+	}
+}
+
+// A typed turn is one the person is at, so the turn judge never pushes it to their devices.
+func (d *Daemon) markTurnTyped(sessionID string, typed bool) {
+	if err := d.Registry.MarkTurnTyped(sessionID, typed); err != nil {
+		d.log.Printf("record who typed the prompt of %s: %s", d.resolveDisplay(sessionID), err)
 	}
 }
 

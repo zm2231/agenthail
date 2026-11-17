@@ -12,6 +12,8 @@ func (d *Daemon) personCapture(capture delivery.PersonCaptureContext) {
 		return
 	}
 	now := time.Now()
+	// Held whether or not a ledger takes the words: the prompt hook claims it to tell a delivered prompt from one typed into the session.
+	d.delivered.add(capture.Target.ID, capture.IntentUUID, capture.Message, now)
 	record, err := d.recordPersonWords(capture.Target, ledger.Utterance{
 		Ref:        ledger.DeliveryRef(capture.IntentUUID),
 		Surface:    string(capture.Target.Surface),
@@ -21,10 +23,5 @@ func (d *Daemon) personCapture(capture delivery.PersonCaptureContext) {
 	})
 	if err != nil {
 		d.log.Printf("ledger capture: record delivery %s to %s in project %s: %s", capture.IntentUUID, capture.Target.ID, record.key, err)
-		return
 	}
-	if !record.captured {
-		return
-	}
-	d.delivered.add(capture.Target.ID, capture.IntentUUID, capture.Message, now)
 }

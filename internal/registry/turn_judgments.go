@@ -16,6 +16,8 @@ type TurnFacts struct {
 	OpenAsks          int    `json:"openAsks"`
 	ChildrenWorking   int    `json:"childrenWorking"`
 	AwaitedRelays     int    `json:"awaitedRelays"`
+	// Typed means the person typed the prompt that opened the turn into the session itself, so they are at it.
+	Typed bool `json:"typed,omitempty"`
 	// AskedOf holds where each open ask is routed: a session id or AskToPerson.
 	AskedOf  []string `json:"askedOf,omitempty"`
 	Awaiting []string `json:"awaiting,omitempty"`
@@ -43,6 +45,7 @@ type TurnJudgment struct {
 	Headline     string             `json:"headline,omitempty"`
 	Facts        TurnFacts          `json:"facts"`
 	Error        string             `json:"error,omitempty"`
+	PushedAt     time.Time          `json:"pushedAt,omitzero"`
 }
 
 func (r *Registry) TurnEndFacts(sessionID string) (TurnFacts, error) {
@@ -88,19 +91,45 @@ func (r *Registry) RecordTurnJudgment(j TurnJudgment) error {
 	return tx.Commit()
 }
 
-const turnJudgmentColumns = `j.session_id, j.turn_id, j.ended_at_ms, j.judged_at_ms, j.model, j.promise_model, j.ms, j.promise, j.needs, j.needs_tail, j.state, j.state_json, j.ending, j.headline, j.facts_json, j.error`
+const turnJudgmentColumns = `j.session_id, j.turn_id, j.ended_at_ms, j.judged_at_ms, j.model, j.promise_model, j.ms, j.promise, j.needs, j.needs_tail, j.state, j.state_json, j.ending, j.headline, j.facts_json, j.error, j.pushed_at_ms`
 
 func scanTurnJudgment(row rowScanner) (TurnJudgment, error) {
 	var j TurnJudgment
-	var ended, judged int64
+	var ended, judged, pushed int64
 	var stateP, facts string
-	if err := row.Scan(&j.SessionID, &j.TurnID, &ended, &judged, &j.Model, &j.PromiseModel, &j.Ms, &j.Promise, &j.Needs, &j.NeedsTail, &j.State, &stateP, &j.Ending, &j.Headline, &facts, &j.Error); err != nil {
+	if err := row.Scan(&j.SessionID, &j.TurnID, &ended, &judged, &j.Model, &j.PromiseModel, &j.Ms, &j.Promise, &j.Needs, &j.NeedsTail, &j.State, &stateP, &j.Ending, &j.Headline, &facts, &j.Error, &pushed); err != nil {
 		return TurnJudgment{}, err
 	}
-	j.EndedAt, j.JudgedAt = time.UnixMilli(ended).UTC(), unixMilliOrZero(judged)
+	j.EndedAt, j.JudgedAt, j.PushedAt = time.UnixMilli(ended).UTC(), unixMilliOrZero(judged), unixMilliOrZero(max(pushed, 0))
 	_ = json.Unmarshal([]byte(stateP), &j.StateP)
 	_ = json.Unmarshal([]byte(facts), &j.Facts)
 	return j, nil
+}
+
+// ClaimTurnPush claims the push of a turn once, and only while it is still the session's last turn with none running after it and the row still shows the ask askID ("" for none) that the state pushed was read with. The claim is held as the negative of its time, which reads as not pushed, until ConfirmTurnPush or ReleaseTurnPush settles it.
+func (r *Registry) ClaimTurnPush(sessionID, turnID, askID string, at time.Time) (bool, error) {
+	result, err := r.db.Exec(`UPDATE turn_judgments SET pushed_at_ms=? WHERE session_id=? AND turn_id=? AND pushed_at_ms=0
+		AND EXISTS (SELECT 1 FROM session_runtime WHERE session_id=? AND completed_turn_id=? AND active_turn_id='')
+		AND COALESCE((SELECT (`+rowAsk+`) FROM (SELECT ? AS session_id) s),'')=?`, -at.UnixMilli(), sessionID, turnID, sessionID, turnID, sessionID, askID)
+	if err != nil {
+		return false, err
+	}
+	claimed, err := result.RowsAffected()
+	return claimed == 1, err
+}
+
+func (r *Registry) ConfirmTurnPush(sessionID, turnID string, claimedAt time.Time) (bool, error) {
+	result, err := r.db.Exec(`UPDATE turn_judgments SET pushed_at_ms=? WHERE session_id=? AND turn_id=? AND pushed_at_ms=?`, claimedAt.UnixMilli(), sessionID, turnID, -claimedAt.UnixMilli())
+	if err != nil {
+		return false, err
+	}
+	confirmed, err := result.RowsAffected()
+	return confirmed == 1, err
+}
+
+func (r *Registry) ReleaseTurnPush(sessionID, turnID string, claimedAt time.Time) error {
+	_, err := r.db.Exec(`UPDATE turn_judgments SET pushed_at_ms=0 WHERE session_id=? AND turn_id=? AND pushed_at_ms=?`, sessionID, turnID, -claimedAt.UnixMilli())
+	return err
 }
 
 func (r *Registry) TurnJudgments(sessionID string, limit int) ([]TurnJudgment, error) {

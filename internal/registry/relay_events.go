@@ -150,9 +150,6 @@ func (r *Registry) captureRelayCompletionsByKey(key, previous string, batch surf
 			completedAt = event.CompletedAt.UnixMilli()
 		}
 		message := event.Text
-		if event.EndTurnNudge {
-			message = ""
-		}
 		if _, err := tx.Exec(`INSERT INTO relay_events(source_key,completion_id,input_id,message,relay_hops,completed_at_ms) VALUES(?,?,?,?,?,?) ON CONFLICT(source_key,completion_id) DO NOTHING`, key, event.ID, event.InputID, message, hops, completedAt); err != nil {
 			return err
 		}

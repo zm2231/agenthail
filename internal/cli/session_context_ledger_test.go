@@ -108,3 +108,11 @@ func TestTerminalPromptAddsNoLedgerContextWhenOnlyCaptured(t *testing.T) {
 		t.Fatalf("a session whose words are only captured was asked to attach: %v", output)
 	}
 }
+
+func TestAPromptWithoutAPromptIDIsReportedUnderItsTurnID(t *testing.T) {
+	app, calls := ledgerHookFixture(t, false, false)
+	app.sessionContext(strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"ship it","turn_id":"turn-7"}`), surface.KindClaude, 4242, time.Now())
+	if got := calls(); len(got) != 1 || got[0] != (captureCall{SessionID: "s1", PromptID: "turn-7", Prompt: "ship it"}) {
+		t.Fatalf("a prompt whose hook names only its turn was not reported: %+v", got)
+	}
+}

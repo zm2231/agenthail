@@ -135,12 +135,6 @@ func (r *Registry) SessionAsks(sessionID string) ([]Ask, error) {
 	return queryAsks(context.Background(), r.read, `WHERE session_id=? ORDER BY created_at_ms, id`, sessionID)
 }
 
-func (r *Registry) AskRaisedSince(sessionID string, since time.Time) (bool, error) {
-	var raised bool
-	err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM asks WHERE session_id=? AND origin='agent' AND created_at_ms>=?)`, sessionID, since.UnixMilli()).Scan(&raised)
-	return raised, err
-}
-
 // ClaimAsk answers an open ask at most once; false means it was already answered or withdrawn.
 func (r *Registry) ClaimAsk(id string, answer AskAnswer, by, via string, at time.Time) (bool, error) {
 	encoded, err := json.Marshal(answer)
