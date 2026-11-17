@@ -67,6 +67,30 @@ func (e *CatalogQueueProjectionConflict) Error() string {
 	return fmt.Sprintf("catalog queue projection for %s is stale; current queue count is %d", e.SessionID, e.QueueCount)
 }
 
+// CatalogHostedRuntimeConflict reports that a caller built a projection that
+// calls a Claude process the session row keeps on the host runtime a
+// terminal one; the projection is rebuilt with RuntimeKind.
+type CatalogHostedRuntimeConflict struct {
+	SessionID   string
+	RuntimeKind surface.RuntimeKind
+}
+
+func (e *CatalogHostedRuntimeConflict) Error() string {
+	return fmt.Sprintf("catalog projection for %s names a runtime the session row keeps as %s", e.SessionID, e.RuntimeKind)
+}
+
+func validateHostedRuntimeTx(tx catalogQuerier, s surface.Session) error {
+	var kept surface.RuntimeKind
+	err := tx.QueryRow(`SELECT sessions.runtime_kind FROM sessions, (SELECT ? AS runtime_kind, ? AS pid, ? AS pid_identity) AS excluded WHERE sessions.id=? AND `+sessionKeepsHostedSQL, s.RuntimeKind, s.PID, s.PIDIdentity, s.ID).Scan(&kept)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return &CatalogHostedRuntimeConflict{SessionID: s.ID, RuntimeKind: kept}
+}
+
 func queueCountInProjection(raw []byte) (int, bool) {
 	var projection struct {
 		QueueCount *int `json:"queueCount"`
@@ -208,6 +232,9 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 		return CatalogEvent{}, false, SessionOwnedError{SessionID: state.Session.ID, HostID: owner}
 	}
 	if err := validateQueueProjectionTx(tx, state.Session.ID, []byte(state.ProjectionFingerprint), event.Payload); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if err := validateHostedRuntimeTx(tx, state.Session); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	prior, err := readCatalogSessionPrior(tx, state.Session.ID)

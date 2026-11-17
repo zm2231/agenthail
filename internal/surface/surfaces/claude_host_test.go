@@ -385,6 +385,32 @@ func TestAHostSessionIsOpenWhileTheHostListsIt(t *testing.T) {
 	})
 }
 
+func TestAHostListingCachedBeforeAnOpenStillListsTheOpenedProcessAsHosted(t *testing.T) {
+	c, fixture := hostedClaude(t)
+	client := fixture.Start(t)
+	if hosted := c.host.runs(context.Background(), os.Getpid(), "none", time.Time{}); hosted {
+		t.Fatal("the test process is listed as hosted")
+	}
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	c.host.mu.Lock()
+	c.host.ttl, c.host.listed = time.Hour, time.Now()
+	c.host.mu.Unlock()
+	sessions, err := c.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range sessions {
+		if session.ID == id {
+			if session.RuntimeKind != surface.RuntimeClaudeHost {
+				t.Fatalf("runtime=%s, want the process the host opened listed as hosted", session.RuntimeKind)
+			}
+			return
+		}
+	}
+	t.Fatalf("sessions=%+v, want the opened conversation listed", sessions)
+}
+
 func TestWithoutAHostOnlyARecordedProcessThatStillRunsCountsAsHosted(t *testing.T) {
 	home := t.TempDir()
 	c := inDaemon(NewClaude(nil, home))
@@ -408,7 +434,7 @@ func TestWithoutAHostOnlyARecordedProcessThatStillRunsCountsAsHosted(t *testing.
 	}
 	for conversation, want := range map[string]bool{"running": true, "reused": false, "exited": false, "untimed": false} {
 		c.host.forget()
-		if got := c.host.runs(context.Background(), live, conversation) || c.host.runs(context.Background(), 999999, conversation); got != want {
+		if got := c.host.runs(context.Background(), live, conversation, time.Time{}) || c.host.runs(context.Background(), 999999, conversation, time.Time{}); got != want {
 			t.Fatalf("%s hosted=%v, want %v", conversation, got, want)
 		}
 	}

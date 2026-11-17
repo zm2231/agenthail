@@ -61,7 +61,7 @@ func (d *Daemon) publishRoute(reached surface.Session) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	d.publishLive(ctx, reached.ID, func(session *surface.Session) {
-		session.Bridge, session.Transport, session.PID = reached.Bridge, reached.Transport, reached.PID
+		session.Bridge, session.Transport, session.PID, session.PIDIdentity = reached.Bridge, reached.Transport, reached.PID, reached.PIDIdentity
 	})
 }
 

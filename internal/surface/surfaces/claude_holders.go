@@ -152,7 +152,7 @@ func refuseSharedMove(conversation string, holders []map[string]any) error {
 func shareConversation(processes []claudeProcess) claudeProcess {
 	sort.SliceStable(processes, func(i, j int) bool { return processes[i].startedAt < processes[j].startedAt })
 	shared := processes[0]
-	shared.session.PID, shared.session.Bridge, shared.session.Transport = 0, "", ""
+	shared.session.PID, shared.session.PIDIdentity, shared.session.Bridge, shared.session.Transport = 0, "", "", ""
 	shared.holders = processes
 	records := make([]map[string]any, 0, len(processes))
 	for _, process := range processes {

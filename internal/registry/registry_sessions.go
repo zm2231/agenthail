@@ -69,7 +69,7 @@ func registerSessionRowTx(tx *sql.Tx, s surface.Session) error {
 			pids = append(pids, holder.PID)
 		}
 		for _, pid := range pids {
-			if _, err := tx.Exec(`UPDATE sessions SET pid=0,bridge='',updated_at=datetime('now') WHERE surface=? AND pid=? AND id<>?`, string(surface.KindClaude), pid, s.ID); err != nil {
+			if _, err := tx.Exec(`UPDATE sessions SET pid=0,pid_identity='',bridge='',updated_at=datetime('now') WHERE surface=? AND pid=? AND id<>?`, string(surface.KindClaude), pid, s.ID); err != nil {
 				return err
 			}
 		}
@@ -82,7 +82,7 @@ func markRestoredEndedTx(tx *sql.Tx, ended, read surface.Session) error {
 	if !ended.LastActive.IsZero() {
 		lastActive = ended.LastActive.UnixMilli()
 	}
-	result, err := tx.Exec(`UPDATE sessions SET status=?,ended=?,pid=0,bridge='',last_active_ms=?,updated_at=datetime('now')
+	result, err := tx.Exec(`UPDATE sessions SET status=?,ended=?,pid=0,pid_identity='',bridge='',last_active_ms=?,updated_at=datetime('now')
 		WHERE id=? AND runtime_kind=? AND transport=? AND pid=? AND bridge=? AND status=?`,
 		string(ended.Status), b2i(sessionEnded(ended)), lastActive,
 		read.ID, string(read.RuntimeKind), read.Transport, read.PID, read.Bridge, string(read.Status))

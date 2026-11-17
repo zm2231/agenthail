@@ -743,6 +743,11 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 			}
 			return true
 		}
+		var hosted *registry.CatalogHostedRuntimeConflict
+		if errors.As(publishErr, &hosted) {
+			session.RuntimeKind = hosted.RuntimeKind
+			continue
+		}
 		var conflict *registry.CatalogQueueProjectionConflict
 		if !errors.As(publishErr, &conflict) {
 			d.log.Printf("catalog session %s: %s", d.resolveDisplay(session.ID), publishErr)

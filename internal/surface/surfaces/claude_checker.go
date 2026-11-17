@@ -22,6 +22,7 @@ func (c *Claude) StartChecker(ctx context.Context, start surface.CheckerStart) (
 		_ = c.host.client.Close(ctx, start.Run)
 		return nil, fmt.Errorf("the Claude host opened %s without the checker sandbox", start.Run)
 	}
-	return &surface.Session{ID: start.Run, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: opened.PID,
+	identity, _ := processIdentity(opened.PID)
+	return &surface.Session{ID: start.Run, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: opened.PID, PIDIdentity: identity,
 		Name: "narrowing checker", Cwd: start.Cwd, Status: surface.StatusBusy, Source: "agenthail", ConfiguredModel: opened.Model, LastActive: time.Now()}, nil
 }

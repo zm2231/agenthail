@@ -7,7 +7,7 @@ import (
 )
 
 func sessionColumnsSQL(status string) string {
-	return `s.id,s.surface,s.name,s.cwd,s.pid,` + status + `,s.ended,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),COALESCE(cs.background_tasks,X''),COALESCE(cs.usage_limit,X''),COALESCE(cs.turn_stop,X''),COALESCE(cs.settings,X''),` + sessionSubagentSelect
+	return `s.id,s.surface,s.name,s.cwd,s.pid,s.pid_identity,` + status + `,s.ended,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),COALESCE(cs.background_tasks,X''),COALESCE(cs.usage_limit,X''),COALESCE(cs.turn_stop,X''),COALESCE(cs.settings,X''),` + sessionSubagentSelect
 }
 
 type sessionScan struct {
@@ -21,7 +21,7 @@ type sessionScan struct {
 
 func (c *sessionScan) targets() []any {
 	s := &c.session
-	return append([]any{&s.ID, &c.kind, &s.Name, &s.Cwd, &s.PID, &c.status, &s.Ended, &s.Transcript, &c.hasLocal, &s.Source, &s.Transport, &s.RuntimeKind, &s.ConfiguredModel, &s.Bridge, &s.ForkedFrom, &c.lastActiveMS, &c.launcher, &c.location, &c.focusable, &c.waitingOn, &c.background, &c.usageLimit, &c.turnStop, &c.settings}, c.subagent.targets()...)
+	return append([]any{&s.ID, &c.kind, &s.Name, &s.Cwd, &s.PID, &s.PIDIdentity, &c.status, &s.Ended, &s.Transcript, &c.hasLocal, &s.Source, &s.Transport, &s.RuntimeKind, &s.ConfiguredModel, &s.Bridge, &s.ForkedFrom, &c.lastActiveMS, &c.launcher, &c.location, &c.focusable, &c.waitingOn, &c.background, &c.usageLimit, &c.turnStop, &c.settings}, c.subagent.targets()...)
 }
 
 func (c *sessionScan) result() (surface.Session, error) {

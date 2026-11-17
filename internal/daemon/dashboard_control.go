@@ -50,6 +50,6 @@ func pinHolder(ctx context.Context, adapter surface.Surface, session *surface.Se
 	if err != nil || pinned.ID != session.ID || pinned.PID != pid || startedAt != 0 && pinned.StartedAt.UnixMilli() != startedAt {
 		return fmt.Errorf("Claude process %d does not hold conversation %s", pid, session.ID)
 	}
-	session.PID, session.HolderPID, session.HolderStart, session.Transport, session.Bridge = pinned.PID, pinned.HolderPID, pinned.HolderStart, pinned.Transport, pinned.Bridge
+	session.PID, session.PIDIdentity, session.HolderPID, session.HolderStart, session.Transport, session.Bridge = pinned.PID, pinned.PIDIdentity, pinned.HolderPID, pinned.HolderStart, pinned.Transport, pinned.Bridge
 	return nil
 }

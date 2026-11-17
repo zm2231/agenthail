@@ -30,6 +30,7 @@ type claudeHost struct {
 	client     claudehost.Client
 	state      string
 	mu         sync.Mutex
+	ttl        time.Duration
 	listed     time.Time
 	sessions   map[string]int
 	open       map[string]claudehost.Session
@@ -45,15 +46,29 @@ func claudeHosted(sess *surface.Session) bool {
 }
 
 func newClaudeHost(home string) *claudeHost {
-	return &claudeHost{client: claudehost.NewClient(home), state: filepath.Join(claudehost.StateDir(home), "state.json")}
+	return &claudeHost{client: claudehost.NewClient(home), ttl: claudeHostListTTL, state: filepath.Join(claudehost.StateDir(home), "state.json")}
 }
 
 // runs reports whether a host started this Claude process for this
 // conversation. That includes a process an earlier host started, which holds
 // its session until it exits, so a person's turn to it waits rather than
-// taking the native socket.
-func (h *claudeHost) runs(ctx context.Context, pid int, conversation string) bool {
-	return pid > 0 && conversation != "" && h.listing(ctx)[conversation] == pid
+// taking the native socket. A host knows a process's pid from the moment it
+// spawns it, before Claude writes the session record read at readAt, so a
+// listing older than that record is read again before the process is called
+// unhosted.
+func (h *claudeHost) runs(ctx context.Context, pid int, conversation string, readAt time.Time) bool {
+	if pid <= 0 || conversation == "" {
+		return false
+	}
+	if h.listing(ctx)[conversation] == pid {
+		return true
+	}
+	h.mu.Lock()
+	if h.listed.Before(readAt) {
+		h.listed = time.Time{}
+	}
+	h.mu.Unlock()
+	return h.listing(ctx)[conversation] == pid
 }
 
 // forget drops the cached listing, so the next read asks the host.
@@ -80,7 +95,7 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if time.Since(h.listed) > claudeHostListTTL {
+	if time.Since(h.listed) > h.ttl {
 		listCtx, cancel := context.WithTimeout(ctx, claudeHostListTimeout)
 		started := time.Now()
 		listing, err := h.client.List(listCtx)

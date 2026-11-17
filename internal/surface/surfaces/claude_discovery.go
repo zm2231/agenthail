@@ -116,7 +116,7 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 	bridge := c.recordBridge(m)
 	socket := c.peerSocket(ctx, m)
 	pid, _ := m["pid"].(float64)
-	hosted := c.host.runs(ctx, int(pid), conversation)
+	hosted := c.host.runs(ctx, int(pid), conversation, record.readAt)
 	if conversation == "" || (bridge == "" && socket == "" && !hosted) {
 		return claudeProcess{}, false
 	}
@@ -130,6 +130,9 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 		Entrypoint:  str(m, "entrypoint"),
 	}
 	sess.PID = int(pid)
+	if sess.PID > 0 {
+		sess.PIDIdentity, _ = processIdentity(sess.PID)
+	}
 	if socket != "" {
 		sess.Transport = "uds"
 	}

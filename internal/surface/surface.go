@@ -244,30 +244,34 @@ type Session struct {
 	PID     int           `json:"pid"`
 	Status  SessionStatus `json:"status"`
 	// Ended means the runtime no longer holds the session. A send resumes it.
-	Ended                 bool              `json:"ended,omitempty"`
-	WaitingOn             *Waiting          `json:"waitingOn,omitempty"`
-	BackgroundTasks       *BackgroundTasks  `json:"backgroundTasks,omitempty"`
-	UsageLimit            *UsageLimit       `json:"usageLimit,omitempty"`
-	TurnStop              *TurnStop         `json:"turnStop,omitempty"`
-	Settings              *ObservedSettings `json:"settings,omitempty"`
-	Activity              *Activity         `json:"activity,omitempty"`
-	Plan                  *Plan             `json:"plan,omitempty"`
-	Transcript            string            `json:"transcript"`
-	HasLocal              bool              `json:"hasLocal"`
-	Source                string            `json:"source,omitempty"`
-	Transport             string            `json:"transport,omitempty"`
-	RuntimeKind           RuntimeKind       `json:"runtimeKind,omitempty"`
-	ConfiguredModel       string            `json:"configuredModel,omitempty"`
-	Bridge                string            `json:"bridge,omitempty"`
-	ForkedFrom            string            `json:"forkedFrom,omitempty"`
-	Entrypoint            string            `json:"entrypoint,omitempty"`
-	LastActive            time.Time         `json:"lastActive"`
-	StartedAt             time.Time         `json:"startedAt,omitzero"`
-	Runtime               *Runtime          `json:"runtime,omitempty"`
-	Subagent              *Subagent         `json:"subagent,omitempty"`
-	Subagents             *SubagentRollup   `json:"subagents,omitempty"`
-	Holders               []Holder          `json:"holders,omitempty"`
-	HolderPID             int               `json:"-"`
+	Ended           bool              `json:"ended,omitempty"`
+	WaitingOn       *Waiting          `json:"waitingOn,omitempty"`
+	BackgroundTasks *BackgroundTasks  `json:"backgroundTasks,omitempty"`
+	UsageLimit      *UsageLimit       `json:"usageLimit,omitempty"`
+	TurnStop        *TurnStop         `json:"turnStop,omitempty"`
+	Settings        *ObservedSettings `json:"settings,omitempty"`
+	Activity        *Activity         `json:"activity,omitempty"`
+	Plan            *Plan             `json:"plan,omitempty"`
+	Transcript      string            `json:"transcript"`
+	HasLocal        bool              `json:"hasLocal"`
+	Source          string            `json:"source,omitempty"`
+	Transport       string            `json:"transport,omitempty"`
+	RuntimeKind     RuntimeKind       `json:"runtimeKind,omitempty"`
+	ConfiguredModel string            `json:"configuredModel,omitempty"`
+	Bridge          string            `json:"bridge,omitempty"`
+	ForkedFrom      string            `json:"forkedFrom,omitempty"`
+	Entrypoint      string            `json:"entrypoint,omitempty"`
+	LastActive      time.Time         `json:"lastActive"`
+	StartedAt       time.Time         `json:"startedAt,omitzero"`
+	Runtime         *Runtime          `json:"runtime,omitempty"`
+	Subagent        *Subagent         `json:"subagent,omitempty"`
+	Subagents       *SubagentRollup   `json:"subagents,omitempty"`
+	Holders         []Holder          `json:"holders,omitempty"`
+	HolderPID       int               `json:"-"`
+	// PIDIdentity names the process behind PID by its start, so a later
+	// process given the same pid is told apart from it. Empty when it could
+	// not be read.
+	PIDIdentity           string            `json:"-"`
 	HolderStart           string            `json:"-"`
 	StreamCursor          uint64            `json:"-"`
 	StreamCursorSet       bool              `json:"-"`
