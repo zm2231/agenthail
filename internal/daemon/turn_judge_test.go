@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -16,34 +18,51 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+type judgeCall struct {
+	state     map[string]string
+	questions []string
+}
+
 type judgeStub struct {
-	mu     sync.Mutex
-	down   bool
-	states []judgeState
+	mu         sync.Mutex
+	down       bool
+	secondDown bool
+	calls      []judgeCall
 }
 
 func (s *judgeStub) serve(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		State judgeState `json:"state"`
+		State     map[string]string          `json:"state"`
+		Questions map[string]json.RawMessage `json:"questions"`
 	}
 	data, _ := io.ReadAll(r.Body)
 	_ = json.Unmarshal(data, &body)
+	call := judgeCall{state: body.State}
+	for name := range body.Questions {
+		call.questions = append(call.questions, name)
+	}
+	sort.Strings(call.questions)
 	s.mu.Lock()
-	s.states = append(s.states, body.State)
-	down := s.down
+	s.calls = append(s.calls, call)
+	_, promise := body.Questions["promise"]
+	down := s.down || s.secondDown && !promise
 	s.mu.Unlock()
 	if down {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	io.WriteString(w, `{"answers":{"promise":{"type":"noul","noul":0.62},"needs":{"type":"noul","noul":0.08},"needs_tail":{"type":"noul","noul":0.05},
+	if promise {
+		io.WriteString(w, `{"answers":{"promise":{"type":"noul","noul":0.62}}}`)
+		return
+	}
+	io.WriteString(w, `{"answers":{"needs":{"type":"noul","noul":0.08},"needs_tail":{"type":"noul","noul":0.05},
 		"state":{"choice":"continuing","confidence":0.7,"probabilities":{"done":0.1,"waiting_person":0.1,"waiting_work":0.1,"continuing":0.7}}}}`)
 }
 
-func (s *judgeStub) asked() []judgeState {
+func (s *judgeStub) asked() []judgeCall {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]judgeState(nil), s.states...)
+	return append([]judgeCall(nil), s.calls...)
 }
 
 func judgeFixture(t *testing.T, stub *judgeStub) (*Daemon, *registry.Registry, *daemonSurface, surface.Session) {
@@ -107,11 +126,15 @@ func TestAFinishedTurnIsJudgedOnItsEndingWithWhatItWaitsOn(t *testing.T) {
 	if want := (registry.TurnFacts{BackgroundRunning: true, BackgroundSource: surface.BackgroundSourceHost, BackgroundTasks: 1, OpenAsks: 1}); j.Facts != want {
 		t.Fatalf("facts = %+v, want %+v", j.Facts, want)
 	}
-	asked := stub.asked()
-	if len(asked) != 1 || asked[0].Reply != "Next: - I'll trace the flaky test now." || asked[0].FullReply != reply {
-		t.Fatalf("the judge was asked %+v, want once, on the last two sentences and the whole reply", asked)
+	ending := "Next: - I'll trace the flaky test now."
+	want := []judgeCall{
+		{state: map[string]string{"reply": ending}, questions: []string{"promise"}},
+		{state: map[string]string{"reply": ending, "full_reply": reply}, questions: []string{"needs", "needs_tail", "state"}},
 	}
-	if j.Ending != asked[0].Reply || page.Judge == nil || page.Judge.Model != "d1-3b" || page.Judge.Failures != 0 {
+	if asked := stub.asked(); !reflect.DeepEqual(asked, want) {
+		t.Fatalf("the judge was asked %+v, want the promise on the ending alone, then the rest with the whole reply", asked)
+	}
+	if j.Ending != ending || page.Judge == nil || page.Judge.Model != "d1-3b" || page.Judge.Failures != 0 {
 		t.Fatalf("ending %q, judge %+v", j.Ending, page.Judge)
 	}
 }
@@ -124,6 +147,19 @@ func TestATurnTheJudgeCannotAnswerIsStillRecordedWithItsFacts(t *testing.T) {
 		page := readJudgments(t, d, from.ID)
 		return len(page.Judgments) == 1 && page.Judgments[0].Error != "" && page.Judge != nil && page.Judge.Failures == 1
 	})
+}
+
+func TestAJudgmentWhoseSecondCallFailsKeepsNoAnswers(t *testing.T) {
+	stub := &judgeStub{secondDown: true}
+	d, _, fake, from := judgeFixture(t, stub)
+	finishJudgedTurn(d, fake, &from, "turn-1", "Done. I'll push it next.", nil)
+	eventually(t, "the failed judgment", func() bool {
+		page := readJudgments(t, d, from.ID)
+		return len(page.Judgments) == 1 && page.Judgments[0].Error != "" && page.Judge != nil && page.Judge.Failures == 1
+	})
+	if j := readJudgments(t, d, from.ID).Judgments[0]; j.Promise != 0 || j.State != "" {
+		t.Fatalf("a judgment whose second call failed kept answers: %+v", j)
+	}
 }
 
 func TestNoTurnIsJudgedUntilTheJudgeIsConfigured(t *testing.T) {

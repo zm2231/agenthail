@@ -19,11 +19,11 @@ When the observer sees a session's turn complete with a finished reply, it recor
 - `reply`: the last two sentences of the reply. Code blocks are dropped, including an unclosed one through the end, and so is a closing block of links or `Sources:`. Each line, including each list item, is split separately. A promise to act next sits at the end, and a longer ending dilutes it. On 200 hand-labeled turns, the last paragraph raised false holds from 10 to 63 at the threshold that kept the known positives.
 - `full_reply`: the whole reply, up to its last 6000 characters.
 
-The questions, all asked in one call:
+The model reads everything in a call's state, so the questions go in two calls. `promise` is asked alone, with only `reply` in its state: next to the whole reply, the model loses a promise made at the end. On 204 labeled turns, asking it beside `full_reply` ranked unkept promises barely better than chance (AUC 0.54), and asking it on `reply` alone with the wording below ranked them at 0.79. The other three questions share the second call, which has both parts: on 100 held-out lead replies, `needs_tail` ranked replies that need the person better with `full_reply` in the state than on `reply` alone (AUC 0.94 against 0.81).
 
 | Name | Type | Asks |
 |---|---|---|
-| `promise` | probability | whether `reply` ends by promising work the agent starts now or does next, without waiting for the person |
+| `promise` | probability | whether `reply` says the agent itself is starting or continuing work right now, so stopping leaves that work undone |
 | `needs` | probability | whether `full_reply` asks the person for a question, decision or action |
 | `needs_tail` | probability | the same question asked of `reply` |
 | `state` | choice | `done`, `waiting_person`, `waiting_work` or `continuing` |
@@ -43,9 +43,9 @@ A turn with any of these will be woken again by that work, so it cannot leave a 
 
 ## Load
 
-Recording a judgment does not delay the turn's completion, its notification or anything else. A judgment is queued, and two workers ask the model, each with a 15 second limit. The queue holds 64 turns. A turn that doesn't fit is not recorded and counts in `judge.dropped`, so a full queue never adds a write to the turn's completion. A failed call is recorded with its error, counts in `judge.failures` until the next answer, and is not retried. The daemon logs each change between up and down once. Judgments older than 30 days are deleted as new ones are written.
+Recording a judgment does not delay the turn's completion, its notification or anything else. A judgment is queued, and two workers ask the model. Both calls of one judgment share a 15 second limit. The queue holds 64 turns. A turn that doesn't fit is not recorded and counts in `judge.dropped`, so a full queue never adds a write to the turn's completion. A failed call is recorded with its error, counts in `judge.failures` until the next answer, and is not retried. The daemon logs each change between up and down once. Judgments older than 30 days are deleted as new ones are written.
 
-Measured on a Linux build host against the endpoint: one call takes about 0.5 seconds. Twenty calls at once took a median of 4.1 seconds, and 77 of 100 took more than 2. That is why the queue limits concurrency, and why no layer may wait on the model for every turn.
+Measured on a Linux build host against the endpoint: one call takes about 0.5 seconds, so a judgment takes about 1 second. Twenty calls at once took a median of 4.1 seconds, and 77 of 100 took more than 2. That is why the queue limits concurrency, and why no layer may wait on the model for every turn.
 
 ## Reading the records
 
