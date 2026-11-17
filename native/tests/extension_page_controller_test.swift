@@ -39,26 +39,34 @@ struct ExtensionPageControllerTest {
         let controller = ExtensionPageController(entryID: "test/once", hostID: "test-host")
         let dead = URL(string: "http://127.0.0.1:9/x/board/")!
         for _ in 0..<5 { controller.open(dead, signIn: sessions) }
+        let firstMint = await observe({ await sessions.count() }, until: { $0 >= 1 })
+        check(firstMint >= 1, "the first open mints a session, got \(firstMint)")
         try? await Task.sleep(for: .milliseconds(100))
-        check(await sessions.count() == 1, "repeated opens of the same page mint once, got \(await sessions.count())")
+        let firstMints = await sessions.count()
+        check(firstMints == 1, "repeated opens of the same page mint once, got \(firstMints)")
         await sessions.release()
-        try? await Task.sleep(for: .milliseconds(300))
+        let firstLoad = await observe({ controller.loadsStarted }, until: { $0 == 1 })
+        check(firstLoad == 1, "the minted session starts a load, got \(firstLoad)")
         for _ in 0..<5 { controller.open(dead, signIn: sessions) }
         try? await Task.sleep(for: .milliseconds(100))
-        check(controller.loadsStarted == 1, "repeated opens start one load, got \(controller.loadsStarted)")
-        check(await sessions.count() == 1, "and no second mint, got \(await sessions.count())")
+        let loads = controller.loadsStarted
+        let reopenMints = await sessions.count()
+        check(loads == 1, "repeated opens start one load, got \(loads)")
+        check(reopenMints == 1, "and no second mint, got \(reopenMints)")
         controller.reload()
-        try? await Task.sleep(for: .milliseconds(100))
+        let reloadMints = await observe({ await sessions.count() }, until: { $0 == 2 })
+        check(reloadMints == 2, "Reload mints again, got \(reloadMints)")
         await sessions.release()
-        try? await Task.sleep(for: .milliseconds(300))
-        check(controller.loadsStarted == 2, "Reload starts a load, got \(controller.loadsStarted)")
+        let reloadLoads = await observe({ controller.loadsStarted }, until: { $0 == 2 })
+        check(reloadLoads == 2, "Reload starts a load, got \(reloadLoads)")
 
         let clocked = SlowSessions()
         let timed = ExtensionPageController(entryID: "test/clock", hostID: "test-host")
         let since = timed.waitingSince
         check(since != nil && timed.phase.waiting, "a new page starts waiting at once")
         timed.open(dead, signIn: clocked)
-        try? await Task.sleep(for: .milliseconds(100))
+        let clockedMints = await observe({ await clocked.count() }, until: { $0 == 1 })
+        check(clockedMints == 1, "the page starts signing in, got \(clockedMints)")
         check(timed.waitingSince == since, "signing in keeps the time the wait began, so a redrawn note keeps its place")
         timed.stop()
         await clocked.release()
@@ -66,15 +74,28 @@ struct ExtensionPageControllerTest {
         let stopping = SlowSessions()
         let evicted = ExtensionPageController(entryID: "test/stop", hostID: "test-host")
         evicted.open(dead, signIn: stopping)
-        try? await Task.sleep(for: .milliseconds(100))
+        let stoppingMints = await observe({ await stopping.count() }, until: { $0 == 1 })
+        check(stoppingMints == 1, "the page starts signing in before it stops, got \(stoppingMints)")
         evicted.stop()
         await stopping.release()
         try? await Task.sleep(for: .milliseconds(300))
         check(evicted.loadsStarted == 0, "a controller stopped while signing in loads nothing, got \(evicted.loadsStarted)")
         evicted.open(URL(string: "http://127.0.0.1:9/other/")!, signIn: stopping)
         try? await Task.sleep(for: .milliseconds(100))
-        check(await stopping.count() == 1, "a stopped controller opens nothing more")
+        let stoppedMints = await stopping.count()
+        check(stoppedMints == 1, "a stopped controller opens nothing more, got \(stoppedMints)")
         print("ok")
+    }
+
+    @MainActor
+    static func observe(within seconds: Double = 10, _ read: () async -> Int, until done: (Int) -> Bool) async -> Int {
+        let deadline = Date().addingTimeInterval(seconds)
+        var value = await read()
+        while !done(value), Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+            value = await read()
+        }
+        return value
     }
 
     static func check(_ condition: Bool, _ message: String) {
