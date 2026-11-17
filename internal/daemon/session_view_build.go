@@ -78,6 +78,10 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 		return nil, err
 	}
 	leads := presenter.leads
+	directory, err := d.loadLeadDirectory()
+	if err != nil {
+		return nil, err
+	}
 	if d.presentation.building != nil {
 		d.presentation.building()
 	}
@@ -106,6 +110,7 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 			row.Subagent.RootID = hosts.Qualify(record.HostID, row.Subagent.RootID)
 		}
 		if record.HostID == "" {
+			row.TurnState = turnStateOf(&row, record.Judgment, directory)
 			local := host
 			row.Host = &local
 			session := surface.Session{ID: record.ID, Surface: row.Surface, Status: row.Status, RuntimeKind: row.RuntimeKind, LastActive: row.LastActive}

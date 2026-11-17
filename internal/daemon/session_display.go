@@ -110,6 +110,9 @@ func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
 	if row.Status == surface.StatusOffline {
 		return SessionDisplay{Kind: "offline", Label: "Offline"}
 	}
+	if row.TurnState != nil {
+		return SessionDisplay{Kind: "idle", Label: turnStateLabel(row.TurnState)}
+	}
 	label := "Closed"
 	if row.Open {
 		label = "Ready"

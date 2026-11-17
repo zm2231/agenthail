@@ -40,6 +40,7 @@ type CatalogPresentationRow struct {
 	PinnedAt                               time.Time
 	Snooze                                 Snooze
 	TurnEnd                                *TurnEnd
+	Judgment                               *TurnJudgment
 	Ask                                    *Ask
 	Work                                   *WorkRecord
 	PRs                                    []SessionPR
@@ -86,6 +87,10 @@ func (r *Registry) readCatalogPresentation(ctx context.Context, history bool, st
 	if err != nil {
 		return CatalogPresentation{}, err
 	}
+	judgments, err := currentTurnJudgments(ctx, tx)
+	if err != nil {
+		return CatalogPresentation{}, err
+	}
 	asks, err := rowAsks(ctx, tx)
 	if err != nil {
 		return CatalogPresentation{}, err
@@ -108,6 +113,9 @@ func (r *Registry) readCatalogPresentation(ctx context.Context, history bool, st
 		}
 		if end, ok := ends[read.Rows[i].ID]; ok {
 			read.Rows[i].TurnEnd = &end
+		}
+		if judgment, ok := judgments[read.Rows[i].ID]; ok {
+			read.Rows[i].Judgment = &judgment
 		}
 		if ask, ok := asks[read.Rows[i].ID]; ok {
 			read.Rows[i].Ask = &ask

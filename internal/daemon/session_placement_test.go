@@ -121,6 +121,9 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"EndTurn": func(r *dashboardSession, now time.Time) {
 		r.EndTurn = &dashboardEndTurn{Headline: "Deployed", EndedAt: now}
 	},
+	"TurnState": func(r *dashboardSession, _ time.Time) {
+		r.TurnState = &dashboardTurnState{State: turnWaitingPerson, Source: turnSourceJudge}
+	},
 	"TurnCompletion": func(r *dashboardSession, now time.Time) {
 		r.TurnCompletion = &dashboardTurnCompletion{TurnID: "t9", Outcome: turnOutcomeFailed, At: now}
 	},

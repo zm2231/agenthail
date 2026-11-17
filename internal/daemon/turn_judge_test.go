@@ -126,7 +126,7 @@ func TestAFinishedTurnIsJudgedOnItsEndingWithWhatItWaitsOn(t *testing.T) {
 	if j.TurnID != "turn-1" || j.Model != "d1-3b" || j.PromiseModel != "d1-3b" || j.Promise != 0.62 || j.Needs != 0.08 || j.NeedsTail != 0.05 || j.State != "continuing" || j.StateP["continuing"] != 0.7 || j.Error != "" {
 		t.Fatalf("judgment = %+v", j)
 	}
-	if want := (registry.TurnFacts{BackgroundRunning: true, BackgroundSource: surface.BackgroundSourceHost, BackgroundTasks: 1, OpenAsks: 1}); j.Facts != want {
+	if want := (registry.TurnFacts{BackgroundRunning: true, BackgroundSource: surface.BackgroundSourceHost, BackgroundTasks: 1, OpenAsks: 1, AskedOf: []string{registry.AskToPerson}}); !reflect.DeepEqual(j.Facts, want) {
 		t.Fatalf("facts = %+v, want %+v", j.Facts, want)
 	}
 	ending := "Next: - I'll trace the flaky test now."

@@ -19,8 +19,8 @@ func wantTask(t *testing.T, task registry.Task, state, kind, result, turn string
 
 func wantSlots(t *testing.T, f *taskFixture, slots int) {
 	t.Helper()
-	if running, err := f.r.RunningChildren(f.task.Parent); err != nil || running != slots {
-		t.Fatalf("slots=%d err=%v, want %d", running, err, slots)
+	if running, err := f.r.RunningChildren(f.task.Parent); err != nil || len(running) != slots {
+		t.Fatalf("slots=%v err=%v, want %d", running, err, slots)
 	}
 }
 

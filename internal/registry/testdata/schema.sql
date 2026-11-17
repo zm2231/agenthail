@@ -1,4 +1,4 @@
--- schemaVersion 107
+-- schemaVersion 108
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -1465,6 +1465,24 @@ END;
 
 -- trigger catalog_presentation_version_turn_ends_update
 CREATE TRIGGER catalog_presentation_version_turn_ends_update AFTER UPDATE OF completed_turn_id,ended_at_ms,headline,next_json,session_id,source,started_at_ms,turn_id ON turn_ends WHEN (NEW.completed_turn_id IS NOT OLD.completed_turn_id OR NEW.ended_at_ms IS NOT OLD.ended_at_ms OR NEW.headline IS NOT OLD.headline OR NEW.next_json IS NOT OLD.next_json OR NEW.session_id IS NOT OLD.session_id OR NEW.source IS NOT OLD.source OR NEW.started_at_ms IS NOT OLD.started_at_ms OR NEW.turn_id IS NOT OLD.turn_id)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_turn_judgments_delete
+CREATE TRIGGER catalog_presentation_version_turn_judgments_delete AFTER DELETE ON turn_judgments
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_turn_judgments_insert
+CREATE TRIGGER catalog_presentation_version_turn_judgments_insert AFTER INSERT ON turn_judgments
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_turn_judgments_update
+CREATE TRIGGER catalog_presentation_version_turn_judgments_update AFTER UPDATE OF session_id,turn_id,state,facts_json,error ON turn_judgments WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.turn_id IS NOT OLD.turn_id OR NEW.state IS NOT OLD.state OR NEW.facts_json IS NOT OLD.facts_json OR NEW.error IS NOT OLD.error)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
