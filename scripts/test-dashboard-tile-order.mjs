@@ -108,4 +108,27 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
   assert.deepEqual(plain([page.tileOrder().order, page.tileOrder().pinned]), [["c", "b", "a"], ["c"]], "and shown");
 }
 
+{
+  const server = daemon({ order: ["a", "b", "c"], pinned: [], revision: 2 });
+  server.offline = true;
+  const local = storage();
+  const first = { localStorage: local, fetch: (...args) => server.fetch(...args) };
+  await dashboardModules(["tile-order"], first);
+  first.adoptTileOrder(server.state);
+  await first.changeTiles({ kind: "pin", id: "a" }, ["a", "b", "c"]);
+  const reopened = await store(Object.fromEntries(local.items), server);
+  reopened.tilesArrangedBy(({ order, pinned }) => [...order.filter((id) => pinned.includes(id)), ...order.filter((id) => !pinned.includes(id))]);
+  server.offline = false;
+  server.held = true;
+  server.state = { order: ["a", "b", "c"], pinned: [], revision: 3 };
+  reopened.adoptTileOrder(server.state);
+  const sending = reopened.changeTiles({ kind: "pin", id: "b" }, ["a", "b", "c"]);
+  server.state = { order: ["c", "b", "a"], pinned: [], revision: 4 };
+  server.held = false;
+  for (let i = 0; i < 50 && server.state.revision < 5; i++) await new Promise((resolve) => setTimeout(resolve, 2));
+  await sending;
+  assert.deepEqual(plain(server.state.pinned), ["a", "b"], "a pin made offline and one made after reopening both survive a refused write");
+  assert.deepEqual(plain(reopened.tileOrder().pinned), ["a", "b"], "and both show");
+}
+
 console.log("dashboard tile order tests passed");

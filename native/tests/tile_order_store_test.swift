@@ -173,6 +173,29 @@ struct TileOrderStoreTest {
             check(store.arrangement == TileArrangement(order: ["c", "b", "a"], pinned: ["c"]), "and shown: \(store.arrangement)")
         }
 
+        try await withStore { defaults, suite in
+            let daemon = FakeDaemon()
+            await daemon.set(TileOrderState(order: ["a", "b", "c"], pinned: [], revision: 2))
+            await daemon.go(offline: true)
+            let first = TileOrderStore(defaults: defaults, key: suite)
+            first.adopt(await daemon.state) { try await daemon.put($0) }
+            first.change(.pin("a"), arranged: ["a", "b", "c"])
+            _ = try await settle { false }
+            let reopened = TileOrderStore(defaults: defaults, key: suite)
+            _ = reopened.tiles(projects, limit: 3)
+            await daemon.go(offline: false)
+            await daemon.hold(true)
+            await daemon.set(TileOrderState(order: ["a", "b", "c"], pinned: [], revision: 3))
+            reopened.adopt(await daemon.state) { try await daemon.put($0) }
+            reopened.change(.pin("b"), arranged: ["a", "b", "c"])
+            await daemon.set(TileOrderState(order: ["c", "b", "a"], pinned: [], revision: 4))
+            await daemon.hold(false)
+            let landed = try await settle { await daemon.state.revision == 5 }
+            let final = await daemon.state
+            check(landed && final.pinned == ["a", "b"], "a pin made offline and one made after reopening both survive a refused write: \(final)")
+            check(reopened.arrangement.pinned == ["a", "b"], "and both show: \(reopened.arrangement)")
+        }
+
         print("tile order store: ok")
     }
 

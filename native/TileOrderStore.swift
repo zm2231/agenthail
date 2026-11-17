@@ -12,7 +12,7 @@ enum TileWrite: Equatable, Sendable {
     case stale(TileOrderState)
 }
 
-enum TileChange: Equatable {
+enum TileChange: Codable, Equatable {
     case pin(String)
     case move(String, before: String)
     case step(String, by: Int)
@@ -77,6 +77,7 @@ final class TileOrderStore {
         arrangement = TileArrangement(order: defaults.stringArray(forKey: key + ".order") ?? [], pinned: Set(defaults.stringArray(forKey: key + ".pinned") ?? []))
         revision = (defaults.object(forKey: key + ".revision") as? NSNumber)?.int64Value ?? 0
         unsent = defaults.bool(forKey: key + ".unsent")
+        pending = defaults.data(forKey: key + ".pending").flatMap { try? JSONDecoder().decode([TileChange].self, from: $0) } ?? []
     }
 
     func tiles(_ projects: [ProjectState], limit: Int) -> ProjectTiles {
@@ -134,6 +135,7 @@ final class TileOrderStore {
                     case .saved(let saved):
                         pending.removeFirst(min(included, pending.count))
                         revision = saved.revision
+                        persist()
                         guard arrangement == sent else { continue }
                         save(arrangement, unsent: false)
                     case .stale(let current) where retried || !unsent:
@@ -169,9 +171,14 @@ final class TileOrderStore {
     private func save(_ next: TileArrangement, unsent: Bool) {
         if arrangement != next { arrangement = next }
         self.unsent = unsent
-        defaults.set(next.order, forKey: key + ".order")
-        defaults.set(next.pinned.sorted(), forKey: key + ".pinned")
+        persist()
+    }
+
+    private func persist() {
+        defaults.set(arrangement.order, forKey: key + ".order")
+        defaults.set(arrangement.pinned.sorted(), forKey: key + ".pinned")
         defaults.set(NSNumber(value: revision), forKey: key + ".revision")
         defaults.set(unsent, forKey: key + ".unsent")
+        defaults.set(try? JSONEncoder().encode(pending), forKey: key + ".pending")
     }
 }

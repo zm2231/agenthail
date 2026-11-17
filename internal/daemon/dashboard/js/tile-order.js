@@ -2,6 +2,7 @@ import { applyTileChange } from "./project-tiles.js";
 
 const storageKey = "agenthail.tileOrder";
 const empty = { order: [], pinned: [], revision: 0, unsent: false };
+let pending = [];
 let saved = read();
 let heard = false;
 let sending = false;
@@ -12,16 +13,21 @@ function read() {
   try {
     const value = JSON.parse(globalThis.localStorage?.getItem(storageKey) ?? "null");
     if (value && Array.isArray(value.order) && Array.isArray(value.pinned)) {
+      pending = Array.isArray(value.pending) ? value.pending : [];
       return { order: value.order, pinned: value.pinned, revision: Number(value.revision) || 0, unsent: Boolean(value.unsent) };
     }
   } catch {}
   return { ...empty };
 }
 
+function persist() {
+  try { globalThis.localStorage?.setItem(storageKey, JSON.stringify({ ...saved, pending })); } catch {}
+}
+
 function save(next) {
   const moved = JSON.stringify([next.order, next.pinned]) !== JSON.stringify([saved.order, saved.pinned]);
   saved = next;
-  try { globalThis.localStorage?.setItem(storageKey, JSON.stringify(next)); } catch {}
+  persist();
   if (moved) changed();
 }
 
@@ -39,8 +45,6 @@ async function put({ order, pinned, revision }) {
 
 const same = (a, b) => JSON.stringify([a.order, [...a.pinned].sort()]) === JSON.stringify([b.order, [...b.pinned].sort()]);
 
-let pending = [];
-
 function replayed(base) {
   return pending.reduce((arrangement, change) => ({ ...arrangement, ...applyTileChange(arrangement, change, arrange(arrangement)) }), base);
 }
@@ -57,6 +61,7 @@ async function send() {
       if (reply.saved) {
         pending = pending.slice(included);
         saved = { ...saved, revision: reply.saved.revision };
+        persist();
         if (!same(saved, sent)) continue;
         save({ ...saved, unsent: false });
         return;
