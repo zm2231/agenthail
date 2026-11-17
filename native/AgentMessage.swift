@@ -73,3 +73,9 @@ enum AgentFold {
         "notice": ("Agenthail notice", "Agenthail notices"),
     ]
 }
+
+extension AgentMessage {
+    static func inline(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+}

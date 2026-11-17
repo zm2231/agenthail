@@ -73,11 +73,14 @@ struct IOSSentFileCard: View {
             .accessibilityIdentifier("sent-file")
         }
         .sheet(item: $opened) { file in
-            if file.pdf {
-                SentPDFSheet(url: file.url, name: name)
-            } else {
-                ShareSheet(items: [file.url]).ignoresSafeArea()
+            Group {
+                if file.pdf {
+                    SentPDFSheet(url: file.url, name: name)
+                } else {
+                    ShareSheet(items: [file.url]).ignoresSafeArea()
+                }
             }
+            .chromeTypeSize()
         }
         .task(id: copied) {
             guard copied else { return }

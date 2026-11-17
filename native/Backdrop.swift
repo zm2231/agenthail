@@ -38,9 +38,14 @@ struct BackdropSpec: Equatable, Sendable {
         case mesh(columns: Int, rows: Int, colors: [BackdropRGB])
     }
 
+    static let feather: Float = 240
+    static let readingBlurFloor: CGFloat = 24
+
     struct PaneStyle: Equatable, Sendable {
         var minimum: Float
         var strength: Float
+        var blur: CGFloat? = nil
+        var even = false
     }
 
     struct Pane: Equatable, Sendable {

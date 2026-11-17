@@ -22,6 +22,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     let held: () -> Bool
     @Binding var position: ScrollPosition
     @Binding var following: Bool
+    var rescaling = false
     @State private var phase: ScrollPhase = .idle
     @State private var generation = 0
     @State private var placedLeadingRow: String?
@@ -50,7 +51,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
         content
             .scrollPosition($position)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .defaultScrollAnchor(following ? .bottom : nil, for: .sizeChanges)
+            .defaultScrollAnchor(following && !rescaling ? .bottom : nil, for: .sizeChanges)
             .onScrollPhaseChange { old, new in
                 phase = new
                 if new == .idle, old == .interacting || old == .decelerating, let geometry = layout.geometry {
@@ -253,8 +254,8 @@ private final class Layout {
 }
 
 extension View {
-    func transcriptFollow<ID: Equatable>(_ transcript: ID, leadingRow: String?, hasRow: @escaping (String) -> Bool, held: @escaping () -> Bool = { false }, position: Binding<ScrollPosition>, following: Binding<Bool>) -> some View {
-        modifier(TranscriptFollow(transcript: transcript, leadingRow: leadingRow, hasRow: hasRow, held: held, position: position, following: following))
+    func transcriptFollow<ID: Equatable>(_ transcript: ID, leadingRow: String?, hasRow: @escaping (String) -> Bool, held: @escaping () -> Bool = { false }, position: Binding<ScrollPosition>, following: Binding<Bool>, rescaling: Bool = false) -> some View {
+        modifier(TranscriptFollow(transcript: transcript, leadingRow: leadingRow, hasRow: hasRow, held: held, position: position, following: following, rescaling: rescaling))
     }
 }
 

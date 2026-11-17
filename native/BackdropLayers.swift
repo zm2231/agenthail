@@ -4,6 +4,7 @@ import CoreImage
 enum BackdropRole: Hashable, Sendable {
     case sidebar
     case content
+    case reading
 }
 
 struct BackdropLayers: @unchecked Sendable {
@@ -13,6 +14,7 @@ struct BackdropLayers: @unchecked Sendable {
         let scrim: CGImage?
         let scrimPeak: Float
         var plate: CGImage? = nil
+        var even: Float? = nil
     }
 
     let size: CGSize
@@ -64,13 +66,23 @@ extension BackdropRenderer {
 
         let scrim = spec.readability ? layerImage(scrimTint, alpha: field(open, scrimTint)) : nil
         let flatTint = ScrimField.Raster(width: pw, height: ph, fill: paneTint)
-        var bases: [Float: CGImage] = [:]
+        var bases: [BaseKey: CGImage] = [:]
         var panes: [BackdropRole: BackdropLayers.Pane] = [:]
         for (role, style) in styles {
-            if !transparent, bases[style.strength] == nil {
-                bases[style.strength] = paneBase(spec, wallpaper: wallpaper, strength: style.strength, full: CGSize(width: w, height: h), points: CGSize(width: pw, height: ph))
+            let blur = style.blur ?? spec.blur
+            let key = BaseKey(strength: style.strength, blur: blur)
+            if !transparent, bases[key] == nil {
+                bases[key] = paneBase(spec, wallpaper: wallpaper, strength: style.strength, blur: blur, full: CGSize(width: w, height: h), points: CGSize(width: pw, height: ph))
             }
-            let behind = transparent ? nil : bases[style.strength]
+            let behind = transparent ? nil : bases[key]
+            if style.even {
+                var tint = style.minimum
+                if spec.readability, !spec.solidPanes, tint < 1, let raster = analysis(behind) {
+                    tint = max(tint, field(raster, flatTint).max() ?? 0)
+                }
+                panes[role] = BackdropLayers.Pane(base: behind, minimum: style.minimum, scrim: nil, scrimPeak: 0, even: min(tint, 1))
+                continue
+            }
             var above: (image: CGImage, peak: Float)?
             var plate: CGImage?
             if spec.readability, !spec.solidPanes, style.minimum < 1, let raster = analysis(behind) {
@@ -97,13 +109,18 @@ extension BackdropRenderer {
     }
 
     /// A blur of at least 4 points hides the difference, so blurred bases render at one pixel per point.
-    private static func paneBase(_ spec: BackdropSpec, wallpaper: CGImage?, strength: Float, full: CGSize, points: CGSize) -> CGImage? {
-        let pixels = spec.blur >= 4 ? points : full
+    private struct BaseKey: Hashable {
+        let strength: Float
+        let blur: CGFloat
+    }
+
+    private static func paneBase(_ spec: BackdropSpec, wallpaper: CGImage?, strength: Float, blur: CGFloat, full: CGSize, points: CGSize) -> CGImage? {
+        let pixels = blur >= 4 ? points : full
         let bw = Int(pixels.width), bh = Int(pixels.height)
         let plain = CIImage(cgImage: base(spec, wallpaper: wallpaper, strength: strength, texture: false, width: bw, height: bh))
         let bounds = CGRect(x: 0, y: 0, width: bw, height: bh)
-        let sigma = Double(spec.blur * pixels.width / spec.size.width / 3)
-        let shown = spec.blur > 0 ? plain.clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: bounds) : plain
+        let sigma = Double(blur * pixels.width / spec.size.width / 3)
+        let shown = blur > 0 ? plain.clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: bounds) : plain
         return context.createCGImage(shown, from: bounds, format: .RGBA8, colorSpace: srgb)
     }
 

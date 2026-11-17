@@ -15,6 +15,7 @@ struct QueuedMessageSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(PeerEnvelope(item.message).body).font(.body).lineSpacing(4).textSelection(.enabled)
+                        .readingTypeSize()
                     if item.status == "pending" {
                         Text(item.holdLabel).font(.footnote).foregroundStyle(PhonePalette.muted)
                             .accessibilityIdentifier("queued-message-hold")

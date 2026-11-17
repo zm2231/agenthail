@@ -12,7 +12,7 @@ struct AppearanceDraft: Equatable {
         "theme", "theme.accent",
         "background", "background.fit", "background.position", "background.dim", "background.opacity", "background.session-opacity",
         "glass", "glass.blur", "glass.tint", "glass.opacity", "glass.composer.opacity", "glass.readability",
-        "texture", "texture.strength",
+        "texture", "texture.strength", "text.scale",
     ]
 
     var scope: Scope = .everywhere

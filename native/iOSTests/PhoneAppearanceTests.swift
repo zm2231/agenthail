@@ -295,6 +295,34 @@ final class PhoneAppearanceTests: XCTestCase {
         appearance.preview(try config([:]))
         XCTAssertTrue(appearance.spec(key(.cards)).roles.contains(PhonePalette.rgb(SessionStyle.accentHex.dark)))
     }
+
+    func testTextSizeStacksOnTheSystemSize() throws {
+        XCTAssertEqual(PhoneTextScale.steps(1), 0)
+        XCTAssertEqual(PhoneTextScale.steps(1.2), 2)
+        XCTAssertEqual(PhoneTextScale.steps(0.8), -2)
+        XCTAssertEqual(PhoneTextScale.shifted(.large, by: 2), .xxLarge, "two steps up from the default system size")
+        XCTAssertEqual(PhoneTextScale.shifted(.xSmall, by: -2), .xSmall, "the smallest size stays")
+        XCTAssertEqual(PhoneTextScale.shifted(.accessibility4, by: 3), .accessibility5, "the largest size stays")
+        XCTAssertEqual(PhoneTextScale.chromeSteps, 1, "controls and status grow one step at most")
+        let appearance = PhoneAppearance(cache: nil)
+        appearance.preview(try config(["text.scale": 1.3]))
+        XCTAssertEqual(appearance.textScale, 1.3, accuracy: 0.001)
+        appearance.setTextScale(0.9, api: nil)
+        XCTAssertEqual(appearance.textScale, 0.9, accuracy: 0.001, "a chosen size shows at once")
+        XCTAssertNotNil(appearance.textScaleProblem, "a size chosen with no computer connected says it was not saved")
+    }
+
+    func testATextSizeThatFailsToSaveReturnsToTheSavedSize() async throws {
+        let configuration = FixtureScope.open(self).configuration([RefusingUIProtocol.self])
+        let refusing = AgenthailAPI(baseURL: URL(string: "https://host.invalid")!, token: "t", session: URLSession(configuration: configuration))
+        let appearance = PhoneAppearance(cache: nil)
+        appearance.preview(try config(["text.scale": 1.3]))
+        appearance.setTextScale(1.5, api: refusing)
+        XCTAssertEqual(appearance.textScale, 1.5, accuracy: 0.001)
+        for _ in 0..<200 where appearance.textScaleProblem == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNotNil(appearance.textScaleProblem, "a refused write says the size was not saved")
+        XCTAssertEqual(appearance.textScale, 1.3, accuracy: 0.001, "a refused write shows the saved size again")
+    }
 }
 
 private final class UIConfigState: @unchecked Sendable {
@@ -330,6 +358,19 @@ private final class UIConfigURLProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": background ? "image/png" : "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: background ? Self.state.image : Data(Self.state.body.utf8))
         client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class RefusingUIProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.path.hasPrefix("/api/v1/ui") == true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        served {
+            self.client?.urlProtocol(self, didReceive: HTTPURLResponse(url: self.request.url!, statusCode: 503, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: Data(#"{"error":{"message":"fixture unavailable"}}"#.utf8))
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
     }
     override func stopLoading() {}
 }

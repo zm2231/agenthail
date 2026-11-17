@@ -701,7 +701,7 @@ struct SessionScreen: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Self.rowSpacing) {
                 Group {
-                    transcriptRows
+                    transcriptRows.readingTypeSize()
                     if let detail { QueueTailRows(model: model, tail: $queueTail, readOnly: detail.readOnly, generation: rowsGeneration) }
                 }.transcriptScrimRow()
                 .environment(\.sentFiles, SentFileContext(hostName: model.hostName(forSession: session.id)) { [model, id = session.id] item in try await model.sentFile(item, sessionID: id) })
@@ -1027,7 +1027,7 @@ struct IOSComposer: View, @MainActor Equatable {
     @ViewBuilder private var turnControls: some View {
         attachControl
         if !context.readOnly, let settings = context.turnSettings, !settings.isEmpty {
-            // The chips scroll, so they claim no width of their own when the footer decides whether one row fits.
+            // The chips fold into a menu to fit, so they claim no width of their own when the footer decides whether one row fits.
             IOSTurnSettingChips(model: model, sessionID: session.id, settings: settings) { showingModels = true }
                 .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
@@ -1264,6 +1264,7 @@ struct IOSMessage: View {
         }
         .sheet(isPresented: $showingFullMessage) {
             TranscriptDocument(title: "Your message", text: text, markdown: false)
+                .chromeTypeSize()
         }
     }
 
@@ -2062,6 +2063,7 @@ struct SettingsView: View {
                     }
                 }
                 TurnNoticeSettingsSection()
+                PhoneTextSizeSection(model: model)
                 Section("Notifications") {
                     LabeledContent("Status", value: model.notificationStatus)
                     if model.notificationStatus == "Enabling" {

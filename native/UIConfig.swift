@@ -126,7 +126,6 @@ struct UIConfig: Codable, Equatable {
     var textureSpacing: Double { number("texture.spacing", 3) }
 
     var scrimTint: String { text("scrim.tint", "auto") }
-    var scrimFeather: Double { number("scrim.feather", 240) }
     var contrastTarget: Double { number("contrast.target", 4.5) }
 
     var tabs: Bool { text("titlebar.tabs", "sessions") == "sessions" }
@@ -168,6 +167,10 @@ struct UIConfig: Codable, Equatable {
 }
 
 /// One change to ui.conf, checked by the daemon the same way agenthail ui is.
+extension UIConfig {
+    var textScale: Double { min(max(number("text.scale", 1), 0.8), 1.6) }
+}
+
 struct UIChange: Encodable, Equatable {
     var action: String
     var set: [String]? = nil

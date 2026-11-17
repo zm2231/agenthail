@@ -57,7 +57,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `texture.strength` | `0.2` | 0 to 0.6. How strongly the texture darkens. |
 | `texture.spacing` | `3` | 2 to 8. Points between scanlines. |
 | `scrim.tint` | `auto` | Colour of the layer that keeps text readable: `auto` takes the background's own hue, darkened; or `black` or `#rrggbb`. |
-| `scrim.feather` | `240` | 40 to 320. Points over which that layer fades out around text on open areas. |
+| `text.scale` | `1` | 0.8 to 1.6. Text size in the apps. On the Mac it scales the conversation, the sidebar and the message box; **View › Make Text Bigger** (⌘+), **Make Text Smaller** (⌘-) and **Actual Text Size** (⌘0) change it for that Mac at once and write `text.scale@device:<name>` once the keys stop for a second. The iPhone adds it to the text size in iOS Settings. |
 | `contrast.target` | `4.5` | 4.5 to 7. Minimum contrast for every kind of text. With Increase Contrast on in Accessibility settings, the app uses 7. |
 | `color.body` | `default` | Body text: replies, messages and anything without a role of its own. See [Text colours](#text-colours). |
 | `color.muted` | `default` | Secondary text: tool rows, labels and summaries. |
@@ -78,6 +78,8 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 Whatever the background, text keeps at least `contrast.target` contrast: the app measures the background behind text and darkens or lightens it as much as needed, around the text only, so the background stays visible in margins, gaps and empty views. `glass.readability = off` turns this off.
 
 A line for a key that was removed is skipped, and `agenthail doctor`, `agenthail ui check` and Settings › Appearance name the key that replaced it. `glass.sidebar.opacity` and `glass.chrome.opacity` were removed: `glass.opacity` tints every pane.
+
+A retired key is skipped without a warning, so a file that still has one keeps working; `agenthail ui set` refuses it. `scrim.feather` was retired: a session's conversation sits on a reading surface, the 720-point column with its margins and the message box, whose tint is solved so its text always reaches `contrast.target` and whose blur is at least 24 points, so the background shows behind it only as colour. In light mode, or with `glass = off`, the surface is solid. `glass.readability = off` turns the solving off: the surface then uses `glass.opacity` and `glass.blur` exactly. Outside the column the background shows as the `glass.*` settings say.
 
 ## Text colours
 

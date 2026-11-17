@@ -84,7 +84,7 @@ var Keys = []Key{
 	number("texture.spacing", "3", "Points between scanlines.", 2, 8),
 
 	color("scrim.tint", "auto", "Colour of the layer that keeps text readable: auto takes the background's own hue, darkened.", "auto", "black"),
-	number("scrim.feather", "240", "Points over which that layer fades out around text on open areas.", 40, 320),
+	number("text.scale", "1", "Text size: 1 is the default. On the Mac ⌘+, ⌘- and ⌘0 change it for that Mac.", 0.8, 1.6),
 	number("contrast.target", "4.5", "Minimum contrast for every text role. Increase contrast raises it to 7.", 4.5, 7),
 
 	textColor("body", "Body text: replies, messages and anything without a role of its own."),

@@ -1,7 +1,7 @@
 import AppKit
 
 final class ComposerNSTextView: NSTextView {
-    static let font = NSFont.systemFont(ofSize: DesktopType.prose)
+    static var font: NSFont { NSFont.systemFont(ofSize: DesktopType.prose) }
 
     var placeholder = "" {
         didSet {
@@ -55,7 +55,7 @@ final class ComposerNSTextView: NSTextView {
         return view
     }
 
-    static let lineHeight = font.ascender - font.descender + font.leading
+    static var lineHeight: CGFloat { font.ascender - font.descender + font.leading }
     static let composerLines: ClosedRange<Int> = 1...10
 
     /// Measures the text apart from the view: SwiftUI asks during its layout

@@ -24,10 +24,10 @@ final class ActivityPresentationTests: XCTestCase {
         func decode(_ records: [[String: Any]]) throws -> [TimelineItem] {
             try JSONDecoder().decode([TimelineItem].self, from: JSONSerialization.data(withJSONObject: records))
         }
-        let six = try decode((0..<6).flatMap { call("b\($0)", "Bash", ["command": "go test ./case\($0)"]) })
-        XCTAssertFalse(TimelineGroup.make(six)[0].folds, "six calls stay as lines")
-        let seven = try decode((0..<7).flatMap { call("b\($0)", "Bash", ["command": "go test ./case\($0)"]) })
-        XCTAssertTrue(TimelineGroup.make(seven)[0].folds, "a seventh call folds the run")
+        let two = try decode((0..<2).flatMap { call("b\($0)", "Bash", ["command": "go test ./case\($0)"]) })
+        XCTAssertFalse(TimelineGroup.make(two)[0].folds, "two calls stay as lines")
+        let three = try decode((0..<3).flatMap { call("b\($0)", "Bash", ["command": "go test ./case\($0)"]) })
+        XCTAssertTrue(TimelineGroup.make(three)[0].folds, "a third call folds the run")
 
         let edits = try decode(
             call("e1", "Edit", ["file_path": "/work/App.swift", "old_string": "a", "new_string": "b\nc"])

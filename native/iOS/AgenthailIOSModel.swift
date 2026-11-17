@@ -272,6 +272,9 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private let previewPaired: Bool
 
     func session(_ id: String?) -> SessionState? { cells.session(id) }
+    func setTextScale(_ scale: Double) {
+        appearance.setTextScale(scale, api: hostOrder.first.flatMap { connections[$0] }.flatMap { $0.isPreview ? nil : $0.api })
+    }
     func pairedHost(owning sessionID: String) -> SessionHost? { daemon?.pairedHost(owning: sessionID) }
 
     /// Names the lead that replaced a request's session; the computer serving the request gives the id unqualified.

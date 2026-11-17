@@ -11,6 +11,7 @@ final class InterfaceStore: ObservableObject {
     private var base = UIConfig.defaults
     private var overlay: [String: UIConfig.Value] = [:]
     private var loadTask: Task<Void, Never>?
+    private var textScaleWrite: Task<Void, Never>?
 
     static var device: String { Host.current().localizedName ?? "" }
 
@@ -97,5 +98,32 @@ final class InterfaceStore: ObservableObject {
         default: NSApp.appearance = nil
         }
         if next != config { config = next }
+        let scale = TextScale.clamped(CGFloat(next.textScale))
+        if TextScale.shared.factor != scale { TextScale.shared.factor = scale }
+    }
+
+    /// Applies a text size at once and writes it for this Mac after a second without another change, so a run of key presses is one change.
+    func stepTextScale(by steps: Int?, api: AgenthailAPI?) {
+        let next = steps.map { TextScale.stepped(TextScale.shared.factor, by: $0) } ?? 1
+        preview("text.scale", .number(Double(next)))
+        textScaleWrite?.cancel()
+        guard let api else { return }
+        textScaleWrite = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, !Task.isCancelled else { return }
+            await self.change(Self.textScaleChange(next, device: Self.device), api: api)
+        }
+    }
+
+    func supersedeTextScaleWrite(by change: UIChange) {
+        guard ((change.set ?? []) + (change.unset ?? [])).contains(where: { $0.hasPrefix("text.scale") }) else { return }
+        textScaleWrite?.cancel()
+        textScaleWrite = nil
+    }
+
+    static func textScaleChange(_ scale: CGFloat, device: String) -> UIChange {
+        let place = device.isEmpty ? "mac" : "device:" + device
+        let percent = Int((scale * 100).rounded())
+        return UIChange(action: "set", set: ["text.scale@\(place) = \(Double(percent) / 100)"], message: "Text size \(percent)%")
     }
 }

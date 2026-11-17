@@ -119,7 +119,7 @@ struct CompactActivityGroup: View, @MainActor Equatable {
             VStack(alignment: .leading, spacing: 0) {
                 if group.folds {
                     Button { onInspect(); set(!open) } label: {
-                        ToolLineLabel(verb: ToolRunSummary.label(group.items), object: "", isCode: false, failed: false, failures: group.errorCount, trailing: open ? "chevron.down" : "chevron.right")
+                        ToolLineLabel(verb: ToolRunSummary.worked(group.items), object: ToolRunSummary.label(group.items), isCode: false, failed: false, failures: group.errorCount, trailing: open ? "chevron.down" : "chevron.right")
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("activity-" + group.firstItemID)

@@ -52,6 +52,10 @@ struct ComposerTextView: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scroll.documentView as? ComposerNSTextView else { return }
         textView.isEditable = context.environment.isEnabled
+        if textView.font?.pointSize != DesktopType.prose {
+            textView.font = ComposerNSTextView.font
+            textView.typingAttributes[.font] = ComposerNSTextView.font
+        }
         textView.pasteAttachments = onPaste
         editor?.textView = textView
         textView.placeholder = placeholder

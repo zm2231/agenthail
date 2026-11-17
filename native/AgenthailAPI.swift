@@ -279,10 +279,10 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
-    func changeUI(_ change: UIChange, device: String) async throws -> UIConfig {
+    func changeUI(_ change: UIChange, device: String, kind: String = "mac") async throws -> UIConfig {
         var components = URLComponents()
         components.path = "/api/v1/ui"
-        components.queryItems = [URLQueryItem(name: "class", value: "mac"), URLQueryItem(name: "device", value: device)]
+        components.queryItems = [URLQueryItem(name: "class", value: kind), URLQueryItem(name: "device", value: device)]
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         return try await requestEncoded(path, method: "POST", body: change)
     }

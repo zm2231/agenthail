@@ -100,16 +100,49 @@ enum DesktopPalette {
     }
 }
 
+@Observable
+final class TextScale {
+    nonisolated(unsafe) static let shared = TextScale()
+    static let range: ClosedRange<CGFloat> = 0.8...1.6
+    static let step: CGFloat = 0.1
+
+    static let chromeCap: CGFloat = 1.15
+
+    var factor: CGFloat = 1
+    var chrome: CGFloat { min(factor, Self.chromeCap) }
+
+    static func clamped(_ value: CGFloat) -> CGFloat {
+        min(max((value * 20).rounded() / 20, range.lowerBound), range.upperBound)
+    }
+
+    static func stepped(_ value: CGFloat, by steps: Int) -> CGFloat {
+        clamped(value + CGFloat(steps) * step)
+    }
+}
+
 enum DesktopType {
-    static let caption: CGFloat = 11
-    static let meta: CGFloat = 11.5
-    static let secondary: CGFloat = 12
-    static let body: CGFloat = 13
-    static let prose: CGFloat = 14.5
+    private static var scale: CGFloat { TextScale.shared.chrome }
+    static var caption: CGFloat { 11 * scale }
+    static var meta: CGFloat { 11.5 * scale }
+    static var secondary: CGFloat { 12 * scale }
+    static var body: CGFloat { 13 * scale }
+    static var prose: CGFloat { 14.5 * scale }
     /// Extra leading that gives prose a 1.58 line height.
-    static let proseLineSpacing: CGFloat = 6
-    static let title: CGFloat = 15
-    static let display: CGFloat = 20
+    static var proseLineSpacing: CGFloat { 6 * scale }
+    static var title: CGFloat { 15 * scale }
+    static var display: CGFloat { 20 * scale }
+}
+
+/// Transcript text follows the full text size; DesktopType's controls and status stop at TextScale.chromeCap.
+enum ReadingType {
+    private static var scale: CGFloat { TextScale.shared.factor }
+    static var caption: CGFloat { 11 * scale }
+    static var meta: CGFloat { 11.5 * scale }
+    static var secondary: CGFloat { 12 * scale }
+    static var body: CGFloat { 13 * scale }
+    static var prose: CGFloat { 14.5 * scale }
+    static var proseLineSpacing: CGFloat { 6 * scale }
+    static var title: CGFloat { 15 * scale }
 }
 
 enum DesktopSpace {
@@ -127,9 +160,9 @@ enum DesktopColumns {
     /// Wider than the sidebar's max: docked, the window's minimum is twice the sidebar, so the sidebar collapses before it pins the window.
     static let detail = (min: CGFloat(372), ideal: CGFloat(892))
     static let inspector = (min: CGFloat(270), ideal: CGFloat(284), max: CGFloat(300))
-    static let reading: CGFloat = 1040
-    static let wide: CGFloat = 1120
+    static let reading: CGFloat = 720
     static let gutter: CGFloat = 32
+    static let wide: CGFloat = reading + gutter
 
     /// The transcript's column in a pane this wide, and how far a tool run
     /// may reach past its right edge into the gutter.

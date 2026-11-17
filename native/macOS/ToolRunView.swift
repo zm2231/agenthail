@@ -26,7 +26,7 @@ struct ToolRunView: View {
                     opened = rows.choice(!open)
                     rows.set(id, open: !open)
                 } label: {
-                    ToolLineLabel(verb: ToolRunSummary.label(items), object: "", isCode: false, failed: false, failures: failed, trailing: open ? "chevron.down" : "chevron.right")
+                    ToolLineLabel(verb: ToolRunSummary.worked(items), object: ToolRunSummary.label(items), isCode: false, failed: false, failures: failed, trailing: open ? "chevron.down" : "chevron.right")
                 }
                 .buttonStyle(.plain)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
@@ -84,17 +84,17 @@ struct ToolLineLabel: View {
                 .layoutPriority(1)
             if !object.isEmpty {
                 Text(object)
-                    .font(isCode ? .system(size: DesktopType.meta, design: .monospaced) : .system(size: DesktopType.secondary))
+                    .font(isCode ? .system(size: ReadingType.meta, design: .monospaced) : .system(size: ReadingType.secondary))
                     .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.muted)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
             if failed {
                 Text("failed")
-                    .font(.system(size: DesktopType.caption))
+                    .font(.system(size: ReadingType.caption))
             } else if failures > 0 {
                 Text("\(failures) failed")
-                    .font(.system(size: DesktopType.caption))
+                    .font(.system(size: ReadingType.caption))
                     .foregroundStyle(DesktopPalette.failed)
             }
             if let trailing {
@@ -103,7 +103,7 @@ struct ToolLineLabel: View {
                     .foregroundStyle(DesktopPalette.muted)
             }
         }
-        .font(.system(size: DesktopType.secondary))
+        .font(.system(size: ReadingType.secondary))
         .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.text2)
         .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
         .contentShape(Rectangle())
@@ -118,7 +118,7 @@ struct CollapseLine: View {
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: "chevron.up")
-                .font(.system(size: DesktopType.secondary))
+                .font(.system(size: ReadingType.secondary))
                 .foregroundStyle(DesktopPalette.muted)
                 .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
                 .contentShape(Rectangle())
@@ -166,7 +166,7 @@ struct ToolLine: View {
                             ForEach(diffs, id: \.path) { file in
                                 if diffs.count > 1 {
                                     Text(file.change.name)
-                                        .font(.system(size: DesktopType.meta, design: .monospaced))
+                                        .font(.system(size: ReadingType.meta, design: .monospaced))
                                         .foregroundStyle(DesktopPalette.muted)
                                 }
                                 DiffView(id: TranscriptRowID.file(row, path: file.path), hunks: file.hunks)
@@ -176,7 +176,7 @@ struct ToolLine: View {
                     }
                     if results.isEmpty {
                         Text(states[call.id].label)
-                            .font(.system(size: DesktopType.meta))
+                            .font(.system(size: ReadingType.meta))
                             .foregroundStyle(DesktopPalette.muted)
                     }
                     ForEach(results) { result in
@@ -226,7 +226,7 @@ struct ReasoningLine: View {
             if open {
                 VStack(alignment: .leading, spacing: DesktopSpace.xs) {
                     StructuredText(markdown: item.text)
-                        .font(.system(size: DesktopType.body))
+                        .font(.system(size: ReadingType.body))
                         .foregroundStyle(DesktopPalette.text2)
                         .desktopInlineStyle()
                         .textual.textSelection(.enabled)
@@ -294,7 +294,7 @@ struct ToolOutputBlock: View {
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             HStack(spacing: 10) {
                 Text(failed ? "Error output" : "Output")
-                    .font(.system(size: DesktopType.caption, weight: .semibold))
+                    .font(.system(size: ReadingType.caption, weight: .semibold))
                     .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.muted)
                 Spacer()
                 if preview.count < result.text.count {
@@ -307,7 +307,7 @@ struct ToolOutputBlock: View {
                 }
                 Button("Copy output") { copyToPasteboard(result.text) }
             }
-            .font(.system(size: DesktopType.caption))
+            .font(.system(size: ReadingType.caption))
             .buttonStyle(.link)
             if result.text.isEmpty {
                 CodeBlock(text: "The tool returned an empty result.", failed: failed)
@@ -320,7 +320,7 @@ struct ToolOutputBlock: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .font(.system(size: DesktopType.meta, design: .monospaced))
+                .font(.system(size: ReadingType.meta, design: .monospaced))
                 .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.code)
                 .textSelection(.enabled)
                 .padding(DesktopSpace.s)
@@ -335,7 +335,7 @@ struct ToolOutputBlock: View {
                         revealRow($top)
                     }
                 }
-                .font(.system(size: DesktopType.caption))
+                .font(.system(size: ReadingType.caption))
                 .buttonStyle(.link)
             }
             ShortenedNote(item: result)
@@ -383,7 +383,7 @@ struct FileChips: View {
                                 Text("−\(change.removed)").foregroundStyle(DesktopPalette.diffRemoved)
                             }
                         }
-                        .font(.system(size: DesktopType.meta, design: .monospaced))
+                        .font(.system(size: ReadingType.meta, design: .monospaced))
                         .lineLimit(1)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2)
@@ -404,7 +404,7 @@ struct FileChips: View {
                 VStack(alignment: .leading, spacing: 2) {
                     if diffs.count > 1 {
                         Text(file.change.name)
-                            .font(.system(size: DesktopType.meta, design: .monospaced))
+                            .font(.system(size: ReadingType.meta, design: .monospaced))
                             .foregroundStyle(DesktopPalette.muted)
                     }
                     DiffView(id: key(file.path), hunks: file.hunks)
@@ -425,7 +425,7 @@ struct CodeBlock: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: DesktopType.meta, design: .monospaced))
+            .font(.system(size: ReadingType.meta, design: .monospaced))
             .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.code)
             .textSelection(.enabled)
             .lineLimit(lineLimit)
@@ -441,7 +441,7 @@ struct ShortenedNote: View {
     var body: some View {
         if let note = TimelineMetadata.note(item) {
             Text(note)
-                .font(.system(size: DesktopType.caption))
+                .font(.system(size: ReadingType.caption))
                 .foregroundStyle(DesktopPalette.muted)
         }
     }
