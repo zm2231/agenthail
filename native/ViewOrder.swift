@@ -61,6 +61,7 @@ extension ScopePage.View {
             let projects = Set(joined.projects.map(\.id))
             let families = Set(joined.families.map(\.id))
             if !view.families.contains(where: { families.contains($0.id) }) {
+                if let summary = view.summary { joined.summary = (joined.summary ?? ScopePage.Summary()) + summary }
                 for (scope, count) in view.counts {
                     let held = joined.counts[scope] ?? ScopePage.Count(families: 0, sessions: 0)
                     joined.counts[scope] = ScopePage.Count(families: held.families + count.families, sessions: held.sessions + count.sessions)

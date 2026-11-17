@@ -202,7 +202,7 @@ func validCatalogScope(scope string) bool {
 }
 
 func catalogScopeMatches(scope string, row dashboardSession) bool {
-	return ScopeMatches(scope, SessionWorking(row.Status, row.Subagents), row.Current || !row.PinnedAt.IsZero(), row.Archived)
+	return ScopeMatches(scope, SessionWorking(row.Status, row.Subagents) && !presentationNeedsYou(&row), row.Current || !row.PinnedAt.IsZero(), row.Archived)
 }
 
 // SessionWorking reports whether a session or one of its observed subagents is

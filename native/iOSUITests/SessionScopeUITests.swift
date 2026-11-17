@@ -13,11 +13,11 @@ final class SessionScopeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["scope-recent"].isSelected)
 
         let running = app.buttons["scope-running"]
-        XCTAssertTrue(running.label.hasPrefix("Running, "), running.label)
+        XCTAssertTrue(running.label.hasPrefix("Working, "), running.label)
         running.tapWhenReady()
         XCTAssertTrue(running.isSelected)
         XCTAssertTrue(working.waitForExistence(timeout: 5))
-        XCTAssertFalse(idle.exists, "Running lists only working sessions")
+        XCTAssertFalse(idle.exists, "Working lists only working sessions")
         XCTAssertTrue(working.value as? String == "Working", "the ring's status is spoken: \(String(describing: working.value))")
 
         app.buttons["scope-all"].tapWhenReady()

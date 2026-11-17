@@ -101,7 +101,7 @@ struct SidebarRowTest {
         check(pane.renamingSession?.name == "renamed since the row last drew", "Rename acts on the session as it is now, not as the row last drew it: \(pane.renamingSession?.name ?? "nil")")
         actions.adopt()
         check(pane.adoptingSession?.name == "renamed since the row last drew", "Open in Agenthail acts on the session as it is now: \(pane.adoptingSession?.name ?? "nil")")
-        actions.select(keep: false)
+        actions.select()
         check(pane.selectedSessionID == "a", "selecting from a row selects its session")
         withExtendedLifetime(window) {}
     }

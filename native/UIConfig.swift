@@ -130,8 +130,7 @@ struct UIConfig: Codable, Equatable {
     var contrastTarget: Double { number("contrast.target", 4.5) }
 
     var tabs: Bool { text("titlebar.tabs", "sessions") == "sessions" }
-    var tabLabel: String { text("titlebar.tabs.label", "alias-title") }
-    var tabPreview: Bool { text("titlebar.tabs.preview", "on") == "on" }
+    var tabLabel: String { text("titlebar.tabs.label", "alias") }
     var statusItems: [String] { list("statusbar", ["usage", "working", "needs-you", "hosts", "terminal"]) }
 
     var hasBackdrop: Bool { glass && (background != .none || backgroundLight != .none) }

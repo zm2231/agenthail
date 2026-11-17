@@ -31,7 +31,7 @@ func presentationMatches(row *dashboardSession, scope string, now time.Time) boo
 	case "all":
 		return true
 	case "running":
-		return presentationWorking(row)
+		return presentationWorking(row) && !presentationNeedsYou(row)
 	case "current":
 		return presentationCurrent(row)
 	case "recent":
@@ -248,7 +248,7 @@ func countViewFamilies(families []SessionViewFamily) SessionViewCount {
 func (p *sessionViewPlan) summary(families []SessionViewFamily) SessionViewSummary {
 	var result SessionViewSummary
 	for _, family := range families {
-		attention := false
+		attention, working := false, false
 		for _, member := range family.Members {
 			if member.ContextOnly {
 				continue
@@ -256,9 +256,13 @@ func (p *sessionViewPlan) summary(families []SessionViewFamily) SessionViewSumma
 			row := p.rows[member.ID]
 			result.QueuedMessages += row.QueueCount
 			attention = attention || presentationNeedsYou(row)
+			working = working || presentationWorking(row)
 		}
-		if attention {
+		switch {
+		case attention:
 			result.AttentionFamilies++
+		case working:
+			result.WorkingFamilies++
 		}
 	}
 	return result

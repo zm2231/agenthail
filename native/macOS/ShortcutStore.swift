@@ -40,7 +40,6 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case closeTab
     case nextTab
     case previousTab
-    case keepTab
     case composerNewline
     case composerDeleteToLineStart
     case composerDeleteWordBackward
@@ -60,7 +59,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .findSession: "Find session"
         case .previousSession: "Previous session"
         case .nextSession: "Next session"
-        case .showRunning: "Show Running"
+        case .showRunning: "Show Working"
         case .showRecent: "Show Recent"
         case .showAll: "Show All"
         case .showArchived: "Show Archived"
@@ -78,7 +77,6 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .closeTab: "Close tab"
         case .nextTab: "Next tab"
         case .previousTab: "Previous tab"
-        case .keepTab: "Keep tab open"
         case .composerNewline: "New line"
         case .composerDeleteToLineStart: "Delete to start of line"
         case .composerDeleteWordBackward: "Delete previous word"
@@ -123,7 +121,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .composerInterrupt: StoredShortcut(kVK_Escape, 0)
         case .composerStash: StoredShortcut(kVK_ANSI_S, controlKey)
         case .composerSearchHistory: StoredShortcut(kVK_ANSI_R, controlKey)
-        case .rename, .openInNewWindow, .keepTab: nil
+        case .rename, .openInNewWindow: nil
         }
     }
 }

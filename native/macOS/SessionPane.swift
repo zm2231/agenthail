@@ -294,16 +294,62 @@ final class SessionPane: Identifiable {
         return olderItems + ((live ?? detail)?.timeline?.items ?? [])
     }
 
-    /// Shows a session. With tabs, it opens in the preview tab unless kept,
-    /// or switches to the tab it is already in.
-    func select(_ id: String, keep: Bool = false) {
+    func select(_ id: String) {
         let id = model.resolveSessionID(id)
         if tabsEnabled, !closed {
-            changeTabs { $0.open(id, keep: keep, preview: model.interface.config.tabPreview) }
+            leaveNewSession(for: id)
+            let session = model.session(id)
+            changeTabs {
+                $0.open(id)
+                $0.name(id, alias: session?.alias, name: session?.name)
+            }
+            fitTabs()
         } else {
             newSession = nil
         }
         show(id)
+    }
+
+    @ObservationIgnored var tabCapacity = Int.max {
+        didSet { if tabCapacity != oldValue { fitTabs() } }
+    }
+    private(set) var closedTab: ClosedTab?
+    @ObservationIgnored private var closedTabClear: Task<Void, Never>?
+
+    private var newSessionIsEmpty: Bool { newSession?.untouched ?? true }
+
+    private func leaveNewSession(for next: String) {
+        guard next != SessionTabs.newSession, tabs.active == SessionTabs.newSession, newSessionIsEmpty else { return }
+        changeTabs { $0.close(SessionTabs.newSession) }
+    }
+
+    func holdsTab(_ id: String) -> Bool {
+        if id == SessionTabs.newSession { return !newSessionIsEmpty }
+        return model.hasDraft(id) || model.sessionAttention[id] != nil || model.session(id)?.isPinned == true
+    }
+
+    private func fitTabs() {
+        guard tabsEnabled, !closed else { return }
+        let before = tabs.tabs
+        var shut: [String] = []
+        changeTabs { shut = $0.fit(capacity: tabCapacity, holds: holdsTab) }
+        guard let last = shut.last else { return }
+        let stored = before.first { $0.id == last }
+        let title = model.session(last).map { model.title(of: $0) }
+            ?? stored.map { SessionTabs.title(alias: $0.alias, name: $0.name, id: last, label: "alias") } ?? "Untitled conversation"
+        closedTab = ClosedTab(id: last, title: title)
+        closedTabClear?.cancel()
+        closedTabClear = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            self?.closedTab = nil
+        }
+    }
+
+    func reopenClosedTab() {
+        guard let closedTab else { return }
+        self.closedTab = nil
+        select(closedTab.id)
     }
 
     private func changeTabs(_ change: (inout SessionTabs) -> Void) {
@@ -320,9 +366,12 @@ final class SessionPane: Identifiable {
         let fresh = newSession == nil
         if fresh { newSession = NewSessionDraft(model: model, selected: selectedSession) }
         if fresh, let project = model.projects.first(where: { $0.id == scope.projectID }), let checkout = PaneScope.newSessionCheckout(project) {
-            newSession?.place(host: ProjectMenu.host(of: checkout), folder: checkout.rootPath)
+            newSession?.place(host: ProjectMenu.host(of: checkout), folder: checkout.rootPath, byDefault: true)
         }
-        if tabsEnabled { changeTabs { $0.open(SessionTabs.newSession, keep: true) } }
+        if tabsEnabled {
+            changeTabs { $0.open(SessionTabs.newSession) }
+            fitTabs()
+        }
         if let message { newSession?.take(message) }
         clearSelection()
     }
@@ -354,7 +403,11 @@ final class SessionPane: Identifiable {
         let id = model.resolveSessionID(id)
         let shared = newSession?.takeHeld() ?? []
         if tabsEnabled, !closed {
-            changeTabs { $0.replace(SessionTabs.newSession, with: id) }
+            let session = model.session(id)
+            changeTabs {
+                $0.replace(SessionTabs.newSession, with: id)
+                $0.name(id, alias: session?.alias, name: session?.name)
+            }
         } else {
             newSession = nil
         }
@@ -371,12 +424,9 @@ final class SessionPane: Identifiable {
     }
 
     func activateTab(_ id: String) {
+        leaveNewSession(for: id)
         changeTabs { $0.activate(id) }
         showActiveTab()
-    }
-
-    func keepTab(_ id: String) {
-        changeTabs { $0.keep(id) }
     }
 
     func closeTab(_ id: String) {
@@ -393,7 +443,7 @@ final class SessionPane: Identifiable {
         if model.api != nil { unarchived = await model.performNow(action: "session-unarchive", sessionID: session.id) }
         if unarchived {
             if archivedTab?.id == session.id { archivedTab = nil }
-            select(session.id, keep: true)
+            select(session.id)
         } else if archivedTab == nil || archivedTab?.id == session.id {
             archivedTab = session
             archivedTabError = model.api == nil ? "Agenthail isn't connected, so the session stays archived." : model.operationError ?? "The session couldn't be unarchived."
@@ -407,6 +457,7 @@ final class SessionPane: Identifiable {
 
     func stepTab(_ offset: Int) {
         guard let next = tabs.neighbour(offset) else { return }
+        leaveNewSession(for: next)
         changeTabs { $0.activate(next) }
         showActiveTab()
     }
@@ -453,13 +504,16 @@ final class SessionPane: Identifiable {
 
     private func reconcileTabs(_ sessions: [SessionState]) {
         if tabs.tabs.isEmpty, let selected = selectedSessionID {
-            changeTabs { $0.open(selected, keep: true) }
+            changeTabs { $0.open(selected) }
         }
         let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var dropped: [String] = []
         changeTabs {
             dropped = $0.reconcile(resolve: model.resolveSessionID) { id in
                 id == SessionTabs.newSession || byID[id].map { $0.archived != true } == true
+            }
+            for tab in $0.tabs {
+                if let session = byID[tab.id] { $0.name(tab.id, alias: session.alias, name: session.name) }
             }
         }
         if let archived = dropped.lazy.compactMap({ byID[self.model.resolveSessionID($0)] }).first(where: { $0.archived == true }) {
@@ -799,7 +853,6 @@ final class SessionPane: Identifiable {
         let attachments = composerDraft.attachments
         composer = ""
         composerDraft.attachments = []
-        changeTabs { $0.keep(sessionID) }
         model.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery, turnOptions: codex ? composerDraft.turnOptions : nil)
         composerDraft.recordSending(text)
         composerDraft.restoreStashAfterSend()

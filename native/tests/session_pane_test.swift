@@ -80,7 +80,7 @@ struct SessionPaneTest {
         UserDefaults.standard.removeObject(forKey: "sessionTabs")
         let tabbedModel = AgenthailModel(connecting: false)
         let tabbed = tabbedModel.mainPane!
-        tabbed.select("A", keep: true)
+        tabbed.select("A")
         tabbed.openNewSession()
         let new = SessionTabs.newSession
         check(tabbed.tabs.tabs.map(\.id) == ["A", new] && tabbed.tabs.active == new && tabbed.selectedSessionID == nil && tabbed.newSession != nil, "New Session opens its own tab and clears the selection")
@@ -94,12 +94,29 @@ struct SessionPaneTest {
         check(tabbed.selectedSessionID == nil && tabbed.tabs.active == new, "stepping onto the New Session tab shows it")
         tabbed.showStarted("S")
         check(tabbed.tabs.tabs.map(\.id) == ["A", "S"] && tabbed.tabs.active == "S" && tabbed.selectedSessionID == "S" && tabbed.newSession == nil, "a started session takes over the New Session tab")
-        tabbed.keepTab("S")
         let tabReaders = PaneChanges(tabbed) { _ = $0.tabs }
         tabbed.select("S")
-        tabbed.keepTab("S")
         tabbed.activateTab("S")
-        check(tabReaders.count == 0 && tabbed.tabs.active == "S", "reselecting the active kept tab leaves tab readers alone: \(tabReaders.count)")
+        check(tabReaders.count == 0 && tabbed.tabs.active == "S", "reselecting the active tab leaves tab readers alone: \(tabReaders.count)")
+        tabbed.openNewSession()
+        tabbed.activateTab("A")
+        check(!tabbed.tabs.tabs.contains { $0.id == new } && tabbed.selectedSessionID == "A", "an empty New Session tab closes when you leave it: \(tabbed.tabs.tabs.map(\.id))")
+        tabbed.openNewSession()
+        tabbed.newSession?.form.model = "a-model-the-person-picked"
+        tabbed.activateTab("A")
+        check(tabbed.tabs.tabs.contains { $0.id == new } && tabbed.newSession?.form.model == "a-model-the-person-picked", "a New Session with an option the person picked stays when left, without a message: \(tabbed.tabs.tabs.map(\.id))")
+        tabbed.closeTab(new)
+        tabbed.openNewSession(host: nil, folder: "/work/chosen-folder")
+        tabbed.activateTab("A")
+        check(tabbed.tabs.tabs.contains { $0.id == new } && tabbed.newSession?.form.folder == "/work/chosen-folder", "a New Session opened for a project folder stays when left: \(tabbed.tabs.tabs.map(\.id))")
+        tabbed.closeTab(new)
+        tabbed.select("B")
+        tabbed.select("C")
+        tabbed.tabCapacity = 2
+        check(tabbed.tabs.tabs.map(\.id) == ["B", "C"] && tabbed.closedTab?.id == "A", "a full strip closes the least recently used tabs and offers the last one back: \(tabbed.tabs.tabs.map(\.id)) \(String(describing: tabbed.closedTab))")
+        tabbed.reopenClosedTab()
+        check(tabbed.tabs.active == "A" && tabbed.tabs.tabs.count == 2 && tabbed.closedTab?.id == "B", "Reopen brings the tab back and the strip stays full: \(tabbed.tabs.tabs.map(\.id))")
+        tabbed.tabCapacity = .max
         func row(_ id: String) -> SessionState {
             SessionState(id: id, surface: "codex", name: id, alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
         }
@@ -112,6 +129,8 @@ struct SessionPaneTest {
         tabbed.closeTab("S")
         check(tabbed.shownProjectID == "P" && tabbed.selectedSessionID == nil, "closing a tab left the shown project")
         tabbed.showStarted("S")
+        let startedTabs = try! JSONDecoder().decode(SessionTabs.self, from: JSONEncoder().encode(tabbed.tabs))
+        check(startedTabs.tabs.first { $0.id == "S" }?.name == "S", "a started session's tab keeps its name for restoring before the session list arrives: \(startedTabs.tabs)")
         tabbed.showProject("P")
         tabbed.activateTab("A")
         check(tabbed.shownProjectID == nil && tabbed.selectedSessionID == "A", "activating a tab shows its session")
@@ -126,10 +145,10 @@ struct SessionPaneTest {
         tabbed.closeTab("A")
         tabbed.closeTab("S")
         check(tabbed.tabs.tabs.map(\.id) == [new] && tabbed.selectedSessionID == nil && tabbed.newSession?.form.message == "", "closing the last tab leaves a fresh New Session")
-        tabbed.select("A", keep: true)
-        tabbed.select("S", keep: true)
+        tabbed.select("A")
+        tabbed.select("S")
         tabbed.showInbox()
-        check(tabbed.showsInbox && tabbed.selectedSessionID == nil && tabbed.displayedSession == nil && tabbed.tabs.tabs.map(\.id) == [new, "A", "S"], "the Inbox shows in place of the active tab and keeps the tabs")
+        check(tabbed.showsInbox && tabbed.selectedSessionID == nil && tabbed.displayedSession == nil && tabbed.tabs.tabs.map(\.id) == ["A", "S"], "the Inbox shows in place of the active tab and keeps the tabs; the empty New Session tab closed when left")
         tabbedModel.adopt(listed)
         tabbed.reconcile()
         check(tabbed.showsInbox && tabbed.selectedSessionID == nil, "a catalog refresh leaves the Inbox shown")
@@ -203,7 +222,7 @@ struct SessionPaneTest {
         check(scoped.scope == .all && scoped.shownProjectID == "P", "a sidebar project header opens the project without scoping")
         scoped.showAll()
         check(scoped.scope == .all && scoped.shownProjectID == nil, "All closes a project opened from its header")
-        tabbed.select("A", keep: true)
+        tabbed.select("A")
         tabbed.showProject("P")
         tabbed.showAll()
         check(tabbed.shownProjectID == nil && tabbed.selectedSessionID == "A", "with tabs, All closes the project and shows the active tab")
@@ -540,8 +559,8 @@ struct SessionPaneTest {
 
         let restoredTabs = { () -> SessionTabs in
             var tabs = SessionTabs()
-            tabs.open("A", keep: true)
-            tabs.open(SessionTabs.newSession, keep: true)
+            tabs.open("A")
+            tabs.open(SessionTabs.newSession)
             return tabs
         }()
         UserDefaults.standard.set(try! JSONEncoder().encode(restoredTabs), forKey: "sessionTabs")

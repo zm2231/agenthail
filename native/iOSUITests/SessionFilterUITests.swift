@@ -11,8 +11,8 @@ final class SessionFilterUITests: XCTestCase {
         let idle = app.buttons["session-computer::codex-demo"]
         XCTAssertTrue(working.waitForExistence(timeout: 10))
         XCTAssertTrue(idle.exists)
-        for scope in ["Running", "Recent", "All", "Archived"] {
-            let chip = app.buttons["scope-" + scope.lowercased()]
+        for (id, scope) in [("running", "Working"), ("recent", "Recent"), ("all", "All"), ("archived", "Archived")] {
+            let chip = app.buttons["scope-" + id]
             XCTAssertNotNil(chip.label.range(of: "^\(scope), [0-9]+$", options: .regularExpression), "every scope chip says its count: \(chip.label)")
         }
 

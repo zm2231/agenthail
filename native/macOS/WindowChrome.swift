@@ -54,7 +54,12 @@ struct TitleBarStrip: View {
 
     static let height: CGFloat = 40
     static let buttonsWidth = WindowButtons.stripInset + WindowButtons.span + 12
-    private static let minimumTab: CGFloat = 120
+    private static let trailingRoom: CGFloat = 40
+
+    static func capacity(_ width: CGFloat) -> Int {
+        max(Int((width - trailingRoom) / minimumTab), 1)
+    }
+    static let minimumTab: CGFloat = 170
     private static let maximumTab: CGFloat = 240
 
     var body: some View {
@@ -62,8 +67,8 @@ struct TitleBarStrip: View {
             if !pane.sidebarShown { SidebarToggle(pane: pane) }
             GeometryReader { geometry in
                 let tabs = pane.tabs.tabs
-                let fits = max(Int(geometry.size.width / Self.minimumTab), 1)
-                let width = min(max(geometry.size.width / CGFloat(max(tabs.count, 1)), Self.minimumTab), Self.maximumTab)
+                let room = geometry.size.width - Self.trailingRoom
+                let width = min(max(room / CGFloat(max(tabs.count, 1)), Self.minimumTab), Self.maximumTab)
                 HStack(spacing: 2) {
                     ScrollViewReader { reader in
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -79,17 +84,6 @@ struct TitleBarStrip: View {
                             if let active { withAnimation { reader.scrollTo(active) } }
                         }
                     }
-                    if tabs.count > fits {
-                        Menu {
-                            ForEach(tabs) { tab in
-                                Button(SessionTabView.title(model.session(tab.id), id: tab.id, label: interface.config.tabLabel)) { pane.activateTab(tab.id) }
-                            }
-                        } label: {
-                            Text("\(tabs.count - fits) more")
-                        }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-                    }
                     Button { model.openNewSession() } label: { Image(systemName: "plus") }
                         .buttonStyle(.plain)
                         .foregroundStyle(DesktopPalette.text2)
@@ -99,6 +93,25 @@ struct TitleBarStrip: View {
                     Spacer(minLength: 0)
                 }
                 .frame(maxHeight: .infinity)
+                .overlay(alignment: .leading) {
+                    if let closed = pane.closedTab {
+                        Button { pane.reopenClosedTab() } label: {
+                            Text("Closed \(closed.title) · ") + Text("Reopen").foregroundStyle(DesktopPalette.accentText)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, DesktopSpace.s)
+                        .padding(.vertical, DesktopSpace.xs)
+                        .background(.regularMaterial, in: Capsule())
+                        .help("Agenthail closed the least recently used tab to make room")
+                        .transition(.opacity)
+                    }
+                }
+                .onAppear { pane.tabCapacity = Self.capacity(geometry.size.width) }
+                .onChange(of: geometry.size.width) { _, width in pane.tabCapacity = Self.capacity(width) }
             }
             Button { model.paletteVisible.toggle() } label: { Image(systemName: "magnifyingglass") }
                 .buttonStyle(.plain)
@@ -169,19 +182,12 @@ struct SessionTabView: View {
     @State private var hovering = false
 
     static func title(_ session: SessionState?, id: String, label: String) -> String {
-        if id == SessionTabs.newSession { return "New Session" }
-        guard let session else { return id }
-        let alias = session.alias.flatMap { $0.isEmpty ? nil : "@\($0)" }
-        let trimmed = session.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = trimmed.isEmpty || trimmed == session.id || UUID(uuidString: trimmed) != nil ? nil : SessionNames.display(trimmed)
-        let parts: [String?]
-        switch label {
-        case "alias": parts = [alias ?? name]
-        case "title": parts = [name ?? alias]
-        default: parts = [alias, name]
-        }
-        let title = parts.compactMap { $0 }.joined(separator: " ")
-        return title.isEmpty ? "Untitled conversation" : title
+        SessionTabs.title(alias: session?.alias, name: session?.name, id: id, label: label)
+    }
+
+    static func title(_ tab: SessionTabs.Tab, session: SessionState?, label: String) -> String {
+        guard let session else { return SessionTabs.title(alias: tab.alias, name: tab.name, id: tab.id, label: label) }
+        return title(session, id: tab.id, label: label)
     }
 
     var body: some View {
@@ -201,21 +207,10 @@ struct SessionTabView: View {
                     .frame(width: 7, height: 7)
                     .accessibilityHidden(true)
             }
-            Text(Self.title(session, id: tab.id, label: label))
-                .italic(!tab.kept)
+            Text(Self.title(tab, session: session, label: label))
                 .foregroundStyle(active ? DesktopPalette.text : DesktopPalette.text2)
                 .lineLimit(1)
-                .truncationMode(.tail)
-            if let host = session?.remoteHostName {
-                Text(host)
-                    .font(.system(size: DesktopType.caption))
-                    .foregroundStyle(DesktopPalette.text2)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(DesktopPalette.line))
-                    .lineLimit(1)
-                    .fixedSize()
-            }
+                .truncationMode(.middle)
             Spacer(minLength: 0)
             Button { pane.closeTab(tab.id) } label: {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
@@ -231,12 +226,10 @@ struct SessionTabView: View {
             if active { RoundedRectangle(cornerRadius: DesktopRadius.row).fill(DesktopPalette.window.opacity(0.6)) }
         }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { pane.keepTab(tab.id) }
         .onTapGesture { pane.activateTab(tab.id) }
         .onHover { hovering = $0 }
         .contextMenu {
             if !composing {
-                if !tab.kept { Button("Keep Open") { pane.keepTab(tab.id) } }
                 Button("Open in New Window") {
                     pane.closeTab(tab.id)
                     openWindow(id: "session", value: tab.id)
@@ -249,7 +242,7 @@ struct SessionTabView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(active ? [.isSelected, .isButton] : .isButton)
-        .help(session.map { Self.title($0, id: tab.id, label: "alias-title") } ?? "")
+        .help(session.map { session in [Self.title(session, id: tab.id, label: "alias-title"), session.remoteHostName.map { "on \($0)" }].compactMap { $0 }.joined(separator: " ") } ?? "")
     }
 }
 

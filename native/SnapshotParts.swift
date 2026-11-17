@@ -38,8 +38,19 @@ struct ScopePage: Decodable {
         let counts: [String: Count]
     }
 
+    struct Summary: Decodable, Equatable {
+        var queuedMessages = 0
+        var attentionFamilies = 0
+        var workingFamilies = 0
+
+        static func + (lhs: Summary, rhs: Summary) -> Summary {
+            Summary(queuedMessages: lhs.queuedMessages + rhs.queuedMessages, attentionFamilies: lhs.attentionFamilies + rhs.attentionFamilies, workingFamilies: lhs.workingFamilies + rhs.workingFamilies)
+        }
+    }
+
     struct View: Decodable, Equatable {
         var counts: [String: Count]
+        var summary: Summary? = nil
         let surfaces: [Surface]
         var refreshAt: String? = nil
         var projects: [ViewProject]
