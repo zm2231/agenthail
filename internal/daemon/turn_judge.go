@@ -25,14 +25,17 @@ const (
 )
 
 const (
-	judgePromise   = "The `reply` is the agent's final message of its turn; after it the agent stops and does nothing until someone writes again. Does the reply end by promising work the agent says it is starting now or will do next, without waiting for the person, so that stopping here leaves that promise unkept?"
+	judgePromise   = "The `reply` is an AI agent's last message of its turn; after it, the agent stops until someone writes to it. Does it say the agent itself is starting or continuing work right now, so stopping here leaves that work undone?"
 	judgeNeeds     = "Does the `full_reply` ask the person a question or need a decision or action from them before work can continue?"
 	judgeNeedsAt   = "Does the `reply` ask the person a question or need a decision or action from them before work can continue?"
 	judgeSituation = "What is the agent's situation at the end of the `reply`?"
 )
 
+var promiseQuestions = map[string]systemone.Question{
+	"promise": {Type: systemone.TypeNoul, Instructions: judgePromise},
+}
+
 var judgeQuestions = map[string]systemone.Question{
-	"promise":    {Type: systemone.TypeNoul, Instructions: judgePromise},
 	"needs":      {Type: systemone.TypeNoul, Instructions: judgeNeeds},
 	"needs_tail": {Type: systemone.TypeNoul, Instructions: judgeNeedsAt},
 	"state": {Type: systemone.TypeChoice, Instructions: judgeSituation, Criteria: map[string]any{
@@ -45,7 +48,7 @@ var judgeQuestions = map[string]systemone.Question{
 
 type judgeState struct {
 	Reply     string `json:"reply"`
-	FullReply string `json:"full_reply"`
+	FullReply string `json:"full_reply,omitempty"`
 }
 
 type judgeJob struct {
@@ -141,14 +144,20 @@ func (d *Daemon) judgeTurn(ctx context.Context, job judgeJob) {
 	callCtx, cancel := context.WithTimeout(ctx, turnJudgeDeadline)
 	defer cancel()
 	asked := time.Now()
-	answers, err := systemone.Client{Config: config, HTTP: d.judge.http}.Ask(callCtx, judgeState{Reply: judgment.Ending, FullReply: job.reply}, judgeQuestions)
+	client := systemone.Client{Config: config, HTTP: d.judge.http}
+	// The model reads the whole state, and the full reply buries a promise made at the end.
+	promise, err := client.Ask(callCtx, judgeState{Reply: judgment.Ending}, promiseQuestions)
+	var answers map[string]systemone.Answer
+	if err == nil {
+		answers, err = client.Ask(callCtx, judgeState{Reply: judgment.Ending, FullReply: job.reply}, judgeQuestions)
+	}
 	judgment.JudgedAt, judgment.Ms = time.Now().UTC(), time.Since(asked).Milliseconds()
 	if err != nil {
 		d.judge.failed(d, err)
 		judgment.Error = err.Error()
 	} else {
 		d.judge.answered(d)
-		judgment.Promise, judgment.Needs, judgment.NeedsTail = answers["promise"].Noul, answers["needs"].Noul, answers["needs_tail"].Noul
+		judgment.Promise, judgment.Needs, judgment.NeedsTail = promise["promise"].Noul, answers["needs"].Noul, answers["needs_tail"].Noul
 		judgment.State, judgment.StateP = answers["state"].Choice, answers["state"].Probabilities
 	}
 	d.recordTurnJudgment(judgment)
