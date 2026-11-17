@@ -2088,16 +2088,10 @@ struct DetailsTab: View {
                 detailRow("Surface", session.surface.capitalized)
                 if let configRoot = session.claudeConfigRoot {
                     GridRow {
-                        Text("Config folder").foregroundStyle(DesktopPalette.text2)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(configRoot.name)
-                            if let account = configRoot.signedInAs, !account.isEmpty {
-                                Text(account)
-                                    .foregroundStyle(DesktopPalette.text2)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                        }
+                        Text("Account").foregroundStyle(DesktopPalette.text2)
+                        Text(configRoot.signedInAs.flatMap { $0.isEmpty ? nil : $0 } ?? configRoot.name)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         .font(.system(size: DesktopType.body))
                         .textSelection(.enabled)
                     }
@@ -2138,6 +2132,7 @@ struct DetailsTab: View {
                 Button("Compact context") { pane.compactContext() }
                     .disabled(pane.controlPending)
                     .help("Ask the agent to compact its context")
+                    .controlSize(.small)
             }
             if canControl, let stop = session.limitResume {
                 VStack(alignment: .leading) {
@@ -2154,6 +2149,7 @@ struct DetailsTab: View {
                     }
                 }
                 .disabled(pane.controlPending)
+                .controlSize(.small)
             }
             GoalSection(model: model, pane: pane, session: session)
             SessionOperationsSection(model: model, pane: pane, session: session)
