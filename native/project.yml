@@ -137,6 +137,7 @@ targets:
       - path: TranscriptScrimRowLayers.swift
       - path: TranscriptScrimRows.swift
       - path: TranscriptTail.swift
+      - path: PastedText.swift
       - path: TranscriptRowID.swift
       - path: TranscriptFocus.swift
       - path: AgentMessage.swift

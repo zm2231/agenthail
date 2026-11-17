@@ -1449,6 +1449,9 @@ struct ComposerView: View {
     @State private var editor = ComposerEditor()
     @State private var showingSent = false
     @State private var searchingSent = false
+    @State private var composerWidth: CGFloat = 0
+    @State private var chipsWidth: CGFloat = 0
+    private static let composerShare: CGFloat = 0.4
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     private var followUp: FollowUpAction { model.busyDelivery }
@@ -1524,66 +1527,73 @@ struct ComposerView: View {
                             .padding(.horizontal, DesktopSpace.s)
                             .padding(.top, DesktopSpace.s)
                     }
-                    HStack(alignment: .bottom, spacing: DesktopSpace.xs) {
-                        if session.capabilities.attach {
-                            Button(action: chooseAttachments) {
-                                Image(systemName: "paperclip")
-                                    .font(.system(size: DesktopType.body))
-                                    .frame(width: 28, height: 28)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(DesktopPalette.text2)
-                            .help("Attach files or images")
-                            .accessibilityLabel("Attach files or images")
-                        }
-                        ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", lines: ComposerNSTextView.composerLines, onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret in updateCompletion { $0.caret = caret } }, completionKey: completionKey, draftID: session.id) { submit(alternate: false) }
-                            .frame(minHeight: 28)
-                            .padding(.horizontal, DesktopSpace.xs)
-                        HStack(spacing: DesktopSpace.xs) {
-                            TurnSettingChips(pane: pane)
-                            if takesTurnOptions { TurnOptionsChip(draft: draft) }
-                            if !session.sharedHolders.isEmpty {
-                                HolderPicker(model: model, session: session)
-                            }
-                            if draft.stash != nil {
-                                Button {
-                                    if draft.isEmpty { draft.toggleStash() }
-                                    focused = true
-                                } label: {
-                                    Label("Stashed", systemImage: "tray.and.arrow.down")
-                                        .font(.system(size: DesktopType.meta, weight: .medium))
-                                        .foregroundStyle(DesktopPalette.text2)
-                                        .padding(.horizontal, 8)
-                                        .frame(height: 22)
-                                        .overlay(Capsule().strokeBorder(DesktopPalette.line))
+                    (composerWide ? AnyLayout(VStackLayout(alignment: .leading, spacing: DesktopSpace.xs)) : AnyLayout(HStackLayout(alignment: .bottom, spacing: DesktopSpace.xs))) {
+                        HStack(alignment: .bottom, spacing: DesktopSpace.xs) {
+                            if session.capabilities.attach {
+                                Button(action: chooseAttachments) {
+                                    Image(systemName: "paperclip")
+                                        .font(.system(size: DesktopType.body))
+                                        .frame(width: 28, height: 28)
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(!draft.isEmpty)
-                                .help(draft.isEmpty ? shortcuts.help("Bring back the stashed draft", .composerStash) : "The stashed draft comes back after you send")
-                                .accessibilityLabel(draft.isEmpty ? "Bring back the stashed draft" : "A draft is stashed; it comes back after you send")
+                                .foregroundStyle(DesktopPalette.text2)
+                                .help("Attach files or images")
+                                .accessibilityLabel("Attach files or images")
                             }
-                            ComposerContextRing(pane: pane, session: session)
-                            if showsSteerNow {
-                                Button("Steer now") { pane.submit(busyDelivery: FollowUpAction.steer.rawValue) }
-                                    .controlSize(.small)
-                                    .help(shortcuts.help("Change the turn in progress", .sendAlternate))
+                            ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", lines: ComposerNSTextView.composerLines, windowShare: Self.composerShare, onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret in updateCompletion { $0.caret = caret } }, completionKey: completionKey, draftID: session.id) { submit(alternate: false) }
+                                .frame(minHeight: 28)
+                                .padding(.horizontal, DesktopSpace.xs)
+                        }
+                        HStack(spacing: DesktopSpace.xs) {
+                            HStack(spacing: DesktopSpace.xs) {
+                                TurnSettingChips(pane: pane)
+                                if takesTurnOptions { TurnOptionsChip(draft: draft) }
+                                if !session.sharedHolders.isEmpty {
+                                    HolderPicker(model: model, session: session)
+                                }
+                                if draft.stash != nil {
+                                    Button {
+                                        if draft.isEmpty { draft.toggleStash() }
+                                        focused = true
+                                    } label: {
+                                        Label("Stashed", systemImage: "tray.and.arrow.down")
+                                            .font(.system(size: DesktopType.meta, weight: .medium))
+                                            .foregroundStyle(DesktopPalette.text2)
+                                            .padding(.horizontal, 8)
+                                            .frame(height: 22)
+                                            .overlay(Capsule().strokeBorder(DesktopPalette.line))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(!draft.isEmpty)
+                                    .help(draft.isEmpty ? shortcuts.help("Bring back the stashed draft", .composerStash) : "The stashed draft comes back after you send")
+                                    .accessibilityLabel(draft.isEmpty ? "Bring back the stashed draft" : "A draft is stashed; it comes back after you send")
+                                }
+                                ComposerContextRing(pane: pane, session: session)
+                                if showsSteerNow {
+                                    Button("Steer now") { pane.submit(busyDelivery: FollowUpAction.steer.rawValue) }
+                                        .controlSize(.small)
+                                        .help(shortcuts.help("Change the turn in progress", .sendAlternate))
+                                }
                             }
+                            .frame(height: 28)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { chipsWidth = $0 }
+                            if composerWide { Spacer(minLength: 0) }
+                            Button(action: primaryAction) {
+                                SendButtonFace(symbol: primarySymbol, size: primaryIsStop ? 10 : 14, diameter: 28, fill: primaryIsStop ? AnyShapeStyle(DesktopPalette.stop) : AnyShapeStyle(DesktopPalette.accent), enabled: session.isWorking || hasText)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!session.isWorking && !hasText)
+                            .accessibilityLabel(primaryLabel)
+                            .help(primaryHelp)
+                            .keyboardShortcut(shortcuts.keyboardShortcut(.send))
+                            Button("") { submit(alternate: true) }
+                                .keyboardShortcut(shortcuts.keyboardShortcut(.sendAlternate))
+                                .hidden()
+                                .frame(width: 0, height: 0)
                         }
-                        .frame(height: 28)
-                        Button(action: primaryAction) {
-                            SendButtonFace(symbol: primarySymbol, size: primaryIsStop ? 10 : 14, diameter: 28, fill: primaryIsStop ? AnyShapeStyle(DesktopPalette.stop) : AnyShapeStyle(DesktopPalette.accent), enabled: session.isWorking || hasText)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!session.isWorking && !hasText)
-                        .accessibilityLabel(primaryLabel)
-                        .help(primaryHelp)
-                        .keyboardShortcut(shortcuts.keyboardShortcut(.send))
-                        Button("") { submit(alternate: true) }
-                            .keyboardShortcut(shortcuts.keyboardShortcut(.sendAlternate))
-                            .hidden()
-                            .frame(width: 0, height: 0)
                     }
                     .padding(DesktopSpace.xs)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { composerWidth = $0 }
                     Text(statusLine)
                         .font(.system(size: DesktopType.caption))
                         .foregroundStyle(DesktopPalette.text2)
@@ -1649,6 +1659,14 @@ struct ComposerView: View {
         .task(id: session.id) { await model.loadPrompts(for: session.id) }
         .task(id: mentionRequest) { await loadMentionFiles(mentionRequest) }
         .onChange(of: completion.items.map(\.id)) { updateCompletion { $0.highlighted = 0 } }
+    }
+
+    private var composerWide: Bool {
+        let text = draft.text
+        if text.contains("\n") || PastedTextStore.shared.containsMarker(text) { return true }
+        guard composerWidth > 0, !text.isEmpty else { return false }
+        let fixed = 28 + DesktopSpace.xs * 4 + (session.capabilities.attach ? 28 + DesktopSpace.xs : 0)
+        return ComposerNSTextView.lineWidth(text) > composerWidth - chipsWidth - fixed
     }
 
     private var primaryIsStop: Bool { SessionPane.stopAvailable(session, removed: false, draftEmpty: draft.isEmpty) }

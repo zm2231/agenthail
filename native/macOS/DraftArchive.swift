@@ -9,8 +9,8 @@ enum DraftArchive {
         var spooledDrafts: [String: [SpooledAttachment]] = [:]
         var spooledStashes: [String: [SpooledAttachment]] = [:]
         for (session, draft) in drafts {
-            if !draft.text.isEmpty { saved.drafts[session] = draft.text }
-            if let stash = draft.stash, !stash.text.isEmpty { saved.stashes[session] = stash.text }
+            if !draft.text.isEmpty { saved.drafts[session] = PastedTextStore.shared.expand(draft.text) }
+            if let stash = draft.stash, !stash.text.isEmpty { saved.stashes[session] = PastedTextStore.shared.expand(stash.text) }
             let uploaded = draft.attachments.compactMap(\.uploaded)
             if !uploaded.isEmpty { uploads[session] = uploaded }
             let stashed = draft.stash?.attachments.compactMap(\.uploaded) ?? []

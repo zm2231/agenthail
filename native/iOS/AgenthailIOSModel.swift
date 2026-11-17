@@ -1900,7 +1900,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func send(to session: SessionState) {
-        let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = PastedTextStore.shared.expand(composer).trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = composerAttachments
         guard !ComposerAttachments.isEmpty(text: message, attachments: attachments) else { return }
         let kept = RefusedSend(message: message, attachments: attachments)
@@ -2201,8 +2201,9 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             if record == nil { unwritten.append(attachment) }
             return record
         }
-        var saved = ComposerStore.Saved(drafts: drafts, stashes: stashes.mapValues(\.text), sends: sendQueue.pending.values.flatMap { $0 }.map { ComposerStore.Saved.Send($0, spool: spool) })
-        if let selectedSessionID { saved.drafts[selectedSessionID] = composer }
+        let expand = PastedTextStore.shared.expand
+        var saved = ComposerStore.Saved(drafts: drafts.mapValues(expand), stashes: stashes.mapValues { expand($0.text) }, sends: sendQueue.pending.values.flatMap { $0 }.map { ComposerStore.Saved.Send($0, spool: spool) })
+        if let selectedSessionID { saved.drafts[selectedSessionID] = expand(composer) }
         saved.drafts = saved.drafts.filter { !$0.value.isEmpty }
         var names = lostAttachments
         func spooled(_ attachments: [ComposerAttachment], for session: String) -> [SpooledAttachment] {

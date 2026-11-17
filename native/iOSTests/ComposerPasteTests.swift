@@ -79,6 +79,52 @@ final class ComposerPasteTests: XCTestCase {
         XCTAssertTrue(pasted.isEmpty)
     }
 
+    func testALongPasteIsOneTokenThatSendsWhereItWasPasted() async throws {
+        let long = (1 ... 15).map { "line \($0)" }.joined(separator: "\n")
+        UIPasteboard.general.string = long
+        let view = makeTextView()
+        view.paste(nil)
+        view.insertText("Would this be useful for us?")
+        let drafted = view.draftText
+        XCTAssertEqual(view.draftOffset(1), 2, "the caret after the token is after its marker in the draft")
+        let token = try XCTUnwrap(view.textStorage.attribute(.attachment, at: 0, effectiveRange: nil) as? PasteTokenAttachment, "the paste shows as one token")
+        XCTAssertEqual(PastedTextStore.shared.expand(drafted), long + "Would this be useful for us?", "the paste is sent where it was, before the question")
+        view.selectedRange = NSRange(location: 0, length: 1)
+        view.copy(nil)
+        XCTAssertEqual(UIPasteboard.general.string, long, "copying the token copies its text")
+        view.attributedText = view.attributedDraft(drafted)
+        XCTAssertEqual(view.draftText, drafted, "a draft with a token loads back the same")
+        let shown = try XCTUnwrap(view.textStorage.attribute(.attachment, at: 0, effectiveRange: nil) as? PasteTokenAttachment)
+        XCTAssertEqual(shown.marker, token.marker)
+        let undo = try XCTUnwrap(view.undoManager)
+        undo.removeAllActions()
+        undo.groupsByEvent = false
+        defer { undo.groupsByEvent = true }
+        undo.beginUndoGrouping()
+        view.finishEditing(shown, edited: "edited paste")
+        undo.endUndoGrouping()
+        XCTAssertNotEqual(view.draftText, drafted, "an edit changes the draft, so it is saved")
+        XCTAssertEqual(PastedTextStore.shared.expand(view.draftText), "edited paste" + "Would this be useful for us?")
+        undo.undo()
+        XCTAssertEqual(view.draftText, drafted, "undo brings back the pasted text")
+        undo.redo()
+        XCTAssertEqual(PastedTextStore.shared.expand(view.draftText), "edited paste" + "Would this be useful for us?", "redo brings back the edit")
+        view.show(bound: "Another session's draft", sync: ComposerTextSync(""))
+        undo.undo()
+        XCTAssertEqual(view.draftText, "Another session's draft", "an undo from the previous draft does not reach the next one")
+        view.attributedText = view.attributedDraft(drafted)
+        view.draftID = "first"
+        view.selectedRange = NSRange(location: 0, length: view.textStorage.length)
+        undo.beginUndoGrouping()
+        view.cut(nil)
+        undo.endUndoGrouping()
+        XCTAssertEqual(view.draftText, "", "cutting everything leaves an empty draft")
+        view.draftID = "second"
+        undo.undo()
+        XCTAssertEqual(view.draftText, "", "the next session's empty draft stays empty after undo")
+        XCTAssertTrue(pasted.isEmpty)
+    }
+
     func testSpreadsheetCellsThatAlsoOfferAPicturePasteAsText() async {
         UIPasteboard.general.items = [[UTType.utf8PlainText.identifier: "a\tb", UTType.png.identifier: png]]
         let view = makeTextView()

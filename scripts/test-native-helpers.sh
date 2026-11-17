@@ -115,6 +115,7 @@ SOURCES=(
   TranscriptScrimRowLayers.swift
   TranscriptScrimRows.swift
   TranscriptTail.swift
+  PastedText.swift
   TranscriptRowID.swift
   TranscriptFocus.swift
   AgentMessage.swift
@@ -158,6 +159,7 @@ SOURCES=(
   macOS/CatalogPosition.swift
   macOS/ComposerKeys.swift
   macOS/ComposerNSTextView.swift
+  macOS/PasteToken.swift
   macOS/ComposerPaste.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift

@@ -62,7 +62,7 @@ final class ComposerNSTextView: NSTextView {
     /// pass, and resizing or laying out the view there makes AppKit schedule
     /// another constraints pass for every keystroke until the window aborts.
     func fittingHeight(width: CGFloat, lines: ClosedRange<Int>) -> CGFloat {
-        let measured = NSMutableAttributedString(string: string, attributes: [.font: Self.font])
+        let measured = NSMutableAttributedString(attributedString: attributedDraft(draftText))
         if string.isEmpty || string.hasSuffix("\n") { measured.append(NSAttributedString(string: " ", attributes: [.font: Self.font])) }
         let padding = (textContainer?.lineFragmentPadding ?? 0) * 2
         let bounds = measured.boundingRect(with: NSSize(width: max(width - padding - textContainerInset.width * 2, 1), height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading])
@@ -73,9 +73,30 @@ final class ComposerNSTextView: NSTextView {
     override func paste(_ sender: Any?) {
         if let pasteAttachments, let pasted = ComposerAttachments.pasted(from: pasteboard) {
             pasteAttachments(pasted)
+        } else if let text = pasteboard.string(forType: .string), PastedTextStore.isLong(text) {
+            insertPastedText(text)
         } else {
             super.paste(sender)
         }
+    }
+
+    override func copy(_ sender: Any?) {
+        if selectionHasPasteToken { copyExpandedSelection() } else { super.copy(sender) }
+    }
+
+    override func cut(_ sender: Any?) {
+        guard selectionHasPasteToken else { return super.cut(sender) }
+        copyExpandedSelection()
+        insertText("", replacementRange: selectedRange())
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if event.clickCount == 1, let hit = pasteToken(at: point) {
+            editPasteToken(hit.token, range: hit.range, from: hit.rect)
+            return
+        }
+        super.mouseDown(with: event)
     }
 
     static let attachmentDragTypes: [NSPasteboard.PasteboardType] = [.fileURL, .png, .tiff, NSPasteboard.PasteboardType("public.jpeg"), NSPasteboard.PasteboardType("public.heic")]
@@ -189,15 +210,15 @@ final class ComposerNSTextView: NSTextView {
     }
 
     func show(bound text: String, sync: ComposerTextSync) {
-        if let shown = sync.textToShow(bound: text), string != shown { replaceAll(with: shown) }
+        if let shown = sync.textToShow(bound: text), draftText != shown { replaceAll(with: shown) }
     }
 
     // unmarkText would report the composed text to the delegate, which by now writes to the next session's draft.
     func load(_ text: String) {
         if hasMarkedText() { inputContext?.discardMarkedText() }
-        string = text
+        textStorage?.setAttributedString(attributedDraft(text))
         undo.removeAllActions()
-        setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        setSelectedRange(NSRange(location: (string as NSString).length, length: 0))
         scrollRangeToVisible(selectedRange())
     }
 
@@ -206,11 +227,11 @@ final class ComposerNSTextView: NSTextView {
         let range = NSRange(location: 0, length: (string as NSString).length)
         breakUndoCoalescing()
         if shouldChangeText(in: range, replacementString: text) {
-            replaceCharacters(in: range, with: text)
+            textStorage?.replaceCharacters(in: range, with: attributedDraft(text))
             didChangeText()
         }
         breakUndoCoalescing()
-        setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        setSelectedRange(NSRange(location: (string as NSString).length, length: 0))
     }
 
     // A text role the backdrop keeps at contrast.target; the system placeholder colour is too faint over glass.
