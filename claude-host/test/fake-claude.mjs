@@ -134,6 +134,7 @@ let hooks = {};
 async function runHooks(event, input) {
   const outputs = [];
   for (const matcher of hooks[event] ?? []) {
+    if (input.tool_name && matcher.matcher && !new RegExp(`^(?:${matcher.matcher})$`).test(input.tool_name)) continue;
     for (const callback of matcher.hookCallbackIds) {
       const id = `fake-${++requests}`;
       write({ type: 'control_request', request_id: id, request: { subtype: 'hook_callback', callback_id: callback, input: { session_id: sessionId, transcript_path: transcript, cwd: process.cwd(), hook_event_name: event, ...input } } });
@@ -187,6 +188,19 @@ async function turn(message) {
     interrupt = null;
     state('running');
     reply = `checker:${JSON.stringify({ decisions, reported })}`;
+  } else if (text.startsWith('SUBAGENT')) {
+    // A subagent starts inside the turn and tries to end it through Agenthail,
+    // as a fork that inherited the session's note does; then the session
+    // ends it. A call a PreToolUse hook denies never reaches the server.
+    const agent = { agent_id: 'fake-subagent', agent_type: 'fork' };
+    const started = await runHooks('SubagentStart', agent);
+    const reached = [];
+    for (const [who, extra] of [['subagent', agent], ['session', {}]]) {
+      const headline = `from the ${who}`;
+      const outputs = await runHooks('PreToolUse', { tool_name: 'mcp__agenthail__agenthail_end_turn', tool_input: { headline }, tool_use_id: `toolu_${who}`, ...extra });
+      if (!outputs.some((output) => output?.hookSpecificOutput?.permissionDecision === 'deny')) reached.push(headline);
+    }
+    reply = `subagent:${JSON.stringify({ told: started.map((output) => output?.hookSpecificOutput?.additionalContext ?? null), reached })}`;
   } else if (text.startsWith('TOOL')) {
     const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'true' }], behavior: 'allow', destination: 'session' }];
     const decision = await control({ subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'true' }, tool_use_id: 'toolu_fake', title: 'Claude wants to run true', ...(text.includes('ALWAYS') ? { permission_suggestions: suggestions } : {}) });

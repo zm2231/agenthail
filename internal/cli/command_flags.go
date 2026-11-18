@@ -90,6 +90,10 @@ func validateCommandFlags(command string, args []string) error {
 		spec.values = map[string]bool{"--target": true, "--cwd": true, "--project": true}
 		spec.bools = map[string]bool{"--all": true, "--mine": true, "--json": true, "--help": true}
 	}
+	if command == "hook" && len(args) > 0 && args[0] == "subagent" {
+		spec.values = nil
+		spec.bools = map[string]bool{"--host": true}
+	}
 	if command == "relay" && len(args) > 0 && args[0] == "add" {
 		spec.values = map[string]bool{"--when": true}
 		spec.bools = map[string]bool{"--once": true}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"github.com/zm2231/agenthail/internal/claudemcp"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -24,10 +25,12 @@ type Hook struct {
 // prompt. The hook ends on its own once the prompt is settled anywhere, so
 // the limit only matters while the person is away.
 var (
-	Prompt       = Hook{Event: "PermissionRequest", Args: "hook permission-request", Matcher: "*", Timeout: 86400}
-	Start        = Hook{Event: "SessionStart", Args: "hook session-context", Timeout: 10}
-	PromptSubmit = Hook{Event: "UserPromptSubmit", Args: "hook session-context", Timeout: 10}
-	All          = []Hook{Prompt, Start, PromptSubmit}
+	Prompt        = Hook{Event: "PermissionRequest", Args: "hook permission-request", Matcher: "*", Timeout: 86400}
+	Start         = Hook{Event: "SessionStart", Args: "hook session-context", Timeout: 10}
+	PromptSubmit  = Hook{Event: "UserPromptSubmit", Args: "hook session-context", Timeout: 10}
+	SubagentStart = Hook{Event: "SubagentStart", Args: "hook subagent", Timeout: 10}
+	SubagentTool  = Hook{Event: "PreToolUse", Args: "hook subagent", Matcher: "mcp__" + claudemcp.Name + "__.*", Timeout: 10}
+	All           = []Hook{Prompt, Start, PromptSubmit, SubagentStart, SubagentTool}
 )
 
 // The states of Agenthail's hooks in a settings file. An outdated hook is
@@ -109,10 +112,10 @@ func InstallAt(path, executable string) (bool, error) {
 	return true, surface.WriteClaudeSettingsFile(path, updated, mode)
 }
 
-// install moves the hook out of an entry whose matcher narrows it, since
-// that matcher may be another hook's, and Agenthail's hooks run for all.
+// install moves the hook out of an entry whose matcher is not its own, since
+// that matcher may be another hook's.
 func (h Hook) install(data []byte, command string) ([]byte, error) {
-	data, err := h.remove(data, func(entry gjson.Result) bool { return !matchesAll(entry) })
+	data, err := h.remove(data, func(entry gjson.Result) bool { return !h.matches(entry) })
 	if err != nil {
 		return nil, err
 	}
@@ -186,8 +189,11 @@ func RetireAt(path string) (bool, error) {
 	return true, surface.WriteClaudeSettingsFile(path, updated, mode)
 }
 
-func matchesAll(entry gjson.Result) bool {
+func (h Hook) matches(entry gjson.Result) bool {
 	matcher := entry.Get("matcher").String()
+	if h.Matcher != "" && h.Matcher != "*" {
+		return matcher == h.Matcher
+	}
 	return matcher == "" || matcher == "*"
 }
 
@@ -281,7 +287,7 @@ func (h Hook) State(data []byte) string {
 			if !h.Owns(command) {
 				continue
 			}
-			if matchesAll(entry) && strings.HasPrefix(command, execPrefix) && hook.Get("timeout").Int() == h.Timeout {
+			if h.matches(entry) && strings.HasPrefix(command, execPrefix) && hook.Get("timeout").Int() == h.Timeout {
 				return Installed
 			}
 			state = Outdated

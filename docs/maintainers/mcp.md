@@ -141,6 +141,8 @@ Archived sessions are outside every scope. `agenthail_sessions` also lists the p
 
 ## Tools
 
+A Claude subagent shares its session's credential, so inside a subagent Claude is told to refuse every tool that would act in the session's name; only the tools that read or work on this host stay open ([subagents](subagents.md#claude-subagents-and-agenthail-tools)).
+
 | Tool | What it returns |
 | --- | --- |
 | `agenthail_whoami` | The calling session, alias, surface, cwd, host, project, coordinator role, capabilities, ceiling and credential expiry |

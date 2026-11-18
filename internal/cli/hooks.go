@@ -20,6 +20,9 @@ import (
 
 const claudeHookInputLimit = 1 << 20
 
+// claudeHostedEnv is set in the environment of every Claude the Claude host runs.
+const claudeHostedEnv = "AGENTHAIL_CLAUDE_HOSTED"
+
 // claudeSessionContextLimit bounds the session-context hook, registry locks
 // included, well inside the hook's timeout: a prompt never waits on it.
 var claudeSessionContextLimit = 5 * time.Second
@@ -77,13 +80,36 @@ func (a *App) cmdHook(args []string) error {
 		}
 		return nil
 	}
+	if len(args) > 0 && args[0] == "subagent" {
+		if len(args) > 2 || len(args) == 2 && args[1] != "--host" {
+			return errors.New("usage: agenthail hook subagent [--host]")
+		}
+		// A hosted Claude also loads the person's settings; its host runs
+		// this hook itself, with --host.
+		if len(args) == 1 && os.Getenv(claudeHostedEnv) != "" {
+			_, _ = io.Copy(io.Discard, io.LimitReader(os.Stdin, claudeHookInputLimit))
+			return nil
+		}
+		var hook struct {
+			Event    string `json:"hook_event_name"`
+			AgentID  string `json:"agent_id"`
+			ToolName string `json:"tool_name"`
+		}
+		if json.NewDecoder(io.LimitReader(os.Stdin, claudeHookInputLimit)).Decode(&hook) != nil {
+			return nil
+		}
+		if output := claudehooks.SubagentOutput(hook.Event, hook.AgentID, hook.ToolName); output != nil {
+			_ = emit(output)
+		}
+		return nil
+	}
 	// Agenthail no longer installs a Stop hook, but settings an earlier install wrote run this until the daemon or hooks install removes them, so it reads its input and does nothing.
 	if len(args) > 0 && args[0] == "stop" {
 		_, _ = io.Copy(io.Discard, io.LimitReader(os.Stdin, claudeHookInputLimit))
 		return nil
 	}
 	if len(args) != 1 || args[0] != "permission-request" {
-		return errors.New("usage: agenthail hook permission-request|session-context")
+		return errors.New("usage: agenthail hook permission-request|session-context|subagent")
 	}
 	if os.Getenv("CLAUDE_CODE_ENTRYPOINT") != "cli" {
 		return nil
