@@ -16,7 +16,7 @@ Limits, refused as `invalid` with a message the agent can act on: a one-line tit
 - A session an agent or coordinator started asks its hearer (`coordinator.PromptHearer`: the project lead, else its spawner) while that hearer runs. Any other session, a lead's own included, asks the person.
 - The hearer gets one `[agenthail]` message naming the ask id and how to answer: `agenthail_answer {"requestId": "<ask id>", "answers": {...}}` or `agenthail ask answer <id> "<answer>"`, and how to pass it on: `decision: "escalate"` or `agenthail ask escalate <id>`.
 - An ask moves one hop up (to its holder's own hearer, else the person) when the holder escalates it, when the holder stops running, or when it has sat with the holder for `askEscalateMinutes` (dashboard config, default 10). The daemon checks every 30 seconds. The holder's undelivered notice is withdrawn when the ask moves.
-- Only the person or the session the ask is routed to may answer it. An answer is delivered once; a second is refused as stale.
+- Only the person or the session the ask is routed to may answer it. An answer is delivered once; a second is refused as stale. A paired host answers for the session it names in `sourceSessionId`, from `agenthail_answer` or the CLI in that session's shell; the host that holds the ask checks that it is routed to that session and records the answer as that session's. On the same host, `agenthail answer` in an agent's shell names its session the way `send` does (`AGENTHAIL_SESSION_ID`, then `CLAUDE_CODE_SESSION_ID`, then `CODEX_THREAD_ID`), and the answer is that session's under the same check: an agent's answer is never recorded as the person's.
 
 ## Permission requests
 

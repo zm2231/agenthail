@@ -112,6 +112,7 @@ func TestEveryAgentWriteAsksBeforeItActs(t *testing.T) {
 		{[]string{"thread", "adopt", "codex:target"}, "control", "", nil},
 		{[]string{"ledger", "work", "add", "a task", "--project", "repo:github.com/example/other"}, "ledger", "", nil},
 		{[]string{"queue", "codex:target", "hello"}, "send", "queue", nil},
+		{[]string{"answer", "codex:target", "always"}, "answer", "always", nil},
 	}
 	for _, c := range cases {
 		before := len(server.requests())

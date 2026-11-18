@@ -5,11 +5,13 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/apitime"
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -46,23 +48,39 @@ func (d *Daemon) mcpRequests(ctx context.Context, caller *mcpCaller, input mcpRe
 	if err != nil {
 		return nil, err
 	}
+	remote, err := d.mcpVisibleHostSessions(caller, mcpFilterAllVisible)
+	if err != nil {
+		return nil, err
+	}
+	visible = append(visible, remote...)
+	sort.Slice(visible, func(i, j int) bool { return visible[i].order < visible[j].order })
 	rows := []map[string]any{}
 	var reads []waitingRead
 	for i := range visible {
 		session := &visible[i]
-		state, err := d.Registry.SessionWaiting(session.ID)
-		if err != nil || state == nil {
+		id, alias, state, read := session.ID, "", session.WaitingOn, waitingRead{session: &session.Session}
+		if session.host == nil {
+			alias, _ = d.Registry.ReverseAlias(session.ID)
+			if state, err = d.Registry.SessionWaiting(session.ID); err != nil {
+				continue
+			}
+		} else {
+			id, alias = hosts.Qualify(session.host.HostID, session.ID), session.host.Alias
+			read = waitingRead{remoteID: id}
+		}
+		if state == nil {
 			continue
 		}
-		row := map[string]any{"sessionId": session.ID, "kind": string(state.Kind), "requestId": state.ID, "answerable": state.Answerable}
-		if alias, _ := d.Registry.ReverseAlias(session.ID); alias != "" {
+		row := map[string]any{"sessionId": id, "kind": string(state.Kind), "requestId": state.ID, "answerable": state.Answerable}
+		if alias != "" {
 			row["alias"] = alias
 		}
 		if !state.Since.IsZero() {
 			row["since"] = state.Since.UTC().Format(time.RFC3339)
 		}
+		read.requestID = state.ID
 		rows = append(rows, row)
-		reads = append(reads, waitingRead{session: &session.Session, requestID: state.ID})
+		reads = append(reads, read)
 	}
 	d.describeWaiting(ctx, rows, reads)
 	waiting := []map[string]any{}
@@ -80,11 +98,7 @@ func (d *Daemon) mcpRequests(ctx context.Context, caller *mcpCaller, input mcpRe
 }
 
 func (d *Daemon) mcpSessionRequests(ctx context.Context, caller *mcpCaller, ref, requestID string) (any, error) {
-	session, err := d.mcpReadableSession(caller, ref)
-	if err != nil {
-		return nil, err
-	}
-	open, err := d.openRequests(ctx, session)
+	sessionID, open, err := d.mcpSessionOpenRequests(ctx, caller, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +109,7 @@ func (d *Daemon) mcpSessionRequests(ctx context.Context, caller *mcpCaller, ref,
 	if requestID != "" {
 		for _, request := range requests {
 			if request.ID == requestID {
-				reply := map[string]any{"sessionId": session.ID, "permissionMode": mode, "request": requestView(request, mcpItemTextLimit)}
+				reply := map[string]any{"sessionId": sessionID, "permissionMode": mode, "request": requestView(request, mcpItemTextLimit)}
 				if open.providerError != "" {
 					reply["providerError"] = open.providerError
 				}
@@ -119,7 +133,7 @@ func (d *Daemon) mcpSessionRequests(ctx context.Context, caller *mcpCaller, ref,
 		used += len(encoded)
 		views = append(views, view)
 	}
-	reply := map[string]any{"sessionId": session.ID, "permissionMode": mode, "requests": views, "total": len(requests), "truncated": len(views) < len(requests)}
+	reply := map[string]any{"sessionId": sessionID, "permissionMode": mode, "requests": views, "total": len(requests), "truncated": len(views) < len(requests)}
 	if open.providerError != "" {
 		reply["providerError"] = open.providerError
 	}
@@ -132,6 +146,7 @@ const waitingListReads = 6
 
 type waitingRead struct {
 	session   *surface.Session
+	remoteID  string
 	requestID string
 }
 
@@ -154,7 +169,7 @@ func (d *Daemon) describeWaiting(ctx context.Context, rows []map[string]any, rea
 				return
 			}
 			defer func() { <-slots }()
-			if request, ok := d.openRequest(ctx, read.session, read.requestID, false); ok {
+			if request, ok := d.waitingRequest(ctx, read); ok {
 				found[i] = &request
 			}
 		}()
@@ -184,6 +199,21 @@ func (d *Daemon) openRequest(ctx context.Context, session *surface.Session, id s
 	if err != nil {
 		return openRequestView{}, false
 	}
+	return findRequest(open, id)
+}
+
+func (d *Daemon) waitingRequest(ctx context.Context, read waitingRead) (openRequestView, bool) {
+	if read.remoteID == "" {
+		return d.openRequest(ctx, read.session, read.requestID, false)
+	}
+	open, err := d.hostOpenRequests(ctx, read.remoteID)
+	if err != nil {
+		return openRequestView{}, false
+	}
+	return findRequest(open, read.requestID)
+}
+
+func findRequest(open openRequests, id string) (openRequestView, bool) {
 	for _, request := range open.requests {
 		if request.ID == id {
 			return request, true

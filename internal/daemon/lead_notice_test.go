@@ -2,6 +2,9 @@ package daemon
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -238,5 +241,35 @@ func TestAPromptAgenthailCannotAnswerGoesOnlyToThePerson(t *testing.T) {
 	ask := f.tell(t, f.d, f.worker, surface.Waiting{Kind: surface.WaitingQuestion, ID: "unread-1"})
 	if notices := f.notices(t); len(notices) != 0 || ask.RoutedTo != registry.AskToPerson || ask.Answerable {
 		t.Fatalf("ask=%+v notices=%+v", ask, notices)
+	}
+}
+
+func TestALeadsCLIAnswerOnItsOwnHostIsRecordedAsTheLeadNotThePerson(t *testing.T) {
+	f := newNoticeFixture(t)
+	f.setLead(t, "lead")
+	f.tell(t, f.d, f.worker, f.waiting)
+	open, err := f.reg.OpenPermissionAsks(f.worker.ID)
+	if err != nil || len(open) != 1 || open[0].RoutedTo != "lead" {
+		t.Fatalf("open=%+v err=%v, want the prompt routed to the lead", open, err)
+	}
+	handler := f.d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
+	respond := func(source string) *httptest.ResponseRecorder {
+		return postAction(t, handler, map[string]any{"action": "respond", "sessionId": f.worker.ID, "requestId": open[0].ID, "decision": map[string]any{"choices": []string{"allow"}}, "sourceSessionId": source})
+	}
+	if response := respond("spawner"); response.Code != http.StatusForbidden {
+		t.Fatalf("a session the prompt is not routed to answered it from the CLI: %d %s", response.Code, response.Body)
+	}
+	if response := respond("lead"); response.Code != http.StatusOK {
+		t.Fatalf("the lead's CLI answer: %d %s", response.Code, response.Body)
+	}
+	f.d.background.wait()
+	history, err := f.reg.ListHistory(20, f.worker.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(history, func(entry registry.HistoryEntry) bool {
+		return strings.HasPrefix(entry.Kind, "request-") && strings.Contains(entry.Result, "session lead") && !strings.Contains(entry.Result, "dashboard") && !strings.Contains(entry.Result, "cli")
+	}) {
+		t.Fatalf("history=%+v, want the answer recorded as the lead's", history)
 	}
 }
