@@ -446,6 +446,14 @@ The command gets the hook
 input with `agenthail_tools` added: `attached` once the conversation has the
 `agenthail` server, `absent` when it was opened without one or its attach
 failed ([MCP](mcp.md)).
+With `--agenthail` every session also gets a `SubagentStart` callback and a
+`PreToolUse` callback matched to `mcp__agenthail__.*`; for a hook input with
+`agent_id` (one that fires inside a subagent) both run `agenthail hook
+subagent --host` and return its `hookSpecificOutput`, and nothing on any
+failure ([subagents](subagents.md#claude-subagents-and-agenthail-tools)). The
+host sets `AGENTHAIL_CLAUDE_HOSTED=1` in every Claude it runs, and the same
+hook installed in the person's settings prints nothing there, so a hosted
+subagent is told and refused once.
 Where Claude records a conversation's system prompt (the SDK's `snapshot`,
 which the SDK notes is still rolling out and does not apply to every
 provider), it resends the prompt it recorded on every later request and resume

@@ -5,6 +5,11 @@ type Tool struct {
 	Description string
 	// Every byte of an always-loaded tool is in every turn's context.
 	AlwaysLoad bool
+	// Subagents marks a tool a Claude subagent may call inside its session:
+	// it reads, or works on this host, without acting as the session toward
+	// another session or the person. A subagent's call carries its session's
+	// credential, so any other tool would act in that session's name.
+	Subagents bool
 }
 
 const (
@@ -13,25 +18,25 @@ const (
 )
 
 var Tools = []Tool{
-	{Name: "agenthail_whoami", Description: "Your session, alias, project, host, coordinator role, capabilities, ceiling and credential expiry."},
-	{Name: "agenthail_sessions", Description: "Sessions you may read: your own, the ones you spawned, and your project's. Paged; pass nextCursor back as cursor. A session that appears while you page shows up when you list again from the start."},
-	{Name: "agenthail_capabilities", Description: "What you may do: capabilities, ceiling, which sessions you can read, which surfaces you may start, and the output limits."},
-	{Name: "agenthail_requests", Description: "The sessions you can read that are waiting on a prompt or question, or one session's open requests, in one call (prompts clipped to fit; pass requestId for one request's longer prompt). If truncated is true, total says how many there are."},
-	{Name: "agenthail_ledger_read", Description: "Your project's intent ledger: the board, or one list (goals, asks, decisions, questions, work, ready, backlog, triage), paged."},
-	{Name: "agenthail_read", Description: "A session's latest items, older pages through before, newer items through since, or a clipped item's full text through bodyRef. Results are capped at 16 KiB."},
-	{Name: "agenthail_projects", Description: "The projects on this host and its paired hosts, with their coordinators. A project marked conflict has coordinators on two hosts and cannot be reached until one is chosen."},
+	{Name: "agenthail_whoami", Subagents: true, Description: "Your session, alias, project, host, coordinator role, capabilities, ceiling and credential expiry."},
+	{Name: "agenthail_sessions", Subagents: true, Description: "Sessions you may read: your own, the ones you spawned, and your project's. Paged; pass nextCursor back as cursor. A session that appears while you page shows up when you list again from the start."},
+	{Name: "agenthail_capabilities", Subagents: true, Description: "What you may do: capabilities, ceiling, which sessions you can read, which surfaces you may start, and the output limits."},
+	{Name: "agenthail_requests", Subagents: true, Description: "The sessions you can read that are waiting on a prompt or question, or one session's open requests, in one call (prompts clipped to fit; pass requestId for one request's longer prompt). If truncated is true, total says how many there are."},
+	{Name: "agenthail_ledger_read", Subagents: true, Description: "Your project's intent ledger: the board, or one list (goals, asks, decisions, questions, work, ready, backlog, triage), paged."},
+	{Name: "agenthail_read", Subagents: true, Description: "A session's latest items, older pages through before, newer items through since, or a clipped item's full text through bodyRef. Results are capped at 16 KiB."},
+	{Name: "agenthail_projects", Subagents: true, Description: "The projects on this host and its paired hosts, with their coordinators. A project marked conflict has coordinators on two hosts and cannot be reached until one is chosen."},
 	{Name: "agenthail_channel_send", Description: "Post a message to a channel or project, delivered to its members as from you."},
 	{Name: "agenthail_coordinator", Description: "Set or clear a project's coordinator. For the person's voice operator only."},
 	{Name: "agenthail_brief", Description: "Ask a project's lead to catch the person up on everything since the person last wrote to it or its project. For the person's voice operator only."},
 	{Name: "agenthail_archive", Description: "Archive, or restore, a session you spawned or, as coordinator, lead."},
-	{Name: "agenthail_history", Description: "Delivery history, or the queue of instructions waiting to be delivered, newest first and paged. For the person's voice operator only."},
+	{Name: "agenthail_history", Subagents: true, Description: "Delivery history, or the queue of instructions waiting to be delivered, newest first and paged. For the person's voice operator only."},
 	{Name: "agenthail_ledger_write", Description: "Record in your project's intent ledger: attach, clause, question or work, with the fields the CLI's ledger commands take. Recorded as your session."},
 	{Name: "agenthail_create", AlwaysLoad: true, Description: "Start a Claude or Codex session with a first message. It is bounded by your own ceiling: no higher permission mode and no folder outside yours. Sessions nest at most 3 deep, with at most 8 running at once per spawner."},
 	{Name: EndTurn, AlwaysLoad: true, Description: "Call this last in every turn, after your reply. headline is what the person reads in their list and notifications without having followed your work: the outcome in plain words. No ids, PR or round numbers, or commit hashes. Calling it again in the same turn replaces the headline."},
 	{Name: Ask, AlwaysLoad: true, Description: "Put a decision to the person, or to your lead or spawner when an agent started you: they see it in Needs you and answer from any device, and the answer arrives as your next message. Raise it before you end your turn; don't also ask in your reply."},
 	{Name: "agenthail_report", Description: "If your spawner started you as a task, tell it you are done or failed, and the result it should read. The first report settles the task; you can keep working."},
-	{Name: "agenthail_result", AlwaysLoad: true, Description: "A task's state and result, by taskId or child target, for its parent or anyone who can read the child. Long text is clipped to fit."},
-	{Name: "agenthail_wait", AlwaysLoad: true, Description: "Wait until a task settles, its child asks for something, or its goal stops, and say which. Default 600 seconds, at most 3600; a Claude session Agenthail doesn't host waits at most 45, so call again with the cursor. If it times out, the tasks you started are still running, and you get one notice when each settles, so you can end your turn instead of waiting again."},
+	{Name: "agenthail_result", AlwaysLoad: true, Subagents: true, Description: "A task's state and result, by taskId or child target, for its parent or anyone who can read the child. Long text is clipped to fit."},
+	{Name: "agenthail_wait", AlwaysLoad: true, Subagents: true, Description: "Wait until a task settles, its child asks for something, or its goal stops, and say which. Default 600 seconds, at most 3600; a Claude session Agenthail doesn't host waits at most 45, so call again with the cursor. If it times out, the tasks you started are still running, and you get one notice when each settles, so you can end your turn instead of waiting again."},
 	{Name: "agenthail_send", AlwaysLoad: true, Description: "Send a message to a session (target) or to a project's coordinator (project). Queued by default; sessions you spawned or lead can also take mode now. A queued message may go to any session in your project, up to your spawner, or by project to any project's coordinator, attributed to you."},
 	{Name: "agenthail_pr", AlwaysLoad: true, Description: "Link, unlink, watch or unwatch a session's pull request. gh pr create links its own."},
 	{Name: "agenthail_steer", Description: "Steer the running turn of a session you spawned or, as coordinator, lead."},
@@ -43,8 +48,8 @@ var Tools = []Tool{
 	{Name: "agenthail_queue", Description: "Retry or cancel a queued instruction, or clear a session's pending ones. For the person's voice operator only."},
 	{Name: "agenthail_relay", Description: "Add, remove or list relays that pass one session's replies to another. For the person's voice operator only."},
 	{Name: "agenthail_channel", Description: "Create, delete, rename or list channels, and add or remove their members. For the person's voice operator only."},
-	{Name: "agenthail_simulator", Description: "Drive an iOS simulator on a Mac: acquire the iPhone or iPad, install a .app from your outDir, launch it, describe the screen, tap, type, swipe, screenshot, push, set a location, read logs, then release it. Only for iOS app work. acquire says how."},
-	{Name: "agenthail_browser", Description: "A headless browser on your host with your own cookies: open a tab, snapshot its accessibility tree with element refs, read its text and links, scroll, dismiss overlays, screenshot it, and act, wait, answer dialogs, resize, list or close. Use it only when the request asks for browser work or names a page, never to check your own edit unasked. servers lists this host's listening ports and the session that started each; localhost reaches them. open says how to drive it."},
+	{Name: "agenthail_simulator", Subagents: true, Description: "Drive an iOS simulator on a Mac: acquire the iPhone or iPad, install a .app from your outDir, launch it, describe the screen, tap, type, swipe, screenshot, push, set a location, read logs, then release it. Only for iOS app work. acquire says how."},
+	{Name: "agenthail_browser", Subagents: true, Description: "A headless browser on your host with your own cookies: open a tab, snapshot its accessibility tree with element refs, read its text and links, scroll, dismiss overlays, screenshot it, and act, wait, answer dialogs, resize, list or close. Use it only when the request asks for browser work or names a page, never to check your own edit unasked. servers lists this host's listening ports and the session that started each; localhost reaches them. open says how to drive it."},
 }
 
 func Lookup(name string) (Tool, bool) {
@@ -54,4 +59,13 @@ func Lookup(name string) (Tool, bool) {
 		}
 	}
 	return Tool{}, false
+}
+
+func ForSubagents(name string) bool {
+	for _, tool := range Tools {
+		if tool.Name == name {
+			return tool.Subagents
+		}
+	}
+	return false
 }

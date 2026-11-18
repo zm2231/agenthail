@@ -108,6 +108,46 @@ agenthail send @lead/Ada "status?"
 agenthail send @lead/Ada/Euclid "status?"
 ```
 
+## Claude subagents and Agenthail tools
+
+A Claude subagent (the Agent tool's `fork`, `general-purpose`, `Explore` and
+the rest) runs inside its parent's Claude process. It has the parent's
+`agenthail` MCP tools, and every call carries the parent's credential (or, for
+`agenthail mcp stdio`, comes from the parent's process), so the daemon cannot
+tell it from the parent. A fork also inherits the parent's whole context,
+Agenthail's note naming the parent and who it reports to included, and takes
+that note as its own. Left alone, a subagent messages the lead in the parent's
+name and its `agenthail_end_turn` replaces the parent's headline.
+
+Claude marks every hook that fires inside a subagent with `agent_id`, so two
+hooks keep a subagent from acting in the parent's name. Both run
+`agenthail hook subagent` (`claudehooks.SubagentOutput`):
+
+- `SubagentStart` adds `claudehooks.SubagentNote`: the subagent works inside
+  another agent's session, its final message is its result and goes back to
+  that agent, and an earlier Agenthail note in its context describes that
+  agent, not it.
+- `PreToolUse`, matched to `mcp__agenthail__.*`, denies a subagent every
+  Agenthail tool not marked `Subagents` in `internal/agenttools`, with a reason
+  that says to put the result in its final message. Subagents keep the tools
+  that read (`whoami`, `sessions`, `capabilities`, `requests`, `ledger_read`,
+  `read`, `projects`, `history`, `result`, `wait`) and the ones that work on
+  this host (`browser`, `simulator`). A new tool is denied until it is marked.
+
+The main thread's calls carry no `agent_id` and are never touched. A session
+the Claude host runs gets both hooks as SDK callbacks
+([Claude host](claude-host.md)); a terminal Claude gets them from
+`agenthail hooks install` ([agent card](agent-card.md)).
+
+Known limits:
+
+- A subagent that runs `agenthail send` (or any other command) through Bash
+  inherits the parent's environment, `CLAUDE_CODE_SESSION_ID` included, so the
+  CLI acts as the parent. The note asks it not to; nothing refuses it.
+- A terminal Claude whose config root does not have Agenthail's hooks
+  (`agenthail hooks status` reads `missing` or `outdated`) gets neither the
+  note nor the refusals, and its subagents act as the parent.
+
 ## Clients
 
 `agenthail list` prints each subagent below its parent with its nickname and

@@ -259,6 +259,43 @@ process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input
   c.close();
 });
 
+test("a subagent is told it works inside the session and cannot end the session's turn in its name", async () => {
+  const f = fixture();
+  const calls = path.join(f.root, 'agenthail-calls.jsonl');
+  const agenthail = path.join(f.root, 'agenthail');
+  fs.writeFileSync(
+    agenthail,
+    `#!${process.execPath}
+const fs = require('node:fs');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), input }) + '\\n');
+if (process.argv[3] !== 'subagent') process.exit(0);
+if (input.hook_event_name === 'SubagentStart') process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext: 'note for ' + input.agent_id } }));
+if (input.hook_event_name === 'PreToolUse') process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'not in a subagent' } }));
+`,
+    { mode: 0o755 },
+  );
+  await startHost(f, { agenthail });
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'SUBAGENT', origin: { kind: 'human' } });
+  await c.event(turnResult(id, uuid));
+  assert.equal(transcript(f, id)[0].reply, `subagent:${JSON.stringify({ told: ['note for fake-subagent'], reached: ['from the session'] })}`, "only the session's own end of turn reaches Agenthail");
+  const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.args[1] === 'subagent');
+  assert.deepEqual(
+    ran.map((r) => [r.args, r.input.hook_event_name, r.input.agent_id]),
+    [
+      [['hook', 'subagent', '--host'], 'SubagentStart', 'fake-subagent'],
+      [['hook', 'subagent', '--host'], 'PreToolUse', 'fake-subagent'],
+    ],
+    "the session's own tool call does not run the subagent hook",
+  );
+  c.close();
+});
+
 test('the hooks of a session whose agenthail server failed to attach say it has no agenthail tools', async () => {
   const f = fixture();
   const calls = path.join(f.root, 'agenthail-calls.jsonl');

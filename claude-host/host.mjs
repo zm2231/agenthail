@@ -683,8 +683,10 @@ async function open(params) {
         // when asked; the SDK otherwise reads them and drops them. It offers
         // its task tools (TaskCreate, TaskList and the rest) to an SDK
         // session only when asked too, though a terminal session has them;
-        // the host's own environment can still turn them off.
-        env: inRoot(checker ? checkerEnv : { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.mcp ? { CLAUDE_CODE_TERMINAL_MCP_TOOLS: END_TURN_TOOL } : {}) }, params.configDir),
+        // the host's own environment can still turn them off. Agenthail's
+        // hooks in the person's settings stand aside for the host's own
+        // when they see AGENTHAIL_CLAUDE_HOSTED.
+        env: inRoot(checker ? checkerEnv : { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', AGENTHAIL_CLAUDE_HOSTED: '1', ...(params.mcp ? { CLAUDE_CODE_TERMINAL_MCP_TOOLS: END_TURN_TOOL } : {}) }, params.configDir),
         pathToClaudeCodeExecutable: args.claude,
         ...conduct,
         onElicitation: (elicitation, options) => s.elicit(elicitation, options),
@@ -1100,7 +1102,31 @@ function sessionContextHooks(s) {
       child.stdin.on('error', () => {});
       child.stdin.end(JSON.stringify(withAgenthailTools(s, withMessageUUID(s, input))));
     });
-  return { SessionStart: [{ hooks: [run] }], UserPromptSubmit: [{ hooks: [run] }] };
+  return {
+    SessionStart: [{ hooks: [run] }],
+    UserPromptSubmit: [{ hooks: [run] }],
+    SubagentStart: [{ hooks: [subagent] }],
+    PreToolUse: [{ matcher: `mcp__${AGENTHAIL_MCP}__.*`, hooks: [subagent] }],
+  };
+}
+
+// subagent tells a Claude subagent it works inside this session and refuses
+// it the Agenthail tools that would act in the session's name, as the
+// subagent hook does for a terminal Claude. Every failure adds nothing.
+function subagent(input, _toolUseID, { signal }) {
+  if (!input.agent_id) return Promise.resolve({});
+  return new Promise((resolve) => {
+    const child = execFile(args.agenthail, ['hook', 'subagent', '--host'], { signal, timeout: 8_000, maxBuffer: 1 << 20 }, (error, stdout) => {
+      let output;
+      try {
+        output = JSON.parse(stdout)?.hookSpecificOutput;
+      } catch {}
+      if (error || output?.hookEventName !== input.hook_event_name) return resolve({});
+      resolve({ hookSpecificOutput: output });
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(JSON.stringify(input));
+  });
 }
 
 // The hooks teach a conversation by the tools it has, which only the host knows.
