@@ -140,11 +140,15 @@ func (a *App) remoteMatches(ctx context.Context, hostID, target string) ([]remot
 			query.Set("host", hostID)
 		}
 		var answer struct {
-			Matches []remoteTarget `json:"matches"`
-			Errors  []string       `json:"errors"`
+			Matches   []remoteTarget `json:"matches"`
+			Errors    []string       `json:"errors"`
+			Ambiguous []string       `json:"ambiguous"`
 		}
 		if err := client.getJSON(ctx, "/api/v1/resolve", query, &answer); err != nil {
 			return nil, fmt.Errorf("resolve %q on paired hosts: %w", target, err)
+		}
+		if len(answer.Ambiguous) > 0 {
+			return nil, targets.AmbiguousError{Message: fmt.Sprintf("ambiguous target %q: %s", target, strings.Join(answer.Ambiguous, "; "))}
 		}
 		if len(answer.Errors) > 0 {
 			return nil, fmt.Errorf("ambiguous target %q: %s", target, strings.Join(answer.Errors, "; "))

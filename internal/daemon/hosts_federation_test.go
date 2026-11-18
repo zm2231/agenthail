@@ -185,9 +185,12 @@ type federationNode struct {
 // net/http replays a request carrying an Idempotency-Key once on a reused
 // connection, so losing an answer for certain takes two drops.
 type actionGate struct {
-	drops     atomic.Int32
-	truncate  atomic.Int32
-	proxyDown atomic.Bool
+	// oldResolve answers a resolve as a host from before ambiguity carried
+	// candidates: 409 ambiguous_target with no candidates.
+	oldResolve atomic.Bool
+	drops      atomic.Int32
+	truncate   atomic.Int32
+	proxyDown  atomic.Bool
 	// proxyRefusals counts the requests refused while proxyDown is set.
 	proxyRefusals atomic.Int32
 	// snapshotsDown refuses snapshots and catalog streams while the version
@@ -353,6 +356,12 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 		}
 		if r.URL.Path != "/api/v1/version" {
 			n.gate.beyondVersion.Add(1)
+		}
+		if r.URL.Path == "/api/v1/resolve" && n.gate.oldResolve.Load() {
+			identity, _ := n.reg.HostIdentity()
+			w.Header().Set(hosts.ResponseHeader, identity.ID)
+			writeAPIError(w, http.StatusConflict, "ambiguous_target", "ambiguous session target \"laptop\" matches laptop-a, laptop-gadget")
+			return
 		}
 		if r.URL.Path == "/api/v1/catalog-events" {
 			if before := n.gate.beforeGap.Swap(nil); before != nil {

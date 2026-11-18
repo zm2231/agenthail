@@ -12,6 +12,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+type AmbiguousTargetError struct {
+	Message    string
+	Candidates []string
+}
+
+func (e AmbiguousTargetError) Error() string { return e.Message }
+
 func (r *Registry) CanonicalSession(ref string) (id, hostID string, found bool, err error) {
 	err = r.read.QueryRow(`SELECT id,host_id FROM sessions WHERE id=?`, ref).Scan(&id, &hostID)
 	if err == nil {
@@ -80,7 +87,7 @@ func (r *Registry) resolveTarget(target, kind string) (string, error) {
 		return "", sql.ErrNoRows
 	}
 	if len(ids) > 1 {
-		return "", fmt.Errorf("ambiguous session target %q matches %s", target, strings.Join(ids, ", "))
+		return "", AmbiguousTargetError{Message: fmt.Sprintf("ambiguous session target %q matches %s", target, strings.Join(ids, ", ")), Candidates: ids}
 	}
 	return ids[0], nil
 }
@@ -138,7 +145,7 @@ func (r *Registry) IDPrefixTarget(kind surface.SurfaceKind, prefix string) (stri
 	case len(ids) == 0:
 		return "", sql.ErrNoRows
 	case len(ids) > 1:
-		return "", fmt.Errorf("ambiguous session id prefix %q matches %s", prefix, strings.Join(ids, ", "))
+		return "", AmbiguousTargetError{Message: fmt.Sprintf("ambiguous session id prefix %q matches %s", prefix, strings.Join(ids, ", ")), Candidates: ids}
 	}
 	return ids[0], nil
 }
@@ -220,7 +227,7 @@ func (r *Registry) resolveSubagentPath(path string) (string, error) {
 			return "", fmt.Errorf("subagent target %q: %s has no subagent %q", "@"+path, current, segment)
 		}
 		if len(matches) > 1 {
-			return "", fmt.Errorf("ambiguous subagent target %q: %q matches %s; use a subagent ID", "@"+path, segment, strings.Join(matches, ", "))
+			return "", AmbiguousTargetError{Message: fmt.Sprintf("ambiguous subagent target %q: %q matches %s; use a subagent ID", "@"+path, segment, strings.Join(matches, ", ")), Candidates: matches}
 		}
 		current = matches[0]
 	}

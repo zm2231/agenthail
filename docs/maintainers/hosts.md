@@ -433,7 +433,11 @@ Each viewing Mac shows its own desktop notification.
 
 `host::target` resolves `target` on that host. A target without a host is
 resolved on this host and on every paired host. One match is used, more than
-one is an error listing each `host::target`, never a pick. With the daemon
+one is an error listing each `host::target`, never a pick. A paired host
+that finds several of its own sessions for the name answers 409
+`ambiguous_target` with a `candidates` list, and agent tools refuse that as
+`invalid`, not retryable. A 409 without `candidates` comes from a host that
+answers any resolver failure that way, so it stays a retryable refusal. With the daemon
 stopped, the CLI still checks mirrored rows by exact id and alias so a local
 match cannot shadow a remote one silently.
 

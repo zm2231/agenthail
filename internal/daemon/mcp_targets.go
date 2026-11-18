@@ -42,6 +42,9 @@ func (d *Daemon) mcpTargets(caller *mcpCaller) targets.Resolver[*surface.Session
 				candidates = []*pairedHost{host}
 			}
 			answer := d.resolveRemote(ctx, candidates, target)
+			if len(answer.Ambiguous) > 0 {
+				return nil, targets.AmbiguousError{Message: fmt.Sprintf("ambiguous target %q: %s", target, strings.Join(answer.Ambiguous, "; "))}
+			}
 			if len(answer.Errors) > 0 {
 				return nil, fmt.Errorf("ambiguous target %q: %s", target, strings.Join(answer.Errors, "; "))
 			}
