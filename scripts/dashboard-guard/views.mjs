@@ -57,24 +57,31 @@ export const VIEWS = [
 
 const LOADED = { full: "#usage-line .usage-chip" };
 
+let reached = () => {};
+
+export function onStep(listener) {
+  reached = listener;
+}
+
 export async function openView(page, dashboard, view) {
-  await page.goto("about:blank");
-  await page.goto(`${dashboard.url}/#${view.hash}`, { waitUntil: "load" });
-  await page.waitForFunction(() => document.querySelector("#daemon-status")?.textContent !== "Connecting");
-  await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; }" });
-  if (LOADED[view.dashboard]) await page.waitForSelector(LOADED[view.dashboard]);
-  if (view.act) await view.act(page);
-  if (view.ready) await page.waitForSelector(view.ready, { visible: true });
+  await step(page, "open blank", () => page.goto("about:blank"));
+  await step(page, "open load", () => page.goto(`${dashboard.url}/#${view.hash}`, { waitUntil: "load" }));
+  await step(page, "open connect", () => page.waitForFunction(() => document.querySelector("#daemon-status")?.textContent !== "Connecting"));
+  await step(page, "open no transitions", () => page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; }" }));
+  if (LOADED[view.dashboard]) await step(page, "open loaded", () => page.waitForSelector(LOADED[view.dashboard]));
+  if (view.act) await step(page, "open act", () => view.act(page));
+  if (view.ready) await step(page, "open ready", () => page.waitForSelector(view.ready, { visible: true }));
   await settle(page);
 }
 
 const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
-async function step(name, run) {
+export async function step(page, name, run) {
+  reached(page, name);
   try {
     return await run();
   } catch (error) {
-    throw new Error(`settle ${name}: ${error.message}`);
+    throw new Error(`${name}: ${error.message}`);
   }
 }
 
@@ -103,18 +110,18 @@ const SETTLE_PASSES = 20;
 export async function settle(page) {
   let previous = null;
   for (let pass = 1; pass <= SETTLE_PASSES; pass++) {
-    await step("frames", () => page.evaluate(frames));
-    await step("ui", () => page.waitForSelector("html[data-ui-settled]"));
-    await step("fonts", () => page.evaluate(() => document.fonts.ready.then(() => {})));
-    await step("backdrop", () => page.evaluate(backdropDecoded));
-    await step("animations", () =>
+    await step(page, "settle frames", () => page.evaluate(frames));
+    await step(page, "settle ui", () => page.waitForSelector("html[data-ui-settled]"));
+    await step(page, "settle fonts", () => page.evaluate(() => document.fonts.ready.then(() => {})));
+    await step(page, "settle backdrop", () => page.evaluate(backdropDecoded));
+    await step(page, "settle animations", () =>
       page.evaluate(async () => {
         const running = document.getAnimations().filter((animation) => animation.playState === "running" && Number.isFinite(animation.effect?.getComputedTiming().endTime));
         await Promise.all(running.map((animation) => animation.finished.catch(() => {})));
       }),
     );
-    await step("frames", () => page.evaluate(frames));
-    const state = await step("state", () => page.evaluate(pageState));
+    await step(page, "settle frames", () => page.evaluate(frames));
+    const state = await step(page, "settle state", () => page.evaluate(pageState));
     if (state === previous && JSON.parse(state).settled) return;
     previous = state;
   }
