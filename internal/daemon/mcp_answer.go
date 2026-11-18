@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -58,7 +59,14 @@ func (d *Daemon) mcpAnswerOnHost(ctx context.Context, caller *mcpCaller, input m
 		return nil, missing
 	}
 	_, remote, err := d.mcpTargets(caller).Resolve(ctx, strings.TrimSpace(input.SessionID))
-	if err != nil || remote == nil || !remote.Exact {
+	if err != nil {
+		var refusal *mcpRefusal
+		if failure := mcpTargetRefusal(err); !errors.As(failure, &refusal) || refusal.Code != "not_found" {
+			return nil, failure
+		}
+		return nil, missing
+	}
+	if remote == nil || !remote.Exact {
 		return nil, missing
 	}
 	if choice != askEscalate && !caller.has("requests.answer") {

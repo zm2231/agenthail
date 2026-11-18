@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -29,6 +30,10 @@ type resolveMatch struct {
 type resolveResponse struct {
 	Matches []resolveMatch `json:"matches"`
 	Errors  []string       `json:"errors,omitempty"`
+	// Ambiguous holds the hosts that named several sessions for the target;
+	// Errors holds 409s without candidates, which a host that predates
+	// candidates sends for any failure.
+	Ambiguous []string `json:"ambiguous,omitempty"`
 }
 
 func (d *Daemon) apiResolveHandler(w http.ResponseWriter, r *http.Request) {
@@ -61,8 +66,12 @@ func (d *Daemon) apiResolveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	matches, err := d.resolveLocal(ctx, target)
+	if ambiguous := (registry.AmbiguousTargetError{}); errors.As(err, &ambiguous) {
+		writeAPIErrorWith(w, http.StatusConflict, "ambiguous_target", err.Error(), map[string]any{"candidates": ambiguous.Candidates})
+		return
+	}
 	if err != nil {
-		writeAPIError(w, http.StatusConflict, "ambiguous_target", err.Error())
+		writeAPIError(w, http.StatusInternalServerError, "resolve_failed", err.Error())
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, resolveResponse{Matches: matches})
@@ -141,7 +150,12 @@ func (d *Daemon) resolveRemote(ctx context.Context, candidates []*pairedHost, ta
 			}
 			var status hosts.StatusError
 			if errors.As(err, &status) && status.Status == http.StatusConflict {
-				result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", host.record.Name, status.Message))
+				line := fmt.Sprintf("%s: %s", host.record.Name, status.Message)
+				if status.Code == "ambiguous_target" && len(status.Candidates) > 0 {
+					result.Ambiguous = append(result.Ambiguous, line)
+				} else {
+					result.Errors = append(result.Errors, line)
+				}
 				continue
 			}
 		}

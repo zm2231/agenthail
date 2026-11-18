@@ -103,6 +103,7 @@ type StatusError struct {
 	Code        string
 	Message     string
 	MovedToHost string
+	Candidates  []string
 }
 
 func (e StatusError) Error() string {
@@ -293,11 +294,12 @@ func ReadResponse(response *http.Response) ([]byte, error) {
 			Code    string `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
-		MovedToHost string `json:"movedToHost"`
+		MovedToHost string   `json:"movedToHost"`
+		Candidates  []string `json:"candidates"`
 	}
 	statusErr := StatusError{Status: response.StatusCode}
 	if json.Unmarshal(body, &envelope) == nil && envelope.Error.Message != "" {
-		statusErr.Code, statusErr.Message, statusErr.MovedToHost = envelope.Error.Code, envelope.Error.Message, envelope.MovedToHost
+		statusErr.Code, statusErr.Message, statusErr.MovedToHost, statusErr.Candidates = envelope.Error.Code, envelope.Error.Message, envelope.MovedToHost, envelope.Candidates
 	} else {
 		statusErr.Message = strings.TrimSpace(string(body))
 	}

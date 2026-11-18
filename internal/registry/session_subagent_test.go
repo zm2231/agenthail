@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -102,7 +103,7 @@ func TestResolveTargetWalksSubagentPaths(t *testing.T) {
 		}
 	}
 	_, err := r.ResolveTarget("@chief/bo")
-	if err == nil || !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "child-bo, child-bo-2") {
+	if ambiguous := (AmbiguousTargetError{}); !errors.As(err, &ambiguous) || !reflect.DeepEqual(ambiguous.Candidates, []string{"child-bo", "child-bo-2"}) || !strings.Contains(err.Error(), "child-bo, child-bo-2") {
 		t.Fatalf("a nickname shared by two siblings is ambiguous: %v", err)
 	}
 }
