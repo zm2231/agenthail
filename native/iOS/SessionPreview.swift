@@ -597,7 +597,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             let id = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value ?? "demo"
             let detail = SessionPreview.previewDetailJSON.replacingOccurrences(of: "\"id\":\"demo\"", with: "\"id\":\"\(id)\"")
             let older = SessionPreview.servesOlderPage && requestQuery.contains { $0.name == "timelineBefore" && $0.value != "0" }
-            body = SessionPreview.servesOlderPage ? SessionPreview.olderPageDetail(base: detail, older: older) : detail
+            body = SessionPreview.servesOlderPage ? SessionPreview.olderPageDetail(base: detail, older: older) : SessionPreview.showsLinks ? SessionPreview.linksDetail(base: detail) : detail
         default: status = 503; body = #"{"error":{"message":"This public preview does not execute actions."}}"#
         }
         }

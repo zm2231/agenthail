@@ -1,4 +1,5 @@
 import SwiftUI
+import Textual
 
 enum TranscriptContext {
     static func title(for item: TimelineItem) -> String? {
@@ -50,7 +51,7 @@ struct TranscriptDocument: View {
                             .font(.footnote).foregroundStyle(PhonePalette.muted)
                     }
                     if markdown { SessionMarkdown(text: text) }
-                    else { Text(text).font(.body).lineSpacing(4).textSelection(.enabled) }
+                    else { InlineText(text, parser: .linkedPlain).font(.body).lineSpacing(4).phoneInlineStyle().textual.textSelection(.enabled) }
                 }
                 .readingTypeSize()
                 .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)

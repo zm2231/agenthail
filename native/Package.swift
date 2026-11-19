@@ -136,6 +136,8 @@ let package = Package(
                 "LeadCrew.swift",
                 "LedgerReady.swift",
                 "AgentMessage.swift",
+                "TranscriptLinks.swift",
+                "LinkedMarkdownParser.swift",
                 "ClampedText.swift",
                 "TurnClock.swift",
                 "TimelineMetadata.swift",

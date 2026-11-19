@@ -1,4 +1,5 @@
 import SwiftUI
+import Textual
 import UIKit
 
 enum AgentFoldGroups {
@@ -38,7 +39,7 @@ struct IOSAgentMessageRow: View {
     @Environment(\.expandAgentMessages) private var expandAll
 
     private var files: [AttachedFile] { item.files ?? [] }
-    private var expandable: Bool { truncated || !files.isEmpty }
+    private var expandable: Bool { truncated || !files.isEmpty || TranscriptLinks.hasAddress(item.text) }
     private var expanded: Bool { expandAll || (rows.current(opened) ?? rows.isOpen(TranscriptRowID.item(item.id)) ?? false) }
     private var chip: String { agentChip(item, agent) }
 
@@ -159,10 +160,11 @@ struct IOSAgentSendRow: View {
             .accessibilityValue(message.isEmpty ? "" : expanded ? "Expanded" : "Collapsed")
             .accessibilityIdentifier("agent-send-" + call.id)
             if expanded {
-                Text(message)
+                InlineText(message, parser: .linkedPlain)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                    .phoneInlineStyle()
+                    .textual.textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 20)
             }

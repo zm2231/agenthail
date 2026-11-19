@@ -1,4 +1,5 @@
 import SwiftUI
+import Textual
 
 struct AgentMessageRow: View {
     let id: String
@@ -11,7 +12,7 @@ struct AgentMessageRow: View {
     @Environment(\.expandAgentMessages) private var expandAll
 
     private var files: [AttachedFile] { entry.item.files ?? [] }
-    private var expandable: Bool { truncated || !files.isEmpty }
+    private var expandable: Bool { truncated || !files.isEmpty || TranscriptLinks.hasAddress(entry.item.text) }
     private var expanded: Bool { expandAll || (rows.current(opened) ?? rows.isOpen(id) ?? false) }
 
     var body: some View {
@@ -20,11 +21,12 @@ struct AgentMessageRow: View {
             if expanded {
                 VStack(alignment: .leading, spacing: DesktopSpace.s) {
                     if !entry.item.text.isEmpty {
-                        Text(entry.item.text)
+                        InlineText(entry.item.text, parser: .linkedPlain)
                             .font(.system(size: ReadingType.prose))
                             .lineSpacing(ReadingType.proseLineSpacing)
                             .foregroundStyle(DesktopPalette.text)
-                            .textSelection(.enabled)
+                            .desktopInlineStyle()
+                            .textual.textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     ForEach(Array(files.enumerated()), id: \.offset) { _, file in AttachedFileChip(file: file) }
@@ -147,11 +149,12 @@ struct AgentSendRow: View {
             .accessibilityLabel("Sent to \(entry.agent.chip): \(entry.agent.summary)\(entry.failed ? ", failed" : "")")
             .accessibilityValue(message.isEmpty ? "" : expanded ? "Expanded" : "Collapsed")
             if expanded {
-                Text(message)
+                InlineText(message, parser: .linkedPlain)
                     .font(.system(size: ReadingType.body))
                     .lineSpacing(4)
                     .foregroundStyle(DesktopPalette.text2)
-                    .textSelection(.enabled)
+                    .desktopInlineStyle()
+                    .textual.textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, DesktopSpace.l)
             }

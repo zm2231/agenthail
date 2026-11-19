@@ -30,7 +30,7 @@ struct SessionMarkdown: View {
     var textStyle: Font.TextStyle = .body
 
     var body: some View {
-        StructuredText(markdown: text)
+        StructuredText(text, parser: .linkedMarkdown)
             .font(.system(textStyle, design: readingStyle ? .serif : .default))
             .phoneInlineStyle()
             .textual.headingStyle(TranscriptHeadingStyle())

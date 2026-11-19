@@ -32,7 +32,7 @@ struct AuditEventRow: View {
             .foregroundStyle(DesktopPalette.accentText)
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             if expanded {
-                StructuredText(markdown: AuditFacts.content(entry))
+                StructuredText(AuditFacts.content(entry), parser: .linkedMarkdown)
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.text)
                     .desktopInlineStyle()
