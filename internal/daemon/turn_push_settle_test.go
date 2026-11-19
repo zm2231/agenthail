@@ -26,6 +26,15 @@ func captureLog(d *Daemon) *lockedLog {
 	return captured
 }
 
+func pendingTurns(d *Daemon, sessionID string) []string {
+	d.turnPushes.mu.Lock()
+	defer d.turnPushes.mu.Unlock()
+	if entry := d.turnPushes.pending[sessionID]; entry != nil {
+		return append([]string(nil), entry.turns...)
+	}
+	return nil
+}
+
 func startTurn(t *testing.T, d *Daemon, fake *daemonSurface, session *surface.Session, turnID string) {
 	t.Helper()
 	fake.observations[session.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: turnID}
@@ -71,7 +80,9 @@ func TestATurnEndedWithAHeadlinePushesOnceWhenItsVerdictLands(t *testing.T) {
 	pushes := newPushRecorder(t, r)
 
 	runTurn(t, d, fake, &from, "turn-1", "Parser fixed and tests pass", "Parser fixed. Tests pass.")
-	time.Sleep(200 * time.Millisecond)
+	if turns := pendingTurns(d, from.ID); len(turns) != 1 || turns[0] != "turn-1" {
+		t.Fatalf("the turn's push is not waiting for its verdict: %v", turns)
+	}
 	if count := pushes.count("turn.completed"); count != 0 {
 		t.Fatalf("the turn pushed %d times before its verdict landed", count)
 	}
@@ -174,7 +185,7 @@ func TestALateVerdictSendsOnlyNeedsYouInPlaceOfTheDeadlinePush(t *testing.T) {
 	if len(finished) != 1 || len(needs) != 1 || finished[0]["collapseId"] == "" || finished[0]["collapseId"] != needs[0]["collapseId"] {
 		t.Fatalf("a late needs-you verdict does not replace the deadline push: %+v %+v", finished, needs)
 	}
-	if lines := settledLines(logged); len(lines) != 1 || !strings.Contains(lines[0], "reason=deadline") {
+	if lines := settledLines(logged); len(lines) != 2 || !strings.Contains(lines[0], "turns=turn-1 reason=deadline event=turn.completed") || !strings.Contains(lines[1], "turns=turn-1 reason=verdict event=turn.needs_you") {
 		t.Fatalf("settled log %q", lines)
 	}
 
@@ -188,5 +199,79 @@ func TestALateVerdictSendsOnlyNeedsYouInPlaceOfTheDeadlinePush(t *testing.T) {
 	waitJudged(t, d, from.ID, "turn-2")
 	if count := pushes.count("turn.completed"); count != 2 {
 		t.Fatalf("a late done verdict pushed again: %d finished pushes", count)
+	}
+}
+
+func TestAVerdictLandingBeforeTheTurnsPushIsSetUpStillSettlesIt(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	pushes := newPushRecorder(t, r)
+	notice := turnCompletedNotice{desktop: "from done", mobile: "from done: Shipped", outcome: turnOutcomeFinished}
+
+	d.turnJudgmentQueued(from.ID, "turn-1")
+	d.needsYouTakesTurnPush(from.ID, "turn-1")
+	d.scheduleTurnPush(from.ID, "turn-1", notice)
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 0 || pendingTurns(d, from.ID) != nil {
+		t.Fatalf("a turn whose needs-you verdict landed first pushed finished %d times, pending %v", count, pendingTurns(d, from.ID))
+	}
+
+	d.turnJudgmentQueued(from.ID, "turn-2")
+	d.turnVerdictLanded(from.ID, "turn-2")
+	d.scheduleTurnPush(from.ID, "turn-2", notice)
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 1 {
+		t.Fatalf("a turn whose done verdict landed first pushed %d times", count)
+	}
+}
+
+func TestAFiredDeadlineDoesNotSendAPushPausedByANewTurn(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	pushes := newPushRecorder(t, r)
+	d.turnJudgmentQueued(from.ID, "turn-1")
+	d.scheduleTurnPush(from.ID, "turn-1", turnCompletedNotice{desktop: "from done", mobile: "from done", outcome: turnOutcomeFinished})
+	d.turnPushes.mu.Lock()
+	entry := d.turnPushes.pending[from.ID]
+	d.turnPushes.mu.Unlock()
+	if entry == nil {
+		t.Fatal("the push did not wait for its verdict")
+	}
+
+	d.pauseTurnPush(from.ID)
+	d.settleTurnPush(from.ID, entry, settledOnDeadline)
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 0 {
+		t.Fatalf("a deadline that fired as a new turn began sent %d pushes", count)
+	}
+}
+
+func TestAMessageDeliveredBeforeTheNextTurnIsSeenHoldsTheVerdictsPush(t *testing.T) {
+	stub := &judgeStub{state: turnDone, hold: make(chan struct{})}
+	d, r, fake, from := judgeFixture(t, stub, "")
+	pushes := newPushRecorder(t, r)
+
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
+	d.observeSession(d.background.ctx, fake, &from)
+	startTurn(t, d, fake, &from, "turn-1")
+	if err := r.QueueMessage(from.ID, "one more thing"); err != nil {
+		t.Fatal(err)
+	}
+	endTurnWithHeadline(t, d, fake, &from, "turn-1", "First pass done", "Done.")
+	if r.QueueCount(from.ID) != 0 {
+		t.Fatal("the queued message was not delivered when the turn ended")
+	}
+	if runtime, _, _ := r.RuntimeState(from.ID); runtime.LastStatus != surface.StatusBusy {
+		t.Fatalf("the delivery did not record the follow-up turn as running: %+v", runtime)
+	}
+
+	close(stub.hold)
+	waitJudged(t, d, from.ID, "turn-1")
+	if count := pushes.count("turn.completed"); count != 0 {
+		t.Fatalf("the first turn's verdict pushed %d times while its follow-up ran", count)
+	}
+	endTurnWithHeadline(t, d, fake, &from, "turn-2", "Follow-up handled", "Handled.")
+	waitJudged(t, d, from.ID, "turn-2")
+	finished := pushes.all("turn.completed")
+	if len(finished) != 1 || finished[0]["turnId"] != "turn-2" || !strings.HasSuffix(finished[0]["message"], ": Follow-up handled") {
+		t.Fatalf("the burst pushed %+v", finished)
 	}
 }

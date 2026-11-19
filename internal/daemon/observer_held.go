@@ -61,10 +61,10 @@ func (d *Daemon) releaseUnobservedHold(ctx context.Context, adapter surface.Surf
 			d.resumeTurnPush(session.ID)
 		case noticed.quiet:
 			d.recordCompletion(session, turnID, false, noticed)
-			d.dropTurnPush(session.ID, "", "", "")
+			d.dropTurnPush(session.ID)
 		default:
 			d.recordCompletion(session, turnID, false, nil)
-			d.scheduleTurnPush(session.ID, turnID, *noticed, false)
+			d.scheduleTurnPush(session.ID, turnID, *noticed)
 		}
 	}
 }

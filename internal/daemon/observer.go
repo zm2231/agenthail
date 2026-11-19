@@ -270,13 +270,12 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 		return
 	}
 	firstSeen := !found && observation.CompletedTurnID != "" && !observation.CompletedAt.IsZero() && !completionStale(observation, time.Now())
-	judging := false
 	if completionChanged || firstSeen {
 		if err := d.Registry.BindTurnCompletion(session.ID, observation.CompletedTurnID, observation.CompletedAt, completionPrecision(session)); err != nil {
 			d.log.Printf("bind turn completion %s: %s", d.resolveDisplay(session.ID), err)
 		}
 		if !stale && observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
-			judging = d.queueTurnJudgment(session, observation.CompletedTurnID, observation.Reply.Text, observation.BackgroundTasks)
+			d.queueTurnJudgment(session, observation.CompletedTurnID, observation.Reply.Text, observation.BackgroundTasks)
 		}
 	}
 	notice := turnCompletedNotice{desktop: desktopNotificationMessage, mobile: mobileNotificationMessage, outcome: notificationOutcome}
@@ -312,9 +311,9 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	}
 	switch {
 	case notice.quiet:
-		d.dropTurnPush(session.ID, "", "", "")
+		d.dropTurnPush(session.ID)
 	case notice.desktop != "":
-		d.scheduleTurnPush(session.ID, observation.CompletedTurnID, notice, judging)
+		d.scheduleTurnPush(session.ID, observation.CompletedTurnID, notice)
 	case terminalCompletion:
 		d.resumeTurnPush(session.ID)
 	}

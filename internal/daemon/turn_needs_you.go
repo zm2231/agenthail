@@ -83,7 +83,7 @@ func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) bool {
 	desktop := fmt.Sprintf("%s needs you%s", d.resolveDisplay(session.ID), headline)
 	mobile := mobileNotification{Title: "Agenthail", Message: fmt.Sprintf("%s needs you%s%s", d.sessionPushSubject(session), d.onHost(), headline), SessionID: session.ID, TurnID: judgment.TurnID, EventType: turnNeedsYouEvent,
 		CollapseID: turnNotificationKey(hostID, session.ID, judgment.TurnID), DedupeKey: needsYouDedupeKey(hostID, session.ID, judgment.TurnID)}
-	d.dropTurnPush(session.ID, judgment.TurnID, settledOnVerdict, turnNeedsYouEvent)
+	d.needsYouTakesTurnPush(session.ID, judgment.TurnID)
 	d.sendTurnNeedsYou(session.ID, desktop, mobile)
 	return true
 }

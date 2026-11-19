@@ -117,13 +117,13 @@ func loadTurnJudgeConfig() (turnJudgeConfig, bool, error) {
 }
 
 // The facts are read when the turn ends, since the judgment may land later and the work it waits on may have moved on.
-func (d *Daemon) queueTurnJudgment(session *surface.Session, turnID, reply string, background *surface.BackgroundTasks) bool {
+func (d *Daemon) queueTurnJudgment(session *surface.Session, turnID, reply string, background *surface.BackgroundTasks) {
 	j := d.judge
 	if j == nil || turnID == "" || strings.TrimSpace(reply) == "" {
-		return false
+		return
 	}
 	if _, ok, err := loadTurnJudgeConfig(); err != nil || !ok {
-		return false
+		return
 	}
 	facts, err := d.Registry.TurnEndFacts(session.ID)
 	if err != nil {
@@ -139,14 +139,14 @@ func (d *Daemon) queueTurnJudgment(session *surface.Session, turnID, reply strin
 	if end, ok, err := d.Registry.CompletedTurnEnd(session.ID, turnID); err == nil && ok {
 		judgment.Headline = end.Headline
 	}
+	d.turnJudgmentQueued(session.ID, turnID)
 	select {
 	case j.jobs <- judgeJob{judgment: judgment, reply: lastRunes(reply, turnJudgeReplyRune)}:
-		return true
 	default:
 		j.mu.Lock()
 		j.dropped++
 		j.mu.Unlock()
-		return false
+		d.turnVerdictLanded(session.ID, turnID)
 	}
 }
 
