@@ -122,7 +122,7 @@ func TestCodexSubagentTurnsRaiseNoCompletionAlertAndItsApprovalOpensTheRoot(t *t
 	})
 	lifecycle.Daemon().CompleteTurn(root, "Shipped")
 	testkit.Eventually(t, "the root's completion alert", 5*time.Second, func() bool {
-		return pushes.count("turn.completed") == 1 && len(desktop.matching(" finished")) == 1
+		return pushes.count("turn.completed") == 1 && len(desktop.matching("Finished")) == 1
 	})
 
 	h.receipt(map[string]any{"action": "send", "sessionId": child, "message": "Check the changelog"})

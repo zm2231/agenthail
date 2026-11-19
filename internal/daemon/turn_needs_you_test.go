@@ -53,7 +53,7 @@ func TestATurnTheJudgeSaysNeedsThePersonPushesNeedsYouInPlaceOfItsFinishedPush(t
 		t.Fatalf("a self-started turn waiting on the person pushed %d times", count)
 	}
 	push := pushes.first(turnNeedsYouEvent)
-	if !strings.Contains(push["message"], "needs you") || push["sessionId"] != from.ID || push["turnId"] != "turn-1" || push["dedupeKey"] == "" || push["collapseId"] == "" {
+	if push["message"] != "Needs you" || push["title"] != "Codex agent" || push["sessionId"] != from.ID || push["turnId"] != "turn-1" || push["dedupeKey"] == "" || push["collapseId"] == "" {
 		t.Fatalf("needs-you push %+v", push)
 	}
 	if finished := pushes.all("turn.completed"); len(finished) != 0 {
@@ -140,11 +140,11 @@ func TestAJudgedNeedsYouTurnOnAPairedHostReachesThePhoneOnce(t *testing.T) {
 	}
 	var said []string
 	for _, notice := range mac.list() {
-		if strings.Contains(notice.message, "needs you") {
+		if strings.Contains(notice.message, "Needs you") {
 			said = append(said, notice.message)
 		}
 	}
-	if len(said) != 1 || !strings.HasSuffix(said[0], "needs you on vps") {
+	if len(said) != 1 || said[0] != "Needs you" {
 		t.Fatalf("the viewer's desktop said %q", said)
 	}
 

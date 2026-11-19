@@ -210,15 +210,15 @@ func TestATurnOnAPairedLinuxHostNotifiesTheViewerAndThePhoneOnce(t *testing.T) {
 		t.Fatalf("the two computers named the notification differently: %+v", sends)
 	}
 	for _, send := range sends {
-		if !strings.HasPrefix(send["message"], "Codex agent finished on ") {
-			t.Fatalf("a push without the app, status and host: %+v", send)
+		if send["title"] != "Codex agent" || send["message"] != "Finished" {
+			t.Fatalf("a push not titled with the agent and its status alone: %+v", send)
 		}
 	}
 	if shown := relay.shown("phone"); len(shown) != 1 {
 		t.Fatalf("the phone showed %d notifications: %+v", len(shown), shown)
 	}
 	notices := mac.list()
-	if len(notices) != 1 || notices[0].message != "Codex agent finished on vps" {
+	if len(notices) != 1 || notices[0].message != "Finished" {
 		t.Fatalf("viewer desktop notices %+v", notices)
 	}
 	for _, send := range sends {
