@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -101,7 +102,11 @@ func (c *Claude) sessionConfigRoot(sess *surface.Session) (surface.ClaudeConfigR
 
 // accountCookies is the profile signed into root's login. It refuses only when
 // every profile answered for another account or none; a profile that could not
-// be asked leaves the answer open, so the message is held.
+// be asked leaves the answer open, so the message is held. claude.ai rotates
+// its session cookie and the browser writes the new one to disk later, so a
+// profile answering 401 or 403 is asked once more on freshly read cookies, and
+// one that answered for this account within claudeAccountRecall is still left
+// open rather than counted signed out.
 func (c *Claude) accountCookies(ctx context.Context, root surface.ClaudeConfigRoot) (CookieSource, error) {
 	candidates, err := signin.Candidates(c.signins, signin.Claude)
 	if err != nil {
@@ -113,9 +118,15 @@ func (c *Claude) accountCookies(ctx context.Context, root surface.ClaudeConfigRo
 	for _, candidate := range candidates {
 		source := c.cookies(candidate)
 		web, err := c.webAccount(ctx, source)
-		var status claudeHTTPStatusError
+		if signedOutAnswer(err) {
+			invalidateCookieHeader(source)
+			web, err = c.webAccount(ctx, source)
+		}
 		switch {
-		case errors.As(err, &status) && status.API && (status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden):
+		case signedOutAnswer(err) && c.answeredFor(source, login.AccountID):
+			answered = false
+			seen = append(seen, fmt.Sprintf("%s answered %v on fresh cookies but was signed into this account within %s", signinLabel(candidate), err, claudeAccountRecall))
+		case signedOutAnswer(err):
 			seen = append(seen, fmt.Sprintf("%s is not signed into claude.ai", signinLabel(candidate)))
 		case err != nil:
 			answered = false
@@ -127,9 +138,26 @@ func (c *Claude) accountCookies(ctx context.Context, root surface.ClaudeConfigRo
 		}
 	}
 	if !answered {
-		return CookieSource{}, surface.DeliveryUnavailable(fmt.Errorf("could not confirm which sign-in profile is signed into claude.ai as %s, the account of %s (%s)", login.Email, root.Root, strings.Join(seen, "; ")))
+		return CookieSource{}, surface.DeliveryUnavailable(fmt.Errorf("%w as %s, the account of %s (%s)", errSigninUnconfirmed, login.Email, root.Root, strings.Join(seen, "; ")))
 	}
 	return CookieSource{}, signin.ProblemError{Consumer: signin.Claude, Err: fmt.Errorf("no sign-in profile is signed into claude.ai as %s, the account of %s (%s); sign in to claude.ai as %s in a browser profile and add it with `agenthail signin add`", login.Email, root.Root, strings.Join(seen, "; "), login.Email)}
+}
+
+// claudeAccountRecall is how long a profile's last answer is remembered once
+// asked: one cookieHeaderTTL while it is served from the cache, and one more
+// after, for the browser to write a rotated cookie.
+const claudeAccountRecall = 2 * cookieHeaderTTL
+
+func signedOutAnswer(err error) bool {
+	var status claudeHTTPStatusError
+	return errors.As(err, &status) && status.API && (status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden)
+}
+
+func (c *Claude) answeredFor(source CookieSource, accountID string) bool {
+	c.webAccounts.mu.Lock()
+	defer c.webAccounts.mu.Unlock()
+	entry, ok := c.webAccounts.byProfile[source.cacheKey()]
+	return ok && entry.account.UUID == accountID && time.Now().Before(entry.expiresAt.Add(claudeAccountRecall-cookieHeaderTTL))
 }
 
 func signinLabel(source signin.Source) string {
@@ -150,7 +178,9 @@ func (c *Claude) webAccount(ctx context.Context, source CookieSource) (claudeWeb
 	if ok && time.Now().Before(entry.expiresAt) {
 		return entry.account, nil
 	}
-	data, err := c.claudeGET(ctx, source, "/api/account", "account")
+	var cookies cookieOrigin
+	data, err := c.claudeGET(withCookieOrigin(ctx, &cookies), source, "/api/account", "account")
+	logAccountProbe(source, cookies, err)
 	if err != nil {
 		return claudeWebAccount{}, err
 	}
@@ -162,6 +192,23 @@ func (c *Claude) webAccount(ctx context.Context, source CookieSource) (claudeWeb
 	c.webAccounts.byProfile[key] = claudeWebAccountEntry{account: account, expiresAt: time.Now().Add(cookieHeaderTTL)}
 	c.webAccounts.mu.Unlock()
 	return account, nil
+}
+
+// logAccountProbe records one sign-in check: the profile, claude.ai's answer
+// and where its cookies came from, never the cookies themselves.
+func logAccountProbe(source CookieSource, cookies cookieOrigin, err error) {
+	answer := "HTTP 200"
+	var status claudeHTTPStatusError
+	switch {
+	case errors.As(err, &status):
+		answer = fmt.Sprintf("HTTP %d", status.Status)
+		if !status.API {
+			answer += " from a Cloudflare page"
+		}
+	case err != nil:
+		answer = err.Error()
+	}
+	log.Printf("Claude sign-in: profile %s (%s) answered the account check with %s; cookies %s", signinLabel(source.Signin), source.Signin.ProfileID, answer, cookies)
 }
 
 // claudeGET reads a claude.ai API path; name stands for the path in errors.

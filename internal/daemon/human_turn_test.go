@@ -51,6 +51,7 @@ type humanTurnFixture struct {
 	posts      []string
 	postErr    error
 	postStatus int
+	get        func(url string) (int, string, error)
 	bridged    surface.Session
 	native     surface.Session
 	home       string
@@ -58,6 +59,11 @@ type humanTurnFixture struct {
 }
 
 func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
+	t.Helper()
+	return newHumanTurnFixtureSignedIn(t, signin.Fixed{Browser: signin.Chrome})
+}
+
+func newHumanTurnFixtureSignedIn(t *testing.T, signins signin.Resolver) *humanTurnFixture {
 	t.Helper()
 	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
@@ -68,7 +74,10 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 	f := &humanTurnFixture{r: r, home: process.Home, process: process}
 	process.Listen()
 	process.Record("conversation-bridge", process.Home, "session_bridge")
-	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
+	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest(signins, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
+		if method == http.MethodGet && f.get != nil {
+			return f.get(url)
+		}
 		if method != http.MethodPost {
 			t.Fatalf("method=%s", method)
 		}

@@ -127,6 +127,9 @@ func (d Dispatcher) SendRouted(ctx context.Context, adapter surface.Surface, ses
 	if err := d.RegisterReached(&routed, session); err != nil {
 		return nil, err
 	}
+	if surface.SameRoute(routed, *session) && d.RouteChanged != nil {
+		d.RouteChanged(*session)
+	}
 	if err := next.Validate(adapter, options); err != nil {
 		return nil, err
 	}
@@ -366,15 +369,19 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		ctx = surface.WithMessageUUID(ctx, intent.UUID)
 		d.capturePerson(sourceID, session, intent.UUID, message)
 	}
-	return d.steer(ctx, adapter, session, message, nil, target, sourceID, "steer", intent, false)
+	receipt, err := d.steer(ctx, adapter, session, message, nil, target, sourceID, "steer", intent, false)
+	if errors.Is(err, errSendInstead) {
+		return d.send(ctx, adapter, session, surface.RouteFor(adapter, session, options.RouteAuthor()), message, "", options, true, deliverypolicy.Queue, intent, "", target, false)
+	}
+	return receipt, err
 }
 
 // steer reports the evidence the surface proved: a Claude Remote Control steer
 // is accepted by the transport, which does not show it reached the turn.
 func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message string, images surface.Uploads, target, sourceID, label string, intent *registry.DeliveryIntent, sendIfEnded bool) (*Receipt, error) {
 	result, err := d.SteerTurn(ctx, adapter, session, message, images)
-	if sendIfEnded && errors.Is(err, surface.ErrNothingToSteer) {
-		return nil, errTurnEnded
+	if sendIfEnded && errors.Is(err, surface.ErrNothingToSteer) || errors.Is(err, surface.ErrRouteChanged) {
+		return nil, errSendInstead
 	}
 	if err != nil {
 		if intent != nil {
@@ -477,7 +484,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 				}
 			}
 			receipt, err := d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, "", intent, observation)
-			if !errors.Is(err, errTurnEnded) {
+			if !errors.Is(err, errSendInstead) {
 				return receipt, err
 			}
 			retry = false
@@ -584,8 +591,8 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 		options.BusyDelivery = string(deliverypolicy.Queue)
 	}
 	receipt, err := d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, result.UUID, intent, nil)
-	if errors.Is(err, errTurnEnded) {
-		return d.send(ctx, adapter, session, route, message, deliveryKey, options, allowQueue, busyMode, intent, baselineCompletionID, target, false)
+	if errors.Is(err, errSendInstead) {
+		return d.send(ctx, adapter, session, surface.RouteFor(adapter, session, options.RouteAuthor()), message, deliveryKey, options, allowQueue, busyMode, intent, baselineCompletionID, target, false)
 	}
 	return receipt, err
 }
@@ -629,9 +636,10 @@ func (d Dispatcher) prepareIntent(sourceID string, session *surface.Session, mes
 	return intent, nil
 }
 
-// errTurnEnded is handleBusy finding the target's turn over by the time it
-// steered; the caller sends the message as the next turn instead.
-var errTurnEnded = errors.New("the busy turn ended before the steer")
+// errSendInstead is a steer that delivered nothing because the target's turn
+// was over or its route changed before the steer; the caller sends the
+// message on the route the session is on now.
+var errSendInstead = errors.New("the steer found the turn over or its route changed")
 
 // handleBusy steers or queues a message for a busy target. observation is the
 // target's state when the caller already has it; without it, a steer observes

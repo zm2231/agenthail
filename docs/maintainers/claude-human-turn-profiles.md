@@ -42,7 +42,10 @@ the CLI and voice checks that reject reply correlation on a peer route. The
 route is derived each time a message is sent and never stored, so a queued
 message follows the target's bridge state at drain time. The choice is made
 before sending and is never revised after a failure that may have reached the
-provider. A person's message never falls back to the native socket.
+provider. A person's message falls back to the native socket only when
+Remote Control is shown, before anything is posted, to be unable to sign in for
+the session (the sign-in failures and HTTP 401 or 403 listed in
+[Claude peers](claude-peers.md)); it is then sent once on the socket as a note.
 
 Options never change authorship. On `RouteHumanTurn`, a per-message model or
 turn option is rejected as an invalid request: the bridge user event has no
@@ -134,7 +137,14 @@ record before the transcript exists ([`claude_signin.go`](../../internal/surface
 `signin.Resolver.SigninCandidates` lists the consumer's choice first, then
 every other readable profile, and the first whose `GET /api/account` names that
 account's `accountUuid` is used. Each profile's account is kept for five
-minutes. When every profile answered, as another account or as signed out
+minutes. claude.ai rotates its session cookie and the browser writes the new
+one to disk some time later, so a profile answering 401 or 403 is asked once
+more on cookies read fresh from the browser; one still refused that answered
+for this account within the last ten minutes (`claudeAccountRecall`) leaves
+the answer open, so the request is held rather than failed. Each check logs
+one line naming the profile, claude.ai's answer, and whether its cookies came
+from the cache (and how long ago they were read) or a fresh read; cookie
+values are never logged. When every profile answered, as another account or as signed out
 (HTTP 401 or 403 answered by claude.ai's API), the request fails as terminal `signin_unreadable` naming the
 account and each profile's answer. When a profile could not be asked (cookie
 bridge failure, a claude.ai error, or a Cloudflare page in front of claude.ai) or the root's `.claude.json`

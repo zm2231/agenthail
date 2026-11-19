@@ -38,6 +38,8 @@ type Claude struct {
 	localOnly    bool
 	goneMu       sync.Mutex
 	goneBridges  map[string]bool
+	refusedMu    sync.Mutex
+	refused      map[string]time.Time
 	mcpAttachment
 }
 

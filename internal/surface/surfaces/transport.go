@@ -43,6 +43,7 @@ func diagnosticExcerpt(value string) string {
 type cookieHeaderCacheEntry struct {
 	header    string
 	err       error
+	readAt    time.Time
 	expiresAt time.Time
 }
 
@@ -61,6 +62,7 @@ func cachedCookieHeader(key string) (cookieHeaderCacheEntry, bool) {
 }
 
 func storeCookieHeader(key string, entry cookieHeaderCacheEntry) {
+	entry.readAt = time.Now()
 	cookieHeaderCache.Lock()
 	cookieHeaderCache.entries[key] = entry
 	cookieHeaderCache.Unlock()
@@ -181,7 +183,12 @@ func processGroupCommand(ctx context.Context, path string, args ...string) *exec
 	return cmd
 }
 
-func loadCookieHeader(parent context.Context, source CookieSource) (string, error) {
+func loadCookieHeader(parent context.Context, source CookieSource) (header string, err error) {
+	origin := cookieOrigin{read: true, readAt: time.Now()}
+	defer func() {
+		origin.failed = err != nil
+		noteCookieOrigin(parent, origin)
+	}()
 	if source.Bridge == "" {
 		return "", fmt.Errorf("cookie bridge not found (set AGENTHAIL_COOKIE_BRIDGE or install cookie.mjs alongside agenthail)")
 	}
@@ -190,12 +197,14 @@ func loadCookieHeader(parent context.Context, source CookieSource) (string, erro
 	}
 	key := source.cacheKey()
 	if entry, ok := cachedCookieHeader(key); ok {
+		origin.cached, origin.readAt = true, entry.readAt
 		return entry.header, entry.err
 	}
 	lock := cookieReadLock(key)
 	lock.Lock()
 	defer lock.Unlock()
 	if entry, ok := cachedCookieHeader(key); ok {
+		origin.cached, origin.readAt = true, entry.readAt
 		return entry.header, entry.err
 	}
 	node, err := shippedNode()
@@ -220,7 +229,7 @@ func loadCookieHeader(parent context.Context, source CookieSource) (string, erro
 		storeCookieHeader(key, cookieHeaderCacheEntry{err: err, expiresAt: time.Now().Add(cookieHeaderFailureTTL)})
 		return "", err
 	}
-	header := strings.TrimSpace(string(output))
+	header = strings.TrimSpace(string(output))
 	if header == "" {
 		err := fmt.Errorf("cookie bridge returned no cookies")
 		storeCookieHeader(key, cookieHeaderCacheEntry{err: err, expiresAt: time.Now().Add(cookieHeaderFailureTTL)})
@@ -228,6 +237,41 @@ func loadCookieHeader(parent context.Context, source CookieSource) (string, erro
 	}
 	storeCookieHeader(key, cookieHeaderCacheEntry{header: header, expiresAt: time.Now().Add(cookieHeaderTTL)})
 	return header, nil
+}
+
+// cookieOrigin records, for a request whose context carries it, where
+// loadCookieHeader took that request's cookies from.
+type cookieOrigin struct {
+	read   bool
+	cached bool
+	failed bool
+	readAt time.Time
+}
+
+type cookieOriginKey struct{}
+
+func withCookieOrigin(ctx context.Context, origin *cookieOrigin) context.Context {
+	return context.WithValue(ctx, cookieOriginKey{}, origin)
+}
+
+func noteCookieOrigin(ctx context.Context, origin cookieOrigin) {
+	if recorded, ok := ctx.Value(cookieOriginKey{}).(*cookieOrigin); ok {
+		*recorded = origin
+	}
+}
+
+func (o cookieOrigin) String() string {
+	switch {
+	case !o.read:
+		return "not read"
+	case o.cached && o.failed:
+		return fmt.Sprintf("not read: the cached result is a failed read from %s ago", time.Since(o.readAt).Round(time.Second))
+	case o.failed:
+		return "not read: reading them from the browser failed"
+	case o.cached:
+		return fmt.Sprintf("cached, read %s ago", time.Since(o.readAt).Round(time.Second))
+	}
+	return "read fresh from the browser"
 }
 
 func invalidateCookieHeader(source CookieSource) {

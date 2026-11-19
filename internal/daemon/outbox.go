@@ -104,8 +104,9 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 			result = &surface.SendResult{UUID: steered.RequestID, Accepted: true}
 		}
 	}
-	if !steer || errors.Is(sendErr, surface.ErrNothingToSteer) {
+	if !steer || errors.Is(sendErr, surface.ErrNothingToSteer) || errors.Is(sendErr, surface.ErrRouteChanged) {
 		steered = nil
+		route = surface.RouteFor(adapter, session, options.RouteAuthor())
 		if sendErr = route.Validate(adapter, options); sendErr == nil {
 			result, sendErr = d.dispatcher().SendRouted(operationCtx, adapter, session, route, item.Message, options)
 		}
