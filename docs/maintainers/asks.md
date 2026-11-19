@@ -144,7 +144,7 @@ Fetch the card when `ask.routedTo` is `person`, `answeredAt` is absent and the s
 - Every option of every request carries an `id`, unique within the request: `o0`, `o1`… for a request with one question, `q0o0`, `q1o2`… with several, a delivery ask's `retry`, `delete`, `cancel` or `dismiss`. Answer with ids, not labels.
 - `suggested` is the index of the recommended option; mark it. `description` is the option's `does`.
 - `links` open outside the app.
-- `detail` is what a tool request asks to do, as `agenthail_requests` gives it: the command for a shell, the path and a summary of the change for an edit, the tool input otherwise, cut on a character at 4 KiB. Questions and input forms carry their own text and have none.
+- `detail` is what a tool request asks to do, as `agenthail_requests` gives it: the command for a shell, the path and a summary of the change for an edit, the tool input otherwise, cut on a character at 2 KiB. Questions and input forms carry their own text and have none.
 - `actions` exist only for a single-question ask: an option button each when it has 4 or fewer options, plus `reply`.
 - When the session's provider cannot be read (its Codex is not running, its terminal stopped), the reply is still `200`: it lists every ask Agenthail holds for the session, no provider requests, and the provider's error in `providerError`. An approval or a delivery problem is usually raised for a session that is offline, so it must show then. `agenthail_requests` carries the same field.
 - The decisions inbox (`/api/v1/decisions`) lists the same request under the session's `ask` item.

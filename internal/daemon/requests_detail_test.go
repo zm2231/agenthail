@@ -23,7 +23,7 @@ func TestTheRequestsAPIDescribesARequestAsAgentsReadIt(t *testing.T) {
 	base := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}
 	responder := &requestingSurface{daemonSurface: base}
 	d := newTestDaemon(t, r, []surface.Surface{responder})
-	long := strings.Repeat("é", mcpItemTextLimit)
+	long := strings.Repeat("é", mcpDetailLimit)
 	responder.open = []surface.Request{
 		{ID: "run", Kind: surface.WaitingApproval, Tool: "Bash", Input: json.RawMessage(`{"command":"make release"}`), CreatedAt: time.Now()},
 		{ID: "long", Kind: surface.WaitingApproval, Tool: "Bash", Input: json.RawMessage(`{"command":"` + long + `"}`), CreatedAt: time.Now()},
@@ -48,7 +48,7 @@ func TestTheRequestsAPIDescribesARequestAsAgentsReadIt(t *testing.T) {
 	if body.Requests[0].Detail != "make release" {
 		t.Fatalf("a command request's detail is %q, want the command", body.Requests[0].Detail)
 	}
-	if detail := body.Requests[1].Detail; !utf8.ValidString(detail) || len(detail) > mcpItemTextLimit || !strings.HasPrefix(long, detail) || detail == "" {
-		t.Fatalf("a long command's detail must be cut on a character within %d bytes, got %d bytes", mcpItemTextLimit, len(detail))
+	if detail := body.Requests[1].Detail; !utf8.ValidString(detail) || len(detail) > mcpDetailLimit || !strings.HasPrefix(long, detail) || detail == "" {
+		t.Fatalf("a long command's detail must be cut on a character within %d bytes, got %d bytes", mcpDetailLimit, len(detail))
 	}
 }

@@ -103,10 +103,10 @@ func (d *Daemon) readOpenRequests(ctx context.Context, session *surface.Session,
 		}
 		request.ID = id
 		request = request.WithOptionIDs()
-		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Brief: clipUTF8(request.Detail(), mcpItemTextLimit), Actions: request.Actions(), ReplacedBy: d.publicSessionID(replacedBy)})
+		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Brief: clipUTF8(request.Detail(), mcpDetailLimit), Actions: request.Actions(), ReplacedBy: d.publicSessionID(replacedBy)})
 	}
 	for _, ask := range asking {
-		requests = append(requests, openRequestView{Request: ask, Prompt: ask.Prompt(), Brief: clipUTF8(ask.Detail(), mcpItemTextLimit), Actions: ask.Actions()})
+		requests = append(requests, openRequestView{Request: ask, Prompt: ask.Prompt(), Brief: clipUTF8(ask.Detail(), mcpDetailLimit), Actions: ask.Actions()})
 	}
 	return openRequests{requests: requests, permissionMode: state.PermissionMode, providerError: providerError}, nil
 }
