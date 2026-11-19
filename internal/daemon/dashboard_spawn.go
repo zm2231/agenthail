@@ -22,6 +22,7 @@ func (d *Daemon) dispatcher() delivery.Dispatcher {
 		},
 		Oversees:     d.oversees,
 		RouteChanged: d.publishRoute,
+		Sending:      d.turnPushHandoff,
 	}
 }
 

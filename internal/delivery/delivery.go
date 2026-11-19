@@ -102,6 +102,9 @@ type Dispatcher struct {
 	// RouteChanged publishes a session whose route a send found changed, so
 	// what the person sees matches the route the send takes.
 	RouteChanged func(session surface.Session)
+	// Sending, when set, runs before a message is sent to start a turn, and
+	// the function it returns runs once the send is accepted or not.
+	Sending func(sessionID string) func(accepted bool)
 }
 
 // Trace is what a send's history records about its route: the route session
@@ -114,11 +117,15 @@ func Trace(adapter surface.Surface, session *surface.Session, author surface.Aut
 // delivering anything leaves session on the route to take; that route is
 // stored and published first, so what the person sees matches it, and the
 // message is sent once more on it.
-func (d Dispatcher) SendRouted(ctx context.Context, adapter surface.Surface, session *surface.Session, route surface.Route, message string, options surface.SendOptions) (*surface.SendResult, error) {
+func (d Dispatcher) SendRouted(ctx context.Context, adapter surface.Surface, session *surface.Session, route surface.Route, message string, options surface.SendOptions) (result *surface.SendResult, err error) {
+	if d.Sending != nil {
+		sent := d.Sending(session.ID)
+		defer func() { sent(err == nil && result != nil && result.Accepted) }()
+	}
 	d.reviveCredential(session)
 	routed := *session
 	text := surface.WithSentAge(message, options.SentAt, time.Now())
-	result, err := route.Send(ctx, adapter, session, text, options)
+	result, err = route.Send(ctx, adapter, session, text, options)
 	next := surface.RouteFor(adapter, session, options.RouteAuthor())
 	if !errors.Is(err, surface.ErrRouteChanged) || next == route {
 		return result, err

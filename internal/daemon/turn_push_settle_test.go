@@ -321,3 +321,40 @@ func TestAMessageDeliveredBeforeTheNextTurnIsSeenHoldsTheVerdictsPush(t *testing
 		t.Fatalf("the burst pushed %+v", finished)
 	}
 }
+
+func TestAMessageSentToTheSessionHoldsItsPushUntilTheDeadline(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	d.turnPushes.window = 100 * time.Millisecond
+	logged := captureLog(d)
+	pushes := newPushRecorder(t, r)
+	notice := turnCompletedNotice{desktop: "from done", mobile: "from done", outcome: turnOutcomeFinished}
+	d.turnJudgmentQueued(from.ID, "turn-1")
+	d.scheduleTurnPush(from.ID, "turn-1", notice)
+
+	sent := d.turnPushHandoff(from.ID)
+	sent(true)
+	d.turnVerdictLanded(from.ID, "turn-1")
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 0 {
+		t.Fatalf("the verdict pushed %d times while the message it was sent was starting a turn", count)
+	}
+	eventually(t, "the deadline push", func() bool { return pushes.count("turn.completed") == 1 })
+	if lines := settledLines(logged); len(lines) != 1 || !strings.Contains(lines[0], "reason=deadline") {
+		t.Fatalf("settled log %q", lines)
+	}
+
+	d.scheduleTurnPush(from.ID, "turn-2", notice)
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 2 {
+		t.Fatalf("a turn with nothing pending pushed %d times in all", count)
+	}
+	d.turnJudgmentQueued(from.ID, "turn-3")
+	d.scheduleTurnPush(from.ID, "turn-3", notice)
+	failed := d.turnPushHandoff(from.ID)
+	failed(false)
+	d.turnVerdictLanded(from.ID, "turn-3")
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 3 {
+		t.Fatalf("a send that was not accepted still held the push: %d pushes", count)
+	}
+}

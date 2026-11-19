@@ -30,6 +30,7 @@ type pendingTurnPush struct {
 	turns  []string
 	notice turnCompletedNotice
 	paused bool
+	handed bool
 	gen    int
 	timer  *time.Timer
 }
@@ -122,7 +123,7 @@ func (d *Daemon) settleTurnPush(sessionID string, entry *pendingTurnPush, gen in
 		p.mu.Unlock()
 		return
 	}
-	if reason != settledOnDeadline && (queued || p.verdict(sessionID, entry.turnID) == verdictQueued) {
+	if reason != settledOnDeadline && (queued || entry.handed || p.verdict(sessionID, entry.turnID) == verdictQueued) {
 		if entry.timer == nil {
 			armed := entry.gen
 			entry.timer = time.AfterFunc(p.window, func() {
@@ -227,4 +228,41 @@ func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string) {
 	}
 	p.mu.Unlock()
 	d.logSettledPush(sessionID, turns, settledOnVerdict, turnNeedsYouEvent)
+}
+
+// A message sent to the session starts a turn the observer has not seen yet, so the push waits for it, up to the deadline; a send that is not accepted lets it go.
+func (d *Daemon) turnPushHandoff(sessionID string) func(accepted bool) {
+	p := d.turnPushes
+	p.mu.Lock()
+	entry := p.pending[sessionID]
+	if entry == nil {
+		p.mu.Unlock()
+		return func(bool) {}
+	}
+	entry.handed = true
+	p.mu.Unlock()
+	return func(accepted bool) {
+		if accepted {
+			p.mu.Lock()
+			waiting := p.pending[sessionID] == entry && !entry.paused
+			if waiting {
+				if entry.timer != nil {
+					entry.timer.Stop()
+					entry.timer = nil
+				}
+				entry.gen++
+			}
+			gen := entry.gen
+			p.mu.Unlock()
+			if waiting {
+				d.settleTurnPush(sessionID, entry, gen, settledOnIdle)
+			}
+			return
+		}
+		p.mu.Lock()
+		entry.handed = false
+		gen := entry.gen
+		p.mu.Unlock()
+		d.settleTurnPush(sessionID, entry, gen, settledOnIdle)
+	}
 }
