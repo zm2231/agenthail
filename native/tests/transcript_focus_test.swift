@@ -46,6 +46,7 @@ struct TranscriptFocusTest {
         check(!blocks.contains { if case .notice = $0.kind { true } else { false } }, "notices are hidden")
         let work = items.filter { ["reasoning", "bash", "bash-out"].contains($0.id) }
         check(ToolRunSummary.folds(ToolRunSummary.entries(work), focus: true), "the work folds in focus even with one call")
+        check(TranscriptFocus.isAsk(item("bare-ask", "toolCall", "agenthail_ask", call: "a")), "a bare agenthail_ask is an ask, as a bare end_turn is an end_turn")
         let askRun = items.filter { ["question", "answer"].contains($0.id) }
         check(!ToolRunSummary.folds(ToolRunSummary.entries(askRun), focus: true), "an ask never folds")
 

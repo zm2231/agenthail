@@ -64,6 +64,6 @@ enum TranscriptFocus {
     }
 
     static func isAsk(_ item: TimelineItem) -> Bool {
-        item.kind == "toolCall" && (["AskUserQuestion", "request_user_input"].contains(item.title) || item.title.hasSuffix("__agenthail_ask"))
+        item.kind == "toolCall" && (["AskUserQuestion", "request_user_input", "agenthail_ask"].contains(item.title) || item.title.hasSuffix("__agenthail_ask"))
     }
 }

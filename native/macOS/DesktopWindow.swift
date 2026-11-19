@@ -2016,17 +2016,18 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 struct SessionInspector: View {
     var model: AgenthailModel
     var pane: SessionPane
-    @State private var chosen: InspectorTab?
+    @State private var chosen: (session: String, tab: InspectorTab)?
     @AppStorage(InspectorTab.nowOffKey) private var nowOff = false
 
     var body: some View {
+        let shownID = pane.displayedSession?.id
         let lead = pane.displayedSession.map { !LeadCrew.crew(of: $0.id, in: model.sessionTree).isEmpty } ?? false
-        let tab = InspectorTab.shown(chosen: chosen, lead: lead, nowOff: nowOff)
+        let tab = InspectorTab.shown(chosen: chosen.flatMap { $0.session == shownID ? $0.tab : nil }, lead: lead, nowOff: nowOff)
         VStack(spacing: 0) {
             HStack(spacing: DesktopSpace.l) {
                 ForEach(InspectorTab.tabs(lead: lead)) { candidate in
                     Button(candidate.rawValue) {
-                        chosen = candidate
+                        chosen = shownID.map { ($0, candidate) }
                         if lead { nowOff = candidate != .now }
                     }
                         .buttonStyle(.plain)

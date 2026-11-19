@@ -3,13 +3,15 @@ import Foundation
 
 @main
 struct LeadCrewTest {
-    static func session(_ id: String, status: String = "idle", waiting: Bool = false, lastActive: String? = nil, turn: String? = nil, reason: String? = nil, headline: String? = nil) -> SessionState {
+    static func session(_ id: String, status: String = "idle", waiting: Bool = false, lastActive: String? = nil, turn: String? = nil, reason: String? = nil, headline: String? = nil, ask: Bool = false, attention: String? = nil) -> SessionState {
         var row: [String: Any] = ["id": id, "surface": "claude", "name": id, "status": status, "queueCount": 0, "open": true, "current": false,
                                   "capabilities": ["send": true, "stream": true, "reply": true, "goal": false, "compact": false, "model": false, "interrupt": false, "steer": false, "respond": true]]
         if waiting { row["waitingOn"] = ["kind": "approval", "id": "r1", "answerable": true] }
         if let lastActive { row["lastActive"] = lastActive }
         if let turn { row["turnState"] = ["state": turn, "reason": reason ?? "", "source": "judge"] }
         if let headline { row["endTurn"] = ["headline": headline] }
+        if ask { row["ask"] = ["id": "ask-1", "title": "Ship it?", "routedTo": "person"] }
+        if let attention { row["attention"] = ["kind": attention, "reason": "Usage limit"] }
         let data = try! JSONSerialization.data(withJSONObject: row)
         return try! JSONDecoder().decode(SessionState.self, from: data)
     }
@@ -37,6 +39,15 @@ struct LeadCrewTest {
         check(LeadCrew.crew(of: "worker", in: tree).map(\.id) == ["nested"], "a member's crew is what nests under it")
         check(LeadCrew.crew(of: "helper", in: tree).isEmpty, "a member with nothing under it has no crew, so no Now tab")
         check(LeadCrew.crew(of: "elsewhere", in: tree).isEmpty, "an unknown session has no crew")
+
+        let asking = session("asking", lastActive: "2026-11-17T08:00:00Z", ask: true)
+        let limited = session("limited", lastActive: "2026-11-17T07:00:00Z", attention: "usageLimit")
+        check(LeadCrew.needsYou(asking) && LeadCrew.asksYou(asking), "a question routed to the person needs you and offers its answer card")
+        check(LeadCrew.needsYou(limited) && !LeadCrew.asksYou(limited), "row attention needs you without a request to answer")
+        check(LeadCrew.needsYou([asking, limited, worker, idle]) == 2, "the count takes asks and attention, not a judged label")
+        check(LeadCrew.stateLabel(asking) == "Needs you", "a child asking the person says so: \(LeadCrew.stateLabel(asking))")
+        let mixed = LeadCrew.ordered([worker, idle, asking, limited]).map(\.id)
+        check(mixed == ["asking", "limited", "worker", "idle"], "asks and attention sort with needs you: \(mixed)")
 
         let ordered = LeadCrew.ordered(LeadCrew.crew(of: "lead", in: tree)).map(\.id)
         check(ordered == ["helper", "worker", "idle", "nested"], "needs you first, then working, then the rest newest first: \(ordered)")

@@ -78,21 +78,21 @@ struct CrewCard: View, @MainActor Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.child == rhs.child }
 
     var body: some View {
-        let request = child.isWaitingOnYou ? requests?.offered(pendingAsk: child.pendingAskID, open: child.pendingAsks).first : nil
+        let request = LeadCrew.asksYou(child) ? requests?.offered(pendingAsk: child.pendingAskID, open: child.pendingAsks).first : nil
         VStack(alignment: .leading, spacing: 6) {
             Button { pane.select(child.id) } label: {
                 HStack(spacing: DesktopSpace.s) {
-                    StatusIndicator(session: child, needsYou: child.isWaitingOnYou)
-                    Text(model.title(of: child))
+                    StatusIndicator(session: child, needsYou: LeadCrew.needsYou(child))
+                    Text(child.displayName)
                         .font(.system(size: DesktopType.body, weight: .semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .layoutPriority(1)
                     Spacer(minLength: 4)
                     TimelineView(.everyMinute) { context in
                         Text(LeadCrew.stateLabel(child, now: context.date))
                             .lineLimit(1)
-                            .foregroundStyle(child.isWaitingOnYou ? DesktopPalette.attention : DesktopPalette.text2)
+                            .fixedSize()
+                            .foregroundStyle(LeadCrew.needsYou(child) ? DesktopPalette.attention : DesktopPalette.text2)
                     }
                     .font(.system(size: DesktopType.secondary))
                 }
@@ -115,7 +115,7 @@ struct CrewCard: View, @MainActor Equatable {
             if let request {
                 RequestCard(request: request, answering: answering, accent: AnyShapeStyle(DesktopPalette.accentText),
                             respond: { decision in Task { await answer(request, decision) } },
-                            asker: model.title(of: child), attention: AnyShapeStyle(DesktopPalette.attention),
+                            asker: child.displayName, attention: AnyShapeStyle(DesktopPalette.attention),
                             surface: nil, actionTint: AnyShapeStyle(DesktopPalette.accent), agentSurface: child.surface)
                     .id(child.id + "/" + request.id)
             }
@@ -129,7 +129,7 @@ struct CrewCard: View, @MainActor Equatable {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.row))
         .task(id: RequestSync.viewKey(child)) {
-            guard child.isWaitingOnYou, RequestSync.lists(child), let api = model.api else {
+            guard LeadCrew.asksYou(child), RequestSync.lists(child), let api = model.api else {
                 requests = nil
                 return
             }

@@ -21,7 +21,7 @@ final class BodyRunsUITests: XCTestCase {
     }
 
     private static func foldRows(_ window: [String: Int]) -> [String: Int] {
-        var folded = window.filter { !$0.key.contains("#") }
+        var folded = window
         let perRow = Dictionary(grouping: window.filter { $0.key.contains("#") && $0.value > 0 }) { String($0.key.prefix { $0 != "#" }) }
         for (name, rows) in perRow {
             folded[name + ".ids"] = rows.count
@@ -40,7 +40,7 @@ final class BodyRunsUITests: XCTestCase {
     }
 
     private static func line(_ name: String, _ runs: [String: Int]) -> String {
-        "MEASURE \(name) " + runs.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+        "MEASURE \(name) " + runs.filter { !$0.key.contains("#") }.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
     }
 
     func testAnotherSessionsUpdatesLeaveTheOpenTranscriptAlone() {
@@ -83,8 +83,10 @@ final class BodyRunsUITests: XCTestCase {
         for view in ["SessionScreen", "IOSComposer", "IOSTimelineRow"] {
             XCTAssertLessThanOrEqual(runs[view, default: 0], 2, "\(view) redrew for a worker's updates")
         }
-        XCTAssertGreaterThan(runs["PhoneCrewCard.ids", default: 0], 0, "the updated worker's card redrew")
-        XCTAssertLessThanOrEqual(runs["PhoneCrewCard.ids", default: 0], 1, "cards other than the updated worker's redrew")
+        XCTAssertGreaterThan(runs["PhoneCrewCard#computer::crew-check", default: 0], 0, "the updated worker's card redrew")
+        let others = runs.filter { $0.key.hasPrefix("PhoneCrewCard#") && $0.key != "PhoneCrewCard#computer::crew-check" }
+        XCTAssertFalse(others.isEmpty, "the other worker's card was counted")
+        XCTAssertTrue(others.allSatisfy { $0.value == 0 }, "cards other than the updated worker's redrew: \(others)")
     }
 
     func testAnotherSessionsUpdatesRedrawOnlyItsRowInTheList() {

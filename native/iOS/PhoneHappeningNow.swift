@@ -58,8 +58,11 @@ struct PhoneHappeningNow: View {
                     HStack {
                         Text("Happening now")
                         Spacer()
-                        if let ready, ready > 0 {
-                            Text("\(ready) ready").foregroundStyle(PhonePalette.accentText)
+                        if let ready, ready > 0, let project = session.project {
+                            Button("\(ready) ready") { open(ConversationRoute.project(project.id)); dismiss() }
+                                .foregroundStyle(PhonePalette.accentText)
+                                .textCase(nil)
+                                .accessibilityHint("Opens this project's work list")
                                 .accessibilityIdentifier("happening-ready")
                         }
                     }
@@ -101,18 +104,19 @@ struct PhoneCrewCard: View, @MainActor Equatable {
         let _ = BodyRuns.hit("PhoneCrewCard")
         let _ = BodyRuns.hit("PhoneCrewCard", id: child.id)
 #endif
-        let request = child.isWaitingOnYou ? requests?.offered(pendingAsk: child.pendingAskID, open: child.pendingAsks).first : nil
+        let request = LeadCrew.asksYou(child) ? requests?.offered(pendingAsk: child.pendingAskID, open: child.pendingAsks).first : nil
         VStack(alignment: .leading, spacing: 6) {
             Button(action: open) {
                 HStack(spacing: 8) {
-                    Circle().fill(child.isWaitingOnYou ? AnyShapeStyle(PhonePalette.attention) : child.isWorking ? AnyShapeStyle(PhonePalette.working) : AnyShapeStyle(PhonePalette.muted))
+                    Circle().fill(LeadCrew.needsYou(child) ? AnyShapeStyle(PhonePalette.attention) : child.isWorking ? AnyShapeStyle(PhonePalette.working) : AnyShapeStyle(PhonePalette.muted))
                         .frame(width: 8, height: 8)
                         .accessibilityHidden(true)
-                    Text(model.cells.title(of: child)).font(.body.weight(.semibold)).lineLimit(1).layoutPriority(1)
+                    Text(child.displayName).font(.body.weight(.semibold)).lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 4)
                     Text(LeadCrew.stateLabel(child)).font(.subheadline)
-                        .foregroundStyle(child.isWaitingOnYou ? AnyShapeStyle(PhonePalette.attention) : AnyShapeStyle(PhonePalette.muted))
+                        .foregroundStyle(LeadCrew.needsYou(child) ? AnyShapeStyle(PhonePalette.attention) : AnyShapeStyle(PhonePalette.muted))
                         .lineLimit(1)
+                        .fixedSize()
                 }
             }
             .buttonStyle(.plain)
@@ -130,14 +134,14 @@ struct PhoneCrewCard: View, @MainActor Equatable {
                                 await model.respond(to: request, sessionID: child.id, decision: decision)
                                 requests = await model.openRequests(of: child.id)
                             } },
-                            asker: model.cells.title(of: child), attention: AnyShapeStyle(PhonePalette.attention), actionTint: AnyShapeStyle(PhonePalette.accent),
+                            asker: child.displayName, attention: AnyShapeStyle(PhonePalette.attention), actionTint: AnyShapeStyle(PhonePalette.accent),
                             agentSurface: child.surface)
                     .id(child.id + "/" + request.id)
             }
         }
         .padding(.vertical, 4)
         .task(id: RequestSync.viewKey(child)) {
-            guard child.isWaitingOnYou, RequestSync.lists(child) else {
+            guard LeadCrew.asksYou(child), RequestSync.lists(child) else {
                 requests = nil
                 return
             }

@@ -14,10 +14,10 @@ enum LeadCrew {
 
     static func ordered(_ crew: [SessionState], now: Date = Date()) -> [SessionState] {
         func rank(_ session: SessionState) -> Int {
+            if needsYou(session) { return 0 }
             switch SessionDisplayKind.of(session, now: now) {
-            case .waiting: 0
-            case .working, .finishing: 1
-            default: 2
+            case .working, .finishing: return 1
+            default: return 2
             }
         }
         return crew.enumerated().sorted { a, b in
@@ -34,10 +34,19 @@ enum LeadCrew {
     }
 
     static func needsYou(_ crew: [SessionState]) -> Int {
-        crew.filter(\.isWaitingOnYou).count
+        crew.filter(needsYou).count
+    }
+
+    static func needsYou(_ session: SessionState) -> Bool {
+        asksYou(session) || session.attention != nil
+    }
+
+    static func asksYou(_ session: SessionState) -> Bool {
+        session.isWaitingOnYou || session.pendingAskID != nil
     }
 
     static func stateLabel(_ session: SessionState, now: Date = Date()) -> String {
+        if !session.isWaitingOnYou, session.pendingAskID != nil { return "Needs you" }
         guard SessionDisplayKind.of(session, now: now) == .idle, let turn = session.turnState else {
             return SessionDisplayKind.label(session, now: now)
         }
