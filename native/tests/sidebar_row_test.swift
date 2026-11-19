@@ -78,11 +78,21 @@ struct SidebarRowTest {
         host.frame = NSRect(x: 0, y: 0, width: 200, height: 400)
         let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.contentView = host
-        func settle() {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-            host.layoutSubtreeIfNeeded()
+        // Under load a second pass over every row can land after a fixed wait, so wait until the counts stop changing.
+        func settle(until ready: () -> Bool = { true }) {
+            var last = -1
+            var quiet = 0
+            let deadline = Date().addingTimeInterval(5)
+            while quiet < 4, Date() < deadline {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                host.layoutSubtreeIfNeeded()
+                let total = renders.counts.values.reduce(0, +)
+                quiet = total == last && ready() ? quiet + 1 : 0
+                last = total
+            }
+            check(quiet >= 4, "rows stopped rendering within 5 s: \(renders.counts)")
         }
-        settle()
+        settle { renders.counts.count == 10 }
         check(renders.counts.count == 10, "every row renders once to start: \(renders.counts)")
         renders.counts = [:]
         selection.unrelated += 1
