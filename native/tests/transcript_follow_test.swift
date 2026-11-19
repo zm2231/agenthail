@@ -423,7 +423,7 @@ struct TranscriptFollowTest {
             for page in 0..<6 {
                 let content = scroll.documentView?.frame.height ?? 0
                 feed.rows = rows("Zt\(Int(start))p\(page)-", 20) + feed.rows
-                awaitReport { $0.content > content }
+                awaitReport("the older page") { $0.content > content }
                 expectEventually(abs(gap(scroll) - place) < 2, "older pages loaded in a row keep a reader near the top in place, from \(Int(start)) after page \(page) distance from bottom \(place) became \(gap(scroll))")
                 spin(0.3)
                 expect(abs(gap(scroll) - place) < 2, "a reader near the top stays in place once page \(page) settles, from \(Int(start)) distance from bottom \(place) became \(gap(scroll))")
@@ -530,8 +530,10 @@ struct TranscriptFollowTest {
                 feed.rows += rows("Qa\(index)-", 1)
                 spin(0.05)
             }
-            move(scroll, to: offset(scroll) - 400)
+            let start = offset(scroll)
+            move(scroll, to: start - 400)
             busyPlace = offset(scroll)
+            expect(start - busyPlace > 300, "the reader scrolled up from \(start) to \(busyPlace) while the main queue was busy")
             for index in 0..<10 {
                 feed.rows += rows("Qb\(index)-", 1)
                 spin(0.05)
@@ -726,15 +728,16 @@ struct TranscriptFollowTest {
     private static func move(_ scroll: NSScrollView, to y: CGFloat) {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
-        awaitReport { abs($0.offset - offset(scroll)) < 1 }
+        awaitReport("the scroll") { abs($0.offset - offset(scroll)) < 1 }
         spin(0.3)
     }
 
     // A loaded machine can take longer than any fixed wait to report a change, so checks start from the reported geometry.
     @MainActor
-    private static func awaitReport(_ done: ((offset: CGFloat, content: CGFloat)) -> Bool) {
+    private static func awaitReport(_ what: String, _ done: ((offset: CGFloat, content: CGFloat)) -> Bool) {
         let deadline = Date().addingTimeInterval(2)
         while reported.map(done) != true, Date() < deadline { spin(0.02) }
+        expect(reported.map(done) == true, "the transcript reported \(what) within 2 s, last report \(String(describing: reported))")
     }
 
     // A live scroll, as a trackpad or wheel gesture reports it, so the transcript sees a reader's scroll phases.
@@ -745,7 +748,7 @@ struct TranscriptFollowTest {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
         NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
-        awaitReport { abs($0.offset - offset(scroll)) < 1 }
+        awaitReport("the scroll") { abs($0.offset - offset(scroll)) < 1 }
         spin(0.05)
         NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
         spin(0.3)
