@@ -90,6 +90,7 @@ struct SidebarRowTest {
                 quiet = total == last && ready() ? quiet + 1 : 0
                 last = total
             }
+            check(quiet >= 4, "rows stopped rendering within 5 s: \(renders.counts)")
         }
         settle { renders.counts.count == 10 }
         check(renders.counts.count == 10, "every row renders once to start: \(renders.counts)")
