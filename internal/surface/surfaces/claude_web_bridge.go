@@ -84,7 +84,7 @@ func (c *Claude) postContent(ctx context.Context, sess *surface.Session, content
 	}
 	cookies, err := c.cookieSource(ctx, sess)
 	if err != nil {
-		return nil, cookieSourceError(err)
+		return nil, c.remoteControlUnauthenticated(sess, cookieSourceError(err))
 	}
 	uuid := surface.MessageUUID(ctx)
 	if uuid == "" {
@@ -123,9 +123,9 @@ func (c *Claude) postContent(ctx context.Context, sess *surface.Session, content
 	case http.StatusBadRequest:
 		return nil, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryInvalidRequest)
 	case http.StatusUnauthorized:
-		return nil, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryAuthenticationNeeded)
+		return nil, c.remoteControlUnauthenticated(sess, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryAuthenticationNeeded))
 	case http.StatusForbidden:
-		return nil, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryAccessDenied)
+		return nil, c.remoteControlUnauthenticated(sess, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryAccessDenied))
 	case http.StatusNotFound:
 		c.forgetBridge(sess.Bridge)
 		return nil, surface.DeliveryTerminal(fmt.Errorf("%w: send failed (HTTP %d): %s", errRemoteControlGone, status, diagnosticExcerpt(respBody)), surface.DeliveryTargetMissing)

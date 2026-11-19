@@ -41,7 +41,7 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
 	}
 	capabilities.Respond = c.answersPrompts(sess)
-	if c.localOnly || nativeClaudeOnly(sess) {
+	if c.remoteControlUnusable(sess) {
 		capabilities.Steer = false
 		capabilities.Compact = false
 		capabilities.Model = false

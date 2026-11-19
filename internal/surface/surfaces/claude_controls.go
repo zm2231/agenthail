@@ -30,7 +30,7 @@ type claudeRemoteEvent struct {
 func (c *Claude) remoteRequest(ctx context.Context, sess *surface.Session, method, path, body string) (string, error) {
 	cookies, err := c.cookieSource(ctx, sess)
 	if err != nil {
-		return "", cookieSourceError(err)
+		return "", c.remoteControlUnauthenticated(sess, cookieSourceError(err))
 	}
 	request := c.request
 	if request == nil {
@@ -52,9 +52,9 @@ func (c *Claude) remoteRequest(ctx context.Context, sess *surface.Session, metho
 	case http.StatusBadRequest:
 		return "", surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
 	case http.StatusUnauthorized:
-		return "", surface.DeliveryTerminal(err, surface.DeliveryAuthenticationNeeded)
+		return "", c.remoteControlUnauthenticated(sess, surface.DeliveryTerminal(err, surface.DeliveryAuthenticationNeeded))
 	case http.StatusForbidden:
-		return "", surface.DeliveryTerminal(err, surface.DeliveryAccessDenied)
+		return "", c.remoteControlUnauthenticated(sess, surface.DeliveryTerminal(err, surface.DeliveryAccessDenied))
 	case http.StatusNotFound:
 		return "", surface.DeliveryTerminal(err, surface.DeliveryTargetMissing)
 	}
@@ -135,7 +135,7 @@ func (c *Claude) Control(ctx context.Context, sess *surface.Session, control sur
 	if control.Action == "permission-mode" {
 		return nil, fmt.Errorf("%w: only a session the Claude host runs changes its permission mode here", surface.ErrUnsupported)
 	}
-	if c.localOnly || nativeClaudeOnly(sess) {
+	if c.remoteControlUnusable(sess) {
 		return nil, surface.ErrUnsupported
 	}
 	if err := c.reachRunning(ctx, sess); err != nil {

@@ -117,7 +117,7 @@ func (c *Claude) Route(sess *surface.Session, author surface.Author) surface.Rou
 }
 
 func (c *Claude) canSendHumanTurn(sess *surface.Session) bool {
-	return sess != nil && sess.Surface == surface.KindClaude && (claudeHosted(sess) || !claudeProcessAlive(sess.PID) || !c.localOnly && !nativeClaudeOnly(sess))
+	return sess != nil && sess.Surface == surface.KindClaude && (claudeHosted(sess) || !claudeProcessAlive(sess.PID) || !c.remoteControlUnusable(sess))
 }
 
 // SendHumanTurn submits a message through Claude's authenticated web bridge as
