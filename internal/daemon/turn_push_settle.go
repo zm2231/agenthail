@@ -108,16 +108,20 @@ func (d *Daemon) scheduleTurnPush(sessionID, turnID string, notice turnCompleted
 	d.settleTurnPush(sessionID, entry, gen, settledOnIdle)
 }
 
-// A delivery records its turn as running before the observer sees it, so the push is taken first and then given back paused if one has.
+// The registry reads happen under the lock, so a delivery or a newer completion lands either before the decision or after the push has gone.
 func (d *Daemon) settleTurnPush(sessionID string, entry *pendingTurnPush, gen int, reason string) {
-	queued := d.Registry.QueueCount(sessionID) > 0
 	p := d.turnPushes
 	p.mu.Lock()
 	if p.pending[sessionID] != entry || entry.paused || entry.gen != gen {
 		p.mu.Unlock()
 		return
 	}
-	if reason != settledOnDeadline && (queued || p.verdict(sessionID, entry.turnID) == verdictQueued) {
+	if d.anotherTurnRunning(sessionID, entry.turnID) {
+		entry.pause()
+		p.mu.Unlock()
+		return
+	}
+	if reason != settledOnDeadline && (d.Registry.QueueCount(sessionID) > 0 || p.verdict(sessionID, entry.turnID) == verdictQueued) {
 		if entry.timer == nil {
 			armed := entry.gen
 			entry.timer = time.AfterFunc(p.window, func() {
@@ -129,15 +133,6 @@ func (d *Daemon) settleTurnPush(sessionID string, entry *pendingTurnPush, gen in
 	}
 	p.remove(sessionID, entry)
 	p.mu.Unlock()
-	if d.anotherTurnRunning(sessionID, entry.turnID) {
-		p.mu.Lock()
-		if p.pending[sessionID] == nil {
-			entry.paused, entry.timer = true, nil
-			p.pending[sessionID] = entry
-		}
-		p.mu.Unlock()
-		return
-	}
 	d.sendSettledTurnPush(sessionID, entry, reason)
 }
 
