@@ -29,6 +29,7 @@ final class Feed: ObservableObject {
 @MainActor var shownOpen: [String: Bool] = [:]
 @MainActor var rowTops: [String: CGFloat] = [:]
 @MainActor var seenGeometry: [String] = []
+@MainActor var reported: (offset: CGFloat, content: CGFloat)?
 @MainActor var live: Set<String> = []
 @MainActor let rowMemory = TranscriptRowMemory()
 @MainActor weak var watched: Feed?
@@ -73,6 +74,7 @@ struct Transcript: View {
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
             layout.visible = geometry.visibleRect
+            reported = (geometry.contentOffset.y, geometry.contentSize.height)
             seenGeometry.append(String(format: "%.3f offset %.0f content %.0f visible maxY %.0f insets %.0f/%.0f end %.0f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 100), geometry.contentOffset.y, geometry.contentSize.height, geometry.visibleRect.maxY, geometry.contentInsets.top, geometry.contentInsets.bottom, geometry.contentSize.height - (geometry.visibleRect.maxY - geometry.contentInsets.bottom)))
             if seenGeometry.count > 12 { seenGeometry.removeFirst() }
             return true
@@ -419,7 +421,9 @@ struct TranscriptFollowTest {
             move(scroll, to: start)
             let place = gap(scroll)
             for page in 0..<6 {
+                let content = scroll.documentView?.frame.height ?? 0
                 feed.rows = rows("Zt\(Int(start))p\(page)-", 20) + feed.rows
+                awaitReport { $0.content > content }
                 expectEventually(abs(gap(scroll) - place) < 2, "older pages loaded in a row keep a reader near the top in place, from \(Int(start)) after page \(page) distance from bottom \(place) became \(gap(scroll))")
                 spin(0.3)
                 expect(abs(gap(scroll) - place) < 2, "a reader near the top stays in place once page \(page) settles, from \(Int(start)) distance from bottom \(place) became \(gap(scroll))")
@@ -514,6 +518,29 @@ struct TranscriptFollowTest {
         }
         spin(0.6)
         expect(!feed.following && abs(offset(scroll) - readerPlace) < 1, "a reader who scrolls up while rows stream stays put, offset \(readerPlace) became \(offset(scroll))")
+
+        // Inside a main-queue block the main queue cannot run another, as on a machine too busy to drain it between passes.
+        feed.transcript = "Q"
+        feed.rows = rows("Q", 60)
+        spin(0.6)
+        var busyPlace: CGFloat = 0
+        var busyDone = false
+        DispatchQueue.main.async {
+            for index in 0..<5 {
+                feed.rows += rows("Qa\(index)-", 1)
+                spin(0.05)
+            }
+            move(scroll, to: offset(scroll) - 400)
+            busyPlace = offset(scroll)
+            for index in 0..<10 {
+                feed.rows += rows("Qb\(index)-", 1)
+                spin(0.05)
+            }
+            busyDone = true
+        }
+        while !busyDone { spin(0.05) }
+        spin(0.6)
+        expect(!feed.following && abs(offset(scroll) - busyPlace) < 1, "a reader who scrolls up while rows stream stays put when the main queue is busy, offset \(busyPlace) became \(offset(scroll))")
 
         feed.transcript = "N"
         feed.rows = rows("N", 60)
@@ -699,7 +726,15 @@ struct TranscriptFollowTest {
     private static func move(_ scroll: NSScrollView, to y: CGFloat) {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
+        awaitReport { abs($0.offset - offset(scroll)) < 1 }
         spin(0.3)
+    }
+
+    // A loaded machine can take longer than any fixed wait to report a change, so checks start from the reported geometry.
+    @MainActor
+    private static func awaitReport(_ done: ((offset: CGFloat, content: CGFloat)) -> Bool) {
+        let deadline = Date().addingTimeInterval(2)
+        while reported.map(done) != true, Date() < deadline { spin(0.02) }
     }
 
     // A live scroll, as a trackpad or wheel gesture reports it, so the transcript sees a reader's scroll phases.
@@ -710,6 +745,7 @@ struct TranscriptFollowTest {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
         NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
+        awaitReport { abs($0.offset - offset(scroll)) < 1 }
         spin(0.05)
         NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
         spin(0.3)
