@@ -20,6 +20,7 @@ import (
 	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
@@ -745,7 +746,7 @@ func TestReconcileRequiresLaunchTokenBeforeSignallingAProcess(t *testing.T) {
 	home := shortTempDir(t, "cp-token-")
 	socketDir := filepath.Join(home, "socks")
 	token := uuid.NewString()
-	command := exec.Command("/bin/sh", "-c", "while :; do sleep 1; done", "agenthail", "claude-peer-worker", token)
+	command := exec.Command("/bin/sh", "-c", testkit.WhileTestRuns("1"), "agenthail", "claude-peer-worker", token)
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}

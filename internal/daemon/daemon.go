@@ -81,6 +81,8 @@ type Daemon struct {
 	// catalogSelected, when set, runs after a catalog publication has chosen
 	// what a session waits on and before its row commits.
 	catalogSelected func(sessionID string)
+	// catalogStatusPassed, when set, runs after each timed status pass.
+	catalogStatusPassed func()
 	// waitingContended, when set, runs when a session's waiting lock is held
 	// by another caller and this one is about to wait for it.
 	waitingContended func(sessionID string)
@@ -490,6 +492,9 @@ func (d *Daemon) runCatalogStatus(ctx context.Context) {
 			return
 		case <-statusTicker.C:
 			d.refreshCatalogStatus(ctx)
+			if d.catalogStatusPassed != nil {
+				d.catalogStatusPassed()
+			}
 			d.syncLeads()
 		case <-problemTicker.C:
 			d.syncDeliveryAsks()

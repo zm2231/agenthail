@@ -280,6 +280,21 @@ func TestStatusPassPublishesWhileDiscoveryIsBlocked(t *testing.T) {
 		}
 		<-release
 	}
+	passes := make(chan struct{})
+	d.catalogStatusPassed = func() {
+		select {
+		case passes <- struct{}{}:
+		case <-release:
+		}
+	}
+	awaitPass := func(why string) {
+		t.Helper()
+		select {
+		case <-passes:
+		case <-time.After(30 * time.Second):
+			t.Fatalf("no status pass finished %s", why)
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -298,7 +313,8 @@ func TestStatusPassPublishesWhileDiscoveryIsBlocked(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	time.Sleep(catalogStatusInterval + 100*time.Millisecond)
+	awaitPass("after the first discovery")
+	awaitPass("after the first discovery")
 	blocking.Store(true)
 	d.requestCatalogDiscovery()
 	select {
@@ -308,15 +324,12 @@ func TestStatusPassPublishesWhileDiscoveryIsBlocked(t *testing.T) {
 	}
 	after := latestCatalogSeq(t, store)
 	source.writeStatus(t, "from", surface.StatusBusy)
-	deadline = time.Now().Add(2 * time.Second)
-	for {
-		if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) > 0 && statuses[len(statuses)-1] == string(surface.StatusBusy) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("busy status did not publish within 2s while discovery was blocked")
-		}
-		time.Sleep(20 * time.Millisecond)
+	// A pass holds in catalogStatusPassed until received, so the first pass
+	// received may have read the file before the write; the second began after.
+	awaitPass("while discovery was blocked")
+	awaitPass("while discovery was blocked")
+	if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) == 0 || statuses[len(statuses)-1] != string(surface.StatusBusy) {
+		t.Fatalf("statuses published while discovery was blocked = %v, want busy last", statuses)
 	}
 }
 

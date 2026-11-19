@@ -35,7 +35,7 @@ func newFakeLaunchd(t *testing.T) *fakeLaunchd {
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	dir := t.TempDir()
 	f := &fakeLaunchd{t: t, dir: dir, calls: filepath.Join(dir, "calls")}
-	testkit.WriteExecutable(t, filepath.Join(dir, "agenthail"), "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n")
+	testkit.WriteExecutable(t, filepath.Join(dir, "agenthail"), "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\n"+testkit.WhileTestRuns("0.05"))
 	testkit.WriteExecutable(t, filepath.Join(dir, "launchctl"), `#!/bin/sh
 dir="`+dir+`"
 printf '%s\n' "$*" >> "$dir/calls"

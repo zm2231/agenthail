@@ -181,10 +181,24 @@ func probeDeadlines(app *App) <-chan time.Time {
 }
 
 // The deadline must be exactly the flag past the instant the command built it, so scheduling cannot hide a wrong timeout; the return bound only catches a command that keeps waiting once that deadline has passed.
-func requireFlagDeadline(t *testing.T, built <-chan time.Time, calls <-chan boundedCall, returned time.Time, flag time.Duration) {
+// On a loaded machine the deadline can pass before the command reaches the surface. Then no call was made, and the command must have stopped on its deadline: a context reports DeadlineExceeded only once its deadline has fired, which a clock read after the return cannot order.
+func requireFlagDeadline(t *testing.T, built <-chan time.Time, calls <-chan boundedCall, err error, returned time.Time, flag time.Duration) {
 	t.Helper()
-	at := <-built
-	call := <-calls
+	var at time.Time
+	select {
+	case at = <-built:
+	default:
+		t.Fatal("the command never built a deadline from --timeout")
+	}
+	var call boundedCall
+	select {
+	case call = <-calls:
+	default:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("the command returned without reaching the surface and not on its deadline: %v", err)
+		}
+		return
+	}
 	if !call.ok || !call.deadline.Equal(at.Add(flag)) {
 		t.Fatalf("the call's deadline is %s after the command built it (set=%v), want the %s from --timeout", call.deadline.Sub(at), call.ok, flag)
 	}
@@ -823,7 +837,7 @@ func TestSendTimeoutBoundsDelivery(t *testing.T) {
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v", err)
 	}
-	requireFlagDeadline(t, built, fake.bounded, returned, 50*time.Millisecond)
+	requireFlagDeadline(t, built, fake.bounded, err, returned, 50*time.Millisecond)
 	var failed delivery.FailedDeliveryError
 	if !errors.As(err, &failed) {
 		t.Fatalf("a send that ran out of time did not say its delivery failed: %v", err)
@@ -970,7 +984,7 @@ func TestReplyLabelsSourceAndBoundsDeadline(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v", err)
 	}
-	requireFlagDeadline(t, built, blocked.bounded, returned, 50*time.Millisecond)
+	requireFlagDeadline(t, built, blocked.bounded, err, returned, 50*time.Millisecond)
 }
 
 func TestCodexLaunchEnablesLoopbackRendererDebugging(t *testing.T) {

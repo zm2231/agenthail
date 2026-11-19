@@ -207,7 +207,8 @@ func stop(cmd *exec.Cmd, owner io.Closer, exited chan error) {
 func (s *Supervisor) awaitHello(ctx context.Context, launch Launch, pid int, exited chan error) error {
 	ctx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
-	return poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
+	var last error
+	err := poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
 		attempt, done := context.WithTimeout(ctx, time.Second)
 		hello, err := s.Client().Hello(attempt)
 		done()
@@ -223,11 +224,21 @@ func (s *Supervisor) awaitHello(ctx context.Context, launch Launch, pid int, exi
 			return false, fmt.Errorf("the host exited: %v", err)
 		default:
 		}
-		if err != nil && !errors.Is(err, ErrNotRunning) {
+		// The host refusing hello is final; a connection that fails or a
+		// reply that is late, as on a loaded machine, is tried again.
+		var refused *Error
+		if errors.As(err, &refused) {
 			return false, err
+		}
+		if err != nil {
+			last = err
 		}
 		return false, nil
 	})
+	if err != nil && ctx.Err() != nil && last != nil {
+		return fmt.Errorf("%w; the last hello: %v", err, last)
+	}
+	return err
 }
 
 // HostError is a host process failure followed by the end of the host's log.
