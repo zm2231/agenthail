@@ -63,35 +63,54 @@ func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpCallerKey{}, caller)))
 			return
 		}
-		credential, err := d.authenticateSession(token, time.Now())
-		if errors.Is(err, registry.ErrCredentialUnknown) {
-			// Codex connects during thread/start, before its token can bind; with no caller every tool call is refused.
-			live, liveErr := d.Registry.PendingCredentialLive(token, time.Now())
-			if liveErr == nil && live {
-				next.ServeHTTP(w, r)
-				return
-			}
-			if liveErr != nil {
-				err = liveErr
-			}
-		}
-		if err != nil {
-			writeMCPAuthError(w, err)
-			return
-		}
-		session, err := d.Registry.Session(credential.SessionID)
-		if err != nil {
-			writeMCPAuthError(w, err)
-			return
-		}
-		caller, err := d.agentCaller(*session)
-		if err != nil {
+		caller, err := withinBound(d, r.Context(), "checking the session credential", mcpCallerBound, func(context.Context) (*mcpCaller, error) {
+			return d.credentialCaller(token)
+		})
+		var stalled *mcpStallError
+		switch {
+		case errors.As(err, &stalled):
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpAnswerKey{}, socketAnswer{tools: true, refusal: stalled.refusal()})))
+		case errors.Is(err, errCallerPermissions):
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "Reading this session's permissions failed; retry.")
-			return
+		case err != nil:
+			writeMCPAuthError(w, err)
+		case caller == nil:
+			next.ServeHTTP(w, r)
+		default:
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpCallerKey{}, caller)))
 		}
-		caller.credential = credential
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpCallerKey{}, caller)))
 	})
+}
+
+var errCallerPermissions = errors.New("reading the session's permissions failed")
+
+// credentialCaller names the session a bearer token belongs to. A nil caller
+// with no error is a Codex thread connecting before its token binds.
+func (d *Daemon) credentialCaller(token string) (*mcpCaller, error) {
+	credential, err := d.authenticateSession(token, time.Now())
+	if errors.Is(err, registry.ErrCredentialUnknown) {
+		// Codex connects during thread/start, before its token can bind; with no caller every tool call is refused.
+		live, liveErr := d.Registry.PendingCredentialLive(token, time.Now())
+		if liveErr == nil && live {
+			return nil, nil
+		}
+		if liveErr != nil {
+			err = liveErr
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	session, err := d.Registry.Session(credential.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	caller, err := d.agentCaller(*session)
+	if err != nil {
+		return nil, errCallerPermissions
+	}
+	caller.credential = credential
+	return caller, nil
 }
 
 // A running session keeps its credential past a day unused: its turns may

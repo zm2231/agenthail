@@ -24,10 +24,10 @@ func TestMCPTokenSeesOnlyItsProjectAndItsChildren(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
 	alpha := addLedgerProject(t, r, "p-alpha", "alpha")
 	beta := addLedgerProject(t, r, "p-beta", "beta")
-	lead := alpha.session(t, r, "alpha-lead")
-	alpha.session(t, r, "alpha-mate")
-	stranger := beta.session(t, r, "beta-one")
-	child := beta.session(t, r, "alpha-child")
+	lead := recordedSession(t, r, alpha, "alpha-lead")
+	recordedSession(t, r, alpha, "alpha-mate")
+	stranger := recordedSession(t, r, beta, "beta-one")
+	child := recordedSession(t, r, beta, "alpha-child")
 	if err := r.RecordSessionOrigin(registry.SessionOrigin{SessionID: child.ID, Via: registry.OriginAgent, CreatorID: lead.ID}); err != nil {
 		t.Fatal(err)
 	}

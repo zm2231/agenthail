@@ -3,8 +3,10 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/agenttools"
@@ -124,39 +126,80 @@ func (d *Daemon) mcpHandlers() map[string]mcpRegistrar {
 
 func addMCPTool[In any](d *Daemon, server *mcp.Server, tool *mcp.Tool, run func(context.Context, *mcpCaller, In) (any, error)) {
 	mcp.AddTool(server, tool, func(ctx context.Context, _ *mcp.CallToolRequest, input In) (*mcp.CallToolResult, any, error) {
+		started := time.Now()
 		caller := mcpCallerFrom(ctx)
-		if caller == nil {
-			return mcpRefused(mcpNoCallerRefusal(ctx)), nil, nil
-		}
-		if _, allowed := extensionTools[tool.Name]; caller.extension != "" && !allowed {
-			return mcpRefused(&mcpRefusal{Code: "not_for_extensions", Message: tool.Name + " belongs to agent sessions; extensions cannot call it."}), nil, nil
-		}
-		ctx, replay := d.replayMCPWrite(ctx, caller, tool.Name, input)
-		var value any
-		var err error
-		if replay.done {
-			value, err = replay.result, replay.err
-		} else {
-			value, err = run(ctx, caller, input)
-		}
-		if err != nil {
-			refusal := mcpRefusalFor(err)
-			if !replay.done {
-				d.recordMCPScopeRefusal(caller, tool.Name, refusal)
-			}
-			return mcpRefused(refusal), nil, nil
-		}
-		encoded, err := apitime.Marshal(value)
-		if err != nil {
-			return nil, nil, err
-		}
-		return mcpEncoded(encoded), nil, nil
+		result, refusal, err := callMCPTool(d, ctx, caller, tool.Name, input, run)
+		d.logMCPCall(ctx, caller, tool.Name, time.Since(started), refusal)
+		return result, nil, err
 	})
 }
 
-func mcpEncoded(encoded []byte) *mcp.CallToolResult {
+// callMCPTool answers within the tool's bound; past it the caller is told so
+// and the work, which cannot be cancelled everywhere, finishes on its own.
+func callMCPTool[In any](d *Daemon, ctx context.Context, caller *mcpCaller, tool string, input In, run func(context.Context, *mcpCaller, In) (any, error)) (*mcp.CallToolResult, *mcpRefusal, error) {
+	if caller == nil {
+		refusal := mcpNoCallerRefusal(ctx)
+		return mcpRefused(refusal), refusal, nil
+	}
+	if _, allowed := extensionTools[tool]; caller.extension != "" && !allowed {
+		refusal := &mcpRefusal{Code: "not_for_extensions", Message: tool + " belongs to agent sessions; extensions cannot call it."}
+		return mcpRefused(refusal), refusal, nil
+	}
+	_, waits := any(input).(mcpOwnTimeout)
+	cancelAtBound := waits || mcpReadTools[tool]
+	value, err := withinBound(d, ctx, tool, mcpCallBound(tool, input), func(bounded context.Context) (mcpToolOutcome, error) {
+		work := ctx
+		if cancelAtBound {
+			work = bounded
+		}
+		work, replay := d.replayMCPWrite(work, caller, tool, input)
+		if replay.done {
+			return mcpToolOutcome{value: replay.result, err: replay.err, replayed: true}, nil
+		}
+		value, err := run(work, caller, input)
+		return mcpToolOutcome{value: value, err: err}, nil
+	})
+	var stall *mcpStallError
+	if errors.As(err, &stall) {
+		refusal := mcpStalledCall(tool, input, stall)
+		return mcpRefused(refusal), refusal, nil
+	}
+	if err == nil {
+		err = value.err
+	}
+	if err != nil {
+		refusal := mcpRefusalFor(err)
+		if !value.replayed {
+			d.recordMCPScopeRefusal(caller, tool, refusal)
+		}
+		return mcpRefused(refusal), refusal, nil
+	}
+	encoded, err := apitime.Marshal(value.value)
+	if err != nil {
+		return nil, nil, err
+	}
+	if refusal := mcpOversize(encoded); refusal != nil {
+		return mcpRefused(refusal), refusal, nil
+	}
+	return mcpEncoded(encoded), nil, nil
+}
+
+type mcpToolOutcome struct {
+	value    any
+	err      error
+	replayed bool
+}
+
+func mcpOversize(encoded []byte) *mcpRefusal {
 	if len(encoded) > mcpOutputLimit {
-		return mcpRefused(&mcpRefusal{Code: "invalid", Message: fmt.Sprintf("The result exceeds %d bytes; ask for a smaller limit.", mcpOutputLimit)})
+		return &mcpRefusal{Code: "invalid", Message: fmt.Sprintf("The result exceeds %d bytes; ask for a smaller limit.", mcpOutputLimit)}
+	}
+	return nil
+}
+
+func mcpEncoded(encoded []byte) *mcp.CallToolResult {
+	if refusal := mcpOversize(encoded); refusal != nil {
+		return mcpRefused(refusal)
 	}
 	return &mcp.CallToolResult{StructuredContent: json.RawMessage(encoded), Content: []mcp.Content{&mcp.TextContent{Text: string(encoded)}}}
 }

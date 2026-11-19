@@ -18,6 +18,33 @@ func (r *Registry) LiveLocalSessions() ([]SessionRef, error) {
 	}, `SELECT s.id,s.rowid FROM sessions s WHERE `+liveLocalSession+` ORDER BY s.rowid`)
 }
 
+// LiveLocalSessionsInProject lists the live local sessions catalog discovery
+// last recorded in projectID.
+func (r *Registry) LiveLocalSessionsInProject(projectID string) ([]SessionRef, error) {
+	return queryRows(r.read, nil, func(row rowScanner) (SessionRef, error) {
+		var ref SessionRef
+		err := row.Scan(&ref.ID, &ref.Order)
+		return ref, err
+	}, `SELECT s.id,s.rowid FROM sessions s JOIN catalog_sessions cs ON cs.session_id=s.id
+		WHERE `+liveLocalSession+` AND json_valid(cs.host_project) AND json_extract(cs.host_project,'$.id')=? ORDER BY s.rowid`, projectID)
+}
+
+// LiveLocalSessionsAmong lists which of ids are live local sessions.
+func (r *Registry) LiveLocalSessionsAmong(ids []string) ([]SessionRef, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	return queryRows(r.read, nil, func(row rowScanner) (SessionRef, error) {
+		var ref SessionRef
+		err := row.Scan(&ref.ID, &ref.Order)
+		return ref, err
+	}, `SELECT s.id,s.rowid FROM sessions s WHERE s.id IN (SELECT value FROM json_each(?)) AND `+liveLocalSession+` ORDER BY s.rowid`, string(encoded))
+}
+
 // HostSessionRef is a paired host's session as this host mirrors it, with the
 // alias and project that host gives it.
 type HostSessionRef struct {

@@ -73,6 +73,7 @@ func TestALeadReadsItsWorkersPromptOnAPairedHostFromTheNotice(t *testing.T) {
 		t.Fatalf("the waiting row for the worker on the paired host: %v, want its request %v with what it runs", row, call["requestId"])
 	}
 	moveSession(t, l.vps, "vps-later", widgetRepo(t, "https://github.com/example/widget.git"), time.Now())
+	l.vps.daemon.discoverCatalog(t.Context())
 	later, err := l.vps.reg.Session("vps-later")
 	if err != nil {
 		t.Fatal(err)

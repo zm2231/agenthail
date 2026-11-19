@@ -150,18 +150,23 @@ func (r *Registry) AuthenticateRunningSessionToken(token string, now time.Time) 
 	return r.authenticateSessionToken(token, now, true)
 }
 
+// credentialUseResolution is how stale a credential's stored use may be: its
+// idle expiry is a day away, so a use within this of the last one is not
+// written again.
+const credentialUseResolution = time.Minute
+
+// authenticateSessionToken only reads. The use it records is written after
+// it, so a request is never held up by the registry's writer; an ended
+// session's credential is refused from the sessions table as it stands.
 func (r *Registry) authenticateSessionToken(token string, now time.Time, running bool) (SessionCredential, error) {
 	if !strings.HasPrefix(token, SessionTokenPrefix) {
 		return SessionCredential{}, ErrCredentialUnknown
 	}
-	tx, err := r.db.Begin()
-	if err != nil {
-		return SessionCredential{}, err
-	}
-	defer tx.Rollback()
-	var hostID string
-	var archived int
-	row, err := scanCredential(tx.QueryRow(credentialSelect+` WHERE token_hash=?`, HashSessionToken(token)))
+	hash := HashSessionToken(token)
+	// A stamp is taken before the row: a write that lands between the two
+	// is then in the row.
+	used, stamped := r.credentialUse.pendingStamp(hash)
+	row, err := scanCredential(r.read.QueryRow(credentialSelect+` WHERE token_hash=?`, hash))
 	if errors.Is(err, sql.ErrNoRows) {
 		return SessionCredential{}, ErrCredentialUnknown
 	}
@@ -175,34 +180,36 @@ func (r *Registry) authenticateSessionToken(token string, now time.Time, running
 		return SessionCredential{}, CredentialRevokedError{Reason: row.revokedReason}
 	}
 	credential := row.SessionCredential
-	if err := tx.QueryRow(`SELECT s.host_id,EXISTS(SELECT 1 FROM session_archive a WHERE a.session_id=s.id) FROM sessions s WHERE s.id=?`, credential.SessionID).Scan(&hostID, &archived); err != nil {
+	var hostID string
+	var archived int
+	if err := r.read.QueryRow(`SELECT s.host_id,EXISTS(SELECT 1 FROM session_archive a WHERE a.session_id=s.id) FROM sessions s WHERE s.id=?`, credential.SessionID).Scan(&hostID, &archived); err != nil {
 		return SessionCredential{}, err
 	}
 	if ended := endedReason(hostID, archived); ended != "" {
-		if _, err := tx.Exec(`UPDATE session_credentials SET revoked_at_ms=?,revoked_reason=? WHERE id=?`, now.UnixMilli(), ended, credential.ID); err != nil {
-			return SessionCredential{}, err
-		}
-		if err := tx.Commit(); err != nil {
-			return SessionCredential{}, err
-		}
 		return SessionCredential{}, CredentialRevokedError{Reason: ended}
 	}
 	if !credential.MaxExpiresAt.After(now) {
 		return SessionCredential{}, ErrCredentialMaxExpired
 	}
+	if stamped && used > credential.LastUsedAt.UnixMilli() {
+		credential.LastUsedAt = time.UnixMilli(used)
+		credential.IdleExpiresAt = time.UnixMilli(used).Add(CredentialIdleLifetime)
+	}
 	if !running && !credential.IdleExpiresAt.After(now) {
 		return SessionCredential{}, CredentialIdleError{SessionID: credential.SessionID}
 	}
-	idle := now.Add(CredentialIdleLifetime)
-	if _, err := tx.Exec(`UPDATE session_credentials SET last_used_at_ms=?,idle_expires_at_ms=? WHERE id=?`, now.UnixMilli(), idle.UnixMilli(), credential.ID); err != nil {
-		return SessionCredential{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return SessionCredential{}, err
+	if now.Sub(credential.LastUsedAt) >= credentialUseResolution {
+		r.credentialUse.stamp(hash, now.UnixMilli())
 	}
 	credential.LastUsedAt = time.UnixMilli(now.UnixMilli())
-	credential.IdleExpiresAt = time.UnixMilli(idle.UnixMilli())
+	credential.IdleExpiresAt = time.UnixMilli(now.UnixMilli()).Add(CredentialIdleLifetime)
 	return credential, nil
+}
+
+func (r *Registry) writeCredentialUse(hash string, usedAt int64) error {
+	_, err := r.db.Exec(`UPDATE session_credentials SET last_used_at_ms=MAX(last_used_at_ms,?),idle_expires_at_ms=MAX(idle_expires_at_ms,?) WHERE token_hash=? AND revoked_at_ms=0`,
+		usedAt, usedAt+CredentialIdleLifetime.Milliseconds(), hash)
+	return err
 }
 
 func (r *Registry) ReviveSessionCredential(sessionID string, now time.Time) error {

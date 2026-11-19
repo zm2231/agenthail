@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -154,7 +155,7 @@ func TestDeviceAuthenticationRecordsLastSeenAtMostOncePerMinute(t *testing.T) {
 	if err != nil || repeat.LastSeenAt != first.LastSeenAt {
 		t.Fatalf("repeat=%+v err=%v", repeat, err)
 	}
-	r.seen.writes.Wait()
+	r.seen.wait()
 	if count := touches(); count != 1 {
 		t.Fatalf("a request within a minute wrote last-seen again: %d writes", count)
 	}
@@ -235,7 +236,7 @@ func TestAFailedLastSeenStampIsWrittenBeforeTheRegistryCloses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.seen.writes.Wait()
+	r.seen.wait()
 	if _, err := r.db.Exec(`DROP TRIGGER refuse_touch`); err != nil {
 		t.Fatal(err)
 	}
@@ -375,5 +376,51 @@ func TestABrowserUnusedForThirtyDaysIsForgottenButAPhoneIsNot(t *testing.T) {
 	}
 	if _, found := listed[idleBrowser.ID]; found || len(listed) != 2 || !listed[activeBrowser.ID] || listed[phone.ID] {
 		t.Fatalf("devices after pruning = %+v", devices)
+	}
+}
+
+func TestADeviceSeenWhileItsLastSeenIsBeingWrittenIsNotStampedAgain(t *testing.T) {
+	r := openTestRegistry(t)
+	pairing, err := r.CreateDevicePairing("Test iPhone", []string{"read"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := r.CompleteDevicePairing(pairing.Secret, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().UTC().Add(-2 * deviceLastSeenResolution).Format(time.RFC3339Nano)
+	if _, err := r.db.Exec(`UPDATE paired_devices SET last_seen_at=?`, stale); err != nil {
+		t.Fatal(err)
+	}
+	writing, held := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(held) }) }
+	t.Cleanup(release)
+	writes := 0
+	r.seen = newStampQueue(func(hash, stamp string) error {
+		writes++
+		if writes == 1 {
+			close(writing)
+			<-held
+		}
+		return r.writeDeviceSeen(hash, stamp)
+	})
+	first, err := r.AuthenticateDevice(token, "read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-writing
+	again, err := r.AuthenticateDevice(token, "read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.LastSeenAt != first.LastSeenAt {
+		t.Fatalf("during the write the device read as last seen %s, not %s", again.LastSeenAt, first.LastSeenAt)
+	}
+	release()
+	r.seen.wait()
+	if writes != 1 {
+		t.Fatalf("last-seen was written %d times within a minute", writes)
 	}
 }

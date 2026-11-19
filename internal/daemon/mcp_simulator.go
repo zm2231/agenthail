@@ -51,11 +51,7 @@ func (d *Daemon) mcpSimulator(ctx context.Context, caller *mcpCaller, input mcpS
 			return nil, err
 		}
 	}
-	timeout := time.Minute
-	if input.Action == "acquire" {
-		timeout = 11 * time.Minute
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, input.mcpTimeout())
 	defer cancel()
 	limit := 0
 	if input.Action == "describe" || input.Action == "logs" {
@@ -136,4 +132,11 @@ func simulatorRefusal(err error) error {
 		return &mcpRefusal{Code: "timeout", Message: "The simulator did not answer in time.", Retryable: true}
 	}
 	return err
+}
+
+func (input mcpSimulatorInput) mcpTimeout() time.Duration {
+	if input.Action == "acquire" {
+		return 11 * time.Minute
+	}
+	return time.Minute
 }

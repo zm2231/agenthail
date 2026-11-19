@@ -78,6 +78,7 @@ type Daemon struct {
 	presence             catalogPresence
 	leads                leadWatch
 	observerNudge        chan struct{}
+	mcpStall             mcpStall
 	// catalogSelected, when set, runs after a catalog publication has chosen
 	// what a session waits on and before its row commits.
 	catalogSelected func(sessionID string)

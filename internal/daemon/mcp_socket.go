@@ -50,10 +50,10 @@ type socketAnswer struct {
 	status  int
 }
 
-type mcpSocketAnswerKey struct{}
+type mcpAnswerKey struct{}
 
 func mcpNoCallerRefusal(ctx context.Context) *mcpRefusal {
-	if answer, ok := ctx.Value(mcpSocketAnswerKey{}).(socketAnswer); ok && answer.refusal != nil {
+	if answer, ok := ctx.Value(mcpAnswerKey{}).(socketAnswer); ok && answer.refusal != nil {
 		return answer.refusal
 	}
 	return &mcpRefusal{Code: "unauthenticated", Message: "This session is still starting; try again in a moment.", Retryable: true}
@@ -97,7 +97,7 @@ func (d *Daemon) mcpSocketHandler() http.Handler {
 	empty, full := d.newBareMCPServer(), d.newMCPServer()
 	forCaller := d.mcpServerFor(full)
 	stream := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
-		answer, _ := r.Context().Value(mcpSocketAnswerKey{}).(socketAnswer)
+		answer, _ := r.Context().Value(mcpAnswerKey{}).(socketAnswer)
 		switch {
 		case answer.caller != nil:
 			return forCaller(r)
@@ -113,12 +113,25 @@ func (d *Daemon) mcpSocketHandler() http.Handler {
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, mcp.DefaultMaxRequestBodyBytes)
 		}
-		answer := d.socketCaller(r)
+		body, err := readMCPRequest(r)
+		if errors.As(err, new(*http.MaxBytesError)) {
+			http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+			return
+		}
+		peer, _ := r.Context().Value(mcpPeerKey{}).(peerproc.Peer)
+		request := mcpSocketRequest{peer: peer, post: r.Method == http.MethodPost, body: body, bodyErr: err}
+		answer, err := withinBound(d, r.Context(), "naming the calling session", mcpCallerBound, func(ctx context.Context) (socketAnswer, error) {
+			return d.socketCaller(ctx, request), nil
+		})
+		var stalled *mcpStallError
+		if errors.As(err, &stalled) {
+			answer = socketAnswer{tools: true, refusal: stalled.refusal()}
+		}
 		if answer.status != 0 {
 			http.Error(w, http.StatusText(answer.status), answer.status)
 			return
 		}
-		ctx := context.WithValue(r.Context(), mcpSocketAnswerKey{}, answer)
+		ctx := context.WithValue(r.Context(), mcpAnswerKey{}, answer)
 		if answer.caller != nil {
 			ctx = context.WithValue(ctx, mcpCallerKey{}, answer.caller)
 		}
@@ -126,14 +139,32 @@ func (d *Daemon) mcpSocketHandler() http.Handler {
 	})
 }
 
-func (d *Daemon) socketCaller(r *http.Request) socketAnswer {
-	ctx := r.Context()
-	peer, ok := ctx.Value(mcpPeerKey{}).(peerproc.Peer)
-	if !ok || peer.UID != os.Getuid() {
+// mcpSocketRequest is what naming a socket request's caller reads from it,
+// taken before the bounded work so that work never touches the request.
+type mcpSocketRequest struct {
+	peer    peerproc.Peer
+	post    bool
+	body    []byte
+	bodyErr error
+}
+
+// readMCPRequest reads a POST body once and puts it back for the MCP handler.
+func readMCPRequest(r *http.Request) ([]byte, error) {
+	if r.Method != http.MethodPost || r.Body == nil {
+		return nil, nil
+	}
+	body, err := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return body, err
+}
+
+func (d *Daemon) socketCaller(ctx context.Context, request mcpSocketRequest) socketAnswer {
+	peer := request.peer
+	if peer.PID == 0 || peer.UID != os.Getuid() {
 		return socketAnswer{}
 	}
 	if threads := d.codexParentThreads(peer.PID); len(threads) > 0 {
-		return d.codexCaller(r, threads)
+		return d.codexCaller(ctx, request, threads)
 	}
 	sessionID := d.processSession(peer.PID)
 	if sessionID == "" {
@@ -176,14 +207,11 @@ func (d *Daemon) codexParentThreads(pid int) []string {
 // serves several threads, and only a tool call names its thread, so the tools
 // are listed to any Codex child and each call acts as the thread it names,
 // once the Codex process is shown to hold that thread.
-func (d *Daemon) codexCaller(r *http.Request, loaded []string) socketAnswer {
+func (d *Daemon) codexCaller(ctx context.Context, request mcpSocketRequest, loaded []string) socketAnswer {
 	refused := func(code, message string) socketAnswer {
 		return socketAnswer{tools: true, refusal: &mcpRefusal{Code: code, Message: message}}
 	}
-	method, thread, err := mcpRequestThread(r)
-	if errors.As(err, new(*http.MaxBytesError)) {
-		return socketAnswer{status: http.StatusRequestEntityTooLarge}
-	}
+	method, thread, err := mcpRequestThread(request)
 	if err != nil {
 		return refused("invalid_request", "A Codex server's request must be one JSON-RPC message.")
 	}
@@ -196,7 +224,7 @@ func (d *Daemon) codexCaller(r *http.Request, loaded []string) socketAnswer {
 	if !slices.Contains(loaded, thread) {
 		return refused("unauthenticated", "The Codex process that started this server has no thread "+thread+" loaded.")
 	}
-	session, err := d.awaitLocalSession(r.Context(), thread)
+	session, err := d.awaitLocalSession(ctx, thread)
 	if err != nil || session.Surface != surface.KindCodex {
 		return refused("unauthenticated", "Codex thread "+thread+" is not a session on this host; it may have moved or been archived.")
 	}
@@ -212,16 +240,14 @@ func (d *Daemon) codexCaller(r *http.Request, loaded []string) socketAnswer {
 }
 
 // mcpRequestThread reads the JSON-RPC method and the thread Codex puts in a
-// tool call's _meta, leaving the body for the MCP handler. A body that is not
-// one JSON object, such as a batch, is an error.
-func mcpRequestThread(r *http.Request) (method, thread string, err error) {
-	if r.Method != http.MethodPost || r.Body == nil {
+// tool call's _meta. A body that is not one JSON object, such as a batch, is
+// an error.
+func mcpRequestThread(request mcpSocketRequest) (method, thread string, err error) {
+	if !request.post {
 		return "", "", nil
 	}
-	body, err := io.ReadAll(r.Body)
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	if err != nil {
-		return "", "", err
+	if request.bodyErr != nil {
+		return "", "", request.bodyErr
 	}
 	var message struct {
 		Method string `json:"method"`
@@ -231,7 +257,7 @@ func mcpRequestThread(r *http.Request) (method, thread string, err error) {
 			} `json:"_meta"`
 		} `json:"params"`
 	}
-	if err := json.Unmarshal(body, &message); err != nil {
+	if err := json.Unmarshal(request.body, &message); err != nil {
 		return "", "", err
 	}
 	return message.Method, message.Params.Meta.ThreadID, nil

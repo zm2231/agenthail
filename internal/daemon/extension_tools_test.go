@@ -261,3 +261,50 @@ func TestAToolTheReloadRemovesIsNotListedWhileTheReloadRuns(t *testing.T) {
 		t.Fatalf("after the reload the session lists %v", names)
 	}
 }
+
+const slowToolServer = `
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
+export default function (ah: any) {
+  ah.tool({
+    name: 'slow',
+    description: 'Acts, then does not answer until released',
+    inputSchema: { type: 'object', properties: {} },
+    run: async () => {
+      fs.writeFileSync(path.join(ah.dir, 'acted'), '');
+      while (!fs.existsSync(path.join(ah.dir, 'release'))) await new Promise(resolve => setTimeout(resolve, 20));
+      return { done: true };
+    },
+  });
+}
+`
+
+func TestAnExtensionToolPastItsLimitReportsAnUnknownOutcomeAndIsLogged(t *testing.T) {
+	previous := extensionToolLimit
+	extensionToolLimit = 500 * time.Millisecond
+	t.Cleanup(func() { extensionToolLimit = previous })
+	home := extensionTestHome(t)
+	writeToolExtension(t, home, "slow", `{"label": "Slow", "capabilities": ["tools"]}`, slowToolServer)
+	logged := &lockedBuffer{}
+	f := startExtensionDaemon(t, home, extensionDaemonOptions{log: logged})
+	f.awaitAllLoaded(t, "slow")
+	f.approve(t, "slow")
+	t.Cleanup(func() { _ = os.WriteFile(filepath.Join(extension.Workspace(home), "slow", "release"), nil, 0o600) })
+	from, err := f.d.Registry.Session("from")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := mcpSession(t, f.server, issueMCPToken(t, f.d, *from))
+	got := callWithin(t, func() (map[string]any, bool) { return callMCP(t, session, "ext_slow_slow", nil) }, 10*time.Second, "a stalled extension tool")
+	detail, _ := got.out["detail"].(map[string]any)
+	if !got.refused || got.out["code"] != "busy" || got.out["retryable"] != false || detail["outcome"] != "unknown" {
+		t.Fatalf("a stalled extension tool = %v (refused %v), want a non-retryable busy refusal with an unknown outcome", got.out, got.refused)
+	}
+	if _, err := os.Stat(filepath.Join(extension.Workspace(home), "slow", "acted")); err != nil {
+		t.Fatalf("the tool never ran, so the outcome was known: %v", err)
+	}
+	if lines := strings.Count(logged.String(), "mcp ext_slow_slow session=from path=http "); lines != 1 {
+		t.Fatalf("%d log lines for the call, want 1:\n%s", lines, logged.String())
+	}
+}

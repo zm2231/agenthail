@@ -1093,7 +1093,7 @@ func (d *Daemon) storedCatalogProject(sessionID string) *CatalogProject {
 
 // The stored project survives a transient git failure, as the daemon's own resolution does.
 func StoredSessionProject(reg *registry.Registry, sessionID string) *CatalogProject {
-	raw, err := reg.CatalogSessionProject(sessionID)
+	raw, _, err := reg.CatalogSessionProject(sessionID)
 	if err != nil || len(raw) == 0 {
 		return nil
 	}
