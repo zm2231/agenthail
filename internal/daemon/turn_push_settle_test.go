@@ -358,3 +358,46 @@ func TestAMessageSentToTheSessionHoldsItsPushUntilTheDeadline(t *testing.T) {
 		t.Fatalf("a send that was not accepted still held the push: %d pushes", count)
 	}
 }
+
+func TestASendAcceptedBeforeTheTurnsPushIsSetUpStillHoldsIt(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	pushes := newPushRecorder(t, r)
+	notice := turnCompletedNotice{desktop: "from done", mobile: "from done", outcome: turnOutcomeFinished}
+
+	d.turnPushHandoff(from.ID)(true)
+	d.scheduleTurnPush(from.ID, "turn-1", notice)
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 0 || pendingTurns(d, from.ID) == nil {
+		t.Fatalf("a push set up after its session was sent a message went out %d times", count)
+	}
+	d.pauseTurnPush(from.ID)
+	d.scheduleTurnPush(from.ID, "turn-2", notice)
+	d.background.wait()
+	finished := pushes.all("turn.completed")
+	if len(finished) != 1 || finished[0]["turnId"] != "turn-2" {
+		t.Fatalf("the burst pushed %+v", finished)
+	}
+}
+
+func TestARefusedSendDoesNotReleaseAnotherAcceptedOne(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	pushes := newPushRecorder(t, r)
+	notice := turnCompletedNotice{desktop: "from done", mobile: "from done", outcome: turnOutcomeFinished}
+	d.turnJudgmentQueued(from.ID, "turn-1")
+	d.scheduleTurnPush(from.ID, "turn-1", notice)
+
+	accepted, refused := d.turnPushHandoff(from.ID), d.turnPushHandoff(from.ID)
+	d.turnVerdictLanded(from.ID, "turn-1")
+	accepted(true)
+	refused(false)
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 0 {
+		t.Fatalf("a refused send released the push an accepted one held: %d pushes", count)
+	}
+	d.pauseTurnPush(from.ID)
+	d.scheduleTurnPush(from.ID, "turn-2", notice)
+	d.background.wait()
+	if finished := pushes.all("turn.completed"); len(finished) != 1 || finished[0]["turnId"] != "turn-2" {
+		t.Fatalf("the burst pushed %+v", finished)
+	}
+}
