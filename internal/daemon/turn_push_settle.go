@@ -274,22 +274,30 @@ func (d *Daemon) turnVerdictLanded(sessionID, turnID string) {
 }
 
 // The needs-you push stands for the turn's finished push, and for the burst it ends.
-func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string) bool {
+func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string) (*pendingTurnPush, bool) {
 	p := d.turnPushes
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.flushed[sessionID] == turnID {
-		p.mu.Unlock()
-		return false
+		return nil, false
 	}
 	p.mark(sessionID, turnID, verdictNeedsYou)
-	turns := []string{turnID}
 	if entry := p.pending[sessionID]; entry != nil && entry.turnID == turnID {
 		p.remove(sessionID, entry)
-		turns = entry.turns
+		return entry, true
 	}
-	p.mu.Unlock()
-	d.logSettledPush(sessionID, turns, settledOnVerdict, turnNeedsYouEvent)
-	return true
+	return nil, true
+}
+
+func (d *Daemon) needsYouNotPushed(sessionID, turnID string, taken *pendingTurnPush) {
+	p := d.turnPushes
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.mark(sessionID, turnID, verdictDone)
+	if taken != nil && p.pending[sessionID] == nil {
+		taken.gen++
+		p.pending[sessionID] = taken
+	}
 }
 
 func (d *Daemon) turnPushHandoff(sessionID string) func(accepted bool) {

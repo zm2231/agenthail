@@ -67,12 +67,25 @@ func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) bool {
 		}
 		return false
 	}
+	taken, settles := d.needsYouTakesTurnPush(session.ID, judgment.TurnID)
+	if !settles {
+		if err := d.Registry.ReleaseTurnPush(session.ID, judgment.TurnID, claimedAt); err != nil {
+			d.log.Printf("turn judge: release the push of %s turn %s: %s", d.resolveDisplay(session.ID), judgment.TurnID, err)
+		}
+		return true
+	}
 	if confirmed, err := d.Registry.ConfirmTurnPush(session.ID, judgment.TurnID, claimedAt); err != nil || !confirmed {
 		if err != nil {
 			d.log.Printf("turn judge: confirm the push of %s turn %s: %s", d.resolveDisplay(session.ID), judgment.TurnID, err)
 		}
+		d.needsYouNotPushed(session.ID, judgment.TurnID, taken)
 		return false
 	}
+	turns := []string{judgment.TurnID}
+	if taken != nil {
+		turns = taken.turns
+	}
+	d.logSettledPush(session.ID, turns, settledOnVerdict, turnNeedsYouEvent)
 	d.requestCatalogDiscovery()
 	d.publishEvent("state.changed", session.ID, map[string]string{"source": "turn-needs-you"})
 	headline := ""
@@ -83,9 +96,6 @@ func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) bool {
 	desktop := fmt.Sprintf("%s needs you%s", d.resolveDisplay(session.ID), headline)
 	mobile := mobileNotification{Title: "Agenthail", Message: fmt.Sprintf("%s needs you%s%s", d.sessionPushSubject(session), d.onHost(), headline), SessionID: session.ID, TurnID: judgment.TurnID, EventType: turnNeedsYouEvent,
 		CollapseID: turnNotificationKey(hostID, session.ID, judgment.TurnID), DedupeKey: needsYouDedupeKey(hostID, session.ID, judgment.TurnID)}
-	if !d.needsYouTakesTurnPush(session.ID, judgment.TurnID) {
-		return true
-	}
 	d.sendTurnNeedsYou(session.ID, desktop, mobile)
 	return true
 }

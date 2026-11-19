@@ -79,8 +79,13 @@ func (d *Daemon) notifyTurnCompleted(notice turnCompletedNotice, sessionID, turn
 
 func (d *Daemon) deliverTurnCompleted(ctx context.Context, notice turnCompletedNotice, sessionID, turnID string) {
 	hostID := d.hostIdentity().ID
-	if err := d.notifyDesktop("Agenthail", notice.desktop, sessionID, "", notice.requestID, notice.actions); err != nil {
-		d.log.Printf("desktop notification: %s", err)
-	}
+	desktop := make(chan struct{})
+	go func() {
+		defer close(desktop)
+		if err := d.notifyDesktop("Agenthail", notice.desktop, sessionID, "", notice.requestID, notice.actions); err != nil {
+			d.log.Printf("desktop notification: %s", err)
+		}
+	}()
+	defer func() { <-desktop }()
 	d.notifyPairedDevices(ctx, mobileNotification{Title: "Agenthail", Message: notice.mobile, SessionID: sessionID, TurnID: turnID, EventType: "turn.completed", RequestID: notice.requestID, CollapseID: turnNotificationKey(hostID, sessionID, turnID), DedupeKey: completionDedupeKey(hostID, sessionID, turnID)})
 }

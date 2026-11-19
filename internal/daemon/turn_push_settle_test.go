@@ -503,7 +503,7 @@ func TestANeedsYouVerdictAfterTheShutdownFlushIsNotSent(t *testing.T) {
 	d.turnJudgmentQueued(from.ID, "turn-1")
 	d.scheduleTurnPush(from.ID, "turn-1", turnCompletedNotice{desktop: "from done", mobile: "from done", outcome: turnOutcomeFinished})
 	d.flushTurnPushes()
-	if d.needsYouTakesTurnPush(from.ID, "turn-1") {
+	if _, settles := d.needsYouTakesTurnPush(from.ID, "turn-1"); settles {
 		t.Fatal("a needs-you verdict for a turn the shutdown flush sent would still be pushed")
 	}
 	if count := pushes.count("turn.completed"); count != 1 {
