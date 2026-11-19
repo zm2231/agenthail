@@ -71,7 +71,7 @@ func TestATurnEndedWithAHeadlinePushesOnceWhenItsVerdictLands(t *testing.T) {
 	pushes := newPushRecorder(t, r)
 
 	runTurn(t, d, fake, &from, "turn-1", "Parser fixed and tests pass", "Parser fixed. Tests pass.")
-	d.background.wait()
+	time.Sleep(200 * time.Millisecond)
 	if count := pushes.count("turn.completed"); count != 0 {
 		t.Fatalf("the turn pushed %d times before its verdict landed", count)
 	}
@@ -133,11 +133,13 @@ func TestATurnAQueuedMessageFollowsPushesOnceForTheLastTurn(t *testing.T) {
 	d, r, fake, from, _ := daemonFixture(t)
 	logged := captureLog(d)
 	pushes := newPushRecorder(t, r)
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
+	d.observeSession(d.background.ctx, fake, &from)
+	startTurn(t, d, fake, &from, "turn-1")
 	if err := r.QueueMessage(from.ID, "one more thing"); err != nil {
 		t.Fatal(err)
 	}
-
-	runTurn(t, d, fake, &from, "turn-1", "First pass done", "Done.")
+	endTurnWithHeadline(t, d, fake, &from, "turn-1", "First pass done", "Done.")
 	d.background.wait()
 	if count := pushes.count("turn.completed"); count != 0 {
 		t.Fatalf("a turn with a message waiting for the session pushed %d times", count)
