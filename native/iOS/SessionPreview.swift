@@ -307,6 +307,8 @@ struct SessionPreview: View {
                 child("crew-check", "bucket-check", status: "busy", minutes: 2, ["plan": ["done": 7, "total": 9, "current": "Stray list, then the digest-split check"]]),
                 child("crew-cleanup", "faa-cleanup", status: "idle", minutes: 1, ["plan": NSNull(), "turnState": ["state": "continuing", "source": "judge"],
                                                                                    "endTurn": ["headline": "Cleanup plan drafted; will finish the last two sources next"]]),
+                child("crew-review", "release-pipeline-notarization-reviewer", status: "idle", minutes: 0, ["plan": NSNull(),
+                      "turnState": ["state": "waiting_work", "reason": "@customer-analytics-dashboard-redesign-lead", "source": "judge"]]),
             ], at: 1)
             snapshot["sessions"] = led
         }

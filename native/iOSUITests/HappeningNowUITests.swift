@@ -5,9 +5,9 @@ final class HappeningNowUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func launch(focus: Bool) -> XCUIApplication {
+    private func launch(focus: Bool, extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-theme", "dark", "--preview-reading", "--preview-crew", "-transcriptFocus", focus ? "YES" : "NO"]
+        app.launchArguments = ["--preview-session", "--preview-theme", "dark", "--preview-reading", "--preview-crew", "-transcriptFocus", focus ? "YES" : "NO"] + extra
         app.launch()
         return app
     }
@@ -34,7 +34,29 @@ final class HappeningNowUITests: XCTestCase {
         XCTAssertTrue(label.exists, "an idle worker that will continue says so")
         XCTAssertGreaterThan(label.frame.width, 120, "the state label keeps its width beside a long name: \(label.frame)")
         XCTAssertTrue(app.staticTexts["@faa-cleanup"].exists, "a card names the worker, not the lead it belongs to")
+        checkLongWorker(app)
         keep(app, "The Now sheet with a working and an idle worker")
+    }
+
+    func testALongWorkerNameAndStateStayReadableAtALargeTextSize() {
+        let app = launch(focus: false, extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
+        let now = app.buttons["happening-now"]
+        XCTAssertTrue(now.waitForExistence(timeout: 30))
+        now.tap()
+        XCTAssertTrue(app.buttons["crew-computer::crew-review"].waitForExistence(timeout: 10))
+        checkLongWorker(app)
+        keep(app, "The Now sheet at a large text size")
+    }
+
+    private func checkLongWorker(_ app: XCUIApplication) {
+        let longName = app.staticTexts["@release-pipeline-notarization-reviewer"]
+        let longState = app.staticTexts["Waiting on @customer-analytics-dashboard-redesign-lead"]
+        XCTAssertTrue(longName.exists && longState.exists, "a worker with a long name and a long state shows both")
+        for text in [longName, longState] {
+            XCTAssertGreaterThan(text.frame.width, 40, "\(text.label) keeps room to read")
+            XCTAssertLessThanOrEqual(text.frame.maxX, app.windows.firstMatch.frame.maxX, "\(text.label) stays on screen")
+        }
+        XCTAssertFalse(longName.frame.intersects(longState.frame), "a long name and a long state do not overlap")
     }
 
     func testFocusShowsTheTurnsWorkAsOneLine() {

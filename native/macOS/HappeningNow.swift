@@ -78,24 +78,30 @@ struct CrewCard: View, @MainActor Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.child == rhs.child }
 
     var body: some View {
-        let request = LeadCrew.asksYou(child) ? requests?.offered(pendingAsk: child.pendingAskID, open: child.pendingAsks).first : nil
+        let request = LeadCrew.asksYou(child) ? requests?.offered(pendingAsk: child.pendingAskID, open: child.pendingAsks, retired: pane.retiredAsks.retired(in: child.id)).first : nil
         VStack(alignment: .leading, spacing: 6) {
             Button { pane.select(child.id) } label: {
-                HStack(spacing: DesktopSpace.s) {
+                HStack(alignment: .firstTextBaseline, spacing: DesktopSpace.s) {
                     StatusIndicator(session: child, needsYou: LeadCrew.needsYou(child))
-                    Text(child.displayName)
-                        .font(.system(size: DesktopType.body, weight: .semibold))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 4)
                     TimelineView(.everyMinute) { context in
-                        Text(LeadCrew.stateLabel(child, now: context.date))
-                            .lineLimit(1)
-                            .fixedSize()
+                        let name = Text(child.displayName).font(.system(size: DesktopType.body, weight: .semibold))
+                        let state = Text(LeadCrew.stateLabel(child, now: context.date))
+                            .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(LeadCrew.needsYou(child) ? DesktopPalette.attention : DesktopPalette.text2)
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .firstTextBaseline, spacing: DesktopSpace.s) {
+                                name.lineLimit(1).fixedSize()
+                                Spacer(minLength: 4)
+                                state.lineLimit(1).fixedSize()
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                name.lineLimit(1).truncationMode(.middle)
+                                state.lineLimit(1).truncationMode(.middle)
+                            }
+                        }
                     }
-                    .font(.system(size: DesktopType.secondary))
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -140,9 +146,11 @@ struct CrewCard: View, @MainActor Equatable {
     private func answer(_ request: SessionRequest, _ decision: RequestDecision) async {
         answering = true
         failure = nil
-        switch await model.answerDecision(request, sessionID: child.id, decision: decision) {
+        switch await pane.answerDecision(request, in: child.id, decision: decision) {
         case .answered: requests = requests?.removing(request.id)
-        case .failed(let error): failure = error.message
+        case .failed(let error):
+            if error.dropsCard { requests = requests?.removing(request.id) }
+            failure = error.message
         case .busy: break
         }
         answering = false

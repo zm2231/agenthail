@@ -104,20 +104,29 @@ struct PhoneCrewCard: View, @MainActor Equatable {
         let _ = BodyRuns.hit("PhoneCrewCard")
         let _ = BodyRuns.hit("PhoneCrewCard", id: child.id)
 #endif
-        let request = LeadCrew.asksYou(child) ? requests?.offered(pendingAsk: child.pendingAskID, open: child.pendingAsks).first : nil
+        let request = LeadCrew.asksYou(child) ? requests?.offered(pendingAsk: child.pendingAskID, open: child.pendingAsks, retired: model.retiredAsks.retired(in: child.id)).first : nil
         VStack(alignment: .leading, spacing: 6) {
             Button(action: open) {
-                HStack(spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Circle().fill(LeadCrew.needsYou(child) ? AnyShapeStyle(PhonePalette.attention) : child.isWorking ? AnyShapeStyle(PhonePalette.working) : AnyShapeStyle(PhonePalette.muted))
                         .frame(width: 8, height: 8)
                         .accessibilityHidden(true)
-                    Text(child.displayName).font(.body.weight(.semibold)).lineLimit(1).truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    Text(LeadCrew.stateLabel(child)).font(.subheadline)
+                    let name = Text(child.displayName).font(.body.weight(.semibold))
+                    let state = Text(LeadCrew.stateLabel(child)).font(.subheadline)
                         .foregroundStyle(LeadCrew.needsYou(child) ? AnyShapeStyle(PhonePalette.attention) : AnyShapeStyle(PhonePalette.muted))
-                        .lineLimit(1)
-                        .fixedSize()
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            name.lineLimit(1).fixedSize()
+                            Spacer(minLength: 4)
+                            state.lineLimit(1).fixedSize()
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            name.lineLimit(1).truncationMode(.middle)
+                            state.lineLimit(1).truncationMode(.middle)
+                        }
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("crew-" + child.id)
