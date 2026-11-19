@@ -150,6 +150,7 @@ struct PhoneCrewCard: View, @MainActor Equatable {
         }
         .padding(.vertical, 4)
         .task(id: RequestSync.viewKey(child)) {
+            model.settleRetiredAsks(child)
             guard LeadCrew.asksYou(child), RequestSync.lists(child) else {
                 requests = nil
                 return

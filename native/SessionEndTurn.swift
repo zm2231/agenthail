@@ -38,10 +38,10 @@ extension SessionState {
 
 extension SessionRequests {
     // A read can still list an ask that the row, or an answer just sent, already retired; a row from an older daemon names only its oldest.
-    func offered(pendingAsk: String?, open: [String]? = nil, retired: String? = nil) -> [SessionRequest] {
+    func offered(pendingAsk: String?, open: [String]? = nil, retired: Set<String> = []) -> [SessionRequest] {
         guard let pendingAsk else { return requests.filter { !$0.isAsk } }
         let waiting = Set(open ?? [pendingAsk])
-        return requests.filter { !$0.isAsk || (waiting.contains($0.id) && $0.id != retired) }
+        return requests.filter { !$0.isAsk || (waiting.contains($0.id) && !retired.contains($0.id)) }
     }
 }
 
@@ -61,32 +61,45 @@ struct AnswerReceipt: Hashable {
     }
 }
 
-// One entry per session, kept while the row still names the ask, so it can neither grow nor hide a newer ask.
+// Asks answered here, per session, each kept only while the row still names it, so the set can neither grow nor hide a newer ask.
 struct RetiredAsks: Hashable {
     private struct Entry: Hashable {
-        let requestID: String
-        let receipt: AnswerReceipt?
+        var requestIDs: Set<String>
+        var latest: String
+        var receipt: AnswerReceipt?
     }
 
     private var bySession: [String: Entry] = [:]
 
-    func retired(in sessionID: String) -> String? { bySession[sessionID]?.requestID }
+    func retired(in sessionID: String) -> Set<String> { bySession[sessionID]?.requestIDs ?? [] }
 
     func receipt(for session: SessionState) -> AnswerReceipt? {
-        guard let entry = bySession[session.id], entry.requestID == session.ask?.id else { return nil }
+        guard let entry = bySession[session.id], entry.latest == session.ask?.id else { return nil }
         return entry.receipt
     }
 
     mutating func retire(_ requestID: String, in sessionID: String, receipt: AnswerReceipt? = nil) {
-        bySession[sessionID] = Entry(requestID: requestID, receipt: receipt)
+        var entry = bySession[sessionID] ?? Entry(requestIDs: [], latest: requestID)
+        entry.requestIDs.insert(requestID)
+        entry.latest = requestID
+        entry.receipt = receipt
+        bySession[sessionID] = entry
     }
 
     func settles(_ session: SessionState) -> Bool {
-        bySession[session.id].map { $0.requestID != session.ask?.id } ?? false
+        bySession[session.id].map { !$0.requestIDs.isSubset(of: Self.named(by: session)) } ?? false
     }
 
     mutating func settle(_ session: SessionState) {
-        if settles(session) { bySession[session.id] = nil }
+        guard settles(session), var entry = bySession[session.id] else { return }
+        entry.requestIDs.formIntersection(Self.named(by: session))
+        if !entry.requestIDs.contains(entry.latest) { entry.receipt = nil }
+        bySession[session.id] = entry.requestIDs.isEmpty ? nil : entry
+    }
+
+    private static func named(by session: SessionState) -> Set<String> {
+        guard let ask = session.ask else { return [] }
+        return Set([ask.id] + (ask.open ?? []))
     }
 }
 
