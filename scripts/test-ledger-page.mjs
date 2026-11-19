@@ -16,6 +16,9 @@ assert.equal(withoutRefs("Reverted 6C63B4554 after review"), "Reverted after rev
 const titles = new Map([["agenthail-W12", "Keep the tile order"]]);
 assert.equal(readable("Follows agenthail-W12 and agenthail-W9", titles), "Follows “Keep the tile order” and another item", "a known item reads as its title and an unknown one names no id");
 assert.equal(readable("done: #1009 (54ee919f1) for agenthail-W12", titles), "for “Keep the tile order”");
+const nested = new Map([["demo-W1", "Follow demo-W2"], ["demo-W2", "Lead demo-W1"]]);
+assert.equal(readable("Depends on demo-W1", nested), "Depends on “Follow another item”", "an id inside a title is named as no id, and two titles naming each other end");
+assert.equal(readable("See demo-W3", nested), "See another item");
 assert.equal(withoutRefs(""), "");
 assert.equal(withoutRefs(undefined), undefined);
 

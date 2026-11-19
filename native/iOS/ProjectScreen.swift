@@ -50,6 +50,7 @@ struct ProjectScreen: View {
     @State private var place: NewSessionPlace?
     @State private var messaging: ListedProject?
     @State private var showingEarlier = false
+    @State private var earlierStalled = false
     @State private var answering: DecisionItem?
 
     private var project: ListedProject? { model.projects[projectID] }
@@ -138,7 +139,13 @@ struct ProjectScreen: View {
             if showingEarlier {
                 Section("Earlier") {
                     ForEach(contents.earlier) { row($0) }
-                    if model.hasEarlier(project) {
+                    if model.hasEarlier(project), earlierStalled {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(model.listingError ?? "Earlier sessions didn't load.").font(.subheadline).foregroundStyle(PhonePalette.muted)
+                            Button("Try Again") { earlierStalled = false }.buttonStyle(.borderless)
+                        }
+                        .accessibilityIdentifier("project-earlier-stalled")
+                    } else if model.hasEarlier(project) {
                         ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
                             .task(id: contents.earlier.count) { await readEarlier(project, past: contents.earlier.count) }
                     } else if contents.earlier.isEmpty {
@@ -172,9 +179,15 @@ struct ProjectScreen: View {
     }
 
     private func readEarlier(_ project: ListedProject, past count: Int) async {
-        repeat {
+        while !Task.isCancelled {
+            let place = model.earlierPlace(project)
             await model.listEarlier(project)
-        } while !Task.isCancelled && model.hasEarlier(project) && ProjectContents.build(project, sessions: model.projectSessions(project)).earlier.count == count
+            if model.earlierPlace(project) == place, model.hasEarlier(project), !Task.isCancelled {
+                earlierStalled = true
+                return
+            }
+            guard model.hasEarlier(project), ProjectContents.build(project, sessions: model.projectSessions(project)).earlier.count == count else { return }
+        }
     }
 
     private func workSection(_ project: ListedProject) -> some View {

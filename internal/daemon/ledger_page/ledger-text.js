@@ -24,9 +24,12 @@ export function withoutRefs(text) {
   return status.test(out) ? "" : out;
 }
 
+const unnamed = "another item";
+
 export function readable(text, titles) {
   if (!text) return text;
-  return withoutRefs(text.replace(workID, (id) => (titles.has(id) ? `“${titles.get(id)}”` : "another item")));
+  const title = (id) => (titles.has(id) ? `“${titles.get(id).replace(workID, unnamed)}”` : unnamed);
+  return withoutRefs(text.replace(workID, title));
 }
 
 export function shownRows(rows, all) {

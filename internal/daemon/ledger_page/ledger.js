@@ -206,9 +206,18 @@ function render() {
   }
   if (view.done.length) parts.push(doneSection(view.done));
   if (!parts.length) parts.push(node("p", "note", "No work recorded for this project yet. Items appear here as sessions add them."));
-  const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.focus : undefined;
+  const controls = () => [...root.querySelectorAll("[data-focus]")];
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const focused = active?.dataset.focus;
+  const place = focused ? controls().indexOf(active) : -1;
   root.replaceChildren(...parts);
-  if (focused) [...root.querySelectorAll("[data-focus]")].find((element) => element.dataset.focus === focused)?.focus();
+  if (!focused) return;
+  const now = controls();
+  const item = focused.startsWith("row:") ? focused.slice(focused.indexOf(":", 4) + 1) : null;
+  const target = now.find((element) => element.dataset.focus === focused)
+    || (item && now.find((element) => element.dataset.focus?.startsWith("row:") && element.dataset.focus.endsWith(`:${item}`)))
+    || now[Math.min(Math.max(place, 0), now.length - 1)];
+  target?.focus();
 }
 
 async function fetchView() {
