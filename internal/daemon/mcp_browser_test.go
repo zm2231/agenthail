@@ -173,9 +173,11 @@ func TestAfterTheBrowserHostRestartsASessionsTabsAreGoneAndOpenWorksAgain(t *tes
 	if err := syscall.Kill(hello.PID, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "a new browser host answers", func() bool {
+	// The new host is spawned only after the old one is marked down, so a
+	// status that is not unavailable once it answers comes from its readiness.
+	eventually(t, "a new browser host is ready", func() bool {
 		next, err := f.host.Client().Hello(t.Context())
-		return err == nil && next.PID != hello.PID
+		return err == nil && next.PID != hello.PID && f.host.Status().State != browserhost.StateUnavailable
 	})
 	if ids := tabIDs(browse(t, f.parent, map[string]any{"action": "list"})); len(ids) != 0 {
 		t.Fatalf("tabs after the restart: %v", ids)

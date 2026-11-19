@@ -77,7 +77,7 @@ func newDashboardLoginFixture(t *testing.T) *dashboardLoginFixture {
 
 	bin := t.TempDir()
 	fakeDaemon := filepath.Join(bin, "agenthail")
-	testkit.WriteExecutable(t, fakeDaemon, "#!/bin/sh\nwhile :; do sleep 1; done\n")
+	testkit.WriteExecutable(t, fakeDaemon, "#!/bin/sh\n"+testkit.WhileTestRuns("1"))
 	process := exec.Command(fakeDaemon, "daemon-run")
 	if err := process.Start(); err != nil {
 		t.Fatal(err)

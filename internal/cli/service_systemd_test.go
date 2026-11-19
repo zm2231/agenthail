@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type fakeService struct {
@@ -61,7 +62,7 @@ func newFakeSystemctl(t *testing.T) (*fakeSystemctl, *systemdService) {
 	daemon.DefaultDashboardListen = dashboard.Listener.Addr().String()
 	t.Cleanup(func() { daemon.DefaultDashboardListen = previousListen })
 	bin := filepath.Join(t.TempDir(), "agenthail")
-	script := "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n"
+	script := "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\n" + testkit.WhileTestRuns("0.05")
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

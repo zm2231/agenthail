@@ -39,7 +39,7 @@ func startFakeDaemon(t *testing.T) int {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "agenthail")
-	testkit.WriteExecutable(t, bin, "#!/bin/sh\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n")
+	testkit.WriteExecutable(t, bin, "#!/bin/sh\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\n"+testkit.WhileTestRuns("0.05"))
 	cmd := exec.Command(bin, "daemon-run")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -58,7 +58,7 @@ func TestALiveDaemonGetsLongerThanTheGoneBoundToStart(t *testing.T) {
 	scratchDaemonHome(t)
 	shortenDaemonBounds(t, 30*time.Second, 200*time.Millisecond)
 	bin := filepath.Join(t.TempDir(), "agenthail")
-	testkit.WriteExecutable(t, bin, "#!/bin/sh\nsleep 0.6\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n")
+	testkit.WriteExecutable(t, bin, "#!/bin/sh\nsleep 0.6\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\n"+testkit.WhileTestRuns("0.05"))
 	cmd := exec.Command(bin, "daemon-run")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -157,7 +157,7 @@ func TestReadinessWaitsForAnEnabledDashboardToAnswer(t *testing.T) {
 func TestLaunchdInstallWaitsPastTheGoneBoundForAStartThatIsMigrating(t *testing.T) {
 	fake := newFakeLaunchd(t)
 	shortenDaemonBounds(t, 30*time.Second, 200*time.Millisecond)
-	testkit.WriteExecutable(t, filepath.Join(fake.dir, "agenthail"), "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\nsleep 1\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n")
+	testkit.WriteExecutable(t, filepath.Join(fake.dir, "agenthail"), "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\nsleep 1\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\n"+testkit.WhileTestRuns("0.05"))
 	out, err := captureStdout(t, launchdService{}.Install)
 	if err != nil {
 		t.Fatalf("install: %v\n%s", err, out)
