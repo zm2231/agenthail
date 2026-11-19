@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -52,7 +51,7 @@ func (d *Daemon) releaseUnobservedHold(ctx context.Context, adapter surface.Surf
 		turnID := previous.HeldCompletionTurnID
 		var noticed *turnCompletedNotice
 		if !session.Delegated() {
-			notice := d.endTurnNotifications(session, turnID, fmt.Sprintf("%s finished", d.resolveDisplay(session.ID)), fmt.Sprintf("%s finished%s", d.sessionPushSubject(session), d.onHost()))
+			notice := d.endTurnNotifications(session, turnID, d.sessionPushTag(session), "Finished")
 			noticed = &notice
 		}
 		switch {
@@ -82,10 +81,10 @@ func (d *Daemon) deliverTurnCompleted(ctx context.Context, notice turnCompletedN
 	desktop := make(chan struct{})
 	go func() {
 		defer close(desktop)
-		if err := d.notifyDesktop("Agenthail", notice.desktop, sessionID, "", notice.requestID, notice.actions); err != nil {
+		if err := d.notifyDesktop(notice.title, notice.desktop, sessionID, "", notice.requestID, notice.actions); err != nil {
 			d.log.Printf("desktop notification: %s", err)
 		}
 	}()
 	defer func() { <-desktop }()
-	d.notifyPairedDevices(ctx, mobileNotification{Title: "Agenthail", Message: notice.mobile, SessionID: sessionID, TurnID: turnID, EventType: "turn.completed", RequestID: notice.requestID, CollapseID: turnNotificationKey(hostID, sessionID, turnID), DedupeKey: completionDedupeKey(hostID, sessionID, turnID)})
+	d.notifyPairedDevices(ctx, mobileNotification{Title: notice.title, Message: notice.mobile, SessionID: sessionID, TurnID: turnID, EventType: "turn.completed", RequestID: notice.requestID, CollapseID: turnNotificationKey(hostID, sessionID, turnID), DedupeKey: completionDedupeKey(hostID, sessionID, turnID)})
 }

@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -210,8 +209,8 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 		d.log.Printf("runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
-	desktopNotificationMessage := ""
-	mobileNotificationMessage := ""
+	notificationTitle := ""
+	notificationBody := ""
 	notificationOutcome := ""
 	completionPredatesActiveDelivery := previous.ActiveTurnID != "" && observation.ActiveTurnID == previous.ActiveTurnID
 	completionChanged := found && !completionPredatesActiveDelivery && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID
@@ -249,8 +248,11 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 		if observation.Reply.Error != "" {
 			notificationOutcome = turnOutcomeFailed
 		}
-		desktopNotificationMessage = fmt.Sprintf("%s %s", d.resolveDisplay(session.ID), notificationOutcome)
-		mobileNotificationMessage = fmt.Sprintf("%s %s%s", d.sessionPushSubject(session), notificationOutcome, d.onHost())
+		notificationTitle = d.sessionPushTag(session)
+		notificationBody = "Finished"
+		if notificationOutcome == turnOutcomeFailed {
+			notificationBody = "Failed"
+		}
 	}
 	if terminalCompletion || previous.NotificationArmed && !completionChanged && turnCannotRun(session, observation) {
 		if err := d.Registry.ClearCompletionNotification(session.ID); err != nil {
@@ -283,9 +285,9 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 			d.queueTurnJudgment(session, observation.CompletedTurnID, observation.Reply.Text, observation.BackgroundTasks)
 		}
 	}
-	notice := turnCompletedNotice{desktop: desktopNotificationMessage, mobile: mobileNotificationMessage, outcome: notificationOutcome}
+	notice := turnCompletedNotice{title: notificationTitle, desktop: notificationBody, mobile: notificationBody, outcome: notificationOutcome}
 	if notice.desktop != "" && observation.Reply.Error == "" {
-		notice = d.endTurnNotifications(session, observation.CompletedTurnID, notice.desktop, notice.mobile)
+		notice = d.endTurnNotifications(session, observation.CompletedTurnID, notice.title, notice.desktop)
 	}
 	if held != previous.HeldCompletionTurnID {
 		if err := d.Registry.HoldCompletion(session.ID, held); err != nil {

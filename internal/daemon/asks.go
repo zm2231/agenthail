@@ -349,8 +349,8 @@ func (d *Daemon) announceAsk(ask registry.Ask) {
 		return
 	}
 	request := askRequest(ask)
-	desktop := fmt.Sprintf("%s needs you: %s", d.resolveDisplay(session.ID), ask.Title)
-	mobile := mobileNotification{Title: "Agenthail", Message: fmt.Sprintf("%s needs you%s: %s", notificationSurfaceName(session.Surface), d.onHost(), ask.Title), SessionID: session.ID, TurnID: ask.ID, EventType: "ask.opened",
+	desktop := "Needs you: " + ask.Title
+	mobile := mobileNotification{Title: d.sessionPushTag(session), Message: desktop, SessionID: session.ID, TurnID: ask.ID, EventType: "ask.opened",
 		CollapseID: askNotificationKey(ask.ID), RequestID: ask.ID, DedupeKey: askDedupeKey(d.hostIdentity().ID, ask.ID)}
 	d.background.start(func(ctx context.Context) {
 		d.deliverAskNotifications(ctx, desktop, mobile, request.Actions())
@@ -377,7 +377,7 @@ func (d *Daemon) deliverAskNotifications(ctx context.Context, desktop string, mo
 	mobile.Actions = actions
 	var posted sync.WaitGroup
 	posted.Go(func() {
-		if err := d.notifyDesktop("Agenthail", desktop, mobile.SessionID, "agenthail-"+mobile.CollapseID, mobile.RequestID, actions); err != nil {
+		if err := d.notifyDesktop(mobile.Title, desktop, mobile.SessionID, "agenthail-"+mobile.CollapseID, mobile.RequestID, actions); err != nil {
 			d.log.Printf("desktop notification: %s", err)
 		}
 	})
