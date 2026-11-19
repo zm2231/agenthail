@@ -123,6 +123,7 @@ SOURCES=(
   LeadCrew.swift
   LedgerReady.swift
   AgentMessage.swift
+  TranscriptLinks.swift
   ClampedText.swift
   TurnClock.swift
   TimelineMetadata.swift

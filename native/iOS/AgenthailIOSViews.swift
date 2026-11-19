@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import ImageIO
+import Textual
 
 struct AgenthailIOSRoot: View {
     @Bindable var model: AgenthailIOSModel
@@ -1241,12 +1242,13 @@ struct IOSMessage: View {
         VStack(alignment: .leading, spacing: 8) {
             if isUser {
                 if !text.isEmpty {
-                    Text(isLongMessage ? String(text.prefix(700)) : text)
+                    InlineText(isLongMessage ? String(text.prefix(700)) : text, parser: .linkedPlain)
                         .font(.body)
                         .lineSpacing(4)
                         .lineLimit(isLongMessage ? 6 : nil)
+                        .phoneInlineStyle()
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                        .textual.textSelection(.enabled)
                 }
                 ForEach(Array(files.enumerated()), id: \.offset) { _, file in
                     AttachedFileChip(file: file)

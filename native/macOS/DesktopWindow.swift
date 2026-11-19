@@ -1311,11 +1311,12 @@ struct UserBubble: View {
             }
         }
         if !text.isEmpty {
-            Text(text)
+            InlineText(text, parser: .linkedPlain)
                 .font(.system(size: ReadingType.prose))
                 .lineSpacing(ReadingType.proseLineSpacing)
                 .lineLimit(expanded ? nil : 8)
-                .textSelection(.enabled)
+                .desktopInlineStyle()
+                .textual.textSelection(.enabled)
                 .padding(.horizontal, 13)
                 .padding(.vertical, 9)
                 .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
@@ -1431,7 +1432,7 @@ struct AssistantReply: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
-            StructuredText(markdown: text)
+            StructuredText(text, parser: .linkedMarkdown)
                 .font(.system(size: ReadingType.prose))
                 .lineSpacing(ReadingType.proseLineSpacing)
                 .foregroundStyle(DesktopPalette.text)

@@ -145,6 +145,8 @@ targets:
       - path: LeadCrew.swift
       - path: LedgerReady.swift
       - path: AgentMessage.swift
+      - path: TranscriptLinks.swift
+      - path: LinkedMarkdownParser.swift
       - path: ClampedText.swift
       - path: TurnClock.swift
       - path: TimelineMetadata.swift

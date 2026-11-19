@@ -27,7 +27,7 @@ struct UnknownTimelineCard: View {
                     .font(.system(size: ReadingType.meta))
                     .foregroundStyle(DesktopPalette.muted)
             } else {
-                StructuredText(markdown: text)
+                StructuredText(text, parser: .linkedMarkdown)
                     .font(.system(size: ReadingType.body))
                     .foregroundStyle(DesktopPalette.text)
                     .desktopInlineStyle()

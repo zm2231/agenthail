@@ -231,7 +231,7 @@ struct ReasoningLine: View {
             .accessibilityValue(open ? "Expanded" : "Collapsed")
             if open {
                 VStack(alignment: .leading, spacing: DesktopSpace.xs) {
-                    StructuredText(markdown: item.text)
+                    StructuredText(item.text, parser: .linkedMarkdown)
                         .font(.system(size: ReadingType.body))
                         .foregroundStyle(DesktopPalette.text2)
                         .desktopInlineStyle()
