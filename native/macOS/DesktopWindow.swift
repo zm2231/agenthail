@@ -1194,51 +1194,65 @@ struct AttachmentImageView: View {
     @State private var failed = false
     @State private var retryCount = 0
 
+    private static let maxWidth: CGFloat = 520
+    private static let maxHeight: CGFloat = 360
+
+    private var ratio: CGFloat {
+        SessionAttachment.boxRatio(attachment.aspectRatio ?? image.flatMap { $0.size.height > 0 ? $0.size.width / $0.size.height : nil } ?? SessionAttachment.placeholderRatio)
+    }
+
     var body: some View {
-        Group {
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: DesktopRadius.card))
-                    .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).strokeBorder(DesktopPalette.line))
-                    .frame(maxWidth: 520, maxHeight: 360, alignment: .leading)
-                    .onTapGesture(count: 2) { open(image) }
-                    .contextMenu {
-                        Button("Open in Preview") { open(image) }
-                        Button("Copy image") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.writeObjects([image])
-                        }
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(DesktopPalette.bubble)
+            .aspectRatio(ratio, contentMode: .fit)
+            .frame(maxWidth: SessionAttachment.maxWidth(ratio, width: Self.maxWidth, height: Self.maxHeight), alignment: .leading)
+            .clipShape(RoundedRectangle(cornerRadius: DesktopRadius.card))
+            .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).strokeBorder(DesktopPalette.line))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .task(id: "\(attachment.id)-\(retryCount)-\(pane.displayedSession?.id ?? "")") { await load() }
+    }
+
+    @ViewBuilder private var content: some View {
+        if let image {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .onTapGesture(count: 2) { open(image) }
+                .contextMenu {
+                    Button("Open in Preview") { open(image) }
+                    Button("Copy image") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.writeObjects([image])
                     }
-            } else if failed {
-                HStack(spacing: DesktopSpace.s) {
-                    Text("Image couldn't be loaded")
-                        .font(.system(size: ReadingType.meta))
+                }
+        } else {
+            if failed {
+                VStack(spacing: 2) {
+                    Text("Couldn't load image")
                         .foregroundStyle(DesktopPalette.muted)
-                    Button("Try again") {
+                        .multilineTextAlignment(.center)
+                    Button("Retry") {
                         failed = false
                         retryCount += 1
                     }
                     .buttonStyle(.link)
-                    .font(.system(size: ReadingType.meta))
+                    .accessibilityIdentifier("attachment-retry")
                 }
+                .font(.system(size: ReadingType.meta))
+                .padding(DesktopSpace.xs)
             } else {
-                RoundedRectangle(cornerRadius: DesktopRadius.card)
-                    .fill(DesktopPalette.bubble)
-                    .frame(width: 220, height: 140)
-                    .overlay { ProgressView().controlSize(.small) }
+                ProgressView().controlSize(.small)
             }
         }
-        .task(id: "\(attachment.id)-\(retryCount)") { await load() }
     }
 
     private func load() async {
         guard image == nil, let sessionID = pane.displayedSession?.id else { return }
         do {
             let data = try await model.attachmentData(sessionID: sessionID, attachment: attachment)
-            if let decoded = NSImage(data: data) { image = decoded } else { failed = true }
+            if let decoded = SessionAttachment.thumbnail(data) { image = NSImage(cgImage: decoded, size: .zero) } else { failed = true }
         } catch {
             if !error.isCancellation { failed = true }
         }

@@ -585,6 +585,7 @@ final class AgenthailModel {
         if let cached = attachmentCache.object(forKey: key) { return cached as Data }
         guard let api else { throw AgenthailAPIError.invalidResponse }
         let data = try await api.sessionAttachment(sessionID: sessionID, id: attachment.id)
+        if attachment.isImage, SessionAttachment.thumbnail(data, maxPixels: 64) == nil { throw AgenthailAPIError.invalidResponse }
         attachmentCache.setObject(data as NSData, forKey: key, cost: data.count)
         return data
     }

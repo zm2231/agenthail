@@ -1194,6 +1194,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         if let cached = attachmentCache[cacheKey] { return cached }
         return await attachmentLoads.value(for: "\(cacheKey)|\(ObjectIdentifier(connection))") { [weak self] in
             guard let data = try? await connection.api.sessionAttachment(sessionID: route.sessionID, id: attachment.id),
+                  !attachment.isImage || SessionAttachment.thumbnail(data, maxPixels: 64) != nil,
                   let self, self.selectedSessionID == sessionID, self.server(for: sessionID) === connection else { return nil }
             if data.count <= self.attachmentCacheLimit {
                 if self.attachmentCacheBytes + data.count > self.attachmentCacheLimit {
