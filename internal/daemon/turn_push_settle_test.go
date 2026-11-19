@@ -371,6 +371,7 @@ func TestASendAcceptedBeforeTheTurnsPushIsSetUpHoldsItForTheFollowUp(t *testing.
 	startTurn(t, d, fake, &from, "turn-1")
 	d.turnPushHandoff(from.ID)(true)
 	endTurnWithHeadline(t, d, fake, &from, "turn-1", "First pass done", "Done.")
+	d.armCompletionNotification(from.ID)
 	d.background.wait()
 	if count := pushes.count("turn.completed"); count != 0 {
 		t.Fatalf("a turn whose session was already sent its next message pushed %d times", count)
@@ -409,6 +410,7 @@ func TestATurnASendStartedThatWasNeverSeenRunningPushesAtOnce(t *testing.T) {
 	pushes := newPushRecorder(t, r)
 	observeIdle(d, fake, &from)
 	d.turnPushHandoff(from.ID)(true)
+	d.armCompletionNotification(from.ID)
 	endTurnWithHeadline(t, d, fake, &from, "turn-1", "Quick answer", "Done.")
 	d.background.wait()
 	if count := pushes.count("turn.completed"); count != 1 {
@@ -436,5 +438,19 @@ func TestARefusedSendDoesNotReleaseAnotherAcceptedOne(t *testing.T) {
 	d.background.wait()
 	if finished := pushes.all("turn.completed"); len(finished) != 1 || finished[0]["turnId"] != "turn-2" {
 		t.Fatalf("the burst pushed %+v", finished)
+	}
+}
+
+func TestAnUnarmedFollowUpLetsTheEarlierTurnsPushGoAtOnce(t *testing.T) {
+	d, r, fake, from, _ := daemonFixture(t)
+	pushes := newPushRecorder(t, r)
+	observeIdle(d, fake, &from)
+	startTurn(t, d, fake, &from, "turn-1")
+	d.turnPushHandoff(from.ID)(true)
+	endTurnWithHeadline(t, d, fake, &from, "turn-1", "First pass done", "Done.")
+	endTurnWithHeadline(t, d, fake, &from, "turn-2", "Unannounced", "Done.")
+	d.background.wait()
+	if finished := pushes.all("turn.completed"); len(finished) != 1 || finished[0]["turnId"] != "turn-1" {
+		t.Fatalf("a follow-up with no push of its own left %+v", finished)
 	}
 }

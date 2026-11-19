@@ -213,9 +213,13 @@ func (d *Daemon) resumeTurnPush(sessionID string) {
 	p := d.turnPushes
 	p.mu.Lock()
 	entry := p.pending[sessionID]
-	if entry == nil || !entry.paused {
+	if entry == nil {
 		p.mu.Unlock()
 		return
+	}
+	if entry.timer != nil {
+		entry.timer.Stop()
+		entry.timer = nil
 	}
 	entry.paused = false
 	entry.gen++
