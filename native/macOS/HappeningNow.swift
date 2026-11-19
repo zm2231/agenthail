@@ -134,6 +134,7 @@ struct CrewCard: View, @MainActor Equatable {
         .padding(DesktopSpace.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.row))
+        .onChange(of: child.ask) { pane.settleRetiredAsks(child) }
         .task(id: RequestSync.viewKey(child)) {
             pane.settleRetiredAsks(child)
             guard LeadCrew.asksYou(child), RequestSync.lists(child), let api = model.api else {

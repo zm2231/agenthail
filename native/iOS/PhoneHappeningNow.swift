@@ -149,6 +149,7 @@ struct PhoneCrewCard: View, @MainActor Equatable {
             }
         }
         .padding(.vertical, 4)
+        .onChange(of: child.ask) { model.settleRetiredAsks(child) }
         .task(id: RequestSync.viewKey(child)) {
             model.settleRetiredAsks(child)
             guard LeadCrew.asksYou(child), RequestSync.lists(child) else {

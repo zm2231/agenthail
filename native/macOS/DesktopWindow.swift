@@ -706,6 +706,7 @@ struct ConversationPane: View {
                     .ignoresSafeArea(.all, edges: .vertical)
             }
                 .task(id: RequestSync.viewKey(session)) { await pane.syncRequests(for: session) }
+                .onChange(of: session.ask) { pane.settleRetiredAsks(session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     ConversationHeader(session: session, title: model.title(of: session), inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: band ? WindowButtons.headerInset(toggle: showsSidebarToggle) : headerInset, underTabs: chromeTop != 0, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)

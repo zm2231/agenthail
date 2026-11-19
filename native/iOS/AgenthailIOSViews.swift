@@ -772,6 +772,7 @@ struct SessionScreen: View {
         .onAppear { olderPlace.scroll = { [position = $position] in position.wrappedValue = $0 } }
         .refreshable { await model.refreshSession(session.id) }
         .task(id: "\(RequestSync.viewKey(liveSession))|\(model.selectedSessionID == session.id)") { await model.syncRequests(for: liveSession) }
+        .onChange(of: liveSession.ask) { model.settleRetiredAsks(liveSession) }
         // Not in the bottom bar: growing the bar would move the transcript and flip atLatest, which hides it again.
         .overlay(alignment: .bottom) {
             if detail != nil { JumpToLatestControl(edge: edge, following: followingLatest, action: goToLatest) }
