@@ -25,16 +25,12 @@ const (
 	verdictNeedsYou
 )
 
-type turnVerdict struct {
-	turnID string
-	state  int
-}
-
 type pendingTurnPush struct {
 	turnID string
 	turns  []string
 	notice turnCompletedNotice
 	paused bool
+	gen    int
 	timer  *time.Timer
 }
 
@@ -44,22 +40,31 @@ func (entry *pendingTurnPush) pause() {
 		entry.timer = nil
 	}
 	entry.paused = true
+	entry.gen++
 }
 
 type turnPushes struct {
 	mu       sync.Mutex
 	window   time.Duration
 	pending  map[string]*pendingTurnPush
-	verdicts map[string]turnVerdict
+	verdicts map[string]map[string]int
 }
 
 func newTurnPushes() *turnPushes {
-	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]turnVerdict{}}
+	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]map[string]int{}}
 }
 
-func (p *turnPushes) judging(sessionID, turnID string) bool {
-	verdict := p.verdicts[sessionID]
-	return verdict.turnID == turnID && verdict.state == verdictQueued
+func (p *turnPushes) mark(sessionID, turnID string, state int) {
+	marks := p.verdicts[sessionID]
+	if marks == nil {
+		marks = map[string]int{}
+		p.verdicts[sessionID] = marks
+	}
+	marks[turnID] = state
+}
+
+func (p *turnPushes) verdict(sessionID, turnID string) int {
+	return p.verdicts[sessionID][turnID]
 }
 
 func (p *turnPushes) remove(sessionID string, entry *pendingTurnPush) {
@@ -67,12 +72,13 @@ func (p *turnPushes) remove(sessionID string, entry *pendingTurnPush) {
 	if entry.timer != nil {
 		entry.timer.Stop()
 	}
+	entry.gen++
 }
 
 func (d *Daemon) turnJudgmentQueued(sessionID, turnID string) {
 	p := d.turnPushes
 	p.mu.Lock()
-	p.verdicts[sessionID] = turnVerdict{turnID: turnID, state: verdictQueued}
+	p.mark(sessionID, turnID, verdictQueued)
 	p.mu.Unlock()
 }
 
@@ -81,50 +87,67 @@ func (d *Daemon) scheduleTurnPush(sessionID, turnID string, notice turnCompleted
 	p := d.turnPushes
 	entry := &pendingTurnPush{turnID: turnID, notice: notice}
 	p.mu.Lock()
-	prior := p.pending[sessionID]
-	if prior != nil {
+	answered := p.verdict(sessionID, turnID) == verdictNeedsYou
+	for marked, state := range p.verdicts[sessionID] {
+		if marked != turnID && state != verdictQueued {
+			delete(p.verdicts[sessionID], marked)
+		}
+	}
+	if prior := p.pending[sessionID]; prior != nil {
 		p.remove(sessionID, prior)
 		entry.turns = append(entry.turns, prior.turns...)
 	}
 	entry.turns = append(entry.turns, turnID)
-	if verdict := p.verdicts[sessionID]; verdict.turnID == turnID && verdict.state == verdictNeedsYou {
+	if answered {
 		p.mu.Unlock()
 		return
 	}
 	p.pending[sessionID] = entry
+	gen := entry.gen
 	p.mu.Unlock()
-	d.settleTurnPush(sessionID, nil, settledOnIdle)
+	d.settleTurnPush(sessionID, entry, gen, settledOnIdle)
 }
 
-// The deadline sends whatever the verdict, but never while the session runs another turn, which a delivery records before the observer sees it.
-func (d *Daemon) settleTurnPush(sessionID string, expected *pendingTurnPush, reason string) {
+// A delivery records its turn as running before the observer sees it, so the push is taken first and then given back paused if one has.
+func (d *Daemon) settleTurnPush(sessionID string, entry *pendingTurnPush, gen int, reason string) {
 	queued := d.Registry.QueueCount(sessionID) > 0
+	p := d.turnPushes
+	p.mu.Lock()
+	if p.pending[sessionID] != entry || entry.paused || entry.gen != gen {
+		p.mu.Unlock()
+		return
+	}
+	if reason != settledOnDeadline && (queued || p.verdict(sessionID, entry.turnID) == verdictQueued) {
+		if entry.timer == nil {
+			armed := entry.gen
+			entry.timer = time.AfterFunc(p.window, func() {
+				d.background.start(func(context.Context) { d.settleTurnPush(sessionID, entry, armed, settledOnDeadline) })
+			})
+		}
+		p.mu.Unlock()
+		return
+	}
+	p.remove(sessionID, entry)
+	p.mu.Unlock()
+	if d.anotherTurnRunning(sessionID, entry.turnID) {
+		p.mu.Lock()
+		if p.pending[sessionID] == nil {
+			entry.paused, entry.timer = true, nil
+			p.pending[sessionID] = entry
+		}
+		p.mu.Unlock()
+		return
+	}
+	d.sendSettledTurnPush(sessionID, entry, reason)
+}
+
+func (d *Daemon) anotherTurnRunning(sessionID, turnID string) bool {
 	runtime, found, err := d.Registry.RuntimeState(sessionID)
 	if err != nil {
 		d.log.Printf("read the runtime of %s to settle its push: %s", d.resolveDisplay(sessionID), err)
+		return false
 	}
-	p := d.turnPushes
-	p.mu.Lock()
-	entry := p.pending[sessionID]
-	if entry == nil || entry.paused || expected != nil && entry != expected {
-		p.mu.Unlock()
-		return
-	}
-	running := found && runtime.LastStatus == surface.StatusBusy && runtime.ActiveTurnID != entry.turnID
-	switch {
-	case running:
-		entry.pause()
-	case reason == settledOnDeadline || !queued && !p.judging(sessionID, entry.turnID):
-		p.remove(sessionID, entry)
-		p.mu.Unlock()
-		d.sendSettledTurnPush(sessionID, entry, reason)
-		return
-	case entry.timer == nil:
-		entry.timer = time.AfterFunc(p.window, func() {
-			d.background.start(func(context.Context) { d.settleTurnPush(sessionID, entry, settledOnDeadline) })
-		})
-	}
-	p.mu.Unlock()
+	return found && runtime.LastStatus == surface.StatusBusy && runtime.ActiveTurnID != "" && runtime.ActiveTurnID != turnID
 }
 
 func (d *Daemon) sendSettledTurnPush(sessionID string, entry *pendingTurnPush, reason string) {
@@ -165,8 +188,10 @@ func (d *Daemon) resumeTurnPush(sessionID string) {
 		return
 	}
 	entry.paused = false
+	entry.gen++
+	gen := entry.gen
 	p.mu.Unlock()
-	d.settleTurnPush(sessionID, entry, settledOnIdle)
+	d.settleTurnPush(sessionID, entry, gen, settledOnIdle)
 }
 
 func (d *Daemon) dropTurnPush(sessionID string) {
@@ -181,21 +206,24 @@ func (d *Daemon) dropTurnPush(sessionID string) {
 func (d *Daemon) turnVerdictLanded(sessionID, turnID string) {
 	p := d.turnPushes
 	p.mu.Lock()
-	if verdict := p.verdicts[sessionID]; verdict.turnID == turnID {
-		p.verdicts[sessionID] = turnVerdict{turnID: turnID, state: verdictDone}
+	if p.verdict(sessionID, turnID) == verdictQueued {
+		p.mark(sessionID, turnID, verdictDone)
 	}
 	entry := p.pending[sessionID]
-	p.mu.Unlock()
-	if entry != nil && entry.turnID == turnID {
-		d.settleTurnPush(sessionID, entry, settledOnVerdict)
+	if entry == nil || entry.turnID != turnID {
+		p.mu.Unlock()
+		return
 	}
+	gen := entry.gen
+	p.mu.Unlock()
+	d.settleTurnPush(sessionID, entry, gen, settledOnVerdict)
 }
 
 // The needs-you push stands for the turn's finished push, and for the burst it ends.
 func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string) {
 	p := d.turnPushes
 	p.mu.Lock()
-	p.verdicts[sessionID] = turnVerdict{turnID: turnID, state: verdictNeedsYou}
+	p.mark(sessionID, turnID, verdictNeedsYou)
 	turns := []string{turnID}
 	if entry := p.pending[sessionID]; entry != nil && entry.turnID == turnID {
 		p.remove(sessionID, entry)

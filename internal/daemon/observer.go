@@ -289,6 +289,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	}
 	if found && previous.LastStatus == surface.StatusBusy && observation.Status != surface.StatusBusy && !completionChanged {
 		d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnIdle, sessionID: session.ID})
+		d.resumeTurnPush(session.ID)
 	}
 	changed := !found || previous.LastStatus != observation.Status || previous.ActiveTurnID != observation.ActiveTurnID || previous.CompletedTurnID != observation.CompletedTurnID
 	if changed {

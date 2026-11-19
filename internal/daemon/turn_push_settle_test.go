@@ -236,11 +236,57 @@ func TestAFiredDeadlineDoesNotSendAPushPausedByANewTurn(t *testing.T) {
 		t.Fatal("the push did not wait for its verdict")
 	}
 
+	d.turnPushes.mu.Lock()
+	armed := entry.gen
+	d.turnPushes.mu.Unlock()
+
 	d.pauseTurnPush(from.ID)
-	d.settleTurnPush(from.ID, entry, settledOnDeadline)
+	d.settleTurnPush(from.ID, entry, armed, settledOnDeadline)
 	d.background.wait()
 	if count := pushes.count("turn.completed"); count != 0 {
 		t.Fatalf("a deadline that fired as a new turn began sent %d pushes", count)
+	}
+	d.resumeTurnPush(from.ID)
+	d.settleTurnPush(from.ID, entry, armed, settledOnDeadline)
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 0 || pendingTurns(d, from.ID) == nil {
+		t.Fatalf("a deadline armed before a pause settled the resumed push: %d pushes", count)
+	}
+}
+
+func TestAnOlderNeedsYouVerdictLeavesTheNewerTurnWaitingForItsOwn(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	pushes := newPushRecorder(t, r)
+	notice := turnCompletedNotice{desktop: "from done", mobile: "from done", outcome: turnOutcomeFinished}
+	d.turnJudgmentQueued(from.ID, "turn-1")
+	d.turnJudgmentQueued(from.ID, "turn-2")
+	d.scheduleTurnPush(from.ID, "turn-2", notice)
+
+	d.needsYouTakesTurnPush(from.ID, "turn-1")
+	d.background.wait()
+	if turns := pendingTurns(d, from.ID); len(turns) != 1 || turns[0] != "turn-2" {
+		t.Fatalf("an older turn's verdict settled the newer turn's push: pending %v", turns)
+	}
+	d.needsYouTakesTurnPush(from.ID, "turn-2")
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 0 || pendingTurns(d, from.ID) != nil {
+		t.Fatalf("the newer turn's own needs-you did not stand for its push: %d finished pushes", count)
+	}
+}
+
+func TestACompletionSeenWhileTheSessionStillReportsBusyPushesOnce(t *testing.T) {
+	d, r, fake, from, _ := daemonFixture(t)
+	pushes := newPushRecorder(t, r)
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
+	d.observeSession(d.background.ctx, fake, &from)
+	startTurn(t, d, fake, &from, "turn-1")
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusBusy, CompletedTurnID: "turn-1", CompletedAt: time.Now(), Reply: &surface.ReplyResult{Text: "Done.", Done: true}}
+	d.observeSession(d.background.ctx, fake, &from)
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1", CompletedAt: time.Now(), Reply: &surface.ReplyResult{Text: "Done.", Done: true}}
+	d.observeSession(d.background.ctx, fake, &from)
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 1 {
+		t.Fatalf("a completion seen while busy pushed %d times", count)
 	}
 }
 
