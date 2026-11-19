@@ -103,10 +103,10 @@ func (d *Daemon) readOpenRequests(ctx context.Context, session *surface.Session,
 		}
 		request.ID = id
 		request = request.WithOptionIDs()
-		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Actions: request.Actions(), ReplacedBy: d.publicSessionID(replacedBy)})
+		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Brief: clipUTF8(request.Detail(), mcpDetailLimit), Actions: request.Actions(), ReplacedBy: d.publicSessionID(replacedBy)})
 	}
 	for _, ask := range asking {
-		requests = append(requests, openRequestView{Request: ask, Prompt: ask.Prompt(), Actions: ask.Actions()})
+		requests = append(requests, openRequestView{Request: ask, Prompt: ask.Prompt(), Brief: clipUTF8(ask.Detail(), mcpDetailLimit), Actions: ask.Actions()})
 	}
 	return openRequests{requests: requests, permissionMode: state.PermissionMode, providerError: providerError}, nil
 }
@@ -134,6 +134,7 @@ func asksCover(asks []registry.Ask, requests []surface.Request) bool {
 type openRequestView struct {
 	surface.Request
 	Prompt  string                  `json:"prompt"`
+	Brief   string                  `json:"detail,omitempty"`
 	Actions []surface.RequestAction `json:"actions,omitempty"`
 	// ReplacedBy is the project's current lead when this request is from a lead a restart replaced.
 	ReplacedBy string `json:"replacedBy,omitempty"`

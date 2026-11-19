@@ -297,6 +297,21 @@ struct SessionPreview: View {
             timed.append(recent)
             snapshot["sessions"] = timed
         }
+        if ProcessInfo.processInfo.arguments.contains("--preview-crew") {
+            var led = snapshot["sessions"] as! [[String: Any]]
+            func child(_ id: String, _ name: String, status: String, minutes: Int, _ extra: [String: Any]) -> [String: Any] {
+                led[0].merging(["id": id, "name": name, "alias": name, "status": status, "lastActive": "2026-09-12T04:0\(minutes):00Z", "queueCount": 0,
+                                "subagent": ["parentId": "demo", "rootId": "demo", "depth": 1]]) { $1 }.merging(extra) { $1 }
+            }
+            led.insert(contentsOf: [
+                child("crew-check", "bucket-check", status: "busy", minutes: 2, ["plan": ["done": 7, "total": 9, "current": "Stray list, then the digest-split check"]]),
+                child("crew-cleanup", "faa-cleanup", status: "idle", minutes: 1, ["plan": NSNull(), "turnState": ["state": "continuing", "source": "judge"],
+                                                                                   "endTurn": ["headline": "Cleanup plan drafted; will finish the last two sources next"]]),
+                child("crew-review", "release-pipeline-notarization-reviewer", status: "idle", minutes: 0, ["plan": NSNull(),
+                      "turnState": ["state": "waiting_work", "reason": "@customer-analytics-dashboard-redesign-lead", "source": "judge"]]),
+            ], at: 1)
+            snapshot["sessions"] = led
+        }
         if TilesPreview.enabled { snapshot["projects"] = TilesPreview.projects }
         if ProjectNowPreview.scenario != nil {
             snapshot["sessions"] = ProjectNowPreview.sessions(capabilities: capabilities)

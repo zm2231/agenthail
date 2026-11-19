@@ -5,10 +5,11 @@ final class BodyRunsUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func runs(_ extra: [String]) -> [String: Int] {
+    private func runs(_ extra: [String], before: (XCUIApplication) -> Void = { _ in }) -> [String: Int] {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-theme", "dark", "--body-runs", "--preview-background-upserts"] + extra
         app.launch()
+        before(app)
         let probe = app.staticTexts["body-runs"]
         XCTAssertTrue(probe.waitForExistence(timeout: 30))
         Thread.sleep(forTimeInterval: 3)
@@ -20,7 +21,7 @@ final class BodyRunsUITests: XCTestCase {
     }
 
     private static func foldRows(_ window: [String: Int]) -> [String: Int] {
-        var folded = window.filter { !$0.key.contains("#") }
+        var folded = window
         let perRow = Dictionary(grouping: window.filter { $0.key.contains("#") && $0.value > 0 }) { String($0.key.prefix { $0 != "#" }) }
         for (name, rows) in perRow {
             folded[name + ".ids"] = rows.count
@@ -39,7 +40,7 @@ final class BodyRunsUITests: XCTestCase {
     }
 
     private static func line(_ name: String, _ runs: [String: Int]) -> String {
-        "MEASURE \(name) " + runs.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+        "MEASURE \(name) " + runs.filter { !$0.key.contains("#") }.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
     }
 
     func testAnotherSessionsUpdatesLeaveTheOpenTranscriptAlone() {
@@ -67,6 +68,25 @@ final class BodyRunsUITests: XCTestCase {
         let streamed = runs["streamed", default: 0]
         XCTAssertGreaterThan(streamed, 50, "the open session kept streaming")
         XCTAssertLessThanOrEqual(runs["SessionScreen", default: 0], streamed * 2 / 3, "text growing in a reply redrew the whole screen")
+    }
+
+    func testAWorkersUpdatesRedrawOnlyItsCardInTheOpenNowSheet() {
+        let runs = runs(["--preview-reading", "--preview-crew"]) { app in
+            let now = app.buttons["happening-now"]
+            XCTAssertTrue(now.waitForExistence(timeout: 30))
+            now.tap()
+            XCTAssertTrue(app.buttons["crew-computer::crew-check"].waitForExistence(timeout: 10))
+        }
+        print(Self.line("now", runs))
+        let upserts = runs["upserts", default: 0]
+        XCTAssertGreaterThan(upserts, 50, "the worker kept updating")
+        for view in ["SessionScreen", "IOSComposer", "IOSTimelineRow"] {
+            XCTAssertLessThanOrEqual(runs[view, default: 0], 2, "\(view) redrew for a worker's updates")
+        }
+        XCTAssertGreaterThan(runs["PhoneCrewCard#computer::crew-check", default: 0], 0, "the updated worker's card redrew")
+        let others = runs.filter { $0.key.hasPrefix("PhoneCrewCard#") && $0.key != "PhoneCrewCard#computer::crew-check" }
+        XCTAssertFalse(others.isEmpty, "the other worker's card was counted")
+        XCTAssertTrue(others.allSatisfy { $0.value == 0 }, "cards other than the updated worker's redrew: \(others)")
     }
 
     func testAnotherSessionsUpdatesRedrawOnlyItsRowInTheList() {

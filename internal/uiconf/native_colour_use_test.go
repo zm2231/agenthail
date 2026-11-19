@@ -37,6 +37,8 @@ var statusColours = map[string]statusColour{
 			"RequestCard.swift":                 {1, "an end-of-turn ask waiting on the person"},
 			"iOS/AgenthailIOSViews.swift":       {6, "the needs-you header, the waiting label, a goal needing the person, sign-in to fix, an end-of-turn ask, workers that need the person"},
 			"iOS/SessionListRow.swift":          {1, "a needs-you row's reason"},
+			"iOS/PhoneHappeningNow.swift":       {4, "the count of workers that need the person, a waiting worker's dot and label, and the request in its card"},
+			"macOS/HappeningNow.swift":          {2, "a waiting worker's label and the request in its card"},
 			"iOS/DecisionSections.swift":        {3, "a decision holding up other sessions, on its row and in its sheet, and the request waiting in the sheet"},
 			"macOS/DecisionInboxPane.swift":     {2, "a decision holding up other sessions, and the request waiting in the card"},
 			"macOS/DecisionList.swift":          {1, "a decision holding up other sessions, on its row"},
@@ -70,6 +72,7 @@ var statusColours = map[string]statusColour{
 			"macOS/DesktopGlass.swift":       {1, "the working role a selected row must stay readable for"},
 			"macOS/UsageAccountsPanel.swift": {1, "sessions working on an account"},
 			"macOS/WorkingSpinner.swift":     {1, "the working spinner"},
+			"iOS/PhoneHappeningNow.swift":    {1, "a working worker's dot"},
 		},
 	},
 	"status dot": {

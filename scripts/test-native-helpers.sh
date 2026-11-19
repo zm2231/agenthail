@@ -120,6 +120,8 @@ SOURCES=(
   PastedText.swift
   TranscriptRowID.swift
   TranscriptFocus.swift
+  LeadCrew.swift
+  LedgerReady.swift
   AgentMessage.swift
   ClampedText.swift
   TurnClock.swift

@@ -26,11 +26,15 @@ final class TimelineMemoTests: XCTestCase {
         XCTAssertEqual(memo.groups(latest: [item("z")], older: [item("y")], foldAgents: false).flatMap(\.items).map(\.id), ["y", "z"], "groups kept rows after the items changed")
     }
 
-    func testFocusDropsToolActivityAndFollowsTheSetting() {
+    func testFocusFoldsTheTurnsWorkIntoOneLineAfterItsRepliesAndFollowsTheSetting() {
         let memo = TimelineMemo()
         let call = TimelineItem(id: "call", kind: "toolCall", role: nil, title: "Bash", text: "ls", timestamp: nil, callId: "k", status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
         let rows = [item("a"), call, item("b")]
-        XCTAssertEqual(memo.groups(latest: rows, older: [], foldAgents: true, focus: true).flatMap(\.items).map(\.id), ["a", "b"])
+        let focused = memo.groups(latest: rows, older: [], foldAgents: true, focus: true)
+        XCTAssertEqual(focused.flatMap(\.items).map(\.id), ["a", "b", "call"], "the turn's work moves after its replies and is kept")
+        let work = focused.first { $0.items.contains { $0.id == "call" } }
+        XCTAssertEqual(work?.focus, true)
+        XCTAssertEqual(work?.folds, true, "the work is one folded line")
         XCTAssertEqual(memo.groups(latest: rows, older: [], foldAgents: true, focus: false).flatMap(\.items).map(\.id), ["a", "call", "b"], "groups ignored turning focus off")
     }
 }

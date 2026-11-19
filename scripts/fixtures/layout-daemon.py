@@ -115,6 +115,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.path.startswith("/api/v1/ui/snapshot/") and os.environ.get("AGENTHAIL_FIXTURE_SHOT_DIR"):
+            with open(os.path.join(os.environ["AGENTHAIL_FIXTURE_SHOT_DIR"], os.path.basename(self.path) + ".png"), "wb") as shot:
+                shot.write(body)
         if ACTIONS_LOG and self.path.split("?", 1)[0] == "/api/v1/actions":
             with open(ACTIONS_LOG, "ab") as log:
                 log.write(body + b"\n")
@@ -235,9 +238,9 @@ if __name__ == "__main__":
         parked_worker = {**SESSION, "id": "local-worker", "alias": "search-indexing-and-ranking-overhaul-worker", "name": "Rework search indexing and ranking for the analytics dashboard", "status": "idle"}
         paired_row = {**SESSION, "id": paired["id"] + "::docs-site", "alias": "docs-site-migration", "name": "Move the docs site", "status": "idle", "host": paired,
                       "project": {"id": "docs-site", "displayName": "docs-site", "rootPath": "/srv/docs-site", "kind": "git"}}
-        for row in (parked_worker, paired_row):
-            row.pop("ask", None)
-            row.pop("attention", None)
+        for listed_row in (parked_worker, paired_row):
+            listed_row.pop("ask", None)
+            listed_row.pop("attention", None)
         rows = [SESSION, parked_worker, paired_row]
         snapshot = RESPONSES["/api/v1/snapshot"]
         snapshot.update({"sessions": rows, "totalSessions": len(rows), "decisionsRev": "fixture-1"})
@@ -548,6 +551,105 @@ if __name__ == "__main__":
                 out.flush()
 
         STREAMS.update({"/api/v1/catalog-events": catalog, "/api/v1/events": events})
+    if sys.argv[1:2] == ["lead"]:
+        # A lead with a worker, a helper waiting on an approval and an idle worker; the events stream asks for a snapshot of the lead with its inspector.
+        def at(minutes):
+            return (datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        def lead_row(id, alias, status, minutes, **extra):
+            return {**SESSION, "id": id, "name": alias, "alias": alias, "status": status, "lastActive": at(minutes), "current": id == "lead", **extra}
+        lead = lead_row("lead", "core-lead", "idle", 1)
+        worker = lead_row("worker", "bucket-check", "busy", 2, plan={"done": 7, "total": 9, "current": "Stray list, then the digest-split check"},
+                     activity={"busySince": at(6)}, endTurn={"headline": "Stray list, then the digest-split check"})
+        helper = lead_row("helper", "source-scout", "idle", 3, capabilities={**CAPABILITIES, "respond": True}, waitingOn={"kind": "approval", "id": "run-1", "answerable": True, "open": ["run-1"]})
+        idle = lead_row("idle", "faa-cleanup", "idle", 9, turnState={"state": "continuing", "source": "judge"}, endTurn={"headline": "Cleanup plan drafted; will finish the last two sources next"})
+        rows = [lead, worker, helper, idle]
+        snapshot = RESPONSES["/api/v1/snapshot"]
+        snapshot["sessions"], snapshot["totalSessions"] = rows, len(rows)
+        four = {"families": 1, "sessions": 4}
+        snapshot["view"] = {
+            "counts": {"running": {"families": 1, "sessions": 1}, "current": four, "recent": four, "all": four, "archived": {"families": 0, "sessions": 0}},
+            "surfaces": [], "projects": [{"id": SESSION["project"]["id"], "name": SESSION["project"]["id"], "counts": four, "collapsedFamilyIds": []}],
+            "families": [{"id": "lead", "rootId": "lead", "projectId": SESSION["project"]["id"], "checkoutId": SESSION["checkout"]["id"],
+                          "members": [{"id": "lead", "depth": 0, "contextOnly": False, "pinned": False},
+                                      {"id": "worker", "depth": 1, "worker": True, "contextOnly": False, "pinned": False},
+                                      {"id": "helper", "depth": 1, "contextOnly": False, "pinned": False},
+                                      {"id": "idle", "depth": 1, "worker": True, "contextOnly": False, "pinned": False}],
+                          "pinned": False, "workingSubagents": 0, "workers": {"count": 2, "working": 1, "needsYou": 0}}],
+        }
+        SESSION["project"]["key"] = "fixture-key"
+        RESPONSES["/api/v1/requests"] = {"permissionMode": "default", "requests": [{
+            "id": "run-1", "kind": "approval", "tool": "Bash", "title": "Run a command", "prompt": "Bash", "alwaysAllow": True, "createdAt": NOW,
+            "input": {"command": "./publish.sh --to sai"}, "detail": "./publish.sh --to sai\n(in /tmp/fixture-project)",
+            "actions": [{"id": "allow", "title": "Allow"}, {"id": "deny", "title": "Deny"}]}]}
+        RESPONSES["/api/v1/ledger"] = {"total": 2, "backlog": [], "truncated": True}
+        RESPONSES["/api/v1/history"] = {"items": [], "hasMore": False, "nextBefore": 0, "kinds": []}
+        RESPONSES["/api/v1/projects/activity"] = {"projects": [{"id": SESSION["project"]["id"], "lastActive": NOW, "sessionCount": 4, "checkouts": [{"projectId": SESSION["project"]["id"], "sessionCount": 4}]}]}
+        RESPONSES["/api/v1/decisions"] = {"decisions": [], "leadHandling": []}
+        def item(id, kind, title="", role=None, text="", minutes=0, call=None, agent=None):
+            value = {"id": id, "kind": kind, "role": role, "title": title, "text": text, "timestamp": at(minutes), "callId": call or id, "status": "completed", "truncated": False}
+            if agent:
+                value["agent"] = agent
+            return value
+        items = [
+            item("p1", "message", role="user", text="Does the new story matching help or hurt on the big single events?", minutes=40),
+            item("r1", "reasoning", text="Check the scoreboard first.", minutes=39),
+            item("c1", "toolCall", "Bash", text='{"command":"./scoreboard --fold 1"}', minutes=39),
+            item("c1o", "toolResult", "Bash", text="373 vs 351", minutes=38, call="c1"),
+            item("s1", "message", role="assistant", text="It hurts, so it stays off. Two causes: the wider sample is worse, and one development has stray articles in it.", minutes=37),
+            item("c2", "toolCall", "Read", text='{"file_path":"/tmp/fixture-project/folds.md"}', minutes=36),
+            item("c3", "toolCall", "Bash", text='{"command":"./compare --folds 1-4"}', minutes=34),
+            item("s2", "message", role="assistant", text="With main's three fixed statements back it wins on fold 1 (373 vs 351) and trial 4 (391 vs 383).", minutes=33),
+            item("d1", "event", "Turn duration", text="6m 2s", minutes=33),
+            item("h1", "message", "bucket-check", role="peer", text="Stray list: 4 pages left. Digest-split check about 50 pages left.", minutes=20,
+                 agent={"direction": "in", "kind": "peer", "peer": "bucket-check", "summary": "Stray list: 4 pages left. Digest-split check about 50 pages left."}),
+            item("s3", "message", role="assistant", text="Nothing changes until you've seen the cleanup plan.", minutes=19),
+            item("p2", "message", role="user", text="Keep going and tell me when the cleanup plan is ready.", minutes=5),
+            item("c4", "toolCall", "Read", text='{"file_path":"/tmp/fixture-project/scoreboard.md"}', minutes=4),
+            item("c5", "toolCall", "Bash", text='{"command":"./compare --folds 1-4"}', minutes=3),
+            item("c6", "toolCall", "Grep", text='{"pattern":"stray"}', minutes=3),
+            item("c7", "toolCall", "Bash", text='{"command":"./one-arm-test"}', minutes=2),
+            item("s4", "message", role="assistant", text="On it. I'll bring you the cleanup plan before anything changes.", minutes=1),
+        ]
+        RESPONSES["/api/v1/session"] = {
+            "session": {k: lead[k] for k in ("id", "surface", "name", "status", "lastActive", "cwd")},
+            "exchanges": [], "capabilities": CAPABILITIES, "readOnly": False, "readOnlyReason": "",
+            "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": items},
+        }
+        RESPONSES["/api/v1/session-options"] = {"surfaces": [{"id": "claude", "workspace": True}], "projects": [], "claudeConfigRoots": []}
+        RESPONSES["/api/v1/session-commands"] = {"commands": [], "unavailable": ""}
+        RESPONSES["/api/v1/session-metadata"] = {}
+        RESPONSES["/api/v1/models"] = {"models": []}
+        theme = sys.argv[2] if len(sys.argv) > 2 else "system"
+        RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
+        HELD_STREAMS.update({"/api/v1/catalog-events", "/api/v1/session-stream", "/api/v1/ledger/events"})
+        shots = [arg.split(":") for arg in sys.argv[3:]]
+
+        def lead_events(out):
+            time.sleep(float(os.environ.get("AGENTHAIL_FIXTURE_SHOT_DELAY", "8")))
+            for seq, (name, view, width, height) in enumerate(shots, start=2):
+                deadline = 50000
+                event = {"id": seq, "type": "ui.snapshot.requested", "timestamp": NOW, "entityId": name,
+                         "data": {"id": name, "session": "lead", "width": int(width), "height": int(height), "view": view, "deadlineMs": deadline}}
+                out.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+                out.flush()
+                time.sleep(6)
+            threading.Event().wait()
+
+        STREAMS["/api/v1/events"] = lead_events
+        child_interval = float(os.environ.get("AGENTHAIL_FIXTURE_CHILD_INTERVAL", "0"))
+        if child_interval > 0:
+            def child_updates(out):
+                seq = 1
+                while True:
+                    time.sleep(child_interval)
+                    seq += 1
+                    moved = {**worker, "lastActive": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                             "plan": {**worker["plan"], "current": f"Stray list, page {seq % 50 + 1} of 50"}}
+                    out.write(b"data: " + json.dumps({"stream": "catalog", "seq": seq, "type": "session.upserted", "data": {"session": moved}}).encode() + b"\n\n")
+                    out.flush()
+
+            HELD_STREAMS.discard("/api/v1/catalog-events")
+            STREAMS["/api/v1/catalog-events"] = child_updates
     server = Server(("127.0.0.1", 0), Handler)
     print(server.server_address[1], flush=True)
     sys.stdout.close()

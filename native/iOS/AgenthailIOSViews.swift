@@ -510,6 +510,7 @@ struct SessionScreen: View {
     private var liveSession: SessionState { model.session(session.id) ?? session }
     @State private var showingInfo = false
     @State private var showingVoice = false
+    @State private var showingNow = false
     @State private var shownRequest: String?
     @State private var activityOnly = false
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
@@ -771,6 +772,7 @@ struct SessionScreen: View {
         .onAppear { olderPlace.scroll = { [position = $position] in position.wrappedValue = $0 } }
         .refreshable { await model.refreshSession(session.id) }
         .task(id: "\(RequestSync.viewKey(liveSession))|\(model.selectedSessionID == session.id)") { await model.syncRequests(for: liveSession) }
+        .onChange(of: liveSession.ask) { model.settleRetiredAsks(liveSession) }
         // Not in the bottom bar: growing the bar would move the transcript and flip atLatest, which hides it again.
         .overlay(alignment: .bottom) {
             if detail != nil { JumpToLatestControl(edge: edge, following: followingLatest, action: goToLatest) }
@@ -863,13 +865,16 @@ struct SessionScreen: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
+                IOSNowButton(model: model, sessionID: session.id, showing: $showingNow)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Session details", systemImage: "info.circle") { showingInfo = true }
                     Picker("Transcript view", selection: $activityOnly) {
                         Text("Chat").tag(false)
                         Text("All events").tag(true)
                     }
-                    Toggle("Focus on messages", systemImage: "bubble.left.and.text.bubble.right", isOn: $focus)
+                    Toggle("Focus", systemImage: "bubble.left.and.text.bubble.right", isOn: $focus)
                         .disabled(activityOnly)
                         .accessibilityIdentifier("session-focus")
                     Toggle("Expand agent messages", systemImage: "text.bubble", isOn: $expandAgents)
@@ -889,6 +894,9 @@ struct SessionScreen: View {
             if let liveDetail = model.selectedDetail, liveDetail.session.id == session.id {
                 SessionInspector(model: model, session: session, initialDetail: liveDetail)
             }
+        }
+        .sheet(isPresented: $showingNow) {
+            PhoneHappeningNow(model: model, session: liveSession, items: items) { model.requestedSessionID = $0 }
         }
         .sheet(isPresented: $showingVoice) {
             if let call = voiceCalls.model {

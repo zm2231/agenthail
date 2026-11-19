@@ -34,18 +34,40 @@ struct TranscriptFocusTest {
             item("done", "done"),
             item("goal", "goal"),
         ]
-        let kept = TranscriptFocus.kept(items).map(\.id)
-        let expected = ["ask-person", "question", "answer", "mcp-ask", "codex-ask", "peer", "send", "sent", "streamed", "file", "image", "reply", "duration"]
-        check(kept == expected, "focus keeps messages, files, asks and agent messages in order: \(kept)")
+        let focused = TranscriptFocus.focused(items).map(\.id)
+        let expected = ["ask-person", "question", "answer", "mcp-ask", "codex-ask", "reasoning", "bash", "bash-out", "peer", "send", "sent", "streamed", "file", "image", "reply", "duration", "done", "goal"]
+        check(focused == expected, "focus keeps what was said and asked in place and moves the turn's work after it: \(focused)")
 
-        let orphan = TranscriptFocus.kept([item("late", "toolResult", call: "q"), item("question", "toolCall", "AskUserQuestion", call: "q")]).map(\.id)
-        check(orphan == ["question"], "a result before its ask is not kept: \(orphan)")
-
-        let blocks = TranscriptBlock.build(TranscriptFocus.kept(items), foldAgents: false)
-        let tools = blocks.filter { if case .tools = $0.kind { true } else { false } }
-        check(tools.count == 1, "the asks form the only tool block: \(blocks.map(\.kind))")
-        if let last = blocks.last { check(last.finished == "duration", "the reply keeps its turn time: \(last)") }
+        let blocks = TranscriptBlock.build(TranscriptFocus.focused(items), foldAgents: false, focus: true)
+        let tools = blocks.compactMap { if case .tools(let run) = $0.kind { run.map(\.id) } else { nil } }
+        check(tools == [["question", "answer", "mcp-ask", "codex-ask"], ["reasoning", "bash", "bash-out"]], "an ask stays a run of its own beside the work, which ends the turn before the helper's message: \(tools)")
+        let reply = blocks.first { $0.id == TranscriptRowID.item("reply") }
+        check(reply?.finished == "duration", "the reply keeps its turn time: \(String(describing: reply))")
         check(!blocks.contains { if case .notice = $0.kind { true } else { false } }, "notices are hidden")
+        let work = items.filter { ["reasoning", "bash", "bash-out"].contains($0.id) }
+        check(ToolRunSummary.folds(ToolRunSummary.entries(work), focus: true), "the work folds in focus even with one call")
+        check(TranscriptFocus.isAsk(item("bare-ask", "toolCall", "agenthail_ask", call: "a")), "a bare agenthail_ask is an ask, as a bare end_turn is an end_turn")
+        let askRun = items.filter { ["question", "answer"].contains($0.id) }
+        check(!ToolRunSummary.folds(ToolRunSummary.entries(askRun), focus: true), "an ask never folds")
+
+        let turns = [
+            item("p1", "message", role: "user"),
+            item("say1", "message", role: "assistant"),
+            item("t1", "toolCall", "Bash", call: "1"),
+            item("say2", "message", role: "assistant"),
+            item("t2", "toolCall", "Read", call: "2"),
+            item("helper", "message", role: "peer", agent: peer),
+            item("t3", "toolCall", "Bash", call: "3"),
+            item("p2", "message", role: "user"),
+            item("t4", "toolCall", "Bash", call: "4"),
+        ]
+        let order = TranscriptFocus.focused(turns).map(\.id)
+        check(order == ["p1", "say1", "say2", "t1", "t2", "helper", "t3", "p2", "t4"], "a turn ends at the next prompt or helper message, and its work follows its prose: \(order)")
+        var timed = turns.filter { $0.kind == "toolCall" }
+        timed[0].timestamp = "2026-11-17T10:00:00Z"
+        timed[1].timestamp = "2026-11-17T10:06:00Z"
+        check(ToolRunSummary.focusLine(Array(timed.prefix(2))) == "6m of work · 2 steps", "the work line: \(ToolRunSummary.focusLine(Array(timed.prefix(2))))")
+        check(ToolRunSummary.focusLine([timed[2]]) == "1 step", "a single untimed step: \(ToolRunSummary.focusLine([timed[2]]))")
 
         let ended = [
             item("bash", "toolCall", "Bash", call: "b"),

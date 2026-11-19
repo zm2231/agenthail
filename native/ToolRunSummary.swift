@@ -84,10 +84,21 @@ enum ToolRunSummary {
     static let asksThePerson: Set<String> = ["AskUserQuestion"]
 
     /// A question still waiting on the person stays in view, so its run does not fold until it is answered.
-    static func folds(_ entries: [ToolRunEntry]) -> Bool {
+    /// In Focus every run of work folds; an ask is never work and stays open.
+    static func folds(_ entries: [ToolRunEntry], focus: Bool = false) -> Bool {
         let calls = entries.compactMap { if case .call(let call, let results) = $0 { return (call, results) } else { return nil } }
         if calls.contains(where: { asksThePerson.contains($0.0.title) && $0.1.isEmpty }) { return false }
+        if focus { return !entries.isEmpty && !calls.contains(where: { TranscriptFocus.isAsk($0.0) }) }
         return calls.count > foldAfter
+    }
+
+    /// The one line a turn's work folds behind in Focus: "6m of work · 14 steps".
+    static func focusLine(_ items: [TimelineItem]) -> String {
+        let steps = items.filter(isCall).count
+        let count = steps == 1 ? "1 step" : "\(steps) steps"
+        let dates = items.compactMap { $0.timestamp.flatMap(TimestampParser.date) }
+        guard let first = dates.min(), let last = dates.max(), last > first else { return steps == 0 ? "Thought" : count }
+        return "\(span(last.timeIntervalSince(first))) of work · \(count)"
     }
 
     static func outputPreview(_ text: String) -> String {

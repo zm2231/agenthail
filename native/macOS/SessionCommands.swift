@@ -104,7 +104,7 @@ struct SessionCommands: Commands {
                 .disabled(pane == nil)
             Toggle("Expand Agent Messages", isOn: $expandAgents)
                 .keyboardShortcut(shortcuts.keyboardShortcut(.expandAgentMessages))
-            Toggle("Focus on Messages", isOn: $focus)
+            Toggle("Focus", isOn: $focus)
             Button("Make Text Bigger") { model.interface.stepTextScale(by: 1, api: model.api) }
                 .keyboardShortcut("+", modifiers: .command)
             Button("Make Text Smaller") { model.interface.stepTextScale(by: -1, api: model.api) }

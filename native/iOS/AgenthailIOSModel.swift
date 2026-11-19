@@ -523,6 +523,13 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         return (connection.api, route)
     }
 
+    func openRequests(of sessionID: String) async -> SessionRequests? {
+        guard let (api, route) = try? resolve(sessionID) else { return nil }
+        return try? await api.requests(sessionID: route.sessionID)
+    }
+
+    func api(for sessionID: String) -> AgenthailAPI? { try? resolve(sessionID).api }
+
     func runningServer(_ sessionID: String) -> (connection: HostConnection, route: SessionRoute)? {
         guard let (connection, route) = try? resolveServer(sessionID), HostCatalog.owner(of: sessionID) == route.hostID else { return nil }
         return (connection, route)
@@ -1653,8 +1660,12 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         await refreshDeliveries()
     }
 
-    func syncRequests(for session: SessionState) async {
+    func settleRetiredAsks(_ session: SessionState) {
         if retiredAsks.settles(session) { retiredAsks.settle(session) }
+    }
+
+    func syncRequests(for session: SessionState) async {
+        settleRetiredAsks(session)
         guard selectedSessionID == session.id else { return }
         guard RequestSync.lists(session) else {
             if sessionRequests != nil { sessionRequests = nil }

@@ -601,6 +601,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var placement: String? = nil
     var registeredAt: String? = nil
     var endTurn: SessionEndTurn? = nil
+    var turnState: SessionTurnState? = nil
     var ask: SessionAsk? = nil
     var move: SessionMove? = nil
     var pinnedAt: String? = nil
@@ -1264,6 +1265,7 @@ struct ProjectIdentity: Codable, Hashable {
     let kind: String
     var archived: Bool? = nil
     var added: Bool? = nil
+    var key: String? = nil
 }
 
 struct CheckoutIdentity: Codable, Hashable {
@@ -2328,6 +2330,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var questions: [Question]? = nil
     let alwaysAllow: Bool
     var input: String? = nil
+    var detail: String? = nil
     var elicitation: Elicitation? = nil
     /// The project's current lead when this request is from a lead a restart replaced.
     var replacedBy: String? = nil
@@ -2342,7 +2345,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var summary: String { [title, displayName].compactMap { $0 }.first { !$0.isEmpty } ?? tool }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation, replacedBy, actions, createdAt, optionsOnly, deadline
+        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, detail, elicitation, replacedBy, actions, createdAt, optionsOnly, deadline
     }
 
     init(id: String, kind: String, tool: String, title: String? = nil, questions: [Question]? = nil, alwaysAllow: Bool = false, input: String? = nil, actions: [Action] = []) {
@@ -2367,6 +2370,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
         createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
         optionsOnly = try container.decodeIfPresent(Bool.self, forKey: .optionsOnly) ?? false
         deadline = try container.decodeIfPresent(String.self, forKey: .deadline)
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
         if let raw = try container.decodeIfPresent(RequestInput.self, forKey: .input), let data = try? JSONEncoder().encode(raw) {
             input = String(data: data, encoding: .utf8)
         }

@@ -31,7 +31,7 @@ final class AskCardTests: XCTestCase {
         XCTAssertEqual(RequestCard.heading(ask, asker: "@builder"), "@builder asks: Ready to ship")
         XCTAssertEqual(requests.offered(pendingAsk: "ask-000000000001").map(\.id), ["ask-000000000001"])
         XCTAssertTrue(requests.offered(pendingAsk: nil).isEmpty, "an answered ask is never offered")
-        XCTAssertTrue(requests.offered(pendingAsk: "ask-000000000001", retired: "ask-000000000001").isEmpty, "an ask answered here is not offered while the row catches up")
+        XCTAssertTrue(requests.offered(pendingAsk: "ask-000000000001", retired: ["ask-000000000001"]).isEmpty, "an ask answered here is not offered while the row catches up")
     }
 
     func testEveryOpenAskIsOfferedNotOnlyTheRowsOldest() throws {

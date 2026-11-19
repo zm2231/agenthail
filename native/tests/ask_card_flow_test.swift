@@ -143,7 +143,7 @@ struct AskCardFlowTest {
         AskDaemon.listed = "ask-000000000007"
         let next = row(requestID: "ask-000000000007")
         await pane.syncRequests(for: next)
-        check(pane.retiredAsks.retired(in: "S") == nil && pane.retiredAsks.receipt(for: next) == nil, "a new ask drops the entry and its receipt")
+        check(pane.retiredAsks.retired(in: "S").isEmpty && pane.retiredAsks.receipt(for: next) == nil, "a new ask drops the entry and its receipt")
         check(pane.requests?.offered(pendingAsk: next.pendingAskID, retired: pane.retiredAsks.retired(in: "S")).map(\.id) == ["ask-000000000007"], "the next ask is offered")
         print("ask card flow ok")
     }

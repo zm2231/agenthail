@@ -706,6 +706,7 @@ struct ConversationPane: View {
                     .ignoresSafeArea(.all, edges: .vertical)
             }
                 .task(id: RequestSync.viewKey(session)) { await pane.syncRequests(for: session) }
+                .onChange(of: session.ask) { pane.settleRetiredAsks(session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     ConversationHeader(session: session, title: model.title(of: session), inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: band ? WindowButtons.headerInset(toggle: showsSidebarToggle) : headerInset, underTabs: chromeTop != 0, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
@@ -884,6 +885,7 @@ struct ConversationHeader: View {
                     .foregroundStyle(DesktopPalette.accentText)
                     .help("Bring this session's terminal to the front")
             }
+            FocusSwitch()
             if let onCall {
                 Button(action: onCall) {
                     Image(systemName: "waveform")
@@ -946,7 +948,7 @@ struct TranscriptView: View {
     }
 
     var body: some View {
-        let blocks = TranscriptBlock.build(TranscriptFocus.shown(focus ? TranscriptFocus.kept(pane.timelineItems) : pane.timelineItems), foldAgents: !expandAgents)
+        let blocks = TranscriptBlock.build(TranscriptFocus.shown(focus ? TranscriptFocus.focused(pane.timelineItems) : pane.timelineItems), foldAgents: !expandAgents && !focus, focus: focus)
         let canResend = pane.removedSession?.id != session.id && session.capabilities.send && !session.isReadOnly
         let layout = DesktopColumns.transcript(pane: paneWidth)
         let ids = blocks.map(\.id)
@@ -1047,6 +1049,7 @@ struct TranscriptView: View {
             .environment(\.toolCallStates, ToolCallStates(items: pane.timelineItems, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.transcriptOverhang, layout.overhang)
             .environment(\.expandAgentMessages, expandAgents)
+            .environment(\.focusWork, focus)
         }
         .clipped()
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -1995,8 +1998,18 @@ struct QueueDock: View {
 }
 
 enum InspectorTab: String, CaseIterable, Identifiable {
+    case now = "Now"
     case details = "Details"
     case delivery = "Delivery"
+
+    static let nowOffKey = "inspectorNowOff"
+
+    static func tabs(lead: Bool) -> [InspectorTab] { lead ? allCases : [.details, .delivery] }
+
+    static func shown(chosen: InspectorTab?, lead: Bool, nowOff: Bool) -> InspectorTab {
+        let tab = chosen ?? (lead && !nowOff ? .now : .details)
+        return tab == .now && !lead ? .details : tab
+    }
 
     var id: String { rawValue }
 }
@@ -2004,13 +2017,20 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 struct SessionInspector: View {
     var model: AgenthailModel
     var pane: SessionPane
-    @State private var tab: InspectorTab = .details
+    @State private var chosen: (session: String, tab: InspectorTab)?
+    @AppStorage(InspectorTab.nowOffKey) private var nowOff = false
 
     var body: some View {
+        let shownID = pane.displayedSession?.id
+        let lead = pane.displayedSession.map { !LeadCrew.crew(of: $0.id, in: model.sessionTree).isEmpty } ?? false
+        let tab = InspectorTab.shown(chosen: chosen.flatMap { $0.session == shownID ? $0.tab : nil }, lead: lead, nowOff: nowOff)
         VStack(spacing: 0) {
             HStack(spacing: DesktopSpace.l) {
-                ForEach(InspectorTab.allCases) { candidate in
-                    Button(candidate.rawValue) { tab = candidate }
+                ForEach(InspectorTab.tabs(lead: lead)) { candidate in
+                    Button(candidate.rawValue) {
+                        chosen = shownID.map { ($0, candidate) }
+                        if lead { nowOff = candidate != .now }
+                    }
                         .buttonStyle(.plain)
                         .fontWeight(tab == candidate ? .semibold : .regular)
                         .foregroundStyle(tab == candidate ? DesktopPalette.text : DesktopPalette.text2)
@@ -2027,6 +2047,7 @@ struct SessionInspector: View {
                 ScrollView {
                     Group {
                         switch tab {
+                        case .now: HappeningNow(model: model, pane: pane, session: session)
                         case .details: DetailsTab(model: model, pane: pane, session: session)
                         case .delivery: DeliveryTab(model: model, session: session)
                         }

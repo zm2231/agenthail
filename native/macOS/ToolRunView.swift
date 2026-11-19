@@ -2,6 +2,10 @@ import AppKit
 import SwiftUI
 import Textual
 
+extension EnvironmentValues {
+    @Entry var focusWork = false
+}
+
 /// A run of tool activity between messages: one quiet line per call, the files it changed as chips, and a
 /// single summary line in place of the lines when the run is long.
 struct ToolRunView: View {
@@ -12,10 +16,11 @@ struct ToolRunView: View {
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
     @Environment(\.revealRow) private var revealRow
+    @Environment(\.focusWork) private var focus
 
     var body: some View {
         let entries = ToolRunSummary.entries(items)
-        let folds = ToolRunSummary.folds(entries)
+        let folds = ToolRunSummary.folds(entries, focus: focus)
         let open = !folds || (rows.current(opened) ?? rows.isOpen(id) ?? false)
         let diffs = FileDiff.merged(entries.flatMap(\.diffs))
         VStack(alignment: .leading, spacing: 2) {
@@ -26,10 +31,11 @@ struct ToolRunView: View {
                     opened = rows.choice(!open)
                     rows.set(id, open: !open)
                 } label: {
-                    ToolLineLabel(verb: ToolRunSummary.worked(items), object: ToolRunSummary.label(items), isCode: false, failed: false, failures: failed, trailing: open ? "chevron.down" : "chevron.right")
+                    ToolLineLabel(verb: focus ? ToolRunSummary.focusLine(items) : ToolRunSummary.worked(items), object: focus ? "" : ToolRunSummary.label(items), isCode: false, failed: false, failures: failed, trailing: open ? "chevron.down" : "chevron.right")
                 }
                 .buttonStyle(.plain)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
+                .accessibilityIdentifier("work-" + id)
                 .contentTop($top)
             }
             if open {
