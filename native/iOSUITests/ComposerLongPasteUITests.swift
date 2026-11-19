@@ -33,7 +33,12 @@ final class ComposerLongPasteUITests: XCTestCase {
                 let paste = menu(app, "Paste")
                 XCTAssertTrue(paste.waitForExistence(timeout: 5), "\(name): the edit menu offers Paste")
                 paste.tap()
-                input.typeText("Would this be useful for us?")
+                XCTAssertTrue(until { !(input.value as? String ?? "").isEmpty }, "\(name): the paste lands in the composer")
+                if !until(2, { focused(input) }) {
+                    input.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+                }
+                XCTAssertTrue(until { focused(input) }, "\(name): the composer keeps the keyboard after the paste")
+                app.typeText("Would this be useful for us?")
                 let screen = app.windows.firstMatch.frame
                 XCTAssertLessThan(input.frame.height, screen.height * 0.4, "\(name): the paste stays one token, not fifteen lines")
                 XCTAssertTrue((input.value as? String ?? "").hasSuffix("Would this be useful for us?"), "\(name): the question follows the paste")
@@ -47,6 +52,19 @@ final class ComposerLongPasteUITests: XCTestCase {
                 app.terminate()
             }
         }
+    }
+
+    private func focused(_ element: XCUIElement) -> Bool {
+        element.value(forKey: "hasKeyboardFocus") as? Bool == true
+    }
+
+    private func until(_ timeout: TimeInterval = 5, _ condition: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(timeout)
+        while Date() < end {
+            if condition() { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return condition()
     }
 
     private func menu(_ app: XCUIApplication, _ title: String) -> XCUIElement {
