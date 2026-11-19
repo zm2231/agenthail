@@ -94,6 +94,7 @@ type turnCompletedNotice struct {
 	desktop, mobile, requestID, outcome string
 	actions                             []surface.RequestAction
 	quiet                               bool
+	endedAt                             time.Time
 }
 
 // A turn that leaves an ask open for the person needs them; the ask was announced when it reached them, so the completion stays quiet.

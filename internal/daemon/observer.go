@@ -314,6 +314,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	case notice.quiet:
 		d.dropTurnPush(session.ID)
 	case notice.desktop != "":
+		notice.endedAt = observation.CompletedAt
 		d.scheduleTurnPush(session.ID, observation.CompletedTurnID, notice)
 	case terminalCompletion:
 		d.resumeTurnPush(session.ID)

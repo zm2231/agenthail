@@ -364,14 +364,18 @@ func TestASendAcceptedBeforeTheTurnsPushIsSetUpStillHoldsIt(t *testing.T) {
 	pushes := newPushRecorder(t, r)
 	notice := turnCompletedNotice{desktop: "from done", mobile: "from done", outcome: turnOutcomeFinished}
 
+	ended := time.Now()
 	d.turnPushHandoff(from.ID)(true)
-	d.scheduleTurnPush(from.ID, "turn-1", notice)
+	first := notice
+	first.endedAt = ended
+	d.scheduleTurnPush(from.ID, "turn-1", first)
 	d.background.wait()
 	if count := pushes.count("turn.completed"); count != 0 || pendingTurns(d, from.ID) == nil {
 		t.Fatalf("a push set up after its session was sent a message went out %d times", count)
 	}
-	d.pauseTurnPush(from.ID)
-	d.scheduleTurnPush(from.ID, "turn-2", notice)
+	followUp := notice
+	followUp.endedAt = time.Now()
+	d.scheduleTurnPush(from.ID, "turn-2", followUp)
 	d.background.wait()
 	finished := pushes.all("turn.completed")
 	if len(finished) != 1 || finished[0]["turnId"] != "turn-2" {

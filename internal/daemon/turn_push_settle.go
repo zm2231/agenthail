@@ -49,11 +49,11 @@ type turnPushes struct {
 	pending  map[string]*pendingTurnPush
 	verdicts map[string]map[string]int
 	sending  map[string]int
-	handed   map[string]bool
+	handed   map[string]time.Time
 }
 
 func newTurnPushes() *turnPushes {
-	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]map[string]int{}, sending: map[string]int{}, handed: map[string]bool{}}
+	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]map[string]int{}, sending: map[string]int{}, handed: map[string]time.Time{}}
 }
 
 func (p *turnPushes) mark(sessionID, turnID string, state int) {
@@ -89,6 +89,9 @@ func (d *Daemon) scheduleTurnPush(sessionID, turnID string, notice turnCompleted
 	p := d.turnPushes
 	entry := &pendingTurnPush{turnID: turnID, notice: notice}
 	p.mu.Lock()
+	if handed, ok := p.handed[sessionID]; ok && (notice.endedAt.IsZero() || handed.Before(notice.endedAt)) {
+		delete(p.handed, sessionID)
+	}
 	answered := p.verdict(sessionID, turnID) == verdictNeedsYou
 	for marked, state := range p.verdicts[sessionID] {
 		if marked != turnID && state != verdictQueued {
@@ -124,7 +127,7 @@ func (d *Daemon) settleTurnPush(sessionID string, entry *pendingTurnPush, gen in
 		p.mu.Unlock()
 		return
 	}
-	if reason != settledOnDeadline && (queued || p.sending[sessionID] > 0 || p.handed[sessionID] || p.verdict(sessionID, entry.turnID) == verdictQueued) {
+	if reason != settledOnDeadline && (queued || p.sending[sessionID] > 0 || !p.handed[sessionID].IsZero() || p.verdict(sessionID, entry.turnID) == verdictQueued) {
 		if entry.timer == nil {
 			armed := entry.gen
 			entry.timer = time.AfterFunc(p.window, func() {
@@ -245,7 +248,7 @@ func (d *Daemon) turnPushHandoff(sessionID string) func(accepted bool) {
 			delete(p.sending, sessionID)
 		}
 		if accepted {
-			p.handed[sessionID] = true
+			p.handed[sessionID] = time.Now()
 		}
 		entry := p.pending[sessionID]
 		if entry == nil || entry.paused {
