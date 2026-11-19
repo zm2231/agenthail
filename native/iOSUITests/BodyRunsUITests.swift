@@ -5,10 +5,11 @@ final class BodyRunsUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func runs(_ extra: [String]) -> [String: Int] {
+    private func runs(_ extra: [String], before: (XCUIApplication) -> Void = { _ in }) -> [String: Int] {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-theme", "dark", "--body-runs", "--preview-background-upserts"] + extra
         app.launch()
+        before(app)
         let probe = app.staticTexts["body-runs"]
         XCTAssertTrue(probe.waitForExistence(timeout: 30))
         Thread.sleep(forTimeInterval: 3)
@@ -67,6 +68,23 @@ final class BodyRunsUITests: XCTestCase {
         let streamed = runs["streamed", default: 0]
         XCTAssertGreaterThan(streamed, 50, "the open session kept streaming")
         XCTAssertLessThanOrEqual(runs["SessionScreen", default: 0], streamed * 2 / 3, "text growing in a reply redrew the whole screen")
+    }
+
+    func testAWorkersUpdatesRedrawOnlyItsCardInTheOpenNowSheet() {
+        let runs = runs(["--preview-reading", "--preview-crew"]) { app in
+            let now = app.buttons["happening-now"]
+            XCTAssertTrue(now.waitForExistence(timeout: 30))
+            now.tap()
+            XCTAssertTrue(app.buttons["crew-computer::crew-check"].waitForExistence(timeout: 10))
+        }
+        print(Self.line("now", runs))
+        let upserts = runs["upserts", default: 0]
+        XCTAssertGreaterThan(upserts, 50, "the worker kept updating")
+        for view in ["SessionScreen", "IOSComposer", "IOSTimelineRow"] {
+            XCTAssertLessThanOrEqual(runs[view, default: 0], 2, "\(view) redrew for a worker's updates")
+        }
+        XCTAssertGreaterThan(runs["PhoneCrewCard.ids", default: 0], 0, "the updated worker's card redrew")
+        XCTAssertLessThanOrEqual(runs["PhoneCrewCard.ids", default: 0], 1, "cards other than the updated worker's redrew")
     }
 
     func testAnotherSessionsUpdatesRedrawOnlyItsRowInTheList() {

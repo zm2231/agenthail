@@ -164,7 +164,7 @@ struct HostCatalog {
             row.subagent = SubagentIdentity(parentId: qualify(host, subagent.parentId), rootId: qualify(host, subagent.rootId), depth: subagent.depth, nickname: subagent.nickname, role: subagent.role)
         }
         if let project = row.project {
-            row.project = ProjectIdentity(id: qualify(host, project.id), displayName: project.displayName, rootPath: project.rootPath, kind: project.kind, archived: project.archived)
+            row.project = ProjectIdentity(id: qualify(host, project.id), displayName: project.displayName, rootPath: project.rootPath, kind: project.kind, archived: project.archived, key: project.key)
         }
         if let checkout = row.checkout, let id = checkout.id {
             row.checkout = CheckoutIdentity(id: qualify(host, id), path: checkout.path, branch: checkout.branch, detachedHead: checkout.detachedHead, isMain: checkout.isMain, dirty: checkout.dirty)

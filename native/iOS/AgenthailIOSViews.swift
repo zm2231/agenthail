@@ -510,6 +510,7 @@ struct SessionScreen: View {
     private var liveSession: SessionState { model.session(session.id) ?? session }
     @State private var showingInfo = false
     @State private var showingVoice = false
+    @State private var showingNow = false
     @State private var shownRequest: String?
     @State private var activityOnly = false
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
@@ -863,6 +864,9 @@ struct SessionScreen: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
+                IOSNowButton(model: model, sessionID: session.id, showing: $showingNow)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Session details", systemImage: "info.circle") { showingInfo = true }
                     Picker("Transcript view", selection: $activityOnly) {
@@ -889,6 +893,9 @@ struct SessionScreen: View {
             if let liveDetail = model.selectedDetail, liveDetail.session.id == session.id {
                 SessionInspector(model: model, session: session, initialDetail: liveDetail)
             }
+        }
+        .sheet(isPresented: $showingNow) {
+            PhoneHappeningNow(model: model, session: liveSession, items: items) { model.requestedSessionID = $0 }
         }
         .sheet(isPresented: $showingVoice) {
             if let call = voiceCalls.model {

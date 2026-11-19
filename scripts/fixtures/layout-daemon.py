@@ -238,9 +238,9 @@ if __name__ == "__main__":
         parked_worker = {**SESSION, "id": "local-worker", "alias": "search-indexing-and-ranking-overhaul-worker", "name": "Rework search indexing and ranking for the analytics dashboard", "status": "idle"}
         paired_row = {**SESSION, "id": paired["id"] + "::docs-site", "alias": "docs-site-migration", "name": "Move the docs site", "status": "idle", "host": paired,
                       "project": {"id": "docs-site", "displayName": "docs-site", "rootPath": "/srv/docs-site", "kind": "git"}}
-        for row in (parked_worker, paired_row):
-            row.pop("ask", None)
-            row.pop("attention", None)
+        for listed_row in (parked_worker, paired_row):
+            listed_row.pop("ask", None)
+            listed_row.pop("attention", None)
         rows = [SESSION, parked_worker, paired_row]
         snapshot = RESPONSES["/api/v1/snapshot"]
         snapshot.update({"sessions": rows, "totalSessions": len(rows), "decisionsRev": "fixture-1"})
@@ -555,13 +555,13 @@ if __name__ == "__main__":
         # A lead with a worker, a helper waiting on an approval and an idle worker; the events stream asks for a snapshot of the lead with its inspector.
         def at(minutes):
             return (datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        def row(id, alias, status, minutes, **extra):
+        def lead_row(id, alias, status, minutes, **extra):
             return {**SESSION, "id": id, "name": alias, "alias": alias, "status": status, "lastActive": at(minutes), "current": id == "lead", **extra}
-        lead = row("lead", "core-lead", "idle", 1)
-        worker = row("worker", "bucket-check", "busy", 2, plan={"done": 7, "total": 9, "current": "Stray list, then the digest-split check"},
+        lead = lead_row("lead", "core-lead", "idle", 1)
+        worker = lead_row("worker", "bucket-check", "busy", 2, plan={"done": 7, "total": 9, "current": "Stray list, then the digest-split check"},
                      activity={"busySince": at(6)}, endTurn={"headline": "Stray list, then the digest-split check"})
-        helper = row("helper", "source-scout", "idle", 3, capabilities={**CAPABILITIES, "respond": True}, waitingOn={"kind": "approval", "id": "run-1", "answerable": True, "open": ["run-1"]})
-        idle = row("idle", "faa-cleanup", "idle", 9, turnState={"state": "continuing", "source": "judge"}, endTurn={"headline": "Cleanup plan drafted; will finish the last two sources next"})
+        helper = lead_row("helper", "source-scout", "idle", 3, capabilities={**CAPABILITIES, "respond": True}, waitingOn={"kind": "approval", "id": "run-1", "answerable": True, "open": ["run-1"]})
+        idle = lead_row("idle", "faa-cleanup", "idle", 9, turnState={"state": "continuing", "source": "judge"}, endTurn={"headline": "Cleanup plan drafted; will finish the last two sources next"})
         rows = [lead, worker, helper, idle]
         snapshot = RESPONSES["/api/v1/snapshot"]
         snapshot["sessions"], snapshot["totalSessions"] = rows, len(rows)
@@ -636,6 +636,20 @@ if __name__ == "__main__":
             threading.Event().wait()
 
         STREAMS["/api/v1/events"] = lead_events
+        child_interval = float(os.environ.get("AGENTHAIL_FIXTURE_CHILD_INTERVAL", "0"))
+        if child_interval > 0:
+            def child_updates(out):
+                seq = 1
+                while True:
+                    time.sleep(child_interval)
+                    seq += 1
+                    moved = {**worker, "lastActive": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                             "plan": {**worker["plan"], "current": f"Stray list, page {seq % 50 + 1} of 50"}}
+                    out.write(b"data: " + json.dumps({"stream": "catalog", "seq": seq, "type": "session.upserted", "data": {"session": moved}}).encode() + b"\n\n")
+                    out.flush()
+
+            HELD_STREAMS.discard("/api/v1/catalog-events")
+            STREAMS["/api/v1/catalog-events"] = child_updates
     server = Server(("127.0.0.1", 0), Handler)
     print(server.server_address[1], flush=True)
     sys.stdout.close()
