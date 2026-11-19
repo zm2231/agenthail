@@ -47,6 +47,9 @@ enum BodyRuns {
         lastEnvironment = entries
     }
 
+    // Both print the hosting view with its frame, so the first layout reads as a change of the same view.
+    private static let hostEntries: Set<String> = ["RenderingRootViewKey", "OpenDataDetectorMatchActionKey"]
+
     static func environmentEntries(_ description: String) -> [String: String] {
         guard let pattern = try? NSRegularExpression(pattern: #"\(([^\s()"]+) "((?:[^"\\]|\\.)*)""#) else { return [:] }
         let text = description as NSString
@@ -54,7 +57,7 @@ enum BodyRuns {
         var entries: [String: String] = [:]
         for match in matches {
             let key = text.substring(with: match.range(at: 1)).map { $0.isLetter || $0.isNumber ? String($0) : "_" }.joined()
-            guard entries[key] == nil else { continue }
+            guard entries[key] == nil, !hostEntries.contains(key) else { continue }
             entries[key] = text.substring(with: match.range(at: 2))
         }
         return entries
@@ -110,6 +113,30 @@ enum BodyRuns {
     }
 }
 
+// Rebuilt unchanged every frame for two seconds, so a rerun means SwiftUI could not compare it; one field would skip that comparison.
+private struct ComparisonProbe: View {
+    @Environment(\.layoutDirection) private var direction
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        let _ = BodyRuns.hit("compare.misses")
+        Color.clear
+    }
+}
+
+private struct ComparisonTicker: View {
+    @State private var frames: [Date] = {
+        let start = Date.now
+        return (0..<120).map { start.addingTimeInterval(Double($0) / 60) }
+    }()
+
+    var body: some View {
+        TimelineView(.explicit(frames)) { _ in ComparisonProbe() }
+    }
+}
+
 struct BodyRunsProbe: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.25)) { _ in
@@ -118,6 +145,7 @@ struct BodyRunsProbe: View {
                 .accessibilityIdentifier("body-runs")
                 .accessibilityLabel(summary)
         }
+        .background(ComparisonTicker())
         .onAppear(perform: BodyRuns.watchMainThread)
     }
 }
