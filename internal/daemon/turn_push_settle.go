@@ -274,30 +274,28 @@ func (d *Daemon) turnVerdictLanded(sessionID, turnID string) {
 }
 
 // The needs-you push stands for the turn's finished push, and for the burst it ends.
-func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string) (*pendingTurnPush, bool) {
+// The needs-you push stands for the turn's finished push, and for the burst it ends: its claim is confirmed under the settler's lock, so scheduling, the shutdown flush and a failed confirm each see either the finished push still waiting or the needs-you push sent.
+func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string, confirm func() (bool, error), release func() error, send func()) (bool, error) {
 	p := d.turnPushes
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.flushed[sessionID] == turnID {
-		return nil, false
+		p.mu.Unlock()
+		return false, release()
+	}
+	if confirmed, err := confirm(); err != nil || !confirmed {
+		p.mu.Unlock()
+		return false, err
 	}
 	p.mark(sessionID, turnID, verdictNeedsYou)
+	turns := []string{turnID}
 	if entry := p.pending[sessionID]; entry != nil && entry.turnID == turnID {
 		p.remove(sessionID, entry)
-		return entry, true
+		turns = entry.turns
 	}
-	return nil, true
-}
-
-func (d *Daemon) needsYouNotPushed(sessionID, turnID string, taken *pendingTurnPush) {
-	p := d.turnPushes
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.mark(sessionID, turnID, verdictDone)
-	if taken != nil && p.pending[sessionID] == nil {
-		taken.gen++
-		p.pending[sessionID] = taken
-	}
+	send()
+	p.mu.Unlock()
+	d.logSettledPush(sessionID, turns, settledOnVerdict, turnNeedsYouEvent)
+	return true, nil
 }
 
 func (d *Daemon) turnPushHandoff(sessionID string) func(accepted bool) {
@@ -341,4 +339,11 @@ func (d *Daemon) turnPushHandoff(sessionID string) func(accepted bool) {
 		p.mu.Unlock()
 		d.settleTurnPush(sessionID, entry, gen, settledOnIdle)
 	}
+}
+
+func (d *Daemon) turnFlushed(sessionID, turnID string) bool {
+	p := d.turnPushes
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.flushed[sessionID] == turnID
 }

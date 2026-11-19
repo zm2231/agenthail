@@ -35,6 +35,11 @@ func pendingTurns(d *Daemon, sessionID string) []string {
 	return nil
 }
 
+func needsYouConfirmed(d *Daemon, sessionID, turnID string) bool {
+	sent, _ := d.needsYouTakesTurnPush(sessionID, turnID, func() (bool, error) { return true, nil }, func() error { return nil }, func() {})
+	return sent
+}
+
 func startTurn(t *testing.T, d *Daemon, fake *daemonSurface, session *surface.Session, turnID string) {
 	t.Helper()
 	fake.observations[session.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: turnID}
@@ -208,7 +213,7 @@ func TestAVerdictLandingBeforeTheTurnsPushIsSetUpStillSettlesIt(t *testing.T) {
 	notice := turnCompletedNotice{desktop: "from done", mobile: "from done: Shipped", outcome: turnOutcomeFinished}
 
 	d.turnJudgmentQueued(from.ID, "turn-1")
-	d.needsYouTakesTurnPush(from.ID, "turn-1")
+	needsYouConfirmed(d, from.ID, "turn-1")
 	d.scheduleTurnPush(from.ID, "turn-1", notice)
 	d.background.wait()
 	if count := pushes.count("turn.completed"); count != 0 || pendingTurns(d, from.ID) != nil {
@@ -262,12 +267,12 @@ func TestAnOlderNeedsYouVerdictLeavesTheNewerTurnWaitingForItsOwn(t *testing.T) 
 	d.turnJudgmentQueued(from.ID, "turn-2")
 	d.scheduleTurnPush(from.ID, "turn-2", notice)
 
-	d.needsYouTakesTurnPush(from.ID, "turn-1")
+	needsYouConfirmed(d, from.ID, "turn-1")
 	d.background.wait()
 	if turns := pendingTurns(d, from.ID); len(turns) != 1 || turns[0] != "turn-2" {
 		t.Fatalf("an older turn's verdict settled the newer turn's push: pending %v", turns)
 	}
-	d.needsYouTakesTurnPush(from.ID, "turn-2")
+	needsYouConfirmed(d, from.ID, "turn-2")
 	d.background.wait()
 	if count := pushes.count("turn.completed"); count != 0 || pendingTurns(d, from.ID) != nil {
 		t.Fatalf("the newer turn's own needs-you did not stand for its push: %d finished pushes", count)
@@ -503,10 +508,26 @@ func TestANeedsYouVerdictAfterTheShutdownFlushIsNotSent(t *testing.T) {
 	d.turnJudgmentQueued(from.ID, "turn-1")
 	d.scheduleTurnPush(from.ID, "turn-1", turnCompletedNotice{desktop: "from done", mobile: "from done", outcome: turnOutcomeFinished})
 	d.flushTurnPushes()
-	if _, settles := d.needsYouTakesTurnPush(from.ID, "turn-1"); settles {
+	if needsYouConfirmed(d, from.ID, "turn-1") {
 		t.Fatal("a needs-you verdict for a turn the shutdown flush sent would still be pushed")
 	}
 	if count := pushes.count("turn.completed"); count != 1 {
 		t.Fatalf("the flush sent %d pushes", count)
+	}
+}
+
+func TestAFailedNeedsYouConfirmLeavesTheFinishedPushWaiting(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	pushes := newPushRecorder(t, r)
+	d.turnJudgmentQueued(from.ID, "turn-1")
+	d.scheduleTurnPush(from.ID, "turn-1", turnCompletedNotice{desktop: "from done", mobile: "from done", outcome: turnOutcomeFinished})
+	sent, _ := d.needsYouTakesTurnPush(from.ID, "turn-1", func() (bool, error) { return false, nil }, func() error { return nil }, func() { t.Fatal("an unconfirmed needs-you push was sent") })
+	if sent || pendingTurns(d, from.ID) == nil {
+		t.Fatalf("a failed confirm settled the turn: sent=%v pending=%v", sent, pendingTurns(d, from.ID))
+	}
+	d.turnVerdictLanded(from.ID, "turn-1")
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 1 {
+		t.Fatalf("the finished push went out %d times after a failed needs-you confirm", count)
 	}
 }
