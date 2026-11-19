@@ -108,7 +108,7 @@ func (d *Daemon) scheduleTurnPush(sessionID, turnID string, notice turnCompleted
 	d.settleTurnPush(sessionID, entry, gen, settledOnIdle)
 }
 
-// The registry reads happen under the lock, so a delivery or a newer completion lands either before the decision or after the push has gone.
+// A delivery records its turn running before it takes its message off the queue, so the queue is read first: a message gone from it has its turn on record.
 func (d *Daemon) settleTurnPush(sessionID string, entry *pendingTurnPush, gen int, reason string) {
 	p := d.turnPushes
 	p.mu.Lock()
@@ -116,12 +116,13 @@ func (d *Daemon) settleTurnPush(sessionID string, entry *pendingTurnPush, gen in
 		p.mu.Unlock()
 		return
 	}
+	queued := d.Registry.QueueCount(sessionID) > 0
 	if d.anotherTurnRunning(sessionID, entry.turnID) {
 		entry.pause()
 		p.mu.Unlock()
 		return
 	}
-	if reason != settledOnDeadline && (d.Registry.QueueCount(sessionID) > 0 || p.verdict(sessionID, entry.turnID) == verdictQueued) {
+	if reason != settledOnDeadline && (queued || p.verdict(sessionID, entry.turnID) == verdictQueued) {
 		if entry.timer == nil {
 			armed := entry.gen
 			entry.timer = time.AfterFunc(p.window, func() {
