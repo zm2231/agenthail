@@ -379,7 +379,9 @@ func (d *Daemon) forwardRemoteExtension(w http.ResponseWriter, r *http.Request, 
 			pr.SetURL(upstream)
 			pr.Out.Host = upstream.Host
 			pr.Out.Header.Del("Cookie")
-			pr.Out.Header.Del("Authorization")
+			if bearers := pr.Out.Header.Values("Authorization"); len(bearers) != 1 || bearers[0] != "Bearer "+extensionKeyPlaceholder {
+				pr.Out.Header.Del("Authorization")
+			}
 			if pr.Out.Header.Get("Origin") == local {
 				pr.Out.Header.Set("Origin", "https://"+upstream.Host)
 			}
