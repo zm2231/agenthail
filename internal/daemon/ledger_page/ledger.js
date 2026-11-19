@@ -1,4 +1,4 @@
-import { shownRows, shortList, withoutRefs } from "./ledger-text.js";
+import { readable, shownRows, shortList } from "./ledger-text.js";
 
 const project = new URLSearchParams(location.search).get("project") || "";
 const root = document.getElementById("work");
@@ -12,8 +12,7 @@ let titles = new Map();
 const priorityWords = { P0: "Urgent", P1: "High priority" };
 
 function plain(text) {
-  if (!text) return text;
-  return withoutRefs(text.replace(/\b[A-Za-z0-9][A-Za-z0-9-]*-W\d+\b/g, (id) => (titles.has(id) ? `“${titles.get(id)}”` : id)));
+  return readable(text, titles);
 }
 
 function learnTitles() {
@@ -84,6 +83,7 @@ function itemLines(key, title, chips, details) {
   const shown = details.filter(Boolean);
   const head = node("button", "row");
   head.type = "button";
+  head.dataset.focus = `row:${key}`;
   head.setAttribute("aria-expanded", String(open));
   head.append(node("span", "title", plain(title)));
   const meta = node("span", "meta");
@@ -134,6 +134,7 @@ function list(key, rows, build) {
   if (rows.length > shortList) {
     const more = node("button", "more", all ? "Show fewer" : `Show all ${rows.length}`);
     more.type = "button";
+    more.dataset.focus = `more:${key}`;
     more.addEventListener("click", () => {
       if (all) expanded.delete(key);
       else expanded.add(key);
@@ -177,6 +178,7 @@ function doneSection(rows) {
   const block = node("section", "done");
   const toggle = node("button", "fold");
   toggle.type = "button";
+  toggle.dataset.focus = "fold:done";
   toggle.setAttribute("aria-expanded", String(doneOpen));
   toggle.append(heading("Recently done", rows.length));
   toggle.addEventListener("click", () => {
@@ -204,7 +206,9 @@ function render() {
   }
   if (view.done.length) parts.push(doneSection(view.done));
   if (!parts.length) parts.push(node("p", "note", "No work recorded for this project yet. Items appear here as sessions add them."));
+  const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.focus : undefined;
   root.replaceChildren(...parts);
+  if (focused) [...root.querySelectorAll("[data-focus]")].find((element) => element.dataset.focus === focused)?.focus();
 }
 
 async function fetchView() {

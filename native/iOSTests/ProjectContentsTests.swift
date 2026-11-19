@@ -5,6 +5,7 @@ import XCTest
 final class ProjectContentsTests: XCTestCase {
     private static let projectID = "repo:github.com/demo/widget"
     private static let noon = ISO8601DateFormatter().date(from: "2026-11-01T12:00:00Z")!
+    private static let weekLater = ISO8601DateFormatter().date(from: "2026-11-08T12:00:00Z")!
 
     private static func project(lead: String? = "lead-session") -> [String: Any] {
         var project: [String: Any] = ["id": projectID, "displayName": "widget", "checkouts": [["host": ["id": "one", "name": "one", "state": "local"], "projectId": "p-widget", "rootPath": "/work/widget"]]]
@@ -101,13 +102,13 @@ final class ProjectContentsTests: XCTestCase {
         defer { model.forgetHost("one") }
         _ = await model.refresh(fresh: true)
         let listed = try XCTUnwrap(model.projects[Self.projectID])
-        XCTAssertEqual(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? []).leadSession?.id, "one::lead-session")
+        XCTAssertEqual(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? [], now: Self.weekLater).leadSession?.id, "one::lead-session")
         XCTAssertTrue(model.hasEarlier(listed))
 
         await model.listEarlier(listed)
         await model.listEarlier(listed)
 
-        XCTAssertEqual(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? []).earlier.map(\.id), ["one::old", "one::older"])
+        XCTAssertEqual(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? [], now: Self.weekLater).earlier.map(\.id), ["one::old", "one::older"])
         XCTAssertFalse(model.hasEarlier(listed))
         let reads = ScopeServer.state.requests("one").filter { $0.contains("scope=all") }
         XCTAssertEqual(reads.count, 2)
@@ -140,7 +141,7 @@ final class ProjectContentsTests: XCTestCase {
 
         await model.listEarlier(listed)
 
-        XCTAssertEqual(Set(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? []).earlier.map(\.id)), ["hpeer::far", "two::near"])
+        XCTAssertEqual(Set(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? [], now: Self.weekLater).earlier.map(\.id)), ["hpeer::far", "two::near"])
         for host in ["one", "two"] {
             XCTAssertTrue(ScopeServer.state.requests(host).contains { $0.contains("scope=all") && $0.contains("projectId=\(Self.projectID)") }, "\(host) was not asked for the project: \(ScopeServer.state.requests(host))")
         }

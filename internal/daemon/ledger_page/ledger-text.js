@@ -1,7 +1,8 @@
 export const shortList = 5;
 
 const pullRequest = /(?:\bPR\s*)?\(?#\d+\)?/gi;
-const commit = /\(?\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b\)?/g;
+const commit = /\(?\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b\)?/gi;
+const workID = /\b[A-Za-z0-9][A-Za-z0-9-]*-W\d+\b/g;
 
 const status = /^(?:done|merged|shipped|fixed|landed|closed)$/i;
 const dangling = /\s+\b(?:in|as|via|by|and|with|at|on)\b(?=\s*(?:[,.;]|$))/gi;
@@ -21,6 +22,11 @@ export function withoutRefs(text) {
     out = out.replace(dangling, "").replace(/([,;:])(?=\s*(?:[,;:.]|$))/g, "").trim();
   } while (out !== before);
   return status.test(out) ? "" : out;
+}
+
+export function readable(text, titles) {
+  if (!text) return text;
+  return withoutRefs(text.replace(workID, (id) => (titles.has(id) ? `“${titles.get(id)}”` : "another item")));
 }
 
 export function shownRows(rows, all) {

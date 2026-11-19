@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../internal/daemon/ledger_page/ledger-text.js", import.meta.url), "utf8");
-const { withoutRefs, shownRows, shortList } = await import("data:text/javascript," + encodeURIComponent(source));
+const { withoutRefs, readable, shownRows, shortList } = await import("data:text/javascript," + encodeURIComponent(source));
 
 assert.equal(withoutRefs("done: #1009 (54ee919f1)"), "", "a note that is only refs says nothing");
 assert.equal(withoutRefs("merged #1009 (54ee919f1)"), "", "a status word left alone says nothing");
@@ -12,6 +12,10 @@ assert.equal(withoutRefs("Superseded by #1070; the list drops ids"), "Superseded
 assert.equal(withoutRefs("Keep the tile order in the daemon (#1086)"), "Keep the tile order in the daemon");
 assert.equal(withoutRefs("Shipped: the reconnect test passes"), "the reconnect test passes");
 assert.equal(withoutRefs("Retry after 2 KiB, decade, facade and the 1234567 bytes"), "Retry after 2 KiB, decade, facade and the 1234567 bytes", "plain words and numbers are not refs");
+assert.equal(withoutRefs("Reverted 6C63B4554 after review"), "Reverted after review", "an uppercase hash is a ref too");
+const titles = new Map([["agenthail-W12", "Keep the tile order"]]);
+assert.equal(readable("Follows agenthail-W12 and agenthail-W9", titles), "Follows “Keep the tile order” and another item", "a known item reads as its title and an unknown one names no id");
+assert.equal(readable("done: #1009 (54ee919f1) for agenthail-W12", titles), "for “Keep the tile order”");
 assert.equal(withoutRefs(""), "");
 assert.equal(withoutRefs(undefined), undefined);
 

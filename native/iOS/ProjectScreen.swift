@@ -140,7 +140,7 @@ struct ProjectScreen: View {
                     ForEach(contents.earlier) { row($0) }
                     if model.hasEarlier(project) {
                         ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
-                            .task(id: contents.earlier.count) { await model.listEarlier(project) }
+                            .task(id: contents.earlier.count) { await readEarlier(project, past: contents.earlier.count) }
                     } else if contents.earlier.isEmpty {
                         Text("No earlier sessions").foregroundStyle(PhonePalette.muted)
                     }
@@ -169,6 +169,12 @@ struct ProjectScreen: View {
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("project-message")
         }
+    }
+
+    private func readEarlier(_ project: ListedProject, past count: Int) async {
+        repeat {
+            await model.listEarlier(project)
+        } while !Task.isCancelled && model.hasEarlier(project) && ProjectContents.build(project, sessions: model.projectSessions(project)).earlier.count == count
     }
 
     private func workSection(_ project: ListedProject) -> some View {
