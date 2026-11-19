@@ -26,13 +26,13 @@ The registry table `session_credentials` holds at most one live credential per s
 - **Identity only:** a credential names a session and its expiry, nothing else. It carries no capabilities, so a change in what a session may do never touches its token.
 - **Issue:** `issueSessionCredential` reuses the live credential until its maximum expiry and otherwise mints a new one. A reused credential's token cannot be recovered, so the caller keeps the token it was first given.
 - **Rotation:** a credential is replaced only when a runtime must be given a token this daemon process does not hold (after a restart, since the registry stores hashes) or when it reached its maximum expiry. `Rotate` returns the held live token when there is one; concurrent resumes of one session share a per-session lock and one token.
-- **Idle expiry, 24 hours:** every authenticated call refreshes it. An expired credential is suspended, not revoked, and two things renew it:
+- **Idle expiry, 24 hours:** every authenticated call refreshes it. Authenticating only reads the registry: the use is kept in memory and written after the call, at most once a minute per credential, so a call never waits on the registry's writer to be named. An expired credential is suspended, not revoked, and two things renew it:
   - The daemon handing the session work: a send on any route (queue drain, direct send, relay, channel and notice deliveries all go through it), a steer, or a goal control (set, clear, pause, resume, budget, and a held Claude `/goal` when it runs). Compaction does not count, since its turn calls no tools. The credential is refreshed just before the message goes out, so the turn it starts can call tools.
   - A call from a session that is running. A turn can start where the daemon never sees it, such as a Claude peer message or a Claude background task notification, so the call is accepted and renews the credential when the session's surface already knows it runs, without a new probe: for Claude, the session record of the session's recorded process (or of its holder, when another process holds the conversation) names the conversation and its `procStart` matches the running process, read from `/proc` on Linux and `sysctl` on macOS, so a reused pid does not count; for Codex, an app-server connection has the thread loaded.
 
   Otherwise the call is refused, and `daemon.log` gets a line naming the session and why.
 - **Maximum expiry, 30 days from issue:** nothing extends it, and a turn does not revive it. Issuing again after it mints a fresh credential.
-- **Revocation:** archiving a session revokes its credential in the same transaction. Authentication also revokes a credential whose session is archived or now belongs to another host. Deleting a session deletes its credentials.
+- **Revocation:** archiving a session revokes its credential in the same transaction. Authentication also refuses, as `credential_revoked`, a credential whose session is archived or now belongs to another host, read from the sessions table at each call. Deleting a session deletes its credentials.
 
 ## How a session gets the server
 
@@ -135,7 +135,7 @@ A session reads:
 
 - itself (`read.self`);
 - every session it spawned, transitively through `session_origins.creator_session_id` (`control.descendants`);
-- the live local sessions of its own project (`read.project`). A session's project is the registered project containing its cwd; a session with no project reads only itself and its descendants.
+- the live local sessions of its own project (`read.project`). The caller's project is the registered project containing its cwd, read through the identity cache that discovery keeps warm for every session it lists. The sessions in that project are the ones catalog discovery last recorded there (`catalog_sessions.host_project`), selected in one query, so a call never resolves other sessions' workspaces or runs git for them. A session discovery has not recorded yet is visible only to itself and its ancestors until it is. A session with no project reads only itself and its descendants.
 
 Archived sessions are outside every scope. `agenthail_sessions` also lists the paired hosts' sessions this host mirrors and can currently reach, under the same rules: those whose owning host puts them in the caller's project (matched by the project id that is the same on every computer) with `read.project`, every one with `read.all`. Each carries its host-qualified id and a `host` with the paired host's `id`, `name` and `state`. `agenthail_requests` with a `sessionId` also reads one such session, by its host-qualified id, as a lead's notice names it, or `host::@alias`, from the paired host that runs it (`mcpSessionOpenRequests`), when `agenthail_sessions` would list it. Without a `sessionId`, the list of waiting sessions also carries each such session that its mirror shows waiting, under its host-qualified id, with the tool, prompt and detail read from the paired host the same way. Every other read tool stays on this host. A session outside the caller's scope is refused with `out_of_scope`; an unknown one with `not_found`.
 
@@ -301,3 +301,25 @@ A tool that refuses returns an MCP tool error (`isError: true`) whose structured
 - other `502`s and any `500` → `refused`, retryable.
 
 `TestEveryActionErrorMapsToAnMCPCode` fails when the parity table records an error code with no rule.
+
+## Every call answers within a bound
+
+A tool call answers or fails within a bound, whatever the daemon is waiting on (the registry's single writer, a session's journal, another host). Work past its bound goes on in the daemon, and its result is dropped; the caller is told:
+
+| Call | Bound | Past it |
+| --- | --- | --- |
+| Naming the caller: the credential check, or the socket's process lookup | 10 s | Every tool call on that request is refused as `busy`, retryable, `detail.phase` naming the step |
+| Read-only tools (`read`, `sessions`, `whoami`, `capabilities`, `requests`, `ledger_read`, `projects`, `history`, `result`) | 30 s | `busy`, retryable |
+| `agenthail_wait`, `agenthail_browser`, `agenthail_simulator` | their own timeout plus 30 s | `busy`, retryable |
+| An extension's tool | 60 s | `busy` with `detail.outcome: "unknown"`, not retryable: the tool takes no `clientRequestId`, so check its effect before calling again. A host that is not running is `unavailable`, retryable |
+| Every other tool, which changes state | 60 s | `busy` with `detail.outcome: "unknown"`. With a `clientRequestId`, retryable: the same id reads its result once the write finishes. Without one, not retryable: check its effect before calling again |
+
+`agenthail_read` with no `since` also stops waiting for a session's journal to start after its catch-up wait (2 s), and answers from the journal it has, or `busy` when there is none yet. A journal source records its start in the registry off the lock shared by every session's source, so a slow write holds up only callers of that session.
+
+Each call writes one line to `daemon.log`:
+
+```
+mcp agenthail_read session=@source-scout path=http took=12ms outcome=ok
+```
+
+`path` is `http` or `socket`; `outcome` is `ok` or `refused:<code>`, with `:<phase>` when it ran past a bound. A call past its bound also saves every goroutine's stack to `~/.agenthail/debug/stall-<time>.txt`, at most once every 10 minutes, and the log line names the file.

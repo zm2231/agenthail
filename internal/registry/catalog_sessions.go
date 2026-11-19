@@ -742,15 +742,14 @@ func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now t
 
 // CatalogProjectionFingerprint returns the committed projection of one
 // catalog session, the same row CatalogSnapshot serves.
-// CatalogSessionProject returns the project last stored for a session, or
-// nil when the session has no catalog row.
-func (r *Registry) CatalogSessionProject(sessionID string) (json.RawMessage, error) {
-	var project []byte
-	err := r.read.QueryRow(`SELECT host_project FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&project)
+// CatalogSessionProject returns the project last stored for a session; found
+// is false when discovery has not recorded the session yet.
+func (r *Registry) CatalogSessionProject(sessionID string) (project json.RawMessage, found bool, err error) {
+	err = r.read.QueryRow(`SELECT host_project FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&project)
 	if err == sql.ErrNoRows {
-		return nil, nil
+		return nil, false, nil
 	}
-	return project, err
+	return project, err == nil, err
 }
 
 // A paired host's checkout is stored under its host-qualified local id.

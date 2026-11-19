@@ -71,9 +71,9 @@ func TestMCPLedgerWritesAsTheCallerInItsOwnProject(t *testing.T) {
 
 func TestMCPRequestsListsOnlyVisibleWaitingSessions(t *testing.T) {
 	d, r, _, _, _, widget := questionDaemon(t)
-	mate := widget.session(t, r, "mate")
+	mate := recordedSession(t, r, widget, "mate")
 	other := addLedgerProject(t, r, "proj-other", "repo:github.com/acme/other")
-	stranger := other.session(t, r, "stranger")
+	stranger := recordedSession(t, r, other, "stranger")
 	now := time.Now()
 	for _, id := range []string{mate.ID, stranger.ID} {
 		recordWait(t, r, id, &surface.Waiting{Kind: surface.WaitingApproval, ID: "req-" + id, Since: now, Answerable: true})

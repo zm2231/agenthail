@@ -78,7 +78,7 @@ func (d *Daemon) mcpSessionView(visible visibleSession) mcpSessionView {
 	session := visible.Session
 	if visible.host == nil {
 		alias, _ := d.Registry.ReverseAlias(session.ID)
-		project, _ := d.sessionProject(session)
+		project, _, _ := d.recordedProject(session)
 		return mcpSessionView{ID: session.ID, Alias: alias, Name: session.Name, Surface: string(session.Surface), Status: string(session.Status), Cwd: session.Cwd, Project: projectView(project)}
 	}
 	view := mcpSessionView{ID: hosts.Qualify(visible.host.HostID, session.ID), Alias: visible.host.Alias, Name: session.Name, Surface: string(session.Surface), Status: string(session.Status), Cwd: session.Cwd, Host: &dashboardHost{ID: visible.host.HostID}}

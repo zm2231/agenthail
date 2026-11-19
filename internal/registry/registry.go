@@ -23,7 +23,8 @@ type Registry struct {
 	now           func() time.Time
 	busyPolicy    func() deliverypolicy.Mode
 	retiredCounts catalogRetiredCache
-	seen          deviceSeen
+	seen          *stampQueue[string, string]
+	credentialUse *stampQueue[string, int64]
 	retryBackoff  time.Duration
 	migration     *MigrationTiming
 	journal       journalStatements
@@ -213,7 +214,10 @@ func connect(path string) (*Registry, error) {
 	}
 	read.SetMaxOpenConns(readConnections)
 	read.SetMaxIdleConns(readConnections)
-	return &Registry{db: &writeDB{raw: db}, read: read, openLock: openLock, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
+	r := &Registry{db: &writeDB{raw: db}, read: read, openLock: openLock, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}
+	r.seen = newStampQueue(r.writeDeviceSeen)
+	r.credentialUse = newStampQueue(r.writeCredentialUse)
+	return r, nil
 }
 
 func closeOpenLock(file *os.File) {
@@ -227,15 +231,8 @@ func (r *Registry) WriteDB() *sql.DB { return r.db.raw }
 func (r *Registry) ReadDB() *sql.DB  { return r.read }
 
 func (r *Registry) Close() error {
-	r.seen.mu.Lock()
-	r.seen.closed = true
-	r.seen.mu.Unlock()
-	r.seen.writes.Wait()
-	r.seen.mu.Lock()
-	pending := r.seen.pending
-	r.seen.pending = nil
-	r.seen.mu.Unlock()
-	r.writeStamps(pending)
+	r.seen.close()
+	r.credentialUse.close()
 	defer closeOpenLock(r.openLock)
 	return errors.Join(r.journal.close(), r.journalRead.close(), r.read.Close(), r.db.Close())
 }

@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -221,14 +220,21 @@ func (r *Registry) AuthenticateDevice(token, requiredScope string) (Device, erro
 	if !strings.HasPrefix(token, deviceTokenPrefix) {
 		return Device{}, ErrDeviceDenied
 	}
+	hash := hashDeviceSecret(token)
+	// A stamp is taken before the row: a write that lands between the two
+	// is then in the row.
+	stamp, stamped := r.seen.pendingStamp(hash)
 	var device Device
 	var scopes string
-	err := r.read.QueryRow(`SELECT id,name,scopes,host_id,created_at,last_seen_at,revoked_at,browser FROM paired_devices WHERE token_hash=?`, hashDeviceSecret(token)).Scan(&device.ID, &device.Name, &scopes, &device.HostID, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt, &device.Browser)
+	err := r.read.QueryRow(`SELECT id,name,scopes,host_id,created_at,last_seen_at,revoked_at,browser FROM paired_devices WHERE token_hash=?`, hash).Scan(&device.ID, &device.Name, &scopes, &device.HostID, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt, &device.Browser)
 	if errors.Is(err, sql.ErrNoRows) || device.RevokedAt != "" {
 		return Device{}, ErrDeviceDenied
 	}
 	if err != nil {
 		return Device{}, err
+	}
+	if stamped && laterTimestamp(stamp, device.LastSeenAt) {
+		device.LastSeenAt = stamp
 	}
 	now := time.Now().UTC()
 	if device.Browser && device.idleSince(now) >= BrowserIdleLimit {
@@ -244,87 +250,22 @@ func (r *Registry) AuthenticateDevice(token, requiredScope string) (Device, erro
 		return device, nil
 	}
 	device.LastSeenAt = formatTimestamp(now)
-	r.stampLastSeen(device.ID, device.LastSeenAt)
+	r.seen.stamp(hash, device.LastSeenAt)
 	return device, nil
 }
 
-// deviceSeen holds the last-seen stamps waiting to be written. Authenticating
-// a request only reads, so a phone's request is never held up by a write that
-// waits on the registry's busy timeout; the stamps are written after it, at
-// most one writer at a time.
-type deviceSeen struct {
-	mu      sync.Mutex
-	pending map[string]string
-	writing bool
-	closed  bool
-	writes  sync.WaitGroup
+func (r *Registry) writeDeviceSeen(hash, stamp string) error {
+	_, err := r.db.Exec(`UPDATE paired_devices SET last_seen_at=? WHERE token_hash=? AND revoked_at=''`, stamp, hash)
+	return err
 }
 
-func (r *Registry) stampLastSeen(deviceID, stamp string) {
-	r.seen.mu.Lock()
-	defer r.seen.mu.Unlock()
-	if r.seen.closed {
-		return
+func laterTimestamp(a, b string) bool {
+	at, err := parseTimestamp(a)
+	if err != nil {
+		return false
 	}
-	if r.seen.pending == nil {
-		r.seen.pending = map[string]string{}
-	}
-	r.seen.pending[deviceID] = stamp
-	if r.seen.writing {
-		return
-	}
-	r.seen.writing = true
-	r.seen.writes.Add(1)
-	go r.writeLastSeen()
-}
-
-// writeLastSeen writes the pending stamps until none are left. A stamp that
-// fails stays pending, unless a newer one replaced it, and the writer stops:
-// the next request starts it again, and Close writes what is left.
-func (r *Registry) writeLastSeen() {
-	defer r.seen.writes.Done()
-	for {
-		r.seen.mu.Lock()
-		pending := r.seen.pending
-		r.seen.pending = nil
-		if len(pending) == 0 {
-			r.seen.writing = false
-			r.seen.mu.Unlock()
-			return
-		}
-		r.seen.mu.Unlock()
-		if failed := r.writeStamps(pending); len(failed) > 0 {
-			r.seen.mu.Lock()
-			r.seen.keep(failed)
-			r.seen.writing = false
-			r.seen.mu.Unlock()
-			return
-		}
-	}
-}
-
-// writeStamps writes each stamp and returns the ones that failed.
-func (r *Registry) writeStamps(stamps map[string]string) map[string]string {
-	failed := map[string]string{}
-	for deviceID, stamp := range stamps {
-		if _, err := r.db.Exec(`UPDATE paired_devices SET last_seen_at=? WHERE id=? AND revoked_at=''`, stamp, deviceID); err != nil {
-			failed[deviceID] = stamp
-		}
-	}
-	return failed
-}
-
-// keep puts failed stamps back as pending where no newer one replaced them.
-// The caller holds mu.
-func (s *deviceSeen) keep(failed map[string]string) {
-	if s.pending == nil {
-		s.pending = map[string]string{}
-	}
-	for deviceID, stamp := range failed {
-		if _, newer := s.pending[deviceID]; !newer {
-			s.pending[deviceID] = stamp
-		}
-	}
+	bt, err := parseTimestamp(b)
+	return err != nil || at.After(bt)
 }
 
 func (device Device) idleSince(now time.Time) time.Duration {

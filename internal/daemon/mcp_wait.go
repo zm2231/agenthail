@@ -392,3 +392,11 @@ func (d *Daemon) noteWaitItemRead(caller *mcpCaller, item mcpWaitItem) {
 		}
 	}
 }
+
+func (input mcpWaitInput) mcpTimeout() time.Duration {
+	seconds := mcpWaitDefaultSec
+	if input.TimeoutSec != nil {
+		seconds = min(max(*input.TimeoutSec, 0), mcpWaitMaxSec)
+	}
+	return time.Duration(seconds) * time.Second
+}

@@ -25,6 +25,8 @@ type sessionSourceManager struct {
 }
 
 type sessionSource struct {
+	started         chan struct{}
+	startErr        error
 	seeded          chan struct{}
 	done            chan struct{}
 	seedErr         error
@@ -62,8 +64,9 @@ func (m *sessionSourceManager) subscribeContext(waitContext context.Context, ses
 		return sessionSourceSubscription{}, fmt.Errorf("session source requires session and adapter")
 	}
 	var subscription sessionSourceSubscription
-	source, err := m.acquire(waitContext, session, adapter, func(source *sessionSource) {
+	source, err := m.acquire(waitContext, session, adapter, func(source *sessionSource) func() {
 		subscription = source.subscribe("viewer")
+		return subscription.Cancel
 	})
 	if err != nil {
 		return sessionSourceSubscription{}, err
@@ -85,10 +88,11 @@ func (m *sessionSourceManager) holdSource(ctx context.Context, session *surface.
 	if strings.TrimSpace(holder) == "" {
 		return nil, nil, fmt.Errorf("session source holder is required")
 	}
-	source, err := m.acquire(ctx, session, adapter, func(source *sessionSource) {
+	source, err := m.acquire(ctx, session, adapter, func(source *sessionSource) func() {
 		source.mu.Lock()
 		source.holders[holder]++
 		source.mu.Unlock()
+		return func() { source.releaseHolder(holder) }
 	})
 	if err != nil {
 		return nil, nil, err
@@ -99,7 +103,9 @@ func (m *sessionSourceManager) holdSource(ctx context.Context, session *surface.
 // acquire attaches to the session's running source, starting one if there is
 // none. A source that has been stopped stays registered until its run returns,
 // and acquire waits for that, so one session's journal never has two writers.
-func (m *sessionSourceManager) acquire(ctx context.Context, session *surface.Session, adapter surface.Surface, attach func(*sessionSource)) (*sessionSource, error) {
+// A new source makes its registry write off m.mu, so a slow writer holds up
+// only the callers of that session, each for no longer than its ctx.
+func (m *sessionSourceManager) acquire(ctx context.Context, session *surface.Session, adapter surface.Surface, attach func(*sessionSource) (detach func())) (*sessionSource, error) {
 	for {
 		m.mu.Lock()
 		if m.closed {
@@ -118,24 +124,51 @@ func (m *sessionSourceManager) acquire(ctx context.Context, session *surface.Ses
 		}
 		start := false
 		if source == nil {
-			epoch, err := m.registry.BeginSessionJournalSource(session.ID)
-			if err != nil {
-				m.mu.Unlock()
-				return nil, err
-			}
 			sourceCtx, cancel := context.WithCancel(context.Background())
-			source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: sourceCtx, cancel: cancel, seeded: make(chan struct{}), done: make(chan struct{}), followers: map[uint64]chan struct{}{}, holders: map[string]int{}, appendBodies: map[string]*streamedBody{}, appendCursors: map[string]uint64{}}
+			source = &sessionSource{manager: m, session: *session, adapter: adapter, ctx: sourceCtx, cancel: cancel, started: make(chan struct{}), seeded: make(chan struct{}), done: make(chan struct{}), followers: map[uint64]chan struct{}{}, holders: map[string]int{}, appendBodies: map[string]*streamedBody{}, appendCursors: map[string]uint64{}}
 			m.sources[session.ID] = source
 			m.running.Add(1)
 			start = true
 		}
-		attach(source)
+		detach := attach(source)
 		m.mu.Unlock()
 		if start {
-			go source.run()
+			go source.start()
+		}
+		select {
+		case <-source.started:
+		case <-ctx.Done():
+			detach()
+			return nil, ctx.Err()
+		}
+		if source.startErr != nil {
+			detach()
+			return nil, source.startErr
 		}
 		return source, nil
 	}
+}
+
+func (s *sessionSource) start() {
+	epoch, err := s.manager.registry.BeginSessionJournalSource(s.session.ID)
+	if err == nil {
+		err = s.ctx.Err()
+	}
+	if err != nil {
+		s.startErr = err
+		s.setSeedErr(err)
+		close(s.started)
+		close(s.seeded)
+		s.cancel()
+		s.closeFollowers()
+		s.remove()
+		close(s.done)
+		s.manager.running.Done()
+		return
+	}
+	s.epoch = epoch
+	close(s.started)
+	s.run()
 }
 
 func (m *sessionSourceManager) shutdown() {

@@ -87,11 +87,10 @@ func browserCall(owner string, input mcpBrowserInput) (map[string]any, time.Dura
 		}
 		params["tab"] = input.Tab
 	}
-	timeout := time.Minute
+	timeout := input.mcpTimeout()
 	switch input.Action {
 	case "open":
 		params["url"] = input.URL
-		timeout = 11 * time.Minute
 	case "navigate":
 		if input.URL == "" {
 			return nil, 0, refuse("invalid", "url is required.")
@@ -147,4 +146,11 @@ func (d *Daemon) browserRefusal(err error) error {
 	default:
 		return err
 	}
+}
+
+func (input mcpBrowserInput) mcpTimeout() time.Duration {
+	if input.Action == "open" {
+		return 11 * time.Minute
+	}
+	return time.Minute
 }

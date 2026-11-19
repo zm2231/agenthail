@@ -48,7 +48,7 @@ func newHostTargets(t *testing.T, localLead bool) hostTargets {
 	local.daemon.discoverCatalog(context.Background())
 	testkit.Eventually(t, "the paired host's sessions, alias and coordinator mirrored", 10*time.Second, func() bool {
 		matches, _ := local.reg.MatchHostSessions(record.ID, "@builder")
-		project, _ := local.reg.CatalogSessionProject("remote-c")
+		project, _, _ := local.reg.CatalogSessionProject("remote-c")
 		if len(matches) != 1 || hostProjectID(project) != widgetProject {
 			return false
 		}

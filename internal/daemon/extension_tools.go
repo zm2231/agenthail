@@ -21,9 +21,10 @@ const (
 	extensionToolBytes       = 2 << 10
 	extensionToolTotalBytes  = 8 << 10
 	extensionToolInputLimit  = 64 << 10
-	extensionToolLimit       = 60 * time.Second
 	mcpToolNameLimit         = 64
 )
+
+var extensionToolLimit = 60 * time.Second
 
 type extensionToolSpec struct {
 	Name        string          `json:"name"`
@@ -140,27 +141,52 @@ func (d *Daemon) extensionToolServer() *mcp.Server {
 
 func (d *Daemon) extensionToolHandler(offered offeredExtensionTool) mcp.ToolHandler {
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		started := time.Now()
 		caller := mcpCallerFrom(ctx)
-		if caller == nil {
-			return mcpRefused(mcpNoCallerRefusal(ctx)), nil
-		}
-		if caller.extension != "" {
-			return mcpRefused(refuse("not_for_extensions", offered.tool.Name+" belongs to agent sessions; extensions cannot call it.")), nil
-		}
-		input := json.RawMessage(bytes.TrimSpace(request.Params.Arguments))
-		if len(input) == 0 || string(input) == "null" {
-			input = json.RawMessage("{}")
-		}
-		var object map[string]json.RawMessage
-		if len(input) > extensionToolInputLimit || json.Unmarshal(input, &object) != nil {
-			return mcpRefused(refuse("invalid", fmt.Sprintf("The arguments must be a JSON object of at most %d bytes.", extensionToolInputLimit))), nil
-		}
-		result, err := d.callExtensionTool(ctx, caller, offered, input)
-		if err != nil {
-			return mcpRefused(mcpRefusalFor(err)), nil
+		result, refusal := d.runExtensionTool(ctx, caller, offered, request)
+		d.logMCPCall(ctx, caller, offered.tool.Name, time.Since(started), refusal)
+		if refusal != nil {
+			return mcpRefused(refusal), nil
 		}
 		return mcpEncoded(result), nil
 	}
+}
+
+func (d *Daemon) runExtensionTool(ctx context.Context, caller *mcpCaller, offered offeredExtensionTool, request *mcp.CallToolRequest) (json.RawMessage, *mcpRefusal) {
+	if caller == nil {
+		return nil, mcpNoCallerRefusal(ctx)
+	}
+	if caller.extension != "" {
+		return nil, refuse("not_for_extensions", offered.tool.Name+" belongs to agent sessions; extensions cannot call it.")
+	}
+	input := json.RawMessage(bytes.TrimSpace(request.Params.Arguments))
+	if len(input) == 0 || string(input) == "null" {
+		input = json.RawMessage("{}")
+	}
+	var object map[string]json.RawMessage
+	if len(input) > extensionToolInputLimit || json.Unmarshal(input, &object) != nil {
+		return nil, refuse("invalid", fmt.Sprintf("The arguments must be a JSON object of at most %d bytes.", extensionToolInputLimit))
+	}
+	result, err := withinBound(d, ctx, offered.tool.Name, extensionToolLimit+mcpWaitMargin, func(context.Context) (json.RawMessage, error) {
+		return d.callExtensionTool(ctx, caller, offered, input)
+	})
+	if stall, ok := errors.AsType[*mcpStallError](err); ok {
+		return nil, extensionToolOutcomeUnknown(offered, stall.bound)
+	}
+	if err != nil {
+		return nil, mcpRefusalFor(err)
+	}
+	if refusal := mcpOversize(result); refusal != nil {
+		return nil, refusal
+	}
+	return result, nil
+}
+
+// extensionToolOutcomeUnknown is the answer for a call the extension may have
+// acted on: an extension tool takes no clientRequestId, so a retry could act
+// twice, and it is not offered as retryable.
+func extensionToolOutcomeUnknown(offered offeredExtensionTool, within time.Duration) *mcpRefusal {
+	return &mcpRefusal{Code: "busy", Message: fmt.Sprintf("Extension %s did not answer %s within %s, and it may still take effect; check before calling it again.", offered.id, offered.tool.Name, within), Detail: map[string]any{"outcome": "unknown"}}
 }
 
 type extensionToolCaller struct {
@@ -197,8 +223,13 @@ func (d *Daemon) callExtensionTool(ctx context.Context, caller *mcpCaller, offer
 	if hostErr, ok := errors.AsType[*nodehost.Error](err); ok {
 		return nil, refuse(hostErr.Code, hostErr.Message)
 	}
+	if errors.Is(err, nodehost.ErrNotRunning) {
+		return nil, &mcpRefusal{Code: "unavailable", Message: "The extension host is not running; try again in a moment.", Retryable: true}
+	}
 	if err != nil {
-		return nil, &mcpRefusal{Code: "unavailable", Message: "The extension host did not answer: " + err.Error(), Retryable: true}
+		refusal := extensionToolOutcomeUnknown(offered, extensionToolLimit)
+		refusal.Message += " (" + err.Error() + ")"
+		return nil, refusal
 	}
 	if len(reply.Result) == 0 {
 		reply.Result = json.RawMessage("null")

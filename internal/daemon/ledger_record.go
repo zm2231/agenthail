@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -70,7 +71,10 @@ func (d *Daemon) recordPersonWordsOnce(session surface.Session, u ledger.Utteran
 	return record, nil
 }
 
-// sessionProject uses the catalog's cached identity so per-prompt capture does not run git on the stream callback.
+// sessionProject is the current project of one session a request acts on,
+// resolved from its own folder through the identity cache, which discovery
+// keeps warm for every session it lists. Anything that covers many sessions
+// uses recordedProject instead, which never runs git.
 func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error) {
 	identity, err := d.sessionIdentity(session)
 	if err != nil {
@@ -80,6 +84,22 @@ func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error
 		return nil, fmt.Errorf("resolve the project of %s: %s", session.Cwd, identity.Problem)
 	}
 	return identity.Project, nil
+}
+
+// recordedProject is the project discovery last recorded for the session;
+// found is false before discovery has recorded it.
+func (d *Daemon) recordedProject(session surface.Session) (project *CatalogProject, found bool, err error) {
+	raw, found, err := d.Registry.CatalogSessionProject(session.ID)
+	if err != nil || !found || len(raw) == 0 {
+		return nil, found, err
+	}
+	if err := json.Unmarshal(raw, &project); err != nil {
+		return nil, true, fmt.Errorf("read the stored project of %s: %w", session.ID, err)
+	}
+	if project == nil || project.ID == "" {
+		return nil, true, nil
+	}
+	return project, true, nil
 }
 
 func (d *Daemon) sessionIdentity(session surface.Session) (catalogIdentity, error) {

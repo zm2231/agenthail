@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -40,25 +42,57 @@ func (d *Daemon) mcpVisibleSessions(caller *mcpCaller, filter string) ([]visible
 	}
 	withProject := caller.has("read.project") && caller.project != nil && filter != mcpFilterMine
 	everything := caller.has("read.all") && filter == mcpFilterAllVisible
-	refs, err := d.Registry.LiveLocalSessions()
+	var refs []registry.SessionRef
+	var err error
+	if everything {
+		refs, err = d.Registry.LiveLocalSessions()
+	} else {
+		refs, err = d.scopedLiveSessions(caller, filter, descendants, withProject)
+	}
 	if err != nil {
 		return nil, err
 	}
-	visible := []visibleSession{}
+	visible := make([]visibleSession, 0, len(refs))
 	for _, ref := range refs {
-		self := ref.ID == caller.session.ID && caller.has("read.self") && filter == mcpFilterAllVisible
-		if !self && !everything && !descendants[ref.ID] && !withProject {
-			continue
-		}
 		session, err := d.Registry.Session(ref.ID)
 		if err != nil {
 			continue
 		}
-		if self || everything || descendants[ref.ID] || d.sameProject(caller, *session) {
-			visible = append(visible, visibleSession{Session: *session, order: ref.Order})
-		}
+		visible = append(visible, visibleSession{Session: *session, order: ref.Order})
 	}
 	return visible, nil
+}
+
+// scopedLiveSessions reads only the sessions in the caller's scope: itself,
+// its descendants and its project's sessions, by the project id the catalog
+// recorded, so the cost follows the project's size, not the machine's.
+func (d *Daemon) scopedLiveSessions(caller *mcpCaller, filter string, descendants map[string]bool, withProject bool) ([]registry.SessionRef, error) {
+	ids := make([]string, 0, len(descendants)+1)
+	if caller.has("read.self") && filter == mcpFilterAllVisible {
+		ids = append(ids, caller.session.ID)
+	}
+	for id := range descendants {
+		ids = append(ids, id)
+	}
+	refs, err := d.Registry.LiveLocalSessionsAmong(ids)
+	if err != nil || !withProject {
+		return refs, err
+	}
+	inProject, err := d.Registry.LiveLocalSessionsInProject(caller.project.ID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		seen[ref.ID] = true
+	}
+	for _, ref := range inProject {
+		if !seen[ref.ID] {
+			refs = append(refs, ref)
+		}
+	}
+	slices.SortFunc(refs, func(a, b registry.SessionRef) int { return cmp.Compare(a.Order, b.Order) })
+	return refs, nil
 }
 
 // mcpVisibleHostSessions lists the paired hosts' sessions the caller may read:

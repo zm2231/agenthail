@@ -68,6 +68,26 @@ func TestMCPNegotiatesOnlyThePinnedRevisions(t *testing.T) {
 	}
 }
 
+// recordedSession registers a session and records its project as a discovery
+// pass would, so a project listing includes it.
+func recordedSession(t *testing.T, r *registry.Registry, project ledgerProject, id string) surface.Session {
+	t.Helper()
+	session := project.session(t, r, id)
+	found, err := ResolvePathProject(context.Background(), r, session.Cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(found)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := registry.CatalogSessionState{Session: session, Project: raw, Checkout: []byte(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: `{"id":"` + id + `"}`}
+	if _, _, err := r.RecordCatalogSession(state, registry.CatalogEvent{DedupeKey: "row:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	return session
+}
+
 func traverseSessions(t *testing.T, session *mcp.ClientSession, between func(page int)) map[string]int {
 	t.Helper()
 	seen := map[string]int{}
@@ -98,9 +118,9 @@ func traverseSessions(t *testing.T, session *mcp.ClientSession, between func(pag
 func TestMCPSessionTraversalReturnsEveryStandingSessionOnce(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
 	project := addLedgerProject(t, r, "p-pages", "pages")
-	lead := project.session(t, r, "page-lead")
+	lead := recordedSession(t, r, project, "page-lead")
 	for index := range 5 {
-		project.session(t, r, fmt.Sprintf("page-%d", index))
+		recordedSession(t, r, project, fmt.Sprintf("page-%d", index))
 	}
 	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, lead))
 	seen := traverseSessions(t, session, func(page int) {
@@ -115,7 +135,7 @@ func TestMCPSessionTraversalReturnsEveryStandingSessionOnce(t *testing.T) {
 		if _, err := r.WriteDB().Exec(`DELETE FROM sessions WHERE id IN ('page-3','page-4')`); err != nil {
 			t.Fatal(err)
 		}
-		project.session(t, r, "page-new")
+		recordedSession(t, r, project, "page-new")
 	})
 	for _, id := range []string{"page-lead", "page-0", "page-1", "page-2"} {
 		if seen[id] != 1 {
