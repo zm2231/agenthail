@@ -651,12 +651,12 @@ struct SessionScreen: View {
                     let leading = items.first?.id
                     ForEach(items) { item in
                         let row = TranscriptRowID.item(item.id)
-                        LiveTimelineRow(item: item, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).rebuilt(row, generation: rowsGeneration).tracksOlderPlace(row, leading: item.id == leading, in: olderPlace).probesScrollJump(row).onAppear { if item.id == items.last?.id { openingRowAppeared(row) } }.id(row)
+                        LiveTimelineRow(item: item, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.displayableAttachment(for: item, sessionID: session.id) }).rebuilt(row, generation: rowsGeneration).tracksOlderPlace(row, leading: item.id == leading, in: olderPlace).probesScrollJump(row).onAppear { if item.id == items.last?.id { openingRowAppeared(row) } }.id(row)
                     }
                 } else {
                     let groups = self.groups
                     ForEach(groups) { group in
-                        CompactActivityGroup(group: group, owner: session.id, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
+                        CompactActivityGroup(group: group, owner: session.id, attachmentLoader: { item in await model.displayableAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
                             .equatable()
                             .rebuilt(group.id, generation: rowsGeneration)
                             .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).probesScrollJump(group.id)
@@ -1459,6 +1459,7 @@ struct AttachmentRow: View {
     let loader: (() async -> Data?)?
     @State private var loaded: Data?
     @State private var attempted = false
+    @State private var loading = false
     @State private var retryCount = 0
     @Environment(\.transcriptRows) private var rows
     @Environment(\.cachedAttachment) private var cached
@@ -1468,34 +1469,46 @@ struct AttachmentRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let data, let image = Self.downsampledImage(data) {
-                Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 320).clipShape(RoundedRectangle(cornerRadius: 12))
-            } else {
-                Label(item.text.isEmpty ? "Image attachment" : item.text, systemImage: "photo").foregroundStyle(PhonePalette.muted)
-                if attempted || rows.isOpen(failedKey) == true, loader != nil { Button("Try again") { retryCount += 1 }.font(.caption) }
+            let image = data.flatMap { SessionAttachment.thumbnail($0) }
+            let ratio = SessionAttachment.boxRatio(item.attachment?.aspectRatio ?? SessionAttachment.ratio(of: image) ?? SessionAttachment.placeholderRatio)
+            Group {
+                if let image {
+                    Image(uiImage: UIImage(cgImage: image)).resizable().aspectRatio(contentMode: .fit)
+                } else if loader != nil, !loading, attempted || rows.isOpen(failedKey) == true {
+                    VStack(spacing: 4) {
+                        Text("Couldn't load image").foregroundStyle(PhonePalette.muted).multilineTextAlignment(.center)
+                        Button("Retry") { retryCount += 1 }.accessibilityIdentifier("attachment-retry")
+                    }
+                    .font(.footnote)
+                    .padding(6)
+                } else if loader != nil {
+                    ProgressView()
+                } else {
+                    Label(item.text.isEmpty ? "Image attachment" : item.text, systemImage: "photo").foregroundStyle(PhonePalette.muted).padding(6)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(PhonePalette.muted.opacity(0.12))
+            .aspectRatio(ratio, contentMode: .fit)
+            .frame(maxWidth: SessionAttachment.maxWidth(ratio, width: .infinity, height: Self.maxHeight), alignment: .leading)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             SessionTimestamp(value: item.timestamp)
         }
         .padding(.vertical, 4)
         .contextMenu { CopyCallID(item: item) }
         .task(id: "\(item.id)-\(retryCount)") {
-            guard let loader, data == nil, retryCount > 0 || rows.isOpen(failedKey) != true else { return }
+            guard let loader, data.flatMap({ SessionAttachment.thumbnail($0, maxPixels: 64) }) == nil else { return }
+            loading = true
+            let result = await loader()
+            loading = false
+            guard !Task.isCancelled else { return }
+            loaded = result
             attempted = true
-            loaded = await loader()
-            if !Task.isCancelled { rows.set(failedKey, open: data == nil) }
+            rows.set(failedKey, open: data == nil)
         }
     }
 
-    private static func downsampledImage(_ data: Data) -> UIImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: 2048
-        ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        return UIImage(cgImage: image)
-    }
+    private static let maxHeight: CGFloat = 320
 }
 
 struct SessionSummary: View, @MainActor Equatable {

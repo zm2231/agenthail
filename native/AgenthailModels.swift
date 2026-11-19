@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import ImageIO
 
 enum TimestampParser {
     static func date(_ value: String) -> Date? {
@@ -2054,6 +2055,37 @@ struct SessionAttachment: Decodable, Equatable, Hashable {
     var name: String? = nil
 
     var isImage: Bool { mediaType.hasPrefix("image/") }
+
+    var aspectRatio: CGFloat? {
+        guard let width, let height, width > 0, height > 0 else { return nil }
+        return CGFloat(width) / CGFloat(height)
+    }
+
+    static let placeholderRatio: CGFloat = 220.0 / 140.0
+    static let boxRatios: ClosedRange<CGFloat> = 0.5...4
+
+    static func boxRatio(_ ratio: CGFloat) -> CGFloat {
+        min(max(ratio, boxRatios.lowerBound), boxRatios.upperBound)
+    }
+
+    static func ratio(of image: CGImage?) -> CGFloat? {
+        guard let image, image.height > 0 else { return nil }
+        return CGFloat(image.width) / CGFloat(image.height)
+    }
+
+    static func thumbnail(_ data: Data, maxPixels: Int = 2048) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    static func maxWidth(_ ratio: CGFloat, width: CGFloat, height maxHeight: CGFloat) -> CGFloat {
+        min(width, maxHeight * ratio)
+    }
 }
 
 // A file sent with a message that the agent received as a stored path. The

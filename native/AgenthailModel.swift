@@ -589,6 +589,10 @@ final class AgenthailModel {
         return data
     }
 
+    func dropAttachment(sessionID: String, attachment: SessionAttachment) {
+        attachmentCache.removeObject(forKey: "\(sessionID)/\(attachment.id)" as NSString)
+    }
+
     func focusInTerminal(_ session: SessionState) {
         perform(action: "session-focus", sessionID: session.id)
     }

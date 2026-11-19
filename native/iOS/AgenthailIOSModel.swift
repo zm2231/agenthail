@@ -1214,6 +1214,13 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         }
     }
 
+    func displayableAttachment(for item: TimelineItem, sessionID: String) async -> Data? {
+        guard let data = await sessionAttachment(for: item, sessionID: sessionID) else { return nil }
+        guard let attachment = item.attachment, attachment.isImage, SessionAttachment.thumbnail(data, maxPixels: 64) == nil else { return data }
+        if let dropped = attachmentCache.removeValue(forKey: "\(sessionID):\(attachment.id)") { attachmentCacheBytes -= dropped.count }
+        return nil
+    }
+
     func cachedAttachment(for item: TimelineItem, sessionID: String) -> Data? {
         item.attachment.flatMap { attachmentCache["\(sessionID):\($0.id)"] }
     }
