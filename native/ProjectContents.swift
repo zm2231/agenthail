@@ -33,12 +33,20 @@ struct ProjectContents: Equatable {
         session.archived != true && (session.isWorking || (session.subagents?.working ?? 0) > 0)
     }
 
-    static func build(lead: ProjectState.Lead?, leadID: String?, projectID: String, sessions: [SessionState], computers: Int, localName: String = "this computer") -> ProjectContents {
+    static let recentWindow: TimeInterval = 24 * 60 * 60
+
+    static func isNow(_ session: SessionState, at now: Date) -> Bool {
+        if running(session) || session.queueCount > 0 || session.waitingOn != nil || session.pendingAskID != nil || session.attention != nil { return true }
+        guard let raw = session.lastActive, let last = TimestampParser.date(raw) else { return false }
+        return now.timeIntervalSince(last) <= recentWindow
+    }
+
+    static func build(lead: ProjectState.Lead?, leadID: String?, projectID: String, sessions: [SessionState], computers: Int, localName: String = "this computer", now: Date = Date()) -> ProjectContents {
         var contents = ProjectContents(lead: lead)
         contents.leadSession = leadID.flatMap { id in sessions.first { $0.id == id } }
         let members = sessions.filter { $0.project?.id == projectID && $0.subagent == nil && $0.archived != true && $0.id != leadID }
-        contents.now = ProjectNow(members.filter { running($0) || $0.current }, computers: computers, localName: localName)
-        contents.earlier = members.filter { !$0.current && !running($0) }
+        contents.now = ProjectNow(members.filter { isNow($0, at: now) }, computers: computers, localName: localName)
+        contents.earlier = members.filter { !isNow($0, at: now) }
         return contents
     }
 }

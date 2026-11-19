@@ -124,6 +124,7 @@ jobs:
           node scripts/test-dashboard-question-pager.mjs
           node scripts/test-dashboard-activity.mjs
           node scripts/test-dashboard-overview.mjs
+          node scripts/test-ledger-page.mjs
           node scripts/test-dashboard-plan.mjs
           node scripts/test-dashboard-ui.mjs
           node scripts/test-dashboard-usage.mjs

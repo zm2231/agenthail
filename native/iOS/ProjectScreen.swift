@@ -125,10 +125,6 @@ struct ProjectScreen: View {
             if !waiting.isEmpty {
                 DecisionSections(model: model, inbox: waiting, open: openSession) { answering = $0 }
             }
-            if contents.now.count > 0 {
-                nowSection(contents.now)
-                workSection(project)
-            }
             Section("Lead") {
                 leadCard(project, contents)
                 if let leads = ProjectContents.leadsLine(project) {
@@ -137,10 +133,8 @@ struct ProjectScreen: View {
                         .accessibilityIdentifier("project-leads")
                 }
             }
-            if contents.now.count == 0 {
-                nowSection(contents.now)
-                workSection(project)
-            }
+            nowSection(contents.now)
+            workSection(project)
             if showingEarlier {
                 Section("Earlier") {
                     ForEach(contents.earlier) { row($0) }
