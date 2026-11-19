@@ -70,13 +70,17 @@ func (d *Daemon) releaseUnobservedHold(ctx context.Context, adapter surface.Surf
 }
 
 func (d *Daemon) notifyTurnCompleted(notice turnCompletedNotice, sessionID, turnID string) {
-	hostID := d.hostIdentity().ID
 	d.background.start(func(ctx context.Context) {
-		if err := d.notifyDesktop("Agenthail", notice.desktop, sessionID, "", notice.requestID, notice.actions); err != nil {
-			d.log.Printf("desktop notification: %s", err)
-		}
 		notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: notice.mobile, SessionID: sessionID, TurnID: turnID, EventType: "turn.completed", RequestID: notice.requestID, CollapseID: turnNotificationKey(hostID, sessionID, turnID), DedupeKey: completionDedupeKey(hostID, sessionID, turnID)})
+		d.deliverTurnCompleted(notificationCtx, notice, sessionID, turnID)
 	})
+}
+
+func (d *Daemon) deliverTurnCompleted(ctx context.Context, notice turnCompletedNotice, sessionID, turnID string) {
+	hostID := d.hostIdentity().ID
+	if err := d.notifyDesktop("Agenthail", notice.desktop, sessionID, "", notice.requestID, notice.actions); err != nil {
+		d.log.Printf("desktop notification: %s", err)
+	}
+	d.notifyPairedDevices(ctx, mobileNotification{Title: "Agenthail", Message: notice.mobile, SessionID: sessionID, TurnID: turnID, EventType: "turn.completed", RequestID: notice.requestID, CollapseID: turnNotificationKey(hostID, sessionID, turnID), DedupeKey: completionDedupeKey(hostID, sessionID, turnID)})
 }

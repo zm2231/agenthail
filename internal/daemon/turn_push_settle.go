@@ -17,6 +17,7 @@ const (
 	settledOnVerdict  = "verdict"
 	settledOnIdle     = "idle"
 	settledOnDeadline = "deadline"
+	settledOnShutdown = "shutdown"
 )
 
 const (
@@ -50,10 +51,11 @@ type turnPushes struct {
 	verdicts map[string]map[string]int
 	sending  map[string]int
 	expected map[string]int
+	injected map[string]int
 }
 
 func newTurnPushes() *turnPushes {
-	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]map[string]int{}, sending: map[string]int{}, expected: map[string]int{}}
+	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]map[string]int{}, sending: map[string]int{}, expected: map[string]int{}, injected: map[string]int{}}
 }
 
 func (p *turnPushes) mark(sessionID, turnID string, state int) {
@@ -157,8 +159,36 @@ func (d *Daemon) sendSettledTurnPush(sessionID string, entry *pendingTurnPush, r
 	d.notifyTurnCompleted(entry.notice, sessionID, entry.turnID)
 }
 
+// A stopping daemon sends what it still holds, under its own deadline, since the stop cancels background work and a restarted daemon does not see the turn end again.
+func (d *Daemon) flushTurnPushes() {
+	p := d.turnPushes
+	p.mu.Lock()
+	held := make(map[string]*pendingTurnPush, len(p.pending))
+	for sessionID, entry := range p.pending {
+		p.remove(sessionID, entry)
+		held[sessionID] = entry
+	}
+	p.mu.Unlock()
+	if len(held) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for sessionID, entry := range held {
+		d.logSettledPush(sessionID, entry.turns, settledOnShutdown, "turn.completed")
+		d.recordTurnNotice(sessionID, entry.turnID, entry.notice)
+		d.deliverTurnCompleted(ctx, entry.notice, sessionID, entry.turnID)
+	}
+}
+
+// injected counts messages that reached the session mid-turn, which this does not tie to a later turn, so the log shows how often a burst may still push twice.
 func (d *Daemon) logSettledPush(sessionID string, turns []string, reason, event string) {
-	d.log.Printf("push settled session=%s turns=%s reason=%s event=%s", sessionID, strings.Join(turns, ","), reason, event)
+	p := d.turnPushes
+	p.mu.Lock()
+	injected := p.injected[sessionID]
+	delete(p.injected, sessionID)
+	p.mu.Unlock()
+	d.log.Printf("push settled session=%s turns=%s reason=%s event=%s injected=%d", sessionID, strings.Join(turns, ","), reason, event, injected)
 }
 
 // A viewer mirrors the notice, so it is recorded only for the turn whose push went out.
@@ -257,7 +287,13 @@ func (d *Daemon) turnPushHandoff(sessionID string) func(accepted bool) {
 	p.mu.Lock()
 	if p.pending[sessionID] == nil {
 		p.mu.Unlock()
-		return func(bool) {}
+		return func(accepted bool) {
+			if accepted {
+				p.mu.Lock()
+				p.injected[sessionID]++
+				p.mu.Unlock()
+			}
+		}
 	}
 	p.sending[sessionID]++
 	p.mu.Unlock()

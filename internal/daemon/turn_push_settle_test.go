@@ -96,7 +96,7 @@ func TestATurnEndedWithAHeadlinePushesOnceWhenItsVerdictLands(t *testing.T) {
 	if message := finished[0]["message"]; !strings.Contains(message, "done") || !strings.HasSuffix(message, ": Parser fixed and tests pass") || finished[0]["turnId"] != "turn-1" {
 		t.Fatalf("the push %+v does not carry the turn's headline", finished[0])
 	}
-	if lines := settledLines(logged); len(lines) != 1 || lines[0] != "push settled session=from turns=turn-1 reason=verdict event=turn.completed" {
+	if lines := settledLines(logged); len(lines) != 1 || lines[0] != "push settled session=from turns=turn-1 reason=verdict event=turn.completed injected=0" {
 		t.Fatalf("settled log %q", lines)
 	}
 	if row := viewRow(t, d, from.ID); row.TurnCompletion == nil || row.TurnCompletion.TurnID != "turn-1" {
@@ -135,7 +135,7 @@ func TestATurnJudgedToNeedThePersonPushesOnlyNeedsYou(t *testing.T) {
 	if len(needs) != 1 || !strings.Contains(needs[0]["message"], "needs you") || !strings.HasSuffix(needs[0]["message"], ": Fix is ready; deploy it?") {
 		t.Fatalf("needs-you pushes %+v", needs)
 	}
-	if lines := settledLines(logged); len(lines) != 1 || lines[0] != "push settled session=from turns=turn-1 reason=verdict event=turn.needs_you" {
+	if lines := settledLines(logged); len(lines) != 1 || lines[0] != "push settled session=from turns=turn-1 reason=verdict event=turn.needs_you injected=0" {
 		t.Fatalf("settled log %q", lines)
 	}
 }
@@ -165,7 +165,7 @@ func TestATurnAQueuedMessageFollowsPushesOnceForTheLastTurn(t *testing.T) {
 	if len(finished) != 1 || finished[0]["turnId"] != "turn-2" || !strings.HasSuffix(finished[0]["message"], ": Follow-up handled") {
 		t.Fatalf("two back-to-back turns pushed %+v", finished)
 	}
-	if lines := settledLines(logged); len(lines) != 1 || lines[0] != "push settled session=from turns=turn-1,turn-2 reason=idle event=turn.completed" {
+	if lines := settledLines(logged); len(lines) != 1 || lines[0] != "push settled session=from turns=turn-1,turn-2 reason=idle event=turn.completed injected=0" {
 		t.Fatalf("settled log %q", lines)
 	}
 }
@@ -185,7 +185,7 @@ func TestALateVerdictSendsOnlyNeedsYouInPlaceOfTheDeadlinePush(t *testing.T) {
 	if len(finished) != 1 || len(needs) != 1 || finished[0]["collapseId"] == "" || finished[0]["collapseId"] != needs[0]["collapseId"] {
 		t.Fatalf("a late needs-you verdict does not replace the deadline push: %+v %+v", finished, needs)
 	}
-	if lines := settledLines(logged); len(lines) != 2 || !strings.Contains(lines[0], "turns=turn-1 reason=deadline event=turn.completed") || !strings.Contains(lines[1], "turns=turn-1 reason=verdict event=turn.needs_you") {
+	if lines := settledLines(logged); len(lines) != 2 || !strings.Contains(lines[0], "turns=turn-1 reason=deadline event=turn.completed injected=0") || !strings.Contains(lines[1], "turns=turn-1 reason=verdict event=turn.needs_you injected=0") {
 		t.Fatalf("settled log %q", lines)
 	}
 
@@ -459,5 +459,39 @@ func TestAnUnarmedFollowUpLetsTheEarlierTurnsPushGoAtOnce(t *testing.T) {
 	d.background.wait()
 	if finished := pushes.all("turn.completed"); len(finished) != 1 || finished[0]["turnId"] != "turn-1" {
 		t.Fatalf("a follow-up with no push of its own left %+v", finished)
+	}
+}
+
+func TestAStoppingDaemonSendsThePushItStillHolds(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	logged := captureLog(d)
+	pushes := newPushRecorder(t, r)
+	d.turnJudgmentQueued(from.ID, "turn-1")
+	d.scheduleTurnPush(from.ID, "turn-1", turnCompletedNotice{desktop: "from done", mobile: "from done", outcome: turnOutcomeFinished})
+	d.turnPushHandoff(from.ID)(true)
+	d.pauseTurnPush(from.ID)
+
+	d.flushTurnPushes()
+	d.background.stop()
+	if count := pushes.count("turn.completed"); count != 1 {
+		t.Fatalf("a stopping daemon sent its held push %d times", count)
+	}
+	if lines := settledLines(logged); len(lines) != 1 || !strings.Contains(lines[0], "reason=shutdown") {
+		t.Fatalf("settled log %q", lines)
+	}
+}
+
+func TestASettledPushCountsMessagesInjectedMidTurn(t *testing.T) {
+	d, r, fake, from, _ := daemonFixture(t)
+	logged := captureLog(d)
+	newPushRecorder(t, r)
+	observeIdle(d, fake, &from)
+	startTurn(t, d, fake, &from, "turn-1")
+	d.turnPushHandoff(from.ID)(true)
+	d.turnPushHandoff(from.ID)(false)
+	endTurnWithHeadline(t, d, fake, &from, "turn-1", "Done", "Done.")
+	d.background.wait()
+	if lines := settledLines(logged); len(lines) != 1 || !strings.HasSuffix(lines[0], "injected=1") {
+		t.Fatalf("settled log %q", lines)
 	}
 }

@@ -432,6 +432,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			d.flushTurnPushes()
 			d.background.stop()
 			<-catalogDone
 			<-hostDone
