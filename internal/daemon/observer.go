@@ -265,7 +265,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 			d.armCompletionNotification(session.ID)
 		}
 		if !completionChanged || observation.ActiveTurnID != "" {
-			d.turnStartedForPush(session.ID)
+			d.pauseTurnPush(session.ID)
 		}
 		d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnStart, sessionID: session.ID})
 	}

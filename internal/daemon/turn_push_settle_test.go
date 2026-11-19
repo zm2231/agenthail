@@ -364,20 +364,23 @@ func observeIdle(d *Daemon, fake *daemonSurface, session *surface.Session) {
 	d.observeSession(d.background.ctx, fake, session)
 }
 
-func TestASendAcceptedBeforeTheTurnsPushIsSetUpHoldsItForTheFollowUp(t *testing.T) {
-	d, r, fake, from, _ := daemonFixture(t)
+func TestASendWhileATurnsPushWaitsHoldsItForTheFollowUp(t *testing.T) {
+	stub := &judgeStub{state: turnDone, hold: make(chan struct{})}
+	d, r, fake, from := judgeFixture(t, stub, "")
 	pushes := newPushRecorder(t, r)
 	observeIdle(d, fake, &from)
 	startTurn(t, d, fake, &from, "turn-1")
-	d.turnPushHandoff(from.ID)(true)
 	endTurnWithHeadline(t, d, fake, &from, "turn-1", "First pass done", "Done.")
+	d.turnPushHandoff(from.ID)(true)
+	close(stub.hold)
+	waitJudged(t, d, from.ID, "turn-1")
 	d.armCompletionNotification(from.ID)
 	d.background.wait()
 	if count := pushes.count("turn.completed"); count != 0 {
 		t.Fatalf("a turn whose session was already sent its next message pushed %d times", count)
 	}
 	endTurnWithHeadline(t, d, fake, &from, "turn-2", "Follow-up handled", "Handled.")
-	d.background.wait()
+	waitJudged(t, d, from.ID, "turn-2")
 	if finished := pushes.all("turn.completed"); len(finished) != 1 || finished[0]["turnId"] != "turn-2" {
 		t.Fatalf("the burst pushed %+v", finished)
 	}
@@ -433,7 +436,7 @@ func TestARefusedSendDoesNotReleaseAnotherAcceptedOne(t *testing.T) {
 	if count := pushes.count("turn.completed"); count != 0 {
 		t.Fatalf("a refused send released the push an accepted one held: %d pushes", count)
 	}
-	d.turnStartedForPush(from.ID)
+	d.turnEndedForPush(from.ID)
 	d.scheduleTurnPush(from.ID, "turn-2", notice)
 	d.background.wait()
 	if finished := pushes.all("turn.completed"); len(finished) != 1 || finished[0]["turnId"] != "turn-2" {

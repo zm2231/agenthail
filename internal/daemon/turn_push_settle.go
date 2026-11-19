@@ -50,11 +50,10 @@ type turnPushes struct {
 	verdicts map[string]map[string]int
 	sending  map[string]int
 	expected map[string]int
-	started  map[string]bool
 }
 
 func newTurnPushes() *turnPushes {
-	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]map[string]int{}, sending: map[string]int{}, expected: map[string]int{}, started: map[string]bool{}}
+	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]map[string]int{}, sending: map[string]int{}, expected: map[string]int{}}
 }
 
 func (p *turnPushes) mark(sessionID, turnID string, state int) {
@@ -172,26 +171,12 @@ func (d *Daemon) recordTurnNotice(sessionID, turnID string, notice turnCompleted
 	d.requestCatalogDiscovery()
 }
 
-// Each accepted send expects one turn, and each turn meets one expectation: when it is seen starting, or when it ends if its start was never seen.
-func (d *Daemon) turnStartedForPush(sessionID string) {
-	p := d.turnPushes
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.started[sessionID] = true
-	p.meetExpected(sessionID)
-	if entry := p.pending[sessionID]; entry != nil {
-		entry.pause()
-	}
-}
-
+// A send counts only while a finished turn's push waits, so every turn that ends after it is one it could have started.
 func (d *Daemon) turnEndedForPush(sessionID string) {
 	p := d.turnPushes
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.started[sessionID] {
-		p.meetExpected(sessionID)
-	}
-	delete(p.started, sessionID)
+	p.meetExpected(sessionID)
 }
 
 func (p *turnPushes) meetExpected(sessionID string) {
@@ -267,10 +252,13 @@ func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string) {
 	d.logSettledPush(sessionID, turns, settledOnVerdict, turnNeedsYouEvent)
 }
 
-// A message sent to the session starts a turn the observer has not seen yet, so a push waits for that turn, up to the deadline; a refused send expects nothing.
 func (d *Daemon) turnPushHandoff(sessionID string) func(accepted bool) {
 	p := d.turnPushes
 	p.mu.Lock()
+	if p.pending[sessionID] == nil {
+		p.mu.Unlock()
+		return func(bool) {}
+	}
 	p.sending[sessionID]++
 	p.mu.Unlock()
 	return func(accepted bool) {
@@ -278,10 +266,10 @@ func (d *Daemon) turnPushHandoff(sessionID string) func(accepted bool) {
 		if p.sending[sessionID]--; p.sending[sessionID] <= 0 {
 			delete(p.sending, sessionID)
 		}
-		if accepted {
+		entry := p.pending[sessionID]
+		if accepted && entry != nil {
 			p.expected[sessionID]++
 		}
-		entry := p.pending[sessionID]
 		if entry == nil || entry.paused {
 			p.mu.Unlock()
 			return
