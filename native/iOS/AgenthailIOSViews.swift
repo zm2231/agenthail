@@ -1514,7 +1514,7 @@ struct SessionSummary: View, @MainActor Equatable {
     var body: some View {
         Button { openDetails(()) } label: {
             HStack(spacing: 8) {
-                status.lineLimit(1).fixedSize().layoutPriority(2)
+                status.lineLimit(1).truncationMode(.tail).layoutPriority(2)
                 Text(modelName).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
                 context.lineLimit(1).fixedSize().layoutPriority(1)

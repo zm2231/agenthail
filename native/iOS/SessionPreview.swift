@@ -312,6 +312,11 @@ struct SessionPreview: View {
             ], at: 1)
             snapshot["sessions"] = led
         }
+        if ProcessInfo.processInfo.arguments.contains("--preview-long-status") {
+            var moving = snapshot["sessions"] as! [[String: Any]]
+            moving[0]["move"] = ["state": "copying", "host": "h0123456789ab", "hostName": "build-server-in-the-far-rack.example.ts.net"]
+            snapshot["sessions"] = moving
+        }
         if TilesPreview.enabled { snapshot["projects"] = TilesPreview.projects }
         if ProjectNowPreview.scenario != nil {
             snapshot["sessions"] = ProjectNowPreview.sessions(capabilities: capabilities)

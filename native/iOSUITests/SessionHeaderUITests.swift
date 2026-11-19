@@ -2,9 +2,9 @@ import XCTest
 
 @MainActor
 final class SessionHeaderUITests: XCTestCase {
-    private func launch(_ size: String, theme: String = "dark") -> XCUIApplication {
+    private func launch(_ size: String, theme: String = "dark", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-theme", theme, "--preview-reading", "--preview-reading-top", "-UIPreferredContentSizeCategoryName", size]
+        app.launchArguments = ["--preview-session", "--preview-theme", theme, "--preview-reading", "--preview-reading-top", "-UIPreferredContentSizeCategoryName", size] + extra
         app.launch()
         XCTAssertTrue(app.buttons["session-summary"].waitForExistence(timeout: 30), "no session header")
         sleep(2)
@@ -40,12 +40,17 @@ final class SessionHeaderUITests: XCTestCase {
         let summary = app.buttons["session-summary"].frame
         let band = CGRect(x: 0, y: 64, width: window.width, height: max(1, summary.minY - 64))
         let scale = UIScreen.main.scale
-        let before = Self.pixels(app.screenshot(), band, scale: scale)
+        let transcript = CGRect(x: 0, y: summary.maxY + 40, width: window.width, height: 200)
+        let first = app.screenshot()
+        let before = Self.pixels(first, band, scale: scale)
         app.swipeUp(velocity: .slow)
         sleep(2)
-        let after = Self.pixels(app.screenshot(), band, scale: scale)
+        let second = app.screenshot()
+        let after = Self.pixels(second, band, scale: scale)
         let changed = Self.difference(before, after)
-        print("MEASURE header \(name) titleBandChange=\(changed) summaryMaxY=\(summary.maxY) share=\(summary.maxY / window.height)")
+        let moved = Self.difference(Self.pixels(first, transcript, scale: scale), Self.pixels(second, transcript, scale: scale))
+        XCTAssertGreaterThan(moved, Self.titleBandLimit * 2, "the transcript did not scroll under the header at \(name), so the band check proves nothing")
+        print("MEASURE header \(name) transcriptChange=\(moved) titleBandChange=\(changed) summaryMaxY=\(summary.maxY) share=\(summary.maxY / window.height)")
         keep(app, "Header mid-scroll, \(name)")
         return changed
     }
@@ -72,11 +77,19 @@ final class SessionHeaderUITests: XCTestCase {
     }
 
     func testTheStatusRowStaysOneLineAndTheHeaderSmallAtTheLargestTextSize() {
-        let app = launch("UICTContentSizeCategoryAccessibilityXXXL")
-        let summary = app.buttons["session-summary"].frame
-        let window = app.windows.firstMatch.frame
-        XCTAssertLessThanOrEqual(summary.maxY / window.height, 0.2, "the header ends at \(summary.maxY) of \(window.height)")
-        XCTAssertLessThanOrEqual(summary.height, 60, "the status row wrapped: \(summary)")
-        keep(app, "Header at the largest text size")
+        for (extra, name) in [([String](), "working"), (["--preview-long-status"], "a long move status")] {
+            let app = launch("UICTContentSizeCategoryAccessibilityXXXL", extra: extra)
+            let summary = app.buttons["session-summary"].frame
+            let window = app.windows.firstMatch.frame
+            XCTAssertLessThanOrEqual(summary.maxY / window.height, 0.2, "with \(name), the header ends at \(summary.maxY) of \(window.height)")
+            XCTAssertLessThanOrEqual(summary.height, 60, "with \(name), the status row wrapped: \(summary)")
+            XCTAssertGreaterThanOrEqual(summary.minX, window.minX, "with \(name), the status row starts off screen: \(summary)")
+            XCTAssertLessThanOrEqual(summary.maxX, window.maxX, "with \(name), the status row runs off screen: \(summary)")
+            for text in app.buttons["session-summary"].staticTexts.allElementsBoundByIndex where !text.frame.isEmpty {
+                XCTAssertLessThanOrEqual(text.frame.maxX, window.maxX + 0.5, "with \(name), \(text.label) runs off screen: \(text.frame)")
+            }
+            keep(app, "Header at the largest text size with \(name)")
+            app.terminate()
+        }
     }
 }
