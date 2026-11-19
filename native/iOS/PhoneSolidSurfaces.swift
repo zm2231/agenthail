@@ -10,7 +10,7 @@ extension View {
     }
 }
 
-// The hard scroll edge still shows a blur of what sits under the bar; a solid surface hides it.
+// A hard scroll edge still leaves text under the bar legible on a phone, so glass gets a mostly opaque ground.
 private struct SolidTopBarGround: ViewModifier {
     @Environment(\.phoneAppearance) private var appearance
 
@@ -31,6 +31,7 @@ private struct ObservedTopBarGround<Content: View>: View {
 }
 
 private struct SolidTopBarGroundBody<Content: View>: View {
+    static var glassGround: Double { 0.86 }
     let content: Content
     let config: UIConfig
     let pane: (Bool, Float) -> Color
@@ -40,11 +41,12 @@ private struct SolidTopBarGroundBody<Content: View>: View {
 
     var body: some View {
         let dark = colorScheme == .dark
+        let ground = pane(dark, PhoneAppearance.contrastTarget(config, increased: contrast == .increased))
         content.background {
             if config.solidSurfaces(dark: dark, reduceTransparency: reduceTransparency) {
-                Rectangle()
-                    .fill(pane(dark, PhoneAppearance.contrastTarget(config, increased: contrast == .increased)))
-                    .ignoresSafeArea(edges: .top)
+                Rectangle().fill(ground).ignoresSafeArea(edges: .top)
+            } else {
+                Rectangle().fill(ground.opacity(Self.glassGround)).background(.ultraThinMaterial).ignoresSafeArea(edges: .top)
             }
         }
     }

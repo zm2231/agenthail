@@ -150,6 +150,10 @@ final class ComposerUITextView: UITextView {
         didSet { refreshPlaceholder() }
     }
 
+    override var attributedText: NSAttributedString! {
+        didSet { refreshPlaceholder() }
+    }
+
     func refreshPlaceholder() { placeholderLabel.isHidden = !text.isEmpty }
 
     override func layoutSubviews() {
