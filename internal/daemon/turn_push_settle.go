@@ -49,11 +49,12 @@ type turnPushes struct {
 	pending  map[string]*pendingTurnPush
 	verdicts map[string]map[string]int
 	sending  map[string]int
-	handed   map[string]time.Time
+	expected map[string]int
+	started  map[string]bool
 }
 
 func newTurnPushes() *turnPushes {
-	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]map[string]int{}, sending: map[string]int{}, handed: map[string]time.Time{}}
+	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]map[string]int{}, sending: map[string]int{}, expected: map[string]int{}, started: map[string]bool{}}
 }
 
 func (p *turnPushes) mark(sessionID, turnID string, state int) {
@@ -89,9 +90,6 @@ func (d *Daemon) scheduleTurnPush(sessionID, turnID string, notice turnCompleted
 	p := d.turnPushes
 	entry := &pendingTurnPush{turnID: turnID, notice: notice}
 	p.mu.Lock()
-	if handed, ok := p.handed[sessionID]; ok && (notice.endedAt.IsZero() || handed.Before(notice.endedAt)) {
-		delete(p.handed, sessionID)
-	}
 	answered := p.verdict(sessionID, turnID) == verdictNeedsYou
 	for marked, state := range p.verdicts[sessionID] {
 		if marked != turnID && state != verdictQueued {
@@ -127,7 +125,7 @@ func (d *Daemon) settleTurnPush(sessionID string, entry *pendingTurnPush, gen in
 		p.mu.Unlock()
 		return
 	}
-	if reason != settledOnDeadline && (queued || p.sending[sessionID] > 0 || !p.handed[sessionID].IsZero() || p.verdict(sessionID, entry.turnID) == verdictQueued) {
+	if reason != settledOnDeadline && (queued || p.sending[sessionID] > 0 || p.expected[sessionID] > 0 || p.verdict(sessionID, entry.turnID) == verdictQueued) {
 		if entry.timer == nil {
 			armed := entry.gen
 			entry.timer = time.AfterFunc(p.window, func() {
@@ -138,7 +136,9 @@ func (d *Daemon) settleTurnPush(sessionID string, entry *pendingTurnPush, gen in
 		return
 	}
 	p.remove(sessionID, entry)
-	delete(p.handed, sessionID)
+	if reason == settledOnDeadline {
+		delete(p.expected, sessionID)
+	}
 	p.mu.Unlock()
 	d.sendSettledTurnPush(sessionID, entry, reason)
 }
@@ -172,11 +172,38 @@ func (d *Daemon) recordTurnNotice(sessionID, turnID string, notice turnCompleted
 	d.requestCatalogDiscovery()
 }
 
+// Each accepted send expects one turn, and each turn meets one expectation: when it is seen starting, or when it ends if its start was never seen.
+func (d *Daemon) turnStartedForPush(sessionID string) {
+	p := d.turnPushes
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.started[sessionID] = true
+	p.meetExpected(sessionID)
+	if entry := p.pending[sessionID]; entry != nil {
+		entry.pause()
+	}
+}
+
+func (d *Daemon) turnEndedForPush(sessionID string) {
+	p := d.turnPushes
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.started[sessionID] {
+		p.meetExpected(sessionID)
+	}
+	delete(p.started, sessionID)
+}
+
+func (p *turnPushes) meetExpected(sessionID string) {
+	if p.expected[sessionID]--; p.expected[sessionID] <= 0 {
+		delete(p.expected, sessionID)
+	}
+}
+
 func (d *Daemon) pauseTurnPush(sessionID string) {
 	p := d.turnPushes
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	delete(p.handed, sessionID)
 	if entry := p.pending[sessionID]; entry != nil {
 		entry.pause()
 	}
@@ -236,7 +263,7 @@ func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string) {
 	d.logSettledPush(sessionID, turns, settledOnVerdict, turnNeedsYouEvent)
 }
 
-// A message sent to the session starts a turn the observer has not seen yet, so a push waits for that turn to be seen, up to the deadline; each send is counted on its own, and a refused one releases nothing it did not hold.
+// A message sent to the session starts a turn the observer has not seen yet, so a push waits for that turn, up to the deadline; a refused send expects nothing.
 func (d *Daemon) turnPushHandoff(sessionID string) func(accepted bool) {
 	p := d.turnPushes
 	p.mu.Lock()
@@ -248,7 +275,7 @@ func (d *Daemon) turnPushHandoff(sessionID string) func(accepted bool) {
 			delete(p.sending, sessionID)
 		}
 		if accepted {
-			p.handed[sessionID] = time.Now()
+			p.expected[sessionID]++
 		}
 		entry := p.pending[sessionID]
 		if entry == nil || entry.paused {

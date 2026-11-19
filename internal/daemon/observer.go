@@ -257,11 +257,16 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 			d.log.Printf("clear completion notification %s: %s", d.resolveDisplay(session.ID), err)
 		}
 	}
+	if completionChanged {
+		d.turnEndedForPush(session.ID)
+	}
 	if found && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
 		if arm {
 			d.armCompletionNotification(session.ID)
 		}
-		d.pauseTurnPush(session.ID)
+		if !completionChanged || observation.ActiveTurnID != "" {
+			d.turnStartedForPush(session.ID)
+		}
 		d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnStart, sessionID: session.ID})
 	}
 	d.settleTaskFromObservation(ctx, adapter, session, observation)
@@ -314,7 +319,6 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	case notice.quiet:
 		d.dropTurnPush(session.ID)
 	case notice.desktop != "":
-		notice.endedAt = observation.CompletedAt
 		d.scheduleTurnPush(session.ID, observation.CompletedTurnID, notice)
 	case terminalCompletion:
 		d.resumeTurnPush(session.ID)
