@@ -38,6 +38,18 @@ final class ComposerPasteTests: XCTestCase {
         XCTAssertFalse(label.isHidden)
     }
 
+    func testAComposerOpenedOnADraftDoesNotDrawItsPlaceholderOverIt() throws {
+        let view = makeTextView()
+        view.placeholder = "Message this agent…"
+        view.attributedText = view.attributedDraft("Keep the regression check with the fix.")
+        view.layoutIfNeeded()
+        let label = try XCTUnwrap(view.subviews.compactMap { $0 as? UILabel }.first { $0.text == "Message this agent…" })
+        XCTAssertTrue(label.isHidden, "the placeholder drew over a restored draft")
+        XCTAssertFalse(label.isAccessibilityElement)
+        view.attributedText = view.attributedDraft("")
+        XCTAssertFalse(label.isHidden, "an emptied draft shows the placeholder again")
+    }
+
     override func tearDown() {
         window?.isHidden = true
         window = nil

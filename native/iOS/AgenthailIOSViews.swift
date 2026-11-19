@@ -1513,19 +1513,14 @@ struct SessionSummary: View, @MainActor Equatable {
 
     var body: some View {
         Button { openDetails(()) } label: {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    status
-                    Text(modelName).lineLimit(1)
-                    Spacer(minLength: 4)
-                    context
-                    Image(systemName: "chevron.down").font(.caption2)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack { status; Spacer(); context }
-                    Text(modelName)
-                }
+            HStack(spacing: 8) {
+                status.lineLimit(1).truncationMode(.tail).layoutPriority(2)
+                Text(modelName).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 4)
+                context.lineLimit(1).fixedSize().layoutPriority(1)
+                Image(systemName: "chevron.down").font(.caption2)
             }
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .font(.footnote)
             .foregroundStyle(PhonePalette.muted)
             .frame(maxWidth: SessionStyle.readingWidth)
