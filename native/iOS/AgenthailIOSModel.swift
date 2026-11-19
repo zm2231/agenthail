@@ -1371,6 +1371,10 @@ final class AgenthailIOSModel: HostConnectionDelegate {
 
     func hasEarlier(_ project: ListedProject) -> Bool { listing.earlier.contains(ProjectContents.key(of: project)) }
 
+    func earlierPlace(_ project: ListedProject) -> [String] {
+        earlierTargets(project).map { "\($0.host.pages.listings[$0.request]?.cursor ?? "")|\($0.host.pages.hasMore($0.request))" }
+    }
+
     var listingError: String? { listing.error }
 
     func projectSessions(_ project: ListedProject) -> [SessionState] {

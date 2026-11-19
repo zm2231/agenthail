@@ -4,6 +4,8 @@ import XCTest
 @MainActor
 final class ProjectContentsTests: XCTestCase {
     private static let projectID = "repo:github.com/demo/widget"
+    private static let noon = ISO8601DateFormatter().date(from: "2026-11-01T12:00:00Z")!
+    private static let weekLater = ISO8601DateFormatter().date(from: "2026-11-08T12:00:00Z")!
 
     private static func project(lead: String? = "lead-session") -> [String: Any] {
         var project: [String: Any] = ["id": projectID, "displayName": "widget", "checkouts": [["host": ["id": "one", "name": "one", "state": "local"], "projectId": "p-widget", "rootPath": "/work/widget"]]]
@@ -39,14 +41,21 @@ final class ProjectContentsTests: XCTestCase {
             Self.row("elsewhere", current: true, project: "repo:github.com/demo/other"),
             Self.row("child", current: true, status: "busy", parent: "busy"),
             Self.row("shelved", archived: true),
+            Self.row("open-idle", current: true, lastActive: "2026-10-29T12:00:00Z"),
+            Self.row("closed-today", lastActive: "2026-11-01T06:00:00Z"),
+            {
+                var waiting = Self.row("asking", lastActive: "2026-10-20T00:00:00Z")
+                waiting["waitingOn"] = ["kind": "approval", "id": "r1", "answerable": true]
+                return waiting
+            }(),
         ]).map { var row = $0; row.id = HostCatalog.qualify("one", row.id); return row }
 
-        let contents = ProjectContents.build(listed, sessions: rows)
+        let contents = ProjectContents.build(listed, sessions: rows, now: Self.noon)
 
         XCTAssertEqual(contents.lead?.name, "collab")
         XCTAssertEqual(contents.leadSession?.id, "one::lead-session")
-        XCTAssertEqual(contents.now.groups.flatMap(\.sessions).map(\.id), ["one::busy", "one::fresh"])
-        XCTAssertEqual(contents.earlier.map(\.id), ["one::old", "one::older"])
+        XCTAssertEqual(Set(contents.now.groups.flatMap(\.sessions).map(\.id)), ["one::busy", "one::fresh", "one::closed-today", "one::asking"], "Now is what works, waits on you or was active in the last day")
+        XCTAssertEqual(contents.earlier.map(\.id), ["one::old", "one::older", "one::open-idle"], "a session left open but idle for days is Earlier, not Now")
     }
 
     func testNowSortsWorkingFirstThenNewestAndGroupsByComputer() throws {
@@ -63,7 +72,7 @@ final class ProjectContentsTests: XCTestCase {
             far,
         ])
 
-        let contents = ProjectContents.build(listed, sessions: rows)
+        let contents = ProjectContents.build(listed, sessions: rows, now: Self.noon)
 
         XCTAssertEqual(contents.now.groups.map { $0.sessions.map(\.id) }, [["one::busy", "one::photos", "one::queued"], ["forge::far"]], "working first, then newest first, and each computer's rows stay together")
         XCTAssertEqual(rows.filter(ProjectContents.running).map(\.id), ["one::busy"], "a queued idle session counted as running")
@@ -93,13 +102,13 @@ final class ProjectContentsTests: XCTestCase {
         defer { model.forgetHost("one") }
         _ = await model.refresh(fresh: true)
         let listed = try XCTUnwrap(model.projects[Self.projectID])
-        XCTAssertEqual(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? []).leadSession?.id, "one::lead-session")
+        XCTAssertEqual(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? [], now: Self.weekLater).leadSession?.id, "one::lead-session")
         XCTAssertTrue(model.hasEarlier(listed))
 
         await model.listEarlier(listed)
         await model.listEarlier(listed)
 
-        XCTAssertEqual(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? []).earlier.map(\.id), ["one::old", "one::older"])
+        XCTAssertEqual(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? [], now: Self.weekLater).earlier.map(\.id), ["one::old", "one::older"])
         XCTAssertFalse(model.hasEarlier(listed))
         let reads = ScopeServer.state.requests("one").filter { $0.contains("scope=all") }
         XCTAssertEqual(reads.count, 2)
@@ -132,7 +141,7 @@ final class ProjectContentsTests: XCTestCase {
 
         await model.listEarlier(listed)
 
-        XCTAssertEqual(Set(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? []).earlier.map(\.id)), ["hpeer::far", "two::near"])
+        XCTAssertEqual(Set(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? [], now: Self.weekLater).earlier.map(\.id)), ["hpeer::far", "two::near"])
         for host in ["one", "two"] {
             XCTAssertTrue(ScopeServer.state.requests(host).contains { $0.contains("scope=all") && $0.contains("projectId=\(Self.projectID)") }, "\(host) was not asked for the project: \(ScopeServer.state.requests(host))")
         }

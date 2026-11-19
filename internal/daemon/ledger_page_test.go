@@ -325,9 +325,13 @@ func TestTheWorkPageIsServedOnItsOwnPortAndNotListedAsAnApp(t *testing.T) {
 	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), `src="ledger.js"`) || !strings.Contains(response.Header.Get("Content-Security-Policy"), "frame-ancestors") {
 		t.Fatalf("the page answered %d %v %.200s", response.StatusCode, response.Header, body)
 	}
-	for _, path := range []string{"/ledger.js", "/ledger.css"} {
-		if response, _ := requestTo(t, base, http.MethodGet, path, "test-token", nil); response.StatusCode != http.StatusOK {
+	for _, path := range []string{"/ledger.js", "/ledger-text.js", "/ledger.css"} {
+		response, _ := requestTo(t, base, http.MethodGet, path, "test-token", nil)
+		if response.StatusCode != http.StatusOK {
 			t.Fatalf("%s answered %d", path, response.StatusCode)
+		}
+		if strings.HasSuffix(path, ".js") && !strings.Contains(response.Header.Get("Content-Type"), "javascript") {
+			t.Fatalf("%s is served as %q, which a module script will not run", path, response.Header.Get("Content-Type"))
 		}
 	}
 	if response, _ := requestTo(t, base, http.MethodGet, "/", "", nil); response.StatusCode != http.StatusUnauthorized {

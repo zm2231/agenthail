@@ -14,10 +14,13 @@ final class ProjectNowUITests: XCTestCase {
         app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Now'")).firstMatch
     }
 
-    func testOneCheckoutsNowComesFirstWithNoGroupHeader() {
+    func testTheLeadComesFirstThenNowThenWork() {
         let app = launch("single")
         XCTAssertTrue(app.staticTexts["Lead"].waitForExistence(timeout: 5))
-        XCTAssertLessThan(top(now(app)), top(app.staticTexts["Lead"]), "what needs you is the first thing on the screen")
+        XCTAssertLessThan(top(app.staticTexts["Lead"]), top(now(app)), "the lead is the first card, whatever Now holds")
+        let work = app.staticTexts["Work"]
+        XCTAssertTrue(work.waitForExistence(timeout: 5))
+        XCTAssertLessThan(top(now(app)), top(work), "Now comes before the work list")
         XCTAssertTrue(app.staticTexts["Now · 2"].exists)
         XCTAssertFalse(app.staticTexts["main"].exists)
         XCTAssertLessThan(top(app.buttons["project-session-computer::waiting"]), top(app.buttons["project-session-computer::idle"]))

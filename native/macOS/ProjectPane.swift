@@ -64,44 +64,38 @@ struct ProjectPane: View {
             VStack(alignment: .leading, spacing: DesktopSpace.l) {
                 header(contents)
                 decisions
-                HStack(alignment: .top, spacing: DesktopSpace.l) {
-                    VStack(alignment: .leading, spacing: DesktopSpace.l) {
-                        card(contents.now.count == 0 ? "Now" : "Now · \(contents.now.count)", trailing: showingEarlier ? nil : ("Show earlier", { showingEarlier = true })) {
-                            if contents.now.count == 0 { empty("Nothing in the last day") }
-                            ForEach(contents.now.groups) { group in
-                                if contents.now.showsGroups {
-                                    Text(group.title)
-                                        .font(.system(size: DesktopType.secondary, weight: .medium)).foregroundStyle(DesktopPalette.text2)
-                                        .lineLimit(1).truncationMode(.middle)
-                                        .padding(.top, DesktopSpace.xs)
-                                        .accessibilityIdentifier("project-now-group-" + group.id)
-                                }
-                                rows(group.sessions)
-                            }
+                card("Lead") { lead(contents) }
+                card(contents.now.count == 0 ? "Now" : "Now · \(contents.now.count)", trailing: showingEarlier ? nil : ("Show earlier", { showingEarlier = true })) {
+                    if contents.now.count == 0 { empty("Nothing in the last day") }
+                    ForEach(contents.now.groups) { group in
+                        if contents.now.showsGroups {
+                            Text(group.title)
+                                .font(.system(size: DesktopType.secondary, weight: .medium)).foregroundStyle(DesktopPalette.text2)
+                                .lineLimit(1).truncationMode(.middle)
+                                .padding(.top, DesktopSpace.xs)
+                                .accessibilityIdentifier("project-now-group-" + group.id)
                         }
-                        card("Work") { ProjectWorkPane(model: model, project: project) }
-                        if showingEarlier {
-                            card("Earlier") {
-                                if contents.earlier.isEmpty && !model.hasEarlier(project.id) { empty("No earlier sessions") }
-                                rows(contents.earlier)
-                                if model.hasEarlier(project.id) {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                        .frame(maxWidth: .infinity)
-                                        .task(id: model.pages.listings[model.earlierRequest(project.id)]?.rows.count ?? -1) { await model.listEarlier(project.id) }
-                                }
-                            }
-                        }
+                        rows(group.sessions)
                     }
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    VStack(alignment: .leading, spacing: DesktopSpace.l) {
-                        card("Lead") { lead(contents) }
-                        card("Folders") { folders }
-                    }
-                    .frame(width: 340)
                 }
+                card("Work") { ProjectWorkPane(model: model, project: project) }
+                if showingEarlier {
+                    card("Earlier") {
+                        if contents.earlier.isEmpty && !model.hasEarlier(project.id) { empty("No earlier sessions") }
+                        rows(contents.earlier)
+                        if model.hasEarlier(project.id) {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(maxWidth: .infinity)
+                                .task(id: model.pages.listings[model.earlierRequest(project.id)]?.rows.count ?? -1) { await model.listEarlier(project.id) }
+                        }
+                    }
+                }
+                card("Folders") { folders }
             }
+            .frame(maxWidth: 960, alignment: .topLeading)
             .padding(DesktopSpace.xl)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
         .scrimText()
         .backdropSurface(DesktopPalette.window)

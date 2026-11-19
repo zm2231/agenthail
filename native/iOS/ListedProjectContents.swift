@@ -19,8 +19,8 @@ extension ProjectContents {
         }.joined(separator: " · ")
     }
 
-    static func build(_ project: ListedProject, sessions: [SessionState]) -> ProjectContents {
+    static func build(_ project: ListedProject, sessions: [SessionState], now: Date = Date()) -> ProjectContents {
         let lead = project.state.leads.first
-        return build(lead: lead, leadID: lead.flatMap { leadSessionID($0, of: project) }, projectID: key(of: project), sessions: sessions, computers: Set(project.state.checkouts.map(\.host.id)).count)
+        return build(lead: lead, leadID: lead.flatMap { leadSessionID($0, of: project) }, projectID: key(of: project), sessions: sessions, computers: Set(project.state.checkouts.map(\.host.id)).count, now: now)
     }
 }
