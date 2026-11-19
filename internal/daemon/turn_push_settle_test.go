@@ -486,12 +486,27 @@ func TestASettledPushCountsMessagesInjectedMidTurn(t *testing.T) {
 	logged := captureLog(d)
 	newPushRecorder(t, r)
 	observeIdle(d, fake, &from)
+	d.turnPushHandoff(from.ID)(true)
 	startTurn(t, d, fake, &from, "turn-1")
 	d.turnPushHandoff(from.ID)(true)
 	d.turnPushHandoff(from.ID)(false)
 	endTurnWithHeadline(t, d, fake, &from, "turn-1", "Done", "Done.")
 	d.background.wait()
 	if lines := settledLines(logged); len(lines) != 1 || !strings.HasSuffix(lines[0], "injected=1") {
-		t.Fatalf("settled log %q", lines)
+		t.Fatalf("a send to the idle session and one into its running turn logged %q", lines)
+	}
+}
+
+func TestANeedsYouVerdictAfterTheShutdownFlushIsNotSent(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	pushes := newPushRecorder(t, r)
+	d.turnJudgmentQueued(from.ID, "turn-1")
+	d.scheduleTurnPush(from.ID, "turn-1", turnCompletedNotice{desktop: "from done", mobile: "from done", outcome: turnOutcomeFinished})
+	d.flushTurnPushes()
+	if d.needsYouTakesTurnPush(from.ID, "turn-1") {
+		t.Fatal("a needs-you verdict for a turn the shutdown flush sent would still be pushed")
+	}
+	if count := pushes.count("turn.completed"); count != 1 {
+		t.Fatalf("the flush sent %d pushes", count)
 	}
 }

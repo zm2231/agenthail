@@ -52,10 +52,11 @@ type turnPushes struct {
 	sending  map[string]int
 	expected map[string]int
 	injected map[string]int
+	flushed  map[string]string
 }
 
 func newTurnPushes() *turnPushes {
-	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]map[string]int{}, sending: map[string]int{}, expected: map[string]int{}, injected: map[string]int{}}
+	return &turnPushes{window: turnPushSettle, pending: map[string]*pendingTurnPush{}, verdicts: map[string]map[string]int{}, sending: map[string]int{}, expected: map[string]int{}, injected: map[string]int{}, flushed: map[string]string{}}
 }
 
 func (p *turnPushes) mark(sessionID, turnID string, state int) {
@@ -159,26 +160,30 @@ func (d *Daemon) sendSettledTurnPush(sessionID string, entry *pendingTurnPush, r
 	d.notifyTurnCompleted(entry.notice, sessionID, entry.turnID)
 }
 
-// A stopping daemon sends what it still holds, under its own deadline, since the stop cancels background work and a restarted daemon does not see the turn end again.
+// A stopping daemon sends what it still holds, each under its own deadline, since the stop cancels background work and a restarted daemon does not see the turn end again; a needs-you verdict for a turn it flushed is not sent after it.
 func (d *Daemon) flushTurnPushes() {
 	p := d.turnPushes
 	p.mu.Lock()
 	held := make(map[string]*pendingTurnPush, len(p.pending))
 	for sessionID, entry := range p.pending {
 		p.remove(sessionID, entry)
+		p.flushed[sessionID] = entry.turnID
 		held[sessionID] = entry
 	}
 	p.mu.Unlock()
-	if len(held) == 0 {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	var sends sync.WaitGroup
 	for sessionID, entry := range held {
 		d.logSettledPush(sessionID, entry.turns, settledOnShutdown, "turn.completed")
 		d.recordTurnNotice(sessionID, entry.turnID, entry.notice)
-		d.deliverTurnCompleted(ctx, entry.notice, sessionID, entry.turnID)
+		sends.Add(1)
+		go func() {
+			defer sends.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			d.deliverTurnCompleted(ctx, entry.notice, sessionID, entry.turnID)
+		}()
 	}
+	sends.Wait()
 }
 
 // injected counts messages that reached the session mid-turn, which this does not tie to a later turn, so the log shows how often a burst may still push twice.
@@ -269,9 +274,13 @@ func (d *Daemon) turnVerdictLanded(sessionID, turnID string) {
 }
 
 // The needs-you push stands for the turn's finished push, and for the burst it ends.
-func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string) {
+func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string) bool {
 	p := d.turnPushes
 	p.mu.Lock()
+	if p.flushed[sessionID] == turnID {
+		p.mu.Unlock()
+		return false
+	}
 	p.mark(sessionID, turnID, verdictNeedsYou)
 	turns := []string{turnID}
 	if entry := p.pending[sessionID]; entry != nil && entry.turnID == turnID {
@@ -280,15 +289,18 @@ func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string) {
 	}
 	p.mu.Unlock()
 	d.logSettledPush(sessionID, turns, settledOnVerdict, turnNeedsYouEvent)
+	return true
 }
 
 func (d *Daemon) turnPushHandoff(sessionID string) func(accepted bool) {
 	p := d.turnPushes
+	runtime, found, _ := d.Registry.RuntimeState(sessionID)
+	midTurn := found && runtime.LastStatus == surface.StatusBusy
 	p.mu.Lock()
 	if p.pending[sessionID] == nil {
 		p.mu.Unlock()
 		return func(accepted bool) {
-			if accepted {
+			if accepted && midTurn {
 				p.mu.Lock()
 				p.injected[sessionID]++
 				p.mu.Unlock()
