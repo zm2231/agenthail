@@ -215,8 +215,10 @@ a paired host's pages and mounts for it.
   no longer has the entry, or when the host is unpaired.
 - Each port admits requests as an extension port does: loopback names only,
   and this daemon's `agenthail_web` cookie or a bearer, with `read` for GET
-  and HEAD and `control` otherwise. It drops every cookie and the
-  `Authorization` header the browser sent, adds a web session the daemon
+  and HEAD and `control` otherwise. It drops every cookie the browser sent,
+  and its `Authorization` header unless that is a single header holding
+  exactly the key placeholder `Bearer agenthail-key`, so the host swaps in a
+  keyed mount's key as it does for its own pages. It adds a web session the daemon
   minted on the host with the pairing token (renewed an hour before it
   expires, and minted again once when the host answers 401), and forwards to
   `https://<host's tailnet name>:<host's port>`, pinned to the host's tailnet

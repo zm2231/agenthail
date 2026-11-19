@@ -4,12 +4,16 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +23,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/nodehost"
+	"github.com/zm2231/agenthail/internal/proxyacct"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -574,6 +580,95 @@ func TestAPairedHostCannotPointOneEntrysPortAtAnother(t *testing.T) {
 		}
 		if body := readAll(t, f.get(t, mount, "/", true)); !strings.HasPrefix(body, "page notes") {
 			t.Fatalf("the notes mount reached %q", body)
+		}
+	}
+}
+
+func TestAPairedHostsKeyedMountGetsItsKeyThroughTheLocalPortAndNoOtherBearerCrosses(t *testing.T) {
+	f := newRemoteExtensionFixture(t)
+	previous := extensionPortBase
+	extensionPortBase = 0
+	t.Cleanup(func() { extensionPortBase = previous })
+	upstream, seen := startUpstream(t)
+	remote := f.remote.daemon
+	home := t.TempDir()
+	remote.SetExtensionHost(home, func() (nodehost.Launch, error) {
+		return nodehost.Launch{}, errors.New("this test runs no extension host")
+	})
+	t.Cleanup(remote.extensions.mounts.close)
+	dir := filepath.Join(extension.Workspace(home), "keyed")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := fmt.Sprintf(`{"label": "Keyed", "mounts": [{"name": "app", "label": "App", "upstream": %q, "entry": "/"}]}`, upstream.URL)
+	for name, body := range map[string]string{"server.ts": "export default function () {}", "extension.json": manifest} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keyFile := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(keyFile, []byte("the-real-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.approveExtension("keyed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.setExtensionMountKey("keyed", "app", &proxyacct.KeyRef{File: keyFile}); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.syncExtensionMounts(); err != nil {
+		t.Fatal(err)
+	}
+	var served int
+	for _, ext := range remote.extensionsView().Extensions {
+		if ext.ID == "keyed" && len(ext.Mounts) == 1 {
+			served = ext.Mounts[0].Port
+		}
+	}
+	if served == 0 {
+		t.Fatal("the host does not serve the keyed mount")
+	}
+	remote.extensions.mounts.mu.Lock()
+	remote.extensions.mounts.dnsName = "example.com"
+	remote.extensions.mounts.mu.Unlock()
+	tailnet := httptest.NewUnstartedServer(&httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
+		pr.SetURL(&url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", served)})
+		pr.Out.Host = pr.In.Host
+	}})
+	tailnet.StartTLS()
+	t.Cleanup(tailnet.Close)
+	f.list(fmt.Sprintf(`{"host":"running","extensions":[{"id":"keyed","label":"Keyed","state":"loaded","mounts":[{"name":"app","label":"App","port":%d,"entry":"/","state":"serving","published":true}]}]}`, tailnet.Listener.Addr().(*net.TCPAddr).Port))
+	view := f.view(t)
+	if len(view.Extensions) != 1 || len(view.Extensions[0].Mounts) != 1 || view.Extensions[0].Mounts[0].Port == 0 {
+		t.Fatalf("the list is %+v", view)
+	}
+	port := view.Extensions[0].Mounts[0].Port
+
+	send := func(authorizations ...string) string {
+		t.Helper()
+		request, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/api", port), nil)
+		request.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: f.session.Value})
+		for _, authorization := range authorizations {
+			request.Header.Add("Authorization", authorization)
+		}
+		request.Header.Set("Sec-Fetch-Site", "same-origin")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("the mount answered %d %s", response.StatusCode, readAll(t, response))
+		}
+		return strings.Join(seen.last(t).Header.Values("Authorization"), "|")
+	}
+	placeholder := "Bearer " + extensionKeyPlaceholder
+	if got := send(placeholder); got != "Bearer the-real-key" {
+		t.Fatalf("the app got Authorization %q, want the host's key for its own page's placeholder", got)
+	}
+	for _, sent := range [][]string{{"Bearer " + dashboardTestToken}, {"Bearer typed-by-hand"}, {"bearer agenthail-key"}, {placeholder, "Bearer " + dashboardTestToken}} {
+		if got := send(sent...); got != "" {
+			t.Fatalf("sending %q, the app got Authorization %q, want none", sent, got)
 		}
 	}
 }
