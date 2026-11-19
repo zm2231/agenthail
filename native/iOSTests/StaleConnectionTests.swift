@@ -266,6 +266,31 @@ final class StaleConnectionTests: XCTestCase {
     }
 
     @MainActor
+    func testAnImageThatWontDecodeIsDroppedSoItLoadsAgain() async throws {
+        KeychainStore.removeAll()
+        ServedSessionProtocol.state.reset(holdDetailOn: nil)
+        defer { KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hown", "https://own.tailnet.ts.net")
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session(self))
+        model.connect()
+        for _ in 0..<150 where model.connection("hown")?.reachable != true { try await Task.sleep(for: .milliseconds(20)) }
+        await model.loadSession("hown::demo")
+        let item = TimelineItem(id: "image", kind: "attachment", role: "user", title: "Image", text: "Image attachment", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil, attachment: SessionAttachment(id: "a1", mediaType: "image/png", width: nil, height: nil, bytes: nil))
+        let fetches = { ServedSessionProtocol.state.sessionRequests("own").filter { $0 == "/api/v1/session-attachment" }.count }
+        let shown = await model.displayableAttachment(for: item, sessionID: "hown::demo")
+        XCTAssertNil(shown, "bytes that aren't a picture are not shown as one")
+        XCTAssertNil(model.cachedAttachment(for: item, sessionID: "hown::demo"), "and are not kept")
+        XCTAssertEqual(fetches(), 1)
+        let again = await model.sessionAttachment(for: item, sessionID: "hown::demo")
+        XCTAssertEqual(again, Data("own".utf8), "the plain loader still returns what the host sent")
+        XCTAssertEqual(fetches(), 2, "a retry fetches again instead of reading the dropped bytes")
+        let file = TimelineItem(id: "file", kind: "attachment", role: "user", title: "File", text: "File", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil, attachment: SessionAttachment(id: "a2", mediaType: "text/plain", width: nil, height: nil, bytes: nil))
+        let fileBytes = await model.displayableAttachment(for: file, sessionID: "hown::demo")
+        XCTAssertEqual(fileBytes, Data("own".utf8), "a file that isn't an image passes through unchanged")
+        model.forgetHost("hown")
+    }
+
+    @MainActor
     func testARouteMovedToAMirrorFetchesSubagentsAndAttachmentsThroughIt() async throws {
         KeychainStore.removeAll()
         ServedSessionProtocol.state.reset(holdDetailOn: nil)

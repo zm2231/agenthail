@@ -650,12 +650,12 @@ struct SessionScreen: View {
                     let leading = items.first?.id
                     ForEach(items) { item in
                         let row = TranscriptRowID.item(item.id)
-                        LiveTimelineRow(item: item, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).rebuilt(row, generation: rowsGeneration).tracksOlderPlace(row, leading: item.id == leading, in: olderPlace).probesScrollJump(row).onAppear { if item.id == items.last?.id { openingRowAppeared(row) } }.id(row)
+                        LiveTimelineRow(item: item, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.displayableAttachment(for: item, sessionID: session.id) }).rebuilt(row, generation: rowsGeneration).tracksOlderPlace(row, leading: item.id == leading, in: olderPlace).probesScrollJump(row).onAppear { if item.id == items.last?.id { openingRowAppeared(row) } }.id(row)
                     }
                 } else {
                     let groups = self.groups
                     ForEach(groups) { group in
-                        CompactActivityGroup(group: group, owner: session.id, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
+                        CompactActivityGroup(group: group, owner: session.id, attachmentLoader: { item in await model.displayableAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
                             .equatable()
                             .rebuilt(group.id, generation: rowsGeneration)
                             .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).probesScrollJump(group.id)

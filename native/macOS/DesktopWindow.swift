@@ -1252,7 +1252,12 @@ struct AttachmentImageView: View {
         guard image == nil, let sessionID = pane.displayedSession?.id else { return }
         do {
             let data = try await model.attachmentData(sessionID: sessionID, attachment: attachment)
-            if let decoded = SessionAttachment.thumbnail(data) { image = NSImage(cgImage: decoded, size: .zero) } else { failed = true }
+            if let decoded = SessionAttachment.thumbnail(data) {
+                image = NSImage(cgImage: decoded, size: .zero)
+            } else {
+                model.dropAttachment(sessionID: sessionID, attachment: attachment)
+                failed = true
+            }
         } catch {
             if !error.isCancellation { failed = true }
         }

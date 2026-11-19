@@ -47,6 +47,28 @@ final class AttachmentRowTests: XCTestCase {
         XCTAssertTrue(edge(of: upright).isTeal, "the upright picture fills its box rather than sitting letterboxed on its side")
     }
 
+    func testBytesThatAreNotAPictureShowTheFailureAndRetryLoadsAgain() async throws {
+        let calls = Calls()
+        let jpeg = try Self.jpeg(width: 2000, height: 1098)
+        let row = host(width: 2000, height: 1098) {
+            await calls.mark("load")
+            return await calls.count("load") == 1 ? Data("not a picture".utf8) : jpeg
+        }
+        try await wait { await calls.has("load") }
+        try await Task.sleep(for: .milliseconds(300))
+        attach(row, "not a picture")
+        XCTAssertFalse(center(of: row).isTeal, "bytes that aren't a picture show no picture")
+        windows.forEach { $0.isHidden = true }
+        windows = []
+        let again = host(width: 2000, height: 1098) {
+            await calls.mark("load")
+            return jpeg
+        }
+        try await wait { self.center(of: again).isTeal }
+        let count = await calls.count("load")
+        XCTAssertEqual(count, 2, "showing the row again after bad bytes fetches the picture")
+    }
+
     func testAVeryNarrowFailedImageKeepsRoomForRetry() async throws {
         let calls = Calls()
         let narrow = host(width: 100, height: 1000) { await calls.mark("narrow"); return nil }
