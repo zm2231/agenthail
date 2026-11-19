@@ -34,8 +34,8 @@ final class SessionHeaderUITests: XCTestCase {
         return Double(total) / Double(a.count)
     }
 
-    private func scrolledTextStaysOutOfTheTitle(_ size: String, name: String) -> Double {
-        let app = launch(size)
+    private func scrolledTextStaysOutOfTheTitle(_ size: String, name: String, theme: String = "dark") -> Double {
+        let app = launch(size, theme: theme)
         let window = app.windows.firstMatch.frame
         let summary = app.buttons["session-summary"].frame
         let band = CGRect(x: 0, y: 64, width: window.width, height: max(1, summary.minY - 64))
@@ -54,8 +54,8 @@ final class SessionHeaderUITests: XCTestCase {
     private static let titleBandLimit = 2.0
 
     func testScrolledTranscriptTextNeverShowsUnderTheHeader() {
-        let changes = [("UICTContentSizeCategoryL", "default"), ("UICTContentSizeCategoryAccessibilityXXXL", "ax5")].map { size, name in
-            (name, scrolledTextStaysOutOfTheTitle(size, name: name))
+        let changes = [("UICTContentSizeCategoryL", "default", "dark"), ("UICTContentSizeCategoryAccessibilityXXXL", "ax5", "dark"), ("UICTContentSizeCategoryL", "light", "light")].map { size, name, theme in
+            (name, scrolledTextStaysOutOfTheTitle(size, name: name, theme: theme))
         }
         for (name, changed) in changes {
             XCTAssertLessThan(changed, Self.titleBandLimit, "the title band changed by \(changed) per channel as the transcript scrolled under it at \(name)")
