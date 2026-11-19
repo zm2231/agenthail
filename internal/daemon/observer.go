@@ -261,6 +261,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 		if arm {
 			d.armCompletionNotification(session.ID)
 		}
+		d.pauseTurnPush(session.ID)
 		d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnStart, sessionID: session.ID})
 	}
 	d.settleTaskFromObservation(ctx, adapter, session, observation)
@@ -269,12 +270,13 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 		return
 	}
 	firstSeen := !found && observation.CompletedTurnID != "" && !observation.CompletedAt.IsZero() && !completionStale(observation, time.Now())
+	judging := false
 	if completionChanged || firstSeen {
 		if err := d.Registry.BindTurnCompletion(session.ID, observation.CompletedTurnID, observation.CompletedAt, completionPrecision(session)); err != nil {
 			d.log.Printf("bind turn completion %s: %s", d.resolveDisplay(session.ID), err)
 		}
 		if !stale && observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
-			d.queueTurnJudgment(session, observation.CompletedTurnID, observation.Reply.Text, observation.BackgroundTasks)
+			judging = d.queueTurnJudgment(session, observation.CompletedTurnID, observation.Reply.Text, observation.BackgroundTasks)
 		}
 	}
 	notice := turnCompletedNotice{desktop: desktopNotificationMessage, mobile: mobileNotificationMessage, outcome: notificationOutcome}
@@ -303,13 +305,18 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	}
 	if completed {
 		var noticed *turnCompletedNotice
-		if notice.desktop != "" {
+		if notice.quiet {
 			noticed = &notice
 		}
 		d.recordCompletion(session, observation.CompletedTurnID, observation.Reply.Error != "", noticed)
 	}
-	if notice.desktop != "" && !notice.quiet {
-		d.notifyTurnCompleted(notice, session.ID, observation.CompletedTurnID)
+	switch {
+	case notice.quiet:
+		d.dropTurnPush(session.ID, "", "", "")
+	case notice.desktop != "":
+		d.scheduleTurnPush(session.ID, observation.CompletedTurnID, notice, judging)
+	case terminalCompletion:
+		d.resumeTurnPush(session.ID)
 	}
 	if terminalCompletion {
 		d.gateLedgerTurn(*session, observation.CompletedTurnID)

@@ -31,6 +31,8 @@ type judgeStub struct {
 	secondDown bool
 	// state is the situation the judge answers; continuing when empty.
 	state string
+	// hold, while set, keeps each judging call open until it closes.
+	hold  chan struct{}
 	calls []judgeCall
 }
 
@@ -51,6 +53,16 @@ func (s *judgeStub) serve(w http.ResponseWriter, r *http.Request) {
 	s.calls = append(s.calls, call)
 	_, promise := body.Questions["promise"]
 	down := s.down || s.secondDown && !promise
+	hold := s.hold
+	s.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-r.Context().Done():
+			return
+		}
+	}
+	s.mu.Lock()
 	state := s.state
 	s.mu.Unlock()
 	if state == "" {

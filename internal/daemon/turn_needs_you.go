@@ -32,30 +32,30 @@ func turnNotificationKey(hostID, sessionID, turnID string) string {
 }
 
 // A turn the judge reads as waiting on the person pushes once, unless the person typed its prompt into the session and so is at it, or a newer turn has started since.
-func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) {
+func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) bool {
 	if judgment.Error != "" || judgment.State != turnWaitingPerson || judgment.Facts.Typed {
-		return
+		return false
 	}
 	session, err := d.Registry.Session(judgment.SessionID)
 	if err != nil || session.Delegated() {
-		return
+		return false
 	}
 	state, askID, err := d.judgedTurnState(session, &judgment)
 	if err != nil {
 		d.log.Printf("turn judge: read the state of %s: %s", d.resolveDisplay(session.ID), err)
-		return
+		return false
 	}
 	if state == nil || state.State != turnWaitingPerson || state.Source != turnSourceJudge {
-		return
+		return false
 	}
 	claimedAt := time.Now()
 	claimed, err := d.Registry.ClaimTurnPush(session.ID, judgment.TurnID, askID, claimedAt)
 	if err != nil {
 		d.log.Printf("turn judge: claim the push of %s turn %s: %s", d.resolveDisplay(session.ID), judgment.TurnID, err)
-		return
+		return false
 	}
 	if !claimed {
-		return
+		return false
 	}
 	if d.turnPushRead != nil {
 		d.turnPushRead()
@@ -65,13 +65,13 @@ func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) {
 		if err := d.Registry.ReleaseTurnPush(session.ID, judgment.TurnID, claimedAt); err != nil {
 			d.log.Printf("turn judge: release the push of %s turn %s: %s", d.resolveDisplay(session.ID), judgment.TurnID, err)
 		}
-		return
+		return false
 	}
 	if confirmed, err := d.Registry.ConfirmTurnPush(session.ID, judgment.TurnID, claimedAt); err != nil || !confirmed {
 		if err != nil {
 			d.log.Printf("turn judge: confirm the push of %s turn %s: %s", d.resolveDisplay(session.ID), judgment.TurnID, err)
 		}
-		return
+		return false
 	}
 	d.requestCatalogDiscovery()
 	d.publishEvent("state.changed", session.ID, map[string]string{"source": "turn-needs-you"})
@@ -83,7 +83,9 @@ func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) {
 	desktop := fmt.Sprintf("%s needs you%s", d.resolveDisplay(session.ID), headline)
 	mobile := mobileNotification{Title: "Agenthail", Message: fmt.Sprintf("%s needs you%s%s", d.sessionPushSubject(session), d.onHost(), headline), SessionID: session.ID, TurnID: judgment.TurnID, EventType: turnNeedsYouEvent,
 		CollapseID: turnNotificationKey(hostID, session.ID, judgment.TurnID), DedupeKey: needsYouDedupeKey(hostID, session.ID, judgment.TurnID)}
+	d.dropTurnPush(session.ID, judgment.TurnID, settledOnVerdict, turnNeedsYouEvent)
 	d.sendTurnNeedsYou(session.ID, desktop, mobile)
+	return true
 }
 
 func (d *Daemon) judgedTurnState(session *surface.Session, judgment *registry.TurnJudgment) (*dashboardTurnState, string, error) {

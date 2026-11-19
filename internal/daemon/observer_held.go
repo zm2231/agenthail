@@ -55,9 +55,16 @@ func (d *Daemon) releaseUnobservedHold(ctx context.Context, adapter surface.Surf
 			notice := d.endTurnNotifications(session, turnID, fmt.Sprintf("%s finished", d.resolveDisplay(session.ID)), fmt.Sprintf("%s finished%s", d.sessionPushSubject(session), d.onHost()))
 			noticed = &notice
 		}
-		d.recordCompletion(session, turnID, false, noticed)
-		if noticed != nil && !noticed.quiet {
-			d.notifyTurnCompleted(*noticed, session.ID, turnID)
+		switch {
+		case noticed == nil:
+			d.recordCompletion(session, turnID, false, nil)
+			d.resumeTurnPush(session.ID)
+		case noticed.quiet:
+			d.recordCompletion(session, turnID, false, noticed)
+			d.dropTurnPush(session.ID, "", "", "")
+		default:
+			d.recordCompletion(session, turnID, false, nil)
+			d.scheduleTurnPush(session.ID, turnID, *noticed, false)
 		}
 	}
 }

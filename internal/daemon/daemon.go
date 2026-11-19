@@ -67,6 +67,7 @@ type Daemon struct {
 	observeRetry         map[string]observeRetry
 	notificationMu       sync.Mutex
 	notificationArmed    map[string]bool
+	turnPushes           *turnPushes
 	waitingLocks         sync.Map
 	permissionMu         sync.Mutex
 	permissionTold       map[string]string
@@ -215,6 +216,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		observeErrors:     map[string]observedError{},
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
+		turnPushes:        newTurnPushes(),
 		notifyDesktop:     NotifyRequest,
 		withdrawDesktop:   WithdrawNotification,
 		events:            newEventHub(reg),

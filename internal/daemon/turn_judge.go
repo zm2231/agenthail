@@ -117,13 +117,13 @@ func loadTurnJudgeConfig() (turnJudgeConfig, bool, error) {
 }
 
 // The facts are read when the turn ends, since the judgment may land later and the work it waits on may have moved on.
-func (d *Daemon) queueTurnJudgment(session *surface.Session, turnID, reply string, background *surface.BackgroundTasks) {
+func (d *Daemon) queueTurnJudgment(session *surface.Session, turnID, reply string, background *surface.BackgroundTasks) bool {
 	j := d.judge
 	if j == nil || turnID == "" || strings.TrimSpace(reply) == "" {
-		return
+		return false
 	}
 	if _, ok, err := loadTurnJudgeConfig(); err != nil || !ok {
-		return
+		return false
 	}
 	facts, err := d.Registry.TurnEndFacts(session.ID)
 	if err != nil {
@@ -141,10 +141,12 @@ func (d *Daemon) queueTurnJudgment(session *surface.Session, turnID, reply strin
 	}
 	select {
 	case j.jobs <- judgeJob{judgment: judgment, reply: lastRunes(reply, turnJudgeReplyRune)}:
+		return true
 	default:
 		j.mu.Lock()
 		j.dropped++
 		j.mu.Unlock()
+		return false
 	}
 }
 
@@ -201,7 +203,9 @@ func (d *Daemon) recordTurnJudgment(judgment registry.TurnJudgment) {
 	}
 	d.requestCatalogDiscovery()
 	d.publishEvent("state.changed", judgment.SessionID, map[string]string{"source": "turn-judgment"})
-	d.pushJudgedTurn(judgment)
+	if !d.pushJudgedTurn(judgment) {
+		d.turnVerdictLanded(judgment.SessionID, judgment.TurnID)
+	}
 }
 
 func (j *turnJudge) failed(d *Daemon, err error) {
