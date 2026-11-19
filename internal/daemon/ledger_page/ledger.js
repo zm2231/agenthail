@@ -205,7 +205,12 @@ function render() {
     if (rows.length) parts.push(section(state, title, rows, (row) => rowFor(state, row)));
   }
   if (view.done.length) parts.push(doneSection(view.done));
-  if (!parts.length) parts.push(node("p", "note", "No work recorded for this project yet. Items appear here as sessions add them."));
+  if (!parts.length) {
+    const empty = node("p", "note", "No work recorded for this project yet. Items appear here as sessions add them.");
+    empty.tabIndex = -1;
+    empty.dataset.focus = "empty";
+    parts.push(empty);
+  }
   const controls = () => [...root.querySelectorAll("[data-focus]")];
   const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const focused = active?.dataset.focus;
