@@ -94,6 +94,7 @@ func mcpStalledCall(tool string, input any, stall *mcpStallError) *mcpRefusal {
 // goroutine and its result is dropped.
 func withinBound[T any](d *Daemon, ctx context.Context, phase string, bound time.Duration, work func(context.Context) (T, error)) (T, error) {
 	ctx, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
 	type outcome struct {
 		value T
 		err   error
@@ -101,7 +102,6 @@ func withinBound[T any](d *Daemon, ctx context.Context, phase string, bound time
 	done := make(chan outcome, 1)
 	started := time.Now()
 	go func() {
-		defer cancel()
 		value, err := work(ctx)
 		done <- outcome{value, err}
 		if took := time.Since(started); took >= mcpSlowCall {
@@ -112,6 +112,11 @@ func withinBound[T any](d *Daemon, ctx context.Context, phase string, bound time
 	case result := <-done:
 		return result.value, result.err
 	case <-ctx.Done():
+		select {
+		case result := <-done:
+			return result.value, result.err
+		default:
+		}
 		var zero T
 		if ctx.Err() == context.DeadlineExceeded {
 			d.noteMCPStall(phase, bound)
