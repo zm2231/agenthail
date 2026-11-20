@@ -58,6 +58,12 @@ func TestResolveAnswersConflictOnlyForANameSeveralSessionsMatch(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	activeLast := func(id string) {
+		t.Helper()
+		if _, err := r.WriteDB().Exec(`UPDATE sessions SET updated_at=CASE id WHEN ? THEN '2026-01-02 00:00:00' ELSE '2026-01-01 00:00:00' END`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
 	handler, token := dashboardRouter(d), pairedControlToken(t, r)
 	resolve := func(target string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/resolve?target="+target, nil)
@@ -66,8 +72,15 @@ func TestResolveAnswersConflictOnlyForANameSeveralSessionsMatch(t *testing.T) {
 		handler.ServeHTTP(response, request)
 		return response
 	}
-	if response := resolve("shared"); response.Code != http.StatusConflict || !ambiguousTarget(response) || !strings.Contains(response.Body.String(), `"candidates":["probe-one","probe-two"]`) {
-		t.Fatalf("a name two sessions match: status=%d body=%s, want 409 ambiguous_target naming both candidates", response.Code, response.Body)
+	for _, newest := range []string{"probe-one", "probe-two"} {
+		activeLast(newest)
+		want := `"candidates":["probe-one","probe-two"]`
+		if newest == "probe-two" {
+			want = `"candidates":["probe-two","probe-one"]`
+		}
+		if response := resolve("shared"); response.Code != http.StatusConflict || !ambiguousTarget(response) || !strings.Contains(response.Body.String(), want) {
+			t.Fatalf("a name two sessions match, %s active last: status=%d body=%s, want 409 ambiguous_target with %s", newest, response.Code, response.Body, want)
+		}
 	}
 	if _, err := r.WriteDB().Exec(`DROP TABLE session_archive`); err != nil {
 		t.Fatal(err)

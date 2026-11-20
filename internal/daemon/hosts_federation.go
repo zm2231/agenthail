@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -365,12 +366,17 @@ func (d *Daemon) pairedHost(ref string) (*pairedHost, bool) {
 
 func (d *Daemon) pairedHosts() []*pairedHost {
 	d.federation.mu.Lock()
-	defer d.federation.mu.Unlock()
 	result := make([]*pairedHost, 0, len(d.federation.hosts))
 	for _, host := range d.federation.hosts {
 		result = append(result, host)
 	}
-	return result
+	d.federation.mu.Unlock()
+	return sortHostsByID(result)
+}
+
+func sortHostsByID(hosts []*pairedHost) []*pairedHost {
+	slices.SortFunc(hosts, func(a, b *pairedHost) int { return strings.Compare(a.record.ID, b.record.ID) })
+	return hosts
 }
 
 var errUnknownHost = errors.New("unknown host")
