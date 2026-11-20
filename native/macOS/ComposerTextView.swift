@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ComposerTextView: NSViewRepresentable {
     @Binding var text: String
-    @Binding var focused: Bool
+    var focusRequest: Int
     let placeholder: String
     var accessibilityLabel: String? = nil
     var lines: ClosedRange<Int> = 2...10
@@ -36,8 +36,9 @@ struct ComposerTextView: NSViewRepresentable {
         textView.onSubmit = { [weak coordinator = context.coordinator] in coordinator?.parent.onSubmit() }
         textView.completionKey = { [weak coordinator = context.coordinator] in coordinator?.parent.completionKey?($0) ?? false }
         editor?.textView = textView
-        textView.focusChanged = { [weak coordinator = context.coordinator] isFocused in
-            coordinator?.focusChanged(isFocused)
+        textView.movedToWindow = { [weak coordinator = context.coordinator, weak textView] in
+            guard let coordinator, let textView else { return }
+            coordinator.focus(textView, request: coordinator.parent.focusRequest)
         }
 
         let scroll = NSScrollView()
@@ -68,9 +69,7 @@ struct ComposerTextView: NSViewRepresentable {
             textView.load(text)
         }
         textView.show(bound: text, sync: context.coordinator.sync)
-        if focused, textView.window != nil, textView.window?.firstResponder !== textView {
-            DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
-        }
+        context.coordinator.focus(textView, request: focusRequest)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: NSScrollView, context _: Context) -> CGSize? {
@@ -88,6 +87,7 @@ struct ComposerTextView: NSViewRepresentable {
         var parent: ComposerTextView
         var sync: ComposerTextSync
         var draftID: String?
+        private var focusApplied = 0
 
         init(_ parent: ComposerTextView) {
             self.parent = parent
@@ -114,9 +114,11 @@ struct ComposerTextView: NSViewRepresentable {
             DispatchQueue.main.async { [self] in parent.onCaret?(caret) }
         }
 
-        func focusChanged(_ isFocused: Bool) {
-            DispatchQueue.main.async { [self] in
-                if parent.focused != isFocused { parent.focused = isFocused }
+        func focus(_ textView: NSTextView, request: Int) {
+            guard request != focusApplied, let window = textView.window else { return }
+            focusApplied = request
+            if window.firstResponder !== textView {
+                DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
             }
         }
     }

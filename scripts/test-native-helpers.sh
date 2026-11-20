@@ -164,6 +164,7 @@ SOURCES=(
   macOS/CatalogPosition.swift
   macOS/ComposerKeys.swift
   macOS/ComposerNSTextView.swift
+  macOS/ComposerTextView.swift
   macOS/PasteToken.swift
   macOS/ComposerPaste.swift
   macOS/ContextBreakdown.swift
@@ -270,6 +271,7 @@ SOURCES=(
   macOS/ConversationHeader.swift
   tests/support/PaneChanges.swift
   tests/support/Signal.swift
+  tests/support/SharedShortcuts.swift
 )
 
 # Helper tests run on a person's Mac: a window ordered on screen appears on their display.

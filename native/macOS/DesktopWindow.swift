@@ -1359,7 +1359,7 @@ struct ComposerView: View {
     var model: AgenthailModel
     let pane: SessionPane
     let session: SessionState
-    @State private var focused = false
+    @State private var focusRequest = 0
     @State private var dropTargeted = false
     @State private var completionState = CompletionState(session: "", caret: 0)
     @State private var editor = ComposerEditor()
@@ -1456,7 +1456,7 @@ struct ComposerView: View {
                                 .help("Attach files or images")
                                 .accessibilityLabel("Attach files or images")
                             }
-                            ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", lines: ComposerNSTextView.composerLines, windowShare: Self.composerShare, onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret in updateCompletion { $0.caret = caret } }, completionKey: completionKey, draftID: session.id) { submit(alternate: false) }
+                            ComposerTextView(text: $draft.text, focusRequest: focusRequest, placeholder: "Message \(session.title)", lines: ComposerNSTextView.composerLines, windowShare: Self.composerShare, onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret in updateCompletion { $0.caret = caret } }, completionKey: completionKey, draftID: session.id) { submit(alternate: false) }
                                 .frame(minHeight: 28)
                                 .padding(.horizontal, DesktopSpace.xs)
                         }
@@ -1470,7 +1470,7 @@ struct ComposerView: View {
                                 if draft.stash != nil {
                                     Button {
                                         if draft.isEmpty { draft.toggleStash() }
-                                        focused = true
+                                        focusRequest += 1
                                     } label: {
                                         Label("Stashed", systemImage: "tray.and.arrow.down")
                                             .font(.system(size: DesktopType.meta, weight: .medium))
@@ -1557,7 +1557,7 @@ struct ComposerView: View {
             SentPromptsList(prompts: draft.sent, canFork: SessionOperationAvailability.fork(session)) { prompt in
                 draft.restore(prompt.text)
                 showingSent = false
-                focused = true
+                focusRequest += 1
             } fork: { prompt in
                 showingSent = false
                 pane.fork(session, before: prompt)
@@ -1567,11 +1567,11 @@ struct ComposerView: View {
             PromptSearchPanel(model: model, sessionID: session.id) { text in
                 draft.restore(text)
                 searchingSent = false
-                focused = true
+                focusRequest += 1
             }
         }
-        .onAppear { focused = true }
-        .onChange(of: draft.focusRequests) { focused = true }
+        .onAppear { focusRequest += 1 }
+        .onChange(of: draft.focusRequests) { focusRequest += 1 }
         .task(id: session.id) { await model.loadPrompts(for: session.id) }
         .task(id: mentionRequest) { await loadMentionFiles(mentionRequest) }
         .onChange(of: completion.items.map(\.id)) { updateCompletion { $0.highlighted = 0 } }
@@ -1678,7 +1678,7 @@ struct ComposerView: View {
             editor.replace(change.range, with: change.replacement, caret: change.caret)
         }
         updateCompletion { $0.highlighted = 0 }
-        focused = true
+        focusRequest += 1
     }
 
     private var nextMode: TurnSetting.Option? {
@@ -1765,7 +1765,7 @@ struct ComposerView: View {
         let added = ComposerAttachments.adding(pasted.attachments, to: draft.attachments)
         draft.attachments = added.attachments
         model.operationError = (pasted.problem ?? added.problem)?.message
-        focused = true
+        focusRequest += 1
     }
     private var primarySymbol: String {
         if primaryIsStop { return "stop.fill" }
