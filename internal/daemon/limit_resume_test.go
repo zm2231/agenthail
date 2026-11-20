@@ -112,11 +112,18 @@ func (f *limitFixture) settled(id, account string, at time.Time) {
 
 func (f *limitFixture) note(id string) string {
 	f.t.Helper()
-	row := f.d.limitResumeRow(id)
-	if row == nil {
-		return ""
+	note := ""
+	if row := f.d.limitResumeRow(id); row != nil {
+		note = row.Note
 	}
-	return row.Note
+	listed := viewRow(f.t, f.d, id)
+	if listed.LimitResume == nil || listed.LimitResume.Note != note {
+		f.t.Fatalf("the session view's stop for %s says %+v, the stop's own row says %q", id, listed.LimitResume, note)
+	}
+	if note != "" && (listed.Display == nil || listed.Display.Detail != note || listed.Attention == nil || listed.Attention.Reason != note) {
+		f.t.Fatalf("the session view does not carry %s's note into its detail and attention: display=%+v attention=%+v", id, listed.Display, listed.Attention)
+	}
+	return note
 }
 
 func (f *limitFixture) pass(now time.Time) {
