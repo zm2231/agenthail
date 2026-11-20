@@ -161,14 +161,14 @@ func TestCodexSubagentTurnsRaiseNoCompletionAlertAndItsApprovalOpensTheRoot(t *t
 	})
 	lifecycle.Daemon().CompleteTurn(root, "Tagged")
 	testkit.Eventually(t, "the root's second completion alert", 5*time.Second, func() bool {
-		return pushes.count("turn.completed") >= 2 && len(desktop.matching(" finished")) >= 2
+		return pushes.count("turn.completed") >= 2 && len(desktop.matching("Finished")) >= 2
 	})
 	for _, push := range pushes.all("turn.completed") {
 		if push["sessionId"] != root {
 			t.Fatalf("a completion push for %q; only the root's turns alert", push["sessionId"])
 		}
 	}
-	for _, alert := range desktop.matching(" finished") {
+	for _, alert := range desktop.matching("Finished") {
 		if alert.sessionID != root {
 			t.Fatalf("a desktop completion alert for %q; only the root's turns alert", alert.sessionID)
 		}

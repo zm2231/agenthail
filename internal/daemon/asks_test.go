@@ -184,7 +184,7 @@ func TestAPersonsSessionThatAsksIsInNeedsYouUntilAnsweredAndItsTurnEndsQuietly(t
 			t.Fatal("the next turn could not end")
 		}
 	})
-	f.alert(t, " done: Deployed")
+	f.alert(t, "Done: Deployed")
 	if row := viewRow(t, f.d, f.from.ID); row.Ask != nil || row.EndTurn == nil || row.EndTurn.Headline != "Deployed" {
 		t.Fatalf("after the next turn: ask=%+v endTurn=%+v", row.Ask, row.EndTurn)
 	}
@@ -209,7 +209,7 @@ func TestACompletionHeldForBackgroundWorkStaysQuietWhileTheAskIsOpen(t *testing.
 	if notices, err := f.r.TurnNotices(); err != nil || notices[f.from.ID].Outcome != turnOutcomeNeedsYou || notices[f.from.ID].RequestID != id {
 		t.Fatalf("notice %+v err=%v", notices[f.from.ID], err)
 	}
-	if alerts := f.desktop.matching(" needs you: Deploy the fix?"); len(alerts) != 1 {
+	if alerts := f.desktop.matching("Needs you: Deploy the fix?"); len(alerts) != 1 {
 		t.Fatalf("the ask was announced %d times", len(alerts))
 	}
 }
@@ -229,7 +229,7 @@ func TestAWorkersAskGoesToWhoStartedItWhichAnswersIt(t *testing.T) {
 		t.Fatalf("a worker's ask put it in front of the person: ask=%+v attention=%+v", row.Ask, row.Attention)
 	}
 	f.d.background.wait()
-	if alerts := f.desktop.matching(" needs you: Deploy the fix?"); len(alerts) != 0 {
+	if alerts := f.desktop.matching("Needs you: Deploy the fix?"); len(alerts) != 0 {
 		t.Fatal("the person was told a worker needs them")
 	}
 
@@ -274,7 +274,7 @@ func TestAnAskTheHearerPassesOnSitsOnOrCannotHearReachesThePerson(t *testing.T) 
 	if ask := f.ask(t, sat); ask.RoutedTo != registry.AskToPerson {
 		t.Fatalf("an ask sat on past its window stayed: %+v", ask)
 	}
-	f.alert(t, " needs you: Which port?")
+	f.alert(t, "Needs you: Which port?")
 	if queued := f.told(t, f.from.ID); len(queued) != 0 {
 		t.Fatalf("the spawner still has notices of asks that left it: %q", queued)
 	}

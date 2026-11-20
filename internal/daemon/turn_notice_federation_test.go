@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -234,10 +233,10 @@ func TestATurnOnAPairedLinuxHostNotifiesTheViewerAndThePhoneOnce(t *testing.T) {
 	hostTurn(t, host, "remote-a", "turn-2", "the model refused", nil)
 	testkit.Eventually(t, "the failure notified", 10*time.Second, func() bool { return len(mac.list()) == 2 })
 	settleNotices(t, host, record.ID, viewer)
-	if notices := mac.list(); notices[1].message != "Codex agent failed on vps" {
+	if notices := mac.list(); notices[1].message != "Failed" {
 		t.Fatalf("failure notice %+v", notices[1])
 	}
-	if shown := relay.shown("phone"); len(shown) != 2 || !strings.Contains(shown[1]["message"], "failed") {
+	if shown := relay.shown("phone"); len(shown) != 2 || shown[1]["message"] != "Failed" {
 		t.Fatalf("after the failure the phone showed %+v", shown)
 	}
 }

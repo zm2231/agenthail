@@ -38,6 +38,8 @@ type DashboardConfig struct {
 	AskPermissionEscalateMinutes int `json:"askPermissionEscalateMinutes,omitempty"`
 	// SimulatorHost names the paired Mac a host without simulators forwards to; unset picks the only connected one that runs them.
 	SimulatorHost string `json:"simulatorHost,omitempty"`
+	// NotificationPreferences holds the person's choices that differ from each preference's default.
+	NotificationPreferences map[string]bool `json:"notificationPreferences,omitempty"`
 }
 
 // ResumesAfterLimit reports whether sessions a usage limit stopped resume
