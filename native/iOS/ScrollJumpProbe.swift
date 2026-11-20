@@ -131,7 +131,7 @@ private final class Ticker: NSObject {
 struct ScrollJumpLabel: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.25)) { _ in
-            Text("jumps=\(ScrollJumpProbe.shared.jumps) worst=\(Int(ScrollJumpProbe.shared.worst)) frame=\(Int(ScrollJumpProbe.shared.longestFrame * 1000))")
+            Text("jumps=\(ScrollJumpProbe.shared.jumps) worst=\(Int(ScrollJumpProbe.shared.worst.rounded(.up))) frame=\(Int(ScrollJumpProbe.shared.longestFrame * 1000))")
                 .font(.system(size: 1)).opacity(0.01)
                 .frame(width: 1, height: 1).clipped()
                 .accessibilityIdentifier("scroll-jumps")
