@@ -89,6 +89,9 @@ func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
 		case registry.LimitResumeLapsed:
 			display.Detail = "Stopped; automatic resume expired"
 		}
+		if stop.Note != "" {
+			display.Detail = stop.Note
+		}
 		return display
 	}
 	if limit := row.UsageLimit; limit != nil && !limit.Lifted(now) {

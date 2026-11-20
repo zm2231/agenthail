@@ -161,6 +161,9 @@ struct SessionPreview: View {
         if arguments.contains("--preview-limit-move") {
             detail["limitResume"] = ["state": "waiting", "resetsAt": "2026-09-12T18:20:00Z", "moveTo": ["root": "team", "account": "team@example.com", "reason": "most headroom, session 18%, week 40%"]]
         }
+        if arguments.contains("--preview-limit-note") {
+            detail["limitResume"] = ["state": "waiting", "resetsAt": "2026-09-12T18:20:00Z", "note": "Its account has room again; restart it to continue"]
+        }
         if arguments.contains("--preview-questions") {
             var session = detail["session"] as! [String: Any]
             session["waitingOn"] = previewQuestions
@@ -316,6 +319,13 @@ struct SessionPreview: View {
             var moving = snapshot["sessions"] as! [[String: Any]]
             moving[0]["move"] = ["state": "copying", "host": "h0123456789ab", "hostName": "build-server-in-the-far-rack.example.ts.net"]
             snapshot["sessions"] = moving
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-limit-note") {
+            var limited = snapshot["sessions"] as! [[String: Any]]
+            limited[0]["status"] = "idle"
+            limited[0]["queueCount"] = 0
+            limited[0]["limitResume"] = ["state": "waiting", "resetsAt": "2026-09-12T18:20:00Z", "note": "Its account has room again; restart it to continue"]
+            snapshot["sessions"] = limited
         }
         if TilesPreview.enabled { snapshot["projects"] = TilesPreview.projects }
         if ProjectNowPreview.scenario != nil {

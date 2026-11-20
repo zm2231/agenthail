@@ -820,10 +820,12 @@ struct LimitResumeState: Codable, Hashable {
     var refusedAt: String? = nil
     var resetsAt: String? = nil
     var moveTo: MoveOffer? = nil
+    var note: String? = nil
 
     var isWaiting: Bool { state == "waiting" }
 
     var label: String {
+        if let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty { return note }
         guard isWaiting else { return "Stopped by usage limit" }
         guard let resetsAt, let date = TimestampParser.date(resetsAt) else { return "Usage limit, resumes when it lifts" }
         let time = Calendar.current.isDateInToday(date) ? date.formatted(date: .omitted, time: .shortened) : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())

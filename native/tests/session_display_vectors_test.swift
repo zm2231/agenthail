@@ -20,7 +20,7 @@ struct SessionDisplayVectorsTest {
             let got = SessionDisplayKind.of(session, now: now)
             if got.rawValue != want { failures.append("\(name): Swift says \(got.rawValue), vectors say \(want)") }
             let kind = SessionDisplayKind(rawValue: want)!
-            if !SessionRowTime.status(session, now: now).hasPrefix(kind.label) {
+            if !SessionRowTime.status(session, now: now).hasPrefix(kind == .limited ? session.limitLabel ?? kind.label : kind.label) {
                 failures.append("\(name): the row says \(SessionRowTime.status(session, now: now)), not \(want)")
             }
             let header = SessionDisplayKind.label(session, now: now)

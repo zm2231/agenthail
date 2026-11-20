@@ -14,6 +14,7 @@ enum SessionRowTime {
     static func status(_ session: SessionState, now: Date) -> String {
         let kind = SessionDisplayKind.of(session, now: now)
         if kind == .working { return "Working " + working(session, now: now) }
-        return [kind.label, idle(session)].compactMap { $0 }.joined(separator: " · ")
+        let label = kind == .limited ? session.limitLabel ?? kind.label : kind.label
+        return [label, idle(session)].compactMap { $0 }.joined(separator: " · ")
     }
 }

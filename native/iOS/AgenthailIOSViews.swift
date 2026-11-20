@@ -1517,7 +1517,12 @@ struct SessionSummary: View, @MainActor Equatable {
         Button { openDetails(()) } label: {
             HStack(spacing: 8) {
                 status.lineLimit(1).truncationMode(.tail).layoutPriority(2)
-                Text(modelName).lineLimit(1).truncationMode(.tail)
+                ViewThatFits(in: .horizontal) {
+                    Text(modelName).lineLimit(1).fixedSize()
+                    Color.clear.frame(width: 0, height: 0)
+                        .accessibilityElement()
+                        .accessibilityLabel(modelName)
+                }
                 Spacer(minLength: 4)
                 context.lineLimit(1).fixedSize().layoutPriority(1)
                 Image(systemName: "chevron.down").font(.caption2)

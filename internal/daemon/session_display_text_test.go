@@ -19,6 +19,24 @@ func TestDisplayCountsUseSingularForOne(t *testing.T) {
 	}
 }
 
+func TestALimitStopsNoteIsItsDetailAndAttention(t *testing.T) {
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	note := "Its account has room again; restart it to continue"
+	row := dashboardSession{Status: surface.StatusIdle, LimitResume: &dashboardLimitResume{State: registry.LimitResumeWaiting, ResetsAt: now.Add(time.Hour), Note: note}}
+	display := sessionDisplay(row, now)
+	row.Display = &display
+	if row.Display.Kind != "limited" || row.Display.Detail != note {
+		t.Fatalf("display=%+v", row.Display)
+	}
+	if attention := rowAttention(row); attention == nil || attention.Reason != note {
+		t.Fatalf("attention=%+v", attention)
+	}
+	row.LimitResume.Note = ""
+	if got := sessionDisplay(row, now).Detail; got != "Automatic resume scheduled" {
+		t.Fatalf("a stop without a note keeps its generic detail, got %q", got)
+	}
+}
+
 func TestQuietDetailDoesNotRepeatTheInstantLabel(t *testing.T) {
 	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	row := dashboardSession{Status: surface.StatusBusy, Activity: &surface.Activity{LastProgressAt: now.Add(-11 * time.Minute)}}
