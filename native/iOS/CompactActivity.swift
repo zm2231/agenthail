@@ -11,8 +11,9 @@ struct TimelineGroup: Identifiable, Equatable {
     var foldLabel: String? = nil
     var foldSenders = ""
     var focus = false
-    var repeats = 1
+    var repeatsByItem: [String: Int] = [:]
     var tightAbove = false
+    var repeats: Int { items.count == 1 ? repeatsByItem[items[0].id] ?? 1 : 1 }
     var firstItemID: String { items.first?.id ?? "" }
     var callCount: Int { items.filter { $0.kind == "toolCall" }.count }
     var errorCount: Int { items.filter(ToolRunSummary.isFailure).count }
@@ -166,7 +167,7 @@ struct CompactActivityGroup: View, @MainActor Equatable {
         } else if group.isReply, let reply = group.items.first {
             LiveTimelineRow(item: reply, finished: group.finished, attachmentLoader: attachmentLoader)
         } else if group.repeats > 1, let item = group.items.first, let agent = item.agent {
-            IOSAgentMessageRow(item: item, agent: agent, repeats: group.repeats)
+            IOSAgentMessageRow(item: item, agent: agent, repeats: group.repeats, memoryID: group.id)
         } else {
             ForEach(group.items) { LiveTimelineRow(item: $0, attachmentLoader: attachmentLoader) }
         }

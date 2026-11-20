@@ -30,12 +30,29 @@ struct AgentRowCompactTest {
             return
         }
         check(fold.members.count == 3, "only identical neighbours merge: \(fold.members.count)")
+        var peer = notice("p", "Branch is ready")
+        peer.agent = AgentMessage(direction: "in", kind: "peer", peer: "@builder", summary: "Branch is ready")
+        let counted = TranscriptBlock.build([notice("x", resume), notice("y", resume), peer, reply])
+        if case .agentFold(let fold) = counted.first?.kind, case .agent(let first) = fold.members.first?.kind {
+            check(fold.label == "3 updates · 2 Agenthail notices, 1 agent message", "the fold counts every notice it holds: \(fold.label)")
+            check(first.chip == "Usage limit reset ×2", "an opened fold keeps the count: \(first.chip)")
+        } else {
+            check(false, "repeated notices and another message fold together: \(counted.map(\.kind))")
+        }
         check(AgentRepeat.runs([]).isEmpty && AgentRepeat.runs(["a", nil, nil, "a", "a"]) == [3..<5], "runs need two equal keys in a row")
 
         var queued = LocalSend(text: "later", sentAt: Date(), status: "Queued")
         queued.queueID = 42
         let sent = LocalSend(text: "now", sentAt: Date(), status: "Sent")
-        check(LocalSend.shown([queued, sent]).map(\.text) == ["now"], "a queued send shows in the queue tray, not the transcript")
+        func row(_ status: String, operation: String = "message") -> QueueState {
+            try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":42,"sessionId":"S","target":"S","message":"later","status":"\#(status)","operation":"\#(operation)","attempts":0,"queuedAt":"2026-01-01T00:00:00Z","evidence":"queued"}"#.utf8))
+        }
+        check(LocalSend.shown([queued, sent], queue: [row("pending")]).map(\.text) == ["now"], "a send waiting in the queue tray shows there, not in the transcript")
+        check(LocalSend.shown([queued, sent], queue: [row("delivered")]).map(\.text) == ["now"], "a delivered send waits for its timeline row")
+        check(LocalSend.shown([queued, sent], queue: [row("canceled")]).map(\.text) == ["now"], "a send taken back or steered does not linger as queued")
+        check(LocalSend.shown([queued, sent], queue: [row("dead")]).map(\.text) == ["later", "now"], "a send whose delivery died shows again")
+        check(LocalSend.shown([queued, sent], queue: [row("inflight")]).map(\.text) == ["later", "now"], "a send the tray no longer shows stays visible")
+        check(LocalSend.shown([queued, sent], queue: []).map(\.text) == ["later", "now"], "a send whose queue row is not loaded stays visible")
         let receipt = { (json: String) in try? JSONDecoder().decode(DeliveryReceipt.self, from: Data(json.utf8)) }
         check(LocalSend.queueID(of: receipt(#"{"status":"queued","queueId":7}"#)) == 7, "a queued receipt names its queue row")
         check(LocalSend.queueID(of: receipt(#"{"status":"queued","queueId":7,"movedTo":"other"}"#)) == nil, "a send queued for another session stays in this transcript")

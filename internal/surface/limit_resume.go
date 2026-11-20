@@ -36,6 +36,9 @@ const CLIPeerPreamble = "Sent with agenthail send from outside any session; no o
 
 const OriginAgenthailNotice = "agenthail-notice"
 
+// Only the CLI's pseudo-session has the cli surface, so no session can take this name.
+const CLIPeerSender = "agenthail/cli: " + CLISenderName
+
 // ParseNotice reports the kind and text of an Agenthail notice.
 func ParseNotice(text string) (kind, body string, ok bool) {
 	match := noticeEnvelope.FindStringSubmatch(text)

@@ -25,8 +25,9 @@ struct LocalSend: Identifiable, Equatable {
 
     static let clockSkew: TimeInterval = 5
 
-    static func shown(_ sends: [LocalSend]) -> [LocalSend] {
-        sends.filter { $0.queueID == nil }
+    static func shown(_ sends: [LocalSend], queue: [QueueState]) -> [LocalSend] {
+        let covered = Set(queue.filter { QueueFacts.coversSend($0) }.map(\.id))
+        return sends.filter { send in send.queueID.map { !covered.contains($0) } ?? true }
     }
 
     static func queueID(of receipt: DeliveryReceipt?) -> Int64? {

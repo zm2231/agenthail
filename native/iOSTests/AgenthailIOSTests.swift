@@ -247,6 +247,10 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(AgentMessage.chip("Usage limit reset", repeats: 6), "Usage limit reset ×6")
         let run = TimelineGroup.make([reply, peer("a"), peer("b"), notice("c", resume)])
         XCTAssertEqual(run.map(\.tightAbove), [false, false, true, true])
+        let folded = TimelineGroup.make([notice("x", resume), notice("y", resume), peer("p"), reply])
+        XCTAssertEqual(folded.first?.foldLabel, "3 updates · 2 Agenthail notices, 1 agent message")
+        XCTAssertEqual(folded.first?.repeatsByItem["y"], 2)
+        XCTAssertEqual(folded.first?.items.map(\.id), ["y", "p"])
         XCTAssertEqual(AgentRowStyle.previewLines, 1)
     }
 

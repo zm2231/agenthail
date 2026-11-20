@@ -87,7 +87,7 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 		if body == "" {
 			body = strings.TrimSpace(text)
 		}
-		if surface.PeerDisplayName(sender) == surface.CLISenderName {
+		if sender == surface.CLIPeerSender {
 			if notice, ok := surface.CLINotice(body); ok {
 				if id := str(origin, "msg_id"); id != "" {
 					notice.ID = "peer:" + id

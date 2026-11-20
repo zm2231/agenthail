@@ -39,6 +39,10 @@ enum QueueFacts {
 
     static func canCancel(_ item: QueueState) -> Bool { item.status == "pending" }
 
+    static func coversSend(_ item: QueueState) -> Bool {
+        QueueSteer.waiting([item]).count == 1 || item.status == "delivered" || item.status == "canceled"
+    }
+
     static func lastError(_ item: QueueState) -> String? {
         guard let error = item.lastError?.trimmingCharacters(in: .whitespacesAndNewlines), !error.isEmpty else { return nil }
         return error
