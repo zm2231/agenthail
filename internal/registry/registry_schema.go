@@ -878,4 +878,21 @@ CREATE TABLE IF NOT EXISTS project_tiles (
 	pinned_json TEXT NOT NULL,
 	revision INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_identities (
+	identity_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	name TEXT NOT NULL UNIQUE,
+	created_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_inbox (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	identity_id TEXT NOT NULL REFERENCES agent_identities(identity_id) ON DELETE CASCADE,
+	message_uuid TEXT NOT NULL DEFAULT '',
+	sender_id TEXT NOT NULL DEFAULT '',
+	sender_name TEXT NOT NULL DEFAULT '',
+	message TEXT NOT NULL,
+	received_at_ms INTEGER NOT NULL,
+	read_at_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
+CREATE INDEX IF NOT EXISTS agent_inbox_unread ON agent_inbox(identity_id, id) WHERE read_at_ms=0;
 `

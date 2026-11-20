@@ -33,3 +33,5 @@ A message that waited carries its `queueId`, its queue row's `queueStatus`, `att
 An item is `pending` while its intent is `submitted`, `queued` or `held` and its queue row, if it has one, is not `canceled`, `delivered` or `removed`. A cancel updates only the queue row, so the inbox settles the item from it: a canceled row reads `canceled` and a removed one `unknown`. The intent keeps its status, so a cancel raises no delivery problem. Otherwise the text is the intent's copy, which keeps the first 16 KiB; past that `truncated` is true, and the whole message is the turn in the target session's transcript.
 
 Intents are not pruned.
+
+An [agent identity](agent-identities.md) has its own inbox besides its intents: `agent_inbox` keeps each message's full text and whether its agent has read it, and `agenthail inbox` reads it.

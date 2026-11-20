@@ -792,6 +792,9 @@ func equalStrings(left, right []string) bool {
 }
 
 func (d *Daemon) publishSurfaceHealth(health dashboardSurface, observedAt time.Time) {
+	if adapter := d.adapters().ForSurface(surface.SurfaceKind(health.Name)); adapter != nil && !surface.Listed(adapter) {
+		return
+	}
 	payload, _ := json.Marshal(map[string]any{"surface": health.Name, "health": health.Health, "detail": health.HealthDetail, "runtime": health.Runtime, "observedAt": observedAt.Format(time.RFC3339Nano)})
 	_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: surface.SurfaceKind(health.Name), Health: health.Health, Detail: health.HealthDetail, ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + health.Name + ":" + health.Health, Type: "surface.health", EntityID: health.Name, Payload: payload})
 }

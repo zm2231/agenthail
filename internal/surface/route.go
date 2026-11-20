@@ -17,10 +17,13 @@ const (
 	RoutePeer
 	RouteHumanTurn
 	RouteAgenthailTurn
+	RouteInbox
 )
 
 func (r Route) String() string {
 	switch r {
+	case RouteInbox:
+		return "inbox"
 	case RoutePeer:
 		return "peer"
 	case RouteHumanTurn:
@@ -49,7 +52,7 @@ func (r Route) TransportOnly() bool { return r == RoutePeer }
 
 // PersonMessage is how a message on this route reaches the session: a peer socket hands the model a note.
 func (r Route) PersonMessage() PersonMessage {
-	if r == RoutePeer {
+	if r == RoutePeer || r == RouteInbox {
 		return PersonNote
 	}
 	return PersonTurn

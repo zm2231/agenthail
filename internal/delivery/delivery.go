@@ -577,8 +577,11 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 			receipt.Evidence = surface.EvidenceTransportAccepted
 		}
 		receipt.Detail = fmt.Sprintf("Sent to %s.", target)
+		if taken == surface.RouteInbox {
+			receipt.Detail = fmt.Sprintf("Delivered to the inbox of @%s. No model reads it and nothing replies; the agent behind @%s reads its inbox.", session.Name, session.Name)
+		}
 		d.markSent(receipt, intent, result.UUID, target)
-		if d.Registry != nil && !peerTransport {
+		if d.Registry != nil && !peerTransport && taken != surface.RouteInbox {
 			if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, baselineCompletionID); err != nil {
 				record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Result: result.UUID, Error: err.Error()})
 			}

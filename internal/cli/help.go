@@ -99,6 +99,14 @@ Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
   identify rm <name>             Remove an alias
   identify list                 Show all names
+  identity add <name>           Give an agent outside Agenthail a durable @name to send as and receive at;
+                                send as it with AGENTHAIL_SESSION_ID=<name> or --from <name>
+  identity rm <name>            Remove the identity and its inbox
+  identity list [--json]        Show identities with their unread counts
+  inbox [<name>] [--all] [--peek] [--limit <n>] [--wait <duration>] [--json]
+                                Print an identity's unread messages oldest first and mark them read;
+                                --wait blocks until one arrives (exit 1 on timeout), --peek leaves them unread
+  inbox [<name>] --prune <age>  Delete read messages older than an age such as 30d
 
 Coordinator (one per project; a message to it always lands):
   coordinator [--cwd <path>] [--json]  Show the coordinator of this folder's project
@@ -242,7 +250,7 @@ Other:
 Targets: @name, PID, session id prefix, cwd/name fragment, surface:target, or host::target.
         A target that matches on more than one host is an error; qualify it as host::target.
         send, steer, interrupt, reply, last, stream and thread create --host reach paired hosts.
-Sender: --from resolves a session; otherwise identity comes from AGENTHAIL_SESSION_ID,
+Sender: --from resolves a session or agent identity; otherwise identity comes from AGENTHAIL_SESSION_ID,
         CLAUDE_CODE_SESSION_ID, then CODEX_THREAD_ID.
         Native Claude peers require the daemon and register automatically before sending.
 `)

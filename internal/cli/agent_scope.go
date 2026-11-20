@@ -31,13 +31,27 @@ func (r *agentScopeRefusal) Error() string {
 
 var errAgentScopeDaemonDown = errors.New("this command runs as an agent session, whose reach the Agenthail daemon checks, and the daemon is not running; start it with: agenthail daemon start")
 
-func agentEnvironment() bool {
+// An agent identity only names the sender: it keeps the reach the CLI has without one.
+func (a *App) agentEnvironment() bool {
 	for _, source := range surface.CallerIdentity {
-		if os.Getenv(source.Variable) != "" {
-			return true
+		if id := os.Getenv(source.Variable); id != "" {
+			return source.Surface != "" || !a.namesAgentIdentity(id)
 		}
 	}
 	return false
+}
+
+func (a *App) namesAgentIdentity(selector string) bool {
+	reg := a.OpenedRegistry()
+	if reg == nil {
+		return false
+	}
+	id, err := reg.ResolveTarget(selector)
+	if err != nil {
+		return false
+	}
+	session, err := reg.Session(id)
+	return err == nil && surface.IsAgentIdentity(session)
 }
 
 // --no-queue delivers at once or fails, so it takes the reach of a send now.
@@ -94,7 +108,7 @@ func (e *askedPerson) Error() string {
 }
 
 func (a *App) personAction(ctx context.Context, api string, payload map[string]any) error {
-	if !agentEnvironment() {
+	if !a.agentEnvironment() {
 		return nil
 	}
 	if action, _ := payload["action"].(string); !slices.Contains(gatedActions, action) {
@@ -117,7 +131,7 @@ func (a *App) personAction(ctx context.Context, api string, payload map[string]a
 // payloadScope checks a send or control from the body it would run, so a
 // cross-project refusal can be asked of the person with --ask-person.
 func (a *App) payloadScope(ctx context.Context, action string, payload map[string]any) (*daemon.ScopeReply, error) {
-	if !agentEnvironment() {
+	if !a.agentEnvironment() {
 		return nil, nil
 	}
 	body, err := json.Marshal(payload)
@@ -165,7 +179,7 @@ func (a *App) agentCreate(ctx context.Context, payload map[string]any) ([]byte, 
 
 // A person's own terminal has no agent identity, so --from there keeps the person's reach.
 func (a *App) agentScope(ctx context.Context, request daemon.ScopeRequest) (*daemon.ScopeReply, error) {
-	if !agentEnvironment() {
+	if !a.agentEnvironment() {
 		return nil, nil
 	}
 	caller, err := a.sourceSessionID(ctx, "")

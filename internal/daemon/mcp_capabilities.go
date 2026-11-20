@@ -1,12 +1,19 @@
 package daemon
 
-import "context"
+import (
+	"context"
+
+	"github.com/zm2231/agenthail/internal/surface"
+)
 
 var mcpLimits = map[string]int{"depth": 3, "children": 8, "outputBytes": mcpOutputLimit, "itemBytes": mcpItemTextLimit}
 
 func (d *Daemon) mcpCapabilities(_ context.Context, caller *mcpCaller, _ struct{}) (any, error) {
 	surfaces := []map[string]any{}
 	for _, adapter := range d.Surfaces {
+		if !surface.Listed(adapter) {
+			continue
+		}
 		entry := map[string]any{"surface": string(adapter.Name()), "spawn": true}
 		if refusal := spawnRefusal(caller, adapter.Name()); refusal != nil {
 			entry["spawn"], entry["reason"] = false, refusal.Message

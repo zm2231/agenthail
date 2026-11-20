@@ -25,7 +25,28 @@ const (
 	// RuntimeOperator marks Agenthail's own pseudo-sessions (the person, the
 	// Agenthail CLI and unrepliable senders), which no adapter serves.
 	RuntimeOperator RuntimeKind = "agenthail"
+	RuntimeAgentInbox RuntimeKind = "agent-inbox"
 )
+
+const KindAgent SurfaceKind = "agent"
+
+const agentIdentityPrefix = "agent:"
+
+func AgentIdentityID(name string) string { return agentIdentityPrefix + name }
+
+func IsAgentIdentity(session *Session) bool {
+	return session != nil && session.RuntimeKind == RuntimeAgentInbox
+}
+
+// UnlistedSurface is an adapter clients never offer: no health chip, filter or start.
+type UnlistedSurface interface {
+	Unlisted()
+}
+
+func Listed(adapter Surface) bool {
+	_, unlisted := adapter.(UnlistedSurface)
+	return !unlisted
+}
 
 const (
 	// PersonSessionID sends what the person who runs this Agenthail wrote in
