@@ -65,7 +65,17 @@ Each request carries the token as `Authorization: Bearer ahr_...`. With Access s
 
 The remote caller has the identity's reach: the person's, as in [Sender and reach](#sender-and-reach). Its MCP capabilities are the operator's (`control.all`, `read.all`). Every tool call it makes is recorded in history as `mcp-remote`, naming the tool and how it got in, never the token.
 
-`agenthail_read` with no `sessionId` returns the identity's unread messages, oldest first, as many as fit in 12 KiB of encoded output, with `remaining` and an `ack` token naming the last one. It marks nothing read: the caller acknowledges by passing `ack` back on its next read, or as `cursor` to `agenthail_wait`, which marks every message up to it read. Until then the same messages come back, so a response lost on the way loses no message. An ack marks read only messages a read has already returned to that identity (`agent_inbox.delivered_at_ms`), up to the one it names, so a mistaken or later id consumes nothing undelivered and a repeated ack is harmless; a value in another form, such as a session's `latestSeq`, is refused. A read with `bodyRef` takes `ack` too. A message whose encoded text is over 4 KiB comes back clipped with `truncated`, its full size in `bytes` and a `bodyRef`; `agenthail_read` with that `bodyRef` (and `offset`, from `nextOffset`) pages its whole text, acknowledged or not. `agenthail_wait` with `tasks: []` returns once a message is unread, so an agent long-waits on it to learn of mail.
+The inbox is read and acknowledged under this contract:
+
+1. A read (`agenthail_read` with no `sessionId`) returns the oldest unread messages that fit in 12 KiB of encoded output, with `remaining` and an `ack` token, `inbox-ack:<id>`, naming the last one. It records those messages as returned (`agent_inbox.delivered_at_ms`) and marks nothing read.
+2. An ack, passed as `ack` on the next read (a `bodyRef` read included) or as `cursor` to `agenthail_wait`, marks read every message of the caller's own inbox that a read has returned, up to the id it names. A value in another form, such as a session's `latestSeq`, is refused.
+3. If a reply is lost, its messages stay unread and the next read returns them again, first.
+4. Repeating an ack changes nothing, even after its messages are pruned.
+5. An older ack marks only up to its own id. An ack naming a later id, even one never returned, marks only messages already returned to that identity.
+
+An ack can only affect the caller's own inbox, and a client that follows the loop never acknowledges past what it received: after a lost reply its next read returns the lost messages first, oldest first, so its next ack covers only messages it has seen. The server therefore keeps no record of which tokens it issued; that would only guard a client against itself.
+
+A message whose encoded text is over 4 KiB comes back clipped with `truncated`, its full size in `bytes` and a `bodyRef`; `agenthail_read` with that `bodyRef` (and `offset`, from `nextOffset`) pages its whole text, acknowledged or not. `agenthail_wait` with `tasks: []` returns once a message is unread, so an agent long-waits on it to learn of mail. The loop is: wait, read, handle, then read with `ack` (which also returns anything newer), and wait again with `ack` as `cursor`.
 
 The transport is stateless Streamable HTTP: the daemon keeps no session, and each request is checked on its own, so a rotated, rebound or turned-off token, or a change to the Access settings, takes effect on the next request. The daemon sends nothing it was not asked for.
 

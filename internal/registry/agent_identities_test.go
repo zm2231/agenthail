@@ -2,6 +2,7 @@ package registry
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -137,5 +138,50 @@ func TestAnInboxKeepsAMessageOnceAndHandsItToOneReader(t *testing.T) {
 	}
 	if _, _, err := r.StoreInboxMessage(InboxMessage{Identity: "agent:nobody", Message: "lost"}); !errors.Is(err, ErrNoAgentIdentity) {
 		t.Fatalf("a message to no identity: %v", err)
+	}
+}
+
+func TestASchema114RegistryUpgradesToAcknowledgedInboxReads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	old, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := old.AddAgentIdentity("scout")
+	if err != nil {
+		old.Close()
+		t.Fatal(err)
+	}
+	stored, _, err := old.StoreInboxMessage(InboxMessage{Identity: identity.SessionID, UUID: "m1", Message: "before the upgrade"})
+	if err != nil {
+		old.Close()
+		t.Fatal(err)
+	}
+	asBeforePresentationTriggers(t, old)
+	for _, statement := range []string{`DROP TABLE identity_remote`, `DROP TABLE mcp_access`, `ALTER TABLE agent_inbox DROP COLUMN delivered_at_ms`, `PRAGMA user_version=114`} {
+		if _, err := old.db.Exec(statement); err != nil {
+			old.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if acked, err := r.AckInbox("scout", stored.ID); err != nil || acked != 0 {
+		t.Fatalf("an ack before any read marked %d err=%v", acked, err)
+	}
+	if err := r.MarkInboxDelivered("scout", []int64{stored.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if acked, err := r.AckInbox("scout", stored.ID); err != nil || acked != 1 {
+		t.Fatalf("acked=%d err=%v after the upgrade", acked, err)
+	}
+	if _, _, err := r.BindRemoteIdentity("scout", "", ""); err != nil {
+		t.Fatalf("remote binding after the upgrade: %v", err)
 	}
 }
