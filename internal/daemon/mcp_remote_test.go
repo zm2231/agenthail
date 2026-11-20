@@ -280,10 +280,11 @@ func TestAnInboxReadReturnsWhatFitsAndLeavesTheRestUnread(t *testing.T) {
 	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 5 {
 		t.Fatalf("unread=%d err=%v before an acknowledgement", unread, err)
 	}
-	next, _ := callMCP(t, session, "agenthail_read", map[string]any{"since": read["latestSeq"]})
+	next, _ := callMCP(t, session, "agenthail_read", map[string]any{"ack": read["ack"]})
 	rest, _ := next["messages"].([]any)
-	if first, _ := rest[0].(map[string]any); len(rest) == 0 || first["id"].(float64) <= read["latestSeq"].(float64) {
-		t.Fatalf("after acknowledging %v the read returned %v", read["latestSeq"], next)
+	last, _ := messages[len(messages)-1].(map[string]any)
+	if first, _ := rest[0].(map[string]any); len(rest) == 0 || first["id"].(float64) <= last["id"].(float64) {
+		t.Fatalf("after acknowledging %v the read returned %v", read["ack"], next)
 	}
 	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 5-len(messages) {
 		t.Fatalf("unread=%d err=%v after the acknowledgement", unread, err)
@@ -311,7 +312,7 @@ func TestAnInboxReadOfEscapeHeavyAndLongMessagesFitsAndLosesNothing(t *testing.T
 		if len(messages) == 0 {
 			break
 		}
-		args = map[string]any{"since": body["latestSeq"]}
+		args = map[string]any{"ack": body["ack"]}
 		for _, raw := range messages {
 			item := raw.(map[string]any)
 			id := item["id"].(float64)
@@ -383,7 +384,7 @@ func TestARemoteIdentityWaitsForItsInboxAndReadsIt(t *testing.T) {
 	if first, _ := messages[0].(map[string]any); first["text"] != "first" || first["from"] != "builder" {
 		t.Fatalf("first=%v", first)
 	}
-	waited, _ = callMCP(t, session, "agenthail_wait", map[string]any{"tasks": []string{}, "timeoutSec": 0, "cursor": fmt.Sprint(read["latestSeq"])})
+	waited, _ = callMCP(t, session, "agenthail_wait", map[string]any{"tasks": []string{}, "timeoutSec": 0, "cursor": read["ack"]})
 	if waited["type"] != "timeout" {
 		t.Fatalf("a wait that acknowledged every message returned %v", waited)
 	}
@@ -398,17 +399,42 @@ func TestAnUnacknowledgedInboxReadIsReturnedAgain(t *testing.T) {
 	session := f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, nil)
 	first, _ := callMCP(t, session, "agenthail_read", nil)
 	second, _ := callMCP(t, session, "agenthail_read", nil)
-	if first["latestSeq"] == nil || first["latestSeq"] != second["latestSeq"] {
+	if first["ack"] == nil || first["ack"] != second["ack"] {
 		t.Fatalf("first=%v second=%v", first, second)
 	}
 	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 1 {
 		t.Fatalf("unread=%d err=%v without an acknowledgement", unread, err)
 	}
-	acked, _ := callMCP(t, session, "agenthail_read", map[string]any{"since": first["latestSeq"]})
+	for _, foreign := range []map[string]any{{"since": 1 << 40}, {"ack": "inbox-ack:999999"}, {"ack": "999999"}, {"ack": "inbox:1"}} {
+		if out, refused := callMCP(t, session, "agenthail_read", foreign); !refused {
+			t.Fatalf("read with %v was accepted: %v", foreign, out)
+		}
+	}
+	if out, refused := callMCP(t, session, "agenthail_wait", map[string]any{"tasks": []string{}, "timeoutSec": 0, "cursor": "999999"}); !refused {
+		t.Fatalf("wait with a foreign cursor was accepted: %v", out)
+	}
+	other, err := f.r.AddAgentIdentity("builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _, err := f.r.StoreInboxMessage(registry.InboxMessage{Identity: other.SessionID, UUID: "theirs", Message: "theirs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, refused := callMCP(t, session, "agenthail_read", map[string]any{"ack": fmt.Sprintf("inbox-ack:%d", stored.ID)}); !refused {
+		t.Fatalf("an ack for another identity's message was accepted: %v", out)
+	}
+	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 1 {
+		t.Fatalf("unread=%d err=%v after refused acks", unread, err)
+	}
+	acked, _ := callMCP(t, session, "agenthail_read", map[string]any{"ack": first["ack"]})
 	if rest, _ := acked["messages"].([]any); len(rest) != 0 {
 		t.Fatalf("after the acknowledgement the read returned %v", acked)
 	}
 	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 0 {
 		t.Fatalf("unread=%d err=%v after the acknowledgement", unread, err)
+	}
+	if out, refused := callMCP(t, session, "agenthail_read", map[string]any{"ack": first["ack"]}); refused {
+		t.Fatalf("repeating an ack was refused: %v", out)
 	}
 }

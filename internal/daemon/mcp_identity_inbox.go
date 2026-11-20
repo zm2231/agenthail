@@ -64,8 +64,8 @@ func clipEncoded(text string, limit int) (string, bool) {
 }
 
 // Unacknowledged messages come back, so a lost response loses none.
-func (d *Daemon) mcpReadInbox(identity registry.AgentIdentity, since *uint64) (any, error) {
-	if err := d.ackInbox(identity, since); err != nil {
+func (d *Daemon) mcpReadInbox(identity registry.AgentIdentity, ack string) (any, error) {
+	if err := d.ackInbox(identity, ack); err != nil {
 		return nil, err
 	}
 	unread, err := d.Registry.ReadInbox(identity.Name, registry.InboxQuery{Peek: true})
@@ -84,7 +84,7 @@ func (d *Daemon) mcpReadInbox(identity registry.AgentIdentity, since *uint64) (a
 		if item.Truncated {
 			item.BodyRef, item.Bytes = mcpInboxRefPrefix+strconv.FormatInt(message.ID, 10), len(message.Message)
 		}
-		result["messages"], result["remaining"], result["latestSeq"] = append(items, item), len(unread)-len(items)-1, message.ID
+		result["messages"], result["remaining"], result["ack"] = append(items, item), len(unread)-len(items)-1, mcpInboxAck(message.ID)
 		result["next"] = mcpInboxNext
 		if encodedLen(result) > mcpInboxBudget && len(items) > 0 {
 			break
@@ -93,24 +93,39 @@ func (d *Daemon) mcpReadInbox(identity registry.AgentIdentity, since *uint64) (a
 	}
 	result["messages"], result["remaining"] = items, len(unread)-len(items)
 	if len(items) == 0 {
-		delete(result, "latestSeq")
+		delete(result, "ack")
 		delete(result, "next")
 	} else {
-		result["latestSeq"] = items[len(items)-1].ID
+		result["ack"] = mcpInboxAck(items[len(items)-1].ID)
 	}
 	return result, nil
 }
 
-const mcpInboxNext = "Pass latestSeq as since on your next agenthail_read, or as cursor to agenthail_wait, to mark these read; until then they are returned again. A truncated message pages through agenthail_read with its bodyRef. Reply with agenthail_send to each sender."
+const mcpInboxNext = "Pass ack on your next agenthail_read, or as cursor to agenthail_wait, to mark these read; until then they are returned again. A truncated message pages through agenthail_read with its bodyRef. Reply with agenthail_send to each sender."
 
-func (d *Daemon) ackInbox(identity registry.AgentIdentity, since *uint64) error {
-	if since == nil {
+const mcpInboxAckPrefix = "inbox-ack:"
+
+func mcpInboxAck(id int64) string { return mcpInboxAckPrefix + strconv.FormatInt(id, 10) }
+
+// Scoped to the identity's own inbox so a foreign cursor marks nothing read.
+func (d *Daemon) ackInbox(identity registry.AgentIdentity, ack string) error {
+	ack = strings.TrimSpace(ack)
+	if ack == "" {
 		return nil
 	}
-	if *since > uint64(1<<62) {
-		return refuse("invalid", "since must be a latestSeq an inbox read returned.")
+	refusal := refuse("invalid", "That ack isn't one an inbox read of yours returned; pass the ack from your last agenthail_read.")
+	raw, ok := strings.CutPrefix(ack, mcpInboxAckPrefix)
+	if !ok {
+		return refusal
 	}
-	_, err := d.Registry.AckInbox(identity.Name, int64(*since))
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return refusal
+	}
+	if _, err := d.Registry.InboxMessageByID(identity.Name, id); err != nil {
+		return refusal
+	}
+	_, err = d.Registry.AckInbox(identity.Name, id)
 	return err
 }
 
@@ -149,14 +164,8 @@ func (d *Daemon) mcpWaitInbox(ctx context.Context, caller *mcpCaller, identity r
 	if seconds < 0 {
 		return nil, refuse("invalid", "timeoutSec can't be negative.")
 	}
-	if cursor := strings.TrimSpace(input.Cursor); cursor != "" {
-		since, err := strconv.ParseUint(cursor, 10, 64)
-		if err != nil {
-			return nil, refuse("invalid", "cursor must be a latestSeq an inbox read returned.")
-		}
-		if err := d.ackInbox(identity, &since); err != nil {
-			return nil, err
-		}
+	if err := d.ackInbox(identity, input.Cursor); err != nil {
+		return nil, err
 	}
 	deadline := time.Now().Add(time.Duration(min(seconds, mcpWaitLimitSec(caller.session))) * time.Second)
 	ticker := time.NewTicker(time.Second)

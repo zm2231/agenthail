@@ -41,7 +41,7 @@ func (d *Daemon) remoteMCP() *remoteMCP {
 		m := &remoteMCP{d: d}
 		m.server = mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{
 			SupportedProtocolVersions: mcpProtocolVersions,
-			Instructions:              "You are an Agenthail agent identity. Messages sent to you wait in your inbox. agenthail_wait with tasks [] returns when one arrives; agenthail_read with no sessionId returns your unread messages. Pass the latestSeq it returns as since on your next read, or as cursor to agenthail_wait, to mark them read; until then they are returned again. Reply with agenthail_send to the sender each message names.",
+			Instructions:              "You are an Agenthail agent identity. Messages sent to you wait in your inbox. agenthail_wait with tasks [] returns when one arrives; agenthail_read with no sessionId returns your unread messages. Pass the ack it returns on your next read, or as cursor to agenthail_wait, to mark them read; until then they are returned again. Reply with agenthail_send to the sender each message names.",
 		})
 		d.registerMCPTools(m.server)
 		stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m.server }, &mcp.StreamableHTTPOptions{Stateless: true})
