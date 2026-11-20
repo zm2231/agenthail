@@ -24,7 +24,7 @@ const (
 	RuntimeNotionWeb        RuntimeKind = "notion-web"
 	// RuntimeOperator marks Agenthail's own pseudo-sessions (the person, the
 	// Agenthail CLI and unrepliable senders), which no adapter serves.
-	RuntimeOperator RuntimeKind = "agenthail"
+	RuntimeOperator   RuntimeKind = "agenthail"
 	RuntimeAgentInbox RuntimeKind = "agent-inbox"
 )
 
