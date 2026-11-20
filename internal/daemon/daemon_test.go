@@ -624,7 +624,7 @@ func TestQueuedRelaySuccessDoesNotCreateDeliveryProblem(t *testing.T) {
 	}
 }
 
-func TestAPhonePushNamesTheSessionByAliasAndProjectAndNeverByItsTitle(t *testing.T) {
+func TestAPhonePushIsTitledWithTheAliasAndNeverNamesItsProjectOrTitle(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	d, r, fake, from, _ := daemonFixture(t)
 	root := t.TempDir()
@@ -677,7 +677,7 @@ func TestAPhonePushNamesTheSessionByAliasAndProjectAndNeverByItsTitle(t *testing
 	d.observeSession(t.Context(), fake, &from)
 	select {
 	case payload := <-received:
-		if payload["message"] != "@builder in widget finished" || strings.Contains(payload["message"], "private-project-title") {
+		if payload["title"] != "@builder" || payload["message"] != "Finished" || strings.Contains(payload["title"]+payload["message"], "private-project-title") || strings.Contains(payload["title"]+payload["message"], "widget") {
 			t.Fatalf("payload=%+v", payload)
 		}
 		if payload["sessionId"] != from.ID {

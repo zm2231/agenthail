@@ -188,6 +188,8 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     @ObservationIgnored private var creationRequestIdentity: CreationRequestIdentity?
     @ObservationIgnored private var creationRequestKey: String?
     var notificationStatus = "Not enabled"
+    var notificationPreferences: [NotificationPreferenceState] = []
+    var notificationPreferenceProblem: String?
     var requestedSessionID: String?
     var forgetCandidate: PairedHostStatus?
     var showPairingConfirmation = false
@@ -2956,6 +2958,43 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     private func storedPush(_ hostID: String) -> StoredPush? {
         guard let value = KeychainStore.get(Self.pushAccount(hostID)) else { return nil }
         return try? JSONDecoder().decode(StoredPush.self, from: Data(value.utf8))
+    }
+
+    func loadNotificationPreferences() async {
+        var merged: [NotificationPreferenceState] = []
+        var failed: [String] = []
+        for id in hostOrder {
+            guard let connection = connections[id], !connection.isPreview else { continue }
+            do {
+                for preference in try await connection.api.notificationPreferences() {
+                    if let index = merged.firstIndex(where: { $0.id == preference.id }) {
+                        let shown = merged[index]
+                        merged[index] = NotificationPreferenceState(id: shown.id, title: shown.title, detail: shown.detail, value: shown.value && preference.value)
+                    } else {
+                        merged.append(preference)
+                    }
+                }
+            } catch {
+                failed.append(id)
+            }
+        }
+        if !failed.isEmpty {
+            merged = merged.map { NotificationPreferenceState(id: $0.id, title: $0.title, detail: $0.detail, value: false) }
+        }
+        notificationPreferences = merged
+        notificationPreferenceProblem = failed.isEmpty ? nil : "Some computers could not be reached, so these show off until every computer confirms."
+    }
+
+    func setNotificationPreference(_ id: String, to value: Bool) {
+        Task {
+            var failed = false
+            for hostID in hostOrder {
+                guard let connection = connections[hostID], !connection.isPreview else { continue }
+                do { _ = try await connection.api.setNotificationPreference(id, to: value) } catch { failed = true }
+            }
+            await loadNotificationPreferences()
+            if failed { notificationPreferenceProblem = "Some computers did not take the change. Reconnect and try again." }
+        }
     }
 
     private func disableNotifications(status: String) async {

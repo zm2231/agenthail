@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -67,13 +66,13 @@ func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) bool {
 		}
 		return false
 	}
-	headline := ""
+	body := "Needs you"
 	if end, ok, err := d.Registry.CompletedTurnEnd(session.ID, judgment.TurnID); err == nil && ok {
-		headline = ": " + shownLine(end.Headline, headlineShownRunes)
+		body += ": " + shownLine(end.Headline, headlineShownRunes)
 	}
 	hostID := d.hostIdentity().ID
-	desktop := fmt.Sprintf("%s needs you%s", d.resolveDisplay(session.ID), headline)
-	mobile := mobileNotification{Title: "Agenthail", Message: fmt.Sprintf("%s needs you%s%s", d.sessionPushSubject(session), d.onHost(), headline), SessionID: session.ID, TurnID: judgment.TurnID, EventType: turnNeedsYouEvent,
+	desktop := body
+	mobile := mobileNotification{Title: d.sessionPushTag(session), Message: body, SessionID: session.ID, TurnID: judgment.TurnID, EventType: turnNeedsYouEvent,
 		CollapseID: turnNotificationKey(hostID, session.ID, judgment.TurnID), DedupeKey: needsYouDedupeKey(hostID, session.ID, judgment.TurnID)}
 	sent, err := d.needsYouTakesTurnPush(session.ID, judgment.TurnID,
 		func() (bool, error) { return d.Registry.ConfirmTurnPush(session.ID, judgment.TurnID, claimedAt) },
@@ -119,15 +118,18 @@ func (d *Daemon) notifyMirroredNeedsYou(host *pairedHost, rawID string, row dash
 	if prior != nil && prior.Pushed && prior.TurnID == state.TurnID {
 		return
 	}
-	desktop := fmt.Sprintf("%s needs you on %s", d.resolveDisplay(row.ID), host.record.Name)
-	mobile := mobileNotification{Title: "Agenthail", Message: fmt.Sprintf("%s needs you on %s", pushSubject(row.Surface, row.Alias, row.Project), host.record.Name), SessionID: row.ID, TurnID: state.TurnID, EventType: turnNeedsYouEvent,
+	desktop := "Needs you"
+	if state.Headline != "" {
+		desktop += ": " + state.Headline
+	}
+	mobile := mobileNotification{Title: pushTag(row.Surface, row.Alias, row.Name, row.Cwd), Message: desktop, SessionID: row.ID, TurnID: state.TurnID, EventType: turnNeedsYouEvent,
 		CollapseID: turnNotificationKey(host.record.ID, rawID, state.TurnID), DedupeKey: needsYouDedupeKey(host.record.ID, rawID, state.TurnID)}
 	d.sendTurnNeedsYou(row.ID, desktop, mobile)
 }
 
 func (d *Daemon) sendTurnNeedsYou(sessionID, desktop string, mobile mobileNotification) {
 	d.background.start(func(ctx context.Context) {
-		if err := d.notifyDesktop("Agenthail", desktop, sessionID, "", "", nil); err != nil {
+		if err := d.notifyDesktop(mobile.Title, desktop, sessionID, "", "", nil); err != nil {
 			d.log.Printf("desktop notification: %s", err)
 		}
 		notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)

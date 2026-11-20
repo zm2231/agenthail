@@ -1,7 +1,8 @@
 package daemon
 
 import (
-	"fmt"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -45,28 +46,46 @@ func shownLine(text string, limit int) string {
 	return strings.TrimRight(cut, " ,;:.-") + "…"
 }
 
-// A push passes through the relay and Apple, so it names the session by alias and never by its title, which is often the person's own words.
-func pushSubject(kind surface.SurfaceKind, alias string, project *CatalogProject) string {
-	who := notificationSurfaceName(kind)
+var (
+	generatedSessionName = regexp.MustCompile(`^([a-z0-9]+(?:-[a-z0-9]+)*)-[0-9a-z]{2}$`)
+	folderSlugBreaks     = regexp.MustCompile(`[^a-z0-9]+`)
+)
+
+// A push passes through the relay and Apple, so it names the session by its alias or by the name Claude Code generates from its folder (news-fqs-pilot-b9 in news-fqs-pilot), never by a name that may hold the person's own words: a Codex name can be the first line of a prompt.
+func pushTag(kind surface.SurfaceKind, alias, name, cwd string) string {
 	if alias != "" {
-		who = "@" + alias
+		return "@" + alias
 	}
-	if project != nil && project.DisplayName != "" {
-		who += " in " + project.DisplayName
+	if kind == surface.KindClaude && folderGeneratedName(name, cwd) {
+		return name
 	}
-	return who
+	switch kind {
+	case surface.KindClaude:
+		return "Claude agent"
+	case surface.KindCodex:
+		return "Codex agent"
+	case surface.KindNotion:
+		return "Notion agent"
+	default:
+		return "Agent"
+	}
 }
 
-func (d *Daemon) sessionPushSubject(session *surface.Session) string {
+func folderGeneratedName(name, cwd string) bool {
+	match := generatedSessionName.FindStringSubmatch(name)
+	if match == nil || cwd == "" {
+		return false
+	}
+	folder := strings.Trim(folderSlugBreaks.ReplaceAllString(strings.ToLower(filepath.Base(cwd)), "-"), "-")
+	return folder != "" && strings.HasPrefix(folder, match[1])
+}
+
+func (d *Daemon) sessionPushTag(session *surface.Session) string {
 	alias, err := d.Registry.ReverseAlias(session.ID)
 	if err != nil {
 		d.log.Printf("read the alias of %s: %s", session.ID, err)
 	}
-	project, err := d.sessionProject(*session)
-	if err != nil {
-		d.log.Printf("read the project of %s: %s", session.ID, err)
-	}
-	return pushSubject(session.Surface, alias, project)
+	return pushTag(session.Surface, alias, session.Name, session.Cwd)
 }
 
 type dashboardAsk struct {
@@ -91,14 +110,14 @@ func (ask *dashboardAsk) asksPerson() bool {
 }
 
 type turnCompletedNotice struct {
-	desktop, mobile, requestID, outcome string
-	actions                             []surface.RequestAction
-	quiet                               bool
+	title, desktop, mobile, requestID, outcome string
+	actions                                    []surface.RequestAction
+	quiet                                      bool
 }
 
 // A turn that leaves an ask open for the person needs them; the ask was announced when it reached them, so the completion stays quiet.
-func (d *Daemon) endTurnNotifications(session *surface.Session, completedTurnID, desktop, mobile string) turnCompletedNotice {
-	notice := turnCompletedNotice{desktop: desktop, mobile: mobile, outcome: turnOutcomeFinished}
+func (d *Daemon) endTurnNotifications(session *surface.Session, completedTurnID, title, body string) turnCompletedNotice {
+	notice := turnCompletedNotice{title: title, desktop: body, mobile: body, outcome: turnOutcomeFinished}
 	ask, asked, err := d.Registry.RowAsk(session.ID)
 	if err != nil {
 		d.log.Printf("read the ask of %s: %s", d.resolveDisplay(session.ID), err)
@@ -112,9 +131,8 @@ func (d *Daemon) endTurnNotifications(session *surface.Session, completedTurnID,
 		d.log.Printf("read turn end %s: %s", d.resolveDisplay(session.ID), err)
 	}
 	if found {
-		headline := shownLine(end.Headline, headlineShownRunes)
-		notice.desktop = fmt.Sprintf("%s done: %s", d.resolveDisplay(session.ID), headline)
-		notice.mobile = fmt.Sprintf("%s done%s: %s", d.sessionPushSubject(session), d.onHost(), headline)
+		notice.desktop = "Done: " + shownLine(end.Headline, headlineShownRunes)
+		notice.mobile = notice.desktop
 	}
 	return notice
 }

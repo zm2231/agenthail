@@ -82,10 +82,14 @@ type TurnNotice struct {
 	Outcome   string
 	RequestID string
 	At        time.Time
+	// Headline is the end_turn headline of the noticed turn itself, so it stays right after a later turn ends.
+	Headline string
 }
 
 func (r *Registry) TurnNotices() (map[string]TurnNotice, error) {
-	rows, err := r.read.Query(`SELECT session_id,notice_turn_id,notice_outcome,notice_request_id,notice_at_ms FROM session_runtime WHERE notice_turn_id<>''`)
+	rows, err := r.read.Query(`SELECT sr.session_id,sr.notice_turn_id,sr.notice_outcome,sr.notice_request_id,sr.notice_at_ms,
+		COALESCE((SELECT te.headline FROM turn_ends te WHERE te.session_id=sr.session_id AND te.completed_turn_id=sr.notice_turn_id AND te.ended_at_ms>0 ORDER BY te.ended_at_ms DESC LIMIT 1),'')
+		FROM session_runtime sr WHERE sr.notice_turn_id<>''`)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +99,7 @@ func (r *Registry) TurnNotices() (map[string]TurnNotice, error) {
 		var sessionID string
 		var notice TurnNotice
 		var atMS int64
-		if err := rows.Scan(&sessionID, &notice.TurnID, &notice.Outcome, &notice.RequestID, &atMS); err != nil {
+		if err := rows.Scan(&sessionID, &notice.TurnID, &notice.Outcome, &notice.RequestID, &atMS, &notice.Headline); err != nil {
 			return nil, err
 		}
 		notice.At = time.UnixMilli(atMS).UTC()

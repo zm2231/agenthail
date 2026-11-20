@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"time"
@@ -24,13 +23,14 @@ const (
 // A viewing host notifies from its host's notice and never judges a mirrored turn finished itself.
 type dashboardTurnCompletion struct {
 	TurnID    string    `json:"turnId"`
+	Headline  string    `json:"headline,omitempty"`
 	Outcome   string    `json:"outcome"`
 	RequestID string    `json:"requestId,omitempty"`
 	At        time.Time `json:"at"`
 }
 
 func turnCompletionRow(notice registry.TurnNotice) *dashboardTurnCompletion {
-	return &dashboardTurnCompletion{TurnID: notice.TurnID, Outcome: notice.Outcome, RequestID: notice.RequestID, At: notice.At}
+	return &dashboardTurnCompletion{TurnID: notice.TurnID, Headline: shownLine(notice.Headline, headlineShownRunes), Outcome: notice.Outcome, RequestID: notice.RequestID, At: notice.At}
 }
 
 // Identical on the host and every viewer, so the relay delivers it to a phone once.
@@ -40,18 +40,6 @@ func completionDedupeKey(hostID, sessionID, turnID string) string {
 	}
 	sum := sha256.Sum256([]byte(hostID + "\x00" + sessionID + "\x00" + turnID))
 	return hex.EncodeToString(sum[:])
-}
-
-// A phone paired to this host and a viewer may show this push instead of the viewer's.
-func (d *Daemon) onHost() string {
-	viewed, err := d.Registry.HasHostViewers()
-	if err != nil {
-		d.log.Printf("read host viewers: %s", err)
-	}
-	if name := d.hostIdentity().Name; viewed && name != "" {
-		return " on " + name
-	}
-	return ""
 }
 
 type mirroredRow struct {
@@ -73,14 +61,17 @@ func (d *Daemon) notifyMirroredCompletion(host *pairedHost, rawID string, row da
 	if completion == nil || prior != nil && prior.TurnID == completion.TurnID || completion.Outcome == turnOutcomeNeedsYou {
 		return
 	}
-	status := "finished"
-	if completion.Outcome == turnOutcomeFailed {
-		status = "failed"
+	body := "Finished"
+	switch {
+	case completion.Outcome == turnOutcomeFailed:
+		body = "Failed"
+	case completion.Headline != "":
+		body = "Done: " + completion.Headline
 	}
-	message := fmt.Sprintf("%s %s on %s", notificationSurfaceName(row.Surface), status, host.record.Name)
-	notification := mobileNotification{Title: "Agenthail", Message: fmt.Sprintf("%s %s on %s", pushSubject(row.Surface, row.Alias, row.Project), status, host.record.Name), SessionID: row.ID, TurnID: completion.TurnID, EventType: "turn.completed", CollapseID: turnNotificationKey(host.record.ID, rawID, completion.TurnID), DedupeKey: completionDedupeKey(host.record.ID, rawID, completion.TurnID)}
+	title := pushTag(row.Surface, row.Alias, row.Name, row.Cwd)
+	notification := mobileNotification{Title: title, Message: body, SessionID: row.ID, TurnID: completion.TurnID, EventType: "turn.completed", CollapseID: turnNotificationKey(host.record.ID, rawID, completion.TurnID), DedupeKey: completionDedupeKey(host.record.ID, rawID, completion.TurnID)}
 	d.background.start(func(ctx context.Context) {
-		if err := d.notifyDesktop("Agenthail", message, row.ID, "", "", nil); err != nil {
+		if err := d.notifyDesktop(title, body, row.ID, "", "", nil); err != nil {
 			d.log.Printf("desktop notification: %s", err)
 		}
 		notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -98,8 +89,8 @@ func (d *Daemon) notifyMirroredAsk(host *pairedHost, rawID string, row dashboard
 	if !ask.asksPerson() || prior != nil && prior.ID == ask.ID && prior.asksPerson() {
 		return
 	}
-	desktop := fmt.Sprintf("%s needs you on %s: %s", d.resolveDisplay(row.ID), host.record.Name, ask.Title)
-	mobile := mobileNotification{Title: "Agenthail", Message: fmt.Sprintf("%s needs you on %s: %s", notificationSurfaceName(row.Surface), host.record.Name, ask.Title), SessionID: row.ID, TurnID: ask.ID, EventType: "ask.opened",
+	desktop := "Needs you: " + ask.Title
+	mobile := mobileNotification{Title: pushTag(row.Surface, row.Alias, row.Name, row.Cwd), Message: desktop, SessionID: row.ID, TurnID: ask.ID, EventType: "ask.opened",
 		CollapseID: askNotificationKey(ask.ID), RequestID: ask.ID, DedupeKey: askDedupeKey(host.record.ID, ask.ID)}
 	d.background.start(func(ctx context.Context) {
 		d.deliverAskNotifications(ctx, desktop, mobile, d.mirroredAskActions(ctx, host, rawID, ask.ID))

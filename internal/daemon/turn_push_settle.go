@@ -155,6 +155,10 @@ func (d *Daemon) anotherTurnRunning(sessionID, turnID string) bool {
 }
 
 func (d *Daemon) sendSettledTurnPush(sessionID string, entry *pendingTurnPush, reason string) {
+	if d.completionQuietedForLead(sessionID) {
+		d.logSettledPush(sessionID, entry.turns, reason, "turn.completed suppressed=lead-only")
+		return
+	}
 	d.logSettledPush(sessionID, entry.turns, reason, "turn.completed")
 	d.recordTurnNotice(sessionID, entry.turnID, entry.notice)
 	d.notifyTurnCompleted(entry.notice, sessionID, entry.turnID)
@@ -173,6 +177,10 @@ func (d *Daemon) flushTurnPushes() {
 	p.mu.Unlock()
 	var sends sync.WaitGroup
 	for sessionID, entry := range held {
+		if d.completionQuietedForLead(sessionID) {
+			d.logSettledPush(sessionID, entry.turns, settledOnShutdown, "turn.completed suppressed=lead-only")
+			continue
+		}
 		d.logSettledPush(sessionID, entry.turns, settledOnShutdown, "turn.completed")
 		d.recordTurnNotice(sessionID, entry.turnID, entry.notice)
 		sends.Add(1)

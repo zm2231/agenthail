@@ -158,7 +158,7 @@ func TestAPersonsSessionThatAsksIsInNeedsYouUntilAnsweredAndItsTurnEndsQuietly(t
 			t.Fatal("end turn refused")
 		}
 	})
-	f.alert(t, " needs you: Deploy the fix?")
+	f.alert(t, "Needs you: Deploy the fix?")
 	row := viewRow(t, f.d, f.from.ID)
 	if row.Ask == nil || row.Ask.ID != id || row.Ask.RoutedTo != registry.AskToPerson || row.Ask.AskedAt.IsZero() || row.Attention == nil || row.Attention.Kind != AttentionAsk || !presentationNeedsYou(&row) {
 		t.Fatalf("row ask=%+v attention=%+v", row.Ask, row.Attention)
@@ -184,7 +184,7 @@ func TestAPersonsSessionThatAsksIsInNeedsYouUntilAnsweredAndItsTurnEndsQuietly(t
 			t.Fatal("the next turn could not end")
 		}
 	})
-	f.alert(t, " done: Deployed")
+	f.alert(t, "Done: Deployed")
 	if row := viewRow(t, f.d, f.from.ID); row.Ask != nil || row.EndTurn == nil || row.EndTurn.Headline != "Deployed" {
 		t.Fatalf("after the next turn: ask=%+v endTurn=%+v", row.Ask, row.EndTurn)
 	}
@@ -193,7 +193,7 @@ func TestAPersonsSessionThatAsksIsInNeedsYouUntilAnsweredAndItsTurnEndsQuietly(t
 func TestACompletionHeldForBackgroundWorkStaysQuietWhileTheAskIsOpen(t *testing.T) {
 	f := newAskFixture(t)
 	id, _ := f.raise(t, f.person, deployAsk)["askId"].(string)
-	f.alert(t, " needs you: Deploy the fix?")
+	f.alert(t, "Needs you: Deploy the fix?")
 	if err := f.r.BindTurnCompletion(f.from.ID, "turn-1", time.Time{}, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestACompletionHeldForBackgroundWorkStaysQuietWhileTheAskIsOpen(t *testing.
 	if notices, err := f.r.TurnNotices(); err != nil || notices[f.from.ID].Outcome != turnOutcomeNeedsYou || notices[f.from.ID].RequestID != id {
 		t.Fatalf("notice %+v err=%v", notices[f.from.ID], err)
 	}
-	if alerts := f.desktop.matching(" needs you: Deploy the fix?"); len(alerts) != 1 {
+	if alerts := f.desktop.matching("Needs you: Deploy the fix?"); len(alerts) != 1 {
 		t.Fatalf("the ask was announced %d times", len(alerts))
 	}
 }
@@ -229,7 +229,7 @@ func TestAWorkersAskGoesToWhoStartedItWhichAnswersIt(t *testing.T) {
 		t.Fatalf("a worker's ask put it in front of the person: ask=%+v attention=%+v", row.Ask, row.Attention)
 	}
 	f.d.background.wait()
-	if alerts := f.desktop.matching(" needs you: Deploy the fix?"); len(alerts) != 0 {
+	if alerts := f.desktop.matching("Needs you: Deploy the fix?"); len(alerts) != 0 {
 		t.Fatal("the person was told a worker needs them")
 	}
 
@@ -260,7 +260,7 @@ func TestAnAskTheHearerPassesOnSitsOnOrCannotHearReachesThePerson(t *testing.T) 
 	if ask := f.ask(t, passed); ask.RoutedTo != registry.AskToPerson || len(ask.Route) != 2 || ask.Route[1].Why != registry.AskPassedOn {
 		t.Fatalf("passed on: %+v", ask)
 	}
-	f.alert(t, " needs you: Deploy the fix?")
+	f.alert(t, "Needs you: Deploy the fix?")
 	if requests := f.requests(t, f.to.ID); len(requests) != 1 || requests[0].ID != passed {
 		t.Fatalf("the person's requests %+v", requests)
 	}
@@ -274,7 +274,7 @@ func TestAnAskTheHearerPassesOnSitsOnOrCannotHearReachesThePerson(t *testing.T) 
 	if ask := f.ask(t, sat); ask.RoutedTo != registry.AskToPerson {
 		t.Fatalf("an ask sat on past its window stayed: %+v", ask)
 	}
-	f.alert(t, " needs you: Which port?")
+	f.alert(t, "Needs you: Which port?")
 	if queued := f.told(t, f.from.ID); len(queued) != 0 {
 		t.Fatalf("the spawner still has notices of asks that left it: %q", queued)
 	}
@@ -459,7 +459,7 @@ func TestANotificationButtonAnswersASingleQuestionAsk(t *testing.T) {
 		defer mu.Unlock()
 		return len(pushed) == 1
 	})
-	if push := pushed[0]; push.requestID != id || len(push.actions) != 3 || push.actions[1].ID != "o1" || push.actions[2].ID != "reply" || !strings.HasSuffix(push.message, "needs you: Deploy the fix?") {
+	if push := pushed[0]; push.requestID != id || len(push.actions) != 3 || push.actions[1].ID != "o1" || push.actions[2].ID != "reply" || push.message != "Needs you: Deploy the fix?" {
 		t.Fatalf("push %+v, ask %s", push, id)
 	}
 	if response := f.respond(f.from.ID, id, "button", map[string]any{"choices": []string{"o1"}}); response.Code != http.StatusOK {
@@ -589,7 +589,7 @@ func TestALongHeadlineIsCutWhereShownAndALaterEndOfTheSameTurnReplacesIt(t *test
 	if end == nil || utf8.RuneCountInString(end.Headline) > 80 || !strings.HasSuffix(end.Headline, "…") || !strings.HasPrefix(long, strings.TrimSuffix(end.Headline, "…")) || len(end.Next) != 3 {
 		t.Fatalf("the row's end of turn: %+v", end)
 	}
-	f.alert(t, " done: "+end.Headline)
+	f.alert(t, "Done: "+end.Headline)
 	if first := f.desktop.matching("First try"); len(first) != 0 {
 		t.Fatalf("the replaced headline was announced: %+v", first)
 	}

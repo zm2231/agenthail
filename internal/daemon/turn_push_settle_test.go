@@ -98,7 +98,7 @@ func TestATurnEndedWithAHeadlinePushesOnceWhenItsVerdictLands(t *testing.T) {
 	if len(finished) != 1 || pushes.count(turnNeedsYouEvent) != 0 {
 		t.Fatalf("one finished turn pushed %d finished and %d needs-you", len(finished), pushes.count(turnNeedsYouEvent))
 	}
-	if message := finished[0]["message"]; !strings.Contains(message, "done") || !strings.HasSuffix(message, ": Parser fixed and tests pass") || finished[0]["turnId"] != "turn-1" {
+	if message := finished[0]["message"]; message != "Done: Parser fixed and tests pass" || finished[0]["title"] != "Codex agent" || finished[0]["turnId"] != "turn-1" {
 		t.Fatalf("the push %+v does not carry the turn's headline", finished[0])
 	}
 	if lines := settledLines(logged); len(lines) != 1 || lines[0] != "push settled session=from turns=turn-1 reason=verdict event=turn.completed injected=0" {
@@ -137,7 +137,7 @@ func TestATurnJudgedToNeedThePersonPushesOnlyNeedsYou(t *testing.T) {
 		t.Fatalf("a turn judged to need the person also pushed finished %d times", count)
 	}
 	needs := pushes.all(turnNeedsYouEvent)
-	if len(needs) != 1 || !strings.Contains(needs[0]["message"], "needs you") || !strings.HasSuffix(needs[0]["message"], ": Fix is ready; deploy it?") {
+	if len(needs) != 1 || needs[0]["message"] != "Needs you: Fix is ready; deploy it?" {
 		t.Fatalf("needs-you pushes %+v", needs)
 	}
 	if lines := settledLines(logged); len(lines) != 1 || lines[0] != "push settled session=from turns=turn-1 reason=verdict event=turn.needs_you injected=0" {

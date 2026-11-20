@@ -2106,7 +2106,20 @@ struct SettingsView: View {
                             .accessibilityIdentifier("notifications-problem")
                     }
                     Text("Your computers send an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(PhonePalette.muted)
+                    ForEach(model.notificationPreferences) { preference in
+                        Toggle(isOn: Binding(get: { preference.value }, set: { model.setNotificationPreference(preference.id, to: $0) })) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(preference.title)
+                                Text(preference.detail).font(.footnote).foregroundStyle(PhonePalette.muted)
+                            }
+                        }
+                        .accessibilityIdentifier("notification-preference-\(preference.id)")
+                    }
+                    if let problem = model.notificationPreferenceProblem {
+                        Text(problem).font(.footnote).foregroundStyle(PhonePalette.failed)
+                    }
                 }
+                .task { await model.loadNotificationPreferences() }
             }
             .listRowBackground(GlassRowBackground(selected: false))
         }

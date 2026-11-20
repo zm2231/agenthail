@@ -418,6 +418,22 @@ struct NotificationSettings: View {
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
+            if !model.notificationPreferences.isEmpty {
+                Section("What notifies") {
+                    ForEach(model.notificationPreferences) { preference in
+                        Toggle(isOn: Binding(get: { preference.value }, set: { model.setNotificationPreference(preference.id, to: $0) })) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(preference.title)
+                                Text(preference.detail)
+                                    .font(.system(size: DesktopType.secondary))
+                                    .foregroundStyle(DesktopPalette.text2)
+                            }
+                        }
+                        .toggleStyle(.switch)
+                        .accessibilityIdentifier("notification-preference-\(preference.id)")
+                    }
+                }
+            }
             SettingsError(model: model)
         }
         .formStyle(.grouped)

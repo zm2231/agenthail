@@ -23,8 +23,9 @@ type dashboardTurnState struct {
 	Reason string `json:"reason,omitempty"`
 	Source string `json:"source"`
 	// TurnID and Pushed name a judged needs-you turn and whether its host pushed it to the person's devices, so a viewer pushes the same turn once under the host's key.
-	TurnID string `json:"turnId,omitempty"`
-	Pushed bool   `json:"pushed,omitempty"`
+	TurnID   string `json:"turnId,omitempty"`
+	Pushed   bool   `json:"pushed,omitempty"`
+	Headline string `json:"headline,omitempty"`
 }
 
 type leadRef struct {
@@ -105,7 +106,7 @@ func turnStateOf(row *dashboardSession, judgment *registry.TurnJudgment, leads l
 			if hasLead && !isLead {
 				return &dashboardTurnState{State: turnWaitingWork, Reason: "@" + lead.name, Source: turnSourceJudge}
 			}
-			return &dashboardTurnState{State: turnWaitingPerson, Source: turnSourceJudge, TurnID: judgment.TurnID, Pushed: !judgment.PushedAt.IsZero()}
+			return &dashboardTurnState{State: turnWaitingPerson, Source: turnSourceJudge, TurnID: judgment.TurnID, Pushed: !judgment.PushedAt.IsZero(), Headline: shownLine(judgment.Headline, headlineShownRunes)}
 		case turnDone, turnWaitingWork, turnContinuing:
 			if judgment.Error == "" {
 				return &dashboardTurnState{State: judgment.State, Source: turnSourceJudge}

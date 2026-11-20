@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -210,15 +209,15 @@ func TestATurnOnAPairedLinuxHostNotifiesTheViewerAndThePhoneOnce(t *testing.T) {
 		t.Fatalf("the two computers named the notification differently: %+v", sends)
 	}
 	for _, send := range sends {
-		if !strings.HasPrefix(send["message"], "Codex agent finished on ") {
-			t.Fatalf("a push without the app, status and host: %+v", send)
+		if send["title"] != "Codex agent" || send["message"] != "Finished" {
+			t.Fatalf("a push not titled with the agent and its status alone: %+v", send)
 		}
 	}
 	if shown := relay.shown("phone"); len(shown) != 1 {
 		t.Fatalf("the phone showed %d notifications: %+v", len(shown), shown)
 	}
 	notices := mac.list()
-	if len(notices) != 1 || notices[0].message != "Codex agent finished on vps" {
+	if len(notices) != 1 || notices[0].message != "Finished" {
 		t.Fatalf("viewer desktop notices %+v", notices)
 	}
 	for _, send := range sends {
@@ -234,11 +233,27 @@ func TestATurnOnAPairedLinuxHostNotifiesTheViewerAndThePhoneOnce(t *testing.T) {
 	hostTurn(t, host, "remote-a", "turn-2", "the model refused", nil)
 	testkit.Eventually(t, "the failure notified", 10*time.Second, func() bool { return len(mac.list()) == 2 })
 	settleNotices(t, host, record.ID, viewer)
-	if notices := mac.list(); notices[1].message != "Codex agent failed on vps" {
+	if notices := mac.list(); notices[1].message != "Failed" {
 		t.Fatalf("failure notice %+v", notices[1])
 	}
-	if shown := relay.shown("phone"); len(shown) != 2 || !strings.Contains(shown[1]["message"], "failed") {
+	if shown := relay.shown("phone"); len(shown) != 2 || shown[1]["message"] != "Failed" {
 		t.Fatalf("after the failure the phone showed %+v", shown)
+	}
+
+	hostTurn(t, host, "remote-a", "turn-3", "", func() {
+		if _, err := host.reg.EndTurn(registry.TurnEnd{SessionID: "remote-a", Headline: "Shipped the fix", Source: registry.TurnSourceTool}, "turn-3", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	})
+	testkit.Eventually(t, "the headline turn notified", 10*time.Second, func() bool { return len(mac.list()) == 3 })
+	settleNotices(t, host, record.ID, viewer)
+	for _, send := range relay.sent() {
+		if send["turnId"] == "turn-3" && send["message"] != "Done: Shipped the fix" {
+			t.Fatalf("a computer pushed the headline turn as %+v", send)
+		}
+	}
+	if notices := mac.list(); notices[2].message != "Done: Shipped the fix" {
+		t.Fatalf("the viewer's desktop said %+v", notices[2])
 	}
 }
 
