@@ -47,11 +47,25 @@
       }
 
       @Test func resizingTheSameTableFollowsTheNewColumnWidth() throws {
-        let wide = measure(.wholeWords, width: 760, then: 200)
+        let wide = measure(.wholeWords, width: 760) { $0.width = 200 }
         let narrow = measure(.wholeWords, width: 200)
 
         #expect(wide.settled == narrow.settled)
         #expect(wide.table > 200)
+      }
+
+      @Test func aLargerFontOrALongerWordWidensTheSameTable() throws {
+        let larger = measure(.wholeWords, width: 200) { $0.fontSize = 26 }
+        let freshLarger = measure(.wholeWords, width: 200, fontSize: 26)
+        #expect(larger.settled == freshLarger.settled)
+        #expect(larger.table == freshLarger.table)
+
+        let longer = Self.markdown.replacingOccurrences(of: "configuration", with: "reconfigurationsnapshotting")
+        let streamed = measure(.wholeWords, width: 200) { $0.markdown = longer }
+        let freshStreamed = measure(.wholeWords, width: 200, markdown: longer)
+        #expect(streamed.settled == freshStreamed.settled)
+        #expect(streamed.table == freshStreamed.table)
+        #expect(streamed.table > measure(.wholeWords, width: 200).table)
       }
 
       @Test(arguments: [200.0, 760.0])
@@ -61,16 +75,16 @@
         #expect(words.first == words.settled)
       }
 
-      private func measure(_ style: some TableStyle, width: CGFloat, then resized: CGFloat? = nil) -> Measured {
+      private func measure(
+        _ style: some TableStyle,
+        width: CGFloat,
+        fontSize: CGFloat = 13,
+        markdown: String = Self.markdown,
+        then change: ((Column) -> Void)? = nil
+      ) -> Measured {
         let tableWidth = TableWidth()
-        let column = Column(width: width)
-        let view = Sized(column: column) {
-          StructuredText(markdown: Self.markdown)
-            .textual.tableStyle(style)
-            .textual.tableCellStyle(Probe(width: tableWidth))
-            .fixedSize(horizontal: false, vertical: true)
-        }
-        let host = NSHostingView(rootView: view)
+        let column = Column(width: width, fontSize: fontSize, markdown: markdown)
+        let host = NSHostingView(rootView: Live(column: column, style: style, probe: Probe(width: tableWidth)))
         let window = NSWindow(
           contentRect: NSRect(x: 0, y: 0, width: width, height: 400),
           styleMask: [.borderless],
@@ -79,13 +93,13 @@
         )
         window.contentView = host
         let first = host.fittingSize
-        if let resized {
+        if let change {
           for _ in 0..<5 {
             host.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))
           }
           tableWidth.value = 0
-          column.width = resized
+          change(column)
         }
         for _ in 0..<5 {
           host.layoutSubtreeIfNeeded()
@@ -97,15 +111,28 @@
       @Observable
       final class Column {
         var width: CGFloat
-        init(width: CGFloat) { self.width = width }
+        var fontSize: CGFloat
+        var markdown: String
+
+        init(width: CGFloat, fontSize: CGFloat, markdown: String) {
+          self.width = width
+          self.fontSize = fontSize
+          self.markdown = markdown
+        }
       }
 
-      private struct Sized<Content: View>: View {
+      private struct Live<Style: TableStyle>: View {
         let column: Column
-        @ViewBuilder let content: Content
+        let style: Style
+        let probe: Probe
 
         var body: some View {
-          content.frame(width: column.width)
+          StructuredText(markdown: column.markdown)
+            .font(.system(size: column.fontSize))
+            .textual.tableStyle(style)
+            .textual.tableCellStyle(probe)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: column.width)
         }
       }
 
