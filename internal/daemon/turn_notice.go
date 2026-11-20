@@ -23,13 +23,14 @@ const (
 // A viewing host notifies from its host's notice and never judges a mirrored turn finished itself.
 type dashboardTurnCompletion struct {
 	TurnID    string    `json:"turnId"`
+	Headline  string    `json:"headline,omitempty"`
 	Outcome   string    `json:"outcome"`
 	RequestID string    `json:"requestId,omitempty"`
 	At        time.Time `json:"at"`
 }
 
 func turnCompletionRow(notice registry.TurnNotice) *dashboardTurnCompletion {
-	return &dashboardTurnCompletion{TurnID: notice.TurnID, Outcome: notice.Outcome, RequestID: notice.RequestID, At: notice.At}
+	return &dashboardTurnCompletion{TurnID: notice.TurnID, Headline: shownLine(notice.Headline, headlineShownRunes), Outcome: notice.Outcome, RequestID: notice.RequestID, At: notice.At}
 }
 
 // Identical on the host and every viewer, so the relay delivers it to a phone once.
@@ -64,8 +65,8 @@ func (d *Daemon) notifyMirroredCompletion(host *pairedHost, rawID string, row da
 	switch {
 	case completion.Outcome == turnOutcomeFailed:
 		body = "Failed"
-	case row.EndTurn.headlineOf(completion.TurnID) != "":
-		body = "Done: " + row.EndTurn.headlineOf(completion.TurnID)
+	case completion.Headline != "":
+		body = "Done: " + completion.Headline
 	}
 	title := pushTag(row.Surface, row.Alias, row.Name, row.Cwd)
 	notification := mobileNotification{Title: title, Message: body, SessionID: row.ID, TurnID: completion.TurnID, EventType: "turn.completed", CollapseID: turnNotificationKey(host.record.ID, rawID, completion.TurnID), DedupeKey: completionDedupeKey(host.record.ID, rawID, completion.TurnID)}

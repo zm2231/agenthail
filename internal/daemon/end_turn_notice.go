@@ -13,7 +13,6 @@ import (
 const AttentionAsk = "ask"
 
 type dashboardEndTurn struct {
-	TurnID   string    `json:"turnId,omitempty"`
 	Headline string    `json:"headline"`
 	Next     []string  `json:"next,omitempty"`
 	EndedAt  time.Time `json:"endedAt"`
@@ -32,7 +31,7 @@ func endTurnRow(end *registry.TurnEnd) *dashboardEndTurn {
 	for _, item := range end.Next {
 		next = append(next, shownLine(item, nextShownRunes))
 	}
-	return &dashboardEndTurn{TurnID: end.CompletedTurnID, Headline: shownLine(end.Headline, headlineShownRunes), Next: next, EndedAt: end.EndedAt}
+	return &dashboardEndTurn{Headline: shownLine(end.Headline, headlineShownRunes), Next: next, EndedAt: end.EndedAt}
 }
 
 func shownLine(text string, limit int) string {
@@ -136,11 +135,4 @@ func (d *Daemon) endTurnNotifications(session *surface.Session, completedTurnID,
 		notice.mobile = notice.desktop
 	}
 	return notice
-}
-
-func (end *dashboardEndTurn) headlineOf(turnID string) string {
-	if end == nil || turnID == "" || end.TurnID != turnID {
-		return ""
-	}
-	return end.Headline
 }

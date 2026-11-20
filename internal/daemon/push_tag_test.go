@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"testing"
+	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -30,18 +32,22 @@ func TestAPushIsTitledWithTheAgentsTagAndNeverItsPromptTitle(t *testing.T) {
 	}
 }
 
-func TestAMirroredPushUsesOnlyTheHeadlineOfItsOwnTurn(t *testing.T) {
-	end := &dashboardEndTurn{TurnID: "turn-2", Headline: "Shipped the fix"}
-	if got := end.headlineOf("turn-2"); got != "Shipped the fix" {
-		t.Fatalf("the turn's own headline read %q", got)
+func TestARowsTurnCompletionKeepsItsOwnHeadlineAfterALaterTurnEnds(t *testing.T) {
+	d, r, fake, from, _ := daemonFixture(t)
+	newPushRecorder(t, r)
+	runTurn(t, d, fake, &from, "turn-1", "First pass done", "Done.")
+	d.background.wait()
+	if _, err := r.EndTurn(registry.TurnEnd{SessionID: from.ID, Headline: "Second pass done", Source: registry.TurnSourceTool}, "turn-2", time.Now()); err != nil {
+		t.Fatal(err)
 	}
-	if got := end.headlineOf("turn-1"); got != "" {
-		t.Fatalf("an earlier turn took a later turn's headline %q", got)
+	if err := r.BindTurnCompletion(from.ID, "turn-2", time.Now(), 0); err != nil {
+		t.Fatal(err)
 	}
-	if got := (*dashboardEndTurn)(nil).headlineOf("turn-1"); got != "" {
-		t.Fatalf("a row without an end read %q", got)
+	row := viewRow(t, d, from.ID)
+	if row.TurnCompletion == nil || row.TurnCompletion.TurnID != "turn-1" || row.TurnCompletion.Headline != "First pass done" {
+		t.Fatalf("the row's turn completion %+v", row.TurnCompletion)
 	}
-	if got := (&dashboardEndTurn{Headline: "Unbound"}).headlineOf("turn-1"); got != "" {
-		t.Fatalf("an end not bound to a turn read %q", got)
+	if row.EndTurn == nil || row.EndTurn.Headline != "Second pass done" {
+		t.Fatalf("the row's current end %+v", row.EndTurn)
 	}
 }
