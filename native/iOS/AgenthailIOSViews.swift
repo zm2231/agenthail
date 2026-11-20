@@ -758,10 +758,10 @@ struct SessionScreen: View {
 #endif
             edge.update(end)
         }
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.contentSize.height > geometry.visibleRect.height
-        } action: { _, value in
-            overflows = value
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentSize.height - geometry.visibleRect.height
+        } action: { _, overflow in
+            overflows = overflow > 0
         }
         .onScrollGeometryChange(for: TranscriptEnd.self) { geometry in
             olderPlace.read(geometry)

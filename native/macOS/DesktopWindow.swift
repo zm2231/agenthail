@@ -972,11 +972,11 @@ struct TranscriptView: View {
             }
         }
         .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, held: { selectionHold.held(over: [.infinite]) }, position: $position, following: $following, rescaling: rescaling)
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.contentSize.height < geometry.containerSize.height * 1.5
-        } action: { _, value in
-            underfilled = value
-            if value { fillViewport() }
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentSize.height - geometry.containerSize.height * 1.5
+        } action: { _, slack in
+            underfilled = slack < 0
+            if underfilled { fillViewport() }
         }
         .onChange(of: pane.olderItems.count) { if underfilled { fillViewport() } }
         .onChange(of: pane.detail?.session.id) { if underfilled { fillViewport() } }
