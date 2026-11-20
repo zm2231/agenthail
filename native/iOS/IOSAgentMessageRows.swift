@@ -83,16 +83,9 @@ struct IOSAgentMessageRow: View {
                         Spacer(minLength: 0)
                         if !expandAll { Text("Show less").font(.footnote.weight(.medium)).foregroundStyle(PhonePalette.accentText) }
                     } else {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ClampedText(text: Text(chip).fontWeight(.semibold).foregroundStyle(PhonePalette.peer) + Text("  ") + Text(AgentMessage.inline(agent.summary)).italic().foregroundStyle(.secondary), lines: AgentRowStyle.previewLines, truncated: $truncated)
-                                .font(.subheadline)
-                                .multilineTextAlignment(.leading)
-                            if expandable {
-                                Text(files.isEmpty ? "Show more" : "Show more · \(files.count == 1 ? "1 file" : "\(files.count) files")")
-                                    .font(.footnote.weight(.medium))
-                                    .foregroundStyle(PhonePalette.accentText)
-                            }
-                        }
+                        ClampedText(text: Text(chip).fontWeight(.semibold).foregroundStyle(PhonePalette.peer) + Text("  ") + Text(AgentMessage.inline(agent.summary)).italic().foregroundStyle(.secondary) + Text(fileNote).foregroundStyle(PhonePalette.muted), lines: AgentRowStyle.previewLines, truncated: $truncated)
+                            .font(.subheadline)
+                            .multilineTextAlignment(.leading)
                     }
                 }
                 .frame(minHeight: 32)
@@ -101,6 +94,7 @@ struct IOSAgentMessageRow: View {
             .buttonStyle(.plain)
             .accessibilityLabel(expanded ? "From \(chip)" : "\(chip): \(agent.summary)")
             .accessibilityValue(expandable || expanded ? (expanded ? "Expanded" : "Collapsed") : "")
+            .accessibilityHint(expandable && !expanded ? "Shows the whole message" : "")
             .accessibilityIdentifier("agent-message-" + item.id)
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
@@ -118,6 +112,10 @@ struct IOSAgentMessageRow: View {
         .contextMenu {
             Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = item.text }
         }
+    }
+
+    private var fileNote: String {
+        files.isEmpty ? "" : files.count == 1 ? "  · 1 file" : "  · \(files.count) files"
     }
 
     private func toggle() {
