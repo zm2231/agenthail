@@ -43,7 +43,8 @@ final class LatestScrollTests: XCTestCase {
 
     func testATurnCutByThePageEdgeKeepsLookingForItsReply() {
         let loaded = [item("c1", kind: "toolCall", role: nil, turn: "t1"), item("e1", kind: "event", role: nil, turn: "t1"), item("p2", role: "user", turn: "t2")]
-        XCTAssertEqual(TurnReveal.find("t1", in: loaded), .partial("e1"), "the reply may be on the older page")
+        XCTAssertEqual(TurnReveal.find("t1", in: loaded), .partial, "the reply may be on the older page")
+        XCTAssertNil(TurnReveal.find("t1", in: loaded).settled, "trailing activity alone is not where the turn opens")
         let older = [item("p1", role: "user", turn: "t1"), item("r1", turn: "t1")]
         XCTAssertEqual(TurnReveal.find("t1", in: older + loaded), .settled("r1"))
     }

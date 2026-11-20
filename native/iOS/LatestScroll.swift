@@ -14,19 +14,12 @@ enum TurnReveal {
 
     enum Found: Equatable {
         case settled(String)
-        case partial(String)
+        case partial
         case missing
 
-        var isSettled: Bool {
-            if case .settled = self { return true }
-            return false
-        }
-
-        var id: String? {
-            switch self {
-            case .settled(let id), .partial(let id): id
-            case .missing: nil
-            }
+        var settled: String? {
+            if case .settled(let id) = self { return id }
+            return nil
         }
     }
 
@@ -39,7 +32,7 @@ enum TurnReveal {
         let rows = items.filter { $0.turnId == turn }
         if let reply = rows.last(where: isReply) { return .settled(reply.id) }
         guard let last = rows.last else { return .missing }
-        return items.first?.turnId == turn ? .partial(last.id) : .settled(last.id)
+        return items.first?.turnId == turn ? .partial : .settled(last.id)
     }
 
     static func row(of id: String, in groups: [TimelineGroup]) -> String? {

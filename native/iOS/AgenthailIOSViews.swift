@@ -520,6 +520,7 @@ struct SessionScreen: View {
     @State private var edge = TranscriptEdge()
     @State private var queueTail = QueueTail()
     @State private var landed = false
+    @State private var turnReveal: Task<Void, Never>?
     @State private var opening = OpeningRebuild()
     @State private var rowsGeneration = 0
     @State private var overflows = false
@@ -577,17 +578,27 @@ struct SessionScreen: View {
         guard let turn = model.takeOpenedTurn(screen) else { return false }
         var found = TurnReveal.find(turn, in: shownItems)
         var pages = 0
-        while !found.isSettled, pages < TurnReveal.olderPages, (model.activityCursor ?? 0) > 0 {
+        while found.settled == nil, pages < TurnReveal.olderPages, let cursor = model.activityCursor, cursor > 0 {
             guard !Task.isCancelled, model.selectedSessionID == screen else { return false }
+            if model.loadingOlderActivity {
+                try? await Task.sleep(for: .milliseconds(100))
+                continue
+            }
             await model.loadOlderActivity()
+            guard model.activityCursor != cursor else { break }
             pages += 1
             found = TurnReveal.find(turn, in: shownItems)
         }
-        guard !Task.isCancelled, model.selectedSessionID == screen, let item = found.id, let target = turnRow(item) else { return false }
+        guard !Task.isCancelled, model.selectedSessionID == screen, let item = found.settled, let target = turnRow(item) else { return false }
         olderPlace.release()
         followingLatest = false
         position.scrollTo(id: target, anchor: .top)
         return true
+    }
+
+    private func startTurnReveal() {
+        turnReveal?.cancel()
+        turnReveal = Task { await revealOpenedTurn() }
     }
 
     private var shownItems: [TimelineItem] {
@@ -949,21 +960,23 @@ struct SessionScreen: View {
             landed = true
             opening.land(open)
             opening.fire(latest: latestRowID, rebuildOpeningRows)
-            if model.openedTurns[session.id] != nil { await revealOpenedTurn() }
+            if model.openedTurns[session.id] != nil { startTurnReveal() }
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { scrollToLatest() }
         }
         .onChange(of: model.openedTurns[session.id]) { _, turn in
             guard landed, turn != nil else { return }
-            Task { await revealOpenedTurn() }
+            startTurnReveal()
         }
         .onAppear { model.sessionAppeared(session.id) }
         .onChange(of: session.id) { old, new in
+            turnReveal?.cancel()
             model.sessionDisappeared(old)
             model.sessionAppeared(new)
         }
         .onDisappear {
+            turnReveal?.cancel()
             olderPlace.release()
             model.sessionDisappeared(session.id)
         }
