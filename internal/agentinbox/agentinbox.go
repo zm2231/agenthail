@@ -67,8 +67,11 @@ func (i *Inbox) Resolve(_ context.Context, target string) (*surface.Session, err
 	if err != nil {
 		return nil, err
 	}
-	if identity, err := reg.AgentIdentityOf(target); err == nil {
-		return reg.Session(identity.SessionID)
+	// A surface-qualified selector reaches here without its "agent:", which is also how identity ids begin.
+	for _, id := range []string{target, string(surface.KindAgent) + ":" + target} {
+		if identity, err := reg.AgentIdentityOf(id); err == nil {
+			return reg.Session(identity.SessionID)
+		}
 	}
 	name := strings.TrimPrefix(strings.TrimPrefix(target, string(surface.KindAgent)+":"), "@")
 	identity, err := reg.AgentIdentityNamed(name)

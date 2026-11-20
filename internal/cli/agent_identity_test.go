@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -53,7 +54,31 @@ func TestAnAgentIdentitySendsWithTheCLIsReachAndReadsItsInbox(t *testing.T) {
 		t.Fatalf("send --reply to an identity: %v", err)
 	}
 
+	identity, err := r.AgentIdentityNamed("scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := captureStdout(t, func() error { return app.Run([]string{"send", identity.SessionID, "by its id"}) }); err != nil || !strings.Contains(out, "inbox of @scout") {
+		t.Fatalf("send to the identity's id %s: out=%q err=%v", identity.SessionID, out, err)
+	}
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"send", "--from", identity.SessionID, "target", "from its id"})
+	}); err != nil || len(fake.sent) != 2 || !strings.Contains(fake.sent[1], "from its id") {
+		t.Fatalf("send from the identity's id: err=%v sent=%v", err, fake.sent)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", identity.SessionID)
+	if app.agentEnvironment() {
+		t.Fatal("the identity's id in AGENTHAIL_SESSION_ID was treated as an agent session")
+	}
+	if id, err := app.sourceSessionID(context.Background(), ""); err != nil || id != identity.SessionID {
+		t.Fatalf("sender from the identity's id=%q err=%v", id, err)
+	}
+
 	t.Setenv("AGENTHAIL_SESSION_ID", "scout")
+	out, err = captureStdout(t, func() error { return app.Run([]string{"inbox", "--all", "--peek"}) })
+	if err != nil || !strings.Contains(out, "by its id") {
+		t.Fatalf("inbox after a send by id: out=%q err=%v", out, err)
+	}
 	out, err = captureStdout(t, func() error { return app.Run([]string{"inbox"}) })
 	if err != nil || !strings.Contains(out, "a note for scout") || !strings.Contains(out, "from Agenthail CLI") || strings.Contains(out, "answer me") {
 		t.Fatalf("inbox: out=%q err=%v", out, err)

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -100,7 +101,13 @@ func TestAnAgentIdentitySendsAcrossHostsAndItsRepliesLandInItsInbox(t *testing.T
 		t.Fatalf("the laptop addresses scout as %q (err %v), want box::@scout", target, err)
 	}
 
-	reply := laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "send", "sessionId": hosts.Qualify(boxRecord.ID, scout), "sourceSessionId": "laptop-a", "message": "reply to scout"})
+	resolved := laptop.request(t, http.MethodGet, "/api/v1/resolve?scope=remote&host=box&target=@scout", nil)
+	var answer resolveResponse
+	if err := json.Unmarshal(resolved.Body.Bytes(), &answer); err != nil || len(answer.Matches) != 1 || answer.Matches[0].ID != hosts.Qualify(boxRecord.ID, scout) || !answer.Matches[0].Exact || answer.Matches[0].Surface != surface.KindAgent {
+		t.Fatalf("box::@scout resolves to status=%d body=%s", resolved.Code, resolved.Body.String())
+	}
+
+	reply := laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "send", "sessionId": answer.Matches[0].ID, "sourceSessionId": "laptop-a", "message": "reply to scout"})
 	if reply.Code != http.StatusOK || !strings.Contains(reply.Body.String(), "inbox of @scout") {
 		t.Fatalf("reply status=%d body=%s", reply.Code, reply.Body.String())
 	}
