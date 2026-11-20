@@ -43,7 +43,7 @@ func submitPrompt(t *testing.T, d *Daemon, sessionID, promptID, prompt string) {
 	}
 }
 
-func TestATurnTheJudgeSaysNeedsThePersonPushesOnceInPlaceOfItsFinishedPush(t *testing.T) {
+func TestATurnTheJudgeSaysNeedsThePersonPushesNeedsYouInPlaceOfItsFinishedPush(t *testing.T) {
 	stub := &judgeStub{state: turnWaitingPerson}
 	d, r, fake, from := judgeFixture(t, stub, "")
 	pushes := newPushRecorder(t, r)
@@ -56,8 +56,8 @@ func TestATurnTheJudgeSaysNeedsThePersonPushesOnceInPlaceOfItsFinishedPush(t *te
 	if !strings.Contains(push["message"], "needs you") || push["sessionId"] != from.ID || push["turnId"] != "turn-1" || push["dedupeKey"] == "" || push["collapseId"] == "" {
 		t.Fatalf("needs-you push %+v", push)
 	}
-	if finished := pushes.all("turn.completed"); len(finished) != 1 || finished[0]["collapseId"] != push["collapseId"] || finished[0]["dedupeKey"] == push["dedupeKey"] {
-		t.Fatalf("the turn's finished push %+v does not give way to its needs-you push %+v", finished, push)
+	if finished := pushes.all("turn.completed"); len(finished) != 0 {
+		t.Fatalf("the turn pushed finished %+v as well as needs-you %+v", finished, push)
 	}
 	if row := viewRow(t, d, from.ID); row.TurnState == nil || row.TurnState.TurnID != "turn-1" || !row.TurnState.Pushed {
 		t.Fatalf("the row does not say its turn was pushed: %+v", row.TurnState)

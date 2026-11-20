@@ -139,12 +139,14 @@ func (d *Daemon) queueTurnJudgment(session *surface.Session, turnID, reply strin
 	if end, ok, err := d.Registry.CompletedTurnEnd(session.ID, turnID); err == nil && ok {
 		judgment.Headline = end.Headline
 	}
+	d.turnJudgmentQueued(session.ID, turnID)
 	select {
 	case j.jobs <- judgeJob{judgment: judgment, reply: lastRunes(reply, turnJudgeReplyRune)}:
 	default:
 		j.mu.Lock()
 		j.dropped++
 		j.mu.Unlock()
+		d.turnVerdictLanded(session.ID, turnID)
 	}
 }
 
@@ -201,7 +203,9 @@ func (d *Daemon) recordTurnJudgment(judgment registry.TurnJudgment) {
 	}
 	d.requestCatalogDiscovery()
 	d.publishEvent("state.changed", judgment.SessionID, map[string]string{"source": "turn-judgment"})
-	d.pushJudgedTurn(judgment)
+	if !d.pushJudgedTurn(judgment) {
+		d.turnVerdictLanded(judgment.SessionID, judgment.TurnID)
+	}
 }
 
 func (j *turnJudge) failed(d *Daemon, err error) {

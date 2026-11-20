@@ -55,21 +55,37 @@ func (d *Daemon) releaseUnobservedHold(ctx context.Context, adapter surface.Surf
 			notice := d.endTurnNotifications(session, turnID, fmt.Sprintf("%s finished", d.resolveDisplay(session.ID)), fmt.Sprintf("%s finished%s", d.sessionPushSubject(session), d.onHost()))
 			noticed = &notice
 		}
-		d.recordCompletion(session, turnID, false, noticed)
-		if noticed != nil && !noticed.quiet {
-			d.notifyTurnCompleted(*noticed, session.ID, turnID)
+		switch {
+		case noticed == nil:
+			d.recordCompletion(session, turnID, false, nil)
+			d.resumeTurnPush(session.ID)
+		case noticed.quiet:
+			d.recordCompletion(session, turnID, false, noticed)
+			d.dropTurnPush(session.ID)
+		default:
+			d.recordCompletion(session, turnID, false, nil)
+			d.scheduleTurnPush(session.ID, turnID, *noticed)
 		}
 	}
 }
 
 func (d *Daemon) notifyTurnCompleted(notice turnCompletedNotice, sessionID, turnID string) {
-	hostID := d.hostIdentity().ID
 	d.background.start(func(ctx context.Context) {
+		notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		d.deliverTurnCompleted(notificationCtx, notice, sessionID, turnID)
+	})
+}
+
+func (d *Daemon) deliverTurnCompleted(ctx context.Context, notice turnCompletedNotice, sessionID, turnID string) {
+	hostID := d.hostIdentity().ID
+	desktop := make(chan struct{})
+	go func() {
+		defer close(desktop)
 		if err := d.notifyDesktop("Agenthail", notice.desktop, sessionID, "", notice.requestID, notice.actions); err != nil {
 			d.log.Printf("desktop notification: %s", err)
 		}
-		notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: notice.mobile, SessionID: sessionID, TurnID: turnID, EventType: "turn.completed", RequestID: notice.requestID, CollapseID: turnNotificationKey(hostID, sessionID, turnID), DedupeKey: completionDedupeKey(hostID, sessionID, turnID)})
-	})
+	}()
+	defer func() { <-desktop }()
+	d.notifyPairedDevices(ctx, mobileNotification{Title: "Agenthail", Message: notice.mobile, SessionID: sessionID, TurnID: turnID, EventType: "turn.completed", RequestID: notice.requestID, CollapseID: turnNotificationKey(hostID, sessionID, turnID), DedupeKey: completionDedupeKey(hostID, sessionID, turnID)})
 }

@@ -257,9 +257,15 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 			d.log.Printf("clear completion notification %s: %s", d.resolveDisplay(session.ID), err)
 		}
 	}
+	if completionChanged {
+		d.turnEndedForPush(session.ID)
+	}
 	if found && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
 		if arm {
 			d.armCompletionNotification(session.ID)
+		}
+		if !completionChanged || observation.ActiveTurnID != "" {
+			d.pauseTurnPush(session.ID)
 		}
 		d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnStart, sessionID: session.ID})
 	}
@@ -288,6 +294,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	}
 	if found && previous.LastStatus == surface.StatusBusy && observation.Status != surface.StatusBusy && !completionChanged {
 		d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnIdle, sessionID: session.ID})
+		d.resumeTurnPush(session.ID)
 	}
 	changed := !found || previous.LastStatus != observation.Status || previous.ActiveTurnID != observation.ActiveTurnID || previous.CompletedTurnID != observation.CompletedTurnID
 	if changed {
@@ -303,13 +310,18 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	}
 	if completed {
 		var noticed *turnCompletedNotice
-		if notice.desktop != "" {
+		if notice.quiet {
 			noticed = &notice
 		}
 		d.recordCompletion(session, observation.CompletedTurnID, observation.Reply.Error != "", noticed)
 	}
-	if notice.desktop != "" && !notice.quiet {
-		d.notifyTurnCompleted(notice, session.ID, observation.CompletedTurnID)
+	switch {
+	case notice.quiet:
+		d.dropTurnPush(session.ID)
+	case notice.desktop != "":
+		d.scheduleTurnPush(session.ID, observation.CompletedTurnID, notice)
+	case terminalCompletion:
+		d.resumeTurnPush(session.ID)
 	}
 	if terminalCompletion {
 		d.gateLedgerTurn(*session, observation.CompletedTurnID)
