@@ -16,6 +16,12 @@ type usageProxy struct {
 	URL  string `json:"url,omitempty"`
 }
 
+type usageRouting struct {
+	Account string    `json:"account,omitempty"`
+	Full    bool      `json:"full,omitempty"`
+	FreesAt time.Time `json:"freesAt,omitzero"`
+}
+
 type usageAccount struct {
 	ID         string       `json:"id"`
 	Provider   string       `json:"provider"`
@@ -24,6 +30,7 @@ type usageAccount struct {
 	NextRetry  time.Time    `json:"nextRetry,omitzero"`
 	Preference float64      `json:"preference"`
 	Preferred  bool         `json:"preferred,omitempty"`
+	Routed     bool         `json:"routed,omitempty"`
 	SetOn      string       `json:"setOn,omitempty"`
 	SetAt      time.Time    `json:"setAt,omitzero"`
 	Meters     []usageMeter `json:"meters"`
@@ -72,16 +79,24 @@ func (d *Daemon) proxyUsageSet(config proxyacct.Config, now time.Time) usageSet 
 	}
 	set.AsOf = reading.readAt
 	entry := d.proxyUsage.entry(config)
+	route := proxyacct.Routing(reading.accounts, now, false)
+	if route.Lead != "" {
+		set.Routing = &usageRouting{Account: route.Lead, Full: route.Full, FreesAt: route.FreesAt}
+	}
 	for _, account := range reading.accounts {
 		view := proxyUsageAccount(account, now)
 		view.Preferred = proxyPreferred(reading.accounts, account)
+		view.Routed = route.Routed[account.Provider] == account.ID
 		if mark, ok := entry.markFor(account.ID, account.Preference); ok {
 			view.SetOn, view.SetAt = mark.host, mark.at
 		}
 		set.Accounts = append(set.Accounts, view)
 	}
-	if frees, ok := proxyAccountsFull(reading.accounts, now); ok {
-		set.Problem = fmt.Sprintf("Every %s Claude account is over its ceiling; the first frees up in %s.", config.Name, proxyWait(frees.Sub(now)))
+	if route.Full {
+		set.Problem = fmt.Sprintf("Every %s Claude account is over its ceiling.", config.Name)
+		if route.FreesAt.After(now) {
+			set.Problem = fmt.Sprintf("Every %s Claude account is over its ceiling; the first frees up in %s.", config.Name, proxyWait(route.FreesAt.Sub(now)))
+		}
 	}
 	return set
 }
@@ -120,31 +135,6 @@ func proxyPreferred(accounts []proxyacct.Account, account proxyacct.Account) boo
 		below = below || other.Preference < account.Preference
 	}
 	return below
-}
-
-// Full means the proxy would skip it: cooling, or a window at its own ceiling.
-func proxyAccountsFull(accounts []proxyacct.Account, now time.Time) (time.Time, bool) {
-	var first time.Time
-	usable := 0
-	for _, account := range accounts {
-		if account.Provider != "claude" || account.Status == proxyacct.StatusDisabled || account.Status == proxyacct.StatusUnavailable {
-			continue
-		}
-		usable++
-		frees := account.NextRetry
-		for _, window := range account.Windows {
-			if window.Ceiling > 0 && window.Percent >= window.Ceiling && window.ResetsAt.After(now) && window.ResetsAt.After(frees) {
-				frees = window.ResetsAt
-			}
-		}
-		if !frees.After(now) {
-			return time.Time{}, false
-		}
-		if first.IsZero() || frees.Before(first) {
-			first = frees
-		}
-	}
-	return first, usable > 0
 }
 
 func proxyProblemText(config proxyacct.Config, err error) (string, string) {

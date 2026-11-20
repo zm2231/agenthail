@@ -43,12 +43,40 @@ struct UsageProxiesTest {
         check(accounts[4].problemTone([]) == .warning, "a proxy that cannot be read warns")
         check(dev.subtitle(now: now) == "cap 60% · over cap · read 12m ago" && dev.rowLabel(dev.meters[1]) == "Week", "one proxy ceiling shows once, and says when a window is over it: \(dev.subtitle(now: now) ?? "")")
 
-        let strip = UsageProxies.strip(accounts)
+        let strip = UsageProxies.strip(accounts, now: now)
         check(strip.map(\.title) == ["dev", "shared · dev", "local (proxy)"], "each proxy is one chip named for it and its fullest account: \(strip.map(\.title))")
         check(strip[1].meters.map(\.percent) == [61] && strip[1].critical, "the proxy chip carries its worst window, in its tone")
         check(strip[2].meters.isEmpty && strip[2].problemTone([]) == .warning, "an unreadable proxy's chip still warns")
-        let unread = UsageProxies.strip(accounts.filter { $0.group?.name == "shared" && $0.login == "team@example.com" })
+        let unread = UsageProxies.strip(accounts.filter { $0.group?.name == "shared" && $0.login == "team@example.com" }, now: now)
         check(unread.map(\.title) == ["shared · team"] && unread[0].meters.isEmpty, "a readable proxy with no reading yet still names its account: \(unread.map(\.title))")
+
+        let routedReport = try JSONDecoder().decode(UsageReport.self, from: Data(#"""
+        {"sets":[{"host":"server","hostId":"h2","provider":"proxy","name":"shared","proxy":{"name":"shared","id":"http://proxy.example:8317"},"meters":[],
+          "routing":{"account":"a"},"accounts":[
+            {"id":"a","provider":"claude","label":"main@example.com","status":"active","preferred":true,"routed":true,"asOf":"2026-10-26T11:48:00Z","meters":[
+              {"provider":"claude","kind":"weekly","label":"Claude week","percent":13,"asOf":"2026-10-26T11:48:00Z","aged":false}]},
+            {"id":"b","provider":"claude","label":"team@example.com","status":"cooling","nextRetry":"2026-10-27T19:00:00Z","asOf":"2026-10-26T09:00:00Z","meters":[
+              {"provider":"claude","kind":"weekly","label":"Claude week","percent":100,"severity":"critical","asOf":"2026-10-26T09:00:00Z","aged":false}]}]}
+        ]}
+        """#.utf8))
+        let routedAccounts = UsageAccounts.make(UsageAccounts.merged([routedReport.sets]), now: now)
+        let routedChip = UsageProxies.strip(routedAccounts, now: now)
+        check(routedChip.map(\.title) == ["shared · main"] && routedChip[0].meters.map(\.percent) == [13] && !routedChip[0].critical, "the proxy chip names the account the proxy routes to, not a fuller cooling one: \(routedChip.map(\.title)) \(routedChip.first?.meters.map(\.percent) ?? [])")
+        check(UsageProxies.byProxy(routedAccounts)[0].accounts.count == 2, "the popover keeps one row per account")
+        check(routedAccounts.first { $0.login == "main@example.com" }?.subtitle(now: now)?.hasPrefix("routed · preferred") == true, "the routed account is marked in its row: \(routedAccounts.first?.subtitle(now: now) ?? "")")
+        check(routedAccounts.first { $0.login == "team@example.com" }?.subtitle(now: now)?.contains("routed") == false, "only the routed account is marked")
+
+        let fullReport = try JSONDecoder().decode(UsageReport.self, from: Data(#"""
+        {"sets":[{"host":"server","hostId":"h2","provider":"proxy","name":"shared","proxy":{"name":"shared","id":"http://proxy.example:8317"},"meters":[],
+          "routing":{"account":"b","full":true,"freesAt":"2026-10-26T17:00:00Z"},"accounts":[
+            {"id":"a","provider":"claude","label":"main@example.com","status":"active","meters":[
+              {"provider":"claude","kind":"weekly","label":"Claude week","percent":61,"ceiling":60,"severity":"critical","asOf":"2026-10-26T11:48:00Z","aged":false}]},
+            {"id":"b","provider":"claude","label":"team@example.com","status":"cooling","nextRetry":"2026-10-27T19:00:00Z","meters":[
+              {"provider":"claude","kind":"weekly","label":"Claude week","percent":100,"severity":"critical","asOf":"2026-10-26T09:00:00Z","aged":false}]}]}
+        ]}
+        """#.utf8))
+        let fullChip = UsageProxies.strip(UsageAccounts.make(UsageAccounts.merged([fullReport.sets]), now: now), now: now)
+        check(fullChip.map(\.title) == ["shared · full, frees in 5h 0m"] && fullChip[0].meters.map(\.percent) == [100] && fullChip[0].critical && fullChip[0].login == "team@example.com", "a full proxy's chip says so, when it frees, and carries the fullest account: \(fullChip.map(\.title))")
 
         let groups = UsageProxies.byProxy(accounts)
         check(groups.map(\.group.title) == ["shared (proxy)", "local (proxy)"] && groups[0].accounts.count == 3 && groups[0].readable && !groups[1].readable, "one group per proxy")

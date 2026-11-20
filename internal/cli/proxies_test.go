@@ -92,7 +92,8 @@ func TestUsagePrintsAProxyGroupWithEveryAccountAndItsSessions(t *testing.T) {
 	  {"host":"laptop","hostId":"h1","local":true,"provider":"claude","name":"work","login":"proxy","root":"/w","proxy":{"name":"shared","id":"http://proxy.example:8317"},"meters":[]},
 	  {"host":"server","hostId":"h2","provider":"proxy","name":"shared","proxy":{"name":"shared","id":"http://proxy.example:8317","url":"http://proxy.example:8317"},"meters":[],"accounts":[
 	    {"id":"a","provider":"claude","label":"dev@example.com","status":"active","asOf":"2026-10-26T11:48:00Z","meters":[{"kind":"session","label":"Claude","percent":18,"ceiling":60},{"kind":"weekly","label":"Claude week","percent":41,"ceiling":60}]},
-	    {"id":"b","provider":"claude","label":"team@example.com","status":"cooling","nextRetry":"2026-10-26T14:20:00Z","meters":[]}],
+	    {"id":"b","provider":"claude","label":"team@example.com","status":"cooling","nextRetry":"2026-10-26T14:20:00Z","meters":[]},
+	    {"id":"c","provider":"codex","label":"dev@example.com","status":"active","routed":true,"preferred":true,"meters":[]}],
 	   "problem":"Every shared Claude account is over its ceiling; the first frees up in 2h 20m."}
 	]`), &sets); err != nil {
 		t.Fatal(err)
@@ -115,6 +116,7 @@ server
   shared (proxy)
     dev@example.com          claude  session 18% (cap 60%)  week 41% (cap 60%)  read 12m ago
     team@example.com         claude, cooling for 2h 20m
+    dev@example.com          codex  routed  preferred
     Every shared Claude account is over its ceiling; the first frees up in 2h 20m.
     sessions: Fix it (working)
 `

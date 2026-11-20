@@ -323,7 +323,10 @@ A Claude root's usage is claude.ai's answer for the root's login, read with the
 browser sign-in profile signed into that login. The daemon reads it at most
 once a minute per root and shares the read across every client and poll; a
 login change starts a fresh read. A read that fails keeps the last reading for
-that login, with its `asOf` and the `problem`. A root that signs in without a claude.ai
+that login with its `asOf`; the `problem` shows only once three reads in a row
+have failed, about three minutes, so one slow browser answer does not replace
+the reading with an error. A login with no reading yet shows the `problem` at
+once. A root that signs in without a claude.ai
 account or holds no login is a set with no meters, a short `problem` that says which, and a
 `problemDetail` that explains it; it never asks claude.ai. The daemon learns an
 API key only from its presence in the environment, the root's `settings.json`

@@ -34,7 +34,7 @@ struct UsageMetersLine: View {
     let now: Date
 
     var body: some View {
-        let chips = UsageProxies.strip(accounts)
+        let chips = UsageProxies.strip(accounts, now: now)
         ViewThatFits(in: .horizontal) {
             row(chips, bars: true, hidden: 0)
             ForEach((1...chips.count).reversed(), id: \.self) { shown in

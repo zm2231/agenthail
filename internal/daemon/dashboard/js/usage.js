@@ -140,7 +140,7 @@ export function accounts(sets, now) {
       group: set.group || null,
       proxyAccount: set.proxyAccount || null,
       capsDiffer: caps.length > 1,
-      subtitle: [set.proxyAccount?.preferred ? "preferred" : null, set.provider === "claude" && !set.group && set.name !== name ? set.name : null, caps.length === 1 ? `cap ${percent(caps[0])}` : null, meters.some((meter) => meter.ceiling && meter.percent >= meter.ceiling) ? "over cap" : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
+      subtitle: [set.proxyAccount?.routed ? "routed" : null, set.proxyAccount?.preferred ? "preferred" : null, set.provider === "claude" && !set.group && set.name !== name ? set.name : null, caps.length === 1 ? `cap ${percent(caps[0])}` : null, meters.some((meter) => meter.ceiling && meter.percent >= meter.ceiling) ? "over cap" : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
       spoken: `${fullTitle}: ${parts.length ? parts.join("; ") : "no usage reading"}`,
     };
   });
@@ -316,7 +316,7 @@ export function start({ document, fetch = (...args) => globalThis.fetch(...args)
     drawPanel();
   };
   const draw = () => {
-    render(document, element, strip(accounts(sets, now())), sessions());
+    render(document, element, strip(accounts(sets, now()), now()), sessions());
     fit(element, wrapped);
     drawPanel();
   };

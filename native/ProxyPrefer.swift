@@ -6,6 +6,7 @@ struct UsageProxyAccountRef: Equatable, Hashable {
     let preferred: Bool
     let setOn: String?
     let setAt: Date?
+    var routed = false
 
     var setNote: String? {
         guard let setOn, let setAt else { return nil }
@@ -85,6 +86,6 @@ struct ProxyPreferResult: Decodable {
 
 extension UsageReport.ProxyAccount {
     func reference(proxy: String) -> UsageProxyAccountRef {
-        UsageProxyAccountRef(proxyId: proxy, id: id, preferred: preferred == true, setOn: setOn, setAt: setAt.flatMap(UsageMeterText.date))
+        UsageProxyAccountRef(proxyId: proxy, id: id, preferred: preferred == true, setOn: setOn, setAt: setAt.flatMap(UsageMeterText.date), routed: routed == true)
     }
 }

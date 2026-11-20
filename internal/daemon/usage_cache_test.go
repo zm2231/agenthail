@@ -66,26 +66,36 @@ func TestUsageReadsClaudeAIOncePerMinuteAcrossPolls(t *testing.T) {
 }
 
 func TestUsageKeepsTheLastReadingWhenClaudeAIFails(t *testing.T) {
-	reader := &scriptedRootReader{answers: []scriptedRootAnswer{
-		{usage: &surface.Usage{FetchedAt: time.Now().Add(-time.Minute), Limits: []surface.UsageWindow{{Kind: "session", Percent: 40}}}},
-		{problem: "claude.ai answered 503"},
-	}}
+	good := scriptedRootAnswer{usage: &surface.Usage{FetchedAt: time.Now().Add(-time.Minute), Limits: []surface.UsageWindow{{Kind: "session", Percent: 40}}}}
+	failed := scriptedRootAnswer{problem: "claude.ai could not be asked which profile holds this login"}
+	reader := &scriptedRootReader{answers: []scriptedRootAnswer{good, failed, failed, failed, good}}
 	root := surface.ClaudeConfigRoot{Name: "default", Root: "/r", Primary: true, SignedInAs: &surface.ClaudeLogin{Email: "a@example.com", AccountID: "a"}}
 	d := &Daemon{}
 	now := time.Now()
-	first := d.claudeUsageSet(context.Background(), reader, root, now)
-	second := d.claudeUsageSet(context.Background(), reader, root, now.Add(2*claudeUsageTTL))
+	poll := func(n int) usageSet {
+		return d.claudeUsageSet(context.Background(), reader, root, now.Add(time.Duration(n)*claudeUsageTTL))
+	}
+	first := poll(0)
 	if len(first.Meters) != 1 || first.Problem != "" {
 		t.Fatalf("first read: %+v", first)
 	}
-	if len(second.Meters) != 1 || second.Problem != "claude.ai answered 503" || !second.AsOf.Equal(first.AsOf) {
-		t.Fatalf("a failed read keeps the last meters, their time and says why: %+v", second)
+	for n := 1; n < claudeUsageFailuresHeld; n++ {
+		if held := poll(n); len(held.Meters) != 1 || held.Problem != "" || !held.AsOf.Equal(first.AsOf) {
+			t.Fatalf("failed refresh %d keeps the last meters and their time, without an error: %+v", n, held)
+		}
+	}
+	shown := poll(claudeUsageFailuresHeld)
+	if len(shown.Meters) != 1 || shown.Problem != failed.problem || !shown.AsOf.Equal(first.AsOf) {
+		t.Fatalf("a failure lasting %d refreshes says why and keeps the last meters: %+v", claudeUsageFailuresHeld, shown)
+	}
+	if again := poll(claudeUsageFailuresHeld + 1); again.Problem != "" || len(again.Meters) != 1 {
+		t.Fatalf("a good read clears the error: %+v", again)
 	}
 	other := root
 	other.SignedInAs = &surface.ClaudeLogin{Email: "b@example.com", AccountID: "b"}
-	reader.answers = append(reader.answers, scriptedRootAnswer{problem: "claude.ai answered 503"})
-	if third := d.claudeUsageSet(context.Background(), reader, other, now.Add(2*claudeUsageTTL)); len(third.Meters) != 0 {
-		t.Fatalf("another login never shows the previous login's usage: %+v", third)
+	reader.answers = append(reader.answers, failed)
+	if third := d.claudeUsageSet(context.Background(), reader, other, now.Add(10*claudeUsageTTL)); len(third.Meters) != 0 || third.Problem != failed.problem {
+		t.Fatalf("a login with no reading yet shows its error at once and never the previous login's usage: %+v", third)
 	}
 }
 
@@ -143,13 +153,13 @@ func TestACancelledPollDoesNotFailTheReadAnotherPollWaitsOn(t *testing.T) {
 	first, cancel := context.WithCancel(context.Background())
 	firstDone := make(chan error, 1)
 	go func() {
-		_, _, err := cache.read(first, reader, root, now)
+		_, _, _, err := cache.read(first, reader, root, now)
 		firstDone <- err
 	}()
 	<-reader.started
 	secondDone := make(chan *surface.Usage, 1)
 	go func() {
-		_, usage, _ := cache.read(context.Background(), reader, root, now)
+		_, usage, _, _ := cache.read(context.Background(), reader, root, now)
 		secondDone <- usage
 	}()
 	cancel()

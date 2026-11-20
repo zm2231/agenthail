@@ -33,6 +33,7 @@ type usageSet struct {
 	Proxy        *usageProxy    `json:"proxy,omitempty"`
 	Accounts     []usageAccount `json:"accounts,omitempty"`
 	ProxyProblem string         `json:"proxyProblem,omitempty"`
+	Routing      *usageRouting  `json:"routing,omitempty"`
 }
 
 func (d *Daemon) usageHandler(w http.ResponseWriter, r *http.Request) {
@@ -129,12 +130,13 @@ func (d *Daemon) claudeUsageSet(ctx context.Context, reader claudeConfigRootRead
 		set.Problem, set.Detail = problem, detail
 		return set
 	}
-	live, usage, err := d.claudeUsage.read(ctx, reader, root, now)
+	live, usage, failures, err := d.claudeUsage.read(ctx, reader, root, now)
 	if usage != nil {
 		set.AsOf = usage.FetchedAt
 	}
 	set.Meters = usageMeters("claude", usage, now)
 	switch {
+	case usage != nil && failures < claudeUsageFailuresHeld:
 	case err != nil:
 		set.Problem = err.Error()
 	case live.UsageProblem != "":

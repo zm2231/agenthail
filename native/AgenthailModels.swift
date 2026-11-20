@@ -203,10 +203,16 @@ struct UsageReport: Decodable, Hashable {
         let status: String
         var nextRetry: String? = nil
         var preferred: Bool? = nil
+        var routed: Bool? = nil
         var setOn: String? = nil
         var setAt: String? = nil
         var meters: [Meter]? = nil
         var asOf: String? = nil
+    }
+    struct Routing: Decodable, Hashable {
+        var account: String? = nil
+        var full: Bool? = nil
+        var freesAt: String? = nil
     }
     struct Set: Decodable, Hashable {
         let host: String
@@ -226,6 +232,7 @@ struct UsageReport: Decodable, Hashable {
         var proxy: Proxy? = nil
         var accounts: [ProxyAccount]? = nil
         var proxyProblem: String? = nil
+        var routing: Routing? = nil
     }
     var sets: [Set]? = nil
 }

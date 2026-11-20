@@ -3,7 +3,7 @@ const time = (value) => {
   return Number.isNaN(parsed) ? null : parsed;
 };
 
-function wait(ms) {
+export function wait(ms) {
   const minutes = Math.max(Math.round(ms / 60_000), 1);
   const hours = Math.floor(minutes / 60);
   if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
@@ -24,7 +24,7 @@ export function proxyGroup(set, sets) {
   const roots = sets.filter((other) => other.provider === "claude" && other.proxy?.id && other.proxy.id === set.proxy?.id).map((other) => ({ hostId: other.hostId, host: other.host, root: other.root, name: other.name }));
   const peers = {};
   for (const account of set.accounts || []) if (account.status !== "disabled") peers[account.provider] = (peers[account.provider] || 0) + 1;
-  return { id, name: set.name, title: `${set.name} (proxy)`, peers, url: set.proxy?.url || null, host: set.host, hostId: set.hostId, local: set.local === true, problem: set.problem || null, problemDetail: set.problemDetail || null, roots };
+  return { id, name: set.name, title: `${set.name} (proxy)`, peers, url: set.proxy?.url || null, host: set.host, hostId: set.hostId, local: set.local === true, problem: set.problem || null, problemDetail: set.problemDetail || null, roots, routing: set.routing || null };
 }
 
 export function expandProxies(sets, now) {
@@ -41,7 +41,7 @@ export function expandProxies(sets, now) {
       continue;
     }
     for (const account of set.accounts) {
-      const proxyAccount = set.proxy?.id ? { proxyId: set.proxy.id, id: account.id, preferred: account.preferred === true, setOn: account.setOn || null, setAt: account.setAt || null } : null;
+      const proxyAccount = set.proxy?.id ? { proxyId: set.proxy.id, id: account.id, preferred: account.preferred === true, routed: account.routed === true, setOn: account.setOn || null, setAt: account.setAt || null } : null;
       expanded.push({ host: set.host, hostId: set.hostId, local: set.local, provider: account.provider, account: account.label, name: set.name, root: `proxy:${group.id}:${account.id}`, meters: account.meters || [], asOf: account.asOf, problem: accountState(account, now), group, proxyAccount });
     }
   }
