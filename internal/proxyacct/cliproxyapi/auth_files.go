@@ -76,7 +76,7 @@ func (a authFiles) accounts(now time.Time) []proxyacct.Account {
 		if provider == "codex" {
 			windows = codexWindows(signals)
 		}
-		accounts = append(accounts, proxyacct.Account{ID: file.Name, Provider: provider, Label: label, Status: status, NextRetry: retry, Preference: preference, Windows: windows})
+		accounts = append(accounts, proxyacct.Account{ID: file.Name, Provider: provider, Label: label, Status: status, NextRetry: retry, Preference: preference, Windows: windows, Drain: file.drain()})
 	}
 	sort.SliceStable(accounts, func(i, j int) bool {
 		if accounts[i].Provider != accounts[j].Provider {
@@ -169,6 +169,68 @@ func codexWindows(signals map[string]signal) []proxyacct.Window {
 		windows = append(windows, proxyacct.Window{Kind: kind, Percent: percent, ResetsAt: unixTime(signals[prefix+"reset-at"].value), ObservedAt: used.observed})
 	}
 	return windows
+}
+
+// drain mirrors claudeUsageReadings in CLIProxyAPI's quota_drain.go, which
+// reads Anthropic headers for every credential, Codex ones included.
+func (f authFile) drain() []proxyacct.Drain {
+	signals := map[string]string{}
+	for key, value := range f.Quota.Signals {
+		signals[strings.ToLower(strings.TrimSpace(key))] = value
+	}
+	const fableReset = "anthropic-ratelimit-unified-7d_oi-reset"
+	if _, ok := signals[fableReset]; !ok {
+		var latest *quota
+		for _, state := range f.ModelQuotas {
+			source := quota{ObservedAt: state.ObservedAt, Signals: state.Signals}
+			if state.Quota != nil {
+				source = *state.Quota
+			}
+			lowered := map[string]string{}
+			for key, value := range source.Signals {
+				lowered[strings.ToLower(strings.TrimSpace(key))] = value
+			}
+			if _, ok := lowered[fableReset]; !ok {
+				continue
+			}
+			if latest == nil || source.ObservedAt.After(latest.ObservedAt) {
+				source.Signals = lowered
+				latest = &source
+			}
+		}
+		if latest != nil {
+			for _, field := range []string{"utilization", "reset"} {
+				name := "anthropic-ratelimit-unified-7d_oi-" + field
+				if value, ok := latest.Signals[name]; ok {
+					signals[name] = value
+				}
+			}
+		}
+	}
+	readings := []proxyacct.Drain{}
+	for _, window := range claudeWindowKinds {
+		prefix := "anthropic-ratelimit-unified-" + window.header + "-"
+		reading := proxyacct.Drain{Kind: window.kind}
+		found := false
+		if raw, ok := signals[prefix+"utilization"]; ok {
+			if value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64); err == nil && value >= 0 {
+				reading.Percent, reading.HasPercent, found = value*100, true, true
+			}
+		}
+		if raw, ok := signals[prefix+"reset"]; ok {
+			if seconds, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && seconds > 0 {
+				reading.ResetsAt, found = time.Unix(seconds, 0).UTC(), true
+			}
+		}
+		if !found {
+			continue
+		}
+		if ceiling := f.Ceiling[window.header]; ceiling > 0 {
+			reading.Ceiling = ceiling
+		}
+		readings = append(readings, reading)
+	}
+	return readings
 }
 
 func unixTime(value string) time.Time {

@@ -39,6 +39,19 @@ type Account struct {
 	NextRetry  time.Time `json:"nextRetry,omitzero"`
 	Preference float64   `json:"preference"`
 	Windows    []Window  `json:"windows"`
+	Drain      []Drain   `json:"-"`
+}
+
+// Drain is one window as CLIProxyAPI's quota-drain selector reads it: from
+// the credential-wide headers, with the per-model week filled from the newest
+// model state only when the credential lacks it. A reading may hold a reset
+// without a percent; a Ceiling of 0 is none.
+type Drain struct {
+	Kind       string
+	Percent    float64
+	HasPercent bool
+	ResetsAt   time.Time
+	Ceiling    float64
 }
 
 type Window struct {

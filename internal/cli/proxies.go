@@ -165,6 +165,9 @@ func writeProxyAccounts(w io.Writer, set usageSetView, now time.Time, indent str
 		if !account.AsOf.IsZero() {
 			line += "  read " + usageDuration(now.Sub(account.AsOf)) + " ago"
 		}
+		if account.Routed {
+			line += "  routed"
+		}
 		if account.Preferred {
 			line += "  preferred"
 		}

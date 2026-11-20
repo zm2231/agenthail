@@ -11,6 +11,9 @@ import (
 
 const claudeUsageTTL = time.Minute
 
+// A failed read behind a good one stays quiet this many refreshes in a row.
+const claudeUsageFailuresHeld = 3
+
 type claudeUsageCache struct {
 	mu      sync.Mutex
 	entries map[string]*claudeUsageEntry
@@ -23,6 +26,7 @@ type claudeUsageEntry struct {
 	live       surface.ClaudeConfigRoot
 	err        error
 	lastGot    *surface.Usage
+	failures   int
 	last       atomic.Pointer[claudeUsageSnapshot]
 	refreshing atomic.Bool
 }
@@ -48,13 +52,13 @@ func (c *claudeUsageCache) entry(root string) *claudeUsageEntry {
 }
 
 // The entry lock is held across the read so concurrent polls share one claude.ai call.
-func (c *claudeUsageCache) read(ctx context.Context, reader claudeConfigRootReader, root surface.ClaudeConfigRoot, now time.Time) (surface.ClaudeConfigRoot, *surface.Usage, error) {
+func (c *claudeUsageCache) read(ctx context.Context, reader claudeConfigRootReader, root surface.ClaudeConfigRoot, now time.Time) (surface.ClaudeConfigRoot, *surface.Usage, int, error) {
 	entry := c.entry(root.Root)
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	login := claudeLoginKey(root)
 	if entry.login != login {
-		entry.login, entry.readAt, entry.live, entry.err, entry.lastGot = login, time.Time{}, surface.ClaudeConfigRoot{}, nil, nil
+		entry.login, entry.readAt, entry.live, entry.err, entry.lastGot, entry.failures = login, time.Time{}, surface.ClaudeConfigRoot{}, nil, nil, 0
 	}
 	if entry.readAt.IsZero() || now.Sub(entry.readAt) >= claudeUsageTTL {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claudeRootUsageTimeout)
@@ -62,11 +66,13 @@ func (c *claudeUsageCache) read(ctx context.Context, reader claudeConfigRootRead
 		cancel()
 		entry.readAt = now
 		if entry.err == nil && entry.live.Usage != nil {
-			entry.lastGot = entry.live.Usage
+			entry.lastGot, entry.failures = entry.live.Usage, 0
+		} else {
+			entry.failures++
 		}
 		entry.last.Store(&claudeUsageSnapshot{login: login, readAt: now, usage: entry.lastGot})
 	}
-	return entry.live, entry.lastGot, entry.err
+	return entry.live, entry.lastGot, entry.failures, entry.err
 }
 
 // Never waits on claude.ai; a missing or stale reading refreshes in the background.

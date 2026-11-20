@@ -56,7 +56,7 @@ assert.deepEqual(heads, ["laptop", "shared (proxy) read from server", "local (pr
 const all = texts(panel);
 assert.equal(dev.subtitle, "cap 60% · over cap · read 12m ago", "an account's one proxy ceiling shows once, and says when a window is over it");
 assert.ok(all.includes("cap 60% · over cap · read 12m ago"));
-const chips = strip(list);
+const chips = strip(list, now);
 assert.deepEqual(chips.map((a) => a.title), ["dev", "shared · dev", "local (proxy)"], "each proxy is one chip named for it and its fullest account");
 assert.deepEqual(chips[1].meters.map((m) => m.percent), [61]);
 assert.equal(chips[1].critical, true, "the proxy chip carries its worst window, in its tone");
@@ -65,7 +65,7 @@ const line = new Node("div");
 render(document, line, chips);
 assert.equal(line.children.filter((c) => c.className.startsWith("usage-chip")).length, 3);
 assert.ok(chips[2].meters.length === 0 && chips[2].problem, "an unreadable proxy's chip still shows why");
-const unread = strip(accounts([{ ...sets[3], accounts: [{ id: "a", provider: "claude", label: "dev@example.com", status: "active", meters: [] }] }], now));
+const unread = strip(accounts([{ ...sets[3], accounts: [{ id: "a", provider: "claude", label: "dev@example.com", status: "active", meters: [] }] }], now), now);
 assert.deepEqual(unread.map((a) => [a.title, a.meters.length]), [["shared · dev", 0]], "a readable proxy with no reading yet still names its account");
 const mixed = accounts([{ ...sets[3], accounts: [{ ...sets[3].accounts[0], meters: [meter("session", "Claude", 18, { ceiling: 60 }), meter("weekly", "Claude week", 41, { ceiling: 80 })] }] }], now)[0];
 assert.equal(mixed.capsDiffer, true);
@@ -76,6 +76,18 @@ assert.ok(all.includes(sets[3].problem), "the group's problem shows under its ac
 const lists = panel.children.filter((c) => c.className === "usage-sessions");
 assert.equal(lists.length, 1, "the proxy group has one session list, not one per account");
 assert.deepEqual(texts(lists[0]), ["s1", "s2"]);
+
+const proxySet = (routing, members) => ({ host: "server", hostId: "h2", provider: "proxy", name: "shared", proxy: shared, meters: [], routing, accounts: members });
+const mainAccount = { id: "a", provider: "claude", label: "main@example.com", status: "active", preferred: true, routed: true, meters: [meter("weekly", "Claude week", 13)] };
+const fullTeam = { id: "b", provider: "claude", label: "team@example.com", status: "cooling", nextRetry: "2026-10-27T19:00:00Z", meters: [meter("weekly", "Claude week", 100, { severity: "critical" })] };
+const routedList = accounts([proxySet({ account: "a" }, [mainAccount, fullTeam])], now);
+const routedChips = strip(routedList, now);
+assert.deepEqual(routedChips.map((a) => [a.title, a.meters.map((m) => m.percent), a.critical]), [["shared · main", [13], false]], "the proxy chip names the account the proxy routes to, not a fuller cooling one");
+assert.equal(routedList.length, 2, "the popover keeps one row per account");
+assert.ok(routedList.find((a) => a.login === "main@example.com").subtitle.startsWith("routed · preferred"), "the routed account is marked in its row");
+assert.ok(!(routedList.find((a) => a.login === "team@example.com").subtitle || "").includes("routed"), "only the routed account is marked");
+const fullChips = strip(accounts([proxySet({ account: "b", full: true, freesAt: "2026-10-26T17:00:00Z" }, [{ ...mainAccount, routed: false, meters: [meter("weekly", "Claude week", 61, { ceiling: 60, severity: "critical" })] }, fullTeam])], now), now);
+assert.deepEqual(fullChips.map((a) => [a.title, a.meters.map((m) => m.percent), a.critical, a.login]), [["shared · full, frees in 5h 0m", [100], true, "team@example.com"]], "a full proxy's chip says so, when it frees, and carries the fullest account");
 
 assert.deepEqual(rootTitles([{ name: "default", primary: true, signedInAs: { email: "dev@example.com" } }, { name: "work", login: "proxy", proxy: "shared", signedInAs: { email: "stale@example.com" } }], "laptop"), ["dev", "shared via proxy"], "a root through a proxy is named for the proxy");
 assert.deepEqual(rootTitles([{ name: "default", primary: true, login: "api_key", loginSource: "bedrock" }, { name: "work", login: "api_key", loginSource: "oauth_token" }, { name: "keys", login: "api_key" }, { name: "spare", login: "signed_out" }], "laptop"), ["laptop (Bedrock)", "laptop (OAuth token)", "laptop (API key)", "laptop (signed out)"], "a root without an account is named for what it signs in with");

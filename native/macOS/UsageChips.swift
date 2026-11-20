@@ -14,7 +14,7 @@ struct UsageChips: View {
             if accounts.isEmpty {
                 if let problem = usage.problem { Text(problem).help(problem) }
             } else {
-                let strip = UsageProxies.strip(accounts)
+                let strip = UsageProxies.strip(accounts, now: context.date)
                 let focus = UsageFocus.pick(strip, shown: pane.displayedSession, sessions: model.knownSessions)
                 Button { showing.toggle() } label: {
                     HStack(spacing: DesktopSpace.m) {

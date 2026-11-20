@@ -12,6 +12,7 @@ struct UsageProxyGroup: Equatable, Hashable, Identifiable {
     let problem: String?
     let problemDetail: String?
     let roots: [Root]
+    var routing: UsageReport.Routing? = nil
 
     var title: String { name + " (proxy)" }
 }
@@ -32,7 +33,7 @@ enum UsageProxies {
         let id = set.proxy?.id ?? set.hostId + "|" + (set.name ?? "")
         let roots = sets.filter { $0.provider == "claude" && $0.proxy != nil && $0.proxy?.id == set.proxy?.id }
             .map { UsageProxyGroup.Root(hostId: $0.hostId, root: $0.root) }
-        return UsageProxyGroup(id: id, name: set.name ?? "proxy", host: set.host, local: set.local == true, problem: set.problem, problemDetail: set.problemDetail, roots: roots)
+        return UsageProxyGroup(id: id, name: set.name ?? "proxy", host: set.host, local: set.local == true, problem: set.problem, problemDetail: set.problemDetail, roots: roots, routing: set.routing)
     }
 
     static func expand(_ sets: [UsageReport.Set], now: Date) -> [(UsageReport.Set, UsageProxyGroup?)] {
@@ -118,13 +119,13 @@ enum UsageProxies {
         }
     }
 
-    static func strip(_ accounts: [UsageAccount]) -> [UsageAccount] {
+    static func strip(_ accounts: [UsageAccount], now: Date) -> [UsageAccount] {
         let groups = byProxy(accounts)
         var placed = Swift.Set<String>()
         return accounts.compactMap { account in
             guard let group = account.group else { return account }
             guard placed.insert(group.id).inserted, let view = groups.first(where: { $0.id == group.id }) else { return nil }
-            return chip(view)
+            return chip(view, now: now)
         }
     }
 
@@ -133,14 +134,29 @@ enum UsageProxies {
         return rank(a) > rank(b)
     }
 
-    private static func chip(_ view: UsageProxyGroupView) -> UsageAccount {
-        let rated = view.accounts.compactMap { account in account.meters.max { worse($1, $0) }.map { (account, $0) } }
-        let top = rated.max { worse($1.1, $0.1) }
+    // The daemon names the account the proxy routes to; an older one does not, and then the fullest stands in.
+    private static func chip(_ view: UsageProxyGroupView, now: Date) -> UsageAccount {
+        let routing = view.group.routing
+        let routed = routing?.account.flatMap { id in view.accounts.first { $0.proxyAccount?.id == id } }
+        let top: (UsageAccount, UsageReport.Meter?)?
+        if let routed {
+            top = (routed, routed.meters.max { worse($1, $0) })
+        } else {
+            let rated = view.accounts.compactMap { account in account.meters.max { worse($1, $0) }.map { (account, $0) } }
+            top = rated.max { worse($1.1, $0.1) }.map { ($0.0, Optional($0.1)) }
+        }
         let lead = top?.0 ?? view.accounts[0]
+        let meter = top?.1
         let suffix = " · " + view.group.name
         let name = lead.title.hasSuffix(suffix) ? String(lead.title.dropLast(suffix.count)) : lead.title
-        let title = lead.provider == "proxy" ? lead.title : view.group.name + " · " + name
-        return UsageAccount(id: "proxy:" + view.group.id, title: title, login: lead.login, signIn: lead.signIn, host: lead.host, hostId: lead.hostId, local: lead.local, provider: lead.provider, rootName: lead.rootName, root: lead.root, meters: top.map { [$0.1] } ?? [], problem: top == nil ? lead.problem : nil, problemDetail: top == nil ? lead.problemDetail : nil, asOf: lead.asOf, group: lead.group)
+        var title = lead.provider == "proxy" ? lead.title : view.group.name + " · " + name
+        if routed != nil, routing?.full == true {
+            title = view.group.name + " · full"
+            if let frees = routing?.freesAt.flatMap(UsageMeterText.date), frees > now {
+                title += ", frees in " + wait(frees.timeIntervalSince(now))
+            }
+        }
+        return UsageAccount(id: "proxy:" + view.group.id, title: title, login: lead.login, signIn: lead.signIn, host: lead.host, hostId: lead.hostId, local: lead.local, provider: lead.provider, rootName: lead.rootName, root: lead.root, meters: meter.map { [$0] } ?? [], problem: meter == nil ? lead.problem : nil, problemDetail: meter == nil ? lead.problemDetail : nil, asOf: lead.asOf, group: lead.group)
     }
 
     static func byProxy(_ accounts: [UsageAccount]) -> [UsageProxyGroupView] {

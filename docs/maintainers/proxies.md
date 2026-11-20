@@ -86,8 +86,7 @@ account is full, the root frees up when the first account does: its cooling
 ends or its windows over a ceiling reset. Disabled and unavailable accounts
 never count. The new-session forms read such a root
 as `shared via proxy · next: team · session 18%, week 41%`: the account with
-the most headroom, the one the proxy would use next, where the status strip
-names the fullest. The readings come from
+the most headroom. The readings come from
 `GET /api/v1/session-options/claude-usage?root=<path>`, which answers a proxy
 root with that account as `best` and its windows as `usage`.
 The pick only reads what the proxy reports; the proxy still chooses the
@@ -119,8 +118,26 @@ polling never adds to the proxy's failed-attempt count.
 
 `GET /api/v1/usage` adds one set per proxy, after the host's own accounts:
 `{provider: "proxy", name, proxy: {name, id, url}, accounts[{id, provider,
-label, status, nextRetry, preference, preferred, setOn, setAt, meters, asOf}],
-problem, problemDetail, proxyProblem}`. Account meters are the same as other meters, with the proxy's
+label, status, nextRetry, preference, preferred, routed, setOn, setAt, meters,
+asOf}], routing: {account, full, freesAt}, problem, problemDetail,
+proxyProblem}`. `routed` marks, per provider, the account the proxy sends new work to now,
+in the proxy's own quota-drain order (`proxyacct.Routing`): live accounts only
+(not cooling, disabled or unavailable), those under their session and week
+ceilings first, then the higher `quota_preference`, then one with no weekly
+reset known yet, then the soonest weekly reset. It reads what the proxy's
+selector reads: the credential-wide Anthropic headers, with the per-model week
+taken from the newest model state only when the credential lacks it, and a
+window past its reset counted as empty. The per-model week's ceiling binds
+only Fable requests, so it never makes an account full for the usage strip. The proxy reads
+no Codex headers, so Codex accounts rank by preference alone; the proxy breaks
+ties by its own credential order, which it does not report. `routing.account`
+is the account the proxy's chip names: the routed Claude account, or the
+routed Codex account on a proxy without Claude. When every Claude account is
+cooling or at a session or week ceiling no Claude account is routed;
+`routing` then has `full: true`, the fullest account, and `freesAt`, when the
+first one frees up, left out when any full account does not say when. The
+usage strip asks for non-Fable work; `proxyacct.Routing` takes a Fable flag,
+and for Fable the per-model week's ceiling binds as well, as in the proxy. Account meters are the same as other meters, with the proxy's
 `ceiling`; a meter at its ceiling is `critical`. A root set through a proxy has
 `login: "proxy"` and `proxy: {name, id}`. `id` is the proxy's scheme, host and
 port; for a loopback proxy it also names the host, so two machines' own local
@@ -139,8 +156,8 @@ Problems are explicit lines, with `proxyProblem` naming the case:
 | `remote_off` | the proxy does not allow management from other machines |
 | `no_management` | the proxy has no management key set |
 
-When every Claude account is cooling or at its own ceiling the set's problem
-says so and when the first frees up.
+When every Claude account is cooling or at its session or week ceiling the
+set's problem says so and, when known, when the first frees up.
 
 Several hosts that share a proxy each report it. The daemon, and the iPhone
 across the computers it is paired with, keep one copy per `id`: one read with a
@@ -195,13 +212,17 @@ proxy still has that value.
 ## In the apps and the CLI
 
 The Mac status strip, the dashboard's top bar and the iPhone's usage line give
-each proxy one chip, `shared · lead 64%`: the proxy's name and its fullest
-account, with that account's fullest window in its tone. Opening the line
+each proxy one chip, `shared · lead 13%`: the proxy's name and the account
+named by `routing`, with that account's fullest window in its tone. When every
+Claude account is full the chip reads `shared · full, frees in 5h 0m` with the
+fullest account's window. A set without `routing`, from an older daemon,
+names the fullest account. Opening the line
 shows each proxy as a group after the hosts, titled `shared (proxy)` and
 `read from <host>` when another host read it, with each account named like any
 other account (followed by the proxy's name when another account has the same
 name), its limits, its ceiling beside when it was read and `over cap` when a
-window has reached it, its cooling or disabled state, the group's problem, and
+window has reached it, `routed` on the account the proxy sends new work to,
+its cooling or disabled state, the group's problem, and
 the sessions on every root through the proxy on any host. The proxy does not
 say which account each session is on.
 
