@@ -58,6 +58,14 @@ func TestAnAgentInAProjectReachesAnIdentityHereAndOnAPairedHost(t *testing.T) {
 
 	out, refused := h.send(t, "vps::@scout", "sent now", map[string]any{"mode": "now"})
 	refusedFor(t, out, refused, "out_of_scope", "not_queued")
+	out, refused = h.send(t, "@notes", "sent now here", map[string]any{"mode": "now"})
+	refusedFor(t, out, refused, "out_of_scope", "not_spawned_or_led")
+	if answer := askScope(t, h.local.daemon, ScopeRequest{SessionID: "local-a", Action: "control", Target: identityID(t, h.local, "notes")}, "127.0.0.1:50000"); answer.status != http.StatusForbidden || answer.code != "out_of_scope" {
+		t.Fatalf("an agent controlling an identity: %+v body=%s", answer, answer.body)
+	}
+	if got := inbox(t, h.local, "notes"); len(got) != 1 {
+		t.Fatalf("a refused send reached the identity: %+v", got)
+	}
 	out, refused = h.send(t, "vps::remote-b", "to another project", nil)
 	refusedFor(t, out, refused, "out_of_scope", "different_project")
 }
