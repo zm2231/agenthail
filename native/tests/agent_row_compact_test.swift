@@ -48,19 +48,19 @@ struct AgentRowCompactTest {
             try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":42,"sessionId":"S","target":"S","message":"later","status":"\#(status)","operation":"\#(operation)","attempts":0,"queuedAt":"2026-01-01T00:00:00Z","evidence":"queued"}"#.utf8))
         }
         check(LocalSend.shown([queued, sent], queue: [row("pending")]).map(\.text) == ["now"], "a send waiting in the queue tray shows there, not in the transcript")
-        check(LocalSend.shown([queued, sent], queue: [row("dead")]).map(\.text) == ["later", "now"], "a send whose delivery died shows again")
-        check(LocalSend.shown([queued, sent], queue: [row("inflight")]).map(\.text) == ["later", "now"], "a send the tray no longer shows stays visible")
-        check(LocalSend.shown([queued, sent], queue: []).map(\.text) == ["later", "now"], "a send the queue has not listed yet stays visible")
+        for status in ["dead", "inflight", "delivered", "canceled"] {
+            check(LocalSend.shown([queued, sent], queue: [row(status)]).map(\.text) == ["later", "now"], "a send the tray does not show stays in the transcript: \(status)")
+        }
+        check(LocalSend.shown([queued, sent], queue: []).map(\.text) == ["later", "now"], "a send the queue does not list stays in the transcript")
 
-        let outbox = MainActor.assumeIsolated { Outbox() }
         MainActor.assumeIsolated {
+            let outbox = Outbox()
             outbox.record(queued, in: "S")
-            outbox.noteQueue([row("pending")])
-            check(LocalSend.shown(outbox.rows["S"] ?? [], queue: [row("pending")]).isEmpty, "the tray holds the queued send")
-            outbox.noteQueue([])
-            check(LocalSend.shown(outbox.rows["S"] ?? [], queue: []).isEmpty, "once delivered, removed, taken back or steered, the send does not come back as Queued")
-            outbox.noteQueue([row("dead")])
-            check(LocalSend.shown(outbox.rows["S"] ?? [], queue: [row("dead")]).count == 1, "a send that dies after leaving the tray shows again")
+            outbox.record(sent, in: "S")
+            outbox.dropQueued(7, in: "S")
+            check(outbox.rows["S"]?.count == 2, "dropping another queue row leaves the send")
+            outbox.dropQueued(42, in: "S")
+            check(outbox.rows["S"]?.map(\.text) == ["now"], "a queued send the person removed, took back or steered leaves the transcript")
         }
         let receipt = { (json: String) in try? JSONDecoder().decode(DeliveryReceipt.self, from: Data(json.utf8)) }
         check(LocalSend.queueID(of: receipt(#"{"status":"queued","queueId":7}"#)) == 7, "a queued receipt names its queue row")

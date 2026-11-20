@@ -101,11 +101,9 @@ final class Outbox {
         }
     }
 
-    func noteQueue(_ queue: [QueueState]) {
-        for row in queue {
-            guard let sends = rows[row.sessionId], let index = sends.firstIndex(where: { $0.queueID == row.id && !$0.queueSeen }) else { continue }
-            rows[row.sessionId]?[index].queueSeen = true
-        }
+    func dropQueued(_ queueID: Int64, in sessionID: String) {
+        let session = resolve(sessionID)
+        rows[session]?.removeAll { $0.queueID == queueID }
     }
 
     func reconcile(_ items: [TimelineItem], for sessionID: String) {

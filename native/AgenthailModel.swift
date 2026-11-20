@@ -169,7 +169,6 @@ final class AgenthailModel {
         hasSnapshot = snapshot != nil
         daemon = snapshot?.daemon
         queue = snapshot?.queue ?? []
-        outbox.noteQueue(queue)
         history = snapshot?.history ?? []
         leadReplacements = snapshot?.leadReplacements ?? []
         projects = snapshot?.projects ?? []
@@ -1228,6 +1227,7 @@ final class AgenthailModel {
                 operationError = AgenthailAPIError.userMessage(error)
                 return
             }
+            outbox.dropQueued(item.id, in: item.sessionId)
             let message = cancelled.message ?? item.message
             let attachments = cancelled.attachments ?? []
             do {
@@ -1248,6 +1248,7 @@ final class AgenthailModel {
         Task {
             do {
                 try await api.action("queue-cancel", queueID: item.id)
+                outbox.dropQueued(item.id, in: item.sessionId)
                 operationError = nil
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)
@@ -1268,6 +1269,7 @@ final class AgenthailModel {
             for item in items.sorted(by: { $0.id < $1.id }) {
                 do {
                     let cancelled = try await api.cancelQueued(item)
+                    outbox.dropQueued(item.id, in: item.sessionId)
                     taken.append(cancelled.message ?? item.message)
                     attachments += cancelled.attachments ?? []
                 } catch {
