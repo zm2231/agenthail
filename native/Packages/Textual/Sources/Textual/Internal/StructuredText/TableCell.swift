@@ -37,13 +37,25 @@ extension StructuredText {
       }
       if keepsWords {
         WholeWords {
-          Text(Self.wordPerLine(AttributedString(content)))
+          words
             .hidden()
             .accessibilityHidden(true)
+            .transformPreference(Text.LayoutKey.self) { $0 = [] }
           text
         }
       } else {
         text
+      }
+    }
+
+    // Plain Text sizes styled words far faster than a fragment; only attachments need the fragment's measuring.
+    @ViewBuilder
+    private var words: some View {
+      let words = Self.wordPerLine(AttributedString(content))
+      if content.runs.contains(where: { $0.textual.attachment != nil }) {
+        WithInlineStyle(words) { TextFragment($0) }
+      } else {
+        WithInlineStyle(words) { Text($0) }
       }
     }
 

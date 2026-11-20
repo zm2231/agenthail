@@ -23,10 +23,17 @@
         var first: CGSize
         var settled: CGSize
         var table: CGFloat
+        var cells: [CellKey: CGFloat]
+      }
+
+      struct CellKey: Hashable {
+        let row: Int
+        let column: Int
       }
 
       private final class TableWidth {
         var value: CGFloat = 0
+        var cells: [CellKey: CGFloat] = [:]
       }
 
       @Test func aWideColumnLaysTheTableOutAsTheDefaultStyleDoes() throws {
@@ -68,6 +75,26 @@
         #expect(streamed.table > measure(.wholeWords, width: 200).table)
       }
 
+      @Test func wordsStyledLargerThanTheirTextStayWhole() throws {
+        let styled = """
+          | Code | Strong | Link |
+          | --- | --- | --- |
+          | `reconfiguration_snapshot` | **Unbreakable** | [documentation](https://example.com) |
+          """
+        let style = InlineStyle()
+          .code(.monospaced, .fontScale(1.25))
+          .strong(.fontWeight(.bold), .fontScale(1.3))
+          .link(.fontScale(1.3))
+        let wide = measure(.wholeWords, width: 900, markdown: styled, inlineStyle: style)
+        let narrow = measure(.wholeWords, width: 160, markdown: styled, inlineStyle: style)
+
+        for column in 0..<3 {
+          let cell = CellKey(row: 1, column: column)
+          #expect(narrow.cells[cell] == wide.cells[cell], "column \(column) wrapped its one word")
+        }
+        #expect(narrow.table > 160)
+      }
+
       @Test(arguments: [200.0, 760.0])
       func theFirstLayoutInAWindowIsTheSettledLayout(width: CGFloat) throws {
         let words = measure(.wholeWords, width: width)
@@ -80,11 +107,12 @@
         width: CGFloat,
         fontSize: CGFloat = 13,
         markdown: String = Self.markdown,
+        inlineStyle: InlineStyle = .default,
         then change: ((Column) -> Void)? = nil
       ) -> Measured {
         let tableWidth = TableWidth()
         let column = Column(width: width, fontSize: fontSize, markdown: markdown)
-        let host = NSHostingView(rootView: Live(column: column, style: style, probe: Probe(width: tableWidth)))
+        let host = NSHostingView(rootView: Live(column: column, style: style, inlineStyle: inlineStyle, probe: Probe(width: tableWidth)))
         let window = NSWindow(
           contentRect: NSRect(x: 0, y: 0, width: width, height: 400),
           styleMask: [.borderless],
@@ -105,7 +133,7 @@
           host.layoutSubtreeIfNeeded()
           RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         }
-        return Measured(first: first, settled: host.fittingSize, table: tableWidth.value)
+        return Measured(first: first, settled: host.fittingSize, table: tableWidth.value, cells: tableWidth.cells)
       }
 
       @Observable
@@ -124,11 +152,13 @@
       private struct Live<Style: TableStyle>: View {
         let column: Column
         let style: Style
+        let inlineStyle: InlineStyle
         let probe: Probe
 
         var body: some View {
           StructuredText(markdown: column.markdown)
             .font(.system(size: column.fontSize))
+            .textual.inlineStyle(inlineStyle)
             .textual.tableStyle(style)
             .textual.tableCellStyle(probe)
             .fixedSize(horizontal: false, vertical: true)
@@ -144,6 +174,9 @@
             .padding(6)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxX } action: {
               width.value = max(width.value, $0)
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+              width.cells[CellKey(row: configuration.row, column: configuration.column)] = $0
             }
         }
       }
