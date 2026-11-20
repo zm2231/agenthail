@@ -263,6 +263,7 @@ SOURCES=(
   macOS/WindowRectReader.swift
   macOS/WindowButtons.swift
   macOS/WindowButtonBand.swift
+  macOS/FullScreenFit.swift
   macOS/WorkingSpinner.swift
   macOS/StatusIndicator.swift
   macOS/FocusSwitch.swift
