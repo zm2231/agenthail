@@ -264,6 +264,9 @@ SOURCES=(
   macOS/WindowButtons.swift
   macOS/WindowButtonBand.swift
   macOS/WorkingSpinner.swift
+  macOS/StatusIndicator.swift
+  macOS/FocusSwitch.swift
+  macOS/ConversationHeader.swift
   tests/support/PaneChanges.swift
   tests/support/Signal.swift
 )

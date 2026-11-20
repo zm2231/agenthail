@@ -645,32 +645,6 @@ struct SessionRowView: View {
     }
 }
 
-struct StatusIndicator: View {
-    let session: SessionState
-    let needsYou: Bool
-    var finishedUnseen = false
-
-    var body: some View {
-        let kind = SessionDisplayKind.of(session)
-        Group {
-            if kind == .working && !needsYou {
-                WorkingSpinner()
-            } else if kind == .finishing && !needsYou {
-                Circle()
-                    .strokeBorder(DesktopPalette.working, lineWidth: 1.5)
-                    .frame(width: 7, height: 7)
-            } else {
-                Circle()
-                    .fill(DesktopPalette.statusColor(session, needsYou: needsYou, finishedUnseen: finishedUnseen))
-                    .frame(width: 7, height: 7)
-            }
-        }
-        .frame(width: 12, height: 12)
-        .accessibilityHidden(true)
-    }
-}
-
-
 struct ConversationPane: View {
     var model: AgenthailModel
     var pane: SessionPane
@@ -681,6 +655,7 @@ struct ConversationPane: View {
     @EnvironmentObject private var voice: VoiceController
     @Environment(\.windowChromeTop) private var chromeTop
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     private var band: Bool { holdsWindowButtons && chromeTop == 0 }
 
@@ -708,7 +683,7 @@ struct ConversationPane: View {
                 .task(id: RequestSync.viewKey(session)) { await pane.syncRequests(for: session) }
                 .onChange(of: session.ask) { pane.settleRetiredAsks(session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    ConversationHeader(session: session, title: model.title(of: session), inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: band ? WindowButtons.headerInset(toggle: showsSidebarToggle) : headerInset, underTabs: chromeTop != 0, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
+                    ConversationHeader(session: session, title: model.title(of: session), inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: band ? WindowButtons.headerInset(toggle: showsSidebarToggle) : headerInset, underTabs: chromeTop != 0, inspectorHelp: shortcuts.help("Inspector", .toggleInspector), onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
@@ -830,89 +805,6 @@ struct RemovedSessionBar: View {
         .frame(maxWidth: DesktopColumns.reading)
         .padding(.horizontal, DesktopColumns.gutter)
         .padding(.bottom, DesktopSpace.l)
-    }
-}
-
-struct ConversationHeader: View {
-    let session: SessionState
-    let title: String
-    @Binding var inspectorVisible: Bool
-    var leadingInset: CGFloat = 22
-    var underTabs = false
-    @ObservedObject private var shortcuts = ShortcutStore.shared
-    var onFocusTerminal: () -> Void = {}
-    var onCall: (() -> Void)?
-
-    static let height = WindowButtons.bandHeight
-    static let underTabsHeight: CGFloat = 32
-
-    var body: some View {
-        HStack(spacing: DesktopSpace.m) {
-            HStack(alignment: .firstTextBaseline, spacing: DesktopSpace.s) {
-                Text(title)
-                    .font(.system(size: DesktopType.body, weight: .semibold))
-                    .truncationMode(.middle)
-                    .layoutPriority(1)
-                if let detail = SessionFacts.headerDetail(session) {
-                    Text(detail)
-                        .font(.system(size: DesktopType.secondary))
-                        .foregroundStyle(DesktopPalette.text2)
-                }
-            }
-            .lineLimit(1)
-            .accessibilityElement(children: .combine)
-            Spacer(minLength: DesktopSpace.m)
-            HStack(spacing: 6) {
-                StatusIndicator(session: session, needsYou: false)
-                TimelineView(.everyMinute) { context in
-                    Text(SessionDisplayKind.label(session, now: context.date))
-                }
-            }
-            .font(.system(size: DesktopType.secondary))
-            .foregroundStyle(DesktopPalette.text2)
-            let live = SessionFacts.headerFacts(session).joined(separator: " · ")
-            if !live.isEmpty {
-                Text(live)
-                    .font(.system(size: DesktopType.secondary).monospacedDigit())
-                    .foregroundStyle(DesktopPalette.text2)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-            if session.runtime?.focusable == true, let host = session.runtime?.hostName {
-                Button("Open in \(host)") { onFocusTerminal() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: DesktopType.secondary))
-                    .foregroundStyle(DesktopPalette.accentText)
-                    .help("Bring this session's terminal to the front")
-            }
-            FocusSwitch()
-            if let onCall {
-                Button(action: onCall) {
-                    Image(systemName: "waveform")
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(DesktopPalette.text2)
-                .help("Call this session by voice")
-                .accessibilityLabel("Call this session")
-            }
-            Button {
-                inspectorVisible.toggle()
-            } label: {
-                Image(systemName: "sidebar.right")
-                    .frame(width: 28, height: 28)
-                    .selectionMark(inspectorVisible)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(DesktopPalette.text2)
-            .help(shortcuts.help("Inspector", .toggleInspector))
-            .accessibilityLabel("Toggle inspector")
-            .accessibilityValue(inspectorVisible ? "Shown" : "Hidden")
-        }
-        .padding(.leading, leadingInset)
-        .padding(.trailing, 14)
-        .frame(height: underTabs ? Self.underTabsHeight : Self.height)
-        .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
     }
 }
 
@@ -2219,6 +2111,11 @@ struct DetailsTab: View {
                 Button("Compact context") { pane.compactContext() }
                     .disabled(pane.controlPending)
                     .help("Ask the agent to compact its context")
+                    .controlSize(.small)
+            }
+            if session.runtime?.focusable == true, let host = session.runtime?.hostName {
+                Button("Open in \(host)") { model.focusInTerminal(session) }
+                    .help("Bring this session's terminal to the front")
                     .controlSize(.small)
             }
             if canControl, let stop = session.limitResume {

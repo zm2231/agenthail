@@ -66,7 +66,8 @@ var statusColours = map[string]statusColour{
 			"iOS/SessionStatusLabel.swift":   {1, "the session header's working status"},
 			"iOS/SessionListChrome.swift":    {5, "the working and finishing rings, a live call"},
 			"iOS/UsageAccountsSheet.swift":   {1, "sessions working on an account"},
-			"macOS/DesktopWindow.swift":      {3, "working subagents, working workers and the finishing ring"},
+			"macOS/DesktopWindow.swift":      {2, "working subagents and working workers"},
+			"macOS/StatusIndicator.swift":    {1, "the finishing ring"},
 			"macOS/StatusItems.swift":        {1, "the working count"},
 			"macOS/SubagentsSection.swift":   {1, "a working subagent"},
 			"macOS/DesktopGlass.swift":       {1, "the working role a selected row must stay readable for"},
@@ -79,8 +80,8 @@ var statusColours = map[string]statusColour{
 		job:  "a session's status dot, which picks amber for needs-you, blue for working and green for finished-unseen",
 		uses: regexp.MustCompile(`DesktopPalette\.statusColor\b`),
 		files: map[string]colourUse{
-			"macOS/DesktopWindow.swift": {1, "the sidebar row's status dot"},
-			"macOS/WindowChrome.swift":  {1, "the tab's status dot"},
+			"macOS/StatusIndicator.swift": {1, "a session's status dot in rows and the conversation header"},
+			"macOS/WindowChrome.swift":    {1, "the tab's status dot"},
 		},
 	},
 	"green": {
@@ -226,7 +227,7 @@ func TestTheColourUseCheckCatchesEachWayAColourIsReached(t *testing.T) {
 		t.Errorf("the listed use failed: %v", problems)
 	}
 	dots := map[string]statusColour{"status dot": statusColours["status dot"]}
-	extra := map[string]string{"macOS/DesktopWindow.swift": "DesktopPalette.statusColor(s)", "macOS/WindowChrome.swift": "DesktopPalette.statusColor(s)", "macOS/J.swift": "DesktopPalette.statusColor(s)"}
+	extra := map[string]string{"macOS/StatusIndicator.swift": "DesktopPalette.statusColor(s)", "macOS/WindowChrome.swift": "DesktopPalette.statusColor(s)", "macOS/J.swift": "DesktopPalette.statusColor(s)"}
 	if problems := checkStatusColourUses(extra, dots); len(problems) == 0 {
 		t.Error("a new status dot passed the check")
 	}
