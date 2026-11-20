@@ -48,11 +48,20 @@ struct AgentRowCompactTest {
             try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":42,"sessionId":"S","target":"S","message":"later","status":"\#(status)","operation":"\#(operation)","attempts":0,"queuedAt":"2026-01-01T00:00:00Z","evidence":"queued"}"#.utf8))
         }
         check(LocalSend.shown([queued, sent], queue: [row("pending")]).map(\.text) == ["now"], "a send waiting in the queue tray shows there, not in the transcript")
-        check(LocalSend.shown([queued, sent], queue: [row("delivered")]).map(\.text) == ["now"], "a delivered send waits for its timeline row")
-        check(LocalSend.shown([queued, sent], queue: [row("canceled")]).map(\.text) == ["now"], "a send taken back or steered does not linger as queued")
         check(LocalSend.shown([queued, sent], queue: [row("dead")]).map(\.text) == ["later", "now"], "a send whose delivery died shows again")
         check(LocalSend.shown([queued, sent], queue: [row("inflight")]).map(\.text) == ["later", "now"], "a send the tray no longer shows stays visible")
-        check(LocalSend.shown([queued, sent], queue: []).map(\.text) == ["later", "now"], "a send whose queue row is not loaded stays visible")
+        check(LocalSend.shown([queued, sent], queue: []).map(\.text) == ["later", "now"], "a send the queue has not listed yet stays visible")
+
+        let outbox = MainActor.assumeIsolated { Outbox() }
+        MainActor.assumeIsolated {
+            outbox.record(queued, in: "S")
+            outbox.noteQueue([row("pending")])
+            check(LocalSend.shown(outbox.rows["S"] ?? [], queue: [row("pending")]).isEmpty, "the tray holds the queued send")
+            outbox.noteQueue([])
+            check(LocalSend.shown(outbox.rows["S"] ?? [], queue: []).isEmpty, "once delivered, removed, taken back or steered, the send does not come back as Queued")
+            outbox.noteQueue([row("dead")])
+            check(LocalSend.shown(outbox.rows["S"] ?? [], queue: [row("dead")]).count == 1, "a send that dies after leaving the tray shows again")
+        }
         let receipt = { (json: String) in try? JSONDecoder().decode(DeliveryReceipt.self, from: Data(json.utf8)) }
         check(LocalSend.queueID(of: receipt(#"{"status":"queued","queueId":7}"#)) == 7, "a queued receipt names its queue row")
         check(LocalSend.queueID(of: receipt(#"{"status":"queued","queueId":7,"movedTo":"other"}"#)) == nil, "a send queued for another session stays in this transcript")

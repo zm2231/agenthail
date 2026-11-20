@@ -16,6 +16,7 @@ struct LocalSend: Identifiable, Equatable {
     var retryStopped = false
     var turnOptions: MessageTurnOptions? = nil
     var queueID: Int64? = nil
+    var queueSeen = false
 
     var canDelete: Bool { failure != nil && (ask?.offersDelete ?? true) }
     var unconfirmedTitle: String? {
@@ -25,9 +26,14 @@ struct LocalSend: Identifiable, Equatable {
 
     static let clockSkew: TimeInterval = 5
 
+    // The snapshot drops delivered and canceled rows, so a seen row that is gone has left the queue.
     static func shown(_ sends: [LocalSend], queue: [QueueState]) -> [LocalSend] {
-        let covered = Set(queue.filter { QueueFacts.coversSend($0) }.map(\.id))
-        return sends.filter { send in send.queueID.map { !covered.contains($0) } ?? true }
+        let rows = Dictionary(queue.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return sends.filter { send in
+            guard let id = send.queueID else { return true }
+            guard let row = rows[id] else { return !send.queueSeen }
+            return !QueueFacts.coversSend(row)
+        }
     }
 
     static func queueID(of receipt: DeliveryReceipt?) -> Int64? {

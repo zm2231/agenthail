@@ -101,6 +101,13 @@ final class Outbox {
         }
     }
 
+    func noteQueue(_ queue: [QueueState]) {
+        for row in queue {
+            guard let sends = rows[row.sessionId], let index = sends.firstIndex(where: { $0.queueID == row.id && !$0.queueSeen }) else { continue }
+            rows[row.sessionId]?[index].queueSeen = true
+        }
+    }
+
     func reconcile(_ items: [TimelineItem], for sessionID: String) {
         guard let sends = rows[sessionID] else { return }
         rows[sessionID] = LocalSend.reconcile(sends, with: items)

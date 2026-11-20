@@ -169,6 +169,7 @@ final class AgenthailModel {
         hasSnapshot = snapshot != nil
         daemon = snapshot?.daemon
         queue = snapshot?.queue ?? []
+        outbox.noteQueue(queue)
         history = snapshot?.history ?? []
         leadReplacements = snapshot?.leadReplacements ?? []
         projects = snapshot?.projects ?? []
