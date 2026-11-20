@@ -200,7 +200,7 @@ final class PhoneAppearance: ObservableObject {
     }
 
     private func wallpaperID(dark: Bool) -> String {
-        if case .image(let path) = config.background(dark: dark) { return path }
+        if case .image(let path) = config.background(dark: dark) { return wallpapers[path] == nil ? "missing:" + path : path }
         return ""
     }
 
@@ -229,9 +229,10 @@ final class PhoneAppearance: ObservableObject {
         let target = file(key)
         let shown = spec(key)
         let config = config
+        let wallpaper = wallpaperID(dark: key.dark)
         Task {
             let result = await Task.detached(priority: .userInitiated) { BackdropRenderer.render(shown) }.value
-            guard config == self.config else { return }
+            guard config == self.config, wallpaper == self.wallpaperID(dark: key.dark) else { return }
             pending.remove(key)
             guard let result else { return }
             keep(result, for: key)
@@ -249,9 +250,10 @@ final class PhoneAppearance: ObservableObject {
         let shown = spec(key)
         let style = BackdropSpec.PaneStyle(minimum: key.solid ? 1 : Float(config.paneOpacity), strength: shown.strength)
         let config = config
+        let wallpaper = wallpaperID(dark: key.dark)
         Task {
             let result = await Task.detached(priority: .userInitiated) { BackdropRenderer.layers(shown, panes: [.content: style]) }.value
-            guard config == self.config else { return }
+            guard config == self.config, wallpaper == self.wallpaperID(dark: key.dark) else { return }
             pending.remove(key)
             guard let result else { return }
             keep(result, for: key)

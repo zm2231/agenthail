@@ -93,9 +93,14 @@ final class PhoneAppearanceTests: XCTestCase {
         guard case .image(let image) = appearance.spec(key(.list)).wallpaper else { return XCTFail("the readable dark image still shows") }
         XCTAssertEqual(image.id, "art/field-dark.jpg")
 
+        var light = key(.list)
+        light.dark = false
+        let fallback = appearance.file(light)
+
         UIConfigURLProtocol.state.images = [:]
         try await load(appearance) { appearance.wallpapers.count == 2 }
         XCTAssertNil(appearance.problem, "the next load fetches the image again")
+        XCTAssertNotEqual(appearance.file(light), fallback, "a render drawn without the image never stands in for one drawn with it")
     }
 
     func testAChangedConfigKeepsTheCachedBackgroundForTheNextLaunch() async throws {
