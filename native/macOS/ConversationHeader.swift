@@ -31,29 +31,31 @@ struct ConversationHeader: View {
             .accessibilityElement(children: .combine)
             Spacer(minLength: DesktopSpace.m)
             stateArea
-            FocusSwitch()
-            if let onCall {
-                Button(action: onCall) {
-                    Image(systemName: "waveform")
+            HStack(spacing: DesktopSpace.xs) {
+                FocusSwitch()
+                if let onCall {
+                    Button(action: onCall) {
+                        Image(systemName: "waveform")
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(DesktopPalette.text2)
+                    .help("Call this session by voice")
+                    .accessibilityLabel("Call this session")
+                }
+                Button {
+                    inspectorVisible.toggle()
+                } label: {
+                    Image(systemName: "sidebar.right")
                         .frame(width: 28, height: 28)
+                        .selectionMark(inspectorVisible)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DesktopPalette.text2)
-                .help("Call this session by voice")
-                .accessibilityLabel("Call this session")
+                .help(inspectorHelp)
+                .accessibilityLabel("Toggle inspector")
+                .accessibilityValue(inspectorVisible ? "Shown" : "Hidden")
             }
-            Button {
-                inspectorVisible.toggle()
-            } label: {
-                Image(systemName: "sidebar.right")
-                    .frame(width: 28, height: 28)
-                    .selectionMark(inspectorVisible)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(DesktopPalette.text2)
-            .help(inspectorHelp)
-            .accessibilityLabel("Toggle inspector")
-            .accessibilityValue(inspectorVisible ? "Shown" : "Hidden")
         }
         .padding(.leading, leadingInset)
         .padding(.trailing, 14)
@@ -61,7 +63,7 @@ struct ConversationHeader: View {
         .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
     }
 
-    static let titleMinWidth: CGFloat = 60
+    static let titleMinWidth: CGFloat = 16
 
     private var stateArea: some View {
         TimelineView(.everyMinute) { context in
@@ -82,7 +84,14 @@ struct ConversationHeader: View {
                 stateLabel(state)
                 openInHost
             }
-            stateLabel(state)
+            HStack(spacing: DesktopSpace.m) {
+                stateLabel(state)
+                openInHostIcon
+            }
+            HStack(spacing: DesktopSpace.m) {
+                stateDot(state)
+                openInHostIcon
+            }
             stateDot(state)
         }
     }
@@ -124,6 +133,19 @@ struct ConversationHeader: View {
                 .foregroundStyle(DesktopPalette.accentText)
                 .help("Bring this session's terminal to the front")
                 .fixedSize()
+        }
+    }
+
+    @ViewBuilder private var openInHostIcon: some View {
+        if session.runtime?.focusable == true, let host = session.runtime?.hostName {
+            Button { onFocusTerminal() } label: {
+                Image(systemName: "terminal")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DesktopPalette.text2)
+            .help("Open in \(host)")
+            .accessibilityLabel("Open in \(host)")
         }
     }
 }

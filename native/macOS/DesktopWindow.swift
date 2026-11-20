@@ -2113,6 +2113,11 @@ struct DetailsTab: View {
                     .help("Ask the agent to compact its context")
                     .controlSize(.small)
             }
+            if session.runtime?.focusable == true, let host = session.runtime?.hostName {
+                Button("Open in \(host)") { model.focusInTerminal(session) }
+                    .help("Bring this session's terminal to the front")
+                    .controlSize(.small)
+            }
             if canControl, let stop = session.limitResume {
                 VStack(alignment: .leading) {
                     HStack {
