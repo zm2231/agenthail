@@ -1,4 +1,4 @@
--- schemaVersion 115
+-- schemaVersion 116
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -617,6 +617,12 @@ CREATE TABLE mcp_access (
 	changed_at_ms INTEGER NOT NULL,
 	keys_read_at_ms INTEGER NOT NULL DEFAULT 0,
 	keys_error TEXT NOT NULL DEFAULT ''
+);
+
+-- table mcp_remote_epoch
+CREATE TABLE mcp_remote_epoch (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	epoch INTEGER NOT NULL
 );
 
 -- table message_queue
@@ -1666,6 +1672,30 @@ BEGIN
 	UPDATE catalog_sessions SET retired=0 WHERE retired=1 AND session_id IN (SELECT id FROM sessions WHERE parent_session_id<>'' AND parent_session_id=NEW.session_id
 		UNION SELECT id FROM sessions WHERE root_session_id<>'' AND root_session_id IN (NEW.session_id,(SELECT NULLIF(root_session_id,'') FROM sessions WHERE id=NEW.session_id)));
 END;
+
+-- trigger identity_remote_epoch_added
+CREATE TRIGGER identity_remote_epoch_added AFTER INSERT ON identity_remote
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+
+-- trigger identity_remote_epoch_changed
+CREATE TRIGGER identity_remote_epoch_changed AFTER UPDATE OF token_hash,access_client_id,access_email ON identity_remote
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+
+-- trigger identity_remote_epoch_removed
+CREATE TRIGGER identity_remote_epoch_removed AFTER DELETE ON identity_remote
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+
+-- trigger mcp_access_epoch_added
+CREATE TRIGGER mcp_access_epoch_added AFTER INSERT ON mcp_access
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+
+-- trigger mcp_access_epoch_changed
+CREATE TRIGGER mcp_access_epoch_changed AFTER UPDATE OF team,aud ON mcp_access
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+
+-- trigger mcp_access_epoch_removed
+CREATE TRIGGER mcp_access_epoch_removed AFTER DELETE ON mcp_access
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
 
 -- trigger message_queue_catalog_delete
 CREATE TRIGGER message_queue_catalog_delete AFTER DELETE ON message_queue

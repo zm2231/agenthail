@@ -204,3 +204,10 @@ func (r *Registry) ClearAccessSettings() error {
 	_, err := r.db.Exec(`DELETE FROM mcp_access WHERE id=1`)
 	return err
 }
+
+// Triggers raise the epoch on every token, binding or Access change, so it never repeats.
+func (r *Registry) RemoteEpoch() (int64, error) {
+	var epoch int64
+	err := r.read.QueryRow(`SELECT epoch FROM mcp_remote_epoch WHERE id=1`).Scan(&epoch)
+	return epoch, err
+}

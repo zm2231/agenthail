@@ -77,7 +77,17 @@ An ack can only affect the caller's own inbox, and a client that follows the loo
 
 A message whose encoded text is over 4 KiB comes back clipped with `truncated`, its full size in `bytes` and a `bodyRef`; `agenthail_read` with that `bodyRef` (and `offset`, from `nextOffset`) pages its whole text, acknowledged or not. `agenthail_wait` with `tasks: []` returns once a message is unread, so an agent long-waits on it to learn of mail. The loop is: wait, read, handle, then read with `ack` (which also returns anything newer), and wait again with `ack` as `cursor`.
 
-The transport is stateless Streamable HTTP: the daemon keeps no session, and each request is checked on its own, so a rotated, rebound or turned-off token, or a change to the Access settings, takes effect on the next request. The daemon sends nothing it was not asked for.
+### Push and the session lifecycle
+
+The transport is stateful Streamable HTTP, so the daemon can tell an identity when mail arrives. Every request, the event stream (GET) included, is still checked on its own as above.
+
+- **Contentless.** A notice carries no sender and no text: `notifications/resources/updated` for `agenthail://inbox/<name>` if the session subscribed to it, and a `notifications/message` at level `notice` with `{inbox, unread, next}` if the session set a logging level. Reading the resource gives the same count. Message text is reached only through `agenthail_read`, a verified request.
+- **Open.** `initialize` opens an SDK session, which the SDK binds to the identity id it was verified as; a request from another identity naming that session is refused.
+- **Bind.** The session's first verified message after `initialize` binds it to the notifier with the identity and the current credential epoch, and the binding lasts until the SDK ends the session, never longer and never shorter. A new, reconnected or resubscribed session, and one that sets a logging level, is told of everything still unread, so a dropped stream or a daemon restart loses nothing.
+- **Revoke.** `mcp_remote_epoch` holds one counter that SQLite triggers raise in the same transaction as any change to a remote token or binding, removal of remote access or of the identity, and any write to the Access team or audience (last-seen and key-status writes do not count). The counter never repeats, so clearing and restoring the same settings, or two rotations in one millisecond, still count as changes. Each notice pass closes every session bound under an older epoch before sending, and checks the epoch again just before it sends. A change landing after that last check can still let one contentless notice through before the next pass closes the session; that is what keeping notices contentless is for. Any remote credential change closes every remote session; clients reconnect with whatever credential is now valid and are told of their unread mail again.
+- **Expire.** A session with no request for an hour is closed (a request in flight, such as a long `agenthail_wait`, pauses that), and the daemon closes every session when it stops. The daemon does not ping clients: the SDK's keepalive closes the session of any client that keeps no event stream open, and a client that only calls tools would then find its session gone.
+
+The notifier follows the inbox's change signal and also sweeps every 5 seconds.
 
 Cloudflare's side (the Access application, its service token, the tunnel and DNS) is set up in Cloudflare; the daemon only checks what arrives.
 
@@ -85,4 +95,4 @@ Cloudflare's side (the Access application, its service token, the tunnel and DNS
 
 - The Mac and iPhone apps and the web dashboard do not show identities or their inboxes. Messages from one show its name like any agent's.
 - `agenthail inbox` reads the local registry, so it runs on the identity's own host. Off that host, use the remote MCP.
-- A remote identity is not pushed a notice when mail arrives; it learns of mail by waiting with `agenthail_wait`.
+- `notifications/message` reaches only a client that sets a logging level, and MCP logging is deprecated in the 2026-07-28 protocol revision; `resources/updated` reaches only a subscriber. A client that does neither learns of mail with `agenthail_wait`.

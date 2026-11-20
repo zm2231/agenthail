@@ -912,4 +912,27 @@ CREATE TABLE IF NOT EXISTS mcp_access (
 	keys_read_at_ms INTEGER NOT NULL DEFAULT 0,
 	keys_error TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS mcp_remote_epoch (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	epoch INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO mcp_remote_epoch(id,epoch) VALUES(1,1);
+DROP TRIGGER IF EXISTS identity_remote_epoch_added;
+CREATE TRIGGER identity_remote_epoch_added AFTER INSERT ON identity_remote
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+DROP TRIGGER IF EXISTS identity_remote_epoch_changed;
+CREATE TRIGGER identity_remote_epoch_changed AFTER UPDATE OF token_hash,access_client_id,access_email ON identity_remote
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+DROP TRIGGER IF EXISTS identity_remote_epoch_removed;
+CREATE TRIGGER identity_remote_epoch_removed AFTER DELETE ON identity_remote
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+DROP TRIGGER IF EXISTS mcp_access_epoch_added;
+CREATE TRIGGER mcp_access_epoch_added AFTER INSERT ON mcp_access
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+DROP TRIGGER IF EXISTS mcp_access_epoch_changed;
+CREATE TRIGGER mcp_access_epoch_changed AFTER UPDATE OF team,aud ON mcp_access
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+DROP TRIGGER IF EXISTS mcp_access_epoch_removed;
+CREATE TRIGGER mcp_access_epoch_removed AFTER DELETE ON mcp_access
+BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
 `

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -16,9 +17,12 @@ import (
 )
 
 const (
-	remoteTokenLife  = time.Hour
-	tokenInfoRemote  = "agenthail.remote"
-	tokenInfoBinding = "agenthail.binding"
+	remoteTokenLife     = time.Hour
+	remoteSessionIdle   = time.Hour
+	tokenInfoRemote     = "agenthail.remote"
+	tokenInfoBinding    = "agenthail.binding"
+	tokenInfoEpoch      = "agenthail.epoch"
+	remoteInboxURIStart = "agenthail://inbox/"
 )
 
 type remoteMCP struct {
@@ -33,18 +37,27 @@ type remoteMCP struct {
 	// certsURL and certsClient replace the team's key set, for tests.
 	certsURL    string
 	certsClient *http.Client
+
+	mu       sync.Mutex
+	sessions map[*mcp.ServerSession]*remotePushSession
+	wake     chan struct{}
+	// beforeNotice runs between a pass's last epoch check and its sends, for tests.
+	beforeNotice func()
 }
 
-// Stateless: every request is verified on its own, so a revoked token stops at its next request.
 func (d *Daemon) remoteMCP() *remoteMCP {
 	d.remoteOnce.Do(func() {
-		m := &remoteMCP{d: d}
+		m := &remoteMCP{d: d, sessions: map[*mcp.ServerSession]*remotePushSession{}, wake: make(chan struct{}, 1)}
 		m.server = mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{
 			SupportedProtocolVersions: mcpProtocolVersions,
-			Instructions:              "You are an Agenthail agent identity. Messages sent to you wait in your inbox. agenthail_wait with tasks [] returns when one arrives; agenthail_read with no sessionId returns your unread messages. Pass the ack it returns on your next read, or as cursor to agenthail_wait, to mark them read; until then they are returned again. Reply with agenthail_send to the sender each message names.",
+			SubscribeHandler:          m.subscribe,
+			UnsubscribeHandler:        func(context.Context, *mcp.UnsubscribeRequest) error { return nil },
+			Instructions:              "You are an Agenthail agent identity. Messages sent to you wait in your inbox. Subscribe to " + remoteInboxURIStart + "<your name> to be told when one arrives; the notice says only how many are unread. agenthail_wait with tasks [] returns when one arrives; agenthail_read with no sessionId returns your unread messages. Pass the ack it returns on your next read, or as cursor to agenthail_wait, to mark them read; until then they are returned again. Reply with agenthail_send to the sender each message names.",
 		})
+		m.server.AddReceivingMiddleware(m.track)
 		d.registerMCPTools(m.server)
-		stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m.server }, &mcp.StreamableHTTPOptions{Stateless: true})
+		m.server.AddResourceTemplate(&mcp.ResourceTemplate{URITemplate: remoteInboxURIStart + "{name}", Name: "inbox", Title: "Inbox", Description: "How many messages wait unread in your inbox. Read them with agenthail_read.", MIMEType: "application/json"}, m.readInbox)
+		stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m.server }, &mcp.StreamableHTTPOptions{EventStore: mcp.NewMemoryEventStore(nil), SessionTimeout: cmp.Or(d.remoteIdle, remoteSessionIdle)})
 		bearer := auth.RequireBearerToken(m.verify, &auth.RequireBearerTokenOptions{})
 		m.handler = bearer(http.NewCrossOriginProtection().Handler(stream))
 		d.remote = m
@@ -104,6 +117,10 @@ func (m *remoteMCP) verify(ctx context.Context, token string, r *http.Request) (
 		d.logMCPAuthRefusal("remote", "-", "unauthenticated", remoteRefusal{reason})
 		return nil, fmt.Errorf("%w: %s", auth.ErrInvalidToken, reason)
 	}
+	epoch, err := d.Registry.RemoteEpoch()
+	if err != nil {
+		return nil, err
+	}
 	remote, err := d.Registry.RemoteIdentityByToken(token)
 	if errors.Is(err, registry.ErrRemoteUnknown) {
 		return refuse("the bearer is not a remote token of any identity here")
@@ -141,7 +158,7 @@ func (m *remoteMCP) verify(ctx context.Context, token string, r *http.Request) (
 	if err := d.Registry.TouchRemoteIdentity(remote.IdentityID, time.Now()); err != nil {
 		d.logRuntimeError("remote mcp last seen", err)
 	}
-	return &auth.TokenInfo{UserID: remote.IdentityID, Expiration: time.Now().Add(remoteTokenLife), Extra: map[string]any{tokenInfoRemote: remote.Name, tokenInfoBinding: binding}}, nil
+	return &auth.TokenInfo{UserID: remote.IdentityID, Expiration: time.Now().Add(remoteTokenLife), Extra: map[string]any{tokenInfoRemote: remote.Name, tokenInfoBinding: binding, tokenInfoEpoch: epoch}}, nil
 }
 
 // An identity has the person's reach, as the CLI it sends with does.
