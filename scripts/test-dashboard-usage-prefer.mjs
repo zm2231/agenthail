@@ -30,7 +30,7 @@ const find = (node, test) => (test(node) ? node : node.children.map((child) => f
 const list = accounts(sets, now);
 const ops = list.find((account) => account.login === "ops@example.com");
 assert.match(ops.subtitle, /^preferred/, "a preferred account says so, not only by color");
-assert.deepEqual(ops.proxyAccount, { proxyId: shared.id, id: "claude-ops.json", preferred: true, setOn: "server", setAt: "2026-10-26T11:20:00Z" });
+assert.deepEqual(ops.proxyAccount, { proxyId: shared.id, id: "claude-ops.json", preferred: true, routed: false, setOn: "server", setAt: "2026-10-26T11:20:00Z" }, "the reference carries the routed mark, as the Swift one does");
 
 const panel = new Node("div");
 const asked = [];
