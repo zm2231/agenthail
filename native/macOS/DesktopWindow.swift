@@ -889,6 +889,7 @@ struct TranscriptView: View {
                             coverView(ids)
                         }
                         .onDisappear { tailLayout.rows[slot.id] = nil }
+                        .reportsTop(slot.id, to: rowTops)
                 }
                 ForEach(Array(sends.enumerated()), id: \.element.id) { index, send in
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, unconfirmed: send.unconfirmedTitle, onEdit: canResend ? { text in
