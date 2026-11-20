@@ -58,10 +58,13 @@ func routesFrom(t *testing.T, node *moveNode, session string) []registry.RouteRo
 func takeTurn(t *testing.T, node *moveNode, session, text string) string {
 	t.Helper()
 	before := len(node.host.Turns(t, session))
-	if _, err := claudehost.NewClient(node.host.Home).Send(context.Background(), claudehost.SendRequest{SessionID: session, UUID: uuid.NewString(), Text: text}); err != nil {
+	client := claudehost.NewClient(node.host.Home)
+	if _, err := client.Send(context.Background(), claudehost.SendRequest{SessionID: session, UUID: uuid.NewString(), Text: text}); err != nil {
 		t.Fatal(err)
 	}
-	testkit.Eventually(t, "the turn", 15*time.Second, func() bool { return len(node.host.Turns(t, session)) == before+1 })
+	testkit.Eventually(t, "the turn to end", 15*time.Second, func() bool {
+		return len(node.host.Turns(t, session)) == before+1 && hostState(t, client, session) == "idle"
+	})
 	turns := node.host.Turns(t, session)
 	return turns[len(turns)-1].Reply
 }
