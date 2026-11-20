@@ -820,6 +820,10 @@ struct SessionPaneTest {
         check(warmModel.store.commands["W1"]?.commands.map(\.insert) == ["/review"] && warmModel.store.commands["W1"]?.unavailable == "", "a streamed command list replaces the session's commands: \(String(describing: warmModel.store.commands["W1"]))")
         check(warmPane.timelineItems.map(\.id) == ["a", "b"], "a command list adds no transcript row: \(warmPane.timelineItems.map(\.id))")
 
+        let earlierDeadline = Date().addingTimeInterval(5)
+        let readsW1 = { (request: String) in request.contains("/api/v1/session-metadata?") && request.contains("id=W1") }
+        while !warmRequests[beforeReturn...].contains(where: readsW1), Date() < earlierDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        check(warmRequests[beforeReturn...].contains(where: readsW1), "the reopened session's own metadata read arrives before the next check starts")
         let beforeShowAll = warmRequests.count
         warmPane.showAllClaudeSubagents()
         warmPane.select("W2")
@@ -828,6 +832,7 @@ struct SessionPaneTest {
         while !warmRequests[beforeShowAll...].contains(where: { $0.contains("/api/v1/session-metadata?") && $0.contains("id=W2") }), Date() < leftDeadline {
             try? await Task.sleep(for: .milliseconds(20))
         }
+        check(warmRequests[beforeShowAll...].contains { $0.contains("/api/v1/session-metadata?") && $0.contains("id=W2") }, "the next session reads its metadata")
         try? await Task.sleep(for: .milliseconds(300))
         let leftBehind = warmRequests[beforeShowAll...].filter { $0.contains("/api/v1/session-metadata?") && $0.contains("id=W1") && !$0.contains("subagents=all") }
         check(leftBehind.isEmpty, "a session left right after asking for every subagent never reads its metadata with the next session's subagent choice: \(leftBehind)")
