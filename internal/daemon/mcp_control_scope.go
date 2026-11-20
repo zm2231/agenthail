@@ -39,6 +39,9 @@ func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref st
 	if session.ID == caller.session.ID {
 		return nil, refuse("invalid", "That is your own session.")
 	}
+	if surface.IsAgentIdentity(session) && upward {
+		return session, nil
+	}
 	if host, err := d.Registry.SessionHost(session.ID); err != nil || host != "" {
 		return nil, scopeRefusal(session.ID, "other_host", "That session runs on another host; reach a project's coordinator there by sending with project instead.")
 	}

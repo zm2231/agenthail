@@ -85,7 +85,7 @@ func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.R
 	if !upward {
 		return nil, scopeRefusal(remote.ID, "not_queued", fmt.Sprintf("%s runs on host %s; across hosts you may only send a queued message.", remote.Label(), remote.Host.Name))
 	}
-	if caller.has("control.all") {
+	if caller.has("control.all") || remote.Surface == surface.KindAgent {
 		return remote.Session(), nil
 	}
 	spawner, err := d.remoteSpawner(caller, remote.ID)
@@ -120,7 +120,7 @@ func (d *Daemon) remoteSpawner(caller *mcpCaller, ref string) (bool, error) {
 // target in before it delivers a send, for a caller whose reach across hosts
 // is its own project.
 func (d *Daemon) remoteSendScope(caller *mcpCaller, target *surface.Session) (string, error) {
-	if _, _, remote := hosts.Split(target.ID); !remote || caller.has("control.all") || caller.project == nil {
+	if _, _, remote := hosts.Split(target.ID); !remote || caller.has("control.all") || caller.project == nil || target.Surface == surface.KindAgent {
 		return "", nil
 	}
 	spawner, err := d.remoteSpawner(caller, target.ID)

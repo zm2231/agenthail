@@ -56,7 +56,7 @@ func channelDeliverScope(request dashboardActionRequest) error {
 }
 
 func (d *Daemon) sendScope(session surface.Session, projectID string) error {
-	if projectID == "" {
+	if projectID == "" || surface.IsAgentIdentity(&session) {
 		return nil
 	}
 	if project := d.resolveProject(session); project != projectID {

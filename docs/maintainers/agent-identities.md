@@ -37,6 +37,8 @@ The adapter lists identities to the catalog like any surface, so each identity h
 
 An identity has the reach of the Agenthail CLI: the CLI does not check it as an agent session, so it is not held to one project. It only names the sender of a message the CLI could already send without one, and grants nothing the person running that CLI does not already have.
 
+In the other direction, any agent may send an identity a queued message, from any project, on this host or a paired one. An identity belongs to no project, so the project reach that limits an agent session (`mcpControlTarget` here, `mcpRemoteTarget` for a paired host's session) admits it, `remoteSendScope` names no project for it, and the owning host's `sendScope` lets it through even when an older sender names a project. A send now (`mode: now`) to an identity on a paired host is refused like any send now across hosts.
+
 ## Across paired hosts
 
 The pairing carries an identity both ways with no new path (see [paired hosts](hosts.md)):
