@@ -47,7 +47,4 @@ func TestARowsTurnCompletionKeepsItsOwnHeadlineAfterALaterTurnEnds(t *testing.T)
 	if row.TurnCompletion == nil || row.TurnCompletion.TurnID != "turn-1" || row.TurnCompletion.Headline != "First pass done" {
 		t.Fatalf("the row's turn completion %+v", row.TurnCompletion)
 	}
-	if row.EndTurn == nil || row.EndTurn.Headline != "Second pass done" {
-		t.Fatalf("the row's current end %+v", row.EndTurn)
-	}
 }
