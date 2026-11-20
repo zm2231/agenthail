@@ -34,11 +34,11 @@ struct FullScreenFitTest {
         }
 
         // AppKit restores the frame in one step on leaving full screen, without a person's drag to keep asking for the width.
-        func leaveFullScreen(fits: Bool, animates: Bool) -> (width: CGFloat, docked: Bool) {
+        func leaveFullScreen(fits: Bool, animates: Bool, from start: CGFloat = 600, thenWiden widened: CGFloat? = nil) -> (width: CGFloat, docked: Bool) {
             let pane = SessionPane(model: AgenthailModel(connecting: false), restoresSelection: false)
             let hosting = NSHostingView(rootView: FitColumns(pane: pane, fits: fits))
             hosting.sizingOptions = [.minSize]
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 700), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: start, height: 700), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
             window.contentView = hosting
             func settle() { for _ in 0..<6 { hosting.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.1)) } }
             settle()
@@ -51,6 +51,11 @@ struct FullScreenFitTest {
             if animates { settle() }
             window.setFrame(narrow, display: false)
             NotificationCenter.default.post(name: NSWindow.didExitFullScreenNotification, object: window)
+            if let widened {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+                window.setFrame(NSRect(origin: window.frame.origin, size: NSSize(width: widened, height: window.frame.height)), display: false)
+            }
+            settle()
             settle()
             return (window.contentLayoutRect.width, pane.sidebarDocks)
         }
@@ -61,7 +66,11 @@ struct FullScreenFitTest {
             check(bare.width > 600 + 0.5, "without the fit, leaving full screen widens a 600 pt window, got \(bare.width)")
             check(fitted.width == 600, "leaving full screen returns a 600 pt window to 600 pt, got \(fitted.width), animates \(animates)")
             check(!fitted.docked, "and the sidebar undocks there, below \(ColumnFit.sidebarDocks) pt")
+            let widened = leaveFullScreen(fits: true, animates: animates, thenWiden: 900)
+            check(widened.width == 900, "a window widened right after leaving full screen keeps the width it was given, got \(widened.width), animates \(animates)")
         }
+        let wide = leaveFullScreen(fits: true, animates: false, from: 1100, thenWiden: 1250)
+        check(wide.width == 1250 && wide.docked, "a window that entered full screen wide enough to dock is left to its own sizes, got \(wide)")
 
         if failures > 0 { exit(1) }
         print("full screen fit tests passed")
