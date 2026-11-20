@@ -46,6 +46,14 @@
         #expect(words.settled.height < plain.settled.height)
       }
 
+      @Test func resizingTheSameTableFollowsTheNewColumnWidth() throws {
+        let wide = measure(.wholeWords, width: 760, then: 200)
+        let narrow = measure(.wholeWords, width: 200)
+
+        #expect(wide.settled == narrow.settled)
+        #expect(wide.table > 200)
+      }
+
       @Test(arguments: [200.0, 760.0])
       func theFirstLayoutInAWindowIsTheSettledLayout(width: CGFloat) throws {
         let words = measure(.wholeWords, width: width)
@@ -53,13 +61,15 @@
         #expect(words.first == words.settled)
       }
 
-      private func measure(_ style: some TableStyle, width: CGFloat) -> Measured {
+      private func measure(_ style: some TableStyle, width: CGFloat, then resized: CGFloat? = nil) -> Measured {
         let tableWidth = TableWidth()
-        let view = StructuredText(markdown: Self.markdown)
-          .textual.tableStyle(style)
-          .textual.tableCellStyle(Probe(width: tableWidth))
-          .fixedSize(horizontal: false, vertical: true)
-          .frame(width: width)
+        let column = Column(width: width)
+        let view = Sized(column: column) {
+          StructuredText(markdown: Self.markdown)
+            .textual.tableStyle(style)
+            .textual.tableCellStyle(Probe(width: tableWidth))
+            .fixedSize(horizontal: false, vertical: true)
+        }
         let host = NSHostingView(rootView: view)
         let window = NSWindow(
           contentRect: NSRect(x: 0, y: 0, width: width, height: 400),
@@ -69,11 +79,34 @@
         )
         window.contentView = host
         let first = host.fittingSize
+        if let resized {
+          for _ in 0..<5 {
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+          }
+          tableWidth.value = 0
+          column.width = resized
+        }
         for _ in 0..<5 {
           host.layoutSubtreeIfNeeded()
           RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         }
         return Measured(first: first, settled: host.fittingSize, table: tableWidth.value)
+      }
+
+      @Observable
+      final class Column {
+        var width: CGFloat
+        init(width: CGFloat) { self.width = width }
+      }
+
+      private struct Sized<Content: View>: View {
+        let column: Column
+        @ViewBuilder let content: Content
+
+        var body: some View {
+          content.frame(width: column.width)
+        }
       }
 
       private struct Probe: TableCellStyle {

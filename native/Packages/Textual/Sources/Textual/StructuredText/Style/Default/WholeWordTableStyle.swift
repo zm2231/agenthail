@@ -40,20 +40,27 @@ extension StructuredText {
 /// Lays the table out at its container's width, which the first subview reports even inside a
 /// horizontal scroll view, or at its narrowest whole-word width when that is wider.
 private struct ContainerWidth: Layout {
-  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-    guard subviews.count == 2 else { return .zero }
-    return subviews[1].sizeThatFits(table(subviews))
+  func makeCache(subviews: Subviews) -> CGFloat? { nil }
+
+  func updateCache(_ cache: inout CGFloat?, subviews: Subviews) {
+    cache = nil
   }
 
-  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout CGFloat?) -> CGSize {
+    guard subviews.count == 2 else { return .zero }
+    return subviews[1].sizeThatFits(table(subviews, cache: &cache))
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout CGFloat?) {
     guard subviews.count == 2 else { return }
     subviews[0].place(at: bounds.origin, proposal: .zero)
-    subviews[1].place(at: bounds.origin, proposal: table(subviews))
+    subviews[1].place(at: bounds.origin, proposal: table(subviews, cache: &cache))
   }
 
-  private func table(_ subviews: Subviews) -> ProposedViewSize {
+  private func table(_ subviews: Subviews, cache: inout CGFloat?) -> ProposedViewSize {
     let container = subviews[0].sizeThatFits(.unspecified).width
-    let narrowest = subviews[1].sizeThatFits(ProposedViewSize(width: 0, height: nil)).width
+    let narrowest = cache ?? subviews[1].sizeThatFits(ProposedViewSize(width: 0, height: nil)).width
+    cache = narrowest
     return ProposedViewSize(width: max(container, narrowest), height: nil)
   }
 }
