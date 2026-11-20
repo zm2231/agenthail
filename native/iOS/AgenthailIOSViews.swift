@@ -572,24 +572,26 @@ struct SessionScreen: View {
     }
 
     // Older pages load until the turn is found, a few at most, so a tap on an old notification still lands somewhere sensible.
-    @discardableResult
-    private func revealOpenedTurn() async -> Bool {
+    private func revealOpenedTurn() async -> Bool? {
         let screen = session.id
-        guard let turn = model.takeOpenedTurn(screen) else { return false }
+        guard let turn = model.takeOpenedTurn(screen) else { return nil }
         var found = TurnReveal.find(turn, in: shownItems)
         var pages = 0
-        while found.settled == nil, pages < TurnReveal.olderPages, let cursor = model.activityCursor, cursor > 0 {
-            guard !Task.isCancelled, model.selectedSessionID == screen else { return false }
+        while found.settled == nil, pages < TurnReveal.olderPages {
+            guard !Task.isCancelled, model.selectedSessionID == screen else { return nil }
             if model.loadingOlderActivity {
                 try? await Task.sleep(for: .milliseconds(100))
+                found = TurnReveal.find(turn, in: shownItems)
                 continue
             }
+            guard let cursor = model.activityCursor, cursor > 0 else { break }
             await model.loadOlderActivity()
+            found = TurnReveal.find(turn, in: shownItems)
             guard model.activityCursor != cursor else { break }
             pages += 1
-            found = TurnReveal.find(turn, in: shownItems)
         }
-        guard !Task.isCancelled, model.selectedSessionID == screen, let item = found.settled, let target = turnRow(item) else { return false }
+        guard !Task.isCancelled, model.selectedSessionID == screen else { return nil }
+        guard let item = found.settled, let target = turnRow(item) else { return false }
         olderPlace.release()
         followingLatest = false
         position.scrollTo(id: target, anchor: .top)
@@ -598,7 +600,11 @@ struct SessionScreen: View {
 
     private func startTurnReveal() {
         turnReveal?.cancel()
-        turnReveal = Task { await revealOpenedTurn() }
+        turnReveal = Task {
+            guard await revealOpenedTurn() == false else { return }
+            followingLatest = true
+            scrollToLatest()
+        }
     }
 
     private var shownItems: [TimelineItem] {
@@ -954,7 +960,7 @@ struct SessionScreen: View {
             await model.loadSession(session.id)
             if startsAtOldest, let first = firstRowID {
                 position.scrollTo(id: first, anchor: .top)
-            } else if followingLatest, await !revealOpenedTurn() {
+            } else if followingLatest, await revealOpenedTurn() != true {
                 scrollToLatest()
             }
             landed = true
