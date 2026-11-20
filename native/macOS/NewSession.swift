@@ -5,12 +5,12 @@ struct NewSessionView: View {
     var model: AgenthailModel
     @ObservedObject var draft: NewSessionDraft
     @ObservedObject private var shortcuts = ShortcutStore.shared
-    @State private var focused = false
+    @State private var focusRequest = 0
 
     var body: some View {
         VStack(spacing: DesktopSpace.s) {
             VStack(alignment: .leading, spacing: 0) {
-                ComposerTextView(text: $draft.form.message, focused: $focused, placeholder: "What should the agent do?", accessibilityLabel: "First message", lines: 4...14) { draft.start() }
+                ComposerTextView(text: $draft.form.message, focusRequest: focusRequest, placeholder: "What should the agent do?", accessibilityLabel: "First message", lines: 4...14) { draft.start() }
                     .padding(.horizontal, 16)
                     .padding(.top, 15)
                     .padding(.bottom, DesktopSpace.s)
@@ -39,7 +39,7 @@ struct NewSessionView: View {
         .padding(.horizontal, DesktopSpace.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .backdropSurface(DesktopPalette.window)
-        .onAppear { focused = true }
+        .onAppear { focusRequest += 1 }
         .task(id: "\(draft.hosts.generation)/\(model.isConnected)") {
             if model.isConnected { await draft.loadOptions() }
         }

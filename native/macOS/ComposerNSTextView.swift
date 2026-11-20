@@ -16,7 +16,7 @@ final class ComposerNSTextView: NSTextView {
     var onDownFromLastLine: (() -> Bool)?
     var onSubmit: (() -> Void)?
     var completionKey: ((CompletionKey) -> Bool)?
-    var focusChanged: ((Bool) -> Void)?
+    var movedToWindow: (() -> Void)?
     var pasteAttachments: ((PastedAttachments) -> Void)? {
         didSet { if (oldValue == nil) != (pasteAttachments == nil) { updateDragTypeRegistration() } }
     }
@@ -197,16 +197,9 @@ final class ComposerNSTextView: NSTextView {
         return abs(here.midY - end.midY) < 1
     }
 
-    override func becomeFirstResponder() -> Bool {
-        let became = super.becomeFirstResponder()
-        if became { focusChanged?(true) }
-        return became
-    }
-
-    override func resignFirstResponder() -> Bool {
-        let resigned = super.resignFirstResponder()
-        if resigned { focusChanged?(false) }
-        return resigned
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { movedToWindow?() }
     }
 
     func show(bound text: String, sync: ComposerTextSync) {
