@@ -191,7 +191,7 @@ private final class Layout {
     let clip = TranscriptClip()
     var lastGrowth: CGFloat?
     var animationStart: ContinuousClock.Instant?
-    private(set) var resized = false
+    private var resizedTurn: Int?
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
     var revealed: RevealedRow?
     private var check: Task<Void, Never>?
@@ -246,10 +246,28 @@ private final class Layout {
         return nil
     }
 
+    var resized: Bool { resizedTurn == RunLoopTurn.current }
+
     func markResized() {
-        guard !resized else { return }
-        resized = true
-        DispatchQueue.main.async { self.resized = false }
+        resizedTurn = RunLoopTurn.current
+    }
+}
+
+/// Counts main run loop passes; unlike a main-queue hop, it moves on even while the main queue is too busy to run a block.
+@MainActor
+enum RunLoopTurn {
+    private static var turn = 0
+    private static let observer: CFRunLoopObserver? = {
+        let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeTimers.rawValue, true, 0) { _, _ in
+            MainActor.assumeIsolated { turn &+= 1 }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        return observer
+    }()
+
+    static var current: Int {
+        _ = observer
+        return turn
     }
 }
 
