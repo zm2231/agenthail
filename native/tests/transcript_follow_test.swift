@@ -33,6 +33,7 @@ final class Feed: ObservableObject {
 @MainActor var live: Set<String> = []
 @MainActor let rowMemory = TranscriptRowMemory()
 @MainActor weak var watched: Feed?
+@MainActor let readerTops = TranscriptRowTops()
 
 func rows(_ prefix: String, _ count: Int) -> [Row] {
     (0..<count).map { Row(id: "\(prefix)\($0)", lines: 1 + ($0 * 7) % 9) }
@@ -55,6 +56,7 @@ struct Transcript: View {
                     ForEach(feed.rows.prefix(split)) { row in
                         RowView(row: row)
                             .padding(.top, 20)
+                            .reportsTop(row.id, to: readerTops)
                     }
                 }
                 VStack(alignment: .leading, spacing: 0) {
@@ -83,7 +85,7 @@ struct Transcript: View {
             guard feed.usesTail else { return }
             layout.tail.update(ids, in: feed.transcript, rows: layout.rows, visible: layout.visible, following: following) { feed.hold.held(over: $0, buttons: 0) }
         }
-        .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.rows.contains { $0.id == id } }, position: $position, following: $following)
+        .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.rows.contains { $0.id == id } }, rows: readerTops, position: $position, following: $following)
         .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: feed.header) }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
         .onChange(of: following) {
@@ -430,6 +432,24 @@ struct TranscriptFollowTest {
             }
         }
 
+        for (start, older) in [(0, 1), (0, 40), (300, 1), (300, 40)] as [(CGFloat, Int)] {
+            feed.transcript = "Zg\(Int(start))-\(older)"
+            feed.rows = rows("Zg", 100)
+            spin(0.6)
+            move(scroll, to: start)
+            spin(0.3)
+            let placeRow = readerRow(scroll, feed)
+            let placeY = screenY(placeRow, scroll)
+            let content = scroll.documentView?.frame.height ?? 0
+            readerTops.holdOlderPlace()
+            feed.rows = (0..<20).map { Row(id: "Zg\(Int(start))-\(older)o\($0)", lines: older) } + feed.rows
+            awaitReport("an older page of \(older)-line rows") { $0.content > content }
+            expectEventually(abs(screenY(placeRow, scroll) - placeY) < 2, "an older page of \(older)-line rows keeps the reader's row in place while rows below it are still estimated, from \(start) \(placeRow) at \(placeY) moved to \(screenY(placeRow, scroll))")
+            spin(0.3)
+            expect(abs(screenY(placeRow, scroll) - placeY) < 2, "the reader's row stays in place once an older page of \(older)-line rows settles, from \(start) \(placeRow) at \(placeY) moved to \(screenY(placeRow, scroll))")
+            expect(!feed.following, "holding the reader's row does not start following")
+        }
+
         feed.transcript = "Zs"
         feed.rows = rows("Zs", 5)
         spin(0.5)
@@ -757,6 +777,16 @@ struct TranscriptFollowTest {
     @MainActor
     private static func bottomOffset(_ scroll: NSScrollView) -> CGFloat {
         offset(scroll) + gap(scroll)
+    }
+
+    @MainActor
+    private static func readerRow(_ scroll: NSScrollView, _ feed: Feed) -> String {
+        feed.rows.filter { live.contains($0.id) && (rowTops[$0.id] ?? -1) >= offset(scroll) }.min { (rowTops[$0.id] ?? 0) < (rowTops[$1.id] ?? 0) }?.id ?? "none"
+    }
+
+    @MainActor
+    private static func screenY(_ row: String, _ scroll: NSScrollView) -> CGFloat {
+        live.contains(row) ? (rowTops[row] ?? .infinity) - offset(scroll) : .infinity
     }
 
     @MainActor

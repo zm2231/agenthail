@@ -818,6 +818,7 @@ struct TranscriptView: View {
     @State private var underfilled = false
     @State private var paneWidth: CGFloat = 0
     @State private var tailLayout = TranscriptTailLayout()
+    @State private var rowTops = TranscriptRowTops()
     @State private var selectionHold = TranscriptSelectionHold()
     @State private var settledSlots = StableSlots()
     @State private var tailRevision = 0
@@ -876,7 +877,7 @@ struct TranscriptView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 60)
                 }
-                ForEach(settled) { blockRow($0, canResend: canResend) }
+                ForEach(settled) { blockRow($0, canResend: canResend).reportsTop($0.id, to: rowTops) }
             }
             .id(TextScale.shared.factor)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { tailLayout.rescale.stack($0, at: ProcessInfo.processInfo.systemUptime) }
@@ -971,7 +972,7 @@ struct TranscriptView: View {
                 rescaling = false
             }
         }
-        .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, held: { selectionHold.held(over: [.infinite]) }, position: $position, following: $following, rescaling: rescaling)
+        .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, held: { selectionHold.held(over: [.infinite]) }, rows: rowTops, position: $position, following: $following, rescaling: rescaling)
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             geometry.contentSize.height - geometry.containerSize.height * 1.5
         } action: { _, slack in
@@ -1049,6 +1050,7 @@ struct TranscriptView: View {
                 ProgressView().controlSize(.mini)
             } else if (pane.olderCursor ?? 0) > 0 {
                 Button("Load earlier") {
+                    rowTops.holdOlderPlace()
                     Task { await pane.loadOlder() }
                 }
                 .buttonStyle(.plain)
@@ -1064,6 +1066,7 @@ struct TranscriptView: View {
 
     private func fillViewport() {
         guard pane.detail != nil, let cursor = pane.olderCursor, cursor > 0, !pane.loadingOlder, pane.olderError == nil else { return }
+        rowTops.holdOlderPlace()
         Task { await pane.loadOlder() }
     }
 
