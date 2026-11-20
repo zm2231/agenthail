@@ -55,6 +55,68 @@ func TestAProxyRootReadsAsItsFreestAccount(t *testing.T) {
 	}
 }
 
+func TestAProxyRootReadsAsTheAccountTheProxyRoutesTo(t *testing.T) {
+	f := newProxyUsageFixture(t, "file")
+	now := time.Now().UTC()
+	signals := func(session, week string) string {
+		return fmt.Sprintf(`{"observed_at":%q,"signals":{"Anthropic-Ratelimit-Unified-5h-Utilization":%q,"Anthropic-Ratelimit-Unified-5h-Reset":"%d","Anthropic-Ratelimit-Unified-7d-Utilization":%q,"Anthropic-Ratelimit-Unified-7d-Reset":"%d"}}`,
+			now.Format(time.RFC3339), session, now.Add(3*time.Hour).Unix(), week, now.Add(50*time.Hour).Unix())
+	}
+	f.proxy.Files.Store(`{"files":[
+ {"name":"claude-main.json","provider":"claude","email":"main@example.com","status":"active","quota_preference":10,"quota":` + signals("0.40", "0.45") + `},
+ {"name":"claude-spare.json","provider":"claude","email":"spare@example.com","status":"active","quota_preference":0,"quota":` + signals("0.02", "0.05") + `},
+ {"name":"claude-team.json","provider":"claude","email":"team@example.com","status":"active","next_retry_after":"2099-01-01T00:00:00Z","quota_preference":10}]}`)
+	var usage struct {
+		Best    string `json:"best"`
+		Problem string `json:"usageProblem"`
+	}
+	raw := f.get(t, "/api/v1/session-options/claude-usage?root="+url.QueryEscape(f.team), &usage)
+	if usage.Best != "main@example.com" || usage.Problem != "" {
+		t.Fatalf("the picker names the preferred account the proxy sends work to, not a freer one it would not use: %s", raw)
+	}
+}
+
+func TestAFullProxyRootReadsAsTheAccountThatFreesFirst(t *testing.T) {
+	f := newProxyUsageFixture(t, "file")
+	now := time.Now().UTC()
+	f.proxy.Files.Store(fmt.Sprintf(`{"files":[
+ {"name":"claude-main.json","provider":"claude","email":"main@example.com","status":"active","quota_ceiling":{"7d":60},
+  "quota":{"observed_at":%q,"signals":{"Anthropic-Ratelimit-Unified-7d-Utilization":"0.62","Anthropic-Ratelimit-Unified-7d-Reset":"%d"}}},
+ {"name":"claude-team.json","provider":"claude","email":"team@example.com","status":"active","next_retry_after":%q,
+  "quota":{"observed_at":%q,"signals":{"Anthropic-Ratelimit-Unified-7d-Utilization":"1.0","Anthropic-Ratelimit-Unified-7d-Reset":"%d"}}}]}`,
+		now.Format(time.RFC3339), now.Add(5*time.Hour).Unix(), now.Add(30*time.Hour).Format(time.RFC3339), now.Format(time.RFC3339), now.Add(30*time.Hour).Unix()))
+	var usage struct {
+		Best      string    `json:"best"`
+		Problem   string    `json:"usageProblem"`
+		Full      bool      `json:"full"`
+		FullUntil time.Time `json:"fullUntil"`
+	}
+	raw := f.get(t, "/api/v1/session-options/claude-usage?root="+url.QueryEscape(f.team), &usage)
+	if usage.Best != "main@example.com" || !strings.Contains(usage.Problem, "the first frees up in 5h") || !usage.Full || usage.FullUntil.Unix() != now.Add(5*time.Hour).Unix() {
+		t.Fatalf("a full root says when the pool frees up and reads as the account that frees first: %s", raw)
+	}
+}
+
+func TestAFullProxyRootGivesNoTimeWhenAFullAccountDoesNotSayWhen(t *testing.T) {
+	f := newProxyUsageFixture(t, "file")
+	now := time.Now().UTC()
+	f.proxy.Files.Store(fmt.Sprintf(`{"files":[
+ {"name":"claude-main.json","provider":"claude","email":"main@example.com","status":"active","quota_ceiling":{"7d":60},
+  "quota":{"observed_at":%q,"signals":{"Anthropic-Ratelimit-Unified-7d-Utilization":"0.62"}}},
+ {"name":"claude-team.json","provider":"claude","email":"team@example.com","status":"active","quota_ceiling":{"7d":60},
+  "quota":{"observed_at":%q,"signals":{"Anthropic-Ratelimit-Unified-7d-Utilization":"1.0","Anthropic-Ratelimit-Unified-7d-Reset":"%d"}}}]}`,
+		now.Format(time.RFC3339), now.Format(time.RFC3339), now.Add(5*time.Hour).Unix()))
+	var usage struct {
+		Problem   string    `json:"usageProblem"`
+		Full      bool      `json:"full"`
+		FullUntil time.Time `json:"fullUntil"`
+	}
+	raw := f.get(t, "/api/v1/session-options/claude-usage?root="+url.QueryEscape(f.team), &usage)
+	if !usage.Full || !usage.FullUntil.IsZero() || strings.Contains(usage.Problem, "frees up") {
+		t.Fatalf("when one full account does not say when it frees, the pool gives no time: %s", raw)
+	}
+}
+
 func TestAFullProxyRootSaysWhenItsFirstAccountFreesUp(t *testing.T) {
 	f := newProxyUsageFixture(t, "file")
 	var usage struct {

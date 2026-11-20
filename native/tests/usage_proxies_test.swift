@@ -93,6 +93,18 @@ struct UsageProxiesTest {
         viaProxy.best = "team@example.com"
         viaProxy.usage = try JSONDecoder().decode(ProviderUsage.self, from: Data(#"{"limits":[{"kind":"session","percent":18},{"kind":"weekly_all","percent":41}]}"#.utf8))
         check(viaProxy.readsUsage && ClaudeRootLabels.option(viaProxy, title: "shared via proxy") == "shared via proxy · next: team · session 18%, week 41%", "a proxy root reads as the account the proxy would use next: \(ClaudeRootLabels.option(viaProxy, title: "shared via proxy"))")
+        var capped = viaProxy
+        capped.usage = try JSONDecoder().decode(ProviderUsage.self, from: Data(#"{"limits":[{"kind":"weekly_all","percent":100,"resetsAt":"2099-01-02T00:00:00Z"}]}"#.utf8))
+        check(capped.exhaustedUntil() == nil && !ClaudeRootLabels.option(capped, title: "shared via proxy").contains("out of usage"), "a proxy root with room is not out of usage because one account's window is at 100%")
+        capped.full = true
+        capped.fullUntil = "2099-01-01T05:00:00Z"
+        check(capped.exhaustedUntil() == (try date("2099-01-01T05:00:00Z")), "a full proxy root is out until the time the daemon gives, not one account's reset")
+        capped.fullUntil = "2000-01-01T00:00:00Z"
+        check(!ClaudeRootLabels.option(capped, title: "shared via proxy").contains("out of usage"), "a full state whose free time has passed no longer reads as out of usage")
+        capped.fullUntil = nil
+        check(capped.exhaustedUntil() == nil && ClaudeRootLabels.option(capped, title: "shared via proxy") == "shared via proxy · out of usage", "a full proxy root with no known free time says so without a time: \(ClaudeRootLabels.option(capped, title: "shared via proxy"))")
+        let answer = try JSONDecoder().decode(ClaudeRootUsage.self, from: Data(#"{"root":"/w","best":"team@example.com","full":true,"fullUntil":"2099-01-01T05:00:00Z"}"#.utf8))
+        check(answer.full == true && answer.fullUntil == "2099-01-01T05:00:00Z", "the root usage answer carries the pool's full state")
         print("ok")
     }
 

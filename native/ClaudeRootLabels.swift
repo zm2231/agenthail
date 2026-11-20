@@ -24,6 +24,7 @@ enum ClaudeRootLabels {
         if let until = root.exhaustedUntil() {
             return "\(title) · out of usage until \(until.formatted(date: .abbreviated, time: .shortened))"
         }
+        if root.fullWithNoTime { return "\(title) · out of usage" }
         let best = root.best.map { "next: " + ($0.split(separator: "@").first.map(String.init) ?? $0) }
         return [title, best, usage(root)].compactMap { $0 }.joined(separator: " · ")
     }

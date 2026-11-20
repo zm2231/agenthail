@@ -79,16 +79,18 @@ changes.
 
 Usage never chooses a new session's root (see the root order in
 [claude-peers.md](claude-peers.md)); balancing work across accounts is the
-proxy's job. A root through a proxy reads as the proxy's Claude account with
-the most headroom: one that is not cooling and is under the proxy's own
-ceiling for each window, or under 90% where the proxy sets none. When every
-account is full, the root frees up when the first account does: its cooling
-ends or its windows over a ceiling reset. Disabled and unavailable accounts
-never count. The new-session forms read such a root
-as `shared via proxy · next: team · session 18%, week 41%`: the account with
-the most headroom. The readings come from
+proxy's job. A root through a proxy reads as the Claude account the proxy
+sends new work to, the same `routed` account the usage strip names (see
+below). When every account is cooling or at a ceiling it reads as the account
+that frees up first, so the forms show when the root frees up. The
+new-session forms read such a root as
+`shared via proxy · next: team · session 18%, week 41%`. The readings come from
 `GET /api/v1/session-options/claude-usage?root=<path>`, which answers a proxy
-root with that account as `best` and its windows as `usage`.
+root with that account as `best` and its windows as `usage`. When the pool is
+full the answer adds `full: true` and `fullUntil`, the time from
+`proxyacct.Routing`, left out when not known. The forms read a proxy root as
+out of usage only from these, never from one account's window at 100%, and
+show `out of usage` with no time when `fullUntil` is missing.
 The pick only reads what the proxy reports; the proxy still chooses the
 account for each request.
 

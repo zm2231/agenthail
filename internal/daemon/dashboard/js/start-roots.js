@@ -51,6 +51,8 @@ export function loadStartRootUsage(options, host) {
         if (!answer || host !== app.startHost || app.startOptions !== options) return;
         root.usage = answer.usage;
         root.best = answer.best || null;
+        root.full = answer.full === true;
+        root.fullUntil = answer.fullUntil || null;
         renderStartConfigRoots(options.claudeConfigRoots, options.claudePick);
       })
       .catch(() => {});
@@ -61,12 +63,16 @@ export function claudeConfigRootOption(root, title = root.name) {
   const exhausted = claudeUsageExhausted(root);
   const detail = root.missing ? "does not exist" : exhausted
     ? `out of usage until ${new Date(exhausted).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-    : rootUsage(root);
+    : root.proxy && root.full && !root.fullUntil ? "out of usage" : rootUsage(root);
   return [title, root.best ? `next: ${root.best.split("@")[0]}` : null, detail].filter(Boolean).join(" · ");
 }
 
 export function claudeUsageExhausted(root) {
   const now = Date.now();
+  if (root.proxy) {
+    const until = Date.parse(root.fullUntil || "");
+    return root.full && until > now ? until : 0;
+  }
   const resets = (root.usage?.limits || []).filter(limit => limit.percent >= 100 && Date.parse(limit.resetsAt) > now).map(limit => Date.parse(limit.resetsAt));
   return resets.length ? Math.max(...resets) : 0;
 }

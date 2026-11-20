@@ -5,12 +5,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/claudepick"
 	"github.com/zm2231/agenthail/internal/proxyacct"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) readProxyPool(ctx context.Context, name string, now time.Time) ([]claudepick.Member, bool) {
+func (d *Daemon) readProxyAccounts(ctx context.Context, name string, now time.Time) ([]proxyacct.Account, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false
@@ -24,7 +23,7 @@ func (d *Daemon) readProxyPool(ctx context.Context, name string, now time.Time) 
 			continue
 		}
 		if reading := d.proxyUsage.read(ctx, config, now); reading.err == nil {
-			return proxyPool(reading.accounts, now), true
+			return reading.accounts, true
 		}
 		return nil, false
 	}
@@ -33,50 +32,59 @@ func (d *Daemon) readProxyPool(ctx context.Context, name string, now time.Time) 
 
 func (d *Daemon) proxyRootUsage(ctx context.Context, root surface.ClaudeConfigRoot, now time.Time) map[string]any {
 	answer := map[string]any{"root": root.Root, "proxy": root.Proxy}
-	pool, ok := d.readProxyPool(ctx, root.Proxy, now)
+	accounts, ok := d.readProxyAccounts(ctx, root.Proxy, now)
 	if !ok {
 		answer["usageProblem"] = "the " + root.Proxy + " proxy's accounts are not readable from this host"
 		return answer
 	}
-	best := claudepick.Pooled(pool, now)
-	if best.Best == "" {
+	route := proxyacct.Routing(accounts, now, false)
+	id := route.Routed["claude"]
+	if route.Full {
+		id = proxyFirstFree(accounts, route, now)
+	}
+	var next *proxyacct.Account
+	for i := range accounts {
+		if accounts[i].ID == id && accounts[i].Provider == "claude" {
+			next = &accounts[i]
+		}
+	}
+	if next == nil {
 		answer["usageProblem"] = "the " + root.Proxy + " proxy reports no Claude account"
 		return answer
 	}
 	usage := &surface.Usage{FetchedAt: now}
-	if best.Session != nil {
-		usage.Limits = append(usage.Limits, surface.UsageWindow{Kind: "session", Percent: best.Session.Percent, ResetsAt: best.Session.ResetsAt})
+	for _, window := range next.Windows {
+		if !window.ResetsAt.IsZero() && !now.Before(window.ResetsAt) {
+			continue
+		}
+		switch window.Kind {
+		case proxyacct.WindowSession:
+			usage.Limits = append(usage.Limits, surface.UsageWindow{Kind: "session", Percent: window.Percent, ResetsAt: window.ResetsAt})
+		case proxyacct.WindowWeek:
+			usage.Limits = append(usage.Limits, surface.UsageWindow{Kind: "weekly_all", Percent: window.Percent, ResetsAt: window.ResetsAt})
+		}
 	}
-	if best.Weekly != nil {
-		usage.Limits = append(usage.Limits, surface.UsageWindow{Kind: "weekly_all", Percent: best.Weekly.Percent, ResetsAt: best.Weekly.ResetsAt})
-	}
-	answer["usage"], answer["best"] = usage, best.Best
-	if !best.FullUntil.IsZero() {
-		answer["usageProblem"] = "every " + root.Proxy + " account is near its limit; the first frees up in " + proxyWait(best.FullUntil.Sub(now))
+	answer["usage"], answer["best"] = usage, next.Label
+	if route.Full {
+		answer["full"] = true
+		answer["usageProblem"] = "every " + root.Proxy + " account is near its limit"
+		if route.FreesAt.After(now) {
+			answer["fullUntil"] = route.FreesAt
+			answer["usageProblem"] = "every " + root.Proxy + " account is near its limit; the first frees up in " + proxyWait(route.FreesAt.Sub(now))
+		}
 	}
 	return answer
 }
 
-func proxyPool(accounts []proxyacct.Account, now time.Time) []claudepick.Member {
-	pool := []claudepick.Member{}
+func proxyFirstFree(accounts []proxyacct.Account, route proxyacct.Route, now time.Time) string {
+	first, at := route.Lead, time.Time{}
 	for _, account := range accounts {
 		if account.Provider != "claude" || account.Status == proxyacct.StatusDisabled || account.Status == proxyacct.StatusUnavailable {
 			continue
 		}
-		member := claudepick.Member{Account: account.Label, RetryAt: account.NextRetry}
-		for _, window := range account.Windows {
-			if !window.ResetsAt.IsZero() && !now.Before(window.ResetsAt) {
-				continue
-			}
-			reading := &claudepick.Window{Percent: window.Percent, ResetsAt: window.ResetsAt, Ceiling: float64(window.Ceiling)}
-			switch window.Kind {
-			case proxyacct.WindowSession:
-				member.Session = reading
-			case proxyacct.WindowWeek:
-				member.Weekly = reading
-			}
+		if frees, _ := proxyacct.Full([]proxyacct.Account{account}, now, false); !frees.IsZero() && (at.IsZero() || frees.Before(at)) {
+			first, at = account.ID, frees
 		}
-		pool = append(pool, member)
 	}
-	return pool
+	return first
 }
