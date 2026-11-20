@@ -15,18 +15,20 @@ final class ScrollJumpProbe {
     private var rows: [String: CGFloat] = [:]
     private var last: (offset: CGFloat, height: CGFloat, rows: [String: CGFloat])?
     private var touched = false
-    private var fingerSteps: [CGFloat] = []
-    private var lines = ["t\tphase\toffset\theight\tshift\tstep\tmoved"]
+    private var fingerSpeeds: [CGFloat] = []
+    private var lastTick: CFTimeInterval?
+    private var lines = ["t\tphase\toffset\theight\tshift\tstep\tmoved\tframe"]
     private var ticker: Ticker?
     private let started = CACurrentMediaTime()
     private(set) var jumps = 0
     private(set) var worst: CGFloat = 0
+    private(set) var longestFrame: CFTimeInterval = 0
 
     func geometry(_ geometry: ScrollGeometry) {
         offset = geometry.contentOffset.y
         height = geometry.contentSize.height
         visible = geometry.visibleRect.height
-        if ticker == nil { ticker = Ticker { [weak self] in self?.tick() } }
+        if ticker == nil { ticker = Ticker { [weak self] in self?.tick(at: $0) } }
     }
 
     func stop() {
@@ -34,6 +36,7 @@ final class ScrollJumpProbe {
         ticker?.invalidate()
         ticker = nil
         last = nil
+        lastTick = nil
     }
 
     func phase(_ phase: ScrollPhase) {
@@ -62,32 +65,42 @@ final class ScrollJumpProbe {
         }.joined(separator: " ")
     }
 
-    private func tick() {
+    private func tick(at time: CFTimeInterval) {
+        let frame = lastTick.map { time - $0 } ?? 0
         defer {
             last = (offset, height, rows)
             lastHeights = heights
+            lastTick = time
         }
+        if phase == "interacting" || phase == "decelerating" { longestFrame = max(longestFrame, frame) }
         guard let last else { return }
         let shown = rows.filter { $0.value - offset > -20 && $0.value - offset < visible }
         let shifts = shown.keys.compactMap { id in last.rows[id].map { rows[id]! - $0 } }.sorted()
         let shift = shifts.isEmpty ? 0 : shifts[shifts.count / 2]
         let moved = rows.filter { id, minY in last.rows[id].map { abs($0 - minY) > 1 } ?? false }.min { $0.value < $1.value }
         let step = offset - last.offset
-        guard abs(shift) > 0.1 || abs(step) > 0.1 || moved != nil || abs(height - last.height) > 0.1 else { return }
-        let recent = fingerSteps.suffix(3).sorted()
-        let finger = recent.isEmpty ? 0 : recent[recent.count / 2]
+        // A long frame moves the finger further, so expected finger travel is its speed times this frame's length.
+        let finger = Self.median(fingerSpeeds.suffix(3)) * frame
         let seen = abs(shift) > 2 ? shift - (step - finger) : 0
-        if abs(shift) <= 2 {
-            fingerSteps.append(step)
-            if fingerSteps.count > 6 { fingerSteps.removeFirst() }
+        if abs(shift) <= 2, frame > 0 {
+            fingerSpeeds.append(step / frame)
+            if fingerSpeeds.count > 6 { fingerSpeeds.removeFirst() }
         }
+        guard abs(shift) > 0.1 || abs(step) > 0.1 || moved != nil || abs(height - last.height) > 0.1 else { return }
         if touched, abs(seen) > 2 {
             jumps += 1
             worst = max(worst, abs(seen))
             lines.append("#before \(last.rows.sorted { $0.value < $1.value }.map { "\($0.key)@\(Int($0.value))h\(Int(lastHeights[$0.key] ?? 0))" }.joined(separator: " "))")
             lines.append("#after \(layout(last.rows))")
         }
-        lines.append(String(format: "%.3f\t%@\t%.1f\t%.1f\t%.1f\t%.1f\t%@", CACurrentMediaTime() - started, phase, offset, height, shift, step, moved?.key ?? "-"))
+        lines.append(String(format: "%.3f\t%@\t%.1f\t%.1f\t%.1f\t%.1f\t%@\t%.1f", CACurrentMediaTime() - started, phase, offset, height, shift, step, moved?.key ?? "-", frame * 1000))
+    }
+
+    nonisolated static func median(_ values: some Collection<CGFloat>) -> CGFloat {
+        let sorted = values.sorted()
+        guard !sorted.isEmpty else { return 0 }
+        let middle = sorted.count / 2
+        return sorted.count.isMultiple(of: 2) ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
     }
 
     private func flush() {
@@ -98,9 +111,9 @@ final class ScrollJumpProbe {
 @MainActor
 private final class Ticker: NSObject {
     private var link: CADisplayLink?
-    private let action: @MainActor () -> Void
+    private let action: @MainActor (CFTimeInterval) -> Void
 
-    init(_ action: @escaping @MainActor () -> Void) {
+    init(_ action: @escaping @MainActor (CFTimeInterval) -> Void) {
         self.action = action
         super.init()
         link = CADisplayLink(target: self, selector: #selector(fire))
@@ -112,13 +125,13 @@ private final class Ticker: NSObject {
         link = nil
     }
 
-    @objc private func fire() { action() }
+    @objc private func fire() { if let link { action(link.timestamp) } }
 }
 
 struct ScrollJumpLabel: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.25)) { _ in
-            Text("jumps=\(ScrollJumpProbe.shared.jumps) worst=\(Int(ScrollJumpProbe.shared.worst))")
+            Text("jumps=\(ScrollJumpProbe.shared.jumps) worst=\(Int(ScrollJumpProbe.shared.worst.rounded(.up))) frame=\(Int(ScrollJumpProbe.shared.longestFrame * 1000))")
                 .font(.system(size: 1)).opacity(0.01)
                 .frame(width: 1, height: 1).clipped()
                 .accessibilityIdentifier("scroll-jumps")
