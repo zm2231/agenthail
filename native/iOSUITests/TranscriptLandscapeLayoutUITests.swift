@@ -90,7 +90,7 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
         XCTAssertTrue(app.buttons["queue-tail-read-26"].isHittable, "the failed delivery row stays readable on one line")
         XCTAssertFalse(app.descendants(matching: .any)["queue-tail-reason-26"].exists, "the reason moves into the sheet")
         XCTAssertTrue(app.descendants(matching: .any)["composer-turn-settings"].exists, "one chip keeps the turn settings in view")
-        XCTAssertFalse(app.descendants(matching: .any)["composer-effort"].exists, "the chip row folds into the one chip")
+        XCTAssertFalse(app.descendants(matching: .any)["composer-mode"].exists, "the chip row folds into the one chip")
         XCTAssertTrue(app.descendants(matching: .any)["session-summary"].exists, "the status stays in the header")
         XCTAssertTrue(app.staticTexts["Working"].exists, "the header names the status, not just its icon")
 
@@ -108,7 +108,7 @@ final class TranscriptLandscapeLayoutUITests: XCTestCase {
 
     func testPortraitKeepsItsLayoutAndRestsBelowTheHeaderAtTheTop() throws {
         let app = open(landscape: false)
-        XCTAssertTrue(app.descendants(matching: .any)["composer-model-picker"].exists, "portrait keeps the chip row")
+        XCTAssertTrue(app.descendants(matching: .any)["composer-mode"].exists, "portrait keeps the chip row")
         XCTAssertFalse(app.descendants(matching: .any)["composer-turn-settings"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["queue-tail-reason-26"].waitForExistence(timeout: 10), "portrait keeps the reason on the row")
         try assertFirstRowRestsBelowTheHeader(app, "in portrait")
