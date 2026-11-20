@@ -79,3 +79,36 @@ extension AgentMessage {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
     }
 }
+
+extension AgentMessage {
+    var repeatKey: String? {
+        guard isIncoming, kind == "notice" else { return nil }
+        return (peer ?? "") + "\n" + summary
+    }
+
+    static func chip(_ chip: String, repeats: Int) -> String {
+        repeats > 1 ? "\(chip) ×\(repeats)" : chip
+    }
+}
+
+enum AgentRowStyle {
+    static let previewLines = 1
+
+    static func expandable(text: String, truncated: Bool, files: Int) -> Bool {
+        truncated || files > 0 || text.trimmingCharacters(in: .whitespacesAndNewlines).contains("\n") || TranscriptLinks.hasAddress(text)
+    }
+}
+
+enum AgentRepeat {
+    static func runs(_ keys: [String?]) -> [Range<Int>] {
+        var runs: [Range<Int>] = []
+        var start = 0
+        for index in keys.indices.dropFirst() + [keys.count] {
+            let continues = index < keys.count && keys[index] != nil && keys[index] == keys[start]
+            if continues { continue }
+            if keys.indices.contains(start), keys[start] != nil, index - start >= 2 { runs.append(start..<index) }
+            start = index
+        }
+        return runs
+    }
+}

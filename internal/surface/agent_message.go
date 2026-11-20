@@ -49,6 +49,11 @@ func PresentTimelineItem(item TimelineItem) TimelineItem {
 			item.Text, channel = envelope.Body, envelope.Channel
 		}
 	}
+	if item.Kind == "message" && item.Role == "peer" && PeerDisplayName(item.Sender) == CLISenderName {
+		if notice, ok := CLINotice(item.Text); ok {
+			item.Kind, item.Role, item.Origin, item.Sender, item.Title, item.Text = notice.Kind, notice.Role, notice.Origin, "", notice.Title, notice.Text
+		}
+	}
 	item.Agent = agentMessage(item, channel)
 	return item
 }

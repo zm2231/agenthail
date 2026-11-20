@@ -110,11 +110,14 @@ struct TranscriptBlock: Identifiable, Equatable {
             }
         }
         flushTools()
+        blocks = repeated(blocks)
         return foldAgents ? folded(blocks) : blocks
     }
 
     static func gap(above block: Kind, after previous: Kind?) -> CGFloat {
         guard let previous else { return 0 }
+        if block.isAgentRow && previous.isAgentRow { return DesktopSpace.xs }
+        if block.isAgentRow && block.isMessageIn { return DesktopSpace.m }
         if block.isMessageIn { return DesktopSpace.xl }
         if previous.isMessageIn { return DesktopSpace.m }
         return DesktopSpace.s
@@ -122,6 +125,13 @@ struct TranscriptBlock: Identifiable, Equatable {
 }
 
 extension TranscriptBlock.Kind {
+    var isAgentRow: Bool {
+        switch self {
+        case .agent, .agentFold: true
+        default: false
+        }
+    }
+
     var isMessageIn: Bool {
         switch self {
         case .user, .agentFold: true

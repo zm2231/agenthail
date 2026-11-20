@@ -32,6 +32,10 @@ func IsAgenthailNotice(text string) bool {
 	return strings.HasPrefix(text, NoticePrefix) || strings.HasPrefix(text, "[agenthail delivery ")
 }
 
+const CLIPeerPreamble = "Sent with agenthail send from outside any session; no one reads replies to it.\n\n"
+
+const OriginAgenthailNotice = "agenthail-notice"
+
 // ParseNotice reports the kind and text of an Agenthail notice.
 func ParseNotice(text string) (kind, body string, ok bool) {
 	match := noticeEnvelope.FindStringSubmatch(text)
@@ -39,4 +43,21 @@ func ParseNotice(text string) (kind, body string, ok bool) {
 		return "", "", false
 	}
 	return match[1], strings.TrimSpace(match[2]), true
+}
+
+func NoticeTitle(kind string) string {
+	if kind == NoticeLimitResume {
+		return "Usage limit reset"
+	}
+	return "Agenthail notice"
+}
+
+func CLINotice(text string) (TimelineItem, bool) {
+	body := strings.TrimSpace(text)
+	body = strings.TrimSpace(strings.TrimPrefix(body, strings.TrimSpace(CLIPeerPreamble)))
+	kind, notice, ok := ParseNotice(body)
+	if !ok {
+		return TimelineItem{}, false
+	}
+	return TimelineItem{Kind: "event", Role: "system", Origin: OriginAgenthailNotice, Title: NoticeTitle(kind), Text: notice}, true
 }

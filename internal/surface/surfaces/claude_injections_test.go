@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -210,9 +211,39 @@ func TestClaudeTimelineShowsTheLimitResumeNoticeAsAgenthails(t *testing.T) {
 		t.Fatalf("items=%+v", page.Items)
 	}
 	for _, item := range notices {
-		if item.Kind != "event" || item.Role != "system" || item.Origin != "agenthail-notice" || item.Title != "Resumed after usage limit" || item.Text != surface.LimitResumeText {
+		if item.Kind != "event" || item.Role != "system" || item.Origin != "agenthail-notice" || item.Title != "Usage limit reset" || item.Text != surface.LimitResumeText {
 			t.Fatalf("notice=%+v", item)
 		}
+	}
+}
+
+func TestClaudeTimelineShowsTheCLIsPeerDeliveredNoticeAsAgenthails(t *testing.T) {
+	body := surface.CLIPeerPreamble + surface.LimitResumeNotice()
+	envelope := "<cross-session-message from=\"uds:/tmp/synthetic.sock\" from-session=\"s1\" from-name=\"agenthail/cli: Agenthail CLI\">\n" + body + "\n</cross-session-message>"
+	record := func(uuid string, origin map[string]any, content string) string {
+		line, err := json.Marshal(map[string]any{"type": "user", "uuid": uuid, "origin": origin, "message": map[string]any{"role": "user", "content": content}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(line) + "\n"
+	}
+	path := timelineFixture(t, record("u1", map[string]any{"kind": "peer", "name": "agenthail/cli: Agenthail CLI", "msg_id": "m1", "body": body}, "Another Claude session sent a message:\n"+envelope)+
+		record("u2", map[string]any{"kind": "peer", "name": "agenthail/cli: Agenthail CLI", "msg_id": "m2"}, envelope)+
+		record("u3", map[string]any{"kind": "peer", "name": "reviewer", "msg_id": "m3", "body": surface.LimitResumeNotice()}, "<cross-session-message from-name=\"reviewer\">"+surface.LimitResumeNotice()+"</cross-session-message>"))
+	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 3 {
+		t.Fatalf("items=%+v", page.Items)
+	}
+	for _, item := range page.Items[:2] {
+		if item.Kind != "event" || item.Role != "system" || item.Origin != surface.OriginAgenthailNotice || item.Title != "Usage limit reset" || item.Text != surface.LimitResumeText {
+			t.Fatalf("notice=%+v", item)
+		}
+	}
+	if forged := page.Items[2]; forged.Role != "peer" || forged.Sender != "reviewer" {
+		t.Fatalf("an agent's notice-shaped message became Agenthail's: %+v", forged)
 	}
 }
 

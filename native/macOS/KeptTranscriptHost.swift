@@ -47,7 +47,7 @@ struct KeptTranscriptRoot: View {
     let inherited: Inherited
 
     var body: some View {
-        TranscriptView(pane: pane, session: session, sends: model.localSends[session.id] ?? [])
+        TranscriptView(pane: pane, session: session, sends: LocalSend.shown(model.localSends[session.id] ?? []))
             .safeAreaInset(edge: .top, spacing: 0) { Color.clear.frame(height: inherited.insets.top) }
             .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: inherited.insets.bottom) }
             .environment(model)

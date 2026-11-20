@@ -4,12 +4,13 @@ struct AgentEntry: Equatable {
     let item: TimelineItem
     let agent: AgentMessage
     var result: TimelineItem? = nil
+    var repeats = 1
 
     var failed: Bool { result.map(ToolRunSummary.isFailure) ?? false }
 
     var chip: String {
-        guard agent.kind == "task", let status = item.status, !status.isEmpty else { return agent.chip }
-        return "\(agent.chip) · \(status)"
+        guard agent.kind == "task", let status = item.status, !status.isEmpty else { return AgentMessage.chip(agent.chip, repeats: repeats) }
+        return AgentMessage.chip("\(agent.chip) · \(status)", repeats: repeats)
     }
 }
 
@@ -23,6 +24,22 @@ extension TranscriptBlock {
     var incomingAgent: AgentMessage? {
         guard case .agent(let entry) = kind, entry.agent.isIncoming else { return nil }
         return entry.agent
+    }
+
+    static func repeated(_ blocks: [TranscriptBlock]) -> [TranscriptBlock] {
+        var merged: [TranscriptBlock] = []
+        var next = 0
+        for run in AgentRepeat.runs(blocks.map { $0.incomingAgent?.repeatKey }) {
+            merged += blocks[next..<run.lowerBound]
+            let last = blocks[run.upperBound - 1]
+            if case .agent(var entry) = last.kind {
+                entry.repeats = run.count
+                merged.append(TranscriptBlock(id: blocks[run.lowerBound].id, kind: .agent(entry), truncated: last.truncated, timestamp: last.timestamp))
+            }
+            next = run.upperBound
+        }
+        merged += blocks[next...]
+        return merged
     }
 
     static func folded(_ blocks: [TranscriptBlock]) -> [TranscriptBlock] {
