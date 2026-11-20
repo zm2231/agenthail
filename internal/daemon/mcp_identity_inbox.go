@@ -63,14 +63,17 @@ func clipEncoded(text string, limit int) (string, bool) {
 	return string(runes[:low]), true
 }
 
-func (d *Daemon) mcpReadInbox(ctx context.Context, identity registry.AgentIdentity) (any, error) {
+// Unacknowledged messages come back, so a lost response loses none.
+func (d *Daemon) mcpReadInbox(identity registry.AgentIdentity, since *uint64) (any, error) {
+	if err := d.ackInbox(identity, since); err != nil {
+		return nil, err
+	}
 	unread, err := d.Registry.ReadInbox(identity.Name, registry.InboxQuery{Peek: true})
 	if err != nil {
 		return nil, err
 	}
-	result := map[string]any{"identity": "@" + identity.Name, "remaining": len(unread), "next": "Call agenthail_read again for the rest."}
+	result := map[string]any{"identity": "@" + identity.Name}
 	items := []mcpInboxItem{}
-	ids := []int64{}
 	for _, message := range unread {
 		sender := message.SenderName
 		if sender == "" {
@@ -81,29 +84,36 @@ func (d *Daemon) mcpReadInbox(ctx context.Context, identity registry.AgentIdenti
 		if item.Truncated {
 			item.BodyRef, item.Bytes = mcpInboxRefPrefix+strconv.FormatInt(message.ID, 10), len(message.Message)
 		}
-		result["messages"], result["remaining"] = append(items, item), len(unread)-len(items)-1
+		result["messages"], result["remaining"], result["latestSeq"] = append(items, item), len(unread)-len(items)-1, message.ID
+		result["next"] = mcpInboxNext
 		if encodedLen(result) > mcpInboxBudget && len(items) > 0 {
 			break
 		}
 		items = append(items, item)
-		ids = append(ids, message.ID)
-	}
-	if err := d.Registry.MarkInboxRead(ctx, identity.Name, ids); err != nil {
-		return nil, err
 	}
 	result["messages"], result["remaining"] = items, len(unread)-len(items)
-	switch {
-	case len(unread) > len(items):
-	case len(items) > 0:
-		result["next"] = "Reply with agenthail_send to the sender each message names. A truncated message's full text pages through agenthail_read with its bodyRef."
-	default:
+	if len(items) == 0 {
+		delete(result, "latestSeq")
 		delete(result, "next")
+	} else {
+		result["latestSeq"] = items[len(items)-1].ID
 	}
 	return result, nil
 }
 
-// mcpReadInboxBody pages one message's full text, read or not, so a clipped
-// message stays whole after it is marked read.
+const mcpInboxNext = "Pass latestSeq as since on your next agenthail_read, or as cursor to agenthail_wait, to mark these read; until then they are returned again. A truncated message pages through agenthail_read with its bodyRef. Reply with agenthail_send to each sender."
+
+func (d *Daemon) ackInbox(identity registry.AgentIdentity, since *uint64) error {
+	if since == nil {
+		return nil
+	}
+	if *since > uint64(1<<62) {
+		return refuse("invalid", "since must be a latestSeq an inbox read returned.")
+	}
+	_, err := d.Registry.AckInbox(identity.Name, int64(*since))
+	return err
+}
+
 func (d *Daemon) mcpReadInboxBody(identity registry.AgentIdentity, ref string, offset int) (any, error) {
 	id, err := strconv.ParseInt(strings.TrimPrefix(ref, mcpInboxRefPrefix), 10, 64)
 	if err != nil {
@@ -139,6 +149,15 @@ func (d *Daemon) mcpWaitInbox(ctx context.Context, caller *mcpCaller, identity r
 	if seconds < 0 {
 		return nil, refuse("invalid", "timeoutSec can't be negative.")
 	}
+	if cursor := strings.TrimSpace(input.Cursor); cursor != "" {
+		since, err := strconv.ParseUint(cursor, 10, 64)
+		if err != nil {
+			return nil, refuse("invalid", "cursor must be a latestSeq an inbox read returned.")
+		}
+		if err := d.ackInbox(identity, &since); err != nil {
+			return nil, err
+		}
+	}
 	deadline := time.Now().Add(time.Duration(min(seconds, mcpWaitLimitSec(caller.session))) * time.Second)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -148,10 +167,10 @@ func (d *Daemon) mcpWaitInbox(ctx context.Context, caller *mcpCaller, identity r
 			return nil, err
 		}
 		if unread > 0 {
-			return map[string]any{"type": "inbox", "unread": unread, "next": "Call agenthail_read with no sessionId to read and mark them read."}, nil
+			return map[string]any{"type": "inbox", "unread": unread, "next": "Call agenthail_read with no sessionId to read them."}, nil
 		}
 		if !time.Now().Before(deadline) {
-			return map[string]any{"type": "timeout", "unread": 0, "next": "Nothing arrived; wait again, or end your turn and be told when a message arrives."}, nil
+			return map[string]any{"type": "timeout", "unread": 0, "next": "Nothing arrived; call agenthail_wait again to keep waiting. Nothing is pushed to you."}, nil
 		}
 		select {
 		case <-ctx.Done():

@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -250,27 +249,18 @@ func (r *Registry) StoreInboxMessage(message InboxMessage) (InboxMessage, bool, 
 	return message, true, tx.Commit()
 }
 
-// MarkInboxRead rolls back if ctx ends first, so an abandoned read consumes nothing.
-func (r *Registry) MarkInboxRead(ctx context.Context, name string, ids []int64) error {
+// AckInbox marks read the identity's messages up to and including through.
+func (r *Registry) AckInbox(name string, through int64) (int, error) {
 	id, err := agentIdentityIDTx(r.read, name)
-	if err != nil || len(ids) == 0 {
-		return err
-	}
-	tx, err := r.db.Begin()
 	if err != nil {
-		return err
+		return 0, err
 	}
-	defer tx.Rollback()
-	now := r.now().UnixMilli()
-	for _, message := range ids {
-		if _, err := tx.ExecContext(ctx, `UPDATE agent_inbox SET read_at_ms=? WHERE id=? AND identity_id=? AND read_at_ms=0`, now, message, id); err != nil {
-			return err
-		}
+	result, err := r.db.Exec(`UPDATE agent_inbox SET read_at_ms=? WHERE identity_id=? AND id<=? AND read_at_ms=0`, r.now().UnixMilli(), id, through)
+	if err != nil {
+		return 0, err
 	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return tx.Commit()
+	acked, err := result.RowsAffected()
+	return int(acked), err
 }
 
 type InboxQuery struct {

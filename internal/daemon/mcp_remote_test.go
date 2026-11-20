@@ -2,10 +2,10 @@ package daemon
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -277,8 +277,16 @@ func TestAnInboxReadReturnsWhatFitsAndLeavesTheRestUnread(t *testing.T) {
 	if len(messages) == 0 || len(messages) == 5 || read["remaining"] != float64(5-len(messages)) {
 		t.Fatalf("read %d messages, remaining=%v", len(messages), read["remaining"])
 	}
+	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 5 {
+		t.Fatalf("unread=%d err=%v before an acknowledgement", unread, err)
+	}
+	next, _ := callMCP(t, session, "agenthail_read", map[string]any{"since": read["latestSeq"]})
+	rest, _ := next["messages"].([]any)
+	if first, _ := rest[0].(map[string]any); len(rest) == 0 || first["id"].(float64) <= read["latestSeq"].(float64) {
+		t.Fatalf("after acknowledging %v the read returned %v", read["latestSeq"], next)
+	}
 	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 5-len(messages) {
-		t.Fatalf("unread=%d err=%v", unread, err)
+		t.Fatalf("unread=%d err=%v after the acknowledgement", unread, err)
 	}
 }
 
@@ -290,8 +298,9 @@ func TestAnInboxReadOfEscapeHeavyAndLongMessagesFitsAndLosesNothing(t *testing.T
 	}
 	session := f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, nil)
 	full := map[float64]string{}
-	for round := 0; round < len(sent); round++ {
-		result, err := session.CallTool(t.Context(), callParams("agenthail_read", nil))
+	args := map[string]any{}
+	for round := 0; round < len(sent)+1; round++ {
+		result, err := session.CallTool(t.Context(), callParams("agenthail_read", args))
 		if err != nil || result.IsError {
 			t.Fatalf("read round %d: err=%v result=%+v", round, err, result)
 		}
@@ -302,6 +311,7 @@ func TestAnInboxReadOfEscapeHeavyAndLongMessagesFitsAndLosesNothing(t *testing.T
 		if len(messages) == 0 {
 			break
 		}
+		args = map[string]any{"since": body["latestSeq"]}
 		for _, raw := range messages {
 			item := raw.(map[string]any)
 			id := item["id"].(float64)
@@ -373,24 +383,32 @@ func TestARemoteIdentityWaitsForItsInboxAndReadsIt(t *testing.T) {
 	if first, _ := messages[0].(map[string]any); first["text"] != "first" || first["from"] != "builder" {
 		t.Fatalf("first=%v", first)
 	}
-	again, _ := callMCP(t, session, "agenthail_read", nil)
-	if rest, _ := again["messages"].([]any); len(rest) != 0 {
-		t.Fatalf("a second read returned %v", again)
+	waited, _ = callMCP(t, session, "agenthail_wait", map[string]any{"tasks": []string{}, "timeoutSec": 0, "cursor": fmt.Sprint(read["latestSeq"])})
+	if waited["type"] != "timeout" {
+		t.Fatalf("a wait that acknowledged every message returned %v", waited)
 	}
 	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 0 {
 		t.Fatalf("unread=%d err=%v", unread, err)
 	}
 }
 
-func TestAnAbandonedInboxReadLeavesItsMessagesUnread(t *testing.T) {
+func TestAnUnacknowledgedInboxReadIsReturnedAgain(t *testing.T) {
 	f := newRemoteFixture(t, "")
 	f.deliver(t, "keep me")
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := f.d.mcpReadInbox(ctx, f.scout); err == nil {
-		t.Fatal("a cancelled inbox read succeeded")
+	session := f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, nil)
+	first, _ := callMCP(t, session, "agenthail_read", nil)
+	second, _ := callMCP(t, session, "agenthail_read", nil)
+	if first["latestSeq"] == nil || first["latestSeq"] != second["latestSeq"] {
+		t.Fatalf("first=%v second=%v", first, second)
 	}
 	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 1 {
-		t.Fatalf("unread=%d err=%v after a cancelled read", unread, err)
+		t.Fatalf("unread=%d err=%v without an acknowledgement", unread, err)
+	}
+	acked, _ := callMCP(t, session, "agenthail_read", map[string]any{"since": first["latestSeq"]})
+	if rest, _ := acked["messages"].([]any); len(rest) != 0 {
+		t.Fatalf("after the acknowledgement the read returned %v", acked)
+	}
+	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 0 {
+		t.Fatalf("unread=%d err=%v after the acknowledgement", unread, err)
 	}
 }
