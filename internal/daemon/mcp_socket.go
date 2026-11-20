@@ -124,8 +124,11 @@ func (d *Daemon) mcpSocketHandler() http.Handler {
 			return d.socketCaller(ctx, request), nil
 		})
 		var stalled *mcpStallError
-		if errors.As(err, &stalled) {
+		switch {
+		case errors.As(err, &stalled):
 			answer = socketAnswer{tools: true, refusal: stalled.refusal()}
+		case err != nil:
+			answer = socketAnswer{tools: true, refusal: mcpCheckFailed()}
 		}
 		if answer.status != 0 {
 			http.Error(w, http.StatusText(answer.status), answer.status)
@@ -171,13 +174,17 @@ func (d *Daemon) socketCaller(ctx context.Context, request mcpSocketRequest) soc
 		return socketAnswer{}
 	}
 	session, err := d.awaitLocalSession(ctx, sessionID)
+	if sessionLookupFailed(err) {
+		d.log.Printf("MCP socket: reading %s failed: %s", d.resolveDisplay(sessionID), err)
+		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
+	}
 	if err != nil {
 		return socketAnswer{}
 	}
 	caller, err := d.agentCaller(session)
 	if err != nil {
 		d.log.Printf("MCP socket: reading the permissions of %s failed: %s", d.resolveDisplay(sessionID), err)
-		return socketAnswer{}
+		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
 	}
 	if d.projectToolsOff(caller.project) {
 		return socketAnswer{}
@@ -225,13 +232,17 @@ func (d *Daemon) codexCaller(ctx context.Context, request mcpSocketRequest, load
 		return refused("unauthenticated", "The Codex process that started this server has no thread "+thread+" loaded.")
 	}
 	session, err := d.awaitLocalSession(ctx, thread)
+	if sessionLookupFailed(err) {
+		d.log.Printf("MCP socket: reading %s failed: %s", d.resolveDisplay(thread), err)
+		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
+	}
 	if err != nil || session.Surface != surface.KindCodex {
 		return refused("unauthenticated", "Codex thread "+thread+" is not a session on this host; it may have moved or been archived.")
 	}
 	caller, err := d.agentCaller(session)
 	if err != nil {
 		d.log.Printf("MCP socket: reading the permissions of %s failed: %s", d.resolveDisplay(thread), err)
-		return socketAnswer{tools: true, refusal: &mcpRefusal{Code: "unauthenticated", Message: "Agenthail could not read this session's permissions; try again in a moment.", Retryable: true}}
+		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
 	}
 	if d.projectToolsOff(caller.project) {
 		return refused("tools_off", "The Agenthail tools are off for this project's sessions that Agenthail did not start; agenthail project mcp <project> on turns them back on.")
@@ -323,3 +334,8 @@ func (d *Daemon) servableSession(session surface.Session) (surface.Session, erro
 }
 
 var errMCPSessionEnded = errors.New("the session has moved or been archived")
+
+// sessionLookupFailed is a registry failure, not a session that is missing or ended.
+func sessionLookupFailed(err error) bool {
+	return err != nil && !errors.Is(err, errMCPSessionEnded) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled)
+}

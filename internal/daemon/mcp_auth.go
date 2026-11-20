@@ -70,10 +70,11 @@ func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 		switch {
 		case errors.As(err, &stalled):
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpAnswerKey{}, socketAnswer{tools: true, refusal: stalled.refusal()})))
-		case errors.Is(err, errCallerPermissions):
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", "Reading this session's permissions failed; retry.")
-		case err != nil:
+		case err != nil && credentialRefused(err):
 			writeMCPAuthError(w, err)
+		case err != nil:
+			d.log.Printf("MCP: checking a session credential failed: %s", err)
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpAnswerKey{}, socketAnswer{tools: true, refusal: mcpCheckFailed()})))
 		case caller == nil:
 			next.ServeHTTP(w, r)
 		default:
@@ -158,6 +159,16 @@ func (d *Daemon) agentCaller(session surface.Session) (*mcpCaller, error) {
 	return caller, nil
 }
 
+// Only a verdict on the credential answers 401: a client drops a server that answers 401.
+func credentialRefused(err error) bool {
+	var revoked registry.CredentialRevokedError
+	return errors.Is(err, registry.ErrCredentialUnknown) || errors.Is(err, registry.ErrCredentialExpired) || errors.Is(err, registry.ErrCredentialMaxExpired) || errors.As(err, &revoked)
+}
+
+func mcpCheckFailed() *mcpRefusal {
+	return &mcpRefusal{Code: "busy", Message: "The daemon could not check this session just now; try again in a moment.", Retryable: true}
+}
+
 func writeMCPAuthError(w http.ResponseWriter, err error) {
 	var revoked registry.CredentialRevokedError
 	switch {
@@ -169,7 +180,5 @@ func writeMCPAuthError(w http.ResponseWriter, err error) {
 		writeAPIErrorWith(w, http.StatusUnauthorized, "credential_expired", "This session's credential reached its 30-day limit; the session gets a new one when it is next started or resumed.", map[string]any{"retryable": false, "detail": map[string]any{"reason": "max"}})
 	case errors.As(err, &revoked):
 		writeAPIErrorWith(w, http.StatusUnauthorized, "credential_revoked", "This session's credential was revoked ("+revoked.Reason+").", map[string]any{"retryable": false, "detail": map[string]any{"reason": revoked.Reason}})
-	default:
-		writeAPIErrorWith(w, http.StatusUnauthorized, "unauthenticated", "The session credential could not be checked.", map[string]any{"retryable": true})
 	}
 }
