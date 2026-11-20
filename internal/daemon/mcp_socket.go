@@ -126,8 +126,10 @@ func (d *Daemon) mcpSocketHandler() http.Handler {
 		var stalled *mcpStallError
 		switch {
 		case errors.As(err, &stalled):
+			d.logMCPAuthRefusal("socket", "", "busy", err)
 			answer = socketAnswer{tools: true, refusal: stalled.refusal()}
 		case err != nil:
+			d.logMCPAuthRefusal("socket", "", "busy", err)
 			answer = socketAnswer{tools: true, refusal: mcpCheckFailed()}
 		}
 		if answer.status != 0 {
@@ -175,7 +177,7 @@ func (d *Daemon) socketCaller(ctx context.Context, request mcpSocketRequest) soc
 	}
 	session, err := d.awaitLocalSession(ctx, sessionID)
 	if sessionLookupFailed(err) {
-		d.log.Printf("MCP socket: reading %s failed: %s", d.resolveDisplay(sessionID), err)
+		d.logMCPAuthRefusal("socket", sessionID, "busy", err)
 		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
 	}
 	if err != nil {
@@ -183,7 +185,7 @@ func (d *Daemon) socketCaller(ctx context.Context, request mcpSocketRequest) soc
 	}
 	caller, err := d.agentCaller(session)
 	if err != nil {
-		d.log.Printf("MCP socket: reading the permissions of %s failed: %s", d.resolveDisplay(sessionID), err)
+		d.logMCPAuthRefusal("socket", sessionID, "busy", err)
 		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
 	}
 	if d.projectToolsOff(caller.project) {
@@ -233,7 +235,7 @@ func (d *Daemon) codexCaller(ctx context.Context, request mcpSocketRequest, load
 	}
 	session, err := d.awaitLocalSession(ctx, thread)
 	if sessionLookupFailed(err) {
-		d.log.Printf("MCP socket: reading %s failed: %s", d.resolveDisplay(thread), err)
+		d.logMCPAuthRefusal("socket", thread, "busy", err)
 		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
 	}
 	if err != nil || session.Surface != surface.KindCodex {
@@ -241,7 +243,7 @@ func (d *Daemon) codexCaller(ctx context.Context, request mcpSocketRequest, load
 	}
 	caller, err := d.agentCaller(session)
 	if err != nil {
-		d.log.Printf("MCP socket: reading the permissions of %s failed: %s", d.resolveDisplay(thread), err)
+		d.logMCPAuthRefusal("socket", thread, "busy", err)
 		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
 	}
 	if d.projectToolsOff(caller.project) {

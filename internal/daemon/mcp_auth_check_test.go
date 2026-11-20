@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestASessionCredentialThatCannotBeCheckedIsABusyRefusalNotA401(t *testing.T) {
@@ -60,5 +61,48 @@ func TestASocketCallerTheDaemonCannotReadIsABusyRefusal(t *testing.T) {
 	out, refused := callMCP(t, client, "agenthail_whoami", nil)
 	if !refused || out["code"] != "busy" || out["retryable"] != true {
 		t.Fatalf("a socket call whose session could not be read = %v (refused %v), want a retryable busy refusal", out, refused)
+	}
+}
+
+func TestAnIdleCredentialWhoseSessionCannotBeReadIsABusyRefusalNotA401(t *testing.T) {
+	d, r, _, from, token, _ := credentialFixture(t)
+	server := mcpServer(t, d)
+	client := mcpSession(t, server, token)
+	idleFor(t, r, from.ID, "idle_expires_at_ms")
+	if _, err := r.WriteDB().Exec(`ALTER TABLE catalog_sessions RENAME TO catalog_sessions_gone`); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := postMCP(t, server, map[string]string{"Authorization": "Bearer " + token}); status == http.StatusUnauthorized {
+		t.Fatalf("an idle credential whose session could not be read answered 401: %v", body)
+	}
+	out, refused := callMCP(t, client, "agenthail_whoami", nil)
+	if !refused || out["code"] != "busy" || out["retryable"] != true {
+		t.Fatalf("a call whose idle credential could not be checked = %v (refused %v), want a retryable busy refusal", out, refused)
+	}
+}
+
+func TestEveryMCPAuthRefusalIsLoggedWithoutTheToken(t *testing.T) {
+	d, r, _, from, token, logged := credentialFixture(t)
+	if err := r.SetAlias("quiet", from.ID); err != nil {
+		t.Fatal(err)
+	}
+	server := mcpServer(t, d)
+	if err := r.RevokeSessionCredentials(from.ID, "revoked", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := postMCP(t, server, map[string]string{"Authorization": "Bearer " + token}); status != http.StatusUnauthorized {
+		t.Fatalf("a revoked credential answered %d", status)
+	}
+	if status, _ := postMCP(t, server, map[string]string{"Authorization": "Bearer ahs_never_issued"}); status != http.StatusUnauthorized {
+		t.Fatalf("an unknown credential answered %d", status)
+	}
+	lines := logged.String()
+	for _, want := range []string{"mcp auth session=@quiet path=http outcome=refused:credential_revoked:revoked", "mcp auth session=- path=http outcome=refused:unauthenticated"} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("the daemon log has no %q:\n%s", want, lines)
+		}
+	}
+	if strings.Contains(lines, token) || strings.Contains(lines, "ahs_never_issued") {
+		t.Fatalf("the daemon log holds a token:\n%s", lines)
 	}
 }

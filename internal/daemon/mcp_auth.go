@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"slices"
@@ -54,11 +55,12 @@ func localReach(r *http.Request) bool {
 
 func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := bearerToken(r)
 		if !localReach(r) {
+			d.logMCPAuthRefusal("http", "", "remote_refused", nil)
 			writeAPIError(w, http.StatusForbidden, "remote_refused", "Session credentials are accepted only from this machine.")
 			return
 		}
-		token := bearerToken(r)
 		if caller, ok := d.extensionCaller(token); ok {
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpCallerKey{}, caller)))
 			return
@@ -69,11 +71,13 @@ func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 		var stalled *mcpStallError
 		switch {
 		case errors.As(err, &stalled):
+			d.logMCPAuthRefusal("http", "", "busy", err)
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpAnswerKey{}, socketAnswer{tools: true, refusal: stalled.refusal()})))
 		case err != nil && credentialRefused(err):
+			d.logMCPAuthRefusal("http", d.Registry.CredentialSession(token), mcpAuthOutcome(err), nil)
 			writeMCPAuthError(w, err)
 		case err != nil:
-			d.log.Printf("MCP: checking a session credential failed: %s", err)
+			d.logMCPAuthRefusal("http", "", "busy", err)
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpAnswerKey{}, socketAnswer{tools: true, refusal: mcpCheckFailed()})))
 		case caller == nil:
 			next.ServeHTTP(w, r)
@@ -125,8 +129,7 @@ func (d *Daemon) authenticateSession(token string, now time.Time) (registry.Sess
 	}
 	session, sessionErr := d.Registry.Session(idle.SessionID)
 	if sessionErr != nil {
-		d.log.Printf("refused the idle-expired credential of %s: reading the session failed: %s", d.resolveDisplay(idle.SessionID), sessionErr)
-		return credential, err
+		return credential, fmt.Errorf("reading the session of an idle credential: %w", sessionErr)
 	}
 	if !d.sessionRunning(session) {
 		d.log.Printf("refused the idle-expired credential of %s: unused for a day and the session is not running", d.resolveDisplay(idle.SessionID))
@@ -167,6 +170,31 @@ func credentialRefused(err error) bool {
 
 func mcpCheckFailed() *mcpRefusal {
 	return &mcpRefusal{Code: "busy", Message: "The daemon could not check this session just now; try again in a moment.", Retryable: true}
+}
+
+func (d *Daemon) logMCPAuthRefusal(path, sessionID, outcome string, cause error) {
+	session := "-"
+	if sessionID != "" {
+		session = d.resolveDisplay(sessionID)
+	}
+	line := fmt.Sprintf("mcp auth session=%s path=%s outcome=refused:%s", session, path, outcome)
+	if cause != nil {
+		line += " err=" + cause.Error()
+	}
+	d.log.Print(line)
+}
+
+func mcpAuthOutcome(err error) string {
+	var revoked registry.CredentialRevokedError
+	switch {
+	case errors.Is(err, registry.ErrCredentialExpired):
+		return "credential_expired:idle"
+	case errors.Is(err, registry.ErrCredentialMaxExpired):
+		return "credential_expired:max"
+	case errors.As(err, &revoked):
+		return "credential_revoked:" + revoked.Reason
+	}
+	return "unauthenticated"
 }
 
 func writeMCPAuthError(w http.ResponseWriter, err error) {

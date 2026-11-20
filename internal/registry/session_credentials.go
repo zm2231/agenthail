@@ -206,6 +206,15 @@ func (r *Registry) authenticateSessionToken(token string, now time.Time, running
 	return credential, nil
 }
 
+func (r *Registry) CredentialSession(token string) string {
+	if !strings.HasPrefix(token, SessionTokenPrefix) {
+		return ""
+	}
+	var sessionID sql.NullString
+	_ = r.read.QueryRow(`SELECT session_id FROM session_credentials WHERE token_hash=?`, HashSessionToken(token)).Scan(&sessionID)
+	return sessionID.String
+}
+
 func (r *Registry) writeCredentialUse(hash string, usedAt int64) error {
 	_, err := r.db.Exec(`UPDATE session_credentials SET last_used_at_ms=MAX(last_used_at_ms,?),idle_expires_at_ms=MAX(idle_expires_at_ms,?) WHERE token_hash=? AND revoked_at_ms=0`,
 		usedAt, usedAt+CredentialIdleLifetime.Milliseconds(), hash)
