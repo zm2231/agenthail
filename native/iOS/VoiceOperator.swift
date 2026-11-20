@@ -122,10 +122,10 @@ struct AgenthailVoiceOperatorSheet: View {
                     userScrolling = false
                 }
             }
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentSize.height - geometry.visibleRect.maxY < 80
-            } action: { _, value in
-                atLatest = value
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentSize.height - geometry.visibleRect.maxY
+            } action: { _, distance in
+                atLatest = distance < 80
             }
             // The navigation bar settles after the first layout and moves
             // the top inset after the initial offset is set, which leaves
