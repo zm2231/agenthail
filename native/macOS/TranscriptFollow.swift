@@ -87,6 +87,10 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 if inserted, !resting { layout.forgetOlder() }
                 let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
                 if resized { layout.markResized() }
+                if !following, let rows, let id = layout.row.pass(TranscriptPass(leadingChanged: inserted, resting: resting, content: new.contentSize.height)) {
+                    restoreHeld(id, in: rows)
+                    return
+                }
                 if layout.revealed?.expired == true { layout.revealed = nil }
                 if !following, resting, let target = layout.revealed?.target(in: new, resized: resized) {
                     settle { $0.scrollTo(y: target) }
@@ -109,9 +113,8 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     }
                 } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
                     settle { $0.scrollTo(edge: .bottom) }
-                } else if !following, inserted, resting, let rows, let row = layout.landRow(content: new.contentSize.height) {
+                } else if !following, inserted, resting, layout.holdingRow {
                     // Rows below the reader that were never laid out are re-estimated as a page arrives, so the end moves; the held row does not.
-                    restoreHeld(row.id, in: rows)
                 } else if !following, inserted, resting {
                     let distance = layout.heldFromEnd ?? (old.contentSize.height - old.contentOffset.y)
                     layout.holdFromEnd(distance, content: new.contentSize.height)
@@ -138,6 +141,13 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 rows?.holdingOlder = { holdOlderPlace(fresh: true) }
             }
             .onDisappear { layout.cancelCheck() }
+            // A page can land without changing the scroll geometry, so the geometry action may not see it.
+            .onChange(of: leadingRow) { old, _ in
+                guard old.map(hasRow) == true else { return }
+                guard resting else { return layout.forgetOlder() }
+                guard !following, let rows, let id = layout.row.pass(TranscriptPass(leadingChanged: true, resting: true, content: layout.geometry?.contentSize.height ?? 0)) else { return }
+                restoreHeld(id, in: rows)
+            }
             .onChange(of: transcript) {
                 generation &+= 1
                 layout.forgetOlder()
@@ -241,7 +251,7 @@ private final class Layout {
     var animationStart: ContinuousClock.Instant?
     private var resizedTurn: Int?
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
-    private var fromRow: (id: String, above: CGFloat, before: CGFloat, until: ContinuousClock.Instant, content: CGFloat?, top: CGFloat?, landing: Bool)?
+    let row = TranscriptRowHold()
     var revealed: RevealedRow?
     private var check: Task<Void, Never>?
 
@@ -269,66 +279,40 @@ private final class Layout {
     }
 
     func holdFromEnd(_ distance: CGFloat, content: CGFloat) {
-        fromRow = nil
+        row.release()
         fromEnd = (distance, .now + .seconds(2), content, true)
     }
 
     var holding: Bool { holdingRow || heldFromEnd != nil }
 
-    var holdingRow: Bool { fromRow.map { $0.content != nil && ContinuousClock.now < $0.until } ?? false }
-    var heldRow: String? { fromRow?.id }
-    var heldBefore: CGFloat? { fromRow?.before }
-
-    private var olderUntil: ContinuousClock.Instant?
-
-    var olderPending: Bool { olderUntil.map { ContinuousClock.now < $0 } ?? false }
+    var holdingRow: Bool { row.holding }
+    var heldRow: String? { row.id }
+    var heldBefore: CGFloat? { row.before }
+    var olderPending: Bool { row.pending }
 
     func armRow(_ id: String, above: CGFloat, before: CGFloat, fresh: Bool) {
         fromEnd = nil
-        if fresh || !olderPending { olderUntil = .now + .seconds(30) }
-        fromRow = (id, above, before, olderUntil ?? .now, nil, nil, true)
+        row.arm(id, above: above, before: before, fresh: fresh)
     }
 
     func forgetOlder() {
-        olderUntil = nil
+        row.forget()
         releaseHold()
-    }
-
-    func landRow(content: CGFloat) -> (id: String, before: CGFloat)? {
-        guard let row = fromRow, row.content == nil, ContinuousClock.now < row.until else { return nil }
-        olderUntil = nil
-        fromRow?.content = content
-        fromRow?.until = .now + .seconds(2)
-        return (row.id, row.before)
     }
 
     func releaseHold() {
         fromEnd = nil
-        fromRow = nil
+        row.release()
         revealed = nil
     }
 
     /// Earlier rows keep re-measuring after they arrive, moving the rows below them without scrolling, and the geometry action
     /// can miss such a resize, so the height is compared with the last one handled. Any other move while settled is the reader's.
     func heldTarget(_ geometry: ScrollGeometry, rows: TranscriptRowTops?) -> CGFloat? {
-        if let row = fromRow, ContinuousClock.now >= row.until {
-            fromRow = nil
-        } else if let row = fromRow, row.content != nil {
-            // The row keeps its pre-insert top until it is laid out again.
-            guard let top = rows?.top(row.id), top != row.before else { return nil }
-            let target = max(top - row.above, 0)
-            if geometry.contentSize.height != row.content || top != row.top {
-                fromRow?.content = geometry.contentSize.height
-                fromRow?.top = top
-                fromRow?.landing = abs(geometry.contentOffset.y - target) > 1
-                return fromRow?.landing == true ? target : nil
-            }
-            if abs(geometry.contentOffset.y - target) <= 1 {
-                fromRow?.landing = false
-            } else if fromRow?.landing == false {
-                releaseHold()
-            }
-            return nil
+        if row.landed {
+            let target = row.target(top: row.id.flatMap { rows?.top($0) }, offset: geometry.contentOffset.y, content: geometry.contentSize.height)
+            if row.id == nil { releaseHold() }
+            return target
         }
         guard let distance = heldFromEnd else { return nil }
         let content = geometry.contentSize.height

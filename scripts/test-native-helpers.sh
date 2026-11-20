@@ -236,6 +236,7 @@ SOURCES=(
   macOS/TranscriptEndCheck.swift
   macOS/TranscriptFollow.swift
   macOS/TranscriptRowTops.swift
+  macOS/TranscriptRowHold.swift
   macOS/TranscriptSelectionHold.swift
   macOS/TranscriptFeed.swift
   macOS/RevealedRow.swift
