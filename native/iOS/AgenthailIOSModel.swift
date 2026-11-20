@@ -1893,8 +1893,16 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         if searchQuery == query { searching = false }
     }
 
-    func openSession(_ sessionID: String) {
-        requestedSessionID = rekeys.resolve(sessionID)
+    func openSession(_ sessionID: String, turn: String? = nil) {
+        let resolved = rekeys.resolve(sessionID)
+        if let turn { openedTurns[resolved] = turn }
+        requestedSessionID = resolved
+    }
+
+    private(set) var openedTurns: [String: String] = [:]
+
+    func takeOpenedTurn(_ sessionID: String) -> String? {
+        openedTurns.removeValue(forKey: rekeys.resolve(sessionID))
     }
 
     private func followRekeys(_ retired: [String: String]) {
@@ -1911,6 +1919,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         var refused = refusedSends
         if rekeys.carry(&refused) { refusedSends = refused }
         _ = rekeys.carry(&lostAttachments)
+        _ = rekeys.carry(&openedTurns)
         if let requested = requestedSessionID, rekeys.resolve(requested) != requested {
             requestedSessionID = rekeys.resolve(requested)
         } else if let selected = selectedSessionID, rekeys.resolve(selected) != selected {

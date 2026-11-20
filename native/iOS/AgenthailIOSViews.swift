@@ -160,8 +160,8 @@ struct MainTabs: View {
             if phase == .active { model.decisionFeed.reload() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .agenthailNotificationOpened)) { notification in
-            guard let sessionID = notification.object as? String else { return }
-            model.openSession(sessionID)
+            guard let opened = notification.object as? OpenedNotification else { return }
+            model.openSession(opened.session, turn: opened.turn)
             selection = .sessions
         }
     }
@@ -520,6 +520,7 @@ struct SessionScreen: View {
     @State private var edge = TranscriptEdge()
     @State private var queueTail = QueueTail()
     @State private var landed = false
+    @State private var turnReveal: Task<Void, Never>?
     @State private var opening = OpeningRebuild()
     @State private var rowsGeneration = 0
     @State private var overflows = false
@@ -568,6 +569,50 @@ struct SessionScreen: View {
         case .row(let id): position.scrollTo(id: id, anchor: .bottom)
         case .edge: position.scrollTo(edge: .bottom)
         }
+    }
+
+    // Older pages load until the turn is found, a few at most, so a tap on an old notification still lands somewhere sensible.
+    private func revealOpenedTurn() async -> Bool? {
+        let screen = session.id
+        guard let turn = model.takeOpenedTurn(screen) else { return nil }
+        var found = TurnReveal.find(turn, in: shownItems)
+        var pages = 0
+        while found.settled == nil, pages < TurnReveal.olderPages {
+            guard !Task.isCancelled, model.selectedSessionID == screen else { return nil }
+            if model.loadingOlderActivity {
+                try? await Task.sleep(for: .milliseconds(100))
+                found = TurnReveal.find(turn, in: shownItems)
+                continue
+            }
+            guard let cursor = model.activityCursor, cursor > 0 else { break }
+            await model.loadOlderActivity()
+            found = TurnReveal.find(turn, in: shownItems)
+            guard model.activityCursor != cursor else { break }
+            pages += 1
+        }
+        guard !Task.isCancelled, model.selectedSessionID == screen else { return nil }
+        guard let item = found.settled, let target = turnRow(item) else { return false }
+        olderPlace.release()
+        followingLatest = false
+        position.scrollTo(id: target, anchor: .top)
+        return true
+    }
+
+    private func startTurnReveal() {
+        turnReveal?.cancel()
+        turnReveal = Task {
+            guard await revealOpenedTurn() == false else { return }
+            followingLatest = true
+            scrollToLatest()
+        }
+    }
+
+    private var shownItems: [TimelineItem] {
+        activityOnly ? items : groups.flatMap(\.items)
+    }
+
+    private func turnRow(_ item: String) -> String? {
+        activityOnly ? TranscriptRowID.item(item) : TurnReveal.row(of: item, in: groups)
     }
 
     private func rebuildOpeningRows() {
@@ -915,22 +960,29 @@ struct SessionScreen: View {
             await model.loadSession(session.id)
             if startsAtOldest, let first = firstRowID {
                 position.scrollTo(id: first, anchor: .top)
-            } else if followingLatest {
+            } else if followingLatest, await revealOpenedTurn() != true {
                 scrollToLatest()
             }
             landed = true
             opening.land(open)
             opening.fire(latest: latestRowID, rebuildOpeningRows)
+            if model.openedTurns[session.id] != nil { startTurnReveal() }
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { scrollToLatest() }
         }
+        .onChange(of: model.openedTurns[session.id]) { _, turn in
+            guard landed, turn != nil else { return }
+            startTurnReveal()
+        }
         .onAppear { model.sessionAppeared(session.id) }
         .onChange(of: session.id) { old, new in
+            turnReveal?.cancel()
             model.sessionDisappeared(old)
             model.sessionAppeared(new)
         }
         .onDisappear {
+            turnReveal?.cancel()
             olderPlace.release()
             model.sessionDisappeared(session.id)
         }

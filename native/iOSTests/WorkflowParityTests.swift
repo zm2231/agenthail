@@ -320,6 +320,19 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testANotificationsTurnFollowsItsSessionAcrossARekey() throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        model.openSession("computer::old", turn: "turn-7")
+        model.host(try XCTUnwrap(model.connection("computer")), rekeyed: ["old": "new"])
+        XCTAssertNil(model.openedTurns["computer::old"])
+        XCTAssertEqual(model.takeOpenedTurn("computer::new"), "turn-7")
+        XCTAssertNil(model.takeOpenedTurn("computer::new"), "a turn is revealed once")
+        model.openSession("computer::old", turn: "turn-8")
+        XCTAssertEqual(model.takeOpenedTurn("computer::old"), "turn-8", "an old id still reaches its turn")
+    }
+
+    @MainActor
     func testTakingBackAQueuedMessageFollowsItsSessionAcrossARekey() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()

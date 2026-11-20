@@ -2,6 +2,25 @@ import XCTest
 
 @MainActor
 final class SessionNavigationTests: XCTestCase {
+    func testANotificationAboutATurnOpensItsSessionAtThatTurnsReply() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-theme", "dark", "--preview-turns", "--preview-follow", "--preview-open-turn", "turn-5"]
+        app.launch()
+        XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 15), "the notification opened its session")
+        let timeline = app.scrollViews["session-timeline"]
+        let reply = timeline.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Reply for turn 5.'")).firstMatch
+        XCTAssertTrue(reply.waitForExistence(timeout: 10), "the turn's reply is in the transcript")
+        app.waitForSteadyJump()
+        XCTAssertTrue(reply.isHittable, "the turn's reply is on screen")
+        XCTAssertLessThan(reply.frame.minY, timeline.frame.midY, "the reply starts in the top half, so it reads from its first line")
+        XCTAssertFalse(timeline.staticTexts["Reconnect is fixed"].isHittable, "the latest reply is not what opened")
+        XCTAssertTrue(app.jumpToLatest.exists, "Jump to latest offers the rest of the session")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "opened at turn 5"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     func testVoiceEntryPreservesTabNavigation() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-app", "--preview-voice-entry", "--preview-crowded"]
