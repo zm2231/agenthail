@@ -79,15 +79,14 @@ final class ScrollJumpProbe {
         let shift = shifts.isEmpty ? 0 : shifts[shifts.count / 2]
         let moved = rows.filter { id, minY in last.rows[id].map { abs($0 - minY) > 1 } ?? false }.min { $0.value < $1.value }
         let step = offset - last.offset
-        guard abs(shift) > 0.1 || abs(step) > 0.1 || moved != nil || abs(height - last.height) > 0.1 else { return }
         // A long frame moves the finger further, so expected finger travel is its speed times this frame's length.
-        let recent = fingerSpeeds.suffix(3).sorted()
-        let finger = (recent.isEmpty ? 0 : recent[recent.count / 2]) * frame
+        let finger = Self.median(fingerSpeeds.suffix(3)) * frame
         let seen = abs(shift) > 2 ? shift - (step - finger) : 0
         if abs(shift) <= 2, frame > 0 {
             fingerSpeeds.append(step / frame)
             if fingerSpeeds.count > 6 { fingerSpeeds.removeFirst() }
         }
+        guard abs(shift) > 0.1 || abs(step) > 0.1 || moved != nil || abs(height - last.height) > 0.1 else { return }
         if touched, abs(seen) > 2 {
             jumps += 1
             worst = max(worst, abs(seen))
@@ -95,6 +94,13 @@ final class ScrollJumpProbe {
             lines.append("#after \(layout(last.rows))")
         }
         lines.append(String(format: "%.3f\t%@\t%.1f\t%.1f\t%.1f\t%.1f\t%@\t%.1f", CACurrentMediaTime() - started, phase, offset, height, shift, step, moved?.key ?? "-", frame * 1000))
+    }
+
+    nonisolated static func median(_ values: some Collection<CGFloat>) -> CGFloat {
+        let sorted = values.sorted()
+        guard !sorted.isEmpty else { return 0 }
+        let middle = sorted.count / 2
+        return sorted.count.isMultiple(of: 2) ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
     }
 
     private func flush() {

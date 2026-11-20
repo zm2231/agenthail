@@ -11,6 +11,15 @@ final class LatestScrollTests: XCTestCase {
         XCTAssertEqual(LatestScroll.target(overflows: true, latest: "q:computer/25", pinned: "q:computer/25"), .edge)
     }
 
+#if DEBUG
+    func testTheScrollProbesFingerSpeedIsTheMedianOfItsRecentFrames() {
+        XCTAssertEqual(ScrollJumpProbe.median([CGFloat]()), 0)
+        XCTAssertEqual(ScrollJumpProbe.median([CGFloat(120)]), 120)
+        XCTAssertEqual(ScrollJumpProbe.median([CGFloat(300), 100]), 200, "two speeds average their middle pair")
+        XCTAssertEqual(ScrollJumpProbe.median([CGFloat(0), 900, 0]), 0, "a finger held still for two frames reads as still")
+    }
+#endif
+
     func testAShortTranscriptOrNoRowGoesToTheEdge() {
         XCTAssertEqual(LatestScroll.target(overflows: false, latest: "q:computer/25", pinned: nil), .edge)
         XCTAssertEqual(LatestScroll.target(overflows: true, latest: nil, pinned: nil), .edge)

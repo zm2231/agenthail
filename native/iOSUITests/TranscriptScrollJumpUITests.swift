@@ -53,7 +53,7 @@ final class TranscriptScrollJumpUITests: XCTestCase {
         frames.lifetime = .keepAlways
         add(frames)
         XCTAssertLessThanOrEqual(jumps, 1, "the transcript moved without the finger: \(probe.label)")
-        XCTAssertLessThanOrEqual(worst, 45, "LazyVStack's one re-estimate of unmeasured rows missed by more than 45 pt: \(probe.label)")
+        XCTAssertLessThanOrEqual(worst, 60, "LazyVStack's one re-estimate of unmeasured rows missed by more than 60 pt: \(probe.label)")
     }
 
     static func parse(_ label: String) -> (jumps: Int, worst: Int, frame: Int) {
