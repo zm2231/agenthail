@@ -29,9 +29,6 @@ func leadRegistry(t *testing.T, projectID string) *Registry {
 
 func TestALeadMovesOnlyWithItsSessionAndOnlyAsTheSameProject(t *testing.T) {
 	r := leadRegistry(t, leadProject)
-	if refusal, err := r.SessionMoveRefusal(moveConversation, false); err != nil || !strings.Contains(refusal, "coordinator") {
-		t.Fatalf("a move without its roles answered %q err=%v, want the coordinator refused", refusal, err)
-	}
 	if refusal, err := r.SessionMoveRefusal(moveConversation, true); err != nil || refusal != "" {
 		t.Fatalf("a move that carries the lead was refused: %q err=%v", refusal, err)
 	}
@@ -39,6 +36,9 @@ func TestALeadMovesOnlyWithItsSessionAndOnlyAsTheSameProject(t *testing.T) {
 	local := leadRegistry(t, "project-widget")
 	if refusal, err := local.SessionMoveRefusal(moveConversation, true); err != nil || !strings.Contains(refusal, "not a Git repository") {
 		t.Fatalf("a lead of a project only this host knows answered %q err=%v, want it refused", refusal, err)
+	}
+	if refusal, err := local.SessionMoveRefusal(moveConversation, false); err != nil || refusal != "" {
+		t.Fatalf("a move to another root of this host, which keeps the lead here, answered %q err=%v", refusal, err)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestTheSourceGivesUpItsLeadOnlyWhenTheMoveCompletes(t *testing.T) {
 	if err := r.BeginMoveOut("move-1", moveConversation, moveTarget, []byte(`{}`), carry, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.ClearCoordinator(leadProject, "person", time.Time{}); err == nil || !strings.Contains(err.Error(), "moving to another host") {
+	if _, err := r.ClearCoordinator(leadProject, "person", time.Time{}); err == nil || !strings.Contains(err.Error(), "is moving; change the coordinator") {
 		t.Fatalf("clearing the lead while it moves answered %v", err)
 	}
 	if spec, err := r.Coordinator(leadProject); err != nil || spec.Name != leadName {

@@ -176,7 +176,7 @@ func coordinatorChangeWhileMovingTx(tx *sql.Tx, projectID string) error {
 		return err
 	}
 	if moving {
-		return fmt.Errorf("the coordinator's session %s is moving to another host; change the coordinator once the move has finished", session)
+		return fmt.Errorf("the coordinator's session %s is moving; change the coordinator once the move has finished", session)
 	}
 	return nil
 }

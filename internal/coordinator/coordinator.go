@@ -271,7 +271,7 @@ func (s Service) current(ctx context.Context, spec registry.CoordinatorSpec) (*s
 	}
 	if moving, err := s.Registry.MovingOut(id); err != nil || moving {
 		if err == nil {
-			err = fmt.Errorf("coordinator conversation %s is moving to another host", id)
+			err = fmt.Errorf("coordinator conversation %s is moving", id)
 		}
 		return session, adapter, "", surface.DeliveryUnavailable(err)
 	}

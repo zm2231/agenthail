@@ -87,11 +87,13 @@ func (r *Registry) SessionMoves(unfinished bool) ([]SessionMove, error) {
 }
 
 // SessionMoveRefusal names what keeps a local session from moving: another
-// host owning it, a move already holding it, a delivery in flight, a relay
-// from it the move cannot carry, any relay of it when relays stay (a move
-// between accounts), a channel or the coordinator role. It is empty when
-// nothing does.
-func (r *Registry) SessionMoveRefusal(conversation string, carry bool) (string, error) {
+// host owning it, a move already holding it or a delivery in flight. A move
+// to another host (toHost) is also refused for what it cannot carry there: the
+// coordinator of a project that is not a Git repository and a relay tied to a
+// channel or behind on its completions. A move between roots of this host
+// keeps the session's id, alias, relays, channels and coordinator role in
+// place. It is empty when nothing refuses the move.
+func (r *Registry) SessionMoveRefusal(conversation string, toHost bool) (string, error) {
 	var owner string
 	if err := r.read.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, conversation).Scan(&owner); err != nil {
 		return "", err
@@ -106,16 +108,6 @@ func (r *Registry) SessionMoveRefusal(conversation string, carry bool) (string, 
 		{`SELECT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`, "a move of it has not finished"},
 		{`SELECT EXISTS(SELECT 1 FROM message_queue WHERE session_id=? AND status='inflight')`, "a message to it is being delivered"},
 	}
-	if !carry {
-		checks = append(checks, []struct {
-			query  string
-			reason string
-		}{
-			{`SELECT EXISTS(SELECT 1 FROM coordinators c JOIN aliases a ON a.name=c.name WHERE c.host_id='' AND a.session_id=?)`, "it is a project coordinator"},
-			{`SELECT EXISTS(SELECT 1 FROM channel_members WHERE session_id=?)`, "it is in a channel"},
-			{`SELECT EXISTS(SELECT 1 FROM routes WHERE active=1 AND (from_session=?1 OR to_session=?1))`, "it is part of an active relay"},
-		}...)
-	}
 	for _, check := range checks {
 		var found bool
 		if err := r.read.QueryRow(check.query, conversation).Scan(&found); err != nil {
@@ -125,7 +117,7 @@ func (r *Registry) SessionMoveRefusal(conversation string, carry bool) (string, 
 			return check.reason, nil
 		}
 	}
-	if !carry {
+	if !toHost {
 		return "", nil
 	}
 	if reason, err := coordinatorMoveRefusal(r.read, conversation); err != nil || reason != "" {
@@ -135,9 +127,11 @@ func (r *Registry) SessionMoveRefusal(conversation string, carry bool) (string, 
 }
 
 // BeginMoveOut records a move out as preparing. Only one move out of a
-// conversation can be unfinished at a time, and relays are the active relays
-// from it the move declared: any change to them since refuses the move, as
-// does a completion they have not forwarded.
+// conversation can be unfinished at a time. A move to another host carries
+// the relays, channels and coordinator role it declared: any change to them
+// since refuses the move, as does a completion its relays have not forwarded.
+// A move between roots of this host (peerHost is self) carries nothing; they
+// stay as they are.
 func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []byte, carry MoveCarry, self string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -151,6 +145,19 @@ func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []by
 	if busy {
 		return fmt.Errorf("a move of %s has not finished", conversation)
 	}
+	if peerHost != self {
+		if err := movedCarryHoldsTx(tx, conversation, carry, self); err != nil {
+			return err
+		}
+	}
+	stamp := formatTimestamp(r.now())
+	if _, err := tx.Exec(`INSERT INTO session_moves(id,conversation,peer_host,role,state,manifest,created_at,updated_at) VALUES(?,?,?,'out',?,?,?,?)`, id, conversation, peerHost, MovePreparing, manifest, stamp, stamp); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func movedCarryHoldsTx(tx *sql.Tx, conversation string, carry MoveCarry, self string) error {
 	current, err := moveCarry(tx, conversation, self)
 	if err != nil {
 		return err
@@ -163,11 +170,7 @@ func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []by
 	} else if reason != "" {
 		return errors.New(reason)
 	}
-	stamp := formatTimestamp(r.now())
-	if _, err := tx.Exec(`INSERT INTO session_moves(id,conversation,peer_host,role,state,manifest,created_at,updated_at) VALUES(?,?,?,'out',?,?,?,?)`, id, conversation, peerHost, MovePreparing, manifest, stamp, stamp); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
 
 // SetMoveState moves a move from one of from to state, recording detail.
