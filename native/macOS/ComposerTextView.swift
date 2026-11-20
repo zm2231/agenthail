@@ -68,9 +68,7 @@ struct ComposerTextView: NSViewRepresentable {
             textView.load(text)
         }
         textView.show(bound: text, sync: context.coordinator.sync)
-        if focused, textView.window != nil, textView.window?.firstResponder !== textView {
-            DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
-        }
+        context.coordinator.focus(textView, requested: focused)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: NSScrollView, context _: Context) -> CGSize? {
@@ -88,6 +86,7 @@ struct ComposerTextView: NSViewRepresentable {
         var parent: ComposerTextView
         var sync: ComposerTextSync
         var draftID: String?
+        private var focusTaken = false
 
         init(_ parent: ComposerTextView) {
             self.parent = parent
@@ -114,7 +113,18 @@ struct ComposerTextView: NSViewRepresentable {
             DispatchQueue.main.async { [self] in parent.onCaret?(caret) }
         }
 
+        // Once per request: the binding lags a resign, and an update in that gap must not take focus back.
+        func focus(_ textView: NSTextView, requested: Bool) {
+            guard requested else { return focusTaken = false }
+            guard !focusTaken, let window = textView.window else { return }
+            focusTaken = true
+            if window.firstResponder !== textView {
+                DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
+            }
+        }
+
         func focusChanged(_ isFocused: Bool) {
+            if isFocused { focusTaken = true }
             DispatchQueue.main.async { [self] in
                 if parent.focused != isFocused { parent.focused = isFocused }
             }
