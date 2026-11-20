@@ -46,6 +46,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		BusyDelivery      string `json:"busyDelivery"`
 		PersonName        string `json:"personName"`
 		ResumeAfterLimit  bool   `json:"resumeAfterLimit"`
+		MoveAfterLimit    bool   `json:"moveAfterLimit"`
 		ClaudeDefaultRoot string `json:"claudeDefaultRoot"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
@@ -71,6 +72,9 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		}
 	case "resume-after-limit":
 		config.ResumeAfterLimit = &request.ResumeAfterLimit
+		err = SaveDashboardConfig(config)
+	case "move-after-limit":
+		config.MoveAfterLimit = &request.MoveAfterLimit
 		err = SaveDashboardConfig(config)
 	case "claude-default-root":
 		if err = d.knownClaudeRoot(request.ClaudeDefaultRoot); err == nil {

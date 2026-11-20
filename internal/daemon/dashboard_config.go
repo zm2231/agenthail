@@ -30,8 +30,11 @@ type DashboardConfig struct {
 	RemoteAccess     RemoteAccessConfig  `json:"remoteAccess"`
 	// ResumeAfterLimit turns off resuming sessions a usage limit stopped
 	// when it is false; unset leaves it on.
-	ResumeAfterLimit *bool           `json:"resumeAfterLimit,omitempty"`
-	Claude           *ClaudeSettings `json:"claude,omitempty"`
+	ResumeAfterLimit *bool `json:"resumeAfterLimit,omitempty"`
+	// MoveAfterLimit turns off moving a session a usage limit stopped to a
+	// proxy root with room when it is false; unset leaves it on.
+	MoveAfterLimit *bool           `json:"moveAfterLimit,omitempty"`
+	Claude         *ClaudeSettings `json:"claude,omitempty"`
 	// AskEscalateMinutes is how long an agent holds an ask before it passes up; unset is 10.
 	AskEscalateMinutes int `json:"askEscalateMinutes,omitempty"`
 	// AskPermissionEscalateMinutes is the same for a permission request, which holds a tool call; unset is 3.
@@ -46,6 +49,12 @@ type DashboardConfig struct {
 // when it resets.
 func (c DashboardConfig) ResumesAfterLimit() bool {
 	return c.ResumeAfterLimit == nil || *c.ResumeAfterLimit
+}
+
+// MovesAfterLimit reports whether a session a usage limit stopped moves to a
+// proxy root with room before its own reset.
+func (c DashboardConfig) MovesAfterLimit() bool {
+	return c.MoveAfterLimit == nil || *c.MoveAfterLimit
 }
 
 func DashboardConfigPath() string {

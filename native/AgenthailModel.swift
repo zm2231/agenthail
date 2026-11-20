@@ -1187,6 +1187,22 @@ final class AgenthailModel {
         }
     }
 
+    /// Whether this computer moves a session a usage limit stopped to a proxy with room; on unless turned off.
+    var movesAfterLimit: Bool { settings?.dashboard.moveAfterLimit != false }
+
+    func setMoveAfterLimit(_ enabled: Bool) {
+        guard let api else { return }
+        Task {
+            do {
+                try await api.setMoveAfterLimit(enabled)
+                settings = try await api.settings()
+                operationError = nil
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
+        }
+    }
+
     var claudeDefaultRoot: String { settings?.claudeDefaultRoot ?? "" }
 
     func setClaudeDefaultRoot(_ name: String) {

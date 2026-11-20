@@ -20,7 +20,9 @@ func (d *Daemon) releaseMovedLimitStop(sessionID string) {
 	d.logLimitResume(d.releaseLimitStop(stop, limitWaiting, true, time.Now()))
 }
 
-func (d *Daemon) claudeRootProxy(choice string) string {
+// rootProxy is the proxy the named or given root runs through, "" for a
+// directly signed-in or unknown one.
+func (v proxyView) rootProxy(choice string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -29,7 +31,7 @@ func (d *Daemon) claudeRootProxy(choice string) string {
 	if err != nil {
 		return ""
 	}
-	root, _ := surface.ClaudeConfigRootFor(d.currentClaudeConfigRoots(), path)
+	root, _ := surface.ClaudeConfigRootFor(v.roots, path)
 	return root.Proxy
 }
 
@@ -42,16 +44,18 @@ func (d *Daemon) doLimitMove(ctx context.Context, sessionID, root string, stopTe
 		return actionResult{}, actionFailed(http.StatusConflict, "move_refused", "this session is not waiting on a usage limit")
 	}
 	defer d.unclaimLimitMove(sessionID)
+	now := time.Now()
+	view := d.readProxyView(now)
 	if root == "" {
-		if offer := d.limitMoveOffer(sessionID, time.Now()); offer != nil {
+		if offer := d.cachedLimitMoveOffers(view, now)[sessionID]; offer != nil {
 			root = offer.Root
 		}
 	}
 	if root == "" {
 		return actionResult{}, actionFailed(http.StatusConflict, "move_refused", "no other Claude account has room for this session now")
 	}
-	if proxy := d.claudeRootProxy(root); proxy != "" {
-		return actionResult{}, actionFailed(http.StatusConflict, "move_refused", fmt.Sprintf("Claude config directory %s runs through the %s proxy, which chooses its own account, so a usage-limit move does not offer it; move the session there with agenthail move <session> --root %s", root, proxy, root))
+	if proxy := view.rootProxy(root); proxy != "" && !view.room(proxy, d.sessionIsFable(sessionID), now) {
+		return actionResult{}, actionFailed(http.StatusConflict, "move_refused", fmt.Sprintf("the %s proxy that Claude config directory %s runs through has no account with room for this session now", proxy, root))
 	}
 	result, err := d.moveSessionToRoot(context.WithoutCancel(ctx), sessionMoveRequest{SessionID: sessionID, Root: root, StopTerminal: stopTerminal})
 	var refused MoveRefusedError

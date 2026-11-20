@@ -92,6 +92,7 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 	build := &sessionViewBuild{key: key, hostEpoch: read.HostEpoch, seq: read.CatalogSeq}
 	host := build.key.host
 	internal := map[string]string{}
+	limits := d.newLimitResumeProjection(now)
 	rows := make([]dashboardSession, 0, len(read.Rows))
 	revision := make([]revisionRow, 0, len(read.Rows))
 	for _, record := range read.Rows {
@@ -120,7 +121,7 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 			}
 		}
 		if limit, ok := read.Limits[record.ID]; ok {
-			row.LimitResume = &dashboardLimitResume{State: limit.State, RefusedAt: limit.RefusedAt, ResetsAt: limit.ResetsAt, MoveTo: d.limitMoveOffer(record.ID, now)}
+			row.LimitResume = limits.row(limit)
 			if limit.State == registry.LimitResumeWaiting {
 				build.expire(now.Add(limitMoveOfferTTL))
 			}

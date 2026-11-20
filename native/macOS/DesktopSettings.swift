@@ -168,8 +168,10 @@ struct GeneralSettings: View {
             Section {
                 Toggle("Resume sessions after a usage limit resets", isOn: Binding(get: { model.resumesAfterLimit }, set: { model.setResumeAfterLimit($0) }))
                     .disabled(model.settings == nil)
+                Toggle("Move stopped sessions to a proxy with room", isOn: Binding(get: { model.movesAfterLimit }, set: { model.setMoveAfterLimit($0) }))
+                    .disabled(model.settings == nil || !model.resumesAfterLimit)
             } footer: {
-                Text("A Claude session a usage limit stopped is sent its queued messages once the limit resets, or asked to continue when it has none. Turned off, queued messages still wait for the reset.")
+                Text("A Claude session a usage limit stopped is sent its queued messages once the limit resets, or asked to continue when it has none. Turned off, queued messages still wait for the reset. A session Agenthail runs can instead move to a Claude account proxy that has room and resume there.")
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
