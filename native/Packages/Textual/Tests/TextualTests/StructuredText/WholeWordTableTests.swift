@@ -24,6 +24,7 @@
         var settled: CGSize
         var table: CGFloat
         var cells: [CellKey: CGFloat]
+        var columns: [Int: CGFloat]
       }
 
       struct CellKey: Hashable {
@@ -34,6 +35,7 @@
       private final class TableWidth {
         var value: CGFloat = 0
         var cells: [CellKey: CGFloat] = [:]
+        var columns: [Int: CGFloat] = [:]
       }
 
       @Test func aWideColumnLaysTheTableOutAsTheDefaultStyleDoes() throws {
@@ -109,6 +111,36 @@
         #expect(narrow.table > 160)
       }
 
+      private static let fourColumns = """
+        | Session | Surface | Status | Notes on the last turn |
+        | --- | --- | --- | --- |
+        | core-lead | claude | idle | Finished the cleanup plan and waiting on review of the configuration changes |
+        | release-notes | claude | waiting | Needs the person to confirm the changelog wording before publishing |
+        """
+
+      @Test(arguments: [260.0, 300.0])
+      func aLongTextColumnGetsMoreWidthThanOneWordColumnsWhenWordsCannotFit(width: CGFloat) throws {
+        for words in [
+          measure(.wholeWords, width: width, fontSize: 15, markdown: Self.fourColumns),
+          measure(.gitHubWholeWords, width: width, fontSize: 15, markdown: Self.fourColumns),
+        ] {
+          let notes = try #require(words.columns[3])
+          for column in 0..<3 {
+            let short = try #require(words.columns[column])
+            #expect(notes > short * 1.25, "notes \(notes) against column \(column) at \(short)")
+          }
+          #expect(words.table > width)
+        }
+      }
+
+      @Test func aTableWhoseWordsJustFitKeepsTheColumnWidth() throws {
+        let words = measure(.wholeWords, width: 360, fontSize: 15, markdown: Self.fourColumns)
+        let plain = measure(.default, width: 360, fontSize: 15, markdown: Self.fourColumns)
+
+        #expect(words.table <= 360)
+        #expect(words.columns == plain.columns)
+      }
+
       @Test(arguments: [200.0, 760.0])
       func theFirstLayoutInAWindowIsTheSettledLayout(width: CGFloat) throws {
         let words = measure(.wholeWords, width: width)
@@ -147,7 +179,8 @@
           host.layoutSubtreeIfNeeded()
           RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         }
-        return Measured(first: first, settled: host.fittingSize, table: tableWidth.value, cells: tableWidth.cells)
+        return Measured(
+          first: first, settled: host.fittingSize, table: tableWidth.value, cells: tableWidth.cells, columns: tableWidth.columns)
       }
 
       @Observable
@@ -189,8 +222,9 @@
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxX } action: {
               width.value = max(width.value, $0)
             }
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-              width.cells[CellKey(row: configuration.row, column: configuration.column)] = $0
+            .onGeometryChange(for: CGSize.self) { $0.size } action: {
+              width.cells[CellKey(row: configuration.row, column: configuration.column)] = $0.height
+              width.columns[configuration.column] = max(width.columns[configuration.column] ?? 0, $0.width)
             }
         }
       }

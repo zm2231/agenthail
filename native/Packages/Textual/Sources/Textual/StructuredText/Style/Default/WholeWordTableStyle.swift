@@ -52,28 +52,42 @@ struct WholeWordTable<Content: View>: View {
 /// Lays the table out at its container's width, which the first subview reports even inside a
 /// horizontal scroll view, or at its narrowest whole-word width when that is wider.
 private struct ContainerWidth: Layout {
-  func makeCache(subviews: Subviews) -> CGFloat? { nil }
+  struct Extent {
+    var narrowest: CGFloat
+    var widest: CGFloat
+  }
 
-  func updateCache(_ cache: inout CGFloat?, subviews: Subviews) {
+  static let roomForLongText: CGFloat = 1.3
+
+  func makeCache(subviews: Subviews) -> Extent? { nil }
+
+  func updateCache(_ cache: inout Extent?, subviews: Subviews) {
     cache = nil
   }
 
-  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout CGFloat?) -> CGSize {
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Extent?) -> CGSize {
     guard subviews.count == 2 else { return .zero }
     return subviews[1].sizeThatFits(table(subviews, cache: &cache))
   }
 
-  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout CGFloat?) {
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Extent?) {
     guard subviews.count == 2 else { return }
     subviews[0].place(at: bounds.origin, proposal: .zero)
     subviews[1].place(at: bounds.origin, proposal: table(subviews, cache: &cache))
   }
 
-  private func table(_ subviews: Subviews, cache: inout CGFloat?) -> ProposedViewSize {
+  private func table(_ subviews: Subviews, cache: inout Extent?) -> ProposedViewSize {
     let container = subviews[0].sizeThatFits(.unspecified).width
-    let narrowest = cache ?? subviews[1].sizeThatFits(ProposedViewSize(width: 0, height: nil)).width
-    cache = narrowest
-    return ProposedViewSize(width: max(container, narrowest), height: nil)
+    let extent =
+      cache
+      ?? Extent(
+        narrowest: subviews[1].sizeThatFits(ProposedViewSize(width: 0, height: nil)).width,
+        widest: subviews[1].sizeThatFits(.unspecified).width
+      )
+    cache = extent
+    guard extent.narrowest > container else { return ProposedViewSize(width: container, height: nil) }
+    let comfortable = min(extent.widest, extent.narrowest * Self.roomForLongText)
+    return ProposedViewSize(width: max(container, comfortable), height: nil)
   }
 }
 
