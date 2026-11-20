@@ -820,9 +820,17 @@ struct SessionPaneTest {
         check(warmModel.store.commands["W1"]?.commands.map(\.insert) == ["/review"] && warmModel.store.commands["W1"]?.unavailable == "", "a streamed command list replaces the session's commands: \(String(describing: warmModel.store.commands["W1"]))")
         check(warmPane.timelineItems.map(\.id) == ["a", "b"], "a command list adds no transcript row: \(warmPane.timelineItems.map(\.id))")
 
+        let beforeShowAll = warmRequests.count
         warmPane.showAllClaudeSubagents()
         warmPane.select("W2")
         await waitForStream("W2", from: beforeReturn)
+        let leftDeadline = Date().addingTimeInterval(5)
+        while !warmRequests[beforeShowAll...].contains(where: { $0.contains("/api/v1/session-metadata?") && $0.contains("id=W2") }), Date() < leftDeadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        let leftBehind = warmRequests[beforeShowAll...].filter { $0.contains("/api/v1/session-metadata?") && $0.contains("id=W1") && !$0.contains("subagents=all") }
+        check(leftBehind.isEmpty, "a session left right after asking for every subagent never reads its metadata with the next session's subagent choice: \(leftBehind)")
         let beforeAll = warmRequests.count
         warmPane.select("W1")
         await waitForStream("W1", from: beforeAll)

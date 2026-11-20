@@ -953,8 +953,10 @@ final class SessionPane: Identifiable {
         modelCatalogNeeded = false
         guard !closed, let api = model.api else { return }
         let selection = selectionGeneration
+        let allSubagents = metadata.allClaudeSubagents
         metadataTask = Task {
-            let loaded = try? await api.sessionMetadata(id: id, allSubagents: metadata.allClaudeSubagents)
+            guard !Task.isCancelled else { return }
+            let loaded = try? await api.sessionMetadata(id: id, allSubagents: allSubagents)
             guard !Task.isCancelled, !closed, selectionGeneration == selection, selectedSessionID == id, removedSession == nil else { return }
             if let loaded { metadata.absorb(loaded) } else { metadata.metadataFailed() }
             modelCatalogNeeded = metadata.needsModelCatalog
