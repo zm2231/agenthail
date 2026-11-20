@@ -29,32 +29,18 @@ struct ConversationHeader: View {
             .lineLimit(1)
             .frame(minWidth: Self.titleMinWidth, alignment: .leading)
             .accessibilityElement(children: .combine)
-            Spacer(minLength: DesktopSpace.m)
+            Spacer(minLength: DesktopSpace.s)
             stateArea
-            HStack(spacing: DesktopSpace.xs) {
-                FocusSwitch()
-                if let onCall {
-                    Button(action: onCall) {
-                        Image(systemName: "waveform")
-                            .frame(width: 28, height: 28)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(DesktopPalette.text2)
-                    .help("Call this session by voice")
-                    .accessibilityLabel("Call this session")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DesktopSpace.m) {
+                    FocusSwitch()
+                    callButton
+                    inspectorButton
                 }
-                Button {
-                    inspectorVisible.toggle()
-                } label: {
-                    Image(systemName: "sidebar.right")
-                        .frame(width: 28, height: 28)
-                        .selectionMark(inspectorVisible)
+                HStack(spacing: DesktopSpace.xs) {
+                    FocusSwitch()
+                    inspectorButton
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(DesktopPalette.text2)
-                .help(inspectorHelp)
-                .accessibilityLabel("Toggle inspector")
-                .accessibilityValue(inspectorVisible ? "Shown" : "Hidden")
             }
         }
         .padding(.leading, leadingInset)
@@ -63,7 +49,35 @@ struct ConversationHeader: View {
         .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
     }
 
-    static let titleMinWidth: CGFloat = 16
+    static let titleMinWidth: CGFloat = 60
+
+    @ViewBuilder private var callButton: some View {
+        if let onCall {
+            Button(action: onCall) {
+                Image(systemName: "waveform")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DesktopPalette.text2)
+            .help("Call this session by voice")
+            .accessibilityLabel("Call this session")
+        }
+    }
+
+    private var inspectorButton: some View {
+        Button {
+            inspectorVisible.toggle()
+        } label: {
+            Image(systemName: "sidebar.right")
+                .frame(width: 28, height: 28)
+                .selectionMark(inspectorVisible)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(DesktopPalette.text2)
+        .help(inspectorHelp)
+        .accessibilityLabel("Toggle inspector")
+        .accessibilityValue(inspectorVisible ? "Shown" : "Hidden")
+    }
 
     private var stateArea: some View {
         TimelineView(.everyMinute) { context in
