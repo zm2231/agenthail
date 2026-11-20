@@ -66,7 +66,11 @@ func (r *Registry) AddAgentIdentity(name string) (AgentIdentity, error) {
 		return AgentIdentity{}, ErrReservedAlias
 	}
 	now := r.now()
-	id := surface.AgentIdentityID(name)
+	host, err := r.HostIdentity()
+	if err != nil {
+		return AgentIdentity{}, fmt.Errorf("read this host's id: %w", err)
+	}
+	id := surface.AgentIdentityID(host.ID, name)
 	tx, err := r.db.Begin()
 	if err != nil {
 		return AgentIdentity{}, err
@@ -100,10 +104,10 @@ func (r *Registry) AddAgentIdentity(name string) (AgentIdentity, error) {
 	if err := aliasReservedTx(tx, name, "", now); err != nil {
 		return AgentIdentity{}, err
 	}
-	var host string
-	switch err := tx.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, id).Scan(&host); {
-	case err == nil && host != "":
-		return AgentIdentity{}, SessionOwnedError{SessionID: id, HostID: host}
+	var ownerHost string
+	switch err := tx.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, id).Scan(&ownerHost); {
+	case err == nil && ownerHost != "":
+		return AgentIdentity{}, SessionOwnedError{SessionID: id, HostID: ownerHost}
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return AgentIdentity{}, err
 	}

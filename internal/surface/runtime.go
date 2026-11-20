@@ -32,7 +32,8 @@ const KindAgent SurfaceKind = "agent"
 
 const agentIdentityPrefix = "agent:"
 
-func AgentIdentityID(name string) string { return agentIdentityPrefix + name }
+// The host id keeps two machines' identities of the same name apart once paired.
+func AgentIdentityID(hostID, name string) string { return agentIdentityPrefix + hostID + ":" + name }
 
 func IsAgentIdentity(session *Session) bool {
 	return session != nil && session.RuntimeKind == RuntimeAgentInbox

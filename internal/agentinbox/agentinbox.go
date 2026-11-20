@@ -67,6 +67,9 @@ func (i *Inbox) Resolve(_ context.Context, target string) (*surface.Session, err
 	if err != nil {
 		return nil, err
 	}
+	if identity, err := reg.AgentIdentityOf(target); err == nil {
+		return reg.Session(identity.SessionID)
+	}
 	name := strings.TrimPrefix(strings.TrimPrefix(target, string(surface.KindAgent)+":"), "@")
 	identity, err := reg.AgentIdentityNamed(name)
 	if err != nil {

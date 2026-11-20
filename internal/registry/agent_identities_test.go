@@ -38,7 +38,11 @@ func TestAnAgentIdentityTakesOnlyAFreeName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.SessionID != surface.AgentIdentityID("scout") {
+	host, err := r.HostIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.SessionID != surface.AgentIdentityID(host.ID, "scout") {
 		t.Fatalf("identity=%+v", identity)
 	}
 	if _, err := r.AddAgentIdentity("scout"); err == nil {

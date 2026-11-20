@@ -25,15 +25,15 @@ A name follows the alias rules: lowercase letters, digits, `.`, `_` and `-`, at 
 
 ## How it is stored
 
-An identity is a local session row (`sessions`, id `agent:<name>`, surface `agent`, runtime kind `agent-inbox`) with its alias in `aliases`, plus a row in `agent_identities`. Its messages are rows in `agent_inbox`, which keeps the full text, the sender's id, the reply address the sender had when it arrived, and when it was read. A message's id is the delivery intent's uuid, so a send replayed to this host is stored once. Both tables arrived with schema 114.
+An identity is a local session row (`sessions`, id `agent:<host id>:<name>`, surface `agent`, runtime kind `agent-inbox`) with its alias in `aliases`, plus a row in `agent_identities`. The host id in the session id keeps two machines' identities of the same name apart once they pair, since paired hosts key mirrored rows by session id. Its messages are rows in `agent_inbox`, which keeps the full text, the sender's id, the reply address the sender had when it arrived, and when it was read. A message's id is the delivery intent's uuid, so a send replayed to this host is stored once. Both tables arrived with schema 114.
 
-The `agentinbox` adapter serves the `agent-inbox` runtime. Its `Send` stores the message and reports it delivered; the dispatcher takes the inbox route for it, which records the intent as sent but starts no turn, and its receipt says the message is in the inbox and that nothing replies. `send --reply` and `--stream` to an identity are refused before anything is sent. Interrupt, steer, goals, compaction and models are refused. `agenthail last @scout` lists the inbox without marking anything read.
+The `agentinbox` adapter serves the `agent-inbox` runtime. Its `Send` stores the message and reports it delivered; the dispatcher takes the inbox route for it, which records the intent as sent but starts no turn (`Route.StartsTurn` is false, so neither a direct send nor a queued one marks a turn started), and its receipt says the message is in the inbox and that nothing replies. `send --reply` and `--stream` to an identity are refused before anything is sent. Interrupt, steer, goals, compaction and models are refused. `agenthail last @scout` lists the inbox without marking anything read.
 
 The adapter lists identities to the catalog like any surface, so each identity has a catalog row. The session list leaves identity rows out (`CatalogListing`), the way it leaves out idle subagents, and clients get no `agent` surface: no health chip, no filter and nothing to start (`surface.Listed`). A paired host's mirror reads every catalog row, so it carries identities.
 
 ## Sender and reach
 
-`--from scout` and `AGENTHAIL_SESSION_ID=scout` resolve to the identity through the same lookup as any session. The message is labeled `[from @scout]`, and a Claude peer message names `agenthail/agent: @scout`. Failure and held notices for an identity's own sends go to its inbox.
+`--from scout` and `AGENTHAIL_SESSION_ID=scout` resolve to the identity through the same lookup as any session. The message is labeled `[from @scout]`, and a Claude peer message names `agenthail/agent: @scout`. Failure and held notices for an identity's own sends go to its inbox. Local Claude sessions get each identity, and each one a connected paired host mirrors, as a peer however long it has been quiet (`CatalogActiveSessions` keeps identity rows out of the activity window), so a Claude session can answer it with its own send.
 
 An identity has the reach of the Agenthail CLI: the CLI does not check it as an agent session, so it is not held to one project. It only names the sender of a message the CLI could already send without one, and grants nothing the person running that CLI does not already have.
 
@@ -41,7 +41,7 @@ An identity has the reach of the Agenthail CLI: the CLI does not check it as an 
 
 The pairing carries an identity both ways with no new path (see [paired hosts](hosts.md)):
 
-- From the identity's host, a send to a paired host's session goes qualified as `<host id>::agent:scout` with the name `@scout`. The receiver mirrors that row, so the message's sender is the mirror and the receiver addresses it as `server::@scout`. A reply routes to the identity's host and lands in the inbox.
+- From the identity's host, a send to a paired host's session goes qualified as `<host id>::agent:<host id>:scout` with the name `@scout`. The receiver mirrors that row, so the message's sender is the mirror and the receiver addresses it as `server::@scout`. A reply routes to the identity's host and lands in the inbox.
 - From a paired host, `agenthail send server::@scout ...` resolves through the mirror. While the identity's host is unreachable the send is held and replayed with its idempotency key, and the inbox keeps it once.
 - A one-way pairing falls back to the unrepliable sender row, as for any session.
 

@@ -50,6 +50,8 @@ func RouteFor(adapter Surface, session *Session, author Author) Route {
 
 func (r Route) TransportOnly() bool { return r == RoutePeer }
 
+func (r Route) StartsTurn() bool { return r != RoutePeer && r != RouteInbox }
+
 // PersonMessage is how a message on this route reaches the session: a peer socket hands the model a note.
 func (r Route) PersonMessage() PersonMessage {
 	if r == RoutePeer || r == RouteInbox {
