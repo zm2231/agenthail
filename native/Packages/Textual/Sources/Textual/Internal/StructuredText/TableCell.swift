@@ -37,12 +37,9 @@ extension StructuredText {
       }
       if keepsWords {
         WholeWords {
-          WithInlineStyle(Self.wordPerLine(AttributedString(content))) {
-            TextFragment($0)
-          }
-          .hidden()
-          .accessibilityHidden(true)
-          .transformPreference(Text.LayoutKey.self) { $0 = [] }
+          Text(Self.wordPerLine(AttributedString(content)))
+            .hidden()
+            .accessibilityHidden(true)
           text
         }
       } else {
