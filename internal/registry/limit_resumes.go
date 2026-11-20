@@ -113,7 +113,7 @@ func (r *Registry) ReleaseLimitStop(sessionID, turnID string, from []LimitResume
 			return false, err
 		}
 		if pending == 0 {
-			if queued, err = enqueueMessageTx(tx, r.now(), sessionID, notice, deliveryKey, surface.SendOptions{}, 0, QueueOperationMessage, queueIntent{}); err != nil {
+			if queued, err = enqueueMessageTx(tx, r.now(), sessionID, notice, deliveryKey, surface.SendOptions{SourceSessionID: surface.SystemSessionID}, 0, QueueOperationMessage, queueIntent{}); err != nil {
 				return false, err
 			}
 		}
@@ -123,7 +123,7 @@ func (r *Registry) ReleaseLimitStop(sessionID, turnID string, from []LimitResume
 	}
 	r.signalHeld(queued)
 	if queued.ID != 0 {
-		_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: queued.ID, Message: notice})
+		_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, SourceSessionID: surface.SystemSessionID, QueueID: queued.ID, Message: notice})
 	}
 	return true, nil
 }
