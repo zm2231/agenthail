@@ -3,6 +3,7 @@ import SwiftUI
 extension StructuredText {
   struct TableCell: View {
     @Environment(\.tableCellStyle) private var tableCellStyle
+    @Environment(\.tableCellsKeepWords) private var keepsWords
 
     private let content: AttributedSubstring
     private let identifier: TableCell.Identifier
@@ -29,15 +30,60 @@ extension StructuredText {
       AnyView(resolvedStyle)
     }
 
+    @ViewBuilder
     private var label: some View {
-      WithInlineStyle(AttributedString(content)) {
+      let text = WithInlineStyle(AttributedString(content)) {
         TextFragment($0)
       }
+      if keepsWords {
+        WholeWords {
+          WithInlineStyle(Self.wordPerLine(AttributedString(content))) {
+            TextFragment($0)
+          }
+          .hidden()
+          .accessibilityHidden(true)
+          .transformPreference(Text.LayoutKey.self) { $0 = [] }
+          text
+        }
+      } else {
+        text
+      }
+    }
+
+    static func wordPerLine(_ text: AttributedString) -> AttributedString {
+      var text = text
+      let spaces = text.characters.indices.filter { text.characters[$0] == " " || text.characters[$0] == "\t" }
+      for index in spaces.reversed() {
+        text.characters.replaceSubrange(index...index, with: "\n")
+      }
+      return text
     }
 
     private var indentationLevel: Int {
       content.presentationIntent?.indentationLevel ?? 0
     }
+  }
+}
+
+extension EnvironmentValues {
+  @Entry var tableCellsKeepWords = false
+}
+
+/// Lays out its second subview no narrower than the first, a copy of the text with one word per
+/// line, so the text wraps between words and its height matches the width it is placed at.
+private struct WholeWords: Layout {
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    guard subviews.count == 2 else { return .zero }
+    let words = subviews[0].sizeThatFits(.unspecified).width
+    let width = proposal.width.map { max($0, words) }
+    let text = subviews[1].sizeThatFits(ProposedViewSize(width: width, height: nil))
+    return CGSize(width: max(text.width, words), height: text.height)
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    guard subviews.count == 2 else { return }
+    subviews[0].place(at: bounds.origin, proposal: .zero)
+    subviews[1].place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
   }
 }
 
