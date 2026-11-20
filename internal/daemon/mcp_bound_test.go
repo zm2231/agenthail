@@ -167,3 +167,24 @@ func TestASocketCallAnswersWhileTheRegistryWriterIsHeldAndIsLoggedAsSocket(t *te
 		t.Fatalf("the daemon log does not name the socket call:\n%s", logged.String())
 	}
 }
+
+func TestWorkThatFinishesWithinItsBoundAlwaysReturnsItsResult(t *testing.T) {
+	d := &Daemon{log: log.New(&lockedBuffer{}, "", 0)}
+	var wrong sync.Map
+	var calls sync.WaitGroup
+	for range 64 {
+		calls.Go(func() {
+			for range 500 {
+				got, err := withinBound(d, context.Background(), "test", time.Minute, func(context.Context) (int, error) { return 1, nil })
+				if err != nil || got != 1 {
+					wrong.Store(err, got)
+				}
+			}
+		})
+	}
+	calls.Wait()
+	wrong.Range(func(err, got any) bool {
+		t.Errorf("work that finished at once came back as %v, %v", got, err)
+		return true
+	})
+}
