@@ -891,7 +891,8 @@ CREATE TABLE IF NOT EXISTS agent_inbox (
 	sender_name TEXT NOT NULL DEFAULT '',
 	message TEXT NOT NULL,
 	received_at_ms INTEGER NOT NULL,
-	read_at_ms INTEGER NOT NULL DEFAULT 0
+	read_at_ms INTEGER NOT NULL DEFAULT 0,
+	delivered_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
 CREATE INDEX IF NOT EXISTS agent_inbox_unread ON agent_inbox(identity_id, id) WHERE read_at_ms=0;

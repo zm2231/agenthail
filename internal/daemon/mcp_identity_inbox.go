@@ -92,6 +92,13 @@ func (d *Daemon) mcpReadInbox(identity registry.AgentIdentity, ack string) (any,
 		items = append(items, item)
 	}
 	result["messages"], result["remaining"] = items, len(unread)-len(items)
+	ids := make([]int64, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	if err := d.Registry.MarkInboxDelivered(identity.Name, ids); err != nil {
+		return nil, err
+	}
 	if len(items) == 0 {
 		delete(result, "ack")
 		delete(result, "next")
@@ -107,7 +114,7 @@ const mcpInboxAckPrefix = "inbox-ack:"
 
 func mcpInboxAck(id int64) string { return mcpInboxAckPrefix + strconv.FormatInt(id, 10) }
 
-// Scoped to the identity's own inbox so a foreign cursor marks nothing read.
+// A stray or later id marks nothing a read has not returned.
 func (d *Daemon) ackInbox(identity registry.AgentIdentity, ack string) error {
 	ack = strings.TrimSpace(ack)
 	if ack == "" {
@@ -120,9 +127,6 @@ func (d *Daemon) ackInbox(identity registry.AgentIdentity, ack string) error {
 	}
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
-		return refusal
-	}
-	if _, err := d.Registry.InboxMessageByID(identity.Name, id); err != nil {
 		return refusal
 	}
 	_, err = d.Registry.AckInbox(identity.Name, id)

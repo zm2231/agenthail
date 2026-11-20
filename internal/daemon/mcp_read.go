@@ -46,11 +46,14 @@ type mcpItemView struct {
 
 func (d *Daemon) mcpRead(ctx context.Context, caller *mcpCaller, input mcpReadInput) (any, error) {
 	if identity, ok := d.callerIdentity(caller); ok && strings.TrimSpace(input.SessionID) == "" {
-		if strings.HasPrefix(input.BodyRef, mcpInboxRefPrefix) {
-			return d.mcpReadInboxBody(identity, input.BodyRef, input.Offset)
-		}
 		if input.Since != nil || input.Before != "" {
 			return nil, refuse("invalid", "Your inbox read takes ack, not since or before; pass the ack your last read returned.")
+		}
+		if strings.HasPrefix(input.BodyRef, mcpInboxRefPrefix) {
+			if err := d.ackInbox(identity, input.Ack); err != nil {
+				return nil, err
+			}
+			return d.mcpReadInboxBody(identity, input.BodyRef, input.Offset)
 		}
 		return d.mcpReadInbox(identity, input.Ack)
 	}

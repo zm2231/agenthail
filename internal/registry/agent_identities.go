@@ -249,13 +249,33 @@ func (r *Registry) StoreInboxMessage(message InboxMessage) (InboxMessage, bool, 
 	return message, true, tx.Commit()
 }
 
-// AckInbox marks read the identity's messages up to and including through.
+// Only delivered messages can be acknowledged.
+func (r *Registry) MarkInboxDelivered(name string, ids []int64) error {
+	id, err := agentIdentityIDTx(r.read, name)
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := r.now().UnixMilli()
+	for _, message := range ids {
+		if _, err := tx.Exec(`UPDATE agent_inbox SET delivered_at_ms=? WHERE id=? AND identity_id=? AND delivered_at_ms=0`, now, message, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// AckInbox marks read the identity's delivered messages up to and including through.
 func (r *Registry) AckInbox(name string, through int64) (int, error) {
 	id, err := agentIdentityIDTx(r.read, name)
 	if err != nil {
 		return 0, err
 	}
-	result, err := r.db.Exec(`UPDATE agent_inbox SET read_at_ms=? WHERE identity_id=? AND id<=? AND read_at_ms=0`, r.now().UnixMilli(), id, through)
+	result, err := r.db.Exec(`UPDATE agent_inbox SET read_at_ms=? WHERE identity_id=? AND id<=? AND read_at_ms=0 AND delivered_at_ms>0`, r.now().UnixMilli(), id, through)
 	if err != nil {
 		return 0, err
 	}

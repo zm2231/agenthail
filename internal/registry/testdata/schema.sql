@@ -184,7 +184,8 @@ CREATE TABLE agent_inbox (
 	sender_name TEXT NOT NULL DEFAULT '',
 	message TEXT NOT NULL,
 	received_at_ms INTEGER NOT NULL,
-	read_at_ms INTEGER NOT NULL DEFAULT 0
+	read_at_ms INTEGER NOT NULL DEFAULT 0,
+	delivered_at_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- table alias_reservations

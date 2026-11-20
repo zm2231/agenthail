@@ -405,7 +405,7 @@ func TestAnUnacknowledgedInboxReadIsReturnedAgain(t *testing.T) {
 	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 1 {
 		t.Fatalf("unread=%d err=%v without an acknowledgement", unread, err)
 	}
-	for _, foreign := range []map[string]any{{"since": 1 << 40}, {"ack": "inbox-ack:999999"}, {"ack": "999999"}, {"ack": "inbox:1"}} {
+	for _, foreign := range []map[string]any{{"since": 1 << 40}, {"ack": "999999"}, {"ack": "inbox:1"}} {
 		if out, refused := callMCP(t, session, "agenthail_read", foreign); !refused {
 			t.Fatalf("read with %v was accepted: %v", foreign, out)
 		}
@@ -421,20 +421,71 @@ func TestAnUnacknowledgedInboxReadIsReturnedAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out, refused := callMCP(t, session, "agenthail_read", map[string]any{"ack": fmt.Sprintf("inbox-ack:%d", stored.ID)}); !refused {
-		t.Fatalf("an ack for another identity's message was accepted: %v", out)
+	if _, refused := callMCP(t, session, "agenthail_read", map[string]any{"ack": fmt.Sprintf("inbox-ack:%d", stored.ID)}); refused {
+		t.Fatal("an ack naming a later id was refused rather than marking only what was delivered")
 	}
-	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 1 {
-		t.Fatalf("unread=%d err=%v after refused acks", unread, err)
-	}
-	acked, _ := callMCP(t, session, "agenthail_read", map[string]any{"ack": first["ack"]})
-	if rest, _ := acked["messages"].([]any); len(rest) != 0 {
-		t.Fatalf("after the acknowledgement the read returned %v", acked)
+	if unread, err := f.r.UnreadInbox("builder"); err != nil || unread != 1 {
+		t.Fatalf("another identity's unread=%d err=%v after scout's ack", unread, err)
 	}
 	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 0 {
-		t.Fatalf("unread=%d err=%v after the acknowledgement", unread, err)
+		t.Fatalf("unread=%d err=%v: an ack past the delivered message must still cover it", unread, err)
+	}
+	f.deliver(t, "new")
+	if _, refused := callMCP(t, session, "agenthail_read", map[string]any{"ack": fmt.Sprintf("inbox-ack:%d", stored.ID+1000)}); refused {
+		t.Fatal("a far-future ack was refused")
+	}
+	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 1 {
+		t.Fatalf("unread=%d err=%v: a message returned only by that same read must stay unread", unread, err)
+	}
+	if _, err := f.r.PruneInbox("scout", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
 	}
 	if out, refused := callMCP(t, session, "agenthail_read", map[string]any{"ack": first["ack"]}); refused {
-		t.Fatalf("repeating an ack was refused: %v", out)
+		t.Fatalf("repeating an ack after its message was pruned was refused: %v", out)
+	}
+}
+
+func TestAnAckCoversOnlyThePagesAReadReturned(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	for i := range 6 {
+		f.deliver(t, strings.Repeat(string(rune('a'+i)), 4000))
+	}
+	session := f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, nil)
+	read, _ := callMCP(t, session, "agenthail_read", nil)
+	messages, _ := read["messages"].([]any)
+	if len(messages) == 0 || read["remaining"] == float64(0) {
+		t.Fatalf("read=%v", read)
+	}
+	all, err := f.r.ReadInbox("scout", registry.InboxQuery{Peek: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := fmt.Sprintf("inbox-ack:%d", all[len(all)-1].ID)
+	callMCP(t, session, "agenthail_wait", map[string]any{"tasks": []string{}, "timeoutSec": 0, "cursor": later})
+	if unread, _ := f.r.UnreadInbox("scout"); unread != len(all)-len(messages) {
+		t.Fatalf("unread=%d after acking a later id; want the %d undelivered left", unread, len(all)-len(messages))
+	}
+}
+
+func TestAnAckSentWithABodyPageTakesEffect(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	f.deliver(t, strings.Repeat("z", 6000))
+	session := f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, nil)
+	truncated := map[string]any{}
+	next, _ := callMCP(t, session, "agenthail_read", nil)
+	for _, raw := range next["messages"].([]any) {
+		if item := raw.(map[string]any); item["truncated"] == true {
+			truncated = item
+		}
+	}
+	if truncated["bodyRef"] == nil {
+		t.Fatalf("no truncated item in %v", next)
+	}
+	before, _ := f.r.UnreadInbox("scout")
+	if _, refused := callMCP(t, session, "agenthail_read", map[string]any{"bodyRef": truncated["bodyRef"], "ack": next["ack"]}); refused {
+		t.Fatal("a body page with an ack was refused")
+	}
+	if after, _ := f.r.UnreadInbox("scout"); after >= before {
+		t.Fatalf("an ack sent with a body page was ignored: unread %d -> %d", before, after)
 	}
 }
