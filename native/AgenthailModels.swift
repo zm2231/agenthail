@@ -1809,6 +1809,7 @@ struct DashboardConfigState: Decodable {
     let codexRecentHours: Int
     let busyDelivery: String
     var resumeAfterLimit: Bool? = nil
+    var moveAfterLimit: Bool? = nil
 }
 
 /// `set` is false while the name is the host account's own.

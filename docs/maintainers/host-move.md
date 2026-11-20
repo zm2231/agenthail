@@ -453,19 +453,62 @@ under its new root. A canceled or lapsed stop stays held.
 ### Moving at a usage limit
 
 While a limit stop waits and the host has two or more roots, the dashboard
-projection's `limitResume.moveTo{root, account, reason}` names the target
-`claudepick.MoveTarget` chooses from the cached usage readings: a claude.ai
-root other than the stop's, with a reading, under 90% of its session and week
-(or the proxy's own ceiling), the least loaded first. Proxy, API-key, signed-out and unread roots are never
-offered. The offers are computed for every waiting stop at once and kept
-five seconds, or until a stop changes. The `limit-move` action
-(`configRoot` optional, defaulting to the offer) runs the move above, and
-refuses a session whose stop is not waiting or a `configRoot` behind a proxy,
-so a stale or hand-built offer never lands in a proxy root;
-`agenthail move --root` is the way there. It claims the waiting stop
+projection's `limitResume.moveTo{root, account, reason}` names a target. The
+first root behind an account proxy with room for the session comes first
+(reason `the <proxy> proxy has room`), skipping the stop's own root and any
+other root through the same proxy, which reach the same accounts; otherwise `claudepick.MoveTarget` chooses from
+the cached usage readings: a claude.ai root other than the stop's, with a
+reading, under 90% of its session and week, the least loaded first. API-key,
+signed-out and unread roots are never offered. The offers are computed for
+every waiting stop at once and kept five seconds, or until a stop changes.
+
+A proxy has room when the proxy itself would route new work for the session
+now: `proxyacct.Full` is false and `proxyacct.Pick` names a Claude account,
+both from the proxy's cached accounts (`proxyUsage.cached`, a minute old at
+most) and with the per-model week counted only for a Fable model, as the
+proxy does. Agenthail reads the proxy and never writes to it: it sets no
+preference and releases no session pinned to an account.
+
+The `limit-move` action (`configRoot` optional, defaulting to the offer)
+runs the move above. It refuses a session whose stop is not waiting, and a
+`configRoot` behind a proxy that has no room for the session now;
+`agenthail move --root` moves there regardless. It claims the waiting stop
 first; while the claim holds, `limit-resume` and `limit-resume-cancel` on
 that session are refused, so a cancel either lands before the move starts or
-after it finishes. Nothing moves a stopped session unless the person asks.
+after it finishes.
+
+The resume pass also acts on its own, once per stop, for a session the Claude
+host runs, while resuming after limits is on (see
+[session operations](session-operations.md)). A stop that is still waiting
+and has not been acted on gets, in order:
+
+1. On a proxy root whose proxy has room: a restart of its process, so the
+   next turn asks the proxy again.
+2. On a directly signed-in root that has had a turn end there without an
+   error since the refusal: a restart.
+3. On a directly signed-in root otherwise, with `moveAfterLimit` on (the
+   default, in `dashboard.json`, the `move-after-limit` settings action and
+   both apps' settings), the session no coordinator, and its own reset at
+   least 15 minutes away or unknown: a move to the first proxy root with
+   room, logged as `move <session> from <root> to <root>: its usage limit
+   stopped it and the <proxy> proxy has room`. The move runs in the
+   background under the same claim as `limit-move`, and releases the stop
+   with the resume notice when it lands.
+4. Otherwise the stop waits for its reset.
+
+A session is never moved to another directly signed-in root on its own, and
+a terminal session or a coordinator is never moved. A restart or a move that
+fails counts as the stop's attempt, and a stop that follows a refused resume
+carries its attempts, so each stop gets one action and then waits for its own
+reset.
+
+The projection's `limitResume.resetsAt` is when the stop resumes, which
+clients show as such: its own reset, or sooner when a proxy that step 1 or 3
+would act through is full and `proxyacct.Full` says it frees an account
+before then. For a move, that time must also leave the stop's own reset at
+least 15 minutes away. A stop whose refusal named no reset shows none, since
+it is probed on its own schedule. Each pass, and each projection of the
+stops, reads the roots and the proxies' cached accounts once.
 
 ## Not in this slice
 

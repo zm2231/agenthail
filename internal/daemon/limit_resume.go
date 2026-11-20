@@ -88,13 +88,13 @@ func (d *Daemon) resumeAfterLimits(ctx context.Context, now time.Time) {
 		d.log.Printf("read usage-limit stops: %s", err)
 		return
 	}
-	enabled := d.resumeAfterLimitEnabled()
+	enabled, moves := d.resumeAfterLimitEnabled(), d.moveAfterLimitEnabled()
 	byAccount := map[string][]registry.LimitResume{}
 	for _, resume := range resumes {
 		byAccount[resume.AccountKey] = append(byAccount[resume.AccountKey], resume)
 	}
 	for account, stops := range byAccount {
-		d.resumeAccount(account, stops, enabled, now)
+		d.resumeAccount(account, stops, enabled, moves, now)
 	}
 }
 
@@ -168,13 +168,17 @@ func (d *Daemon) sweepLimitStops(ctx context.Context, now time.Time) {
 // own reset has passed. Before that, a turn on the root that ends without an
 // error after the refusal shows the account behind the root has room, which
 // only a new process sees: a hosted session is restarted once and resumed,
-// and any other gets a note to restart it. A stop that follows a refused
-// resume is tried once more, at its own reset if that is still ahead, and
-// never on the root's room. With no reset time, one session tries a resume
-// each interval, a bounded number of times.
-func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, enabled bool, now time.Time) {
+// and any other gets a note to restart it. A hosted session on a proxy root
+// is restarted once when the proxy has room; one on a direct root without
+// room moves once to a proxy root with room when moves are on (limitSwitch).
+// A stop that follows a refused resume or move is tried once more, at its
+// own reset if that is still ahead, and never on room elsewhere. With no
+// reset time, one session tries a resume each interval, a bounded number of
+// times.
+func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, enabled, moves bool, now time.Time) {
 	var due []limitRelease
 	var probes []registry.LimitResume
+	var view *proxyView
 	var latest time.Time
 	probing := false
 	for _, stop := range stops {
@@ -190,12 +194,21 @@ func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, ena
 			d.logLimitResume(d.setLimitResume(stop, limitWaiting, registry.LimitResumeLapsed, now))
 			continue
 		}
-		switch {
-		case !stop.ResetsAt.IsZero() && !now.Before(stop.ResetsAt.Add(limitResumeGrace)):
+		if !stop.ResetsAt.IsZero() && !now.Before(stop.ResetsAt.Add(limitResumeGrace)) {
 			due = append(due, limitRelease{stop: stop})
-		case stop.Attempts == 0 && d.limitResumes.settledAfter(account, stop.RefusedAt):
-			due = append(due, limitRelease{stop: stop, restart: true})
-		case stop.ResetsAt.IsZero():
+			continue
+		}
+		if enabled && stop.Attempts == 0 {
+			if view == nil {
+				read := d.readProxyView(now)
+				view = &read
+			}
+			if release, ok := d.limitSwitch(*view, stop, moves, now); ok {
+				due = append(due, release)
+				continue
+			}
+		}
+		if stop.ResetsAt.IsZero() {
 			probes = append(probes, stop)
 			if stop.RefusedAt.After(latest) {
 				latest = stop.RefusedAt
@@ -204,7 +217,7 @@ func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, ena
 	}
 	if !enabled {
 		for _, release := range due {
-			if !release.restart {
+			if !release.restart && release.moveTo == "" {
 				d.logLimitResume(d.releaseLimitStop(release.stop, limitWaiting, false, now))
 			}
 		}
@@ -218,11 +231,17 @@ func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, ena
 	}
 	sort.SliceStable(due, func(i, j int) bool { return due[i].stop.RefusedAt.After(due[j].stop.RefusedAt) })
 	for _, release := range due {
-		if !release.restart {
+		switch {
+		case release.moveTo != "":
+			if d.moveLimitedSession(release, now) {
+				return
+			}
+		case release.restart:
+			if d.restartLimitedSession(release.stop, now) {
+				return
+			}
+		default:
 			d.logLimitResume(d.releaseLimitStop(release.stop, limitWaiting, true, now))
-			return
-		}
-		if d.restartLimitedSession(release.stop, now) {
 			return
 		}
 	}
@@ -236,6 +255,8 @@ func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, ena
 type limitRelease struct {
 	stop    registry.LimitResume
 	restart bool
+	moveTo  string
+	moveVia string
 }
 
 // limitStopLapsed reports whether a stop is past being resumed
@@ -418,7 +439,9 @@ func (l *limitResumer) released(account string) (time.Time, bool) {
 }
 
 // dashboardLimitResume is a session's usage-limit stop as clients show it.
-// A released stop is not shown: the session is running again.
+// A released stop is not shown: the session is running again. ResetsAt is
+// when it resumes: its own reset, or sooner when a full proxy it would
+// switch through frees an account first.
 type dashboardLimitResume struct {
 	State     registry.LimitResumeState `json:"state"`
 	RefusedAt time.Time                 `json:"refusedAt"`
@@ -442,8 +465,7 @@ func (d *Daemon) limitResumeRow(sessionID string) *dashboardLimitResume {
 	if err != nil || !found || resume.State == registry.LimitResumeReleased {
 		return nil
 	}
-	now := time.Now()
-	return &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt, Note: d.limitResumeNote(resume, now), MoveTo: d.limitMoveOffer(sessionID, now)}
+	return d.newLimitResumeProjection(time.Now()).row(resume)
 }
 
 // limitResumeRows reads every shown stop at once, so a catalog pass reads
@@ -457,15 +479,45 @@ func (d *Daemon) limitResumeRows() (map[string]*dashboardLimitResume, error) {
 		return nil, err
 	}
 	rows := map[string]*dashboardLimitResume{}
-	now := time.Now()
-	offers := d.cachedLimitMoveOffers(now)
+	projection := d.newLimitResumeProjection(time.Now())
 	for _, resume := range resumes {
-		if resume.State == registry.LimitResumeReleased {
-			continue
+		if resume.State != registry.LimitResumeReleased {
+			rows[resume.SessionID] = projection.row(resume)
 		}
-		rows[resume.SessionID] = &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt, Note: d.limitResumeNote(resume, now), MoveTo: offers[resume.SessionID]}
 	}
 	return rows, nil
+}
+
+// limitResumeProjection shows stops as clients see them, reading the settings,
+// the roots and the proxies' cached accounts once, and only once a waiting
+// stop needs them, for every stop it shows.
+type limitResumeProjection struct {
+	d              *Daemon
+	now            time.Time
+	read           bool
+	enabled, moves bool
+	view           proxyView
+	offers         map[string]*limitMoveOffer
+}
+
+func (d *Daemon) newLimitResumeProjection(now time.Time) *limitResumeProjection {
+	return &limitResumeProjection{d: d, now: now}
+}
+
+func (p *limitResumeProjection) row(stop registry.LimitResume) *dashboardLimitResume {
+	row := &dashboardLimitResume{State: stop.State, RefusedAt: stop.RefusedAt, ResetsAt: stop.ResetsAt, Note: p.d.limitResumeNote(stop, p.now)}
+	if stop.State != registry.LimitResumeWaiting {
+		return row
+	}
+	if !p.read {
+		p.read = true
+		p.enabled, p.moves = p.d.resumeAfterLimitEnabled(), p.d.moveAfterLimitEnabled()
+		p.view = p.d.readProxyView(p.now)
+		p.offers = p.d.cachedLimitMoveOffers(p.view, p.now)
+	}
+	row.ResetsAt = p.d.limitResumesAt(p.view, stop, p.enabled, p.moves, p.now)
+	row.MoveTo = p.offers[stop.SessionID]
+	return row
 }
 
 func (d *Daemon) limitResumeNote(stop registry.LimitResume, now time.Time) string {

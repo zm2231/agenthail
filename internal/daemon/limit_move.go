@@ -34,10 +34,10 @@ func (m *limitMoves) forget() {
 }
 
 func (d *Daemon) limitMoveOffer(sessionID string, now time.Time) *limitMoveOffer {
-	return d.cachedLimitMoveOffers(now)[sessionID]
+	return d.cachedLimitMoveOffers(d.readProxyView(now), now)[sessionID]
 }
 
-func (d *Daemon) cachedLimitMoveOffers(now time.Time) map[string]*limitMoveOffer {
+func (d *Daemon) cachedLimitMoveOffers(view proxyView, now time.Time) map[string]*limitMoveOffer {
 	moves := d.limitResumes.moves
 	moves.mu.Lock()
 	if moves.fresh && now.Sub(moves.readAt) < limitMoveOfferTTL {
@@ -50,14 +50,14 @@ func (d *Daemon) cachedLimitMoveOffers(now time.Time) map[string]*limitMoveOffer
 	if err != nil {
 		return nil
 	}
-	offers := d.limitMoveOffers(stops, now)
+	offers := d.limitMoveOffers(view, stops, now)
 	moves.mu.Lock()
 	moves.offers, moves.readAt, moves.fresh = offers, now, true
 	moves.mu.Unlock()
 	return offers
 }
 
-func (d *Daemon) limitMoveOffers(stops []registry.LimitResume, now time.Time) map[string]*limitMoveOffer {
+func (d *Daemon) limitMoveOffers(view proxyView, stops []registry.LimitResume, now time.Time) map[string]*limitMoveOffer {
 	waiting := false
 	for _, stop := range stops {
 		waiting = waiting || stop.State == registry.LimitResumeWaiting
@@ -65,14 +65,17 @@ func (d *Daemon) limitMoveOffers(stops []registry.LimitResume, now time.Time) ma
 	if !waiting {
 		return nil
 	}
-	roots := d.currentClaudeConfigRoots()
-	if len(roots) < 2 {
+	if len(view.roots) < 2 {
 		return nil
 	}
-	candidates := limitMoveCandidates(d.claudeCachedUsageSets(roots, now), now)
+	candidates := limitMoveCandidates(d.claudeCachedUsageSets(view.roots, now), now)
 	offers := map[string]*limitMoveOffer{}
 	for _, stop := range stops {
 		if stop.State != registry.LimitResumeWaiting {
+			continue
+		}
+		if root, ok := view.rootWithRoom(stop.AccountKey, d.sessionIsFable(stop.SessionID), now); ok {
+			offers[stop.SessionID] = &limitMoveOffer{Root: root.Name, Reason: "the " + root.Proxy + " proxy has room"}
 			continue
 		}
 		if target, ok := claudepick.MoveTarget(candidates, stop.AccountKey); ok {

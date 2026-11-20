@@ -35,6 +35,7 @@ export function renderSettings() {
   $("#settings-codex-hours").value = String(dashboard.codexRecentHours);
   $("#settings-busy-delivery").value = String(dashboard.busyDelivery || "queue");
   $("#settings-resume-after-limit").checked = dashboard.resumeAfterLimit !== false;
+  $("#settings-move-after-limit").checked = dashboard.moveAfterLimit !== false;
   renderClaudeDefaultRoot(app.settings.claudeDefaultRoot, app.settings.claudeRoots || []);
   $("#settings-listener").textContent = dashboard.listen;
   renderSurfaceHealth();

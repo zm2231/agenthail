@@ -197,23 +197,16 @@ func presentationJSON(raw string) json.RawMessage {
 }
 
 func catalogPresentationLimits(ctx context.Context, tx *sql.Tx) (map[string]LimitResume, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT session_id,state,refused_at_ms,resets_at_ms FROM limit_resumes WHERE state!='released'`)
+	rows, err := tx.QueryContext(ctx, `SELECT `+limitResumeColumns+` FROM limit_resumes WHERE state!='released'`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	limits := map[string]LimitResume{}
 	for rows.Next() {
-		var limit LimitResume
-		var refused, resets int64
-		if err := rows.Scan(&limit.SessionID, &limit.State, &refused, &resets); err != nil {
+		limit, err := scanLimitResume(rows)
+		if err != nil {
 			return nil, err
-		}
-		if refused > 0 {
-			limit.RefusedAt = time.UnixMilli(refused).UTC()
-		}
-		if resets > 0 {
-			limit.ResetsAt = time.UnixMilli(resets).UTC()
 		}
 		limits[limit.SessionID] = limit
 	}

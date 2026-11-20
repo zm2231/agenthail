@@ -575,6 +575,12 @@ func TestTheResumeAfterLimitSettingIsSaved(t *testing.T) {
 	if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", `{"action":"resume-after-limit","resumeAfterLimit":true}`); response.Code != http.StatusOK || !f.d.resumeAfterLimitEnabled() {
 		t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())
 	}
+	if !f.d.moveAfterLimitEnabled() {
+		t.Fatal("moving after a limit is off by default")
+	}
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", `{"action":"move-after-limit","moveAfterLimit":false}`); response.Code != http.StatusOK || f.d.moveAfterLimitEnabled() || !f.d.resumeAfterLimitEnabled() {
+		t.Fatalf("turning moves off: status=%d body=%s", response.Code, response.Body.String())
+	}
 }
 
 func TestACancelDuringAPassIsNotOverriddenByTheStaleRow(t *testing.T) {
@@ -591,7 +597,7 @@ func TestACancelDuringAPassIsNotOverriddenByTheStaleRow(t *testing.T) {
 	if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/actions", `{"action":"limit-resume-cancel","sessionId":"worker"}`); response.Code != http.StatusOK {
 		t.Fatalf("cancel status=%d body=%s", response.Code, response.Body.String())
 	}
-	f.d.resumeAccount("/roots/work", read, true, resetsAt.Add(limitResumeGrace))
+	f.d.resumeAccount("/roots/work", read, true, true, resetsAt.Add(limitResumeGrace))
 	if state := f.state("worker"); state != registry.LimitResumeCanceled {
 		t.Fatalf("the pass released a canceled stop: %q", state)
 	}
@@ -600,7 +606,7 @@ func TestACancelDuringAPassIsNotOverriddenByTheStaleRow(t *testing.T) {
 	}
 	read[0].ResetsAt = time.Time{}
 	read[0].Attempts = limitProbeTries
-	f.d.resumeAccount("/roots/work", read, true, resetsAt.Add(limitResumeGrace))
+	f.d.resumeAccount("/roots/work", read, true, true, resetsAt.Add(limitResumeGrace))
 	if state := f.state("worker"); state != registry.LimitResumeCanceled {
 		t.Fatalf("the pass lapsed a canceled stop: %q", state)
 	}

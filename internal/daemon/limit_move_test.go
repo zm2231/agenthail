@@ -21,6 +21,13 @@ import (
 
 func limitMoveNode(t *testing.T, workPercent string) (*moveNode, string, string) {
 	t.Helper()
+	return limitMoveNodeWith(t, workPercent, func(string) string { return `{"name":"shared","url":"http://127.0.0.1:9"}` })
+}
+
+// limitMoveNodeWith takes the proxy entries of the host's config, given the
+// home the node runs in, and any roots it lists after pool.
+func limitMoveNodeWith(t *testing.T, workPercent string, proxy func(home string) string, extraRoots ...func(home string) string) (*moveNode, string, string) {
+	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	claudetest.New(t)
@@ -31,7 +38,7 @@ func limitMoveNode(t *testing.T, workPercent string) (*moveNode, string, string)
 	second := filepath.Join(host.Home, ".work", ".claude")
 	pool := filepath.Join(host.Home, ".pool", ".claude")
 	writeUsageFixture(t, map[string]string{
-		filepath.Join(host.Home, ".agenthail", "config.json"): `{"claudeConfigDirs":["` + second + `",{"path":"` + pool + `","proxy":"shared"}],"proxies":[{"name":"shared","url":"http://127.0.0.1:9"}]}`,
+		filepath.Join(host.Home, ".agenthail", "config.json"): `{"claudeConfigDirs":["` + second + `",{"path":"` + pool + `","proxy":"shared"}` + extraRootEntries(host.Home, extraRoots) + `],"proxies":[` + proxy(host.Home) + `]}`,
 		filepath.Join(host.Home, ".claude.json"):              `{"oauthAccount":{"accountUuid":"acct-a","emailAddress":"me@example.com","organizationUuid":"org-a"}}`,
 		filepath.Join(second, ".claude.json"):                 `{"oauthAccount":{"accountUuid":"acct-b","emailAddress":"work@example.com","organizationUuid":"org-b"}}`,
 		filepath.Join(pool, ".claude.json"):                   `{}`,
@@ -59,6 +66,14 @@ func limitMoveNode(t *testing.T, workPercent string) (*moveNode, string, string)
 	node := &federationNode{daemon: d, reg: reg, gate: &actionGate{}}
 	node.handler = d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
 	return &moveNode{federationNode: node, host: host, claude: claude}, second, pool
+}
+
+func extraRootEntries(home string, roots []func(string) string) string {
+	var entries string
+	for _, root := range roots {
+		entries += "," + root(home)
+	}
+	return entries
 }
 
 func readClaudeUsage(t *testing.T, d *Daemon) {
@@ -150,13 +165,13 @@ func TestNoMoveIsOfferedWhenNoOtherAccountHasRoom(t *testing.T) {
 	}
 }
 
-func TestALimitMoveRefusesAProxyRootThatAMoveByHandTakes(t *testing.T) {
+func TestALimitMoveRefusesAProxyRootWithoutRoomThatAMoveByHandTakes(t *testing.T) {
 	node, _, pool := limitMoveNode(t, "95")
 	session := startMovable(t, node)
 	primary := filepath.Join(node.host.Home, ".claude")
 	stopAtLimit(t, node, session, primary, "u1", time.Now().Add(-time.Minute))
 	response := postAction(t, node.handler, map[string]any{"action": "limit-move", "sessionId": session.ID, "configRoot": "pool"})
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "shared proxy") {
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "the shared proxy that Claude config directory pool runs through has no account with room") {
 		t.Fatalf("limit-move status=%d body=%s", response.Code, response.Body.String())
 	}
 	if transcriptUnder(primary, session.ID) == "" {

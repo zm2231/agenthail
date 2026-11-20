@@ -555,6 +555,7 @@
                 <button class="soft-button" type="submit">Save</button>
               </form>
               <label class="setting-row"><div><strong>Resume after usage limits</strong><p>When a usage limit stops a Claude session, send its queued messages, or ask it to continue, once the limit resets.</p></div><input id="settings-resume-after-limit" type="checkbox"></label>
+              <label class="setting-row"><div><strong>Move to a proxy after usage limits</strong><p>When a usage limit stops a session Agenthail runs and a Claude account proxy has room, move the session to the proxy's config directory and resume it there instead of waiting for the reset.</p></div><input id="settings-move-after-limit" type="checkbox"></label>
               <div class="setting-row"><div><strong>Claude root for new sessions</strong><p>A session you start goes here unless you pick another. A session an agent starts stays in the agent's root, and a replacement lead in the old lead's root.</p></div></div>
               <form class="settings-form" id="claude-default-root-form">
                 <label><span>Default root</span><select id="settings-claude-default-root"></select></label>

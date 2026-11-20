@@ -89,4 +89,13 @@ export function bindSettingsEvents() {
       toast(error.message);
     }
   });
+  $("#settings-move-after-limit").addEventListener("change", async (event) => {
+    try {
+      await updateSettings({ action: "move-after-limit", moveAfterLimit: event.target.checked });
+      toast(event.target.checked ? "Stopped sessions move to a proxy with room." : "Stopped sessions wait on their own account.");
+    } catch (error) {
+      event.target.checked = !event.target.checked;
+      toast(error.message);
+    }
+  });
 }
