@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/cfaccess"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const identityUsage = "usage: agenthail identity <add <name>|rm <name>|list> [--json]"
+const identityUsage = "usage: agenthail identity <add <name>|rm <name>|list|remote <name> ...|access ...> [--json]"
 
 func (a *App) cmdIdentity(args []string) error {
 	positional := stripFlags(args)
@@ -58,19 +59,128 @@ func (a *App) cmdIdentity(args []string) error {
 		if err != nil {
 			return err
 		}
+		remotes, err := reg.RemoteIdentities()
+		if err != nil {
+			return err
+		}
+		remoteByName := map[string]registry.RemoteIdentity{}
+		for _, remote := range remotes {
+			remoteByName[remote.Name] = remote
+		}
 		if jsonOut {
-			return emit(map[string]any{"identities": identities})
+			return emit(map[string]any{"identities": identities, "remote": remotes})
 		}
 		if len(identities) == 0 {
 			fmt.Println("(no identities; add one with: agenthail identity add <name>)")
 			return nil
 		}
 		for _, identity := range identities {
-			fmt.Printf("@%-20s unread=%d total=%d since %s\n", identity.Name, identity.Unread, identity.Total, identity.CreatedAt.Local().Format(time.DateTime))
+			line := fmt.Sprintf("@%-20s unread=%d total=%d since %s", identity.Name, identity.Unread, identity.Total, identity.CreatedAt.Local().Format(time.DateTime))
+			if remote, ok := remoteByName[identity.Name]; ok {
+				line += "  remote: " + remote.Binding() + ", last seen " + lastSeen(remote.LastSeen)
+			}
+			fmt.Println(line)
 		}
 		return nil
+	case "remote":
+		return a.identityRemote(reg, positional, args, jsonOut)
+	case "access":
+		return identityAccess(reg, positional, args, jsonOut)
 	}
 	return errors.New(identityUsage)
+}
+
+func lastSeen(at time.Time) string {
+	if at.IsZero() {
+		return "never"
+	}
+	return at.Local().Format(time.DateTime)
+}
+
+const identityRemoteUsage = "usage: agenthail identity remote <name> [--access-client-id <id> | --access-email <email>] | --rotate | --off [--json]"
+
+func (a *App) identityRemote(reg *registry.Registry, positional, args []string, jsonOut bool) error {
+	if len(positional) != 2 {
+		return errors.New(identityRemoteUsage)
+	}
+	name := strings.TrimPrefix(positional[1], "@")
+	clientID, email := flagVal(args, "--access-client-id"), flagVal(args, "--access-email")
+	rotate, off := hasFlag(args, "--rotate"), hasFlag(args, "--off")
+	if off {
+		if rotate || clientID != "" || email != "" {
+			return errors.New(identityRemoteUsage)
+		}
+		if err := reg.UnbindRemoteIdentity(name); err != nil {
+			return err
+		}
+		if jsonOut {
+			return emit(map[string]any{"identity": name, "remote": false})
+		}
+		fmt.Printf("@%s has no remote access now; its next remote call is refused\n", name)
+		return nil
+	}
+	var remote registry.RemoteIdentity
+	var token string
+	var err error
+	if rotate {
+		if clientID != "" || email != "" {
+			return errors.New("--rotate keeps the Access binding; to change it, run identity remote with the new binding instead")
+		}
+		remote, token, err = reg.RotateRemoteIdentity(name)
+	} else {
+		remote, token, err = reg.BindRemoteIdentity(name, clientID, email)
+	}
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		return emit(map[string]any{"identity": name, "binding": remote.Binding(), "token": token})
+	}
+	fmt.Printf("@%s can now call this daemon's /mcp from another machine (%s).\n", name, remote.Binding())
+	fmt.Printf("Its token, shown only now; any earlier one stops working:\n\n  %s\n\n", token)
+	fmt.Println("Send it as Authorization: Bearer <token> on every request.")
+	if remote.ClientID != "" || remote.Email != "" {
+		fmt.Println("Through Cloudflare Access, also send the service token's CF-Access-Client-Id and CF-Access-Client-Secret.")
+	}
+	if _, _, configured, err := reg.AccessSettings(); err == nil && !configured {
+		fmt.Println("No Access settings are set, so the token alone gets in; set them with: agenthail identity access set --team <team> --aud <tag>")
+	}
+	return nil
+}
+
+const identityAccessUsage = "usage: agenthail identity access [set --team <team> --aud <tag> | clear] [--json]"
+
+func identityAccess(reg *registry.Registry, positional, args []string, jsonOut bool) error {
+	action := ""
+	if len(positional) > 1 {
+		action = positional[1]
+	}
+	switch {
+	case action == "set" && len(positional) == 2:
+		team, aud := cfaccess.Team(flagVal(args, "--team")), flagVal(args, "--aud")
+		if err := reg.SetAccessSettings(team, aud); err != nil {
+			return err
+		}
+	case action == "clear" && len(positional) == 2:
+		if err := reg.ClearAccessSettings(); err != nil {
+			return err
+		}
+	case action != "":
+		return errors.New(identityAccessUsage)
+	}
+	team, aud, configured, err := reg.AccessSettings()
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		return emit(map[string]any{"configured": configured, "team": team, "aud": aud})
+	}
+	if !configured {
+		fmt.Println("Access: off. A remote identity gets in with its token alone; publish only /mcp to it.")
+		return nil
+	}
+	fmt.Printf("Access: team %s, audience %s. A remote identity needs its Access credential and its token.\n", team, aud)
+	return nil
 }
 
 const inboxUsage = "usage: agenthail inbox [<name>] [--all] [--peek] [--limit <n>] [--wait <duration>] [--json] | agenthail inbox [<name>] --prune <age>"

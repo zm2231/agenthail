@@ -23,6 +23,8 @@ type mcpCaller struct {
 	capabilities []string
 	ceiling      json.RawMessage
 	extension    string
+	// remote is how a remote identity got in: its Access binding, or "token only".
+	remote string
 }
 
 func (c *mcpCaller) has(capability string) bool {

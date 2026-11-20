@@ -149,6 +149,8 @@ type Daemon struct {
 	identityMu               sync.RWMutex
 	identity                 registry.HostIdentity
 	federation               *federation
+	remoteOnce               sync.Once
+	remote                   *remoteMCP
 	remoteExtensions         *remoteExtensions
 	uploads                  *uploads.Store
 	limitResumes             *limitResumer
@@ -405,6 +407,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer close(extensionsDone)
 		d.superviseExtensions(ctx)
 	}()
+	go d.runRemoteInboxNotices(ctx)
 	go d.sweepUploads(ctx)
 	go d.sweepSimulatorLeases(ctx)
 	go d.runLimitResumes(ctx)

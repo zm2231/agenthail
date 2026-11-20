@@ -45,7 +45,15 @@ func scopeRefusal(target, rule, message string) *mcpRefusal {
 
 func (d *Daemon) mcpHandler() http.Handler {
 	stream := mcp.NewStreamableHTTPHandler(d.mcpServerFor(d.newMCPServer()), mcpStreamOptions)
-	return d.mcpAuth(http.NewCrossOriginProtection().Handler(stream))
+	local := d.mcpAuth(http.NewCrossOriginProtection().Handler(stream))
+	remote := d.remoteMCP().handler
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if remoteRequest(r) {
+			remote.ServeHTTP(w, r)
+			return
+		}
+		local.ServeHTTP(w, r)
+	})
 }
 
 var mcpStreamOptions = &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true}
@@ -125,11 +133,19 @@ func (d *Daemon) mcpHandlers() map[string]mcpRegistrar {
 }
 
 func addMCPTool[In any](d *Daemon, server *mcp.Server, tool *mcp.Tool, run func(context.Context, *mcpCaller, In) (any, error)) {
-	mcp.AddTool(server, tool, func(ctx context.Context, _ *mcp.CallToolRequest, input In) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, tool, func(ctx context.Context, req *mcp.CallToolRequest, input In) (*mcp.CallToolResult, any, error) {
 		started := time.Now()
 		caller := mcpCallerFrom(ctx)
+		if _, info := remoteName(req.Extra); caller == nil && info != nil {
+			remote, err := d.remoteCaller(info)
+			if err != nil {
+				return nil, nil, err
+			}
+			caller = remote
+		}
 		result, refusal, err := callMCPTool(d, ctx, caller, tool.Name, input, run)
 		d.logMCPCall(ctx, caller, tool.Name, time.Since(started), refusal)
+		d.recordRemoteCall(caller, tool.Name, refusal)
 		return result, nil, err
 	})
 }

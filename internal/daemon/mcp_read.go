@@ -21,7 +21,7 @@ const (
 )
 
 type mcpReadInput struct {
-	SessionID string  `json:"sessionId" jsonschema:"session id or @alias"`
+	SessionID string  `json:"sessionId,omitempty" jsonschema:"session id or @alias; an agent identity leaves it out to read its inbox"`
 	Limit     int     `json:"limit,omitempty" jsonschema:"exchanges per page when reading back, 1 to 50; default 5"`
 	Before    string  `json:"before,omitempty" jsonschema:"nextCursor from a previous call, to read further back"`
 	Since     *uint64 `json:"since,omitempty" jsonschema:"latestSeq from a previous call, to read only what came after it"`
@@ -44,6 +44,9 @@ type mcpItemView struct {
 }
 
 func (d *Daemon) mcpRead(ctx context.Context, caller *mcpCaller, input mcpReadInput) (any, error) {
+	if identity, ok := d.callerIdentity(caller); ok && strings.TrimSpace(input.SessionID) == "" {
+		return d.mcpReadInbox(identity)
+	}
 	session, err := d.mcpReadableSession(caller, input.SessionID)
 	if err != nil {
 		return nil, err

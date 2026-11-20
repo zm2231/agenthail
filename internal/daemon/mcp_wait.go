@@ -69,6 +69,9 @@ type taskWaitState struct {
 }
 
 func (d *Daemon) mcpWait(ctx context.Context, caller *mcpCaller, input mcpWaitInput) (any, error) {
+	if identity, ok := d.callerIdentity(caller); ok && len(input.Tasks) == 0 {
+		return d.mcpWaitInbox(ctx, caller, identity, input)
+	}
 	refs, timeout, err := mcpWaitRequest(caller, input)
 	if err != nil {
 		return nil, err

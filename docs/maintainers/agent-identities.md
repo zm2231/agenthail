@@ -49,7 +49,30 @@ The pairing carries an identity both ways with no new path (see [paired hosts](h
 
 After `identity rm`, the next discovery passes retire the row and paired hosts drop their mirror; a send that still reaches the host is refused with `no such agent identity`.
 
+## Remote MCP
+
+An agent that runs on no machine you pair, such as a hosted agent, uses an identity through the daemon's `/mcp` from the internet. It is the same endpoint with the same tools; the caller is the identity.
+
+```
+agenthail identity add scout
+agenthail identity access set --team example-team --aud <application AUD tag>
+agenthail identity remote scout --access-client-id <service token Client ID>
+```
+
+`identity remote` prints a token starting `ahr_` once and keeps only its SHA-256 hash (`identity_remote`, schema 115). Running it again, or with `--rotate`, issues a new token and the old one stops working; `--off` removes remote access and keeps the identity and its inbox. `identity list` and `agenthail doctor` show each binding and when it last called.
+
+Each request carries the token as `Authorization: Bearer ahr_...`. With Access settings set (`mcp_access`), it must also carry the `Cf-Access-Jwt-Assertion` header that Cloudflare Access adds. The daemon checks that JWT's RS256 signature against the team's key set (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, fetched again at most once a minute for a key id it does not know), its issuer, its audience and its time with 60 seconds of skew. The JWT must belong to the identity the token names: a service token, whose JWT has an empty `sub`, by its Client ID in `common_name` (compared lowercased and without `.access`), or a person's login by `email` with `--access-email`. Either credential alone, or two that name different identities, gets 401. Without Access settings the token alone gets in, and a request that carries an Access header is refused, since nothing here can check it; in that mode, publish only `/mcp` to the daemon. With either mode, a request that came through Access for any path other than `/mcp` gets 404.
+
+The remote caller has the identity's reach: the person's, as in [Sender and reach](#sender-and-reach). Its MCP capabilities are the operator's (`control.all`, `read.all`). Every tool call it makes is recorded in history as `mcp-remote`, naming the tool and how it got in, never the token.
+
+`agenthail_read` with no `sessionId` returns the identity's unread messages, oldest first, as many as fit in 12 KiB, and marks only those read; `remaining` says how many are left. `agenthail_wait` with `tasks: []` returns once a message is unread. The inbox is also the resource `agenthail://inbox/<name>`, which reads without marking anything read.
+
+The transport is stateful Streamable HTTP. When a remote session's inbox holds a message it has not been told of, the daemon sends `notifications/resources/updated` for its inbox, if the session subscribed to it, and a `notifications/message` at level `notice` with the unread count, sender and a short summary, if the session set a logging level. A session is told of everything unread when it connects, reconnects or subscribes, so a dropped connection or a daemon restart loses nothing: the inbox is the record and notices only point at it. The daemon follows the inbox's change signal and also sweeps every 5 seconds.
+
+Cloudflare's side (the Access application, its service token, the tunnel and DNS) is set up in Cloudflare; the daemon only checks what arrives.
+
 ## Known gaps
 
 - The Mac and iPhone apps and the web dashboard do not show identities or their inboxes. Messages from one show its name like any agent's.
-- `agenthail inbox` reads the local registry, so it runs on the identity's own host.
+- `agenthail inbox` reads the local registry, so it runs on the identity's own host. Off that host, use the remote MCP.
+- `notifications/message` reaches only a client that sets a logging level, and MCP logging is deprecated in the 2026-07-28 protocol revision. `resources/updated` needs a subscription. A client that does neither learns of messages by calling `agenthail_wait`.

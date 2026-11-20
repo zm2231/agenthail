@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/agentinbox"
 	"github.com/zm2231/agenthail/internal/daemon"
@@ -93,5 +94,96 @@ func TestAnAgentIdentitySendsWithTheCLIsReachAndReadsItsInbox(t *testing.T) {
 	}
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"inbox"}) }); err == nil || !strings.Contains(err.Error(), "not an agent identity") {
 		t.Fatalf("inbox for a session: %v", err)
+	}
+}
+
+func TestIdentityRemoteShowsItsTokenOnceAndDoctorReportsTheMode(t *testing.T) {
+	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}})
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := captureStdout(t, func() error { return app.Run(args) })
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		return out
+	}
+	run("identity", "add", "scout")
+	if health, err := remoteMCPHealthOf(r, time.Now()); err != nil || health.Mode != "off" {
+		t.Fatalf("health=%+v err=%v", health, err)
+	}
+	out := run("identity", "remote", "scout")
+	token := ""
+	for field := range strings.FieldsSeq(out) {
+		if strings.HasPrefix(field, registry.RemoteTokenPrefix) {
+			token = field
+		}
+	}
+	if token == "" || !strings.Contains(out, "token alone gets in") {
+		t.Fatalf("identity remote: %q", out)
+	}
+	if remote, err := r.RemoteIdentityByToken(token); err != nil || remote.Name != "scout" {
+		t.Fatalf("remote=%+v err=%v", remote, err)
+	}
+	if listed := run("identity", "list"); strings.Contains(listed, token) || !strings.Contains(listed, "remote: token only") {
+		t.Fatalf("identity list: %q", listed)
+	}
+	if health, _ := remoteMCPHealthOf(r, time.Now()); health.Mode != "token only" || !strings.Contains(health.String(), "@scout: token only") {
+		t.Fatalf("health=%s", health)
+	}
+
+	run("identity", "access", "set", "--team", "https://Example-Team.cloudflareaccess.com/", "--aud", "tag")
+	if team, aud, ok, err := r.AccessSettings(); err != nil || !ok || team != "example-team.cloudflareaccess.com" || aud != "tag" {
+		t.Fatalf("team=%q aud=%q ok=%v err=%v", team, aud, ok, err)
+	}
+	health, _ := remoteMCPHealthOf(r, time.Now())
+	if health.Mode != "access+token" || len(health.Problems) != 1 || !strings.Contains(health.Problems[0], "no Access binding") {
+		t.Fatalf("health=%+v", health)
+	}
+	out = run("identity", "remote", "scout", "--access-client-id", "ID-1.access")
+	if strings.Contains(out, token) || !strings.Contains(out, "service token id-1") {
+		t.Fatalf("rebind: %q", out)
+	}
+	if _, err := r.RemoteIdentityByToken(token); !errors.Is(err, registry.ErrRemoteUnknown) {
+		t.Fatalf("the first token still works after a rebind: %v", err)
+	}
+	if health, _ := remoteMCPHealthOf(r, time.Now()); len(health.Problems) != 0 {
+		t.Fatalf("problems=%v", health.Problems)
+	}
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"identity", "remote", "scout", "--access-client-id", "a", "--access-email", "b@example.com"})
+	}); err == nil {
+		t.Fatal("bound both a client id and an email")
+	}
+	run("identity", "remote", "scout", "--off")
+	if _, err := r.RemoteIdentityNamed("scout"); err == nil {
+		t.Fatal("remote access still on after --off")
+	}
+	run("identity", "access", "clear")
+	if _, _, ok, _ := r.AccessSettings(); ok {
+		t.Fatal("Access settings still set after clear")
+	}
+}
+
+func TestInboxPruneTakesItsAgeAsTheFlagsValue(t *testing.T) {
+	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}})
+	identity, err := r.AddAgentIdentity("scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.StoreInboxMessage(registry.InboxMessage{Identity: identity.SessionID, UUID: "old", Message: "old", ReceivedAt: time.Now().Add(-48 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ReadInbox("scout", registry.InboxQuery{}); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := captureStdout(t, func() error { return app.Run([]string{"inbox", "scout", "--prune", "1d"}) }); err != nil {
+		t.Fatalf("inbox scout --prune 1d: out=%q err=%v", out, err)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "scout")
+	if out, err := captureStdout(t, func() error { return app.Run([]string{"inbox", "--prune", "1d"}) }); err != nil {
+		t.Fatalf("inbox --prune 1d: out=%q err=%v", out, err)
+	}
+	if all, err := r.ReadInbox("scout", registry.InboxQuery{All: true, Peek: true}); err != nil || len(all) != 0 {
+		t.Fatalf("inbox after prune=%v err=%v", all, err)
 	}
 }
