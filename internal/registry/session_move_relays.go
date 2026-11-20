@@ -62,7 +62,7 @@ func relaysMovingTx(tx *sql.Tx, sessions ...string) error {
 		if moving, err := movingOutTx(tx, session); err != nil {
 			return err
 		} else if moving {
-			return fmt.Errorf("relay source %s is moving to another host; change its relays once the move has finished", session)
+			return fmt.Errorf("relay source %s is moving; change its relays once the move has finished", session)
 		}
 	}
 	return nil

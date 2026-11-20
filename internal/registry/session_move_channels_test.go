@@ -51,7 +51,7 @@ func TestTheChannelsOfAMovingSessionCannotChange(t *testing.T) {
 		"join":  func() error { return r.AddToChannel("reviewers", moveConversation) },
 		"leave": func() error { return r.RemoveFromChannel("builders", moveConversation) },
 	} {
-		if err := change(); err == nil || !strings.Contains(err.Error(), "is moving to another host") {
+		if err := change(); err == nil || !strings.Contains(err.Error(), "is moving; change") {
 			t.Fatalf("%s: the channels of a moving session changed: %v", name, err)
 		}
 	}

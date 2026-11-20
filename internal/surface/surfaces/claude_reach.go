@@ -365,7 +365,7 @@ func (c *Claude) moveHoldMarker(conversation string) string {
 func (c *Claude) lockToDeliver(ctx context.Context, conversation string) (func(), error) {
 	return c.lockConversationUnless(ctx, conversation, func() error {
 		if _, err := os.Stat(c.moveHoldMarker(conversation)); err == nil {
-			return surface.DeliveryUnavailable(fmt.Errorf("%w: Claude conversation %s is moving to another host", surface.ErrDeliveryHeld, conversation))
+			return surface.DeliveryUnavailable(fmt.Errorf("%w: Claude conversation %s is moving", surface.ErrDeliveryHeld, conversation))
 		}
 		return nil
 	})

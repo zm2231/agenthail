@@ -429,6 +429,20 @@ is a valid target: the session continues under whichever account the proxy
 chooses, which is how a person out of quota on a signed-in root reaches the
 pool.
 
+The conversation keeps its id, so everything keyed by it stays as it is: its
+alias, the relays from and to it, its channels and, for a project's
+coordinator, the role. None of them refuses a move between roots, as they
+do a move to another host (a coordinator of a project that is not a Git
+repository, a relay tied to a channel or behind on its completions), and the
+move declares no carry. Relays read a Claude conversation by its transcript
+path, so when the move lands, and when a daemon that stopped mid-move settles
+it, the completions captured from the old path and the read cursor move to
+the new one (the transcript is renamed, so the cursor still points at the
+same place): its relays forward what they had not yet, once, and keep
+reading. While it runs, a change to its relays, channels or
+the project's coordinator is refused like during any move, and a message to
+it waits in the queue.
+
 A move to another host carries no project config; the target's root starts
 without the source's trust, allowed tools or local MCP servers.
 

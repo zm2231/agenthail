@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,6 +69,11 @@ func (d *Daemon) moveSessionToRoot(ctx context.Context, request sessionMoveReque
 	if err != nil {
 		detail = "its resume under the new account is unconfirmed: " + err.Error()
 	}
+	moved := ""
+	if resumed != nil {
+		moved = resumed.Transcript
+	}
+	d.followMovedRelaySource(read.Transcript, moved, request.Root)
 	if err := d.setMoveOutState(manifest.ID, session.ID, registry.MoveDone, detail, registry.MovePreparing); err != nil {
 		return result, err
 	}
@@ -106,6 +113,9 @@ func (d *Daemon) recoverRootMove(move registry.SessionMove, manifest moveManifes
 	state, detail := registry.MoveFailed, "the daemon stopped before the move finished"
 	if moved {
 		state, detail = registry.MoveDone, "the daemon stopped during the move; it finished when the daemon started"
+		if session, err := d.Registry.Session(move.Conversation); err == nil {
+			d.followMovedRelaySource(session.Transcript, "", manifest.Root)
+		}
 	}
 	if err := d.setMoveOutState(move.ID, move.Conversation, state, detail, registry.MovePreparing); err != nil {
 		d.log.Printf("move %s: %s", move.ID, err)
@@ -116,4 +126,36 @@ func (d *Daemon) recoverRootMove(move registry.SessionMove, manifest moveManifes
 func (d *Daemon) settledRootMove() {
 	d.invalidateDashboard()
 	d.requestCatalogDiscovery()
+}
+
+// followMovedRelaySource keeps relays from a conversation reading it after a
+// move renamed its transcript from one config root to another. The move keeps
+// the transcript's place under the root, so the new path, when the resume did
+// not report it, is the old one under the target root.
+func (d *Daemon) followMovedRelaySource(from, to, root string) {
+	if from == "" {
+		return
+	}
+	if to == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			d.log.Printf("follow the relays of %s: %s", from, err)
+			return
+		}
+		target, err := surface.ResolveClaudeConfigRoot(home, root)
+		if err != nil {
+			d.log.Printf("follow the relays of %s: %s", from, err)
+			return
+		}
+		source := filepath.Dir(filepath.Dir(filepath.Dir(from)))
+		rel, err := filepath.Rel(source, from)
+		if err != nil {
+			d.log.Printf("follow the relays of %s: %s", from, err)
+			return
+		}
+		to = filepath.Join(target, rel)
+	}
+	if err := d.Registry.MoveRelaySource(from, to); err != nil {
+		d.log.Printf("follow the relays of %s to %s: %s", from, to, err)
+	}
 }

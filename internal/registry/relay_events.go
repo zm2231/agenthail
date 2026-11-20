@@ -287,3 +287,41 @@ func (r *Registry) consumeRelay(route RouteRow, event RelayEvent, payload, busyD
 	}
 	return queueID, nil
 }
+
+// MoveRelaySource follows a Claude transcript renamed from one config root to
+// another: the captured completions and the read cursor kept for the old path
+// move to the new one, so relays from the conversation forward what they have
+// not yet and keep reading where they stopped. A cursor already kept for the
+// new path is replaced, since the old one is never further along.
+func (r *Registry) MoveRelaySource(fromTranscript, toTranscript string) error {
+	from, to := "claude:"+fromTranscript, "claude:"+toTranscript
+	if fromTranscript == "" || toTranscript == "" || from == to {
+		return nil
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var cursor string
+	err = tx.QueryRow(`SELECT cursor FROM relay_sources WHERE source_key=?`, from).Scan(&cursor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO relay_sources(source_key,cursor) VALUES(?,?) ON CONFLICT(source_key) DO UPDATE SET cursor=excluded.cursor`, to, cursor); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM relay_sources WHERE source_key=?`, from); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE OR IGNORE relay_events SET source_key=? WHERE source_key=?`, to, from); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM relay_events WHERE source_key=?`, from); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

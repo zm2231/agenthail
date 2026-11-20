@@ -152,7 +152,7 @@ func channelsSettledTx(tx *sql.Tx, sessionID string) error {
 	if moving, err := movingOutTx(tx, sessionID); err != nil {
 		return err
 	} else if moving {
-		return fmt.Errorf("session %s is moving to another host; change its channels once the move has finished", sessionID)
+		return fmt.Errorf("session %s is moving; change its channels once the move has finished", sessionID)
 	}
 	return nil
 }

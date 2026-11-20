@@ -53,8 +53,8 @@ func TestAMoveRefusesARelayWithACompletionItHasNotForwarded(t *testing.T) {
 	if reason, err := r.SessionMoveRefusal(moveConversation, true); err != nil || !strings.Contains(reason, "relay #"+strconv.FormatInt(id, 10)+" has a completion it has not forwarded yet") {
 		t.Fatalf("refusal=%q err=%v", reason, err)
 	}
-	if reason, _ := r.SessionMoveRefusal(moveConversation, false); !strings.Contains(reason, "active relay") {
-		t.Fatalf("a move between accounts, which keeps relays here, gave %q", reason)
+	if reason, err := r.SessionMoveRefusal(moveConversation, false); err != nil || reason != "" {
+		t.Fatalf("a move between accounts, which keeps relays here, gave %q err=%v", reason, err)
 	}
 }
 
@@ -113,7 +113,7 @@ func TestTheRelaysOfAMovingSessionCannotChange(t *testing.T) {
 		"forward completion": func() error { _, err := r.ConsumeRelay(before[0], events[0], "done", "", ""); return err },
 	}
 	for name, change := range changes {
-		if err := change(); err == nil || !strings.Contains(err.Error(), "is moving to another host") {
+		if err := change(); err == nil || !strings.Contains(err.Error(), "is moving; change") {
 			t.Fatalf("%s: a relay of a moving session changed: %v", name, err)
 		}
 	}

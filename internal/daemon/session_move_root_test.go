@@ -13,6 +13,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
+	"time"
 )
 
 func addClaudeRoot(t *testing.T, home string) string {
@@ -90,6 +92,72 @@ func TestAnIdleSessionMovesToAnotherAccountOnItsHostWithItsProjectConfig(t *test
 	}
 	if reason, _ := node.reg.SessionMoveRefusal(session.ID, false); reason != "" {
 		t.Fatalf("a finished move still holds the session: %s", reason)
+	}
+}
+
+func TestACoordinatorMovesToAnotherAccountKeepingItsRoleChannelsAndRelays(t *testing.T) {
+	node, second, cwd := rootMoveNode(t)
+	session := startMovable(t, node)
+	listener := startMovable(t, node)
+	if err := node.reg.SetAlias("widget-lead", session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := node.reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: "widget", Name: "widget-lead", Surface: "claude", ProjectRoot: cwd, Cwd: cwd}, registry.CoordinatorChange{SessionID: session.ID, ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := node.reg.CreateChannel("builders"); err != nil {
+		t.Fatal(err)
+	}
+	if err := node.reg.AddToChannel("builders", session.ID); err != nil {
+		t.Fatal(err)
+	}
+	relay := relayFrom(t, node, session, listener.ID)
+	captured := takeTurn(t, node, session.ID, "captured before the move")
+	cursor, err := node.reg.RelaySourceCursor(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := node.claude.ReadCompletions(context.Background(), session, cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := node.reg.CaptureRelayCompletions(session.ID, cursor, batch); err != nil || len(batch.Events) != 1 {
+		t.Fatalf("captured %d completions before the move, err=%v", len(batch.Events), err)
+	}
+	unread := takeTurn(t, node, session.ID, "unread before the move")
+
+	if _, err := node.daemon.moveSessionToRoot(context.Background(), sessionMoveRequest{SessionID: session.ID, Root: "work"}); err != nil {
+		t.Fatal(err)
+	}
+	if transcriptUnder(second, session.ID) == "" {
+		t.Fatal("the coordinator did not move to the other account")
+	}
+	if lead, ok, err := node.reg.CoordinatorOfSession(session.ID); err != nil || !ok || lead.ProjectID != "widget" {
+		t.Fatalf("the moved session coordinates %+v ok=%v err=%v, want widget", lead, ok, err)
+	}
+	if alias, _ := node.reg.ReverseAlias(session.ID); alias != "widget-lead" {
+		t.Fatalf("the moved coordinator is @%q, want @widget-lead", alias)
+	}
+	if members, err := node.reg.ChannelMembers("builders"); err != nil || len(members) != 1 || members[0] != session.ID {
+		t.Fatalf("builders has %v err=%v, want the moved session", members, err)
+	}
+	if routes := routesFrom(t, node, session.ID); len(routes) != 1 || routes[0].ID != relay || !routes[0].Active {
+		t.Fatalf("relays after the move: %+v, want relay #%d still active", routes, relay)
+	}
+
+	moved, err := node.reg.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := takeTurn(t, node, session.ID, "after the move")
+	testkit.Eventually(t, "the relay to forward every completion", 15*time.Second, func() bool {
+		node.daemon.syncRelays(context.Background(), node.claude, moved)
+		return relayForwards(t, node, listener.ID, after) == 1
+	})
+	for _, text := range []string{captured, unread, after} {
+		if forwarded := relayForwards(t, node, listener.ID, text); forwarded != 1 {
+			t.Errorf("the relay forwarded %q %d times, want once", text, forwarded)
+		}
 	}
 }
 
