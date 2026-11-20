@@ -83,16 +83,19 @@ struct IOSAgentMessageRow: View {
                         Spacer(minLength: 0)
                         if !expandAll { Text("Show less").font(.footnote.weight(.medium)).foregroundStyle(PhonePalette.accentText) }
                     } else {
-                        ClampedText(text: Text(chip).fontWeight(.semibold).foregroundStyle(PhonePalette.peer) + Text("  ") + Text(AgentMessage.inline(agent.summary)).italic().foregroundStyle(.secondary) + Text(fileNote).foregroundStyle(PhonePalette.muted), lines: AgentRowStyle.previewLines, truncated: $truncated)
+                        ClampedText(text: Text(chip).fontWeight(.semibold).foregroundStyle(PhonePalette.peer) + Text("  ") + Text(AgentMessage.inline(agent.summary)).italic().foregroundStyle(.secondary), lines: AgentRowStyle.previewLines, truncated: $truncated)
                             .font(.subheadline)
                             .multilineTextAlignment(.leading)
+                        if !fileNote.isEmpty {
+                            Text(fileNote).font(.footnote).foregroundStyle(PhonePalette.muted).fixedSize()
+                        }
                     }
                 }
                 .frame(minHeight: 32)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(expanded ? "From \(chip)" : "\(chip): \(agent.summary)")
+            .accessibilityLabel(expanded ? "From \(chip)" : "\(chip): \(agent.summary)" + (fileNote.isEmpty ? "" : ", \(fileNote)"))
             .accessibilityValue(expandable || expanded ? (expanded ? "Expanded" : "Collapsed") : "")
             .accessibilityHint(expandable && !expanded ? "Shows the whole message" : "")
             .accessibilityIdentifier("agent-message-" + item.id)
@@ -115,7 +118,7 @@ struct IOSAgentMessageRow: View {
     }
 
     private var fileNote: String {
-        files.isEmpty ? "" : files.count == 1 ? "  · 1 file" : "  · \(files.count) files"
+        files.isEmpty ? "" : files.count == 1 ? "1 file" : "\(files.count) files"
     }
 
     private func toggle() {

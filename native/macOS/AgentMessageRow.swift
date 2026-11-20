@@ -45,8 +45,11 @@ struct AgentMessageRow: View {
         Button(action: toggle) {
             HStack(alignment: .firstTextBaseline, spacing: DesktopSpace.s) {
                 AgentRowMetrics.marker(open: false).opacity(expandable ? 1 : 0)
-                ClampedText(text: Text(entry.chip).fontWeight(.semibold).foregroundStyle(DesktopPalette.peer) + Text("  ") + Text(AgentMessage.inline(entry.agent.summary)).italic().foregroundStyle(DesktopPalette.text2) + Text(fileNote).foregroundStyle(DesktopPalette.muted), lines: AgentRowStyle.previewLines, truncated: $truncated)
+                ClampedText(text: Text(entry.chip).fontWeight(.semibold).foregroundStyle(DesktopPalette.peer) + Text("  ") + Text(AgentMessage.inline(entry.agent.summary)).italic().foregroundStyle(DesktopPalette.text2), lines: AgentRowStyle.previewLines, truncated: $truncated)
                     .font(.system(size: ReadingType.body))
+                if !fileNote.isEmpty {
+                    Text(fileNote).font(.system(size: ReadingType.caption)).foregroundStyle(DesktopPalette.muted).fixedSize()
+                }
                 if let time = TurnClock.time(entry.item.timestamp) {
                     Text(time).font(.system(size: ReadingType.caption)).foregroundStyle(DesktopPalette.meta).fixedSize()
                 }
@@ -61,7 +64,7 @@ struct AgentMessageRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(entry.chip): \(entry.agent.summary)")
+        .accessibilityLabel("\(entry.chip): \(entry.agent.summary)" + (fileNote.isEmpty ? "" : ", \(fileNote)"))
         .accessibilityValue(expandable ? "Collapsed" : "")
         .accessibilityHint(expandable ? "Shows the whole message" : "")
     }
@@ -93,7 +96,7 @@ struct AgentMessageRow: View {
     }
 
     private var fileNote: String {
-        files.isEmpty ? "" : files.count == 1 ? "  · 1 file" : "  · \(files.count) files"
+        files.isEmpty ? "" : files.count == 1 ? "1 file" : "\(files.count) files"
     }
 
     private func toggle() {
