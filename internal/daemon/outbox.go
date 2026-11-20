@@ -118,7 +118,8 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		return
 	}
 	trace := delivery.Trace(adapter, session, options.RouteAuthor(), addressed.Bridge)
-	peerTransport := surface.RouteFor(adapter, session, options.RouteAuthor()).TransportOnly()
+	taken := surface.RouteFor(adapter, session, options.RouteAuthor())
+	peerTransport := taken.TransportOnly()
 	if sendErr != nil {
 		d.finishQueueFailure(item, session, sendErr, now, trace)
 		return
@@ -147,7 +148,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "busy", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return
 	}
-	if steered == nil && !peerTransport {
+	if steered == nil && taken.StartsTurn() {
 		if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, ""); err != nil {
 			d.log.Printf("record queue delivery %d start: %s", item.ID, err)
 		}

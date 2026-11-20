@@ -45,4 +45,5 @@ A test that runs a host whose packages are missing fails at once and names the `
 - [MCP server: session credentials, read tools, scope and limits](mcp.md)
 - [Agent messages in the transcript: the `agent` field and the fold rule](agent-messages.md)
 - [Inbox: what a session was sent, where it is recorded, and how it is read](inbox.md)
+- [Agent identities: a name and an inbox for an agent outside Agenthail](agent-identities.md)
 - [Dashboard design reference](../../design.md)

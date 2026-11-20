@@ -79,7 +79,7 @@ func (a *App) cmdExtensions(args []string) error {
 	}
 	asJSON := hasFlag(args, "--json")
 	caller := ""
-	if agentEnvironment() && (sub == "approve" || sub == "key" || sub == "call" || sub == "run") {
+	if a.agentEnvironment() && (sub == "approve" || sub == "key" || sub == "call" || sub == "run") {
 		if caller, err = a.sourceSessionID(ctx, ""); err != nil {
 			return err
 		}
@@ -87,7 +87,7 @@ func (a *App) cmdExtensions(args []string) error {
 	var data []byte
 	switch {
 	case sub == "build" && len(positional) >= 2:
-		if agentEnvironment() {
+		if a.agentEnvironment() {
 			return errors.New("starting a builder is the person's to do; to work on an extension yourself, edit ~/.agenthail/extensions and read its AGENTS.md")
 		}
 		return a.buildExtension(ctx, client, strings.Join(positional[1:], " "), flagVal(args, "--agent"), asJSON)

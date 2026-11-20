@@ -1,4 +1,10 @@
--- schemaVersion 113
+-- schemaVersion 114
+
+-- index agent_inbox_message
+CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
+
+-- index agent_inbox_unread
+CREATE INDEX agent_inbox_unread ON agent_inbox(identity_id, id) WHERE read_at_ms=0;
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -160,6 +166,25 @@ CREATE TABLE action_receipts (
 	receipt BLOB NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
+);
+
+-- table agent_identities
+CREATE TABLE agent_identities (
+	identity_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	name TEXT NOT NULL UNIQUE,
+	created_at_ms INTEGER NOT NULL
+);
+
+-- table agent_inbox
+CREATE TABLE agent_inbox (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	identity_id TEXT NOT NULL REFERENCES agent_identities(identity_id) ON DELETE CASCADE,
+	message_uuid TEXT NOT NULL DEFAULT '',
+	sender_id TEXT NOT NULL DEFAULT '',
+	sender_name TEXT NOT NULL DEFAULT '',
+	message TEXT NOT NULL,
+	received_at_ms INTEGER NOT NULL,
+	read_at_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- table alias_reservations

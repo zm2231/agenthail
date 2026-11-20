@@ -181,7 +181,7 @@ func (d *Daemon) registerRecentClaudePeers(ctx context.Context, advertise func(c
 	var eligible []surface.Session
 	for _, record := range sessions {
 		session := record.Session
-		if record.Freshness.Stale || !surface.RecentlyActive(session, now) {
+		if record.Freshness.Stale || !surface.RecentlyActive(session, now) && !surface.IsAgentIdentity(&session) {
 			continue
 		}
 		// A paired host's sessions, Claude included, have no socket on this

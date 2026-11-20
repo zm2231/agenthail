@@ -74,7 +74,7 @@ func (a *App) cmdLedger(args []string) error {
 	if len(positional) == 0 {
 		return a.ledgerBoard(store, args)
 	}
-	if !ledgerRead(positional) && agentEnvironment() {
+	if !ledgerRead(positional) && a.agentEnvironment() {
 		key := strings.TrimSpace(flagVal(args, "--project"))
 		if key == "" {
 			var err error

@@ -7,6 +7,7 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/zm2231/agenthail/internal/agentinbox"
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/cli"
 	"github.com/zm2231/agenthail/internal/codexconfig"
@@ -65,6 +66,7 @@ func main() {
 	app.Surfaces = []cli.SurfaceEntry{
 		{Name: "claude", Surface: claude},
 		{Name: "codex", Surface: codex},
+		{Name: "agent", Surface: agentinbox.New(app.OpenedRegistry)},
 	}
 	if helpers {
 		app.Surfaces = append(app.Surfaces, cli.SurfaceEntry{Name: "notion", Surface: surfaces.NewNotion(

@@ -39,6 +39,9 @@ func (a *App) cmdDoctor(args []string) error {
 	var results []doctorResult
 	failures := 0
 	for _, e := range a.Surfaces {
+		if !surface.Listed(e.Surface) {
+			continue
+		}
 		caps := e.Surface.Capabilities()
 		var enabled []string
 		if caps.Send {

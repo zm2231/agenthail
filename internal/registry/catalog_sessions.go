@@ -875,7 +875,8 @@ func (r *Registry) catalogSnapshot(query string, args []any, listing func(catalo
 }
 
 // CatalogActiveSessions returns the catalog's sessions that are working, or
-// not offline and active since the given time, newest first. It reads only
+// not offline and either active since the given time or an agent identity,
+// which stays reachable however long it is quiet, newest first. It reads only
 // those rows, so a caller that needs no other session skips the full snapshot.
 func (r *Registry) CatalogActiveSessions(since time.Time) ([]CatalogSessionState, error) {
 	// Activity is stored in whole milliseconds, so the first one at or after
@@ -885,8 +886,8 @@ func (r *Registry) CatalogActiveSessions(since time.Time) ([]CatalogSessionState
 		sinceMS++
 	}
 	rows, err := r.read.Query(catalogSessionSelect+`
-		WHERE s.status=? OR (s.status<>? AND s.last_active_ms>=?)
-		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`, string(surface.StatusBusy), string(surface.StatusOffline), sinceMS)
+		WHERE s.status=? OR (s.status<>? AND (s.last_active_ms>=? OR s.runtime_kind=?))
+		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`, string(surface.StatusBusy), string(surface.StatusOffline), sinceMS, string(surface.RuntimeAgentInbox))
 	if err != nil {
 		return nil, err
 	}

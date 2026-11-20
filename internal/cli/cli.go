@@ -58,6 +58,12 @@ func (a *App) registry() *registry.Registry {
 	return r
 }
 
+// OpenedRegistry is the registry, opened on first use, or nil when it cannot be opened.
+func (a *App) OpenedRegistry() *registry.Registry {
+	r, _ := a.openRegistry()
+	return r
+}
+
 func (a *App) openRegistry() (*registry.Registry, error) {
 	a.registryMu.Lock()
 	defer a.registryMu.Unlock()
@@ -212,6 +218,10 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdSignin(rest)
 	case "identify":
 		return a.cmdIdentify(rest)
+	case "identity", "identities":
+		return a.cmdIdentity(rest)
+	case "inbox":
+		return a.cmdInbox(rest)
 	case "coordinator":
 		return a.cmdCoordinator(rest)
 	case "channel":

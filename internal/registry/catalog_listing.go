@@ -32,12 +32,13 @@ type catalogListingRow struct {
 	entity   string
 	parent   string
 	subagent bool
+	identity bool
 	active   bool
 	busy     bool
 	retired  bool
 }
 
-const catalogListingSelect = `SELECT s.id,s.host_id,s.parent_session_id,s.source,s.status,s.ended,cs.current FROM catalog_sessions cs `
+const catalogListingSelect = `SELECT s.id,s.host_id,s.parent_session_id,s.source,s.status,s.ended,cs.current,s.runtime_kind FROM catalog_sessions cs `
 
 func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
 	byID := map[string]catalogListingRow{}
@@ -84,14 +85,14 @@ func readCatalogListingRows(q catalogQuerier, byID map[string]catalogListingRow,
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, hostID, parent, source, status string
+		var id, hostID, parent, source, status, runtimeKind string
 		var ended, current bool
-		if err := rows.Scan(&id, &hostID, &parent, &source, &status, &ended, &current); err != nil {
+		if err := rows.Scan(&id, &hostID, &parent, &source, &status, &ended, &current, &runtimeKind); err != nil {
 			return err
 		}
 		busy := status == string(surface.StatusBusy)
 		retired := ended && !current
-		byID[id] = catalogListingRow{entity: hosts.Qualify(hostID, id), parent: parent, subagent: delegatedColumns(parent, source), active: busy || current, busy: busy, retired: retired}
+		byID[id] = catalogListingRow{entity: hosts.Qualify(hostID, id), parent: parent, subagent: delegatedColumns(parent, source), identity: runtimeKind == string(surface.RuntimeAgentInbox), active: busy || current, busy: busy, retired: retired}
 	}
 	return rows.Err()
 }
@@ -105,7 +106,7 @@ func catalogListing(byID map[string]catalogListingRow) CatalogListing {
 			return shown
 		}
 		row := byID[id]
-		shown := !row.subagent
+		shown := !row.subagent && !row.identity
 		if row.subagent && row.active && row.parent != "" && !path[id] {
 			if _, found := byID[row.parent]; found {
 				path[id] = true

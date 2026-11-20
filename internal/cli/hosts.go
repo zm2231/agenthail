@@ -291,6 +291,10 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, scopeProject
 	if jsonOut {
 		return emit(receipt)
 	}
+	if remote.Surface == surface.KindAgent {
+		fmt.Printf("%s: %s\n", remote.Label(), receipt.Detail)
+		return nil
+	}
 	fmt.Printf("sent to %s (turn %s)\n", remote.Label(), receipt.TurnID)
 	return nil
 }
@@ -379,7 +383,7 @@ func (a *App) createThreadThroughDaemon(hostText string, request threadCreateReq
 	}
 	var data []byte
 	var status int
-	if hostText == "" && agentEnvironment() {
+	if hostText == "" && a.agentEnvironment() {
 		data, status, err = a.agentCreate(ctx, payload)
 		if err != nil {
 			return err

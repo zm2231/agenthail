@@ -205,7 +205,7 @@ func (a *App) respond(ctx context.Context, target, requestID string, decision su
 		return "", err
 	}
 	payload := map[string]any{"action": "respond", "requestId": requestID, "decision": decision}
-	if agentEnvironment() {
+	if a.agentEnvironment() {
 		caller, err := a.sourceSessionID(ctx, "")
 		if err != nil {
 			return "", err

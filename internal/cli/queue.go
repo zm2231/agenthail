@@ -91,7 +91,7 @@ func (a *App) cmdQueue(args []string) error {
 		}
 		payload := map[string]any{"action": "queue-clear", "sessionId": sessionID}
 		var senders []string
-		if agentEnvironment() {
+		if a.agentEnvironment() {
 			if senders, err = a.registry().PendingSenders(sessionID); err != nil {
 				return err
 			}

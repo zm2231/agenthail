@@ -76,6 +76,9 @@ func (a *App) cmdSend(args []string) error {
 	if err != nil {
 		return err
 	}
+	if (wantStream || wantReply) && a.isAgentIdentityTarget(sess, remote) {
+		return fmt.Errorf("%s is an agent identity: a message to it waits in its inbox and nothing replies here, so --reply and --stream have nothing to wait for. Send without them; its agent answers by sending to you", target)
+	}
 	if remote != nil {
 		scope, err := a.payloadScope(ctx, "send", map[string]any{"action": "send", "sessionId": remote.ID, "message": message, "busyDelivery": "queue", "noQueue": hasFlag(args, "--no-queue")})
 		if err != nil {
@@ -307,6 +310,8 @@ func (a *App) cmdSend(args []string) error {
 
 	if jsonOut {
 		return emit(receipt)
+	} else if surface.IsAgentIdentity(sess) {
+		fmt.Println(receipt.Detail)
 	} else if receipt.Evidence == surface.EvidenceTransportAccepted {
 		fmt.Printf("accepted by Claude socket (message %s); receiver policy and model completion are pending\n", receipt.TurnID)
 	} else if follow.messageID != "" && follow.turnID != "" {
@@ -318,6 +323,13 @@ func (a *App) cmdSend(args []string) error {
 		fmt.Println(receipt.Notice)
 	}
 	return nil
+}
+
+func (a *App) isAgentIdentityTarget(sess *surface.Session, remote *remoteTarget) bool {
+	if remote == nil {
+		return surface.IsAgentIdentity(sess)
+	}
+	return remote.Surface == surface.KindAgent
 }
 
 func waitForReply(ctx context.Context, adapter surface.Surface, session *surface.Session, baseline, turnID string, timeout time.Duration) (*surface.ReplyResult, error) {

@@ -204,6 +204,10 @@ unrepliable row stays in the problem list; no delivery notice is queued for
 it, since nothing would read one. Notices for the operator still queue, for the
 person to see.
 
+An [agent identity](agent-identities.md) is a local session row, so it crosses
+the pairing the same way: the peer mirrors it, its sends arrive from that
+mirror, and replies route back to its inbox.
+
 Claude peers: while a paired host is connected, its sessions, Claude included,
 are advertised to local Claude sessions as peers named
 `agenthail/<surface>: <host>/<name>`. Local peers keep their name without a

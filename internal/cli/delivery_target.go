@@ -79,6 +79,9 @@ func (a *App) namesExactly(target string, session *surface.Session, remote *remo
 	if _, rest, qualified := hosts.Split(target); qualified {
 		target = rest
 	}
+	if session.ID == target {
+		return true
+	}
 	if kind, selector, ok := a.surfaceQualified(target); ok {
 		if session.Surface != kind {
 			return false
