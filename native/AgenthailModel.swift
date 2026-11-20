@@ -46,6 +46,7 @@ final class AgenthailModel {
     var pairingNotice: String?
     @ObservationIgnored var pairingWatch: Task<Void, Never>?
     var settings: DashboardSettingsState?
+    var notificationPreferences: [NotificationPreferenceState] = []
     var claudeRemoteControl: ClaudeRemoteControlState?
     var audit: [HistoryState] = []
     var auditKinds: [String] = []
@@ -733,6 +734,7 @@ final class AgenthailModel {
         guard let api else { return }
         do {
             settings = try await api.settings()
+            notificationPreferences = (try? await api.notificationPreferences()) ?? notificationPreferences
             await loadAudit(reset: true)
         } catch {
             operationError = AgenthailAPIError.userMessage(error)
@@ -779,6 +781,19 @@ final class AgenthailModel {
                 await loadAudit(reset: true)
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)
+            }
+        }
+    }
+
+    func setNotificationPreference(_ id: String, to value: Bool) {
+        guard let api else { return }
+        Task {
+            do {
+                notificationPreferences = try await api.setNotificationPreference(id, to: value)
+                operationError = nil
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+                notificationPreferences = (try? await api.notificationPreferences()) ?? notificationPreferences
             }
         }
     }

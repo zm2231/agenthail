@@ -1834,6 +1834,17 @@ struct DashboardSettingsState: Decodable {
     var claudeRoots: [String]? = nil
 }
 
+struct NotificationPreferenceState: Decodable, Identifiable, Equatable {
+    let id: String
+    let title: String
+    let detail: String
+    let value: Bool
+}
+
+struct NotificationPreferencesResponse: Decodable {
+    let preferences: [NotificationPreferenceState]
+}
+
 struct NotificationStatusState: Decodable {
     let enabled: Bool
     let available: Bool

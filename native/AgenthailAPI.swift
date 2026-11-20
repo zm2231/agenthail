@@ -587,6 +587,16 @@ final class AgenthailAPI: @unchecked Sendable {
         try await get("/api/v1/settings")
     }
 
+    func notificationPreferences() async throws -> [NotificationPreferenceState] {
+        let response: NotificationPreferencesResponse = try await get("/api/v1/notification-preferences")
+        return response.preferences
+    }
+
+    func setNotificationPreference(_ id: String, to value: Bool) async throws -> [NotificationPreferenceState] {
+        let response: NotificationPreferencesResponse = try await request("/api/v1/notification-preferences", method: "PUT", body: ["id": id, "value": value])
+        return response.preferences
+    }
+
     func setPersonName(_ name: String) async throws {
         let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "person-name", "personName": name])
     }
