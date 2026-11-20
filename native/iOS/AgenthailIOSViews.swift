@@ -1698,8 +1698,13 @@ struct SessionInspector: View {
                     if detail.readOnly { Label(detail.readOnlyReason, systemImage: "lock").font(.footnote) }
                     else {
                         if detail.capabilities.model {
-                            Button("Change model") { showingModels = true }
-                                .disabled(model.pendingControls.contains(session.id))
+                            let shown = detail.turnSettings?.setting(TurnSetting.model)
+                            Button { showingModels = true } label: {
+                                LabeledContent("Model", value: shown?.valueLabel ?? detail.model ?? "Default")
+                            }
+                            .accessibilityLabel(shown?.chipAccessibilityLabel ?? "Model, \(detail.model ?? "Default")")
+                            .accessibilityIdentifier("session-model")
+                            .disabled(model.pendingControls.contains(session.id))
                         }
                         if let effort = detail.turnSettings?.setting(TurnSetting.effort) {
                             Menu {

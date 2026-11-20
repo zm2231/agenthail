@@ -10,7 +10,7 @@ final class CustomModelUITests: XCTestCase {
         XCTAssertTrue(summary.waitForExistence(timeout: 10))
         summary.tapWhenReady()
         XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
-        let change = app.buttons["Change model"]
+        let change = app.buttons["session-model"]
         let list = app.collectionViews.firstMatch
         for _ in 0..<6 where !change.isHittable { list.swipeUp() }
         XCTAssertTrue(change.isHittable, "session details change the model")

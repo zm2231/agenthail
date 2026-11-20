@@ -33,7 +33,9 @@ final class SessionMenuTurnSettingsUITests: XCTestCase {
         let effort = app.buttons["session-effort"]
         let list = app.collectionViews.firstMatch
         for _ in 0..<6 where !effort.isHittable { list.swipeUp() }
-        XCTAssertTrue(app.buttons["Change model"].exists, "session details change the model")
+        let model = app.buttons["session-model"]
+        XCTAssertTrue(model.exists, "session details change the model")
+        XCTAssertEqual(model.label, "Model, Claude Sonnet", "the model row names the current model, as the only place it shows")
         XCTAssertTrue(effort.isHittable, "session details change the effort")
         XCTAssertEqual(effort.label, "Effort, High", "the effort names its setting and value")
         XCTAssertFalse(app.buttons["Change effort"].exists, "the effort is offered once")
