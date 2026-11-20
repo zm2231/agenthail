@@ -1520,6 +1520,8 @@ struct SessionSummary: View, @MainActor Equatable {
                 ViewThatFits(in: .horizontal) {
                     Text(modelName).lineLimit(1).fixedSize()
                     Color.clear.frame(width: 0, height: 0)
+                        .accessibilityElement()
+                        .accessibilityLabel(modelName)
                 }
                 Spacer(minLength: 4)
                 context.lineLimit(1).fixedSize().layoutPriority(1)

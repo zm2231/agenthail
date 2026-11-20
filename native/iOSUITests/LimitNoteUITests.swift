@@ -11,6 +11,7 @@ final class LimitNoteUITests: XCTestCase {
         let note = "Its account has room again; restart it to continue"
         XCTAssertTrue(summary.label.contains(note), "the header's status is the stop's note: \(summary.label)")
         XCTAssertFalse(summary.label.contains("Usage limit"), "the generic label gives way to the note: \(summary.label)")
+        XCTAssertTrue(summary.label.contains("Claude"), "VoiceOver still hears the model when it does not fit on screen: \(summary.label)")
         let fragments = summary.staticTexts.allElementsBoundByIndex.filter { $0.frame.width > 0 && $0.frame.width < 20 }.map(\.label)
         XCTAssertTrue(fragments.isEmpty, "no text in the header row is squeezed to a sliver: \(fragments)")
         let shot = XCTAttachment(screenshot: app.screenshot())

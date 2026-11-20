@@ -31,6 +31,7 @@
     {"name": "a usage limit lifting this instant", "patch": {"usageLimit": {"resetsAt": "2026-11-03T12:00:00Z"}}, "kind": "idle"},
     {"name": "a usage limit with no reset time", "patch": {"usageLimit": {}}, "kind": "limited"},
     {"name": "a resume waiting for the limit", "patch": {"limitResume": {"state": "waiting", "refusedAt": "2026-11-03T10:00:00Z", "resetsAt": "2026-11-03T13:00:00Z"}}, "kind": "limited"},
+    {"name": "a resume waiting with a note", "patch": {"limitResume": {"state": "waiting", "refusedAt": "2026-11-03T10:00:00Z", "resetsAt": "2026-11-03T13:00:00Z", "note": "Its account has room again; restart it to continue"}}, "kind": "limited"},
     {"name": "a resume canceled", "patch": {"limitResume": {"state": "canceled", "refusedAt": "2026-11-03T10:00:00Z"}}, "kind": "limited"},
     {"name": "a resume that lapsed", "patch": {"limitResume": {"state": "lapsed", "refusedAt": "2026-11-03T10:00:00Z"}}, "kind": "limited"},
     {"name": "a resume released", "patch": {"limitResume": {"state": "released", "refusedAt": "2026-11-03T10:00:00Z"}}, "kind": "idle"},
