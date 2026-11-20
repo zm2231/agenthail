@@ -1525,7 +1525,7 @@ struct ComposerView: View {
                     .background(DesktopPalette.window, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
                     .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(DesktopPalette.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
             } else {
-                let queued = model.queuedItems(for: session.id)
+                let queued = model.trayItems(for: session)
                 BoundedDock {
                     VStack(spacing: 0) {
                         ForEach(model.leadReplacements.filter { $0.sessionId == session.id }, id: \.listID) { replacement in

@@ -53,6 +53,14 @@ struct AgentRowCompactTest {
         }
         check(LocalSend.shown([queued, sent], queue: []).map(\.text) == ["later", "now"], "a send the queue does not list stays in the transcript")
 
+        func session(send: Bool, readOnly: Bool = false) -> SessionState {
+            let json = #"{"id":"S","surface":"claude","name":"builder","status":"busy","queueCount":1,"open":true,"current":true,"readOnly":\#(readOnly),"capabilities":{"send":\#(send),"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false,"respond":false}}"#
+            return try! JSONDecoder().decode(SessionState.self, from: Data(json.utf8))
+        }
+        check(QueueFacts.tray([row("pending")], for: session(send: true)).map(\.id) == [42], "a session that takes messages shows its queue tray")
+        check(QueueFacts.tray([row("pending")], for: session(send: false)).isEmpty && QueueFacts.tray([row("pending")], for: session(send: true, readOnly: true)).isEmpty, "a session that can't take messages shows no tray")
+        check(LocalSend.shown([queued], queue: QueueFacts.tray([row("pending")], for: session(send: false))).count == 1, "with no tray the queued send stays in the transcript")
+
         MainActor.assumeIsolated {
             let outbox = Outbox()
             outbox.record(queued, in: "S")

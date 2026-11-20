@@ -39,6 +39,10 @@ enum QueueFacts {
 
     static func canCancel(_ item: QueueState) -> Bool { item.status == "pending" }
 
+    static func tray(_ queue: [QueueState], for session: SessionState) -> [QueueState] {
+        session.isReadOnly || !session.capabilities.send ? [] : QueueSteer.waiting(queue.filter { $0.sessionId == session.id })
+    }
+
     static func lastError(_ item: QueueState) -> String? {
         guard let error = item.lastError?.trimmingCharacters(in: .whitespacesAndNewlines), !error.isEmpty else { return nil }
         return error

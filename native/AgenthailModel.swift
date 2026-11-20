@@ -1216,6 +1216,10 @@ final class AgenthailModel {
         QueueSteer.waiting(queue.filter { $0.sessionId == sessionID })
     }
 
+    func trayItems(for session: SessionState) -> [QueueState] {
+        QueueFacts.tray(queue, for: session)
+    }
+
     @discardableResult
     func steerQueued(_ item: QueueState, capabilities: Capabilities) -> Task<Void, Never>? {
         guard let api, QueueSteer.refusal(item, capabilities: capabilities) == nil else { return nil }
