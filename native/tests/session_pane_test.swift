@@ -820,20 +820,21 @@ struct SessionPaneTest {
         check(warmModel.store.commands["W1"]?.commands.map(\.insert) == ["/review"] && warmModel.store.commands["W1"]?.unavailable == "", "a streamed command list replaces the session's commands: \(String(describing: warmModel.store.commands["W1"]))")
         check(warmPane.timelineItems.map(\.id) == ["a", "b"], "a command list adds no transcript row: \(warmPane.timelineItems.map(\.id))")
 
-        func metadataReads(_ id: String) -> Int { warmRequests.filter { $0.contains("/api/v1/session-metadata?") && $0.contains("id=\(id)&") || $0.hasSuffix("id=\(id) HTTP/1.1") }.count }
+        func metadataReads(_ id: String) -> Int { warmRequests.filter { $0.contains("/api/v1/session-metadata?") && ($0.contains("id=\(id)&") || $0.hasSuffix("id=\(id) HTTP/1.1")) }.count }
         func awaitReads(_ id: String, above count: Int) async {
             let deadline = Date().addingTimeInterval(5)
             while metadataReads(id) <= count, Date() < deadline { try? await Task.sleep(for: .milliseconds(20)) }
         }
         var quiet = (metadataReads("W1"), metadataReads("W2"))
+        var calm = false
         let settleDeadline = Date().addingTimeInterval(5)
         repeat {
             let seen = quiet
             try? await Task.sleep(for: .milliseconds(300))
             quiet = (metadataReads("W1"), metadataReads("W2"))
-            if quiet == seen { break }
+            if quiet == seen { calm = true; break }
         } while Date() < settleDeadline
-        check(quiet.0 > 0 && quiet.1 > 0, "both sessions read their metadata before the next check starts: \(quiet)")
+        check(calm && quiet.0 > 0 && quiet.1 > 0, "both sessions' metadata reads stop arriving before the next check starts: \(quiet), quiet \(calm)")
         let beforeShowAll = warmRequests.count
         warmPane.showAllClaudeSubagents()
         warmPane.select("W2")
