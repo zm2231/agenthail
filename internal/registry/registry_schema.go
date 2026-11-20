@@ -891,8 +891,25 @@ CREATE TABLE IF NOT EXISTS agent_inbox (
 	sender_name TEXT NOT NULL DEFAULT '',
 	message TEXT NOT NULL,
 	received_at_ms INTEGER NOT NULL,
-	read_at_ms INTEGER NOT NULL DEFAULT 0
+	read_at_ms INTEGER NOT NULL DEFAULT 0,
+	delivered_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
 CREATE INDEX IF NOT EXISTS agent_inbox_unread ON agent_inbox(identity_id, id) WHERE read_at_ms=0;
+CREATE TABLE IF NOT EXISTS identity_remote (
+	identity_id TEXT PRIMARY KEY REFERENCES agent_identities(identity_id) ON DELETE CASCADE,
+	token_hash TEXT NOT NULL UNIQUE,
+	access_client_id TEXT NOT NULL DEFAULT '',
+	access_email TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL,
+	last_seen_at_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS mcp_access (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	team TEXT NOT NULL,
+	aud TEXT NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	keys_read_at_ms INTEGER NOT NULL DEFAULT 0,
+	keys_error TEXT NOT NULL DEFAULT ''
+);
 `

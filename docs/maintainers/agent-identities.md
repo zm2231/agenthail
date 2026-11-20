@@ -49,7 +49,40 @@ The pairing carries an identity both ways with no new path (see [paired hosts](h
 
 After `identity rm`, the next discovery passes retire the row and paired hosts drop their mirror; a send that still reaches the host is refused with `no such agent identity`.
 
+## Remote MCP
+
+An agent that runs on no machine you pair, such as a hosted agent, uses an identity through the daemon's `/mcp` from the internet. It is the same endpoint with the same tools; the caller is the identity.
+
+```
+agenthail identity add scout
+agenthail identity access set --team example-team --aud <application AUD tag>
+agenthail identity remote scout --access-client-id <service token Client ID>
+```
+
+`identity remote` prints a token starting `ahr_` once and keeps only its SHA-256 hash (`identity_remote`, schema 115). Running it again, or with `--rotate`, issues a new token and the old one stops working; `--off` removes remote access and keeps the identity and its inbox. `identity list` and `agenthail doctor` show each binding and when it last called.
+
+Each request carries the token as `Authorization: Bearer ahr_...`. With Access settings set (`mcp_access`), it must also carry the `Cf-Access-Jwt-Assertion` header that Cloudflare Access adds. The daemon checks that JWT's RS256 signature against the team's key set (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, fetched again at most once a minute for a key id it does not know), its issuer, its audience and its time with 60 seconds of skew. The JWT must belong to the identity the token names: a service token, whose JWT has an empty `sub`, by its Client ID in `common_name` (compared lowercased and without `.access`), or a person's login by `email` with `--access-email`. Either credential alone, or two that name different identities, gets 401. Without Access settings the token alone gets in, and a request that carries an Access header is refused, since nothing here can check it; in that mode, publish only `/mcp` to the daemon. With either mode, a request that came through Access for any path other than `/mcp` gets 404.
+
+The remote caller has the identity's reach: the person's, as in [Sender and reach](#sender-and-reach). Its MCP capabilities are the operator's (`control.all`, `read.all`). Every tool call it makes is recorded in history as `mcp-remote`, naming the tool and how it got in, never the token.
+
+The inbox is read and acknowledged under this contract:
+
+1. A read (`agenthail_read` with no `sessionId`) returns the oldest unread messages that fit in 12 KiB of encoded output, with `remaining` and an `ack` token, `inbox-ack:<id>`, naming the last one. It records those messages as returned (`agent_inbox.delivered_at_ms`) and marks nothing read.
+2. An ack, passed as `ack` on the next read (a `bodyRef` read included) or as `cursor` to `agenthail_wait`, marks read every message of the caller's own inbox that a read has returned, up to the id it names. A value in another form, such as a session's `latestSeq`, is refused.
+3. If a reply is lost, its messages stay unread and the next read returns them again, first.
+4. Repeating an ack changes nothing, even after its messages are pruned.
+5. An older ack marks only up to its own id. An ack naming a later id, even one never returned, marks only messages already returned to that identity.
+
+An ack can only affect the caller's own inbox, and a client that follows the loop never acknowledges past what it received: after a lost reply its next read returns the lost messages first, oldest first, so its next ack covers only messages it has seen. The server therefore keeps no record of which tokens it issued; that would only guard a client against itself.
+
+A message whose encoded text is over 4 KiB comes back clipped with `truncated`, its full size in `bytes` and a `bodyRef`; `agenthail_read` with that `bodyRef` (and `offset`, from `nextOffset`) pages its whole text, acknowledged or not. `agenthail_wait` with `tasks: []` returns once a message is unread, so an agent long-waits on it to learn of mail. The loop is: wait, read, handle, then read with `ack` (which also returns anything newer), and wait again with `ack` as `cursor`.
+
+The transport is stateless Streamable HTTP: the daemon keeps no session, and each request is checked on its own, so a rotated, rebound or turned-off token, or a change to the Access settings, takes effect on the next request. The daemon sends nothing it was not asked for.
+
+Cloudflare's side (the Access application, its service token, the tunnel and DNS) is set up in Cloudflare; the daemon only checks what arrives.
+
 ## Known gaps
 
 - The Mac and iPhone apps and the web dashboard do not show identities or their inboxes. Messages from one show its name like any agent's.
-- `agenthail inbox` reads the local registry, so it runs on the identity's own host.
+- `agenthail inbox` reads the local registry, so it runs on the identity's own host. Off that host, use the remote MCP.
+- A remote identity is not pushed a notice when mail arrives; it learns of mail by waiting with `agenthail_wait`.

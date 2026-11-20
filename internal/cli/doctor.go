@@ -218,6 +218,8 @@ func (a *App) cmdDoctor(args []string) error {
 	var syncHealth []ledgerSyncHealth
 	var push pushHealth
 	var pushErr error
+	var remoteMCP remoteMCPHealth
+	var remoteMCPErr error
 	var connection connectionHealth
 	var connectionErr error
 	hostCtx, cancelHosts := context.WithTimeout(ctx, 15*time.Second)
@@ -225,6 +227,7 @@ func (a *App) cmdDoctor(args []string) error {
 	cancelHosts()
 	if r := a.registry(); r != nil {
 		push, pushErr = pushHealthOf(r, time.Now())
+		remoteMCP, remoteMCPErr = remoteMCPHealthOf(r, time.Now())
 		connection, connectionErr = connectionHealthOf(r, time.Now())
 		callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		syncHealth, syncErr = a.ledgerSyncHealth(callCtx, r)
@@ -287,6 +290,10 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		if pushErr != nil {
 			report["pushError"] = pushErr.Error()
+		}
+		report["remoteMcp"] = remoteMCP
+		if remoteMCPErr != nil {
+			report["remoteMcpError"] = remoteMCPErr.Error()
 		}
 		if hostsErr != nil {
 			report["hostPairingError"] = hostsErr.Error()
@@ -402,6 +409,11 @@ func (a *App) cmdDoctor(args []string) error {
 			fmt.Printf("push: unknown (%s)\n", pushErr)
 		} else {
 			fmt.Println(push)
+		}
+		if remoteMCPErr != nil {
+			fmt.Printf("remote mcp: unknown (%s)\n", remoteMCPErr)
+		} else {
+			fmt.Println(remoteMCP)
 		}
 		if connectionErr != nil {
 			fmt.Printf("connection: unknown (%s)\n", connectionErr)

@@ -120,5 +120,5 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.Handle("/mcp", d.mcpHandler())
 	mux.Handle(extensionFetchPath, d.extensionFetchHandler())
 	mux.Handle(extensionBadgePath, d.extensionBadgeHandler())
-	return d.dashboardHeaders(mux)
+	return d.dashboardHeaders(accessPathGuard(mux))
 }

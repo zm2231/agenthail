@@ -21,10 +21,11 @@ const (
 )
 
 type mcpReadInput struct {
-	SessionID string  `json:"sessionId" jsonschema:"session id or @alias"`
+	SessionID string  `json:"sessionId,omitempty" jsonschema:"session id or @alias; an agent identity leaves it out to read its inbox"`
 	Limit     int     `json:"limit,omitempty" jsonschema:"exchanges per page when reading back, 1 to 50; default 5"`
 	Before    string  `json:"before,omitempty" jsonschema:"nextCursor from a previous call, to read further back"`
 	Since     *uint64 `json:"since,omitempty" jsonschema:"latestSeq from a previous call, to read only what came after it"`
+	Ack       string  `json:"ack,omitempty" jsonschema:"an agent identity's ack from its last inbox read, to mark those messages read"`
 	BodyRef   string  `json:"bodyRef,omitempty" jsonschema:"bodyRef of a clipped item, to page through its full text"`
 	Offset    int     `json:"offset,omitempty" jsonschema:"byte offset into bodyRef; use nextOffset from the previous call"`
 }
@@ -44,6 +45,18 @@ type mcpItemView struct {
 }
 
 func (d *Daemon) mcpRead(ctx context.Context, caller *mcpCaller, input mcpReadInput) (any, error) {
+	if identity, ok := d.callerIdentity(caller); ok && strings.TrimSpace(input.SessionID) == "" {
+		if input.Since != nil || input.Before != "" {
+			return nil, refuse("invalid", "Your inbox read takes ack, not since or before; pass the ack your last read returned.")
+		}
+		if strings.HasPrefix(input.BodyRef, mcpInboxRefPrefix) {
+			if err := d.ackInbox(identity, input.Ack); err != nil {
+				return nil, err
+			}
+			return d.mcpReadInboxBody(identity, input.BodyRef, input.Offset)
+		}
+		return d.mcpReadInbox(identity, input.Ack)
+	}
 	session, err := d.mcpReadableSession(caller, input.SessionID)
 	if err != nil {
 		return nil, err

@@ -149,6 +149,8 @@ type Daemon struct {
 	identityMu               sync.RWMutex
 	identity                 registry.HostIdentity
 	federation               *federation
+	remoteOnce               sync.Once
+	remote                   *remoteMCP
 	remoteExtensions         *remoteExtensions
 	uploads                  *uploads.Store
 	limitResumes             *limitResumer

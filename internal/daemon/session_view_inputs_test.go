@@ -49,6 +49,8 @@ var notSessionViewInputs = map[string]string{
 	"decision_dismissals": "the Inbox's dismissed stopped cards, read only by the decisions page; no session view shows them",
 	"agent_identities":    "read only by agenthail identity, agenthail inbox and the inbox adapter; an identity's session row is a view input, and the session list hides it",
 	"agent_inbox":         "an identity's messages, read only by agenthail inbox and the inbox adapter's tail; no session view shows them",
+	"identity_remote":     "an identity's remote token hash and Access binding, read only by the remote MCP verifier, agenthail identity and doctor",
+	"mcp_access":          "the Cloudflare Access team and audience, read only by the remote MCP verifier, agenthail identity access and doctor",
 }
 
 // Dropping session_archive or projects from the registry's presentation inputs

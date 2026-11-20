@@ -102,7 +102,14 @@ Identity:
   identity add <name>           Give an agent outside Agenthail a durable @name to send as and receive at;
                                 send as it with AGENTHAIL_SESSION_ID=<name> or --from <name>
   identity rm <name>            Remove the identity and its inbox
-  identity list [--json]        Show identities with their unread counts
+  identity list [--json]        Show identities with their unread counts and remote access
+  identity remote <name> [--access-client-id <id> | --access-email <email>]
+                                Let the identity call this daemon's /mcp from another machine; prints its token once
+  identity remote <name> --rotate | --off
+                                Issue a new token (the old one stops working), or turn remote access off
+  identity access [set --team <team> --aud <tag> | clear]
+                                The Cloudflare Access application remote identities come through; without one,
+                                a remote identity's token alone gets in
   inbox [<name>] [--all] [--peek] [--limit <n>] [--wait <duration>] [--json]
                                 Print an identity's unread messages oldest first and mark them read;
                                 --wait blocks until one arrives (exit 1 on timeout), --peek leaves them unread
