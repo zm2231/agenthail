@@ -46,6 +46,7 @@ export function usageLimitLabel(session) {
 
 export function limitResumeLabel(session) {
   const stop = session.limitResume;
+  if (stop.note) return stop.note;
   if (stop.state !== "waiting") return "Stopped by usage limit";
   const resets = Date.parse(stop.resetsAt || "");
   if (!resets) return "Usage limit, resumes when it lifts";

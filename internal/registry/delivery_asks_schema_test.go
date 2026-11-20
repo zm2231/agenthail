@@ -17,10 +17,7 @@ func TestARegistryAtSchema91MovesDeliveryProblemsToAsks(t *testing.T) {
 	register(t, r, "sender", "target")
 	open := failIntent(t, r, DeliveryIntentSent, surface.EvidenceTransportAccepted)
 	dismissed := failIntent(t, r, DeliveryIntentSent, surface.EvidenceTransportAccepted)
-	attended, err := r.QueueMessageWithKey("target", "unconfirmed", "unconfirmed:1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	attended := queueFromPerson(t, r, "target", "unconfirmed", "unconfirmed:1")
 	if _, err := r.db.Exec(`UPDATE message_queue SET status='inflight',attempts=1 WHERE id=?`, attended); err != nil {
 		t.Fatal(err)
 	}

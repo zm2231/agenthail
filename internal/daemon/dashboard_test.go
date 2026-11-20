@@ -1011,7 +1011,10 @@ func TestEffectiveCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
 
 func TestOnlyAMessageWhoseOutcomeIsUnknownBecomesADeliveryAsk(t *testing.T) {
 	d, registry, _, _, target := daemonFixture(t)
-	if err := registry.QueueMessage(target.ID, "requires a decision"); err != nil {
+	if err := registry.EnsureSender(surface.PersonSessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.QueueMessageWithOptions(target.ID, "requires a decision", "", surface.SendOptions{SourceSessionID: surface.PersonSessionID}); err != nil {
 		t.Fatal(err)
 	}
 	d.syncDeliveryAsks()
@@ -1048,10 +1051,7 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 	if _, err := registry.CreateChannel("reviewers"); err != nil {
 		t.Fatal(err)
 	}
-	queueID, err := registry.QueueMessageWithOptions(target.ID, "do not retry", "", surface.SendOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	queueID := queueFromPerson(t, registry, target.ID, "do not retry", "")
 	if _, err := registry.ClaimNextMessage(target.ID, time.Now()); err != nil {
 		t.Fatal(err)
 	}

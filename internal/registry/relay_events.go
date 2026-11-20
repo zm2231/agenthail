@@ -263,7 +263,7 @@ func (r *Registry) consumeRelay(route RouteRow, event RelayEvent, payload, busyD
 	if payload != "" {
 		key := fmt.Sprintf("relay:%d:%s", route.ID, event.CompletionID)
 		if hostSend != nil {
-			queueID, err = queueHostDeliveryTx(tx, r.now(), route.ToSession, payload, key, hostSend, false)
+			queueID, err = queueHostDeliveryTx(tx, r.now(), route.ToSession, payload, key, hostSend, false, route.FromSession, event.RelayHops+1)
 		} else {
 			var queued enqueued
 			queued, err = enqueueMessageTx(tx, r.now(), route.ToSession, payload, key, surface.SendOptions{SourceSessionID: route.FromSession, BusyDelivery: busyDelivery}, event.RelayHops+1, QueueOperationMessage, queueIntent{Sender: route.FromSession})

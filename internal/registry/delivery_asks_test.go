@@ -85,29 +85,38 @@ func TestAFailedSendFromAnAgentAsksThatAgent(t *testing.T) {
 	}
 }
 
-func TestThePersonsSendAndARelayedMessageAskThePersonAboutTheTarget(t *testing.T) {
-	for name, queue := range map[string]func(*Registry) (int64, error){
-		"the person's send": func(r *Registry) (int64, error) {
+func TestOnlyThePersonsOwnSendAsksThePerson(t *testing.T) {
+	for name, send := range map[string]struct {
+		queue    func(*Registry) (int64, error)
+		asksThem bool
+	}{
+		"the person's send": {asksThem: true, queue: func(r *Registry) (int64, error) {
 			if err := r.EnsureSender(surface.PersonSessionID); err != nil {
 				return 0, err
 			}
 			id, _, err := r.QueueDeliveryWithIntent("target", "from the person", "", surface.SendOptions{SourceSessionID: surface.PersonSessionID})
 			return id, err
-		},
-		"a relayed message": func(r *Registry) (int64, error) {
+		}},
+		"a relayed message": {queue: func(r *Registry) (int64, error) {
 			return r.QueueRelayMessageWithOptions("target", "relayed", "relay:1:turn-1", 1, surface.SendOptions{SourceSessionID: "sender"})
-		},
+		}},
+		"a sender with no session": {queue: func(r *Registry) (int64, error) {
+			return r.QueueMessageWithOptions("target", "from elsewhere", "", surface.SendOptions{SourceSessionID: "elsewhere"})
+		}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := openTestRegistry(t)
 			register(t, r, "sender", "target")
-			queueID, err := queue(r)
+			queueID, err := send.queue(r)
 			if err != nil {
 				t.Fatal(err)
 			}
 			failQueued(t, r, queueID)
-			ask := onlyDeliveryAsk(t, r)
-			if ask.SessionID != "target" || ask.RoutedTo != AskToPerson {
+			if !send.asksThem {
+				if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+					t.Fatalf("asks=%+v, want none", asks)
+				}
+			} else if ask := onlyDeliveryAsk(t, r); ask.SessionID != "target" || ask.RoutedTo != AskToPerson {
 				t.Fatalf("ask=%+v, want it on the target and routed to the person", ask)
 			}
 			if count := r.QueueCount("sender"); count != 0 {
@@ -233,6 +242,18 @@ func failIntent(t *testing.T, r *Registry, status DeliveryIntentStatus, evidence
 		t.Fatalf("changed=%v err=%v", changed, err)
 	}
 	return intent.ID
+}
+
+func queueFromPerson(t *testing.T, r *Registry, sessionID, message, key string) int64 {
+	t.Helper()
+	if err := r.EnsureSender(surface.PersonSessionID); err != nil {
+		t.Fatal(err)
+	}
+	id, _, err := r.QueueDeliveryWithIntent(sessionID, message, key, surface.SendOptions{SourceSessionID: surface.PersonSessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func contains(list []string, want string) bool {
@@ -422,5 +443,134 @@ func TestAProviderConfirmingAHeldMessageWithdrawsItsAsk(t *testing.T) {
 	}
 	if state := askState(t, r, ask.ID); state != AskWithdrawn {
 		t.Fatalf("a held message the provider confirmed left its ask %s", state)
+	}
+}
+
+func TestAgenthailsOwnNoticeThatFailsAsksNobody(t *testing.T) {
+	for name, fail := range map[string]func(*testing.T, *Registry, int64){
+		"failed": failQueued,
+		"unconfirmed": func(t *testing.T, r *Registry, queueID int64) {
+			if _, err := r.db.Exec(`UPDATE message_queue SET status='inflight',attempts=attempts+1 WHERE id=?`, queueID); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.DeadLetterUnknown(queueID, errors.New("connection closed")); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := openTestRegistry(t)
+			register(t, r, "target")
+			now := time.Now()
+			if err := r.RecordLimitStop(surface.Session{ID: "target"}, "/roots/work", surface.LimitStop{TurnID: "u1", RefusedAt: now.Add(-time.Hour), ResetsAt: now.Add(-time.Minute)}); err != nil {
+				t.Fatal(err)
+			}
+			released, err := r.ReleaseLimitStop("target", "u1", []LimitResumeState{LimitResumeWaiting}, surface.LimitResumeNotice(), "limit-resume:target:u1", now)
+			if err != nil || !released {
+				t.Fatalf("released=%v err=%v", released, err)
+			}
+			rows, err := r.ListQueue(false, nil)
+			if err != nil || len(rows) != 1 {
+				t.Fatalf("queue=%+v err=%v", rows, err)
+			}
+			fail(t, r, rows[0].ID)
+			if err := r.SyncDeliveryAsks(time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+				t.Fatalf("Agenthail's own notice raised asks: %+v", asks)
+			}
+		})
+	}
+}
+
+func TestTheSweepClosesAsksAboutNoticesAndHandsAnAgentsAskBackFromThePerson(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target")
+	now := time.Now()
+	if err := r.RecordLimitStop(surface.Session{ID: "target"}, "/roots/work", surface.LimitStop{TurnID: "u1", RefusedAt: now.Add(-time.Hour), ResetsAt: now.Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if released, err := r.ReleaseLimitStop("target", "u1", []LimitResumeState{LimitResumeWaiting}, surface.LimitResumeNotice(), "limit-resume:target:u1", now); err != nil || !released {
+		t.Fatalf("released=%v err=%v", released, err)
+	}
+	rows, err := r.ListQueue(false, nil)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("queue=%+v err=%v", rows, err)
+	}
+	failQueued(t, r, rows[0].ID)
+	var noticeIntent int64
+	var retries int
+	if err := r.db.QueryRow(`SELECT id,retries FROM delivery_intents WHERE queue_id=?`, rows[0].ID).Scan(&noticeIntent, &retries); err != nil {
+		t.Fatal(err)
+	}
+	ref := fmt.Sprintf("intent:%d:%d:failed", noticeIntent, retries)
+	if _, err := r.db.Exec(`INSERT OR IGNORE INTO asks(id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,created_at_ms,ref) VALUES('ask-notice','target',?,'Message not delivered','[]',?,?,'[]',?,?,?)`,
+		AskOriginDelivery, AskToPerson, now.UnixMilli(), AskOpen, now.UnixMilli(), ref); err != nil {
+		t.Fatal(err)
+	}
+	var noticeAsk string
+	if err := r.db.QueryRow(`SELECT id FROM asks WHERE origin=? AND ref=?`, AskOriginDelivery, ref).Scan(&noticeAsk); err != nil {
+		t.Fatal(err)
+	}
+	agentQueue, _, err := r.QueueDeliveryWithIntent("target", "please rebase", "", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failQueued(t, r, agentQueue)
+
+	if err := r.SyncDeliveryAsks(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if state := askState(t, r, noticeAsk); state != AskWithdrawn {
+		t.Fatalf("the ask about Agenthail's notice is %s, want withdrawn", state)
+	}
+	ask := onlyDeliveryAsk(t, r)
+	if ask.SessionID != "sender" || ask.RoutedTo != "sender" {
+		t.Fatalf("ask=%+v, want the agent's own ask kept on the sender", ask)
+	}
+
+	if _, err := r.db.Exec(`UPDATE asks SET routed_to=? WHERE id=?`, AskToPerson, ask.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SyncDeliveryAsks(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if state := askState(t, r, ask.ID); state != AskWithdrawn {
+		t.Fatalf("the agent's ask escalated to the person is %s, want withdrawn", state)
+	}
+	if again := onlyDeliveryAsk(t, r); again.ID == ask.ID || again.SessionID != "sender" || again.RoutedTo != "sender" || again.Ref != ask.Ref {
+		t.Fatalf("ask=%+v, want the agent asked again about its own message", again)
+	}
+}
+
+func TestAnUnreadHourFailureFromAnEarlierReleaseAsksNobody(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "target")
+	if err := r.EnsureSender(surface.PersonSessionID); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: surface.PersonSessionID, TargetSessionID: "target", Message: "read later", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := r.RecordDeliveryFailure(intent.ID, "transport failed"); err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if err := r.SyncDeliveryAsks(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ask := onlyDeliveryAsk(t, r)
+	if _, err := r.WriteDB().Exec(`UPDATE delivery_intents SET failure=? WHERE id=?`, unreadHourFailure, intent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SyncDeliveryAsks(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+		t.Fatalf("asks=%+v, want none about a message that reached its session", asks)
+	}
+	if state, _, err := r.Ask(ask.ID); err != nil || state.State != AskWithdrawn {
+		t.Fatalf("ask=%+v err=%v, want the open ask withdrawn", state, err)
 	}
 }

@@ -82,7 +82,7 @@ func TestAPromptFromASessionThePersonStartedGoesToTheLeadOnAPairedHostFirst(t *t
 			return strings.Contains(got, ask.ID) && strings.Contains(got, `"sessionId":"`+l.workerQ+`"`)
 		})
 	})
-	escalated := l.laptop.daemon.escalateAsk(ask, "")
+	escalated := l.laptop.daemon.escalateAsk(ask, "", registry.AskEscalated)
 	if escalated.RoutedTo != registry.AskToPerson {
 		t.Fatalf("after the window the ask went to %q, want the person", escalated.RoutedTo)
 	}

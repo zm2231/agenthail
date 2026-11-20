@@ -77,10 +77,7 @@ func TestMobileCreationOptionsAndAuthorizedCreation(t *testing.T) {
 
 func TestMobileQueueIncludesFailedRowAndRetriesThroughActionAPI(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
-	id, err := registry.QueueMessageWithKey("from", "Failed instruction", "failure-probe")
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := queueFromPerson(t, registry, "from", "Failed instruction", "failure-probe")
 	if _, err := registry.ClaimNextMessage("from", time.Now()); err != nil {
 		t.Fatal(err)
 	}

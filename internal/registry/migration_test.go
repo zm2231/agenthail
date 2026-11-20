@@ -292,25 +292,14 @@ func assertMigratedRegistryAcceptsCurrentWrites(t *testing.T, r *Registry) {
 		t.Fatal(err)
 	}
 	failQueued(t, r, relayID)
-	var relayed *DeliveryIntent
-	for _, ask := range openDeliveryAsks(t, r) {
-		ref, ok := ParseDeliveryRef(ask.Ref)
-		if !ok || ref.IntentID == 0 {
-			continue
-		}
-		intent, err := r.DeliveryIntent(ref.IntentID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if intent.QueueID == relayID {
-			relayed = intent
-			if ask.RoutedTo != AskToPerson {
-				t.Fatalf("relayed failure ask=%+v, want it routed to the person", ask)
-			}
-		}
+	relayed, err := r.DeliveryIntent(intentOfQueue(t, r, relayID))
+	if err != nil || !relayed.Relayed || relayed.Status != DeliveryIntentFailed {
+		t.Fatalf("relayed intent=%+v err=%v", relayed, err)
 	}
-	if relayed == nil || !relayed.Relayed {
-		t.Fatalf("relayed intent=%+v", relayed)
+	for _, ask := range openDeliveryAsks(t, r) {
+		if ref, ok := ParseDeliveryRef(ask.Ref); ok && ref.IntentID == relayed.ID {
+			t.Fatalf("a relayed failure raised %+v", ask)
+		}
 	}
 	assertMigratedRouteRelaysDurably(t, r)
 }

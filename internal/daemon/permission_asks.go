@@ -222,7 +222,7 @@ func (d *Daemon) noticePermission(ctx context.Context, ask registry.Ask) {
 	d.taskNoticeMu.Unlock()
 	if sendErr != nil {
 		d.log.Printf("tell %s that %s is waiting: %s", d.resolveDisplay(ask.RoutedTo), d.resolveDisplay(session.ID), sendErr)
-		d.escalateAsk(ask, registry.AskToPerson)
+		d.escalateAsk(ask, registry.AskToPerson, registry.AskEscalated)
 	}
 }
 

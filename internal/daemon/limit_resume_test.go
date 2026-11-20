@@ -21,8 +21,22 @@ type limitFixture struct {
 	d       *Daemon
 	r       *registry.Registry
 	fake    *daemonSurface
+	host    *lifecycleSurface
 	dir     string
 	enabled bool
+}
+
+type lifecycleSurface struct {
+	*daemonSurface
+	stops   []string
+	stopErr error
+}
+
+func (s *lifecycleSurface) SessionAction(_ context.Context, session *surface.Session, action string) (map[string]any, error) {
+	if action == "stop" {
+		s.stops = append(s.stops, session.ID)
+	}
+	return map[string]any{"sessionId": session.ID, "action": action}, s.stopErr
 }
 
 func newLimitFixture(t *testing.T, ids ...string) *limitFixture {
@@ -44,7 +58,8 @@ func newLimitFixture(t *testing.T, ids ...string) *limitFixture {
 		}
 		f.fake.sessions[id] = session
 	}
-	f.d = newTestDaemon(t, r, []surface.Surface{f.fake})
+	f.host = &lifecycleSurface{daemonSurface: f.fake}
+	f.d = newTestDaemon(t, r, []surface.Surface{f.host})
 	f.d.limitResumeEnabled = func() bool { return f.enabled }
 	return f
 }
@@ -78,6 +93,29 @@ func (f *limitFixture) observe(id string, at time.Time, observation *surface.Tur
 
 func (f *limitFixture) refused(id, account, turn string, refusedAt, resetsAt time.Time) {
 	f.observe(id, refusedAt, &surface.TurnObservation{Status: surface.StatusIdle, UsageAccount: account, LimitStop: &surface.LimitStop{TurnID: turn, RefusedAt: refusedAt, ResetsAt: resetsAt}})
+}
+
+func (f *limitFixture) hosted(id string) {
+	f.t.Helper()
+	session := f.fake.sessions[id]
+	session.RuntimeKind = surface.RuntimeClaudeHost
+	if err := f.r.RecordObservedSession(session); err != nil {
+		f.t.Fatal(err)
+	}
+	f.fake.sessions[id] = session
+}
+
+func (f *limitFixture) settled(id, account string, at time.Time) {
+	f.observe(id, at, &surface.TurnObservation{Status: surface.StatusIdle, UsageAccount: account, SettledAt: at})
+}
+
+func (f *limitFixture) note(id string) string {
+	f.t.Helper()
+	row := f.d.limitResumeRow(id)
+	if row == nil {
+		return ""
+	}
+	return row.Note
 }
 
 func (f *limitFixture) pass(now time.Time) {
@@ -178,7 +216,7 @@ func TestSessionsOnOneAccountResumeOneAtATime(t *testing.T) {
 	}
 }
 
-func TestAnUnknownResetIsProbedByOneSessionAndItsSuccessReleasesTheRest(t *testing.T) {
+func TestAnUnknownResetIsProbedByOneSessionAndItsSuccessTellsTheRestToRestart(t *testing.T) {
 	f := newLimitFixture(t, "third", "first", "second")
 	refusedAt := time.Now().Add(-3 * time.Hour).Truncate(time.Second)
 	f.refused("third", "/roots/work", "u1", refusedAt.Add(-time.Second), time.Time{})
@@ -200,30 +238,159 @@ func TestAnUnknownResetIsProbedByOneSessionAndItsSuccessReleasesTheRest(t *testi
 	}
 
 	settled := probeAt.Add(time.Minute)
-	f.observe("second", settled, &surface.TurnObservation{Status: surface.StatusIdle, UsageAccount: "/roots/work", SettledAt: settled})
+	f.settled("second", "/roots/work", settled)
 	f.pass(settled.Add(time.Second))
 	if state := f.state("second"); state != "" {
 		t.Fatalf("a stop stayed after its session settled: %q", state)
 	}
-	if state := f.state("first"); state != registry.LimitResumeReleased {
-		t.Fatalf("the probe's success did not release the rest: %q", state)
-	}
 	f.pass(settled.Add(time.Second + limitResumeSpacing))
-	if state := f.state("third"); state != registry.LimitResumeReleased {
-		t.Fatalf("the probe's success did not release the rest: %q", state)
+	for _, id := range []string{"first", "third"} {
+		if state := f.state(id); state != registry.LimitResumeWaiting {
+			t.Fatalf("%s, a terminal session, was sent a resume its running process would refuse: %q", id, state)
+		}
+		if note := f.note(id); note == "" {
+			t.Fatalf("%s does not say its account has room and it needs a restart", id)
+		}
+	}
+	if queued := f.queued("first"); len(queued) != 0 {
+		t.Fatalf("queued=%q", queued)
 	}
 }
 
-func TestASuccessOnTheAccountReleasesBeforeTheStoredReset(t *testing.T) {
+func TestATerminalSessionWhoseRootHasRoomIsNotSentAResume(t *testing.T) {
 	f := newLimitFixture(t, "stopped", "other")
 	refusedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
 	f.refused("stopped", "/roots/proxy", "u1", refusedAt, refusedAt.Add(5*time.Hour))
 	f.pass(refusedAt.Add(time.Second))
 	settled := refusedAt.Add(10 * time.Minute)
-	f.observe("other", settled, &surface.TurnObservation{Status: surface.StatusIdle, UsageAccount: "/roots/proxy", SettledAt: settled})
+	f.settled("other", "/roots/proxy", settled)
 	f.pass(settled.Add(time.Second))
+	if state := f.state("stopped"); state != registry.LimitResumeWaiting {
+		t.Fatalf("state=%q, want waiting", state)
+	}
+	if queued := f.queued("stopped"); len(queued) != 0 {
+		t.Fatalf("a resume was queued into a process that still holds the limit: %q", queued)
+	}
+	if len(f.host.stops) != 0 {
+		t.Fatalf("a terminal session was stopped: %v", f.host.stops)
+	}
+	if note := f.note("stopped"); note != "Its account has room again; restart it to continue" {
+		t.Fatalf("note=%q", note)
+	}
+}
+
+func TestAHostedSessionIsRestartedOnceWhenItsRootHasRoomAndARefusalWaitsForItsOwnReset(t *testing.T) {
+	f := newLimitFixture(t, "stopped", "other")
+	f.hosted("stopped")
+	refusedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	resetsAt := refusedAt.Add(30 * time.Hour)
+	f.refused("stopped", "/roots/proxy", "u1", refusedAt, resetsAt)
+	f.pass(refusedAt.Add(time.Second))
+	if len(f.host.stops) != 0 || f.state("stopped") != registry.LimitResumeWaiting {
+		t.Fatalf("acted before the root had room: stops=%v state=%q", f.host.stops, f.state("stopped"))
+	}
+
+	settled := refusedAt.Add(10 * time.Minute)
+	f.settled("other", "/roots/proxy", settled)
+	f.pass(settled.Add(time.Second))
+	if len(f.host.stops) != 1 || f.host.stops[0] != "stopped" {
+		t.Fatalf("stops=%v, want the stopped session restarted once", f.host.stops)
+	}
 	if state := f.state("stopped"); state != registry.LimitResumeReleased {
 		t.Fatalf("state=%q, want released", state)
+	}
+	if queued := f.queued("stopped"); len(queued) != 1 || queued[0] != surface.LimitResumeNotice() {
+		t.Fatalf("queued=%q", queued)
+	}
+	if _, err := f.r.CancelPendingByKey("limit-resume:stopped:u1"); err != nil {
+		t.Fatal(err)
+	}
+
+	refusedAgain := settled.Add(time.Minute)
+	f.refused("stopped", "/roots/proxy", "u2", refusedAgain, resetsAt)
+	at := refusedAgain
+	for range 20 {
+		at = at.Add(time.Minute)
+		f.settled("other", "/roots/proxy", at)
+		f.pass(at.Add(time.Second))
+	}
+	if len(f.host.stops) != 1 {
+		t.Fatalf("a refused resume was restarted again: stops=%v", f.host.stops)
+	}
+	if state := f.state("stopped"); state != registry.LimitResumeWaiting {
+		t.Fatalf("state=%q, want waiting for its own reset", state)
+	}
+	if queued := f.queued("stopped"); len(queued) != 0 {
+		t.Fatalf("a refused resume was sent again: %q", queued)
+	}
+	if note := f.note("stopped"); note != "Resuming didn't go through; it tries once more at its reset" {
+		t.Fatalf("note=%q", note)
+	}
+
+	f.pass(resetsAt.Add(limitResumeGrace))
+	if state := f.state("stopped"); state != registry.LimitResumeReleased {
+		t.Fatalf("state=%q, want released at its own reset", state)
+	}
+	if len(f.host.stops) != 1 {
+		t.Fatalf("its own reset restarted it: stops=%v", f.host.stops)
+	}
+	if _, err := f.r.CancelPendingByKey("limit-resume:stopped:u2"); err != nil {
+		t.Fatal(err)
+	}
+	afterReset := resetsAt.Add(2 * limitResumeGrace)
+	f.refused("stopped", "/roots/proxy", "u3", afterReset, resetsAt)
+	f.pass(afterReset.Add(limitResumeSpacing))
+	if state := f.state("stopped"); state != registry.LimitResumeLapsed {
+		t.Fatalf("state=%q, want lapsed after a refusal past its reset", state)
+	}
+	if note := f.note("stopped"); note == "" {
+		t.Fatal("a lapsed stop does not say why it no longer resumes")
+	}
+}
+
+func TestAFailedRestartIsNotRetriedEvenAfterTheDaemonRestartsAndTheRowSaysWhy(t *testing.T) {
+	f := newLimitFixture(t, "stopped", "other")
+	f.hosted("stopped")
+	f.host.stopErr = fmt.Errorf("host unreachable")
+	refusedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	resetsAt := refusedAt.Add(30 * time.Hour)
+	f.refused("stopped", "/roots/proxy", "u1", refusedAt, resetsAt)
+	f.pass(refusedAt.Add(time.Second))
+	at := refusedAt.Add(10 * time.Minute)
+	for range 5 {
+		f.settled("other", "/roots/proxy", at)
+		f.pass(at.Add(time.Second))
+		at = at.Add(time.Minute)
+	}
+	if len(f.host.stops) != 1 {
+		t.Fatalf("stops=%v, want one restart attempt", f.host.stops)
+	}
+	if note := f.note("stopped"); note != "Could not restart it to resume: host unreachable; it tries once more at its reset" {
+		t.Fatalf("note=%q", note)
+	}
+
+	f.d.limitResumes = newLimitResumer()
+	f.host.stopErr = nil
+	for range 5 {
+		f.settled("other", "/roots/proxy", at)
+		f.pass(at.Add(time.Second))
+		at = at.Add(time.Minute)
+	}
+	if len(f.host.stops) != 1 {
+		t.Fatalf("a failed restart was tried again after the daemon restarted: stops=%v", f.host.stops)
+	}
+	if state := f.state("stopped"); state != registry.LimitResumeWaiting {
+		t.Fatalf("state=%q", state)
+	}
+	if queued := f.queued("stopped"); len(queued) != 0 {
+		t.Fatalf("queued=%q", queued)
+	}
+	if note := f.note("stopped"); note != "Resuming didn't go through; it tries once more at its reset" {
+		t.Fatalf("note after the daemon restarted=%q", note)
+	}
+	f.pass(resetsAt.Add(limitResumeGrace))
+	if state := f.state("stopped"); state != registry.LimitResumeReleased {
+		t.Fatalf("state=%q, want released at its own reset", state)
 	}
 }
 

@@ -193,7 +193,10 @@ func (d *Daemon) raiseAsk(session surface.Session, input askInput) (registry.Ask
 func (d *Daemon) tellHearer(ask registry.Ask, hearer noticeRecipient) registry.Ask {
 	if _, err := d.sendNotice(hearer, d.askNoticeFor(ask, hearer.sessionID), askNoticeKey(ask.ID, hearer.sessionID)); err != nil {
 		d.log.Printf("tell %s that %s asks: %s", hearer.role, d.resolveDisplay(ask.SessionID), err)
-		return d.escalateAsk(ask, registry.AskToPerson)
+		if ask.Origin == registry.AskOriginDelivery {
+			return ask
+		}
+		return d.escalateAsk(ask, registry.AskToPerson, registry.AskEscalated)
 	}
 	return ask
 }
@@ -244,7 +247,7 @@ func askNotice(header string, ask registry.Ask, target string, mcp bool) string 
 }
 
 // escalateAsk moves an open ask one hop up: to its holder's own hearer while one runs, else to the person.
-func (d *Daemon) escalateAsk(ask registry.Ask, to string) registry.Ask {
+func (d *Daemon) escalateAsk(ask registry.Ask, to, why string) registry.Ask {
 	hearer, routed := noticeRecipient{}, false
 	if to == "" && ask.RoutedTo != registry.AskToPerson {
 		hearer, routed = d.askHearer(ask.RoutedTo)
@@ -254,7 +257,7 @@ func (d *Daemon) escalateAsk(ask registry.Ask, to string) registry.Ask {
 	} else if to == "" {
 		to = registry.AskToPerson
 	}
-	moved, err := d.Registry.RouteAsk(ask.ID, to, registry.AskEscalated, time.Now())
+	moved, err := d.Registry.RouteAsk(ask.ID, to, why, time.Now())
 	if err != nil {
 		d.log.Printf("escalate %s: %s", ask.ID, err)
 		return ask
@@ -315,7 +318,7 @@ func (d *Daemon) sweepAsks(now time.Time) {
 	}
 	agentWindow, permissionWindow := d.askEscalateAfter(), d.permissionEscalateAfter()
 	for _, ask := range open {
-		if ask.RoutedTo == registry.AskToPerson {
+		if ask.RoutedTo == registry.AskToPerson || ask.Origin == registry.AskOriginDelivery {
 			continue
 		}
 		window := agentWindow
@@ -323,7 +326,7 @@ func (d *Daemon) sweepAsks(now time.Time) {
 			window = permissionWindow
 		}
 		if !d.hears(ask.RoutedTo) || now.Sub(ask.RoutedAt) >= window {
-			d.escalateAsk(ask, "")
+			d.escalateAsk(ask, "", registry.AskEscalated)
 		}
 	}
 }
@@ -517,7 +520,7 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 		if by == registry.AskToPerson {
 			return actionResult{}, invalidRequest("the person answers an ask; only an agent passes it on")
 		}
-		current := d.escalateAsk(ask, "")
+		current := d.escalateAsk(ask, "", registry.AskPassedOn)
 		return actionOK(map[string]any{"ok": true, "result": map[string]any{"requestId": askID, "outcome": "escalated", "routedTo": d.publicSessionID(current.RoutedTo)}}), nil
 	}
 	switch ask.Origin {

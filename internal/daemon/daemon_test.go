@@ -591,7 +591,7 @@ func TestQueuedDeliveryBindsProviderTurnForReconciliation(t *testing.T) {
 	}
 }
 
-func TestQueuedRelayTerminalFailureAsksThePersonOnceWithoutNotifyingSource(t *testing.T) {
+func TestQueuedRelayTerminalFailureAsksNobodyAndDoesNotNotifyTheSource(t *testing.T) {
 	daemon, r, fake, from, to := daemonFixture(t)
 	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
 		t.Fatal(err)
@@ -603,8 +603,8 @@ func TestQueuedRelayTerminalFailureAsksThePersonOnceWithoutNotifyingSource(t *te
 	if count := r.QueueCount(from.ID); count != 0 {
 		t.Fatalf("source notices=%d", count)
 	}
-	if asks := openDeliveryAsks(t, r); len(asks) != 1 || asks[0].SessionID != to.ID || asks[0].RoutedTo != registry.AskToPerson {
-		t.Fatalf("asks=%+v", asks)
+	if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+		t.Fatalf("a relayed failure raised asks: %+v", asks)
 	}
 }
 

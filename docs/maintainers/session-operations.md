@@ -224,8 +224,8 @@ target discovery no longer reports; a closed Claude session is the exception,
 since the daemon resumes it to deliver its queue. `refused` means the
 target refused to start, such as Claude failing to resume the conversation in
 the Claude host. The row's last error carries Claude's message, and each refusal
-raises one delivery ask: an agent sender is asked first, otherwise the person
-(see `asks.md#delivery-problems`). The message stays
+raises one delivery ask for its sender: the agent that sent it, or the person
+for their own message (see `asks.md#delivery-problems`). The message stays
 queued and is delivered on the first attempt after the cause is fixed. Empty means
 the next scan claims that message.
 

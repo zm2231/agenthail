@@ -88,12 +88,21 @@ const deliveryReason = `CASE
 	ELSE 'It failed'
 END`
 
-// A relay source never sent the message: telling it would start a turn the same relay forwards again.
-func deliveryRoute(sender, target string, relayed bool) (sessionID, routedTo string) {
-	if relayed || !readsNotices(sender) {
-		return target, AskToPerson
+// deliveryRoute is who decides about a delivery that went wrong, and
+// whether anyone does. The person decides only about a message they sent; an
+// agent only about its own, as a notice to it. Nobody is asked about a
+// relayed message, whose source never sent it, or one from Agenthail itself,
+// an extension or a sender with no session.
+func deliveryRoute(sender, target string, relayed bool) (sessionID, routedTo string, asked bool) {
+	switch {
+	case relayed:
+		return "", "", false
+	case sender == surface.PersonSessionID || sender == surface.CLISessionID:
+		return target, AskToPerson, true
+	case readsNotices(sender):
+		return sender, sender, true
 	}
-	return sender, sender
+	return "", "", false
 }
 
 func deliveryOption(id string) AskOption {
@@ -150,7 +159,10 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 			status = deliveryMaybeHeld
 		}
 		problem := deliveryProblem{ref: fmt.Sprintf("intent:%d:%d:%s", id, retries, status)}
-		problem.sessionID, problem.routedTo = deliveryRoute(sender, target, relayed)
+		var asked bool
+		if problem.sessionID, problem.routedTo, asked = deliveryRoute(sender, target, relayed); !asked {
+			continue
+		}
 		if status == deliveryMaybeHeld {
 			problem.title = "Message may have been held by its target"
 			problem.question = deliveryQuestion(message, failure, DeliveryDismiss)
@@ -173,8 +185,8 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT mq.id,mq.session_id,mq.source_session_id,COALESCE(di.relayed,0),mq.message,mq.refusal,mq.refused_now,mq.late,mq.reason,mq.holders_json
-		FROM (SELECT id,session_id,CASE WHEN EXISTS(SELECT 1 FROM sessions s WHERE s.id=message_queue.source_session_id) THEN source_session_id ELSE '' END AS source_session_id,message,refusal,`+queueRefusedRow+` AS refused_now,`+queueLateRow+` AS late,`+deliveryReason+` AS reason,holders_json
+	rows, err = tx.QueryContext(ctx, `SELECT mq.id,mq.session_id,mq.source_session_id,COALESCE(di.relayed,0) OR mq.relay_hops>0,mq.message,mq.refusal,mq.refused_now,mq.late,mq.reason,mq.holders_json
+		FROM (SELECT id,session_id,CASE WHEN EXISTS(SELECT 1 FROM sessions s WHERE s.id=message_queue.source_session_id) THEN source_session_id ELSE '' END AS source_session_id,relay_hops,message,refusal,`+queueRefusedRow+` AS refused_now,`+queueLateRow+` AS late,`+deliveryReason+` AS reason,holders_json
 			FROM message_queue WHERE status='dead' AND dead_at_ms>?1 OR `+queueRefusedRow+` OR `+queueLateRow+`) mq
 		LEFT JOIN delivery_intents di ON di.queue_id=mq.id
 		WHERE COALESCE(di.status,'') NOT IN ('failed','held')
@@ -195,7 +207,10 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 			return nil, err
 		}
 		var problem deliveryProblem
-		problem.sessionID, problem.routedTo = deliveryRoute(sender, target, relayed)
+		var asked bool
+		if problem.sessionID, problem.routedTo, asked = deliveryRoute(sender, target, relayed); !asked {
+			continue
+		}
 		if refused && len(holders) > 1 {
 			problem.ref, problem.title, problem.question = sharedProblem(id, refusal, message, holders)
 		} else if refused {
@@ -254,6 +269,10 @@ func (r *Registry) deliveryWrite(write func(*sql.Tx) error) error {
 	return tx.Commit()
 }
 
+func passedOn(ask Ask) bool {
+	return len(ask.Route) > 0 && ask.Route[len(ask.Route)-1].Why == AskPassedOn
+}
+
 func syncDeliveryAsksTx(tx *sql.Tx, now time.Time) error {
 	var inPlay bool
 	if err := tx.QueryRow(deliveryAsksInPlay, now.Add(-deadReviewWindow).UnixMilli(), now.Add(-deliveryLateAfter).UnixMilli()).Scan(&inPlay); err != nil || !inPlay {
@@ -269,12 +288,12 @@ func syncDeliveryAsksTx(tx *sql.Tx, now time.Time) error {
 		return err
 	}
 	at := time.UnixMilli(now.UnixMilli()).UTC()
-	wanted := make(map[string]bool, len(problems))
+	wanted := make(map[string]string, len(problems))
 	for _, problem := range problems {
-		wanted[problem.sessionID+"\x00"+problem.ref] = true
+		wanted[problem.sessionID+"\x00"+problem.ref] = problem.routedTo
 	}
 	for _, ask := range open {
-		if wanted[ask.SessionID+"\x00"+ask.Ref] {
+		if routedTo, ok := wanted[ask.SessionID+"\x00"+ask.Ref]; ok && (ask.RoutedTo == routedTo || passedOn(ask)) {
 			continue
 		}
 		if _, err := tx.Exec(`UPDATE asks SET state=?,answered_at_ms=? WHERE id=? AND state=?`, AskWithdrawn, at.UnixMilli(), ask.ID, AskOpen); err != nil {
