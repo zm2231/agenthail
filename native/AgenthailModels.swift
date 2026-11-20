@@ -55,12 +55,19 @@ struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
     var proxy: String? = nil
     var usage: ProviderUsage? = nil
     var best: String? = nil
+    var full: Bool? = nil
+    var fullUntil: String? = nil
     var id: String { root }
     var signedIn: Bool { signedInAs != nil }
+    var fullWithNoTime: Bool { proxy != nil && full == true && fullUntil == nil }
     var readsUsage: Bool { signedIn || proxy != nil }
     var selectable: Bool { signedIn || login == "api_key" || login == "proxy" }
 
     func exhaustedUntil(now: Date = Date()) -> Date? {
+        if proxy != nil {
+            guard full == true, let until = fullUntil.flatMap(TimestampParser.date), until > now else { return nil }
+            return until
+        }
         let resets = (usage?.limits ?? []).filter { $0.percent >= 100 }.compactMap { limit in
             limit.resetsAt.flatMap(TimestampParser.date)
         }.filter { $0 > now }
@@ -175,6 +182,8 @@ struct ClaudeRootUsage: Decodable {
     var usage: ProviderUsage? = nil
     var usageProblem: String? = nil
     var best: String? = nil
+    var full: Bool? = nil
+    var fullUntil: String? = nil
 }
 
 struct UsageReport: Decodable, Hashable {
@@ -354,6 +363,8 @@ struct CreationHostPicker {
         guard loaded == generation, let index = options?.claudeConfigRoots?.firstIndex(where: { $0.root == next.root }) else { return }
         options?.claudeConfigRoots?[index].usage = next.usage
         options?.claudeConfigRoots?[index].best = next.best
+        options?.claudeConfigRoots?[index].full = next.full
+        options?.claudeConfigRoots?[index].fullUntil = next.fullUntil
     }
 
     mutating func receive(pick next: ClaudeRootPick, for loaded: Int) {

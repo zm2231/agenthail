@@ -83,6 +83,18 @@ assert.equal(pending[asked + 1]?.url, "/api/v1/session-options/claude-usage?root
 pending[asked + 1].resolve({ ok: true, json: async () => ({ best: "team@example.com", usage: { limits: [{ kind: "session", percent: 18 }, { kind: "weekly_all", percent: 41 }] } }) });
 await settle();
 assert(select.innerHTML.includes(">shared via proxy · next: team · session 18%, week 41%</option>"), select.innerHTML);
+const shared = proxied.claudeConfigRoots[1];
+const soon = new Date(Date.now() + 5 * 3600e3).toISOString();
+const later = new Date(Date.now() + 30 * 3600e3).toISOString();
+Object.assign(shared, { best: "team@example.com", full: false, fullUntil: null, usage: { limits: [{ kind: "weekly_all", percent: 100, resetsAt: later }] } });
+assert.equal(context.claudeUsageExhausted(shared), 0, "a proxy root with room is not out of usage because one account's window is at 100%");
+Object.assign(shared, { full: true, fullUntil: soon });
+assert.equal(context.claudeUsageExhausted(shared), Date.parse(soon), "a full proxy root is out until the time the daemon gives, not one account's reset");
+Object.assign(shared, { full: true, fullUntil: new Date(Date.now() - 60e3).toISOString() });
+assert(!context.claudeConfigRootOption(shared, "shared via proxy").includes("out of usage"), "a full state whose free time has passed no longer reads as out of usage");
+Object.assign(shared, { full: true, fullUntil: null });
+assert.equal(context.claudeUsageExhausted(shared), 0);
+assert(context.claudeConfigRootOption(shared, "shared via proxy").endsWith(" · out of usage"), "a full proxy root with no known free time says so without a time");
 console.log("ok dashboard config roots");
 
 context.renderStartConfigRoots([
