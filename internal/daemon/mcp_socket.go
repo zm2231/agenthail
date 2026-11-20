@@ -126,10 +126,10 @@ func (d *Daemon) mcpSocketHandler() http.Handler {
 		var stalled *mcpStallError
 		switch {
 		case errors.As(err, &stalled):
-			d.logMCPAuthRefusal("socket", "", "busy", err)
+			d.logMCPAuthRefusal("socket", "-", "busy", err)
 			answer = socketAnswer{tools: true, refusal: stalled.refusal()}
 		case err != nil:
-			d.logMCPAuthRefusal("socket", "", "busy", err)
+			d.logMCPAuthRefusal("socket", "-", "busy", err)
 			answer = socketAnswer{tools: true, refusal: mcpCheckFailed()}
 		}
 		if answer.status != 0 {
@@ -217,10 +217,13 @@ func (d *Daemon) codexParentThreads(pid int) []string {
 // are listed to any Codex child and each call acts as the thread it names,
 // once the Codex process is shown to hold that thread.
 func (d *Daemon) codexCaller(ctx context.Context, request mcpSocketRequest, loaded []string) socketAnswer {
+	method, thread, err := mcpRequestThread(request)
 	refused := func(code, message string) socketAnswer {
+		if code == "unauthenticated" {
+			d.logMCPAuthRefusal("socket", thread, code, nil)
+		}
 		return socketAnswer{tools: true, refusal: &mcpRefusal{Code: code, Message: message}}
 	}
-	method, thread, err := mcpRequestThread(request)
 	if err != nil {
 		return refused("invalid_request", "A Codex server's request must be one JSON-RPC message.")
 	}

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestASessionCredentialThatCannotBeCheckedIsABusyRefusalNotA401(t *testing.T) {
@@ -104,5 +107,22 @@ func TestEveryMCPAuthRefusalIsLoggedWithoutTheToken(t *testing.T) {
 	}
 	if strings.Contains(lines, token) || strings.Contains(lines, "ahs_never_issued") {
 		t.Fatalf("the daemon log holds a token:\n%s", lines)
+	}
+}
+
+func TestACodexSocketCallForAThreadItsProcessDoesNotHoldIsLogged(t *testing.T) {
+	d, reg, codex := codexSocketDaemon(t)
+	logged := &lockedBuffer{}
+	d.log = log.New(logged, "", 0)
+	registerCodex(t, reg, "thread-a", t.TempDir())
+	registerCodex(t, reg, "thread-c", t.TempDir())
+	codex.load(t, "thread-a")
+	relay := startCodexRelay(t, false)
+	testkit.Eventually(t, "the Codex relay lists the tools", 10*time.Second, func() bool { return len(listedToolNames(t, relay)) > 0 })
+	if _, refused := codexWhoami(t, relay, "thread-c"); refused != "unauthenticated" {
+		t.Fatalf("a call naming an unloaded thread was refused as %q", refused)
+	}
+	if want := "mcp auth session=thread-c path=socket outcome=refused:unauthenticated"; !strings.Contains(logged.String(), want) {
+		t.Fatalf("the daemon log has no %q:\n%s", want, logged.String())
 	}
 }

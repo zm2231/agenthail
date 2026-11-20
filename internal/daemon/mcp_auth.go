@@ -57,7 +57,7 @@ func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
 		if !localReach(r) {
-			d.logMCPAuthRefusal("http", "", "remote_refused", nil)
+			d.logMCPAuthRefusal("http", "-", "remote_refused", nil)
 			writeAPIError(w, http.StatusForbidden, "remote_refused", "Session credentials are accepted only from this machine.")
 			return
 		}
@@ -65,19 +65,26 @@ func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpCallerKey{}, caller)))
 			return
 		}
-		caller, err := withinBound(d, r.Context(), "checking the session credential", mcpCallerBound, func(context.Context) (*mcpCaller, error) {
-			return d.credentialCaller(token)
+		checked, err := withinBound(d, r.Context(), "checking the session credential", mcpCallerBound, func(context.Context) (credentialCheck, error) {
+			caller, err := d.credentialCaller(token)
+			if err != nil && credentialRefused(err) {
+				if id := d.Registry.CredentialSession(token); id != "" {
+					return credentialCheck{refusedSession: d.resolveDisplay(id)}, err
+				}
+			}
+			return credentialCheck{caller: caller}, err
 		})
+		caller := checked.caller
 		var stalled *mcpStallError
 		switch {
 		case errors.As(err, &stalled):
-			d.logMCPAuthRefusal("http", "", "busy", err)
+			d.logMCPAuthRefusal("http", "-", "busy", err)
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpAnswerKey{}, socketAnswer{tools: true, refusal: stalled.refusal()})))
 		case err != nil && credentialRefused(err):
-			d.logMCPAuthRefusal("http", d.Registry.CredentialSession(token), mcpAuthOutcome(err), nil)
+			d.logMCPAuthRefusal("http", checked.refusedSession, mcpAuthOutcome(err), nil)
 			writeMCPAuthError(w, err)
 		case err != nil:
-			d.logMCPAuthRefusal("http", "", "busy", err)
+			d.logMCPAuthRefusal("http", "-", "busy", err)
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpAnswerKey{}, socketAnswer{tools: true, refusal: mcpCheckFailed()})))
 		case caller == nil:
 			next.ServeHTTP(w, r)
@@ -172,10 +179,15 @@ func mcpCheckFailed() *mcpRefusal {
 	return &mcpRefusal{Code: "busy", Message: "The daemon could not check this session just now; try again in a moment.", Retryable: true}
 }
 
-func (d *Daemon) logMCPAuthRefusal(path, sessionID, outcome string, cause error) {
-	session := "-"
-	if sessionID != "" {
-		session = d.resolveDisplay(sessionID)
+type credentialCheck struct {
+	caller         *mcpCaller
+	refusedSession string
+}
+
+// session is already a display name or id: the registry may be stalled when a refusal is logged.
+func (d *Daemon) logMCPAuthRefusal(path, session, outcome string, cause error) {
+	if session == "" {
+		session = "-"
 	}
 	line := fmt.Sprintf("mcp auth session=%s path=%s outcome=refused:%s", session, path, outcome)
 	if cause != nil {
