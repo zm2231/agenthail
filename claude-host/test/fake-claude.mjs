@@ -286,8 +286,9 @@ async function turn(message) {
     setTimeout(() => finish(id, { turn: false }), ms);
     reply = `ambient:${ms}`;
   }
-  fs.appendFileSync(transcript, JSON.stringify({ uuid, text, reply, origin: message.origin ?? null, priority: message.priority ?? null, pid: process.pid, inputClosed }) + '\n');
+  // Claude's transcript first, so a test that sees the turn recorded can read its completion.
   claudeTranscript(uuid, text, reply);
+  fs.appendFileSync(transcript, JSON.stringify({ uuid, text, reply, origin: message.origin ?? null, priority: message.priority ?? null, pid: process.pid, inputClosed }) + '\n');
   write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
   await stop();
   write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, user_message_uuids: [uuid], duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, modelUsage: modelUsage() });
@@ -328,8 +329,8 @@ function notifyReleased() {
 function notified(id) {
   state('running');
   const reply = `notified:${id}`;
-  fs.appendFileSync(transcript, JSON.stringify({ uuid: null, text: '<task-notification>', reply, origin: { kind: 'task-notification' }, priority: null, pid: process.pid, inputClosed }) + '\n');
   claudeTranscript(crypto.randomUUID(), `<task-notification>\n<task-id>${id}</task-id>\n<status>completed</status>\n</task-notification>`, reply);
+  fs.appendFileSync(transcript, JSON.stringify({ uuid: null, text: '<task-notification>', reply, origin: { kind: 'task-notification' }, priority: null, pid: process.pid, inputClosed }) + '\n');
   write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
   write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, modelUsage: modelUsage() });
   state('idle');
