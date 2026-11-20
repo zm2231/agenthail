@@ -79,6 +79,12 @@ struct SessionPreview: View {
     @ViewBuilder private var previewBody: some View {
         if ProcessInfo.processInfo.arguments.contains("--preview-app") {
             MainTabs(model: model)
+                .task {
+                    guard let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--preview-open-turn"), index + 1 < ProcessInfo.processInfo.arguments.count,
+                          let session = IOSAppDelegate.openedSession(["sessionId": "demo", "host": "computer"]) else { return }
+                    try? await Task.sleep(for: .seconds(3))
+                    NotificationCenter.default.post(name: .agenthailNotificationOpened, object: OpenedNotification(session: session, turn: ProcessInfo.processInfo.arguments[index + 1]))
+                }
         } else if ProcessInfo.processInfo.arguments.contains("--preview-new") {
             NewSessionSheet(model: model)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {
@@ -208,6 +214,13 @@ struct SessionPreview: View {
             if ProcessInfo.processInfo.arguments.contains("--preview-long-history") { items.insert(contentsOf: Self.longHistory, at: 0) }
             detail["timeline"] = timeline.merging(["items": items, "nextBefore": 0]) { $1 }
             return String(data: try! JSONSerialization.data(withJSONObject: detail), encoding: .utf8)!
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-turns") {
+            let turns: [[String: Any]] = (1...40).flatMap { n -> [[String: Any]] in [
+                ["id": "turn-\(n)-prompt", "kind": "message", "role": "user", "title": "user", "text": "Prompt for turn \(n).", "turnId": "turn-\(n)", "truncated": false],
+                ["id": "turn-\(n)-reply", "kind": "message", "role": "assistant", "title": "assistant", "text": "Reply for turn \(n). " + String(repeating: "It records what the agent decided at this point. ", count: 4), "turnId": "turn-\(n)", "truncated": false],
+            ] }
+            items.insert(contentsOf: turns, at: 0)
         }
         items.removeLast()
         items.append(["id": "5", "kind": "reasoning", "title": "Thinking", "text": "The regression test covers the reconnect boundary. The remaining check is whether the queued instruction retains its session identity.", "truncated": false])

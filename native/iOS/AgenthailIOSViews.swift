@@ -160,8 +160,8 @@ struct MainTabs: View {
             if phase == .active { model.decisionFeed.reload() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .agenthailNotificationOpened)) { notification in
-            guard let sessionID = notification.object as? String else { return }
-            model.openSession(sessionID)
+            guard let opened = notification.object as? OpenedNotification else { return }
+            model.openSession(opened.session, turn: opened.turn)
             selection = .sessions
         }
     }
@@ -570,6 +570,28 @@ struct SessionScreen: View {
         }
     }
 
+    // Older pages load until the turn is found, a few at most, so a tap on an old notification still lands somewhere sensible.
+    @discardableResult
+    private func revealOpenedTurn() async -> Bool {
+        guard let turn = model.takeOpenedTurn(session.id) else { return false }
+        var target = turnRow(turn)
+        var pages = 0
+        while target == nil, pages < TurnReveal.olderPages, (model.activityCursor ?? 0) > 0 {
+            await model.loadOlderActivity()
+            pages += 1
+            target = turnRow(turn)
+        }
+        guard let target else { return false }
+        olderPlace.release()
+        followingLatest = false
+        position.scrollTo(id: target, anchor: .top)
+        return true
+    }
+
+    private func turnRow(_ turn: String) -> String? {
+        activityOnly ? TurnReveal.item(turn, in: items).map(TranscriptRowID.item) : TurnReveal.row(turn, groups: groups)
+    }
+
     private func rebuildOpeningRows() {
         guard followingLatest, !userScrolling else { return }
 #if DEBUG
@@ -915,7 +937,7 @@ struct SessionScreen: View {
             await model.loadSession(session.id)
             if startsAtOldest, let first = firstRowID {
                 position.scrollTo(id: first, anchor: .top)
-            } else if followingLatest {
+            } else if followingLatest, await !revealOpenedTurn() {
                 scrollToLatest()
             }
             landed = true
@@ -924,6 +946,10 @@ struct SessionScreen: View {
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { scrollToLatest() }
+        }
+        .onChange(of: model.openedTurns[session.id]) { _, turn in
+            guard landed, turn != nil else { return }
+            Task { await revealOpenedTurn() }
         }
         .onAppear { model.sessionAppeared(session.id) }
         .onChange(of: session.id) { old, new in

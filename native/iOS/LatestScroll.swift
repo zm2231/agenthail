@@ -8,3 +8,17 @@ enum LatestScroll: Equatable {
         return .row(latest)
     }
 }
+
+enum TurnReveal {
+    static let olderPages = 3
+
+    static func item(_ turn: String, in items: [TimelineItem]) -> String? {
+        let rows = items.filter { $0.turnId == turn }
+        return (rows.last { $0.kind == "message" && $0.role == "assistant" } ?? rows.last)?.id
+    }
+
+    static func row(_ turn: String, groups: [TimelineGroup]) -> String? {
+        guard let id = item(turn, in: groups.flatMap(\.items)) else { return nil }
+        return groups.first { $0.items.contains { $0.id == id } }?.id
+    }
+}

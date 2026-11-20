@@ -42,8 +42,9 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
             return
         }
         guard let opened = Self.openedSession(userInfo) else { return }
+        let turn = Self.openedTurn(userInfo)
         await MainActor.run {
-            NotificationCenter.default.post(name: .agenthailNotificationOpened, object: opened)
+            NotificationCenter.default.post(name: .agenthailNotificationOpened, object: OpenedNotification(session: opened, turn: turn))
         }
     }
 }
@@ -55,12 +56,22 @@ extension IOSAppDelegate {
         return HostCatalog.qualify(host, sessionID)
     }
 
+    nonisolated static func openedTurn(_ userInfo: [AnyHashable: Any]) -> String? {
+        guard let turn = userInfo["turnId"] as? String, !turn.isEmpty else { return nil }
+        return turn
+    }
+
     nonisolated static func pairedAPI(host: String) throws -> AgenthailAPI {
         guard let credential = KeychainStore.get(PairedCredential.account(for: host)).flatMap(PairedCredential.decode) else {
             throw AgenthailAPIError.unavailable("This iPhone is no longer paired with the computer that sent this notification.")
         }
         return AgenthailAPI(baseURL: credential.endpoint, token: credential.token)
     }
+}
+
+struct OpenedNotification: Sendable {
+    let session: String
+    let turn: String?
 }
 
 extension Notification.Name {
