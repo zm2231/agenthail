@@ -48,20 +48,24 @@ final class TranscriptScrollJumpUITests: XCTestCase {
         shot.name = "after scrolling up"
         shot.lifetime = .keepAlways
         add(shot)
-        let (jumps, worst) = Self.parse(probe.label)
+        let (jumps, worst, frame) = Self.parse(probe.label)
+        let frames = XCTAttachment(string: "jumps=\(jumps) worst=\(worst) longest frame=\(frame) ms")
+        frames.lifetime = .keepAlways
+        add(frames)
         XCTAssertLessThanOrEqual(jumps, 1, "the transcript moved without the finger: \(probe.label)")
-        XCTAssertLessThanOrEqual(worst, 80, "LazyVStack's one re-estimate of unmeasured rows missed by more than 80 pt: \(probe.label)")
+        XCTAssertLessThanOrEqual(worst, 45, "LazyVStack's one re-estimate of unmeasured rows missed by more than 45 pt: \(probe.label)")
     }
 
-    static func parse(_ label: String) -> (jumps: Int, worst: Int) {
-        guard let match = label.wholeMatch(of: /jumps=(\d+) worst=(\d+)/), let jumps = Int(match.1), let worst = Int(match.2) else { return (.max, .max) }
-        return (jumps, worst)
+    static func parse(_ label: String) -> (jumps: Int, worst: Int, frame: Int) {
+        guard let match = label.wholeMatch(of: /jumps=(\d+) worst=(\d+) frame=(\d+)/), let jumps = Int(match.1), let worst = Int(match.2), let frame = Int(match.3) else { return (.max, .max, .max) }
+        return (jumps, worst, frame)
     }
 
     func testTheProbeLabelParsesOnlyItsExactForm() {
-        XCTAssertEqual(Self.parse("jumps=1 worst=57").jumps, 1)
-        XCTAssertEqual(Self.parse("jumps=1 worst=57").worst, 57)
-        for bad in ["jumps=-1 worst=-1", "jumps=0", "jumps=0 worst=3 extra=1", "worst=3 jumps=0", "", "jumps=0 worst=3.5"] {
+        XCTAssertEqual(Self.parse("jumps=1 worst=57 frame=67").jumps, 1)
+        XCTAssertEqual(Self.parse("jumps=1 worst=57 frame=67").worst, 57)
+        XCTAssertEqual(Self.parse("jumps=1 worst=57 frame=67").frame, 67)
+        for bad in ["jumps=-1 worst=-1 frame=1", "jumps=0", "jumps=0 worst=3", "jumps=0 worst=3 frame=1 extra=1", "worst=3 jumps=0 frame=1", "", "jumps=0 worst=3 frame=3.5"] {
             XCTAssertEqual(Self.parse(bad).jumps, .max, bad)
         }
     }
