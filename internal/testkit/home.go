@@ -31,6 +31,7 @@ func RunInOwnHome(run func() int) int {
 		os.Unsetenv(name)
 	}
 	clearAgentEnv()
+	stopGitAutoMaintenance()
 	return run()
 }
 
