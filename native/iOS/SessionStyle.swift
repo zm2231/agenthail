@@ -35,6 +35,7 @@ struct SessionMarkdown: View {
             .phoneInlineStyle()
             .textual.headingStyle(TranscriptHeadingStyle())
             .textual.paragraphStyle(TranscriptParagraphStyle())
+            .textual.tableStyle(.gitHubWholeWords)
             .textual.structuredTextStyle(.gitHub)
             .textual.textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)

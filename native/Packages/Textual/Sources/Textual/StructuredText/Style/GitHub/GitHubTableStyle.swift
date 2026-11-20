@@ -38,12 +38,60 @@ extension StructuredText {
   }
 }
 
+extension StructuredText {
+  /// The GitHub table style, wrapping cells between words to fit its container and scrolling
+  /// horizontally only when the longest words cannot fit.
+  public struct GitHubWholeWordTableStyle: TableStyle {
+    private static let borderWidth: CGFloat = 1
+
+    /// Creates the whole-word GitHub table style.
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+      WholeWordTable {
+        configuration.label
+          .textual.tableBackground { layout in
+            Canvas { context, _ in
+              for bounds in layout.evenRowBounds {
+                context.fill(
+                  Path(bounds.integral),
+                  with: .style(DynamicColor.gitHubSecondaryBackground)
+                )
+              }
+            }
+          }
+          .textual.tableOverlay { layout in
+            Canvas { context, _ in
+              for divider in layout.dividers() {
+                context.fill(
+                  Path(divider),
+                  with: .style(DynamicColor.gitHubBorder)
+                )
+              }
+            }
+          }
+          .padding(Self.borderWidth)
+          .border(DynamicColor.gitHubBorder, width: Self.borderWidth)
+      }
+      .textual.tableCellSpacing(horizontal: Self.borderWidth, vertical: Self.borderWidth)
+      .textual.blockSpacing(.init(top: 0, bottom: 16))
+    }
+  }
+}
+
 extension StructuredText.TableLayout {
   fileprivate var evenRowBounds: [CGRect] {
     rowIndices
       .dropFirst()
       .filter { $0.isMultiple(of: 2) }
       .map { rowBounds($0) }
+  }
+}
+
+extension StructuredText.TableStyle where Self == StructuredText.GitHubWholeWordTableStyle {
+  /// The GitHub table style, keeping words whole and scrolling horizontally only when they cannot fit.
+  public static var gitHubWholeWords: Self {
+    .init()
   }
 }
 

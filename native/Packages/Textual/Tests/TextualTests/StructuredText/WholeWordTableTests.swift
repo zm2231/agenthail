@@ -53,6 +53,20 @@
         #expect(words.settled.height < plain.settled.height)
       }
 
+      @Test func theGitHubLookKeepsWordsWholeTheSameWay() throws {
+        let wide = measure(.gitHubWholeWords, width: 760)
+        let plainWide = measure(.gitHub, width: 760)
+        #expect(wide.settled.height == plainWide.settled.height)
+        #expect(wide.table <= 760)
+
+        let narrow = measure(.gitHubWholeWords, width: 200)
+        let plainNarrow = measure(.gitHub, width: 200)
+        #expect(narrow.table > 200)
+        #expect(narrow.settled.width == 200)
+        #expect(narrow.settled.height < plainNarrow.settled.height)
+        #expect(narrow.first == narrow.settled)
+      }
+
       @Test func resizingTheSameTableFollowsTheNewColumnWidth() throws {
         let wide = measure(.wholeWords, width: 760) { $0.width = 200 }
         let narrow = measure(.wholeWords, width: 200)

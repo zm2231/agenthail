@@ -10,30 +10,42 @@ extension StructuredText {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
-      Overflow {
-        ContainerWidth {
-          Color.clear
-            .frame(height: 0)
-            .containerRelativeFrame(.horizontal)
-          configuration.label
-            .fixedSize(horizontal: false, vertical: true)
-            .textual.tableOverlay { layout in
-              Canvas { context, _ in
-                for divider in layout.dividers() {
-                  context.fill(
-                    Path(divider),
-                    with: .style(DynamicColor.grayTertiary)
-                  )
-                }
+      WholeWordTable {
+        configuration.label
+          .fixedSize(horizontal: false, vertical: true)
+          .textual.tableOverlay { layout in
+            Canvas { context, _ in
+              for divider in layout.dividers() {
+                context.fill(
+                  Path(divider),
+                  with: .style(DynamicColor.grayTertiary)
+                )
               }
             }
-            .padding(Self.borderWidth)
-        }
+          }
+          .padding(Self.borderWidth)
       }
-      .textual.tableCellsKeepWords()
       .textual.tableCellSpacing(horizontal: Self.borderWidth, vertical: Self.borderWidth)
       .textual.blockSpacing(.fontScaled(top: 1.6, bottom: 1.6))
     }
+  }
+}
+
+/// Scrolls a table horizontally only when its cells, each kept as wide as its longest word, cannot
+/// fit the container.
+struct WholeWordTable<Content: View>: View {
+  @ViewBuilder let content: Content
+
+  var body: some View {
+    Overflow {
+      ContainerWidth {
+        Color.clear
+          .frame(height: 0)
+          .containerRelativeFrame(.horizontal)
+        content
+      }
+    }
+    .textual.tableCellsKeepWords()
   }
 }
 
