@@ -52,6 +52,7 @@ final class SessionPane: Identifiable {
     private(set) var sidebarOverlay = false
     private(set) var sidebarHidden = false
     @ObservationIgnored private var fitted = false
+    @ObservationIgnored private(set) var fittedWidth: CGFloat?
     var renamingSession: SessionState?
     var movingSession: SessionState?
     var adoptingSession: SessionState?
@@ -139,6 +140,7 @@ final class SessionPane: Identifiable {
     /// conversation on request instead, and forgets that request once it
     /// can dock again. The inspector collapses first, then the sidebar.
     func fitWindow(width: CGFloat) {
+        fittedWidth = width
         if !fitted {
             fitted = true
             inspectorVisible = width >= ColumnFit.inspectorOpens
