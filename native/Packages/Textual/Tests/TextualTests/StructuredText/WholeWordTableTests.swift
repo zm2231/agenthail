@@ -138,6 +138,7 @@
         let plain = measure(.default, width: 360, fontSize: 15, markdown: Self.fourColumns)
 
         #expect(words.table <= 360)
+        #expect(words.columns.count == 4)
         #expect(words.columns == plain.columns)
       }
 
