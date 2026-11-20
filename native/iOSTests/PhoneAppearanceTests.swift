@@ -76,6 +76,33 @@ final class PhoneAppearanceTests: XCTestCase {
         XCTAssertEqual(Array(relaunched.wallpapers.keys), ["backgrounds/sea.png"])
     }
 
+    func testAnUnreadableLightImageStillLetsTheNewLookThrough() async throws {
+        UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"theme":"system","background":"image: art/field-dark.jpg"},"chosen":{},"overrides":{},"problems":[]}"#
+        UIConfigURLProtocol.state.image = Self.png
+        let appearance = PhoneAppearance(cache: cache)
+        try await load(appearance) { appearance.config.rev == "one" && appearance.active }
+
+        UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"theme":"dark","glass.opacity":0.45,"background":"image: art/field-dark.jpg","background.light":"image: art/field-light.jpg"},"chosen":{},"overrides":{},"problems":[]}"#
+        UIConfigURLProtocol.state.images = ["art/field-light.jpg": Data("not an image".utf8)]
+        try await load(appearance) { appearance.config.rev == "two" }
+
+        XCTAssertEqual(appearance.colorScheme, .dark)
+        XCTAssertEqual(appearance.config.paneOpacity, 0.45)
+        XCTAssertEqual(appearance.problem, "The background image art/field-light.jpg can't be read.")
+        XCTAssertEqual(Array(appearance.wallpapers.keys), ["art/field-dark.jpg"])
+        guard case .image(let image) = appearance.spec(key(.list)).wallpaper else { return XCTFail("the readable dark image still shows") }
+        XCTAssertEqual(image.id, "art/field-dark.jpg")
+
+        var light = key(.list)
+        light.dark = false
+        let fallback = appearance.file(light)
+
+        UIConfigURLProtocol.state.images = [:]
+        try await load(appearance) { appearance.wallpapers.count == 2 }
+        XCTAssertNil(appearance.problem, "the next load fetches the image again")
+        XCTAssertNotEqual(appearance.file(light), fallback, "a render drawn without the image never stands in for one drawn with it")
+    }
+
     func testAChangedConfigKeepsTheCachedBackgroundForTheNextLaunch() async throws {
         UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"background":"image: backgrounds/sea.png"},"chosen":{},"overrides":{},"problems":[]}"#
         UIConfigURLProtocol.state.image = Self.png
@@ -330,6 +357,7 @@ private final class UIConfigState: @unchecked Sendable {
     private var _query: [String: String] = [:]
     private var _body = ""
     private var _image = Data()
+    private var _images: [String: Data] = [:]
     var query: [String: String] { lock.withLock { _query } }
     var body: String {
         get { lock.withLock { _body } }
@@ -339,8 +367,12 @@ private final class UIConfigState: @unchecked Sendable {
         get { lock.withLock { _image } }
         set { lock.withLock { _image = newValue } }
     }
+    var images: [String: Data] {
+        get { lock.withLock { _images } }
+        set { lock.withLock { _images = newValue } }
+    }
     func record(_ query: [String: String]) { lock.withLock { _query = query } }
-    func reset() { lock.withLock { _query = [:]; _body = ""; _image = Data() } }
+    func reset() { lock.withLock { _query = [:]; _body = ""; _image = Data(); _images = [:] } }
 }
 
 private final class UIConfigURLProtocol: URLProtocol, @unchecked Sendable {
@@ -356,7 +388,8 @@ private final class UIConfigURLProtocol: URLProtocol, @unchecked Sendable {
             Self.state.record(Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") }))
         }
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": background ? "image/png" : "application/json"])!, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: background ? Self.state.image : Data(Self.state.body.utf8))
+        let image = components.queryItems?.first { $0.name == "path" }?.value.flatMap { Self.state.images[$0] } ?? Self.state.image
+        client?.urlProtocol(self, didLoad: background ? image : Data(Self.state.body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}

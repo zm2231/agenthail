@@ -120,21 +120,34 @@ final class PhoneAppearance: ObservableObject {
                 if Task.isCancelled { return }
                 var wallpapers: [String: WallpaperImage] = [:]
                 var fetched: [String: Data] = [:]
+                var unreadable: [String] = []
                 for path in loaded.imagePaths {
                     if let kept = self.wallpapers[path] {
                         wallpapers[path] = kept
                         continue
                     }
-                    let data = try await api.uiBackground(path: path)
+                    let data: Data
+                    do {
+                        data = try await api.uiBackground(path: path)
+                    } catch {
+                        if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+                        unreadable.append(path)
+                        continue
+                    }
                     let maxPixels = Self.maxPixels
                     let image = await Task.detached { WallpaperImage.decode(data, id: path, maxPixels: maxPixels) }.value
                     if Task.isCancelled { return }
                     guard let image else {
-                        self.problem = "The background image \(path) can't be read."
-                        return
+                        unreadable.append(path)
+                        continue
                     }
                     wallpapers[path] = image
                     fetched[path] = data
+                }
+                let unreadableProblem = unreadable.isEmpty ? nil : "The background image \(unreadable.joined(separator: ", ")) can't be read."
+                if !unreadable.isEmpty, wallpapers.isEmpty {
+                    self.problem = unreadableProblem
+                    return
                 }
                 if loaded != config || wallpapers != self.wallpapers {
                     config = loaded
@@ -143,7 +156,7 @@ final class PhoneAppearance: ObservableObject {
                     save(loaded, wallpapers: fetched)
                 }
                 if textScaleWrite == nil { chosenTextScale = nil }
-                problem = nil
+                problem = unreadableProblem
             } catch {
                 if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
                 problem = AgenthailAPIError.userMessage(error)
@@ -187,7 +200,7 @@ final class PhoneAppearance: ObservableObject {
     }
 
     private func wallpaperID(dark: Bool) -> String {
-        if case .image(let path) = config.background(dark: dark) { return path }
+        if case .image(let path) = config.background(dark: dark) { return wallpapers[path] == nil ? "missing:" + path : path }
         return ""
     }
 
@@ -216,9 +229,10 @@ final class PhoneAppearance: ObservableObject {
         let target = file(key)
         let shown = spec(key)
         let config = config
+        let wallpaper = wallpaperID(dark: key.dark)
         Task {
             let result = await Task.detached(priority: .userInitiated) { BackdropRenderer.render(shown) }.value
-            guard config == self.config else { return }
+            guard config == self.config, wallpaper == self.wallpaperID(dark: key.dark) else { return }
             pending.remove(key)
             guard let result else { return }
             keep(result, for: key)
@@ -236,9 +250,10 @@ final class PhoneAppearance: ObservableObject {
         let shown = spec(key)
         let style = BackdropSpec.PaneStyle(minimum: key.solid ? 1 : Float(config.paneOpacity), strength: shown.strength)
         let config = config
+        let wallpaper = wallpaperID(dark: key.dark)
         Task {
             let result = await Task.detached(priority: .userInitiated) { BackdropRenderer.layers(shown, panes: [.content: style]) }.value
-            guard config == self.config else { return }
+            guard config == self.config, wallpaper == self.wallpaperID(dark: key.dark) else { return }
             pending.remove(key)
             guard let result else { return }
             keep(result, for: key)
