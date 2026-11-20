@@ -40,9 +40,9 @@ const limitHeldFilter = `EXISTS(SELECT 1 FROM limit_resumes lr WHERE lr.session_
 // RecordLimitStop records that session's last turn was refused by a usage
 // limit on account. The same refused turn keeps its state and attempts. A
 // new refused turn waits again; when it refuses a resume, the resume's
-// attempts carry over, so retries are counted across refusals. A later reset
-// time also becomes the reset of every other session waiting on the account,
-// since they share the limit.
+// attempts carry over, so a stop shows it follows a refused resume. Each stop
+// keeps the reset its own refusal named: sessions on one config root can run
+// as different accounts.
 func (r *Registry) RecordLimitStop(session surface.Session, account string, stop surface.LimitStop) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -61,12 +61,6 @@ func (r *Registry) RecordLimitStop(session surface.Session, account string, stop
 		session.ID, stop.TurnID, account, unixMilli(stop.RefusedAt), unixMilli(stop.ResetsAt), now); err != nil {
 		return err
 	}
-	if !stop.ResetsAt.IsZero() {
-		if _, err := tx.Exec(`UPDATE limit_resumes SET resets_at_ms=? WHERE account_key=? AND session_id!=? AND state='waiting' AND resets_at_ms<?`,
-			stop.ResetsAt.UnixMilli(), account, session.ID, stop.ResetsAt.UnixMilli()); err != nil {
-			return err
-		}
-	}
 	return tx.Commit()
 }
 
@@ -83,6 +77,18 @@ func (r *Registry) ClearLimitStop(sessionID, turnID string) error {
 // another refused turn, is left as it is.
 func (r *Registry) TransitionLimitResume(sessionID, turnID string, from []LimitResumeState, state LimitResumeState, now time.Time) (bool, error) {
 	return transitionLimitResume(r.db, sessionID, turnID, from, state, now)
+}
+
+// CountLimitAttempt counts a resume of the stop of turnID that did not go
+// through while the stop keeps waiting, so the stop is not tried the same way
+// again. It reports whether the stop was still waiting on turnID.
+func (r *Registry) CountLimitAttempt(sessionID, turnID string, now time.Time) (bool, error) {
+	result, err := r.db.Exec(`UPDATE limit_resumes SET attempts=attempts+1, updated_at_ms=? WHERE session_id=? AND turn_id=? AND state='waiting'`, now.UnixMilli(), sessionID, turnID)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	return changed > 0, err
 }
 
 // ReleaseLimitStop releases the stop of turnID when it is still in one of

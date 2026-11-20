@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,18 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+func queueFromPerson(t *testing.T, r *registry.Registry, sessionID, message, key string) int64 {
+	t.Helper()
+	if err := r.EnsureSender(surface.PersonSessionID); err != nil {
+		t.Fatal(err)
+	}
+	id, _, err := r.QueueDeliveryWithIntent(sessionID, message, key, surface.SendOptions{SourceSessionID: surface.PersonSessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
 
 func openDeliveryAsks(t *testing.T, r *registry.Registry) []registry.Ask {
 	t.Helper()
@@ -114,7 +127,7 @@ func TestTheSenderIsAskedFirstAndOnlyItMayAnswerForItsMessage(t *testing.T) {
 	}
 }
 
-func TestAnUnansweredSenderAskMovesToThePerson(t *testing.T) {
+func TestASenderAskStaysWithTheSenderUnlessItPassesItOn(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
 	failedIntent(t, r, "from", registry.DeliveryIntentSubmitted, "build the release")
 	d.syncDeliveryAsks()
@@ -122,10 +135,76 @@ func TestAnUnansweredSenderAskMovesToThePerson(t *testing.T) {
 	if len(asks) != 1 || asks[0].RoutedTo != "from" {
 		t.Fatalf("asks=%+v", asks)
 	}
-	d.escalateAsk(asks[0], "")
+	d.sweepAsks(time.Now().Add(24 * time.Hour))
+	if kept, _, err := r.Ask(asks[0].ID); err != nil || kept.RoutedTo != "from" || kept.State != registry.AskOpen {
+		t.Fatalf("ask=%+v err=%v, want it left with its sender past the window", kept, err)
+	}
+	d.escalateAsk(asks[0], registry.AskToPerson, registry.AskEscalated)
+	d.syncDeliveryAsks()
+	if state, _, err := r.Ask(asks[0].ID); err != nil || state.State != registry.AskWithdrawn {
+		t.Fatalf("ask=%+v err=%v, want an escalation Agenthail made withdrawn", state, err)
+	}
+	asks = openDeliveryAsks(t, r)
+	if len(asks) != 1 || asks[0].RoutedTo != "from" {
+		t.Fatalf("asks=%+v, want the sender asked again", asks)
+	}
+	if passed := d.performAction(t.Context(), sessionPrincipal("from"), actionFormatAPIv1, []byte(answerBody(asks[0], askEscalate)), "sender"); passed.Status != http.StatusOK {
+		t.Fatalf("pass on: status=%d body=%s", passed.Status, passed.Body)
+	}
+	d.syncDeliveryAsks()
 	moved, found, err := r.Ask(asks[0].ID)
 	if err != nil || !found || moved.RoutedTo != registry.AskToPerson || moved.State != registry.AskOpen {
-		t.Fatalf("ask=%+v found=%v err=%v, want it open with the person", moved, found, err)
+		t.Fatalf("ask=%+v found=%v err=%v, want the ask its sender passed on open with the person", moved, found, err)
+	}
+}
+
+func TestADeliveryAskPassedOnStaysWithItsHearerWhenTheNoticeFails(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	if err := r.RecordSessionOrigin(registry.OriginOf("from", "to")); err != nil {
+		t.Fatal(err)
+	}
+	failedIntent(t, r, "from", registry.DeliveryIntentSubmitted, "build the release")
+	d.syncDeliveryAsks()
+	asks := openDeliveryAsks(t, r)
+	if len(asks) != 1 || asks[0].RoutedTo != "from" {
+		t.Fatalf("asks=%+v", asks)
+	}
+	if _, err := r.WriteDB().Exec(`CREATE TRIGGER fail_notice BEFORE INSERT ON message_queue WHEN NEW.session_id='to' BEGIN SELECT RAISE(ABORT,'injected notice failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if passed := d.performAction(t.Context(), sessionPrincipal("from"), actionFormatAPIv1, []byte(answerBody(asks[0], askEscalate)), "sender"); passed.Status != http.StatusOK {
+		t.Fatalf("pass on: status=%d body=%s", passed.Status, passed.Body)
+	}
+	d.syncDeliveryAsks()
+	held, _, err := r.Ask(asks[0].ID)
+	if err != nil || held.State != registry.AskOpen || held.RoutedTo != "to" || len(held.Route) != 2 || held.Route[1].Why != registry.AskPassedOn {
+		t.Fatalf("ask=%+v err=%v, want it left with the hearer it was passed to", held, err)
+	}
+}
+
+func TestThePersonAnswersADeliveryAskOnThisMachineWithTheDashboardToken(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	queueID := queueFromPerson(t, r, "to", "never arrives", "")
+	if item, err := r.ClaimNextMessage("to", time.Now()); err != nil || item == nil || item.ID != queueID {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.DeadLetterMessage(queueID, errors.New("delivery rejected [target missing]: gone")); err != nil {
+		t.Fatal(err)
+	}
+	asks := openDeliveryAsks(t, r)
+	if len(asks) != 1 || asks[0].RoutedTo != registry.AskToPerson {
+		t.Fatalf("asks=%+v", asks)
+	}
+	encoded, _ := json.Marshal(map[string]any{"op": "answer", "askId": asks[0].ID, "choices": []string{"dismiss"}})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/asks", bytes.NewReader(encoded))
+	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+	response := httptest.NewRecorder()
+	d.dashboardHandler(&dashboardServer{token: dashboardTestToken}).ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("answer status=%d body=%s", response.Code, response.Body.String())
+	}
+	if answered, _, err := r.Ask(asks[0].ID); err != nil || answered.State != registry.AskAnswered || answered.AnsweredBy != registry.AskToPerson {
+		t.Fatalf("ask=%+v err=%v, want it answered by the person", answered, err)
 	}
 }
 
@@ -188,9 +267,7 @@ func TestAMessageThatMayHaveReachedItsSessionIsNeverOfferedDelete(t *testing.T) 
 
 func TestRetryRequeuesAMessageWhoseOutcomeIsUnknown(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
-	if err := r.QueueMessage("to", "maybe lost"); err != nil {
-		t.Fatal(err)
-	}
+	queueFromPerson(t, r, "to", "maybe lost", "")
 	item, err := r.ClaimNextMessage("to", time.Now())
 	if err != nil || item == nil {
 		t.Fatalf("item=%+v err=%v", item, err)

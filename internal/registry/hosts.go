@@ -656,13 +656,16 @@ type HostDelivery struct {
 	Status    string
 }
 
-func (r *Registry) QueueHostDelivery(sessionID, message, key string, request []byte, sent bool) (int64, error) {
+// QueueHostDelivery holds a request for the paired host that owns sessionID.
+// source is who sent it and relayHops the relay legs so far, so a failure is
+// put to its sender and a relayed one to nobody.
+func (r *Registry) QueueHostDelivery(sessionID, message, key string, request []byte, sent bool, source string, relayHops int) (int64, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-	id, err := queueHostDeliveryTx(tx, r.now(), sessionID, message, key, request, sent)
+	id, err := queueHostDeliveryTx(tx, r.now(), sessionID, message, key, request, sent, source, relayHops)
 	if err != nil {
 		return 0, err
 	}
@@ -674,7 +677,7 @@ func (r *Registry) QueueHostDelivery(sessionID, message, key string, request []b
 	return id, nil
 }
 
-func queueHostDeliveryTx(tx *sql.Tx, now time.Time, sessionID, message, key string, request []byte, sent bool) (int64, error) {
+func queueHostDeliveryTx(tx *sql.Tx, now time.Time, sessionID, message, key string, request []byte, sent bool, source string, relayHops int) (int64, error) {
 	if key == "" || len(request) == 0 {
 		return 0, fmt.Errorf("a held host delivery needs its idempotency key and request")
 	}
@@ -682,9 +685,9 @@ func queueHostDeliveryTx(tx *sql.Tx, now time.Time, sessionID, message, key stri
 	if sent {
 		status, inflightAt, evidence = "inflight", now.UnixMilli(), surface.EvidenceUnknown
 	}
-	result, err := tx.Exec(`INSERT INTO message_queue(session_id,message,delivery_key,host_request,status,attempts,inflight_at_ms,evidence,updated_at)
-		SELECT ?,?,?,?,?,1,?,?,datetime('now') WHERE EXISTS(SELECT 1 FROM sessions WHERE id=? AND host_id<>'')`,
-		sessionID, message, key, request, status, inflightAt, evidence, sessionID)
+	result, err := tx.Exec(`INSERT INTO message_queue(session_id,message,delivery_key,host_request,status,attempts,inflight_at_ms,evidence,source_session_id,relay_hops,updated_at)
+		SELECT ?,?,?,?,?,1,?,?,?,?,datetime('now') WHERE EXISTS(SELECT 1 FROM sessions WHERE id=? AND host_id<>'')`,
+		sessionID, message, key, request, status, inflightAt, evidence, source, relayHops, sessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -720,7 +723,7 @@ func (r *Registry) QueueHostSend(send HostSend) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return r.QueueHostDelivery(send.SessionID, send.Message, send.Key, request, false)
+	return r.QueueHostDelivery(send.SessionID, send.Message, send.Key, request, false, send.SourceSessionID, send.RelayHops)
 }
 
 // ForwardSender names the person or the Agenthail CLI on a request for a

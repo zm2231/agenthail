@@ -1123,6 +1123,47 @@ func TestFederationUnconfirmedSendRetriesByReplayingItsKey(t *testing.T) {
 	}
 }
 
+func TestAHeldSendThatDiesAsksItsSender(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	remote.gate.proxyDown.Store(true)
+	for _, test := range []struct {
+		name      string
+		author    string
+		send      func(body string) int
+		sessionID string
+		routedTo  string
+	}{
+		{"an agent", "", func(body string) int {
+			return local.daemon.performAction(t.Context(), sessionPrincipal("local-a"), actionFormatAPIv1, []byte(body), "agent").Status
+		}, "local-a", "local-a"},
+		{"the person", "person", func(body string) int {
+			return local.request(t, http.MethodPost, "/api/v1/actions", json.RawMessage(body)).Code
+		}, "remote-a", registry.AskToPerson},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"action":"send","sessionId":%q,"message":"from %s","author":%q}`, qualified, test.name, test.author)
+			if code := test.send(body); code != http.StatusOK {
+				t.Fatalf("send status=%d", code)
+			}
+			var id int64
+			queue, _ := local.reg.ListQueue(true, nil)
+			for _, item := range queue {
+				if item.Message == "from "+test.name {
+					id = item.ID
+				}
+			}
+			if err := local.reg.DeadLetterUnknown(id, errors.New("host vps has not confirmed the message")); err != nil {
+				t.Fatal(err)
+			}
+			ask := deliveryAskByRef(t, local.reg, fmt.Sprintf("queue:%d:dead", id))
+			if ask.SessionID != test.sessionID || ask.RoutedTo != test.routedTo {
+				t.Fatalf("ask on %s routed to %s, want on %s routed to %s", ask.SessionID, ask.RoutedTo, test.sessionID, test.routedTo)
+			}
+		})
+	}
+}
+
 func TestFederationRevokedTokenMarksHostUnauthorized(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	devices, err := remote.reg.ListDevices(false)

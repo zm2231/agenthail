@@ -194,10 +194,16 @@ type DeliveryIntent struct {
 // failed before any attempt left it unconfirmed.
 const deletableFailure = `di.status='failed' AND di.failed_from IN ('submitted','queued')`
 
+// unreadHourFailure is the failure older releases recorded for a message
+// Claude accepted when no turn that read it was seen within an hour. That
+// message still reached its session, so it never needs anyone.
+const unreadHourFailure = "Claude accepted this message, but no turn that read it was seen within an hour."
+
 // settledDeliveryFailure matches a failure that no longer needs anyone: a
-// later message from the same sender reached the same target, or it is more
-// than a day old. A held message stays until its target releases or drops it.
-const settledDeliveryFailure = `di.status='failed' AND (di.updated_at<datetime('now','-1 day') OR EXISTS (
+// later message from the same sender reached the same target, it is more
+// than a day old, or it is an unread-hour failure. A held message stays until
+// its target releases or drops it.
+const settledDeliveryFailure = `di.status='failed' AND (di.updated_at<datetime('now','-1 day') OR di.failure='` + unreadHourFailure + `' OR EXISTS (
 	SELECT 1 FROM delivery_intents later
 	WHERE later.sender_session_id=di.sender_session_id AND later.target_session_id=di.target_session_id
 		AND later.id>di.id AND later.status IN ('sent','delivered')))`

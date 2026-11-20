@@ -36,7 +36,7 @@ func TestDeliveryIntentReconcilesOnlyByBoundProviderKey(t *testing.T) {
 	}
 }
 
-func TestQueuedRelayFailureRaisesOneAskForThePersonWithoutNotifyingTheRelaySourceAcrossReplayAndReopen(t *testing.T) {
+func TestAQueuedRelayFailureAsksNobodyAndNotifiesNoOneAcrossReplayAndReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	first, err := Open(path)
 	if err != nil {
@@ -52,11 +52,10 @@ func TestQueuedRelayFailureRaisesOneAskForThePersonWithoutNotifyingTheRelaySourc
 		t.Fatalf("replayID=%d queueID=%d err=%v", replayID, queueID, err)
 	}
 	failQueued(t, first, queueID)
-	ask := onlyDeliveryAsk(t, first)
-	if ask.SessionID != "target" || ask.RoutedTo != AskToPerson {
-		t.Fatalf("ask=%+v, want it on the target and routed to the person", ask)
+	if asks := openDeliveryAsks(t, first); len(asks) != 0 {
+		t.Fatalf("a relayed failure raised asks: %+v", asks)
 	}
-	intent, err := first.DeliveryIntent(deliveryRef(t, ask).IntentID)
+	intent, err := first.DeliveryIntent(intentOfQueue(t, first, queueID))
 	if err != nil || intent.QueueID != queueID || intent.Status != DeliveryIntentFailed || intent.SenderSessionID != "sender" || intent.TargetSessionID != "target" || !intent.Relayed {
 		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
@@ -77,9 +76,18 @@ func TestQueuedRelayFailureRaisesOneAskForThePersonWithoutNotifyingTheRelaySourc
 	if err := second.SyncDeliveryAsks(time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if again := onlyDeliveryAsk(t, second); again.ID != ask.ID {
-		t.Fatalf("reopened ask=%+v, want %s", again, ask.ID)
+	if asks := openDeliveryAsks(t, second); len(asks) != 0 {
+		t.Fatalf("a relayed failure raised asks after reopen: %+v", asks)
 	}
+}
+
+func intentOfQueue(t *testing.T, r *Registry, queueID int64) int64 {
+	t.Helper()
+	var id int64
+	if err := r.db.QueryRow(`SELECT id FROM delivery_intents WHERE queue_id=?`, queueID).Scan(&id); err != nil {
+		t.Fatalf("intent of queue %d: %v", queueID, err)
+	}
+	return id
 }
 
 func TestQueueDeliveryFromAnUnregisteredSenderIsRecordedAsAgenthail(t *testing.T) {
@@ -175,7 +183,7 @@ func failQueued(t *testing.T, r *Registry, queueID int64) {
 	}
 }
 
-func TestFailedPersistedRelayCompletionDoesNotNotifyTheRelaySource(t *testing.T) {
+func TestAFailedPersistedRelayCompletionAsksNobodyAndDoesNotNotifyTheRelaySource(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	r, err := Open(path)
 	if err != nil {
@@ -219,17 +227,16 @@ func TestFailedPersistedRelayCompletionDoesNotNotifyTheRelaySource(t *testing.T)
 	if err != nil || routes[0].PendingCount != 0 || routes[0].FireCount != 1 {
 		t.Fatalf("routes=%+v err=%v", routes, err)
 	}
-	ask := onlyDeliveryAsk(t, r)
-	if ask.SessionID != "target" || ask.RoutedTo != AskToPerson {
-		t.Fatalf("ask=%+v, want it on the target and routed to the person", ask)
+	if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+		t.Fatalf("a relayed failure raised asks: %+v", asks)
 	}
-	intent, err := r.DeliveryIntent(deliveryRef(t, ask).IntentID)
+	intent, err := r.DeliveryIntent(intentOfQueue(t, r, queueID))
 	if err != nil || intent.QueueID != queueID || !intent.Relayed || intent.SenderSessionID != "source" {
 		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
 }
 
-func TestASenderNothingReadsGetsNoNoticeAndItsAsksGoToThePerson(t *testing.T) {
+func TestASenderNothingReadsGetsNoNoticeAndOnlyThePersonsAsksThem(t *testing.T) {
 	senders := map[string]func(*Registry) (string, error){
 		"unrepliable": func(r *Registry) (string, error) {
 			return r.EnsureUnrepliableSender("h0123456789ab", "worker-1", "vps/builder")
@@ -266,7 +273,12 @@ func TestASenderNothingReadsGetsNoNoticeAndItsAsksGoToThePerson(t *testing.T) {
 			if count := r.QueueCount(sender); count != 0 {
 				t.Fatalf("%d refusal notices queued for a sender nothing reads", count)
 			}
-			if refused := onlyDeliveryAsk(t, r); refused.SessionID != "target" || refused.RoutedTo != AskToPerson || deliveryRef(t, refused).QueueID != queueID {
+			asksThePerson := sender == surface.PersonSessionID || sender == surface.CLISessionID
+			if !asksThePerson {
+				if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+					t.Fatalf("a refusal from an unrepliable sender raised asks: %+v", asks)
+				}
+			} else if refused := onlyDeliveryAsk(t, r); refused.SessionID != "target" || refused.RoutedTo != AskToPerson || deliveryRef(t, refused).QueueID != queueID {
 				t.Fatalf("refusal ask=%+v, want it on the target and routed to the person", refused)
 			}
 			if _, err := r.RecordDeliveryFailure(deliveryID, "transport failed"); err != nil {
@@ -283,6 +295,12 @@ func TestASenderNothingReadsGetsNoNoticeAndItsAsksGoToThePerson(t *testing.T) {
 				if session.ID == sender {
 					t.Fatalf("the sender is watched: %+v", watched)
 				}
+			}
+			if !asksThePerson {
+				if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+					t.Fatalf("a failure from an unrepliable sender raised asks: %+v", asks)
+				}
+				return
 			}
 			failed := onlyDeliveryAsk(t, r)
 			if failed.SessionID != "target" || failed.RoutedTo != AskToPerson || deliveryRef(t, failed).IntentID != deliveryID {
@@ -347,7 +365,7 @@ func assertFailureStaysInHistory(t *testing.T, r *Registry, deliveryID, queueID 
 	t.Fatalf("queue list --all lost the failed message %d: %+v", queueID, queued)
 }
 
-func TestADeliveryThatOnlyReachedItsTargetsTransportWaitsAnHourForTheTurnThatReadsIt(t *testing.T) {
+func TestATargetIsWatchedForAnHourForTheTurnThatReadsADeliveryOnlyItsTransportTook(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "sender", "target", "codex")
 	watched := func(id string) bool {
@@ -393,14 +411,14 @@ func TestADeliveryThatOnlyReachedItsTargetsTransportWaitsAnHourForTheTurnThatRea
 	if err := r.AckMessageWithEvidence(queuedLong, "target", 0, surface.EvidenceTransportAccepted, "queued-uuid"); err != nil {
 		t.Fatal(err)
 	}
-	if failed, err := r.FailUnseenDeliveryTurns(time.Now()); err != nil || failed != 0 || !watched("target") {
-		t.Fatalf("failed=%d err=%v watched=%v, want a delivery accepted now watched though queued two hours ago", failed, err, watched("target"))
+	if !watched("target") {
+		t.Fatal("a delivery accepted now is not watched because it was queued two hours ago")
 	}
 	if reconciled, err := r.ReconcileDeliveryIntent("target", "queued-uuid"); err != nil || !reconciled {
 		t.Fatalf("reconciled=%v err=%v", reconciled, err)
 	}
 	read := send("target", surface.EvidenceTransportAccepted)
-	started := send("codex", surface.EvidenceDelivered)
+	send("codex", surface.EvidenceDelivered)
 	if !watched("target") || watched("codex") {
 		t.Fatalf("watched target=%v codex=%v, want only the target a transport took the message for", watched("target"), watched("codex"))
 	}
@@ -410,48 +428,19 @@ func TestADeliveryThatOnlyReachedItsTargetsTransportWaitsAnHourForTheTurnThatRea
 	if watched("target") {
 		t.Fatal("a delivered message still keeps its target watched")
 	}
-	maybeHeld := send("target", surface.EvidenceTransportAccepted)
-	unseen := send("target", surface.EvidenceTransportAccepted)
-	if _, err := r.db.Exec(`UPDATE delivery_intents SET failure='Claude may have held this message' WHERE id=?`, maybeHeld.ID); err != nil {
-		t.Fatal(err)
+	unread := send("target", surface.EvidenceTransportAccepted)
+	age(unread, 59*time.Minute)
+	if !watched("target") {
+		t.Fatal("a delivery accepted within the hour no longer keeps its target watched")
 	}
-	for _, intent := range []*DeliveryIntent{unseen, maybeHeld, started} {
-		age(intent, 59*time.Minute)
-	}
-	if failed, err := r.FailUnseenDeliveryTurns(time.Now()); err != nil || failed != 0 {
-		t.Fatalf("failed=%d err=%v within the hour", failed, err)
-	}
-	for _, intent := range []*DeliveryIntent{unseen, maybeHeld, started} {
-		age(intent, 61*time.Minute)
-	}
+	age(unread, 61*time.Minute)
 	if watched("target") {
-		t.Fatal("a delivery sent over an hour ago still keeps its target watched")
+		t.Fatal("a delivery accepted over an hour ago still keeps its target watched")
 	}
-	if failed, err := r.FailUnseenDeliveryTurns(time.Now()); err != nil || failed != 1 {
-		t.Fatalf("failed=%d err=%v, want only the unseen delivery", failed, err)
+	if got, err := r.DeliveryIntent(unread.ID); err != nil || got.Status != DeliveryIntentSent || got.Failure != "" {
+		t.Fatalf("intent=%+v err=%v, want a message nobody was seen reading left sent, not failed", got, err)
 	}
-	for _, want := range []struct {
-		intent  *DeliveryIntent
-		status  DeliveryIntentStatus
-		failure string
-	}{
-		{unseen, DeliveryIntentFailed, DeliveryTurnUnseen},
-		{maybeHeld, DeliveryIntentSent, "Claude may have held this message"},
-		{started, DeliveryIntentSent, ""},
-	} {
-		got, err := r.DeliveryIntent(want.intent.ID)
-		if err != nil || got.Status != want.status || got.Failure != want.failure {
-			t.Fatalf("intent=%+v err=%v, want %s %q", got, err, want.status, want.failure)
-		}
-	}
-	asks := openDeliveryAsks(t, r)
-	listed := false
-	for _, ask := range asks {
-		if deliveryRef(t, ask).IntentID == unseen.ID && strings.Contains(ask.Questions[0].Question, DeliveryTurnUnseen) {
-			listed = true
-		}
-	}
-	if !listed {
-		t.Fatalf("asks=%+v, want the unseen delivery listed with its reason", asks)
+	if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+		t.Fatalf("a message nobody was seen reading raised asks: %+v", asks)
 	}
 }

@@ -119,7 +119,7 @@ func TestACanceledResumeIsKeptForItsTurn(t *testing.T) {
 	}
 }
 
-func TestALaterResetOnAnAccountMovesEveryWaitingSessionOnIt(t *testing.T) {
+func TestEachStopKeepsTheResetItsOwnRefusalNamed(t *testing.T) {
 	r := openTestRegistry(t)
 	for _, id := range []string{"first", "second", "elsewhere"} {
 		if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
@@ -140,9 +140,9 @@ func TestALaterResetOnAnAccountMovesEveryWaitingSessionOnIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, resume := range resumes {
-		want := late
-		if resume.SessionID == "elsewhere" {
-			want = early
+		want := early
+		if resume.SessionID == "first" {
+			want = late
 		}
 		if !resume.ResetsAt.Equal(want) {
 			t.Fatalf("%s resets at %s, want %s", resume.SessionID, resume.ResetsAt, want)

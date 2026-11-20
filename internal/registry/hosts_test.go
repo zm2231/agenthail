@@ -187,7 +187,7 @@ func TestHeldHostDeliveryIsInvisibleToLocalClaimsAndMatchesByAlias(t *testing.T)
 	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "remote work"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `","alias":"builder"}`)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.QueueHostDelivery("remote-thread", "held", "cli-key", []byte(`{"action":"send"}`), false); err != nil {
+	if _, err := r.QueueHostDelivery("remote-thread", "held", "cli-key", []byte(`{"action":"send"}`), false, "", 0); err != nil {
 		t.Fatal(err)
 	}
 	if item, err := r.ClaimNextMessage("remote-thread", time.Now()); err != nil || item != nil {
@@ -271,11 +271,11 @@ func TestLocalRegistrationTakesASessionItsHostStoppedServing(t *testing.T) {
 	if _, _, err := r.ApplyHostCatalogRow(hostID, row); err != nil {
 		t.Fatal(err)
 	}
-	unsent, err := r.QueueHostDelivery("remote-thread", "never sent", "key-unsent", []byte(`{"action":"send"}`), false)
+	unsent, err := r.QueueHostDelivery("remote-thread", "never sent", "key-unsent", []byte(`{"action":"send"}`), false, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sent, err := r.QueueHostDelivery("remote-thread", "sent once", "key-sent", []byte(`{"action":"send"}`), true)
+	sent, err := r.QueueHostDelivery("remote-thread", "sent once", "key-sent", []byte(`{"action":"send"}`), true, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,11 +344,11 @@ func TestHeldHostDeliveryStaysPendingUntilTheHostTakesIt(t *testing.T) {
 	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
-	held, err := r.QueueHostDelivery("remote-thread", "while away", "key-held", []byte(`{"action":"send"}`), false)
+	held, err := r.QueueHostDelivery("remote-thread", "while away", "key-held", []byte(`{"action":"send"}`), false, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	canceled, err := r.QueueHostDelivery("remote-thread", "never mind", "key-canceled", []byte(`{"action":"send"}`), false)
+	canceled, err := r.QueueHostDelivery("remote-thread", "never mind", "key-canceled", []byte(`{"action":"send"}`), false, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +393,7 @@ func TestHostDeliveryConfirmationWindowStartsAtFirstSend(t *testing.T) {
 	}
 	start := time.Now().Truncate(time.Millisecond)
 	r.now = func() time.Time { return start }
-	id, err := r.QueueHostDelivery("remote-thread", "waited offline", "key-wait", []byte(`{"action":"send"}`), false)
+	id, err := r.QueueHostDelivery("remote-thread", "waited offline", "key-wait", []byte(`{"action":"send"}`), false, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestHostDeliveryConfirmationWindowStartsAtFirstSend(t *testing.T) {
 	if err != nil || !claimed || !inflightAt.Equal(firstSend) {
 		t.Fatalf("replay claim moved the window: at=%v claimed=%v err=%v", inflightAt, claimed, err)
 	}
-	sent, err := r.QueueHostDelivery("remote-thread", "written once", "key-sent", []byte(`{"action":"send"}`), true)
+	sent, err := r.QueueHostDelivery("remote-thread", "written once", "key-sent", []byte(`{"action":"send"}`), true, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

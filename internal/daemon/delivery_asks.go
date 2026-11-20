@@ -16,11 +16,6 @@ import (
 
 func (d *Daemon) syncDeliveryAsks() {
 	d.failUnreportedPeerHolds(time.Now())
-	if failed, err := d.Registry.FailUnseenDeliveryTurns(time.Now()); err != nil {
-		d.log.Printf("fail unseen delivery turns: %s", err)
-	} else if failed > 0 {
-		d.log.Printf("failed %d deliveries no turn was seen reading", failed)
-	}
 	if err := d.Registry.SyncDeliveryAsks(time.Now()); err != nil {
 		d.log.Printf("sync delivery asks: %s", err)
 	}
@@ -75,7 +70,6 @@ func (d *Daemon) tellDeliveryAsks() {
 			d.announceAsk(ask)
 		} else if _, err := d.sendNotice(noticeRecipient{sessionID: ask.RoutedTo, role: "sender"}, d.askNoticeFor(ask, ask.RoutedTo), askNoticeKey(ask.ID, ask.RoutedTo)); err != nil {
 			d.log.Printf("tell %s its message was not delivered: %s", d.resolveDisplay(ask.RoutedTo), err)
-			d.escalateAsk(ask, "")
 		}
 		if err := d.Registry.MarkAskAnnounced(ask.ID, time.Now()); err != nil {
 			d.log.Printf("mark %s told: %s", ask.ID, err)

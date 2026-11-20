@@ -257,7 +257,7 @@ func TestAnAskTheHearerPassesOnSitsOnOrCannotHearReachesThePerson(t *testing.T) 
 	if out, refused := callMCP(t, f.person, "agenthail_answer", map[string]any{"requestId": passed, "decision": "escalate", "clientRequestId": "pass"}); refused {
 		t.Fatalf("escalate: %v", out)
 	}
-	if ask := f.ask(t, passed); ask.RoutedTo != registry.AskToPerson || len(ask.Route) != 2 || ask.Route[1].Why != registry.AskEscalated {
+	if ask := f.ask(t, passed); ask.RoutedTo != registry.AskToPerson || len(ask.Route) != 2 || ask.Route[1].Why != registry.AskPassedOn {
 		t.Fatalf("passed on: %+v", ask)
 	}
 	f.alert(t, " needs you: Deploy the fix?")

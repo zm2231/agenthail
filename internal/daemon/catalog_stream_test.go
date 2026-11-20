@@ -79,8 +79,8 @@ func TestActiveCatalogSubscriberReconnectsAfterARelayFailureWithoutReplay(t *tes
 	d.fireRelays(&sender, "relay-turn", 0, "forwarded reply")
 	fake.sendErr = surface.DeliveryTerminal(fmt.Errorf("target rejected input"), surface.DeliveryInvalidRequest)
 	d.drainMessageQueue(context.Background(), fake, &target)
-	if asks := openDeliveryAsks(t, store); len(asks) != 1 || asks[0].SessionID != target.ID || asks[0].RoutedTo != registry.AskToPerson {
-		t.Fatalf("asks=%+v, want the relay failure asked of the person", asks)
+	if asks := openDeliveryAsks(t, store); len(asks) != 0 {
+		t.Fatalf("asks=%+v, want a relay failure to ask nobody", asks)
 	}
 	if _, created, err := d.catalog.publish(registry.CatalogEvent{DedupeKey: "session:target:after-failure", Type: "session.upserted", EntityID: target.ID, Payload: []byte(`{"id":"target"}`)}); err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)

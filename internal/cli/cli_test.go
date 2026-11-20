@@ -1125,7 +1125,7 @@ func TestQueueListShowsASendAPairedHostQueuedAsDelivered(t *testing.T) {
 	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-busy", Name: "remote-busy", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}, EntityID: hostID + "::remote-busy", Projection: json.RawMessage(`{"id":"` + hostID + `::remote-busy","status":"busy"}`), ObservedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	id, err := r.QueueHostDelivery("remote-busy", "after your turn", "key-synthetic", []byte(`{"action":"send"}`), false)
+	id, err := r.QueueHostDelivery("remote-busy", "after your turn", "key-synthetic", []byte(`{"action":"send"}`), false, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

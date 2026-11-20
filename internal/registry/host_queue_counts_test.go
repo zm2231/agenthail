@@ -102,7 +102,7 @@ func TestMirroredQueueCountsMatchAFullRecomputeAfterAnyQueueChange(t *testing.T)
 		case op == 0 || len(ids) == 0:
 			target := all[random.Intn(len(all))]
 			if random.Intn(2) == 0 {
-				if _, err := r.QueueHostDelivery(target, fmt.Sprintf("send %d", step), "", []byte(`{}`), false); err != nil {
+				if _, err := r.QueueHostDelivery(target, fmt.Sprintf("send %d", step), "", []byte(`{}`), false, "", 0); err != nil {
 					exec(`INSERT INTO message_queue(session_id,message,status) VALUES(?,?,'pending')`, target, fmt.Sprintf("send %d", step))
 				}
 			} else {

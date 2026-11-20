@@ -6,8 +6,6 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestARowDeferredPastTheBoundTellsItsSenderOnceAndStaysQueued(t *testing.T) {
@@ -69,13 +67,10 @@ func TestARowDeferredPastTheBoundTellsItsSenderOnceAndStaysQueued(t *testing.T) 
 	}
 }
 
-func TestALateRowFromASenderWithNoSessionAsksThePersonAboutTheTarget(t *testing.T) {
+func TestALateRowThePersonSentAsksThePersonAboutTheTarget(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "target")
-	queueID, err := r.QueueMessageWithOptions("target", "from a sender this host never recorded", "", surface.SendOptions{SourceSessionID: "elsewhere"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	queueID := queueFromPerson(t, r, "target", "from the person", "")
 	now := time.Now()
 	if item, err := r.ClaimNextMessage("target", now.Add(-20*time.Minute)); err != nil || item == nil || item.ID != queueID {
 		t.Fatalf("claim=%+v err=%v", item, err)

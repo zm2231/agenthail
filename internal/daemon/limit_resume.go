@@ -35,18 +35,20 @@ const (
 
 // limitResumer remembers, between passes, what each session's transcript
 // looked like when it was last read, when each account last had a turn end
-// without an error, and when each account last had a session resumed.
+// without an error, when each account last had a session resumed, and which
+// stops a restart failed for.
 type limitResumer struct {
 	mu          sync.Mutex
 	seen        map[string]time.Time
 	settled     map[string]time.Time
 	lastRelease map[string]time.Time
+	restarts    map[string]string
 	moves       *limitMoves
 	claims      limitMoveClaims
 }
 
 func newLimitResumer() *limitResumer {
-	return &limitResumer{seen: map[string]time.Time{}, settled: map[string]time.Time{}, lastRelease: map[string]time.Time{}, moves: newLimitMoves()}
+	return &limitResumer{seen: map[string]time.Time{}, settled: map[string]time.Time{}, lastRelease: map[string]time.Time{}, restarts: map[string]string{}, moves: newLimitMoves()}
 }
 
 func (d *Daemon) runLimitResumes(ctx context.Context) {
@@ -160,15 +162,20 @@ func (d *Daemon) sweepLimitStops(ctx context.Context, now time.Time) {
 	d.limitResumes.moves.forget()
 }
 
-// resumeAccount resumes the sessions waiting on one account. Every session
-// on it waits for the same reset. A turn on the account that ends without an
-// error after the earliest refusal shows the limit has lifted whatever reset
-// was stored, since the account behind a config root can change between
-// turns. With no reset time, one session tries a resume each interval and the
-// rest follow only once it succeeds.
+// resumeAccount resumes the sessions stopped on one config root, each by
+// its own evidence. A running Claude process keeps the limit it was told
+// until the reset it named, so a stop is resumed by a message only once its
+// own reset has passed. Before that, a turn on the root that ends without an
+// error after the refusal shows the account behind the root has room, which
+// only a new process sees: a hosted session is restarted once and resumed,
+// and any other gets a note to restart it. A stop that follows a refused
+// resume is tried once more, at its own reset if that is still ahead, and
+// never on the root's room. With no reset time, one session tries a resume
+// each interval, a bounded number of times.
 func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, enabled bool, now time.Time) {
-	var waiting []registry.LimitResume
-	var earliest, latest, resetsAt time.Time
+	var due []limitRelease
+	var probes []registry.LimitResume
+	var latest time.Time
 	probing := false
 	for _, stop := range stops {
 		switch stop.State {
@@ -179,44 +186,110 @@ func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, ena
 		default:
 			continue
 		}
-		if !stop.ResetsAt.IsZero() && now.After(stop.ResetsAt.Add(limitResumeLapse)) || stop.ResetsAt.IsZero() && stop.Attempts >= limitProbeTries {
+		if limitStopLapsed(stop, now) {
 			d.logLimitResume(d.setLimitResume(stop, limitWaiting, registry.LimitResumeLapsed, now))
 			continue
 		}
-		waiting = append(waiting, stop)
-		if earliest.IsZero() || stop.RefusedAt.Before(earliest) {
-			earliest = stop.RefusedAt
-		}
-		if stop.RefusedAt.After(latest) {
-			latest = stop.RefusedAt
-		}
-		if stop.ResetsAt.After(resetsAt) {
-			resetsAt = stop.ResetsAt
-		}
-	}
-	if len(waiting) == 0 {
-		return
-	}
-	sort.SliceStable(waiting, func(i, j int) bool { return waiting[i].RefusedAt.After(waiting[j].RefusedAt) })
-	lifted := d.limitResumes.settledAfter(account, earliest)
-	due := lifted || !resetsAt.IsZero() && !now.Before(resetsAt.Add(limitResumeGrace))
-	if !enabled {
-		if due || resetsAt.IsZero() {
-			for _, stop := range waiting {
-				d.logLimitResume(d.releaseLimitStop(stop, limitWaiting, false, now))
+		switch {
+		case !stop.ResetsAt.IsZero() && !now.Before(stop.ResetsAt.Add(limitResumeGrace)):
+			due = append(due, limitRelease{stop: stop})
+		case stop.Attempts == 0 && d.limitResumes.settledAfter(account, stop.RefusedAt):
+			due = append(due, limitRelease{stop: stop, restart: true})
+		case stop.ResetsAt.IsZero():
+			probes = append(probes, stop)
+			if stop.RefusedAt.After(latest) {
+				latest = stop.RefusedAt
 			}
 		}
-		return
 	}
-	if !due {
-		if !resetsAt.IsZero() || probing || now.Before(latest.Add(limitProbeInterval)) {
-			return
+	if !enabled {
+		for _, release := range due {
+			if !release.restart {
+				d.logLimitResume(d.releaseLimitStop(release.stop, limitWaiting, false, now))
+			}
 		}
+		for _, stop := range probes {
+			d.logLimitResume(d.releaseLimitStop(stop, limitWaiting, false, now))
+		}
+		return
 	}
 	if last, ok := d.limitResumes.released(account); ok && now.Sub(last) < limitResumeSpacing {
 		return
 	}
-	d.logLimitResume(d.releaseLimitStop(waiting[0], limitWaiting, true, now))
+	sort.SliceStable(due, func(i, j int) bool { return due[i].stop.RefusedAt.After(due[j].stop.RefusedAt) })
+	for _, release := range due {
+		if !release.restart {
+			d.logLimitResume(d.releaseLimitStop(release.stop, limitWaiting, true, now))
+			return
+		}
+		if d.restartLimitedSession(release.stop, now) {
+			return
+		}
+	}
+	if len(due) > 0 || len(probes) == 0 || probing || now.Before(latest.Add(limitProbeInterval)) {
+		return
+	}
+	sort.SliceStable(probes, func(i, j int) bool { return probes[i].RefusedAt.After(probes[j].RefusedAt) })
+	d.logLimitResume(d.releaseLimitStop(probes[0], limitWaiting, true, now))
+}
+
+type limitRelease struct {
+	stop    registry.LimitResume
+	restart bool
+}
+
+// limitStopLapsed reports whether a stop is past being resumed
+// automatically: a day after its reset, after its tries when it has no reset,
+// or when a resume was refused after the reset it waited for.
+func limitStopLapsed(stop registry.LimitResume, now time.Time) bool {
+	if stop.ResetsAt.IsZero() {
+		return stop.Attempts >= limitProbeTries
+	}
+	return now.After(stop.ResetsAt.Add(limitResumeLapse)) || stop.Attempts > 0 && !stop.RefusedAt.Before(stop.ResetsAt)
+}
+
+// restartLimitedSession restarts a hosted session whose root has room so its
+// next turn runs in a new process, then resumes it. It reports whether it
+// acted. A restart that fails counts as the stop's attempt, so the stop then
+// waits for its own reset and is never restarted again.
+func (d *Daemon) restartLimitedSession(stop registry.LimitResume, now time.Time) bool {
+	session, err := d.Registry.Session(stop.SessionID)
+	if err != nil || session.RuntimeKind != surface.RuntimeClaudeHost {
+		return false
+	}
+	adapter, err := d.adapters().For(session)
+	if err != nil {
+		d.failLimitRestart(stop, err.Error(), now)
+		return false
+	}
+	lifecycle, ok := adapter.(surface.SessionLifecycle)
+	if !ok {
+		d.failLimitRestart(stop, "its surface cannot stop it", now)
+		return false
+	}
+	acted := false
+	if !d.unlessLimitMoving(stop.SessionID, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), surfaceOperationTimeout)
+		defer cancel()
+		if _, err := lifecycle.SessionAction(ctx, session, "stop"); err != nil {
+			d.failLimitRestart(stop, err.Error(), now)
+			return
+		}
+		acted = true
+		d.logLimitResume(d.releaseLimitStop(stop, limitWaiting, true, now))
+	}) {
+		return false
+	}
+	return acted
+}
+
+func (d *Daemon) failLimitRestart(stop registry.LimitResume, reason string, now time.Time) {
+	d.log.Printf("restart %s after its usage limit: %s", d.resolveDisplay(stop.SessionID), reason)
+	d.limitResumes.noteRestartFailure(stop, reason)
+	if _, err := d.Registry.CountLimitAttempt(stop.SessionID, stop.TurnID, now); err != nil {
+		d.log.Printf("count the restart of %s: %s", d.resolveDisplay(stop.SessionID), err)
+	}
+	d.limitResumeChanged(stop.SessionID)
 }
 
 var (
@@ -320,6 +393,23 @@ func (l *limitResumer) noteRelease(account string, at time.Time) {
 	l.lastRelease[account] = at
 }
 
+func limitStopKey(stop registry.LimitResume) string {
+	return stop.SessionID + "\x00" + stop.TurnID
+}
+
+func (l *limitResumer) noteRestartFailure(stop registry.LimitResume, reason string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.restarts[limitStopKey(stop)] = reason
+}
+
+func (l *limitResumer) restartFailure(stop registry.LimitResume) (string, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	reason, ok := l.restarts[limitStopKey(stop)]
+	return reason, ok
+}
+
 func (l *limitResumer) released(account string) (time.Time, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -333,6 +423,7 @@ type dashboardLimitResume struct {
 	State     registry.LimitResumeState `json:"state"`
 	RefusedAt time.Time                 `json:"refusedAt"`
 	ResetsAt  time.Time                 `json:"resetsAt,omitzero"`
+	Note      string                    `json:"note,omitempty"`
 	MoveTo    *limitMoveOffer           `json:"moveTo,omitempty"`
 }
 
@@ -340,7 +431,7 @@ func sameLimitResume(a, b *dashboardLimitResume) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.State == b.State && a.RefusedAt.Equal(b.RefusedAt) && a.ResetsAt.Equal(b.ResetsAt) && sameLimitMoveOffer(a.MoveTo, b.MoveTo)
+	return a.State == b.State && a.RefusedAt.Equal(b.RefusedAt) && a.ResetsAt.Equal(b.ResetsAt) && a.Note == b.Note && sameLimitMoveOffer(a.MoveTo, b.MoveTo)
 }
 
 func (d *Daemon) limitResumeRow(sessionID string) *dashboardLimitResume {
@@ -351,7 +442,8 @@ func (d *Daemon) limitResumeRow(sessionID string) *dashboardLimitResume {
 	if err != nil || !found || resume.State == registry.LimitResumeReleased {
 		return nil
 	}
-	return &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt, MoveTo: d.limitMoveOffer(sessionID, time.Now())}
+	now := time.Now()
+	return &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt, Note: d.limitResumeNote(resume, now), MoveTo: d.limitMoveOffer(sessionID, now)}
 }
 
 // limitResumeRows reads every shown stop at once, so a catalog pass reads
@@ -365,14 +457,39 @@ func (d *Daemon) limitResumeRows() (map[string]*dashboardLimitResume, error) {
 		return nil, err
 	}
 	rows := map[string]*dashboardLimitResume{}
-	offers := d.cachedLimitMoveOffers(time.Now())
+	now := time.Now()
+	offers := d.cachedLimitMoveOffers(now)
 	for _, resume := range resumes {
 		if resume.State == registry.LimitResumeReleased {
 			continue
 		}
-		rows[resume.SessionID] = &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt, MoveTo: offers[resume.SessionID]}
+		rows[resume.SessionID] = &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt, Note: d.limitResumeNote(resume, now), MoveTo: offers[resume.SessionID]}
 	}
 	return rows, nil
+}
+
+func (d *Daemon) limitResumeNote(stop registry.LimitResume, now time.Time) string {
+	if reason, failed := d.limitResumes.restartFailure(stop); failed && stop.State == registry.LimitResumeWaiting {
+		return "Could not restart it to resume: " + reason + "; it tries once more at its reset"
+	}
+	refusedAgain := stop.Attempts > 0 && !stop.ResetsAt.IsZero()
+	switch stop.State {
+	case registry.LimitResumeLapsed:
+		if refusedAgain && !stop.RefusedAt.Before(stop.ResetsAt) {
+			return "Resuming was refused after its reset; resume it when the limit lifts"
+		}
+	case registry.LimitResumeWaiting:
+		if refusedAgain {
+			return "Resuming didn't go through; it tries once more at its reset"
+		}
+		if !d.limitResumes.settledAfter(stop.AccountKey, stop.RefusedAt) {
+			return ""
+		}
+		if session, err := d.Registry.Session(stop.SessionID); err == nil && session.RuntimeKind != surface.RuntimeClaudeHost {
+			return "Its account has room again; restart it to continue"
+		}
+	}
+	return ""
 }
 
 // doLimitResume resumes a stopped session now, whatever its reset, or

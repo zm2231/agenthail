@@ -308,7 +308,7 @@ func TestFederationStopsReplayingHeldSendsOnceTheHostIsIncompatible(t *testing.T
 	remote.gate.actions.Store(hold)
 	var ids []int64
 	for _, message := range []string{"first", "second"} {
-		id, err := local.reg.QueueHostDelivery("remote-a", message, "fwd-"+message, []byte(`{"action":"send","sessionId":"remote-a","message":"`+message+`"}`), false)
+		id, err := local.reg.QueueHostDelivery("remote-a", message, "fwd-"+message, []byte(`{"action":"send","sessionId":"remote-a","message":"`+message+`"}`), false, "", 0)
 		if err != nil {
 			t.Fatal(err)
 		}

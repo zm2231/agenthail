@@ -44,7 +44,12 @@ func (d *Daemon) forwardHostAction(ctx context.Context, p principal, key string,
 	message, _ := request["message"].(string)
 	var notSent hosts.NotSentError
 	sent := !errors.As(err, &notSent)
-	queueID, queueErr := d.Registry.QueueHostDelivery(sessionID, message, key, body, sent)
+	source, queueErr := d.heldSendSender(p, request)
+	var queueID int64
+	if queueErr == nil {
+		hops, _ := request["relayHops"].(float64)
+		queueID, queueErr = d.Registry.QueueHostDelivery(sessionID, message, key, body, sent, source, int(hops))
+	}
 	if queueErr != nil {
 		return replyWith(func(w http.ResponseWriter) { writeHostError(w, host, errors.Join(err, queueErr)) })
 	}
@@ -103,4 +108,24 @@ type redirectedAfterMoveKey struct{}
 func redirectedAfterMove(ctx context.Context) bool {
 	redirected, _ := ctx.Value(redirectedAfterMoveKey{}).(bool)
 	return redirected
+}
+
+// heldSendSender is who sent a send held for a paired host: the calling
+// session, the sender it names on this host, or else the person or the CLI.
+func (d *Daemon) heldSendSender(p principal, request map[string]any) (string, error) {
+	source, _ := request["sourceSessionId"].(string)
+	if p.Kind == principalSession {
+		source = p.Claimed
+	}
+	if host, local, ok := hosts.Split(source); ok && host == d.hostIdentity().ID {
+		source = local
+	}
+	if source == "" {
+		author, _ := request["author"].(string)
+		source = surface.SourcelessSender(surface.Author(author))
+	}
+	if source == surface.PersonSessionID || source == surface.CLISessionID {
+		return source, d.Registry.EnsureSender(source)
+	}
+	return source, nil
 }

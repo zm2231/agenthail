@@ -25,6 +25,9 @@ const (
 
 	AskRaised    = "raised"
 	AskEscalated = "escalated"
+	// AskPassedOn is a hop its holder chose, unlike an escalation the daemon
+	// made after a window or when the holder stopped.
+	AskPassedOn = "passed on"
 
 	MaxAskTitle    = 80
 	MaxAskQuestion = 160

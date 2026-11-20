@@ -311,7 +311,7 @@ func TestRemoteSessionCommandsRouteThroughDaemon(t *testing.T) {
 
 func TestHeldSendForRemoteSessionIsLocalQueueData(t *testing.T) {
 	app, reg, _, api := federatedCLIFixture(t, true)
-	id, err := reg.QueueHostDelivery("remote-1", "held for vps", "cli-synthetic", []byte(`{"action":"send"}`), false)
+	id, err := reg.QueueHostDelivery("remote-1", "held for vps", "cli-synthetic", []byte(`{"action":"send"}`), false, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

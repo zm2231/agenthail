@@ -576,9 +576,7 @@ func TestOldQueuedMessageStaysPendingAndClaimable(t *testing.T) {
 func TestDeadDeliveryMovesToHistoryAfterReviewWindow(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
-	if _, err := r.QueueMessageWithKey("s", "uncertain old delivery", "old-unknown"); err != nil {
-		t.Fatal(err)
-	}
+	queueFromPerson(t, r, "s", "uncertain old delivery", "old-unknown")
 	item, err := r.ClaimNextMessage("s", time.Now())
 	if err != nil || item == nil {
 		t.Fatalf("item=%+v err=%v", item, err)
@@ -832,9 +830,7 @@ func TestQueueDeadLetterAndExplicitRetry(t *testing.T) {
 func TestADeadLetterAsksUntilItIsRetried(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
-	if err := r.QueueMessage("s", "needs a decision"); err != nil {
-		t.Fatal(err)
-	}
+	queueFromPerson(t, r, "s", "needs a decision", "")
 	if asks := openDeliveryAsks(t, r); len(asks) != 0 {
 		t.Fatalf("pending message asks=%+v", asks)
 	}
@@ -871,9 +867,7 @@ func TestADeadLetterAsksUntilItIsRetried(t *testing.T) {
 func TestCancelingADeadLetterWithdrawsItsAsk(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
-	if err := r.QueueMessage("s", "cancel this"); err != nil {
-		t.Fatal(err)
-	}
+	queueFromPerson(t, r, "s", "cancel this", "")
 	item, err := r.ClaimNextMessage("s", time.Now())
 	if err != nil || item == nil {
 		t.Fatalf("item=%+v err=%v", item, err)
@@ -898,9 +892,7 @@ func TestAnUnconfirmedDeliveryAskExplainsEachHTTPRejection(t *testing.T) {
 		t.Helper()
 		r := openTestRegistry(t)
 		register(t, r, "s")
-		if err := r.QueueMessage("s", "needs recovery"); err != nil {
-			t.Fatal(err)
-		}
+		queueFromPerson(t, r, "s", "needs recovery", "")
 		item, err := r.ClaimNextMessage("s", time.Now())
 		if err != nil || item == nil {
 			t.Fatalf("item=%+v err=%v", item, err)
@@ -1596,7 +1588,7 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		}
 		cleared(t, r, id)
 	})
-	t.Run("a relayed refusal asks the person", func(t *testing.T) {
+	t.Run("a relayed refusal asks nobody", func(t *testing.T) {
 		r := openTestRegistry(t)
 		for _, id := range []string{"sender", "target"} {
 			if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
@@ -1617,18 +1609,18 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		if err := r.DeferMessage(id, refusal, time.Now()); err != nil {
 			t.Fatal(err)
 		}
-		if ask := onlyDeliveryAsk(t, r); ask.SessionID != "target" || ask.RoutedTo != AskToPerson {
-			t.Fatalf("ask=%+v, want the person asked about the target", ask)
+		if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+			t.Fatalf("a relayed refusal raised asks: %+v", asks)
 		}
 		rows, err := r.ListQueue(false, nil)
 		if err != nil || len(rows) != 1 || rows[0].ID != id {
 			t.Fatalf("a relayed refusal queued a notice: rows=%+v err=%v", rows, err)
 		}
 	})
-	t.Run("a refusal without a sender asks the person", func(t *testing.T) {
+	t.Run("a refusal without a sender asks nobody", func(t *testing.T) {
 		r, id, _ := setup(t, surface.SendOptions{})
-		if ask := onlyDeliveryAsk(t, r); ask.SessionID != "target" || ask.RoutedTo != AskToPerson {
-			t.Fatalf("ask=%+v, want the person asked about the target", ask)
+		if asks := openDeliveryAsks(t, r); len(asks) != 0 {
+			t.Fatalf("a senderless refusal raised asks: %+v", asks)
 		}
 		rows, err := r.ListQueue(false, nil)
 		if err != nil {

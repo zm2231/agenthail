@@ -33,7 +33,7 @@ func TestHoldingASendForAHostTouchesItsChangeSignal(t *testing.T) {
 	if data, err := os.ReadFile(path); err != nil || len(data) != 0 {
 		t.Fatalf("new signal=%q err=%v", data, err)
 	}
-	if _, err := r.QueueHostDelivery("remote-thread", "held", "key-held", []byte(`{"action":"send"}`), false); err != nil {
+	if _, err := r.QueueHostDelivery("remote-thread", "held", "key-held", []byte(`{"action":"send"}`), false, "", 0); err != nil {
 		t.Fatal(err)
 	}
 	if data, err := os.ReadFile(path); err != nil || len(data) == 0 {
@@ -46,7 +46,7 @@ func TestASignalThatCannotBeWrittenNeverFailsTheSendItSignals(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(r.Path()), "changes"), []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.QueueHostDelivery("remote-thread", "held", "key-held", []byte(`{"action":"send"}`), false); err != nil {
+	if _, err := r.QueueHostDelivery("remote-thread", "held", "key-held", []byte(`{"action":"send"}`), false, "", 0); err != nil {
 		t.Fatalf("held send failed with its signal unwritable: %v", err)
 	}
 	if held, err := r.HostDeliveries("h0123456789ab"); err != nil || len(held) != 1 {
@@ -60,7 +60,7 @@ func TestRetryingADeadHostSendTouchesItsChangeSignalAndALocalOneDoesNot(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	held, err := r.QueueHostDelivery("remote-thread", "held", "key-held", []byte(`{"action":"send"}`), false)
+	held, err := r.QueueHostDelivery("remote-thread", "held", "key-held", []byte(`{"action":"send"}`), false, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
