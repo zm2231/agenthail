@@ -5,9 +5,11 @@ final class BodyRunsUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func runs(_ extra: [String], before: (XCUIApplication) -> Void = { _ in }) -> [String: Int] {
+    private func runs(_ name: String, _ extra: [String], before: (XCUIApplication) -> Void = { _ in }) -> [String: Int] {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-theme", "dark", "--body-runs", "--preview-background-upserts"] + extra
+        // Otherwise SwiftUI redraws every child until its background comparison setup is done, which a loaded host stretches past the window.
+        app.launchEnvironment["AG_ASYNC_LAYOUTS"] = "0"
         app.launch()
         before(app)
         let probe = app.staticTexts["body-runs"]
@@ -16,8 +18,12 @@ final class BodyRunsUITests: XCTestCase {
         let before = Self.counts(probe.label)
         Thread.sleep(forTimeInterval: 10)
         let after = Self.counts(probe.label)
-        let window = after.reduce(into: [String: Int]()) { $0[$1.key] = $1.value - (before[$1.key] ?? 0) }
-        return Self.foldRows(window)
+        var window = after.reduce(into: [String: Int]()) { $0[$1.key] = $1.value - (before[$1.key] ?? 0) }
+        window["compare.missesSinceLaunch"] = after["compare.misses", default: 0]
+        let runs = Self.foldRows(window)
+        print(Self.line(name, runs))
+        XCTAssertLessThanOrEqual(after["compare.misses", default: 0], 2, "SwiftUI could not compare unchanged views, so this measured its warm-up, not the app; check that AG_ASYNC_LAYOUTS=0 is still honoured")
+        return runs
     }
 
     private static func foldRows(_ window: [String: Int]) -> [String: Int] {
@@ -44,8 +50,7 @@ final class BodyRunsUITests: XCTestCase {
     }
 
     func testAnotherSessionsUpdatesLeaveTheOpenTranscriptAlone() {
-        let runs = runs(["--preview-reading"])
-        print(Self.line("transcript", runs))
+        let runs = runs("transcript", ["--preview-reading"])
         XCTAssertGreaterThan(runs["upserts", default: 0], 50, "the background session kept updating")
         for view in ["SessionScreen", "IOSComposer", "IOSTimelineRow"] {
             XCTAssertLessThanOrEqual(runs[view, default: 0], 2, "\(view) redrew for another session's updates")
@@ -53,8 +58,7 @@ final class BodyRunsUITests: XCTestCase {
     }
 
     func testStreamingIntoACrowdedTranscriptRedrawsOnlyTheGrowingMessage() {
-        let runs = runs(["--preview-stream", "--preview-stream-rate", "10"])
-        print(Self.line("streaming", runs))
+        let runs = runs("streaming", ["--preview-stream", "--preview-stream-rate", "10"])
         let streamed = runs["streamed", default: 0]
         XCTAssertGreaterThan(streamed, 50, "the open session kept streaming")
         for view in ["CompactActivityGroup", "IOSTimelineRow"] {
@@ -63,21 +67,19 @@ final class BodyRunsUITests: XCTestCase {
     }
 
     func testTextStreamingIntoAReplyLeavesTheScreenAlone() {
-        let runs = runs(["--preview-stream", "--preview-stream-rate", "10", "--preview-stream-shape", "text"])
-        print(Self.line("text-streaming", runs))
+        let runs = runs("text-streaming", ["--preview-stream", "--preview-stream-rate", "10", "--preview-stream-shape", "text"])
         let streamed = runs["streamed", default: 0]
         XCTAssertGreaterThan(streamed, 50, "the open session kept streaming")
         XCTAssertLessThanOrEqual(runs["SessionScreen", default: 0], streamed * 2 / 3, "text growing in a reply redrew the whole screen")
     }
 
     func testAWorkersUpdatesRedrawOnlyItsCardInTheOpenNowSheet() {
-        let runs = runs(["--preview-reading", "--preview-crew"]) { app in
+        let runs = runs("now", ["--preview-reading", "--preview-crew"]) { app in
             let now = app.buttons["happening-now"]
             XCTAssertTrue(now.waitForExistence(timeout: 30))
             now.tap()
             XCTAssertTrue(app.buttons["crew-computer::crew-check"].waitForExistence(timeout: 10))
         }
-        print(Self.line("now", runs))
         let upserts = runs["upserts", default: 0]
         XCTAssertGreaterThan(upserts, 50, "the worker kept updating")
         for view in ["SessionScreen", "IOSComposer", "IOSTimelineRow"] {
@@ -90,8 +92,7 @@ final class BodyRunsUITests: XCTestCase {
     }
 
     func testAnotherSessionsUpdatesRedrawOnlyItsRowInTheList() {
-        let runs = runs(["--preview-app"])
-        print(Self.line("list", runs))
+        let runs = runs("list", ["--preview-app"])
         let upserts = runs["upserts", default: 0]
         XCTAssertGreaterThan(upserts, 50, "the background session kept updating")
         for view in ["MainTabs", "ConversationListView"] {
