@@ -239,6 +239,22 @@ func TestATurnOnAPairedLinuxHostNotifiesTheViewerAndThePhoneOnce(t *testing.T) {
 	if shown := relay.shown("phone"); len(shown) != 2 || shown[1]["message"] != "Failed" {
 		t.Fatalf("after the failure the phone showed %+v", shown)
 	}
+
+	hostTurn(t, host, "remote-a", "turn-3", "", func() {
+		if _, err := host.reg.EndTurn(registry.TurnEnd{SessionID: "remote-a", Headline: "Shipped the fix", Source: registry.TurnSourceTool}, "turn-3", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	})
+	testkit.Eventually(t, "the headline turn notified", 10*time.Second, func() bool { return len(mac.list()) == 3 })
+	settleNotices(t, host, record.ID, viewer)
+	for _, send := range relay.sent() {
+		if send["turnId"] == "turn-3" && send["message"] != "Done: Shipped the fix" {
+			t.Fatalf("a computer pushed the headline turn as %+v", send)
+		}
+	}
+	if notices := mac.list(); notices[2].message != "Done: Shipped the fix" {
+		t.Fatalf("the viewer's desktop said %+v", notices[2])
+	}
 }
 
 func TestEachViewingMacNotifiesItsOwnScreenWhileThePhoneGetsOne(t *testing.T) {

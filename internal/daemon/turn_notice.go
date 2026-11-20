@@ -61,10 +61,13 @@ func (d *Daemon) notifyMirroredCompletion(host *pairedHost, rawID string, row da
 		return
 	}
 	body := "Finished"
-	if completion.Outcome == turnOutcomeFailed {
+	switch {
+	case completion.Outcome == turnOutcomeFailed:
 		body = "Failed"
+	case row.EndTurn != nil && row.EndTurn.Headline != "":
+		body = "Done: " + row.EndTurn.Headline
 	}
-	title := pushTag(row.Surface, row.Alias, row.Name)
+	title := pushTag(row.Surface, row.Alias, row.Name, row.Cwd)
 	notification := mobileNotification{Title: title, Message: body, SessionID: row.ID, TurnID: completion.TurnID, EventType: "turn.completed", CollapseID: turnNotificationKey(host.record.ID, rawID, completion.TurnID), DedupeKey: completionDedupeKey(host.record.ID, rawID, completion.TurnID)}
 	d.background.start(func(ctx context.Context) {
 		if err := d.notifyDesktop(title, body, row.ID, "", "", nil); err != nil {
@@ -86,7 +89,7 @@ func (d *Daemon) notifyMirroredAsk(host *pairedHost, rawID string, row dashboard
 		return
 	}
 	desktop := "Needs you: " + ask.Title
-	mobile := mobileNotification{Title: pushTag(row.Surface, row.Alias, row.Name), Message: desktop, SessionID: row.ID, TurnID: ask.ID, EventType: "ask.opened",
+	mobile := mobileNotification{Title: pushTag(row.Surface, row.Alias, row.Name, row.Cwd), Message: desktop, SessionID: row.ID, TurnID: ask.ID, EventType: "ask.opened",
 		CollapseID: askNotificationKey(ask.ID), RequestID: ask.ID, DedupeKey: askDedupeKey(host.record.ID, ask.ID)}
 	d.background.start(func(ctx context.Context) {
 		d.deliverAskNotifications(ctx, desktop, mobile, d.mirroredAskActions(ctx, host, rawID, ask.ID))

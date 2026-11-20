@@ -119,7 +119,10 @@ func (d *Daemon) notifyMirroredNeedsYou(host *pairedHost, rawID string, row dash
 		return
 	}
 	desktop := "Needs you"
-	mobile := mobileNotification{Title: pushTag(row.Surface, row.Alias, row.Name), Message: "Needs you", SessionID: row.ID, TurnID: state.TurnID, EventType: turnNeedsYouEvent,
+	if row.EndTurn != nil && row.EndTurn.Headline != "" {
+		desktop += ": " + row.EndTurn.Headline
+	}
+	mobile := mobileNotification{Title: pushTag(row.Surface, row.Alias, row.Name, row.Cwd), Message: desktop, SessionID: row.ID, TurnID: state.TurnID, EventType: turnNeedsYouEvent,
 		CollapseID: turnNotificationKey(host.record.ID, rawID, state.TurnID), DedupeKey: needsYouDedupeKey(host.record.ID, rawID, state.TurnID)}
 	d.sendTurnNeedsYou(row.ID, desktop, mobile)
 }

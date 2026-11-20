@@ -81,11 +81,13 @@ func (d *Daemon) notificationPreferencesHandler(w http.ResponseWriter, r *http.R
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "send an id and a value")
 			return
 		}
-		known := false
-		for _, row := range notificationPreferences {
-			known = known || row.ID == request.ID
+		var known *notificationPreference
+		for i := range notificationPreferences {
+			if notificationPreferences[i].ID == request.ID {
+				known = &notificationPreferences[i]
+			}
 		}
-		if !known {
+		if known == nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "unknown notification preference "+request.ID)
 			return
 		}
@@ -93,6 +95,9 @@ func (d *Daemon) notificationPreferencesHandler(w http.ResponseWriter, r *http.R
 			config.NotificationPreferences = map[string]bool{}
 		}
 		config.NotificationPreferences[request.ID] = *request.Value
+		if *request.Value == known.Default {
+			delete(config.NotificationPreferences, request.ID)
+		}
 		if err := SaveDashboardConfig(config); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return

@@ -2978,8 +2978,11 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                 failed.append(id)
             }
         }
+        if !failed.isEmpty {
+            merged = merged.map { NotificationPreferenceState(id: $0.id, title: $0.title, detail: $0.detail, value: false) }
+        }
         notificationPreferences = merged
-        notificationPreferenceProblem = failed.isEmpty ? nil : "Some computers could not be reached. Their notification choices are not shown."
+        notificationPreferenceProblem = failed.isEmpty ? nil : "Some computers could not be reached, so these show off until every computer confirms."
     }
 
     func setNotificationPreference(_ id: String, to value: Bool) {

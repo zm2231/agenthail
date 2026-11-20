@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -45,14 +46,17 @@ func shownLine(text string, limit int) string {
 	return strings.TrimRight(cut, " ,;:.-") + "…"
 }
 
-var generatedSessionName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+var (
+	generatedSessionName = regexp.MustCompile(`^([a-z0-9]+(?:-[a-z0-9]+)*)-[0-9a-z]{2}$`)
+	folderSlugBreaks     = regexp.MustCompile(`[^a-z0-9]+`)
+)
 
-// A push passes through the relay and Apple, so it names the session by its alias or a generated name like news-pilot-21, never a title written from the person's own words.
-func pushTag(kind surface.SurfaceKind, alias, name string) string {
+// A push passes through the relay and Apple, so it names the session by its alias or by a name generated from its folder (news-fqs-pilot-b9 in news-fqs-pilot), never by a name that may hold the person's own words.
+func pushTag(kind surface.SurfaceKind, alias, name, cwd string) string {
 	if alias != "" {
 		return "@" + alias
 	}
-	if len(name) <= 40 && generatedSessionName.MatchString(name) {
+	if folderGeneratedName(name, cwd) {
 		return name
 	}
 	switch kind {
@@ -67,12 +71,21 @@ func pushTag(kind surface.SurfaceKind, alias, name string) string {
 	}
 }
 
+func folderGeneratedName(name, cwd string) bool {
+	match := generatedSessionName.FindStringSubmatch(name)
+	if match == nil || cwd == "" {
+		return false
+	}
+	folder := strings.Trim(folderSlugBreaks.ReplaceAllString(strings.ToLower(filepath.Base(cwd)), "-"), "-")
+	return folder != "" && strings.HasPrefix(folder, match[1])
+}
+
 func (d *Daemon) sessionPushTag(session *surface.Session) string {
 	alias, err := d.Registry.ReverseAlias(session.ID)
 	if err != nil {
 		d.log.Printf("read the alias of %s: %s", session.ID, err)
 	}
-	return pushTag(session.Surface, alias, session.Name)
+	return pushTag(session.Surface, alias, session.Name, session.Cwd)
 }
 
 type dashboardAsk struct {
