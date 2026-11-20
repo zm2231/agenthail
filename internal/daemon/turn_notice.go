@@ -64,8 +64,8 @@ func (d *Daemon) notifyMirroredCompletion(host *pairedHost, rawID string, row da
 	switch {
 	case completion.Outcome == turnOutcomeFailed:
 		body = "Failed"
-	case row.EndTurn != nil && row.EndTurn.Headline != "":
-		body = "Done: " + row.EndTurn.Headline
+	case row.EndTurn.headlineOf(completion.TurnID) != "":
+		body = "Done: " + row.EndTurn.headlineOf(completion.TurnID)
 	}
 	title := pushTag(row.Surface, row.Alias, row.Name, row.Cwd)
 	notification := mobileNotification{Title: title, Message: body, SessionID: row.ID, TurnID: completion.TurnID, EventType: "turn.completed", CollapseID: turnNotificationKey(host.record.ID, rawID, completion.TurnID), DedupeKey: completionDedupeKey(host.record.ID, rawID, completion.TurnID)}

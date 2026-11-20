@@ -13,6 +13,7 @@ import (
 const AttentionAsk = "ask"
 
 type dashboardEndTurn struct {
+	TurnID   string    `json:"turnId,omitempty"`
 	Headline string    `json:"headline"`
 	Next     []string  `json:"next,omitempty"`
 	EndedAt  time.Time `json:"endedAt"`
@@ -31,7 +32,7 @@ func endTurnRow(end *registry.TurnEnd) *dashboardEndTurn {
 	for _, item := range end.Next {
 		next = append(next, shownLine(item, nextShownRunes))
 	}
-	return &dashboardEndTurn{Headline: shownLine(end.Headline, headlineShownRunes), Next: next, EndedAt: end.EndedAt}
+	return &dashboardEndTurn{TurnID: end.CompletedTurnID, Headline: shownLine(end.Headline, headlineShownRunes), Next: next, EndedAt: end.EndedAt}
 }
 
 func shownLine(text string, limit int) string {
@@ -51,12 +52,12 @@ var (
 	folderSlugBreaks     = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
-// A push passes through the relay and Apple, so it names the session by its alias or by a name generated from its folder (news-fqs-pilot-b9 in news-fqs-pilot), never by a name that may hold the person's own words.
+// A push passes through the relay and Apple, so it names the session by its alias or by the name Claude Code generates from its folder (news-fqs-pilot-b9 in news-fqs-pilot), never by a name that may hold the person's own words: a Codex name can be the first line of a prompt.
 func pushTag(kind surface.SurfaceKind, alias, name, cwd string) string {
 	if alias != "" {
 		return "@" + alias
 	}
-	if folderGeneratedName(name, cwd) {
+	if kind == surface.KindClaude && folderGeneratedName(name, cwd) {
 		return name
 	}
 	switch kind {
@@ -135,4 +136,11 @@ func (d *Daemon) endTurnNotifications(session *surface.Session, completedTurnID,
 		notice.mobile = notice.desktop
 	}
 	return notice
+}
+
+func (end *dashboardEndTurn) headlineOf(turnID string) string {
+	if end == nil || turnID == "" || end.TurnID != turnID {
+		return ""
+	}
+	return end.Headline
 }
