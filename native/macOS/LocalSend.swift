@@ -15,6 +15,7 @@ struct LocalSend: Identifiable, Equatable {
     var unconfirmed = false
     var retryStopped = false
     var turnOptions: MessageTurnOptions? = nil
+    var queueID: Int64? = nil
 
     var canDelete: Bool { failure != nil && (ask?.offersDelete ?? true) }
     var unconfirmedTitle: String? {
@@ -23,6 +24,16 @@ struct LocalSend: Identifiable, Equatable {
     }
 
     static let clockSkew: TimeInterval = 5
+
+    static func shown(_ sends: [LocalSend], queue: [QueueState]) -> [LocalSend] {
+        let tray = Set(QueueSteer.waiting(queue).map(\.id))
+        return sends.filter { send in send.queueID.map { !tray.contains($0) } ?? true }
+    }
+
+    static func queueID(of receipt: DeliveryReceipt?) -> Int64? {
+        guard let receipt, receipt.status == "queued", (receipt.movedTo ?? "").isEmpty else { return nil }
+        return receipt.queueId
+    }
 
     var files: [AttachedFile] {
         attachments.map { AttachedFile(name: $0.name, bytes: $0.byteCount) }

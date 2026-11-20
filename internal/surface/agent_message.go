@@ -38,7 +38,9 @@ var injectedNoticeKinds = map[string]string{
 
 func PresentTimelineItem(item TimelineItem) TimelineItem {
 	channel := ""
+	fromCLI := item.Kind == "message" && item.Role == "peer" && item.Sender == CLIPeerSender
 	if (item.Kind == "message" || item.Kind == "text") && item.Role == "user" && item.Origin == "" {
+		fromCLI = strings.HasPrefix(item.Text, CLILabel)
 		if envelope, ok := ParsePeerEnvelope(item.Text); ok {
 			item.Role, item.Origin, item.Sender, item.Title, item.Text = "peer", AgentKindPeer, envelope.Sender, envelope.Sender, envelope.Body
 			channel = envelope.Channel
@@ -47,6 +49,11 @@ func PresentTimelineItem(item TimelineItem) TimelineItem {
 	if item.Kind == "message" && item.Role == "peer" && channel == "" {
 		if envelope, ok := ParsePeerEnvelope(item.Text); ok && envelope.Channel != "" {
 			item.Text, channel = envelope.Body, envelope.Channel
+		}
+	}
+	if fromCLI {
+		if notice, ok := CLINotice(item.Text); ok {
+			item.Kind, item.Role, item.Origin, item.Sender, item.Title, item.Text = notice.Kind, notice.Role, notice.Origin, "", notice.Title, notice.Text
 		}
 	}
 	item.Agent = agentMessage(item, channel)

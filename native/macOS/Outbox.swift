@@ -101,6 +101,11 @@ final class Outbox {
         }
     }
 
+    func dropQueued(_ queueID: Int64, in sessionID: String) {
+        let session = resolve(sessionID)
+        rows[session]?.removeAll { $0.queueID == queueID }
+    }
+
     func reconcile(_ items: [TimelineItem], for sessionID: String) {
         guard let sends = rows[sessionID] else { return }
         rows[sessionID] = LocalSend.reconcile(sends, with: items)
@@ -147,6 +152,7 @@ final class Outbox {
             let receipt = try await api.send(wire)
             update(send.id, in: send.sessionID) {
                 $0.status = LocalSend.label(for: receipt.result)
+                $0.queueID = LocalSend.queueID(of: receipt.result)
                 $0.unconfirmed = false
                 $0.retryStopped = false
             }

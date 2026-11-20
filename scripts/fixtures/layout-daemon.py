@@ -610,6 +610,9 @@ if __name__ == "__main__":
             item("c7", "toolCall", "Bash", text='{"command":"./one-arm-test"}', minutes=2),
             item("s4", "message", role="assistant", text="On it. I'll bring you the cleanup plan before anything changes.", minutes=1),
         ]
+        if os.environ.get("AGENTHAIL_FIXTURE_TIMELINE"):
+            with open(os.environ["AGENTHAIL_FIXTURE_TIMELINE"]) as timeline:
+                items = json.load(timeline)
         RESPONSES["/api/v1/session"] = {
             "session": {k: lead[k] for k in ("id", "surface", "name", "status", "lastActive", "cwd")},
             "exchanges": [], "capabilities": CAPABILITIES, "readOnly": False, "readOnlyReason": "",

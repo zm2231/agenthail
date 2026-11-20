@@ -53,6 +53,34 @@ func TestPresentTimelineItemMarksAgentMessages(t *testing.T) {
 			agent: &AgentMessage{Direction: AgentIn, Kind: AgentKindContinuation, Peer: "Continued automatically", Summary: "go on"},
 		},
 		{
+			name:  "limit-resume notice the CLI sent a codex session",
+			item:  TimelineItem{Kind: "message", Role: "user", Title: "user", Text: CLILabel + LimitResumeNotice()},
+			want:  TimelineItem{Kind: "event", Role: "system", Origin: OriginAgenthailNotice, Title: "Usage limit reset", Text: LimitResumeText},
+			agent: &AgentMessage{Direction: AgentIn, Kind: AgentKindNotice, Peer: "Usage limit reset", Summary: LimitResumeText},
+		},
+		{
+			name:  "limit-resume notice the CLI sent over a claude peer socket",
+			item:  TimelineItem{Kind: "message", Role: "peer", Origin: "peer", Sender: "agenthail/cli: Agenthail CLI", Title: "agenthail/cli: Agenthail CLI", Text: CLIPeerPreamble + LimitResumeNotice()},
+			want:  TimelineItem{Kind: "event", Role: "system", Origin: OriginAgenthailNotice, Title: "Usage limit reset", Text: LimitResumeText},
+			agent: &AgentMessage{Direction: AgentIn, Kind: AgentKindNotice, Peer: "Usage limit reset", Summary: LimitResumeText},
+		},
+		{
+			name:  "a claude session named like the CLI stays its message",
+			item:  TimelineItem{Kind: "message", Role: "peer", Origin: "peer", Sender: "agenthail/claude: Agenthail CLI", Title: "agenthail/claude: Agenthail CLI", Text: CLIPeerPreamble + LimitResumeNotice()},
+			agent: &AgentMessage{Direction: AgentIn, Kind: AgentKindPeer, Peer: "Agenthail CLI", Summary: AgentSummary(CLIPeerPreamble + LimitResumeNotice())},
+		},
+		{
+			name:  "a codex session named like the CLI stays its message",
+			item:  TimelineItem{Kind: "message", Role: "user", Title: "user", Text: "[from Agenthail CLI] " + LimitResumeNotice()},
+			want:  TimelineItem{Kind: "message", Role: "peer", Origin: "peer", Sender: "Agenthail CLI", Title: "Agenthail CLI", Text: LimitResumeNotice()},
+			agent: &AgentMessage{Direction: AgentIn, Kind: AgentKindPeer, Peer: "Agenthail CLI", Summary: LimitResumeNotice()},
+		},
+		{
+			name:  "notice text from another agent stays its message",
+			item:  TimelineItem{Kind: "message", Role: "peer", Origin: "peer", Sender: "@builder", Title: "@builder", Text: LimitResumeNotice()},
+			agent: &AgentMessage{Direction: AgentIn, Kind: AgentKindPeer, Peer: "@builder", Summary: LimitResumeNotice()},
+		},
+		{
 			name: "other injected prompt",
 			item: TimelineItem{Kind: "event", Role: "system", Origin: "system", Title: "Injected prompt", Text: "x"},
 		},

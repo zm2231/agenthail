@@ -3,6 +3,27 @@ import Textual
 import UIKit
 
 enum AgentFoldGroups {
+    static let tightRunGap: CGFloat = 4
+
+    static func repeated(_ groups: [TimelineGroup]) -> [TimelineGroup] {
+        let keys = groups.map { group -> String? in
+            guard group.items.count == 1, group.foldLabel == nil else { return nil }
+            return group.items[0].agent?.repeatKey
+        }
+        var merged: [TimelineGroup] = []
+        var next = 0
+        for run in AgentRepeat.runs(keys) {
+            merged += groups[next..<run.lowerBound]
+            var group = groups[run.lowerBound]
+            group.items = groups[run.upperBound - 1].items
+            group.repeatsByItem = [group.items[0].id: run.count]
+            merged.append(group)
+            next = run.upperBound
+        }
+        merged += groups[next...]
+        return merged
+    }
+
     static func folded(_ groups: [TimelineGroup]) -> [TimelineGroup] {
         let shown = groups.filter { group in !group.items.allSatisfy { $0.kind == "done" } }
         let agents = shown.map { group -> AgentMessage? in
@@ -13,8 +34,9 @@ enum AgentFoldGroups {
         var next = 0
         for run in AgentFold.runs(agents) {
             folded += shown[next..<run.lowerBound]
-            let messages = agents[run].compactMap { $0 }
+            let messages = shown[run].flatMap { group in group.items.compactMap(\.agent).flatMap { Array(repeating: $0, count: group.repeats) } }
             var group = TimelineGroup(id: TranscriptRowID.fold(shown[run.lowerBound].id), items: shown[run].flatMap(\.items))
+            group.repeatsByItem = shown[run].reduce(into: [:]) { merged, member in merged.merge(member.repeatsByItem) { $1 } }
             group.foldLabel = AgentFold.label(messages)
             group.foldSenders = AgentFold.senders(messages)
             folded.append(group)
@@ -33,15 +55,18 @@ private func agentChip(_ item: TimelineItem, _ agent: AgentMessage) -> String {
 struct IOSAgentMessageRow: View {
     let item: TimelineItem
     let agent: AgentMessage
+    var repeats = 1
+    var memoryID: String? = nil
     @State private var opened: RowChoice<Bool>?
     @State private var truncated = false
     @Environment(\.transcriptRows) private var rows
     @Environment(\.expandAgentMessages) private var expandAll
 
+    private var rowKey: String { memoryID ?? TranscriptRowID.item(item.id) }
     private var files: [AttachedFile] { item.files ?? [] }
-    private var expandable: Bool { truncated || !files.isEmpty || TranscriptLinks.hasAddress(item.text) }
-    private var expanded: Bool { expandAll || (rows.current(opened) ?? rows.isOpen(TranscriptRowID.item(item.id)) ?? false) }
-    private var chip: String { agentChip(item, agent) }
+    private var expandable: Bool { AgentRowStyle.expandable(text: item.text, truncated: truncated, files: files.count) }
+    private var expanded: Bool { expandAll || (rows.current(opened) ?? rows.isOpen(rowKey) ?? false) }
+    private var chip: String { AgentMessage.chip(agentChip(item, agent), repeats: repeats) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -58,16 +83,11 @@ struct IOSAgentMessageRow: View {
                         Spacer(minLength: 0)
                         if !expandAll { Text("Show less").font(.footnote.weight(.medium)).foregroundStyle(PhonePalette.accentText) }
                     } else {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(chip).font(.subheadline.weight(.semibold)).foregroundStyle(PhonePalette.peer)
-                            ClampedText(text: Text(AgentMessage.inline(previewText)).foregroundStyle(.primary), lines: 6, truncated: $truncated)
-                                .font(.body)
-                                .multilineTextAlignment(.leading)
-                            if expandable {
-                                Text(files.isEmpty ? "Show more" : "Show more · \(files.count == 1 ? "1 file" : "\(files.count) files")")
-                                    .font(.footnote.weight(.medium))
-                                    .foregroundStyle(PhonePalette.accentText)
-                            }
+                        ClampedText(text: Text(chip).fontWeight(.semibold).foregroundStyle(PhonePalette.peer) + Text("  ") + Text(AgentMessage.inline(agent.summary)).italic().foregroundStyle(.secondary), lines: AgentRowStyle.previewLines, truncated: $truncated)
+                            .font(.subheadline)
+                            .multilineTextAlignment(.leading)
+                        if !fileNote.isEmpty {
+                            Text(fileNote).font(.footnote).foregroundStyle(PhonePalette.muted).fixedSize()
                         }
                     }
                 }
@@ -75,8 +95,9 @@ struct IOSAgentMessageRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(expanded ? "From \(chip)" : "\(chip): \(agent.summary)")
+            .accessibilityLabel(expanded ? "From \(chip)" : "\(chip): \(agent.summary)" + (fileNote.isEmpty ? "" : ", \(fileNote)"))
             .accessibilityValue(expandable || expanded ? (expanded ? "Expanded" : "Collapsed") : "")
+            .accessibilityHint(expandable && !expanded ? "Shows the whole message" : "")
             .accessibilityIdentifier("agent-message-" + item.id)
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
@@ -96,16 +117,15 @@ struct IOSAgentMessageRow: View {
         }
     }
 
-    private var previewText: String {
-        let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? agent.summary : text
+    private var fileNote: String {
+        files.isEmpty ? "" : files.count == 1 ? "1 file" : "\(files.count) files"
     }
 
     private func toggle() {
         guard !expandAll, expandable || expanded else { return }
         let next = !expanded
         opened = rows.choice(next)
-        rows.set(TranscriptRowID.item(item.id), open: next)
+        rows.set(rowKey, open: next)
     }
 }
 
@@ -214,7 +234,7 @@ struct IOSAgentFoldRow: View {
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(group.items) { item in
-                        if let agent = item.agent { IOSAgentMessageRow(item: item, agent: agent) }
+                        if let agent = item.agent { IOSAgentMessageRow(item: item, agent: agent, repeats: group.repeatsByItem[item.id] ?? 1) }
                     }
                 }
                 .padding(.leading, 18)

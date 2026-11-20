@@ -12,7 +12,7 @@ struct AgentMessageRow: View {
     @Environment(\.expandAgentMessages) private var expandAll
 
     private var files: [AttachedFile] { entry.item.files ?? [] }
-    private var expandable: Bool { truncated || !files.isEmpty || TranscriptLinks.hasAddress(entry.item.text) }
+    private var expandable: Bool { AgentRowStyle.expandable(text: entry.item.text, truncated: truncated, files: files.count) }
     private var expanded: Bool { expandAll || (rows.current(opened) ?? rows.isOpen(id) ?? false) }
 
     var body: some View {
@@ -43,32 +43,28 @@ struct AgentMessageRow: View {
 
     private var preview: some View {
         Button(action: toggle) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: DesktopSpace.s) {
-                    AgentRowMetrics.marker(open: false).opacity(expandable ? 1 : 0)
-                    Text(entry.chip)
-                        .font(.system(size: ReadingType.body, weight: .semibold))
-                        .foregroundStyle(DesktopPalette.peer)
-                    if let time = TurnClock.time(entry.item.timestamp) {
-                        Text(time).font(.system(size: ReadingType.caption)).foregroundStyle(DesktopPalette.meta)
-                    }
-                    if expandable {
-                        Text("Show more")
-                            .font(.system(size: ReadingType.caption, weight: .medium))
-                            .foregroundStyle(DesktopPalette.accentText)
-                            .fixedSize()
-                    }
+            HStack(alignment: .firstTextBaseline, spacing: DesktopSpace.s) {
+                AgentRowMetrics.marker(open: false).opacity(expandable ? 1 : 0)
+                ClampedText(text: Text(entry.chip).fontWeight(.semibold).foregroundStyle(DesktopPalette.peer) + Text("  ") + Text(AgentMessage.inline(entry.agent.summary)).italic().foregroundStyle(DesktopPalette.text2), lines: AgentRowStyle.previewLines, truncated: $truncated)
+                    .font(.system(size: ReadingType.body))
+                if !fileNote.isEmpty {
+                    Text(fileNote).font(.system(size: ReadingType.caption)).foregroundStyle(DesktopPalette.muted).fixedSize()
                 }
-                ClampedText(text: Text(AgentMessage.inline(previewText)).foregroundStyle(DesktopPalette.text) + Text(fileNote).foregroundStyle(DesktopPalette.muted), lines: AgentRowMetrics.previewLines, truncated: $truncated)
-                    .font(.system(size: ReadingType.prose))
-                    .lineSpacing(ReadingType.proseLineSpacing)
-                    .padding(.leading, AgentRowMetrics.indent)
+                if let time = TurnClock.time(entry.item.timestamp) {
+                    Text(time).font(.system(size: ReadingType.caption)).foregroundStyle(DesktopPalette.meta).fixedSize()
+                }
+                if expandable {
+                    Text("Show more")
+                        .font(.system(size: ReadingType.caption, weight: .medium))
+                        .foregroundStyle(DesktopPalette.accentText)
+                        .fixedSize()
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(entry.chip): \(entry.agent.summary)")
+        .accessibilityLabel("\(entry.chip): \(entry.agent.summary)" + (fileNote.isEmpty ? "" : ", \(fileNote)"))
         .accessibilityValue(expandable ? "Collapsed" : "")
         .accessibilityHint(expandable ? "Shows the whole message" : "")
     }
@@ -99,13 +95,8 @@ struct AgentMessageRow: View {
         }
     }
 
-    private var previewText: String {
-        let text = entry.item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? entry.agent.summary : text
-    }
-
     private var fileNote: String {
-        files.isEmpty ? "" : files.count == 1 ? "  · 1 file" : "  · \(files.count) files"
+        files.isEmpty ? "" : files.count == 1 ? "1 file" : "\(files.count) files"
     }
 
     private func toggle() {
@@ -202,7 +193,7 @@ struct AgentFoldRow: View {
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             .accessibilityHint("From \(entry.senders)")
             if expanded {
-                VStack(alignment: .leading, spacing: DesktopSpace.s) {
+                VStack(alignment: .leading, spacing: DesktopSpace.xs) {
                     ForEach(entry.members) { member in
                         if case .agent(let agent) = member.kind { AgentMessageRow(id: member.id, entry: agent) }
                     }
@@ -222,7 +213,6 @@ struct AgentFoldRow: View {
 
 enum AgentRowMetrics {
     static let indent: CGFloat = 16
-    static let previewLines = 6
 
     static func marker(open: Bool) -> some View {
         Image(systemName: "chevron.right")

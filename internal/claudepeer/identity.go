@@ -64,7 +64,7 @@ func peerContent(session surface.Session, target, socket, fromMode, message stri
 	case surface.PersonSessionID:
 		message = session.Name + surface.PersonPeerPreamble + message
 	case surface.CLISessionID:
-		message = "Sent with agenthail send from outside any session; no one reads replies to it.\n\n" + message
+		message = surface.CLIPeerPreamble + message
 	}
 	message = peerTag.ReplaceAllString(message, `<\$1`)
 	mode := ""

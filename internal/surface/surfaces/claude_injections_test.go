@@ -2,7 +2,9 @@ package surfaces
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -210,8 +212,42 @@ func TestClaudeTimelineShowsTheLimitResumeNoticeAsAgenthails(t *testing.T) {
 		t.Fatalf("items=%+v", page.Items)
 	}
 	for _, item := range notices {
-		if item.Kind != "event" || item.Role != "system" || item.Origin != "agenthail-notice" || item.Title != "Resumed after usage limit" || item.Text != surface.LimitResumeText {
+		if item.Kind != "event" || item.Role != "system" || item.Origin != "agenthail-notice" || item.Title != "Usage limit reset" || item.Text != surface.LimitResumeText {
 			t.Fatalf("notice=%+v", item)
+		}
+	}
+}
+
+func TestClaudeTimelineShowsTheCLIsPeerDeliveredNoticeAsAgenthails(t *testing.T) {
+	body := surface.CLIPeerPreamble + surface.LimitResumeNotice()
+	envelope := "<cross-session-message from=\"uds:/tmp/synthetic.sock\" from-session=\"s1\" from-name=\"agenthail/cli: Agenthail CLI\">\n" + body + "\n</cross-session-message>"
+	record := func(uuid string, origin map[string]any, content string) string {
+		line, err := json.Marshal(map[string]any{"type": "user", "uuid": uuid, "timestamp": "2026-11-19T10:00:0" + uuid[1:] + "Z", "origin": origin, "message": map[string]any{"role": "user", "content": content}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(line) + "\n"
+	}
+	path := timelineFixture(t, record("u1", map[string]any{"kind": "peer", "name": "agenthail/cli: Agenthail CLI", "msg_id": "m1", "body": body}, "Another Claude session sent a message:\n"+envelope)+
+		record("u2", map[string]any{"kind": "peer", "name": "agenthail/cli: Agenthail CLI", "msg_id": "m2"}, envelope)+
+		record("u3", map[string]any{"kind": "peer", "name": "reviewer", "msg_id": "m3", "body": surface.LimitResumeNotice()}, "<cross-session-message from-name=\"reviewer\">"+surface.LimitResumeNotice()+"</cross-session-message>")+
+		record("u4", map[string]any{"kind": "peer", "name": "agenthail/claude: Agenthail CLI", "msg_id": "m4", "body": body}, "<cross-session-message from-name=\"agenthail/claude: Agenthail CLI\">"+body+"</cross-session-message>"))
+	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 4 {
+		t.Fatalf("items=%+v", page.Items)
+	}
+	for index, item := range page.Items[:2] {
+		id, at := fmt.Sprintf("peer:m%d", index+1), fmt.Sprintf("2026-11-19T10:00:0%dZ", index+1)
+		if item.Kind != "event" || item.Role != "system" || item.Origin != surface.OriginAgenthailNotice || item.Title != "Usage limit reset" || item.Text != surface.LimitResumeText || item.ID != id || item.Timestamp != at {
+			t.Fatalf("notice=%+v, want id %s at %s", item, id, at)
+		}
+	}
+	for _, forged := range page.Items[2:] {
+		if forged.Role != "peer" || forged.Origin == surface.OriginAgenthailNotice {
+			t.Fatalf("an agent's notice-shaped message became Agenthail's: %+v", forged)
 		}
 	}
 }

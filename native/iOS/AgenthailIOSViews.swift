@@ -659,6 +659,7 @@ struct SessionScreen: View {
                     ForEach(groups) { group in
                         CompactActivityGroup(group: group, owner: session.id, attachmentLoader: { item in await model.displayableAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
                             .equatable()
+                            .padding(.top, group.tightAbove ? AgentFoldGroups.tightRunGap - Self.rowSpacing : 0)
                             .rebuilt(group.id, generation: rowsGeneration)
                             .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).probesScrollJump(group.id)
                             .countsAppearances("groupAppeared")

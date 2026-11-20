@@ -227,6 +227,33 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(TimelineGroup.make([peer("a", "@x"), peer("b", "@y"), reply], foldAgents: false).map(\.id), ["a", "b", "r"].map(TranscriptRowID.group))
     }
 
+    func testRepeatedNoticesShareOneRowAndAgentRunsSitTight() throws {
+        func notice(_ id: String, _ text: String) -> TimelineItem {
+            var item = TimelineItem(id: id, kind: "event", role: "system", title: "Usage limit reset", text: text, timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+            item.agent = AgentMessage(direction: "in", kind: "notice", peer: "Usage limit reset", summary: text)
+            return item
+        }
+        func peer(_ id: String) -> TimelineItem {
+            var item = TimelineItem(id: id, kind: "message", role: "peer", title: "@x", text: "hi", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+            item.agent = AgentMessage(direction: "in", kind: "peer", peer: "@x", summary: "hi")
+            return item
+        }
+        let reply = TimelineItem(id: "r", kind: "message", role: "assistant", title: "assistant", text: "ok", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        let resume = "Your usage limit has reset. Continue the work that was interrupted."
+        let groups = TimelineGroup.make([reply] + (1...6).map { notice("n\($0)", resume) })
+        XCTAssertEqual(groups.map(\.id), ["r", "n1"].map(TranscriptRowID.group))
+        XCTAssertEqual(groups.last?.repeats, 6)
+        XCTAssertEqual(groups.last?.items.map(\.id), ["n6"])
+        XCTAssertEqual(AgentMessage.chip("Usage limit reset", repeats: 6), "Usage limit reset ×6")
+        let run = TimelineGroup.make([reply, peer("a"), peer("b"), notice("c", resume)])
+        XCTAssertEqual(run.map(\.tightAbove), [false, false, true, true])
+        let folded = TimelineGroup.make([notice("x", resume), notice("y", resume), peer("p"), reply])
+        XCTAssertEqual(folded.first?.foldLabel, "3 updates · 2 Agenthail notices, 1 agent message")
+        XCTAssertEqual(folded.first?.repeatsByItem["y"], 2)
+        XCTAssertEqual(folded.first?.items.map(\.id), ["y", "p"])
+        XCTAssertEqual(AgentRowStyle.previewLines, 1)
+    }
+
     func testConsecutiveSendsShareOneGroupWithTheirResults() throws {
         func send(_ id: String) -> TimelineItem {
             var item = TimelineItem(id: id, kind: "toolCall", role: "assistant", title: "Bash", text: "", timestamp: nil, callId: "c" + id, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)

@@ -17,7 +17,7 @@ const (
 	claudeOriginCommand          = "command"
 	claudeOriginInterrupt        = "interrupt"
 	claudeOriginSystem           = "system"
-	claudeOriginNotice           = "agenthail-notice"
+	claudeOriginNotice           = surface.OriginAgenthailNotice
 )
 
 var (
@@ -87,6 +87,14 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 		if body == "" {
 			body = strings.TrimSpace(text)
 		}
+		if sender == surface.CLIPeerSender {
+			if notice, ok := surface.CLINotice(body); ok {
+				if id := str(origin, "msg_id"); id != "" {
+					notice.ID = "peer:" + id
+				}
+				return notice
+			}
+		}
 		if words, ok := claudePersonWords(text, body); ok {
 			item := surface.TimelineItem{Kind: "message", Role: "user", Origin: surface.OriginPerson, Title: "user", Text: words}
 			if id := str(origin, "msg_id"); id != "" {
@@ -107,11 +115,7 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 		if !enveloped {
 			body = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), surface.NoticePrefix))
 		}
-		title := "Agenthail notice"
-		if notice == surface.NoticeLimitResume {
-			title = "Resumed after usage limit"
-		}
-		return surface.TimelineItem{Kind: "event", Role: "system", Origin: kind, Title: title, Text: body}
+		return surface.TimelineItem{Kind: "event", Role: "system", Origin: kind, Title: surface.NoticeTitle(notice), Text: body}
 	case claudeOriginAutoContinuation:
 		return surface.TimelineItem{Kind: "event", Role: "system", Origin: kind, Title: "Continued automatically", Text: strings.TrimSpace(text)}
 	default:

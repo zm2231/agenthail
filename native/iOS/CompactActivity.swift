@@ -11,10 +11,14 @@ struct TimelineGroup: Identifiable, Equatable {
     var foldLabel: String? = nil
     var foldSenders = ""
     var focus = false
+    var repeatsByItem: [String: Int] = [:]
+    var tightAbove = false
+    var repeats: Int { items.count == 1 ? repeatsByItem[items[0].id] ?? 1 : 1 }
     var firstItemID: String { items.first?.id ?? "" }
     var callCount: Int { items.filter { $0.kind == "toolCall" }.count }
     var errorCount: Int { items.filter(ToolRunSummary.isFailure).count }
     var isSend: Bool { items.first?.agent?.isSend == true }
+    var isAgentRow: Bool { foldLabel != nil || isSend || (items.count == 1 && items[0].agent?.isIncoming == true) }
     var isActivity: Bool { foldLabel == nil && !isSend && items.allSatisfy { ["toolCall", "toolResult", "reasoning"].contains($0.kind) } }
     var folds: Bool { ToolRunSummary.folds(ToolRunSummary.entries(items), focus: focus) }
 
@@ -57,7 +61,10 @@ struct TimelineGroup: Identifiable, Equatable {
             else if isTurnDuration(item), let last = groups.last, last.isReply, last.items.count == 1 { groups[groups.count - 1].items.append(item) }
             else { groups.append(TimelineGroup(id: TranscriptRowID.group(item.id), items: [item], focus: focus && activity)) }
         }
-        return foldAgents ? AgentFoldGroups.folded(groups) : groups
+        groups = AgentFoldGroups.repeated(groups)
+        if foldAgents { groups = AgentFoldGroups.folded(groups) }
+        for index in groups.indices.dropFirst() { groups[index].tightAbove = groups[index].isAgentRow && groups[index - 1].isAgentRow }
+        return groups
     }
 
     var invocations: [TimelineGroup] {
@@ -159,6 +166,8 @@ struct CompactActivityGroup: View, @MainActor Equatable {
             }
         } else if group.isReply, let reply = group.items.first {
             LiveTimelineRow(item: reply, finished: group.finished, attachmentLoader: attachmentLoader)
+        } else if group.repeats > 1, let item = group.items.first, let agent = item.agent {
+            IOSAgentMessageRow(item: item, agent: agent, repeats: group.repeats, memoryID: group.id)
         } else {
             ForEach(group.items) { LiveTimelineRow(item: $0, attachmentLoader: attachmentLoader) }
         }
