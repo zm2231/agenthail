@@ -150,6 +150,7 @@ type Daemon struct {
 	identity                 registry.HostIdentity
 	federation               *federation
 	remoteOnce               sync.Once
+	remoteIdle               time.Duration
 	remote                   *remoteMCP
 	remoteExtensions         *remoteExtensions
 	uploads                  *uploads.Store

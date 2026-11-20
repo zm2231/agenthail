@@ -45,6 +45,9 @@ type mcpItemView struct {
 
 func (d *Daemon) mcpRead(ctx context.Context, caller *mcpCaller, input mcpReadInput) (any, error) {
 	if identity, ok := d.callerIdentity(caller); ok && strings.TrimSpace(input.SessionID) == "" {
+		if strings.HasPrefix(input.BodyRef, mcpInboxRefPrefix) {
+			return d.mcpReadInboxBody(identity, input.BodyRef, input.Offset)
+		}
 		return d.mcpReadInbox(identity)
 	}
 	session, err := d.mcpReadableSession(caller, input.SessionID)

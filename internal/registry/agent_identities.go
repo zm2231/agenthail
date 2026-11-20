@@ -388,3 +388,15 @@ func (r *Registry) AgentIdentitySessions() ([]surface.Session, error) {
 	}
 	return appendRows(make([]surface.Session, 0), rows, scanSession)
 }
+
+func (r *Registry) InboxMessageByID(name string, messageID int64) (InboxMessage, error) {
+	id, err := agentIdentityIDTx(r.read, name)
+	if err != nil {
+		return InboxMessage{}, err
+	}
+	message, err := scanInboxMessage(r.read.QueryRow(inboxSelect+` WHERE m.identity_id=? AND m.id=?`, id, messageID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return InboxMessage{}, fmt.Errorf("@%s has no message %d", name, messageID)
+	}
+	return message, err
+}

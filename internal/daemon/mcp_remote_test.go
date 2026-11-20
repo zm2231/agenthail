@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -41,9 +42,12 @@ type remoteFixture struct {
 	log    *bytes.Buffer
 }
 
-func newRemoteFixture(t *testing.T, clientID string) *remoteFixture {
+func newRemoteFixture(t *testing.T, clientID string, setup ...func(*Daemon)) *remoteFixture {
 	t.Helper()
 	d, r, _, _, _ := daemonFixture(t)
+	for _, apply := range setup {
+		apply(d)
+	}
 	f := &remoteFixture{d: d, r: r, issuer: cfaccesstest.New(t), log: &bytes.Buffer{}}
 	d.log = log.New(f.log, "", 0)
 	d.remoteMCP().certsURL = f.issuer.CertsURL()
@@ -370,5 +374,161 @@ func TestAnInboxReadReturnsWhatFitsAndLeavesTheRestUnread(t *testing.T) {
 	}
 	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 5-len(messages) {
 		t.Fatalf("unread=%d err=%v", unread, err)
+	}
+}
+
+func TestAnInboxReadOfEscapeHeavyAndLongMessagesFitsAndLosesNothing(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	sent := []string{strings.Repeat("\n", 4000), strings.Repeat("\"<q>\"", 3000), strings.Repeat("é", 9000)}
+	for _, text := range sent {
+		f.deliver(t, text)
+	}
+	session := f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, nil)
+	full := map[float64]string{}
+	for round := 0; round < len(sent); round++ {
+		result, err := session.CallTool(t.Context(), callParams("agenthail_read", nil))
+		if err != nil || result.IsError {
+			t.Fatalf("read round %d: err=%v result=%+v", round, err, result)
+		}
+		encoded, _ := json.Marshal(result.StructuredContent)
+		var body map[string]any
+		_ = json.Unmarshal(encoded, &body)
+		messages, _ := body["messages"].([]any)
+		if len(messages) == 0 {
+			break
+		}
+		for _, raw := range messages {
+			item := raw.(map[string]any)
+			id := item["id"].(float64)
+			if item["truncated"] != true {
+				full[id] = item["text"].(string)
+				continue
+			}
+			var text strings.Builder
+			offset := float64(0)
+			for {
+				page, refused := callMCP(t, session, "agenthail_read", map[string]any{"bodyRef": item["bodyRef"], "offset": offset})
+				if refused {
+					t.Fatalf("body page refused: %v", page)
+				}
+				text.WriteString(page["text"].(string))
+				next, more := page["nextOffset"].(float64)
+				if !more {
+					break
+				}
+				offset = next
+			}
+			full[id] = text.String()
+		}
+	}
+	if len(full) != len(sent) {
+		t.Fatalf("recovered %d of %d messages", len(full), len(sent))
+	}
+	for _, text := range sent {
+		found := false
+		for _, got := range full {
+			found = found || got == text
+		}
+		if !found {
+			t.Fatalf("a %d-byte message was not recovered whole", len(text))
+		}
+	}
+}
+
+func TestRevokingARemoteIdentityEndsItsOpenSession(t *testing.T) {
+	for _, revoke := range []string{"rotate", "off", "access"} {
+		t.Run(revoke, func(t *testing.T) {
+			f := newRemoteFixture(t, "")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			go f.d.runRemoteInboxNotices(ctx)
+			updated := make(chan string, 8)
+			logged := make(chan any, 8)
+			session := f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, &mcp.ClientOptions{
+				ResourceUpdatedHandler: func(_ context.Context, req *mcp.ResourceUpdatedNotificationRequest) { updated <- req.Params.URI },
+				LoggingMessageHandler:  func(_ context.Context, req *mcp.LoggingMessageRequest) { logged <- req.Params.Data },
+			})
+			if err := session.SetLoggingLevel(t.Context(), &mcp.SetLoggingLevelParams{Level: "notice"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := session.Subscribe(t.Context(), &mcp.SubscribeParams{URI: "agenthail://inbox/scout"}); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			switch revoke {
+			case "rotate":
+				_, _, err = f.r.RotateRemoteIdentity("scout")
+			case "off":
+				err = f.r.UnbindRemoteIdentity("scout")
+			case "access":
+				err = f.r.SetAccessSettings(cfaccesstest.Team, cfaccesstest.AUD)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.deliver(t, "after revocation")
+			ended := make(chan struct{})
+			go func() { _ = session.Wait(); close(ended) }()
+			select {
+			case <-ended:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the session stayed open after its credential changed")
+			}
+			select {
+			case uri := <-updated:
+				t.Fatalf("a revoked session was told of %s", uri)
+			case data := <-logged:
+				t.Fatalf("a revoked session got the summary %v", data)
+			default:
+			}
+		})
+	}
+}
+
+func TestSubscribingAgainRetellsUnreadMail(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	updated := make(chan string, 8)
+	session := f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, &mcp.ClientOptions{
+		ResourceUpdatedHandler: func(_ context.Context, req *mcp.ResourceUpdatedNotificationRequest) { updated <- req.Params.URI },
+	})
+	m := f.d.remoteMCP()
+	f.deliver(t, "waiting")
+	callMCP(t, session, "agenthail_whoami", nil)
+	m.notify(t.Context())
+	if err := session.Subscribe(t.Context(), &mcp.SubscribeParams{URI: "agenthail://inbox/scout"}); err != nil {
+		t.Fatal(err)
+	}
+	m.notify(t.Context())
+	select {
+	case <-updated:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a session that subscribed after a notice pass was never told of its unread mail")
+	}
+}
+
+func TestAnAbandonedRemoteSessionIsClosed(t *testing.T) {
+	f := newRemoteFixture(t, "", func(d *Daemon) { d.remoteIdle = 300 * time.Millisecond })
+	transport := &mcp.StreamableClientTransport{Endpoint: f.server.URL + "/mcp", HTTPClient: &http.Client{Transport: headerTransport{"Authorization": "Bearer " + f.token}}, MaxRetries: -1, DisableStandaloneSSE: true}
+	if _, err := mcp.NewClient(&mcp.Implementation{Name: "gone", Version: "1"}, nil).Connect(t.Context(), transport, nil); err != nil {
+		t.Fatal(err)
+	}
+	m := f.d.remoteMCP()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		m.notify(t.Context())
+		m.mu.Lock()
+		tracked := len(m.sessions)
+		m.mu.Unlock()
+		live := 0
+		for range m.server.Sessions() {
+			live++
+		}
+		if live == 0 && tracked == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("live=%d tracked=%d after the idle timeout", live, tracked)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
