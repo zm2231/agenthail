@@ -48,7 +48,7 @@ func (d *Daemon) mcpRead(ctx context.Context, caller *mcpCaller, input mcpReadIn
 		if strings.HasPrefix(input.BodyRef, mcpInboxRefPrefix) {
 			return d.mcpReadInboxBody(identity, input.BodyRef, input.Offset)
 		}
-		return d.mcpReadInbox(identity)
+		return d.mcpReadInbox(ctx, identity)
 	}
 	session, err := d.mcpReadableSession(caller, input.SessionID)
 	if err != nil {

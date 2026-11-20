@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -246,15 +247,11 @@ func (r *Registry) StoreInboxMessage(message InboxMessage) (InboxMessage, bool, 
 		return InboxMessage{}, false, err
 	}
 	message.Identity = name
-	if err := tx.Commit(); err != nil {
-		return InboxMessage{}, false, err
-	}
-	r.signalChange(ChangeAgentInbox)
-	return message, true, nil
+	return message, true, tx.Commit()
 }
 
-// MarkInboxRead marks the identity's messages ids read, leaving any other.
-func (r *Registry) MarkInboxRead(name string, ids []int64) error {
+// MarkInboxRead rolls back if ctx ends first, so an abandoned read consumes nothing.
+func (r *Registry) MarkInboxRead(ctx context.Context, name string, ids []int64) error {
 	id, err := agentIdentityIDTx(r.read, name)
 	if err != nil || len(ids) == 0 {
 		return err
@@ -266,31 +263,14 @@ func (r *Registry) MarkInboxRead(name string, ids []int64) error {
 	defer tx.Rollback()
 	now := r.now().UnixMilli()
 	for _, message := range ids {
-		if _, err := tx.Exec(`UPDATE agent_inbox SET read_at_ms=? WHERE id=? AND identity_id=? AND read_at_ms=0`, now, message, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE agent_inbox SET read_at_ms=? WHERE id=? AND identity_id=? AND read_at_ms=0`, now, message, id); err != nil {
 			return err
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return tx.Commit()
-}
-
-// LatestUnreadInbox is the newest unread message id of each identity that has
-// one, for waking its remote callers.
-func (r *Registry) LatestUnreadInbox() (map[string]int64, error) {
-	rows, err := r.read.Query(`SELECT identity_id,MAX(id) FROM agent_inbox WHERE read_at_ms=0 GROUP BY identity_id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	latest := map[string]int64{}
-	for rows.Next() {
-		var id string
-		var newest int64
-		if err := rows.Scan(&id, &newest); err != nil {
-			return nil, err
-		}
-		latest[id] = newest
-	}
-	return latest, rows.Err()
 }
 
 type InboxQuery struct {

@@ -1,9 +1,7 @@
 package daemon
 
 import (
-	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,18 +12,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/cfaccess"
-	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
 const (
-	remoteInboxURIPrefix = "agenthail://inbox/"
-	remoteInboxSweep     = 5 * time.Second
-	remoteTokenLife      = time.Hour
-	remoteSessionIdle    = time.Hour
-	tokenInfoGeneration  = "agenthail.generation"
-	tokenInfoRemote      = "agenthail.remote"
-	tokenInfoBinding     = "agenthail.binding"
+	remoteTokenLife  = time.Hour
+	tokenInfoRemote  = "agenthail.remote"
+	tokenInfoBinding = "agenthail.binding"
 )
 
 type remoteMCP struct {
@@ -40,34 +33,18 @@ type remoteMCP struct {
 	// certsURL and certsClient replace the team's key set, for tests.
 	certsURL    string
 	certsClient *http.Client
-
-	mu       sync.Mutex
-	sessions map[*mcp.ServerSession]*remoteMCPSession
-	wake     chan struct{}
 }
 
-type remoteMCPSession struct {
-	identity   string
-	name       string
-	generation string
-	notified   int64
-}
-
-func remoteInboxURI(name string) string { return remoteInboxURIPrefix + name }
-
+// Stateless: every request is verified on its own, so a revoked token stops at its next request.
 func (d *Daemon) remoteMCP() *remoteMCP {
 	d.remoteOnce.Do(func() {
-		m := &remoteMCP{d: d, sessions: map[*mcp.ServerSession]*remoteMCPSession{}, wake: make(chan struct{}, 1)}
+		m := &remoteMCP{d: d}
 		m.server = mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{
 			SupportedProtocolVersions: mcpProtocolVersions,
-			SubscribeHandler:          m.subscribe,
-			UnsubscribeHandler:        func(context.Context, *mcp.UnsubscribeRequest) error { return nil },
-			Instructions:              "You are an Agenthail agent identity. Messages sent to you wait in your inbox, the resource " + remoteInboxURIPrefix + "<your name>; subscribe to it to be told when one arrives. agenthail_read with no target returns your unread messages and marks them read; agenthail_wait with no tasks returns when one arrives. Reply with agenthail_send to the sender it names.",
+			Instructions:              "You are an Agenthail agent identity. Messages sent to you wait in your inbox. agenthail_wait with tasks [] returns when one arrives; agenthail_read with no sessionId returns your unread messages and marks them read. Reply with agenthail_send to the sender each message names.",
 		})
-		m.server.AddReceivingMiddleware(m.track)
 		d.registerMCPTools(m.server)
-		m.server.AddResourceTemplate(&mcp.ResourceTemplate{URITemplate: remoteInboxURIPrefix + "{name}", Name: "inbox", Title: "Inbox", Description: "Your unread messages, oldest first. Reading the resource leaves them unread.", MIMEType: "application/json"}, m.readInbox)
-		stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m.server }, &mcp.StreamableHTTPOptions{EventStore: mcp.NewMemoryEventStore(nil), SessionTimeout: cmp.Or(d.remoteIdle, remoteSessionIdle)})
+		stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m.server }, &mcp.StreamableHTTPOptions{Stateless: true})
 		bearer := auth.RequireBearerToken(m.verify, &auth.RequireBearerTokenOptions{})
 		m.handler = bearer(http.NewCrossOriginProtection().Handler(stream))
 		d.remote = m
@@ -164,29 +141,7 @@ func (m *remoteMCP) verify(ctx context.Context, token string, r *http.Request) (
 	if err := d.Registry.TouchRemoteIdentity(remote.IdentityID, time.Now()); err != nil {
 		d.logRuntimeError("remote mcp last seen", err)
 	}
-	extra := map[string]any{tokenInfoRemote: remote.Name, tokenInfoBinding: binding, tokenInfoGeneration: remoteGeneration(remote, team, aud, configured)}
-	return &auth.TokenInfo{UserID: remote.IdentityID, Expiration: time.Now().Add(remoteTokenLife), Extra: extra}, nil
-}
-
-// A rotation, rebind, --off or Access change ends sessions opened before it.
-func remoteGeneration(remote registry.RemoteIdentity, team, aud string, configured bool) string {
-	return fmt.Sprintf("%d|%s|%s|%t|%s|%s", remote.CreatedAt.UnixMilli(), remote.ClientID, remote.Email, configured, team, aud)
-}
-
-func (m *remoteMCP) currentGenerations() (map[string]string, error) {
-	remotes, err := m.d.Registry.RemoteIdentities()
-	if err != nil {
-		return nil, err
-	}
-	team, aud, configured, err := m.d.Registry.AccessSettings()
-	if err != nil {
-		return nil, err
-	}
-	current := map[string]string{}
-	for _, remote := range remotes {
-		current[remote.IdentityID] = remoteGeneration(remote, team, aud, configured)
-	}
-	return current, nil
+	return &auth.TokenInfo{UserID: remote.IdentityID, Expiration: time.Now().Add(remoteTokenLife), Extra: map[string]any{tokenInfoRemote: remote.Name, tokenInfoBinding: binding}}, nil
 }
 
 // An identity has the person's reach, as the CLI it sends with does.
@@ -221,166 +176,6 @@ func remoteName(extra *mcp.RequestExtra) (string, *auth.TokenInfo) {
 	}
 	name, _ := extra.TokenInfo.Extra[tokenInfoRemote].(string)
 	return name, extra.TokenInfo
-}
-
-// The SDK's InitializedHandler gets no TokenInfo, so sessions are learned here.
-func (m *remoteMCP) track(next mcp.MethodHandler) mcp.MethodHandler {
-	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-		session, ok := req.GetSession().(*mcp.ServerSession)
-		name, info := remoteName(req.GetExtra())
-		if !ok || name == "" || method == "initialize" {
-			return next(ctx, method, req)
-		}
-		m.mu.Lock()
-		_, known := m.sessions[session]
-		if !known {
-			generation, _ := info.Extra[tokenInfoGeneration].(string)
-			m.sessions[session] = &remoteMCPSession{identity: info.UserID, name: name, generation: generation}
-		}
-		m.mu.Unlock()
-		result, err := next(ctx, method, req)
-		// The SDK registers a subscription or log level only once the handler returns.
-		if err == nil && (method == "resources/subscribe" || method == "logging/setLevel") {
-			m.mu.Lock()
-			if state, ok := m.sessions[session]; ok {
-				state.notified = 0
-			}
-			m.mu.Unlock()
-		}
-		if !known || err == nil && (method == "resources/subscribe" || method == "logging/setLevel") {
-			m.poke()
-		}
-		return result, err
-	}
-}
-
-func (m *remoteMCP) subscribe(_ context.Context, req *mcp.SubscribeRequest) error {
-	name, _ := remoteName(req.Extra)
-	if name == "" || req.Params == nil {
-		return errors.New("only a remote identity subscribes to an inbox")
-	}
-	if req.Params.URI != remoteInboxURI(name) {
-		return fmt.Errorf("you may subscribe only to your own inbox, %s", remoteInboxURI(name))
-	}
-	return nil
-}
-
-func (m *remoteMCP) readInbox(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	name, _ := remoteName(req.Extra)
-	if name == "" || req.Params.URI != remoteInboxURI(name) {
-		return nil, mcp.ResourceNotFoundError(req.Params.URI)
-	}
-	messages, err := m.d.Registry.ReadInbox(name, registry.InboxQuery{Peek: true})
-	if err != nil {
-		return nil, err
-	}
-	body, err := json.Marshal(map[string]any{"identity": name, "unread": messages})
-	if err != nil {
-		return nil, err
-	}
-	return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{URI: req.Params.URI, MIMEType: "application/json", Text: string(body)}}}, nil
-}
-
-func (m *remoteMCP) poke() {
-	select {
-	case m.wake <- struct{}{}:
-	default:
-	}
-}
-
-// The inbox is the record; a new or resubscribed session is told of all unread.
-func (d *Daemon) runRemoteInboxNotices(ctx context.Context) {
-	m := d.remoteMCP()
-	var follow <-chan struct{}
-	if path, err := d.Registry.ChangeSignal(registry.ChangeAgentInbox); err != nil {
-		d.log.Printf("follow agent inboxes, noticing them every %s instead: %s", remoteInboxSweep, err)
-	} else {
-		wake := filewake.Follow(path)
-		defer wake.Release()
-		follow = wake.C()
-	}
-	ticker := time.NewTicker(remoteInboxSweep)
-	defer ticker.Stop()
-	for {
-		m.notify(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		case <-m.wake:
-		case <-follow:
-		}
-	}
-}
-
-func (m *remoteMCP) notify(ctx context.Context) {
-	live := map[*mcp.ServerSession]bool{}
-	for session := range m.server.Sessions() {
-		live[session] = true
-	}
-	m.mu.Lock()
-	for session := range m.sessions {
-		if !live[session] {
-			delete(m.sessions, session)
-		}
-	}
-	if len(m.sessions) == 0 {
-		m.mu.Unlock()
-		return
-	}
-	m.mu.Unlock()
-	current, err := m.currentGenerations()
-	if err != nil {
-		m.d.logRuntimeError("remote inbox notices", err)
-		return
-	}
-	var revoked []*mcp.ServerSession
-	m.mu.Lock()
-	for session, state := range m.sessions {
-		if current[state.identity] != state.generation {
-			revoked = append(revoked, session)
-			delete(m.sessions, session)
-		}
-	}
-	m.mu.Unlock()
-	for _, session := range revoked {
-		_ = session.Close()
-	}
-	latest, err := m.d.Registry.LatestUnreadInbox()
-	if err != nil {
-		m.d.logRuntimeError("remote inbox notices", err)
-		return
-	}
-	type due struct {
-		session *mcp.ServerSession
-		state   remoteMCPSession
-		newest  int64
-	}
-	var notices []due
-	names := map[string]bool{}
-	m.mu.Lock()
-	for session, state := range m.sessions {
-		if newest := latest[state.identity]; newest > state.notified {
-			notices = append(notices, due{session: session, state: *state, newest: newest})
-			names[state.name] = true
-			state.notified = newest
-		}
-	}
-	m.mu.Unlock()
-	for name := range names {
-		if err := m.server.ResourceUpdated(ctx, &mcp.ResourceUpdatedNotificationParams{URI: remoteInboxURI(name)}); err != nil {
-			m.d.logRuntimeError("remote inbox resource updated", err)
-		}
-	}
-	for _, notice := range notices {
-		messages, err := m.d.Registry.ReadInbox(notice.state.name, registry.InboxQuery{Peek: true})
-		if err != nil || len(messages) == 0 {
-			continue
-		}
-		last := messages[len(messages)-1]
-		data := map[string]any{"inbox": remoteInboxURI(notice.state.name), "unread": len(messages), "from": last.SenderName, "summary": clip(last.Message, 200)}
-		_ = notice.session.Log(ctx, &mcp.LoggingMessageParams{Level: "notice", Logger: "agenthail", Data: data})
-	}
 }
 
 func (d *Daemon) recordRemoteCall(caller *mcpCaller, tool string, refusal *mcpRefusal) {

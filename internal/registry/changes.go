@@ -19,9 +19,6 @@ const ChangeHostDeliveries ChangeReason = "host-deliveries"
 // ChangeMoveIns is a move arriving here that was accepted or settled.
 const ChangeMoveIns ChangeReason = "move-ins"
 
-// ChangeAgentInbox is a message stored in an agent identity's inbox.
-const ChangeAgentInbox ChangeReason = "agent-inbox"
-
 // ChangeSignal returns the file that writes for reason touch after they
 // commit, creating it so a watcher can follow it before the first write. A
 // touch is only a hint: a follower still keeps its timer for any it misses.

@@ -63,12 +63,12 @@ func clipEncoded(text string, limit int) (string, bool) {
 	return string(runes[:low]), true
 }
 
-func (d *Daemon) mcpReadInbox(identity registry.AgentIdentity) (any, error) {
+func (d *Daemon) mcpReadInbox(ctx context.Context, identity registry.AgentIdentity) (any, error) {
 	unread, err := d.Registry.ReadInbox(identity.Name, registry.InboxQuery{Peek: true})
 	if err != nil {
 		return nil, err
 	}
-	result := map[string]any{"identity": "@" + identity.Name, "inbox": remoteInboxURI(identity.Name), "remaining": len(unread), "next": "Call agenthail_read again for the rest."}
+	result := map[string]any{"identity": "@" + identity.Name, "remaining": len(unread), "next": "Call agenthail_read again for the rest."}
 	items := []mcpInboxItem{}
 	ids := []int64{}
 	for _, message := range unread {
@@ -88,7 +88,7 @@ func (d *Daemon) mcpReadInbox(identity registry.AgentIdentity) (any, error) {
 		items = append(items, item)
 		ids = append(ids, message.ID)
 	}
-	if err := d.Registry.MarkInboxRead(identity.Name, ids); err != nil {
+	if err := d.Registry.MarkInboxRead(ctx, identity.Name, ids); err != nil {
 		return nil, err
 	}
 	result["messages"], result["remaining"] = items, len(unread)-len(items)
@@ -148,7 +148,7 @@ func (d *Daemon) mcpWaitInbox(ctx context.Context, caller *mcpCaller, identity r
 			return nil, err
 		}
 		if unread > 0 {
-			return map[string]any{"type": "inbox", "unread": unread, "inbox": remoteInboxURI(identity.Name), "next": "Call agenthail_read with no sessionId to read and mark them read."}, nil
+			return map[string]any{"type": "inbox", "unread": unread, "next": "Call agenthail_read with no sessionId to read and mark them read."}, nil
 		}
 		if !time.Now().Before(deadline) {
 			return map[string]any{"type": "timeout", "unread": 0, "next": "Nothing arrived; wait again, or end your turn and be told when a message arrives."}, nil

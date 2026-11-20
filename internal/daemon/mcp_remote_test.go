@@ -42,12 +42,9 @@ type remoteFixture struct {
 	log    *bytes.Buffer
 }
 
-func newRemoteFixture(t *testing.T, clientID string, setup ...func(*Daemon)) *remoteFixture {
+func newRemoteFixture(t *testing.T, clientID string) *remoteFixture {
 	t.Helper()
 	d, r, _, _, _ := daemonFixture(t)
-	for _, apply := range setup {
-		apply(d)
-	}
 	f := &remoteFixture{d: d, r: r, issuer: cfaccesstest.New(t), log: &bytes.Buffer{}}
 	d.log = log.New(f.log, "", 0)
 	d.remoteMCP().certsURL = f.issuer.CertsURL()
@@ -269,98 +266,6 @@ func TestARemoteIdentityGetsTheLocalTools(t *testing.T) {
 	}
 }
 
-func TestARemoteIdentityIsToldOfItsInboxAndReadsIt(t *testing.T) {
-	f := newRemoteFixture(t, "")
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	go f.d.runRemoteInboxNotices(ctx)
-
-	updated := make(chan string, 8)
-	logged := make(chan map[string]any, 8)
-	options := &mcp.ClientOptions{
-		ResourceUpdatedHandler: func(_ context.Context, req *mcp.ResourceUpdatedNotificationRequest) {
-			updated <- req.Params.URI
-		},
-		LoggingMessageHandler: func(_ context.Context, req *mcp.LoggingMessageRequest) {
-			if data, ok := req.Params.Data.(map[string]any); ok {
-				logged <- data
-			}
-		},
-	}
-	headers := map[string]string{"Authorization": "Bearer " + f.token}
-	listen := func() *mcp.ClientSession {
-		session := f.connect(t, headers, options)
-		if err := session.SetLoggingLevel(t.Context(), &mcp.SetLoggingLevelParams{Level: "notice"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := session.Subscribe(t.Context(), &mcp.SubscribeParams{URI: "agenthail://inbox/scout"}); err != nil {
-			t.Fatal(err)
-		}
-		return session
-	}
-	expect := func(what string, unread float64) {
-		t.Helper()
-		select {
-		case uri := <-updated:
-			if uri != "agenthail://inbox/scout" {
-				t.Fatalf("%s: updated %s", what, uri)
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatalf("%s: no resources/updated", what)
-		}
-		select {
-		case data := <-logged:
-			if data["unread"] != unread || data["from"] != "builder" || data["inbox"] != "agenthail://inbox/scout" {
-				t.Fatalf("%s: logged %v", what, data)
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatalf("%s: no log message", what)
-		}
-	}
-
-	session := listen()
-	if err := session.Subscribe(t.Context(), &mcp.SubscribeParams{URI: "agenthail://inbox/builder"}); err == nil {
-		t.Fatal("subscribed to another identity's inbox")
-	}
-	waited, refused := callMCP(t, session, "agenthail_wait", map[string]any{"tasks": []string{}, "timeoutSec": 0})
-	if refused || waited["type"] != "timeout" {
-		t.Fatalf("wait on an empty inbox=%v refused=%v", waited, refused)
-	}
-	f.deliver(t, "first")
-	expect("a new message", 1)
-	resource, err := session.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: "agenthail://inbox/scout"})
-	if err != nil || len(resource.Contents) != 1 || !strings.Contains(resource.Contents[0].Text, `"first"`) {
-		t.Fatalf("resource=%+v err=%v", resource, err)
-	}
-	if _, err := session.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: "agenthail://inbox/builder"}); err == nil {
-		t.Fatal("read another identity's inbox")
-	}
-	session.Close()
-
-	f.deliver(t, "second")
-	session = listen()
-	expect("unread on reconnect", 2)
-	waited, refused = callMCP(t, session, "agenthail_wait", map[string]any{"tasks": []string{}, "timeoutSec": 5})
-	if refused || waited["type"] != "inbox" || waited["unread"] != float64(2) {
-		t.Fatalf("wait=%v refused=%v", waited, refused)
-	}
-	read, refused := callMCP(t, session, "agenthail_read", nil)
-	messages, _ := read["messages"].([]any)
-	if refused || len(messages) != 2 || read["remaining"] != float64(0) {
-		t.Fatalf("read=%v refused=%v", read, refused)
-	}
-	if first, _ := messages[0].(map[string]any); first["text"] != "first" || first["from"] != "builder" {
-		t.Fatalf("first=%v", first)
-	}
-	again, _ := callMCP(t, session, "agenthail_read", nil)
-	if rest, _ := again["messages"].([]any); len(rest) != 0 {
-		t.Fatalf("a second read returned %v", again)
-	}
-	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 0 {
-		t.Fatalf("unread=%d err=%v", unread, err)
-	}
-}
-
 func TestAnInboxReadReturnsWhatFitsAndLeavesTheRestUnread(t *testing.T) {
 	f := newRemoteFixture(t, "")
 	for i := range 5 {
@@ -435,100 +340,57 @@ func TestAnInboxReadOfEscapeHeavyAndLongMessagesFitsAndLosesNothing(t *testing.T
 	}
 }
 
-func TestRevokingARemoteIdentityEndsItsOpenSession(t *testing.T) {
-	for _, revoke := range []string{"rotate", "off", "access"} {
-		t.Run(revoke, func(t *testing.T) {
-			f := newRemoteFixture(t, "")
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			go f.d.runRemoteInboxNotices(ctx)
-			updated := make(chan string, 8)
-			logged := make(chan any, 8)
-			session := f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, &mcp.ClientOptions{
-				ResourceUpdatedHandler: func(_ context.Context, req *mcp.ResourceUpdatedNotificationRequest) { updated <- req.Params.URI },
-				LoggingMessageHandler:  func(_ context.Context, req *mcp.LoggingMessageRequest) { logged <- req.Params.Data },
-			})
-			if err := session.SetLoggingLevel(t.Context(), &mcp.SetLoggingLevelParams{Level: "notice"}); err != nil {
-				t.Fatal(err)
-			}
-			if err := session.Subscribe(t.Context(), &mcp.SubscribeParams{URI: "agenthail://inbox/scout"}); err != nil {
-				t.Fatal(err)
-			}
-			var err error
-			switch revoke {
-			case "rotate":
-				_, _, err = f.r.RotateRemoteIdentity("scout")
-			case "off":
-				err = f.r.UnbindRemoteIdentity("scout")
-			case "access":
-				err = f.r.SetAccessSettings(cfaccesstest.Team, cfaccesstest.AUD)
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			f.deliver(t, "after revocation")
-			ended := make(chan struct{})
-			go func() { _ = session.Wait(); close(ended) }()
-			select {
-			case <-ended:
-			case <-time.After(10 * time.Second):
-				t.Fatal("the session stayed open after its credential changed")
-			}
-			select {
-			case uri := <-updated:
-				t.Fatalf("a revoked session was told of %s", uri)
-			case data := <-logged:
-				t.Fatalf("a revoked session got the summary %v", data)
-			default:
-			}
-		})
-	}
-}
-
-func TestSubscribingAgainRetellsUnreadMail(t *testing.T) {
+func TestARemoteIdentityWaitsForItsInboxAndReadsIt(t *testing.T) {
 	f := newRemoteFixture(t, "")
-	updated := make(chan string, 8)
-	session := f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, &mcp.ClientOptions{
-		ResourceUpdatedHandler: func(_ context.Context, req *mcp.ResourceUpdatedNotificationRequest) { updated <- req.Params.URI },
-	})
-	m := f.d.remoteMCP()
-	f.deliver(t, "waiting")
-	callMCP(t, session, "agenthail_whoami", nil)
-	m.notify(t.Context())
-	if err := session.Subscribe(t.Context(), &mcp.SubscribeParams{URI: "agenthail://inbox/scout"}); err != nil {
+	session := f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, nil)
+	waited, refused := callMCP(t, session, "agenthail_wait", map[string]any{"tasks": []string{}, "timeoutSec": 0})
+	if refused || waited["type"] != "timeout" {
+		t.Fatalf("wait on an empty inbox=%v refused=%v", waited, refused)
+	}
+	stored := make(chan error, 1)
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		var err error
+		for _, text := range []string{"first", "second"} {
+			if err == nil {
+				_, _, err = f.r.StoreInboxMessage(registry.InboxMessage{Identity: f.scout.SessionID, UUID: text, SenderName: "builder", Message: text})
+			}
+		}
+		stored <- err
+	}()
+	waited, refused = callMCP(t, session, "agenthail_wait", map[string]any{"tasks": []string{}, "timeoutSec": 10})
+	if refused || waited["type"] != "inbox" {
+		t.Fatalf("wait=%v refused=%v", waited, refused)
+	}
+	if err := <-stored; err != nil {
 		t.Fatal(err)
 	}
-	m.notify(t.Context())
-	select {
-	case <-updated:
-	case <-time.After(5 * time.Second):
-		t.Fatal("a session that subscribed after a notice pass was never told of its unread mail")
+	read, refused := callMCP(t, session, "agenthail_read", nil)
+	messages, _ := read["messages"].([]any)
+	if refused || len(messages) != 2 || read["remaining"] != float64(0) {
+		t.Fatalf("read=%v refused=%v", read, refused)
+	}
+	if first, _ := messages[0].(map[string]any); first["text"] != "first" || first["from"] != "builder" {
+		t.Fatalf("first=%v", first)
+	}
+	again, _ := callMCP(t, session, "agenthail_read", nil)
+	if rest, _ := again["messages"].([]any); len(rest) != 0 {
+		t.Fatalf("a second read returned %v", again)
+	}
+	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 0 {
+		t.Fatalf("unread=%d err=%v", unread, err)
 	}
 }
 
-func TestAnAbandonedRemoteSessionIsClosed(t *testing.T) {
-	f := newRemoteFixture(t, "", func(d *Daemon) { d.remoteIdle = 300 * time.Millisecond })
-	transport := &mcp.StreamableClientTransport{Endpoint: f.server.URL + "/mcp", HTTPClient: &http.Client{Transport: headerTransport{"Authorization": "Bearer " + f.token}}, MaxRetries: -1, DisableStandaloneSSE: true}
-	if _, err := mcp.NewClient(&mcp.Implementation{Name: "gone", Version: "1"}, nil).Connect(t.Context(), transport, nil); err != nil {
-		t.Fatal(err)
+func TestAnAbandonedInboxReadLeavesItsMessagesUnread(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	f.deliver(t, "keep me")
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := f.d.mcpReadInbox(ctx, f.scout); err == nil {
+		t.Fatal("a cancelled inbox read succeeded")
 	}
-	m := f.d.remoteMCP()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		m.notify(t.Context())
-		m.mu.Lock()
-		tracked := len(m.sessions)
-		m.mu.Unlock()
-		live := 0
-		for range m.server.Sessions() {
-			live++
-		}
-		if live == 0 && tracked == 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("live=%d tracked=%d after the idle timeout", live, tracked)
-		}
-		time.Sleep(100 * time.Millisecond)
+	if unread, err := f.r.UnreadInbox("scout"); err != nil || unread != 1 {
+		t.Fatalf("unread=%d err=%v after a cancelled read", unread, err)
 	}
 }
