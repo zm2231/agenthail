@@ -2194,6 +2194,11 @@ struct DetailsTab: View {
                 } else if let model = pane.detail?.model {
                     detailRow("Model", model)
                 }
+                if canControl, let effort = pane.detail?.turnSettings?.setting(TurnSetting.effort) {
+                    TurnSettingMenuRow(setting: effort, disabled: pane.controlPending) { option in
+                        TurnSettingChoice.choose(option, for: effort, pending: &pendingMode, apply: pane.changeTurnSetting)
+                    }
+                }
                 if canControl && session.capabilities.permissionMode, let mode = pane.detail?.turnSettings?.setting(TurnSetting.mode) {
                     TurnSettingMenuRow(setting: mode, title: "Permissions", disabled: pane.controlPending) { option in
                         TurnSettingChoice.choose(option, for: mode, pending: &pendingMode, apply: pane.changeTurnSetting)

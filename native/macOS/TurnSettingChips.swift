@@ -8,7 +8,7 @@ struct TurnSettingChips: View {
 
     var body: some View {
         HStack(spacing: DesktopSpace.xs) {
-            ForEach([TurnSetting.model, TurnSetting.effort, TurnSetting.mode], id: \.self) { key in
+            ForEach([TurnSetting.mode], id: \.self) { key in
                 if let setting = settings.setting(key) { chip(setting) }
             }
         }

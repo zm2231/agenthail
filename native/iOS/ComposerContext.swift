@@ -1,14 +1,12 @@
 import Foundation
 
-struct ComposerContext: Equatable, ModelChoices {
+struct ComposerContext: Equatable {
     let sessionID: String
     let busy: Bool
     let waiting: Bool
     let capabilities: Capabilities
     let readOnly: Bool
     let turnSettings: [TurnSetting]?
-    let models: [ModelOption]?
-    let model: String?
 
     init(_ detail: SessionDetail) {
         sessionID = detail.session.id
@@ -17,7 +15,5 @@ struct ComposerContext: Equatable, ModelChoices {
         capabilities = detail.capabilities
         readOnly = detail.readOnly
         turnSettings = detail.turnSettings
-        models = detail.models
-        model = detail.model
     }
 }

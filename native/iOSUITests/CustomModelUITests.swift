@@ -6,9 +6,15 @@ final class CustomModelUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-theme", "dark"]
         app.launch()
-        let chip = app.buttons["composer-model-picker"]
-        XCTAssertTrue(chip.waitForExistence(timeout: 10))
-        chip.tap()
+        let summary = app.buttons["session-summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        summary.tapWhenReady()
+        XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
+        let change = app.buttons["session-model"]
+        let list = app.collectionViews.firstMatch
+        for _ in 0..<6 where !change.isHittable { list.swipeUp() }
+        XCTAssertTrue(change.isHittable, "session details change the model")
+        change.tap()
         XCTAssertTrue(app.navigationBars["Model"].waitForExistence(timeout: 10))
         let field = app.textFields["Enter an explicit model ID"]
         let search = app.searchFields["Search model options"]

@@ -952,9 +952,7 @@ struct IOSComposer: View, @MainActor Equatable {
     let session: SessionState
     let context: ComposerContext
     let showQueuedRow: RowAction<Void, Void>?
-    @State private var showingModels = false
     @State private var showingPrompts = false
-    @State private var loadedModels: [ModelOption]?
     @State private var completionState = CompletionState(session: "", caret: 0)
     @State private var editor = IOSComposerEditor()
 
@@ -1037,9 +1035,9 @@ struct IOSComposer: View, @MainActor Equatable {
 
     @ViewBuilder private var turnControls: some View {
         attachControl
-        if !context.readOnly, let settings = context.turnSettings, !settings.isEmpty {
+        if !context.readOnly, let settings = context.turnSettings, settings.setting(TurnSetting.mode) != nil {
             // The chips fold into a menu to fit, so they claim no width of their own when the footer decides whether one row fits.
-            IOSTurnSettingChips(model: model, sessionID: session.id, settings: settings) { showingModels = true }
+            IOSTurnSettingChips(model: model, sessionID: session.id, settings: settings)
                 .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
         }
@@ -1116,8 +1114,8 @@ struct IOSComposer: View, @MainActor Equatable {
                     HStack(spacing: 8) {
                         attachControl
                         textView(lines: 1 ... 2).padding(.leading, attachShown ? 0 : 8)
-                        if !context.readOnly, let settings = context.turnSettings, !settings.isEmpty {
-                            IOSTurnSettingsMenu(model: model, sessionID: session.id, settings: settings) { showingModels = true }
+                        if !context.readOnly, let settings = context.turnSettings, settings.setting(TurnSetting.mode) != nil {
+                            IOSTurnSettingsMenu(model: model, sessionID: session.id, settings: settings)
                         }
                         sendControls
                     }
@@ -1152,12 +1150,6 @@ struct IOSComposer: View, @MainActor Equatable {
                 draft.text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : draft.text + "\n\n" + text
             }
         }
-        .sheet(isPresented: $showingModels) {
-            SearchableModelSelectionSheet(initialOptions: context.modelOptions(catalog: loadedModels), currentSelectedID: context.selectedModelID, allowsDefault: false, onSelect: { value in
-                if let value { Task { await model.setTurnSetting(TurnSetting.model, to: value, sessionID: session.id) } }
-            }, reload: { context.modelOptions(catalog: try await loadModels()) })
-        }
-        .onChange(of: session.id) { _, _ in loadedModels = nil }
         .task(id: mentionRequest) { await loadMentionFiles(mentionRequest) }
     }
 
@@ -1212,12 +1204,6 @@ struct IOSComposer: View, @MainActor Equatable {
         guard let token = completionToken else { return }
         let change = ComposerCompletion.edit(item, in: draft.text, at: token)
         editor.replace(change.range, with: change.replacement, caret: change.caret)
-    }
-
-    private func loadModels() async throws -> [ModelOption] {
-        let options = try await model.creationModels(surface: session.surface, host: session.remoteHostID)
-        loadedModels = options
-        return options
     }
 }
 
@@ -1712,8 +1698,23 @@ struct SessionInspector: View {
                     if detail.readOnly { Label(detail.readOnlyReason, systemImage: "lock").font(.footnote) }
                     else {
                         if detail.capabilities.model {
-                            Button("Change model") { showingModels = true }
-                                .disabled(model.pendingControls.contains(session.id))
+                            let shown = detail.turnSettings?.setting(TurnSetting.model)
+                            Button { showingModels = true } label: {
+                                LabeledContent("Model", value: shown?.valueLabel ?? detail.model ?? "Default")
+                            }
+                            .accessibilityLabel(shown?.chipAccessibilityLabel ?? "Model, \(detail.model ?? "Default")")
+                            .accessibilityIdentifier("session-model")
+                            .disabled(model.pendingControls.contains(session.id))
+                        }
+                        if let effort = detail.turnSettings?.setting(TurnSetting.effort) {
+                            Menu {
+                                TurnSettingPicker(model: model, sessionID: session.id, setting: effort, options: effort.options)
+                            } label: {
+                                LabeledContent("Effort", value: effort.valueLabel)
+                            }
+                            .accessibilityLabel(effort.chipAccessibilityLabel)
+                            .accessibilityIdentifier("session-effort")
+                            .disabled(model.pendingControls.contains(session.id))
                         }
                         if detail.capabilities.permissionMode, let mode = detail.turnSettings?.setting(TurnSetting.mode) {
                             Menu {
@@ -1739,9 +1740,11 @@ struct SessionInspector: View {
                                 Button("Check runtime status") { model.action("status", session: session) }
                                 Button("Inspect context") { model.action("context", session: session) }
                                 Button("Check usage") { model.action("usage", session: session) }
-                                Menu("Change effort") {
-                                    ForEach(["low", "medium", "high", "max", "auto"], id: \.self) { effort in
-                                        Button(effort.capitalized) { model.action("effort", session: session, message: effort) }
+                                if detail.turnSettings?.setting(TurnSetting.effort) == nil {
+                                    Menu("Change effort") {
+                                        ForEach(["low", "medium", "high", "max", "auto"], id: \.self) { effort in
+                                            Button(effort.capitalized) { model.action("effort", session: session, message: effort) }
+                                        }
                                     }
                                 }
                                 Button("Rename Claude session") { claudeName = session.name; renamingClaude = true }

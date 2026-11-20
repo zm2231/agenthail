@@ -14,7 +14,7 @@ final class ComposerLargeTextUITests: XCTestCase {
         let screen = app.windows.firstMatch.frame
         let composerTop = input.frame.minY - 8
         XCTAssertLessThan((screen.maxY - composerTop) / screen.height, 0.4, "the composer takes too much of the screen")
-        let turn = app.buttons.matching(NSPredicate(format: "identifier IN %@", ["composer-model-picker", "composer-turn-more"])).firstMatch
+        let turn = app.buttons.matching(NSPredicate(format: "identifier IN %@", ["composer-mode", "composer-turn-more"])).firstMatch
         XCTAssertTrue(turn.exists, "the turn settings stay reachable")
         XCTAssertEqual(turn.frame.midY, send.frame.midY, accuracy: 4, "controls that fit share one row")
     }
