@@ -2,7 +2,8 @@
 # Usage: ci-darwin-tests.sh
 # The macOS verify job's tests, run concurrently: the packages with macOS code
 # paths, internal/daemon as SHARDS shards of one test binary, the dashboard
-# readability guard and, with FULL=true, the native helper tests.
+# readability guard and, with FULL=true, the native helper tests and the
+# macOS Textual table tests.
 # GUARD_CACHE is where the guard keeps Chrome for Testing.
 set -euo pipefail
 
@@ -30,5 +31,6 @@ set -- "$@" "dashboard readability guard" \
 	"cd internal/daemon && AGENTHAIL_BROWSER_GUARD=1 AGENTHAIL_BROWSER_CACHE='${GUARD_CACHE:?}' '$bin' -test.run '^TestDashboardTextIsReadableOverEveryBackground\$' -test.count=1 -test.timeout 25m -test.v"
 if [ "${FULL:-}" = true ]; then
 	set -- "$@" "native helper tests" "scripts/test-native-helpers.sh"
+	set -- "$@" "Textual table tests" "swift test --package-path native/Packages/Textual --scratch-path '$work/textual' --filter WholeWordTableTests"
 fi
 scripts/ci-concurrently.sh "$@"

@@ -176,6 +176,12 @@ extension TextualNamespace where Base: View {
       .containerValue(\.tableCellSpacing, .init(horizontal: horizontal, vertical: vertical))
   }
 
+  /// Keeps each table cell at least as wide as its longest word, so a table too wide for its
+  /// container grows instead of breaking words.
+  public func tableCellsKeepWords(_ keep: Bool = true) -> some View {
+    base.environment(\.tableCellsKeepWords, keep)
+  }
+
   /// Controls how content that overflows horizontally behaves in ``Overflow``.
   ///
   /// Use ``OverflowMode/wrap`` to wrap content to the available width, or
