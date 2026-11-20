@@ -573,23 +573,29 @@ struct SessionScreen: View {
     // Older pages load until the turn is found, a few at most, so a tap on an old notification still lands somewhere sensible.
     @discardableResult
     private func revealOpenedTurn() async -> Bool {
-        guard let turn = model.takeOpenedTurn(session.id) else { return false }
-        var target = turnRow(turn)
+        let screen = session.id
+        guard let turn = model.takeOpenedTurn(screen) else { return false }
+        var found = TurnReveal.find(turn, in: shownItems)
         var pages = 0
-        while target == nil, pages < TurnReveal.olderPages, (model.activityCursor ?? 0) > 0 {
+        while !found.isSettled, pages < TurnReveal.olderPages, (model.activityCursor ?? 0) > 0 {
+            guard !Task.isCancelled, model.selectedSessionID == screen else { return false }
             await model.loadOlderActivity()
             pages += 1
-            target = turnRow(turn)
+            found = TurnReveal.find(turn, in: shownItems)
         }
-        guard let target else { return false }
+        guard !Task.isCancelled, model.selectedSessionID == screen, let item = found.id, let target = turnRow(item) else { return false }
         olderPlace.release()
         followingLatest = false
         position.scrollTo(id: target, anchor: .top)
         return true
     }
 
-    private func turnRow(_ turn: String) -> String? {
-        activityOnly ? TurnReveal.item(turn, in: items).map(TranscriptRowID.item) : TurnReveal.row(turn, groups: groups)
+    private var shownItems: [TimelineItem] {
+        activityOnly ? items : groups.flatMap(\.items)
+    }
+
+    private func turnRow(_ item: String) -> String? {
+        activityOnly ? TranscriptRowID.item(item) : TurnReveal.row(of: item, in: groups)
     }
 
     private func rebuildOpeningRows() {
@@ -943,6 +949,7 @@ struct SessionScreen: View {
             landed = true
             opening.land(open)
             opening.fire(latest: latestRowID, rebuildOpeningRows)
+            if model.openedTurns[session.id] != nil { await revealOpenedTurn() }
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { scrollToLatest() }

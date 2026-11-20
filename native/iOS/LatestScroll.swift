@@ -12,13 +12,37 @@ enum LatestScroll: Equatable {
 enum TurnReveal {
     static let olderPages = 3
 
-    static func item(_ turn: String, in items: [TimelineItem]) -> String? {
-        let rows = items.filter { $0.turnId == turn }
-        return (rows.last { $0.kind == "message" && $0.role == "assistant" } ?? rows.last)?.id
+    enum Found: Equatable {
+        case settled(String)
+        case partial(String)
+        case missing
+
+        var isSettled: Bool {
+            if case .settled = self { return true }
+            return false
+        }
+
+        var id: String? {
+            switch self {
+            case .settled(let id), .partial(let id): id
+            case .missing: nil
+            }
+        }
     }
 
-    static func row(_ turn: String, groups: [TimelineGroup]) -> String? {
-        guard let id = item(turn, in: groups.flatMap(\.items)) else { return nil }
-        return groups.first { $0.items.contains { $0.id == id } }?.id
+    static func isReply(_ item: TimelineItem) -> Bool {
+        item.isSaid && (item.role ?? "assistant") == "assistant" && !item.isInstructions
+    }
+
+    // A turn whose reply isn't loaded may still have it on an older page, unless the turn's start is loaded too.
+    static func find(_ turn: String, in items: [TimelineItem]) -> Found {
+        let rows = items.filter { $0.turnId == turn }
+        if let reply = rows.last(where: isReply) { return .settled(reply.id) }
+        guard let last = rows.last else { return .missing }
+        return items.first?.turnId == turn ? .partial(last.id) : .settled(last.id)
+    }
+
+    static func row(of id: String, in groups: [TimelineGroup]) -> String? {
+        groups.first { $0.items.contains { $0.id == id } }?.id
     }
 }
