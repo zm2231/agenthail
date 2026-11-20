@@ -14,6 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 type limitFixture struct {
@@ -750,5 +751,48 @@ func TestALimitSweepListsTranscriptsOnceForAllItsSessions(t *testing.T) {
 	}
 	if listings := f.fake.listings.Load(); listings != 1 {
 		t.Fatalf("listed transcripts %d times in one sweep", listings)
+	}
+}
+
+func TestTheResumeNoticeReachesTheSessionAsAgenthailWithNothingAdded(t *testing.T) {
+	f := newOrphanFixture(t)
+	f.claude.Listen()
+	f.claude.Record(orphanConversation, f.claude.Home, "")
+	manager := claudetest.ListenPeerManager(t, f.claude.Home)
+	session := surface.Session{ID: orphanConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "orphan", PID: f.claude.PID, Status: surface.StatusIdle, Transport: "uds", Cwd: f.claude.Home, Transcript: f.session.Transcript}
+	if err := f.r.RecordObservedSession(session); err != nil {
+		t.Fatal(err)
+	}
+	refusedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := f.r.RecordLimitStop(session, "/roots/work", surface.LimitStop{TurnID: "u1", RefusedAt: refusedAt, ResetsAt: refusedAt.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	stop, _, err := f.r.LimitResumeFor(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if released, err := f.daemon.releaseLimitStop(stop, limitWaiting, true, refusedAt.Add(time.Minute+limitResumeGrace)); err != nil || !released {
+		t.Fatalf("released=%v err=%v", released, err)
+	}
+	f.daemon.drainMessageQueue(t.Context(), f.daemon.adapters().ForSurface(surface.KindClaude), &session)
+	sends := manager.Sends()
+	if len(sends) != 1 || sends[0].Source != surface.SystemSessionID || sends[0].Message != surface.LimitResumeNotice() {
+		t.Fatalf("sends=%+v, want the notice alone from Agenthail", sends)
+	}
+	history, err := f.r.ListHistory(50, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued := 0
+	for _, entry := range history {
+		if entry.Kind == "queued" {
+			queued++
+			if entry.SourceSessionID != surface.SystemSessionID {
+				t.Fatalf("the notice was queued in history from %q", entry.SourceSessionID)
+			}
+		}
+	}
+	if queued != 1 {
+		t.Fatalf("history has %d queued entries, want the notice once", queued)
 	}
 }

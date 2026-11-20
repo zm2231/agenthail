@@ -411,6 +411,26 @@ func TestAHeldSendNamesOnlyThisHostsSessionAsItsSender(t *testing.T) {
 	}
 }
 
+func TestAHeldSendFromAgenthailIsQueuedInHistoryFromAgenthail(t *testing.T) {
+	r := openTestRegistry(t)
+	if _, err := r.AddHost(PairedHost{ID: "h0123456789ab", Name: "vps", Endpoint: "https://vps.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.ApplyHostCatalogRow("h0123456789ab", HostCatalogRow{Session: surface.Session{ID: "remote", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}, EntityID: "h0123456789ab::remote", Projection: []byte(`{"id":"h0123456789ab::remote"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.QueueHostSend(HostSend{SessionID: "remote", Message: "notice", Key: "held:notice", SourceSessionID: surface.SystemSessionID}); err != nil {
+		t.Fatal(err)
+	}
+	history, err := r.ListHistory(10, "remote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].Kind != "queued" || history[0].SourceSessionID != surface.SystemSessionID {
+		t.Fatalf("history=%+v, want the send queued from Agenthail", history)
+	}
+}
+
 func TestARelayReadBeforeItsRouteMovedIsNotDeliveredToTheOldDestination(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "source", "old-lead", "new-lead")

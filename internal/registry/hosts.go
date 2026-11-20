@@ -673,7 +673,7 @@ func (r *Registry) QueueHostDelivery(sessionID, message, key string, request []b
 		return 0, err
 	}
 	r.signalChange(ChangeHostDeliveries)
-	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: message})
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, SourceSessionID: source, QueueID: id, Message: message})
 	return id, nil
 }
 
