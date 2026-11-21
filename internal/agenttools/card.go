@@ -40,7 +40,7 @@ var cardLines = []cardLine{
 		when: func(in CardInput) bool { return in.ReportTo != "" },
 		arg:  func(in CardInput) string { return in.ReportTo },
 	},
-	{use: "end every turn, after your reply", mcp: EndTurn + ` {"headline":"<the outcome, for the person>"}`, when: func(in CardInput) bool { return in.Tools == GivenTools }},
+	{use: "end every turn, then write your reply", mcp: EndTurn + ` {"headline":"<the outcome, for the person>"}`, when: func(in CardInput) bool { return in.Tools == GivenTools }},
 	{use: "put a decision to the person or your lead", cli: `agenthail ask "<title>" --option <label> --option <label>`, mcp: Ask + ` {"title":"<one line>","questions":[{"question":"<question>","options":[{"label":"<label>"}]}]}`},
 	{use: "message another session", cli: `agenthail send <@alias|session-id> "<message>"`, mcp: `agenthail_send {"target":"<@alias|session-id>","message":"<message>"}`},
 	{use: "find sessions and their aliases", cli: "agenthail list --json", mcp: "agenthail_sessions"},
