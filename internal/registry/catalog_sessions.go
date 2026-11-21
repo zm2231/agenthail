@@ -375,6 +375,9 @@ func catalogRowStaysRetiredTx(tx *sql.Tx, s surface.Session) (bool, error) {
 	return s.LastActive.IsZero() || s.LastActive.UnixMilli() <= lastActiveMS, nil
 }
 
+// Naming pid>0 lets the planner use the partial sessions_pid index.
+const claudePIDAttachedElsewhereSQL = `SELECT EXISTS(SELECT 1 FROM sessions WHERE surface=? AND pid=? AND pid>0 AND id<>?)`
+
 // sessionRowMatchesTx reports whether registering the session would leave its
 // stored session and runtime rows unchanged, so an unchanged catalog
 // observation needs no write.
@@ -408,7 +411,7 @@ func sessionRowMatchesTx(tx catalogQuerier, s surface.Session) (bool, error) {
 	}
 	if s.Surface == surface.KindClaude && s.PID > 0 {
 		var attachedElsewhere bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sessions WHERE surface=? AND pid=? AND id<>?)`, string(surface.KindClaude), s.PID, s.ID).Scan(&attachedElsewhere); err != nil || attachedElsewhere {
+		if err := tx.QueryRow(claudePIDAttachedElsewhereSQL, string(surface.KindClaude), s.PID, s.ID).Scan(&attachedElsewhere); err != nil || attachedElsewhere {
 			return false, err
 		}
 	}
