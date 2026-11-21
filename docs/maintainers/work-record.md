@@ -13,7 +13,7 @@ The design follows from that:
 
 1. **Mechanics before instructions.** Most of the three capabilities need no agent call at all: the turn judge reads how a turn ended, `gh pr create` links its PR, a merged PR settles the session. What an agent must know fits in two card lines.
 2. **One service, three faces.** The work record lives in a new `internal/workrecord` package over the registry. Writes go through `performAction`, the path the CLI (`internal/cli/daemon_api.go:110`) and MCP writes (`internal/daemon/mcp_write.go:29-46`) already share. One spec table per tool (name, one-line use, input struct) registers the MCP tool, builds the CLI help, and supplies the card line, so the three cannot drift.
-3. **Hosted sessions are taught the tools.** A session holding a live Agenthail MCP credential (every Claude host session and every Codex thread Agenthail starts) gets a card naming MCP tools; a terminal Claude or Codex session whose own config starts the stdio relay is taught the tools too, without the line to end every turn with `agenthail_end_turn`, and one without the server keeps the CLI card. A small core is always loaded through `_meta["anthropic/alwaysLoad"]: true` (supported by Claude Code 2.1.316): `agenthail_send`, `agenthail_create`, `agenthail_wait`, `agenthail_result`, and later `agenthail_end_turn` and `agenthail_pr`. Everything else stays deferred. `agenthail_end_turn` is MCP only, because the clients need its structure and validation, and it is named in `CLAUDE_CODE_TERMINAL_MCP_TOOLS` so its result ends the turn without a filler reply.
+3. **Hosted sessions are taught the tools.** A session holding a live Agenthail MCP credential (every Claude host session and every Codex thread Agenthail starts) gets a card naming MCP tools; a terminal Claude or Codex session whose own config starts the stdio relay is taught the tools too, without the line to call `agenthail_end_turn` before each turn's reply, and one without the server keeps the CLI card. A small core is always loaded through `_meta["anthropic/alwaysLoad"]: true` (supported by Claude Code 2.1.316): `agenthail_send`, `agenthail_create`, `agenthail_wait`, `agenthail_result`, and later `agenthail_end_turn` and `agenthail_pr`. Everything else stays deferred. `agenthail_end_turn` is MCP only, because the clients need its structure and validation.
 4. **A budget test.** A Go test pins the bytes of the rendered card, the always-loaded tool JSON and the whole tool list. Growth fails the test until the pinned numbers are raised in the same change.
 
 ### Text injected
@@ -93,18 +93,20 @@ A session with none of these rows looks exactly as it does today; adopted termin
 
 ## Tools
 
-### `agenthail_end_turn` (MCP, always loaded, terminal)
+### `agenthail_end_turn` (MCP, always loaded)
 
 ```
 headline  string, at most 80        sidebar and push line
 next      at most 3 strings, each at most 160
 ```
 
+**Order.** The agent calls the tool when the turn's work is done and then writes its reply as its final message, with no tool call after it; a successful result says so. Claude Opus 5.5 returns text written between tool calls as a progress-update `thinking` block holding only a summary of that text, so a reply written before the call would reach the transcript as a Thought rather than as the reply. Only the text after a turn's last tool call is kept verbatim.
+
 Refused, with a message the agent can act on: a blank, multi-line or long headline; more than 3 next items; a second call in one turn. A turn that needs a decision raises an ask first ([asks.md](asks.md)); the ask, not the end of turn, puts the session in Needs you.
 
 **Skipped call and spoken questions.** Nothing holds or prompts a turn that ends without `agenthail_end_turn`: the turn judge reads its state from the reply, and the row shows no headline. A reply that asks the person something no ask carries is judged waiting on the person and pushes Needs you ([turn judge](turn-judge.md#the-push)). Agenthail installs no `Stop` hook. A `Stop` hook an earlier install wrote goes away without the person doing anything: the daemon, when it starts (as after an update), removes from every Claude config root's `settings.json` and from Codex any agenthail hook this binary no longer writes, and installs nothing; `agenthail hooks install` and `uninstall`, and their `codex` forms, remove them too. Until then `agenthail hook stop` reads its input and exits 0 with no output, so an old hook neither errors nor holds a turn. The daemon starts Codex for this only when its `hooks.json` or `config.toml` names such a hook, and leaves every other hook where it is, so Codex keeps trusting them.
 
-**Effects.** Session rows, in the session view and the snapshot, carry `endTurn {headline, next, endedAt}` while the end stands, with the headline cut to 80 characters and each next item to 160. The turn-completed notification says "done: headline" with the same cut headline, or nothing when the session has an ask open to the person, which was announced on its own. A phone push names the session by its alias (else the app) and its project, never by the session's title, since pushes pass through the relay and Apple: "@builder in widget done: Deployed". Hosted Claude sessions name the tool in `CLAUDE_CODE_TERMINAL_MCP_TOOLS`, so a successful call ends the turn with no reply after it; a refused call is an error result and does not.
+**Effects.** Session rows, in the session view and the snapshot, carry `endTurn {headline, next, endedAt}` while the end stands, with the headline cut to 80 characters and each next item to 160. The turn-completed notification says "done: headline" with the same cut headline, or nothing when the session has an ask open to the person, which was announced on its own. A phone push names the session by its alias (else the app) and its project, never by the session's title, since pushes pass through the relay and Apple: "@builder in widget done: Deployed".
 
 ### `isolation: "worktree"` on `agenthail_create` and `agenthail thread create --worktree`
 

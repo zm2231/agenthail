@@ -30,8 +30,10 @@ func (d *Daemon) mcpEndTurn(ctx context.Context, caller *mcpCaller, input mcpEnd
 	}
 	d.requestCatalogDiscovery()
 	d.publishEvent("state.changed", session.ID, map[string]string{"source": "end-turn"})
-	return map[string]any{"ok": true}, nil
+	return map[string]any{"ok": true, "then": endTurnThen}, nil
 }
+
+const endTurnThen = "Turn recorded. Now write your reply to the person as your final message, and call no more tools."
 
 const endTurnStoredRunes = 1000
 
