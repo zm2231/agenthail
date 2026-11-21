@@ -37,6 +37,7 @@ A test that runs a host whose packages are missing fails at once and names the `
 - [Subagents: identity, families, targets, and cost](subagents.md)
 - [Projects, scopes and archive](projects.md)
 - [Pinned sessions, and reaching a session whose process ended](pinned-sessions.md)
+- [Codex read state: unread rows and marking them read or unread](codex-read-state.md)
 - [Paired hosts: pairing, ownership, routing, and unreachable delivery](hosts.md)
 - [Moving a session to another host: protocol and failure model](host-move.md)
 - [Registry migrations: adding a table, column, index or data step](registry-migrations.md)
