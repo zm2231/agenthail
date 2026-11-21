@@ -24,6 +24,7 @@ import { renderContextUsage } from "./context-usage.js";
 import { limitMoveQuestion } from "./limit-move.js";
 import { openProject, syncProjectPane } from "./project-pane.js";
 import { briefToast } from "./project-view.js";
+import { markUnread } from "./read-state.js";
 
 export function bindConversationEvents() {
   document.addEventListener("click", async (event) => {
@@ -256,6 +257,19 @@ export function bindConversationEvents() {
           const result = await changeLead((replace) => action("coordinator-set", replace ? { replace: true } : {}, crypto.randomUUID(), sessionID));
           if (result) toast(`@${result.coordinator.name} leads ${result.coordinator.projectRoot}.`);
         });
+      }
+      return;
+    }
+    const unreadControl = event.target.closest("[data-mark-unread]");
+    if (unreadControl && app.selected) {
+      unreadControl.disabled = true;
+      try {
+        await markUnread(app.selected);
+        toast("Marked unread.");
+      } catch (error) {
+        toast(error.message);
+      } finally {
+        unreadControl.disabled = false;
       }
       return;
     }

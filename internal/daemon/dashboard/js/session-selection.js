@@ -15,6 +15,7 @@ import { leaveProject } from "./project-pane.js";
 import { scopeAfterSelecting, syncDecisionPane } from "./pane-scope.js";
 import { findSession } from "./session-pages.js";
 import { pageHistory } from "./stream-items.js";
+import { readWhileLooking } from "./read-state.js";
 
 export async function selectSession(id, focus = false) {
   if (app.selected?.id !== id) { for (const selector of ["#turn-tier", "#turn-schema"]) $(selector).value = ""; $("#session-operation-result").textContent = ""; $("#session-operation-form").reset(); }
@@ -36,6 +37,7 @@ export async function selectSession(id, focus = false) {
   renderSessions();
   showView("conversations");
   syncConversationLayout();
+  readWhileLooking(true);
   $("#chat-surface").textContent = labels[session.surface] || session.surface;
   $("#chat-title").textContent = displayName(session);
   $("#chat-subtitle").textContent = conversationMeta(session);

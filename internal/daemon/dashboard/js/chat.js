@@ -19,6 +19,7 @@ import { alignTranscriptTop } from "./transcript-scroll.js";
 import { expandAgentsPreference, markClampedAgentRows } from "./agent-messages.js";
 import { limitMoveButton } from "./limit-move.js";
 import { renderTurnSettings } from "./turn-settings.js";
+import { unread } from "./read-state.js";
 
 export function renderChat() {
   const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning, claudeRuns, claudeSubagents, claudeSubagentsTotal } = app.history || {};
@@ -45,6 +46,7 @@ export function renderChat() {
   }
   const expandAgents = expandAgentsPreference();
   controls.push(`<button data-expand-agents aria-pressed="${expandAgents}" type="button">${expandAgents ? "Collapse agent messages" : "Expand agent messages"}</button>`);
+  if (session.readState && !unread(session)) controls.push('<button data-mark-unread type="button">Mark unread</button>');
   controls.push(`<button data-archive-action="${session.archived ? "session-unarchive" : "session-archive"}" type="button">${session.archived ? "Unarchive" : "Archive"}</button>`);
   if (session.cwd && !(session.project?.added && session.project.rootPath === session.cwd))
     controls.push(`<button data-project-add="${escape(session.cwd)}" data-project-host="${escape(checkoutHost(session))}" type="button">Add folder as project</button>`);
