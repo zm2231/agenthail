@@ -14,7 +14,7 @@ import (
 
 func (c *Claude) MoveToRoot(ctx context.Context, out *surface.MoveOut, moveID, root string) (*surface.Session, error) {
 	conversation := out.Conversation
-	if !claudeConversationID(conversation) || !claudeConversationID(moveID) {
+	if !safeFileName(conversation) || !safeFileName(moveID) {
 		return nil, fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	target, err := surface.ResolveClaudeStartRoot(c.home, root)
@@ -118,7 +118,7 @@ func (c *Claude) returnRootMove(conversation, moveID, target string) error {
 }
 
 func (c *Claude) RecoverRootMove(ctx context.Context, conversation, moveID, root string) (bool, error) {
-	if !claudeConversationID(conversation) || !claudeConversationID(moveID) {
+	if !safeFileName(conversation) || !safeFileName(moveID) {
 		return false, fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	unlock, err := c.lockConversation(ctx, conversation)

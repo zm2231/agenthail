@@ -62,21 +62,6 @@ func claudeTranscriptMissing(path, otherwise string) string {
 	return "the transcript has " + otherwise
 }
 
-func modelSetting(model, source string, models []surface.ModelOption) *surface.ModelSetting {
-	if model == "" {
-		return nil
-	}
-	setting := &surface.ModelSetting{Value: model, Source: source}
-	if models != nil {
-		listed := false
-		for _, option := range models {
-			listed = listed || option.ID == model
-		}
-		setting.Listed = &listed
-	}
-	return setting
-}
-
 func readClaudeLatestPermissionMode(ctx context.Context, path string) string {
 	if path == "" {
 		return ""

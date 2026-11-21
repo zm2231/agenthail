@@ -327,7 +327,7 @@ func (c *Codex) moveGoal(ctx context.Context, client codexClient, threadID strin
 // the thread is idle and Agenthail's writes wait. It may run again after a
 // crash: a thread this move already archived stays archived.
 func (c *Codex) ArchiveMove(conversation, moveID string) error {
-	if !validCodexMoveThread(conversation) || !claudeConversationID(moveID) {
+	if !validCodexMoveThread(conversation) || !safeFileName(moveID) {
 		return fmt.Errorf("Codex session %q or move %q is not a valid id", conversation, moveID)
 	}
 	declared, held := c.moves.of(conversation)
@@ -407,7 +407,7 @@ func (h CodexHome) allArchived(record codexMoveRecord) bool {
 // RestoreMove brings back a thread this move archived with thread/unarchive.
 // A move that archived nothing leaves the thread as it is.
 func (c *Codex) RestoreMove(conversation, moveID string) error {
-	if !validCodexMoveThread(conversation) || !claudeConversationID(moveID) {
+	if !validCodexMoveThread(conversation) || !safeFileName(moveID) {
 		return fmt.Errorf("Codex session %q or move %q is not a valid id", conversation, moveID)
 	}
 	record, archived, err := c.home.readMoveRecord(conversation, moveID, "archived")
@@ -536,7 +536,7 @@ func (c *Codex) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.R
 	if err := c.CheckMoveIn(in); err != nil {
 		return nil, err
 	}
-	if !claudeConversationID(in.MoveID) {
+	if !safeFileName(in.MoveID) {
 		return nil, fmt.Errorf("move id %q is not valid", in.MoveID)
 	}
 	state, _ := decodeCodexMoveState(in)
@@ -688,7 +688,7 @@ func (c *Codex) placeMoveIn(in surface.MoveIn, staging string, files []string) e
 // DropMoveIn sets aside the rollouts a move placed in sessions/, into the
 // move's folder, and runs commit before Agenthail can resume the thread.
 func (c *Codex) DropMoveIn(ctx context.Context, conversation, moveID string, admit, commit func() error) error {
-	if !validCodexMoveThread(conversation) || !claudeConversationID(moveID) {
+	if !validCodexMoveThread(conversation) || !safeFileName(moveID) {
 		return fmt.Errorf("Codex session %q or move %q is not a valid id", conversation, moveID)
 	}
 	release, err := c.home.holdThread(ctx, conversation)

@@ -67,13 +67,6 @@ func codexTurnSettings(current codexThreadSettings, models []surface.ModelOption
 	return append(settings, mode)
 }
 
-func effortLabel(level string) string {
-	if level == "xhigh" {
-		return "Extra high"
-	}
-	return strings.ToUpper(level[:1]) + level[1:]
-}
-
 func (c *Codex) SetTurnSetting(ctx context.Context, sess *surface.Session, key, value string) error {
 	if key == surface.TurnSettingModel {
 		if err := surface.ValidModelName(value); err != nil {

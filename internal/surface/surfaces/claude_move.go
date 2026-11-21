@@ -26,18 +26,10 @@ import (
 // conversation cannot be placed for a working directory that long.
 const claudeProjectDirLimit = 200
 
-// claudeMovedDir holds a moved conversation's files beside, never inside,
-// the folders Claude and Agenthail read conversations from.
-const claudeMovedDir = "agenthail-moved"
-
 var claudeProjectDirUnsafe = regexp.MustCompile(`[^A-Za-z0-9]`)
 
 func claudeProjectDirName(cwd string) string {
 	return claudeProjectDirUnsafe.ReplaceAllString(cwd, "-")
-}
-
-func claudeConversationID(id string) bool {
-	return id != "" && !strings.ContainsAny(id, `/\`) && !strings.HasPrefix(id, ".")
 }
 
 // claudeMoveOrigin records where a moved conversation's transcript lived, so
@@ -52,7 +44,7 @@ type claudeMoveOrigin struct {
 // until Release so nothing here resumes it meanwhile.
 func (c *Claude) PrepareMove(ctx context.Context, sess *surface.Session, request surface.AdoptRequest) (out *surface.MoveOut, err error) {
 	conversation := sess.ID
-	if !claudeConversationID(conversation) {
+	if !safeFileName(conversation) {
 		return nil, fmt.Errorf("Claude session %q is not a conversation id", sess.ID)
 	}
 	unlock, err := c.holdForMove(ctx, conversation)
@@ -174,20 +166,6 @@ func regularFilesSize(name string) (int64, error) {
 	return total, err
 }
 
-func hashFile(name string) (int64, string, error) {
-	file, err := os.Open(name)
-	if err != nil {
-		return 0, "", err
-	}
-	defer file.Close()
-	sum := sha256.New()
-	size, err := io.Copy(sum, file)
-	if err != nil {
-		return 0, "", err
-	}
-	return size, hex.EncodeToString(sum.Sum(nil)), nil
-}
-
 // claudeMoveParts are a conversation's own files, by their place in a move
 // archive and under a config root: the transcript, its folder of subagent
 // transcripts and tool results, and its task list.
@@ -198,7 +176,7 @@ func claudeMoveParts(conversation string) []string {
 // movedDir holds one move's copy of a conversation, so the copy a finished
 // move left is never taken for another move's.
 func (c *Claude) movedDir(root, conversation, moveID string) string {
-	return filepath.Join(root, claudeMovedDir, conversation, moveID)
+	return filepath.Join(root, movedDir, conversation, moveID)
 }
 
 // rootPath is where a move archive part lives under a config root.
@@ -214,7 +192,7 @@ func claudeRootPart(root, projectDir, part string) string {
 // <root>/agenthail-moved/<id>/<move id>/. It may run again after a crash: a
 // part already archived stays where it is.
 func (c *Claude) ArchiveMove(conversation, moveID string) error {
-	if !claudeConversationID(conversation) || !claudeConversationID(moveID) {
+	if !safeFileName(conversation) || !safeFileName(moveID) {
 		return fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	roots, err := surface.ClaudeConfigRoots(c.home)
@@ -253,7 +231,7 @@ func (c *Claude) ArchiveMove(conversation, moveID string) error {
 // RestoreMove puts a move's archived files back where ArchiveMove found
 // them. A move that archived nothing leaves the conversation as it is.
 func (c *Claude) RestoreMove(conversation, moveID string) error {
-	if !claudeConversationID(conversation) || !claudeConversationID(moveID) {
+	if !safeFileName(conversation) || !safeFileName(moveID) {
 		return fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	roots, err := surface.ClaudeConfigRoots(c.home)
@@ -299,20 +277,6 @@ func (c *Claude) moveOrigin(roots []string, conversation, moveID string) (claude
 		return origin, true, nil
 	}
 	return claudeMoveOrigin{}, false, nil
-}
-
-// renameIfPresent moves from to to unless from is gone, which an earlier run
-// that already moved it leaves.
-func renameIfPresent(from, to string) error {
-	if _, err := os.Lstat(from); errors.Is(err, fs.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	if _, err := os.Lstat(to); err == nil {
-		return fmt.Errorf("move %s: %s already exists", from, to)
-	}
-	return os.Rename(from, to)
 }
 
 // WriteMoveArchive streams an archived conversation as a tar of its parts:
@@ -436,7 +400,7 @@ func (c *Claude) CarryProjectSettings(in surface.MoveIn) (func() error, error) {
 // checkMoveInPlace refuses a conversation id or working directory Claude
 // could not keep as given.
 func checkMoveInPlace(in surface.MoveIn) error {
-	if !claudeConversationID(in.Conversation) {
+	if !safeFileName(in.Conversation) {
 		return fmt.Errorf("Claude session %q is not a conversation id", in.Conversation)
 	}
 	if !filepath.IsAbs(in.Cwd) {
@@ -460,7 +424,7 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 	if err := checkMoveInPlace(in); err != nil {
 		return nil, err
 	}
-	if !claudeConversationID(in.MoveID) {
+	if !safeFileName(in.MoveID) {
 		return nil, fmt.Errorf("move id %q is not valid", in.MoveID)
 	}
 	unlock, err := c.lockConversation(ctx, in.Conversation)
@@ -565,7 +529,7 @@ func (c *Claude) setAsideExisting(root string, in surface.MoveIn, part, at strin
 // the move's folder under agenthail-moved/, and runs commit before any other
 // Agenthail process can resume the conversation.
 func (c *Claude) DropMoveIn(ctx context.Context, conversation, moveID string, admit, commit func() error) error {
-	if !claudeConversationID(conversation) || !claudeConversationID(moveID) {
+	if !safeFileName(conversation) || !safeFileName(moveID) {
 		return fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	unlock, err := c.lockConversation(ctx, conversation)
@@ -701,38 +665,4 @@ func extractMoveArchive(staging string, in surface.MoveIn, archive io.Reader) er
 		return fmt.Errorf("moved conversation %s has no transcript", in.Conversation)
 	}
 	return nil
-}
-
-// checkPrefix refuses unless the file at shorter is absent or begins the file
-// at longer, so a move never drops turns either copy has.
-func checkPrefix(shorter, longer string) error {
-	existing, err := os.Open(shorter)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	defer existing.Close()
-	arriving, err := os.Open(longer)
-	if err != nil {
-		return err
-	}
-	defer arriving.Close()
-	left := make([]byte, 64<<10)
-	right := make([]byte, 64<<10)
-	for {
-		n, readErr := io.ReadFull(existing, left)
-		if n > 0 {
-			if _, err := io.ReadFull(arriving, right[:n]); err != nil || string(left[:n]) != string(right[:n]) {
-				return fmt.Errorf("the transcript here and the one arriving have diverged")
-			}
-		}
-		if errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF) {
-			return nil
-		}
-		if readErr != nil {
-			return readErr
-		}
-	}
 }
