@@ -318,6 +318,7 @@ Sessions read the ledger with the `agenthail_ledger_read` MCP tool. Other client
 GET /api/v1/ledger?projectKey=<key>                         # the board
 GET /api/v1/ledger?projectKey=<key>&view=work&state=open&q=index
 GET /api/v1/ledger?projectKey=<key>&view=item&id=<item or ask>
+GET /api/v1/ledger?projectKey=<key>&view=words&id=<utterance ref>&context=2
 GET /api/v1/ledger/events                                   # ledger.changed, one per project when it changes
 ```
 
@@ -327,6 +328,7 @@ GET /api/v1/ledger/events                                   # ledger.changed, on
   - `ready`, the ranked next work;
   - `backlog`, parked work with whether each item can come back and why (`kind`, `ready`), and `triage`, unowned open or blocked work idle `days` days (14 by default), as `agenthail ledger backlog` prints them;
   - `item`: one work item with its context, or one ask, as `agenthail ledger show --json` prints it.
+  - `words`: one captured message, what was typed and what was quoted, and with `context` (0 to 20) the turns around it from the session's journal, as `agenthail ledger words --json` prints it. Only the host that captured the message holds those turns; asked elsewhere, it answers `409` naming that host. `agenthail ledger words` reads through this view, so it needs the daemon running.
 - **Work filters.** With no filter, the `work` view lists every work item, settled and deleted ones included. With any filter, it selects as `agenthail ledger list` does: `q`, `state`, `type`, `priority`, `label`, `assignee`, `clause`, `found` and `all`.
 - **Paging.** Lists are ordered by id and paged with `limit` (1 to 100) and the `nextCursor` of the previous page. A page starts after that id, so items added meanwhile don't shift it.
 - **Caching.** Every answer carries an `ETag`, a hash of its exact bytes. Send it back as `If-None-Match` and an unchanged answer is `304 Not Modified`. Two different answers never share a tag, including after the daemon rebuilds a board from the log.

@@ -7,38 +7,15 @@ import (
 	"slices"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
 const (
-	WordsMaxAround  = 20
 	wordsAnchorID   = "entry"
 	wordsAnchorTime = "time"
 )
-
-type Words struct {
-	ID         string                 `json:"id"`
-	TargetID   string                 `json:"targetId"`
-	At         string                 `json:"ts"`
-	Host       string                 `json:"host"`
-	Text       string                 `json:"text"`
-	Typed      string                 `json:"typed"`
-	Quoted     []string               `json:"quoted,omitempty"`
-	MoreQuoted int                    `json:"moreQuoted,omitempty"`
-	Context    *ledger.ContextPayload `json:"context,omitempty"`
-	Anchor     string                 `json:"anchor,omitempty"`
-	Turns      []WordsTurn            `json:"turns,omitempty"`
-}
-
-type WordsTurn struct {
-	ItemID    string `json:"itemId"`
-	Role      string `json:"role"`
-	TS        string `json:"ts"`
-	Text      string `json:"text"`
-	Truncated bool   `json:"truncated,omitempty"`
-	Message   bool   `json:"message,omitempty"`
-}
 
 type WordsNotFound struct{ Key, Ref string }
 
@@ -53,26 +30,26 @@ func (e WordsElsewhere) Error() string {
 }
 
 // Only the capturing host holds the session journal the turns come from; elsewhere they are refused.
-func ReadWords(r *registry.Registry, store *ledger.Store, key, ref string, around int) (Words, error) {
-	if around < 0 || around > WordsMaxAround {
-		return Words{}, fmt.Errorf("--context takes 0 to %d turns", WordsMaxAround)
+func ReadWords(r *registry.Registry, store *ledger.Store, key, ref string, around int) (daemonapi.Words, error) {
+	if around < 0 || around > daemonapi.WordsMaxAround {
+		return daemonapi.Words{}, fmt.Errorf("--context takes 0 to %d turns", daemonapi.WordsMaxAround)
 	}
 	captured, ok, err := store.CapturedWords(key, ref)
 	if err != nil {
-		return Words{}, err
+		return daemonapi.Words{}, err
 	}
 	if !ok {
-		return Words{}, WordsNotFound{Key: key, Ref: ref}
+		return daemonapi.Words{}, WordsNotFound{Key: key, Ref: ref}
 	}
 	self, err := r.HostIdentity()
 	if err != nil {
-		return Words{}, err
+		return daemonapi.Words{}, err
 	}
 	if captured.HostID == "" {
 		// Events written before origin stamping carry no host; only this host could have written them.
 		captured.HostID = self.ID
 	}
-	words := Words{ID: captured.ID, TargetID: captured.TargetID, At: captured.At, Host: hostName(r, self, captured.HostID), Text: captured.Text, Context: captured.Context}
+	words := daemonapi.Words{ID: captured.ID, TargetID: captured.TargetID, At: captured.At, Host: hostName(r, self, captured.HostID), Text: captured.Text, Context: captured.Context}
 	var quotes []ledger.Quote
 	if captured.Context != nil {
 		quotes = captured.Context.Quotes
@@ -102,8 +79,8 @@ func hostName(r *registry.Registry, self registry.HostIdentity, id string) strin
 	return id
 }
 
-func journalTurns(r *registry.Registry, sessionID string) ([]WordsTurn, error) {
-	var turns []WordsTurn
+func journalTurns(r *registry.Registry, sessionID string) ([]daemonapi.WordsTurn, error) {
+	var turns []daemonapi.WordsTurn
 	var cursor uint64
 	for rows := 0; rows < sessionJournalRetentionCount; {
 		page, err := r.ReadSessionJournalPage(sessionID, cursor, contextPage)
@@ -119,7 +96,7 @@ func journalTurns(r *registry.Registry, sessionID string) ([]WordsTurn, error) {
 			if json.Unmarshal(page.Entries[i].Payload, &p) != nil || p.Body == "" || (p.Role != "user" && p.Role != "assistant") || (p.Kind != "message" && p.Kind != "text") {
 				continue
 			}
-			turns = append(turns, WordsTurn{ItemID: p.ItemID, Role: p.Role, TS: p.TS, Text: p.Body, Truncated: p.Truncated})
+			turns = append(turns, daemonapi.WordsTurn{ItemID: p.ItemID, Role: p.Role, TS: p.TS, Text: p.Body, Truncated: p.Truncated})
 		}
 		rows += len(page.Entries)
 		if page.NextBefore == 0 || len(page.Entries) == 0 {
@@ -131,7 +108,7 @@ func journalTurns(r *registry.Registry, sessionID string) ([]WordsTurn, error) {
 	return turns, nil
 }
 
-func turnsAround(turns []WordsTurn, captured ledger.CapturedWords, around int) (string, []WordsTurn) {
+func turnsAround(turns []daemonapi.WordsTurn, captured ledger.CapturedWords, around int) (string, []daemonapi.WordsTurn) {
 	if c := captured.Context; c != nil && c.EntryItemID != "" {
 		for i, turn := range turns {
 			if turn.ItemID == c.EntryItemID {

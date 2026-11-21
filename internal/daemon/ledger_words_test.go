@@ -3,6 +3,8 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +64,21 @@ func TestAMessagesWordsShowWhatWasTypedQuotedAndTheTurnsAroundIt(t *testing.T) {
 	if refusal, refused := callMCP(t, session, "agenthail_ledger_read", map[string]any{"view": "words", "id": ledger.PromptRef("p-9")}); !refused || refusal["code"] != "not_found" {
 		t.Fatalf("mcp words for an unknown message = %v", refusal)
 	}
+
+	viaAPI, _ := ledgerGetJSON(t, handler, wordsTarget(p.key, ledger.PromptRef("p-1"))+"&context=1")
+	if list, _ := viaAPI["turns"].([]any); viaAPI["typed"] != "yes, both kinds" || viaAPI["anchor"] != "entry" || len(list) != 3 {
+		t.Fatalf("api words = %v", viaAPI)
+	}
+	if w := ledgerGet(t, handler, wordsTarget(p.key, ledger.PromptRef("p-1"))+"&context=21", ""); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "0 to 20") {
+		t.Fatalf("api words with too much context = %d %s", w.Code, w.Body)
+	}
+	if w := ledgerGet(t, handler, wordsTarget(p.key, ledger.PromptRef("p-9")), ""); w.Code != http.StatusNotFound {
+		t.Fatalf("api words for an unknown message = %d %s", w.Code, w.Body)
+	}
+}
+
+func wordsTarget(key, ref string) string {
+	return "/api/v1/ledger?" + url.Values{"projectKey": {key}, "view": {"words"}, "id": {ref}}.Encode()
 }
 
 func TestTheTurnsAroundWordsAreReadOnlyOnTheHostThatCapturedThem(t *testing.T) {
@@ -89,6 +106,9 @@ func TestTheTurnsAroundWordsAreReadOnlyOnTheHostThatCapturedThem(t *testing.T) {
 	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, s))
 	if refusal, refused := callMCP(t, session, "agenthail_ledger_read", map[string]any{"view": "words", "id": ledger.PromptRef("p-1"), "context": 1}); !refused || refusal["code"] != "unavailable" || !strings.Contains(refusal["message"].(string), "hfar") {
 		t.Fatalf("mcp words from another host = %v", refusal)
+	}
+	if w := ledgerGet(t, handler, wordsTarget(p.key, ledger.PromptRef("p-1"))+"&context=1", ""); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "hfar") {
+		t.Fatalf("api words from another host = %d %s", w.Code, w.Body)
 	}
 
 	if _, err := r.WriteDB().Exec(`UPDATE ledger_events SET actor_host_id='', origin_seq=0 WHERE project_key=? AND ref=?`, p.key, ledger.PromptRef("p-1")); err != nil {

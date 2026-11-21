@@ -38,7 +38,7 @@ var ledgerCommands = map[string]func(a *App, c ledgerCall) error{
 		if len(c.positional) != 2 {
 			return fmt.Errorf("usage: agenthail ledger words <utterance_id> [--context N] [--json]")
 		}
-		return a.ledgerWords(c.store, c.args, c.positional[1])
+		return a.ledgerWords(c.args, c.positional[1])
 	},
 	"enable":       func(a *App, c ledgerCall) error { return a.ledgerEnable(c.args) },
 	"disable":      func(a *App, c ledgerCall) error { return a.ledgerDisable(c.args) },

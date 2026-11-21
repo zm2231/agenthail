@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/apitime"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 )
@@ -55,7 +56,7 @@ const (
 
 func (d *Daemon) mcpLedgerWords(key string, input mcpLedgerInput) (any, error) {
 	if input.Context < 0 || input.Context > mcpWordsAround {
-		return nil, refuse("invalid", fmt.Sprintf("context takes 0 to %d turns here; agenthail ledger words reads up to %d.", mcpWordsAround, WordsMaxAround))
+		return nil, refuse("invalid", fmt.Sprintf("context takes 0 to %d turns here; agenthail ledger words reads up to %d.", mcpWordsAround, daemonapi.WordsMaxAround))
 	}
 	words, err := ReadWords(d.Registry, d.ledgerStore(), key, input.ID, input.Context)
 	var elsewhere WordsElsewhere
@@ -71,21 +72,21 @@ func (d *Daemon) mcpLedgerWords(key string, input mcpLedgerInput) (any, error) {
 	return fitWords(words)
 }
 
-func fitWords(words Words) (Words, error) {
+func fitWords(words daemonapi.Words) (daemonapi.Words, error) {
 	for limit := mcpWordsTextBytes; limit > 0; limit /= 2 {
 		fitted := clipWords(words, limit, limit*2/5)
 		encoded, err := apitime.Marshal(fitted)
 		if err != nil {
-			return Words{}, err
+			return daemonapi.Words{}, err
 		}
 		if len(encoded) <= mcpOutputLimit {
 			return fitted, nil
 		}
 	}
-	return Words{}, refuse("invalid", fmt.Sprintf("These words do not fit in %d bytes; agenthail ledger words shows them in full.", mcpOutputLimit))
+	return daemonapi.Words{}, refuse("invalid", fmt.Sprintf("These words do not fit in %d bytes; agenthail ledger words shows them in full.", mcpOutputLimit))
 }
 
-func clipWords(words Words, text, part int) Words {
+func clipWords(words daemonapi.Words, text, part int) daemonapi.Words {
 	id := func(s string) string { return clipHead(s, min(mcpWordsIDBytes, part)) }
 	words.ID, words.TargetID, words.At, words.Host = id(words.ID), id(words.TargetID), id(words.At), id(words.Host)
 	words.Text, words.Typed = clipHead(words.Text, text), clipHead(words.Typed, text)

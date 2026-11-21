@@ -137,6 +137,10 @@ func (d *Daemon) apiLedgerReadHandler(w http.ResponseWriter, r *http.Request) {
 	if !d.knownLedgerProject(w, r, key, "") {
 		return
 	}
+	if query.Get("view") == "words" {
+		d.apiLedgerWords(w, r, key, query)
+		return
+	}
 	req, err := ledgerReadQuery(query)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -156,6 +160,10 @@ func (d *Daemon) apiLedgerReadHandler(w http.ResponseWriter, r *http.Request) {
 		writeLedgerError(w, err)
 		return
 	}
+	writeLedgerRead(w, r, result)
+}
+
+func writeLedgerRead(w http.ResponseWriter, r *http.Request, result any) {
 	body, err := apitime.Marshal(result)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "encode_failed", err.Error())
