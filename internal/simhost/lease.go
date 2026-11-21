@@ -30,6 +30,8 @@ type point struct{ X, Y float64 }
 type lease struct {
 	owner    string
 	kind     string
+	device   string
+	runtime  string
 	udid     string
 	acquired time.Time
 	lastUsed time.Time
@@ -44,6 +46,7 @@ type lease struct {
 type LeaseView struct {
 	Kind      string    `json:"kind"`
 	Device    string    `json:"device"`
+	Runtime   string    `json:"runtime,omitempty"`
 	UDID      string    `json:"udid"`
 	Acquired  time.Time `json:"acquired"`
 	IdleUntil time.Time `json:"idleUntil"`
@@ -52,35 +55,70 @@ type LeaseView struct {
 }
 
 func (h *Host) view(l *lease) LeaseView {
-	return LeaseView{Kind: l.kind, Device: Kinds[l.kind].Name, UDID: l.udid, Acquired: l.acquired, IdleUntil: l.lastUsed.Add(IdleLimit), EndsAt: l.capAt, OutDir: h.ownerDir(l.owner)}
+	return LeaseView{Kind: l.kind, Device: l.device, Runtime: l.runtimeLabel(), UDID: l.udid, Acquired: l.acquired, IdleUntil: l.lastUsed.Add(IdleLimit), EndsAt: l.capAt, OutDir: h.ownerDir(l.owner)}
+}
+
+func (l *lease) runtimeLabel() string {
+	if version := runtimeVersion(l.runtime); version != "" {
+		return "iOS " + version
+	}
+	return ""
+}
+
+func (l *lease) shared() bool { return l.device == Kinds[l.kind].Name }
+
+func (l *lease) fits(kindName, want string) bool {
+	if kindName != "" && l.kind != kindName {
+		return false
+	}
+	if runtimeWanted(want) == "" {
+		return true
+	}
+	return iosRuntime{Identifier: l.runtime, Version: runtimeVersion(l.runtime)}.matches(want)
+}
+
+func (l *lease) label() string {
+	if l.shared() {
+		return l.kind
+	}
+	return l.kind + " (" + l.runtimeLabel() + ")"
 }
 
 func (h *Host) lockPath(udid string) string {
 	return filepath.Join(h.lockDir, "agenthail-simulator-"+udid+".lock")
 }
 
-func (h *Host) acquire(ctx context.Context, owner, kindName string) (LeaseView, error) {
+func (h *Host) acquire(ctx context.Context, owner, kindName, want string) (LeaseView, error) {
 	kind, ok := Kinds[kindName]
 	if !ok {
 		return LeaseView{}, refuse("invalid", "kind must be iphone or ipad.")
 	}
-	h.endExpired(func(l *lease) bool { return l.kind == kindName })
+	versioned := runtimeWanted(want) != ""
+	slot := func(l *lease) bool {
+		if versioned {
+			return l.fits(kindName, want)
+		}
+		return l.kind == kindName && l.shared()
+	}
+	h.endExpired(slot)
 	h.mu.Lock()
 	for _, l := range h.leases {
-		if l.kind == kindName {
+		if slot(l) {
 			defer h.mu.Unlock()
-			if l.owner == owner {
-				l.lastUsed = h.now()
-				return h.view(l), nil
-			}
-			return LeaseView{}, &Error{Code: "busy", Message: fmt.Sprintf("Another session holds the %s; try again later or use the other kind.", kind.Name), Detail: map[string]any{"heldSince": l.acquired, "endsBy": h.ends(l)}}
+			return h.reuse(l, owner)
 		}
 	}
 	h.mu.Unlock()
-	d, err := h.resolve(ctx, kind)
+	d, err := h.resolve(ctx, kind, want)
 	if err != nil {
 		return LeaseView{}, err
 	}
+	h.mu.Lock()
+	if l := h.leases[d.UDID]; l != nil {
+		defer h.mu.Unlock()
+		return h.reuse(l, owner)
+	}
+	h.mu.Unlock()
 	file, err := os.OpenFile(h.lockPath(d.UDID), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return LeaseView{}, err
@@ -88,7 +126,7 @@ func (h *Host) acquire(ctx context.Context, owner, kindName string) (LeaseView, 
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		file.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return LeaseView{}, refuse("busy", "The %s is in use by a run outside Agenthail's leases, such as a test through scripts/ios-simulator.sh; try again later.", kind.Name)
+			return LeaseView{}, refuse("busy", "The %s is in use by a run outside Agenthail's leases, such as a test through scripts/ios-simulator.sh; try again later.", d.Name)
 		}
 		return LeaseView{}, err
 	}
@@ -97,15 +135,24 @@ func (h *Host) acquire(ctx context.Context, owner, kindName string) (LeaseView, 
 		return LeaseView{}, err
 	}
 	now := h.now()
-	l := &lease{owner: owner, kind: kindName, udid: d.UDID, acquired: now, lastUsed: now, capAt: now.Add(LeaseLimit), lock: file, launched: map[string]bool{}, refs: map[string]point{}}
+	l := &lease{owner: owner, kind: kindName, device: d.Name, runtime: d.Runtime, udid: d.UDID, acquired: now, lastUsed: now, capAt: now.Add(LeaseLimit), lock: file, launched: map[string]bool{}, refs: map[string]point{}}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if held := h.leases[d.UDID]; held != nil {
 		file.Close()
-		return LeaseView{}, refuse("busy", "Another session took the %s first.", kind.Name)
+		return LeaseView{}, refuse("busy", "Another session took the %s first.", d.Name)
 	}
 	h.leases[d.UDID] = l
 	return h.view(l), nil
+}
+
+// reuse is called with h.mu held.
+func (h *Host) reuse(l *lease, owner string) (LeaseView, error) {
+	if l.owner == owner {
+		l.lastUsed = h.now()
+		return h.view(l), nil
+	}
+	return LeaseView{}, &Error{Code: "busy", Message: fmt.Sprintf("Another session holds the %s; try again later or use another kind or runtime.", l.device), Detail: map[string]any{"heldSince": l.acquired, "endsBy": h.ends(l)}}
 }
 
 func (h *Host) ends(l *lease) time.Time {
@@ -122,20 +169,25 @@ func (h *Host) boot(ctx context.Context, udid string) error {
 	return err
 }
 
-func (h *Host) held(owner, kindName string) (*lease, error) {
+func (h *Host) held(owner, kindName, want string) (*lease, error) {
 	h.endExpired(func(l *lease) bool { return l.owner == owner })
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	var found *lease
 	for _, l := range h.leases {
-		if l.owner == owner && (kindName == "" || l.kind == kindName) {
-			if kindName == "" && h.ownedKinds(owner) > 1 {
-				return nil, refuse("invalid", "You hold both simulators; say which with kind.")
-			}
-			l.lastUsed = h.now()
-			return l, nil
+		if l.owner != owner || !l.fits(kindName, want) {
+			continue
 		}
+		if found != nil {
+			return nil, refuse("invalid", "You hold more than one simulator; say which with kind, and runtime for a device made for one.")
+		}
+		found = l
 	}
-	return nil, refuse("not_held", "You hold no simulator%s; acquire one first.", map[bool]string{true: " of that kind", false: ""}[kindName != ""])
+	if found == nil {
+		return nil, refuse("not_held", "You hold no simulator%s; acquire one first.", map[bool]string{true: " of that kind", false: ""}[kindName != "" || runtimeWanted(want) != ""])
+	}
+	found.lastUsed = h.now()
+	return found, nil
 }
 
 func (h *Host) ownedKinds(owner string) int {
@@ -148,8 +200,8 @@ func (h *Host) ownedKinds(owner string) int {
 	return n
 }
 
-func (h *Host) renew(owner, kindName string) (LeaseView, error) {
-	l, err := h.held(owner, kindName)
+func (h *Host) renew(owner, kindName, want string) (LeaseView, error) {
+	l, err := h.held(owner, kindName, want)
 	if err != nil {
 		return LeaseView{}, err
 	}
@@ -160,7 +212,11 @@ func (h *Host) renew(owner, kindName string) (LeaseView, error) {
 }
 
 func (h *Host) Release(owner, kindName string) []string {
-	return h.end(h.Detach(owner, kindName).leases)
+	return h.release(owner, kindName, "")
+}
+
+func (h *Host) release(owner, kindName, want string) []string {
+	return h.end(h.detach(func(l *lease) bool { return l.owner == owner && l.fits(kindName, want) }))
 }
 
 type Detached struct{ leases []*lease }
@@ -202,7 +258,7 @@ func (h *Host) end(ended []*lease) []string {
 	kinds := make([]string, 0, len(ended))
 	for _, l := range ended {
 		h.cleanup(l)
-		kinds = append(kinds, l.kind)
+		kinds = append(kinds, l.label())
 	}
 	sort.Strings(kinds)
 	return kinds

@@ -70,12 +70,13 @@ func New(config Config) *Host {
 }
 
 type Status struct {
-	Ready   bool   `json:"ready"`
-	Problem string `json:"problem,omitempty"`
-	Fix     string `json:"fix,omitempty"`
-	AXe     string `json:"axe,omitempty"`
-	Runtime string `json:"runtime,omitempty"`
-	Simslim bool   `json:"simslim"`
+	Ready   bool         `json:"ready"`
+	Problem string       `json:"problem,omitempty"`
+	Fix     string       `json:"fix,omitempty"`
+	AXe     string       `json:"axe,omitempty"`
+	Runtime string       `json:"runtime,omitempty"`
+	Simslim bool         `json:"simslim"`
+	Devices []DeviceView `json:"devices,omitempty"`
 }
 
 func (h *Host) Status(ctx context.Context) Status {
@@ -94,7 +95,11 @@ func (h *Host) Status(ctx context.Context) Status {
 		return Status{Runtime: runtime, Problem: "AXe, which taps, types and reads the screen, is not installed", Fix: "brew install cameroncooke/axe/axe"}
 	}
 	_, slimErr := h.run(ctx, "simslim", "--version")
-	return Status{Ready: true, AXe: strings.TrimSpace(string(out)), Runtime: runtime, Simslim: slimErr == nil}
+	status := Status{Ready: true, AXe: strings.TrimSpace(string(out)), Runtime: runtime, Simslim: slimErr == nil}
+	if all, err := h.devices(ctx); err == nil {
+		status.Devices = agenthailDevices(all)
+	}
+	return status
 }
 
 func (h *Host) Local() bool { return h.goos == "darwin" }
@@ -104,35 +109,18 @@ func (h *Host) run(ctx context.Context, name string, args ...string) ([]byte, er
 }
 
 func (h *Host) iosRuntime(ctx context.Context) (string, error) {
-	out, err := h.run(ctx, "xcrun", "simctl", "list", "runtimes", "--json")
+	installed, err := h.iosRuntimes(ctx)
 	if err != nil {
 		return "", err
 	}
-	var list struct {
-		Runtimes []struct {
-			Identifier  string `json:"identifier"`
-			IsAvailable bool   `json:"isAvailable"`
-		} `json:"runtimes"`
-	}
-	if err := json.Unmarshal(out, &list); err != nil {
-		return "", fmt.Errorf("read simulator runtimes: %w", err)
-	}
-	found := ""
-	for _, runtime := range list.Runtimes {
-		if runtime.IsAvailable && strings.Contains(runtime.Identifier, "iOS") {
-			found = runtime.Identifier
-		}
-	}
-	if found == "" {
-		return "", fmt.Errorf("no iOS Simulator runtime is installed")
-	}
-	return found, nil
+	return installed[len(installed)-1].Identifier, nil
 }
 
 type device struct {
-	UDID  string `json:"udid"`
-	Name  string `json:"name"`
-	State string `json:"state"`
+	UDID    string `json:"udid"`
+	Name    string `json:"name"`
+	State   string `json:"state"`
+	Runtime string `json:"-"`
 }
 
 func (h *Host) devices(ctx context.Context) ([]device, error) {
@@ -147,8 +135,11 @@ func (h *Host) devices(ctx context.Context) ([]device, error) {
 		return nil, fmt.Errorf("read simulators: %w", err)
 	}
 	var all []device
-	for _, runtimeDevices := range list.Devices {
-		all = append(all, runtimeDevices...)
+	for runtime, runtimeDevices := range list.Devices {
+		for _, d := range runtimeDevices {
+			d.Runtime = runtime
+			all = append(all, d)
+		}
 	}
 	return all, nil
 }
@@ -158,18 +149,11 @@ func (h *Host) find(ctx context.Context, name string) (device, bool, error) {
 	if err != nil {
 		return device{}, false, err
 	}
-	var match device
-	found := false
-	for _, d := range all {
-		if d.Name == name && (!found || d.UDID < match.UDID) {
-			match, found = d, true
-		}
-	}
-	return match, found, nil
+	d, ok := lowest(all, func(d device) bool { return d.Name == name })
+	return d, ok, nil
 }
 
-// A new device takes its name only once slimmed, so a failed slim is never found and reused.
-func (h *Host) resolve(ctx context.Context, kind Kind) (device, error) {
+func (h *Host) resolve(ctx context.Context, kind Kind, want string) (device, error) {
 	h.create.Lock()
 	defer h.create.Unlock()
 	unlock, err := h.lockCreate(ctx)
@@ -177,35 +161,80 @@ func (h *Host) resolve(ctx context.Context, kind Kind) (device, error) {
 		return device{}, err
 	}
 	defer unlock()
-	if d, ok, err := h.find(ctx, kind.Name); err != nil || ok {
-		return d, err
+	if runtimeWanted(want) == "" {
+		if d, ok, err := h.find(ctx, kind.Name); err != nil || ok {
+			return d, err
+		}
+		runtime, err := h.iosRuntime(ctx)
+		if err != nil {
+			return device{}, err
+		}
+		return h.createDevice(ctx, kind, kind.Name, runtime)
 	}
-	runtime, err := h.iosRuntime(ctx)
+	installed, err := h.iosRuntimes(ctx)
 	if err != nil {
 		return device{}, err
 	}
+	runtime, err := pickRuntime(installed, want)
+	if err != nil {
+		return device{}, err
+	}
+	all, err := h.devices(ctx)
+	if err != nil {
+		return device{}, err
+	}
+	shared, sharedFound := lowest(all, func(d device) bool { return d.Name == kind.Name })
+	if sharedFound && shared.Runtime == runtime.Identifier {
+		return shared, nil
+	}
+	name := kind.nameOn(runtime)
+	if d, ok := lowest(all, func(d device) bool { return d.Name == name && d.Runtime == runtime.Identifier }); ok {
+		return d, nil
+	}
+	if other, ok := lowest(all, func(d device) bool { return d.Name == name }); ok {
+		return device{}, &Error{Code: "conflict", Message: fmt.Sprintf("A simulator named %q is on another runtime; rename or delete it, then acquire again.", name), Detail: map[string]any{"udid": other.UDID}}
+	}
+	if !sharedFound && runtime.Identifier == installed[len(installed)-1].Identifier {
+		name = kind.Name
+	}
+	return h.createDevice(ctx, kind, name, runtime.Identifier)
+}
+
+func lowest(all []device, match func(device) bool) (device, bool) {
+	var found device
+	ok := false
+	for _, d := range all {
+		if match(d) && (!ok || d.UDID < found.UDID) {
+			found, ok = d, true
+		}
+	}
+	return found, ok
+}
+
+// A new device takes its name only once slimmed, so a failed slim is never found and reused.
+func (h *Host) createDevice(ctx context.Context, kind Kind, name, runtime string) (device, error) {
 	deviceType, err := h.deviceType(ctx, kind)
 	if err != nil {
 		return device{}, err
 	}
 	if _, err := h.run(ctx, "simslim", "--version"); err != nil {
-		out, err := h.run(ctx, "xcrun", "simctl", "create", kind.Name, deviceType, runtime)
+		out, err := h.run(ctx, "xcrun", "simctl", "create", name, deviceType, runtime)
 		if err != nil {
 			return device{}, err
 		}
-		return device{UDID: strings.TrimSpace(string(out)), Name: kind.Name, State: "Shutdown"}, nil
+		return device{UDID: strings.TrimSpace(string(out)), Name: name, State: "Shutdown", Runtime: runtime}, nil
 	}
-	out, err := h.run(ctx, "xcrun", "simctl", "create", kind.Name+" (slimming)", deviceType, runtime)
+	out, err := h.run(ctx, "xcrun", "simctl", "create", name+" (slimming)", deviceType, runtime)
 	if err != nil {
 		return device{}, err
 	}
 	udid := strings.TrimSpace(string(out))
-	if err := h.slim(ctx, udid, kind.Name); err != nil {
+	if err := h.slim(ctx, udid, name); err != nil {
 		_, _ = h.run(ctx, "xcrun", "simctl", "shutdown", udid)
 		_, _ = h.run(ctx, "xcrun", "simctl", "delete", udid)
-		return device{}, fmt.Errorf("could not slim and name a new %s simulator: %w", kind.Name, err)
+		return device{}, fmt.Errorf("could not slim and name a new %s simulator: %w", name, err)
 	}
-	return device{UDID: udid, Name: kind.Name, State: "Shutdown"}, nil
+	return device{UDID: udid, Name: name, State: "Shutdown", Runtime: runtime}, nil
 }
 
 func (h *Host) slim(ctx context.Context, udid, name string) error {

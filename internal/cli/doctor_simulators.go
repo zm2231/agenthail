@@ -20,6 +20,17 @@ var doctorSimulators = func(ctx context.Context) *simhost.Status {
 }
 
 func simulatorsLine(status *simhost.Status) string {
+	line := simulatorsHeadline(status)
+	if status == nil || !status.Ready {
+		return line
+	}
+	for _, d := range status.Devices {
+		line += fmt.Sprintf("\n  %s: %s", d.Device, d.Runtime)
+	}
+	return line
+}
+
+func simulatorsHeadline(status *simhost.Status) string {
 	switch {
 	case status == nil:
 		return ""

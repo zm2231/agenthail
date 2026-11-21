@@ -12,7 +12,8 @@ import (
 
 type mcpSimulatorInput struct {
 	Action    string            `json:"action" jsonschema:"list, acquire, renew, release, install, launch, terminate, openUrl, describe, tap, type, swipe, button, screenshot, push, location or logs."`
-	Kind      string            `json:"kind,omitempty" jsonschema:"iphone or ipad; needed when you hold both."`
+	Kind      string            `json:"kind,omitempty" jsonschema:"iphone or ipad; needed when you hold more than one."`
+	Runtime   string            `json:"runtime,omitempty" jsonschema:"acquire: an installed iOS version such as 18.5, for a device on that runtime; omit for the newest. Other actions: which held device, when you hold more than one."`
 	App       string            `json:"app,omitempty" jsonschema:"install: a .app path inside your outDir."`
 	BundleID  string            `json:"bundleId,omitempty" jsonschema:"The app's bundle id."`
 	Args      []string          `json:"args,omitempty" jsonschema:"launch: arguments."`
@@ -57,7 +58,7 @@ func (d *Daemon) mcpSimulator(ctx context.Context, caller *mcpCaller, input mcpS
 	if input.Action == "describe" || input.Action == "logs" {
 		limit = browserTextLimit
 	}
-	out, err := d.callSimulator(ctx, caller.session.ID, simhost.Request{Action: input.Action, Kind: input.Kind, App: input.App, BundleID: input.BundleID, Args: input.Args, Env: input.Env, URL: input.URL, Ref: input.Ref, X: input.X, Y: input.Y, ToX: input.ToX, ToY: input.ToY, Seconds: input.Seconds, Text: input.Text, Button: input.Button, Payload: input.Payload, Latitude: input.Latitude, Longitude: input.Longitude, Limit: limit})
+	out, err := d.callSimulator(ctx, caller.session.ID, simhost.Request{Action: input.Action, Kind: input.Kind, Runtime: input.Runtime, App: input.App, BundleID: input.BundleID, Args: input.Args, Env: input.Env, URL: input.URL, Ref: input.Ref, X: input.X, Y: input.Y, ToX: input.ToX, ToY: input.ToY, Seconds: input.Seconds, Text: input.Text, Button: input.Button, Payload: input.Payload, Latitude: input.Latitude, Longitude: input.Longitude, Limit: limit})
 	if err != nil {
 		return nil, simulatorRefusal(err)
 	}
