@@ -21,7 +21,7 @@ person up; agenthail_projects, agenthail_coordinator,
 agenthail_channel_send, agenthail_channel, agenthail_relay, agenthail_queue, agenthail_alias
 and agenthail_archive to organize them; agenthail_ledger_read and agenthail_ledger_write for a
 project's intent ledger. agenthail_capabilities says what you may do.
-Every write tool takes a clientRequestId: reuse it to retry the same request, and use a new one
+Give each write a clientRequestId: reuse it to retry the same request, and use a new one
 for a new request.
 You may inspect sessions and discuss a plan without asking for confirmation for every read.
 Resolve names against live discovery. Never guess an ambiguous target or invent delivery.

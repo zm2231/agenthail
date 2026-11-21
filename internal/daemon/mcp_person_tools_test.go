@@ -109,7 +109,4 @@ func TestAChannelPostIsSentAsTheCaller(t *testing.T) {
 	if out, refused := callMCP(t, f.child, "agenthail_channel_send", map[string]any{"channel": "ops", "message": "status: green", "clientRequestId": "p1"}); refused {
 		t.Fatalf("channel send: %v", out)
 	}
-	if code := refusalCode(t, f.child, "agenthail_channel_send", map[string]any{"channel": "ops", "message": "no key"}); code != "invalid" {
-		t.Fatalf("channel send without clientRequestId: code=%q", code)
-	}
 }

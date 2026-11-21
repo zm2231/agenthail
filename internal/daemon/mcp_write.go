@@ -11,13 +11,13 @@ import (
 )
 
 type mcpWrite struct {
-	ClientRequestID string `json:"clientRequestId,omitempty" jsonschema:"Required. A key you choose for this request; repeating it replays the first result instead of acting twice."`
+	ClientRequestID string `json:"clientRequestId,omitempty" jsonschema:"Optional. Send one to make a retry safe: repeating it replays the first result instead of acting twice."`
 }
 
 func (w mcpWrite) key(tool string) (string, error) {
 	id := strings.TrimSpace(w.ClientRequestID)
 	if id == "" {
-		return "", refuse("invalid", "clientRequestId is required on every write; choose one per request and reuse it only to retry.")
+		return "", nil
 	}
 	key := tool + ":" + id
 	if len(key) > registry.ActionReceiptKeyLimit {

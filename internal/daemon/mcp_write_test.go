@@ -153,9 +153,6 @@ func TestARepeatedClientRequestIDActsOnceAndADifferentRequestConflicts(t *testin
 	if code := refusalCode(t, f.parent, "agenthail_send", map[string]any{"target": "to", "message": "other", "clientRequestId": "same"}); code != "idempotency_conflict" {
 		t.Fatalf("code=%q, want idempotency_conflict", code)
 	}
-	if code := refusalCode(t, f.parent, "agenthail_send", map[string]any{"target": "to", "message": "no key"}); code != "invalid" {
-		t.Fatalf("code=%q, want invalid without a clientRequestId", code)
-	}
 }
 
 func mcpAudits(t *testing.T, r *registry.Registry) []registry.HistoryEntry {
