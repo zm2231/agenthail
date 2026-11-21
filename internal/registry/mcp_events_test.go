@@ -1,7 +1,9 @@
 package registry
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,14 +88,28 @@ func TestAnUpgradeKeepsAnEventSubscriptionThatWasSetToExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer upgraded.Close()
 	if kept, live, err := upgraded.LiveEventSubscription(sub.ID); err != nil || !live || kept.Generation != sub.Generation {
 		t.Fatalf("after the upgrade: %+v live=%v err=%v", kept, live, err)
+	}
+	tx, err := upgraded.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	column, err := columnExists(tx, "mcp_event_subscriptions", "refresh_before_ms")
+	tx.Rollback()
+	if err != nil || column {
+		t.Fatalf("refresh_before_ms after the upgrade: present=%v err=%v", column, err)
 	}
 	if _, _, err := upgraded.StoreInboxMessage(InboxMessage{Identity: sub.IdentityID, UUID: "m", Message: "m"}); err != nil {
 		t.Fatal(err)
 	}
 	if due, err := upgraded.DueEvents(time.Now(), time.Hour); err != nil || len(due) != 1 || due[0].ID != sub.ID {
 		t.Fatalf("due=%+v err=%v, want the subscription that was set to expire", due, err)
+	}
+	upgraded.Close()
+	withMigrations(t)
+	var refused *UnknownMigrationsError
+	if _, err := Open(path); !errors.As(err, &refused) || !strings.Contains(err.Error(), "2026-11-21-event-subscriptions-never-expire") {
+		t.Fatalf("a build without the migration opened the upgraded registry: %v", err)
 	}
 }
