@@ -97,6 +97,45 @@ func TestAnAgentIdentitySendsWithTheCLIsReachAndReadsItsInbox(t *testing.T) {
 	}
 }
 
+func TestARemovedIdentityCannotSendAsItself(t *testing.T) {
+	fake := &cliSurface{
+		kind: surface.KindCodex,
+		sessions: map[string]surface.Session{
+			"target": {ID: "target", Name: "Target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "vscode", Transport: "desktop", Status: surface.StatusIdle},
+		},
+		caps: surface.Capabilities{Send: true},
+	}
+	app, r := cliFixture(t, fake)
+	app.Surfaces = append(app.Surfaces, SurfaceEntry{Name: "agent", Surface: agentinbox.New(func() *registry.Registry { return r })})
+	if err := r.RecordObservedSession(fake.sessions["target"]); err != nil {
+		t.Fatal(err)
+	}
+	app.scopeOverride = func(daemon.ScopeRequest) (*daemon.ScopeReply, error) {
+		return nil, errors.New("the daemon was asked about a removed identity's send")
+	}
+	identity, err := r.AddAgentIdentity("kat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RemoveAgentIdentity("kat"); err != nil {
+		t.Fatal(err)
+	}
+	for _, sender := range []string{"kat", identity.SessionID} {
+		t.Setenv("AGENTHAIL_SESSION_ID", sender)
+		_, err := captureStdout(t, func() error { return app.Run([]string{"send", "target", "hello from " + sender}) })
+		if err == nil || !strings.Contains(err.Error(), "removed") {
+			t.Fatalf("send with AGENTHAIL_SESSION_ID=%s: err=%v", sender, err)
+		}
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "")
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "--from", "kat", "target", "from a flag"}) }); err == nil || !strings.Contains(err.Error(), "removed") {
+		t.Fatalf("send --from kat: err=%v", err)
+	}
+	if len(fake.sent) != 0 {
+		t.Fatalf("a removed identity sent %v", fake.sent)
+	}
+}
+
 func TestIdentityRemoteShowsItsTokenOnceAndDoctorReportsTheMode(t *testing.T) {
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}})
 	run := func(args ...string) string {
