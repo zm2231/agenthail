@@ -13,18 +13,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
-	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
-
-func commandInserts(commands *surface.RuntimeCommands) []string {
-	var out []string
-	for _, command := range commands.Commands {
-		out = append(out, command.Insert)
-	}
-	return out
-}
 
 func TestAHostSessionOffersTheCommandsItsClaudeReported(t *testing.T) {
 	c, fixture := hostedClaude(t)
@@ -38,7 +30,7 @@ func TestAHostSessionOffersTheCommandsItsClaudeReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := commandInserts(commands), []string{"/review", "/compact", "/statusline", "/l5-probe"}; !slices.Equal(got, want) || commands.Unavailable != "" {
+	if got, want := surfacetest.CommandInserts(commands), []string{"/review", "/compact", "/statusline", "/l5-probe"}; !slices.Equal(got, want) || commands.Unavailable != "" {
 		t.Fatalf("commands = %v (unavailable %q), want %v", got, commands.Unavailable, want)
 	}
 	if commands.Commands[0].Description != "Review a pull request" || commands.Commands[0].ArgumentHint != "[pr]" {
@@ -56,7 +48,7 @@ func TestASessionAPersonReachesOutsideTheHostOffersWhatClaudeListsForItsFolder(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := commandInserts(commands); !slices.Contains(got, "/l5-probe") || commands.Unavailable != "" {
+	if got := surfacetest.CommandInserts(commands); !slices.Contains(got, "/l5-probe") || commands.Unavailable != "" {
 		t.Fatalf("commands = %v (unavailable %q), want the folder's listing", got, commands.Unavailable)
 	}
 }
@@ -102,7 +94,7 @@ func TestACommandsWatchListsOffTheStreamAndSendsOnlyAChangedList(t *testing.T) {
 	var lists atomic.Int32
 	events := make(chan surface.StreamEvent, 8)
 	started := time.Now()
-	watch := watchCommands(context.Background(), func(ctx context.Context) (*surface.RuntimeCommands, error) {
+	watch := surface.WatchCommands(context.Background(), func(ctx context.Context) (*surface.RuntimeCommands, error) {
 		lists.Add(1)
 		asked <- struct{}{}
 		select {
@@ -121,14 +113,14 @@ func TestACommandsWatchListsOffTheStreamAndSendsOnlyAChangedList(t *testing.T) {
 	}
 	review := &surface.RuntimeCommands{Commands: []surface.RuntimeCommand{{Name: "review", Insert: "/review"}}}
 	release <- review
-	if event := <-events; event.Kind != "commands" || event.Version != 1 || !sameRuntimeCommands(event.Commands, review) {
+	if event := <-events; event.Kind != "commands" || event.Version != 1 || !surface.SameRuntimeCommands(event.Commands, review) {
 		t.Fatalf("event = %+v", event)
 	}
 	release <- &surface.RuntimeCommands{Commands: []surface.RuntimeCommand{{Name: "review", Insert: "/review"}}}
 	watch.Refresh()
 	notes := &surface.RuntimeCommands{Commands: []surface.RuntimeCommand{{Name: "notes", Insert: "/notes"}}}
 	release <- notes
-	if event := <-events; event.Version != 2 || !sameRuntimeCommands(event.Commands, notes) {
+	if event := <-events; event.Version != 2 || !surface.SameRuntimeCommands(event.Commands, notes) {
 		t.Fatalf("event = %+v, want only the changed list", event)
 	}
 	if got := lists.Load(); got != 3 {
@@ -186,8 +178,8 @@ func TestAClaudeStreamSendsTheTimelineWhileItsFolderIsStillBeingListed(t *testin
 				if replied == 0 {
 					t.Fatal("the commands came before the timeline they were listed beside")
 				}
-				if !slices.Contains(commandInserts(event.Commands), "/l5-probe") {
-					t.Fatalf("commands = %v", commandInserts(event.Commands))
+				if !slices.Contains(surfacetest.CommandInserts(event.Commands), "/l5-probe") {
+					t.Fatalf("commands = %v", surfacetest.CommandInserts(event.Commands))
 				}
 				cancel()
 				<-streamed
@@ -198,72 +190,5 @@ func TestAClaudeStreamSendsTheTimelineWhileItsFolderIsStillBeingListed(t *testin
 		case <-ctx.Done():
 			t.Fatal("the folder's commands never reached the stream")
 		}
-	}
-}
-
-func TestACodexStreamRelistsSkillsWhenTheAppServerSaysTheyChanged(t *testing.T) {
-	slowManagedPoll(t)
-	var listed atomic.Int32
-	fake := startManagedCodex(t, func(method string, params map[string]any) map[string]any {
-		if method == "skills/list" {
-			skills := []any{map[string]any{"name": "review", "description": "Review"}}
-			if listed.Add(1) > 1 {
-				skills = append(skills, map[string]any{"name": "found-later", "description": "Found later"})
-			}
-			return map[string]any{"data": []any{map[string]any{"cwd": "/w", "skills": skills}}}
-		}
-		return (&switchableTurn{}).respond(method, params)
-	})
-	fake.AddThread(codextest.Thread{ID: "thread"})
-	fake.Load("thread")
-	sess := managedRolloutSession(t, `{"type":"session_meta","payload":{"id":"thread"}}`)
-	sess.TranscriptOffsetSet = true
-	sess.Cwd = "/w"
-	events := make(chan surface.StreamEvent, 64)
-	ctx, cancel := context.WithCancel(context.Background())
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		_ = isolatedManagedRuntime(t).Stream(ctx, sess, "", func(event surface.StreamEvent) {
-			if event.Kind == "commands" {
-				events <- event
-			}
-		}, time.Minute)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		<-stopped
-	})
-	awaitInserts := func(want ...string) {
-		t.Helper()
-		select {
-		case event := <-events:
-			if got := commandInserts(event.Commands); !slices.Equal(got, want) {
-				t.Fatalf("commands = %v, want %v", got, want)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("no commands event, want %v", want)
-		}
-	}
-	awaitInserts("$review")
-	awaitCalls(t, fake, "thread/resume", 1)
-	fake.Notify("skills/changed", map[string]any{})
-	awaitInserts("$review", "$found-later")
-	if params := fake.Calls("skills/list")[0]; params["forceReload"] != true {
-		t.Fatalf("skills/list params = %v", params)
-	}
-}
-
-func TestCodexOffersEachEnabledSkillOnceAsADollarCommand(t *testing.T) {
-	resp := map[string]any{"result": map[string]any{"data": []any{map[string]any{"cwd": "/w", "skills": []any{
-		map[string]any{"name": "review", "description": "Long review text", "interface": map[string]any{"shortDescription": "Review"}},
-		map[string]any{"name": "off", "description": "Disabled", "enabled": false},
-		map[string]any{"name": "review", "description": "A second root's copy"},
-		map[string]any{"name": "notes", "description": "Take notes", "shortDescription": "Notes"},
-	}}}}}
-	commands := codexRuntimeCommands(resp)
-	want := []surface.RuntimeCommand{{Name: "review", Description: "Review", Insert: "$review"}, {Name: "notes", Description: "Notes", Insert: "$notes"}}
-	if !slices.Equal(commands.Commands, want) || commands.Unavailable != "" {
-		t.Fatalf("commands = %+v, want %+v", commands.Commands, want)
 	}
 }

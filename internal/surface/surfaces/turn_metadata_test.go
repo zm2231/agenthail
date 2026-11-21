@@ -3,7 +3,6 @@ package surfaces
 import (
 	"context"
 	"errors"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -14,98 +13,6 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
-
-func count(n int64) *int64 { return &n }
-
-const codexTurnRecords = `{"timestamp":"2026-10-19T10:00:00Z","type":"session_meta","payload":{"id":"thread"}}
-{"timestamp":"2026-10-19T10:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
-{"timestamp":"2026-10-19T10:00:00Z","type":"turn_context","payload":{"turn_id":"turn-1","model":"gpt-fixture"}}
-{"timestamp":"2026-10-19T10:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"build it"}}
-{"timestamp":"2026-10-19T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":120},"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":5,"output_tokens":20,"reasoning_output_tokens":8,"total_tokens":120}}}}
-`
-
-const codexTurnRest = `{"timestamp":"2026-10-19T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":120},"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":5,"output_tokens":20,"reasoning_output_tokens":8,"total_tokens":120}}}}
-{"timestamp":"2026-10-19T10:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":300},"last_token_usage":{"input_tokens":150,"cached_input_tokens":100,"cache_write_input_tokens":0,"output_tokens":30,"reasoning_output_tokens":2,"total_tokens":180}}}}
-{"timestamp":"2026-10-19T10:00:04Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"built"}]}}
-{"timestamp":"2026-10-19T10:00:04Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","duration_ms":4200}}
-{"timestamp":"2026-10-19T10:01:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2"}}
-{"timestamp":"2026-10-19T10:01:00Z","type":"turn_context","payload":{"turn_id":"turn-2","model":"gpt-fixture"}}
-{"timestamp":"2026-10-19T10:01:00Z","type":"event_msg","payload":{"type":"user_message","message":"and test it"}}
-{"timestamp":"2026-10-19T10:01:01Z","type":"compacted","payload":{"message":"","window_number":1,"window_id":"window-2"}}
-{"timestamp":"2026-10-19T10:01:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":300},"last_token_usage":{"input_tokens":150,"cached_input_tokens":100,"cache_write_input_tokens":0,"output_tokens":30,"reasoning_output_tokens":2,"total_tokens":180}}}}
-{"timestamp":"2026-10-19T10:01:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":330},"last_token_usage":{"input_tokens":30,"total_tokens":30}}}}
-{"timestamp":"2026-10-19T10:01:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":380},"last_token_usage":{"input_tokens":40,"output_tokens":10,"total_tokens":50}}}}
-{"timestamp":"2026-10-19T10:01:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"stopping"}]}}
-{"timestamp":"2026-10-19T10:01:03Z","type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-2","parent_turn_id":"turn-1"}}
-`
-
-var (
-	codexCompletedTurn = &surface.TurnMetadata{V: 1, State: "completed", Model: "gpt-fixture", DurationMs: count(4200), Usage: &surface.TurnUsage{InputTokens: 250, CachedInputTokens: 140, CacheWriteTokens: 5, OutputTokens: 50, ReasoningTokens: count(10)}, ContextTokens: count(180)}
-	codexAbortedTurn   = &surface.TurnMetadata{V: 1, State: "interrupted", Model: "gpt-fixture", Usage: &surface.TurnUsage{InputTokens: 70, OutputTokens: 10}, ContextTokens: count(50),
-		Compactions: []surface.TurnCompaction{{Trigger: "unknown", PreTokens: count(180), PostTokens: count(30)}}, Unavailable: []string{"durationMs", "usage.reasoningTokens"}}
-)
-
-func TestCodexTranscriptReportsEachTurnsModelUsageAndDuration(t *testing.T) {
-	path := timelineFixture(t, codexTurnRecords+codexTurnRest)
-	codex := &Codex{desktopURL: "ws://127.0.0.1:1"}
-	read, err := codex.ReadSession(context.Background(), &surface.Session{ID: "thread", Transport: codexTransportDesktop, Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
-	if err != nil || len(read.Exchanges) != 2 {
-		t.Fatalf("read=%+v err=%v", read, err)
-	}
-	surfacetest.WantTurn(t, "completed", read.Exchanges[0].Turn, codexCompletedTurn)
-	surfacetest.WantTurn(t, "aborted", read.Exchanges[1].Turn, codexAbortedTurn)
-}
-
-func TestCodexStreamResumedMidTurnCountsTheWholeTurn(t *testing.T) {
-	for _, start := range []string{"task_started", "turn_started"} {
-		t.Run(start, func(t *testing.T) {
-			head := strings.ReplaceAll(codexTurnRecords, `"task_started"`, `"`+start+`"`)
-			path := timelineFixture(t, head)
-			offset := int64(len(head))
-			testkit.AppendFile(t, path, strings.ReplaceAll(codexTurnRest, `"task_started"`, `"`+start+`"`))
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			var turns []*surface.TurnMetadata
-			err := (&Codex{}).Stream(ctx, &surface.Session{ID: "thread", Transcript: path, TranscriptOffset: offset, TranscriptOffsetSet: true}, "", func(event surface.StreamEvent) {
-				if event.Kind == "done" {
-					turns = append(turns, event.Turn)
-					if len(turns) == 2 {
-						cancel()
-					}
-				}
-			}, 2*time.Second)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				t.Fatal(err)
-			}
-			if len(turns) != 2 {
-				t.Fatalf("done turns=%d", len(turns))
-			}
-			surfacetest.WantTurn(t, "completed", turns[0], codexCompletedTurn)
-			surfacetest.WantTurn(t, "aborted", turns[1], codexAbortedTurn)
-		})
-	}
-}
-
-func TestCodexTurnWhoseStartIsOutOfReachHasNoUsage(t *testing.T) {
-	limit := transcript.TurnScanLimit
-	transcript.TurnScanLimit = 1
-	t.Cleanup(func() { transcript.TurnScanLimit = limit })
-	path := timelineFixture(t, codexTurnRecords)
-	testkit.AppendFile(t, path, codexTurnRest)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	var first *surface.TurnMetadata
-	err := (&Codex{}).Stream(ctx, &surface.Session{ID: "thread", Transcript: path, TranscriptOffset: int64(len(codexTurnRecords)), TranscriptOffsetSet: true}, "", func(event surface.StreamEvent) {
-		if event.Kind == "done" && first == nil {
-			first = event.Turn
-			cancel()
-		}
-	}, 2*time.Second)
-	if err != nil && !errors.Is(err, context.Canceled) {
-		t.Fatal(err)
-	}
-	surfacetest.WantTurn(t, "joined midway", first, &surface.TurnMetadata{V: 1, State: "completed", DurationMs: count(4200), Unavailable: []string{"model", "usage", "contextTokens", "compactions"}})
-}
 
 const claudeTurnHead = `{"type":"permission-mode","permissionMode":"default","sessionId":"session"}
 {"type":"user","uuid":"u1","timestamp":"2026-10-19T10:00:00Z","message":{"content":"fix it"}}
@@ -132,15 +39,15 @@ const claudeTurnTail = `{"type":"system","subtype":"compact_boundary","uuid":"cb
 `
 
 var (
-	claudeCompletedTurn = &surface.TurnMetadata{V: 1, State: "completed", Model: "claude-fixture", DurationMs: count(7000), Usage: &surface.TurnUsage{InputTokens: 2228, CachedInputTokens: 2100, CacheWriteTokens: 120, OutputTokens: 55, ReasoningTokens: count(12)}, ContextTokens: count(1125),
-		Compactions: []surface.TurnCompaction{{Trigger: "threshold", PreTokens: count(1103), PostTokens: count(200)}}}
-	claudeInterruptedTurn = &surface.TurnMetadata{V: 1, State: "interrupted", Model: "claude-fixture", DurationMs: count(5000), Usage: &surface.TurnUsage{InputTokens: 57, CachedInputTokens: 50, OutputTokens: 9}, ContextTokens: count(30),
-		Compactions: []surface.TurnCompaction{{Trigger: "idle", PreTokens: count(1300), PostTokens: count(250)}, {Trigger: "manual", PreTokens: count(260), PostTokens: count(240), RequestID: "c1"}, {Trigger: "threshold", PreTokens: count(57), PostTokens: count(30)}}, Unavailable: []string{"usage.reasoningTokens"}}
+	claudeCompletedTurn = &surface.TurnMetadata{V: 1, State: "completed", Model: "claude-fixture", DurationMs: surfacetest.Count(7000), Usage: &surface.TurnUsage{InputTokens: 2228, CachedInputTokens: 2100, CacheWriteTokens: 120, OutputTokens: 55, ReasoningTokens: surfacetest.Count(12)}, ContextTokens: surfacetest.Count(1125),
+		Compactions: []surface.TurnCompaction{{Trigger: "threshold", PreTokens: surfacetest.Count(1103), PostTokens: surfacetest.Count(200)}}}
+	claudeInterruptedTurn = &surface.TurnMetadata{V: 1, State: "interrupted", Model: "claude-fixture", DurationMs: surfacetest.Count(5000), Usage: &surface.TurnUsage{InputTokens: 57, CachedInputTokens: 50, OutputTokens: 9}, ContextTokens: surfacetest.Count(30),
+		Compactions: []surface.TurnCompaction{{Trigger: "idle", PreTokens: surfacetest.Count(1300), PostTokens: surfacetest.Count(250)}, {Trigger: "manual", PreTokens: surfacetest.Count(260), PostTokens: surfacetest.Count(240), RequestID: "c1"}, {Trigger: "threshold", PreTokens: surfacetest.Count(57), PostTokens: surfacetest.Count(30)}}, Unavailable: []string{"usage.reasoningTokens"}}
 )
 
 func TestClaudeTranscriptReportsEachTurnsModelUsageAndDuration(t *testing.T) {
 	for _, notice := range []string{"Compacted while idle, before the prompt cache expired", "Compacted after an hour idle, using a summary written while you were away"} {
-		path := timelineFixture(t, claudeTurnHead+strings.Replace(claudeTurnTail, "Compacted while idle, before the prompt cache expired", notice, 1))
+		path := surfacetest.TimelineFixture(t, claudeTurnHead+strings.Replace(claudeTurnTail, "Compacted while idle, before the prompt cache expired", notice, 1))
 		read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
 		if err != nil || len(read.Exchanges) != 2 {
 			t.Fatalf("read=%+v err=%v", read, err)
@@ -167,86 +74,13 @@ func TestClaudeStreamResumedMidTurnCountsTheWholeTurn(t *testing.T) {
 	surfacetest.WantTurn(t, "interrupted", turns["u2"], claudeInterruptedTurn)
 }
 
-func TestATurnStillInProgressIsRunningAndOneWithoutAnEndIsUnknownUntilTheNextStarts(t *testing.T) {
-	path := timelineFixture(t, claudeTurnHead)
+func TestAClaudeTurnStillInProgressIsRunning(t *testing.T) {
+	path := surfacetest.TimelineFixture(t, claudeTurnHead)
 	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusBusy}, surface.SessionReadRequest{Limit: 5})
 	if err != nil || len(read.Exchanges) != 1 {
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
 	surfacetest.WantTurn(t, "in progress", read.Exchanges[0].Turn, &surface.TurnMetadata{V: 1, State: "running", Unavailable: []string{"model", "durationMs", "usage", "contextTokens", "compactions"}})
-
-	path = timelineFixture(t, `{"timestamp":"2026-09-07T12:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"hi"}}
-{"timestamp":"2026-09-07T12:01:00Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}}
-{"timestamp":"2026-09-07T12:02:00Z","type":"event_msg","payload":{"type":"user_message","message":"again"}}
-`)
-	read, err = (&Codex{desktopURL: "ws://127.0.0.1:1"}).ReadSession(context.Background(), &surface.Session{ID: "thread", Transport: codexTransportDesktop, Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
-	if err != nil || len(read.Exchanges) != 2 {
-		t.Fatalf("read=%+v err=%v", read, err)
-	}
-	unknown := &surface.TurnMetadata{V: 1, State: "unknown", Unavailable: []string{"state", "model", "durationMs", "usage", "contextTokens", "compactions"}}
-	surfacetest.WantTurn(t, "superseded", read.Exchanges[0].Turn, unknown)
-	surfacetest.WantTurn(t, "idle tail", read.Exchanges[1].Turn, unknown)
-	if strings.Contains(surfacetest.TurnJSON(t, unknown), "inputTokens") {
-		t.Fatal("unavailable usage must not read as zero tokens")
-	}
-
-	path = timelineFixture(t, `{"timestamp":"2026-09-07T12:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-a"}}
-{"timestamp":"2026-09-07T12:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"hi"}}
-{"timestamp":"2026-09-07T12:01:00Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}}
-{"timestamp":"2026-09-07T12:02:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-b"}}
-{"timestamp":"2026-09-07T12:02:05Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-b","duration_ms":5000}}
-`)
-	read, err = (&Codex{desktopURL: "ws://127.0.0.1:1"}).ReadSession(context.Background(), &surface.Session{ID: "thread", Transport: codexTransportDesktop, Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
-	if err != nil || len(read.Exchanges) != 1 {
-		t.Fatalf("read=%+v err=%v", read, err)
-	}
-	surfacetest.WantTurn(t, "turn without an end before a silent turn", read.Exchanges[0].Turn, &surface.TurnMetadata{V: 1, State: "interrupted", Usage: &surface.TurnUsage{}, Unavailable: []string{"model", "durationMs", "usage.reasoningTokens", "contextTokens"}})
-}
-
-func TestManagedCodexTurnsCarryWhatTheirRolloutRecorded(t *testing.T) {
-	rollout := strings.ReplaceAll(codexTurnRecords+strings.ReplaceAll(codexTurnRest, `"text":"stopping"`, `"text":"built"`), `"task_started"`, `"turn_started"`)
-	path := timelineFixture(t, rollout+`{"timestamp":"2026-10-19T10:02:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-3"}}
-{"timestamp":"2026-10-19T10:02:00Z","type":"event_msg","payload":{"type":"user_message","message":"one more"}}
-{"timestamp":"2026-10-19T10:02:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"no end in the rollout"}]}}
-`)
-	session := managedSession()
-	session.Transcript = path
-	turn := func(id, status, text string) any {
-		return map[string]any{"id": id, "status": status, "items": []any{agentMessage(id+"-answer", "final_answer", text)}}
-	}
-	newestFirst := []any{
-		turn("turn-3", "failed", "no end in the rollout"),
-		turn("turn-2", "interrupted", "built"),
-		turn("turn-1", "completed", "built"),
-	}
-	startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
-		switch method {
-		case "thread/read":
-			return map[string]any{"thread": map[string]any{"id": "thread"}}
-		case "thread/turns/list":
-			return map[string]any{"data": newestFirst}
-		}
-		return nil
-	})
-	read, err := isolatedManagedRuntime(t).ReadSession(context.Background(), session, surface.SessionReadRequest{Limit: 5})
-	if err != nil || read.Source != "rpc" || len(read.Exchanges) != 3 {
-		t.Fatalf("read=%+v err=%v", read, err)
-	}
-	surfacetest.WantTurn(t, "completed", read.Exchanges[0].Turn, codexCompletedTurn)
-	surfacetest.WantTurn(t, "aborted", read.Exchanges[1].Turn, codexAbortedTurn)
-	surfacetest.WantTurn(t, "app server only", read.Exchanges[2].Turn, &surface.TurnMetadata{V: 1, State: "failed", Unavailable: []string{"model", "durationMs", "usage", "contextTokens", "compactions"}})
-
-	startManagedCodex(t, managedThreadReads(managedTurn("turn-1", "completed", agentMessage("final", "final_answer", "built"))))
-	var done *surface.TurnMetadata
-	err = isolatedManagedRuntime(t).Stream(context.Background(), session, "turn-1", func(event surface.StreamEvent) {
-		if event.Kind == "done" {
-			done = event.Turn
-		}
-	}, 2*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	surfacetest.WantTurn(t, "streamed", done, codexCompletedTurn)
 }
 
 // streamedClaudeTurns streams rest after head until the last turn ends, and
@@ -290,109 +124,20 @@ func TestClaudeCompactionInATurnJoinedMidwayIsNotTheNextTurns(t *testing.T) {
 	surfacetest.WantTurn(t, "after a turn joined midway", turns["u2"], claudeInterruptedTurn)
 }
 
-func TestCodexCompactionInATurnJoinedMidwayIsNotTheNextTurns(t *testing.T) {
-	limit := transcript.TurnScanLimit
-	transcript.TurnScanLimit = 1
-	t.Cleanup(func() { transcript.TurnScanLimit = limit })
-	path := timelineFixture(t, codexTurnRecords)
-	testkit.AppendFile(t, path, `{"timestamp":"2026-10-19T10:00:02Z","type":"compacted","payload":{"message":"","window_number":1,"window_id":"window-1"}}`+"\n"+codexTurnRest)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	var turns []*surface.TurnMetadata
-	err := (&Codex{}).Stream(ctx, &surface.Session{ID: "thread", Transcript: path, TranscriptOffset: int64(len(codexTurnRecords)), TranscriptOffsetSet: true}, "", func(event surface.StreamEvent) {
-		if event.Kind == "done" {
-			if turns = append(turns, event.Turn); len(turns) == 2 {
-				cancel()
-			}
-		}
-	}, 2*time.Second)
-	if err != nil && !errors.Is(err, context.Canceled) || len(turns) != 2 {
-		t.Fatalf("turns=%d err=%v", len(turns), err)
-	}
-	surfacetest.WantTurn(t, "after a turn joined midway", turns[1], codexAbortedTurn)
-}
-
-func streamedCodexTurns(t *testing.T, head, rest string, want int) []*surface.TurnMetadata {
-	t.Helper()
-	path := timelineFixture(t, head)
-	testkit.AppendFile(t, path, rest)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	var turns []*surface.TurnMetadata
-	err := (&Codex{}).Stream(ctx, &surface.Session{ID: "thread", Transcript: path, TranscriptOffset: int64(len(head)), TranscriptOffsetSet: true}, "", func(event surface.StreamEvent) {
-		if event.Kind == "done" {
-			if turns = append(turns, event.Turn); len(turns) == want {
-				cancel()
-			}
-		}
-	}, 2*time.Second)
-	if err != nil && !errors.Is(err, context.Canceled) || len(turns) != want {
-		t.Fatalf("turns=%d err=%v", len(turns), err)
-	}
-	return turns
-}
-
 func TestAReaderJoiningAfterACompactionReportsTheTurnsWholeCompactionHistory(t *testing.T) {
 	claudeSplit := strings.Index(claudeTurnTail, `{"type":"assistant","uuid":"a5"`)
 	surfacetest.WantTurn(t, "claude", streamedClaudeTurns(t, claudeTurnHead+claudeTurnTail[:claudeSplit], claudeTurnTail[claudeSplit:], "u2")["u2"], claudeInterruptedTurn)
-	records := codexTurnRecords + codexTurnRest
-	codexSplit := strings.Index(records, `{"timestamp":"2026-10-19T10:01:02Z","type":"event_msg","payload":{"type":"token_count"`)
-	surfacetest.WantTurn(t, "codex", streamedCodexTurns(t, records[:codexSplit], records[codexSplit:], 1)[0], codexAbortedTurn)
 }
 
 func TestATurnWhoseEarlierHistoryIsOutOfReachDoesNotClaimItHadNoCompactions(t *testing.T) {
-	records := codexTurnRecords + codexTurnRest
-	start := strings.Index(records, `{"timestamp":"2026-10-19T10:01:00Z","type":"event_msg","payload":{"type":"task_started"`)
-	split := strings.Index(records, `{"timestamp":"2026-10-19T10:01:02Z","type":"event_msg","payload":{"type":"token_count"`)
+	claude := claudeTurnHead + claudeTurnTail
+	start := strings.Index(claude, `{"type":"user","uuid":"u2"`)
+	split := strings.Index(claude, `{"type":"assistant","uuid":"a5"`)
 	limit := transcript.TurnScanLimit
 	transcript.TurnScanLimit = int64(split - start + 1)
 	t.Cleanup(func() { transcript.TurnScanLimit = limit })
-	turn := streamedCodexTurns(t, records[:split], records[split:], 1)[0]
-	if turn.Compactions != nil || !slices.Contains(turn.Unavailable, "compactions") {
-		t.Fatalf("codex turn=%s, want its compactions unavailable", surfacetest.TurnJSON(t, turn))
-	}
-
-	claude := claudeTurnHead + claudeTurnTail
-	start = strings.Index(claude, `{"type":"user","uuid":"u2"`)
-	split = strings.Index(claude, `{"type":"assistant","uuid":"a5"`)
-	transcript.TurnScanLimit = int64(split - start + 1)
-	turn = streamedClaudeTurns(t, claude[:split], claude[split:], "u2")["u2"]
+	turn := streamedClaudeTurns(t, claude[:split], claude[split:], "u2")["u2"]
 	if turn == nil || turn.Compactions != nil || !slices.Contains(turn.Unavailable, "compactions") {
 		t.Fatalf("claude turn=%s, want its compactions unavailable", surfacetest.TurnJSON(t, turn))
-	}
-}
-
-func TestCodexCompactionsBackToBackLeaveTheSizeBetweenThemUnknown(t *testing.T) {
-	for _, between := range []struct {
-		name    string
-		records string
-		pre     *int64
-	}{
-		{name: "nothing measured"},
-		{name: "a request no smaller", records: `{"timestamp":"2026-10-19T10:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1000},"last_token_usage":{"input_tokens":490,"output_tokens":10,"total_tokens":500}}}}
-`, pre: count(500)},
-	} {
-		t.Run(between.name, func(t *testing.T) {
-			path := timelineFixture(t, `{"timestamp":"2026-10-19T10:00:00Z","type":"session_meta","payload":{"id":"thread"}}
-{"timestamp":"2026-10-19T10:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
-{"timestamp":"2026-10-19T10:00:00Z","type":"turn_context","payload":{"turn_id":"turn-1","model":"gpt-fixture"}}
-{"timestamp":"2026-10-19T10:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"build it"}}
-{"timestamp":"2026-10-19T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":500},"last_token_usage":{"input_tokens":480,"output_tokens":20,"total_tokens":500}}}}
-{"timestamp":"2026-10-19T10:00:02Z","type":"compacted","payload":{"message":"","window_number":1,"window_id":"window-1"}}
-`+between.records+`{"timestamp":"2026-10-19T10:00:03Z","type":"compacted","payload":{"message":"","window_number":2,"window_id":"window-2"}}
-{"timestamp":"2026-10-19T10:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1040},"last_token_usage":{"input_tokens":40,"total_tokens":40}}}}
-{"timestamp":"2026-10-19T10:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"built"}]}}
-{"timestamp":"2026-10-19T10:00:05Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","duration_ms":5000}}
-`)
-			read, err := (&Codex{desktopURL: "ws://127.0.0.1:1"}).ReadSession(context.Background(), &surface.Session{ID: "thread", Transport: codexTransportDesktop, Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
-			if err != nil || len(read.Exchanges) != 1 {
-				t.Fatalf("read=%+v err=%v", read, err)
-			}
-			turn := read.Exchanges[0].Turn
-			want := []surface.TurnCompaction{{Trigger: "unknown", PreTokens: count(500)}, {Trigger: "unknown", PreTokens: between.pre, PostTokens: count(40)}}
-			if !reflect.DeepEqual(turn.Compactions, want) || *turn.ContextTokens != 40 {
-				t.Fatalf("turn=%s", surfacetest.TurnJSON(t, turn))
-			}
-		})
 	}
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -72,7 +72,7 @@ func TestCodexSubagentTurnsRaiseNoCompletionAlertAndItsApprovalOpensTheRoot(t *t
 	t.Cleanup(func() { store.Close() })
 	pushes := newPushRecorder(t, store)
 	desktop := &desktopRecorder{}
-	h, _ := runDaemonWith(t, store, func(d *Daemon) { d.notifyDesktop = desktop.notify }, surfaces.NewCodex(unreachableDesktop))
+	h, _ := runDaemonWith(t, store, func(d *Daemon) { d.notifyDesktop = desktop.notify }, codexsurface.NewCodex(unreachableDesktop))
 
 	status, payload := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "session-create", "surface": "codex", "message": "Plan the release", "cwd": t.TempDir()})
 	var created struct {

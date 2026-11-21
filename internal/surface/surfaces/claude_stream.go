@@ -22,12 +22,12 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 }
 
 func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
-	var commands *commandsWatch
+	var commands *surface.CommandsWatch
 	var route *streamRoute
 	if uuid == "" {
-		onEvent = serializedEvents(onEvent)
+		onEvent = surface.SerializedEvents(onEvent)
 		route = c.newStreamRoute(ctx, sess)
-		commands = watchCommands(ctx, func(ctx context.Context) (*surface.RuntimeCommands, error) {
+		commands = surface.WatchCommands(ctx, func(ctx context.Context) (*surface.RuntimeCommands, error) {
 			listed := route.current()
 			return c.Commands(ctx, &listed)
 		}, onEvent)

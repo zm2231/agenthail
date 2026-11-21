@@ -9,6 +9,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
@@ -70,7 +71,7 @@ func TestSteersMatchesTheSessionCapabilities(t *testing.T) {
 			c.DisableRemoteControl()
 		}
 		c.refused = map[string]time.Time{"refused": time.Now().Add(time.Hour)}
-		for _, adapter := range []surface.Surface{c, NewCodex("")} {
+		for _, adapter := range []surface.Surface{c, codexsurface.NewCodex("")} {
 			for _, session := range sessions {
 				if got, want := surface.CanSteer(adapter, session), surface.EffectiveCapabilities(adapter, session).Steer; got != want {
 					t.Errorf("%T localOnly=%v session=%+v: CanSteer=%v, capabilities say %v", adapter, localOnly, session, got, want)

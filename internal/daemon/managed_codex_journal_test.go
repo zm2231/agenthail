@@ -14,7 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 const managedRolloutStart = `{"type":"session_meta","payload":{"id":"managed-thread","cwd":"/work"}}
@@ -114,7 +114,7 @@ func TestAManagedCodexTurnJournalsAPromptSteeredAfterItsSeedOnce(t *testing.T) {
 	managedTurnAppServer(t, &finished)
 	_, reg, _, _, _ := daemonFixture(t)
 	session := managedCodexSession(t, reg, managedRolloutStart)
-	adapter := surfaces.NewCodex("1")
+	adapter := codexsurface.NewCodex("1")
 	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &session, adapter)
 	if err != nil {
@@ -154,7 +154,7 @@ func TestAManagedCodexThreadWithoutARolloutYetJournalsItsFirstTurnWhenItStarts(t
 		t.Fatal(err)
 	}
 	manager := newTestSourceManager(t, reg)
-	subscription, err := manager.prepareStream(context.Background(), &session, surfaces.NewCodex("1"))
+	subscription, err := manager.prepareStream(context.Background(), &session, codexsurface.NewCodex("1"))
 	if err != nil {
 		t.Fatalf("a thread whose first turn has not started could not be followed: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestAManagedCodexJournalWithAppServerRowsIsReadOnceFromItsRollout(t *testin
 	managedTurnAppServer(t, &finished)
 	_, reg, _, _, _ := daemonFixture(t)
 	session := managedCodexSession(t, reg, managedRolloutStart+managedRolloutSteer)
-	adapter := surfaces.NewCodex("1")
+	adapter := codexsurface.NewCodex("1")
 	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &session, adapter)
 	if err != nil {

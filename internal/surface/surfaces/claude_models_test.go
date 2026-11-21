@@ -88,3 +88,27 @@ fi
 		t.Fatalf("second catalog=%+v err=%v", models, err)
 	}
 }
+
+func TestClaudeModelsPreservesCatalogMetadata(t *testing.T) {
+	home := t.TempDir()
+	binary := filepath.Join(home, "claude")
+	script := `#!/bin/sh
+IFS= read -r _
+printf '%s\n' '{"type":"control_response","response":{"request_id":"agenthail-model-catalog","response":{"models":[{"value":"default","displayName":"Default","description":"recommended","supportedEffortLevels":["low","high"]},{"value":"haiku","displayName":"Haiku","resolvedModel":"claude-haiku-4-5-20251001"}]}}}'
+sleep 30
+`
+	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
+	models, err := NewClaude(nil, home).Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || models[0].ID != "default" || !models[0].Default || models[0].Description != "recommended" {
+		t.Fatalf("catalog options lost: %#v", models)
+	}
+	if len(models[0].SupportedReasoningEfforts) != 2 || !models[0].AllowsCustom {
+		t.Fatalf("catalog capability metadata lost: %#v", models[0])
+	}
+}

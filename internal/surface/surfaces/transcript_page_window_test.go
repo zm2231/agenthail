@@ -1,77 +1,14 @@
 package surfaces
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
-	"os"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
-
-type pageTranscript struct {
-	path       string
-	boundaries []int64
-}
-
-func writePageTranscript(t *testing.T, records func(turn int, rng *rand.Rand) []map[string]any, turns int, seed int64) pageTranscript {
-	t.Helper()
-	rng := rand.New(rand.NewSource(seed))
-	path := filepath.Join(t.TempDir(), "transcript.jsonl")
-	file, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	var offset int64
-	boundaries := []int64{0}
-	var buffer strings.Builder
-	for turn := 1; turn <= turns; turn++ {
-		for _, record := range records(turn, rng) {
-			line, _ := json.Marshal(record)
-			buffer.Write(line)
-			buffer.WriteByte('\n')
-			offset += int64(len(line) + 1)
-			boundaries = append(boundaries, offset)
-		}
-		if buffer.Len() > 1<<20 {
-			if _, err := file.WriteString(buffer.String()); err != nil {
-				t.Fatal(err)
-			}
-			buffer.Reset()
-		}
-	}
-	if _, err := file.WriteString(buffer.String()); err != nil {
-		t.Fatal(err)
-	}
-	return pageTranscript{path: path, boundaries: boundaries}
-}
-
-// scaleTranscriptReads keeps the doublings from first window to budget while shrinking both.
-func scaleTranscriptReads(t *testing.T) {
-	t.Helper()
-	budget, window := transcript.TimelineReadBudget, transcript.TimelineFirstWindow
-	transcript.TimelineReadBudget, transcript.TimelineFirstWindow = budget/16, window/16
-	t.Cleanup(func() { transcript.TimelineReadBudget, transcript.TimelineFirstWindow = budget, window })
-}
-
-func toolOutput(rng *rand.Rand) string {
-	window := int(transcript.TimelineFirstWindow)
-	switch roll := rng.Intn(1000); {
-	case roll == 0:
-		return strings.Repeat("o", window*11/8+rng.Intn(4*window))
-	case roll < 30:
-		return strings.Repeat("o", window/25+rng.Intn(window*2/5))
-	default:
-		return strings.Repeat("o", rng.Intn(400))
-	}
-}
 
 func claudePageRecords(turn int, rng *rand.Rand) []map[string]any {
 	at := fmt.Sprintf("2026-10-23T09:%02d:%02dZ", turn/60%60, turn%60)
@@ -80,7 +17,7 @@ func claudePageRecords(turn int, rng *rand.Rand) []map[string]any {
 		id := fmt.Sprintf("call-%d-%d", turn, call)
 		records = append(records,
 			map[string]any{"type": "assistant", "uuid": "tool-" + id, "timestamp": at, "message": map[string]any{"id": fmt.Sprintf("message-%d", turn), "content": []map[string]any{{"type": "tool_use", "id": id, "name": "Bash", "input": map[string]any{"command": "go test"}}}}},
-			map[string]any{"type": "user", "uuid": "result-" + id, "timestamp": at, "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": id, "content": toolOutput(rng)}}}},
+			map[string]any{"type": "user", "uuid": "result-" + id, "timestamp": at, "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": id, "content": surfacetest.ToolOutput(rng)}}}},
 		)
 	}
 	return append(records,
@@ -89,97 +26,14 @@ func claudePageRecords(turn int, rng *rand.Rand) []map[string]any {
 	)
 }
 
-func codexPageRecords(turn int, rng *rand.Rand) []map[string]any {
-	at := fmt.Sprintf("2026-10-23T09:%02d:%02dZ", turn/60%60, turn%60)
-	id := fmt.Sprintf("turn-%d", turn)
-	records := []map[string]any{
-		{"timestamp": at, "type": "event_msg", "payload": map[string]any{"type": "task_started", "turn_id": id}},
-		{"timestamp": at, "type": "turn_context", "payload": map[string]any{"turn_id": id, "model": "gpt-fixture"}},
-		{"timestamp": at, "type": "event_msg", "payload": map[string]any{"type": "user_message", "message": fmt.Sprintf("question %d", turn)}},
-		{"timestamp": at, "type": "response_item", "payload": map[string]any{"type": "message", "role": "user", "content": []map[string]any{{"type": "input_text", "text": fmt.Sprintf("question %d", turn)}}}},
-	}
-	for call := 0; call < rng.Intn(4); call++ {
-		callID := fmt.Sprintf("call-%d-%d", turn, call)
-		records = append(records,
-			map[string]any{"timestamp": at, "type": "response_item", "payload": map[string]any{"type": "function_call", "name": "shell", "call_id": callID, "arguments": `{"command":"go test"}`}},
-			map[string]any{"timestamp": at, "type": "response_item", "payload": map[string]any{"type": "function_call_output", "call_id": callID, "output": toolOutput(rng)}},
-		)
-	}
-	return append(records,
-		map[string]any{"timestamp": at, "type": "response_item", "payload": map[string]any{"type": "message", "role": "assistant", "content": []map[string]any{{"type": "output_text", "text": fmt.Sprintf("answer %d", turn)}}}},
-		map[string]any{"timestamp": at, "type": "event_msg", "payload": map[string]any{"type": "task_complete", "turn_id": id, "duration_ms": 1000}},
-	)
-}
-
-func readPageWithFirstWindow(t *testing.T, window int64, path, source string, before int64, limit int) *surface.SessionReadResult {
-	t.Helper()
-	previous := transcript.TimelineFirstWindow
-	transcript.TimelineFirstWindow = window
-	defer func() { transcript.TimelineFirstWindow = previous }()
-	page, err := transcript.ReadPage(context.Background(), path, transcriptFormatOf(source), before, limit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return page
-}
-
-func samePage(t *testing.T, label string, got, want *surface.SessionReadResult) {
-	t.Helper()
-	if !reflect.DeepEqual(got, want) {
-		var differs []string
-		gotValue, wantValue := reflect.ValueOf(*got), reflect.ValueOf(*want)
-		for i := 0; i < gotValue.NumField(); i++ {
-			if !reflect.DeepEqual(gotValue.Field(i).Interface(), wantValue.Field(i).Interface()) {
-				gotJSON, _ := json.Marshal(gotValue.Field(i).Interface())
-				wantJSON, _ := json.Marshal(wantValue.Field(i).Interface())
-				differs = append(differs, fmt.Sprintf("%s: got %.300s want %.300s", gotValue.Type().Field(i).Name, gotJSON, wantJSON))
-			}
-		}
-		t.Fatalf("%s: a page read from a small first window differs from one read of the whole budget:\n%s", label, strings.Join(differs, "\n"))
-	}
-}
-
-func checkPagesMatchTheWholeBudgetRead(t *testing.T, written pageTranscript, source string, samples int) {
-	t.Helper()
-	rng := rand.New(rand.NewSource(7))
-	info, err := os.Stat(written.path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Size() <= transcript.TimelineReadBudget {
-		t.Fatalf("fixture is %d bytes; it must exceed the %d byte budget", info.Size(), transcript.TimelineReadBudget)
-	}
-	limits := []int{1, 2, 3, 5, 10, 20, 40, surface.MaxExchangePage}
-	for sample := 0; sample < samples; sample++ {
-		before := int64(0)
-		if sample > 0 {
-			before = written.boundaries[1+rng.Intn(len(written.boundaries)-1)]
-		}
-		limit := limits[rng.Intn(len(limits))]
-		want := readPageWithFirstWindow(t, transcript.TimelineReadBudget, written.path, source, before, limit)
-		got := readPageWithFirstWindow(t, transcript.TimelineFirstWindow, written.path, source, before, limit)
-		samePage(t, fmt.Sprintf("%s before=%d limit=%d", source, before, limit), got, want)
-		if next := got.NextBefore; next > 0 && limit > 0 {
-			older := readPageWithFirstWindow(t, transcript.TimelineFirstWindow, written.path, source, next, limit)
-			samePage(t, fmt.Sprintf("%s older page before=%d limit=%d", source, next, limit), older, readPageWithFirstWindow(t, transcript.TimelineReadBudget, written.path, source, next, limit))
-		}
-	}
-}
-
 func TestATranscriptPageReadsWhatItShowsAndMatchesAReadOfTheWholeBudget(t *testing.T) {
-	scaleTranscriptReads(t)
-	written := writePageTranscript(t, claudePageRecords, 26000/16, 1)
-	checkPagesMatchTheWholeBudgetRead(t, written, "claude", 24)
-}
-
-func TestACodexTranscriptPageMatchesAReadOfTheWholeBudget(t *testing.T) {
-	scaleTranscriptReads(t)
-	written := writePageTranscript(t, codexPageRecords, 20000/16, 2)
-	checkPagesMatchTheWholeBudgetRead(t, written, "codex", 16)
+	surfacetest.ScaleTranscriptReads(t)
+	written := surfacetest.WritePageTranscript(t, claudePageRecords, 26000/16, 1)
+	surfacetest.CheckPagesMatchTheWholeBudgetRead(t, written, claudeTranscript{}, "claude", 24)
 }
 
 func TestAPageWhoseToolOutputIsLargerThanTheFirstWindowStillShowsIt(t *testing.T) {
-	scaleTranscriptReads(t)
+	surfacetest.ScaleTranscriptReads(t)
 	huge := func(turn int, rng *rand.Rand) []map[string]any {
 		records := claudePageRecords(turn, rng)
 		if turn == 30 || turn == 60 {
@@ -192,12 +46,12 @@ func TestAPageWhoseToolOutputIsLargerThanTheFirstWindowStillShowsIt(t *testing.T
 		}
 		return records
 	}
-	written := writePageTranscript(t, huge, 60, 3)
+	written := surfacetest.WritePageTranscript(t, huge, 60, 3)
 	for _, limit := range []int{1, 2, 10} {
 		shown := 0
 		for before, pages := int64(0), 0; pages < 100; pages++ {
-			got := readPageWithFirstWindow(t, transcript.TimelineFirstWindow, written.path, "claude", before, limit)
-			samePage(t, fmt.Sprintf("limit=%d before=%d", limit, before), got, readPageWithFirstWindow(t, transcript.TimelineReadBudget, written.path, "claude", before, limit))
+			got := surfacetest.ReadPageWithFirstWindow(t, transcript.TimelineFirstWindow, written.Path, claudeTranscript{}, before, limit)
+			surfacetest.SamePage(t, fmt.Sprintf("limit=%d before=%d", limit, before), got, surfacetest.ReadPageWithFirstWindow(t, transcript.TimelineReadBudget, written.Path, claudeTranscript{}, before, limit))
 			for _, item := range got.Items {
 				if strings.HasPrefix(item.Text, "xxxx") {
 					shown++
@@ -229,11 +83,11 @@ func TestAPageIsTruncatedOnlyByWhatItShows(t *testing.T) {
 			map[string]any{"type": "assistant", "uuid": fmt.Sprintf("answer-%d", turn), "timestamp": at, "message": map[string]any{"id": fmt.Sprintf("message-%d", turn), "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": fmt.Sprintf("answer %d", turn)}}}},
 		)
 	}
-	written := writePageTranscript(t, older, 3, 4)
-	if newest := readPageWithFirstWindow(t, transcript.TimelineFirstWindow, written.path, "claude", 0, 1); newest.Truncated {
+	written := surfacetest.WritePageTranscript(t, older, 3, 4)
+	if newest := surfacetest.ReadPageWithFirstWindow(t, transcript.TimelineFirstWindow, written.Path, claudeTranscript{}, 0, 1); newest.Truncated {
 		t.Fatal("the newest exchange is marked truncated by an older output it does not show")
 	}
-	if whole := readPageWithFirstWindow(t, transcript.TimelineFirstWindow, written.path, "claude", 0, 3); !whole.Truncated {
+	if whole := surfacetest.ReadPageWithFirstWindow(t, transcript.TimelineFirstWindow, written.Path, claudeTranscript{}, 0, 3); !whole.Truncated {
 		t.Fatal("a page showing the shortened output is not marked truncated")
 	}
 }
@@ -250,38 +104,12 @@ func TestTheReplyOfAPageWhoseLatestTurnsHaveNoAnswerMatchesAReadOfTheWholeBudget
 		}
 		return records
 	}
-	written := writePageTranscript(t, quiet, 2040, 5)
+	written := surfacetest.WritePageTranscript(t, quiet, 2040, 5)
 	for _, limit := range []int{1, 2, 10} {
-		got := readPageWithFirstWindow(t, transcript.TimelineFirstWindow, written.path, "claude", 0, limit)
-		samePage(t, fmt.Sprintf("limit=%d", limit), got, readPageWithFirstWindow(t, transcript.TimelineReadBudget, written.path, "claude", 0, limit))
+		got := surfacetest.ReadPageWithFirstWindow(t, transcript.TimelineFirstWindow, written.Path, claudeTranscript{}, 0, limit)
+		surfacetest.SamePage(t, fmt.Sprintf("limit=%d", limit), got, surfacetest.ReadPageWithFirstWindow(t, transcript.TimelineReadBudget, written.Path, claudeTranscript{}, 0, limit))
 		if got.Reply == nil || got.Reply.Text != "answer 2000" {
 			t.Fatalf("limit=%d: reply=%+v, want the last answer, from turn 2000", limit, got.Reply)
 		}
-	}
-}
-
-func TestARolloutSegmentPageAboveAFloorMatchesAReadOfTheWholeBudget(t *testing.T) {
-	scaleTranscriptReads(t)
-	written := writePageTranscript(t, codexPageRecords, 20000/16, 6)
-	rng := rand.New(rand.NewSource(8))
-	for sample := 0; sample < 12; sample++ {
-		high := len(written.boundaries)/2 + rng.Intn(len(written.boundaries)/2)
-		before := written.boundaries[high]
-		floor := written.boundaries[rng.Intn(len(written.boundaries)/2)]
-		if sample%2 == 1 {
-			// A floor inside the first window, so the page stops at the floor.
-			floor = written.boundaries[high-1-rng.Intn(200)]
-		}
-		read := func(window int64) *surface.SessionReadResult {
-			previous := transcript.TimelineFirstWindow
-			transcript.TimelineFirstWindow = window
-			defer func() { transcript.TimelineFirstWindow = previous }()
-			page, err := transcript.ReadWindow(context.Background(), written.path, codexTranscript{}, floor, before, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			return page
-		}
-		samePage(t, fmt.Sprintf("floor=%d before=%d", floor, before), read(transcript.TimelineFirstWindow), read(transcript.TimelineReadBudget))
 	}
 }

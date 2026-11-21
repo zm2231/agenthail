@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 type emptySeedSurface struct {
@@ -78,7 +78,7 @@ func TestCodexSourceRecoversRecordsAfterSuccessfulSeedAndColdRestart(t *testing.
 	if err := reg.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
-	adapter := surfaces.NewCodex("http://127.0.0.1:1")
+	adapter := codexsurface.NewCodex("http://127.0.0.1:1")
 	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &from, adapter)
 	if err != nil {

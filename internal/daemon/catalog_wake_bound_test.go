@@ -9,7 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func openDescriptors(t *testing.T) int {
@@ -50,7 +50,7 @@ func TestCodexFoldersFollowedStayBoundedAsDaysPass(t *testing.T) {
 	}
 	watcher := filewake.New(filewake.DefaultLimit, t.Logf)
 	t.Cleanup(func() { _ = watcher.Close() })
-	wakes := newCatalogWakes([]surface.Surface{surfaces.NewCodex("")}, watcher.FollowDir)
+	wakes := newCatalogWakes([]surface.Surface{codexsurface.NewCodex("")}, watcher.FollowDir)
 	t.Cleanup(wakes.close)
 	wakes.sync()
 	settled := openDescriptors(t)

@@ -14,7 +14,7 @@ import (
 
 func (c *Claude) MoveToRoot(ctx context.Context, out *surface.MoveOut, moveID, root string) (*surface.Session, error) {
 	conversation := out.Conversation
-	if !safeFileName(conversation) || !safeFileName(moveID) {
+	if !surface.SafeFileName(conversation) || !surface.SafeFileName(moveID) {
 		return nil, fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	target, err := surface.ResolveClaudeStartRoot(c.home, root)
@@ -78,7 +78,7 @@ func (c *Claude) placeRootMove(conversation, moveID, source, target, projectDir 
 		if err := os.MkdirAll(filepath.Dir(to), 0700); err != nil {
 			return err
 		}
-		if err := renameIfPresent(filepath.Join(dir, filepath.FromSlash(part)), to); err != nil {
+		if err := surface.RenameIfPresent(filepath.Join(dir, filepath.FromSlash(part)), to); err != nil {
 			return err
 		}
 	}
@@ -110,7 +110,7 @@ func (c *Claude) returnRootMove(conversation, moveID, target string) error {
 		if err := os.MkdirAll(filepath.Dir(kept), 0700); err != nil {
 			return err
 		}
-		if err := renameIfPresent(claudeRootPart(target, origin.ProjectDir, part), kept); err != nil {
+		if err := surface.RenameIfPresent(claudeRootPart(target, origin.ProjectDir, part), kept); err != nil {
 			return err
 		}
 	}
@@ -118,7 +118,7 @@ func (c *Claude) returnRootMove(conversation, moveID, target string) error {
 }
 
 func (c *Claude) RecoverRootMove(ctx context.Context, conversation, moveID, root string) (bool, error) {
-	if !safeFileName(conversation) || !safeFileName(moveID) {
+	if !surface.SafeFileName(conversation) || !surface.SafeFileName(moveID) {
 		return false, fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	unlock, err := c.lockConversation(ctx, conversation)
@@ -153,7 +153,7 @@ func (c *Claude) RecoverRootMove(ctx context.Context, conversation, moveID, root
 			if err := os.MkdirAll(filepath.Dir(to), 0700); err != nil {
 				return false, err
 			}
-			if err := renameIfPresent(filepath.Join(dir, filepath.FromSlash(part)), to); err != nil {
+			if err := surface.RenameIfPresent(filepath.Join(dir, filepath.FromSlash(part)), to); err != nil {
 				return false, err
 			}
 		}

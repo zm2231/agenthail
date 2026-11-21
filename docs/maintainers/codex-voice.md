@@ -342,7 +342,7 @@ truncate them through a second speech-submission path.
 
 Read these units in order:
 
-1. `internal/surface/surfaces/codex_voice_managed.go`: the call's app-server
+1. `internal/surface/codexsurface/voice_managed.go`: the call's app-server
    connection, its event window, and tool-call answers repeating Codex's
    original request id. `codex_bridge.go` is the Desktop renderer contract for
    an operator Desktop has open: a tool answer is `mcp-response` with
@@ -355,7 +355,7 @@ Read these units in order:
    coding session. `poll.go` applies provider events, `spoken.go` delivers spoken
    requests, and `tool_calls.go` answers dynamic tools. `operator.go` creates the
    persistent operator and builds its instructions and native request parameters.
-3. `internal/surface/surfaces/codex_voice.go`: operator creation and the route
+3. `internal/surface/codexsurface/voice.go`: operator creation and the route
    choice: Desktop only while Desktop has the operator open, otherwise Codex's
    app-server. No approval-policy override.
 4. `internal/daemon/voice.go` and `voice_peer.js`: control-scoped Bearer-only API

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 func TestClaudePeerMessageFromThePersonIsTheirMessage(t *testing.T) {
@@ -16,8 +17,8 @@ func TestClaudePeerMessageFromThePersonIsTheirMessage(t *testing.T) {
 		record, _ := json.Marshal(map[string]any{"type": "user", "uuid": uuid, "origin": map[string]any{"kind": "peer", "name": name, "msg_id": uuid, "body": body}, "message": map[string]any{"content": content}})
 		return string(record) + "\n"
 	}
-	path := timelineFixture(t, line("p1", "agenthail/person: Zain", words, envelope)+line("p2", "reviewer", "Please rebase", agent))
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	path := surfacetest.TimelineFixture(t, line("p1", "agenthail/person: Zain", words, envelope)+line("p2", "reviewer", "Please rebase", agent))
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,7 +19,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
@@ -1009,7 +1009,7 @@ func TestManagedCodexLaunchWritesProviderReceiptBeforeExec(t *testing.T) {
 	var receiptAtExec surface.ManagedCodexLaunchReceipt
 	errExec := errors.New("provider process exited after dispatch")
 	t.Setenv("CODEX_HOME", t.TempDir())
-	home := surfaces.CodexHome{Codex: t.TempDir()}
+	home := codexsurface.CodexHome{Codex: t.TempDir()}
 	err := runManagedCodexLaunch(
 		context.Background(),
 		[]string{"--model", "o4-mini", "--", "hello"},

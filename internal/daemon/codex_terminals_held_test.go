@@ -11,7 +11,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -46,7 +46,7 @@ func TestARelayStaysHeldWhileAnOlderCodexsTranscriptShowsItsShellRunning(t *test
 	fake.Load(threadID)
 	rollout := fake.RolloutPath(threadID)
 
-	codex := surfaces.NewCodex(unreachableDesktop)
+	codex := codexsurface.NewCodex(unreachableDesktop)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

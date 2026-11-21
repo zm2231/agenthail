@@ -10,7 +10,6 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type heldCredentials struct {
@@ -18,7 +17,7 @@ type heldCredentials struct {
 	entered, release chan struct{}
 }
 
-func (s *heldCredentials) SetMCPCredentials(surfaces.MCPCredentials) {
+func (s *heldCredentials) SetMCPCredentials(surface.MCPCredentials) {
 	close(s.entered)
 	<-s.release
 }

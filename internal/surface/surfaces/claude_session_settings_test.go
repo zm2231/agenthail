@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 func TestAHostedClaudeSessionReportsItsSettingsFromTheRunningProcess(t *testing.T) {
@@ -42,9 +43,9 @@ func TestAHostedClaudeSessionReportsItsSettingsFromTheRunningProcess(t *testing.
 func TestAStoppedClaudeSessionReportsItsSettingsFromItsTranscriptWithoutStarting(t *testing.T) {
 	fixture, host, c := hostResume(t)
 	session := exitedSession(fixture)
-	appendLine(t, session.Transcript, `{"type":"user","permissionMode":"acceptEdits","message":{"role":"user","content":"go"}}`)
-	appendLine(t, session.Transcript, `{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[]}}`)
-	appendLine(t, session.Transcript, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}`)
+	surfacetest.AppendLine(t, session.Transcript, `{"type":"user","permissionMode":"acceptEdits","message":{"role":"user","content":"go"}}`)
+	surfacetest.AppendLine(t, session.Transcript, `{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[]}}`)
+	surfacetest.AppendLine(t, session.Transcript, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}`)
 
 	invocations := filepath.Join(fixture.Home, "argv")
 	before, _ := os.ReadFile(invocations)

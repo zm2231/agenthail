@@ -17,7 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func (a *App) cmdDoctor(args []string) error {
@@ -180,7 +180,7 @@ func (a *App) cmdDoctor(args []string) error {
 	codexHooks := ""
 	if executable, err := os.Executable(); err == nil {
 		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		codexHooks, _ = surfaces.CodexContextState(callCtx, surfaces.CodexHomeFromEnv(), executable)
+		codexHooks, _ = codexsurface.CodexContextState(callCtx, codexsurface.CodexHomeFromEnv(), executable)
 		cancel()
 	}
 	codexMCP := ""
@@ -188,7 +188,7 @@ func (a *App) cmdDoctor(args []string) error {
 		codexMCP = "unknown: " + err.Error()
 	} else {
 		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if codexMCP, err = codexMCPState(callCtx, surfaces.CodexHomeFromEnv(), off, relayExecutable()); err != nil {
+		if codexMCP, err = codexMCPState(callCtx, codexsurface.CodexHomeFromEnv(), off, relayExecutable()); err != nil {
 			codexMCP = "unknown: " + err.Error()
 		}
 		cancel()
@@ -451,23 +451,23 @@ func (a *App) cmdDoctor(args []string) error {
 			fmt.Printf("%s (line skipped)\n", problem)
 		}
 		switch codexHooks {
-		case surfaces.CodexHooksMissing:
+		case codexsurface.CodexHooksMissing:
 			fmt.Printf("codex hooks: missing; Codex sessions, including the ones Agenthail starts, aren't told who they are, and turns you type into Codex push Needs you to your devices, until you run: agenthail hooks install codex\n")
-		case surfaces.CodexHooksOutdated:
+		case codexsurface.CodexHooksOutdated:
 			fmt.Printf("codex hooks: outdated; Codex sessions may not be told who they are, and turns you type into Codex may push Needs you to your devices, until you run: agenthail hooks install codex\n")
-		case surfaces.CodexHooksUntrusted:
+		case codexsurface.CodexHooksUntrusted:
 			fmt.Printf("codex hooks: Codex hook not trusted yet: run agenthail hooks install codex or trust it in Codex\n")
 		}
 		switch codexMCP {
-		case "", surfaces.CodexRelayInstalled, claudeMCPOff:
+		case "", codexsurface.CodexRelayInstalled, claudeMCPOff:
 		case claudeMCPOffInstalled:
 			fmt.Printf("codex MCP server: codexMCP turns it off, but its entry is still there; run: agenthail mcp install\n")
-		case surfaces.CodexRelayMissing, surfaces.CodexRelayOutdated:
+		case codexsurface.CodexRelayMissing, codexsurface.CodexRelayOutdated:
 			fmt.Printf("codex MCP server: %s; Codex sessions started outside Agenthail don't have its tools until you run: agenthail mcp install\n", codexMCP)
-		case surfaces.CodexRelayDangling:
+		case codexsurface.CodexRelayDangling:
 			fmt.Printf("codex MCP server: its command no longer exists, so Codex shows a failed server at every start; run agenthail mcp install, or agenthail mcp uninstall if Agenthail is gone\n")
-		case surfaces.CodexRelayTaken:
-			fmt.Printf("codex MCP server: another server is named %s in the Codex config; rename it, then run: agenthail mcp install\n", surfaces.CodexRelayServerName)
+		case codexsurface.CodexRelayTaken:
+			fmt.Printf("codex MCP server: another server is named %s in the Codex config; rename it, then run: agenthail mcp install\n", codexsurface.CodexRelayServerName)
 		default:
 			fmt.Printf("codex MCP server: %s\n", codexMCP)
 		}

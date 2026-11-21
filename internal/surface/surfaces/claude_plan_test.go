@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 const planConversation = "6f1c2d3e-0000-4000-8000-000000000001"
@@ -87,7 +88,7 @@ func TestClaudePlanCountsTheSessionsOwnTaskList(t *testing.T) {
 		t.Fatalf("plan=%+v", plan)
 	}
 	writeTasks(t, root, planConversation, task("1", "Parse", "completed"), task("2", "Render", "in_progress"))
-	appendTranscript(t, path, planUpdate("1", "toolu_u2", "completed")+planUpdate("2", "toolu_u3", "in_progress"))
+	surfacetest.AppendTranscript(t, path, planUpdate("1", "toolu_u2", "completed")+planUpdate("2", "toolu_u3", "in_progress"))
 	if plan := observePlan(t, claude, path); plan == nil || *plan != (surface.Plan{Done: 1, Total: 2, Current: "Working on Render"}) {
 		t.Fatalf("after updates plan=%+v", plan)
 	}
@@ -106,12 +107,12 @@ func TestClaudePlanReadsTheTaskListOnlyAfterATaskResult(t *testing.T) {
 	if *reads != 1 {
 		t.Fatalf("three observations with one batch of task results read the list %d times", *reads)
 	}
-	appendTranscript(t, path, `{"type":"assistant","uuid":"a9","timestamp":"2026-10-23T10:02:00Z","message":{"id":"m9","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}`+"\n")
+	surfacetest.AppendTranscript(t, path, `{"type":"assistant","uuid":"a9","timestamp":"2026-10-23T10:02:00Z","message":{"id":"m9","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}`+"\n")
 	observePlan(t, claude, path)
 	if *reads != 1 {
 		t.Fatalf("a record with no task result read the list again: %d reads", *reads)
 	}
-	appendTranscript(t, path, planUpdate("2", "toolu_u4", "in_progress"))
+	surfacetest.AppendTranscript(t, path, planUpdate("2", "toolu_u4", "in_progress"))
 	observePlan(t, claude, path)
 	observePlan(t, claude, path)
 	if *reads != 2 {
@@ -175,7 +176,7 @@ func TestClaudePlanDropsADeletedTaskAndFollowsTodoWrite(t *testing.T) {
 	if plan := observePlan(t, claude, path); plan == nil || *plan != (surface.Plan{Done: 1, Total: 1}) {
 		t.Fatalf("after deleting task 2 plan=%+v", plan)
 	}
-	appendTranscript(t, path, `{"type":"assistant","uuid":"a7","timestamp":"2026-10-23T10:03:00Z","message":{"id":"m7","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_t","name":"TodoWrite","input":{"todos":[{"content":"Trace","status":"completed","activeForm":"Tracing"},{"content":"Fix","status":"in_progress","activeForm":"Fixing"},{"content":"Ship","status":"pending","activeForm":"Shipping"}]}}]}}`+"\n")
+	surfacetest.AppendTranscript(t, path, `{"type":"assistant","uuid":"a7","timestamp":"2026-10-23T10:03:00Z","message":{"id":"m7","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_t","name":"TodoWrite","input":{"todos":[{"content":"Trace","status":"completed","activeForm":"Tracing"},{"content":"Fix","status":"in_progress","activeForm":"Fixing"},{"content":"Ship","status":"pending","activeForm":"Shipping"}]}}]}}`+"\n")
 	if plan := observePlan(t, claude, path); plan == nil || *plan != (surface.Plan{Done: 1, Total: 3, Current: "Fixing"}) {
 		t.Fatalf("after TodoWrite plan=%+v", plan)
 	}

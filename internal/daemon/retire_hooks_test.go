@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/tidwall/gjson"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func TestTheDaemonRemovesAStopHookAnEarlierInstallWroteAndLeavesEveryOtherHook(t *testing.T) {
@@ -26,7 +26,7 @@ func TestTheDaemonRemovesAStopHookAnEarlierInstallWroteAndLeavesEveryOtherHook(t
 		t.Fatal(err)
 	}
 
-	d.retireStrayHooks(t.Context(), home, surfaces.CodexHome{Codex: filepath.Join(home, ".codex")})
+	d.retireStrayHooks(t.Context(), home, codexsurface.CodexHome{Codex: filepath.Join(home, ".codex")})
 	data, err := os.ReadFile(settings)
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestTheDaemonRemovesAStopHookAnEarlierInstallWroteAndLeavesEveryOtherHook(t
 	if err := os.WriteFile(settings, []byte(untouched), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	d.retireStrayHooks(t.Context(), home, surfaces.CodexHome{Codex: filepath.Join(home, ".codex")})
+	d.retireStrayHooks(t.Context(), home, codexsurface.CodexHome{Codex: filepath.Join(home, ".codex")})
 	if data, _ := os.ReadFile(settings); string(data) != untouched {
 		t.Fatalf("settings with no agenthail hook were rewritten: %s", data)
 	}

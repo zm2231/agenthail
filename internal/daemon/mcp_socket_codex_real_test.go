@@ -16,7 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/zm2231/agenthail/internal/codextest"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -122,7 +122,7 @@ func TestARealCodexThreadCallsTheToolsAsItselfThroughTheStdioRelay(t *testing.T)
 	relay := fmt.Sprintf("[mcp_servers.agenthail]\ncommand = %q\nargs = [\"-test.run=^TestMCPStdioRelayHelper$\"]\ndefault_tools_approval_mode = \"approve\"\nenv = { AGENTHAIL_TEST_RELAY_READY = %q, AGENTHAIL_TEST_RELAY_SOCKET = %q }\n", os.Args[0], ready, MCPSocketPath())
 	real := codextest.StartRealWith(t, model, relay)
 	stop()
-	d.Surfaces = append(d.Surfaces, surfaces.NewCodexIn(surfaces.CodexHome{Codex: real.CodexHome, State: filepath.Join(real.Home, ".agenthail")}, ""))
+	d.Surfaces = append(d.Surfaces, codexsurface.NewCodexIn(codexsurface.CodexHome{Codex: real.CodexHome, State: filepath.Join(real.Home, ".agenthail")}, ""))
 	restarted, err := d.startMCPSocket()
 	if err != nil {
 		t.Fatal(err)

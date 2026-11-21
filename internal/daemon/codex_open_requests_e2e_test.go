@@ -10,7 +10,7 @@ import (
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -41,7 +41,7 @@ func TestEveryCodexRequestOpeningOrClosingMovesTheRowAndTheDecisionsRevision(t *
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	h, _ := runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
+	h, _ := runDaemon(t, store, codexsurface.NewCodex(unreachableDesktop))
 	status, payload := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "session-create", "surface": "codex", "message": "Clean the build", "cwd": t.TempDir()})
 	var created struct {
 		Session struct {

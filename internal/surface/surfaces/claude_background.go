@@ -41,7 +41,7 @@ func (c *Claude) hostBackground(ctx context.Context, sess *surface.Session) (*su
 	for _, task := range listed.Tasks {
 		tasks = append(tasks, surface.BackgroundTask{ID: task.ID, Kind: claudeTaskKind(task.Type), Description: task.Description, ParentID: task.ParentID, Ambient: task.Ambient, Since: task.Since.UTC()})
 	}
-	background := backgroundOf(tasks, surface.BackgroundSourceHost)
+	background := surface.BackgroundOf(tasks, surface.BackgroundSourceHost)
 	if listed.TaskTurnOwed && !surface.BackgroundRunning(background) {
 		if background == nil {
 			background = &surface.BackgroundTasks{Source: surface.BackgroundSourceHost}
@@ -88,7 +88,7 @@ func (c *Claude) recordBackground(ctx context.Context, sess *surface.Session) *s
 			tasks = append(tasks, task)
 		}
 	}
-	background := backgroundOf(tasks, surface.BackgroundSourceTranscript)
+	background := surface.BackgroundOf(tasks, surface.BackgroundSourceTranscript)
 	if shell && !surface.BackgroundRunning(background) {
 		if background == nil {
 			background = &surface.BackgroundTasks{Source: surface.BackgroundSourceStatus}

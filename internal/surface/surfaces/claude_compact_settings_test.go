@@ -12,6 +12,7 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -27,10 +28,10 @@ func TestAHostSessionTurnsAutocompactOffNowAndItsWindowGoesToTheRoot(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if auto := settingValue(t, settings, surface.CompactSettingAuto); auto.Value != surface.CompactAutoOn || auto.Applies != surface.TurnSettingAppliesNow {
+	if auto := surfacetest.SettingValue(t, settings, surface.CompactSettingAuto); auto.Value != surface.CompactAutoOn || auto.Applies != surface.TurnSettingAppliesNow {
 		t.Fatalf("autoCompact = %+v", auto)
 	}
-	if window := settingValue(t, settings, surface.CompactSettingWindow); window.Value != "" || window.Applies != surface.TurnSettingAppliesNewSessions || window.Scope != "default" {
+	if window := surfacetest.SettingValue(t, settings, surface.CompactSettingWindow); window.Value != "" || window.Applies != surface.TurnSettingAppliesNewSessions || window.Scope != "default" {
 		t.Fatalf("compactWindow = %+v", window)
 	}
 	if err := c.SetCompactSetting(ctx, sess, surface.CompactSettingAuto, surface.CompactAutoOff); err != nil {
@@ -46,10 +47,10 @@ func TestAHostSessionTurnsAutocompactOffNowAndItsWindowGoesToTheRoot(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := settingValue(t, settings, surface.CompactSettingAuto).Value; got != surface.CompactAutoOff {
+	if got := surfacetest.SettingValue(t, settings, surface.CompactSettingAuto).Value; got != surface.CompactAutoOff {
 		t.Fatalf("autoCompact after turning it off = %q", got)
 	}
-	if got := settingValue(t, settings, surface.CompactSettingWindow).Value; got != "400000" {
+	if got := surfacetest.SettingValue(t, settings, surface.CompactSettingWindow).Value; got != "400000" {
 		t.Fatalf("compactWindow after the change = %q", got)
 	}
 	data, err := os.ReadFile(filepath.Join(fixture.Home, ".claude", "settings.json"))
@@ -83,7 +84,7 @@ func TestAWindowChangeBeforeClaudeNamesItsModelGoesToTheChosenModelsWindow(t *te
 	c := NewClaude(nil, home)
 	sess := &surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, ConfiguredModel: "claude-opus-5-5"}
 	listed, err := c.CompactSettings(context.Background(), sess)
-	if err != nil || settingValue(t, listed, surface.CompactSettingWindow).Value != surface.CompactAuto {
+	if err != nil || surfacetest.SettingValue(t, listed, surface.CompactSettingWindow).Value != surface.CompactAuto {
 		t.Fatalf("settings=%+v err=%v", listed, err)
 	}
 	if err := c.SetCompactSetting(context.Background(), sess, surface.CompactSettingWindow, "600000"); err != nil {
@@ -123,7 +124,7 @@ func TestASessionsOwnCompactWindowStaysPendingUntilItsNextMessage(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	own := settingValue(t, settings, surface.CompactSettingSessionWindow)
+	own := surfacetest.SettingValue(t, settings, surface.CompactSettingSessionWindow)
 	if own.Value != surface.CompactWindowRootDefault || own.Pending == nil || *own.Pending != "150000" || own.Applies != surface.TurnSettingAppliesNextMessage {
 		t.Fatalf("own window = %+v", own)
 	}
@@ -134,7 +135,7 @@ func TestASessionsOwnCompactWindowStaysPendingUntilItsNextMessage(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if own := settingValue(t, settings, surface.CompactSettingSessionWindow); own.Pending != nil {
+	if own := surfacetest.SettingValue(t, settings, surface.CompactSettingSessionWindow); own.Pending != nil {
 		t.Fatalf("choosing the window in effect again leaves %q pending", *own.Pending)
 	}
 }

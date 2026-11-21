@@ -12,7 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 type mcpCodexFixture struct {
@@ -74,7 +74,7 @@ func (f *mcpCodexFixture) restartAgenthail(t *testing.T) {
 	if f.server != nil {
 		f.server.Close()
 	}
-	f.daemon = newTestDaemon(t, f.registry, []surface.Surface{surfaces.NewCodex(unreachableDesktop)})
+	f.daemon = newTestDaemon(t, f.registry, []surface.Surface{codexsurface.NewCodex(unreachableDesktop)})
 	f.server = httptest.NewServer(f.daemon.dashboardHandler(&dashboardServer{token: dashboardTestToken}))
 	t.Cleanup(f.server.Close)
 	f.daemon.attachMCPCredentials(strings.TrimPrefix(f.server.URL, "http://"))

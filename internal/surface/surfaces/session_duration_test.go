@@ -3,11 +3,13 @@ package surfaces
 import (
 	"context"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 func TestClaudeDurationUsesRecordedMilliseconds(t *testing.T) {
-	path := timelineFixture(t, "{\"type\":\"system\",\"subtype\":\"turn_duration\",\"durationMs\":114536}\n")
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	path := surfacetest.TimelineFixture(t, "{\"type\":\"system\",\"subtype\":\"turn_duration\",\"durationMs\":114536}\n")
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

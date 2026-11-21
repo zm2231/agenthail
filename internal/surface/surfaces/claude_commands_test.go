@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 // claudeGoalSequence is what Claude Code 2.1.304 writes when /goal runs in a
@@ -24,7 +25,7 @@ const claudeGoalSequence = `{"type":"user","uuid":"u-human","message":{"role":"u
 `
 
 func TestClaudeGoalCommandRendersAsEventsNotUserMessages(t *testing.T) {
-	page, err := readTimeline(context.Background(), timelineFixture(t, claudeGoalSequence), "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), surfacetest.TimelineFixture(t, claudeGoalSequence), 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,7 @@ func TestClaudeGoalCommandRendersAsEventsNotUserMessages(t *testing.T) {
 }
 
 func TestClaudeGoalCommandIsAnExchangeOfItsOutputWithoutItsMarkup(t *testing.T) {
-	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: timelineFixture(t, claudeGoalSequence), Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 10})
+	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: surfacetest.TimelineFixture(t, claudeGoalSequence), Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +100,7 @@ const claudeContextSequence = `{"type":"user","uuid":"u-human","origin":{"kind":
 `
 
 func TestAClaudeBuiltInRunBetweenTurnsReadsAsTheLatestExchange(t *testing.T) {
-	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: timelineFixture(t, claudeContextSequence), Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 10})
+	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: surfacetest.TimelineFixture(t, claudeContextSequence), Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +170,7 @@ func TestClaudeCommandMarkupClassifies(t *testing.T) {
 }
 
 func TestClaudeTypedSlashCommandIsAPromptInEveryReading(t *testing.T) {
-	path := timelineFixture(t, `{"type":"user","uuid":"typed","origin":{"kind":"human"},"timestamp":"2026-10-20T18:00:00Z","message":{"role":"user","content":"<command-message>goal</command-message>\n<command-name>/goal</command-name>\n<command-args>tests pass</command-args>"}}
+	path := surfacetest.TimelineFixture(t, `{"type":"user","uuid":"typed","origin":{"kind":"human"},"timestamp":"2026-10-20T18:00:00Z","message":{"role":"user","content":"<command-message>goal</command-message>\n<command-name>/goal</command-name>\n<command-args>tests pass</command-args>"}}
 {"type":"system","subtype":"local_command","uuid":"output","parentUuid":"typed","content":"<local-command-stdout>Goal set: tests pass</local-command-stdout>","commandRun":{"command":"goal","args":"tests pass"},"timestamp":"2026-10-20T18:00:00Z"}
 {"type":"assistant","uuid":"a","timestamp":"2026-10-20T18:00:05Z","message":{"id":"m","stop_reason":"end_turn","content":[{"type":"text","text":"Working on it"}]}}
 {"type":"system","subtype":"stop_hook_summary"}
@@ -183,7 +184,7 @@ func TestClaudeTypedSlashCommandIsAPromptInEveryReading(t *testing.T) {
 	if err != nil || observation.Reply == nil || observation.Reply.UserText != "/goal tests pass" || strings.Join(observation.InputTurnIDs, ",") != "typed" {
 		t.Fatalf("observation=%+v err=%v", observation, err)
 	}
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +203,7 @@ func TestClaudeTypedSlashCommandIsAPromptInEveryReading(t *testing.T) {
 }
 
 func TestClaudeTypedTextShapedLikeCommandOutputIsThePersonsPrompt(t *testing.T) {
-	path := timelineFixture(t, `{"type":"user","uuid":"typed","origin":{"kind":"human"},"timestamp":"2026-10-20T18:00:00Z","message":{"role":"user","content":"<local-command-stdout>literal</local-command-stdout>"}}
+	path := surfacetest.TimelineFixture(t, `{"type":"user","uuid":"typed","origin":{"kind":"human"},"timestamp":"2026-10-20T18:00:00Z","message":{"role":"user","content":"<local-command-stdout>literal</local-command-stdout>"}}
 {"type":"assistant","uuid":"a","timestamp":"2026-10-20T18:00:05Z","message":{"id":"m","stop_reason":"end_turn","content":[{"type":"text","text":"That is command output markup"}]}}
 {"type":"system","subtype":"stop_hook_summary"}
 `)
@@ -210,14 +211,14 @@ func TestClaudeTypedTextShapedLikeCommandOutputIsThePersonsPrompt(t *testing.T) 
 	if err != nil || read.Reply == nil || read.Reply.UserText != "<local-command-stdout>literal</local-command-stdout>" {
 		t.Fatalf("read reply=%+v err=%v", read.Reply, err)
 	}
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil || len(page.Items) == 0 || page.Items[0].Role != "user" || page.Items[0].Origin != "" || page.Items[0].TurnID != "typed" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
 }
 
 func TestClaudeTypedTextShapedLikeAnInterruptIsThePersonsPrompt(t *testing.T) {
-	path := timelineFixture(t, `{"type":"user","uuid":"typed","origin":{"kind":"human"},"timestamp":"2026-10-20T18:00:00Z","message":{"role":"user","content":"[Request interrupted by user] what does this mean?"}}
+	path := surfacetest.TimelineFixture(t, `{"type":"user","uuid":"typed","origin":{"kind":"human"},"timestamp":"2026-10-20T18:00:00Z","message":{"role":"user","content":"[Request interrupted by user] what does this mean?"}}
 {"type":"assistant","uuid":"a","timestamp":"2026-10-20T18:00:05Z","message":{"id":"m","stop_reason":"end_turn","content":[{"type":"text","text":"Claude writes it when you interrupt"}]}}
 {"type":"system","subtype":"turn_duration","durationMs":5000,"timestamp":"2026-10-20T18:00:06Z"}
 `)
@@ -225,7 +226,7 @@ func TestClaudeTypedTextShapedLikeAnInterruptIsThePersonsPrompt(t *testing.T) {
 	if err != nil || read.Reply == nil || read.Reply.UserText != "[Request interrupted by user] what does this mean?" || !read.Reply.Done {
 		t.Fatalf("read reply=%+v err=%v", read.Reply, err)
 	}
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,7 @@
     {
       "method": "initialize",
       "production_literal_references": [
-        "internal/surface/surfaces/codex_managed.go:77"
+        "internal/surface/codexsurface/managed.go:77"
       ]
     },
     {
@@ -18,14 +18,14 @@
     {
       "method": "thread/start",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:689"
+        "internal/surface/codexsurface/codex.go:689"
       ]
     },
     {
       "method": "thread/resume",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:1053",
-        "internal/surface/surfaces/codex_managed.go:204"
+        "internal/surface/codexsurface/codex.go:1053",
+        "internal/surface/codexsurface/managed.go:204"
       ]
     },
     {
@@ -59,19 +59,19 @@
     {
       "method": "thread/goal/set",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:1008"
+        "internal/surface/codexsurface/codex.go:1008"
       ]
     },
     {
       "method": "thread/goal/get",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:1024"
+        "internal/surface/codexsurface/codex.go:1024"
       ]
     },
     {
       "method": "thread/goal/clear",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:1017"
+        "internal/surface/codexsurface/codex.go:1017"
       ]
     },
     {
@@ -125,7 +125,7 @@
     {
       "method": "thread/compact/start",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:1042"
+        "internal/surface/codexsurface/codex.go:1042"
       ]
     },
     {
@@ -159,7 +159,7 @@
     {
       "method": "thread/list",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:386"
+        "internal/surface/codexsurface/codex.go:386"
       ]
     },
     {
@@ -209,8 +209,8 @@
     {
       "method": "thread/search",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:552",
-        "internal/surface/surfaces/codex.go:558"
+        "internal/surface/codexsurface/codex.go:552",
+        "internal/surface/codexsurface/codex.go:558"
       ]
     },
     {
@@ -220,26 +220,26 @@
     {
       "method": "thread/loaded/list",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:328"
+        "internal/surface/codexsurface/codex.go:328"
       ]
     },
     {
       "method": "thread/read",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:516",
-        "internal/surface/surfaces/codex_thread.go:38"
+        "internal/surface/codexsurface/codex.go:516",
+        "internal/surface/codexsurface/thread.go:38"
       ]
     },
     {
       "method": "thread/turns/list",
       "production_literal_references": [
-        "internal/surface/surfaces/codex_thread.go:127"
+        "internal/surface/codexsurface/thread.go:127"
       ]
     },
     {
       "method": "thread/items/list",
       "production_literal_references": [
-        "internal/surface/surfaces/codex_thread.go:144"
+        "internal/surface/codexsurface/thread.go:144"
       ]
     },
     {
@@ -373,8 +373,8 @@
     {
       "method": "turn/start",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:717",
-        "internal/surface/surfaces/codex.go:760"
+        "internal/surface/codexsurface/codex.go:717",
+        "internal/surface/codexsurface/codex.go:760"
       ]
     },
     {
@@ -384,13 +384,13 @@
     {
       "method": "turn/steer",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:1154"
+        "internal/surface/codexsurface/codex.go:1154"
       ]
     },
     {
       "method": "turn/interrupt",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:1127"
+        "internal/surface/codexsurface/codex.go:1127"
       ]
     },
     {
@@ -428,7 +428,7 @@
     {
       "method": "model/list",
       "production_literal_references": [
-        "internal/surface/surfaces/codex.go:1081"
+        "internal/surface/codexsurface/codex.go:1081"
       ]
     },
     {

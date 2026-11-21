@@ -9,7 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 const phasedRolloutTurn = `{"type":"response_item","payload":{"id":"NAME-c","type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"NAME checking"}]}}
@@ -45,7 +45,7 @@ func TestACodexRolloutsCommentaryReachesTheSessionStreamApartFromItsAnswer(t *te
 	_, reg, _, _, _ := daemonFixture(t)
 	session := managedCodexSession(t, reg, managedRolloutStart+phasedTurn("seeded"))
 	manager := newTestSourceManager(t, reg)
-	subscription, err := manager.prepareStream(context.Background(), &session, surfaces.NewCodex("1"))
+	subscription, err := manager.prepareStream(context.Background(), &session, codexsurface.NewCodex("1"))
 	if err != nil {
 		t.Fatal(err)
 	}

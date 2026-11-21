@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 // A set with no provider is a host that could not answer.
@@ -156,7 +156,7 @@ func (d *Daemon) codexUsageSet(ctx context.Context, now time.Time) *usageSet {
 	defer cancel()
 	usage, err := reader.Usage(ctx)
 	switch {
-	case errors.Is(err, surfaces.ErrNoCodexUsage):
+	case errors.Is(err, codexsurface.ErrNoCodexUsage):
 		return nil
 	case err != nil:
 		return &usageSet{Provider: "codex", Problem: err.Error()}

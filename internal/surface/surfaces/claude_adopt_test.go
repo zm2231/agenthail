@@ -10,6 +10,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 func TestAdoptRefusesABusySessionAndLeavesItsProcessRunning(t *testing.T) {
@@ -73,7 +74,7 @@ func TestAdoptResumesAConversationInTheConfigRootThatHoldsIt(t *testing.T) {
 	spare := fixture.AddRoot("spare")
 	host := claudehosttest.New(t, fixture.Home)
 	host.Start(t)
-	c := inDaemon(NewClaude(nil, fixture.Home))
+	c := surfacetest.InDaemon(NewClaude(nil, fixture.Home))
 	fixture.Transcript(fixtureConversation, fixture.Home)
 	result, err := c.AdoptSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.AdoptRequest{})
 	if err != nil {
@@ -93,7 +94,7 @@ func TestAdoptRefusesASessionWithABackgroundAgentRunning(t *testing.T) {
 	path := fixture.Transcript(fixtureConversation, fixture.Home)
 	fixture.RecordStatus(fixtureConversation, fixture.Home, "", "idle", "", time.Now().Add(-time.Second))
 	now := time.Now().UTC().Add(time.Second)
-	appendTranscript(t, path, mustJSON(t, backgroundCall(now, "call-agent", "Agent", map[string]any{"description": "Review the diff"}))+"\n"+
+	surfacetest.AppendTranscript(t, path, mustJSON(t, backgroundCall(now, "call-agent", "Agent", map[string]any{"description": "Review the diff"}))+"\n"+
 		mustJSON(t, backgroundResult(now, "call-agent", map[string]any{"isAsync": true, "agentId": "a-review"}))+"\n")
 	_, err := c.AdoptSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.AdoptRequest{StopTerminal: true})
 	var busy *surface.AdoptBusyError
@@ -103,7 +104,7 @@ func TestAdoptRefusesASessionWithABackgroundAgentRunning(t *testing.T) {
 	if !claudeProcessAlive(fixture.PID) || len(host.Spawns(t, fixtureConversation)) != 0 {
 		t.Fatal("a session with background work was stopped or resumed")
 	}
-	appendTranscript(t, path, mustJSON(t, backgroundNotification(now.Add(time.Second), "a-review"))+"\n")
+	surfacetest.AppendTranscript(t, path, mustJSON(t, backgroundNotification(now.Add(time.Second), "a-review"))+"\n")
 	if _, err := c.AdoptSession(context.Background(), &surface.Session{ID: fixtureConversation}, surface.AdoptRequest{StopTerminal: true}); err != nil {
 		t.Fatalf("adopting once the agent ended: %v", err)
 	}

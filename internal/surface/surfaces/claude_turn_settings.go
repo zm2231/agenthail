@@ -64,7 +64,7 @@ func claudeTurnSettings(models []surface.ModelOption, model, effort, mode string
 	}
 	effortSetting := surface.TurnSetting{Key: surface.TurnSettingEffort, Value: effort, Applies: surface.TurnSettingAppliesNow}
 	for _, level := range efforts {
-		effortSetting.Options = append(effortSetting.Options, surface.TurnSettingOption{ID: level, Label: effortLabel(level)})
+		effortSetting.Options = append(effortSetting.Options, surface.TurnSettingOption{ID: level, Label: surface.EffortLabel(level)})
 	}
 	settings := []surface.TurnSetting{modelSetting, effortSetting}
 	if hosted {

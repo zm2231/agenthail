@@ -18,6 +18,7 @@ import (
 	"github.com/zm2231/agenthail/internal/nodehost"
 	"github.com/zm2231/agenthail/internal/poll"
 	"github.com/zm2231/agenthail/internal/simhost"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
@@ -258,7 +259,7 @@ func (a *App) daemonUninstallService() error {
 		fmt.Printf("Claude may show a failed agenthail MCP server until it is removed with agenthail mcp uninstall: %s\n", err)
 	}
 	if err := codexMCPAt("uninstall"); err != nil {
-		fmt.Printf("Codex may show a failed %s MCP server until it is removed with agenthail mcp uninstall: %s\n", surfaces.CodexRelayServerName, err)
+		fmt.Printf("Codex may show a failed %s MCP server until it is removed with agenthail mcp uninstall: %s\n", codexsurface.CodexRelayServerName, err)
 	}
 	return nil
 }
@@ -275,7 +276,7 @@ func humanSize(n int64) string {
 }
 
 func printCodexSetupNote() {
-	if _, err := surfaces.CodexDaemonCLI(surfaces.CodexHomeFromEnv()); err != nil {
+	if _, err := codexsurface.CodexDaemonCLI(codexsurface.CodexHomeFromEnv()); err != nil {
 		fmt.Printf("Codex: %s\n", err)
 	}
 }

@@ -1,0 +1,311 @@
+package codexsurface
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
+)
+
+// codexHookSource is installed with its own hash as its ABI, so any change to
+// it replaces the hook a running Desktop already holds.
+const codexHookSource = `
+(() => {
+  if (!globalThis.electronBridge || typeof globalThis.electronBridge.sendMessageFromView !== 'function') return 'no-renderer-bridge';
+  const current = globalThis.__agenthailCodexDesktopRendererV2;
+  if (current && current.abi === __ABI__ && typeof current.request === 'function') return 'already';
+  const bridge = {
+    abi: __ABI__,
+    events: current && Array.isArray(current.events) ? current.events.slice() : [],
+    sequence: current && Number.isSafeInteger(current.sequence) ? current.sequence : 0,
+    next: current && Number.isSafeInteger(current.next) ? current.next : 0,
+    pending: current && current.pending instanceof Map ? current.pending : new Map(),
+    toolRequests: new Map(),
+    hosts: current && current.hosts && typeof current.hosts === 'object' ? {...current.hosts} : {},
+  };
+  if (current && current.toolRequests instanceof Map) {
+    for (const [key, request] of current.toolRequests) {
+      if (request && request.id != null) bridge.toolRequests.set(key, {id: request.id, threadId: request.threadId, at: Number.isFinite(request.at) ? request.at : Date.now()});
+    }
+  }
+  if (current) {
+    current.retired = true;
+    if (current.waiters instanceof Set) for (const waiter of [...current.waiters]) waiter(false);
+  }
+  bridge.waiters = new Set();
+  const wake = () => { for (const waiter of [...bridge.waiters]) waiter(false); };
+  const stopped = host => ({error: {code: 'app_server_stopped', message: 'Codex Desktop app-server stopped: ' + host.fatal}});
+  const down = host => ({error: {code: 'app_server_down', message: 'Codex Desktop app-server stopped: ' + host.fatal}});
+  // Desktop answers request-app-server-state asynchronously; one that never answers costs only the first second.
+  const stateAsked = Date.now();
+  bridge.settled = () => new Promise(resolve => {
+    const check = () => bridge.hosts.local || Date.now() - stateAsked >= 1000 ? resolve() : setTimeout(check, 20);
+    check();
+  });
+  const noteHost = data => {
+    if (typeof data.hostId !== 'string' || data.hostId === '') return;
+    const host = {...(bridge.hosts[data.hostId] || {}), hostId: data.hostId};
+    if (typeof data.transport === 'string') host.transport = data.transport;
+    if (typeof data.appServerVersion === 'string' && data.appServerVersion) host.appServerVersion = data.appServerVersion;
+    if (data.type === 'codex-app-server-connection-changed' && typeof data.state === 'string') {
+      host.state = data.state;
+      if (data.state === 'connected') host.fatal = null;
+    }
+    if (data.type === 'codex-app-server-initialized') {
+      host.state = 'connected';
+      host.fatal = null;
+    }
+    if (data.type === 'codex-app-server-fatal-error') host.fatal = String(data.errorMessage || 'unknown error');
+    bridge.hosts[data.hostId] = host;
+    if (data.hostId === 'local' && host.fatal) {
+      for (const [id, resolve] of [...bridge.pending]) {
+        bridge.pending.delete(id);
+        resolve(stopped(host));
+      }
+    }
+  };
+  window.addEventListener('message', event => {
+    const data = event.data;
+    if (bridge.retired || !data) return;
+    if (data.type === 'codex-app-server-connection-changed' || data.type === 'codex-app-server-initialized' || data.type === 'codex-app-server-fatal-error') {
+      noteHost(data);
+      return;
+    }
+    if (data.hostId !== 'local') return;
+    if (data.type === 'mcp-response' && data.message && data.message.id != null) {
+      const id = String(data.message.id);
+      const resolve = bridge.pending.get(id);
+      if (resolve) {
+        bridge.pending.delete(id);
+        resolve(data.message);
+      }
+      return;
+    }
+    if (data.type === 'mcp-notification' && typeof data.method === 'string') {
+      bridge.events.push({sequence: ++bridge.sequence, method: data.method, params: data.params || {}});
+      if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
+      wake();
+      return;
+    }
+    if (data.type === 'mcp-request' && data.request && data.request.method === 'item/tool/call' && data.request.id != null) {
+      const params = data.request.params || {};
+      // Desktop answers its own threads' tool calls where this bridge can't
+      // see it, so requests expire by age; one being answered is far younger.
+      const now = Date.now();
+      for (const [key, request] of bridge.toolRequests) {
+        if (now - request.at < 600000 && bridge.toolRequests.size < 4096) break;
+        bridge.toolRequests.delete(key);
+      }
+      bridge.toolRequests.set(String(data.request.id), {id: data.request.id, threadId: params.threadId, at: now});
+      bridge.events.push({sequence: ++bridge.sequence, method: 'item/tool/call', params: {...params, requestId: String(data.request.id)}});
+      if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
+      wake();
+    }
+  });
+  // voiceBatch is a voice call's events after a cursor; voiceEvents waits up
+  // to waitMs for the first of them.
+  bridge.voiceBatch = (after, threadId) => ({
+    cursor: bridge.sequence,
+    lost: after > bridge.sequence || (bridge.events.length > 0 && bridge.events[0].sequence > after + 1),
+    events: bridge.events.filter(e => e.sequence > after && e.params.threadId === threadId && ((e.method.startsWith('thread/realtime/') && e.method !== 'thread/realtime/outputAudio/delta') || (e.method === 'item/tool/call' && bridge.toolRequests.has(String(e.params.requestId))) || e.method === 'turn/started' || (e.method === 'item/completed' && e.params.item?.type === 'agentMessage' && e.params.item?.phase === 'final_answer'))),
+  });
+  bridge.voiceEvents = (after, threadId, waitMs) => new Promise(resolve => {
+    let timer = null;
+    const check = final => {
+      const batch = bridge.voiceBatch(after, threadId);
+      if (!final && !bridge.retired && !batch.lost && batch.events.length === 0) return;
+      bridge.waiters.delete(check);
+      if (timer !== null) clearTimeout(timer);
+      resolve(batch);
+    };
+    bridge.waiters.add(check);
+    timer = setTimeout(() => check(true), Math.max(0, waitMs));
+    check(waitMs <= 0);
+  });
+  bridge.respondDynamicToolCall = async (requestId, threadId, success, text) => {
+    const key = String(requestId);
+    const request = bridge.toolRequests.get(key);
+    if (!request) throw Error('Dynamic tool request is no longer available');
+    if (request.threadId !== threadId) throw Error('Dynamic tool response thread does not match its request');
+    await globalThis.electronBridge.sendMessageFromView({type:'mcp-response', hostId:'local', threadId, response:{id:request.id, result:{success:Boolean(success), contentItems:[{type:'inputText', text:String(text || '')}]}}});
+    bridge.toolRequests.delete(key);
+  };
+  bridge.request = (method, params, timeoutMs) => bridge.settled().then(() => new Promise(resolve => {
+    const local = bridge.hosts.local;
+    if (local && local.fatal) return resolve(down(local));
+    const id = 'agenthail-' + Date.now() + '-' + (++bridge.next);
+    const timer = setTimeout(() => {
+      if (bridge.pending.delete(id)) resolve({error:{code:'timeout', message:'Codex Desktop app-server request timed out'}});
+    }, timeoutMs);
+    bridge.pending.set(id, response => { clearTimeout(timer); resolve(response); });
+    Promise.resolve(globalThis.electronBridge.sendMessageFromView({type:'mcp-request', hostId:'local', request:{id, method, params:params||{}}, timeoutMs, retainResponse:false})).catch(error => {
+      if (bridge.pending.delete(id)) { clearTimeout(timer); resolve({error:{code:'write_failed', message:String(error && error.message || error)}}); }
+    });
+  }));
+  globalThis.__agenthailCodexDesktopRendererV2 = bridge;
+  Promise.resolve(globalThis.electronBridge.sendMessageFromView({type:'request-app-server-state'})).catch(() => {});
+  return 'hooked';
+})()
+`
+
+var codexHookJS = func() string {
+	sum := sha256.Sum256([]byte(codexHookSource))
+	return strings.ReplaceAll(codexHookSource, "__ABI__", strconvQuote(hex.EncodeToString(sum[:8])))
+}()
+
+func codexRPCJSONJS(method, paramsJSON string, timeout time.Duration) string {
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop renderer bridge is unavailable'}});return JSON.stringify(await b.request(%s,%s,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`,
+		strconvQuote(method), paramsJSON, timeout.Milliseconds())
+}
+
+func codexDynamicToolResponseJS(requestID, threadID string, success bool, text string) string {
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.respondDynamicToolCall!=='function')return'bridge_unavailable';await b.respondDynamicToolCall(%s,%s,%t,%s);return'ok'}catch(e){return String(e&&e.message||e)}})()`, strconvQuote(requestID), strconvQuote(threadID), success, strconvQuote(text))
+}
+
+func codexPayloadInitJS(id string) string {
+	return fmt.Sprintf(`(()=>{globalThis.__agenthailPayloads=globalThis.__agenthailPayloads||Object.create(null);globalThis.__agenthailPayloads[%s]='';return'ok'})()`, strconvQuote(id))
+}
+
+func codexPayloadAppendJS(id, chunk string) string {
+	return fmt.Sprintf(`(()=>{const p=globalThis.__agenthailPayloads;if(!p||typeof p[%s]!=='string')return'missing';p[%s]+=%s;return'ok'})()`, strconvQuote(id), strconvQuote(id), strconvQuote(chunk))
+}
+
+func codexPayloadDeleteJS(id string) string {
+	return fmt.Sprintf(`(()=>{const p=globalThis.__agenthailPayloads;if(p)delete p[%s];return'ok'})()`, strconvQuote(id))
+}
+
+func codexStagedRPCJS(id, method string, timeout time.Duration) string {
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2,p=globalThis.__agenthailPayloads;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop renderer bridge is unavailable'}});if(!p||typeof p[%s]!=='string')return JSON.stringify({error:{code:'missing_payload',message:'staged request payload is unavailable'}});const encoded=p[%s];delete p[%s];const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));const params=JSON.parse(new TextDecoder().decode(bytes));return JSON.stringify(await b.request(%s,params,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`, strconvQuote(id), strconvQuote(id), strconvQuote(id), strconvQuote(method), timeout.Milliseconds())
+}
+
+const codexEventCursorJS = `(()=>{const b=globalThis.__agenthailCodexDesktopRendererV2;return b?b.sequence:0})()`
+
+func codexEventsJS(after int64) string {
+	return fmt.Sprintf(`(()=>{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b)return JSON.stringify({cursor:0,events:[]});return JSON.stringify({cursor:b.sequence,events:b.events.filter(x=>x.sequence>%d)})})()`, after)
+}
+
+func strconvQuote(value string) string {
+	b, _ := json.Marshal(value)
+	return string(b)
+}
+
+func (c *Codex) ensureHooked(ctx context.Context, conn *cdpConn) error {
+	var lastResult string
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		value, err := conn.evaluate(ctx, codexHookJS, 5*time.Second)
+		if err == nil {
+			lastResult, _ = value.(string)
+			if lastResult == "hooked" || lastResult == "already" {
+				return nil
+			}
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	if lastResult == "no-renderer-bridge" {
+		return fmt.Errorf("Codex Desktop renderer bridge was not found; wait for Codex to finish launching or relaunch it with 'agenthail launch codex'")
+	}
+	if lastErr != nil {
+		return fmt.Errorf("install Codex Desktop bridge: %w", lastErr)
+	}
+	return fmt.Errorf("install Codex Desktop bridge: unexpected result %q after 3 attempts", lastResult)
+}
+
+func (c *Codex) rpc(ctx context.Context, conn *cdpConn, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
+	payloadID := "agenthail-" + uuid.NewString()
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("encode %s params: %w", method, err)
+	}
+	expression := codexRPCJSONJS(method, string(paramsJSON), wait)
+	if len(paramsJSON) > 2048 {
+		staged := false
+		defer func() {
+			if staged {
+				_, _ = conn.evaluate(context.Background(), codexPayloadDeleteJS(payloadID), 500*time.Millisecond)
+			}
+		}()
+		if value, stageErr := conn.evaluate(ctx, codexPayloadInitJS(payloadID), 2*time.Second); stageErr != nil || value != "ok" {
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("stage %s params: %v (%v)", method, stageErr, value))
+		}
+		staged = true
+		encoded := base64.StdEncoding.EncodeToString(paramsJSON)
+		for start := 0; start < len(encoded); start += 2048 {
+			end := start + 2048
+			if end > len(encoded) {
+				end = len(encoded)
+			}
+			if value, stageErr := conn.evaluate(ctx, codexPayloadAppendJS(payloadID, encoded[start:end]), 2*time.Second); stageErr != nil || value != "ok" {
+				return nil, surface.DeliveryUnavailable(fmt.Errorf("stage %s params chunk: %v (%v)", method, stageErr, value))
+			}
+		}
+		expression = codexStagedRPCJS(payloadID, method, wait)
+	}
+	value, err := conn.evaluate(ctx, expression, wait+2*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	raw, _ := value.(string)
+	var response map[string]any
+	if err := json.Unmarshal([]byte(raw), &response); err != nil {
+		return nil, fmt.Errorf("parse %s response: %w", method, err)
+	}
+	if envelope, ok := response["error"].(map[string]any); ok {
+		code, _ := envelope["code"].(float64)
+		refused := &codexRPCError{Method: method, Code: int(code), Message: transcript.String(envelope, "message"), Data: envelope["data"]}
+		if bridgeCode, _ := envelope["code"].(string); codexBridgeUnsent[bridgeCode] {
+			return nil, surface.DeliveryUnavailable(refused)
+		}
+		return nil, refused
+	}
+	return response, nil
+}
+
+// codexBridgeUnsent are the bridge's own refusals, made before the request reached Desktop's app-server.
+var codexBridgeUnsent = map[string]bool{"app_server_down": true, "bridge_unavailable": true, "missing_payload": true, "write_failed": true}
+
+type codexEvent struct {
+	Sequence int64          `json:"sequence"`
+	Method   string         `json:"method"`
+	Params   map[string]any `json:"params"`
+	// RequestID is set on a server request, which expects an answer.
+	RequestID json.RawMessage `json:"-"`
+	received  int64
+}
+
+func codexContainsID(value any, ids ...string) bool {
+	switch current := value.(type) {
+	case string:
+		for _, id := range ids {
+			if id != "" && current == id {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, child := range current {
+			if codexContainsID(child, ids...) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range current {
+			if codexContainsID(child, ids...) {
+				return true
+			}
+		}
+	}
+	return false
+}

@@ -14,7 +14,7 @@ Meanwhile four mechanisms each carry "the person must decide something", with di
 | Today | Stored in | Routed to | Answered by | Notified |
 |---|---|---|---|---|
 | End-turn asks | `turn_ends.asks_json`, `routed_to`, `answer_*` (`internal/registry/turn_ends.go:11-43`) | lead **or** person (`coordinator.PromptHearer`, `internal/coordinator/lead.go:29`) | person only, `respond` with `turn-end-<ms>`; agents get 403 (`internal/daemon/dashboard_session_actions.go:218-221`). A routed ask is never marked answered and `agenthail_wait` can't see it. | `turn.completed` push with buttons; never withdrawn |
-| Permission requests | provider (claude-host `pending`, Codex server requests `internal/surface/surfaces/codex_requests.go:358,392`); only the oldest is persisted in `session_runtime.waiting_*`, the rest in memory (`internal/daemon/open_requests.go:10-20`) | lead **and** person at once (`internal/daemon/waiting.go:183-264`, `lead_notice.go` `noticeWaiting`) | `respond` / `agenthail_answer`; provider vocabularies differ (Claude allow/always/deny + reason, Codex allow/always/never/stop, no reason) | `session.waiting` push with buttons, withdrawn |
+| Permission requests | provider (claude-host `pending`, Codex server requests `internal/surface/codexsurface/requests.go:358,392`); only the oldest is persisted in `session_runtime.waiting_*`, the rest in memory (`internal/daemon/open_requests.go:10-20`) | lead **and** person at once (`internal/daemon/waiting.go:183-264`, `lead_notice.go` `noticeWaiting`) | `respond` / `agenthail_answer`; provider vocabularies differ (Claude allow/always/deny + reason, Codex allow/always/never/stop, no reason) | `session.waiting` push with buttons, withdrawn |
 | Delivery problems | `delivery_intents` failed/held, `attention_items` | sender agent gets a notice; person sees banners | `delivery-dismiss`, `delivery-delete`, `queue-retry`, `queue-cancel` | none, except `delivery.refused` (`internal/daemon/outbox.go:315`) |
 | Ledger questions | `ledger_events` `question*` (`internal/ledger/board_questions.go:8-33`); recommendation + default + deadline, no options | asking session only | agent attach `--as answers` with the person's words; no device UI | only at expiry, no request id (`internal/daemon/ledger_questions.go:76-86`) |
 
@@ -144,7 +144,7 @@ Each source is migrated in its own layer, and its old path goes in the same chan
 
 ### Stop reminder for leads
 
-- A Stop hook for terminal Claude joins the settings.json set (`internal/claudehooks/hooks.go`). The Codex Stop hook (`internal/surface/surfaces/codex_hooks_install.go:26`) and the claude-host hook keep calling `agenthail hook stop`.
+- A Stop hook for terminal Claude joins the settings.json set (`internal/claudehooks/hooks.go`). The Codex Stop hook (`internal/surface/codexsurface/hooks_install.go:26`) and the claude-host hook keep calling `agenthail hook stop`.
 - `turnStop` (`internal/cli/turn_stop.go`) no longer requires an MCP credential. It still names `agenthail_end_turn` to a session holding one whose turn has not ended, in the same hold.
 - It holds the stop once per turn (`stop_hook_active` lets the next stop through) when all of these hold:
   - the session is a lead: a project coordinator, or the spawner of a running session;

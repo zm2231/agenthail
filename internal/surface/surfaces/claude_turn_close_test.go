@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -115,12 +116,12 @@ func TestClaudeObservationKeepsClosingTurnBusyUntilItCloses(t *testing.T) {
 
 func TestClaudeTimelineReplyWaitsForLastContentBlock(t *testing.T) {
 	path := writeTranscript(t, closedTurnRecords+promptRecord+thinkingRecord+textRecord)
-	read, err := readTimeline(context.Background(), path, "claude", 0, 20)
+	read, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 20)
 	if err != nil || read.Reply == nil || read.Reply.Text != "ONE" || read.Reply.Done {
 		t.Fatalf("closing reply=%+v err=%v", read.Reply, err)
 	}
 	testkit.AppendFile(t, path, hookRecord)
-	read, err = readTimeline(context.Background(), path, "claude", 0, 20)
+	read, err = surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 20)
 	if err != nil || read.Reply == nil || read.Reply.Text != "ONE" || !read.Reply.Done {
 		t.Fatalf("closed reply=%+v err=%v", read.Reply, err)
 	}

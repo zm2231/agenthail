@@ -12,7 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -24,7 +24,7 @@ func TestACodexThreadThatStartsWaitingShowsBeforeTheNextDiscoveryPass(t *testing
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	h, _ := runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
+	h, _ := runDaemon(t, store, codexsurface.NewCodex(unreachableDesktop))
 	time.Sleep(1500 * time.Millisecond)
 	if commands := lifecycle.Commands(); slices.Contains(commands, "app-server daemon start") {
 		t.Fatalf("the daemon started Codex before any conversation needed it: %v", commands)

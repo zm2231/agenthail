@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -176,17 +177,6 @@ func awaitStreamedText(t *testing.T, texts <-chan string, want string) {
 	}
 }
 
-func replaceTranscript(t *testing.T, path string, records ...string) {
-	t.Helper()
-	replacement := path + ".next"
-	if err := os.WriteFile(replacement, []byte(strings.Join(records, "\n")+"\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(replacement, path); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestClaudeStreamSendsTheGoalWhenClaudeRecordsAVerdict(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"/goal tests pass"}}`+"\n"+goalSetRecord)
 	goals, _, _ := streamClaudeGoals(t, path)
@@ -237,7 +227,7 @@ func TestClaudeStreamFollowsAReplacedTranscript(t *testing.T) {
 			if active.goal == nil || active.goal.Status != surface.GoalStatusActive {
 				t.Fatalf("goal event = %+v", active.goal)
 			}
-			replaceTranscript(t, path, records...)
+			surfacetest.ReplaceTranscript(t, path, records...)
 			replaced, err := os.Stat(path)
 			if err != nil {
 				t.Fatal(err)
@@ -332,7 +322,7 @@ func TestClaudeGoalRunsAsACommandAndReportsClaudesAnswer(t *testing.T) {
 			fixture, session := idleGoalSession(t)
 			remote := newFakeRemoteControl(t)
 			remote.onPost = func(payload map[string]any) []map[string]any {
-				appendTranscript(t, session.Transcript, goalCommandOutput("other", "Goal set: other")+goalCommandOutput(test.args, test.output))
+				surfacetest.AppendTranscript(t, session.Transcript, goalCommandOutput("other", "Goal set: other")+goalCommandOutput(test.args, test.output))
 				return nil
 			}
 			claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)
@@ -366,7 +356,7 @@ func TestClaudeGoalCommandWaitsForAnIdleSessionAndItsAnswer(t *testing.T) {
 	remote.onPost = nil
 
 	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "busy", "", time.Time{})
-	appendTranscript(t, session.Transcript, `{"type":"user","uuid":"u2","message":{"content":"working"}}`+"\n")
+	surfacetest.AppendTranscript(t, session.Transcript, `{"type":"user","uuid":"u2","message":{"content":"working"}}`+"\n")
 	if err := claude.GoalSet(context.Background(), session, "tests pass"); !surface.IsDeliveryUnavailable(err) || remote.postCount() != 1 {
 		t.Fatalf("busy err=%v posts=%d", err, remote.postCount())
 	}
@@ -383,7 +373,7 @@ func TestClaudeGoalCommandFindsATranscriptClaudeCreatesAfterTheSend(t *testing.T
 	session.Transcript = ""
 	remote := newFakeRemoteControl(t)
 	remote.onPost = func(map[string]any) []map[string]any {
-		appendTranscript(t, fixture.Transcript(session.ID, fixture.Home), goalCommandOutput("tests pass", "Goal set: tests pass"))
+		surfacetest.AppendTranscript(t, fixture.Transcript(session.ID, fixture.Home), goalCommandOutput("tests pass", "Goal set: tests pass"))
 		return nil
 	}
 	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)

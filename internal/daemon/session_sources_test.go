@@ -18,6 +18,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	providers "github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
@@ -48,7 +49,7 @@ func TestCodexTranscriptReplacedBeforeCatchUpReloadsFromTheNewFileAfterRegistryR
 		reg.Close()
 		t.Fatal(err)
 	}
-	adapter := providers.NewCodex("http://127.0.0.1:1")
+	adapter := codexsurface.NewCodex("http://127.0.0.1:1")
 	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &from, adapter)
 	if err != nil {
@@ -163,7 +164,7 @@ func TestLegacySeedCheckpointNeverAcceptsReplacementAcrossRetries(t *testing.T) 
 	if err := os.Rename(replacement, transcript); err != nil {
 		t.Fatal(err)
 	}
-	adapter := providers.NewCodex("http://127.0.0.1:1")
+	adapter := codexsurface.NewCodex("http://127.0.0.1:1")
 	manager := newTestSourceManager(t, reg)
 	for attempt := 0; attempt < 2; attempt++ {
 		if _, err := manager.prepareStream(context.Background(), &from, adapter); !errors.Is(err, surface.ErrTranscriptUnavailable) || !strings.Contains(err.Error(), "identity checkpoint is unavailable") {

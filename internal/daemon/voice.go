@@ -18,7 +18,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/voice"
 )
 
@@ -27,8 +27,8 @@ var voicePeerScript string
 
 func (d *Daemon) registerVoiceAPI(mux *http.ServeMux, dashboard *dashboardServer) {
 	var provider voice.Provider
-	if codex, ok := d.adapters().ForSurface(surface.KindCodex).(*surfaces.Codex); ok {
-		provider = &surfaces.CodexVoice{Codex: codex}
+	if codex, ok := d.adapters().ForSurface(surface.KindCodex).(*codexsurface.Codex); ok {
+		provider = &codexsurface.CodexVoice{Codex: codex}
 	}
 	s := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.registerVoiceOperator, d.resolveVoiceTarget, coordinator.Sender{Service: d.coordinator()}, func(session *surface.Session, active bool) {
 		d.setSessionSourceHold(session, active, "voice")

@@ -17,7 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/voice"
 )
 
@@ -35,12 +35,12 @@ func TestLiveCodexVoice(t *testing.T) {
 	if audioPath == "" || followupPath == "" || workerID == "" {
 		t.Fatal("listing audio, followup audio, and an existing test-owned worker ID are required")
 	}
-	codex := surfaces.NewCodex(os.Getenv("AGENTHAIL_CODEX_REMOTE"))
+	codex := codexsurface.NewCodex(os.Getenv("AGENTHAIL_CODEX_REMOTE"))
 	statePath := os.Getenv("AGENTHAIL_VOICE_SMOKE_STATE")
 	if statePath == "" {
 		statePath = filepath.Join(t.TempDir(), "operator.json")
 	}
-	s := voice.New(statePath, &surfaces.CodexVoice{Codex: codex}, nil)
+	s := voice.New(statePath, &codexsurface.CodexVoice{Codex: codex}, nil)
 	defer s.Close()
 	if s.View("").Session == nil {
 		t.Fatal("provide an existing test-owned operator state; this evaluation must not create tasks")
