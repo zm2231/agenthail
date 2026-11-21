@@ -18,6 +18,7 @@ import (
 // host; a host session already runs there.
 func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
 	capabilities := c.Capabilities()
+	capabilities.Steer = c.Steers(sess)
 	capabilities.GoalSet = sess == nil || c.canSendHumanTurn(sess)
 	capabilities.RemoteControl = !c.localOnly
 	capabilities.PersonMessage = c.Route(sess, surface.AuthorPerson).PersonMessage()
@@ -42,13 +43,17 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 	}
 	capabilities.Respond = c.answersPrompts(sess)
 	if c.remoteControlUnusable(sess) {
-		capabilities.Steer = false
 		capabilities.Compact = false
 		capabilities.Model = false
 		capabilities.Interrupt = false
 		capabilities.Commands = false
 	}
 	return capabilities
+}
+
+// Steers is the Steer of SessionCapabilities, without the transcript lookups Respond needs.
+func (c *Claude) Steers(sess *surface.Session) bool {
+	return c.Capabilities().Steer && (sess == nil || claudeHosted(sess) || !c.remoteControlUnusable(sess))
 }
 
 // DisableRemoteControl limits the surface to local Claude Code sessions on an
