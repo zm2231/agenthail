@@ -201,7 +201,6 @@ func (d *Daemon) runRemoteInboxNotices(ctx context.Context) {
 	}
 }
 
-// Draining admitted requests first means no session is created after the snapshot.
 func (m *remoteMCP) closeAll() {
 	m.admitMu.Lock()
 	m.stopped.Store(true)
@@ -211,8 +210,18 @@ func (m *remoteMCP) closeAll() {
 	go func() { m.admitted.Wait(); close(drained) }()
 	select {
 	case <-drained:
+		m.retireAll()
 	case <-time.After(remoteRetireWait):
+		m.retireAll()
+		// A request still admitted may yet open a session; retire again once it has gone.
+		go func() {
+			<-drained
+			m.retireAll()
+		}()
 	}
+}
+
+func (m *remoteMCP) retireAll() {
 	m.mu.Lock()
 	all := map[*mcp.ServerSession]*remotePushSession{}
 	for session, state := range m.sessions {

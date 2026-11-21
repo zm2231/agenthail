@@ -101,7 +101,7 @@ Binding reads the epoch and records the session under one lock, so a notice pass
 
 Two windows are accepted, both because notices are contentless: a credential change landing after a pass's last epoch check can let that pass's notice through, and a retiring session keeps its subscription until the SDK ends it, so it can still get the `resources/updated` broadcast meant for another session of the same inbox. Either way it learns only that mail is waiting, and reading needs a valid credential. Holding notices back until a retiring session is gone would delay every live session of that inbox for as long as the close takes, with no limit.
 
-When the daemon stops it refuses new remote requests (503), cancels and drains the requests already admitted, then retires every remote session, bound or not, so none is created after that. The daemon does not ping clients: the SDK's keepalive closes the session of any client that keeps no event stream open, and a client that only calls tools would then find its session gone.
+When the daemon stops it refuses new remote requests (503), cancels and drains the requests already admitted, then retires every remote session, bound or not. If an admitted request has not finished within 2 seconds it retires them then and again once that request has gone, so no session it opens outlives the stop. The daemon does not ping clients: the SDK's keepalive closes the session of any client that keeps no event stream open, and a client that only calls tools would then find its session gone.
 
 The notifier follows the inbox's change signal and also sweeps every 5 seconds.
 
