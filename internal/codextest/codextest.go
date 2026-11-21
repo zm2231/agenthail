@@ -697,9 +697,18 @@ func (d *Daemon) lifecycle(method string, params map[string]any, result map[stri
 		}
 		return map[string]any{"data": ids}
 	case "thread/list":
+		included, filtered := params["includedThreadIds"].([]any)
+		wanted := map[string]bool{}
+		for _, id := range included {
+			if id, ok := id.(string); ok {
+				wanted[id] = true
+			}
+		}
 		threads := make([]any, 0, len(d.order))
 		for index := len(d.order) - 1; index >= 0; index-- {
-			threads = append(threads, d.threadJSON(d.threads[d.order[index]], false))
+			if id := d.order[index]; !filtered || wanted[id] {
+				threads = append(threads, d.threadJSON(d.threads[id], false))
+			}
 		}
 		return map[string]any{"data": threads}
 	case "thread/turns/list":
