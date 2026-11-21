@@ -169,7 +169,7 @@ func (h *Host) resolve(ctx context.Context, kind Kind, want string) (device, err
 		if err != nil {
 			return device{}, err
 		}
-		return h.createDevice(ctx, kind, kind.Name, runtime)
+		return h.createDevice(ctx, kind, kind.Name, iosRuntime{Identifier: runtime})
 	}
 	installed, err := h.iosRuntimes(ctx)
 	if err != nil {
@@ -197,7 +197,7 @@ func (h *Host) resolve(ctx context.Context, kind Kind, want string) (device, err
 	if !sharedFound && runtime.Identifier == installed[len(installed)-1].Identifier {
 		name = kind.Name
 	}
-	return h.createDevice(ctx, kind, name, runtime.Identifier)
+	return h.createDevice(ctx, kind, name, runtime)
 }
 
 func lowest(all []device, match func(device) bool) (device, bool) {
@@ -212,8 +212,9 @@ func lowest(all []device, match func(device) bool) (device, bool) {
 }
 
 // A new device takes its name only once slimmed, so a failed slim is never found and reused.
-func (h *Host) createDevice(ctx context.Context, kind Kind, name, runtime string) (device, error) {
-	deviceType, err := h.deviceType(ctx, kind)
+func (h *Host) createDevice(ctx context.Context, kind Kind, name string, on iosRuntime) (device, error) {
+	runtime := on.Identifier
+	deviceType, err := h.deviceType(ctx, kind, on.Supported)
 	if err != nil {
 		return device{}, err
 	}
@@ -260,22 +261,24 @@ func (h *Host) slim(ctx context.Context, udid, name string) error {
 	return err
 }
 
-func (h *Host) deviceType(ctx context.Context, kind Kind) (string, error) {
-	out, err := h.run(ctx, "xcrun", "simctl", "list", "devicetypes", "--json")
-	if err != nil {
-		return "", err
-	}
-	var list struct {
-		DeviceTypes []struct {
-			Identifier string `json:"identifier"`
-			Name       string `json:"name"`
-		} `json:"devicetypes"`
-	}
-	if err := json.Unmarshal(out, &list); err != nil {
-		return "", fmt.Errorf("read simulator device types: %w", err)
+// An older runtime does not support the newest device types, so its own list wins.
+func (h *Host) deviceType(ctx context.Context, kind Kind, supported []deviceTypeEntry) (string, error) {
+	types := supported
+	if len(types) == 0 {
+		out, err := h.run(ctx, "xcrun", "simctl", "list", "devicetypes", "--json")
+		if err != nil {
+			return "", err
+		}
+		var list struct {
+			DeviceTypes []deviceTypeEntry `json:"devicetypes"`
+		}
+		if err := json.Unmarshal(out, &list); err != nil {
+			return "", fmt.Errorf("read simulator device types: %w", err)
+		}
+		types = list.DeviceTypes
 	}
 	for _, prefix := range []string{kind.Prefer, kind.Family} {
-		for _, t := range list.DeviceTypes {
+		for _, t := range types {
 			if strings.HasPrefix(t.Name, prefix) {
 				return t.Identifier, nil
 			}

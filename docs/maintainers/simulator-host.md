@@ -56,14 +56,19 @@ picks the device this way:
 It is created the same way as a shared device, under the same lock and slimmed
 before it takes its name, and its leases end and clean up the same way. A
 runtime that is not installed, or a shorter version that names more than one,
-is refused as `invalid` with the installed versions in `installed`; Agenthail
-never downloads a runtime. A simulator that already has the device's name but
+is refused as `invalid`, naming the installed versions (also in `installed`
+for the Mac's own sessions; a forwarded refusal carries only its message);
+Agenthail never downloads a runtime. It is checked before any lease, so the
+answer never depends on what is held. A new device is created as the first
+iPhone or 11-inch iPad Pro the runtime itself supports, since an older runtime
+does not run the newest models. A simulator that already has the device's name but
 is on another runtime is refused as `conflict`, to be renamed or deleted by
 hand. Without `runtime`, `acquire` leases the shared device as it always has.
 
 A session may hold the shared device and a device for a runtime of the same
 kind at once; then every call names the one it means with `runtime` as well
-as `kind`. `list` shows every Agenthail device with its runtime, and the
+as `kind`, and `release` with a `kind` that names both is refused. `release`
+with neither `kind` nor `runtime` ends every lease the session holds. `list` shows every Agenthail device with its runtime, and the
 installed runtimes in `runtimes`; `agenthail doctor` prints each device and
 its runtime under its `simulators:` line, and `simulators.devices` in
 `--json`. `scripts/ios-simulator.sh iphone --runtime 18.5 run ...` finds or

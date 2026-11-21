@@ -21,7 +21,7 @@ func TestAcquireWithARuntimeCreatesItsOwnDeviceOnFirstRequestOnly(t *testing.T) 
 		t.Fatalf("lease = %+v", lease)
 	}
 	create := sim.ran("xcrun simctl create")
-	if len(create) != 1 || create[0].Args[2] != "Agenthail iPhone (iOS 18.5) (slimming)" || create[0].Args[4] != ios18 {
+	if len(create) != 1 || create[0].Args[2] != "Agenthail iPhone (iOS 18.5) (slimming)" || create[0].Args[3] != "t.iPhone-16" || create[0].Args[4] != ios18 {
 		t.Fatalf("create = %+v", create)
 	}
 	if len(sim.ran("simslim on UDID-1 --profile")) != 1 || sim.devices["UDID-1"] != "Agenthail iPhone (iOS 18.5)" {
@@ -187,5 +187,43 @@ func TestListAndStatusNameEveryAgenthailDeviceWithItsRuntime(t *testing.T) {
 	}
 	if strings.Join(devices, ";") != "Agenthail iPhone=iOS 27.0;Agenthail iPhone (iOS 18.5)=iOS 18.5" {
 		t.Fatalf("status devices = %v", devices)
+	}
+}
+
+func TestAShortVersionNamingTwoRuntimesIsRefusedEvenWithALeaseHeld(t *testing.T) {
+	sim := newFakeSim()
+	sim.runtimesJSON = `{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-18-5","isAvailable":true},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-18-6","isAvailable":true},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","isAvailable":true}]}`
+	h, _ := newTestHost(t, sim)
+	if code := refusalCode(t, h, "s1", Request{Action: "acquire", Kind: "iphone", Runtime: "18"}); code != "invalid" {
+		t.Fatalf("18 with 18.5 and 18.6 installed = %s", code)
+	}
+	held := mustCall(t, h, "s1", Request{Action: "acquire", Kind: "iphone", Runtime: "18.5"})["lease"].(LeaseView)
+	for _, owner := range []string{"s1", "s2"} {
+		if code := refusalCode(t, h, owner, Request{Action: "acquire", Kind: "iphone", Runtime: "18"}); code != "invalid" {
+			t.Fatalf("18 for %s while 18.5 is leased = %s", owner, code)
+		}
+	}
+	if lease := mustCall(t, h, "s1", Request{Action: "acquire", Kind: "iphone", Runtime: "18.5"})["lease"].(LeaseView); lease.UDID != held.UDID {
+		t.Fatalf("the held lease changed: %+v", lease)
+	}
+}
+
+func TestReleaseRefusesAKindThatNamesTwoHeldDevices(t *testing.T) {
+	sim := newFakeSim()
+	h, _ := newTestHost(t, sim)
+	mustCall(t, h, "s1", Request{Action: "acquire", Kind: "iphone"})
+	mustCall(t, h, "s1", Request{Action: "acquire", Kind: "iphone", Runtime: "18.5"})
+	if code := refusalCode(t, h, "s1", Request{Action: "release", Kind: "iphone"}); code != "invalid" {
+		t.Fatalf("a kind-only release over two devices = %s", code)
+	}
+	if out := mustCall(t, h, "s1", Request{Action: "list"}); len(out["simulators"].([]map[string]any)) != 3 || !h.Holds("s1") {
+		t.Fatal("a refused release ended a lease")
+	}
+	if released := mustCall(t, h, "s1", Request{Action: "release", Kind: "iphone", Runtime: "27.0"})["released"].([]string); strings.Join(released, ",") != "iphone" {
+		t.Fatalf("released %v, want the shared iPhone", released)
+	}
+	mustCall(t, h, "s1", Request{Action: "acquire", Kind: "ipad"})
+	if released := mustCall(t, h, "s1", Request{Action: "release"})["released"].([]string); strings.Join(released, ",") != "ipad,iphone (iOS 18.5)" {
+		t.Fatalf("release without kind ended %v, want every lease", released)
 	}
 }

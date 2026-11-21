@@ -11,6 +11,12 @@ import (
 type iosRuntime struct {
 	Identifier string
 	Version    string
+	Supported  []deviceTypeEntry
+}
+
+type deviceTypeEntry struct {
+	Identifier string `json:"identifier"`
+	Name       string `json:"name"`
 }
 
 func runtimeVersion(identifier string) string {
@@ -51,9 +57,10 @@ func (h *Host) iosRuntimes(ctx context.Context) ([]iosRuntime, error) {
 	}
 	var list struct {
 		Runtimes []struct {
-			Identifier  string `json:"identifier"`
-			Version     string `json:"version"`
-			IsAvailable bool   `json:"isAvailable"`
+			Identifier  string            `json:"identifier"`
+			Version     string            `json:"version"`
+			IsAvailable bool              `json:"isAvailable"`
+			Supported   []deviceTypeEntry `json:"supportedDeviceTypes"`
 		} `json:"runtimes"`
 	}
 	if err := json.Unmarshal(out, &list); err != nil {
@@ -68,7 +75,7 @@ func (h *Host) iosRuntimes(ctx context.Context) ([]iosRuntime, error) {
 		if version == "" {
 			version = runtimeVersion(r.Identifier)
 		}
-		found = append(found, iosRuntime{Identifier: r.Identifier, Version: version})
+		found = append(found, iosRuntime{Identifier: r.Identifier, Version: version, Supported: r.Supported})
 	}
 	if len(found) == 0 {
 		return nil, fmt.Errorf("no iOS Simulator runtime is installed")

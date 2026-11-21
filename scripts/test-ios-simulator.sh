@@ -170,17 +170,19 @@ wait
 { [ "$(wc -l <"$WORK/state.creates")" -eq 1 ] && [ "$(cat "$WORK/race-1")" = UDID-NEW ] && [ "$(cat "$WORK/race-2")" = UDID-NEW ]; } ||
   fail "two first runs did not share one new simulator: $(wc -l <"$WORK/state.creates" 2>/dev/null) created ($(cat "$WORK/race-1") / $(cat "$WORK/race-2"))"
 
-two='{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-18-5","version":"18.5","isAvailable":true},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","version":"27.0","isAvailable":true}]}'
+two='{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-18-5","version":"18.5","isAvailable":true,"supportedDeviceTypes":[{"name":"iPhone 16 Pro","identifier":"iPhone-16-Pro"}]},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","version":"27.0","isAvailable":true}]}'
 on_runtime() {
   rm -f "$CREATED" "$RENAMED"
   runtime_status=0
   RUNTIMES="$two" DEVICE_TYPES="{\"devicetypes\":[$phone]}" "$@" >"$WORK/rt-out" 2>&1 || runtime_status=$?
   created_as="$(sed -n 3p "$CREATED" 2>/dev/null || true)"
   created_on="$(sed -n 5p "$CREATED" 2>/dev/null || true)"
+  created_type="$(sed -n 4p "$CREATED" 2>/dev/null || true)"
 }
 on_runtime "$ROOT/scripts/ios-simulator.sh" iphone --runtime 18.5
 { [ "$runtime_status" = 0 ] && [ "$created_as" = "Agenthail iPhone (iOS 18.5)" ] && [ "$created_on" = com.apple.CoreSimulator.SimRuntime.iOS-18-5 ]; } ||
   fail "--runtime 18.5 did not create its own device on iOS 18.5: exit $runtime_status, $created_as on $created_on"
+[ "$created_type" = iPhone-16-Pro ] || fail "a device for iOS 18.5 was not one of the types iOS 18.5 supports: $created_type"
 on_runtime env PATH="$WORK/slim:$PATH" "$ROOT/scripts/ios-simulator.sh" iphone --runtime "iOS 18.5"
 { [ "$created_as" = "Agenthail iPhone (iOS 18.5) (slimming)" ] && [ "$(cat "$RENAMED" 2>/dev/null)" = "UDID-NEW Agenthail iPhone (iOS 18.5)" ]; } ||
   fail "a device for a runtime was not slimmed before taking its name: $created_as"

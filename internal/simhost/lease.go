@@ -94,9 +94,20 @@ func (h *Host) acquire(ctx context.Context, owner, kindName, want string) (Lease
 		return LeaseView{}, refuse("invalid", "kind must be iphone or ipad.")
 	}
 	versioned := runtimeWanted(want) != ""
+	if versioned {
+		installed, err := h.iosRuntimes(ctx)
+		if err != nil {
+			return LeaseView{}, err
+		}
+		runtime, err := pickRuntime(installed, want)
+		if err != nil {
+			return LeaseView{}, err
+		}
+		want = runtime.Identifier
+	}
 	slot := func(l *lease) bool {
 		if versioned {
-			return l.fits(kindName, want)
+			return l.kind == kindName && l.runtime == want
 		}
 		return l.kind == kindName && l.shared()
 	}
@@ -212,11 +223,25 @@ func (h *Host) renew(owner, kindName, want string) (LeaseView, error) {
 }
 
 func (h *Host) Release(owner, kindName string) []string {
-	return h.release(owner, kindName, "")
+	return h.end(h.detach(func(l *lease) bool { return l.owner == owner && (kindName == "" || l.kind == kindName) }))
 }
 
-func (h *Host) release(owner, kindName, want string) []string {
-	return h.end(h.detach(func(l *lease) bool { return l.owner == owner && l.fits(kindName, want) }))
+func (h *Host) release(owner, kindName, want string) ([]string, error) {
+	match := func(l *lease) bool { return l.owner == owner && l.fits(kindName, want) }
+	if kindName != "" || runtimeWanted(want) != "" {
+		h.mu.Lock()
+		n := 0
+		for _, l := range h.leases {
+			if match(l) {
+				n++
+			}
+		}
+		h.mu.Unlock()
+		if n > 1 {
+			return nil, refuse("invalid", "That names more than one simulator you hold; say which with runtime, or release without kind to end them all.")
+		}
+	}
+	return h.end(h.detach(match)), nil
 }
 
 type Detached struct{ leases []*lease }

@@ -51,7 +51,11 @@ func (h *Host) Call(ctx context.Context, owner string, req Request) (map[string]
 		view, err := h.renew(owner, req.Kind, req.Runtime)
 		return map[string]any{"lease": view}, err
 	case "release":
-		return map[string]any{"released": h.release(owner, req.Kind, req.Runtime)}, nil
+		released, err := h.release(owner, req.Kind, req.Runtime)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"released": released}, nil
 	}
 	l, err := h.held(owner, req.Kind, req.Runtime)
 	if err != nil {

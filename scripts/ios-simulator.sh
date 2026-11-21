@@ -98,9 +98,15 @@ if [ "${1:-}" = --runtime ]; then
 fi
 
 create_device() {
-  local new_name="$1" runtime="$2" device udid
+  local new_name="$1" runtime="$2" types="${3:-}" device udid
+  # An older runtime does not support the newest device types, so its own list wins.
+  [ -n "$types" ] || types="$(xcrun simctl list devicetypes --json)"
   # The iPad UI tests are written for the 11-inch iPad Pro; Xcode lists the 13-inch first.
-  device="$(xcrun simctl list devicetypes --json | jq -r --arg family "$family" --arg prefer "$prefer" '.devicetypes | (map(select(.name | startswith($prefer))) | first) // (map(select(.name | startswith($family))) | first) | .identifier')"
+  device="$(jq -r --arg family "$family" --arg prefer "$prefer" '.devicetypes | (map(select(.name | startswith($prefer))) | first) // (map(select(.name | startswith($family))) | first) | .identifier // empty' <<<"$types")"
+  if [ -z "$device" ]; then
+    echo "$0: Xcode has no $family simulator device type for $runtime" >&2
+    exit 1
+  fi
   if command -v simslim >/dev/null; then
     # The device takes its name only once slimmed and shut down, so a failed slim is never found and reused.
     udid="$(xcrun simctl create "$new_name (slimming)" "$device" "$runtime")"
@@ -157,7 +163,7 @@ find_or_create_on() {
     if [ "$runtime" = "$newest" ] && [ -z "$(jq -r --arg name "$name" '[.[] | select(.name == $name)] | first | .udid // empty' <<<"$devices")" ]; then
       versioned="$name"
     fi
-    udid="$(create_device "$versioned" "$runtime")"
+    udid="$(create_device "$versioned" "$runtime" "$(jq -c --arg id "$runtime" '.[] | select(.identifier == $id) | select((.supportedDeviceTypes // []) | length > 0) | {devicetypes: .supportedDeviceTypes}' <<<"$runtimes")")"
   fi
   printf '%s\n' "$udid"
 }
