@@ -3,6 +3,7 @@ package daemon
 import (
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -21,61 +22,61 @@ type dashboardSurface struct {
 }
 
 type dashboardSession struct {
-	Display           *SessionDisplay            `json:"display,omitempty"`
-	Attention         *SessionAttention          `json:"attention,omitempty"`
-	ID                string                     `json:"id"`
-	Surface           surface.SurfaceKind        `json:"surface"`
-	RuntimeKind       surface.RuntimeKind        `json:"runtimeKind,omitempty"`
-	ClaudeConfigRoot  *surface.SessionConfigRoot `json:"claudeConfigRoot,omitempty"`
-	Name              string                     `json:"name"`
-	Cwd               string                     `json:"cwd,omitempty"`
-	Alias             string                     `json:"alias,omitempty"`
-	Status            surface.SessionStatus      `json:"status"`
-	Ended             bool                       `json:"ended,omitempty"`
-	WaitingOn         *surface.Waiting           `json:"waitingOn,omitempty"`
-	BackgroundTasks   *surface.BackgroundTasks   `json:"backgroundTasks,omitempty"`
-	UsageLimit        *surface.UsageLimit        `json:"usageLimit,omitempty"`
-	TurnStop          *surface.TurnStop          `json:"turnStop,omitempty"`
-	Settings          *surface.ObservedSettings  `json:"settings,omitempty"`
-	LimitResume       *dashboardLimitResume      `json:"limitResume,omitempty"`
-	Activity          *surface.Activity          `json:"activity,omitempty"`
-	Plan              *surface.Plan              `json:"plan,omitempty"`
-	LastActive        time.Time                  `json:"lastActive,omitempty"`
-	RegisteredAt      time.Time                  `json:"registeredAt,omitzero"`
-	QueueCount        int                        `json:"queueCount"`
-	Open              bool                       `json:"open"`
-	Current           bool                       `json:"current"`
-	Archived          bool                       `json:"archived,omitempty"`
-	PinnedAt          time.Time                  `json:"pinnedAt,omitzero"`
-	ReadState         *surface.ReadState         `json:"readState,omitempty"`
-	Snooze            *dashboardSnooze           `json:"snooze,omitempty"`
-	InboxSection      string                     `json:"inboxSection,omitempty"`
-	EndTurn           *dashboardEndTurn          `json:"endTurn,omitempty"`
-	TurnState         *dashboardTurnState        `json:"turnState,omitempty"`
-	Ask               *dashboardAsk              `json:"ask,omitempty"`
-	TurnCompletion    *dashboardTurnCompletion   `json:"turnCompletion,omitempty"`
-	CurrentReason     string                     `json:"currentReason,omitempty"`
-	Capabilities      surface.Capabilities       `json:"capabilities"`
-	ReadOnly          bool                       `json:"readOnly,omitempty"`
-	ReadOnlyReason    string                     `json:"readOnlyReason,omitempty"`
-	Source            string                     `json:"source,omitempty"`
-	Transport         string                     `json:"transport,omitempty"`
-	ForkedFrom        string                     `json:"forkedFrom,omitempty"`
-	Project           *CatalogProject            `json:"project,omitempty"`
-	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
-	Worktree          *workView                  `json:"worktree,omitempty"`
-	PRs               []prView                   `json:"prs,omitempty"`
-	Move              *moveView                  `json:"move,omitempty"`
-	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
-	UnavailableReason string                     `json:"unavailableReason,omitempty"`
-	Runtime           *surface.Runtime           `json:"runtime,omitempty"`
-	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
-	Subagent          *surface.Subagent          `json:"subagent,omitempty"`
-	StartedBy         string                     `json:"startedBy,omitempty"`
-	Task              bool                       `json:"task,omitempty"`
-	Delegated         bool                       `json:"delegated,omitempty"`
-	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
-	Holders           []surface.Holder           `json:"holders,omitempty"`
+	Display           *daemonapi.SessionDisplay   `json:"display,omitempty"`
+	Attention         *daemonapi.SessionAttention `json:"attention,omitempty"`
+	ID                string                      `json:"id"`
+	Surface           surface.SurfaceKind         `json:"surface"`
+	RuntimeKind       surface.RuntimeKind         `json:"runtimeKind,omitempty"`
+	ClaudeConfigRoot  *surface.SessionConfigRoot  `json:"claudeConfigRoot,omitempty"`
+	Name              string                      `json:"name"`
+	Cwd               string                      `json:"cwd,omitempty"`
+	Alias             string                      `json:"alias,omitempty"`
+	Status            surface.SessionStatus       `json:"status"`
+	Ended             bool                        `json:"ended,omitempty"`
+	WaitingOn         *surface.Waiting            `json:"waitingOn,omitempty"`
+	BackgroundTasks   *surface.BackgroundTasks    `json:"backgroundTasks,omitempty"`
+	UsageLimit        *surface.UsageLimit         `json:"usageLimit,omitempty"`
+	TurnStop          *surface.TurnStop           `json:"turnStop,omitempty"`
+	Settings          *surface.ObservedSettings   `json:"settings,omitempty"`
+	LimitResume       *dashboardLimitResume       `json:"limitResume,omitempty"`
+	Activity          *surface.Activity           `json:"activity,omitempty"`
+	Plan              *surface.Plan               `json:"plan,omitempty"`
+	LastActive        time.Time                   `json:"lastActive,omitempty"`
+	RegisteredAt      time.Time                   `json:"registeredAt,omitzero"`
+	QueueCount        int                         `json:"queueCount"`
+	Open              bool                        `json:"open"`
+	Current           bool                        `json:"current"`
+	Archived          bool                        `json:"archived,omitempty"`
+	PinnedAt          time.Time                   `json:"pinnedAt,omitzero"`
+	ReadState         *surface.ReadState          `json:"readState,omitempty"`
+	Snooze            *dashboardSnooze            `json:"snooze,omitempty"`
+	InboxSection      string                      `json:"inboxSection,omitempty"`
+	EndTurn           *dashboardEndTurn           `json:"endTurn,omitempty"`
+	TurnState         *dashboardTurnState         `json:"turnState,omitempty"`
+	Ask               *dashboardAsk               `json:"ask,omitempty"`
+	TurnCompletion    *dashboardTurnCompletion    `json:"turnCompletion,omitempty"`
+	CurrentReason     string                      `json:"currentReason,omitempty"`
+	Capabilities      surface.Capabilities        `json:"capabilities"`
+	ReadOnly          bool                        `json:"readOnly,omitempty"`
+	ReadOnlyReason    string                      `json:"readOnlyReason,omitempty"`
+	Source            string                      `json:"source,omitempty"`
+	Transport         string                      `json:"transport,omitempty"`
+	ForkedFrom        string                      `json:"forkedFrom,omitempty"`
+	Project           *CatalogProject             `json:"project,omitempty"`
+	Checkout          *catalogCheckout            `json:"checkout,omitempty"`
+	Worktree          *workView                   `json:"worktree,omitempty"`
+	PRs               []prView                    `json:"prs,omitempty"`
+	Move              *moveView                   `json:"move,omitempty"`
+	ObservedAt        time.Time                   `json:"observedAt,omitempty"`
+	UnavailableReason string                      `json:"unavailableReason,omitempty"`
+	Runtime           *surface.Runtime            `json:"runtime,omitempty"`
+	Freshness         *registry.CatalogFreshness  `json:"freshness,omitempty"`
+	Subagent          *surface.Subagent           `json:"subagent,omitempty"`
+	StartedBy         string                      `json:"startedBy,omitempty"`
+	Task              bool                        `json:"task,omitempty"`
+	Delegated         bool                        `json:"delegated,omitempty"`
+	Subagents         *surface.SubagentRollup     `json:"subagents,omitempty"`
+	Holders           []surface.Holder            `json:"holders,omitempty"`
 	// ReplacedLead lists when a conversation a restart replaced held a coordinator's name.
 	ReplacedLead        []registry.CoordinatorTenure `json:"replacedLead,omitempty"`
 	ObservedSubagents   *surface.SubagentRollup      `json:"observedSubagents,omitempty"`

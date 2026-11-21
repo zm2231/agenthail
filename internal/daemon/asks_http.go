@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -156,7 +157,7 @@ func (d *Daemon) answerAskLocally(ctx context.Context, w http.ResponseWriter, re
 		writeAPIError(w, http.StatusConflict, "conflict", "surface is not configured")
 		return
 	}
-	p := principal{ID: localDashboardPrincipal, Kind: principalPerson, Claimed: CLIActor, DashboardBearer: true}
+	p := principal{ID: localDashboardPrincipal, Kind: principalPerson, Claimed: daemonapi.CLIActor, DashboardBearer: true}
 	if by := strings.TrimSpace(request.SessionID); by != "" {
 		p = sessionPrincipal(by)
 	}

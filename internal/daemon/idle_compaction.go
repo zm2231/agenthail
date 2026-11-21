@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -133,7 +134,7 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 			}
 			hold = "a message or command is queued or in flight"
 		}
-		d.idleHolds.record(IdleCompactionHold{SessionID: session.ID, Root: look.root, RequestAt: state.LastRequestAt, ContextTokens: state.ContextTokens, Reason: hold, At: now}, func(held IdleCompactionHold) {
+		d.idleHolds.record(daemonapi.IdleCompactionHold{SessionID: session.ID, Root: look.root, RequestAt: state.LastRequestAt, ContextTokens: state.ContextTokens, Reason: hold, At: now}, func(held daemonapi.IdleCompactionHold) {
 			d.log.Printf("idle compaction held for %s at %d tokens, idle %s: %s", d.resolveDisplay(held.SessionID), held.ContextTokens, idle.Round(time.Minute), held.Reason)
 		})
 	}

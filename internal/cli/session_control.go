@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -159,7 +159,7 @@ func (a *App) cmdModel(args []string) error {
 		read := *sess
 		result, controlErr := controller.Control(ctx, sess, surface.ControlRequest{Action: "model", Value: name})
 		if controlErr == nil {
-			a.recordHistory(registry.HistoryEntry{Kind: "model", SessionID: sess.ID, Message: name, Result: "changed by " + daemon.CLIActor})
+			a.recordHistory(registry.HistoryEntry{Kind: "model", SessionID: sess.ID, Message: name, Result: "changed by " + daemonapi.CLIActor})
 		}
 		if controlErr == nil && a.registry() != nil {
 			if err := a.registry().UpdateSession(*sess, registry.EditedSessionUpdate(read, *sess)); err != nil {

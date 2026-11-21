@@ -4,34 +4,29 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
 const g2CountEventInterval = time.Hour
-
-type G2Count struct {
-	ProjectKey string    `json:"projectKey"`
-	Since      time.Time `json:"since"`
-	Checked    int       `json:"checked"`
-	Gated      int       `json:"gated"`
-}
 
 type g2Counter struct {
 	mu        sync.Mutex
 	since     time.Time
 	published time.Time
-	projects  map[string]*G2Count
+	projects  map[string]*daemonapi.G2Count
 }
 
 func newG2Counter(since time.Time) *g2Counter {
-	return &g2Counter{since: since, published: since, projects: map[string]*G2Count{}}
+	return &g2Counter{since: since, published: since, projects: map[string]*daemonapi.G2Count{}}
 }
 
-func (c *g2Counter) record(projectKey string, gated bool, now time.Time) (snapshot []G2Count, publish bool) {
+func (c *g2Counter) record(projectKey string, gated bool, now time.Time) (snapshot []daemonapi.G2Count, publish bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	count := c.projects[projectKey]
 	if count == nil {
-		count = &G2Count{ProjectKey: projectKey, Since: c.since}
+		count = &daemonapi.G2Count{ProjectKey: projectKey, Since: c.since}
 		c.projects[projectKey] = count
 	}
 	count.Checked++
@@ -48,13 +43,13 @@ func (c *g2Counter) record(projectKey string, gated bool, now time.Time) (snapsh
 	return snapshot, true
 }
 
-func (c *g2Counter) project(projectKey string) G2Count {
+func (c *g2Counter) project(projectKey string) daemonapi.G2Count {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if count := c.projects[projectKey]; count != nil {
 		return *count
 	}
-	return G2Count{ProjectKey: projectKey, Since: c.since}
+	return daemonapi.G2Count{ProjectKey: projectKey, Since: c.since}
 }
 
 func (d *Daemon) countG2Check(projectKey string, gated bool) {

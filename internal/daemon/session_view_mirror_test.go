@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -19,7 +20,7 @@ func TestPresentationMirrorsQualifyMembersAndReformatStatus(t *testing.T) {
 	}
 	for _, id := range []string{"root", "child"} {
 		session := surface.Session{ID: id, Name: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
-		row := dashboardSession{ID: id, Name: id, Surface: session.Surface, Status: session.Status, Host: &dashboardHost{ID: hostID, Name: "peer", State: "connected"}, UnavailableReason: "workspace missing", Display: &SessionDisplay{Label: "Peer text"}}
+		row := dashboardSession{ID: id, Name: id, Surface: session.Surface, Status: session.Status, Host: &dashboardHost{ID: hostID, Name: "peer", State: "connected"}, UnavailableReason: "workspace missing", Display: &daemonapi.SessionDisplay{Label: "Peer text"}}
 		if id == "child" {
 			session.Subagent = &surface.Subagent{ParentID: "root", RootID: "root"}
 			row.Subagent = session.Subagent

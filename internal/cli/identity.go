@@ -10,9 +10,10 @@ import (
 
 	"github.com/zm2231/agenthail/internal/broadcast"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/notify"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -120,7 +121,7 @@ func (a *App) cmdChannel(args []string) error {
 		if err := broadcast.ValidateChannelName(a.registry(), name); err != nil {
 			return err
 		}
-		if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "channel-create", "channel": name}); err != nil {
+		if err := a.personAction(ctx, daemonapi.PersonActionAPI, map[string]any{"action": "channel-create", "channel": name}); err != nil {
 			return err
 		}
 		id, err := a.registry().CreateChannel(name)
@@ -137,7 +138,7 @@ func (a *App) cmdChannel(args []string) error {
 		if err := broadcast.ValidateChannelName(a.registry(), newName); err != nil {
 			return err
 		}
-		if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "channel-rename", "channel": name, "newChannel": newName}); err != nil {
+		if err := a.personAction(ctx, daemonapi.PersonActionAPI, map[string]any{"action": "channel-rename", "channel": name, "newChannel": newName}); err != nil {
 			return err
 		}
 		if err := a.registry().RenameChannel(name, newName); err != nil {
@@ -154,7 +155,7 @@ func (a *App) cmdChannel(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "channel-add", "channel": channelName, "targetId": member}); err != nil {
+		if err := a.personAction(ctx, daemonapi.PersonActionAPI, map[string]any{"action": "channel-add", "channel": channelName, "targetId": member}); err != nil {
 			return err
 		}
 		if err := a.registry().AddToChannel(channelName, member); err != nil {
@@ -168,7 +169,7 @@ func (a *App) cmdChannel(args []string) error {
 		}
 		channelName := strings.TrimPrefix(args[1], "#")
 		if args[2] == "--all" || args[2] == "-a" {
-			if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "channel-delete", "channel": channelName}); err != nil {
+			if err := a.personAction(ctx, daemonapi.PersonActionAPI, map[string]any{"action": "channel-delete", "channel": channelName}); err != nil {
 				return err
 			}
 			if err := a.registry().DeleteChannel(channelName); err != nil {
@@ -181,7 +182,7 @@ func (a *App) cmdChannel(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "channel-remove", "channel": channelName, "targetId": member}); err != nil {
+		if err := a.personAction(ctx, daemonapi.PersonActionAPI, map[string]any{"action": "channel-remove", "channel": channelName, "targetId": member}); err != nil {
 			return err
 		}
 		if err := a.registry().RemoveFromChannel(channelName, member); err != nil {
@@ -258,7 +259,7 @@ func (a *App) cmdRelay(args []string) error {
 		if err != nil {
 			return fmt.Errorf("to-target: %w", err)
 		}
-		if err := a.personAction(ctx, daemon.PersonActionAPI, map[string]any{"action": "relay-add", "fromId": relayEnd(fromSess, fromRemote), "toId": relayEnd(toSess, toRemote), "pattern": pattern, "once": once, "handoff": handoff}); err != nil {
+		if err := a.personAction(ctx, daemonapi.PersonActionAPI, map[string]any{"action": "relay-add", "fromId": relayEnd(fromSess, fromRemote), "toId": relayEnd(toSess, toRemote), "pattern": pattern, "once": once, "handoff": handoff}); err != nil {
 			return err
 		}
 		if fromRemote != nil || toRemote != nil {
@@ -355,7 +356,7 @@ func (a *App) cmdRelay(args []string) error {
 			payload["host"] = hostRef
 		}
 		ctx := context.Background()
-		if err := a.personAction(ctx, daemon.PersonActionAPI, payload); err != nil {
+		if err := a.personAction(ctx, daemonapi.PersonActionAPI, payload); err != nil {
 			return err
 		}
 		client, err := a.daemonAPI()
@@ -380,20 +381,20 @@ func (a *App) cmdDaemon(args []string) error {
 	if len(args) == 2 && args[0] == "notify" {
 		switch args[1] {
 		case "on", "enable":
-			status, err := daemon.EnableNotifications()
+			status, err := notify.Enable()
 			if err != nil {
 				return err
 			}
 			fmt.Printf("desktop notifications: enabled (%s)\n", status.Authorization)
 			return nil
 		case "off", "disable":
-			if err := daemon.DisableNotifications(); err != nil {
+			if err := notify.Disable(); err != nil {
 				return err
 			}
 			fmt.Println("desktop notifications: disabled")
 			return nil
 		case "status":
-			status := daemon.GetNotificationStatus()
+			status := notify.CurrentStatus()
 			state := "disabled"
 			if status.Enabled {
 				state = "enabled"
@@ -404,17 +405,17 @@ func (a *App) cmdDaemon(args []string) error {
 			}
 			return nil
 		case "test":
-			status := daemon.GetNotificationStatus()
+			status := notify.CurrentStatus()
 			if !status.Enabled {
 				return fmt.Errorf("desktop notifications are not enabled (%s)", status.Authorization)
 			}
-			if err := daemon.Notify("Agenthail", "Native notifications are ready.", "", ""); err != nil {
+			if err := notify.Notify("Agenthail", "Native notifications are ready.", "", ""); err != nil {
 				return err
 			}
 			fmt.Println("test notification sent")
 			return nil
 		case "settings":
-			return daemon.OpenNotificationSettings()
+			return notify.OpenSettings()
 		default:
 			return fmt.Errorf("usage: agenthail daemon notify <on|off|status|test|settings>")
 		}

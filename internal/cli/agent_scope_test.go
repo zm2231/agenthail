@@ -8,27 +8,27 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func allowAgentScope(daemon.ScopeRequest) (*daemon.ScopeReply, error) {
-	return &daemon.ScopeReply{}, nil
+func allowAgentScope(daemonapi.ScopeRequest) (*daemonapi.ScopeReply, error) {
+	return &daemonapi.ScopeReply{}, nil
 }
 
 type scopeServer struct {
 	mu       sync.Mutex
-	asked    []daemon.ScopeRequest
+	asked    []daemonapi.ScopeRequest
 	refusal  string
 	accepted string
 }
 
 func (s *scopeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != daemon.ScopePath {
+	if r.URL.Path != daemonapi.ScopePath {
 		http.NotFound(w, r)
 		return
 	}
-	var request daemon.ScopeRequest
+	var request daemonapi.ScopeRequest
 	_ = json.NewDecoder(r.Body).Decode(&request)
 	s.mu.Lock()
 	s.asked = append(s.asked, request)
@@ -42,10 +42,10 @@ func (s *scopeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(s.accepted))
 }
 
-func (s *scopeServer) requests() []daemon.ScopeRequest {
+func (s *scopeServer) requests() []daemonapi.ScopeRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]daemon.ScopeRequest(nil), s.asked...)
+	return append([]daemonapi.ScopeRequest(nil), s.asked...)
 }
 
 func scopedFixture(t *testing.T, server *scopeServer) (*App, *cliSurface) {
@@ -85,7 +85,7 @@ func TestAnAgentsWriteOutsideItsReachIsRefusedWithTheRuleBeforeAnythingIsSent(t 
 	}
 }
 
-func payloadOf(t *testing.T, request daemon.ScopeRequest) map[string]any {
+func payloadOf(t *testing.T, request daemonapi.ScopeRequest) map[string]any {
 	t.Helper()
 	if request.Payload == nil {
 		return nil

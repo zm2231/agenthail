@@ -214,14 +214,6 @@ func (d *Daemon) recordSetting(session *surface.Session, action, value, actor st
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: action, SessionID: session.ID, Message: value, Result: "changed by " + actor})
 }
 
-// ActionActorHeader carries who started an action when the daemon is not
-// the first hop: the CLI through its local daemon, or a person on another
-// host through that host's daemon.
-const ActionActorHeader = "Agenthail-Actor"
-
-// CLIActor is how history names an action taken from the agenthail CLI.
-const CLIActor = "the CLI"
-
 const maxActorLength = 160
 
 // claimedActor keeps a forwarded actor to one bounded printable line.

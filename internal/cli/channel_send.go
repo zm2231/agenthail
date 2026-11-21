@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
 type channelHostOutcome struct {
@@ -37,7 +37,7 @@ func (r channelReceipt) refused() int {
 }
 
 func (a *App) channelSend(ctx context.Context, name, message, fromLabel string, jsonOut bool) error {
-	if _, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "channel-send", Channel: name}); err != nil {
+	if _, err := a.agentScope(ctx, daemonapi.ScopeRequest{Action: "channel-send", Channel: name}); err != nil {
 		return err
 	}
 	sourceID, err := a.sourceSessionID(ctx, fromLabel)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/github"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -63,7 +64,7 @@ func (d *Daemon) prProblem(pr registry.SessionPR) string {
 }
 
 func prSource(p principal) string {
-	if p.Kind == principalSession || p.Claimed == CLIActor && p.DashboardBearer {
+	if p.Kind == principalSession || p.Claimed == daemonapi.CLIActor && p.DashboardBearer {
 		return registry.PRSourceAgent
 	}
 	return registry.PRSourcePerson

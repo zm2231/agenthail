@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -60,7 +61,7 @@ func (d *Daemon) answerApproval(ctx context.Context, ask registry.Ask, response 
 }
 
 func (d *Daemon) runApproval(ctx context.Context, p principal, approval registry.Approval) actionReply {
-	if approval.API == PersonActionSettings {
+	if approval.API == daemonapi.PersonActionSettings {
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/settings", bytes.NewReader(approval.Payload))
 		if err != nil {
 			return actionReply{Status: http.StatusInternalServerError, Body: []byte(err.Error())}

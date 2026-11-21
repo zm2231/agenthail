@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/daemonctl"
 )
 
@@ -49,7 +49,7 @@ func TestDebugHeapWritesEachProfileTheDaemonServes(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths := strings.Fields(output)
-	if len(paths) != 1+len(daemon.DebugProfiles) {
+	if len(paths) != 1+len(daemonapi.DebugProfiles) {
 		t.Fatalf("output=%q", output)
 	}
 	if !strings.HasPrefix(filepath.Base(paths[0]), "memstats-") || !strings.HasSuffix(paths[0], ".json") {
@@ -58,7 +58,7 @@ func TestDebugHeapWritesEachProfileTheDaemonServes(t *testing.T) {
 	if data, err := os.ReadFile(paths[0]); err != nil || string(data) != `{"HeapSys":1}` {
 		t.Fatalf("memstats: %q %v", data, err)
 	}
-	for index, name := range daemon.DebugProfiles {
+	for index, name := range daemonapi.DebugProfiles {
 		path := paths[index+1]
 		if filepath.Dir(path) != dir || !strings.HasPrefix(filepath.Base(path), name+"-") || !strings.HasSuffix(path, ".pb.gz") {
 			t.Fatalf("%s written to %s", name, path)

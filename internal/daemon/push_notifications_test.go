@@ -38,26 +38,9 @@ func TestSendDevicePushUsesBoundedCapabilityPayload(t *testing.T) {
 
 func TestSendDevicePushFailsWhenRelayIsNotConfigured(t *testing.T) {
 	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", "")
-	previous := bundledPushRelayURL
-	bundledPushRelayURL = ""
-	t.Cleanup(func() { bundledPushRelayURL = previous })
 	target := registry.DevicePushTarget{InstallationID: "install", Credential: "secret"}
 	if _, err := sendDevicePush(context.Background(), target, mobileNotification{Title: "Agenthail", Message: "Session finished", SessionID: "codex/session", TurnID: "turn-42", EventType: "turn.completed"}); err == nil {
 		t.Fatalf("error=%v", err)
-	}
-}
-
-func TestPushRelayURLUsesBuildDefaultAndEnvironmentOverride(t *testing.T) {
-	previous := bundledPushRelayURL
-	bundledPushRelayURL = "https://packaged.example.test/"
-	t.Cleanup(func() { bundledPushRelayURL = previous })
-	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", "")
-	if got := PushRelayURL(); got != "https://packaged.example.test" {
-		t.Fatalf("packaged URL=%q", got)
-	}
-	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", "https://self-hosted.example.test/")
-	if got := PushRelayURL(); got != "https://self-hosted.example.test" {
-		t.Fatalf("override URL=%q", got)
 	}
 }
 

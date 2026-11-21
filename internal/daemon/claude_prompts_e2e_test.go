@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -35,7 +36,7 @@ func (w *withdrawals) has(identifier string) bool {
 	return slices.Contains(w.identifiers, identifier)
 }
 
-func (h *runningDaemon) postPrompt(prompt string, pid int) (int, ClaudePermissionResponse) {
+func (h *runningDaemon) postPrompt(prompt string, pid int) (int, daemonapi.ClaudePermissionResponse) {
 	h.t.Helper()
 	body := `{"pid":` + strings.TrimSpace(string(mustJSON(h.t, pid))) + `,"prompt":` + prompt + `}`
 	request, err := http.NewRequest(http.MethodPost, h.server.URL+"/api/v1/claude/permission-request", bytes.NewReader([]byte(body)))
@@ -48,7 +49,7 @@ func (h *runningDaemon) postPrompt(prompt string, pid int) (int, ClaudePermissio
 		h.t.Fatal(err)
 	}
 	defer response.Body.Close()
-	var decoded ClaudePermissionResponse
+	var decoded daemonapi.ClaudePermissionResponse
 	_ = json.NewDecoder(response.Body).Decode(&decoded)
 	return response.StatusCode, decoded
 }
@@ -72,7 +73,7 @@ func TestATerminalQuestionHeldByTheHookIsAnsweredFromAgenthailAndItsNoticesAreWi
 	prompt := `{"session_id":"conversation-question","tool_name":"AskUserQuestion","tool_input":` + pickABranch + `}`
 	type held struct {
 		status   int
-		response ClaudePermissionResponse
+		response daemonapi.ClaudePermissionResponse
 	}
 	done := make(chan held, 1)
 	go func() {

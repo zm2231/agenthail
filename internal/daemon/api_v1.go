@@ -15,8 +15,10 @@ import (
 
 	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/buildinfo"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/notify"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sse"
 )
@@ -122,7 +124,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	d.registerExtensionRoutes(mux, dashboard)
 	mux.HandleFunc("POST /api/v1/web-session", d.apiV1Guard(dashboard, "read", d.apiWebSessionHandler(dashboard)))
 	d.registerSimulatorRoutes(mux, dashboard)
-	mux.HandleFunc(MCPClaimPath, d.apiV1Guard(dashboard, "control", d.apiMCPClaimHandler))
+	mux.HandleFunc(daemonapi.MCPClaimPath, d.apiV1Guard(dashboard, "control", d.apiMCPClaimHandler))
 	mux.HandleFunc("/api/v1/version", d.apiV1Guard(dashboard, "read", d.apiVersionHandler))
 	mux.HandleFunc("/api/v1/snapshot", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) })))
 	mux.HandleFunc("POST /api/v1/projects/{id}/brief", d.apiV1Guard(dashboard, "control", d.apiProjectBriefHandler))
@@ -216,7 +218,7 @@ func (d *Daemon) apiVersionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := d.hostIdentity()
-	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolMinimum, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name, Simulators: d.knownSimulators(), Identity: d.build})
+	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolMinimum, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: notify.PushRelayURL(), HostID: identity.ID, HostName: identity.Name, Simulators: d.knownSimulators(), Identity: d.build})
 }
 
 func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -105,13 +106,13 @@ func TestSessionViewOrderHoldsStillWhileWorkRuns(t *testing.T) {
 func TestSessionViewOrderMovesOnlyOnNews(t *testing.T) {
 	f := newOrderFixture()
 	before := f.order(t, "current")
-	f.rows["s04"].WaitingOn, f.rows["s04"].Attention = &surface.Waiting{ID: "q", Since: f.now}, &SessionAttention{Kind: "request"}
+	f.rows["s04"].WaitingOn, f.rows["s04"].Attention = &surface.Waiting{ID: "q", Since: f.now}, &daemonapi.SessionAttention{Kind: "request"}
 	asked := f.order(t, "current")
 	if asked.Collapsed["p-alpha"][0] != "s04" || !reflect.DeepEqual(asked.Projects, before.Projects) {
 		t.Fatalf("a waiting row did not go to the top of its project: %+v", asked)
 	}
 	f.now = f.now.Add(time.Minute)
-	f.rows["s01"].WaitingOn, f.rows["s01"].Attention = &surface.Waiting{ID: "q2", Since: f.now}, &SessionAttention{Kind: "request"}
+	f.rows["s01"].WaitingOn, f.rows["s01"].Attention = &surface.Waiting{ID: "q2", Since: f.now}, &daemonapi.SessionAttention{Kind: "request"}
 	if got := f.order(t, "current").Collapsed["p-alpha"][:2]; fmt.Sprint(got) != "[s04 s01]" {
 		t.Fatalf("a newer wait went ahead of the older one: %v", got)
 	}

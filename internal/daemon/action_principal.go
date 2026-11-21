@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
 type principalKind string
@@ -34,7 +36,7 @@ type principal struct {
 }
 
 func principalFromRequest(r *http.Request) principal {
-	p := principal{ID: localDashboardPrincipal, Kind: principalPerson, Claimed: claimedActor(r.Header.Get(ActionActorHeader)), DashboardBearer: dashboardBearer(r.Context())}
+	p := principal{ID: localDashboardPrincipal, Kind: principalPerson, Claimed: claimedActor(r.Header.Get(daemonapi.ActionActorHeader)), DashboardBearer: dashboardBearer(r.Context())}
 	if id, ok := r.Context().Value(actionPrincipalContextKey{}).(string); ok && id != "" {
 		p.ID = id
 	}
@@ -72,8 +74,8 @@ func (p principal) actor() string {
 		}
 		return fmt.Sprintf("host %s", p.HostName)
 	}
-	if p.Claimed == CLIActor && p.DashboardBearer {
-		return CLIActor
+	if p.Claimed == daemonapi.CLIActor && p.DashboardBearer {
+		return daemonapi.CLIActor
 	}
 	return "the dashboard"
 }

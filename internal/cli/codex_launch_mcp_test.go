@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/codextest"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
@@ -36,7 +36,7 @@ func TestATerminalLaunchStartsItsThreadWithTheLaunchCredentialAndClaimsIt(t *tes
 	}
 	var claims []map[string]string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != daemon.MCPClaimPath || r.Header.Get("Authorization") != "Bearer dashboard-synthetic" {
+		if r.URL.Path != daemonapi.MCPClaimPath || r.Header.Get("Authorization") != "Bearer dashboard-synthetic" {
 			http.NotFound(w, r)
 			return
 		}

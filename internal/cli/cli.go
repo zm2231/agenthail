@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
@@ -42,7 +42,7 @@ type App struct {
 	daemonSessionPageReader   func() (sessionPageReader, error)
 	daemonSessionStreamReader func() (sessionStreamReader, error)
 	daemonAPIOverride         func() (*daemonAPIClient, error)
-	scopeOverride             func(daemon.ScopeRequest) (*daemon.ScopeReply, error)
+	scopeOverride             func(daemonapi.ScopeRequest) (*daemonapi.ScopeReply, error)
 	askPerson                 bool
 	askReason                 string
 	agentNotices              []string

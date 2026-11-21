@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -122,7 +123,7 @@ func TestAnIdleLargeSessionIsCompactedOnceBeforeItsCacheExpires(t *testing.T) {
 
 	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/v1/claude/compact-settings", "")
 	var body struct {
-		Holds []IdleCompactionHold `json:"idleCompactionHolds"`
+		Holds []daemonapi.IdleCompactionHold `json:"idleCompactionHolds"`
 	}
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
 		t.Fatalf("compact settings = %d %s", response.Code, response.Body)
@@ -177,11 +178,11 @@ func TestEachHeldIdleCompactionIsReportedOnceWhenMoreAreHeldThanTheListKeeps(t *
 	}
 	d := newTestDaemon(t, r, []surface.Surface{fake})
 	router := dashboardRouter(d)
-	holds := func() []IdleCompactionHold {
+	holds := func() []daemonapi.IdleCompactionHold {
 		t.Helper()
 		response := serveDashboardRequest(router, http.MethodGet, "/api/v1/claude/compact-settings", "")
 		var body struct {
-			Holds []IdleCompactionHold `json:"idleCompactionHolds"`
+			Holds []daemonapi.IdleCompactionHold `json:"idleCompactionHolds"`
 		}
 		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
 			t.Fatalf("compact settings = %d %s", response.Code, response.Body)
@@ -192,7 +193,7 @@ func TestEachHeldIdleCompactionIsReportedOnceWhenMoreAreHeldThanTheListKeeps(t *
 	d.compactIdle(context.Background(), now, read)
 	first := holds()
 	d.compactIdle(context.Background(), now.Add(time.Minute), read)
-	if second := holds(); len(first) != idleCompactionHoldsKept || !slices.EqualFunc(first, second, func(a, b IdleCompactionHold) bool { return a.SessionID == b.SessionID && a.At.Equal(b.At) }) {
+	if second := holds(); len(first) != idleCompactionHoldsKept || !slices.EqualFunc(first, second, func(a, b daemonapi.IdleCompactionHold) bool { return a.SessionID == b.SessionID && a.At.Equal(b.At) }) {
 		t.Fatalf("holds after the first pass: %d, after the second they changed: %v", len(first), second)
 	}
 }

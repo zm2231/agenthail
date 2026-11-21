@@ -6,12 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func inboxRow(kind string, edit func(*dashboardSession)) dashboardSession {
-	row := dashboardSession{ID: "s", Display: &SessionDisplay{Kind: kind}}
+	row := dashboardSession{ID: "s", Display: &daemonapi.SessionDisplay{Kind: kind}}
 	if edit != nil {
 		edit(&row)
 	}
@@ -22,7 +23,7 @@ func TestEachRowLandsInOneInboxSection(t *testing.T) {
 	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	later := &dashboardSnooze{SnoozedAt: now.Add(-time.Hour), Until: now.Add(time.Hour), Wake: registry.SnoozeWakeTime}
 	past := &dashboardSnooze{SnoozedAt: now.Add(-2 * time.Hour), Until: now.Add(-time.Minute), Wake: registry.SnoozeWakeTime}
-	asks := &SessionAttention{Kind: "request"}
+	asks := &daemonapi.SessionAttention{Kind: "request"}
 	cases := []struct {
 		name string
 		row  dashboardSession
@@ -83,7 +84,7 @@ func TestTheViewIsRereadWhenASnoozeEnds(t *testing.T) {
 
 func TestAPinnedSessionStaysCurrentWhenItIsNotRunning(t *testing.T) {
 	now := time.Now()
-	row := dashboardSession{ID: "s", Status: surface.StatusOffline, Display: &SessionDisplay{Kind: "offline"}}
+	row := dashboardSession{ID: "s", Status: surface.StatusOffline, Display: &daemonapi.SessionDisplay{Kind: "offline"}}
 	if presentationCurrent(&row) || catalogScopeMatches("current", row) {
 		t.Fatal("an unpinned offline session counted as current")
 	}

@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
 type sessionViewPlan struct {
@@ -117,7 +119,7 @@ func newSessionViewPlan(rows []dashboardSession, scope string, filters SessionVi
 const sessionHold = 10 * time.Minute
 
 func presentationNeedsYou(row *dashboardSession) bool {
-	return row.Attention != nil && row.Attention.Kind != AttentionReplacedRequest
+	return row.Attention != nil && row.Attention.Kind != daemonapi.AttentionReplacedRequest
 }
 
 func presentationWaitingSince(row *dashboardSession) time.Time {

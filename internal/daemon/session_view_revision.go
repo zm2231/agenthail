@@ -1,15 +1,16 @@
 package daemon
 
 import (
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
 type revisionRow struct {
 	Record        registry.CatalogPresentationRow
-	Display       *SessionDisplay
+	Display       *daemonapi.SessionDisplay
 	Current       bool
 	CurrentReason string
-	Attention     *SessionAttention
+	Attention     *daemonapi.SessionAttention
 	InboxSection  string
 	LimitResume   *dashboardLimitResume
 	Host          *dashboardHost

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -38,7 +39,7 @@ func (p rowPresenter) present(row *dashboardSession, localID string) {
 	row.Attention = rowAttention(*row)
 }
 
-func (d *Daemon) presentedAttention(sessionID string, now time.Time) (*SessionAttention, error) {
+func (d *Daemon) presentedAttention(sessionID string, now time.Time) (*daemonapi.SessionAttention, error) {
 	stored, found, err := d.Registry.CatalogProjection(sessionID)
 	if err != nil || !found {
 		return nil, err

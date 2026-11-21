@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -123,7 +124,7 @@ func namedSessions(ids []string, leads leadDirectory) string {
 	if len(ids) == 1 {
 		return leads.named(ids[0])
 	}
-	return fmt.Sprintf("%s and %s", leads.named(ids[0]), CountText(len(ids)-1, "other"))
+	return fmt.Sprintf("%s and %s", leads.named(ids[0]), daemonapi.CountText(len(ids)-1, "other"))
 }
 
 func turnStateLabel(state *dashboardTurnState) string {

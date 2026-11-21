@@ -4,20 +4,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
-
-type SessionDisplay struct {
-	Kind          string     `json:"kind"`
-	Label         string     `json:"label"`
-	Detail        string     `json:"detail"`
-	WaitingPlace  string     `json:"waitingPlace,omitempty"`
-	ResetsAt      *time.Time `json:"resetsAt,omitempty"`
-	ResumesAt     *time.Time `json:"resumesAt,omitempty"`
-	QuietSince    *time.Time `json:"quietSince,omitempty"`
-	ToolStartedAt *time.Time `json:"toolStartedAt,omitempty"`
-}
 
 func displayInstant(at time.Time) *time.Time {
 	if at.IsZero() {
@@ -27,7 +17,7 @@ func displayInstant(at time.Time) *time.Time {
 	return &at
 }
 
-func sessionDisplay(row dashboardSession, now time.Time) SessionDisplay {
+func sessionDisplay(row dashboardSession, now time.Time) daemonapi.SessionDisplay {
 	display := sessionDisplayState(row, now)
 	if row.Freshness != nil && row.Freshness.Stale {
 		if display.Detail != "" {
@@ -38,9 +28,9 @@ func sessionDisplay(row dashboardSession, now time.Time) SessionDisplay {
 	return display
 }
 
-func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
+func sessionDisplayState(row dashboardSession, now time.Time) daemonapi.SessionDisplay {
 	if mirroredHostDown(row) || row.Status == surface.StatusUnknown || row.Status == "notLoaded" {
-		return SessionDisplay{Kind: "unavailable", Label: "Unavailable", Detail: row.UnavailableReason}
+		return daemonapi.SessionDisplay{Kind: "unavailable", Label: "Unavailable", Detail: row.UnavailableReason}
 	}
 	if wait := row.WaitingOn; wait != nil {
 		place, detail := "elsewhere", "Answer where the session is running"
@@ -54,10 +44,10 @@ func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
 		case row.RuntimeKind == surface.RuntimeClaudeCLI:
 			place, detail = "terminal", "Answer in its terminal"
 		}
-		return SessionDisplay{Kind: "waiting", Label: "Waiting on you", Detail: detail, WaitingPlace: place}
+		return daemonapi.SessionDisplay{Kind: "waiting", Label: "Waiting on you", Detail: detail, WaitingPlace: place}
 	}
 	if row.Status == surface.StatusBusy {
-		display := SessionDisplay{Kind: "working", Label: "Working"}
+		display := daemonapi.SessionDisplay{Kind: "working", Label: "Working"}
 		if activity := row.Activity; activity != nil {
 			last := activity.LastProgressAt
 			if last.IsZero() {
@@ -76,7 +66,7 @@ func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
 		return display
 	}
 	if stop := row.LimitResume; stop != nil && stop.State != registry.LimitResumeReleased {
-		display := SessionDisplay{Kind: "limited", Label: "Usage limit"}
+		display := daemonapi.SessionDisplay{Kind: "limited", Label: "Usage limit"}
 		switch stop.State {
 		case registry.LimitResumeWaiting:
 			display.Detail = "Resumes when the limit lifts"
@@ -99,28 +89,28 @@ func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
 		if !limit.ResetsAt.IsZero() {
 			detail = "Limit reset scheduled"
 		}
-		return SessionDisplay{Kind: "limited", Label: "Usage limit", Detail: detail, ResetsAt: displayInstant(limit.ResetsAt)}
+		return daemonapi.SessionDisplay{Kind: "limited", Label: "Usage limit", Detail: detail, ResetsAt: displayInstant(limit.ResetsAt)}
 	}
 	if stop := row.TurnStop; stop != nil {
-		return SessionDisplay{Kind: "stopped", Label: "Stopped", Detail: turnStopDetail(stop)}
+		return daemonapi.SessionDisplay{Kind: "stopped", Label: "Stopped", Detail: turnStopDetail(stop)}
 	}
 	if surface.BackgroundRunning(row.BackgroundTasks) {
-		return SessionDisplay{Kind: "finishing", Label: "Finishing", Detail: "Waiting on background work"}
+		return daemonapi.SessionDisplay{Kind: "finishing", Label: "Finishing", Detail: "Waiting on background work"}
 	}
 	if row.QueueCount > 0 {
-		return SessionDisplay{Kind: "queued", Label: "Queued", Detail: CountText(row.QueueCount, "message") + " waiting"}
+		return daemonapi.SessionDisplay{Kind: "queued", Label: "Queued", Detail: daemonapi.CountText(row.QueueCount, "message") + " waiting"}
 	}
 	if row.Status == surface.StatusOffline {
-		return SessionDisplay{Kind: "offline", Label: "Offline"}
+		return daemonapi.SessionDisplay{Kind: "offline", Label: "Offline"}
 	}
 	if row.TurnState != nil {
-		return SessionDisplay{Kind: "idle", Label: turnStateLabel(row.TurnState)}
+		return daemonapi.SessionDisplay{Kind: "idle", Label: turnStateLabel(row.TurnState)}
 	}
 	label := "Closed"
 	if row.Open {
 		label = "Ready"
 	}
-	return SessionDisplay{Kind: "idle", Label: label}
+	return daemonapi.SessionDisplay{Kind: "idle", Label: label}
 }
 
 func turnStopDetail(stop *surface.TurnStop) string {

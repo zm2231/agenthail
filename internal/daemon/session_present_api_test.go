@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -84,7 +85,7 @@ func TestAWaitingSessionKeepsItsAttentionAcrossAProgressUpsert(t *testing.T) {
 	detail := get("/api/v1/session?id=" + lead.ID)
 	defer detail.Body.Close()
 	var opened struct {
-		Attention *SessionAttention `json:"attention"`
+		Attention *daemonapi.SessionAttention `json:"attention"`
 	}
 	if err := json.NewDecoder(detail.Body).Decode(&opened); err != nil {
 		t.Fatal(err)

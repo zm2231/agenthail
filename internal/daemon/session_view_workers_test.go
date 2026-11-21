@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -52,7 +53,7 @@ func TestAWorkerFoldsUnderTheSessionThatStartedItInTheSameCheckout(t *testing.T)
 	f.add("lead", "", "main")
 	f.add("worker", "lead", "main", func(r *dashboardSession) { r.Status = surface.StatusBusy })
 	f.add("worker-of-worker", "worker", "main")
-	f.add("asking", "lead", "main", func(r *dashboardSession) { r.Attention = &SessionAttention{Kind: AttentionAsk} })
+	f.add("asking", "lead", "main", func(r *dashboardSession) { r.Attention = &daemonapi.SessionAttention{Kind: AttentionAsk} })
 	f.add("elsewhere", "lead", "topic")
 	f.add("subagent", "", "main", func(r *dashboardSession) {
 		r.Status, r.Subagent = surface.StatusBusy, &surface.Subagent{ParentID: "lead", RootID: "lead", Depth: 1}

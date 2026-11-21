@@ -5,25 +5,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 const idleCompactionHoldsKept = 50
 
-type IdleCompactionHold struct {
-	SessionID     string    `json:"sessionId"`
-	Session       string    `json:"session"`
-	Root          string    `json:"root"`
-	RequestAt     time.Time `json:"requestAt"`
-	ContextTokens int64     `json:"contextTokens"`
-	Reason        string    `json:"reason"`
-	At            time.Time `json:"at"`
-}
-
 type idleCompactionHolds struct {
 	mu        sync.Mutex
 	announced map[string]time.Time
-	recent    []IdleCompactionHold
+	recent    []daemonapi.IdleCompactionHold
 }
 
 func idleCompactionHold(session *surface.Session, settings surface.IdleCompaction, refused, canCompact bool) string {
@@ -44,7 +35,7 @@ func idleCompactionHold(session *surface.Session, settings surface.IdleCompactio
 	return ""
 }
 
-func (h *idleCompactionHolds) record(hold IdleCompactionHold, announce func(IdleCompactionHold)) {
+func (h *idleCompactionHolds) record(hold daemonapi.IdleCompactionHold, announce func(daemonapi.IdleCompactionHold)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if at, ok := h.announced[hold.SessionID]; ok && at.Equal(hold.RequestAt) {
@@ -71,7 +62,7 @@ func (h *idleCompactionHolds) forgetExcept(listed map[string]bool) {
 	}
 }
 
-func (h *idleCompactionHolds) list() []IdleCompactionHold {
+func (h *idleCompactionHolds) list() []daemonapi.IdleCompactionHold {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return slices.Clone(h.recent)

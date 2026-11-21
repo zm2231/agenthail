@@ -5,17 +5,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 var decisionStart = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
 func decisionRow(id, kind string, minute int) dashboardSession {
-	row := dashboardSession{ID: id, Display: &SessionDisplay{Kind: "idle"}, Project: &CatalogProject{ID: "web-app"}, LastActive: decisionStart.Add(time.Duration(minute) * time.Minute)}
+	row := dashboardSession{ID: id, Display: &daemonapi.SessionDisplay{Kind: "idle"}, Project: &CatalogProject{ID: "web-app"}, LastActive: decisionStart.Add(time.Duration(minute) * time.Minute)}
 	if kind == "" {
 		return row
 	}
-	row.Attention = &SessionAttention{Kind: kind, Reason: kind + " reason"}
+	row.Attention = &daemonapi.SessionAttention{Kind: kind, Reason: kind + " reason"}
 	if kind == "request" {
 		row.WaitingOn = &surface.Waiting{ID: id + "-wait", Kind: surface.WaitingApproval, Since: row.LastActive}
 	}
@@ -141,7 +142,7 @@ func TestHeldAndFailedDeliveriesAreStoppedAndNeverReadAsQuestions(t *testing.T) 
 
 func TestRemoteAndReplacedLeadRowsAreNotDecisions(t *testing.T) {
 	replaced := decisionRow("replaced", "request", 1)
-	replaced.Attention.Kind = AttentionReplacedRequest
+	replaced.Attention.Kind = daemonapi.AttentionReplacedRequest
 	remote := decisionRow("other-host::far", "request", 2)
 	w := &decisionWorld{rows: []dashboardSession{replaced, remote}, open: map[string][]openRequestView{"other-host::far": {prompt("x")}}}
 	if page := w.page(); len(page.Decisions) != 0 || len(w.asked) != 0 {
@@ -164,9 +165,9 @@ func TestAWorkersPromptHeldByALiveLeadIsLeadHandlingNotADecision(t *testing.T) {
 func TestAWorkersPromptIsTheirsOnceTheLeadCannotHoldIt(t *testing.T) {
 	cases := map[string]func(*dashboardSession){
 		"lead archived":    func(lead *dashboardSession) { lead.Archived = true },
-		"lead unavailable": func(lead *dashboardSession) { lead.Display = &SessionDisplay{Kind: "unavailable"} },
+		"lead unavailable": func(lead *dashboardSession) { lead.Display = &daemonapi.SessionDisplay{Kind: "unavailable"} },
 		"lead asks the person": func(lead *dashboardSession) {
-			lead.Attention = &SessionAttention{Kind: AttentionAsk, Reason: "which layout"}
+			lead.Attention = &daemonapi.SessionAttention{Kind: AttentionAsk, Reason: "which layout"}
 		},
 		"lead waits on a prompt": func(lead *dashboardSession) { *lead = decisionRow("lead", "request", 0) },
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
+	"github.com/zm2231/agenthail/internal/notify"
 )
 
 func (d *Daemon) person() (dashboardPerson, error) {
@@ -27,7 +28,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if r.Method == http.MethodGet {
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "claudeDefaultRoot": config.ClaudeDefaultRoot(), "claudeRoots": d.claudeRootNames(), "remoteAccess": RemoteAccessStatusForConfig(config), "notifications": GetNotificationStatus(), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "claudeDefaultRoot": config.ClaudeDefaultRoot(), "claudeRoots": d.claudeRootNames(), "remoteAccess": RemoteAccessStatusForConfig(config), "notifications": notify.CurrentStatus(), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -85,16 +86,16 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 	case "person-name":
 		err = d.Registry.SetPersonName(request.PersonName)
 	case "notifications-enable":
-		_, err = EnableNotifications()
+		_, err = notify.Enable()
 	case "notifications-disable":
-		err = DisableNotifications()
+		err = notify.Disable()
 	case "notifications-settings":
-		err = OpenNotificationSettings()
+		err = notify.OpenSettings()
 	case "notifications-test":
-		if !GetNotificationStatus().Enabled {
+		if !notify.CurrentStatus().Enabled {
 			err = fmt.Errorf("desktop notifications are not enabled")
 		} else {
-			err = Notify("Agenthail", "Notifications are working", "", "")
+			err = notify.Notify("Agenthail", "Notifications are working", "", "")
 		}
 	default:
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "unsupported settings action")

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -82,7 +83,7 @@ func (a *App) cmdLedger(args []string) error {
 				return err
 			}
 		}
-		if _, err := a.agentScope(context.Background(), daemon.ScopeRequest{Action: "ledger", Project: key}); err != nil {
+		if _, err := a.agentScope(context.Background(), daemonapi.ScopeRequest{Action: "ledger", Project: key}); err != nil {
 			return err
 		}
 	}

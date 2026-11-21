@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
@@ -28,20 +29,6 @@ func (d *Daemon) claudePrompts() claudePromptHolder {
 	return nil
 }
 
-// ClaudePermissionRequest is what `agenthail hook permission-request` posts:
-// the hook's input as Claude passed it, the pid of the Claude process that
-// ran the hook, and when it ran.
-type ClaudePermissionRequest struct {
-	Prompt claudesurface.ClaudePermissionPrompt `json:"prompt"`
-	PID    int                                  `json:"pid"`
-	// AskedAtMS is when the hook read the prompt, in Unix milliseconds.
-	AskedAtMS int64 `json:"askedAt,omitempty"`
-}
-
-type ClaudePermissionResponse struct {
-	Decision *claudesurface.ClaudePromptDecision `json:"decision"`
-}
-
 // claudePermissionRequestHandler holds the request open until the prompt is
 // answered or settled. Only this machine's CLI holds the dashboard token it
 // requires, so no paired device or browser can post a prompt.
@@ -59,7 +46,7 @@ func (d *Daemon) claudePermissionRequestHandler(w http.ResponseWriter, r *http.R
 		writeAPIError(w, http.StatusNotFound, "not_held", claudesurface.ErrPromptNotHeld.Error())
 		return
 	}
-	var request ClaudePermissionRequest
+	var request daemonapi.ClaudePermissionRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, apiRequestBodyLimit)).Decode(&request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", "The prompt is not valid JSON.")
 		return
@@ -82,7 +69,7 @@ func (d *Daemon) claudePermissionRequestHandler(w http.ResponseWriter, r *http.R
 		writeAPIError(w, http.StatusBadRequest, "invalid_prompt", err.Error())
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, ClaudePermissionResponse{Decision: decision})
+	writeDashboardJSON(w, http.StatusOK, daemonapi.ClaudePermissionResponse{Decision: decision})
 }
 
 // claudePromptChanged records what the session waits on once a held prompt

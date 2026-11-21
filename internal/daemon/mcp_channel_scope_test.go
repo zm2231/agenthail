@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -89,7 +90,7 @@ func TestAnAgentPostsOnlyToItsOwnProjectsChannel(t *testing.T) {
 		t.Fatalf("the person's post: status=%d body=%s posts=%d", reply.Status, reply.Body, widgetPosts())
 	}
 
-	cli := principal{ID: localDashboardPrincipal, Kind: principalPerson, Claimed: CLIActor}
+	cli := principal{ID: localDashboardPrincipal, Kind: principalPerson, Claimed: daemonapi.CLIActor}
 	if reply := d.doAction(t.Context(), cli, dashboardActionRequest{Action: "channel-send", Channel: "#widget", Message: "from the CLI", SourceSessionID: "outsider"}); reply.Status != 200 || widgetPosts() != 7 {
 		t.Fatalf("the CLI posts as the CLI, as agenthail send does: status=%d body=%s posts=%d", reply.Status, reply.Body, widgetPosts())
 	}

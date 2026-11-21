@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
+
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -89,15 +91,15 @@ func TestAnAgentStartsASessionOnAPairedComputerWithinItsCeilingAndThePersonIsTol
 	}
 
 	above, _ := json.Marshal(map[string]any{"surface": "codex", "host": "vps", "cwd": work, "message": "help", "approvalPolicy": "never"})
-	if refused := askScope(t, local.daemon, ScopeRequest{SessionID: "spawner", Action: "create", Create: above}, local127); refused.code != "exceeds_ceiling" {
+	if refused := askScope(t, local.daemon, daemonapi.ScopeRequest{SessionID: "spawner", Action: "create", Create: above}, local127); refused.code != "exceeds_ceiling" {
 		t.Fatalf("a start above the spawner's ceiling on the paired computer: %+v", refused)
 	}
 	asTask, _ := json.Marshal(map[string]any{"surface": "codex", "host": "vps", "cwd": work, "message": "help", "task": true})
-	if refused := askScope(t, local.daemon, ScopeRequest{SessionID: "spawner", Action: "create", Create: asTask}, local127); refused.code != "invalid" {
+	if refused := askScope(t, local.daemon, daemonapi.ScopeRequest{SessionID: "spawner", Action: "create", Create: asTask}, local127); refused.code != "invalid" {
 		t.Fatalf("a task on the paired computer: %+v", refused)
 	}
 	payload, _ := json.Marshal(map[string]any{"surface": "codex", "host": "vps", "cwd": work + "/", "message": "help"})
-	answer := askScope(t, local.daemon, ScopeRequest{SessionID: "spawner", Action: "create", Create: payload}, local127)
+	answer := askScope(t, local.daemon, daemonapi.ScopeRequest{SessionID: "spawner", Action: "create", Create: payload}, local127)
 	if answer.status >= http.StatusMultipleChoices {
 		t.Fatalf("the start on the paired computer: %d %s", answer.status, answer.body)
 	}
@@ -119,7 +121,7 @@ func TestWhileThePersonKeepsPairedStartsAnAgentIsRefusedAndNothingStarts(t *test
 	setAgentDecision(t, "session-create-remote", dashconfig.AgentAsk)
 	boundedSpawner(t, local.reg, "spawner", "edits")
 	payload, _ := json.Marshal(map[string]any{"surface": "codex", "host": "vps", "cwd": "/srv/work", "message": "help"})
-	refused := askScope(t, local.daemon, ScopeRequest{SessionID: "spawner", Action: "create", Create: payload}, "127.0.0.1:50000")
+	refused := askScope(t, local.daemon, daemonapi.ScopeRequest{SessionID: "spawner", Action: "create", Create: payload}, "127.0.0.1:50000")
 	if refused.code != "out_of_scope" || refused.rule != "other_host" {
 		t.Fatalf("a start the person keeps for themselves: %+v", refused)
 	}
@@ -181,7 +183,7 @@ func TestALeadsActionThePersonHearsAboutIsToldOnceAndOnlyWhenItsCommandReportsIt
 	const local = "127.0.0.1:50000"
 	archive := func(caller string) scopeAnswer {
 		body, _ := json.Marshal(map[string]any{"action": "project-archive", "projectId": project})
-		return askScope(t, d, ScopeRequest{SessionID: caller, Action: "operator", Payload: &PersonAction{API: PersonActionAPI, Body: body}}, local)
+		return askScope(t, d, daemonapi.ScopeRequest{SessionID: caller, Action: "operator", Payload: &daemonapi.PersonAction{API: daemonapi.PersonActionAPI, Body: body}}, local)
 	}
 	if refused := archive(worker.ID); refused.code != "capability_missing" || refused.rule != "person_only" {
 		t.Fatalf("a worker archiving its project: %+v", refused)
@@ -190,12 +192,12 @@ func TestALeadsActionThePersonHearsAboutIsToldOnceAndOnlyWhenItsCommandReportsIt
 	if admitted.status != http.StatusOK || admitted.reply.Notice == "" || len(person.told()) != 0 {
 		t.Fatalf("the lead archiving its project: %+v told=%q", admitted, person.told())
 	}
-	askScope(t, d, ScopeRequest{SessionID: worker.ID, Action: "notice", Notice: admitted.reply.Notice}, local)
+	askScope(t, d, daemonapi.ScopeRequest{SessionID: worker.ID, Action: "notice", Notice: admitted.reply.Notice}, local)
 	if len(person.told()) != 0 {
 		t.Fatalf("another session reported the lead's action: %q", person.told())
 	}
 	for range 2 {
-		askScope(t, d, ScopeRequest{SessionID: lead.ID, Action: "notice", Notice: admitted.reply.Notice}, local)
+		askScope(t, d, daemonapi.ScopeRequest{SessionID: lead.ID, Action: "notice", Notice: admitted.reply.Notice}, local)
 	}
 	if told := person.told(); len(told) != 1 || !strings.Contains(told[0], "Archive project widget") {
 		t.Fatalf("the person was told %q", told)
@@ -226,20 +228,20 @@ func TestAnAgentMessagesAnotherProjectFreelyAndThePersonHearsWhenItSteersOne(t *
 	}
 	d.discoverCatalog(t.Context())
 	const local = "127.0.0.1:50000"
-	queued := ScopeRequest{SessionID: worker.ID, Action: "send", Target: outsider.ID}
+	queued := daemonapi.ScopeRequest{SessionID: worker.ID, Action: "send", Target: outsider.ID}
 	if admitted := askScope(t, d, queued, local); admitted.status != http.StatusOK || admitted.reply.TargetID != outsider.ID || len(person.told()) != 0 {
 		t.Fatalf("a queued message to another project: %+v told=%q", admitted, person.told())
 	}
-	now := ScopeRequest{SessionID: worker.ID, Action: "send", Target: outsider.ID, Mode: "now"}
+	now := daemonapi.ScopeRequest{SessionID: worker.ID, Action: "send", Target: outsider.ID, Mode: "now"}
 	admitted := askScope(t, d, now, local)
 	if admitted.status != http.StatusOK || admitted.reply.Notice == "" || len(person.told()) != 0 {
 		t.Fatalf("a message sent now to another project, before it ran: %+v told=%q", admitted, person.told())
 	}
-	askScope(t, d, ScopeRequest{SessionID: worker.ID, Action: "notice", Notice: admitted.reply.Notice}, local)
+	askScope(t, d, daemonapi.ScopeRequest{SessionID: worker.ID, Action: "notice", Notice: admitted.reply.Notice}, local)
 	if told := person.told(); len(told) != 1 || !strings.Contains(told[0], "in another project") {
 		t.Fatalf("the person was told %q", told)
 	}
-	if refused := askScope(t, d, ScopeRequest{SessionID: worker.ID, Action: "answer", Target: outsider.ID, Mode: "allow"}, local); refused.code != "out_of_scope" {
+	if refused := askScope(t, d, daemonapi.ScopeRequest{SessionID: worker.ID, Action: "answer", Target: outsider.ID, Mode: "allow"}, local); refused.code != "out_of_scope" {
 		t.Fatalf("answering for a session in another project: %+v", refused)
 	}
 
@@ -272,15 +274,15 @@ func TestALeadTurnsResumingAfterALimitOffForItsOwnProjectAndThePersonIsTold(t *t
 	}
 	const local = "127.0.0.1:50000"
 	hostWide, _ := json.Marshal(map[string]any{"action": "resume-after-limit", "resumeAfterLimit": false})
-	if refused := askScope(t, d, ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: &PersonAction{API: PersonActionSettings, Body: hostWide}}, local); refused.code != "capability_missing" {
+	if refused := askScope(t, d, daemonapi.ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: &daemonapi.PersonAction{API: daemonapi.PersonActionSettings, Body: hostWide}}, local); refused.code != "capability_missing" {
 		t.Fatalf("a lead turning resuming off for the whole host: %+v", refused)
 	}
 	ownProject, _ := json.Marshal(map[string]any{"action": "project-setting", "projectId": found.ID, "setting": registry.ProjectSettingLimitResume, "value": registry.ProjectLimitResumeOff})
-	admitted := askScope(t, d, ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: &PersonAction{API: PersonActionAPI, Body: ownProject}}, local)
+	admitted := askScope(t, d, daemonapi.ScopeRequest{SessionID: lead.ID, Action: "operator", Payload: &daemonapi.PersonAction{API: daemonapi.PersonActionAPI, Body: ownProject}}, local)
 	if admitted.status != http.StatusOK || admitted.reply.Notice == "" {
 		t.Fatalf("a lead turning resuming off for its own project: %+v", admitted)
 	}
-	askScope(t, d, ScopeRequest{SessionID: lead.ID, Action: "notice", Notice: admitted.reply.Notice}, local)
+	askScope(t, d, daemonapi.ScopeRequest{SessionID: lead.ID, Action: "notice", Notice: admitted.reply.Notice}, local)
 	if told := person.told(); len(told) != 1 || !strings.Contains(told[0], "limit-resume to off") {
 		t.Fatalf("the person was told %q", told)
 	}
@@ -292,7 +294,7 @@ func TestThePersonsRunningLimitBoundsAnAgentsStarts(t *testing.T) {
 	changeAgentPolicy(t, func(config *dashconfig.Config) error { return config.SetAgentLimit("running", 2) })
 	registerBusyChildren(t, f.registry, spawner, 2)
 	payload, _ := json.Marshal(map[string]any{"surface": "codex", "cwd": root, "message": "one more"})
-	refused := askScope(t, f.daemon, ScopeRequest{SessionID: spawner, Action: "create", Create: payload}, "127.0.0.1:50000")
+	refused := askScope(t, f.daemon, daemonapi.ScopeRequest{SessionID: spawner, Action: "create", Create: payload}, "127.0.0.1:50000")
 	if refused.code != "children_limit" || !strings.Contains(string(refused.body), "2 sessions running") {
 		t.Fatalf("a third start under a limit of 2: %+v %s", refused, refused.body)
 	}

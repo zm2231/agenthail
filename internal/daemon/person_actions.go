@@ -10,32 +10,22 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
 const (
-	PersonActionAPI      = "action"
-	PersonActionSettings = "settings"
-
 	approvalLifetime = 24 * time.Hour
 )
-
-// A PersonAction is the exact request a gated command sends the daemon: an
-// action body for /api/v1/actions, or a settings body. Its scope is read from
-// the body, never from what the caller says it touches.
-type PersonAction struct {
-	API  string          `json:"api"`
-	Body json.RawMessage `json:"body"`
-}
 
 type personActionRequest struct {
 	dashboardActionRequest
 	ResumeAfterLimit bool `json:"resumeAfterLimit"`
 }
 
-func (a PersonAction) decode() (personActionRequest, error) {
-	if a.API != PersonActionAPI && a.API != PersonActionSettings {
+func decodePersonAction(a daemonapi.PersonAction) (personActionRequest, error) {
+	if a.API != daemonapi.PersonActionAPI && a.API != daemonapi.PersonActionSettings {
 		return personActionRequest{}, refuse("invalid", "payload api is action or settings.")
 	}
 	var request personActionRequest
@@ -48,8 +38,8 @@ func (a PersonAction) decode() (personActionRequest, error) {
 	return request, nil
 }
 
-func (d *Daemon) personActionScope(ctx context.Context, caller *mcpCaller, action PersonAction) (string, error) {
-	request, err := action.decode()
+func (d *Daemon) personActionScope(ctx context.Context, caller *mcpCaller, action daemonapi.PersonAction) (string, error) {
+	request, err := decodePersonAction(action)
 	if err != nil {
 		return "", err
 	}
@@ -88,7 +78,7 @@ func (d *Daemon) leadActsOnOwn(ctx context.Context, caller *mcpCaller, api strin
 	if !caller.has("control.project") || caller.project == nil || !d.mcpIsProjectLead(caller, caller.session.ID) {
 		return false
 	}
-	if api != PersonActionAPI {
+	if api != daemonapi.PersonActionAPI {
 		return false
 	}
 	switch request.Action {
@@ -210,7 +200,7 @@ func (d *Daemon) relayEnds(id int64) (string, string, bool) {
 // The person reads this, not the agent's words, so an agent cannot label one
 // action as another. An action it cannot word cannot be asked for.
 func (d *Daemon) describePersonAction(api string, request personActionRequest) (string, error) {
-	if api == PersonActionSettings {
+	if api == daemonapi.PersonActionSettings {
 		if request.Action == "resume-after-limit" {
 			if request.ResumeAfterLimit {
 				return "Turn on resuming sessions a usage limit stopped", nil
@@ -324,8 +314,8 @@ func (d *Daemon) rowNameOr(sessionID, unknown string) string {
 	return unknown
 }
 
-func (d *Daemon) askPersonToAllow(ctx context.Context, caller *mcpCaller, action PersonAction, reason string) (registry.Ask, error) {
-	request, err := action.decode()
+func (d *Daemon) askPersonToAllow(ctx context.Context, caller *mcpCaller, action daemonapi.PersonAction, reason string) (registry.Ask, error) {
+	request, err := decodePersonAction(action)
 	if err != nil {
 		return registry.Ask{}, err
 	}

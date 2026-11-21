@@ -19,6 +19,7 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/zm2231/agenthail/internal/daemonctl"
+	"github.com/zm2231/agenthail/internal/notify"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -123,13 +124,13 @@ func isGoneWebPushError(err error) bool {
 func (d *Daemon) notifyBrowsers(ctx context.Context, notification mobileNotification) {
 	message := webPushMessage{
 		Type:       "notify",
-		Title:      boundedNotificationText(notification.Title, 120),
-		Message:    boundedNotificationText(notification.Message, 1200),
-		SessionID:  boundedNotificationText(notification.SessionID, 240),
-		TurnID:     boundedNotificationText(notification.TurnID, 240),
-		EventType:  boundedNotificationText(notification.EventType, 80),
-		CollapseID: boundedNotificationText(notification.CollapseID, 64),
-		RequestID:  boundedNotificationText(notification.RequestID, 240),
+		Title:      notify.BoundedText(notification.Title, 120),
+		Message:    notify.BoundedText(notification.Message, 1200),
+		SessionID:  notify.BoundedText(notification.SessionID, 240),
+		TurnID:     notify.BoundedText(notification.TurnID, 240),
+		EventType:  notify.BoundedText(notification.EventType, 80),
+		CollapseID: notify.BoundedText(notification.CollapseID, 64),
+		RequestID:  notify.BoundedText(notification.RequestID, 240),
 		Actions:    browserActions(notification.Actions),
 	}
 	urgency := webpush.UrgencyNormal
@@ -145,7 +146,7 @@ func browserActions(actions []surface.RequestAction) []surface.RequestAction {
 	var out []surface.RequestAction
 	for _, action := range actions {
 		if action.ID != "reply" {
-			out = append(out, surface.RequestAction{ID: boundedNotificationText(action.ID, 40), Title: boundedNotificationText(action.Title, 40)})
+			out = append(out, surface.RequestAction{ID: notify.BoundedText(action.ID, 40), Title: notify.BoundedText(action.Title, 40)})
 		}
 	}
 	return out
@@ -156,7 +157,7 @@ func browserActions(actions []surface.RequestAction) []surface.RequestAction {
 // one, so a browser that was offline never shows the answered question.
 // Browsers on Apple's push service are left out: see withdrawsClose.
 func (d *Daemon) withdrawFromBrowsers(ctx context.Context, collapseID string) {
-	d.sendToBrowsers(ctx, webPushMessage{Type: "withdraw", CollapseID: boundedNotificationText(collapseID, 64)}, webpush.UrgencyNormal, "withdraw browser notification")
+	d.sendToBrowsers(ctx, webPushMessage{Type: "withdraw", CollapseID: notify.BoundedText(collapseID, 64)}, webpush.UrgencyNormal, "withdraw browser notification")
 }
 
 func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urgency webpush.Urgency, what string) {

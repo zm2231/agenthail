@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -93,7 +94,7 @@ func (d *Daemon) askPersonForControl(ctx context.Context, caller *mcpCaller, req
 	if err != nil {
 		return registry.Ask{}, err
 	}
-	return d.askPersonToAllow(ctx, caller, PersonAction{API: PersonActionAPI, Body: encoded}, reason)
+	return d.askPersonToAllow(ctx, caller, daemonapi.PersonAction{API: daemonapi.PersonActionAPI, Body: encoded}, reason)
 }
 
 type mcpAskPerson struct {
@@ -120,21 +121,21 @@ func (d *Daemon) mcpAskOnRefusal(ctx context.Context, caller *mcpCaller, err err
 
 // controlPayloadScope answers the CLI's send or control check from the body
 // the command would run, so an approvable refusal can be asked for as is.
-func (d *Daemon) controlPayloadScope(ctx context.Context, caller *mcpCaller, request ScopeRequest) (ScopeReply, error) {
+func (d *Daemon) controlPayloadScope(ctx context.Context, caller *mcpCaller, request daemonapi.ScopeRequest) (daemonapi.ScopeReply, error) {
 	var asked dashboardActionRequest
-	if request.Payload.API != PersonActionAPI || json.Unmarshal(request.Payload.Body, &asked) != nil || !slices.Contains(controlApprovalActions, asked.Action) {
-		return ScopeReply{}, refuse("invalid", "the payload is a send, steer, interrupt, session-archive or session-unarchive action body.")
+	if request.Payload.API != daemonapi.PersonActionAPI || json.Unmarshal(request.Payload.Body, &asked) != nil || !slices.Contains(controlApprovalActions, asked.Action) {
+		return daemonapi.ScopeReply{}, refuse("invalid", "the payload is a send, steer, interrupt, session-archive or session-unarchive action body.")
 	}
 	body, err := controlApproval(caller, asked)
 	if err != nil {
-		return ScopeReply{}, err
+		return daemonapi.ScopeReply{}, err
 	}
 	if body.SessionID == caller.session.ID {
-		return ScopeReply{TargetID: caller.session.ID}, nil
+		return daemonapi.ScopeReply{TargetID: caller.session.ID}, nil
 	}
 	target, notice, err := d.mcpReachTarget(ctx, caller, body.SessionID, reachOf(body))
 	if err == nil {
-		reply := ScopeReply{TargetID: target.ID, Notice: d.holdAgentNotice(caller, notice)}
+		reply := daemonapi.ScopeReply{TargetID: target.ID, Notice: d.holdAgentNotice(caller, notice)}
 		if body.Action == "send" {
 			reply.ScopeProjectID, err = d.remoteSendScope(caller, target)
 		}
@@ -142,15 +143,15 @@ func (d *Daemon) controlPayloadScope(ctx context.Context, caller *mcpCaller, req
 	}
 	refusal, ok := approvableControl(err)
 	if !ok {
-		return ScopeReply{}, err
+		return daemonapi.ScopeReply{}, err
 	}
 	if !request.AskPerson {
 		refusal.Message += " To ask the person to allow it, run the same command again with --ask-person --reason \"<why you need it>\"; their answer arrives as your next message."
-		return ScopeReply{}, refusal
+		return daemonapi.ScopeReply{}, refusal
 	}
 	ask, err := d.askPersonForControl(ctx, caller, body, request.Reason)
 	if err != nil {
-		return ScopeReply{}, err
+		return daemonapi.ScopeReply{}, err
 	}
-	return ScopeReply{AskID: ask.ID}, nil
+	return daemonapi.ScopeReply{AskID: ask.ID}, nil
 }

@@ -1,7 +1,5 @@
 package daemon
 
-import "fmt"
-
 func mirroredHostDown(row dashboardSession) bool {
 	if row.Host == nil {
 		return false
@@ -11,11 +9,4 @@ func mirroredHostDown(row dashboardSession) bool {
 		return true
 	}
 	return false
-}
-
-func CountText(n int, noun string) string {
-	if n == 1 {
-		return "1 " + noun
-	}
-	return fmt.Sprintf("%d %ss", n, noun)
 }

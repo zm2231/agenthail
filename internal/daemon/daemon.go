@@ -18,6 +18,7 @@ import (
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/github"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/notify"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/simhost"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -225,8 +226,8 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
 		turnPushes:        newTurnPushes(),
-		notifyDesktop:     NotifyRequest,
-		withdrawDesktop:   WithdrawNotification,
+		notifyDesktop:     notify.NotifyRequest,
+		withdrawDesktop:   notify.Withdraw,
 		events:            newEventHub(reg),
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},

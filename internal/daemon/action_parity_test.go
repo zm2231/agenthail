@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -360,7 +361,7 @@ func replyOverHTTP(d *Daemon, format actionFormat, path string, c parityCase) ac
 	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(c.body))
 	request = request.WithContext(p.context(request.Context()))
 	if p.Claimed != "" {
-		request.Header.Set(ActionActorHeader, p.Claimed)
+		request.Header.Set(daemonapi.ActionActorHeader, p.Claimed)
 	}
 	if c.key != "" {
 		request.Header.Set(actionIdempotencyHeader, c.key)

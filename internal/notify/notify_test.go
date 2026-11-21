@@ -1,4 +1,4 @@
-package daemon
+package notify
 
 import (
 	"os"
@@ -30,7 +30,7 @@ func TestNotifyPassesSessionToHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_MAC_APP", helper)
-	if err := SaveNotificationConfig(NotificationConfig{Enabled: true}); err != nil {
+	if err := SaveConfig(Config{Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
@@ -65,7 +65,7 @@ func TestARequestNotificationPassesItsButtonsToTheHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_MAC_APP", helper)
-	if err := SaveNotificationConfig(NotificationConfig{Enabled: true}); err != nil {
+	if err := SaveConfig(Config{Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	actions := []surface.RequestAction{{ID: "allow", Title: "Allow"}, {ID: "deny", Title: "Deny"}}
@@ -98,11 +98,11 @@ func TestEnableNotificationsPersistsOnlyAuthorizedState(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("AGENTHAIL_MAC_APP", helper)
-	status, err := EnableNotifications()
+	status, err := Enable()
 	if err != nil || !status.Enabled {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
-	config, err := LoadNotificationConfig()
+	config, err := LoadConfig()
 	if err != nil || !config.Enabled {
 		t.Fatalf("config=%+v", config)
 	}
@@ -115,13 +115,13 @@ func TestNotificationConfigConcurrentWritesRemainValid(t *testing.T) {
 		group.Add(1)
 		go func(enabled bool) {
 			defer group.Done()
-			if err := SaveNotificationConfig(NotificationConfig{Enabled: enabled}); err != nil {
+			if err := SaveConfig(Config{Enabled: enabled}); err != nil {
 				t.Errorf("save: %v", err)
 			}
 		}(index%2 == 0)
 	}
 	group.Wait()
-	if _, err := LoadNotificationConfig(); err != nil {
+	if _, err := LoadConfig(); err != nil {
 		t.Fatal(err)
 	}
 }

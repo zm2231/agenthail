@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -42,7 +43,7 @@ func TestAnAgentInAProjectReachesAnIdentityHereAndOnAPairedHost(t *testing.T) {
 
 	remoteRef := hosts.Qualify(h.record.ID, remoteScout)
 	for _, target := range []string{remoteRef, identityID(t, h.local, "notes")} {
-		answer := askScope(t, h.local.daemon, ScopeRequest{SessionID: "local-a", Action: "send", Payload: scopePayload(PersonActionAPI, `{"action":"send","sessionId":"`+target+`","message":"m","busyDelivery":"queue"}`)}, "127.0.0.1:50000")
+		answer := askScope(t, h.local.daemon, daemonapi.ScopeRequest{SessionID: "local-a", Action: "send", Payload: scopePayload(daemonapi.PersonActionAPI, `{"action":"send","sessionId":"`+target+`","message":"m","busyDelivery":"queue"}`)}, "127.0.0.1:50000")
 		if answer.status != http.StatusOK || answer.reply.ScopeProjectID != "" {
 			t.Fatalf("the CLI's scope check for a send to %s: %+v body=%s", target, answer, answer.body)
 		}
@@ -60,7 +61,7 @@ func TestAnAgentInAProjectReachesAnIdentityHereAndOnAPairedHost(t *testing.T) {
 	refusedFor(t, out, refused, "out_of_scope", "not_queued")
 	out, refused = h.send(t, "@notes", "sent now here", map[string]any{"mode": "now"})
 	refusedFor(t, out, refused, "out_of_scope", "not_spawned_or_led")
-	if answer := askScope(t, h.local.daemon, ScopeRequest{SessionID: "local-a", Action: "control", Target: identityID(t, h.local, "notes")}, "127.0.0.1:50000"); answer.status != http.StatusForbidden || answer.code != "out_of_scope" {
+	if answer := askScope(t, h.local.daemon, daemonapi.ScopeRequest{SessionID: "local-a", Action: "control", Target: identityID(t, h.local, "notes")}, "127.0.0.1:50000"); answer.status != http.StatusForbidden || answer.code != "out_of_scope" {
 		t.Fatalf("an agent controlling an identity: %+v body=%s", answer, answer.body)
 	}
 	if got := inbox(t, h.local, "notes"); len(got) != 1 {

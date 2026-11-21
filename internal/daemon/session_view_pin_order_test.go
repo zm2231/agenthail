@@ -5,6 +5,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
 func TestPinnedFamiliesSortBelowNeedsYouAndAboveActiveOldestPinFirst(t *testing.T) {
@@ -12,8 +14,8 @@ func TestPinnedFamiliesSortBelowNeedsYouAndAboveActiveOldestPinFirst(t *testing.
 	f.rows["s16"].PinnedAt = f.now.Add(-time.Hour)
 	f.rows["s13"].PinnedAt = f.now.Add(-2 * time.Hour)
 	f.rows["s17"].PinnedAt = f.now.Add(-3 * time.Hour)
-	f.rows["s17"].Attention = &SessionAttention{Kind: AttentionAsk}
-	f.rows["s15"].Attention = &SessionAttention{Kind: AttentionAsk}
+	f.rows["s17"].Attention = &daemonapi.SessionAttention{Kind: AttentionAsk}
+	f.rows["s15"].Attention = &daemonapi.SessionAttention{Kind: AttentionAsk}
 
 	for _, scope := range []string{"all", "recent", "current"} {
 		order := f.order(t, scope)

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -14,7 +14,7 @@ const (
 	idleCompactionHoldsTimeout = 5 * time.Second
 )
 
-func (a *App) idleCompactionHolds() ([]daemon.IdleCompactionHold, error) {
+func (a *App) idleCompactionHolds() ([]daemonapi.IdleCompactionHold, error) {
 	client, err := a.daemonAPI()
 	if err != nil {
 		return nil, err
@@ -22,18 +22,18 @@ func (a *App) idleCompactionHolds() ([]daemon.IdleCompactionHold, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), idleCompactionHoldsTimeout)
 	defer cancel()
 	var body struct {
-		Holds []daemon.IdleCompactionHold `json:"idleCompactionHolds"`
+		Holds []daemonapi.IdleCompactionHold `json:"idleCompactionHolds"`
 	}
 	if err := client.getJSON(ctx, "/api/v1/claude/compact-settings", nil, &body); err != nil {
 		return nil, err
 	}
 	if body.Holds == nil {
-		body.Holds = []daemon.IdleCompactionHold{}
+		body.Holds = []daemonapi.IdleCompactionHold{}
 	}
 	return body.Holds, nil
 }
 
-func describeIdleCompactionHolds(root string, holds []daemon.IdleCompactionHold) []string {
+func describeIdleCompactionHolds(root string, holds []daemonapi.IdleCompactionHold) []string {
 	var lines []string
 	for i := len(holds) - 1; i >= 0 && len(lines) < idleCompactionHoldsShown; i-- {
 		hold := holds[i]

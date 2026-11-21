@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
 func TestAnAgentsCLIStartsRacingForTheLastSlotStartOneSession(t *testing.T) {
@@ -14,7 +16,7 @@ func TestAnAgentsCLIStartsRacingForTheLastSlotStartOneSession(t *testing.T) {
 	for _, key := range []string{"r1", "r2"} {
 		go func() {
 			payload, _ := json.Marshal(map[string]any{"surface": "codex", "cwd": root, "message": "race " + key})
-			results <- askScope(t, f.daemon, ScopeRequest{SessionID: spawner, Action: "create", Create: payload}, "127.0.0.1:50000")
+			results <- askScope(t, f.daemon, daemonapi.ScopeRequest{SessionID: spawner, Action: "create", Create: payload}, "127.0.0.1:50000")
 		}()
 	}
 	limited := 0
@@ -32,7 +34,7 @@ func TestAnAgentsCLIStartIsBoundedByItsCeiling(t *testing.T) {
 	f := newMCPCodexFixture(t)
 	spawner, _, root := f.startParent(t)
 	payload, _ := json.Marshal(map[string]any{"surface": "codex", "cwd": root, "message": "help", "approvalPolicy": "never"})
-	answer := askScope(t, f.daemon, ScopeRequest{SessionID: spawner, Action: "create", Create: payload}, "127.0.0.1:50000")
+	answer := askScope(t, f.daemon, daemonapi.ScopeRequest{SessionID: spawner, Action: "create", Create: payload}, "127.0.0.1:50000")
 	var created struct {
 		Session struct {
 			ID string `json:"id"`
@@ -50,11 +52,11 @@ func TestAnAgentsCLIStartIsBoundedByItsCeiling(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload, _ = json.Marshal(map[string]any{"surface": "codex", "cwd": elsewhere, "message": "help"})
-	if refused := askScope(t, f.daemon, ScopeRequest{SessionID: created.Session.ID, Action: "create", Create: payload}, "127.0.0.1:50000"); refused.code != "exceeds_ceiling" {
+	if refused := askScope(t, f.daemon, daemonapi.ScopeRequest{SessionID: created.Session.ID, Action: "create", Create: payload}, "127.0.0.1:50000"); refused.code != "exceeds_ceiling" {
 		t.Fatalf("the child starting outside its folder: %+v", refused)
 	}
 	payload, _ = json.Marshal(map[string]any{"surface": "claude", "cwd": root, "message": "help", "configRoot": "/elsewhere/.claude"})
-	if refused := askScope(t, f.daemon, ScopeRequest{SessionID: created.Session.ID, Action: "create", Create: payload}, "127.0.0.1:50000"); refused.code != "invalid" {
+	if refused := askScope(t, f.daemon, daemonapi.ScopeRequest{SessionID: created.Session.ID, Action: "create", Create: payload}, "127.0.0.1:50000"); refused.code != "invalid" {
 		t.Fatalf("the child choosing an unconfigured Claude root: %+v", refused)
 	}
 	audits := mcpAudits(t, f.registry)
@@ -75,7 +77,7 @@ func TestAnAgentsCLIStartCannotWidenItsChildsCeiling(t *testing.T) {
 			ID string `json:"id"`
 		} `json:"session"`
 	}
-	if answer := askScope(t, f.daemon, ScopeRequest{SessionID: spawner, Action: "create", Create: payload}, "127.0.0.1:50000"); json.Unmarshal(answer.body, &child) != nil || child.Session.ID == "" {
+	if answer := askScope(t, f.daemon, daemonapi.ScopeRequest{SessionID: spawner, Action: "create", Create: payload}, "127.0.0.1:50000"); json.Unmarshal(answer.body, &child) != nil || child.Session.ID == "" {
 		t.Fatalf("child: %d %s", answer.status, answer.body)
 	}
 	payload, _ = json.Marshal(map[string]any{"surface": "codex", "cwd": root, "message": "grandchild", "ceiling": map[string]any{}, "task": true})
@@ -84,7 +86,7 @@ func TestAnAgentsCLIStartCannotWidenItsChildsCeiling(t *testing.T) {
 			ID string `json:"id"`
 		} `json:"session"`
 	}
-	if answer := askScope(t, f.daemon, ScopeRequest{SessionID: child.Session.ID, Action: "create", Create: payload}, "127.0.0.1:50000"); json.Unmarshal(answer.body, &grandchild) != nil || grandchild.Session.ID == "" {
+	if answer := askScope(t, f.daemon, daemonapi.ScopeRequest{SessionID: child.Session.ID, Action: "create", Create: payload}, "127.0.0.1:50000"); json.Unmarshal(answer.body, &grandchild) != nil || grandchild.Session.ID == "" {
 		t.Fatalf("grandchild: %d %s", answer.status, answer.body)
 	}
 	ceiling, err := f.registry.SessionCeiling(grandchild.Session.ID)

@@ -9,16 +9,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/notify"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
-
-var bundledPushRelayURL string
 
 var pushHTTPClient = &http.Client{Timeout: 12 * time.Second}
 
@@ -31,13 +29,6 @@ type pushRelayError struct {
 
 func (e *pushRelayError) Error() string {
 	return fmt.Sprintf("relay returned %d: %s", e.status, e.detail)
-}
-
-func PushRelayURL() string {
-	if value := strings.TrimSpace(os.Getenv("AGENTHAIL_PUSH_RELAY_URL")); value != "" {
-		return strings.TrimRight(value, "/")
-	}
-	return strings.TrimRight(strings.TrimSpace(bundledPushRelayURL), "/")
 }
 
 // mobileNotification is one push to every paired device. CollapseID, when
@@ -107,7 +98,7 @@ func (d *Daemon) notifyPairedDevices(ctx context.Context, notification mobileNot
 		}()
 	}
 	sends.Wait()
-	d.log.Print(attempt.line(PushRelayURL() != ""))
+	d.log.Print(attempt.line(notify.PushRelayURL() != ""))
 }
 
 func sendDevicePushWithRetry(ctx context.Context, target registry.DevicePushTarget, notification mobileNotification) (bool, error) {
@@ -159,22 +150,22 @@ func isTerminalPushRelayError(err error) bool {
 // sendDevicePush reports whether the relay passed the push id on, so the
 // device will send a receipt; a relay from before receipts does not.
 func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, notification mobileNotification) (bool, error) {
-	relayURL := PushRelayURL()
+	relayURL := notify.PushRelayURL()
 	if relayURL == "" {
 		return false, errors.New("push relay is not configured")
 	}
 	body := map[string]any{
 		"installationId": target.InstallationID,
 		"credential":     target.Credential,
-		"title":          boundedNotificationText(notification.Title, 120),
-		"message":        boundedNotificationText(notification.Message, 1200),
-		"sessionId":      boundedNotificationText(notification.SessionID, 240),
-		"turnId":         boundedNotificationText(notification.TurnID, 240),
-		"eventType":      boundedNotificationText(notification.EventType, 80),
-		"collapseId":     boundedNotificationText(notification.CollapseID, 64),
+		"title":          notify.BoundedText(notification.Title, 120),
+		"message":        notify.BoundedText(notification.Message, 1200),
+		"sessionId":      notify.BoundedText(notification.SessionID, 240),
+		"turnId":         notify.BoundedText(notification.TurnID, 240),
+		"eventType":      notify.BoundedText(notification.EventType, 80),
+		"collapseId":     notify.BoundedText(notification.CollapseID, 64),
 	}
 	if notification.RequestID != "" {
-		body["requestId"] = boundedNotificationText(notification.RequestID, 240)
+		body["requestId"] = notify.BoundedText(notification.RequestID, 240)
 	}
 	if notification.PushID != "" {
 		body["pushId"] = notification.PushID
@@ -229,18 +220,18 @@ func (d *Daemon) withdrawFromPairedDevices(ctx context.Context, collapseID strin
 	for _, target := range targets {
 		attempt.record(target.DeviceID, sendDeviceWithdraw(ctx, target, collapseID))
 	}
-	d.log.Print(attempt.line(PushRelayURL() != ""))
+	d.log.Print(attempt.line(notify.PushRelayURL() != ""))
 }
 
 func sendDeviceWithdraw(ctx context.Context, target registry.DevicePushTarget, collapseID string) error {
-	relayURL := PushRelayURL()
+	relayURL := notify.PushRelayURL()
 	if relayURL == "" {
 		return errors.New("push relay is not configured")
 	}
 	payload, err := json.Marshal(map[string]any{
 		"installationId": target.InstallationID,
 		"credential":     target.Credential,
-		"collapseId":     boundedNotificationText(collapseID, 64),
+		"collapseId":     notify.BoundedText(collapseID, 64),
 	})
 	if err != nil {
 		return err
