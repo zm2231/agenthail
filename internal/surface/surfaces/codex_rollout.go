@@ -208,15 +208,15 @@ func pruneCodexRolloutCache(dir string) {
 // are always the current rollout's: a stream follows only that one.
 func readCodexTranscriptPage(ctx context.Context, home CodexHome, path, threadID string, before int64, limit int) (*surface.SessionReadResult, error) {
 	if path == "" {
-		return readTranscriptPage(ctx, path, "codex", before, limit, nil)
+		return readTranscriptPage(ctx, path, codexTranscript{}, before, limit)
 	}
 	header, _, err := readCodexRolloutHeader(path)
 	if err != nil || header.Payload.HistoryBase == nil {
-		return readTranscriptPage(ctx, path, "codex", before, limit, nil)
+		return readTranscriptPage(ctx, path, codexTranscript{}, before, limit)
 	}
 	segments, err := home.rolloutLineage(path, threadID)
 	if err != nil {
-		page, pageErr := readTranscriptPage(ctx, path, "codex", before, limit, nil)
+		page, pageErr := readTranscriptPage(ctx, path, codexTranscript{}, before, limit)
 		if pageErr != nil {
 			return nil, pageErr
 		}
@@ -263,7 +263,7 @@ func readCodexTranscriptPage(ctx context.Context, home CodexHome, path, threadID
 			if local == 0 && index != last {
 				local = segment.end
 			}
-			page, err = readTranscriptWindow(ctx, segment.path, "codex", segment.start, local, remaining, nil)
+			page, err = readTranscriptWindow(ctx, segment.path, codexTranscript{}, segment.start, local, remaining)
 			if err != nil {
 				return nil, err
 			}
@@ -291,7 +291,7 @@ func readCodexTranscriptPage(ctx context.Context, home CodexHome, path, threadID
 		index, local = index-1, 0
 	}
 	if first != last {
-		current, err := readTranscriptPage(ctx, path, "codex", 0, 1, nil)
+		current, err := readTranscriptPage(ctx, path, codexTranscript{}, 0, 1)
 		if err != nil {
 			return nil, err
 		}
@@ -345,7 +345,7 @@ func codexRevertedItems(ctx context.Context, segment codexRolloutSegment) ([]sur
 		if before == 0 && info.Size() <= segment.end {
 			return nil, nil
 		}
-		page, err := readTranscriptWindow(ctx, segment.path, "codex", segment.end, before, 0, nil)
+		page, err := readTranscriptWindow(ctx, segment.path, codexTranscript{}, segment.end, before, 0)
 		if err != nil {
 			return nil, err
 		}

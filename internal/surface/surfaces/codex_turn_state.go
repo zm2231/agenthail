@@ -187,7 +187,7 @@ func (c *Codex) liveTurn(ctx context.Context, sessionID, path string, info os.Fi
 			state.cursor.offset = scan.offset
 		}
 	}
-	if offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
+	if offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxTranscriptRecordBytes, func(line []byte) error {
 		state.turn.apply(line)
 		return nil
 	}); err == nil {

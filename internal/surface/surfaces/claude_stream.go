@@ -143,7 +143,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if interrupted {
 				return nil
 			}
-			if err := decorateTimelineAttachments(ctx, items, record, "claude", recordOffset); err != nil {
+			if err := decorateTimelineAttachments(ctx, items, claudeAttachmentReferences(record), recordOffset); err != nil {
 				return err
 			}
 			items, err := appendSentFiles(ctx, items, calls, record, recordOffset, line)

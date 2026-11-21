@@ -16,7 +16,7 @@ func claudeRecordTimelineItems(ctx context.Context, calls *claudeToolCalls, reco
 	if !interrupted {
 		items = claudeTimelineItems(record)
 	}
-	if err := decorateTimelineAttachments(ctx, items, record, "claude", offset); err != nil {
+	if err := decorateTimelineAttachments(ctx, items, claudeAttachmentReferences(record), offset); err != nil {
 		return nil, err
 	}
 	if !interrupted {

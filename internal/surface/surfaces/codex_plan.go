@@ -44,7 +44,7 @@ func (c *Codex) plan(ctx context.Context, path string, info os.FileInfo) *surfac
 	if reset {
 		state = &codexPlanState{}
 		state.cursor.reset(info)
-		lines, offset, err := readRecentJSONLLines(ctx, path, 0, codexPlanFirstReadBytes, maxCodexTranscriptRecordBytes)
+		lines, offset, err := readRecentJSONLLines(ctx, path, 0, codexPlanFirstReadBytes, maxTranscriptRecordBytes)
 		if err != nil {
 			delete(c.planState, path)
 			return nil
@@ -55,7 +55,7 @@ func (c *Codex) plan(ctx context.Context, path string, info os.FileInfo) *surfac
 		state.cursor.offset = offset
 		c.planState[path] = state
 	}
-	offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
+	offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxTranscriptRecordBytes, func(line []byte) error {
 		state.apply(line)
 		return nil
 	})

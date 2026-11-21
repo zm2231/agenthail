@@ -115,7 +115,7 @@ func readPageWithFirstWindow(t *testing.T, window int64, path, source string, be
 	previous := timelineFirstWindow
 	timelineFirstWindow = window
 	defer func() { timelineFirstWindow = previous }()
-	page, err := readTranscriptPage(context.Background(), path, source, before, limit, nil)
+	page, err := readTranscriptPage(context.Background(), path, transcriptFormatOf(source), before, limit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestARolloutSegmentPageAboveAFloorMatchesAReadOfTheWholeBudget(t *testing.T
 			previous := timelineFirstWindow
 			timelineFirstWindow = window
 			defer func() { timelineFirstWindow = previous }()
-			page, err := readTranscriptWindow(context.Background(), transcript.path, "codex", floor, before, 0, nil)
+			page, err := readTranscriptWindow(context.Background(), transcript.path, codexTranscript{}, floor, before, 0)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"slices"
-	"time"
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -17,7 +16,7 @@ import (
 // records after start. It reports whether a larger span would give the same
 // page: the page stopped at a record its own limits chose, after the first
 // record whose state the span knows exactly.
-func readTranscriptSpan(ctx context.Context, file *os.File, path, source string, floor, start, end, completeEnd, before int64, limit int, settled func(time.Time) bool, starts *turnStartSearch, result *surface.SessionReadResult) (bool, error) {
+func readTranscriptSpan(ctx context.Context, file *os.File, path string, format transcriptFormat, floor, start, end, completeEnd, before int64, limit int, starts *turnStartSearch, result *surface.SessionReadResult) (bool, error) {
 	var err error
 	windowStart := start
 	data := make([]byte, end-start)
@@ -41,91 +40,11 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 		data = nil
 	}
 	lines := bytes.SplitAfter(data, []byte{'\n'})
-	projection := codexUserProjection{}
-	skipResponseUsers := map[int]bool{}
-	recordTurnIDs := map[int]string{}
-	currentTurnID := ""
-	codexTurns := map[int]*surface.TurnMetadata{}
-	codexItems := map[int][]surface.TimelineItem{}
-	codexCutOffs := map[int][]surface.TimelineItem{}
-	callRecords := map[string]int{}
-	window := surface.CodexToolWindow{}
-	// Claude's turn state is rebuilt at start; Codex's turn and prompt state
-	// are known from the span's first turn start.
-	exactFrom := start
-	if source == "codex" {
-		exactFrom = end
-		meter, err := codexTurnMeterFrom(ctx, file, start, starts)
-		if err != nil {
-			return false, err
-		}
-		lineOffset := start
-		for index, line := range lines {
-			recordOffset := lineOffset
-			lineOffset += int64(len(line))
-			var record map[string]any
-			if decodeCompactRecord(line, &record) != nil {
-				continue
-			}
-			if exactFrom == end && codexRecordStartsTurn(record) {
-				exactFrom = recordOffset
-			}
-			codexCutOffs[index] = meter.cutOff(record)
-			if turn := meter.observe(record); turn != nil {
-				codexTurns[index] = turn
-			}
-			if turnID := codexRecordTurnID(record); turnID != "" {
-				currentTurnID = turnID
-			}
-			recordTurnIDs[index] = currentTurnID
-			codexItems[index] = codexPlaceItems(codexItems, callRecords, index, record, codexRecordItems(&window, record, currentTurnID))
-			if projection.consume(record, codexItems[index], currentTurnID) {
-				skipResponseUsers[index] = true
-			}
-		}
+	span, err := format.readSpan(ctx, file, transcriptSpan{path: path, start: start, end: end, completeEnd: completeEnd, before: before, lines: lines, starts: starts, result: result})
+	if err != nil {
+		return false, err
 	}
-	result.CodexPendingEventUser = projection.pending
-	result.CodexPendingEventTurn = projection.turnID
-	result.CodexCurrentTurnID = currentTurnID
-	result.CodexToolWindow = window
-	var claudeEnds map[int][]claudeTurnEnd
-	var claudeInterrupts map[int]bool
-	var calls *claudeToolCalls
-	if source == "claude" {
-		calls = newClaudeToolCalls(path)
-		turns, err := claudeTurnStateFrom(ctx, file, start, starts)
-		if err != nil {
-			return false, err
-		}
-		claudeEnds = map[int][]claudeTurnEnd{}
-		claudeInterrupts = map[int]bool{}
-		lineOffset, last := start, -1
-		for index, line := range lines {
-			recordOffset := lineOffset
-			lineOffset += int64(len(line))
-			var record map[string]any
-			if decodeCompactRecord(line, &record) != nil {
-				continue
-			}
-			calls.observe(record, recordOffset)
-			turnID, ended, interrupted := turns.observe(record, recordOffset, line, func() int { return len(claudeTimelineItems(record)) })
-			recordTurnIDs[index] = turnID
-			claudeEnds[index] = ended
-			claudeInterrupts[index] = interrupted
-			last = index
-		}
-		if before <= 0 && last >= 0 {
-			claudeEnds[last] = append(claudeEnds[last], turns.settle(settled)...)
-		}
-		if before <= 0 && turns.closing.TurnID != "" {
-			// A stream resuming at the page's end finishes the turn the page saw closing.
-			closing := turns.closing
-			if closing.Anchor, err = completionAnchor(path, completeEnd); err != nil {
-				return false, err
-			}
-			result.ClaudeClosingTurn = closing
-		}
-	}
+	exactFrom := span.exactFrom()
 	offset := start + int64(len(data))
 	budget := 512 << 10
 	var groups [][]surface.TimelineItem
@@ -149,35 +68,12 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 			truncatedAt = append(truncatedAt, offset)
 			continue
 		}
-		var items []surface.TimelineItem
-		if source == "claude" {
-			items, err = claudeRecordTimelineItems(ctx, calls, record, offset, line, recordTurnIDs[index], claudeEnds[index], claudeInterrupts[index])
-			if err != nil {
-				return false, err
-			}
-		} else {
-			items = slices.Clone(codexItems[index])
-			for itemIndex := range items {
-				if turnID := recordTurnIDs[index]; turnID != "" {
-					items[itemIndex].TurnID = turnID
-				}
-				if items[itemIndex].Kind == "done" {
-					items[itemIndex].Turn = codexTurns[index]
-				}
-			}
-			items = append(codexCutOffs[index], items...)
-			if err := decorateTimelineAttachments(ctx, items, record, source, offset); err != nil {
-				return false, err
-			}
-			if skipResponseUsers[index] {
-				continue
-			}
-			for i := range items {
-				items[i].ID = codexServedItemKey(record, line, offset, items[i], i)
-				if items[i].Timestamp == "" {
-					items[i].Timestamp = str(record, "timestamp")
-				}
-			}
+		items, skip, err := span.items(ctx, index, record, offset, line)
+		if err != nil {
+			return false, err
+		}
+		if skip {
+			continue
 		}
 		if len(items) == 0 {
 			// Records without items still close a Claude turn whose last block was written.
@@ -258,12 +154,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 	// Records that reached the span's start may continue before it: a reply
 	// from their first turn may be that turn's tail, and no reply may only
 	// mean it is further back.
-	replyKnown := true
-	if source == "claude" {
-		var from int
-		result.Reply, from = claudeTranscriptReply(records, result.Source, settled)
-		replyKnown = stopped || from > 0 || start <= floor
-	}
+	replyKnown := !span.reply(records, result) || stopped || start <= floor
 	pageStart := int64(-1)
 	if limit > 0 && len(result.Exchanges) > limit {
 		result.Exchanges = result.Exchanges[len(result.Exchanges)-limit:]

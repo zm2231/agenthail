@@ -50,7 +50,7 @@ func testProcessStart(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return start.UTC().Format(claudeProcessStartLayout)
+	return start.UTC().Format(psStartLayout)
 }
 
 func TestClaudeOpenSessionsFollowTheSessionRecord(t *testing.T) {

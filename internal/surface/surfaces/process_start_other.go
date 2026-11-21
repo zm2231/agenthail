@@ -21,7 +21,7 @@ func processStartTime(pid int) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	return time.ParseInLocation(claudeProcessStartLayout, output, time.UTC)
+	return time.ParseInLocation(psStartLayout, output, time.UTC)
 }
 
 // processIdentity names a running process by its start time, which tells it

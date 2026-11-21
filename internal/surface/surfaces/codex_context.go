@@ -13,8 +13,6 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const maxCodexTranscriptRecordBytes = 32 * 1024 * 1024
-
 type codexContextState struct {
 	cursor       transcriptCursor
 	usage        surface.ContextUsage
@@ -69,7 +67,7 @@ func (c *Codex) ContextUsage(ctx context.Context, sess *surface.Session) (*surfa
 		state.cursor.reset(info)
 		c.contextState[path] = state
 	}
-	offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
+	offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxTranscriptRecordBytes, func(line []byte) error {
 		var record codexContextRecord
 		if json.Unmarshal(line, &record) != nil {
 			return nil
