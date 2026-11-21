@@ -79,6 +79,17 @@ struct TranscriptFocusTest {
         ]
         let read = TranscriptFocus.focused(replied).map(\.id)
         check(read == ["ask", "note", "run", "run-out", "answer", "took"], "the turn's work sits above its final reply, as in the full transcript, and the reply reads last: \(read)")
+        let after = [
+            item("ask", "message", role: "user"),
+            item("answer", "message", role: "assistant"),
+            item("late", "toolCall", "Bash", call: "l"),
+            item("late-out", "toolResult", "Bash", call: "l"),
+            item("took", "event", "Turn duration"),
+        ]
+        let moved = TranscriptFocus.focused(after)
+        check(moved.map(\.id) == ["ask", "late", "late-out", "answer", "took"], "work after the reply moves above it: \(moved.map(\.id))")
+        let timedReply = TranscriptBlock.build(moved, foldAgents: false, focus: true).first { $0.id == TranscriptRowID.item("answer") }
+        check(timedReply?.finished == "took", "a reply the work moved above keeps its turn time: \(String(describing: timedReply))")
 
         let ended = [
             item("bash", "toolCall", "Bash", call: "b"),
