@@ -47,7 +47,7 @@ func (d *Daemon) replayMCPWrite(ctx context.Context, caller *mcpCaller, tool str
 		return ctx, mcpReplay{}
 	}
 	key, err := write.writeRequest().key(tool)
-	if err != nil {
+	if err != nil || key == "" {
 		return ctx, mcpReplay{}
 	}
 	encoded, err := mcpWriteIdentity(input)
