@@ -29,7 +29,7 @@ func TestTheDaemonLogsWhatAnUpgradeSpent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schema-1)); err != nil {
+	if _, err := db.Exec(fmt.Sprintf(`DROP TABLE schema_migrations; PRAGMA user_version=%d`, schema-1)); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -38,6 +38,10 @@ func TestTheDaemonLogsWhatAnUpgradeSpent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	var newest string
+	if err := store.ReadDB().QueryRow(`SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1`).Scan(&newest); err != nil {
+		t.Fatal(err)
+	}
 
 	var logged bytes.Buffer
 	d := New(store, nil)
@@ -48,7 +52,7 @@ func TestTheDaemonLogsWhatAnUpgradeSpent(t *testing.T) {
 	output := logged.String()
 	for _, want := range []string{
 		"registry open took 12ms",
-		fmt.Sprintf("registry migrated from schema %d to schema %d: backup ", schema-1, schema),
+		fmt.Sprintf("registry migrated from schema %d to %s: backup ", schema-1, newest),
 		", migration ",
 		", compress ",
 		"after launch",

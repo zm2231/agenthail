@@ -23,7 +23,6 @@ type EventSubscription struct {
 	Secret          string
 	PrevSecret      string
 	PrevSecretUntil time.Time
-	RefreshBefore   time.Time
 	VerifiedAt      time.Time
 	NotifiedThrough int64
 	Failures        int
@@ -38,28 +37,20 @@ func (s EventSubscription) Secrets(now time.Time) []string {
 }
 
 type EventSubscribe struct {
-	ID            string
-	IdentityID    string
-	TokenHash     string
-	Epoch         int64
-	Name          string
-	Args          string
-	URL           string
-	Secret        string
-	RefreshBefore time.Time
-	Verified      bool
-	Limit         int
-	SecretGrace   time.Duration
+	ID          string
+	IdentityID  string
+	TokenHash   string
+	Epoch       int64
+	Name        string
+	Args        string
+	URL         string
+	Secret      string
+	Verified    bool
+	Limit       int
+	SecretGrace time.Duration
 }
 
-const eventSubscriptionColumns = `s.id,s.generation,s.identity_id,s.name,s.args,s.url,s.secret,s.prev_secret,s.prev_secret_until_ms,s.refresh_before_ms,s.verified_at_ms,s.notified_through,s.failures,s.suspended_at_ms`
-
-func millis(at time.Time) int64 {
-	if at.IsZero() {
-		return 0
-	}
-	return at.UnixMilli()
-}
+const eventSubscriptionColumns = `s.id,s.generation,s.identity_id,s.name,s.args,s.url,s.secret,s.prev_secret,s.prev_secret_until_ms,s.verified_at_ms,s.notified_through,s.failures,s.suspended_at_ms`
 
 func fromMillis(ms int64) time.Time {
 	if ms == 0 {
@@ -70,12 +61,12 @@ func fromMillis(ms int64) time.Time {
 
 func scanEventSubscription(row rowScanner, extra ...any) (EventSubscription, error) {
 	var sub EventSubscription
-	var prevUntil, refresh, verified, suspended int64
-	dest := append([]any{&sub.ID, &sub.Generation, &sub.IdentityID, &sub.Name, &sub.Args, &sub.URL, &sub.Secret, &sub.PrevSecret, &prevUntil, &refresh, &verified, &sub.NotifiedThrough, &sub.Failures, &suspended}, extra...)
+	var prevUntil, verified, suspended int64
+	dest := append([]any{&sub.ID, &sub.Generation, &sub.IdentityID, &sub.Name, &sub.Args, &sub.URL, &sub.Secret, &sub.PrevSecret, &prevUntil, &verified, &sub.NotifiedThrough, &sub.Failures, &suspended}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return EventSubscription{}, err
 	}
-	sub.PrevSecretUntil, sub.RefreshBefore, sub.VerifiedAt, sub.SuspendedAt = fromMillis(prevUntil), fromMillis(refresh), fromMillis(verified), fromMillis(suspended)
+	sub.PrevSecretUntil, sub.VerifiedAt, sub.SuspendedAt = fromMillis(prevUntil), fromMillis(verified), fromMillis(suspended)
 	return sub, nil
 }
 
@@ -107,9 +98,6 @@ func (r *Registry) SubscribeEvent(s EventSubscribe) (EventSubscription, error) {
 	if current == 0 || epoch != s.Epoch {
 		return EventSubscription{}, ErrRemoteCredentialsMoved
 	}
-	if _, err := tx.Exec(`DELETE FROM mcp_event_subscriptions WHERE identity_id=? AND refresh_before_ms<>0 AND refresh_before_ms<=?`, s.IdentityID, now.UnixMilli()); err != nil {
-		return EventSubscription{}, err
-	}
 	var held int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM mcp_event_subscriptions WHERE identity_id=? AND id<>?`, s.IdentityID, s.ID).Scan(&held); err != nil {
 		return EventSubscription{}, err
@@ -121,14 +109,14 @@ func (r *Registry) SubscribeEvent(s EventSubscribe) (EventSubscription, error) {
 	if s.Verified {
 		verified = now.UnixMilli()
 	}
-	if _, err := tx.Exec(`INSERT INTO mcp_event_subscriptions(id,identity_id,token_hash,name,args,url,secret,refresh_before_ms,verified_at_ms,notified_through,created_at_ms,generation)
-		VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,(SELECT COALESCE(MAX(id),0) FROM agent_inbox WHERE identity_id=?2),?10,?12)
+	if _, err := tx.Exec(`INSERT INTO mcp_event_subscriptions(id,identity_id,token_hash,name,args,url,secret,verified_at_ms,notified_through,created_at_ms,generation)
+		VALUES(?1,?2,?3,?4,?5,?6,?7,?8,(SELECT COALESCE(MAX(id),0) FROM agent_inbox WHERE identity_id=?2),?9,?11)
 		ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash,generation=excluded.generation,
 			prev_secret=CASE WHEN secret<>excluded.secret THEN secret ELSE prev_secret END,
-			prev_secret_until_ms=CASE WHEN secret<>excluded.secret THEN ?11 ELSE prev_secret_until_ms END,
-			secret=excluded.secret,refresh_before_ms=excluded.refresh_before_ms,
+			prev_secret_until_ms=CASE WHEN secret<>excluded.secret THEN ?10 ELSE prev_secret_until_ms END,
+			secret=excluded.secret,
 			verified_at_ms=MAX(verified_at_ms,excluded.verified_at_ms),failures=0,suspended_at_ms=0,deferred_until_ms=0`,
-		s.ID, s.IdentityID, s.TokenHash, s.Name, s.Args, s.URL, s.Secret, millis(s.RefreshBefore), verified, now.UnixMilli(), now.Add(s.SecretGrace).UnixMilli(), rand.Text()); err != nil {
+		s.ID, s.IdentityID, s.TokenHash, s.Name, s.Args, s.URL, s.Secret, verified, now.UnixMilli(), now.Add(s.SecretGrace).UnixMilli(), rand.Text()); err != nil {
 		return EventSubscription{}, err
 	}
 	sub, err := scanEventSubscription(tx.QueryRow(`SELECT `+eventSubscriptionColumns+` FROM mcp_event_subscriptions s WHERE s.id=?`, s.ID))
@@ -160,10 +148,7 @@ type DueEvent struct {
 }
 
 // The join on token_hash ends delivery the moment the identity's credentials change.
-const (
-	liveEventFrom  = ` FROM mcp_event_subscriptions s JOIN identity_remote r ON r.identity_id=s.identity_id AND r.token_hash=s.token_hash`
-	liveEventWhere = ` WHERE (s.refresh_before_ms=0 OR s.refresh_before_ms>?1)`
-)
+const liveEventFrom = ` FROM mcp_event_subscriptions s JOIN identity_remote r ON r.identity_id=s.identity_id AND r.token_hash=s.token_hash`
 
 func (r *Registry) DueEvents(now time.Time, trialEvery time.Duration) ([]DueEvent, error) {
 	return queryRows(r.read, []DueEvent{}, func(row rowScanner) (DueEvent, error) {
@@ -173,11 +158,11 @@ func (r *Registry) DueEvents(now time.Time, trialEvery time.Duration) ([]DueEven
 		return due, err
 	}, `SELECT `+eventSubscriptionColumns+`,u.newest,u.unread`+liveEventFrom+`
 		JOIN (SELECT identity_id,MAX(id) newest,COUNT(*) unread FROM agent_inbox WHERE read_at_ms=0 GROUP BY identity_id) u ON u.identity_id=s.identity_id AND u.newest>s.notified_through`+
-		liveEventWhere+` AND (s.suspended_at_ms=0 OR s.suspended_at_ms<=?2) AND s.deferred_until_ms<=?1 ORDER BY s.id`, now.UnixMilli(), now.Add(-trialEvery).UnixMilli())
+		` WHERE (s.suspended_at_ms=0 OR s.suspended_at_ms<=?2) AND s.deferred_until_ms<=?1 ORDER BY s.id`, now.UnixMilli(), now.Add(-trialEvery).UnixMilli())
 }
 
-func (r *Registry) LiveEventSubscription(id string, now time.Time) (EventSubscription, bool, error) {
-	sub, err := scanEventSubscription(r.read.QueryRow(`SELECT `+eventSubscriptionColumns+liveEventFrom+liveEventWhere+` AND s.id=?2`, now.UnixMilli(), id))
+func (r *Registry) LiveEventSubscription(id string) (EventSubscription, bool, error) {
+	sub, err := scanEventSubscription(r.read.QueryRow(`SELECT `+eventSubscriptionColumns+liveEventFrom+` WHERE s.id=?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return EventSubscription{}, false, nil
 	}
@@ -218,12 +203,4 @@ func (r *Registry) EventFailed(id, generation string, suspendAfter int) (bool, e
 func (r *Registry) DeferEvent(id, generation string, until time.Time) error {
 	_, err := r.db.Exec(`UPDATE mcp_event_subscriptions SET deferred_until_ms=? WHERE id=? AND generation=?`, until.UnixMilli(), id, generation)
 	return err
-}
-
-func (r *Registry) PruneExpiredEventSubscriptions(now time.Time) (int64, error) {
-	result, err := r.db.Exec(`DELETE FROM mcp_event_subscriptions WHERE refresh_before_ms<>0 AND refresh_before_ms<=?`, now.UnixMilli())
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
 }

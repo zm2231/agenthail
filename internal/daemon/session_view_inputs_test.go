@@ -203,6 +203,10 @@ func sweepSessionViewShard(t *testing.T, f *viewFixture, shard int, tables []str
 		}
 	}
 	for _, table := range tables {
+		// Changing the recorded migrations makes the registry refuse to open, so no view could be built.
+		if table == "schema_migrations" {
+			continue
+		}
 		rowKey, keepKey, restoreColumns, restoreValues := sessionViewRowKey(t, db, table)
 		where := ` WHERE ` + rowKey + `=?`
 		if len(queryStrings(t, db, fmt.Sprintf(`SELECT 1 FROM %q LIMIT 1`, table))) == 0 {

@@ -24,6 +24,11 @@ func registryAtSchema(t *testing.T, path string, schema int) {
 	if err := r.RecordObservedSession(surface.Session{ID: "kept", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "kept"}); err != nil {
 		t.Fatal(err)
 	}
+	if schema < schemaVersion {
+		if _, err := r.db.Exec(`DROP TABLE schema_migrations`); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := r.db.Exec(`PRAGMA user_version=` + strconv.Itoa(schema)); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +108,7 @@ func TestABackupHoldsWhatIsStillInTheWALAndStandsAlone(t *testing.T) {
 	if err := r.RecordObservedSession(surface.Session{ID: "in-wal", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "in-wal"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`PRAGMA user_version=` + strconv.Itoa(schemaVersion-1)); err != nil {
+	if _, err := r.db.Exec(`DROP TABLE schema_migrations; PRAGMA user_version=` + strconv.Itoa(schemaVersion-1)); err != nil {
 		t.Fatal(err)
 	}
 	r.Close()
@@ -117,7 +122,7 @@ func TestABackupHoldsWhatIsStillInTheWALAndStandsAlone(t *testing.T) {
 	}
 	timing, recorded := migrated.Migration()
 	migrated.Close()
-	if !recorded || timing.From != "schema 126" || timing.To != "schema 127" || timing.Backup <= 0 || timing.Migrate <= 0 {
+	if !recorded || timing.From != "schema 126" || timing.To != currentLevel().String() || timing.Backup <= 0 || timing.Migrate <= 0 {
 		t.Fatalf("migration timing = %+v, %v", timing, recorded)
 	}
 

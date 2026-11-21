@@ -32,7 +32,6 @@ import (
 const (
 	eventInboxUnread       = "inbox.unread"
 	eventSubscriptionLimit = 8
-	eventMinTTL            = 5 * time.Minute
 	eventVerifiedFor       = 24 * time.Hour
 	eventSecretGrace       = 10 * time.Minute
 	eventRequestTimeout    = 10 * time.Second
@@ -261,15 +260,16 @@ func webhookKey(secret string) ([]byte, bool) {
 	return key, len(key) >= 24 && len(key) <= 64
 }
 
-func eventTTL(raw json.RawMessage, now time.Time) (time.Time, error) {
+// A given ttlMs is checked but not honored, so a client that always sends one never loses its subscription.
+func checkEventTTL(raw json.RawMessage) error {
 	if len(raw) == 0 || string(raw) == "null" {
-		return time.Time{}, nil
+		return nil
 	}
 	var ms int64
 	if err := json.Unmarshal(raw, &ms); err != nil || ms < 0 {
-		return time.Time{}, invalidEventParams("ttlMs must be a non-negative integer or null")
+		return invalidEventParams("ttlMs must be a non-negative integer or null")
 	}
-	return now.Add(max(time.Duration(ms)*time.Millisecond, eventMinTTL)), nil
+	return nil
 }
 
 func eventSubscriptionID(identity, callback, name, args string) string {
@@ -293,11 +293,10 @@ func (m *remoteMCP) subscribeEvent(ctx context.Context, _ *mcp.ServerSession, pa
 	if _, ok := webhookKey(params.Delivery.Secret); !ok {
 		return nil, invalidEventParams("delivery.secret must be whsec_ followed by base64 of 24 to 64 bytes")
 	}
-	now := time.Now()
-	refreshBefore, err := eventTTL(params.TTLMs, now)
-	if err != nil {
+	if err := checkEventTTL(params.TTLMs); err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	id := eventSubscriptionID(principal.identity, callback, params.Name, args)
 	verified, err := m.d.Registry.EventEndpointVerified(principal.identity, callback, now.Add(-eventVerifiedFor))
 	if err != nil {
@@ -309,7 +308,7 @@ func (m *remoteMCP) subscribeEvent(ctx context.Context, _ *mcp.ServerSession, pa
 			return nil, callbackError(reason)
 		}
 	}
-	sub, err := m.d.Registry.SubscribeEvent(registry.EventSubscribe{ID: id, IdentityID: principal.identity, TokenHash: principal.tokenHash, Epoch: principal.epoch, Name: params.Name, Args: args, URL: callback, Secret: params.Delivery.Secret, RefreshBefore: refreshBefore, Verified: !verified, Limit: eventSubscriptionLimit, SecretGrace: eventSecretGrace})
+	sub, err := m.d.Registry.SubscribeEvent(registry.EventSubscribe{ID: id, IdentityID: principal.identity, TokenHash: principal.tokenHash, Epoch: principal.epoch, Name: params.Name, Args: args, URL: callback, Secret: params.Delivery.Secret, Verified: !verified, Limit: eventSubscriptionLimit, SecretGrace: eventSecretGrace})
 	if errors.Is(err, registry.ErrEventSubscriptionLimit) {
 		data, _ := json.Marshal(map[string]any{"limit": "subscriptions", "max": eventSubscriptionLimit})
 		return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: err.Error(), Data: data}
@@ -319,12 +318,7 @@ func (m *remoteMCP) subscribeEvent(ctx context.Context, _ *mcp.ServerSession, pa
 	}
 	m.recordEvent(principal.identity, callback, "subscribed")
 	m.pokeEvents()
-	result := &eventsSubscribeResult{ID: sub.ID}
-	if !sub.RefreshBefore.IsZero() {
-		at := sub.RefreshBefore.UTC().Format(time.RFC3339)
-		result.RefreshBefore = &at
-	}
-	return result, nil
+	return &eventsSubscribeResult{ID: sub.ID}, nil
 }
 
 func (m *remoteMCP) unsubscribeEvent(ctx context.Context, _ *mcp.ServerSession, params *eventsUnsubscribeParams) (*eventsUnsubscribeResult, error) {
