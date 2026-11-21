@@ -1,4 +1,4 @@
--- schemaVersion 118
+-- schemaVersion 119
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/surface"
 	_ "modernc.org/sqlite"
 )
 
@@ -492,6 +493,14 @@ func migrateTx(tx *sql.Tx) error {
 	}
 	if version < 68 {
 		if _, err := tx.Exec(`UPDATE sessions SET ended=1 WHERE status='offline'`); err != nil {
+			return err
+		}
+	}
+	if version >= 1 && version < 119 {
+		if _, err := tx.Exec(retireRemovedIdentities, string(surface.RuntimeAgentInbox)); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(dropPairedSessionAliases); err != nil {
 			return err
 		}
 	}

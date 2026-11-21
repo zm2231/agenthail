@@ -3,6 +3,7 @@ package registry
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -183,5 +184,99 @@ func TestASchema114RegistryUpgradesToAcknowledgedInboxReads(t *testing.T) {
 	}
 	if _, _, err := r.BindRemoteIdentity("scout", "", ""); err != nil {
 		t.Fatalf("remote binding after the upgrade: %v", err)
+	}
+}
+
+func catalogRow(t *testing.T, r *Registry, id string) {
+	t.Helper()
+	if _, err := r.db.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,observed_at) VALUES(?,'{}','{}',?)`, id, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mirrorRetired(t *testing.T, r *Registry) []string {
+	t.Helper()
+	retired, err := catalogMirrorRetiredTx(r.read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return retired.IDs
+}
+
+func TestRemovingAnIdentityRetiresItsRowForPairedHosts(t *testing.T) {
+	r := openTestRegistry(t)
+	identity, err := r.AddAgentIdentity("kat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogRow(t, r, identity.SessionID)
+	if err := r.RemoveAgentIdentity("kat"); err != nil {
+		t.Fatal(err)
+	}
+	if retired := mirrorRetired(t, r); !slices.Contains(retired, identity.SessionID) {
+		t.Fatalf("retired=%v, want the removed identity's row", retired)
+	}
+}
+
+func TestASchema118RegistryRetiresRemovedIdentitiesAndDropsNamesTakenByPairedSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	old, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := old.AddAgentIdentity("live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leftover, err := old.AddAgentIdentity("kat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogRow(t, old, live.SessionID)
+	catalogRow(t, old, leftover.SessionID)
+	const hostID = "h0123456789ab"
+	if _, err := old.AddHost(PairedHost{ID: hostID, Name: "katbox", Endpoint: "https://katbox.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"remote-kat", "remote-lead"} {
+		if _, _, err := old.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: id}, EntityID: hostID + "::" + id, Projection: []byte(`{"id":"` + hostID + "::" + id + `"}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	register(t, old, "worker")
+	if err := old.SetAlias("builder", "worker"); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`DELETE FROM agent_identities WHERE name='kat'`,
+		`DELETE FROM aliases WHERE name='kat'`,
+		`INSERT INTO aliases(name,session_id) VALUES('kat-2','remote-kat'),('collab','remote-lead')`,
+		`INSERT INTO coordinators(project_id,host_id,name,surface,session_id,changed_at_ms) VALUES('p','` + hostID + `','collab','claude','remote-lead',1)`,
+		`PRAGMA user_version=118`,
+	} {
+		if _, err := old.db.Exec(statement); err != nil {
+			old.Close()
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	retired := mirrorRetired(t, r)
+	if !slices.Contains(retired, leftover.SessionID) || slices.Contains(retired, live.SessionID) {
+		t.Fatalf("retired=%v, want only the removed identity %s", retired, leftover.SessionID)
+	}
+	if alias, err := r.ReverseAlias("remote-kat"); err == nil {
+		t.Fatalf("a paired host's session kept the name @%s", alias)
+	}
+	for id, want := range map[string]string{"remote-lead": "collab", "worker": "builder", live.SessionID: "live"} {
+		if alias, err := r.ReverseAlias(id); err != nil || alias != want {
+			t.Fatalf("%s alias=%q err=%v, want @%s kept", id, alias, err, want)
+		}
 	}
 }
