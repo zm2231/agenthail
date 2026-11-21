@@ -62,3 +62,24 @@ func TestAReclassifiedHookCaptureLeavesThePersonsWords(t *testing.T) {
 		}
 	}
 }
+
+func TestReclassifiedWordsOweNoContext(t *testing.T) {
+	db := openTestDB(t)
+	s := ledger.NewCachedStore(db, db)
+	if err := s.Enable("p", ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now().Add(-time.Hour)
+	if _, _, err := s.RecordUtterance(said("claude-prompt:wake", "check the review")); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := s.ReclassifyUtterance("p", "claude-prompt:wake", "scheduled", time.Now()); err != nil || !done {
+		t.Fatalf("reclassify: %v %v", done, err)
+	}
+	if owed, err := s.LocalWithoutContextSince("p", before); err != nil || len(owed) != 0 {
+		t.Fatalf("owed contexts after reclassify = %+v err=%v", owed, err)
+	}
+	if inserted, err := s.RecordContext("p", ledger.ContextPayload{UtteranceID: "claude-prompt:wake", Status: ledger.ReplyNone}, time.Now()); err != nil || inserted {
+		t.Fatalf("a context for reclassified words: inserted=%v err=%v", inserted, err)
+	}
+}
