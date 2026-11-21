@@ -105,8 +105,8 @@ const watchedForWork = `
 	UNION SELECT target_session_id FROM delivery_intents WHERE ` + awaitingTurnRow + ` AND accepted_at_ms>=?`
 
 const watchedForTurnEnd = `
-	SELECT l.id FROM sessions l
-	WHERE l.host_id='' AND (SELECT te.completed_turn_id='' AND te.started_at_ms>=? FROM turn_ends te WHERE te.session_id=l.id ORDER BY te.started_at_ms DESC LIMIT 1)`
+	SELECT te.session_id FROM turn_ends te
+	WHERE te.started_at_ms>=? AND te.completed_turn_id='' AND NOT EXISTS (SELECT 1 FROM turn_ends later WHERE later.session_id=te.session_id AND later.started_at_ms>te.started_at_ms)`
 
 const watchedSessionsQuery = `
 	SELECT s.id,s.surface,EXISTS(SELECT 1 FROM session_runtime r WHERE r.session_id=s.id AND r.notification_armed=1),

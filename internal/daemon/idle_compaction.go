@@ -77,7 +77,7 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 	if err != nil {
 		return
 	}
-	sessions, err := d.Registry.ListSessions(0)
+	sessions, err := d.Registry.ListSessionsOf(surface.KindClaude)
 	if err != nil {
 		d.log.Printf("read sessions for idle compaction: %s", err)
 		return

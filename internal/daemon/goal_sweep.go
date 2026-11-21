@@ -64,7 +64,7 @@ func (d *Daemon) runGoalSweeps(ctx context.Context) {
 }
 
 func (d *Daemon) sweepStoppedGoals(ctx context.Context, now time.Time) {
-	sessions, err := d.Registry.ListSessions(0)
+	sessions, err := d.Registry.ListSessionsActiveSince(now.Add(-goalSweepWindow))
 	if err != nil {
 		d.log.Printf("list sessions for stopped goals: %s", err)
 		return

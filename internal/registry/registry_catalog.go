@@ -140,17 +140,36 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 }
 
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := sessionSelect(`CASE WHEN cs.session_id IS NOT NULL THEN s.status ELSE ? END`) + ` FROM sessions s` + sessionJoins + ` WHERE s.host_id='' ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
-	args := []any{string(surface.StatusOffline)}
 	if limit > 0 {
-		query += ` LIMIT ?`
-		args = append(args, limit)
+		return r.listLocalSessions(``, ` LIMIT ?`, limit)
 	}
-	rows, err := r.read.Query(query, args...)
+	return r.listLocalSessions(``, ``)
+}
+
+func (r *Registry) ListSessionsActiveSince(since time.Time) ([]surface.Session, error) {
+	return r.listLocalSessions(` AND s.last_active_ms>=?`, ``, ceilUnixMilli(since))
+}
+
+func (r *Registry) ListSessionsOf(kind surface.SurfaceKind) ([]surface.Session, error) {
+	return r.listLocalSessions(` AND s.surface=?`, ``, string(kind))
+}
+
+func (r *Registry) listLocalSessions(filter, tail string, args ...any) ([]surface.Session, error) {
+	query := sessionSelect(`CASE WHEN cs.session_id IS NOT NULL THEN s.status ELSE ? END`) + ` FROM sessions s` + sessionJoins + ` WHERE s.host_id=''` + filter + ` ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id` + tail
+	rows, err := r.read.Query(query, append([]any{string(surface.StatusOffline)}, args...)...)
 	if err != nil {
 		return nil, err
 	}
 	return appendRows(make([]surface.Session, 0), rows, scanSession)
+}
+
+// Rounding up keeps a millisecond column compared with >= to exactly the times at or after t.
+func ceilUnixMilli(t time.Time) int64 {
+	ms := t.UnixMilli()
+	if time.UnixMilli(ms).Before(t) {
+		ms++
+	}
+	return ms
 }
 
 func (r *Registry) SessionUpdatedBefore(id string, before time.Time) (bool, error) {
