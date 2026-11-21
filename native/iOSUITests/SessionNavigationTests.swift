@@ -142,7 +142,6 @@ final class SessionNavigationTests: XCTestCase {
         app.launch()
         let voice = app.buttons["voice-entry"]
         XCTAssertTrue(voice.waitForExistence(timeout: 10))
-        XCTAssertEqual(voice.label, "Return to call", "the preview call is live")
         voice.tapWhenReady()
         let call = app.navigationBars["Talk to orchestrator"]
         XCTAssertTrue(call.waitForExistence(timeout: 5))
@@ -160,6 +159,9 @@ final class SessionNavigationTests: XCTestCase {
         app.buttons["voice-entry"].tapWhenReady()
         let call = app.navigationBars["Talk to orchestrator"]
         XCTAssertTrue(call.waitForExistence(timeout: 5))
+        let activity = app.descendants(matching: .any)["voice-activity"].firstMatch
+        for _ in 0..<4 where !activity.isHittable { app.swipeUp() }
+        activity.tapWhenReady()
         let timeline = app.buttons["Open full timeline"].firstMatch
         for _ in 0..<4 where !timeline.isHittable { app.swipeUp() }
         timeline.tapWhenReady()

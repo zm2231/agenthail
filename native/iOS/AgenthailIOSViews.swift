@@ -159,9 +159,12 @@ struct MainTabs: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.decisionFeed.reload() }
         }
-        .onChange(of: PhoneRoute.shared.pending, initial: true) { _, _ in
-            guard let opened = PhoneRoute.shared.take() else { return }
-            model.openSession(opened.session, turn: opened.turn)
+        .onChange(of: PhoneRoute.shared.pending, initial: true) { _, pending in
+            guard pending != nil else { return }
+            PresentedSheets.whenNoDraftIsOpen {
+                guard let opened = PhoneRoute.shared.take() else { return }
+                model.openSession(opened.session, turn: opened.turn)
+            }
         }
         .onChange(of: model.routeOpenings) { _, _ in PresentedSheets.closeAll() }
     }

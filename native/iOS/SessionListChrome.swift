@@ -168,17 +168,23 @@ struct VoiceToolbarButton: View {
 @MainActor
 enum PresentedSheets {
     private static var drafts: Set<UUID> = []
-    private static var closeWhenDraftsClose = false
+    private static var afterDraftsClose: (@MainActor () -> Void)?
 
-    // A sheet whose input differs from what it opened with is never closed by a
-    // route: the session opens underneath, and the other sheets close once the
-    // last such sheet does.
-    static func closeAll() {
+    // A sheet whose input differs from what it opened with holds a route:
+    // moving the conversation underneath would close it, because the
+    // conversation that presents it leaves the screen. The route runs once
+    // the last such sheet closes.
+    static func whenNoDraftIsOpen(_ route: @escaping @MainActor () -> Void) {
         guard drafts.isEmpty else {
-            closeWhenDraftsClose = true
+            afterDraftsClose = route
             return
         }
-        closeWhenDraftsClose = false
+        afterDraftsClose = nil
+        route()
+    }
+
+    static func closeAll() {
+        guard drafts.isEmpty else { return }
         for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
             for window in scene.windows where window.isKeyWindow {
                 guard let root = window.rootViewController, root.presentedViewController != nil else { continue }
@@ -193,7 +199,9 @@ enum PresentedSheets {
 
     fileprivate static func closed(_ id: UUID) {
         drafts.remove(id)
-        if drafts.isEmpty, closeWhenDraftsClose { closeAll() }
+        guard drafts.isEmpty, let route = afterDraftsClose else { return }
+        afterDraftsClose = nil
+        route()
     }
 }
 
