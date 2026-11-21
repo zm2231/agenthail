@@ -162,7 +162,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     // Armed when the reader asks for an older page, from the row frames already reported, so nothing is inferred while the page lands.
     private func holdOlderPlace(fresh: Bool) {
         guard !following else { return }
-        guard let geometry = layout.geometry, let leading = rows?.leading(above: geometry.contentOffset.y + geometry.containerSize.height) else { return layout.row.request(fresh: fresh) }
+        guard let geometry = layout.geometry, let leading = rows?.leading(above: geometry.contentOffset.y + geometry.containerSize.height) else { return layout.requestOlder(fresh: fresh) }
         layout.armRow(leading.id, above: leading.top - geometry.contentOffset.y, before: leading.top, fresh: fresh)
     }
 
@@ -175,7 +175,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     private func restoreHeld(_ id: String, in rows: TranscriptRowTops) {
         settleHold { position in
             guard layout.heldRow == id else { return }
-            if !layout.row.measured, rows.top(id).map({ $0 == layout.heldBefore }) ?? true {
+            if rows.top(id).map({ !layout.row.measured && $0 == layout.heldBefore }) ?? true {
                 position.scrollTo(id: id, anchor: .top)
             } else {
                 correct(in: rows)
@@ -309,6 +309,12 @@ private final class Layout {
     var heldRow: String? { row.id }
     var heldBefore: CGFloat? { row.before }
     var olderPending: Bool { row.pending }
+
+    func requestOlder(fresh: Bool) {
+        renew()
+        fromEnd = nil
+        row.request(fresh: fresh)
+    }
 
     func armRow(_ id: String, above: CGFloat, before: CGFloat, fresh: Bool) {
         renew()

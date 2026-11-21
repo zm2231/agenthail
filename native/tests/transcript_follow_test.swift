@@ -887,6 +887,7 @@ struct TranscriptFollowTest {
             awaitReport("the scroll") { abs($0.offset - offset(scroll)) < 1 }
             spin(0.3)
         }
+        expect(abs(offset(scroll) - y) < 1, "the reader's scroll reached \(y), stopped at \(offset(scroll))")
     }
 
     // A loaded machine can take longer than any fixed wait to report a change, so checks start from the reported geometry.

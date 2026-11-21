@@ -77,6 +77,12 @@ struct TranscriptRowHoldTest {
         waiting.settle(until: .now - .seconds(1))
         expect(!waiting.holding && !waiting.landed, "a landed hold ends once its settle window has passed")
 
+        let replaced = TranscriptRowHold()
+        replaced.arm("m120", above: 71, before: 39, fresh: true)
+        _ = replaced.pass(TranscriptPass(leadingChanged: true, resting: true, following: false, content: 4388))
+        replaced.request(fresh: true)
+        expect(!replaced.holding && replaced.id == nil && replaced.pending, "a new request with no row to hold ends the previous page's hold and stays pending, holding \(replaced.holding) row \(String(describing: replaced.id))")
+
         let once = TranscriptRowHold()
         once.arm("m120", above: 71, before: 39, fresh: true)
         _ = once.pass(TranscriptPass(leadingChanged: true, resting: true, following: false, content: 4388))

@@ -21,6 +21,7 @@ final class TranscriptRowHold {
 
     func request(fresh: Bool) {
         if fresh || !pending { olderUntil = .now + .seconds(30) }
+        row = nil
     }
 
     func arm(_ id: String, above: CGFloat, before: CGFloat, fresh: Bool) {
