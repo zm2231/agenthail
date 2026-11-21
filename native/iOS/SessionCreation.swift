@@ -16,7 +16,7 @@ struct NewSessionSheet: View {
     @State private var selectedLauncher: LauncherOption?
     @State private var showingModels = false
     @State private var launch = LaunchSettings()
-    @State private var edits = DraftEdits()
+    @State private var baseline = DraftBaseline<FormValues>()
 
     init(model: AgenthailIOSModel, place: NewSessionPlace? = nil) {
         self.model = model
@@ -27,9 +27,26 @@ struct NewSessionSheet: View {
         _cwd = State(initialValue: place?.folder ?? "")
     }
 
-    private var dirty: Bool { edits.dirty || !message.isEmpty }
+    private struct FormValues: Equatable {
+        var host: String?
+        var surface: String
+        var launcher: String?
+        var model: String
+        var cwd: String
+        var message: String
+        var launch: LaunchSettings
+        var claude: [String: String]
+    }
 
-    var body: some View { content.holdsDraft(dirty) }
+    private var values: FormValues {
+        FormValues(host: hosts.selectedHost?.id, surface: selectedSurface, launcher: selectedLauncher?.id, model: selectedModel, cwd: cwd, message: message, launch: launch, claude: claude.fields)
+    }
+
+    var body: some View {
+        content
+            .onChange(of: values, initial: true) { _, values in baseline.follow(values) }
+            .holdsDraft(baseline.differs(values))
+    }
 
     private var options: SessionCreationOptions? { hosts.options }
     private var hostName: String { hosts.selectedHost?.name ?? "your computer" }
@@ -44,7 +61,7 @@ struct NewSessionSheet: View {
                         ContentUnavailableView("No agent can start sessions", systemImage: "bubble.left", description: Text("Configure a supported runtime on \(hostName), then reload."))
                     } else {
                         Section("Agent") {
-                            Picker("Run with", selection: $selectedSurface.tracking($edits)) {
+                            Picker("Run with", selection: $selectedSurface.touching($baseline)) {
                                 ForEach(options.surfaces) { Text($0.id.capitalized).tag($0.id) }
                             }
                             Text(selectedSurface != "claude" ? "Uses the runtime configured on \(hostName)." : selectedLauncher?.id == "claude-bg" ? "Starts a Claude Code background job on \(hostName)." : "Starts a Claude session on \(hostName), run by Agenthail.").font(.footnote).foregroundStyle(PhonePalette.muted)
@@ -52,7 +69,7 @@ struct NewSessionSheet: View {
                         let launchers = launchers(for: selectedSurface, options: options)
                         if !launchers.isEmpty {
                             Section("Where it runs") {
-                                Picker("Launcher", selection: $selectedLauncher.tracking($edits)) {
+                                Picker("Launcher", selection: $selectedLauncher.touching($baseline)) {
                                     Text("Use \(hostName) default").tag(LauncherOption?.none)
                                     ForEach(launchers) { launcher in
                                         Text(launcher.available ? launcher.label : "\(launcher.label) (unavailable)")
@@ -71,13 +88,13 @@ struct NewSessionSheet: View {
                             Section("Project on \(hostName)") {
                                 if !options.projects.isEmpty {
                                     Menu {
-                                        ForEach(options.projects) { project in Button(project.displayName) { edits.record("cwd", from: cwd, to: project.rootPath); cwd = project.rootPath } }
+                                        ForEach(options.projects) { project in Button(project.displayName) { baseline.touch(); cwd = project.rootPath } }
                                     } label: {
                                         LabeledContent("Project", value: options.projects.first(where: { $0.rootPath == cwd })?.displayName ?? "Choose")
                                     }
                                     .accessibilityIdentifier("creation-project-picker")
                                 }
-                                TextField("~/projects/my-project", text: $cwd.tracking($edits, key: "cwd")).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                TextField("~/projects/my-project", text: $cwd.touching($baseline)).textInputAutocapitalization(.never).autocorrectionDisabled()
                                 Text("Pick a project or type a folder. Leave blank to use the home folder on \(hostName). The folder must already exist.").font(.footnote).foregroundStyle(PhonePalette.muted)
                             }
                         }
@@ -91,13 +108,13 @@ struct NewSessionSheet: View {
                             Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on \(hostName).").font(.footnote).foregroundStyle(PhonePalette.muted)
                         }
                         if selectedSurface == "codex" {
-                            LaunchSettingsView(settings: $launch.tracking($edits), modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)
+                            LaunchSettingsView(settings: $launch.touching($baseline), modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)
                         }
                         if selectedSurface == "claude", hosts.claudeConfigRoots.count > 1 {
                             let roots = hosts.claudeConfigRoots
                             let titles = ClaudeRootLabels.titles(roots, host: hostName)
                             Section {
-                                Picker("Account", selection: $claude.configRoot.tracking($edits)) {
+                                Picker("Account", selection: $claude.configRoot.touching($baseline)) {
                                     Text(ClaudeRootLabels.byDefault(hosts.claudePick, roots: roots, titles: titles)).tag("")
                                     ForEach(Array(zip(roots, titles)), id: \.0.id) { root, title in
                                         Text(ClaudeRootLabels.option(root, title: title)).tag(root.root).selectionDisabled(!root.selectable)
@@ -114,19 +131,19 @@ struct NewSessionSheet: View {
                             }
                         }
                         Section("First instruction") {
-                            TextField("What would you like the agent to do?", text: $message, axis: .vertical).lineLimit(4...12)
+                            TextField("What would you like the agent to do?", text: $message.touching($baseline), axis: .vertical).lineLimit(4...12)
                         }
                         if selectedSurface == "claude" {
                             Section {
                                 DisclosureGroup("Claude options") {
-                                    TextField("Session name (optional)", text: $claude.name.tracking($edits))
-                                    TextField("New worktree name (optional)", text: $claude.worktree.tracking($edits)).textInputAutocapitalization(.never).autocorrectionDisabled()
-                                    TextField("Named agent (optional)", text: $claude.agent.tracking($edits)).textInputAutocapitalization(.never).autocorrectionDisabled()
-                                    Picker("Effort", selection: $claude.effort.tracking($edits)) {
+                                    TextField("Session name (optional)", text: $claude.name.touching($baseline))
+                                    TextField("New worktree name (optional)", text: $claude.worktree.touching($baseline)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                    TextField("Named agent (optional)", text: $claude.agent.touching($baseline)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                    Picker("Effort", selection: $claude.effort.touching($baseline)) {
                                         Text("Runtime default").tag("")
                                         ForEach(["low", "medium", "high", "xhigh", "max"], id: \.self) { Text($0.capitalized).tag($0) }
                                     }
-                                    Picker("Permissions", selection: $claude.permissionMode.tracking($edits)) {
+                                    Picker("Permissions", selection: $claude.permissionMode.touching($baseline)) {
                                         Text("Runtime default").tag("")
                                         Text("Ask before changes").tag("manual")
                                         Text("Accept edits").tag("acceptEdits")
@@ -174,7 +191,7 @@ struct NewSessionSheet: View {
             .onAppear { model.prepareNewSessionForm() }
             .sheet(isPresented: $showingModels) {
                 SearchableModelSelectionSheet(initialOptions: models, currentSelectedID: selectedModel.isEmpty ? nil : selectedModel, allowsDefault: true, onSelect: { value in
-                    edits.record("model", from: selectedModel, to: value ?? "")
+                    baseline.touch()
                     selectedModel = value ?? ""
                     launch.effort = nil
                 }, reload: {
@@ -221,9 +238,8 @@ struct NewSessionSheet: View {
         Menu {
             ForEach(hosts.hosts) { host in
                 Button {
-                    let before = hosts.selectedHost?.id
+                    baseline.touch()
                     if hosts.select(host.id) { cwd = ""; selectedSurface = "" }
-                    edits.record("host", from: before, to: hosts.selectedHost?.id)
                 } label: {
                     if host.id == hosts.selectedHost?.id {
                         Label(host.name, systemImage: "checkmark")

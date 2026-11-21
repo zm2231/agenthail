@@ -77,32 +77,34 @@ private struct IOSAddProjectForm: View {
     @State private var suggestions: [String] = []
     @State private var saving = false
     @State private var error: String?
-    @State private var edits = DraftEdits()
+    @State private var baseline = DraftBaseline<[String]>()
     @Environment(\.dismiss) private var dismiss
 
-    private var dirty: Bool { edits.dirty || !title.isEmpty }
+    private var values: [String] { [host, folder, title] }
 
     private var path: String { folder.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        content.holdsDraft(dirty)
+        content
+            .onChange(of: values, initial: true) { _, values in baseline.follow(values) }
+            .holdsDraft(baseline.differs(values))
     }
 
     @ViewBuilder private var content: some View {
         Form {
             if model.creationHosts.count > 1 {
-                Picker("Computer", selection: $host.tracking($edits)) {
+                Picker("Computer", selection: $host.touching($baseline)) {
                     ForEach(model.creationHosts) { host in Text(host.name).tag(host.id).disabled(!host.isAvailable) }
                 }
             }
             Section("Folder") {
-                TextField("/path/to/folder", text: $folder.tracking($edits, key: "folder")).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("/path/to/folder", text: $folder.touching($baseline)).textInputAutocapitalization(.never).autocorrectionDisabled()
                 ForEach(suggestions, id: \.self) { suggestion in
-                    Button(suggestion) { edits.record("folder", from: folder, to: suggestion); folder = suggestion }.font(.footnote)
+                    Button(suggestion) { baseline.touch(); folder = suggestion }.font(.footnote)
                 }
             }
             Section("Name") {
-                TextField("Optional", text: $title)
+                TextField("Optional", text: $title.touching($baseline))
             }
             if let error { Text(error).font(.footnote).foregroundStyle(PhonePalette.failed) }
         }
@@ -178,7 +180,7 @@ private struct IOSProjectLeadForm: View {
     var model: AgenthailIOSModel
     let project: ListedProject
     @State private var checkout = 0
-    @State private var edits = DraftEdits()
+    @State private var baseline = DraftBaseline<[String]>()
     @State private var surface = "claude"
     @State private var name = ""
     @State private var saving = false
@@ -190,23 +192,27 @@ private struct IOSProjectLeadForm: View {
         project.state.checkouts.enumerated().filter { $0.element.archived != true && ["local", "connected"].contains($0.element.host.state) }.map { ($0.offset, $0.element) }
     }
 
-    private var dirty: Bool { edits.dirty || !name.isEmpty }
+    private var values: [String] { [String(checkout), surface, name] }
 
-    var body: some View { content.holdsDraft(dirty) }
+    var body: some View {
+        content
+            .onChange(of: values, initial: true) { _, values in baseline.follow(values) }
+            .holdsDraft(baseline.differs(values))
+    }
 
     @ViewBuilder private var content: some View {
         Form {
             Section {
                 if usable.count > 1 {
-                    Picker("Computer", selection: $checkout.tracking($edits)) {
+                    Picker("Computer", selection: $checkout.touching($baseline)) {
                         ForEach(usable, id: \.index) { entry in Text(entry.checkout.host.name).tag(entry.index) }
                     }
                 }
-                Picker("Agent", selection: $surface.tracking($edits)) {
+                Picker("Agent", selection: $surface.touching($baseline)) {
                     Text("Claude").tag("claude")
                     Text("Codex").tag("codex")
                 }
-                TextField("Name (optional)", text: $name).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("Name (optional)", text: $name.touching($baseline)).textInputAutocapitalization(.never).autocorrectionDisabled()
             } footer: {
                 Text(project.state.leads.isEmpty ? "Starts a lead conversation. Its first message starts it." : "Starts a new lead in place of \(project.state.leads.map { "@\($0.name)" }.joined(separator: " and ")). To make an existing conversation the lead, use Make project lead in its details.")
             }

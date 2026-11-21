@@ -214,23 +214,27 @@ extension View {
     }
 }
 
-struct DraftEdits {
-    private var openedWith: [String: Any] = [:]
-    private var differs: [String: Bool] = [:]
+struct DraftBaseline<Values: Equatable> {
+    private var opened: Values?
+    private var touched = false
 
-    var dirty: Bool { differs.values.contains(true) }
+    mutating func follow(_ values: Values) {
+        if !touched { opened = values }
+    }
 
-    mutating func record<Value: Equatable>(_ key: String, from old: Value, to new: Value) {
-        let opened = openedWith[key] as? Value ?? old
-        if openedWith[key] == nil { openedWith[key] = old }
-        differs[key] = new != opened
+    mutating func touch() {
+        touched = true
+    }
+
+    func differs(_ values: Values) -> Bool {
+        touched && opened != values
     }
 }
 
-extension Binding where Value: Equatable {
-    func tracking(_ edits: Binding<DraftEdits>, key: String? = nil, line: Int = #line, column: Int = #column) -> Binding<Value> {
+extension Binding {
+    func touching<Values>(_ baseline: Binding<DraftBaseline<Values>>) -> Binding<Value> {
         Binding(get: { wrappedValue }, set: { new in
-            edits.wrappedValue.record(key ?? "\(line):\(column)", from: wrappedValue, to: new)
+            baseline.wrappedValue.touch()
             wrappedValue = new
         })
     }
