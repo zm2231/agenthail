@@ -79,9 +79,8 @@ func (r *Registry) issueSessionCredential(sessionID string, now time.Time, rotat
 		return IssuedCredential{}, err
 	}
 	defer tx.Rollback()
-	var hostID string
-	var archived int
-	if err := tx.QueryRow(`SELECT s.host_id,EXISTS(SELECT 1 FROM session_archive a WHERE a.session_id=s.id) FROM sessions s WHERE s.id=?`, sessionID).Scan(&hostID, &archived); err != nil {
+	hostID, archived, err := sessionPlacement(tx, sessionID)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return IssuedCredential{}, fmt.Errorf("session %s is not registered", sessionID)
 		}
@@ -166,7 +165,7 @@ func (r *Registry) authenticateSessionToken(token string, now time.Time, running
 	// A stamp is taken before the row: a write that lands between the two
 	// is then in the row.
 	used, stamped := r.credentialUse.pendingStamp(hash)
-	row, err := scanCredential(r.read.QueryRow(credentialSelect+` WHERE token_hash=?`, hash))
+	row, err := scanCredential(r.callers.QueryRow(credentialSelect+` WHERE token_hash=?`, hash))
 	if errors.Is(err, sql.ErrNoRows) {
 		return SessionCredential{}, ErrCredentialUnknown
 	}
@@ -180,9 +179,8 @@ func (r *Registry) authenticateSessionToken(token string, now time.Time, running
 		return SessionCredential{}, CredentialRevokedError{Reason: row.revokedReason}
 	}
 	credential := row.SessionCredential
-	var hostID string
-	var archived int
-	if err := r.read.QueryRow(`SELECT s.host_id,EXISTS(SELECT 1 FROM session_archive a WHERE a.session_id=s.id) FROM sessions s WHERE s.id=?`, credential.SessionID).Scan(&hostID, &archived); err != nil {
+	hostID, archived, err := sessionPlacement(r.callers, credential.SessionID)
+	if err != nil {
 		return SessionCredential{}, err
 	}
 	if ended := endedReason(hostID, archived); ended != "" {
@@ -211,7 +209,7 @@ func (r *Registry) CredentialSession(token string) string {
 		return ""
 	}
 	var sessionID sql.NullString
-	_ = r.read.QueryRow(`SELECT session_id FROM session_credentials WHERE token_hash=?`, HashSessionToken(token)).Scan(&sessionID)
+	_ = r.callers.QueryRow(`SELECT session_id FROM session_credentials WHERE token_hash=?`, HashSessionToken(token)).Scan(&sessionID)
 	return sessionID.String
 }
 
@@ -229,6 +227,11 @@ func (r *Registry) ReviveSessionCredential(sessionID string, now time.Time) erro
 func (r *Registry) RevokeSessionCredentials(sessionID, reason string, now time.Time) error {
 	_, err := r.db.Exec(`UPDATE session_credentials SET revoked_at_ms=?,revoked_reason=? WHERE session_id=? AND revoked_at_ms=0`, now.UnixMilli(), reason, sessionID)
 	return err
+}
+
+func sessionPlacement(q interface{ QueryRow(string, ...any) *sql.Row }, sessionID string) (hostID string, archived int, err error) {
+	err = q.QueryRow(`SELECT s.host_id,EXISTS(SELECT 1 FROM session_archive a WHERE a.session_id=s.id) FROM sessions s WHERE s.id=?`, sessionID).Scan(&hostID, &archived)
+	return hostID, archived, err
 }
 
 func endedReason(hostID string, archived int) string {

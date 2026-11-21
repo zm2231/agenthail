@@ -27,7 +27,7 @@ func (f approvalFixture) outsider(t *testing.T) surface.Session {
 
 func (f approvalFixture) workerCaller(t *testing.T) *mcpCaller {
 	t.Helper()
-	caller, err := f.d.agentCaller(f.worker)
+	caller, err := f.d.scopeCaller(f.worker.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

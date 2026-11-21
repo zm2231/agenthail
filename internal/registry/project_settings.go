@@ -52,8 +52,12 @@ func (r *Registry) ProjectSettings() ([]ProjectSetting, error) {
 // ProjectSettingValue is the setting's value, or its first allowed value
 // when nobody has set it.
 func (r *Registry) ProjectSettingValue(project, name string) (string, error) {
+	return projectSettingValue(r.read, project, name)
+}
+
+func projectSettingValue(db *sql.DB, project, name string) (string, error) {
 	var value string
-	err := r.read.QueryRow(`SELECT value FROM project_settings WHERE project_id=? AND name=?`, project, name).Scan(&value)
+	err := db.QueryRow(`SELECT value FROM project_settings WHERE project_id=? AND name=?`, project, name).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return projectSettingValues[name][0], nil
 	}

@@ -25,11 +25,6 @@ func sessionCapabilities(roles registry.SessionRoles) []string {
 	return capabilities
 }
 
-func (d *Daemon) capabilitiesOf(sessionID string) ([]string, error) {
-	roles, err := d.Registry.LocalSessionRoles(sessionID)
-	return sessionCapabilities(roles), err
-}
-
 func (d *Daemon) issueSessionCredential(session surface.Session) (registry.IssuedCredential, error) {
 	return d.Registry.IssueSessionCredential(session.ID, time.Now())
 }

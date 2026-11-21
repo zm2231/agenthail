@@ -18,6 +18,7 @@ import (
 type Registry struct {
 	db            *writeDB
 	read          *sql.DB
+	callers       *sql.DB
 	openLock      *os.File
 	path          string
 	now           func() time.Time
@@ -56,9 +57,11 @@ func (r *Registry) Steers(busyDelivery string) bool {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion    = 125
-	readConnections  = 4
-	deadReviewWindow = time.Hour
+	schemaVersion   = 125
+	readConnections = 4
+	// Kept apart from the general readers so a background scan cannot hold up naming a caller.
+	callerConnections = 2
+	deadReviewWindow  = time.Hour
 )
 
 func SchemaVersion() int { return schemaVersion }
@@ -214,7 +217,16 @@ func connect(path string) (*Registry, error) {
 	}
 	read.SetMaxOpenConns(readConnections)
 	read.SetMaxIdleConns(readConnections)
-	r := &Registry{db: &writeDB{raw: db}, read: read, openLock: openLock, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}
+	callers, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(15000)&_pragma=query_only(1)&_pragma=cache_size(-2048)")
+	if err != nil {
+		read.Close()
+		db.Close()
+		closeOpenLock(openLock)
+		return nil, err
+	}
+	callers.SetMaxOpenConns(callerConnections)
+	callers.SetMaxIdleConns(callerConnections)
+	r := &Registry{db: &writeDB{raw: db}, read: read, callers: callers, openLock: openLock, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}
 	r.seen = newStampQueue(r.writeDeviceSeen)
 	r.credentialUse = newStampQueue(r.writeCredentialUse)
 	return r, nil
@@ -234,5 +246,5 @@ func (r *Registry) Close() error {
 	r.seen.close()
 	r.credentialUse.close()
 	defer closeOpenLock(r.openLock)
-	return errors.Join(r.journal.close(), r.journalRead.close(), r.read.Close(), r.db.Close())
+	return errors.Join(r.journal.close(), r.journalRead.close(), r.callers.Close(), r.read.Close(), r.db.Close())
 }

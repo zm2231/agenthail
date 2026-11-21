@@ -222,11 +222,11 @@ func (d *Daemon) remoteCaller(info *auth.TokenInfo) (*mcpCaller, error) {
 	if !ok {
 		return nil, nil
 	}
-	session, err := d.Registry.Session(info.UserID)
+	record, err := d.Registry.Caller(info.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("read @%s: %w", name, err)
 	}
-	caller, err := d.agentCaller(*session)
+	caller, err := d.agentCaller(record)
 	if err != nil {
 		return nil, err
 	}

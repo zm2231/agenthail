@@ -213,7 +213,7 @@ func TestAnApprovalShowsWhileItsSessionsProviderCannotBeRead(t *testing.T) {
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || len(body.Requests) != 1 || body.Requests[0].ID != askID || !strings.Contains(body.ProviderError, "not running") {
 		t.Fatalf("requests answered %d %s, want the approval %s and the provider's error", response.Code, response.Body, askID)
 	}
-	caller, err := f.d.agentCaller(f.worker)
+	caller, err := f.d.scopeCaller(f.worker.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

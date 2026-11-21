@@ -86,11 +86,11 @@ func (d *Daemon) refuseScope(w http.ResponseWriter, caller *mcpCaller, action st
 }
 
 func (d *Daemon) scopeCaller(sessionID string) (*mcpCaller, error) {
-	session, err := d.Registry.Session(strings.TrimSpace(sessionID))
+	record, err := d.Registry.Caller(strings.TrimSpace(sessionID))
 	if err != nil {
 		return nil, refuse("not_found", "Agenthail does not know the calling session "+sessionID+".")
 	}
-	return d.agentCaller(*session)
+	return d.agentCaller(record)
 }
 
 // The check and the start share the spawn lock, as agenthail_create's do, so concurrent starts cannot pass the children limit together.

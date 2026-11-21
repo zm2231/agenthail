@@ -35,7 +35,7 @@ func (d *Daemon) projectToolsOff(project *CatalogProject) bool {
 	if project == nil {
 		return false
 	}
-	value, err := d.Registry.ProjectSettingValue(project.ID, registry.ProjectSettingMCP)
+	value, err := d.Registry.CallerProjectSetting(project.ID, registry.ProjectSettingMCP)
 	if err != nil {
 		d.log.Printf("MCP socket: reading the tools setting of %s failed: %s", project.DisplayName, err)
 		return true
