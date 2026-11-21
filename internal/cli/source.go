@@ -2,10 +2,12 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -31,6 +33,9 @@ func (a *App) sourceSessionID(ctx context.Context, selector string) (string, err
 	if selector == "" {
 		return "", nil
 	}
+	if err := a.removedIdentity(selector); err != nil {
+		return "", err
+	}
 	if a.registry() != nil {
 		registrySelector := selector
 		expectedSurface := ""
@@ -41,7 +46,7 @@ func (a *App) sourceSessionID(ctx context.Context, selector string) (string, err
 		if id, err := a.registry().ResolveTarget(registrySelector); err == nil {
 			kind, _, _, sessionErr := a.registry().GetSession(id)
 			if sessionErr == nil && (expectedSurface == "" || expectedSurface == strings.ToLower(kind)) {
-				return id, nil
+				return id, a.removedIdentity(id)
 			}
 		}
 	}
@@ -57,4 +62,20 @@ func (a *App) sourceSessionID(ctx context.Context, selector string) (string, err
 		return "", fmt.Errorf("resolve sender (use --from surface:session): %w", err)
 	}
 	return session.ID, nil
+}
+
+// identity rm keeps the identity's session row, so its name and id still resolve.
+func (a *App) removedIdentity(id string) error {
+	reg := a.registry()
+	if reg == nil {
+		return nil
+	}
+	session, err := reg.Session(id)
+	if err != nil || !surface.IsAgentIdentity(session) {
+		return nil
+	}
+	if _, err := reg.AgentIdentityOf(id); !errors.Is(err, registry.ErrNoAgentIdentity) {
+		return err
+	}
+	return fmt.Errorf("resolve sender: @%s was removed as an agent identity, so nothing can reply to it; add it again with 'agenthail identity add %s', or send without it", session.Name, session.Name)
 }

@@ -492,7 +492,12 @@ func (m *Manager) Send(ctx context.Context, sourceID, targetSocket, message stri
 		if err != nil {
 			return nil, surface.DeliveryUnavailable(fmt.Errorf("load sender %q: %w", sourceID, err))
 		}
-		if session.Surface != surface.KindClaude {
+		owner, err := m.registry.SessionHost(session.ID)
+		if err != nil {
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("load sender %q host: %w", sourceID, err))
+		}
+		// A paired host's session is answered at host::@alias, so a name here would only take one from this host.
+		if session.Surface != surface.KindClaude && owner == "" {
 			if _, err := m.registry.ReserveGeneratedAlias(session.ID, session.Name); err != nil {
 				return nil, surface.DeliveryUnavailable(fmt.Errorf("reserve sender handle: %w", err))
 			}

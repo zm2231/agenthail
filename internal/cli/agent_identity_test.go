@@ -97,6 +97,49 @@ func TestAnAgentIdentitySendsWithTheCLIsReachAndReadsItsInbox(t *testing.T) {
 	}
 }
 
+func TestARemovedIdentityCannotSendAsItself(t *testing.T) {
+	fake := &cliSurface{
+		kind: surface.KindCodex,
+		sessions: map[string]surface.Session{
+			"target": {ID: "target", Name: "Target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "vscode", Transport: "desktop", Status: surface.StatusIdle},
+		},
+		caps: surface.Capabilities{Send: true},
+	}
+	app, r := cliFixture(t, fake)
+	app.Surfaces = append(app.Surfaces, SurfaceEntry{Name: "agent", Surface: agentinbox.New(func() *registry.Registry { return r })})
+	if err := r.RecordObservedSession(fake.sessions["target"]); err != nil {
+		t.Fatal(err)
+	}
+	app.scopeOverride = func(daemon.ScopeRequest) (*daemon.ScopeReply, error) {
+		return nil, errors.New("the daemon scope check ran")
+	}
+	identity, err := r.AddAgentIdentity("kat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RemoveAgentIdentity("kat"); err != nil {
+		t.Fatal(err)
+	}
+	for _, sender := range []string{"kat", identity.SessionID} {
+		t.Setenv("AGENTHAIL_SESSION_ID", sender)
+		_, err := captureStdout(t, func() error { return app.Run([]string{"send", "target", "hello from " + sender}) })
+		if err == nil || !strings.Contains(err.Error(), "removed") {
+			t.Fatalf("send with AGENTHAIL_SESSION_ID=%s: err=%v", sender, err)
+		}
+	}
+	for _, caller := range []string{"", "target"} {
+		t.Setenv("AGENTHAIL_SESSION_ID", caller)
+		for _, sender := range []string{"kat", identity.SessionID} {
+			if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "--from", sender, "target", "from a flag"}) }); err == nil || !strings.Contains(err.Error(), "removed") {
+				t.Fatalf("send --from %s as %q: err=%v", sender, caller, err)
+			}
+		}
+	}
+	if len(fake.sent) != 0 {
+		t.Fatalf("a removed identity sent %v", fake.sent)
+	}
+}
+
 func TestIdentityRemoteShowsItsTokenOnceAndDoctorReportsTheMode(t *testing.T) {
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}})
 	run := func(args ...string) string {

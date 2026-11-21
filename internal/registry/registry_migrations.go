@@ -495,6 +495,12 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
+	if version >= 1 && version < 119 {
+		// A paired host's session is answered at host::@alias, so a local name only takes one from this host.
+		if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id IN (SELECT id FROM sessions WHERE host_id<>'') AND name NOT IN (SELECT name FROM coordinators)`); err != nil {
+			return err
+		}
+	}
 	if err := moveDeliveryProblemsToAsks(tx); err != nil {
 		return err
 	}

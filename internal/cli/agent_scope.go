@@ -50,8 +50,8 @@ func (a *App) namesAgentIdentity(selector string) bool {
 	if err != nil {
 		return false
 	}
-	session, err := reg.Session(id)
-	return err == nil && surface.IsAgentIdentity(session)
+	_, err = reg.AgentIdentityOf(id)
+	return err == nil
 }
 
 // --no-queue delivers at once or fails, so it takes the reach of a send now.

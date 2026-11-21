@@ -53,6 +53,10 @@ func (a *App) cmdSend(args []string) error {
 	defer cancel()
 
 	fromLabel := flagVal(args, "--from")
+	source, err := a.sourceSessionID(ctx, fromLabel)
+	if err != nil {
+		return err
+	}
 	if fromLabel != "" {
 		message = fmt.Sprintf("[from %s] %s", fromLabel, message)
 	}
@@ -103,10 +107,6 @@ func (a *App) cmdSend(args []string) error {
 	scopeProjectID := ""
 	if allowed != nil {
 		scopeProjectID = allowed.ScopeProjectID
-	}
-	source, err := a.sourceSessionID(ctx, fromLabel)
-	if err != nil {
-		return err
 	}
 	route, unreadable := coord.RouteOf(ctx, sess.ID, coordinator.FromAgent("", source))
 	if unreadable != nil && (!surface.IsDeliveryUnavailable(unreadable) || hasFlag(args, "--no-queue")) {

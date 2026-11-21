@@ -98,6 +98,7 @@ func queueFrame(reg *registry.Registry, c Config, f frame, ownSocket string) err
 	if err := json.Unmarshal(f.Message, &body); err != nil || body.Role != "user" || body.Content == "" {
 		return errors.New("invalid user message")
 	}
+	body.Content = authoredText(body.Content, f.From)
 	target, err := reg.Session(c.Session.ID)
 	if err != nil {
 		return fmt.Errorf("canonical target is not registered: %w", err)

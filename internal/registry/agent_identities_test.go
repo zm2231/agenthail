@@ -185,3 +185,54 @@ func TestASchema114RegistryUpgradesToAcknowledgedInboxReads(t *testing.T) {
 		t.Fatalf("remote binding after the upgrade: %v", err)
 	}
 }
+
+func TestASchema118RegistryDropsNamesTakenByPairedSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	old, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := old.AddAgentIdentity("live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const hostID = "h0123456789ab"
+	if _, err := old.AddHost(PairedHost{ID: hostID, Name: "katbox", Endpoint: "https://katbox.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"remote-kat", "remote-lead"} {
+		if _, _, err := old.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: id}, EntityID: hostID + "::" + id, Projection: []byte(`{"id":"` + hostID + "::" + id + `"}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	register(t, old, "worker")
+	if err := old.SetAlias("builder", "worker"); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`INSERT INTO aliases(name,session_id) VALUES('kat-2','remote-kat'),('collab','remote-lead')`,
+		`INSERT INTO coordinators(project_id,host_id,name,surface,session_id,changed_at_ms) VALUES('p','` + hostID + `','collab','claude','remote-lead',1)`,
+		`PRAGMA user_version=118`,
+	} {
+		if _, err := old.db.Exec(statement); err != nil {
+			old.Close()
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if alias, err := r.ReverseAlias("remote-kat"); err == nil {
+		t.Fatalf("a paired host's session kept the name @%s", alias)
+	}
+	for id, want := range map[string]string{"remote-lead": "collab", "worker": "builder", live.SessionID: "live"} {
+		if alias, err := r.ReverseAlias(id); err != nil || alias != want {
+			t.Fatalf("%s alias=%q err=%v, want @%s kept", id, alias, err, want)
+		}
+	}
+}
