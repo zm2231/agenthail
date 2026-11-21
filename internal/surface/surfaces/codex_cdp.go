@@ -71,26 +71,21 @@ func resolveCodexRendererEndpoint(ctx context.Context, endpoint string) ([]codex
 		if resp.StatusCode != http.StatusOK || decodeErr != nil {
 			continue
 		}
-		var primary []codexCDPTarget
-		var secondary []codexCDPTarget
+		var targets []codexCDPTarget
 		for _, value := range values {
 			if kind, _ := value["type"].(string); kind != "page" {
 				continue
 			}
 			url, _ := value["url"].(string)
 			wsURL, _ := value["webSocketDebuggerUrl"].(string)
-			if wsURL == "" || !strings.HasPrefix(url, "app://-/index.html") {
+			// The avatar overlay answers RPC but never receives turn notifications.
+			if wsURL == "" || !strings.HasPrefix(url, "app://-/index.html") || strings.Contains(url, "avatar-overlay") {
 				continue
 			}
-			target := codexCDPTarget{wsURL: wsURL}
-			if strings.Contains(url, "avatar-overlay") {
-				secondary = append(secondary, target)
-			} else {
-				primary = append(primary, target)
-			}
+			targets = append(targets, codexCDPTarget{wsURL: wsURL})
 		}
-		if len(primary) > 0 {
-			return append(primary, secondary...), nil
+		if len(targets) > 0 {
+			return targets, nil
 		}
 	}
 	return nil, fmt.Errorf("no Codex Desktop renderer debug target at %s; quit Codex and relaunch it with 'agenthail launch codex'", endpoint)

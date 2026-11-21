@@ -23,6 +23,13 @@ type Desktop struct {
 	methods     []string
 	expressions []string
 	lookups     int
+	hosts       string
+}
+
+func (b *Desktop) SetHosts(hosts string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.hosts = hosts
 }
 
 // Lookups counts the debug target listings fetched from the renderer.
@@ -84,6 +91,10 @@ func StartDesktop(t testing.TB, respond func(method string) string) *Desktop {
 				bridge.expressions = append(bridge.expressions, expression)
 				bridge.mu.Unlock()
 				value = respond(match[1])
+			case strings.Contains(expression, "Object.values(b.hosts)"):
+				bridge.mu.Lock()
+				value = bridge.hosts
+				bridge.mu.Unlock()
 			case strings.Contains(expression, "__agenthailPayloads"):
 				value = "ok"
 			}

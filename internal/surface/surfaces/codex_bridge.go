@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 // codexHookSource is installed with its own hash as its ABI, so any change to
@@ -27,6 +28,7 @@ const codexHookSource = `
     next: current && Number.isSafeInteger(current.next) ? current.next : 0,
     pending: current && current.pending instanceof Map ? current.pending : new Map(),
     toolRequests: new Map(),
+    hosts: current && current.hosts && typeof current.hosts === 'object' ? {...current.hosts} : {},
   };
   if (current && current.toolRequests instanceof Map) {
     for (const [key, request] of current.toolRequests) {
@@ -39,9 +41,44 @@ const codexHookSource = `
   }
   bridge.waiters = new Set();
   const wake = () => { for (const waiter of [...bridge.waiters]) waiter(false); };
+  const stopped = host => ({error: {code: 'app_server_stopped', message: 'Codex Desktop app-server stopped: ' + host.fatal}});
+  const down = host => ({error: {code: 'app_server_down', message: 'Codex Desktop app-server stopped: ' + host.fatal}});
+  // Desktop answers request-app-server-state asynchronously; one that never answers costs only the first second.
+  const stateAsked = Date.now();
+  bridge.settled = () => new Promise(resolve => {
+    const check = () => bridge.hosts.local || Date.now() - stateAsked >= 1000 ? resolve() : setTimeout(check, 20);
+    check();
+  });
+  const noteHost = data => {
+    if (typeof data.hostId !== 'string' || data.hostId === '') return;
+    const host = {...(bridge.hosts[data.hostId] || {}), hostId: data.hostId};
+    if (typeof data.transport === 'string') host.transport = data.transport;
+    if (typeof data.appServerVersion === 'string' && data.appServerVersion) host.appServerVersion = data.appServerVersion;
+    if (data.type === 'codex-app-server-connection-changed' && typeof data.state === 'string') {
+      host.state = data.state;
+      if (data.state === 'connected') host.fatal = null;
+    }
+    if (data.type === 'codex-app-server-initialized') {
+      host.state = 'connected';
+      host.fatal = null;
+    }
+    if (data.type === 'codex-app-server-fatal-error') host.fatal = String(data.errorMessage || 'unknown error');
+    bridge.hosts[data.hostId] = host;
+    if (data.hostId === 'local' && host.fatal) {
+      for (const [id, resolve] of [...bridge.pending]) {
+        bridge.pending.delete(id);
+        resolve(stopped(host));
+      }
+    }
+  };
   window.addEventListener('message', event => {
     const data = event.data;
-    if (bridge.retired || !data || data.hostId !== 'local') return;
+    if (bridge.retired || !data) return;
+    if (data.type === 'codex-app-server-connection-changed' || data.type === 'codex-app-server-initialized' || data.type === 'codex-app-server-fatal-error') {
+      noteHost(data);
+      return;
+    }
+    if (data.hostId !== 'local') return;
     if (data.type === 'mcp-response' && data.message && data.message.id != null) {
       const id = String(data.message.id);
       const resolve = bridge.pending.get(id);
@@ -100,7 +137,9 @@ const codexHookSource = `
     await globalThis.electronBridge.sendMessageFromView({type:'mcp-response', hostId:'local', threadId, response:{id:request.id, result:{success:Boolean(success), contentItems:[{type:'inputText', text:String(text || '')}]}}});
     bridge.toolRequests.delete(key);
   };
-  bridge.request = (method, params, timeoutMs) => new Promise(resolve => {
+  bridge.request = (method, params, timeoutMs) => bridge.settled().then(() => new Promise(resolve => {
+    const local = bridge.hosts.local;
+    if (local && local.fatal) return resolve(down(local));
     const id = 'agenthail-' + Date.now() + '-' + (++bridge.next);
     const timer = setTimeout(() => {
       if (bridge.pending.delete(id)) resolve({error:{code:'timeout', message:'Codex Desktop app-server request timed out'}});
@@ -109,8 +148,9 @@ const codexHookSource = `
     Promise.resolve(globalThis.electronBridge.sendMessageFromView({type:'mcp-request', hostId:'local', request:{id, method, params:params||{}}, timeoutMs, retainResponse:false})).catch(error => {
       if (bridge.pending.delete(id)) { clearTimeout(timer); resolve({error:{code:'write_failed', message:String(error && error.message || error)}}); }
     });
-  });
+  }));
   globalThis.__agenthailCodexDesktopRendererV2 = bridge;
+  Promise.resolve(globalThis.electronBridge.sendMessageFromView({type:'request-app-server-state'})).catch(() => {});
   return 'hooked';
 })()
 `
@@ -198,7 +238,7 @@ func (c *Codex) rpc(ctx context.Context, conn *cdpConn, method string, params ma
 			}
 		}()
 		if value, stageErr := conn.evaluate(ctx, codexPayloadInitJS(payloadID), 2*time.Second); stageErr != nil || value != "ok" {
-			return nil, fmt.Errorf("stage %s params: %v (%v)", method, stageErr, value)
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("stage %s params: %v (%v)", method, stageErr, value))
 		}
 		staged = true
 		encoded := base64.StdEncoding.EncodeToString(paramsJSON)
@@ -208,7 +248,7 @@ func (c *Codex) rpc(ctx context.Context, conn *cdpConn, method string, params ma
 				end = len(encoded)
 			}
 			if value, stageErr := conn.evaluate(ctx, codexPayloadAppendJS(payloadID, encoded[start:end]), 2*time.Second); stageErr != nil || value != "ok" {
-				return nil, fmt.Errorf("stage %s params chunk: %v (%v)", method, stageErr, value)
+				return nil, surface.DeliveryUnavailable(fmt.Errorf("stage %s params chunk: %v (%v)", method, stageErr, value))
 			}
 		}
 		expression = codexStagedRPCJS(payloadID, method, wait)
@@ -224,10 +264,17 @@ func (c *Codex) rpc(ctx context.Context, conn *cdpConn, method string, params ma
 	}
 	if envelope, ok := response["error"].(map[string]any); ok {
 		code, _ := envelope["code"].(float64)
-		return nil, &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message")}
+		refused := &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message")}
+		if bridgeCode, _ := envelope["code"].(string); codexBridgeUnsent[bridgeCode] {
+			return nil, surface.DeliveryUnavailable(refused)
+		}
+		return nil, refused
 	}
 	return response, nil
 }
+
+// codexBridgeUnsent are the bridge's own refusals, made before the request reached Desktop's app-server.
+var codexBridgeUnsent = map[string]bool{"app_server_down": true, "bridge_unavailable": true, "missing_payload": true, "write_failed": true}
 
 type codexEvent struct {
 	Sequence int64          `json:"sequence"`

@@ -20,7 +20,7 @@ const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('nod
 const programs=JSON.parse(fs.readFileSync(0,'utf8')),listeners=[];
 const sent=[];
 // Desktop's main process reads message.response.id for a view's mcp-response.
-const host={sendMessageFromView:message=>{if(message.type==='mcp-response')void message.response.id;sent.push(message)}};
+const host={sendMessageFromView:message=>{if(message.type==='request-app-server-state')return;if(message.type==='mcp-response')void message.response.id;sent.push(message)}};
 const context=vm.createContext({window:{addEventListener:(name,f)=>listeners.push(f)},electronBridge:host,setTimeout,clearTimeout});
 assert.equal(vm.runInContext(programs.hook,context),'hooked');
 assert.equal(vm.runInContext(programs.hook,context),'already');
@@ -84,7 +84,7 @@ assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,6);
 
   // A hook an earlier daemon installed is replaced, keeping its event cursor.
   const oldListeners=[],oldSent=[];
-  const upgraded=vm.createContext({window:{addEventListener:(name,f)=>oldListeners.push(f)},electronBridge:{sendMessageFromView:message=>{if(message.type==='mcp-response')void message.response.id;oldSent.push(message)}},setTimeout,clearTimeout});
+  const upgraded=vm.createContext({window:{addEventListener:(name,f)=>oldListeners.push(f)},electronBridge:{sendMessageFromView:message=>{if(message.type==='request-app-server-state')return;if(message.type==='mcp-response')void message.response.id;oldSent.push(message)}},setTimeout,clearTimeout});
   vm.runInContext("globalThis.__agenthailCodexDesktopRendererV2={abi:2,toolRequests:new Map([['77',{id:77,threadId:'operator'}]]),events:[{sequence:5,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_transfer',requestId:'77'}},{sequence:6,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_transfer',requestId:'5'}},{sequence:7,method:'turn/started',params:{threadId:'operator'}}],sequence:7,next:3,pending:new Map(),request(){}}",upgraded);
   let woken=0;
   upgraded.__agenthailCodexDesktopRendererV2.waiters=vm.runInContext('new Set()',upgraded).add(()=>{woken++});

@@ -3,7 +3,6 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -46,7 +45,7 @@ func (c *Codex) createVoiceOperator(ctx context.Context, client codexClient, cwd
 		"threadSource": "agenthail", "serviceName": "agenthail-voice", "dynamicTools": voice.DynamicTools(),
 	}, 15*time.Second)
 	if err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(err)
+		return nil, codexOperationOutcome(err)
 	}
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
@@ -124,15 +123,13 @@ func (v *CodexVoice) Request(ctx context.Context, s *surface.Session, method str
 			}
 		}
 		_, err := link.client.Request(ctx, method, params, 15*time.Second)
-		var rpc *codexRPCError
-		if method == "thread/realtime/start" && errors.As(err, &rpc) {
+		if _, refused := codexAppServerRefusal(err); method == "thread/realtime/start" && refused {
 			return link.startRefusal(err)
 		}
 		return err
 	}
 	_, err := v.Codex.requestSession(ctx, s, true, method, params, 15*time.Second)
-	var rpc *codexRPCError
-	if method == "thread/realtime/start" && errors.As(err, &rpc) {
+	if rpc, refused := codexAppServerRefusal(err); method == "thread/realtime/start" && refused {
 		return &voice.RejectedError{Reason: rpc.Message}
 	}
 	return err

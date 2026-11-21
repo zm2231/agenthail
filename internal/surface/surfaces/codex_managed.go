@@ -249,6 +249,14 @@ func (e *codexRPCError) Error() string {
 	return fmt.Sprintf("%s RPC error (%d): %s", e.Method, e.Code, e.Message)
 }
 
+func codexAppServerRefusal(err error) (*codexRPCError, bool) {
+	var rpc *codexRPCError
+	if surface.IsDeliveryUnavailable(err) || !errors.As(err, &rpc) {
+		return nil, false
+	}
+	return rpc, true
+}
+
 // Respond answers a server request on this connection.
 func (c *managedCodexClient) Respond(id json.RawMessage, result any) error {
 	c.writeMu.Lock()

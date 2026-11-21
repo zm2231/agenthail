@@ -971,6 +971,7 @@ type RuntimeStatus struct {
 	Detail      string         `json:"detail,omitempty"`
 	Remediation string         `json:"remediation,omitempty"`
 	Notes       []RuntimeNote  `json:"notes,omitempty"`
+	AppServer   *AppServer     `json:"appServer,omitempty"`
 }
 
 type RuntimeNote struct {

@@ -141,7 +141,7 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	}
 	turnResponse, err := c.startTurn(ctx, client, threadID, "turn/start", turnParams, 10*time.Second)
 	if err != nil {
-		return session, nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/start: %w", err))
+		return session, nil, codexOperationOutcome(fmt.Errorf("turn/start: %w", err))
 	}
 	turnID := threadID
 	if turnResult, _ := turnResponse["result"].(map[string]any); turnResult != nil {

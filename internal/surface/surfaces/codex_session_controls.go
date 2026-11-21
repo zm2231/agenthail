@@ -93,7 +93,7 @@ func (c *Codex) SteerWithImages(ctx context.Context, sess *surface.Session, mess
 		"expectedTurnId": turnID,
 		"input":          codexUserInput(message, images),
 	}, 5*time.Second); err != nil {
-		return surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/steer: %w", err))
+		return codexOperationOutcome(fmt.Errorf("turn/steer: %w", err))
 	}
 	return nil
 }
